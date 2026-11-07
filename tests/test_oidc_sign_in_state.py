@@ -130,7 +130,11 @@ async def test_negative_control_one_record_loses_the_first_sign_in(oidc_env, mon
 async def test_a_state_another_browser_holds_is_refused(oidc_env, store):
     info = await _start(oidc_env)
     assert not await _finishes(info["state"], "")  # no binding cookie
-    assert not await _finishes(info["state"], info["state"][:-1] + "x")
+    # Another browser's binding: the state with its last character changed
+    # (to "y" when it already ends in "x": "x" alone made the same state
+    # 1 run in 64).
+    other = info["state"][:-1] + ("y" if info["state"].endswith("x") else "x")
+    assert not await _finishes(info["state"], other)
     # The refusal took nothing: the browser that began it still finishes.
     assert await _finishes(info["state"], info["state"])
 

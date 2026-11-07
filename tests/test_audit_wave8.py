@@ -39,7 +39,9 @@ def test_listed_x_show_have_x_cloak() -> None:
             'x-show="$store.search.loading"',
         ),
         REPO / "kazma-ui/kazma_ui/templates/chat.html": (
-            'x-show="error"',
+            # The first-run card (its error line moved to the setup guide,
+            # 2026-11-07); the card itself must not flash before Alpine.
+            'x-show="show"',
         ),
         REPO / "kazma-ui/kazma_ui/templates/ide.html": (
             'x-show="result"',

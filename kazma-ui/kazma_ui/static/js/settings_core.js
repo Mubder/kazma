@@ -373,6 +373,9 @@
         pkgDbBackend: 'sqlite',
         pkgDbUrlSet: false,
         pkgMemory: { status: '', summary: '', headline: '', layers: {}, issues: [] },
+        // The install `kazma setup install` recorded: mode (express, full,
+        // custom; null when none was recorded), when, and how many parts.
+        pkgInstall: { mode: null, at: null, chosen: 0, total: 0 },
         pkgSearch: '',
         pkgLoading: false,
         pkgLoaded: false,

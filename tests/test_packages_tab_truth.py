@@ -56,7 +56,9 @@ def test_no_page_recommends_a_pruning_uv_sync():
             if PRUNING_SYNC.search(line):
                 offenders.append(f"{path.relative_to(ROOT)}:{n}")
     assert not offenders, offenders
-    assert 'uv pip install -e ".[all]"' in SETTINGS.read_text(encoding="utf-8")
+    # "Install everything" is the installer's Full mode (2026-11-07), which
+    # syncs with --inexact: additive, like `kazma update`.
+    assert "kazma setup install --mode full" in SETTINGS.read_text(encoding="utf-8")
 
 
 def test_the_gate_catches_the_old_command():

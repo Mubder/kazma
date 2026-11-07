@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **A setup guide in the web app.** A new install opens `/setup`, a guide in
+  English and Arabic: what Kazma is, then the model, either a cloud provider
+  (a link to where its keys are made, the key, then the provider's own list of
+  models) or Ollama or LM Studio on this computer (found by the guide, with
+  where to download one that is not there). The model picked becomes the one
+  Kazma uses and is sent one short message; the guide goes on only when it
+  answers. Then the optional extras (chat apps, About me, mail, what was
+  installed), and done. The chat page's card opens it until a model is set
+  up, and Settings → Providers opens it again. On a new install that card had
+  never shown: every install lists Ollama and LM Studio, and they counted as a
+  model set up.
+- **Settings → Packages speaks in the install's parts.** It says which install
+  this was (Express, Full or Custom) and when; a part the install left out is
+  "Not chosen", not "Missing" (or "Partial", for Postgres, whose driver the
+  database tools bring); each part is added with `kazma setup install --with
+  <part>`, and everything with `kazma setup install --mode full`.
+- **Switching the model ends a stale fallback notice.** A "Model fallback: X has
+  no usable API key" notice about a provider you moved away from closed only
+  when that provider got its key, so it stayed for good.
 - **A fresh Windows can run setup.** A Windows client refuses to run
   PowerShell script files until someone changes its policy, so the README's
   `.\setup.ps1` stopped before its first line on a clean Windows 11 ("running

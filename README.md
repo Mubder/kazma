@@ -16,7 +16,7 @@
     <a href="https://github.com/Mubder/kazma/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Mubder/kazma/ci.yml?branch=main&style=flat-square&label=CI&logo=githubactions&logoColor=white" alt="CI status"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" alt="MIT License"></a>
     <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.11%20%E2%80%93%203.14-3776AB.svg?style=flat-square&logo=python&logoColor=white" alt="Python 3.11 to 3.14"></a>
-    <a href="https://github.com/Mubder/kazma/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/Tests-20%2C107-10B981.svg?style=flat-square&logo=pytest&logoColor=white" alt="Tests"></a>
+    <a href="https://github.com/Mubder/kazma/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/Tests-20%2C122-10B981.svg?style=flat-square&logo=pytest&logoColor=white" alt="Tests"></a>
     <a href="https://kazma.ai/docs/security/prompt-injection/"><img src="https://img.shields.io/badge/Prompt_injection-measured-EF4444.svg?style=flat-square" alt="Prompt injection measured"></a>
     <a href="https://kazma.ai"><img src="https://img.shields.io/badge/Website-kazma.ai-06B6D4.svg?style=flat-square" alt="Website"></a>
   </p>
@@ -36,7 +36,7 @@
 <!-- Metrics auto-verified from METRICS.md -->
 | Codebase | Test suite | History | Talk to it from |
 |---|---|---|---|
-| **~791K LOC** (629K Python code + 46K JS) | **20,107 tests** (1,539 test files) | **4,512+ commits** across 6 packages | Web · TUI · CLI · Telegram · Discord · Slack |
+| **~792K LOC** (629K Python code + 47K JS) | **20,122 tests** (1,541 test files) | **4,513+ commits** across 6 packages | Web · TUI · CLI · Telegram · Discord · Slack |
 
 ---
 
@@ -69,10 +69,12 @@ cd kazma
 PowerShell scripts, and `setup.cmd` gets past that for this one run without
 changing any setting.
 
-Setup installs Kazma as a service and, once it answers, opens
-**http://127.0.0.1:9090**. On the first visit the chat page asks for a
-provider, its key and a model; after that, Kazma is ready to talk. If you
-leave the service out (Custom), start Kazma yourself:
+Setup installs Kazma as a service and, once it answers, opens its setup
+guide at **http://127.0.0.1:9090/setup**. The guide connects the AI model,
+either a cloud provider with its API key (it lists the provider's models and
+sends the one you pick a test message) or Ollama or LM Studio on this
+computer, then shows the optional extras. After that, Kazma is ready to talk.
+If you leave the service out (Custom), start Kazma yourself:
 `.venv/bin/kazma serve` (Windows: `.venv\Scripts\kazma serve`).
 
 The script installs [`uv`](https://docs.astral.sh/uv/) if it is missing (and

@@ -4221,6 +4221,48 @@ refused connection takes about 2 s on Windows, and 240 s became 325 s).
 Gates: `tests/test_install_modes.py` (the model there as the control; the
 old count of 48 tries).
 
+### 21d. The setup guide (`/setup`, `kazma-ui/kazma_ui/setup_api.py`)
+
+The owner, after a clean Windows install (2026-11-07): "why there is no Web
+UI setup guide". The first visit had one card (a provider list, a key, a
+model name to type), and on a fresh install it never showed:
+`compute_setup_status` counted any LISTED local provider as set up, and every
+install lists Ollama and LM Studio.
+- **Ready means a model Kazma can use**: the active provider has a key or is
+  a local server, or another provider has a key (Kazma falls back to it, and
+  says so). A listed local server counts only as the provider in use.
+- **The guide** (`templates/setup.html`, `static/js/setup_guide.js`, catalog
+  slice `setup.*`, EN/AR): welcome (the first sentence of What Kazma is, the
+  language), the model, optional extras, done. The installer's last step
+  opens it (`kazma_cli.install._finish`); the chat page's card, Settings ->
+  Providers & Connectors and the page search open it.
+- **Choosing the model**: a cloud provider whose key is all it needs
+  (`guided`; `custom`, Azure and Bedrock are Settings', `_NOT_GUIDED`) or a
+  local server (`/api/setup/local`: loopback `/models`, no proxy, 2 s, nothing
+  saved). `/api/setup/provider` saves the provider without switching to it
+  (an empty key keeps the stored one; an address set in Settings stays), the
+  existing `/api/providers/{name}/discover` lists its models,
+  `/api/setup/bootstrap` switches model AND provider (§1), and
+  `/api/setup/check` sends the chosen model one message through
+  `kazma_core.model_registry.ModelRegistry.get_client_by_provider` (each provider's own API style; reasoning
+  off where the client can; 60 s). The page goes on only when it answered.
+  Errors are codes the page words (`setup.err.*`); a provider's own refusal is
+  shown as it came (`friendly_llm_error`).
+- Everything but `/api/setup/status` is admin (`platform_rbac._ADMIN_PREFIXES`).
+- **A switch ends a stale fallback notice**
+  (`model_fallback.report_provider_chosen`, from both switches in
+  `runtime/model_switch`): saving a provider before switching let Kazma fall
+  back from the shipped placeholder, and that notice closed only when the
+  placeholder got a key.
+- **Settings -> Packages reads the install's record**
+  (`install_components.install_overview`, `parts_of_extra`): the mode and
+  date, an extra of a part left out "Not chosen" (never Missing or Partial),
+  and `kazma setup install --with <part>` as each extra's command.
+Gates: `tests/test_setup_guide.py` (each with the old behaviour as its
+control), `tests/e2e/test_setup_guide_browser.py` (a fresh install's chat
+card to a working model on a stand-in Ollama; Settings to the guide in
+Arabic).
+
 ### 22. Agent Skills Ecosystem (`kazma-core/kazma_core/agent_skills/`)
 
 Kazma is a first-class citizen of the open **agentskills.io** `SKILL.md`

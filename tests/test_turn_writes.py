@@ -24,18 +24,24 @@ REPORT = "# Kuwait\n\n" + "A long section of the report. " * 40
 
 
 @pytest.fixture
-def workspace():
-    """A folder of its own inside the test run's workspace, and a chat thread."""
-    import uuid
+def workspace(tmp_path):
+    """A workspace of its own, bound as this test's, and a chat thread.
 
-    from kazma_core.workspace.binding import resolve_active_root
+    Bound by the per-task scope, the ladder's first rung: a folder made
+    under ``resolve_active_root()`` landed in the checkout whenever an
+    earlier test in the process had left the active workspace there
+    (``d4-*`` folders beside pyproject.toml, 2026-11-07).
+    """
+    from kazma_core.ide.workspace_scope import pin_workspace_path, reset_workspace_path
 
-    folder = resolve_active_root() / f"d4-{uuid.uuid4().hex[:8]}"
-    folder.mkdir(parents=True)
+    folder = tmp_path / "d4"
+    folder.mkdir()
+    scope = pin_workspace_path(tmp_path)
     token = set_current_thread_id("thread-d4")
     yield folder
     clear_read_cache()
     reset_current_thread_id(token)
+    reset_workspace_path(scope)
 
 
 def _write(path, content):

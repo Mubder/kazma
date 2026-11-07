@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% set active_page = "setup" %}
+{% block title %}Kazma — {{ t('setup.title') }}{% endblock %}
+{% block page_title %}<span class="ki" data-icon="sparkles" aria-hidden="true"></span> {{ t('setup.title') }}{% endblock %}
+
+{% block content %}
+{#- The first-run setup guide: welcome, the model (a cloud provider or one on
+    this computer), optional extras, done. Its data: kazma_ui/setup_api.py
+    (/api/setup/*); the model list: /api/providers/{name}/discover. -#}
+<div class="setup-guide" x-data="setupGuide()">
+  <ol class="setup-steps" aria-label="{{ t('setup.steps_label') }}">
+    <li :class="stepClass(1)">{{ t('setup.step_welcome') }}</li>
+    <li :class="stepClass(2)">{{ t('setup.step_model') }}</li>
+    <li :class="stepClass(3)">{{ t('setup.step_extras') }}</li>
+    <li :class="stepClass(4)">{{ t('setup.step_done') }}</li>
+  </ol>
+
+  <div class="card setup-card" x-show="!loaded && !loadFailed">
+    <p class="setup-muted">{{ t('setup.loading') }}</p>
+  </div>
+  <div class="card setup-card" x-cloak x-show="loadFailed">
+    <p class="setup-error">{{ t('setup.load_failed') }}</p>
+    <div class="setup-actions">
+      <button type="button" class="btn btn-secondary" @click="init()">{{ t('setup.retry') }}</button>
+    </div>
+  </div>
+
+  {#- 1. Welcome -#}
+  <section class="card setup-card" id="setup-step-welcome" x-cloak x-show="loaded && step === 1">
+    <h2>{{ t('setup.welcome_title') }}</h2>
+    <p class="setup-lead">{{ t('setup.welcome_lead') }}</p>
+    <p>{{ t('setup.welcome_body') }}</p>
+    <p class="setup-row" x-show="ready">
+      <span>{{ t('setup.already_ready') }}</span>
+      <bdi dir="ltr" translate="no" x-text="activeLabel()"></bdi>
+    </p>
+    <div class="setup-row">
+      <span class="setup-label">{{ t('setup.language') }}</span>
+      <button type="button" class="btn" :class="lang === 'en' ? 'btn-primary' : 'btn-secondary'"
+              @click="setLang('en')" lang="en" translate="no">English</button>
+      <button type="button" class="btn" :class="lang === 'ar' ? 'btn-primary' : 'btn-secondary'"
+              @click="setLang('ar')" lang="ar" translate="no">العربية</button>
+    </div>
+    <div class="setup-actions">
+      <a href="/" class="btn btn-secondary" x-show="ready">{{ t('setup.open_chat') }}</a>
+      <button type="button" class="btn btn-primary" id="setup-start" @click="go(2)">
+        <span x-show="!ready">{{ t('setup.start') }}</span>
+        <span x-show="ready">{{ t('setup.change_model') }}</span>
+      </button>
+    </div>
+  </section>
+
+  {#- 2. The model -#}
+  <section class="card setup-card" id="setup-step-model" x-cloak x-show="loaded && step === 2">
+    <h2>{{ t('setup.model_title') }}</h2>
+    <p class="setup-muted">{{ t('setup.model_lead') }}</p>
+    <div class="setup-choice">
+      <button type="button" class="setup-option" id="setup-choose-cloud"
+              :class="{ 'is-selected': where === 'cloud' }" @click="choose('cloud')">
+        <strong>{{ t('setup.cloud_title') }}</strong>
+        <span>{{ t('setup.cloud_body') }}</span>
+      </button>
+      <button type="button" class="setup-option" id="setup-choose-local"
+              :class="{ 'is-selected': where === 'local' }" @click="choose('local')">
+        <strong>{{ t('setup.local_title') }}</strong>
+        <span>{{ t('setup.local_body') }}</span>
+      </button>
+    </div>
+
+    <div class="setup-card-part" x-show="where === 'cloud'">
+      <label class="setup-label" for="setup-provider">{{ t('setup.provider') }}</label>
+      <select id="setup-provider" class="form-select" x-model="provider" @change="providerChanged()">
+        <template x-for="p in cloudPresets()" :key="p.id">
+          {#- :selected keeps the list on the provider the guide will use: the
+              options are drawn after x-model has set the select. -#}
+          <option :value="p.id" :selected="p.id === provider" x-text="p.name"></option>
+        </template>
+      </select>
+      <p class="setup-muted">{{ t('setup.other_providers') }}
+        <a href="/settings?tab=providers_connectors">{{ t('setup.other_providers_link') }}</a></p>
+      <p x-show="keyUrl()">
+        <a :href="keyUrl()" target="_blank" rel="noopener noreferrer">{{ t('setup.get_key') }}</a>
+      </p>
+      <label class="setup-label" for="setup-key">{{ t('setup.api_key') }}</label>
+      <input id="setup-key" class="form-input" type="password" autocomplete="off" x-model="apiKey"
+             placeholder="{{ t('setup.key_placeholder') }}" @keydown.enter="connect()">
+      <p class="setup-muted">{{ t('setup.key_hint') }}</p>
+      <div class="setup-row">
+        <button type="button" class="btn btn-primary" id="setup-connect" @click="connect()" :disabled="busy">
+          {{ t('setup.check_key') }}
+        </button>
+      </div>
+    </div>
+
+    <div class="setup-card-part" x-show="where === 'local'">
+      <p class="setup-muted" x-show="localLoading">{{ t('setup.local_looking') }}</p>
+      <template x-for="s in servers" :key="s.id">
+        <div class="setup-server">
+          <strong translate="no" x-text="s.name"></strong>
+          <span class="setup-muted" x-show="s.online">{{ t('setup.server_running') }}</span>
+          <span class="setup-muted" x-show="!s.online">{{ t('setup.server_not_running') }}</span>
+          <button type="button" class="btn btn-primary" x-show="s.online" @click="useLocal(s.id)" :disabled="busy">
+            {{ t('setup.use_server') }}
+          </button>
+          <a class="btn btn-secondary" x-show="!s.online" :href="s.download" target="_blank"
+             rel="noopener noreferrer">{{ t('setup.download') }}</a>
+        </div>
+      </template>
+      <p class="setup-muted" x-show="!localLoading">{{ t('setup.local_hint') }}</p>
+      <code class="setup-command" dir="ltr" translate="no" x-show="!localLoading">ollama pull llama3.2</code>
+      <div class="setup-row">
+        <button type="button" class="btn btn-secondary" @click="findLocal()" :disabled="localLoading">
+          {{ t('setup.look_again') }}
+        </button>
+      </div>
+    </div>
+
+    <div class="setup-card-part" x-show="listed">
+      <label class="setup-label" for="setup-model">{{ t('setup.model') }}</label>
+      <input id="setup-model" class="form-input" list="setup-model-list" x-model="model"
+             autocomplete="off" translate="no" dir="ltr">
+      <datalist id="setup-model-list">
+        <template x-for="m in models" :key="m"><option :value="m"></option></template>
+      </datalist>
+      <p class="setup-muted"><span x-text="modelsFound()"></span> {{ t('setup.model_hint') }}</p>
+      <div class="setup-row">
+        <button type="button" class="btn btn-primary" id="setup-use-model" @click="useModel()"
+                :disabled="busy || !String(model || '').trim()">{{ t('setup.use_model') }}</button>
+      </div>
+    </div>
+
+    <p class="setup-muted" x-show="busy && status" x-text="status"></p>
+    <p class="setup-ok" id="setup-check-ok" x-show="tested">{{ t('setup.check_ok') }}</p>
+    <p class="setup-error" id="setup-error" x-show="error">
+      <span x-text="errorLead"></span> <bdi translate="no" x-text="error"></bdi>
+    </p>
+    <div class="setup-actions">
+      <button type="button" class="btn btn-secondary" @click="go(1)">{{ t('setup.back') }}</button>
+      <button type="button" class="btn btn-primary" id="setup-next" @click="go(3)" :disabled="!tested">
+        {{ t('setup.next') }}
+      </button>
+    </div>
+  </section>
+
+  {#- 3. Optional extras -#}
+  <section class="card setup-card" id="setup-step-extras" x-cloak x-show="loaded && step === 3">
+    <h2>{{ t('setup.extras_title') }}</h2>
+    <p class="setup-muted">{{ t('setup.extras_lead') }}</p>
+    <ul class="setup-extras">
+      <li><a href="/settings?tab=providers_connectors"><strong>{{ t('setup.extra_chat') }}</strong>
+        <span>{{ t('setup.extra_chat_body') }}</span></a></li>
+      <li><a href="/settings?tab=memory"><strong>{{ t('setup.extra_about') }}</strong>
+        <span>{{ t('setup.extra_about_body') }}</span></a></li>
+      <li><a href="/settings?tab=email"><strong>{{ t('setup.extra_mail') }}</strong>
+        <span>{{ t('setup.extra_mail_body') }}</span></a></li>
+      <li><a href="/settings?tab=packages"><strong>{{ t('setup.extra_parts') }}</strong>
+        <span>{{ t('setup.extra_parts_body') }}</span></a></li>
+    </ul>
+    <div class="setup-actions">
+      <button type="button" class="btn btn-secondary" @click="go(2)">{{ t('setup.back') }}</button>
+      <button type="button" class="btn btn-primary" id="setup-to-done" @click="go(4)">{{ t('setup.next') }}</button>
+    </div>
+  </section>
+
+  {#- 4. Done -#}
+  <section class="card setup-card" id="setup-step-done" x-cloak x-show="loaded && step === 4">
+    <h2>{{ t('setup.done_title') }}</h2>
+    <p class="setup-row"><span>{{ t('setup.done_lead') }}</span>
+      <bdi dir="ltr" translate="no" x-text="activeLabel()"></bdi></p>
+    <p class="setup-label">{{ t('setup.try_title') }}</p>
+    <ul class="setup-try">
+      <li>{{ t('setup.try_1') }}</li>
+      <li>{{ t('setup.try_2') }}</li>
+      <li>{{ t('setup.try_3') }}</li>
+    </ul>
+    <div class="setup-actions">
+      <a href="/" class="btn btn-primary" id="setup-open-chat">{{ t('setup.open_chat') }}</a>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/setup_guide.js?v={{ js_version() }}"></script>
+{% endblock %}

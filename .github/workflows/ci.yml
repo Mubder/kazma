@@ -720,7 +720,8 @@ jobs:
             tests/e2e/test_runs_panel.py \
             tests/e2e/test_header_menus_on_top.py \
             tests/e2e/test_new_chat_memory_choice.py \
-            tests/e2e/test_problems_panel.py
+            tests/e2e/test_problems_panel.py \
+            tests/e2e/test_setup_guide_browser.py
         env:
           KAZMA_DB_BACKEND: sqlite
 

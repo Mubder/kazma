@@ -419,6 +419,18 @@ def register_misc_routes(self: Any) -> None:
                 "active_page": "ide",
             },
         )
+    @self.app.get("/setup", response_class=HTMLResponse)
+    def setup_page(request: Request) -> HTMLResponse:
+        """The first-run setup guide (kazma_ui/setup_api.py serves its data)."""
+        return self.templates.TemplateResponse(
+            request,
+            "setup.html",
+            {
+                "config": self.agent.config,
+                "active_page": "setup",
+            },
+        )
+
     @self.app.get("/replay", response_class=HTMLResponse)
     def replay_page(request: Request) -> HTMLResponse:
         return self.templates.TemplateResponse(

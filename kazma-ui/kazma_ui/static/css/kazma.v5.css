@@ -98,9 +98,59 @@ html[data-theme="light"] { color-scheme: only light; }
 }
 .setup-wall-card h2 { margin: 0; font-size: 1.25rem; }
 .setup-wall-card p { margin: 0; color: var(--text-muted); font-size: 0.9rem; }
-.setup-wall-label { font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); }
-.setup-wall-error { color: var(--error); font-size: 0.85rem; }
-.setup-wall-hint { font-size: 0.75rem; }
+.setup-wall-card .btn { align-self: flex-start; }
+
+/* The setup guide (/setup): one card per step, the steps above it. */
+.setup-guide { width: min(44rem, 100%); margin: 0 auto; padding: var(--sp-4) 0 var(--sp-6); }
+.setup-steps {
+  list-style: none; margin: 0 0 var(--sp-4); padding: 0;
+  display: flex; gap: var(--sp-2); flex-wrap: wrap;
+}
+.setup-steps li {
+  flex: 1 1 8rem; padding: var(--sp-2) var(--sp-3);
+  border-block-end: 3px solid var(--border); color: var(--text-muted);
+  font-size: 0.85rem; font-weight: 600;
+}
+.setup-steps li.is-current { border-color: var(--accent); color: var(--text); }
+.setup-steps li.is-done { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.setup-card { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-6); }
+.setup-card[x-cloak] { display: none !important; }
+.setup-card-part { display: flex; flex-direction: column; gap: var(--sp-2); }
+.setup-card-part .form-input,
+.setup-card-part .form-select { width: 100%; max-width: 28rem; }
+.setup-card h2 { margin: 0; font-size: 1.35rem; }
+.setup-card p { margin: 0; }
+.setup-lead { font-size: 1.05rem; font-weight: 600; color: var(--accent); }
+.setup-muted { color: var(--text-muted); font-size: 0.9rem; }
+.setup-label { font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); }
+.setup-error { color: var(--error); font-size: 0.9rem; }
+.setup-ok { color: var(--success, #16a34a); font-weight: 600; }
+.setup-row { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
+.setup-actions { display: flex; gap: var(--sp-2); justify-content: flex-end; flex-wrap: wrap; margin-top: var(--sp-2); }
+.setup-choice { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: var(--sp-3); }
+.setup-option {
+  display: flex; flex-direction: column; gap: var(--sp-1); text-align: start;
+  padding: var(--sp-4); border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-elevated); color: var(--text); cursor: pointer; font: inherit;
+}
+.setup-option span { color: var(--text-muted); font-size: 0.85rem; }
+.setup-option.is-selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.setup-server {
+  display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap;
+  padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.setup-server strong { min-width: 6rem; }
+.setup-server .setup-muted { flex: 1 1 10rem; }
+.setup-extras { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
+.setup-extras a {
+  display: flex; flex-direction: column; gap: 2px; padding: var(--sp-3);
+  border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); text-decoration: none;
+}
+.setup-extras a:hover { border-color: var(--accent); }
+.setup-extras span { color: var(--text-muted); font-size: 0.85rem; }
+.setup-try { margin: 0; padding-inline-start: 1.2rem; display: grid; gap: var(--sp-1); }
+.setup-command { font-family: var(--font-mono, monospace); font-size: 0.85rem; padding: var(--sp-2) var(--sp-3);
+  background: var(--bg-elevated); border-radius: var(--radius); align-self: flex-start; }
 
 /* Hands tape — HITL patch review stack (v5 only; do not copy into kazma.css). */
 .hitl-diff {

@@ -988,10 +988,10 @@ def _finish(parts, found: dict[str, PartState], machine: Machine, options, say) 
         say(f"Kazma has not answered yet. Open {url} in a minute; "
             "scripts/service/kazma_guard.py --status says what it is doing.")
         return
-    say(f"Kazma is running: {url} (the first visit asks for a provider key)", "ok")
+    say(f"Kazma is running: {url} (its setup guide connects the AI model)", "ok")
     if not options.no_browser and machine.interactive():
         try:
-            machine.open_url(url + "/")
+            machine.open_url(url + "/setup")
         except (webbrowser.Error, OSError) as exc:  # no browser here: the address is said above
             log_text = f"could not open a browser: {type(exc).__name__}"
             say(log_text)

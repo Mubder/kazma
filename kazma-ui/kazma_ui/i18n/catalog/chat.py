@@ -785,36 +785,22 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "YOLO on — running…",
     },
     "chat.setup_title": {
-        "ar": "ابدأ المحادثة",
-        "en": "Start chatting",
+        "ar": "أعدّ كاظمه",
+        "en": "Set up Kazma",
     },
     "chat.setup_subtitle": {
-        "ar": "مفتاح واحد ونموذج واحد. يمكنك تغييرهما لاحقاً من الإعدادات.",
-        "en": "One key and one model. You can change them later in Settings.",
-    },
-    "chat.setup_provider": {
-        "ar": "المزوّد",
-        "en": "Provider",
+        "ar": "تحتاج كاظمه إلى نموذج ذكاء اصطناعي قبل أن تجيب. يربط دليل الإعداد نموذجًا في بضع دقائق: "
+              "مزوّدًا سحابيًا بمفتاح API، أو نموذجًا على هذا الجهاز.",
+        "en": "Kazma needs an AI model before it can answer. The setup guide connects one in a few "
+              "minutes: a cloud provider with an API key, or a model on this computer.",
     },
     "chat.setup_api_key": {
         "ar": "مفتاح API",
         "en": "API key",
     },
-    "chat.setup_model": {
-        "ar": "النموذج",
-        "en": "Model",
-    },
     "chat.setup_start": {
-        "ar": "ابدأ",
-        "en": "Start",
-    },
-    "chat.setup_settings_hint": {
-        "ar": "المحليون (Ollama / LM Studio) لا يحتاجون مفتاحاً. الإعدادات تبقى متاحة.",
-        "en": "Local (Ollama / LM Studio) needs no key. Settings stays available.",
-    },
-    "chat.setup_key_placeholder": {
-        "ar": "اختياري للمحلي",
-        "en": "Optional for local",
+        "ar": "ابدأ دليل الإعداد",
+        "en": "Start the setup guide",
     },
     "chat.notify_done_title": {
         "ar": "Kazma — اكتملت المهمة",

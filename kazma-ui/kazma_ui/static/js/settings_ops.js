@@ -810,10 +810,23 @@
                     this.pkgDbBackend = data.db_backend || 'sqlite';
                     this.pkgDbUrlSet = !!data.db_url_set;
                     this.pkgMemory = data.memory || { status: '', summary: '', headline: '', layers: {}, issues: [] };
+                    this.pkgInstall = data.install || { mode: null, at: null, chosen: 0, total: 0 };
                     this.pkgLoaded = true;
                 }
             } catch (e) { /* silent */ }
             this.pkgLoading = false;
+        },
+
+        // "Installed as Express on 7 Nov 2026: 14 of 23 parts." -- or '' when
+        // no install was recorded.
+        pkgInstallLine() {
+            const inst = this.pkgInstall || {};
+            if (!inst.mode) return '';
+            const mode = window.kazmaT('packages.mode_' + inst.mode, inst.mode);
+            const when = inst.at && window.KazmaFormat
+                ? window.KazmaFormat.date(new Date(Number(inst.at) * 1000)) : '';
+            return window.kazmaCount('packages.installed_as', Number(inst.total) || 0,
+                { mode: mode, date: when, chosen: inst.chosen });
         },
 
         get pkgMemoryLayerRows() {
