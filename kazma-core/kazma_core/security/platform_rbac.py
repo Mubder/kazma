@@ -73,6 +73,13 @@ _ADMIN_PREFIXES = (
     # future system prompt, for every user of the install -- an operator
     # could confirm what the admin had held back.
     "/api/commitment",
+    # The setup guide saves a provider's key and switches the model Kazma
+    # uses, as Settings does: its page and its writes are the admin's.
+    "/setup",
+    "/api/setup/local",
+    "/api/setup/provider",
+    "/api/setup/bootstrap",
+    "/api/setup/check",
 )
 
 # Paths viewer may access (read-ish); everything else needs operator+

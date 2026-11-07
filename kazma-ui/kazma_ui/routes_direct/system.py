@@ -701,6 +701,25 @@ def register_system_routes(self: Any) -> None:
             })
         extras_list.sort(key=lambda e: (e.get("priority", 50), e.get("name") or ""))
 
+        # The install's parts (kazma setup install: Express, Full or Custom):
+        # an extra a part brings is added with `kazma setup install --with
+        # <part>`, which also installs the part's system pieces, and an extra
+        # of a part left out of the recorded install is "not chosen", not
+        # missing (kazma_core.install_components.install_overview).
+        from kazma_core.install_components import install_overview, parts_of_extra
+        from kazma_core.postgres_service import read_record
+
+        install = install_overview(await asyncio.to_thread(read_record))
+        chosen_parts = {p["id"] for p in install["parts"] if p["chosen"]}
+        for extra in extras_list:
+            owners = parts_of_extra(str(extra.get("name") or ""))
+            if not owners:
+                continue
+            extra["part"] = owners[0]
+            extra["install_cmd"] = f"kazma setup install --with {owners[0]}"
+            if install["mode"]:
+                extra["chosen"] = any(owner in chosen_parts for owner in owners)
+
         # Live memory health snapshot for the Packages tab Memory card.
         memory_summary: dict = {
             "status": "UNKNOWN",
@@ -757,6 +776,7 @@ def register_system_routes(self: Any) -> None:
             "db_backend": _db_backend,
             "db_url_set": bool(_db_url),
             "memory": memory_summary,
+            "install": {k: install[k] for k in ("mode", "at", "chosen", "total")},
         }
     @self.app.post("/api/system/memory/backup")
     async def _create_memory_backup():

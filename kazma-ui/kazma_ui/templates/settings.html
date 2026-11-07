@@ -40,6 +40,8 @@
             <div style="display:flex;gap:8px;margin-bottom:8px">
                 <button class="btn btn-sm" :class="hubSubtab === 'providers' ? 'btn-primary' : 'btn-secondary'" @click="hubSubtab = 'providers'">{{ t('settings.llm_providers_models') }}</button>
                 <button class="btn btn-sm" :class="hubSubtab === 'connectors' ? 'btn-primary' : 'btn-secondary'" @click="hubSubtab = 'connectors'">{{ t('settings.platform_connectors') }}</button>
+                <a href="/setup" class="btn btn-sm btn-secondary" id="settings-setup-guide" style="margin-inline-start:auto"
+                   title="{{ t('setup.reopen_hint') }}">{{ t('setup.reopen') }}</a>
             </div>
         </div>
 
@@ -2445,7 +2447,7 @@
             </div>
             <p class="pkg-muted pkg-hint" x-show="pkgLoaded && !pkgExtras.some(e => e.name === 'rag' && e.installed)" x-cloak>
                 {{ t('packages.memory_hint') }}
-                <code>pip install -e ".[rag]"</code>
+                <code translate="no">kazma setup install --with meaning_search</code>
             </p>
         </div>
 
@@ -2454,6 +2456,7 @@
             <div class="pkg-panel-head">
                 <h4 class="pkg-h4">{{ t('packages.optional_deps') }}</h4>
                 <p class="pkg-muted">{{ t('packages.optional_deps_hint') }}</p>
+                <p class="pkg-muted" id="pkg-install-line" x-show="pkgInstallLine()" x-text="pkgInstallLine()" x-cloak></p>
             </div>
             <div x-show="pkgLoading" class="pkg-loading" x-cloak>{{ t('common.loading') }}</div>
             <template x-for="extra in pkgExtras" :key="extra.name">
@@ -2462,15 +2465,21 @@
                         <div class="pkg-extra-titles">
                             <span class="pkg-extra-title" translate="no" x-text="extra.title || extra.name"></span>
                             <span class="pkg-extra-slug" translate="no" x-text="'[' + extra.name + ']'"></span>
+                            {# A part the recorded install left out is "not chosen", never
+                               missing (or partial, when another part brought one of its
+                               packages): chosen is false only with a record. #}
                             <span class="badge pkg-badge"
-                                  :class="extra.installed ? 'badge-success' : (extra.partial ? 'badge-warning' : 'badge-danger')"
+                                  :class="extra.installed ? 'badge-success' : (extra.chosen === false ? 'badge-secondary' : (extra.partial ? 'badge-warning' : 'badge-danger'))"
                                   x-text="extra.installed
                                     ? t('packages.installed_badge')
-                                    : (extra.partial
-                                      ? (t('packages.partial_badge') + ' (' + (extra.installed_count || 0) + '/' + (extra.package_count || 0) + ')')
-                                      : t('packages.missing_badge'))"></span>
+                                    : (extra.chosen === false
+                                      ? t('packages.not_chosen_badge')
+                                      : (extra.partial
+                                        ? (t('packages.partial_badge') + ' (' + (extra.installed_count || 0) + '/' + (extra.package_count || 0) + ')')
+                                        : t('packages.missing_badge')))"></span>
                         </div>
                         <p class="pkg-extra-desc" translate="no" x-text="extra.description"></p>
+                        <p class="pkg-muted" x-show="!extra.installed && extra.chosen === false" x-cloak>{{ t('packages.not_chosen_hint') }}</p>
                     </div>
                     <div class="pkg-chips">
                         <template x-for="pkg in extra.packages" :key="pkg.name">
@@ -2532,13 +2541,18 @@
         <div class="settings-group">
             <h4 class="pkg-h4">{{ t('packages.install_all_title') }}</h4>
             <p class="pkg-muted" style="margin:0 0 10px 0;">{{ t('packages.install_all_desc') }}</p>
+            {# The Full install from one table (kazma_core/install_components.py):
+               Python packages and the system pieces each part needs, additive
+               (uv sync --inexact), continuing where an earlier run stopped. #}
             <div class="pkg-install-bar">
                 <span class="pkg-install-prompt">$</span>
-                {# Additive, as `kazma update` installs (kazma_cli.update._reinstall_local):
-                   uv's exact sync, with all extras too, removes every package outside
-                   the set it was asked for. #}
-                <code class="pkg-install-cmd" translate="no">uv pip install -e ".[all]"</code>
-                <button type="button" class="btn btn-xs btn-secondary" @click="copyPkgCmd('uv pip install -e &quot;.[all]&quot;')">{{ t('packages.copy') }}</button>
+                <code class="pkg-install-cmd" translate="no">kazma setup install --mode full</code>
+                <button type="button" class="btn btn-xs btn-secondary" @click="copyPkgCmd('kazma setup install --mode full')">{{ t('packages.copy') }}</button>
+            </div>
+            <div class="pkg-install-bar">
+                <span class="pkg-install-prompt">&gt;</span>
+                <code class="pkg-install-cmd" translate="no">.\setup.cmd -Mode full</code>
+                <button type="button" class="btn btn-xs btn-secondary" @click="copyPkgCmd('.\\setup.cmd -Mode full')">{{ t('packages.copy') }}</button>
             </div>
         </div>
     </div>

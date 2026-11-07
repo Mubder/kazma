@@ -381,7 +381,7 @@ def test_express_installs_everything_but_docker_and_a_second_run_does_nothing(bo
                               "Cisco.ClamAV", "OpenJS.NodeJS.LTS"]
     assert box.models and box.service and box.scheduled and box.langs and "ara" in box.langs
     assert "Docker.DockerDesktop" not in _installs(box)
-    assert box.opened == ["http://127.0.0.1:9090/"], out
+    assert box.opened == ["http://127.0.0.1:9090/setup"], out  # the setup guide
     record = json.loads((box.home / "setup_record.json").read_text(encoding="utf-8"))["install"]
     assert record["mode"] == "express" and record["components"] == ic.express_ids()
     assert all(r["ok"] for r in record["results"].values()), record["results"]

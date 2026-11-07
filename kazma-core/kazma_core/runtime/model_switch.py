@@ -221,6 +221,10 @@ def switch_active_model(
         final_model,
         final_prov,
     )
+    if final_prov:
+        from kazma_core.observability.model_fallback import report_provider_chosen
+
+        report_provider_chosen(final_prov)  # a notice about a provider left behind ends
     return SwitchResult(ok=True, model=final_model, provider=final_prov)
 
 
@@ -309,6 +313,9 @@ def switch_active_provider(
         final_prov,
         final_model,
     )
+    from kazma_core.observability.model_fallback import report_provider_chosen
+
+    report_provider_chosen(final_prov)  # a notice about a provider left behind ends
     return SwitchResult(ok=True, model=final_model, provider=final_prov)
 
 

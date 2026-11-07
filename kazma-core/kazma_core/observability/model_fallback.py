@@ -319,6 +319,35 @@ def report_provider_usable(provider: str) -> None:
         _keep_mark("settle", key)
 
 
+def report_provider_chosen(provider: str) -> None:
+    """The operator made *provider* the one Kazma uses: a substitution notice
+    about any other provider describes a setting that no longer exists, and
+    ends, quietly (no "resolved" page: nothing about it was fixed).
+
+    A provider the operator moved away from never gets its key, so its notice
+    stayed for good: the setup guide's switch from the shipped placeholder
+    left "Model fallback: custom has no usable API key" on every page (the
+    clean Windows VM, 2026-11-07).
+    """
+    name = (provider or "").strip().lower()
+    if not name:
+        return
+    with _lock:
+        stale = [key for key, episode in _active.items()
+                 if episode.kind == "substitution" and key != f"substitution:{name}"]
+        episodes = [(key, _active.pop(key)) for key in stale]
+    if not episodes:
+        return
+    from kazma_core.observability.alerts import AlertDispatcher
+
+    for key, episode in episodes:
+        AlertDispatcher.resolve_alerts_for_subsystem("llm-fallback:" + key.split(":", 1)[1])
+        if episode.marked and not _suppressed():
+            _keep_mark("settle", key)
+    logger.info("[model_fallback] %s is the provider in use: closed the fallback notice(s) of %s",
+                name, ", ".join(key.split(":", 1)[1] for key, _ in episodes))
+
+
 def report_rebind_failed(*, provider: str, error: str) -> None:
     """A key was saved for *provider* and the running agent could not rebuild
     its client: it keeps answering with the client it had, built for the key

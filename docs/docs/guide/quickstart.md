@@ -8,7 +8,7 @@ description: Kazma Quickstart — code-audited reference (unified docs, v0.9+)
 
 > Get Kazma running and answering messages in under 10 minutes. This guide is the install source of truth — keep it in lockstep with `pyproject.toml`, `setup.cmd` / `setup.ps1` / `setup.sh`, and Settings → Packages.
 >
-> Once Kazma is running, open **`/` — that is chat**, not the dashboard. First-run asks for one provider key and one model. Inspectors live under **More**.
+> Once Kazma is running, open **`/` — that is chat**, not the dashboard. On a new install its [setup guide](#the-setup-guide) connects the model first. Inspectors live under **More**.
 
 ---
 
@@ -121,7 +121,34 @@ How a run goes:
   repair) checks everything and continues where it stopped. Everything said,
   and every program's output, goes to `.kazma/install.log`.
 - **Kazma opens.** With the service installed it waits for Kazma to answer and
-  opens the browser on it; the first visit asks for a provider key.
+  opens the browser on its setup guide (below).
+
+### The setup guide
+
+`/setup` takes a new install to a working model, in English or Arabic. Setup
+opens it; until a model is set up, the chat page shows a card that opens it;
+Settings → Providers & Connectors opens it again (**Setup guide**), as does
+the page search (Ctrl+K).
+
+1. **Welcome**: what Kazma is, and the language.
+2. **Model**: either
+   - **a cloud provider**: pick it (each has a link to where its API keys are
+     made), paste the key, and the guide lists the provider's models; or
+   - **a model on this computer**: the guide looks for Ollama and LM Studio
+     here, says which run and how many models each has, and where to download
+     one that does not.
+
+   Pick a model and the guide makes it the one Kazma uses (model and provider
+   together) and sends it one short message. It goes on only when the model
+   answers. Run the guide again to change the model: a key saved before can
+   be left empty. Azure OpenAI, AWS Bedrock and endpoints of your own need
+   more than a key, and are set up in Settings → Providers.
+3. **Extras**, each optional: chat apps (Telegram, Discord, Slack), Memory →
+   About me, mail and calendar, and what was installed (Settings → Packages).
+4. **Done**: the model in use and a few things to try.
+
+The guide's routes are `/api/setup/*`; everything but the status is the
+administrator's, as Settings is.
 
 ```bash
 kazma setup install --list                     # every part, what Kazma lacks without it
@@ -135,6 +162,12 @@ kazma setup install --with browser --without push
 `--mode` and `-y`. Without a terminal (a script, CI) setup installs Kazma's own
 packages for the mode and shows the rest as the plan; `-Yes` / `-y` installs
 everything.
+
+Settings → Packages shows the install: which one it was and when, each part's
+packages, a part the install left out as **Not chosen** (never "Missing"), and
+the command that adds a part, `kazma setup install --with <part>`, which also
+installs what the part needs outside Python (Chromium for the browser tools,
+for example).
 
 The system programs come from the OS's package manager:
 

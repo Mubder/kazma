@@ -22,7 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 __all__ = ["COMPONENTS", "EXTRA_ALIASES", "MODES", "Component", "by_id", "components_for", "express_ids",
-           "extras_for", "full_ids", "toggle"]
+           "extras_for", "full_ids", "install_overview", "parts_of_extra", "toggle"]
 
 MODES = ("express", "full", "custom")
 
@@ -249,3 +249,35 @@ def extras_for(components: list[Component]) -> list[str]:
             if extra not in seen:
                 seen.append(extra)
     return seen
+
+
+def parts_of_extra(extra: str) -> list[str]:
+    """The parts that install the Python extra *extra*, in table order."""
+    return [comp.id for comp in COMPONENTS if extra in comp.extras]
+
+
+def install_overview(record: dict | None) -> dict:
+    """The install as `kazma setup install` recorded it, for Settings -> Packages.
+
+    ``mode`` is None when no install was recorded (a hand install, an older
+    one): then no part is called chosen or left out. With a record, a part
+    left out reads as not chosen, never as missing: the VM's Express install
+    showed the parts Express leaves out as "Missing" (2026-11-07).
+    """
+    install = (record or {}).get("install") or {}
+    mode = install.get("mode") if install.get("mode") in MODES else None
+    chosen = set(install.get("components") or []) if mode else set()
+    results = install.get("results") or {}
+    parts = []
+    for comp in COMPONENTS:
+        result = results.get(comp.id) or {}
+        parts.append({
+            "id": comp.id,
+            "title": comp.title,
+            "express": comp.express,
+            "extras": list(comp.extras),
+            "chosen": (comp.id in chosen) if mode else None,
+            "ok": result.get("ok"),
+        })
+    return {"mode": mode, "at": install.get("at"), "chosen": len(chosen) if mode else 0,
+            "total": len(COMPONENTS), "parts": parts}

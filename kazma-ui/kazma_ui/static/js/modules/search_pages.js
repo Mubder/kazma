@@ -17,4 +17,7 @@ export const KAZMA_SEARCH_PAGES = [
     { href: "/mcp", title: "MCP", key: "nav.mcp" },
     { href: "/x", title: "X Studio", key: "nav.x_studio" },
     { href: "/settings", title: "Settings", key: "nav.settings" },
+    // Not in the sidebar: the first-run guide, reached from the chat page's
+    // card, Settings -> Providers and here.
+    { href: "/setup", title: "Setup guide", key: "setup.reopen" },
 ];

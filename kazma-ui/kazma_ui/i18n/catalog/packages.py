@@ -193,8 +193,44 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Missing",
     },
     "packages.install_all_desc": {
-        "ar": "لتثبيت جميع التبعيات الاختيارية دفعة واحدة، في مجلد التثبيت وكاظمه متوقف (يضيف الحزم ولا يزيل أيًا منها):",
-        "en": "To install all optional dependencies at once, in the install folder with Kazma stopped (it adds packages and removes none):",
+        "ar": "لتثبيت كل أجزاء كاظمه (نمط الكامل، ومنه Docker وPostgreSQL)، شغّل أحد هذين في مجلد "
+              "التثبيت (الثاني على Windows). يضيف ولا يزيل شيئًا، ويكمل من حيث توقف:",
+        "en": "To install every part of Kazma (the Full install, Docker and PostgreSQL among them), run "
+              "one of these in the install folder (the second on Windows). It adds, removes nothing, and "
+              "continues where it stopped:",
+    },
+    # The install `kazma setup install` recorded (Express, Full or Custom).
+    "packages.mode_express": {"ar": "السريع", "en": "Express"},
+    "packages.mode_full": {"ar": "الكامل", "en": "Full"},
+    "packages.mode_custom": {"ar": "المخصّص", "en": "Custom"},
+    "packages.installed_as.zero": {
+        "ar": "ثُبّتت كاظمه بنمط {mode} في {date}: {chosen} من دون أجزاء.",
+        "en": "Installed as {mode} on {date}: {chosen} of 0 parts.",
+    },
+    "packages.installed_as.one": {
+        "ar": "ثُبّتت كاظمه بنمط {mode} في {date}: {chosen} من جزء واحد.",
+        "en": "Installed as {mode} on {date}: {chosen} of 1 part.",
+    },
+    "packages.installed_as.two": {
+        "ar": "ثُبّتت كاظمه بنمط {mode} في {date}: {chosen} من جزأين.",
+        "en": "Installed as {mode} on {date}: {chosen} of 2 parts.",
+    },
+    "packages.installed_as.few": {
+        "ar": "ثُبّتت كاظمه بنمط {mode} في {date}: {chosen} من {n} أجزاء.",
+        "en": "Installed as {mode} on {date}: {chosen} of {n} parts.",
+    },
+    "packages.installed_as.many": {
+        "ar": "ثُبّتت كاظمه بنمط {mode} في {date}: {chosen} من {n} جزءًا.",
+        "en": "Installed as {mode} on {date}: {chosen} of {n} parts.",
+    },
+    "packages.installed_as.other": {
+        "ar": "ثُبّتت كاظمه بنمط {mode} في {date}: {chosen} من {n} جزء.",
+        "en": "Installed as {mode} on {date}: {chosen} of {n} parts.",
+    },
+    "packages.not_chosen_badge": {"ar": "غير مختار", "en": "Not chosen"},
+    "packages.not_chosen_hint": {
+        "ar": "تُرك خارج هذا التثبيت. لإضافته:",
+        "en": "Left out of this install. To add it:",
     },
     "packages.install_all_title": {
         "ar": "تثبيت الكل",
@@ -256,8 +292,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Memory engine",
     },
     "packages.memory_hint": {
-        "ar": "لاسترجاع المتجهات بالكامل ثبّت إضافة rag:",
-        "en": "For full vector recall install the rag extra:",
+        "ar": "للبحث بالمعنى في الذاكرة ثبّت جزء البحث بالمعنى:",
+        "en": "For recall by meaning, install the meaning-search part:",
     },
     "packages.memory_issues": {
         "ar": "مشاكل الذاكرة",
