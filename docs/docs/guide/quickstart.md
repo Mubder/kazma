@@ -6,9 +6,9 @@ description: Kazma Quickstart — code-audited reference (unified docs, v0.9+)
 ---
 > This page is published at [kazma.ai/docs/quickstart/](https://kazma.ai/docs/quickstart/) ([Arabic](https://kazma.ai/ar/docs/quickstart/)).
 
-> Get Kazma running and answering messages in under 10 minutes. This guide is the install source of truth — keep it in lockstep with `pyproject.toml`, `setup.ps1` / `setup.sh`, and Settings → Packages.
+> Get Kazma running and answering messages in under 10 minutes. This guide is the install source of truth — keep it in lockstep with `pyproject.toml`, `setup.cmd` / `setup.ps1` / `setup.sh`, and Settings → Packages.
 >
-> After `kazma serve`, open **`/` — that is chat**, not the dashboard. First-run asks for one provider key and one model. Inspectors live under **More**.
+> Once Kazma is running, open **`/` — that is chat**, not the dashboard. First-run asks for one provider key and one model. Inspectors live under **More**.
 
 ---
 
@@ -39,9 +39,16 @@ cd kazma
 ```
 
 ```powershell
-# Windows (PowerShell) — never chain with && / ||; use ; and $LASTEXITCODE
-.\setup.ps1
+# Windows (PowerShell or Command Prompt)
+.\setup.cmd
 ```
+
+`setup.cmd` runs `setup.ps1`. A fresh Windows refuses to run PowerShell script
+files ("running scripts is disabled on this system": its execution policy is
+Restricted), so `setup.ps1` cannot be started directly there; `setup.cmd` is not a
+PowerShell script, and it starts PowerShell with the policy bypassed for that
+one process. No setting is changed, and a policy set by Group Policy still
+wins.
 
 ```bash
 # Linux / macOS / WSL
@@ -117,7 +124,7 @@ kazma setup install --mode express -y          # no questions
 kazma setup install --with browser --without push
 ```
 
-`setup.ps1` takes `-Mode express|full|custom` and `-Yes`; `setup.sh` takes
+`setup.cmd` (and `setup.ps1`) take `-Mode express|full|custom` and `-Yes`; `setup.sh` takes
 `--mode` and `-y`. Without a terminal (a script, CI) setup installs Kazma's own
 packages for the mode and shows the rest as the plan; `-Yes` / `-y` installs
 everything.
@@ -296,6 +303,10 @@ The complete key-by-key reference is in [Configuration](configuration).
 ## 4. Run
 
 ### Web UI (most common)
+
+Installed by setup with its service part (Express and Full have it), Kazma is
+already running and setup opened the browser on it. `kazma serve` is for an
+install without the service: Path B, or Custom with the service left out.
 
 ```bash
 kazma serve              # default host 127.0.0.1, port 9090

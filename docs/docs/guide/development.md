@@ -30,6 +30,7 @@ kazma/
 ├── pyproject.toml       # Single hatchling build (6 packages in the wheel)
 ├── Dockerfile           # Main agent image
 ├── docker-compose.yml   # Host 9090 → container 8000
+├── setup.cmd            # Windows: runs setup.ps1 past a fresh Windows' script policy
 ├── setup.ps1            # Windows bootstrap (kazma setup install: Express, Full or Custom)
 ├── setup.sh             # Linux / macOS / WSL bootstrap
 └── run.sh               # Minimal E2E reproduction
@@ -74,7 +75,7 @@ There is **no `[cli]` extra** and no `[tracing]` extra. Full extra table: [Quick
 ### 2.2 Windows
 
 ```powershell
-.\setup.ps1            # uv (and Python), Kazma's packages, kazma setup install (Express, Full or Custom), import check
+.\setup.cmd            # runs setup.ps1: uv (and Python), Kazma's packages, kazma setup install (Express, Full or Custom), import check
 ```
 
 ### 2.3 uv (used by `setup.sh` / `run.sh`)
