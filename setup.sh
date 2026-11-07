@@ -26,17 +26,27 @@ while [[ $# -gt 0 ]]; do
 done
 case "$MODE" in ""|express|full|custom) ;; *) echo "--mode is express, full or custom (not '$MODE')"; exit 2 ;; esac
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+# Kazma's colours, readable on a light terminal and a dark one: its royal blue
+# (#3b82f6, the web app's identity colour) and darker green, amber and red
+# than a terminal's bright defaults (bright yellow all but vanishes on white).
+# 256-colour codes, which macOS's Terminal shows too (it has no 24-bit
+# colour); none when the output is not a terminal or NO_COLOR is set.
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+    BRAND='\033[1;38;5;33m'
+    GREEN='\033[38;5;28m'
+    YELLOW='\033[38;5;172m'
+    RED='\033[38;5;160m'
+    DIM='\033[38;5;66m'
+    NC='\033[0m'
+else
+    BRAND='' GREEN='' YELLOW='' RED='' DIM='' NC=''
+fi
 
 log_ok()      { echo -e "  ${GREEN}✅ $*${NC}"; }
 log_warn()    { echo -e "  ${YELLOW}⚠️  $*${NC}"; }
 log_fail()    { echo -e "  ${RED}❌ $*${NC}"; }
-log_info()    { echo -e "  ${BLUE}ℹ️  $*${NC}"; }
-log_header()  { echo -e "\n${BLUE}━━━ $* ━━━${NC}"; }
+log_info()    { echo -e "  ℹ️  $*"; }
+log_header()  { echo -e "\n${BRAND}━━━ $* ━━━${NC}"; }
 
 # ── Helper: test if uv actually works ───────────────────────────────────────
 uv_works() {
@@ -50,8 +60,24 @@ if [[ ! -x "$0" ]]; then
     exit 1
 fi
 
-echo -e "\n${GREEN}🇰🇼 Kazma (كاظمه) — Bootstrap v3${NC}"
-echo -e "${BLUE}   Autonomous AI Agent Framework${NC}\n"
+# Which Kazma this installs, read before anything is installed: the version
+# pyproject.toml declares and, in a git checkout, the commit.
+script_dir="$(cd "$(dirname "$0")" && pwd)"
+kazma_version="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$script_dir/pyproject.toml" 2>/dev/null | head -n 1 || true)"
+kazma_commit="$(git -C "$script_dir" rev-parse --short HEAD 2>/dev/null || true)"
+version_text="${kazma_version:-(version unknown)}"
+if [[ -n "$kazma_version" && -n "$kazma_commit" ]]; then
+    version_text="$kazma_version (commit $kazma_commit)"
+fi
+# What Kazma is, in its own words (docs/docs/guide/what-is-kazma.md).
+echo
+echo -e "  ${BRAND}Kazma (كاظمه) ${version_text} — setup${NC}"
+echo -e "  The self-hosted AI agent that asks before it acts."
+echo -e "  ${DIM}It runs on this machine with the AI models you choose, remembers what you${NC}"
+echo -e "  ${DIM}tell it, and works in English and Arabic. Open source (MIT), built in Kuwait.${NC}"
+echo
+echo -e "  ${DIM}This installs uv and a Python when they are missing, Kazma's packages, then${NC}"
+echo -e "  ${DIM}asks how to install Kazma: Express, Full or Custom.${NC}"
 
 # ── 1. Environmental Guardrails ─────────────────────────────────────────────
 
@@ -331,5 +357,5 @@ log_info "Parts:          .venv/bin/python -m kazma_cli setup install --list"
 log_info "Everything:     ./setup.sh --mode full"
 log_info "Docs:           https://kazma.ai/docs/"
 echo ""
-echo -e "${GREEN}🇰🇼 كاظمه — Built to remember. Built to last.${NC}"
+echo -e "${BRAND}🇰🇼 كاظمه — Built to remember. Built to last.${NC}"
 echo ""

@@ -47,11 +47,6 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-if ($Mode -and @("express", "full", "custom") -notcontains $Mode.ToLower()) {
-    Write-Host "  -Mode is express, full or custom (not '$Mode')" -ForegroundColor Red
-    exit 2
-}
-
 # A person at a terminal: someone can answer a question (not -NonInteractive,
 # not a redirected input). Nothing is asked, and no window is opened, otherwise.
 $NonInteractiveFlag = @([Environment]::GetCommandLineArgs() | Where-Object { "$_" -like "-NonI*" }).Count -gt 0
@@ -59,11 +54,40 @@ $Interactive = [Environment]::UserInteractive -and -not [Console]::IsInputRedire
 
 # ── Logging helpers ──────────────────────────────────────────────────────────
 
-function Log-Ok($msg) { Write-Host "  ✅ $msg" -ForegroundColor Green }
-function Log-Warn($msg) { Write-Host "  ⚠️  $msg" -ForegroundColor Yellow }
-function Log-Fail($msg) { Write-Host "  ❌ $msg" -ForegroundColor Red }
-function Log-Info($msg) { Write-Host "  ℹ️  $msg" -ForegroundColor Cyan }
-function Log-Header($msg) { Write-Host "`n━━━ $msg ━━━" -ForegroundColor Cyan }
+# Kazma's colours, readable on a light terminal and a dark one: its royal
+# blue (#3b82f6, the web app's identity colour) and darker green, amber and
+# red than a terminal's bright defaults (bright yellow and cyan all but vanish
+# on white). 24-bit where the terminal takes escape codes, the nearest console
+# colour where it does not, none when the output goes to a file or NO_COLOR is set.
+$PlainOutput = [bool]$env:NO_COLOR
+try { $PlainOutput = $PlainOutput -or [Console]::IsOutputRedirected } catch { Write-Verbose "$_" }
+$UseEscapes = $false
+try { $UseEscapes = [bool]$Host.UI.SupportsVirtualTerminal } catch { Write-Verbose "$_" }
+$KazmaTones = @{
+    brand = @("59;130;246", "Blue")
+    ok    = @("22;163;74", "DarkGreen")
+    warn  = @("217;119;6", "DarkYellow")
+    fail  = @("220;38;38", "Red")
+    dim   = @("100;116;139", "DarkGray")
+}
+
+function Write-Kazma([string]$text, [string]$tone = "", [switch]$Bold) {
+    if ($PlainOutput -or -not $tone) { Write-Host $text; return }
+    $rgb, $console = $KazmaTones[$tone]
+    if ($UseEscapes) {
+        $esc = [char]27
+        $weight = if ($Bold) { "1;" } else { "" }
+        Write-Host "$esc[${weight}38;2;${rgb}m$text$esc[0m"
+    } else {
+        Write-Host $text -ForegroundColor $console
+    }
+}
+
+function Log-Ok($msg) { Write-Kazma "  ✅ $msg" ok }
+function Log-Warn($msg) { Write-Kazma "  ⚠️  $msg" warn }
+function Log-Fail($msg) { Write-Kazma "  ❌ $msg" fail }
+function Log-Info($msg) { Write-Kazma "  ℹ️  $msg" }
+function Log-Header($msg) { Write-Kazma "`n━━━ $msg ━━━" brand -Bold }
 
 if ($Debug) {
     $VerbosePreference = "Continue"
@@ -104,8 +128,34 @@ function Test-UvWorks {
 
 # ── Banner ───────────────────────────────────────────────────────────────────
 
-Write-Host "`n🇰🇼 Kazma (كاظمه) — Bootstrap v3 (PowerShell)`n" -ForegroundColor Green
-Write-Host "   Autonomous AI Agent Framework`n" -ForegroundColor Cyan
+# Which Kazma this installs, read before anything is installed: the version
+# pyproject.toml declares and, in a git checkout, the commit.
+$KazmaVersion = ""
+$pyproject = Join-Path $PSScriptRoot "pyproject.toml"
+if (Test-Path $pyproject -PathType Leaf) {
+    $versionLine = Select-String -Path $pyproject -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1
+    if ($versionLine) { $KazmaVersion = $versionLine.Matches[0].Groups[1].Value }
+}
+$commit = "$(Invoke-Native -StdoutOnly { git -C $PSScriptRoot rev-parse --short HEAD })".Trim()
+if ($LASTEXITCODE -ne 0) { $commit = "" }
+$versionText = $KazmaVersion
+if ($versionText -and $commit) { $versionText += " (commit $commit)" }
+if (-not $versionText) { $versionText = "(version unknown)" }
+
+# What Kazma is, in its own words (docs/docs/guide/what-is-kazma.md).
+Write-Host ""
+Write-Kazma "  Kazma (كاظمه) $versionText — setup" brand -Bold
+Write-Kazma "  The self-hosted AI agent that asks before it acts."
+Write-Kazma "  It runs on this machine with the AI models you choose, remembers what you" dim
+Write-Kazma "  tell it, and works in English and Arabic. Open source (MIT), built in Kuwait." dim
+Write-Host ""
+Write-Kazma "  This installs uv and a Python when they are missing, Kazma's packages, then" dim
+Write-Kazma "  asks how to install Kazma: Express, Full or Custom." dim
+
+if ($Mode -and @("express", "full", "custom") -notcontains $Mode.ToLower()) {
+    Write-Kazma "  -Mode is express, full or custom (not '$Mode')" fail
+    exit 2
+}
 
 # ── 0. An administrator window ──────────────────────────────────────────────
 # System packages (winget) and the service need administrator rights. Asked
@@ -409,5 +459,5 @@ Log-Info "Parts:          $VenvPython -m kazma_cli setup install --list"
 Log-Info "Everything:     .\setup.cmd -Mode full"
 Log-Info "Docs:           https://kazma.ai/docs/"
 Write-Host ""
-Write-Host "🇰🇼 كاظمه — Built to remember. Built to last." -ForegroundColor Green
+Write-Kazma "🇰🇼 كاظمه — Built to remember. Built to last." brand -Bold
 Write-Host ""

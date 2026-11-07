@@ -382,8 +382,9 @@ def test_express_installs_everything_but_docker_and_a_second_run_does_nothing(bo
     assert all(r["ok"] for r in record["results"].values()), record["results"]
     log = (box.home / "install.log").read_text(encoding="utf-8")
     assert "The plan:" in log and "Successfully installed" in log
-    # Not chosen: said, with what Kazma lacks without each.
-    assert "Not chosen" in out and ic.by_id("docker").lacks in out
+    # Not chosen: named on screen; what Kazma lacks without each is in the log.
+    assert "Left out (9): " in out and "Docker" in out
+    assert "Not chosen" in log and ic.by_id("docker").lacks in log
 
     box.ran.clear()
     again = _machine(box, answers=[])
@@ -398,7 +399,7 @@ def test_problems_are_said_before_anything_is_done(box, capsys):
     machine = _machine(box, answers=["", "n"], online=False, free=2 * 2**30)
     assert install(_options(), machine) == 1
     out = capsys.readouterr().out
-    assert out.index("Problems found before anything was done") < out.index("The plan:")
+    assert out.index("Problems found before anything was done") < out.index("steps to run")
     assert "neither pypi.org nor github.com answers" in out and "GB free" in out
     assert not _installs(box) and not box.extras and "Nothing was done." in out
 
@@ -505,3 +506,129 @@ def test_the_list_names_every_part(capsys):
     out = capsys.readouterr().out
     for comp in ic.COMPONENTS:
         assert comp.id in out and comp.lacks in out
+
+
+# -- what the screen shows (the clean Windows VM, 2026-11-07) -------------------------------
+
+
+def test_an_install_shows_a_short_summary_and_logs_every_step(box, capsys):
+    """The first clean-VM run printed every part's state, every part left out
+    with what Kazma lacks without it, and every step's command line before
+    one question. The screen now names the parts; the log holds the rest."""
+    from kazma_cli.install import install
+    from kazma_core.version import get_version
+
+    machine = _machine(box, answers=["", ""])
+    assert install(_options(), machine) == 0
+    out = capsys.readouterr().out
+    first = out.splitlines()[0]
+    assert first == f"Kazma {get_version()}: setup on Windows, with winget", first
+    before_question = out[: out.index("steps to run")]
+    assert "To install (" in before_question and "Left out (9): " in before_question
+    assert "Meaning search" in before_question and "(bge-m3)" not in before_question
+    assert "winget install" not in out and "The plan:" not in out
+    assert len(before_question.splitlines()) <= 20, before_question
+    log = (box.home / "install.log").read_text(encoding="utf-8")
+    assert "The plan:" in log and "winget install" in log and "Not chosen" in log
+    assert "Done: " in out  # the end: a line, not every part's state again
+    assert "After the install:" not in out and "After the install:" in log
+
+
+def test_a_dry_run_still_shows_every_step(box, capsys):
+    """--dry-run and --check are for reading: they keep the whole listing."""
+    from kazma_cli.install import install
+
+    assert install(_options(mode="express", dry_run=True), _machine(box)) == 0
+    out = capsys.readouterr().out
+    assert "The plan:" in out and "winget install" in out and "Not chosen" in out
+
+
+def test_keys_typed_before_a_question_are_dropped(monkeypatch):
+    """An Enter left in the console answered "Choose 1, 2 or 3" on the clean
+    VM. Before asking a person, what was typed ahead is thrown away; a
+    question answered by code (the tests' own) drains nothing."""
+    import builtins
+    import os
+
+    from kazma_cli import setup
+
+    drained: list[str] = []
+    pending = ["\r", "x"]
+
+    class Console:
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr(setup.sys, "stdin", Console())
+    if os.name == "nt":
+        import msvcrt
+
+        monkeypatch.setattr(msvcrt, "kbhit", lambda: bool(pending))
+        monkeypatch.setattr(msvcrt, "getwch", lambda: drained.append(pending.pop(0)) or drained[-1])
+    else:
+        import termios
+
+        monkeypatch.setattr(termios, "tcflush", lambda fd, how: (drained.extend(pending), pending.clear()))
+    monkeypatch.setattr(builtins, "input", lambda question: "2")
+
+    assert setup._ask(builtins.input, "Choose 1, 2 or 3 [1]: ") == "2"
+    assert drained == ["\r", "x"] and not pending
+
+    # The negative control: an answer that is not a person's leaves the console alone.
+    pending[:] = ["\r"]
+    drained.clear()
+    assert setup._ask(lambda question: "", "Install now? [Y/n] ") == ""
+    assert drained == [] and pending == ["\r"]
+
+
+ESC = chr(27)
+BACKSLASH = chr(92)
+
+
+def test_colours_only_on_a_terminal_and_the_log_stays_plain(box, capsys, monkeypatch):
+    from kazma_cli import install as inst
+
+    monkeypatch.setattr(inst, "_COLOURS", [True])
+    painted = inst._paint("Kazma", "brand")
+    assert painted == f"{ESC}[1;38;5;33mKazma{ESC}[0m"
+    assert inst._paint("Kazma") == "Kazma"
+    inst.install(_options(), _machine(box, answers=["", ""]))
+    out = capsys.readouterr().out
+    log = (box.home / "install.log").read_text(encoding="utf-8")
+    assert ESC in out and ESC not in log
+    monkeypatch.setattr(inst, "_COLOURS", [False])
+    assert inst._paint("Kazma", "brand") == "Kazma"
+
+
+# The bright yellow, bright cyan and white of a terminal's palette all but
+# vanish on a light background: no setup script uses them. The scripts spell
+# an escape as the text \033 (a backslash, then 033).
+_FADING_ON_WHITE = re.compile(
+    r"-ForegroundColor\s+(Yellow|Cyan|White|Gray)\b"  # PowerShell's bright ones
+    + "|" + re.escape(BACKSLASH) + r"033\[(?:[01];)?(?:33|36|37|9[0-7])m"  # yellow, cyan, white
+)
+
+
+def _fading_colours(text: str) -> list[str]:
+    return [m.group(0) for m in _FADING_ON_WHITE.finditer(text)]
+
+
+def test_setup_scripts_use_colours_a_light_terminal_shows():
+    root = Path(__file__).resolve().parent.parent
+    for name in ("setup.ps1", "setup.sh"):
+        text = (root / name).read_text(encoding="utf-8-sig")
+        assert _fading_colours(text) == [], name
+    # The negative control: the colours both scripts used until 2026-11-07.
+    assert _fading_colours('Write-Host "x" -ForegroundColor Yellow') == ["-ForegroundColor Yellow"]
+    old_yellow = BACKSLASH + "033[1;33m"
+    assert _fading_colours(f"YELLOW='{old_yellow}'") == [old_yellow]
+
+
+def test_the_setup_intro_says_what_kazma_is_in_its_own_words():
+    """The intro's one line is the first sentence of What Kazma is."""
+    root = Path(__file__).resolve().parent.parent
+    page = (root / "docs" / "docs" / "guide" / "what-is-kazma.md").read_text(encoding="utf-8")
+    sentence = re.search(r"\*\*(Kazma is the [^*]+)\*\*", page).group(1)
+    line = sentence.replace("Kazma is the", "The", 1)
+    for name in ("setup.ps1", "setup.sh"):
+        assert line in (root / name).read_text(encoding="utf-8-sig"), (name, line)
