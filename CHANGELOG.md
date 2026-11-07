@@ -18,6 +18,11 @@
   "Not chosen", not "Missing" (or "Partial", for Postgres, whose driver the
   database tools bring); each part is added with `kazma setup install --with
   <part>`, and everything with `kazma setup install --mode full`.
+- **A reloaded reply names the model that answered it.** Live, the reply named
+  the model that answered; after a reload it named the model the page had asked
+  for, because the page's stream saved the reply once more and wrote that over
+  it. Both now name the one that answered. A client that names no model still
+  continues with the model the chat ran with, not a failover's backup.
 - **Switching the model ends a stale fallback notice.** A "Model fallback: X has
   no usable API key" notice about a provider you moved away from closed only
   when that provider got its key, so it stayed for good.

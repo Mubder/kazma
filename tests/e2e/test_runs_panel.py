@@ -42,7 +42,12 @@ def _dead_letter(data_dir: str) -> str:
 
     reset_incident_store(None)  # bind to this server's data dir
     asyncio.run(supervisor.tick())
-    return get_incident_store().live()[0]["id"]
+    # This dead letter's incident, not the newest: in a full e2e run the pass
+    # also found another test's chat turn left open in this process, and the
+    # card under test was that one (2026-11-07).
+    ours = [row for row in get_incident_store().live() if row["run_id"] == "memory_task:t-dead"]
+    assert len(ours) == 1, get_incident_store().live()
+    return ours[0]["id"]
 
 
 @pytest.mark.parametrize("language", ["en", "ar"])
