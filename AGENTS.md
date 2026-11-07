@@ -4194,6 +4194,23 @@ languages, the docs, setup.ps1's own messages) names `setup.cmd`, and
 `powershell -File setup.ps1` refused there, and a setup.cmd that does not
 change folder, as the negative controls).
 
+**What the install shows** (the owner, after the clean VM's first run,
+2026-11-07: some 60 lines before one question, no version, and the mode
+question answered by an Enter left in the console). The setup scripts open
+with the version and commit and the first sentence of
+`docs/docs/guide/what-is-kazma.md`; `kazma setup install` starts with
+`_header` (`get_version()`) and, when installing, says only a summary by
+part name (`_say_summary`): every part's state, what each part left out
+lacks and every step's command go to the install log (`--dry-run` and
+`--check` print them). `setup._ask` drops what was typed ahead before it
+asks a person (`_drop_typeahead`). Colours are Kazma's royal blue and darker
+green, amber and red (`_TONES`, setup.sh's 256-colour codes, setup.ps1's
+24-bit originals), never a terminal's bright yellow, cyan or white, and none
+off a terminal or with `NO_COLOR`; the log is plain. Gates in
+`tests/test_install_modes.py` (the summary, the typed-ahead keys with a
+question answered by code as the control, the colours, the scripts' fading
+colours with the old ones as the control, the intro read from the page).
+
 ### 22. Agent Skills Ecosystem (`kazma-core/kazma_core/agent_skills/`)
 
 Kazma is a first-class citizen of the open **agentskills.io** `SKILL.md`

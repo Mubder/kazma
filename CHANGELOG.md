@@ -10,6 +10,14 @@
   the policy bypassed for that one run and changes no setting. The README
   (English and Arabic) and the docs say so, and no longer tell you to start
   Kazma by hand after setup has installed it as a service.
+- **The install says less, and the right things.** It opens with the version
+  and commit it installs and what Kazma is, in Kazma's blue, readable on a
+  light or a dark terminal (the bright yellow and cyan it used vanish on
+  white). Before its one question it names the parts to install, those
+  already there and those left out; every part's state and every step's
+  command go to `.kazma/install.log` (`--dry-run` still prints them). A key
+  pressed before a question, such as an Enter left over from pasting the
+  commands, no longer answers it.
 
 ## 0.21.0 — Install Kazma in one run: Express, Full or Custom (2026-11-07)
 

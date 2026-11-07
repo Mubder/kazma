@@ -97,11 +97,18 @@ prints the same list):
 
 How a run goes:
 
+- **Which Kazma.** Its first lines say the version and commit it installs,
+  and what Kazma is, in Kazma's blue (readable on a light or a dark terminal;
+  plain when `NO_COLOR` is set or the output goes to a file).
 - **Everything is checked first.** Before anything is done it lists every
   problem it can see: too little disk space, no network, an administrator
   terminal needed, and whether Docker can run here at all (virtualization off
   in the firmware, or a Windows virtual machine whose host does not pass it
-  through). Then one plan and one question.
+  through). Then a short summary (the parts to install, those already there
+  and those left out, by name) and one question. Every part's state and every
+  step's command go to `.kazma/install.log`; `--dry-run` and `--check` print
+  them. Keys pressed before a question (a stray Enter) are not taken as its
+  answer.
 - **An administrator window.** On Windows, system packages and the service
   need administrator rights: `setup.ps1` opens an administrator window for
   itself and goes on there (`-NoElevate` stays in the same window). On Linux

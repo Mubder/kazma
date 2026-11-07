@@ -297,7 +297,33 @@ _SYSTEM_ATTEMPTS = 3
 _SYSTEM_RETRY_WAIT_S = 15.0
 
 
+def _drop_typeahead() -> None:
+    """Throw away keys pressed before a question: they are not its answer.
+
+    The clean Windows VM's first install (2026-11-07) passed "Choose 1, 2 or
+    3" without a key pressed: an Enter left in the console (the end of the
+    pasted commands, or one pressed during the long package sync) answered
+    it. Installers drain what was typed ahead before they ask.
+    """
+    try:
+        if not sys.stdin.isatty():
+            return
+        if os.name == "nt":
+            import msvcrt
+
+            while msvcrt.kbhit():
+                msvcrt.getwch()
+        else:
+            import termios
+
+            termios.tcflush(sys.stdin, termios.TCIFLUSH)
+    except (OSError, ValueError, AttributeError, ImportError):  # no console to drain: nothing typed ahead
+        return
+
+
 def _ask(ask, question: str) -> str:
+    if ask is input:  # a person at this console: only what they type after the question counts
+        _drop_typeahead()
     try:
         return ask(question)
     except EOFError:  # no terminal to answer from: no

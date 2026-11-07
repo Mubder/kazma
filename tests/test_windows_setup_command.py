@@ -71,6 +71,7 @@ def test_setup_cmd_runs_where_scripts_are_disabled(tmp_path):
     its exit code back. The same script started the README's old way is
     refused before it runs."""
     cmd = _copy_pair(tmp_path / "kazma")
+    (cmd.parent / "pyproject.toml").write_text('[project]\nname = "kazma"\nversion = "9.8.7"\n', encoding="utf-8")
     env = _restricted_env()
 
     done = _run(["cmd.exe", "/d", "/c", str(cmd), "-Mode", "bogus"], cwd=cmd.parent, env=env)
@@ -78,6 +79,10 @@ def test_setup_cmd_runs_where_scripts_are_disabled(tmp_path):
     assert _DISABLED not in output, output
     assert "-Mode is express, full or custom (not 'bogus')" in output, output
     assert done.returncode == 2, output
+    # Its first line says which Kazma it installs (no git here: no commit).
+    # Windows PowerShell writes a pipe in the console's code page, so only
+    # the ASCII of that line is compared.
+    assert re.search(r"Kazma \S+ 9\.8\.7 \S+ setup", output), output
 
     # The negative control: .\setup.ps1 as the README said, on that machine.
     refused = _run([str(_POWERSHELL), "-NoProfile", "-File", str(cmd.parent / "setup.ps1"), "-Mode", "bogus"],

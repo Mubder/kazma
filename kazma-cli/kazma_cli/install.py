@@ -32,6 +32,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import textwrap
 import time
 import urllib.request
 import webbrowser
@@ -64,12 +65,49 @@ DISK_NEEDED = {"express": 8 * 2**30, "full": 25 * 2**30, "custom": 8 * 2**30}
 ANSWER_WAIT_S = 240.0
 
 _MODE_TEXT = {
-    "express": "everything that needs no Docker: meaning search, document reading with OCR, LibreOffice, "
-               "the malware scan, Node.js and the service. The default.",
-    "full": "every part, Docker and PostgreSQL among them (Docker needs the CPU's virtualization; "
-            "Windows may need a restart in the middle).",
-    "custom": "choose each part; each says what Kazma lacks without it.",
+    "express": "everything that needs no Docker",
+    "full": "every part, Docker and PostgreSQL included (Windows may restart once)",
+    "custom": "choose each part",
 }
+
+_OS_NAMES = {"windows": "Windows", "macos": "macOS", "linux": "Linux"}
+
+#: Kazma's colours, readable on a light terminal and a dark one (setup.sh has
+#: the same 256-colour codes, setup.ps1 their 24-bit originals): the brand's
+#: royal blue, then darker green, amber and red than a terminal's bright ones.
+_TONES = {"brand": "1;38;5;33", "ok": "38;5;28", "warn": "38;5;172", "fail": "38;5;160"}
+_COLOURS: list[bool] = []
+
+
+def _colours_on() -> bool:
+    """Colour only on a terminal that shows it, and never with NO_COLOR set.
+    Windows' console shows escape codes once asked to (ENABLE_VIRTUAL_TERMINAL_PROCESSING)."""
+    if _COLOURS:
+        return _COLOURS[0]
+    on = False
+    try:
+        on = not os.environ.get("NO_COLOR") and sys.stdout.isatty()
+    except (AttributeError, ValueError):  # no stdout to ask
+        on = False
+    if on and os.name == "nt":
+        try:
+            import ctypes
+
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+            mode = ctypes.c_uint32()
+            on = bool(kernel32.GetConsoleMode(handle, ctypes.byref(mode))
+                      and kernel32.SetConsoleMode(handle, mode.value | 0x0004))
+        except (AttributeError, OSError):  # not a console Windows can switch: plain text
+            on = False
+    _COLOURS.append(on)
+    return on
+
+
+def _paint(text: str, tone: str = "") -> str:
+    if not tone or not text or not _colours_on():
+        return text
+    return f"\033[{_TONES[tone]}m{text}\033[0m"
 
 
 def add_install_parser(sub) -> None:
@@ -449,7 +487,7 @@ def _choose_mode(options, recorded: dict, machine: Machine, say) -> str:
         return recorded["mode"]
     if options.yes or not machine.interactive():
         return "express"  # -y asks nothing, the mode included
-    say("How should Kazma be installed?")
+    say("How should Kazma be installed?", "brand")
     for number, mode in enumerate(("express", "full", "custom"), 1):
         say(f"  {number}. {mode.capitalize()}{' (recommended)' if mode == 'express' else ''}: {_MODE_TEXT[mode]}")
     while True:
@@ -612,6 +650,41 @@ def _show_parts(parts, found: dict[str, PartState], say) -> None:
         say(f"  {mark:4} {part.title}: {state.detail}")
 
 
+def _short_title(title: str) -> str:
+    """A part's name without the brackets: "Meaning search (bge-m3)" -> "Meaning search"."""
+    return title.split(" (", 1)[0]
+
+
+def _say_group(label: str, parts, say) -> None:
+    """One line of the summary, wrapped to the terminal: the label, how many, the names."""
+    if not parts:
+        return
+    width = max(60, min(100, shutil.get_terminal_size((100, 24)).columns - 1))
+    text = f"{label} ({len(parts)}): " + ", ".join(_short_title(p.title) for p in parts)
+    say(textwrap.fill(text, width=width, initial_indent="  ", subsequent_indent="      "))
+
+
+def _say_summary(mode: str, parts, found: dict[str, PartState], pre: _Preflight, left_out, say) -> None:
+    """What the install will do, short: the details are in the log.
+
+    The first run on a clean Windows printed every part's state, every part
+    left out with what Kazma lacks without it, and every step's command line:
+    some 60 lines before one question (the owner, 2026-11-07). The screen
+    says which parts, by name; the log, --dry-run and --check say the rest.
+    """
+    from kazma_core.english_count import count_noun
+    from kazma_core.install_components import full_ids
+
+    say(f"{mode.capitalize()}: {len(parts)} of {count_noun(len(full_ids()), 'part')}", "brand")
+    _say_group("To install", [p for p in parts if found[p.id].ok is False and p.id not in pre.blocked], say)
+    _say_group("Already here", [p for p in parts if found[p.id].ok], say)
+    _say_group("Not possible here", [p for p in parts if p.id in pre.blocked], say)
+    _say_group("Could not tell", [p for p in parts if found[p.id].ok is None], say)
+    _say_group("Left out", left_out, say)
+    if left_out:
+        say("  What each part gives, and what Kazma lacks without it: kazma setup install --list")
+
+
 @dataclass
 class _Preflight:
     problems: list[str] = field(default_factory=list)
@@ -685,12 +758,12 @@ def _execute(plan: list[PlannedStep], machine: Machine, platform, say, log) -> t
             not_done.append(item.step.title)
             failed.add(item.part)
             continue
-        say(f"-> {item.step.title}")
+        say(f"-> {item.step.title}", "brand")
         ok, detail = _attempt(item, machine, env_path, say, log)
         if not ok and item.step.dep:
             ok = _installed_anyway(item.step, platform, machine, say)
         if not ok:
-            say(f"   FAILED: {detail}")
+            say(f"   FAILED: {detail}", "fail")
             not_done.append(item.step.title)
             failed.add(item.part)
             continue
@@ -725,8 +798,8 @@ def install(options, machine: Machine | None = None) -> int:
         machine.root = _project_root()
     log = _InstallLog(machine.log_path or _default_log_path())
 
-    def say(text: str = "") -> None:
-        print(text, flush=True)
+    def say(text: str = "", tone: str = "") -> None:
+        print(_paint(text, tone), flush=True)
         log.write(text)
 
     if options.list:
@@ -734,21 +807,26 @@ def install(options, machine: Machine | None = None) -> int:
     platform = machine.platform or pgs.detect_platform()
     recorded = pgs.read_record(machine.record_path).get("install") or {}
     log.write(f"--- kazma setup install ({' '.join(sys.argv[1:]) or 'no arguments'})")
-    say(f"platform: {platform.os}" + (" (WSL)" if platform.wsl else "")
-        + f", package manager: {platform.manager or 'none known'}")
+    say(_header(platform), "brand")
     try:
         mode, parts = _select_parts(options, recorded, machine, say)
     except (KeyError, ValueError) as exc:
         say(f"Not a part of Kazma: {exc}. See: kazma setup install --list")
         return 2
-    say(f"Install: {mode.capitalize()} ({len(parts)} of {count_noun(len(full_ids()), 'part')})")
+    # --check and --dry-run are for reading: every part's state, what each
+    # part left out lacks, every step's command. An install shows a summary
+    # and keeps all of that in its log.
+    detailed = options.check or options.dry_run
+    show = say if detailed else log.write
+    say(f"Checking {count_noun(len(parts), 'part')} of {mode.capitalize()}...")
     found, states = _check_parts(parts, machine, platform)
-    _show_parts(parts, found, say)
+    show(f"Install: {mode.capitalize()} ({len(parts)} of {count_noun(len(full_ids()), 'part')})")
+    _show_parts(parts, found, show)
     left_out = [c for c in COMPONENTS if c.id not in {p.id for p in parts}]
     if left_out:
-        say("Not chosen (what Kazma lacks without each):")
+        show("Not chosen (what Kazma lacks without each):")
         for comp in left_out:
-            say(f"  --   {comp.title}: {comp.lacks}")
+            show(f"  --   {comp.title}: {comp.lacks}")
     pre = _preflight(parts, found, machine, platform, mode, options, say)
     todo = [p for p in parts if found[p.id].ok is False and p.id not in pre.blocked]
     plan = build_plan(todo, found, states, machine, platform, pre.readiness) if todo else []
@@ -757,10 +835,12 @@ def install(options, machine: Machine | None = None) -> int:
     if admin_short and not options.packages_only:
         pre.problems.append("some steps need an administrator terminal: open PowerShell with "
                             "'Run as administrator' and run setup again")
+    if not detailed:
+        _say_summary(mode, parts, found, pre, left_out, say)
     if pre.problems:
-        say("Problems found before anything was done:")
+        say("Problems found before anything was done:", "warn")
         for problem in pre.problems:
-            say(f"  !! {problem}")
+            say(f"  !! {problem}", "warn")
     if options.check:
         record_system(states, machine.record_path)
         if any(found[p.id].ok is False for p in parts):
@@ -769,11 +849,14 @@ def install(options, machine: Machine | None = None) -> int:
         return 1 if pre.problems else 0
     if not plan:
         return _nothing_to_do(mode, parts, found, pre, machine, options, say)
-    say("The plan:")
+    show("The plan:")
     for number, item in enumerate(plan, 1):
-        say(f"  {number:2}. {item.step.title}\n      {item.step.printable()}")
+        show(f"  {number:2}. {item.step.title}\n      {item.step.printable()}")
     if options.dry_run:
         return 0
+    where = f"; every step and its command are in {log.path}" if log.path else ""
+    say(f"{count_noun(len(plan), 'step')} to run, needing about "
+        f"{DISK_NEEDED.get(mode, DISK_NEEDED['express']) / 2**30:.0f} GB of disk{where}.")
     stop = _go_ahead(options, machine, admin_short=admin_short, say=say)
     if stop is not None:
         if stop == 2:
@@ -783,7 +866,21 @@ def install(options, machine: Machine | None = None) -> int:
         plan = [item for item in plan if item.step.title.startswith("install Kazma's packages")]
     not_done, restart_needed = _execute(plan, machine, platform, say, log.write)
     return _conclude(mode, parts, pre, machine, platform, options, say, not_done=not_done,
-                     restart_needed=restart_needed)
+                     restart_needed=restart_needed, log_only=log.write)
+
+
+def _header(platform) -> str:
+    """The install's first line: which Kazma it installs, and where.
+
+    It used to start "platform: windows, package manager: winget"; the owner
+    asked for the version first (2026-11-07). The version is the checkout's
+    own (``0.21.0+g3bf44c5``: the release and its commit).
+    """
+    from kazma_core.version import get_version
+
+    where = _OS_NAMES.get(platform.os, platform.os) + (" (WSL)" if platform.wsl else "")
+    manager = platform.manager or "no package manager Kazma knows"
+    return f"Kazma {get_version()}: setup on {where}, with {manager}"
 
 
 def _nothing_to_do(mode: str, parts, found: dict[str, PartState], pre: _Preflight, machine: Machine, options,
@@ -800,7 +897,7 @@ def _nothing_to_do(mode: str, parts, found: dict[str, PartState], pre: _Prefligh
 
 
 def _conclude(mode: str, parts, pre: _Preflight, machine: Machine, platform, options, say, *,
-              not_done: list[str], restart_needed: bool) -> int:
+              not_done: list[str], restart_needed: bool, log_only=None) -> int:
     """Check every part again, record it, and say what Kazma lacks for now."""
     from kazma_core.system_deps import record_system
 
@@ -809,13 +906,22 @@ def _conclude(mode: str, parts, pre: _Preflight, machine: Machine, platform, opt
         after[cid] = PartState(False, reason)
     record_system(after_states, machine.record_path)
     _record(mode, [p.id for p in parts], after, machine.record_path)
-    say("After the install:")
-    _show_parts(parts, after, say)
+    # Every part's state is in the log; the screen names what is in place and,
+    # for each part that is not, what Kazma lacks for now.
+    from kazma_core.english_count import count_noun
+
+    log_only = log_only or say
+    log_only("After the install:")
+    _show_parts(parts, after, log_only)
     missing = [p for p in parts if after[p.id].ok is False]
-    if missing:
-        say("Not installed, and what Kazma lacks for now:")
+    in_place = [p for p in parts if after[p.id].ok]
+    if not missing:
+        say(f"Done: {count_noun(len(in_place), 'part')} of {mode.capitalize()} in place.", "ok")
+    else:
+        _say_group("In place", in_place, say)
+        say("Not installed, and what Kazma lacks for now:", "warn")
         for part in missing:
-            say(f"  -- {part.title}: {part.lacks}")
+            say(f"  -- {part.title}: {part.lacks}", "warn")
     if restart_needed:
         say("Restart Windows to finish WSL, then run setup again: it continues where it stopped.")
     elif missing or not_done:
@@ -854,7 +960,7 @@ def _finish(parts, found: dict[str, PartState], machine: Machine, options, say) 
         say(f"Kazma has not answered yet. Open {url} in a minute; "
             "scripts/service/kazma_guard.py --status says what it is doing.")
         return
-    say(f"Kazma is running: {url} (the first visit asks for a provider key)")
+    say(f"Kazma is running: {url} (the first visit asks for a provider key)", "ok")
     if not options.no_browser and machine.interactive():
         try:
             machine.open_url(url + "/")
