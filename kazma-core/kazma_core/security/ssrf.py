@@ -68,6 +68,62 @@ class UnresolvedHostError(SSRFError):
 _SHARED_ADDRESS_SPACE = ipaddress.ip_network("100.64.0.0/10")
 
 
+#: Cloud metadata endpoints inside ranges an owner's own network may use:
+#: never an address of the owner's own (Alibaba Cloud's, AWS's IPv6 one).
+_METADATA_IPS = frozenset({
+    ipaddress.ip_address("100.100.100.200"),
+    ipaddress.ip_address("fd00:ec2::254"),
+})
+
+
+def own_network_ip(ip: ipaddress._BaseAddress) -> bool:
+    """True for an address on this computer or the owner's own network:
+    loopback, private (RFC 1918, IPv6 ULA) and the shared space Tailscale
+    uses -- never link-local (``169.254.169.254``, cloud metadata), a
+    metadata address (:data:`_METADATA_IPS`), multicast or reserved space.
+
+    For a model server the owner set up (providers stage 1): discovery
+    refused every private address but loopback, so a vLLM on 192.168.1.20
+    answered chat and could not list its models.
+    """
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    if ip in _METADATA_IPS:
+        return False
+    if ip.is_loopback:  # before "reserved": ipaddress counts ::1 as reserved
+        return True
+    if ip.is_link_local or ip.is_multicast or ip.is_unspecified or ip.is_reserved:
+        return False
+    if isinstance(ip, ipaddress.IPv4Address) and ip in _SHARED_ADDRESS_SPACE:
+        return True
+    return bool(ip.is_loopback or ip.is_private)
+
+
+def resolves_to_own_network(url: str) -> bool:
+    """True when the host of *url* is, or resolves only to, addresses on
+    this computer or its own network (:func:`own_network_ip`). False when it
+    cannot be resolved, or any address it resolves to is elsewhere.
+    Blocking (DNS): async callers use ``asyncio.to_thread``."""
+    from urllib.parse import urlparse
+
+    try:
+        host = (urlparse(url).hostname or "").strip("[]")
+    except ValueError:
+        return False
+    if not host:
+        return False
+    try:
+        ips = [ipaddress.ip_address(host)]
+    except ValueError:
+        ips = []
+        for raw in _resolve_host_ips(host):
+            try:
+                ips.append(ipaddress.ip_address(raw.split("%", 1)[0]))
+            except ValueError:
+                return False
+    return bool(ips) and all(own_network_ip(ip) for ip in ips)
+
+
 def _is_blocked_ip(ip: ipaddress._BaseAddress) -> bool:
     """Return *True* if *ip* is private, loopback, link-local, reserved, or unspecified.
 

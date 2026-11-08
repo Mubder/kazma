@@ -29,6 +29,7 @@ const MIXINS = ["settings_core.js", "settings_hub.js", "settings_agent.js",
 const VALIDATES = {
   saveModelProfile: "needs a profile name",
   saveHubProvider: "needs a name and a base URL",
+  saveHubProviderAnyway: "confirms, then is saveHubProvider (needs a name and a base URL)",
   saveHubConnector: "needs a connector name",
   saveHubProfile: "needs a profile name",
   saveMcpServer: "needs a server name",

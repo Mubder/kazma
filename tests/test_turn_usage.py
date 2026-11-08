@@ -37,10 +37,10 @@ def test_a_call_carries_the_turn_it_ran_in(ledger):
     finally:
         reset_turn_id(token)
     ledger.record_llm_call(thread_id="t", prompt_tokens=1, completion_tokens=1, turn_id="turn-b")
-    assert ledger.turn_usage("turn-a") == {"calls": 1, "tokens": 15, "cost": 0.01}
+    assert ledger.turn_usage("turn-a") == {"calls": 1, "tokens": 15, "cost": 0.01, "unpriced": 0}
     # Negative control: another turn's call is not this turn's.
-    assert ledger.turn_usage("turn-b") == {"calls": 1, "tokens": 2, "cost": 0.0}
-    assert ledger.turn_usage("") == {"calls": 0, "tokens": 0, "cost": 0.0}
+    assert ledger.turn_usage("turn-b") == {"calls": 1, "tokens": 2, "cost": 0.0, "unpriced": 0}
+    assert ledger.turn_usage("") == {"calls": 0, "tokens": 0, "cost": 0.0, "unpriced": 0}
 
 
 class _LedgerClock:
@@ -65,7 +65,7 @@ def test_a_turn_sums_every_segment_and_a_segment_only_itself(ledger, monkeypatch
     whole = ledger.turn_usage("x")
     assert whole["calls"] == 3 and whole["tokens"] == 250
     assert whole["cost"] == pytest.approx(0.0025)
-    assert ledger.turn_usage("x", since=since) == {"calls": 1, "tokens": 10, "cost": 0.0005}
+    assert ledger.turn_usage("x", since=since) == {"calls": 1, "tokens": 10, "cost": 0.0005, "unpriced": 0}
 
 
 def test_a_ledger_from_before_turn_ids_is_migrated(tmp_path, monkeypatch):

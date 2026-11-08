@@ -1851,12 +1851,12 @@ async def supervisor_node(
         # Off the loop: the ledger is a SQLite write per call, and its switch
         # a settings read (arecord_llm_call runs both in a thread).
         try:
-            from kazma_core.observability.llm_ledger import arecord_llm_call
+            from kazma_core.observability.llm_ledger import arecord_llm_call, provider_of
 
             await arecord_llm_call(
                 thread_id=str(state.get("thread_id", "")),
                 iteration=int(state.get("iteration", 0) or 0),
-                provider=type(llm).__name__,
+                provider=provider_of(llm),
                 model=str(routed_model or ""),
                 duration_ms=(time.monotonic() - start) * 1000,
                 status="error",
@@ -1909,13 +1909,13 @@ async def supervisor_node(
     # Off the loop: the ledger is a SQLite write per call, and its switch a
     # settings read (arecord_llm_call runs both in a thread).
     try:
-        from kazma_core.observability.llm_ledger import arecord_llm_call
+        from kazma_core.observability.llm_ledger import arecord_llm_call, provider_of
 
         _served_model = _served_by[-1] if _served_by else ""
         await arecord_llm_call(
             thread_id=str(state.get("thread_id", "")),
             iteration=int(state.get("iteration", 0) or 0),
-            provider=type(llm).__name__,
+            provider=provider_of(llm),
             model=str(response.model or _served_model or routed_model or ""),
             prompt_tokens=int(response.usage.get("prompt_tokens", 0) or 0),
             completion_tokens=int(response.usage.get("completion_tokens", 0) or 0),
@@ -1923,6 +1923,7 @@ async def supervisor_node(
             duration_ms=duration_ms,
             status="ok",
             failover_from=str(routed_model or "") if _served_model else "",
+            priced=bool(getattr(response, "cost_known", True)),
         )
     except Exception:
         pass

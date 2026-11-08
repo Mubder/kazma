@@ -288,6 +288,17 @@
         adapterRoutingTest: null,
         hubProfiles: [],
         hubProfilesLoaded: false,
+        // The backup models, each with the provider that would serve it,
+        // and usable ones to offer (/api/settings/failover-backup).
+        failoverBackup: null,
+        // Model prices (kazma_core.model_prices): the owner's, and the models
+        // used with no known price (null: the ledger could not be read).
+        modelPrices: [],
+        modelPricesUnpriced: [],
+        modelPricesLoaded: false,
+        modelPricesFailed: false,
+        modelPricesSaving: false,
+        modelPricesMax: 1000,
         hubProviderModal: false,
         hubConnectorModal: false,
         hubProfileModal: false,
@@ -582,6 +593,7 @@
                     self._fetch('/api/settings/appearance'),
                     self._fetch('/api/settings/agent/nonstop'),
                 ]);
+                if (typeof self.loadFailoverBackup === 'function') self.loadFailoverBackup();
 
                 if (settings) {
                     if (settings.model) Object.assign(self.currentModel, settings.model);
@@ -677,6 +689,7 @@
                         self.loadHubConnectors(),
                         self.loadHubProfiles(),
                         self.loadAdapterRouting(),
+                        self.loadModelPrices(),
                     ]);
                 }
             } catch (e) {
@@ -864,6 +877,7 @@
                         this.loadHubProviders(),
                         this.loadHubConnectors(),
                         this.loadHubProfiles(),
+                        this.loadModelPrices(),
                     ]);
                     break;
                 case 'models': break; // Loaded on init

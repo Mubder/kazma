@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -54,6 +55,13 @@ def is_deepseek_api(base_url: str) -> bool:
 
     host = (urlparse(str(base_url or "")).hostname or "").lower()
     return host == "deepseek.com" or host.endswith(".deepseek.com")
+
+
+def _is_openai_api(base_url: str) -> bool:
+    """True for OpenAI's own API (not an OpenAI-compatible one)."""
+    from urllib.parse import urlparse
+
+    return (urlparse(str(base_url or "")).hostname or "").lower() == "api.openai.com"
 
 
 def _http_status_is_transient(status_code: int | None) -> bool:
@@ -114,6 +122,55 @@ def hoist_system_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]
         if not (isinstance(m, dict) and m.get("role") in ("system", "developer"))
     ]
     return head + rest
+
+
+#: Request fields a model refused, by (endpoint, model): every later request
+#: to it is sent without them (providers stage 1, 2026-11-08). OpenAI's
+#: reasoning models (o-series, GPT-5) refuse ``max_tokens`` and any
+#: temperature but the default; Kazma sent both on every call.
+_PARAM_FIXES: dict[tuple[str, str], frozenset[str]] = {}
+_PARAM_FIXES_LOCK = threading.Lock()
+
+
+def _param_fix_key(base_url: str, model: str) -> tuple[str, str]:
+    return (str(base_url or "").rstrip("/").lower(), str(model or "").strip().lower())
+
+
+def _param_fixes_for(base_url: str, model: str) -> frozenset[str]:
+    """The fixes a model needed before (:data:`_PARAM_FIXES`)."""
+    with _PARAM_FIXES_LOCK:
+        return _PARAM_FIXES.get(_param_fix_key(base_url, model), frozenset())
+
+
+def _remember_param_fix(base_url: str, model: str, fix: str) -> None:
+    key = _param_fix_key(base_url, model)
+    with _PARAM_FIXES_LOCK:
+        _PARAM_FIXES[key] = _PARAM_FIXES.get(key, frozenset()) | {fix}
+
+
+def _refused_parameter(status_code: int, detail: str) -> str | None:
+    """The fix a 400 asks for, by what it names: ``max_completion_tokens``
+    (``max_tokens`` refused) or ``no_temperature`` (only the default taken)."""
+    if status_code not in (400, 422):
+        return None
+    d = str(detail or "").lower()
+    if "max_completion_tokens" in d and "max_tokens" in d:
+        return "max_completion_tokens"
+    if "temperature" in d and any(w in d for w in (
+        "unsupported", "not supported", "does not support", "only the default",
+    )):
+        return "no_temperature"
+    return None
+
+
+def _apply_param_fixes(payload: dict[str, Any], fixes: frozenset[str] | set[str], *, openai_api: bool = False) -> None:
+    """Rename or drop the fields a model refuses, in place. OpenAI's own API
+    takes ``max_completion_tokens`` for every chat model (``max_tokens`` is
+    its deprecated name), so it is sent there from the first request."""
+    if ("max_completion_tokens" in fixes or openai_api) and "max_tokens" in payload:
+        payload["max_completion_tokens"] = payload.pop("max_tokens")
+    if "no_temperature" in fixes:
+        payload.pop("temperature", None)
 
 
 def cost_from_usage(
@@ -206,9 +263,11 @@ class LLMConfig:
     max_tokens: int = 16384
     temperature: float = 0.7
     timeout: float = 60.0
-    # Cost tracking (per 1M tokens, in USD)
-    input_cost_per_1m: float = 0.15
-    output_cost_per_1m: float = 0.60
+    # Cost tracking (per 1M tokens, in USD). None: the price is not known,
+    # and the call's cost is recorded as unknown (kazma_core.model_prices).
+    # It was gpt-4o-mini's $0.15 / $0.60, applied to every model.
+    input_cost_per_1m: float | None = None
+    output_cost_per_1m: float | None = None
     # LiteLLM router support
     router: str | None = None
     fallback_model: str | None = None
@@ -282,6 +341,9 @@ class LLMResponse:
     model: str = ""
     usage: dict[str, int] = field(default_factory=dict)
     cost_usd: float = 0.0
+    #: False when no price was known for the call (kazma_core.model_prices):
+    #: ``cost_usd`` is then 0.0 and means "unknown", never "free".
+    cost_known: bool = True
     duration_ms: float = 0.0
     #: Characters of hidden reasoning a thinking model returned beside the
     #: answer (DeepSeek's ``reasoning_content``). Not shown, not part of
@@ -761,7 +823,7 @@ class LLMProvider:
                 logger.warning(
                     "LLMProvider: API key contained non-ASCII characters; these "
                     "were stripped. If you use a cloud provider, set a valid ASCII "
-                    "API key in Settings > Models/Providers."
+                    "API key in Settings > Providers & Connectors."
                 )
             self._http = httpx.AsyncClient(
                 base_url=base,
@@ -1051,6 +1113,15 @@ class LLMProvider:
                     transient=False,
                     kind="context_overflow",
                 ) from e
+
+            # ── A refused request field (providers stage 1) ─────────────
+            # o-series / GPT-5 models (and an endpoint serving them) refuse
+            # ``max_tokens`` and any temperature but the default. Ask again
+            # without what was refused -- at most once per field -- and
+            # remember it for this endpoint and model.
+            fixed_answer = await self._retry_refused_parameters(client, payload, status_code, detail, start)
+            if fixed_answer is not None:
+                return fixed_answer
 
             # ── Tool-definition fallback ────────────────────────────────
             # NVIDIA NIM / some providers reject tool-calling with a
@@ -1364,6 +1435,7 @@ class LLMProvider:
                         response.usage, retry_response.usage
                     )
                     retry_response.cost_usd += response.cost_usd
+                    retry_response.cost_known = retry_response.cost_known and response.cost_known
                     response = retry_response
                 else:
                     logger.warning(
@@ -1377,6 +1449,7 @@ class LLMProvider:
                         retry_response.usage, response.usage
                     )
                     response.cost_usd += retry_response.cost_usd
+                    response.cost_known = response.cost_known and retry_response.cost_known
 
         return response
 
@@ -1425,6 +1498,10 @@ class LLMProvider:
             payload["tool_choice"] = "auto"
         if response_format:
             payload["response_format"] = response_format
+        _apply_param_fixes(
+            payload, _param_fixes_for(str(self.config.base_url or ""), payload["model"]),
+            openai_api=_is_openai_api(str(self.config.base_url or "")),
+        )
         if reasoning == "off" and self._is_deepseek_endpoint():
             # DeepSeek thinks by default (high effort) and the reasoning
             # counts against max_tokens: a caller that sized max_tokens for
@@ -1934,11 +2011,7 @@ class LLMProvider:
                 prompt_tokens,
             )
 
-        cost = cost_from_usage(
-            usage,
-            input_cost_per_1m=self.config.input_cost_per_1m,
-            output_cost_per_1m=self.config.output_cost_per_1m,
-        )
+        cost, cost_known = self._call_cost(usage)
 
         return LLMResponse(
             content=content,
@@ -1947,9 +2020,68 @@ class LLMProvider:
             model=data.get("model", self.config.model),
             usage=usage,
             cost_usd=round(cost, 6),
+            cost_known=cost_known,
             duration_ms=round(duration_ms, 1),
             reasoning_chars=len(str(message.get("reasoning_content") or "")),
         )
+
+    async def _retry_refused_parameters(
+        self, client: Any, payload: dict[str, Any], status_code: int, detail: str, start: float,
+    ) -> LLMResponse | None:
+        """The answer once the fields the provider refused are fixed
+        (:func:`_refused_parameter`), or None when it refused none of them.
+        A retry refused again for another field fixes that one too; a field
+        already fixed is never retried. A refusal on the retry for any other
+        reason raises as the first would have."""
+        applied: set[str] = set()
+        while True:
+            fix = _refused_parameter(status_code, detail)
+            if fix is None or fix in applied:
+                return None if not applied else self._raise_refused(status_code, detail)
+            applied.add(fix)
+            model = str(payload.get("model") or self.config.model or "")
+            _remember_param_fix(str(self.config.base_url or ""), model, fix)
+            logger.warning(
+                "[LLMProvider] %s refused a request field for model %s (%s): asking again without it",
+                self._describe_endpoint(), model, fix,
+            )
+            _apply_param_fixes(payload, {fix})
+            try:
+                resp = await client.post("/chat/completions", json=payload)
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as again:
+                status_code = again.response.status_code
+                try:
+                    detail = again.response.text
+                except Exception:  # noqa: BLE001 - a body that cannot be read is no detail
+                    detail = ""
+                continue
+            except httpx.TransportError as e:
+                # Raised inside chat()'s HTTPStatusError handler, so its own
+                # network handlers never see it: classified here (§3).
+                raise LLMError(f"LLM call failed (network): {e}", transient=True) from e
+            data = self._json_answer(resp)
+            return self._parse_response(data, (time.monotonic() - start) * 1000)
+
+    @staticmethod
+    def _raise_refused(status_code: int, detail: str) -> LLMResponse:
+        raise LLMError(
+            f"LLM call failed (HTTP {status_code}): {str(detail or '')[:300]}",
+            transient=_http_status_is_transient(status_code),
+        )
+
+    def _call_cost(self, usage: dict[str, Any]) -> tuple[float, bool]:
+        """(dollars, known) for a call's *usage* (kazma_core.model_prices):
+        what the provider reported, else the configured price, else unknown."""
+        from kazma_core.model_prices import reported_cost
+
+        reported = reported_cost(usage, self.config.base_url or "")
+        if reported is not None:
+            return reported, True
+        inp, outp = self.config.input_cost_per_1m, self.config.output_cost_per_1m
+        if inp is None or outp is None:
+            return 0.0, False
+        return cost_from_usage(usage, input_cost_per_1m=inp, output_cost_per_1m=outp), True
 
     async def _retry_direct_after_gateway_fail(
         self, payload: dict[str, Any], exc: BaseException

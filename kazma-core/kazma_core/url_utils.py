@@ -122,7 +122,10 @@ def normalize_provider_url(
     # /api/paas/v4/v1/chat/completions — a 404 on every call, which is exactly
     # what the Google exemption below was added for. Patching this vendor by
     # vendor has now happened twice; the rule is the fix.
-    already_versioned = re.search(r"/v\d+[a-z0-9]*$", path) is not None
+    # Anywhere in the path, not only at its end: DeepInfra serves its
+    # OpenAI-compatible API at /v1/openai, and /v1 was added after it
+    # (.../v1/openai/v1/chat/completions, a 404; providers stage 1).
+    already_versioned = re.search(r"/v\d+[a-z0-9]*(?:/|$)", path) is not None
     if ensure_v1 and not already_versioned:
         # Don't append /v1 for Ollama (it uses /api/* endpoints)
         # or LiteLLM proxy (it handles routing itself)

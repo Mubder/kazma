@@ -60,7 +60,7 @@ changes — just set the base URL + key.
 | OpenRouter | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
 | Mistral | `https://api.mistral.ai/v1` | `MISTRAL_API_KEY` |
 | Together AI | `https://api.together.xyz/v1` | `TOGETHER_API_KEY` |
-| Cohere | `https://api.cohere.ai/v1` | `COHERE_API_KEY` |
+| Cohere | `https://api.cohere.ai/compatibility/v1` | `COHERE_API_KEY` |
 | Fireworks AI | `https://api.fireworks.ai/inference/v1` | `FIREWORKS_API_KEY` |
 | Perplexity | `https://api.perplexity.ai` | `PERPLEXITY_API_KEY` |
 | AI21 Labs | `https://api.ai21.com/studio/v1` | `AI21_API_KEY` |
@@ -69,16 +69,63 @@ changes — just set the base URL + key.
 | LM Studio (local) | `http://localhost:1234/v1` | *(none)* |
 | Custom | *(any)* | *(any)* |
 
-Local providers (Ollama/LM Studio) don't need a real key — a dummy key is
-injected automatically.
+### Model servers on this computer or your network
 
-**Ollama discovery/health use the configured provider Base URL** (fallback
-`http://127.0.0.1:11434`), so a server running in WSL/container can reach an
-Ollama daemon on another host by pointing the provider's Base URL at it
-(e.g. the WSL gateway IP for a Windows-hosted Ollama — `127.0.0.1` inside
-WSL is the WSL VM, not Windows). The provider **Test Connection** button
-reports `Cannot connect to <base_url> (connection failed)` when the endpoint
-is unreachable.
+A model server on this computer or on your own network needs no key, and its
+calls cost nothing. That means Ollama, LM Studio, vLLM, llama.cpp, LocalAI,
+Jan or any other OpenAI-compatible server, at any of these addresses:
+
+- this computer (`localhost`, `127.0.0.1`);
+- a private address (`192.168.x.x`, `10.x.x.x`, `172.16–31.x.x`, IPv6 `fd00::/8`);
+- a Tailscale address (`100.64.0.0/10`);
+- a host name with no dot (`gpu-box`), or one ending in `.local`, `.lan`,
+  `.home.arpa` or `.internal` (`host.docker.internal`).
+
+Such a server can be tested without a key, its models listed and chosen in
+the chat's picker. The setup guide finds one on another computer by its
+address ("A server on another computer on your network"). Cloud metadata
+addresses (`169.254.169.254`, Alibaba Cloud's `100.100.100.200`) never count
+as yours.
+
+**An address is used as you give it** when it already names a version
+anywhere in its path (DeepInfra's `/v1/openai`, Z.AI's `/api/paas/v4`);
+`/v1` is added only to an address with none (`https://openrouter.ai/api`).
+
+### Test, before saving
+
+**Test Connection** sends the model one short message through the same client
+chat uses for the provider (Anthropic's own messages API for Anthropic,
+Bedrock's for Bedrock, and so on). In the Add / Edit dialog it checks the
+values as typed, without saving them; **Save** opens once the test answered,
+and a failed test offers **Save anyway** behind a confirmation. A failure says
+what failed (the key was refused, no such model, rate limited, unreachable,
+an empty answer) and the HTTP status, never the provider's reply text. A
+cloud provider with no key is saved switched off, and cannot be switched on
+until it has one. Two providers at one address are named on the list.
+
+### Prices
+
+A call's cost is the model's own price, or it is shown as **unknown**:
+
+1. your price for the model (**Settings → Providers & Connectors → Model
+   prices**, in US dollars per million tokens). That card also lists the
+   models used in the last 30 days with no known price;
+2. free, for a server on this computer or your network;
+3. the price table of the Anthropic and Bedrock clients, for the models they
+   name (a dated id such as `claude-sonnet-4-20250514` matches
+   `claude-sonnet-4`; a newer version never does);
+4. otherwise unknown: shown as "price unknown" in the chat, `$ —` on the
+   chat's cost badge, a count of unpriced calls on the Dashboard and in
+   `/cost`, and left out of the daily cost limit.
+
+OpenRouter reports what each call cost (`usage.cost`), and that wins.
+
+### Newer OpenAI models
+
+OpenAI's own API is sent `max_completion_tokens` (its reasoning models refuse
+`max_tokens`). Any other endpoint that refuses `max_tokens`, or any
+temperature but the default, is asked once more without it, and the fix is
+remembered for that endpoint and model.
 
 ---
 
@@ -144,5 +191,13 @@ per project/location. Hardcoded model list: `gemini-2.5-flash`,
 The registry auto-corrects provider/model mismatches: calling a model owned
 by a different provider than the active one switches both. Use **Settings →
 Providers** in the UI, `/config model <name>` (chat), or the Model selector in
-the sidebar. See [AGENTS.md §1](https://github.com/Mubder/kazma/blob/main/AGENTS.md) for the model-registry
+the sidebar. A saved profile's **Use** switches to its model, and to the
+provider that serves it.
+
+**The backup model** (Settings → System → Non-stop → failover) must be one a
+provider can answer for: switched on, with a key or on your network, listing
+the model. Settings shows which provider would serve each backup, refuses to
+save one nothing serves, and offers a model of each other working provider.
+A backup from the same vendor as the model in use is flagged: one outage
+stops both. See [AGENTS.md §1](https://github.com/Mubder/kazma/blob/main/AGENTS.md) for the model-registry
 invariants.

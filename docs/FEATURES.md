@@ -39,11 +39,12 @@ Every line below describes that setup.
 | Feature | Status | Where |
 |---|---|---|
 | 20 provider presets: OpenAI, DeepSeek, Groq, xAI, OpenRouter, Mistral, Together, Fireworks, Perplexity, Cohere, AI21, NVIDIA and Z.AI (OpenAI-compatible); native Anthropic, Google Gemini (incl. Vertex), Azure OpenAI and AWS Bedrock; and any custom OpenAI-compatible endpoint | Shipped | Settings → Providers |
-| Local models through Ollama and LM Studio | Shipped | Settings → Providers |
-| A provider's Test sends a real completion, not just a ping | Shipped | Settings → Providers |
+| Local models through Ollama and LM Studio, and any OpenAI-compatible model server on your own network (vLLM, llama.cpp, LocalAI...), with no key | Shipped | Settings → Providers, the setup guide |
+| A provider's Test sends a real message through the same client chat uses, before anything is saved | Shipped | Settings → Providers |
+| The backup model is checked: Settings shows which provider would answer it, refuses one nothing serves, and suggests working ones | Shipped | Settings → System → Non-stop |
 | Best model per task for multi-agent workers; image questions go to a vision-capable model | Shipped | `models/selection.py`, `vision_capability.py` |
 | When a model fails over to another, you are told (page + banner) | Shipped | `observability/model_fallback.py` |
-| Token and cost per answer; a cost breaker that halts runaway spending | Shipped | chat footer, dashboard |
+| Token and cost per answer, each cost the model's own price or shown as unknown (you can set a model's price); a cost breaker that halts runaway spending | Shipped | chat footer, dashboard, Settings → Providers → Model prices |
 
 ## Safety and control
 

@@ -246,7 +246,11 @@
         return;
       }
       var cost = Number(data.cost) || 0;
-      value.textContent = '$' + cost.toFixed(cost < 1 ? 4 : 2);
+      // Calls with no known price are not in the cost (kazma_core.model_prices):
+      // the spend is then "at least" the priced share, or unknown.
+      var unpriced = Number(data.unpriced) || 0;
+      value.textContent = unpriced && !cost ? '—'
+        : (unpriced ? '≥ ' : '') + '$' + cost.toFixed(cost < 1 ? 4 : 2);
       var limit = Number(data.limit_usd) || 0;
       if (limit > 0) {
         var share = Math.round(cost / limit * 100);
@@ -256,6 +260,9 @@
       } else {
         sub.textContent = window.tOr('dashboard.spend_today_no_limit', 'No daily limit set');
         value.style.color = '';
+      }
+      if (unpriced && window.kazmaCount) {
+        sub.textContent += ' · ' + window.kazmaCount('dashboard.spend_unpriced', unpriced);
       }
     }).catch(function() { /* keep the last reading */ });
   }
@@ -429,11 +436,15 @@
         if (asked !== chartRange) return;  // another range was chosen meanwhile
         if (!data || !data.available) throw new Error('unavailable');
         chartBuckets = Array.isArray(data.buckets) ? data.buckets : [];
+        chartUnpriced = Number(data.totals && data.totals.unpriced) || 0;
         drawTokenChart();
         drawCostChart();
       })
       .catch(function() { /* keep the bars on screen; the next refresh tries again */ });
   }
+
+  // Calls in the charts' range with no known price (the cost line leaves them out).
+  var chartUnpriced = 0;
 
   function chartSeries(field) {
     return chartBuckets.map(function(b) { return { t: b.start * 1000, v: Number(b[field]) || 0 }; });
@@ -545,8 +556,12 @@
 
     ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim() || '#8b9bb8';
     ctx.font = '10px "IBM Plex Sans", sans-serif';
-    drawChartLabel(ctx, canvas, window.kazmaT('dashboard.chart_cost_max', '{n} max',
-      { n: '$' + max.toFixed(4) }), 18);
+    // Calls with no known price are not in the line: the label says how many.
+    var costLabel = window.kazmaT('dashboard.chart_cost_max', '{n} max', { n: '$' + max.toFixed(4) });
+    if (chartUnpriced && window.kazmaCount) {
+      costLabel += ' · ' + window.kazmaCount('dashboard.spend_unpriced', chartUnpriced);
+    }
+    drawChartLabel(ctx, canvas, costLabel, 18);
   }
 
   // ── System Resources (via Telemetry SSE) ──────────────

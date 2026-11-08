@@ -608,15 +608,12 @@ class AnthropicProvider(LLMProvider):
             "max_tokens": "length",
             "stop_sequence": "stop",
         }.get(stop_reason, stop_reason or ("tool_calls" if tool_calls else "stop"))
-        in_cost, out_cost = _MODEL_COSTS.get(payload["model"], (3.0, 15.0))
         usage_blob = {
             "input_tokens": usage_in,
             "output_tokens": usage_out,
             "cache_read_input_tokens": cache_read,
         }
-        cost = cost_from_usage(
-            usage_blob, input_cost_per_1m=in_cost, output_cost_per_1m=out_cost
-        )
+        cost, cost_known = self._anthropic_cost(payload["model"], usage_blob)
         assembled = LLMResponse(
             content="".join(text_parts),
             tool_calls=tool_calls,
@@ -629,6 +626,7 @@ class AnthropicProvider(LLMProvider):
                 "cache_read_input_tokens": usage_blob["cache_read_input_tokens"],
             },
             cost_usd=cost,
+            cost_known=cost_known,
             duration_ms=(time.monotonic() - start) * 1000,
         )
         yield StreamDelta(response=assembled)
@@ -665,16 +663,11 @@ class AnthropicProvider(LLMProvider):
             "stop_sequence": "stop",
         }.get(stop_reason, stop_reason or "stop")
 
-        in_cost, out_cost = _MODEL_COSTS.get(model, (3.0, 15.0))
-        cost = cost_from_usage(
-            {
-                "input_tokens": usage_in,
-                "output_tokens": usage_out,
-                "cache_read_input_tokens": cache_read,
-            },
-            input_cost_per_1m=in_cost,
-            output_cost_per_1m=out_cost,
-        )
+        cost, cost_known = self._anthropic_cost(model, {
+            "input_tokens": usage_in,
+            "output_tokens": usage_out,
+            "cache_read_input_tokens": cache_read,
+        })
 
         return LLMResponse(
             content="".join(text_parts),
@@ -688,8 +681,23 @@ class AnthropicProvider(LLMProvider):
                 "cache_read_input_tokens": cache_read,
             },
             cost_usd=cost,
+            cost_known=cost_known,
             duration_ms=(time.monotonic() - start) * 1000,
         )
+
+    def _anthropic_cost(self, model: str, usage: dict[str, Any]) -> tuple[float, bool]:
+        """(dollars, known): the configured price (the owner's), else this
+        module's table for the model (kazma_core.model_prices.table_price),
+        else unknown. An unlisted model was priced as Sonnet ($3 / $15)."""
+        from kazma_core.model_prices import table_price
+
+        inp, outp = self.config.input_cost_per_1m, self.config.output_cost_per_1m
+        if inp is None or outp is None:
+            found = table_price(_MODEL_COSTS, model)
+            if found is None:
+                return 0.0, False
+            inp, outp = found
+        return cost_from_usage(usage, input_cost_per_1m=inp, output_cost_per_1m=outp), True
 
     async def close(self) -> None:
         if self._http is not None:

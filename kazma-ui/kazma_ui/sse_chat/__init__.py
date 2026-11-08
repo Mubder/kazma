@@ -33,7 +33,7 @@ code to one another).
   capacity           action, reply, long_active, yolo_active, plan_active
                      (/long, /plan, /yolo)
   error              content (the request or the turn failed)
-  done               content, tokens, cost, duration_ms, interrupted, empty,
+  done               content, tokens, cost, cost_known, duration_ms, interrupted, empty,
                      model, turn_id, session_tokens, session_cost, gate_views;
                      stopped_for_shutdown, notice (Kazma is restarting: the
                      turn did not end, content is empty)
@@ -1331,6 +1331,8 @@ def create_sse_chat_router(
                             turn_usage["tokens"] = data.get("tokens")
                         if data.get("cost") is not None:
                             turn_usage["cost"] = data.get("cost")
+                        if isinstance(data.get("cost_known"), bool):
+                            turn_usage["cost_known"] = data["cost_known"]
                         # The model that answered (FA-210). This save comes
                         # after the pump's and replaced its model with the one
                         # requested: live said "harness", reload "harness-model".
@@ -1393,6 +1395,7 @@ def create_sse_chat_router(
                         run_model=_turn_model or None,
                         tokens=turn_usage.get("tokens"),
                         cost=turn_usage.get("cost"),
+                        cost_known=turn_usage.get("cost_known"),
                         thread_id=thread_id,
                     )
 

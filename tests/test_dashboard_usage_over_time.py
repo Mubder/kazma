@@ -92,7 +92,7 @@ def test_the_route_gives_each_range_its_buckets(ledger, monkeypatch, range_, bar
     # The call made a moment ago is in the newest bucket, so the chart's
     # right edge is now.
     assert body["buckets"][-1]["tokens"] == 1234
-    assert body["totals"] == {"tokens": 1234, "cost": pytest.approx(0.05), "calls": 1}
+    assert body["totals"] == {"tokens": 1234, "cost": pytest.approx(0.05), "calls": 1, "unpriced": 0}
 
 
 def test_an_unknown_range_is_the_hour(ledger, monkeypatch) -> None:

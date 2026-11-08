@@ -12,6 +12,14 @@ GEMINI_MODELS: list[str] = [
     "gemini-2.0-flash-lite",
 ]
 
+
+#: A preset's earlier address, by preset: a stored row still on it is moved
+#: to the preset's address at boot (``seed_missing_presets``). An address the
+#: owner typed is never touched -- only one the preset itself once gave.
+RETIRED_PRESET_URLS: dict[str, tuple[str, ...]] = {
+    "cohere": ("https://api.cohere.ai/v1",),
+}
+
 PROVIDER_PRESETS: dict[str, dict[str, str]] = {
     "openai": {
         "name": "OpenAI",
@@ -109,7 +117,9 @@ PROVIDER_PRESETS: dict[str, dict[str, str]] = {
     },
     "cohere": {
         "name": "Cohere",
-        "base_url": "https://api.cohere.ai/v1",
+        # Cohere's OpenAI-compatible API (docs.cohere.com/docs/compatibility-api).
+        # The preset named its own API's /v1, which has no /chat/completions.
+        "base_url": "https://api.cohere.ai/compatibility/v1",
         "models_endpoint": "/models",
         "auth_header": "Bearer",
         "docs": "https://dashboard.cohere.com/api-keys",

@@ -622,7 +622,7 @@
           if (window.KazmaBidi) KazmaBidi.apply($('research-detail-title'), t.prompt || '');
           // Labels from the catalog; the worker names are data (escaped).
           $('research-detail-meta').innerHTML =
-            '<span>' + esc(i18n('research.ui.meta_cost', 'Cost: {cost}', { cost: '$' + (t.cost || 0).toFixed(4) })) + '</span> · ' +
+            '<span>' + esc(i18n('research.ui.meta_cost', 'Cost: {cost}', { cost: t.cost ? '$' + Number(t.cost).toFixed(4) : '—' })) + '</span> · ' +
             '<span>' + esc(i18n('research.ui.meta_tokens', 'Tokens: {n}', { n: t.tokens || 0 })) + '</span> · ' +
             '<span>' + esc(i18n('research.ui.meta_duration', 'Duration: {s}s', { s: (t.duration || 0).toFixed(1) })) + '</span> · ' +
             '<span>' + esc(i18n('research.ui.meta_workers', 'Workers: {names}', { names: (t.workers || []).join(', ') })) + '</span>';
@@ -1162,7 +1162,7 @@
         esc(timeAgo(t.created_at));
     } else {
       meta = '<span translate="no">' + esc((t.workers || []).join(', ')) + '</span> · ' +
-        '<span>$' + (t.cost || 0).toFixed(4) + '</span> · ' +
+        '<span>' + (t.cost ? '$' + Number(t.cost).toFixed(4) : '—') + '</span> · ' +
         '<span>' + (t.duration || 0).toFixed(1) + 's</span> · ' +
         '<span>' + timeAgo(t.completed_at || t.created_at) + '</span>';
     }
@@ -1212,7 +1212,7 @@
             '<div dir="' + titleDir(t) + '" style="font-weight:600;color:var(--text-primary);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + titleHtml(t) + '</div>' +
             '<div style="font-size:0.85rem;color:var(--text-muted);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' +
               '<span translate="no">' + esc((t.workers || []).join(', ')) + '</span> · ' +
-              '<span>$' + (t.cost || 0).toFixed(4) + '</span> · ' +
+              '<span>' + (t.cost ? '$' + Number(t.cost).toFixed(4) : '—') + '</span> · ' +
               '<span>' + timeAgo(t.completed_at || t.created_at) + '</span>' +
             '</div>' +
           '</div>' +

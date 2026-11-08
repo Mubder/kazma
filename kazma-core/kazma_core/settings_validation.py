@@ -119,6 +119,41 @@ def _daily_cost_limit(value: Any) -> Any:
     return usd
 
 
+#: How many models the owner may price (a list a person keeps by hand).
+MAX_OWNER_PRICES = 500
+
+
+def _model_prices(value: Any) -> dict[str, dict[str, float]]:
+    """``models.prices``: the owner's price per million tokens for a model
+    (kazma_core.model_prices). Every entry must be a model name and two
+    amounts in range: refused whole, never saved with an entry dropped."""
+    import json
+
+    from kazma_core.model_prices import MAX_PRICE_PER_1M, parse_owner_prices
+
+    if isinstance(value, str):
+        try:
+            value = json.loads(value) if value.strip() else {}
+        except ValueError as exc:
+            raise SettingRejected("Model prices must be a list of models and their prices.") from exc
+    if not isinstance(value, dict):
+        raise SettingRejected("Model prices must be a list of models and their prices.")
+    if len(value) > MAX_OWNER_PRICES:
+        raise SettingRejected(f"At most {MAX_OWNER_PRICES} models can be priced.")
+    parsed = parse_owner_prices(value)
+    out: dict[str, dict[str, float]] = {}
+    for name in value:
+        key = str(name or "").strip().lower()
+        if not key or len(key) > 200 or key not in parsed:
+            raise SettingRejected(
+                f"Each model needs a name and two prices from 0 to {int(MAX_PRICE_PER_1M)} US dollars "
+                f"per million tokens ({str(name)[:80]!r} has not)."
+            )
+        price = parsed[key]
+        out[key] = {"input": price.input_per_1m, "output": price.output_per_1m}
+    return out
+
+
 def _lifecycle_events(value: Any) -> Any:
     # Only events Kazma sends: a name it does not know would switch that
     # message off at the next boot without a word.
@@ -331,6 +366,7 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
     from kazma_core.lifecycle_notifier import EVENTS_KEY
     from kazma_core.memory.config import TENANT_MODE_KEY
     from kazma_core.memory.embedder import API_KEY_ENV_KEY
+    from kazma_core.model_prices import OWNER_PRICES_KEY
     from kazma_core.runs.runbooks import RUNBOOKS_KEY, validate_runbooks
     from kazma_core.swarm.task_store import TASK_RETENTION_KEY
 
@@ -352,6 +388,7 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
         RUNBOOKS_KEY: (validate_runbooks, None),
         "agent.language": (_agent_language, "agent"),
         "agent.max_iterations": (_max_iterations, "agent"),
+        OWNER_PRICES_KEY: (_model_prices, "models"),
         OFFSITE_KEEP_KEY: (_offsite_keep, "backups"),
     }
 

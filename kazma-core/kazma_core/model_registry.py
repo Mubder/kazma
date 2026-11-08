@@ -219,6 +219,17 @@ class ModelRegistry:
         # the generation it was built at (FA-106: resilient_chat kept a
         # provider's old key and base URL until a restart).
         self._generation = 0
+        # The owner's model prices are in every client built (model_prices):
+        # a write to them, by any path (Settings, a restore), rebuilds them.
+        listen = getattr(self._config_store, "add_change_listener", None)
+        if callable(listen):
+            listen(self._on_settings_written)
+
+    def _on_settings_written(self, keys: Any) -> None:
+        from kazma_core.model_prices import OWNER_PRICES_KEY
+
+        if keys is None or OWNER_PRICES_KEY in keys:
+            self.prices_changed()
 
     @property
     def generation(self) -> int:
@@ -228,6 +239,13 @@ class ModelRegistry:
     def _config_changed(self) -> None:
         with self._lock:
             self._generation += 1
+
+    def prices_changed(self) -> None:
+        """The owner's model prices changed: every client is built again with
+        them (a cached client keeps the price it was built with)."""
+        with self._lock:
+            self._clients.clear()
+            self._config_changed()
 
     def _track(self, client: LLMProvider, provider: str = "") -> LLMProvider:
         """Register a built client for shutdown cleanup, returning it unchanged."""
@@ -666,18 +684,18 @@ class ModelRegistry:
             # defect one branch over: with nothing configured it invented an
             # OpenAI model and dialled a provider that may hold no key. Ask
             # the provider we actually resolved above.
-            if not effective_model:
+            # ``llm.model`` is the legacy "custom" profile's model (an install
+            # set up by environment): never another provider's. Read for any
+            # provider, it sent kazma.yaml's gpt-4o-mini to DeepSeek
+            # (providers stage 1).
+            if not effective_model and provider_name == "custom":
                 effective_model = str(self._config_store.get("llm.model", "") or "")
             if not effective_model:
                 from kazma_core.providers import default_model_for
 
                 effective_model = default_model_for(provider_name)
 
-            config = LLMConfig.from_dict({
-                "base_url": base_url,
-                "api_key": api_key,
-                "model": effective_model,
-            })
+            config = self._client_config(provider_name, base_url, api_key, effective_model)
 
             # The client class comes from the provider's declared `api_style`
             # (see kazma_core.provider_adapters). This used to be a four-way
@@ -709,11 +727,10 @@ class ModelRegistry:
         owner = self.find_provider_for_model(clean_id)
         if owner:
             owner_name = str(owner.get("name", "")).lower()
-            config = LLMConfig.from_dict({
-                "base_url": str(owner.get("base_url", "")),
-                "api_key": coerce_api_key(owner.get("api_key", "")),
-                "model": clean_id,
-            })
+            config = self._client_config(
+                owner_name, str(owner.get("base_url", "")),
+                coerce_api_key(owner.get("api_key", "")), clean_id,
+            )
             return self._track(build_client(owner_name, config, owner), owner_name)
 
         # Fallback: use active profile with overridden model
@@ -749,12 +766,21 @@ class ModelRegistry:
                 or default_model_for(provider_name)
             )
         base_url, api_key = self.resolve_provider_credentials(provider_name)
-        config = LLMConfig.from_dict({
-            "base_url": base_url,
-            "api_key": api_key,
-            "model": effective_model,
-        })
+        config = self._client_config(provider_name, base_url, api_key, effective_model)
         return self._track(build_client(provider_name, config, entry), provider_name)
+
+    def _client_config(self, provider_name: str, base_url: str, api_key: str, model: str) -> LLMConfig:
+        """The config a client is built from, with the model's price when one
+        is known (kazma_core.model_prices: the owner's, or free for a server
+        on this network). Without it every call was priced as gpt-4o-mini."""
+        from kazma_core.model_prices import price_for
+
+        fields: dict[str, Any] = {"base_url": base_url, "api_key": api_key, "model": model}
+        price = price_for(provider_name, base_url, str(model or ""), store=self._config_store)
+        if price is not None:
+            fields["input_cost_per_1m"] = price.input_per_1m
+            fields["output_cost_per_1m"] = price.output_per_1m
+        return LLMConfig.from_dict(fields)
 
     def _active_model_if_owned_by(self, provider_name: str) -> str:
         """The active model when it belongs to *provider_name*, else "".
@@ -810,8 +836,13 @@ class ModelRegistry:
         it could not be asked (:meth:`discover` says why)."""
         return (await self.discover(provider_name)).models
 
-    async def discover(self, provider_name: str) -> DiscoveryResult:
+    async def discover(self, provider_name: str, candidate: dict[str, Any] | None = None) -> DiscoveryResult:
         """Hit the provider's ``/models`` endpoint: its model IDs, or why not.
+
+        *candidate*: a provider entry to ask instead of the stored one -- what
+        a Settings dialog or the setup guide typed, not saved yet
+        (kazma_core.provider_check). Its answer is neither cached nor used
+        to prune the stored selection.
 
         A failure is a failure (FA-107): it returned the list cached from an
         earlier discovery, and Settings said "Found 2 models" over a provider
@@ -828,8 +859,13 @@ class ModelRegistry:
         def failed(code: str, detail: str) -> DiscoveryResult:
             return DiscoveryResult.failed(code, detail, cached=cached)
 
+        def keep(ids: list[str]) -> None:
+            if candidate is None:
+                self._discovered_models[clean_name] = ids
+
         # The provider list is settings and vault reads (audit 2026-10-26 AUD-111).
-        provider_entry = await asyncio.to_thread(self.get_provider, clean_name)
+        provider_entry = candidate if candidate is not None else await asyncio.to_thread(
+            self.get_provider, clean_name)
         if not provider_entry:
             logger.warning("discover_models: provider %r not found", clean_name)
             return failed("not_found", f"There is no provider named {clean_name!r}.")
@@ -861,11 +897,13 @@ class ModelRegistry:
                                     elif full_name:
                                         model_ids.append(full_name)
                                 if model_ids:
-                                    self._discovered_models[clean_name] = sorted(set(model_ids))
-                                    await asyncio.to_thread(
-                                        self._prune_stale_selected_models, clean_name, self._discovered_models[clean_name]
-                                    )
-                                    return DiscoveryResult(True, list(self._discovered_models[clean_name]))
+                                    found = sorted(set(model_ids))
+                                    keep(found)
+                                    if candidate is None:
+                                        await asyncio.to_thread(
+                                            self._prune_stale_selected_models, clean_name, found
+                                        )
+                                    return DiscoveryResult(True, list(found))
                             problem = f"Google answered HTTP {resp.status_code}."
                     except Exception as exc:
                         logger.warning("discover_models: Google AI Studio dynamic discovery failed: %s", exc)
@@ -879,7 +917,7 @@ class ModelRegistry:
 
                 # Vertex AI has no /models endpoint: the built-in list is the answer.
                 from kazma_core.providers import GEMINI_MODELS
-                self._discovered_models[clean_name] = list(GEMINI_MODELS)
+                keep(list(GEMINI_MODELS))
                 return DiscoveryResult(True, list(GEMINI_MODELS), source="built_in")
             logger.warning("discover_models: no base_url for %r", clean_name)
             return failed("no_base_url", "The provider has no base URL.")
@@ -905,12 +943,18 @@ class ModelRegistry:
         # instead of answering (2026-10-02).
         from urllib.parse import urlparse
 
-        from kazma_core.security.ssrf import SSRFError, validate_url
+        from kazma_core.security.ssrf import SSRFError, resolves_to_own_network, validate_url
 
         try:
             _host = (urlparse(url).hostname or "").lower()
             _loopback = _host in ("localhost", "127.0.0.1", "::1")
-            await asyncio.to_thread(validate_url, url, block_unresolved=True, allow_private=_loopback)
+            # A server on the owner's own network (providers stage 1): every
+            # address its host resolves to is loopback, private or Tailscale's
+            # -- never link-local (cloud metadata). Anything else is checked as
+            # a public address, as before.
+            _own = _loopback or await asyncio.to_thread(resolves_to_own_network, url)
+            if not _own:
+                await asyncio.to_thread(validate_url, url, block_unresolved=True)
         except SSRFError as exc:
             logger.warning("discover_models: SSRF blocked %r for %r: %s", url, clean_name, exc)
             return failed("blocked_url", "Kazma does not send requests to that address.")
@@ -957,8 +1001,9 @@ class ModelRegistry:
                     model_ids.append(str(model_id))
 
             model_ids = sorted(set(model_ids))
-            self._discovered_models[clean_name] = model_ids
-            await asyncio.to_thread(self._prune_stale_selected_models, clean_name, model_ids)  # audit 2026-10-26 AUD-111
+            keep(model_ids)
+            if candidate is None:
+                await asyncio.to_thread(self._prune_stale_selected_models, clean_name, model_ids)  # audit 2026-10-26 AUD-111
             return DiscoveryResult(True, list(model_ids))
 
         except ValueError as exc:  # a body that is not JSON
@@ -1580,10 +1625,6 @@ class ModelRegistry:
         llm_model = str(self._config_store.get("llm.model", "") or "").strip()
         if llm_model and not is_speech_model(llm_model):
             models.add(llm_model)
-
-        yaml_default_model = str(self._config_store.get("models.default", "") or "").strip()
-        if yaml_default_model and not is_speech_model(yaml_default_model):
-            models.add(yaml_default_model)
 
         task_defaults = self._collect_task_defaults()
         models.update(task_defaults.values())

@@ -121,6 +121,86 @@ def _find_local_servers(get=None) -> list[dict[str, Any]]:
     return found
 
 
+class _AddressBody(BaseModel):
+    address: str = Field(min_length=1, max_length=300)
+
+
+def _network_server(address: str, get=None, own_network=None) -> dict[str, Any]:
+    """A model server at *address* on this computer's network: its
+    OpenAI-compatible base address and how many models it lists, or a code
+    the guide words (``bad_address``, ``not_own_network``, ``no_server``).
+
+    Only an address on the owner's own network is asked
+    (kazma_core.security.ssrf.resolves_to_own_network: never link-local or a
+    cloud metadata address) -- the guide is no way to probe the internet. The
+    address as typed, then with ``/v1`` (vLLM, llama.cpp, LocalAI and LM
+    Studio serve there; Ollama too). Nothing is saved. *get* and
+    *own_network* replace the HTTP call and the DNS check in tests.
+    """
+    import re
+    from urllib.parse import urlsplit
+
+    import httpx
+
+    from kazma_core.security.ssrf import resolves_to_own_network
+
+    raw = address.strip()
+    if "://" not in raw:
+        raw = f"http://{raw}"
+    try:
+        parts = urlsplit(raw)
+        host = parts.hostname or ""
+        port = parts.port
+    except ValueError:
+        return {"ok": False, "error": "bad_address"}
+    if parts.scheme not in ("http", "https") or not host or parts.username or parts.password:
+        return {"ok": False, "error": "bad_address"}
+    base = raw.rstrip("/")
+    if not (own_network or resolves_to_own_network)(base):
+        return {"ok": False, "error": "not_own_network"}
+
+    def fetch(url: str) -> Any:
+        with httpx.Client(timeout=3.0, trust_env=False, follow_redirects=False) as client:
+            return client.get(url)
+
+    get = get or fetch
+    candidates = [base] if re.search(r"/v\d", parts.path or "") else [base, f"{base}/v1"]
+    for candidate in candidates:
+        try:
+            resp = get(f"{candidate}/models")
+            if resp.status_code != 200:
+                continue
+            data = resp.json().get("data")
+        except (httpx.HTTPError, OSError, ValueError, AttributeError):
+            continue
+        if isinstance(data, list):
+            label = f"{host}:{port}" if port else host
+            return {"ok": True, "base_url": candidate, "label": label,
+                    "models": len([m for m in data if isinstance(m, dict)])}
+    return {"ok": False, "error": "no_server"}
+
+
+def _register_network_server(found: dict[str, Any], registry: Any | None = None) -> str:
+    """Save the server :func:`_network_server` found as a provider of its
+    own (``server-<host>-<port>``), switched on, with no key. Returns its name."""
+    import re
+
+    if registry is None:
+        from kazma_core.model_registry import get_model_registry
+
+        registry = get_model_registry()
+    label = str(found["label"])
+    name = "server-" + re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")
+    registry.upsert_provider({
+        "name": name,
+        "display_name": label,
+        "base_url": str(found["base_url"]),
+        "api_key": "local",
+        "enabled": True,
+    })
+    return name
+
+
 class _ProviderBody(BaseModel):
     provider: str = Field(min_length=1, max_length=64)
     api_key: str = Field(default="", max_length=4096)
@@ -130,24 +210,30 @@ def _save_provider(body: _ProviderBody, registry: Any | None = None) -> dict[str
     """Save a provider and its key, without making it the one Kazma uses: the
     guide lists its models and tests one before switching to it. A key left
     empty keeps the one stored; a cloud provider with none is refused."""
+    from kazma_core.runtime.live_llm import url_is_local
+
     pid = body.provider.strip().lower()
     preset = PROVIDER_PRESETS.get(pid)
-    if preset is None:
-        return {"ok": False, "error": "unknown_provider"}
     if registry is None:
         from kazma_core.model_registry import get_model_registry
 
         registry = get_model_registry()
+    stored = registry.get_provider(pid) if hasattr(registry, "get_provider") else None
+    if preset is None and stored is None:
+        return {"ok": False, "error": "unknown_provider"}
     api_key = body.api_key.strip()
     if api_key in {"***", "••••", "****"}:
         api_key = ""
-    stored = registry.get_provider(pid) if hasattr(registry, "get_provider") else None
-    if pid not in _LOCAL and not api_key and not _has_key((stored or {}).get("api_key")):
+    # Needs no key: Ollama and LM Studio, or a server the guide found on this
+    # computer's network (stored, its address on the owner's network).
+    local = pid in _LOCAL or url_is_local(str((stored or {}).get("base_url") or ""))
+    if not local and not api_key and not _has_key((stored or {}).get("api_key")):
         return {"ok": False, "error": "api_key_required"}
-    entry: dict[str, Any] = {"name": pid, "display_name": str(preset.get("name") or pid), "enabled": True}
+    display = str((preset or {}).get("name") or (stored or {}).get("display_name") or pid)
+    entry: dict[str, Any] = {"name": pid, "display_name": display, "enabled": True}
     if not str((stored or {}).get("base_url") or "").strip():  # an address set in Settings stays
-        entry["base_url"] = str(preset.get("base_url") or "")
-    if api_key or pid in _LOCAL:
+        entry["base_url"] = str((preset or {}).get("base_url") or "")
+    if api_key or local:
         entry["api_key"] = api_key or "local"
     result = registry.upsert_provider(entry)
     if isinstance(result, dict) and result.get("error"):
@@ -168,25 +254,43 @@ def create_setup_router() -> APIRouter:
     def setup_status() -> dict[str, Any]:
         return compute_setup_status()
 
+    @router.post("/api/setup/local/address")
+    def setup_network_server(body: _AddressBody) -> dict[str, Any]:
+        """A model server on another computer of this network: found and
+        saved as a provider, or a code the page words. Admin only (it saves
+        a provider), like the rest of the guide."""
+        found = _network_server(body.address)
+        if not found.get("ok"):
+            return found
+        return {"ok": True, "provider": _register_network_server(found), "label": found["label"],
+                "models": found["models"]}
+
     @router.get("/api/setup/local")
     def setup_local() -> dict[str, Any]:
         """The guide's "a model on this computer": which servers run here."""
         return {"servers": _find_local_servers()}
 
-    @router.post("/api/setup/provider")
-    def setup_provider(body: _ProviderBody) -> dict[str, Any]:
-        """Save a provider (and its key) for the guide to list and test its models.
-        A store that cannot write answers through the app's own error handler."""
-        return _save_provider(body)
+    @router.post("/api/setup/models")
+    async def setup_models(body: _CandidateBody) -> dict[str, Any]:
+        """The provider's chat models, asked with the key as typed -- nothing
+        saved (providers stage 1: the guide saved the key before listing, and
+        a refused key stayed saved). ``{ok, models}``, or ``{ok: false, error,
+        detail}`` with a code the page words."""
+        from kazma_core.models.modality import chat_models
+        from kazma_core.provider_check import list_models
+
+        registry, entry = await _candidate(body)
+        if registry is None:
+            return entry
+        found = await list_models(registry, entry)
+        if not found.ok:
+            return {"ok": False, "error": str(found.error or "list_failed"), "detail": str(found.detail or "")}
+        return {"ok": True, "models": chat_models(found.models)}
 
     @router.post("/api/setup/bootstrap")
     def setup_bootstrap(body: BootstrapBody, request: Request) -> dict[str, Any]:
         del request  # auth is middleware; CSRF is middleware
         pid = body.provider.strip().lower()
-        preset = PROVIDER_PRESETS.get(pid)
-        if preset is None:
-            return {"error": "unknown_provider", "ready": False}
-
         api_key = body.api_key.strip()
         if api_key in {"***", "••••", "****"}:
             api_key = ""
@@ -233,54 +337,47 @@ def create_setup_router() -> APIRouter:
         return compute_setup_status()
 
     @router.post("/api/setup/check")
-    async def setup_check(body: _CheckBody) -> dict[str, Any]:
-        """One short message to the model the guide just chose, through the
-        client Kazma's chat uses for it (each provider's own API style)."""
-        return await _check_model(body.provider.strip().lower(), body.model.strip())
+    async def setup_check(body: _CandidateBody) -> dict[str, Any]:
+        """One short message to the model the guide is about to choose,
+        through the client chat would build for it (kazma_core.provider_check)
+        -- with the key as typed, before anything is saved: the page saves
+        and switches (``/api/setup/bootstrap``) only when this answered.
+        ``{ok, ms}``, or ``{ok: false, error, detail}`` with a code."""
+        from kazma_core.provider_check import check_model
+
+        model = body.model.strip()
+        if not model:
+            return {"ok": False, "error": "no_model"}
+        registry, entry = await _candidate(body)
+        if registry is None:
+            return entry
+        check = await check_model(entry, model)
+        if check["ok"]:
+            return {"ok": True, "ms": check["ms"]}
+        logger.info("[setup] model check failed: %s", check.get("error_code"))
+        return {"ok": False, "error": str(check.get("error_code") or "failed"), "detail": str(check.get("error") or "")}
 
     return router
 
 
-class _CheckBody(BaseModel):
+class _CandidateBody(BaseModel):
     provider: str = Field(min_length=1, max_length=64)
-    model: str = Field(min_length=1, max_length=200)
+    api_key: str = Field(default="", max_length=4096)
+    model: str = Field(default="", max_length=200)
 
 
-#: How long the guide's check waits for the model's answer.
-_CHECK_TIMEOUT_S = 60.0
-
-
-async def _check_model(provider: str, model: str, registry: Any | None = None) -> dict[str, Any]:
-    """Send "Reply with the word OK." to *model* of *provider*: ``{ok, ms}``,
-    or ``{ok: false, error}`` in words the page shows as they are."""
+async def _candidate(body: _CandidateBody) -> tuple[Any, dict[str, Any]]:
+    """``(registry, candidate entry)``, or ``(None, refusal)`` with the
+    refusal's code (kazma_core.provider_check.candidate_entry)."""
     import asyncio
-    import time
 
-    import httpx
+    from kazma_core.model_registry import get_model_registry
+    from kazma_core.provider_check import CandidateRefused, candidate_entry
 
-    from kazma_core.llm_provider import LLMError
-    from kazma_core.retry import friendly_llm_error
-
-    if registry is None:
-        from kazma_core.model_registry import get_model_registry
-
-        registry = get_model_registry()
-    started = time.monotonic()
+    registry = await asyncio.to_thread(get_model_registry)
     try:
-        client = await asyncio.to_thread(registry.get_client_by_provider, provider, model)
-        if client is None:
-            return {"ok": False, "error": "not_configured"}
-        kwargs: dict[str, Any] = {"max_tokens": 32, "model": model}
-        can_turn_off = getattr(client, "can_turn_off_reasoning", None)
-        if callable(can_turn_off) and can_turn_off():
-            kwargs["reasoning"] = "off"  # a thinking model spends a small limit thinking
-        await asyncio.wait_for(
-            client.chat([{"role": "user", "content": "Reply with the word OK."}], **kwargs),
-            timeout=_CHECK_TIMEOUT_S,
-        )
-    except asyncio.TimeoutError:
-        return {"ok": False, "error": "timeout"}  # worded by the page, in its language
-    except (LLMError, httpx.HTTPError, OSError, ValueError, RuntimeError) as exc:  # the check's answer
-        logger.info("[setup] model check failed: %s", type(exc).__name__, exc_info=True)
-        return {"ok": False, "error": friendly_llm_error(exc, model=model)}
-    return {"ok": True, "ms": round((time.monotonic() - started) * 1000)}
+        entry = await asyncio.to_thread(
+            candidate_entry, registry, body.provider.strip().lower(), api_key=body.api_key.strip())
+    except CandidateRefused as exc:
+        return None, {"ok": False, "error": exc.code}
+    return registry, entry

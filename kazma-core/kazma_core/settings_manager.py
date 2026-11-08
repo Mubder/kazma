@@ -825,6 +825,19 @@ class SettingsManager:
                 chain = [p.strip() for p in chain.split(",") if p.strip()]
             if not isinstance(chain, list) or len(chain) > 8:
                 raise ValueError("Failover chain must be a list of at most 8 model ids.")
+            # A backup nothing can serve is refused (providers stage 1): the
+            # chain named Google with no Google key, and the failover drill
+            # failed for a month with OpenRouter and Groq both working.
+            from kazma_core.failover_backup import unusable_backups
+            from kazma_core.model_registry import get_model_registry
+
+            bad = unusable_backups(get_model_registry(), [str(m).strip() for m in chain if str(m).strip()])
+            if bad:
+                raise ValueError(
+                    "No provider that can be called serves "
+                    + ", ".join(repr(row["model"]) for row in bad)
+                    + " (a provider switched on, with a key or on this network, listing the model)."
+                )
             items.append(("agent.nonstop.failover.chain", ",".join(str(m) for m in chain), "agent"))
         if "failover_cooldown_seconds" in data:
             v = float(data["failover_cooldown_seconds"])

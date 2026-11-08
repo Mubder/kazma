@@ -204,10 +204,14 @@ class TestAnUndecryptableKeySaysSo:
             assert ModelRegistry(store).stored_key_is_undecryptable("groq") is True
 
     def test_the_test_route_says_which_problem_it_is(self):
+        # The Test route builds its candidate through provider_check since
+        # providers stage 1 (2026-11-08); the refusal is said there.
         import inspect
 
+        from kazma_core import provider_check
         from kazma_ui import providers as ui_providers
 
-        src = inspect.getsource(ui_providers)
+        assert "candidate_entry" in inspect.getsource(ui_providers)
+        src = inspect.getsource(provider_check)
         assert "stored_key_is_undecryptable" in src
         assert "KAZMA_VAULT_KEY" in src

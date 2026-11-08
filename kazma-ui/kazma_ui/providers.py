@@ -9,15 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from typing import Any
 
-import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from kazma_core.config_store import ConfigStore, is_vault_ref
 from kazma_core.env_files import env_credential
-from kazma_core.errors import safe_error
 from kazma_core.model_registry import get_model_registry
 from kazma_core.security.url_credentials import (
     mask_url_credentials,
@@ -33,7 +30,6 @@ from kazma_ui.models import (
     ProviderToggleRequest,
     ProviderUpdateRequest,
 )
-from kazma_core.http_tls import shared_ssl_context
 from kazma_ui.json_body import InvalidJsonBody, invalid_json_response, read_json
 
 logger = logging.getLogger(__name__)
@@ -99,11 +95,6 @@ def _is_secret_key(key: str) -> bool:
     return any(hint in lower for hint in _SECRET_KEY_HINTS)
 
 
-# The probe lives in kazma_core.provider_probe so that this route and
-# /api/settings/providers/{name}/test cannot drift apart again. Two routes
-# both offer "Test"; the Settings page reaches this one, and a fix applied to
-# only one of them changes nothing an operator would ever see.
-from kazma_core.provider_probe import probe_chat_completion as _probe_chat_completion
 from kazma_core.providers import capabilities as _provider_capabilities
 
 
@@ -119,6 +110,44 @@ def _activate_tested_provider(registry: Any, name: str) -> None:
         maybe_activate_provider_for_chat(name, registry=registry)
     except Exception:
         logger.debug("[providers] chat activate after Test failed", exc_info=True)
+
+
+def _can_be_called(registry: Any, name: str) -> bool:
+    """A saved provider chat can call: on this computer or its network, or
+    with a key Kazma would send (the vault, ``<PROVIDER>_API_KEY``). A cloud
+    provider switched on with no key was a provider that failed every
+    message and that Kazma might fall back to (providers stage 1)."""
+    from kazma_core.provider_check import LOCAL_NAMES
+    from kazma_core.runtime.live_llm import key_is_usable, url_is_local
+
+    entry = registry.get_provider(name) or {}
+    if name.lower() in LOCAL_NAMES or url_is_local(str(entry.get("base_url") or "")):
+        return True
+    _url, key = registry.resolve_provider_credentials(name)
+    return key_is_usable(key)
+
+
+def _same_address(providers: list[dict[str, Any]], name: str, base_url: str) -> list[str]:
+    """The other providers at *base_url* (normalized): a second row for one
+    service (Z.AI and zai on the live install) -- said, not refused, since a
+    second account of a vendor is saved this way until providers have
+    several keys."""
+    from kazma_core.url_utils import normalize_provider_url
+
+    def address(url: str) -> str:
+        try:
+            return normalize_provider_url(url).rstrip("/").lower()
+        except ValueError:  # a port out of range: compared as typed
+            return url.strip().rstrip("/").lower()
+
+    if not base_url:
+        return []
+    here = address(base_url)
+    return sorted(
+        str(p.get("name") or "") for p in providers
+        if str(p.get("name") or "") != name and p.get("base_url")
+        and address(str(p["base_url"])) == here
+    )
 
 
 def _mask_provider_entry(provider: dict[str, Any]) -> dict[str, Any]:
@@ -298,7 +327,8 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         """List all LLM providers with masked API keys and discovered models."""
         registry = get_model_registry()
         providers = []
-        for p in registry.list_providers():
+        all_rows = registry.list_providers()
+        for p in all_rows:
             entry = _mask_provider_entry(p)
             name = p.get("name", "")
             from kazma_core.models.modality import chat_models, speech_models
@@ -323,6 +353,13 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
             # `None` inside `supports` means NOT VERIFIED and the UI renders it
             # as such — it is not a quiet "no".
             entry["capabilities"] = _provider_capabilities(name)
+            # On this computer or its network: needs no key (url_is_local).
+            # The pages decided it by name, so a keyless vLLM at 192.168.1.20
+            # was hidden from the chat's model picker (providers stage 1).
+            from kazma_core.runtime.live_llm import url_is_local
+
+            entry["local"] = url_is_local(str(p.get("base_url") or ""))
+            entry["same_address_as"] = _same_address(all_rows, name, str(p.get("base_url") or ""))
             providers.append(entry)
         return providers
 
@@ -345,7 +382,16 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         result = registry.upsert_provider(data)
         if "error" in result:
             raise HTTPException(status_code=400, detail=result["error"])
-        return _mask_provider_entry(result)
+        answer = _mask_provider_entry(result)
+        # Saved, but not switched on with no key: it would fail every message.
+        if result.get("enabled", True) and not _can_be_called(registry, data["name"]):
+            registry.toggle_provider(data["name"], False)
+            answer["enabled"] = False
+            answer["switched_off"] = "no_key"
+        twins = _same_address(registry.list_providers(), data["name"], str(result.get("base_url") or ""))
+        if twins:
+            answer["same_address_as"] = twins
+        return answer
 
     @router.delete("/api/providers/{name}")
     def delete_provider(name: str) -> dict[str, str]:
@@ -356,293 +402,140 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
 
     @router.post("/api/providers/{name}/toggle")
     def toggle_provider(name: str, req: ProviderToggleRequest) -> dict[str, str]:
-        """Enable or disable an LLM provider."""
+        """Enable or disable an LLM provider. A cloud provider with no key is
+        not switched on (409 ``no_key``): it would fail every message."""
         registry = get_model_registry()
+        if req.enabled and not _can_be_called(registry, name):
+            raise HTTPException(status_code=409, detail={
+                "code": "no_key", "message": "This provider has no API key: add its key before switching it on."})
         registry.toggle_provider(name, req.enabled)
         return {"status": "ok"}
 
-    @router.post("/api/providers/{name}/test", response_model=ProviderTestResponse)
-    async def test_provider(name: str, request: Request) -> dict[str, Any]:
-        """Run a non-destructive health check against the provider's /models endpoint.
+    async def _model_to_check(
+        registry: Any, entry: dict[str, Any], typed_model: str,
+    ) -> tuple[str, list[str] | None, dict[str, Any] | None]:
+        """``(model, models listed or None, refusal or None)``: the model typed,
+        else the provider's own (``probe_model_for``), else the first chat
+        model its list offers -- listed with what was typed, not saved."""
+        from kazma_core.models.modality import chat_models, speech_models
+        from kazma_core.provider_check import list_models
+        from kazma_core.providers import default_model_for
 
-        Optional JSON body ``{"api_key": "..."}`` tests the typed key (modal
-        Test) instead of the stored one. Empty or masked ``****`` means
-        "use the stored key" — the edit field is left blank on purpose.
-        """
-        registry = get_model_registry()
-        provider = registry.get_provider(name)
-        if not provider:
-            return {"success": False, "error": f"Provider '{name}' not found"}
+        model = str(typed_model or "").strip()
+        if model:
+            return model, None, None
+        name = str(entry["name"])
+        if await asyncio.to_thread(registry.get_provider, name) is not None:
+            model = await asyncio.to_thread(registry.probe_model_for, name)
+            if model:
+                return model, None, None
+        found = await list_models(registry, entry)
+        chats = chat_models(found.models) if found.ok else []
+        if chats:
+            preferred = default_model_for(name)
+            return (preferred if preferred in chats else chats[0]), chats, None
+        if found.ok and speech_models(found.models):
+            return "", [], {"error_code": "speech_only", "reachable": True, "error": (
+                "Reachable, but the listed models are speech (Whisper/TTS), not chat. "
+                "Configure speech under Settings -> Voice.")}
+        if not found.ok:
+            return "", None, {"error_code": "list_failed", "reachable": found.error != "unreachable",
+                              "error": str(found.detail or found.error)}
+        return "", [], {"error_code": "no_model", "reachable": True,
+                        "error": "The provider lists no model to try. Type one and test again."}
 
-        typed_key = ""
+    def _check_answer(check: dict[str, Any], models: list[str] | None) -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "success": bool(check["ok"]), "chat_ok": bool(check["ok"]),
+            "reachable": bool(check.get("reachable", True)), "chat_model": check.get("model"),
+        }
+        if check["ok"]:
+            out["chat_ms"] = out["latency_ms"] = int(check.get("ms") or 0)
+        else:
+            out["error_code"] = check.get("error_code")
+            out["error"] = check.get("error")
+        if models is not None:
+            out["models"] = models
+        return out
+
+    async def _typed_fields(request: Request) -> dict[str, Any] | JSONResponse:
+        body: Any = {}
         ctype = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
         if ctype == "application/json":
             try:
                 body = await read_json(request, allow_empty=True)
             except InvalidJsonBody:
                 return invalid_json_response()
-            if isinstance(body, dict):
-                typed_key = _sanitize_api_key(str(body.get("api_key") or ""))
+        return body if isinstance(body, dict) else {}
+
+    @router.post("/api/providers/check", response_model=ProviderTestResponse)
+    async def check_typed_provider(request: Request) -> dict[str, Any] | JSONResponse:
+        """Check a provider as the Settings dialog has it, WITHOUT saving it
+        (providers stage 1, kazma_core.provider_check): ``{name, base_url,
+        api_key, model}`` -- an empty or masked key means the stored one. One
+        short message through the client chat would build. The dialog saves
+        only after this answered: it wrote the provider, typed key and all,
+        before testing, and a refused key stayed saved."""
+        from kazma_core.provider_check import CandidateRefused, candidate_entry, check_model
+
+        fields = await _typed_fields(request)
+        if isinstance(fields, JSONResponse):
+            return fields
+        registry = get_model_registry()
+        try:
+            entry = await asyncio.to_thread(
+                candidate_entry, registry, str(fields.get("name") or ""),
+                base_url=str(fields.get("base_url") or ""),
+                api_key=_sanitize_api_key(str(fields.get("api_key") or "")),
+            )
+        except CandidateRefused as exc:
+            return {"success": False, "error_code": exc.code, "error": exc.message}
+        model, models, refusal = await _model_to_check(registry, entry, str(fields.get("model") or ""))
+        if refusal is not None:
+            return {"success": False, "chat_ok": False, **refusal, "models": models}
+        return _check_answer(await check_model(entry, model), models)
+
+    @router.post("/api/providers/{name}/test", response_model=ProviderTestResponse)
+    async def test_provider(name: str, request: Request) -> dict[str, Any] | JSONResponse:
+        """Test a SAVED provider through the client chat uses for it, and
+        record its health (providers stage 1, kazma_core.provider_check).
+
+        Optional JSON body ``{"api_key": "..."}`` tests the typed key instead
+        of the stored one (kept only when the test answered). It probed
+        every provider with OpenAI's request -- ``Authorization: Bearer`` to
+        ``/models`` and ``/chat/completions`` -- so Anthropic, Azure and
+        Bedrock failed Test while chat worked.
+        """
+        from kazma_core.provider_check import CandidateRefused, candidate_entry, check_model
+
+        registry = get_model_registry()
+        if await asyncio.to_thread(registry.get_provider, name) is None:
+            return {"success": False, "error_code": "unknown_provider", "error": f"Provider '{name}' not found"}
+        fields = await _typed_fields(request)
+        if isinstance(fields, JSONResponse):
+            return fields
+        typed_key = _sanitize_api_key(str(fields.get("api_key") or ""))
         if typed_key and _is_masked_placeholder(typed_key):
             typed_key = ""
-        if typed_key:
-            provider = dict(provider)
-            provider["api_key"] = typed_key
-
-        if name.lower() == "google":
-            # Test Google Provider (either AI Studio or Vertex AI)
-            try:
-                client = registry.get_client_by_provider(name)
-                if not client:
-                    return {"success": False, "error": "Failed to construct Google Gemini provider client"}
-                
-                # Retrieve the authenticated HTTP client (resolves ADC or API Key)
-                http_client = await client._get_client()
-                
-                # Perform a lightweight ping to the base URL
-                start = time.monotonic()
-                if getattr(client, "_use_ai_studio", False):
-                    # Google AI Studio: query the native models endpoint which is guaranteed to be supported.
-                    resp = await http_client.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={client.config.api_key}")
-                    latency = int((time.monotonic() - start) * 1000)
-                    if resp.status_code == 200:
-                        await asyncio.to_thread(registry.set_provider_health, name, "healthy")
-                        await asyncio.to_thread(_activate_tested_provider, registry, name)
-                        return {"success": True, "latency_ms": latency}
-                    else:
-                        await asyncio.to_thread(registry.set_provider_health, name, "degraded")
-                        error_msg = f"AI Studio returned HTTP {resp.status_code}"
-                        if resp.status_code == 401:
-                            error_msg += " (Unauthorized: Your Google AI Studio API key is invalid or has expired. Please verify your key or generate a new one at https://aistudio.google.com/)"
-                        elif resp.status_code == 403:
-                            error_msg += " (Forbidden: Your key does not have permission, or your region might not be supported. See https://ai.google.dev/gemini-api/docs/available-regions)"
-                        return {"success": False, "error": error_msg, "latency_ms": latency}
-                else:
-                    # Vertex AI: just check if get_client succeeded and do a lightweight head/get to base_url to check network.
-                    try:
-                        resp = await http_client.get("")
-                        latency = int((time.monotonic() - start) * 1000)
-                        await asyncio.to_thread(registry.set_provider_health, name, "healthy")
-                        await asyncio.to_thread(_activate_tested_provider, registry, name)
-                        return {"success": True, "latency_ms": latency}
-                    except httpx.ConnectError:
-                        await asyncio.to_thread(registry.set_provider_health, name, "down")
-                        return {"success": False, "error": f"Cannot connect to Vertex AI at {client.config.base_url}"}
-            except Exception as e:
-                await asyncio.to_thread(registry.set_provider_health, name, "down")
-                # AUD-102: the client gets a code and reference, the log the
-                # exception (it can carry the endpoint and key parameters).
-                return {"success": False, "error": f"Google Provider test failed: {safe_error(e)}"}
-
-        base_url = str(provider.get("base_url", "")).rstrip("/")
-        api_key = _sanitize_api_key(str(provider.get("api_key", "") or ""))
-        if api_key and _is_masked_placeholder(api_key):
-            api_key = ""
-
-        if not api_key and not typed_key:
-            # The provider row is not the only place a key can live. Chat also
-            # resolves the legacy `llm.*` settings and `<PROVIDER>_API_KEY` from
-            # the environment, so a provider configured entirely through a .env
-            # file answered every message while Test reported
-            # "No API key stored for this provider" — the check contradicting
-            # the thing it checks. Ask the runtime what it would send.
-            resolved_url, resolved_key = registry.resolve_provider_credentials(name)
-            api_key = _sanitize_api_key(resolved_key)
-            if api_key and _is_masked_placeholder(api_key):
-                api_key = ""
-            if not base_url:
-                base_url = str(resolved_url or "").rstrip("/")
-
-        local_names = {"ollama", "lm-studio", "lmstudio", "local"}
-        if not api_key and name.lower() not in local_names:
-            # "No key" and "a key I cannot decrypt" arrive here identically —
-            # both as an empty string — and they need opposite actions. Telling
-            # an operator who saved a key to paste it again is the one thing
-            # that cannot help.
-            if registry.stored_key_is_undecryptable(name):
-                return {
-                    "success": False,
-                    "error": (
-                        "A key IS saved for this provider, but the vault cannot "
-                        "decrypt it. KAZMA_VAULT_KEY is missing from this "
-                        "process, or is not the value the key was encrypted "
-                        "with. Restore that variable rather than re-pasting the "
-                        "key — the stored value is intact."
-                    ),
-                }
-            # The same helper the resolver uses, so the message names the
-            # variable Kazma actually reads. Spelling it locally is how
-            # `Z.AI_API_KEY` got told to an operator as something to set.
-            from kazma_core.providers import env_key_for
-
-            env_name = env_key_for(name)
-            return {
-                "success": False,
-                "error": (
-                    "No API key found for this provider. Kazma looked in the "
-                    "provider's saved key (the vault), the legacy llm.* "
-                    f"settings, and ${env_name}. Paste the full key into the "
-                    "field and Test again."
-                ),
-            }
-        if not base_url:
-            return {"success": False, "error": "No base URL configured"}
-
-        # Normalize to the OpenAI-compatible /v1 form. Local providers
-        # (Ollama, LM Studio, …) live on localhost / private LAN addresses,
-        # so private URLs must be allowed here (they are user-configured
-        # endpoints, not untrusted external input).
-        from urllib.parse import urlparse, urlunparse
-
-        from kazma_core.security.ssrf import validate_url
-        from kazma_core.url_utils import normalize_provider_url
-
-        base = normalize_provider_url(base_url, ensure_v1=True)
-        root = urlunparse((urlparse(base).scheme, urlparse(base).netloc, "", "", "", ""))
-        # Candidate health endpoints: the provider's own /models, plus the
-        # OpenAI-compatible /v1/models (covers LM Studio, Ollama, cloud).
-        candidates = [f"{base}/models", f"{root}/v1/models"]
-
-        # Strip any non-ASCII characters from the API key (e.g. an Arabic key
-        # pasted by an Arabic-first operator) so the Authorization header can
-        # be encoded — mirrors LLMProvider._strip_non_ascii.
-        safe_key = "".join(ch for ch in api_key if ord(ch) < 128) if api_key else ""
-
-        start = time.monotonic()
         try:
-            headers: dict[str, str] = {"Content-Type": "application/json"}
-            if safe_key:
-                headers["Authorization"] = f"Bearer {safe_key}"
-            await asyncio.to_thread(validate_url, base, allow_private=True)
-            async with httpx.AsyncClient(timeout=10.0, verify=shared_ssl_context()) as client:
-                last_status = None
-                last_exc: Exception | None = None
-                for url in candidates:
-                    try:
-                        resp = await client.get(url, headers=headers)
-                    except Exception as exc:
-                        last_exc = exc
-                        # Try the next candidate endpoint.
-                        continue
-                    last_status = resp.status_code
-                    if resp.status_code == 200:
-                        latency = int((time.monotonic() - start) * 1000)
-                        # The model list answered. That is NOT the same as the
-                        # provider working, and reporting it as such is how a
-                        # paid provider showed green on this page while every
-                        # message sent to it came back 404. Send a real
-                        # completion on the path the product uses before
-                        # claiming success.
-                        # `api_key`, not the raw provider row: the row may be
-                        # empty while the runtime resolves the key from the
-                        # environment, and the chat probe has to send what a
-                        # real message would send.
-                        # The row's `model` field is only one of the places a
-                        # model can live, and it is empty for a provider set up
-                        # by discovering and ticking models. Reading only it
-                        # made the probe send nothing and then blame the
-                        # provider for "chat failing".
-                        probe_model = registry.probe_model_for(name)
-                        if not probe_model:
-                            from kazma_core.models.modality import speech_models
-
-                            only_speech = speech_models(
-                                registry.get_discovered_models(name)
-                                or (provider.get("models") or [])
-                            )
-                            if only_speech:
-                                return {
-                                    "success": False,
-                                    "latency_ms": latency,
-                                    "reachable": True,
-                                    "chat_ok": False,
-                                    "error": (
-                                        "Reachable, but the listed models are speech "
-                                        "(Whisper/TTS), not chat. Pick a chat model "
-                                        "here; configure STT/TTS under Settings → Voice. "
-                                        "API keys are shared."
-                                    ),
-                                }
-                            return {
-                                "success": False,
-                                "latency_ms": latency,
-                                "reachable": True,
-                                "chat_ok": False,
-                                "error": (
-                                    "Reachable, but no model is selected for this "
-                                    "provider, so there is nothing to send. Press "
-                                    "Discover, tick at least one model, then Test "
-                                    "again."
-                                ),
-                            }
-                        chat = await _probe_chat_completion(
-                            base_url, typed_key or api_key, probe_model,
-                        )
-                        if not chat["ok"]:
-                            # Its own health value, not "degraded". "Degraded"
-                            # is also what a failing model list writes, and
-                            # collapsing the two loses the distinction the
-                            # moment the page reloads.
-                            await asyncio.to_thread(registry.set_provider_health, name, "chat_failing")
-                            return {
-                                "success": False,
-                                "latency_ms": latency,
-                                "reachable": True,
-                                "chat_ok": False,
-                                "error": (
-                                    "Reachable, but chat is failing. The model list "
-                                    f"answered in {latency} ms; a real completion "
-                                    f"returned: {chat['error']}"
-                                ),
-                            }
-                        if typed_key:
-                            try:
-                                await asyncio.to_thread(
-                                    registry.upsert_provider, {"name": name, "api_key": typed_key}
-                                )
-                            except Exception:
-                                logger.debug(
-                                    "[providers] persist tested key failed",
-                                    exc_info=True,
-                                )
-                        await asyncio.to_thread(registry.set_provider_health, name, "healthy")
-                        await asyncio.to_thread(_activate_tested_provider, registry, name)
-                        return {
-                            "success": True,
-                            "latency_ms": latency,
-                            "reachable": True,
-                            "chat_ok": True,
-                            "chat_ms": chat["ms"],
-                            "chat_model": chat["model"],
-                        }
-                latency = int((time.monotonic() - start) * 1000)
-                await asyncio.to_thread(registry.set_provider_health, name, "degraded")
-                if last_status is None:
-                    logger.debug("Provider test %r: all endpoints unreachable (%s)", name, type(last_exc).__name__)
-                    return {
-                        "success": False,
-                        "latency_ms": latency,
-                        "error": "Cannot connect to the configured provider (connection failed)",
-                    }
-                hint = ""
-                if last_status == 401:
-                    hint = (
-                        "Provider rejected the key Kazma sent (401). "
-                        "Paste the full key over the **** dots — Test does "
-                        "not invent a new key from the dashboard. "
-                    )
-                return {
-                    "success": False,
-                    "latency_ms": latency,
-                    "error": f"{hint}HTTP {last_status}. Check the provider URL and key.",
-                }
-        except httpx.ConnectError:
-            await asyncio.to_thread(registry.set_provider_health, name, "down")
-            return {"success": False, "error": "Cannot connect to the configured provider"}
-        except Exception as exc:  # pragma: no cover - defensive
-            await asyncio.to_thread(registry.set_provider_health, name, "down")
-            logger.error("Provider test failed for %r (%s)", name, type(exc).__name__)
-            return {"success": False, "error": "Provider test failed unexpectedly"}
+            entry = await asyncio.to_thread(candidate_entry, registry, name, api_key=typed_key)
+        except CandidateRefused as exc:
+            return {"success": False, "error_code": exc.code, "error": exc.message}
+        model, models, refusal = await _model_to_check(registry, entry, "")
+        if refusal is not None:
+            if refusal.get("reachable") is False:
+                await asyncio.to_thread(registry.set_provider_health, name, "down")
+            return {"success": False, "chat_ok": False, **refusal, "models": models}
+        check = await check_model(entry, model)
+        # Its own health values: "chat_failing" (it answered, not as a model)
+        # is not "down" (it could not be reached), and the page keeps both.
+        health = "healthy" if check["ok"] else ("chat_failing" if check.get("reachable") else "down")
+        await asyncio.to_thread(registry.set_provider_health, name, health)
+        if check["ok"]:
+            if typed_key:
+                await asyncio.to_thread(registry.upsert_provider, {"name": name, "api_key": typed_key})
+            await asyncio.to_thread(_activate_tested_provider, registry, name)
+        return _check_answer(check, models)
 
     @router.post("/api/providers/{name}/discover", response_model=None)
     async def discover_provider_models(name: str) -> dict[str, Any] | JSONResponse:

@@ -136,12 +136,15 @@ the page search (Ctrl+K).
      made), paste the key, and the guide lists the provider's models; or
    - **a model on this computer**: the guide looks for Ollama and LM Studio
      here, says which run and how many models each has, and where to download
-     one that does not.
+     one that does not; or give the address of **a server on another computer
+     on your network** (vLLM, llama.cpp, LocalAI, LM Studio or Ollama there,
+     such as `192.168.1.20:8000`). It needs no key.
 
-   Pick a model and the guide makes it the one Kazma uses (model and provider
-   together) and sends it one short message. It goes on only when the model
-   answers. Run the guide again to change the model: a key saved before can
-   be left empty. Azure OpenAI, AWS Bedrock and endpoints of your own need
+   Pick a model and the guide sends it one short message with the key as you
+   typed it. Only when it answers does the guide save the provider and make
+   the model the one Kazma uses (model and provider together): a key that is
+   refused is never saved. Run the guide again to change the model: a key
+   saved before can be left empty. Azure OpenAI, AWS Bedrock and endpoints of your own need
    more than a key, and are set up in Settings → Providers.
 3. **Extras**, each optional: chat apps (Telegram, Discord, Slack), Memory →
    About me, mail and calendar, and what was installed (Settings → Packages).

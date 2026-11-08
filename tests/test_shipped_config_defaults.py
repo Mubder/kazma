@@ -89,6 +89,10 @@ def test_every_declaration_is_consistent():
     ids = [entry_id(e) for e in config_defaults.RETIRED_DEFAULTS]
     assert len(ids) == len(set(ids))
     for entry in config_defaults.RETIRED_DEFAULTS:
+        if entry.removed:
+            # The key is gone from kazma.yaml; a stored old value is deleted.
+            assert entry.key not in shipped, f"{entry.key}: declared removed, but kazma.yaml ships it"
+            continue
         assert entry.key in shipped, f"{entry.key}: not a setting kazma.yaml ships"
         assert not any(config_defaults.same_value(shipped[entry.key], v) for v in entry.old), (
             f"{entry.key}: kazma.yaml still ships a value it retires"

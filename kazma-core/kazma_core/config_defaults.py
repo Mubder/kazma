@@ -58,9 +58,55 @@ class RetiredDefault:
     since: str
     #: Why it changed, for the log line and the reader.
     why: str
+    #: The key itself is gone from kazma.yaml: a stored copy of an old value
+    #: is deleted (``ConfigStore.apply_retired_defaults``), so nothing is left
+    #: that reads as a setting. Declared, so a mistyped key is still caught
+    #: (tests/test_shipped_config_defaults.py).
+    removed: bool = False
 
 
 RETIRED_DEFAULTS: tuple[RetiredDefault, ...] = (
+    RetiredDefault(
+        key="llm.input_cost_per_1m",
+        removed=True,
+        old=(0.15,),
+        since="2026-11-08",
+        why=(
+            "read by nothing: a price is the model's own (kazma_core.model_prices), "
+            "and this was gpt-4o-mini's, applied to every model"
+        ),
+    ),
+    RetiredDefault(
+        key="llm.output_cost_per_1m",
+        removed=True,
+        old=(0.6,),
+        since="2026-11-08",
+        why=(
+            "read by nothing: a price is the model's own (kazma_core.model_prices), "
+            "and this was gpt-4o-mini's, applied to every model"
+        ),
+    ),
+    RetiredDefault(
+        key="models.default",
+        removed=True,
+        old=("gpt-4o-mini",),
+        since="2026-11-08",
+        why="read only to add gpt-4o-mini to the model lists of installs with no OpenAI key",
+    ),
+    RetiredDefault(
+        key="models.fallback",
+        removed=True,
+        old=("gpt-4o-mini",),
+        since="2026-11-08",
+        why="read by nothing: the backup models are agent.nonstop.failover.chain",
+    ),
+    RetiredDefault(
+        key="models.router",
+        removed=True,
+        old=("kazma", "litellm"),
+        since="2026-11-08",
+        why="read by nothing",
+    ),
     RetiredDefault(
         key="agent.version",
         old=("0.20.0",),

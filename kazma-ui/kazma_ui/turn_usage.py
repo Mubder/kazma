@@ -60,10 +60,13 @@ def turn_started_epoch(session_id: str, turn_id: str) -> float | None:
     return None
 
 
-def turn_totals(turn_id: str, *, since: str = "") -> tuple[int, float, int]:
-    """``(tokens, cost_usd, calls)`` of the turn's LLM calls, or of the ones
-    recorded after ``since`` (one segment). Reads SQLite -- off the loop."""
+def turn_totals(turn_id: str, *, since: str = "") -> tuple[int, float, int, int]:
+    """``(tokens, cost_usd, calls, unpriced)`` of the turn's LLM calls, or of
+    the ones recorded after ``since`` (one segment). ``unpriced``: calls with
+    no known price, not in ``cost_usd`` (kazma_core.model_prices). Reads
+    SQLite -- off the loop."""
     from kazma_core.observability.llm_ledger import turn_usage
 
     usage = turn_usage(turn_id, since=since)
-    return int(usage["tokens"]), float(usage["cost"]), int(usage["calls"])
+    return (int(usage["tokens"]), float(usage["cost"]), int(usage["calls"]),
+            int(usage.get("unpriced") or 0))

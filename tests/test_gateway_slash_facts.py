@@ -67,8 +67,8 @@ def test_thread_usage_sums_one_chats_calls(ledger):
     ledger.record_llm_call(thread_id="chat-a", prompt_tokens=900, completion_tokens=100, cost_usd=0.01)
     ledger.record_llm_call(thread_id="chat-b", prompt_tokens=5000, completion_tokens=5000, cost_usd=1.0)
 
-    assert ledger.thread_usage("chat-a") == {"calls": 2, "tokens": 2500, "cost": pytest.approx(0.03)}
-    assert ledger.thread_usage("chat-c") == {"calls": 0, "tokens": 0, "cost": 0.0}
+    assert ledger.thread_usage("chat-a") == {"calls": 2, "tokens": 2500, "cost": pytest.approx(0.03), "unpriced": 0}
+    assert ledger.thread_usage("chat-c") == {"calls": 0, "tokens": 0, "cost": 0.0, "unpriced": 0}
 
 
 def test_an_unreadable_ledger_is_unknown_not_zero(ledger, monkeypatch):
@@ -103,10 +103,22 @@ async def test_cost_says_when_the_ledger_is_unreadable(ledger, monkeypatch):
 
 
 async def test_cost_says_when_no_price_is_known(ledger):
+    """A call with no known price is recorded as such (providers stage 1,
+    kazma_core.model_prices): /cost says the cost is unknown and where to set
+    the price -- never "$0.0000", which reads as free."""
+    ledger.record_llm_call(thread_id="gw-telegram-42", prompt_tokens=800, completion_tokens=200,
+                           cost_usd=0.0, priced=False)
+    reply = await _answer("/cost")
+    assert "Session cost: unknown (1,000 tokens, 1 model call)" in reply
+    assert "had no known price" in reply and "Model prices" in reply
+    assert "$0.0000" not in reply
+
+
+async def test_a_known_price_of_zero_is_said_as_zero(ledger):
+    """The control: a call priced at nothing (a model on this computer)."""
     ledger.record_llm_call(thread_id="gw-telegram-42", prompt_tokens=800, completion_tokens=200, cost_usd=0.0)
     reply = await _answer("/cost")
-    assert "`$0.0000` (1,000 tokens, 1 model call)" in reply
-    assert "no price is recorded" in reply
+    assert "`$0.0000` (1,000 tokens, 1 model call)" in reply and "unknown" not in reply
 
 
 # ── /status: the gateway manager ────────────────────────────────────────

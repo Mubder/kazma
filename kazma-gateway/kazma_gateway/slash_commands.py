@@ -432,12 +432,19 @@ def _cmd_cost(ctx: dict[str, Any]) -> str:
     tokens, cost, calls = ctx.get("total_tokens"), ctx.get("total_cost"), ctx.get("total_calls")
     if not isinstance(tokens, int) or not isinstance(cost, (int, float)) or not isinstance(calls, int):
         return "💰 Session cost: unknown (the cost ledger could not be read)."
+    # Calls with no known price are not in ``cost`` (kazma_core.model_prices):
+    # every model was priced as gpt-4o-mini until 2026-11-08.
+    unpriced = int(ctx.get("unpriced_calls") or 0)
+    shown = f"`${cost:.4f}`" if not unpriced else (f"at least `${cost:.4f}`" if cost else "unknown")
     text = (
-        f"💰 Session cost: `${cost:.4f}` ({count_noun(tokens, 'token')}, "
+        f"💰 Session cost: {shown} ({count_noun(tokens, 'token')}, "
         f"{count_noun(calls, 'model call')})"
     )
-    if tokens and not cost:
-        text += " — no price is recorded for this chat's models"
+    if unpriced:
+        text += (
+            f" — {count_noun(unpriced, 'call')} had no known price; add it in "
+            "Settings → Providers & Connectors → Model prices"
+        )
     return text
 
 

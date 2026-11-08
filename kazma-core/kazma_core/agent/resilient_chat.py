@@ -22,6 +22,8 @@ import logging
 import time
 from typing import Any
 
+from kazma_core.observability.llm_ledger import provider_of
+
 __all__ = ["reset_failover_cache", "resilient_chat"]
 
 logger = logging.getLogger(__name__)
@@ -212,13 +214,14 @@ async def resilient_chat(
             await _record(
                 thread_id=thread_id,
                 iteration=iteration,
-                provider=type(client).__name__,
+                provider=provider_of(client),
                 model=str(getattr(response, "model", "") or model or ""),
                 prompt_tokens=int(usage.get("prompt_tokens", 0) or 0),
                 completion_tokens=int(usage.get("completion_tokens", 0) or 0),
                 cost_usd=float(getattr(response, "cost_usd", 0.0) or 0.0),
                 duration_ms=(time.monotonic() - start) * 1000,
                 status="ok",
+                priced=bool(getattr(response, "cost_known", True)),
             )
             # The primary answered: a failover it was under is over.
             from kazma_core.observability.model_fallback import report_model_served
@@ -295,7 +298,7 @@ async def resilient_chat(
                     await _record(
                         thread_id=thread_id,
                         iteration=iteration,
-                        provider=type(fb_client).__name__,
+                        provider=provider_of(fb_client),
                         model=fb_model,
                         prompt_tokens=int(usage.get("prompt_tokens", 0) or 0),
                         completion_tokens=int(usage.get("completion_tokens", 0) or 0),
@@ -303,6 +306,7 @@ async def resilient_chat(
                         duration_ms=(time.monotonic() - start) * 1000,
                         status="ok",
                         failover_from=str(model or ""),
+                        priced=bool(getattr(response, "cost_known", True)),
                     )
                     from kazma_core.observability.model_fallback import report_failover
 
@@ -324,7 +328,7 @@ async def resilient_chat(
     await _record(
         thread_id=thread_id,
         iteration=iteration,
-        provider=type(client).__name__,
+        provider=provider_of(client),
         model=str(model or ""),
         duration_ms=(time.monotonic() - start) * 1000,
         status="error",

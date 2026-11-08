@@ -431,6 +431,27 @@ class SettingsRouterBuilder:
                 "daily_max": MAX_DAILY_COST_LIMIT_USD,
             }
 
+        @router.get("/api/settings/model-prices")
+        def api_get_model_prices() -> dict[str, Any]:
+            """The owner's model prices, and the models called in the last 30
+            days with no known price (kazma_core.model_prices): what the
+            Model prices card lists. Saved through ``PUT /api/settings/single``
+            (``models.prices``, validated there). ``unpriced`` is None when the
+            call ledger cannot be read."""
+            from kazma_core.model_prices import MAX_PRICE_PER_1M, OWNER_PRICES_KEY, parse_owner_prices
+            from kazma_core.observability.llm_ledger import unpriced_models
+
+            prices = parse_owner_prices(config_store.get(OWNER_PRICES_KEY))
+            return {
+                "key": OWNER_PRICES_KEY,
+                "prices": [
+                    {"model": name, "input": p.input_per_1m, "output": p.output_per_1m}
+                    for name, p in sorted(prices.items())
+                ],
+                "unpriced": unpriced_models(30),
+                "max": MAX_PRICE_PER_1M,
+            }
+
         @router.get("/api/settings/outside-watch")
         def api_get_outside_watch(fresh: bool = False) -> dict[str, Any]:
             """The outside watch (resilience plan B1): paired or not, the
@@ -1197,9 +1218,31 @@ class SettingsRouterBuilder:
         @router.put("/api/settings/agent/nonstop")
         def api_save_nonstop(req: dict[str, Any]) -> dict[str, str]:
             """Save non-stop / self-healing settings. Live-re-read by the
-            supervisor path (get_nonstop_config) — no restart needed."""
-            _get_sm().save_nonstop_settings(req)
+            supervisor path (get_nonstop_config) — no restart needed. A value
+            out of range, or a backup model nothing can serve, is a 400 with
+            what is wrong (it was a 500)."""
+            try:
+                _get_sm().save_nonstop_settings(req)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from None
             return {"status": "ok"}
+
+        @router.get("/api/settings/failover-backup")
+        def api_failover_backup() -> dict[str, Any]:
+            """The backup models: each with the provider that would serve it
+            and whether it can be called, and a model of each other usable
+            provider to use instead (kazma_core.failover_backup)."""
+            from kazma_core.agent.nonstop import get_nonstop_config
+            from kazma_core.failover_backup import backup_status, parse_chain, suggest_backups
+            from kazma_core.model_registry import get_model_registry
+
+            registry = get_model_registry()
+            chain = parse_chain(config_store.get("agent.nonstop.failover.chain", ""))
+            return {
+                "enabled": bool(get_nonstop_config().failover.enabled),
+                "chain": backup_status(registry, chain),
+                "suggestions": suggest_backups(registry),
+            }
 
         @router.get("/api/settings/voice")
         def api_get_voice_settings() -> dict[str, Any]:

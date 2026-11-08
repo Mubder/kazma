@@ -297,8 +297,12 @@ export function sidebarComponent() {
                 if (!res.ok) return;
                 const providers = await res.json();
                 if (!Array.isArray(providers)) return;
+                // The chat's picker's rule: a provider with a key, or one on
+                // this computer or its network (``local``). This list showed
+                // keyless cloud providers the chat's picker hid.
+                const localNames = { ollama: 1, 'lm-studio': 1, lmstudio: 1, local: 1 };
                 this.modelOptions = providers
-                    .filter(p => p.enabled)
+                    .filter(p => p.enabled && (p.api_key || p.local || localNames[String(p.name || '').toLowerCase()]))
                     .map(p => {
                         // Use visible_models (user-selected subset or all if none selected)
                         const visible = p.visible_models || p.selected_models || [];

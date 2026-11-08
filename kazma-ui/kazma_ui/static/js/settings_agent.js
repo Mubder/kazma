@@ -149,10 +149,35 @@
                     return;
                 }
                 showToast(_k('settings.agentjs.non_stop_settings_saved_applies', 'Non-stop settings saved — applies live'), 'success');
+                this.loadFailoverBackup();
             } catch (e) {
                 showToast(_k('settings.agentjs.save_failed_2', 'Save failed'), 'error');
             }
             this.saving = false;
+        },
+
+        // ── The backup models (kazma_core.failover_backup) ──
+        async loadFailoverBackup() {
+            const data = window.kazmaGetJson ? await window.kazmaGetJson('/api/settings/failover-backup') : null;
+            if (data) this.failoverBackup = data;
+        },
+
+        /** Offer usable backups when no backup of another vendor can answer. */
+        backupSuggestionsShown() {
+            const b = this.failoverBackup;
+            if (!b || !(b.suggestions || []).length) return false;
+            return !(b.chain || []).some(function (row) { return row.usable && !row.same_vendor; });
+        },
+
+        /** Put a suggested backup in the chain, in place of the ones that
+         *  cannot answer; the owner saves it with the section's button. */
+        useBackup(model) {
+            const usable = ((this.failoverBackup && this.failoverBackup.chain) || [])
+                .filter(function (row) { return row.usable; })
+                .map(function (row) { return row.model; });
+            if (usable.indexOf(model) < 0) usable.unshift(model);
+            this.nonstop.failover_chain = usable.join(', ');
+            this.nonstop.failover_enabled = true;
         },
 
         async saveTenantMode() {

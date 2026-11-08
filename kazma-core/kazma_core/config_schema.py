@@ -97,7 +97,6 @@ class ModelRegistryConfig(BaseModel):
     
     active_model: str | None = Field(default=None)
     active_provider: str | None = Field(default=None)
-    fallback_models: list[str] = Field(default_factory=list)
 
 
 class TracingConfig(BaseModel):

@@ -198,10 +198,10 @@ def register_system_tools(registry: Any) -> None:
         if val is _MISSING:
             key_clean = (key or "").strip().lower()
             aliases: dict[str, list[str]] = {
-                "agent.model": ["registry.active_model", "registry.active_chat_model", "models.default", "llm.model"],
-                "model": ["registry.active_model", "registry.active_chat_model", "models.default", "llm.model"],
-                "active_model": ["registry.active_model", "registry.active_chat_model", "models.default"],
-                "agent.active_model": ["registry.active_model", "registry.active_chat_model", "models.default"],
+                "agent.model": ["registry.active_model", "registry.active_chat_model", "llm.model"],
+                "model": ["registry.active_model", "registry.active_chat_model", "llm.model"],
+                "active_model": ["registry.active_model", "registry.active_chat_model"],
+                "agent.active_model": ["registry.active_model", "registry.active_chat_model"],
                 "agent.provider": ["registry.active_provider", "llm.provider"],
                 "provider": ["registry.active_provider", "llm.provider"],
                 "active_provider": ["registry.active_provider", "llm.provider"],

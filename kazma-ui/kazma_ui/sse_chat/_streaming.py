@@ -1551,12 +1551,19 @@ async def _stream_langgraph_events(
             # paused is not counted once per segment.
             _segment_tokens, _segment_cost = int(total_tokens or 0), float(total_cost or 0.0)
             _usage_turn = current_turn_id()
+            # False when a call of the turn had no known price: its dollars
+            # are not in the total, and the reply says so instead of a cost
+            # that reads as everything (kazma_core.model_prices).
+            _cost_known = True
             if _usage_turn:
                 # Zero calls = no ledger rows (ledger off): keep the old values.
-                _t_tok, _t_cost, _t_calls = await asyncio.to_thread(turn_totals, _usage_turn)
+                _t_tok, _t_cost, _t_calls, _t_unpriced = await asyncio.to_thread(
+                    turn_totals, _usage_turn
+                )
                 if _t_calls:
                     total_tokens, total_cost = _t_tok, _t_cost
-                    _s_tok, _s_cost, _s_calls = await asyncio.to_thread(
+                    _cost_known = _t_unpriced == 0
+                    _s_tok, _s_cost, _s_calls, _s_unpriced = await asyncio.to_thread(
                         turn_totals, _usage_turn, since=_segment_started_iso
                     )
                     _segment_tokens, _segment_cost = _s_tok, _s_cost
@@ -1604,6 +1611,7 @@ async def _stream_langgraph_events(
             _done_payload = {
                 "tokens": total_tokens,
                 "cost": round(total_cost, 6),
+                "cost_known": _cost_known,
                 "duration_ms": duration_ms,
                 "interrupted": interrupted,
                 "empty": (not content_acc and not interrupted),
@@ -1636,6 +1644,7 @@ async def _stream_langgraph_events(
                 model=_done_model,
                 tokens=total_tokens,
                 cost=total_cost,
+                cost_known=_cost_known,
                 duration_ms=duration_ms,
                 parts=_hitl_persist_parts(
                     content_acc,

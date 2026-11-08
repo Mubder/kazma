@@ -77,7 +77,7 @@ _ADMIN_PREFIXES = (
     # uses, as Settings does: its page and its writes are the admin's.
     "/setup",
     "/api/setup/local",
-    "/api/setup/provider",
+    "/api/setup/models",
     "/api/setup/bootstrap",
     "/api/setup/check",
 )

@@ -2071,6 +2071,7 @@ async def _build_slash_ctx(
                 ctx["total_tokens"] = usage["tokens"]
                 ctx["total_cost"] = usage["cost"]
                 ctx["total_calls"] = usage["calls"]
+                ctx["unpriced_calls"] = int(usage.get("unpriced") or 0)
 
         elif head_cmd == "/status":
             if manager is not None:

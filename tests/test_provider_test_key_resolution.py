@@ -88,9 +88,15 @@ class TestTheTestRouteUsesIt:
 
         from kazma_ui import providers as ui_providers
 
+        # Since providers stage 1 (2026-11-08) one candidate carries the key
+        # to both: candidate_entry resolves it through the runtime, and the
+        # listing and the check are given that entry.
+        from kazma_core import provider_check
+
         src = inspect.getsource(ui_providers)
         assert 'typed_key or str(provider.get("api_key")' not in src
-        assert "typed_key or api_key" in src
+        assert "candidate_entry, registry, name, api_key=typed_key" in src
+        assert "resolve_provider_credentials" in inspect.getsource(provider_check.candidate_entry)
 
 
 class TestTheEnvVarNameIsUsable:

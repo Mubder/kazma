@@ -69,7 +69,7 @@
                     <section class="pc-panel" aria-label="{{ t('settings.llm_providers') }}">
                         <div class="pc-phead">
                             <span class="pc-ptitle" x-text="'{{ t('settings.configured') }} · ' + hubProviders.length"></span>
-                            <button class="btn btn-primary btn-sm" @click="openHubProviderModal()">+ {{ t('settings.add_provider') }}</button>
+                            <button class="btn btn-primary btn-sm" id="provider-add" @click="openHubProviderModal()">+ {{ t('settings.add_provider') }}</button>
                         </div>
 
                         <div x-show="hubProvidersLoaded && hubProviders.length === 0" class="empty-state" x-cloak>
@@ -88,6 +88,9 @@
                                         <span class="pc-off" x-show="!p.enabled" x-cloak x-text="'{{ t('common.disabled') }}'"></span>
                                     </span>
                                     <span class="pc-rurl" translate="no" x-text="p.base_url || '—'"></span>
+                                    <span class="pc-rurl" x-show="(p.same_address_as || []).length" x-cloak>
+                                        {{ t('settings.provider_same_address') }} <bdi translate="no" x-text="(p.same_address_as || []).join(', ')"></bdi>
+                                    </span>
                                 </span>
                                 <span class="pc-rside">
                                     <span class="state-pill" :class="'state-' + providerState(p)" x-text="providerStateLabel(p)"></span>
@@ -265,6 +268,53 @@
                 </div>
             </div>
 
+            <!-- Model prices (kazma_core.model_prices): the owner's price per
+                 million tokens for a model whose provider reports no cost. -->
+            <div class="settings-group" id="model-prices">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px">
+                    <h3>{{ t('settings.model_prices_title') }}</h3>
+                    <button type="button" class="btn btn-secondary btn-sm" @click="addModelPrice('')">+ {{ t('settings.model_prices_add') }}</button>
+                </div>
+                <p class="setting-desc">{{ t('settings.model_prices_lede') }}</p>
+                <p class="setting-desc">{{ t('settings.model_prices_where') }}</p>
+                <p class="text-error" x-show="modelPricesFailed" x-cloak>{{ t('settings.model_prices_load_failed') }}</p>
+                <div x-show="modelPricesLoaded && modelPrices.length === 0" class="empty-state" style="padding:12px" x-cloak>
+                    {{ t('settings.model_prices_empty') }}
+                </div>
+                <template x-for="(p, i) in modelPrices" :key="i">
+                    <div class="model-price-row" style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px;margin-bottom:8px">
+                        <label style="flex:2 1 180px">
+                            <span class="setting-desc">{{ t('settings.model_prices_model') }}</span>
+                            <input class="form-input" type="text" dir="ltr" translate="no" x-model="p.model" autocomplete="off">
+                        </label>
+                        <label style="flex:1 1 120px">
+                            <span class="setting-desc">{{ t('settings.model_prices_input') }}</span>
+                            <input class="form-input" type="number" min="0" :max="modelPricesMax" step="0.0001" dir="ltr" x-model="p.input">
+                        </label>
+                        <label style="flex:1 1 120px">
+                            <span class="setting-desc">{{ t('settings.model_prices_output') }}</span>
+                            <input class="form-input" type="number" min="0" :max="modelPricesMax" step="0.0001" dir="ltr" x-model="p.output">
+                        </label>
+                        <button type="button" class="btn btn-danger btn-sm" @click="removeModelPrice(i)"
+                                aria-label="{{ t('common.remove') }}" title="{{ t('common.remove') }}">&times;</button>
+                    </div>
+                </template>
+                <div style="margin-bottom:12px">
+                    <button type="button" class="btn btn-primary btn-sm" id="model-prices-save" @click="saveModelPrices()"
+                            :disabled="modelPricesSaving || !modelPricesLoaded">{{ t('settings.model_prices_save') }}</button>
+                </div>
+                <h4 style="margin:8px 0">{{ t('settings.model_prices_unpriced_title') }}</h4>
+                <p class="setting-desc" x-show="modelPricesLoaded && modelPricesUnpriced === null" x-cloak>{{ t('settings.model_prices_unreadable') }}</p>
+                <p class="setting-desc" x-show="modelPricesLoaded && Array.isArray(modelPricesUnpriced) && modelPricesUnpriced.length === 0" x-cloak>{{ t('settings.model_prices_none') }}</p>
+                <template x-for="u in (modelPricesUnpriced || [])" :key="u.model">
+                    <div style="display:flex;align-items:center;gap:12px;padding:6px 0">
+                        <span translate="no" dir="ltr" style="flex:1;font-weight:600" x-text="u.model"></span>
+                        <span class="setting-desc" x-text="window.kazmaCount ? window.kazmaCount('settings.model_prices_calls', u.calls) : u.calls"></span>
+                        <button type="button" class="btn btn-secondary btn-sm" @click="addModelPrice(u.model)">{{ t('settings.model_prices_set') }}</button>
+                    </div>
+                </template>
+            </div>
+
             <div class="settings-group">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
                     <h3>{{ t('settings.saved_profiles') }}</h3>
@@ -280,7 +330,7 @@
                             <div translate="no" style="font-size:0.8rem;color:var(--text-muted)" x-text="(p.provider || 'custom') + ' / ' + (p.model || '?')"></div>
                             <div style="font-size:0.75rem;color:var(--text-tertiary)" x-text="p.base_url || ''"></div>
                         </div>
-                        <button class="btn btn-secondary btn-sm" @click="loadHubProfile(p.name)">{{ t('settings.load') }}</button>
+                        <button class="btn btn-secondary btn-sm" @click="loadHubProfile(p.name)">{{ t('settings.use_profile') }}</button>
                         <button class="btn btn-danger btn-sm" @click="deleteHubProfile(p.name)">×</button>
                     </div>
                 </template>
@@ -670,7 +720,7 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label>{{ t('settings.name_id') }}</label>
-                        <input type="text" class="form-input" x-model="hubEditingProvider.name" translate="no" placeholder="openai" :disabled="hubEditingProvider._existing">
+                        <input type="text" class="form-input" id="provider-name" x-model="hubEditingProvider.name" translate="no" placeholder="openai" :disabled="hubEditingProvider._existing">
                     </div>
                     <div class="form-group">
                         <label>{{ t('settings.display_name') }}</label>
@@ -693,13 +743,13 @@
                             <div class="form-group" style="margin-bottom: 12px;">
                                 <label>{{ t('settings.api_key') }}</label>
                                 <div class="input-with-toggle">
-                                    <input :type="hubShowProviderKey ? 'text' : 'password'" class="form-input" x-model="hubEditingProvider.api_key" :placeholder="hubEditingProvider._has_stored_key ? t('settings.hub.keep_key') : t('settings.hub.ai_studio_key_ph')" autocomplete="off" spellcheck="false">
+                                    <input :type="hubShowProviderKey ? 'text' : 'password'" class="form-input" x-model="hubEditingProvider.api_key" @input="hubProviderTested = false" :placeholder="hubEditingProvider._has_stored_key ? t('settings.hub.keep_key') : t('settings.hub.ai_studio_key_ph')" autocomplete="off" spellcheck="false">
                                     <button class="btn btn-icon" type="button" @click="hubShowProviderKey = !hubShowProviderKey" :title="hubShowProviderKey ? t('settings.hub.hide') : t('settings.hub.show')" x-html="hubShowProviderKey ? KazmaIcons.get('eye-off') : KazmaIcons.get('eye')"></button>
                                 </div>
                             </div>
                             <div class="form-group">
                                 <label>{{ t('settings.hub.base_url_optional') }}</label>
-                                <input type="text" class="form-input" x-model="hubEditingProvider.base_url" translate="no" placeholder="https://generativelanguage.googleapis.com/v1beta">
+                                <input type="text" class="form-input" x-model="hubEditingProvider.base_url" @input="hubProviderTested = false" translate="no" placeholder="https://generativelanguage.googleapis.com/v1beta">
                             </div>
                         </div>
 
@@ -727,12 +777,12 @@
                     <div>
                         <div class="form-group" style="margin-bottom: 12px;">
                             <label>{{ t('settings.base_url') }}</label>
-                            <input type="text" class="form-input" x-model="hubEditingProvider.base_url" translate="no" placeholder="https://api.openai.com/v1">
+                            <input type="text" class="form-input" id="provider-base-url" x-model="hubEditingProvider.base_url" @input="hubProviderTested = false" translate="no" placeholder="https://api.openai.com/v1">
                         </div>
                         <div class="form-group" style="margin-bottom: 12px;">
                             <label>{{ t('settings.api_key') }}</label>
                             <div class="input-with-toggle">
-                                <input :type="hubShowProviderKey ? 'text' : 'password'" class="form-input" x-model="hubEditingProvider.api_key" :placeholder="hubEditingProvider._has_stored_key ? t('settings.hub.keep_key') : 'sk-...'" autocomplete="off" spellcheck="false">
+                                <input :type="hubShowProviderKey ? 'text' : 'password'" class="form-input" x-model="hubEditingProvider.api_key" @input="hubProviderTested = false" :placeholder="hubEditingProvider._has_stored_key ? t('settings.hub.keep_key') : 'sk-...'" autocomplete="off" spellcheck="false">
                                 <button class="btn btn-icon" type="button" @click="hubShowProviderKey = !hubShowProviderKey" :title="hubShowProviderKey ? t('settings.hub.hide') : t('settings.hub.show')" x-html="hubShowProviderKey ? KazmaIcons.get('eye-off') : KazmaIcons.get('eye')"></button>
                             </div>
                             <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">{{ t('settings.masked_placeholder_hint') }}</div>
@@ -741,7 +791,7 @@
                 </template>
                 <div class="form-group">
                     <label>{{ t('settings.models_comma') }}</label>
-                    <input type="text" class="form-input" x-model="hubEditingProvider.models" placeholder="gpt-4o, gpt-4o-mini">
+                    <input type="text" class="form-input" id="provider-models" x-model="hubEditingProvider.models" placeholder="gpt-4o, gpt-4o-mini">
                 </div>
                 <div class="form-group">
                     <label style="display:flex;align-items:center;gap:8px">
@@ -754,8 +804,10 @@
                 </div>
                 <div class="modal-actions" style="flex-wrap:wrap;gap:8px">
                     <button class="btn btn-secondary" @click="hubProviderModal = false">{{ t('settings.cancel') }}</button>
-                    <button class="btn btn-secondary" @click="testHubProviderFromModal()" :disabled="hubTestingProvider === 'modal'" x-text="hubTestingProvider === 'modal' ? '{{ t('settings.testing') }}' : '{{ t('settings.test_connection') }}'"></button>
-                    <button class="btn btn-primary" @click="saveHubProvider()" :disabled="saving || !hubProviderTested" x-text="saving ? '{{ t('settings.saving') }}' : '{{ t('settings.save') }}'"></button>
+                    <button class="btn btn-secondary" id="provider-test" @click="testHubProviderFromModal()" :disabled="hubTestingProvider === 'modal'" x-text="hubTestingProvider === 'modal' ? '{{ t('settings.testing') }}' : '{{ t('settings.test_connection') }}'"></button>
+                    <button class="btn btn-secondary" id="provider-save-anyway" x-show="hubTestResult && hubTestResult.source === 'modal' && !hubTestResult.success" x-cloak
+                            @click="saveHubProviderAnyway()" :disabled="saving">{{ t('settings.save_untested') }}</button>
+                    <button class="btn btn-primary" id="provider-save" @click="saveHubProvider()" :disabled="saving || !hubProviderTested" x-text="saving ? '{{ t('settings.saving') }}' : '{{ t('settings.save') }}'"></button>
                 </div>
                 <div x-show="!hubProviderTested" style="font-size:0.8rem;color:var(--warning);margin-top:8px" x-cloak>
                     {{ t('settings.test_before_save') }}
@@ -1195,7 +1247,26 @@
                 <div class="form-row two-col-grid">
                     <div class="form-group">
                         <label>{{ t('settings.nonstop_failover_chain') }}</label>
-                        <input type="text" class="form-input" x-model="nonstop.failover_chain" placeholder="gpt-4o, claude-sonnet-4.5, deepseek-chat">
+                        <input type="text" class="form-input" id="failover-chain" dir="ltr" translate="no" x-model="nonstop.failover_chain" placeholder="gpt-4o, claude-sonnet-4.5, deepseek-chat">
+                        {#- Each backup with the provider that would serve it
+                            (kazma_core.failover_backup): a backup nothing can
+                            call is said, and the save refuses it. -#}
+                        <template x-for="row in ((failoverBackup && failoverBackup.chain) || [])" :key="row.model">
+                            <p class="setting-desc" style="margin:4px 0">
+                                <bdi dir="ltr" translate="no" x-text="row.model"></bdi>:
+                                <span x-show="row.usable" x-cloak>{{ t('settings.backup_served_by') }} <bdi translate="no" x-text="row.provider"></bdi></span>
+                                <span x-show="!row.usable" x-cloak class="text-error">{{ t('settings.backup_unusable') }}</span>
+                                <span x-show="row.usable && row.same_vendor" x-cloak class="text-warning">{{ t('settings.backup_same_vendor') }}</span>
+                            </p>
+                        </template>
+                        <div x-show="backupSuggestionsShown()" x-cloak>
+                            <p class="setting-desc" style="margin:6px 0 4px">{{ t('settings.backup_suggest') }}</p>
+                            <template x-for="s in ((failoverBackup && failoverBackup.suggestions) || [])" :key="s.provider">
+                                <button type="button" class="btn btn-secondary btn-sm" style="margin:0 6px 6px 0" @click="useBackup(s.model)">
+                                    <bdi dir="ltr" translate="no" x-text="s.model + ' · ' + s.display_name"></bdi>
+                                </button>
+                            </template>
+                        </div>
                     </div>
                     <div class="form-group">
                         <label>{{ t('settings.nonstop_failover_cooldown') }}</label>

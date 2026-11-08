@@ -225,6 +225,12 @@ class ProviderTestResponse(BaseModel):
     chat_ms: int | None = None
     #: The model the provider says it served, which need not be the one asked for.
     chat_model: str | None = None
+    #: What failed, as a code the page words in its language
+    #: (kazma_core.provider_check): api_key_required, key_refused, not_found,
+    #: rate_limited, unreachable, empty, timeout, no_model, ...
+    error_code: str | None = None
+    #: The models the check listed when none was given to try.
+    models: list[str] | None = None
 
 
 class ConnectorTestResponse(BaseModel):
