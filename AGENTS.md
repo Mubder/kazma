@@ -4139,6 +4139,38 @@ pytest-timeout pytest refused to start on every fresh install, `fast_test.py`
 too (`tests/test_setup_extras_run_the_suite.py`, the old `dev` list as the
 control); setup says pytest's own last line when it cannot collect.
 
+**A fresh Windows's winget is repaired, and a slow download is not cut off**
+(the clean VM `KazmaVMs`, 2026-11-08, reached over SSH). winget answered
+0x8A15000F ("Data required by the source is missing") to every install, so
+Express left out OCR, LibreOffice, ClamAV and Node.js; `winget source update`
+said "Done" and changed nothing. `setup.run_system_step` reads that answer
+from a winget step (`_winget_source_missing`), registers the package list's
+own signed MSIX (`WINGET_SOURCE_PACKAGE`, `Add-AppxPackage`) once and runs the
+step again; a repair that fails says so in the step's answer. A step had 30
+minutes: at about 1 MB/s Kazma's optional packages took longer, uv was killed
+mid-download and the step said "could not run". A step now has
+`STEP_TIMEOUT_S` (3 h: the programs keep their own network timeouts) and one
+cut off says "still running after N min, stopped". **The Visual C++ runtime
+is a system dependency** (`system_deps._vcruntime_version`, registry
+`VC\Runtimes\x64`, at least `VCRUNTIME_MIN` 14.40; winget
+`Microsoft.VCRedist.2015+.x64`; Windows only, `WINDOWS_ONLY`/`needed_here`,
+checked and installed first): a fresh Windows has none, PyTorch failed to load
+c10.dll and the meaning-search model and neural OCR could not install. Earlier
+VMs had it only because a winget install before the model brought it along.
+Meaning search and neural OCR name it (`system=("vcruntime",)`). **The service
+task names its account in full** (`WindowsIdentity::GetCurrent().Name`): the
+VM's account and computer were both KazmaDrill_1, and Register-ScheduledTask
+refused the bare `$env:USERNAME` ("The parameter is incorrect", UserId); over
+SSH `$env:USERDOMAIN` reads WORKGROUP. Gates: the 0x8A15000F tests in
+`tests/test_setup_system.py` (the runner without the repair as the negative
+control, failing all three attempts),
+`test_a_long_step_has_time_and_a_cut_off_one_says_so`, the runtime's version
+checks there,
+`test_control_without_the_runtime_meaning_search_and_neural_ocr_fail`
+(`tests/test_install_modes.py`, whose bare Windows now has no runtime), and
+`test_the_task_names_its_account_in_full`
+(`tests/test_windows_task_registration.py`).
+
 **A re-run of setup removes nothing** (the same day, the owner: "uv sync
 always removes what is there every time it is used again"). A plain `uv sync`
 makes the environment exactly the extras it names; `setup.ps1`/`setup.sh`

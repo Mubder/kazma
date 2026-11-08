@@ -450,7 +450,7 @@ def build_plan(parts, found: dict[str, PartState], states, machine: Machine, pla
     python = machine.python
     if "meaning_search" in todo_ids:
         plan.append(PlannedStep("meaning_search", Step(
-            "download the meaning-search model (bge-m3, about 4 GB: a few minutes)",
+            "download the meaning-search model (bge-m3, about 4 GB)",
             (python, "-c", "from kazma_core.memory.embedder import download_local_model; download_local_model()")),
             attempts=_SYSTEM_ATTEMPTS))
     if "neural_ocr" in todo_ids and root is not None and (root / "scripts" / "ocr_models.py").is_file():
@@ -738,9 +738,12 @@ def _preflight(parts, found: dict[str, PartState], machine: Machine, platform, m
                             f"{needed / 2**30:.0f} GB")
     if not (machine.reachable("pypi.org") or machine.reachable("github.com")):
         pre.problems.append("neither pypi.org nor github.com answers: the install downloads from them")
-    if platform.manager is None and any(p.system for p in todo):
+    from kazma_core.system_deps import needed_here
+
+    by_hand = [p for p in todo if any(needed_here(d, platform) for d in p.system)]
+    if platform.manager is None and by_hand:
         pre.problems.append("no package manager Kazma knows here (winget, Homebrew, apt, dnf): install "
-                            + ", ".join(p.title for p in todo if p.system) + " by hand")
+                            + ", ".join(p.title for p in by_hand) + " by hand")
     return pre
 
 

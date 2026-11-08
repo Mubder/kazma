@@ -55,7 +55,7 @@ COMPONENTS: tuple[Component, ...] = (
         "meaning_search", "Meaning search (bge-m3)",
         "memory and the Knowledge Library find what a question is about, not only its words",
         "memory recall and the Knowledge Library match words only",
-        express=True, extras=("rag",), size="about 2 GB (PyTorch)"),
+        express=True, extras=("rag",), system=("vcruntime",), size="about 2 GB (PyTorch)", admin=True),
     Component(
         "documents", "Document reading and writing (PyMuPDF, PDFium, WeasyPrint)",
         "PDFs read with their Arabic, tables and layout; HTML and Markdown to PDF",
@@ -95,7 +95,7 @@ COMPONENTS: tuple[Component, ...] = (
         "neural_ocr", "Neural OCR for Arabic (its models)",
         "scans read with Arabic-Indic digits and better Arabic",
         "OCR reads with Tesseract only (weaker Arabic, no Arabic-Indic digits)",
-        express=True, extras=("ocr",), needs=("ocr",), size="about 300 MB"),
+        express=True, extras=("ocr",), system=("vcruntime",), needs=("ocr",), size="about 300 MB", admin=True),
     Component(
         "office", "Office documents (LibreOffice)",
         "Word, Excel and PowerPoint files are read and converted; Arabic PDFs drawn well",

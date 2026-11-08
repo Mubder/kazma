@@ -244,9 +244,15 @@ if (Test-UvWorks) {
 
     # Priority 2: official PowerShell installer
     if (-not $UvInstalled) {
-        Log-Info "pip failed, trying official installer..."
+        # Only say pip failed when there was a Python to run it: a fresh
+        # Windows has none, and the clean VM's install (2026-11-08) read
+        # "pip failed" there. 6>&1: uv's installer writes with Write-Host,
+        # and its "restart your shell" advice is for a person, not for this
+        # script, which reads the new PATH itself just below.
+        if ($PythonCmd) { Log-Info "pip failed, trying uv's official installer..." }
+        else { Log-Info "Installing uv with its official installer..." }
         try {
-            Invoke-Native { Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression } | ForEach-Object { Write-Verbose $_ }
+            Invoke-Native { Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression 6>&1 } | ForEach-Object { Write-Verbose $_ }
             # Refresh PATH for the current session
             $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "User") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "Machine")
             if (Test-UvWorks) {

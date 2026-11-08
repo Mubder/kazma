@@ -139,6 +139,40 @@ def _exit_text(code: int) -> str:
     return f"0x{code & 0xFFFFFFFF:08X}" if code >= 0x80000000 or code < -0x10000 else str(code)
 
 
+#: winget's answer when this machine's copy of its package list was never set
+#: up: 0x8A15000F, "Data required by the source is missing". A fresh Windows 11
+#: (the clean VM, 2026-11-08) answered it to every install; ``winget source
+#: update`` said "Done" and changed nothing, and registering the list's own
+#: package -- Microsoft's signed MSIX, the fix winget's maintainers give --
+#: made installs work.
+WINGET_SOURCE_MISSING = 0x8A15000F
+WINGET_SOURCE_PACKAGE = "https://cdn.winget.microsoft.com/cache/source.msix"
+
+
+def _winget_source_missing(step, detail: str) -> bool:
+    """Whether *step* is a winget command that failed for want of its package list."""
+    return (bool(step.argv) and Path(step.argv[0]).stem.lower() == "winget"
+            and detail.startswith(f"exit {_exit_text(WINGET_SOURCE_MISSING)}"))
+
+
+def _register_winget_source(run, log) -> tuple[bool, str]:
+    from kazma_core.postgres_service import Step
+
+    repair = Step("register winget's package list",
+                  ("powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                   "$ProgressPreference = 'SilentlyContinue'; "
+                   f"Add-AppxPackage -Path '{WINGET_SOURCE_PACKAGE}' -ErrorAction Stop"))
+    return _run_step(repair, [], run=run, log=log)
+
+
+#: How long one setup step may run. The programs a step runs have network
+#: timeouts of their own (uv, winget, apt), so this only guards against a
+#: program that never ends. It was 30 minutes until the clean VM's install
+#: (2026-11-08): at about 1 MB/s Kazma's optional packages took longer, uv was
+#: killed mid-download, and the step said "could not run".
+STEP_TIMEOUT_S = 3 * 3600
+
+
 def _run_step(step, secrets_: list[str], *, run=subprocess.run, cwd: str | None = None,
               log=None) -> tuple[bool, str]:
     """Run one step; its whole output (scrubbed) goes to *log* when given, the
@@ -152,8 +186,13 @@ def _run_step(step, secrets_: list[str], *, run=subprocess.run, cwd: str | None 
         # UTF-8: winget, apt and brew write it whatever the console's code page;
         # read as the ANSI code page, winget's own messages came back garbled.
         done = run(list(step.argv), **feed, capture_output=True, text=True,
-                   encoding="utf-8", errors="replace", env=env, timeout=1800, check=False,
+                   encoding="utf-8", errors="replace", env=env, timeout=STEP_TIMEOUT_S, check=False,
                    **({"cwd": cwd} if cwd else {}))
+    except subprocess.TimeoutExpired as exc:
+        minutes = int((exc.timeout or STEP_TIMEOUT_S) // 60)
+        if log is not None:
+            log(f"{step.printable()} was still running after {minutes} min and was stopped")
+        return False, f"still running after {minutes} min, stopped"
     except (OSError, subprocess.SubprocessError) as exc:
         if log is not None:
             log(f"could not run {step.printable()}: {exc}")
@@ -353,7 +392,15 @@ def run_system_step(step, *, which, run=subprocess.run, log=None) -> tuple[bool,
             return _run_step(type(step)("load it", ("launchctl", "load", "-w", str(agent))), [], run=run, log=log)
         except OSError as exc:
             return False, str(exc)
-    return _run_step(step, [], run=run, log=log)
+    ok, detail = _run_step(step, [], run=run, log=log)
+    if not ok and _winget_source_missing(step, detail):
+        if log is not None:
+            log("winget's package list is not set up on this machine: registering it, then trying again")
+        fixed, why = _register_winget_source(run, log)
+        if not fixed:
+            return False, f"{detail} -- registering winget's package list failed: {why}"
+        return _run_step(step, [], run=run, log=log)
+    return ok, detail
 
 
 def _setup_system(options, *, run=subprocess.run, which=None, ask=input, platform=None, finders=None,

@@ -189,6 +189,27 @@ def test_the_task_script_uses_the_constants_the_status_checks():
         assert f"-RepetitionInterval (New-TimeSpan -Minutes {installer.KEEP_ALIVE_MINUTES})" in ps1
 
 
+def test_the_task_names_its_account_in_full():
+    """The clean VM (2026-11-08): account and computer were both named
+    KazmaDrill_1, and Register-ScheduledTask refused the bare name ("The
+    parameter is incorrect", UserId); the full name registered."""
+    for elevated in (True, False):
+        ps1 = installer.windows_task_ps1(elevated=elevated)
+        assert "-UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)" in ps1
+        assert "$env:USERNAME" not in ps1 and "$env:USERDOMAIN" not in ps1
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="asks Windows for the account")
+def test_the_account_expression_gives_a_qualified_name():
+    script = installer.windows_task_ps1(elevated=True)
+    expr = script.split("-UserId ", 1)[1].split(" -LogonType", 1)[0]
+    done = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                           f"(New-ScheduledTaskPrincipal -UserId {expr} -LogonType S4U).UserId"],
+                          capture_output=True, text=True, timeout=60, check=False)
+    name = done.stdout.strip()
+    assert "\\" in name and name.split("\\", 1)[1], (name, done.stderr)
+
+
 # -- --install never replaces a task for the worse ---------------------------
 
 

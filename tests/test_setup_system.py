@@ -33,7 +33,8 @@ class _Machine:
     """A machine with some programs; ``run`` answers as they would."""
 
     def __init__(self, *, tesseract_langs=("ara", "eng", "osd"), clam=True, fonts=True, docker=True,
-                 freshclam_scheduled=True, soffice=True, node="v22.11.0"):
+                 freshclam_scheduled=True, soffice=True, node="v22.11.0", vcruntime=(14, 44)):
+        self.vcruntime = vcruntime
         self.programs = {"tesseract", "fc-list"} if tesseract_langs is not None else {"fc-list"}
         if clam:
             self.programs |= {"clamscan", "freshclam"}
@@ -46,7 +47,8 @@ class _Machine:
 
     def finders(self):
         return {"soffice": lambda: "/usr/bin/soffice" if self.soffice else None,
-                "docker": lambda: "/usr/bin/docker" if self.docker else None}
+                "docker": lambda: "/usr/bin/docker" if self.docker else None,
+                "vcruntime": lambda: self.vcruntime}
 
     def which(self, name):
         return f"/usr/bin/{name}" if name in self.programs else None
@@ -85,10 +87,16 @@ def test_each_manager_installs_the_table(machine, manager, tmp_path, monkeypatch
     monkeypatch.setenv("PROGRAMFILES", str(tmp_path))  # this machine's own programs are not the fake's
     machine.langs, machine.programs = None, set()
     machine.soffice = machine.docker = machine.fonts = False
+    machine.vcruntime = None
     platform = PLATFORMS[manager]
     states = sd.check_all(platform, run=machine.run, which=machine.which, **machine.finders())
     steps = sd.install_plan(platform, states)
     argvs = [" ".join(s.argv) for s in steps if s.argv]
+    if manager == "winget":
+        assert steps[0].dep == "vcruntime" and "Microsoft.VCRedist.2015+.x64" in argvs[0], \
+            "the runtime first: what loads it is installed after"
+    else:
+        assert "vcruntime" not in {s.name for s in states}, "Windows's runtime is never listed elsewhere"
     for dep in ("ocr", "office", "malware", "node", "docker"):
         packages = sd.PACKAGES[manager][dep]
         assert any(all(p in line for p in packages) for line in argvs), (dep, argvs)
@@ -122,6 +130,26 @@ def test_an_unscheduled_signature_refresh_is_scheduled(machine):
     states = sd.check_all(PLATFORMS["winget"], run=machine.run, which=machine.which, **machine.finders())
     steps = sd.install_plan(PLATFORMS["winget"], states)
     assert [s.argv[:4] for s in steps] == [("schtasks", "/Create", "/TN", sd.FRESHCLAM_TASK)]
+
+
+@pytest.mark.parametrize("version, ok", [(None, False), ((14, 29), False), ((14, 40), True), ((14, 51), True)])
+def test_the_visual_cpp_runtime_is_checked_by_its_version(machine, version, ok):
+    """A fresh Windows has no Visual C++ runtime: PyTorch then fails to load
+    c10.dll (the clean VM, 2026-11-08)."""
+    machine.vcruntime = version
+    states = sd.check_all(PLATFORMS["winget"], run=machine.run, which=machine.which, **machine.finders())
+    runtime = states[0]
+    assert runtime.name == "vcruntime" and runtime.ok is ok, runtime
+    plan = sd.install_plan(PLATFORMS["winget"], states)
+    assert ("Microsoft.VCRedist.2015+.x64" in " ".join(plan[0].argv)) is (not ok) if plan else ok
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="reads the Windows registry")
+def test_the_runtime_is_read_from_the_registry():
+    found = sd._vcruntime_version()
+    if found is None:
+        pytest.skip("no Visual C++ runtime on this Windows")
+    assert isinstance(found, tuple) and found[0] == 14 and found[1] >= 0
 
 
 def test_no_package_manager_means_no_plan(machine):
@@ -306,6 +334,120 @@ def test_an_install_that_failed_after_installing_counts_as_done(machine, tmp_pat
                          finders=machine.finders(), sleep=lambda s: None)
     assert code == 0 and installs == ["TheDocumentFoundation.LibreOffice"], "installed: not run again"
     assert "installed, though the installer answered exit 0x80004004" in capsys.readouterr().out
+
+
+# The clean Windows 11 VM (2026-11-08): winget answered 0x8A15000F ("Data
+# required by the source is missing") to every install until its package
+# list's own MSIX was registered; `winget source update` said "Done" and
+# changed nothing.
+
+def _winget_without_its_list(machine):
+    """A machine whose winget fails every install until the package list is
+    registered (Add-AppxPackage of its MSIX)."""
+    state = {"registered": False}
+    installs: list[str] = []
+    repairs: list[list[str]] = []
+
+    def run(argv, **kw):
+        if argv[0] == "powershell.exe" and any("Add-AppxPackage" in a for a in argv):
+            repairs.append(list(argv))
+            state["registered"] = True
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        if argv[:2] == ["winget", "install"]:
+            package = argv[argv.index("--id") + 1]
+            installs.append(package)
+            if not state["registered"]:
+                return subprocess.CompletedProcess(
+                    argv, 0x8A15000F, "Failed when opening source(s); try the 'source reset' command if the "
+                    "problem persists.\nAn unexpected error occurred while executing the command:\n"
+                    "0x8a15000f : Data required by the source is missing\n", "")
+            if package == "TheDocumentFoundation.LibreOffice":
+                machine.soffice = True
+            return subprocess.CompletedProcess(argv, 0, "Successfully installed\n", "")
+        return machine.run(argv, **kw)
+
+    return run, installs, repairs
+
+
+def test_a_missing_winget_package_list_is_registered_and_the_install_goes_on(machine, tmp_path, monkeypatch,
+                                                                            capsys):
+    from kazma_cli.setup import WINGET_SOURCE_PACKAGE, _setup_system
+
+    platform = _windows(tmp_path, monkeypatch)
+    machine.soffice = False
+    run, installs, repairs = _winget_without_its_list(machine)
+    waits: list[float] = []
+    code = _setup_system(_options(yes=True), run=run, which=machine.which, platform=platform,
+                         finders=machine.finders(), sleep=waits.append)
+    out = capsys.readouterr().out
+    assert code == 0, out
+    assert installs == ["TheDocumentFoundation.LibreOffice"] * 2, "tried again at once, after the repair"
+    assert len(repairs) == 1 and WINGET_SOURCE_PACKAGE in " ".join(repairs[0])
+    assert waits == [], "no retry wait: the repair is what the install needed"
+
+
+def test_control_without_the_repair_every_attempt_fails(machine, tmp_path, monkeypatch, capsys):
+    """Negative control: the step runner before 2026-11-08 tried winget three
+    times and left LibreOffice out."""
+    import kazma_cli.setup as setup_mod
+
+    monkeypatch.setattr(setup_mod, "_winget_source_missing", lambda step, detail: False)
+    platform = _windows(tmp_path, monkeypatch)
+    machine.soffice = False
+    run, installs, repairs = _winget_without_its_list(machine)
+    code = setup_mod._setup_system(_options(yes=True), run=run, which=machine.which, platform=platform,
+                                   finders=machine.finders(), sleep=lambda s: None)
+    out = capsys.readouterr().out
+    assert code == 1 and installs == ["TheDocumentFoundation.LibreOffice"] * 3 and repairs == []
+    assert "0x8A15000F" in out and "LibreOffice is not installed" in out
+
+
+def test_a_repair_that_fails_says_so(machine, tmp_path, monkeypatch, capsys):
+    from kazma_cli.setup import run_system_step
+    from kazma_core.postgres_service import Step
+
+    def run(argv, **kw):
+        if argv[0] == "powershell.exe":
+            return subprocess.CompletedProcess(argv, 1, "", "Add-AppxPackage : Deployment failed")
+        return subprocess.CompletedProcess(argv, 0x8A15000F, "0x8a15000f : Data required by the source is missing", "")
+
+    ok, detail = run_system_step(Step("install LibreOffice", ("winget", "install", "--id", "X"), dep="office"),
+                                 which=machine.which, run=run)
+    assert not ok and "registering winget's package list failed" in detail and "Deployment failed" in detail
+
+
+def test_a_long_step_has_time_and_a_cut_off_one_says_so():
+    """The clean VM (2026-11-08): at about 1 MB/s Kazma's optional packages
+    took more than the 30 minutes a step had; uv was killed mid-download and
+    the step said "could not run"."""
+    from kazma_cli.setup import STEP_TIMEOUT_S, _run_step
+    from kazma_core.postgres_service import Step
+
+    given: list[float] = []
+
+    def run(argv, **kw):
+        given.append(kw["timeout"])
+        raise subprocess.TimeoutExpired(argv, kw["timeout"])
+
+    logged: list[str] = []
+    ok, detail = _run_step(Step("install Kazma's packages", ("uv", "sync")), [], run=run, log=logged.append)
+    assert given == [STEP_TIMEOUT_S] and STEP_TIMEOUT_S >= 2 * 3600, "an hour's download fits"
+    assert not ok and detail == f"still running after {STEP_TIMEOUT_S // 60} min, stopped"
+    assert "could not run" not in detail and "was still running" in logged[0]
+
+
+def test_another_programs_failure_is_not_taken_for_winget_s(machine):
+    from kazma_cli.setup import run_system_step
+    from kazma_core.postgres_service import Step
+
+    calls: list[list[str]] = []
+
+    def run(argv, **kw):
+        calls.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0x8A15000F, "", "")
+
+    ok, _ = run_system_step(Step("install x", ("brew", "install", "x"), dep="office"), which=machine.which, run=run)
+    assert not ok and calls == [["brew", "install", "x"]], "only winget's answer means its list is missing"
 
 
 def test_one_failed_dependency_does_not_stop_the_others(machine, tmp_path, monkeypatch, capsys):
