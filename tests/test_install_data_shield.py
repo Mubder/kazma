@@ -191,6 +191,64 @@ def test_an_explicit_workspace_seeds_the_first_row(tmp_path, monkeypatch):
         store.close()
 
 
+#: Where tests and their helpers live (pyproject's testpaths).
+_TEST_ROOTS = (
+    "tests",
+    "kazma-core/kazma_core_tests",
+    "kazma-core/tests",
+    "kazma-gateway/kazma_gateway_tests",
+    "kazma-ui/kazma_ui_tests",
+    "kazma-tui/kazma_tui_tests",
+)
+
+
+def _data_dir_without_workspace(source: str) -> list[int]:
+    """Lines of the environment allowlists that pass a child process the
+    test data folder but not the test workspace.
+
+    The shape is the one those tests share: a set literal of lowercase
+    variable names, copied from the test process's environment with
+    ``{k: v for k, v in os.environ.items() if k.lower() in allowed}``. A
+    child given a data folder of its own (``KAZMA_DATA_DIR`` set to a temp
+    path) writes nothing the next test reads, and is not this shape.
+    """
+    lines = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Set) or not node.elts:
+            continue
+        names = [elt.value for elt in node.elts if isinstance(elt, ast.Constant)]
+        if len(names) != len(node.elts) or not all(
+            isinstance(name, str) and name == name.lower() for name in names
+        ):
+            continue
+        if "kazma_data_dir" in names and "kazma_workspace" not in names:
+            lines.append(node.lineno)
+    return lines
+
+
+def test_a_child_given_the_test_data_folder_is_given_the_test_workspace_too():
+    """2026-11-08: research recovery tests ran a child process with only
+    ``{systemroot, ..., path, kazma_data_dir}`` from the environment, in the
+    checkout. The child opened the session's store file first, seeded its
+    working folder -- the repository -- as the active workspace, and a later
+    test's relative file_write landed in the checkout. A child that shares
+    the test data folder takes the test workspace with it."""
+    found = []
+    for root in _TEST_ROOTS:
+        for path in sorted((REPO / root).rglob("*.py")):
+            for line in _data_dir_without_workspace(path.read_text(encoding="utf-8")):
+                found.append(f"{path.relative_to(REPO).as_posix()}:{line}")
+    assert not found, found
+
+
+def test_the_allowlist_check_finds_a_child_without_the_workspace():
+    """Negative control: the allowlist the culprit used, and the fixed one."""
+    old = "allowed = {'systemroot', 'windir', 'temp', 'tmp', 'path', 'kazma_data_dir'}"
+    fixed = "allowed = {'systemroot', 'path', 'kazma_data_dir', 'kazma_workspace'}"
+    assert _data_dir_without_workspace(old) == [1]
+    assert _data_dir_without_workspace(fixed) == []
+
+
 def test_without_an_explicit_workspace_the_seed_is_the_working_folder(tmp_path, monkeypatch):
     """Negative control: the same store with no ``KAZMA_WORKSPACE`` seeds the
     folder it runs in -- the checkout, had the pin not been there."""

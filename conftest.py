@@ -634,6 +634,89 @@ def _isolate_process_singletons(tmp_path):
         pass
 
 
+# ── The active workspace a test starts with is the one it ends with ────────
+# The workspace store is a process singleton over one file (the session data
+# folder's settings.db), and its active row outranks the pin and
+# KAZMA_WORKSPACE in the binding ladder (resolve_active_root). Whatever a test
+# left in that file -- or a singleton of its own it never put back -- named
+# the workspace of every later test in the process. On 2026-11-08 a research
+# recovery test (test_acquisition_durable_controls.py) ran a child process
+# handed the session's KAZMA_DATA_DIR but not KAZMA_WORKSPACE, in the
+# checkout; the child was first to open that file, so its store seeded its
+# working folder -- this repository -- as the active workspace, and a later
+# test's relative file_write put d2-<hex>/report.md in the checkout. So the
+# store is made before the first test, seeded from the pinned KAZMA_WORKSPACE
+# (no test or child process is ever first to seed it), and after every test
+# the singleton and the file's workspace rows are put back as the test found
+# them, whoever wrote them -- another process included. The pin is restored
+# with the binding above. Off with KAZMA_TEST_WORKSPACE_GUARD=0
+# (tests/test_order_independence.py runs the negative controls) or with the
+# rest of KAZMA_TEST_ISOLATION=0.
+def _workspace_rows(db: Path):
+    """The ``workspaces`` table of ``db`` as (columns, rows), None if absent."""
+    import sqlite3 as _sqlite3
+
+    if not db.exists():
+        return None
+    conn = _sqlite3.connect(str(db), timeout=10)
+    try:
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'workspaces'"
+        ).fetchone() is None:
+            return None
+        cursor = conn.execute("SELECT * FROM workspaces ORDER BY rowid")
+        return tuple(c[0] for c in cursor.description), tuple(cursor.fetchall())
+    finally:
+        conn.close()
+
+
+def _put_workspace_rows(db: Path, rows) -> None:
+    """Make the ``workspaces`` table of ``db`` hold exactly ``rows`` again."""
+    import sqlite3 as _sqlite3
+
+    conn = _sqlite3.connect(str(db), timeout=10, isolation_level=None)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            conn.execute("DELETE FROM workspaces")
+            if rows is not None:
+                columns, values = rows
+                present = {r[1] for r in conn.execute("PRAGMA table_info(workspaces)")}
+                keep = [i for i, name in enumerate(columns) if name in present]
+                conn.executemany(
+                    f"INSERT INTO workspaces ({', '.join(columns[i] for i in keep)}) "
+                    f"VALUES ({', '.join('?' for _ in keep)})",
+                    [tuple(row[i] for i in keep) for row in values],
+                )
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.close()
+
+
+@_pytest.fixture(autouse=True)
+def _isolate_workspace_store():
+    if (os.environ.get("KAZMA_TEST_ISOLATION") == "0"
+            or os.environ.get("KAZMA_TEST_WORKSPACE_GUARD") == "0"):
+        yield
+        return
+    from kazma_core.stores import workspaces as _ws
+
+    db = Path(_ws._DEFAULT_DB)
+    # The session's store, seeded now from the session's pinned workspace.
+    prev_store = _ws.peek_workspace_store() or _ws.get_workspace_store()
+    prev_rows = _workspace_rows(db)
+    yield
+    left = _ws.peek_workspace_store()
+    if left is not prev_store:
+        _park(left)  # never closed here: see _PARKED
+        _ws.set_workspace_store(prev_store)
+    if _workspace_rows(db) != prev_rows:
+        _put_workspace_rows(db, prev_rows)
+
+
 # ── A thread left running is named, and the run ends ────────────────────────
 # A process cannot exit while a non-daemon thread runs: the interpreter joins
 # them before it finishes, and pytest-timeout covers tests, not that wait. On
