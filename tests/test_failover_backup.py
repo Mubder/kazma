@@ -72,6 +72,24 @@ def test_usable_backups_of_other_vendors_are_offered():
         ("openrouter", "google/gemini-2.5-flash"), ("groq", "llama-3.3-70b"), ("server-gpu", "qwen2.5-32b")]
 
 
+
+def test_a_provider_whose_last_check_failed_is_not_offered(monkeypatch):
+    # Live 2026-11-08: Z.AI was on, with a key, its Test failing
+    # (chat_failing), and Settings offered it as a backup.
+    rows = [dict(r) for r in ROWS]
+    for r in rows:
+        if r["name"] == "groq":
+            r["health"] = "chat_failing"
+        if r["name"] == "server-gpu":
+            r["health"] = "down"
+        if r["name"] == "openrouter":
+            r["health"] = "healthy"
+    offers = fb.suggest_backups(_Registry(rows))
+    assert [o["provider"] for o in offers] == ["openrouter"]
+    # Control: the same rows without the health rule offer all three.
+    monkeypatch.setattr(fb, "_FAILED_HEALTH", frozenset())
+    assert [o["provider"] for o in fb.suggest_backups(_Registry(rows))] == ["openrouter", "groq", "server-gpu"]
+
 def test_a_backup_nothing_serves_is_refused_on_save(monkeypatch):
     import kazma_core.model_registry as mr
     from kazma_core.settings_manager import SettingsManager

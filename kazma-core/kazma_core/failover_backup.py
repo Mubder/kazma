@@ -78,10 +78,16 @@ def unusable_backups(registry: Any, chain: list[str]) -> list[dict[str, Any]]:
     return [row for row in backup_status(registry, chain) if not row["usable"]]
 
 
+#: A provider whose last check failed is not offered as a backup: on the live
+#: install Z.AI was switched on with a key, its Test failing, and was the
+#: second suggestion.
+_FAILED_HEALTH = frozenset({"down", "chat_failing"})
+
+
 def suggest_backups(registry: Any, limit: int = 4) -> list[dict[str, str]]:
     """A model of each usable provider of another vendor than the one in
-    use: ``{"provider", "display_name", "model"}``, the provider's own
-    chosen models first."""
+    use, whose last check did not fail: ``{"provider", "display_name",
+    "model"}``, the provider's own chosen models first."""
     from kazma_core.providers import default_model_for
 
     own = _active_vendor(registry)
@@ -91,6 +97,8 @@ def suggest_backups(registry: Any, limit: int = 4) -> list[dict[str, str]]:
         name = str(entry.get("name") or "")
         vendor = _vendor(entry)
         if not name or vendor == own or vendor in seen or not _usable(registry, entry):
+            continue
+        if str(entry.get("health") or "").lower() in _FAILED_HEALTH:
             continue
         visible = registry.get_visible_models(name) or []
         model = (visible[0] if visible else "") or registry.probe_model_for(name) or default_model_for(name)
