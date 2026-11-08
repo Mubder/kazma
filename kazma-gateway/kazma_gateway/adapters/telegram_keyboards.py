@@ -98,16 +98,17 @@ def build_provider_keyboard(providers: list[dict[str, Any]]) -> dict[str, Any]:
 def build_model_keyboard(provider_name: str, models: list[str]) -> dict[str, Any]:
     """Build inline keyboard for model selection within a provider.
 
-    *provider_name* is reserved for callback schemes that need it; model
-    select callbacks currently use ``model_select:{model_id}`` only.
+    Each button names ``provider:model`` (providers stage 3): one model name
+    under two providers is two buttons that pick two things. A long one is
+    stored and sent as a short token (``encode_callback_data``).
     """
-    del provider_name  # kept for API stability / future callback namespacing
     buttons: list[list[dict[str, str]]] = []
     for model_id in models:
         display = model_id
         if "/" in display:
             display = display.split("/")[-1]
+        ref = f"{provider_name}:{model_id}" if provider_name else model_id
         buttons.append(
-            [{"text": display, "callback_data": encode_callback_data(f"model_select:{model_id}")}]
+            [{"text": display, "callback_data": encode_callback_data(f"model_select:{ref}")}]
         )
     return {"inline_keyboard": buttons}

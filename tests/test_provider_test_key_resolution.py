@@ -73,10 +73,15 @@ class TestTheTestRouteUsesIt:
 
         from kazma_ui import providers as ui_providers
 
+        # Since providers stage 2 the route asks provider_check, whose one
+        # credentials rule asks the runtime (resolve_provider_credentials).
+        from kazma_core import provider_check
+
         src = inspect.getsource(ui_providers)
-        assert "resolve_provider_credentials" in src, (
+        assert "credentials_problem" in src and "candidate_entry" in src, (
             "the Test route resolves keys by hand again"
         )
+        assert "resolve_provider_credentials" in inspect.getsource(provider_check.credentials_problem)
 
     def test_the_chat_probe_sends_the_resolved_key(self):
         """The models-list call and the chat probe must send the same key.

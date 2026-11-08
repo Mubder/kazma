@@ -50,13 +50,33 @@ _MODEL_COSTS: dict[str, tuple[float, float]] = {
 class BedrockProvider(LLMProvider):
     """AWS Bedrock client via the Converse API (SigV4-signed via boto3)."""
 
-    def __init__(self, config: LLMConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: LLMConfig | None = None,
+        *,
+        region: str = "",
+        aws_access_key_id: str = "",
+        aws_secret_access_key: str = "",
+        aws_session_token: str = "",
+    ) -> None:
         super().__init__(config)
+        # Settings' own values first (providers stage 2: the Bedrock form),
+        # then the standard AWS chain (environment, shared files, an IAM role).
         self._region = (
-            os.getenv("AWS_REGION", "")
+            region.strip()
+            or os.getenv("AWS_REGION", "")
             or os.getenv("AWS_DEFAULT_REGION", "")
             or "us-east-1"
         )
+        self._credentials = {
+            k: v.strip() for k, v in (
+                ("aws_access_key_id", aws_access_key_id),
+                ("aws_secret_access_key", aws_secret_access_key),
+                ("aws_session_token", aws_session_token),
+            ) if v and v.strip()
+        }
+        if len(self._credentials) == 1 and "aws_session_token" in self._credentials:
+            self._credentials = {}  # a token alone is no credential
         self._client = None
         logger.info("BedrockProvider initialized: model=%s region=%s",
                     self.config.model, self._region)
@@ -71,7 +91,7 @@ class BedrockProvider(LLMProvider):
             logger.error("[Bedrock] boto3 not installed. Run: pip install boto3")
             return None
         try:
-            self._client = boto3.client(_SERVICE, region_name=self._region)
+            self._client = boto3.client(_SERVICE, region_name=self._region, **self._credentials)
         except Exception as exc:  # noqa: BLE001
             logger.error("[Bedrock] could not create boto3 client: %s", exc)
             return None

@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+- **One provider list, and 15 more providers.** The Settings dialog, the setup
+  guide and the server read one catalog (it kept its own ten): Cerebras,
+  DeepInfra, Hugging Face, Cloudflare Workers AI, Moonshot (Kimi), MiniMax,
+  Qwen (Alibaba Cloud), SiliconFlow, Novita, SambaNova, Hyperbolic, vLLM,
+  llama.cpp, LocalAI and Jan join the 20 there were. Azure OpenAI and AWS
+  Bedrock are set up in Settings now (they read the environment only), and a
+  provider can send headers of its own (kept as secrets) or keep its address
+  as typed. A provider added under a name of your own keeps its type.
+- **Speech is not chat.** A speech-to-text service is listed under Speech
+  services and kept out of every chat model list, backup suggestion and
+  fallback; voice is one setting (`voice.*`; `gateway.voice` moves there at
+  the next start).
+- **Each model's details.** Settings → Providers & Connectors → Model details
+  shows every model's context window, output limit, image and tool support and
+  price, and where each came from: your value, the provider's own model list,
+  or Kazma's catalog. Kazma sends no more than a model's known window or
+  output limit, and a known image answer decides whether it gets images.
+- **A model named with its provider, and a model per chat.** Models are
+  `provider:model`, so one name from two providers is two choices. The chat's
+  picker changes the chat it is in (it changed the model for the whole
+  install, Telegram included); the default is set in Settings or the sidebar.
+  In Telegram, Discord and Slack, `/model` sets that chat's model, lists every
+  model (Discord and Slack showed five a provider), and `/model default`
+  changes the default (admin).
+- **More than one key per provider.** When a key is refused, out of credit or
+  out of requests, Kazma switches to the provider's next key, sends the call
+  again and tells you. Every hour it checks each provider's model list (no
+  tokens) and tells you when the provider in use stops answering, and when it
+  answers again.
+- **A model server on your network is ready.** The chat page kept the setup
+  card up over a server on your network in use under a name of its own.
 - **A setup guide in the web app.** A new install opens `/setup`, a guide in
   English and Arabic: what Kazma is, then the model, either a cloud provider
   (a link to where its keys are made, the key, then the provider's own list of

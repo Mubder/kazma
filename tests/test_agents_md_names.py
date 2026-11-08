@@ -59,6 +59,7 @@ SCRIPT_ROOTS = ("kazma-ui/kazma_ui/static", "kazma-ui/kazma_ui/templates")
 
 #: Spans that look like code and are something else. Each says what it is.
 NOT_CODE: dict[str, str] = {
+    "chat.models": "a settings key (kazma_core.chat_model_choice.KEY), not the kazma_ui.chat module",
     "health.dependency_down": "a guard event in guard.log",
     "health.needs_setup": "a guard event in guard.log",
     "health.setup_done": "a guard event in guard.log",

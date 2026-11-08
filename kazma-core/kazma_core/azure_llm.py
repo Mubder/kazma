@@ -36,8 +36,8 @@ class AzureProvider(LLMProvider):
     def __init__(self, config: LLMConfig | None = None) -> None:
         super().__init__(config)
         endpoint = (
-            os.getenv("AZURE_OPENAI_ENDPOINT", "")
-            or self.config.base_url
+            self.config.base_url
+            or os.getenv("AZURE_OPENAI_ENDPOINT", "")
         ).rstrip("/")
         # The generic URL normalization appends "/v1" to every base URL —
         # Azure's path form is ``/openai/deployments/<dep>`` with NO /v1
@@ -46,17 +46,19 @@ class AzureProvider(LLMProvider):
         if endpoint.endswith("/v1"):
             endpoint = endpoint[: -len("/v1")].rstrip("/")
         self._endpoint = endpoint
+        # Settings' own value first (providers stage 2: the Azure form), the
+        # environment for an install configured by it.
         self._api_version = (
-            os.getenv("AZURE_OPENAI_API_VERSION", "")
-            or self.config.api_version
+            self.config.api_version
+            or os.getenv("AZURE_OPENAI_API_VERSION", "")
             or _DEFAULT_API_VERSION
         )
         if not self.config.api_key or self.config.api_key == "not-needed":
             self.config.api_key = os.getenv("AZURE_OPENAI_API_KEY", "")
         # The deployment doubles as the model id in Azure path routing.
         self._deployment = (
-            os.getenv("AZURE_OPENAI_DEPLOYMENT", "")
-            or self.config.model
+            self.config.model
+            or os.getenv("AZURE_OPENAI_DEPLOYMENT", "")
         )
         self._http: httpx.AsyncClient | None = None
         logger.info(
@@ -85,6 +87,7 @@ class AzureProvider(LLMProvider):
                 headers={
                     "api-key": self.config.api_key,
                     "Content-Type": "application/json",
+                    **self.config.extra_headers,
                 },
                 timeout=httpx.Timeout(self.config.timeout, connect=10.0),
                 params={"api-version": self._api_version},

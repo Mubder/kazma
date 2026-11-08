@@ -215,8 +215,11 @@ class ChatPanel(Vertical):
     def _refresh_model_cache(self) -> None:
         """Load available model names for autocomplete."""
         try:
-            from kazma_core.settings.model_registry import get_universal_models
-            self._model_cache = [m["name"] for m in get_universal_models()]
+            from kazma_core.model_registry import get_model_registry
+            from kazma_core.models.options import model_options
+
+            # provider:model, from the list every picker reads (stage 3).
+            self._model_cache = [o["ref"] for o in model_options(get_model_registry(), details=False)["options"]]
         except Exception:
             self._model_cache = []
 

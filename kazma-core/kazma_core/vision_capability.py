@@ -133,6 +133,19 @@ def _matches_any(model_id: str, patterns: tuple[str, ...]) -> bool:
     return any(fnmatch.fnmatch(name, pat.lower()) for name in names for pat in patterns)
 
 
+def _known_vision(model: str) -> bool | None:
+    """What the model's details say (providers stage 3): the owner's Model
+    details, the provider's own list, or Kazma's catalog. None when they do
+    not say; never raises."""
+    from kazma_core.db.pg_helpers import store_errors
+    from kazma_core.model_registry import get_model_registry
+
+    try:
+        return get_model_registry().model_details(model).vision
+    except store_errors():  # not knowing falls back to the names
+        return None
+
+
 def classify(model_id: str | None) -> str:
     """``"vision"``, ``"text"`` or ``"unknown"``, in one order: a name that
     says it sees (:data:`VISION_MARKERS`, and ``KAZMA_VISION_MODELS``), then
@@ -140,6 +153,10 @@ def classify(model_id: str | None) -> str:
     Unknown is never downgraded (fail-open)."""
     if not model_id:
         return "unknown"
+    # What the model's details say wins over its name (providers stage 3).
+    known = _known_vision(model_id)
+    if known is not None:
+        return "vision" if known else "text"
     if _matches_any(model_id, VISION_MARKERS) or _matches_any(model_id, _extra_env_patterns()):
         return "vision"
     if _matches_any(model_id, TEXT_ONLY_PATTERNS):

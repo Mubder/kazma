@@ -189,6 +189,19 @@ class ProviderUpdateRequest(BaseModel):
     google_mode: str = ""
     project_id: str = ""
     location: str = "us-central1"
+    # Providers stage 2: the catalog entry it was made from, what it serves,
+    # the address as typed, headers (every value a secret), Azure's API
+    # version, Bedrock's region and AWS keys. Stage 4: extra keys.
+    preset: str = ""
+    kind: str = ""
+    url_as_typed: bool = False
+    headers: dict[str, str] = Field(default_factory=dict)
+    api_version: str = ""
+    region: str = ""
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
+    aws_session_token: str = ""
+    api_keys: list[dict[str, str]] | None = None
 
 
 class ConnectorUpdateRequest(BaseModel):

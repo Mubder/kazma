@@ -62,9 +62,19 @@ def _google_kwargs(entry: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _bedrock_kwargs(entry: Mapping[str, Any]) -> dict[str, Any]:
+    """Bedrock is addressed by region and signed with AWS keys: from the
+    provider row (Settings' Bedrock form), else the standard AWS chain."""
+    return {
+        k: str(entry.get(k, "") or "")
+        for k in ("region", "aws_access_key_id", "aws_secret_access_key", "aws_session_token")
+    }
+
+
 #: Styles whose client needs more than the LLMConfig to be constructed.
 _EXTRA_KWARGS: dict[str, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     "google": _google_kwargs,
+    "bedrock": _bedrock_kwargs,
 }
 
 
@@ -86,7 +96,10 @@ def build_client(
     """
     from kazma_core.providers import capabilities
 
-    style = str(capabilities(provider_name).get("api_style") or "openai").lower()
+    # A row made from a preset under another name ("Work Azure") speaks its
+    # preset's format (providers stage 2: the row records ``preset``).
+    preset = str((entry or {}).get("preset") or "").strip() or provider_name
+    style = str(capabilities(preset).get("api_style") or "openai").lower()
     if style not in _ADAPTERS:
         # A declared style Kazma has no adapter for. Falling back to the
         # OpenAI shape is what the old ladder did for anything unrecognised,

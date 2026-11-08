@@ -283,7 +283,8 @@ export function sidebarComponent() {
                 if (!res.ok) return;
                 const data = await res.json();
                 if (data && data.model) {
-                    this.activeModel = data.model;
+                    // provider:model, as the picker's values are (stage 3).
+                    this.activeModel = data.provider ? data.provider + ':' + data.model : data.model;
                     const store = Alpine.store('settings');
                     if (store) store.appearance.active_chat_model = data.model;
                 }
@@ -292,31 +293,29 @@ export function sidebarComponent() {
         },
 
         async _fetchModelOptions() {
+            // The one model list (/api/models/options, providers stage 3):
+            // ``provider:model`` values, and the default it names. This
+            // picker sets the install's default; a chat's own picker sets
+            // that chat's model.
             try {
-                const res = await fetch('/api/providers');
+                const res = await fetch('/api/models/options');
                 if (!res.ok) return;
-                const providers = await res.json();
-                if (!Array.isArray(providers)) return;
-                // The chat's picker's rule: a provider with a key, or one on
-                // this computer or its network (``local``). This list showed
-                // keyless cloud providers the chat's picker hid.
-                const localNames = { ollama: 1, 'lm-studio': 1, lmstudio: 1, local: 1 };
-                this.modelOptions = providers
-                    .filter(p => p.enabled && (p.api_key || p.local || localNames[String(p.name || '').toLowerCase()]))
-                    .map(p => {
-                        // Use visible_models (user-selected subset or all if none selected)
-                        const visible = p.visible_models || p.selected_models || [];
-                        const disc = p.discovered_models || [];
-                        const manual = p.models || [];
-                        // Prefer visible_models; fall back to discovered+manual
-                        let models;
-                        if (visible && visible.length) {
-                            models = visible;
-                        } else {
-                            models = [...new Set([...disc, ...manual])].filter(Boolean);
-                        }
-                        return { label: p.display_name || p.name, models };
-                    }).filter(g => g.models.length > 0);
+                const data = await res.json();
+                const options = Array.isArray(data && data.options) ? data.options : [];
+                const groups = [];
+                const byProvider = {};
+                options.forEach(o => {
+                    if (!byProvider[o.provider]) {
+                        byProvider[o.provider] = { label: o.provider_label || o.provider, models: [] };
+                        groups.push(byProvider[o.provider]);
+                    }
+                    byProvider[o.provider].models.push({ ref: o.ref, model: o.model });
+                });
+                this.modelOptions = groups;
+                if (data && data.default) {
+                    this.activeModel = data.default;
+                    this.activeModelLoaded = true;
+                }
             } catch (e) { /* keep empty */ }
         },
 
@@ -345,10 +344,8 @@ export function sidebarComponent() {
                     else console.warn('[sidebar]', msg);
                     return;
                 }
-                if (data && data.active_model) {
-                    this.activeModel = data.active_model;
-                    if (store) store.appearance.active_chat_model = data.active_model;
-                }
+                // The value sent (provider:model) stays selected: the
+                // answer names the model without its provider.
             } catch (e) {
                 console.warn('[sidebar] Failed to sync model:', e);
                 this.activeModel = previous;

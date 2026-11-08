@@ -64,6 +64,19 @@ def _is_openai_api(base_url: str) -> bool:
     return (urlparse(str(base_url or "")).hostname or "").lower() == "api.openai.com"
 
 
+def _header_dict(value: Any) -> dict[str, str]:
+    """Headers from a provider row: names and values as text, an empty name
+    dropped, and nothing that could split a header line."""
+    if not isinstance(value, dict):
+        return {}
+    out: dict[str, str] = {}
+    for name, val in value.items():
+        n, v = str(name or "").strip(), str(val if val is not None else "")
+        if n and not any(c in n + v for c in "\r\n"):
+            out[n] = v
+    return out
+
+
 def _http_status_is_transient(status_code: int | None) -> bool:
     """True for 429 / 5xx (AGENTS.md §3). None = no HTTP response (network)."""
     if status_code is None:
@@ -275,6 +288,14 @@ class LLMConfig:
     # OpenAI-compatible providers ignore it; Azure passes it as a query
     # parameter on every request.
     api_version: str = ""
+    # Headers sent on every request, from the provider row's
+    # ``secret_headers`` (providers stage 2): a gateway's own sign-in, an
+    # organisation id, OpenRouter's app name. Never logged.
+    extra_headers: dict[str, str] = field(default_factory=dict)
+    # ``(failed_key, exc) -> next key or None`` when the provider has more
+    # than one key (providers stage 4, kazma_core.provider_keys). Blocking:
+    # the client calls it off the loop.
+    key_switch: Any = None
 
     def __post_init__(self) -> None:
         """Normalize base_url on construction — catches ALL code paths."""
@@ -316,6 +337,8 @@ class LLMConfig:
             router=d.get("router", cls.router),
             fallback_model=d.get("fallback_model", cls.fallback_model),
             api_version=str(d.get("api_version", cls.api_version) or ""),
+            extra_headers=_header_dict(d.get("extra_headers")),
+            key_switch=d.get("key_switch"),
         )
 
 
@@ -830,6 +853,9 @@ class LLMProvider:
                 headers={
                     "Authorization": f"Bearer {safe_key}",
                     "Content-Type": "application/json",
+                    # The row's own headers win: a gateway that signs in with
+                    # its own Authorization header gets it (providers stage 2).
+                    **self.config.extra_headers,
                 },
                 timeout=httpx.Timeout(self.config.timeout, connect=10.0),
                 verify=await _shared_ssl_context(),
@@ -900,7 +926,8 @@ class LLMProvider:
             max_tokens=max_tokens if max_tokens is not None else self.config.max_tokens,
             temperature=temperature if temperature is not None else self.config.temperature,
         ) as _span:
-            response = await self._chat_inner(
+            response = await self._with_key_switches(
+                self._chat_inner,
                 messages,
                 tools=tools,
                 max_tokens=max_tokens,
@@ -911,6 +938,42 @@ class LLMProvider:
             )
             record_chat_response(_span, response)
             return response
+
+    async def _switch_key_after(self, exc: BaseException) -> bool:
+        """True when the call failed for its KEY and the provider gave
+        another (providers stage 4): the client now holds it."""
+        switch = getattr(self.config, "key_switch", None)
+        if not callable(switch):
+            return False
+        from kazma_core.provider_keys import key_failure
+
+        if not key_failure(exc)[0]:
+            return False
+        failed = str(self.config.api_key or "")
+        from kazma_core.db.pg_helpers import store_errors
+
+        try:
+            new_key = await asyncio.to_thread(switch, failed, exc)
+        except store_errors():  # no switch: the call's own failure stands
+            logger.warning("[LLMProvider] could not switch keys", exc_info=True)
+            return False
+        if not new_key or new_key == failed:
+            return False
+        self.reconfigure(api_key=new_key)
+        return True
+
+    async def _with_key_switches(self, call: Any, *args: Any, **kwargs: Any) -> Any:
+        """*call*, again with the provider's next key each time it fails for
+        its key, at most ``provider_keys.MAX_SWITCHES`` times."""
+        from kazma_core.provider_keys import MAX_SWITCHES
+
+        for _ in range(MAX_SWITCHES):
+            try:
+                return await call(*args, **kwargs)
+            except LLMError as exc:
+                if not await self._switch_key_after(exc):
+                    raise
+        return await call(*args, **kwargs)
 
     async def _chat_inner(
         self,
@@ -1644,6 +1707,36 @@ class LLMProvider:
         return self._parse_response(fake, duration_ms)
 
     async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        model: str | None = None,
+        response_format: dict[str, Any] | None = None,
+        reasoning: str | None = None,
+    ) -> Any:
+        """:meth:`_chat_stream_once`, again with the provider's next key when
+        it failed for its key before any text was streamed (providers stage
+        4): a key that is refused, out of credit or out of requests gives way
+        to the next. Once text has been streamed, a failure is the call's."""
+        from kazma_core.provider_keys import MAX_SWITCHES
+
+        for attempt in range(MAX_SWITCHES + 1):
+            streamed = False
+            try:
+                async for delta in self._chat_stream_once(
+                    messages, tools, max_tokens, temperature, model, response_format, reasoning,
+                ):
+                    if getattr(delta, "content", None):
+                        streamed = True
+                    yield delta
+                return
+            except LLMError as exc:
+                if streamed or attempt >= MAX_SWITCHES or not await self._switch_key_after(exc):
+                    raise
+
+    async def _chat_stream_once(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,

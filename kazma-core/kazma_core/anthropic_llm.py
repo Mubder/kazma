@@ -96,6 +96,7 @@ class AnthropicProvider(LLMProvider):
                     "x-api-key": self.config.api_key,
                     "anthropic-version": _ANTHROPIC_VERSION,
                     "Content-Type": "application/json",
+                    **self.config.extra_headers,
                 },
                 timeout=httpx.Timeout(self.config.timeout, connect=10.0),
                 verify=shared_ssl_context(),
@@ -277,6 +278,21 @@ class AnthropicProvider(LLMProvider):
     # ── Main chat call ───────────────────────────────────────────────
 
     async def chat(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        model: str | None = None,
+        response_format: dict[str, Any] | None = None,
+    ) -> LLMResponse:
+        """:meth:`_chat_once`, again with the provider's next key when one
+        fails for its key (providers stage 4, ``LLMProvider._with_key_switches``)."""
+        return await self._with_key_switches(
+            self._chat_once, messages, tools, max_tokens, temperature, model, response_format,
+        )
+
+    async def _chat_once(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,

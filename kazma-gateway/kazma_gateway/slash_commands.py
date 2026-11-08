@@ -174,9 +174,11 @@ def changes_global_config(text: str) -> bool:
     personality switch (every reply, web chats included), ``/skill
     uninstall``, switching or cloning the active workspace (``/ide repo``) and
     the swarm's output routing (``/swarm config``). Showing and listing stay
-    open. ``graph.py`` asks this before every slash command; the ``/model``
-    menu's pick (``/_models_select``) is handled before that and checks the
-    same admin rule itself.
+    open. ``graph.py`` asks this before every slash command. ``/model``
+    sets the model of the chat it is sent in (providers stage 3) and is not
+    global; ``/model default`` changes the install's default and is: the
+    model menu is handled before this and checks the same admin rule itself
+    for it.
     """
     parts = (text or "").strip().split()
     head = parts[0].lower().split("@", 1)[0] if parts else ""
@@ -203,7 +205,9 @@ def changes_global_config(text: str) -> bool:
         # Changing the Knowledge Library every chat injects from (KB-S07):
         # adding, crawling, refreshing or deleting a library.
         return sub in ("add", "ingest", "crawl", "refresh", "delete")
-    return head == "/_models_select"
+    if head in ("/model", "/models"):
+        return sub == "default" and bool(arg)
+    return False
 
 
 def resolve_slash_command(text: str, context: dict[str, Any] | None = None) -> str | None:
@@ -324,7 +328,7 @@ def _cmd_help() -> str:
         "ℹ️ *Info*\n"
         "• `/help` — Show this list\n"
         "• `/status` — Gateway health overview\n"
-        "• `/model` (`/models`) — Show and switch the model\n"
+        "• `/model` (`/models`) — This chat's model: show, pick, `reset`; `default` sets the install's (admin)\n"
         "• `/memory` — Report memory usage; `/memory off` / `/memory on` — keep this chat out of memory, or let it back in\n"
         "• `/cost` — Tokens and cost of this chat\n\n"
         "For anything else, just ask the agent directly!"

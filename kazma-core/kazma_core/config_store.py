@@ -572,6 +572,16 @@ _HITL_NESTED_TO_FLAT: dict[str, str] = {
 #: and the old row is deleted.
 _MOVED_KEYS: dict[str, str] = {
     "agent.nonstop.watchdog.tool_timeout_seconds": "agent.tool_timeout_seconds",
+    # One voice setting (providers stage 2): kazma.yaml's ``gateway.voice``
+    # was read once at boot as the Telegram adapter's defaults, beside the
+    # ``voice.*`` Settings -> Voice writes and every voice path reads.
+    "gateway.voice.enabled": "voice.enabled",
+    "gateway.voice.tts_reply": "voice.tts_reply",
+    "gateway.voice.stt_provider": "voice.stt_provider",
+    "gateway.voice.tts_provider": "voice.tts_provider",
+    "gateway.voice.tts_voice": "voice.tts_voice",
+    "gateway.voice.stt_language": "voice.stt_language",
+    "gateway.voice.tts_output_format": "voice.tts_output_format",
 }
 
 
@@ -2769,6 +2779,10 @@ class ConfigStore(_ChangeNotices):
             self.apply_retired_defaults({
                 key: value for key, value, _cat in shipped_settings(shipped)
             })
+        # Moved keys before seeding: a moved key's new name is seeded from
+        # kazma.yaml below, and a seeded value would win over the owner's
+        # stored one (the voice switch an owner turned on).
+        self.move_renamed_keys()
 
         # Find which keys are NOT already in the active backend.
         with self._statement_lock(write=False):

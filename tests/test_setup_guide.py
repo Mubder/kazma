@@ -308,3 +308,26 @@ def test_switching_provider_ends_the_fallback_notice_of_the_one_left(monkeypatch
     assert "substitution:custom" not in mf._active
     assert "substitution:ollama" in mf._active  # the provider in use keeps its own
     mf.reset_fallback_state()
+
+
+def test_a_network_server_in_use_is_ready_by_its_address():
+    """The provider in use is a server on the owner's network under a name of
+    its own (one the guide found by address): ready. The name rule alone kept
+    the setup wall over it (found by the stage 2-4 browser test)."""
+    from kazma_ui.setup_api import compute_setup_status
+
+    class _Reg:
+        def get_active_profile(self):
+            return {"provider": "server-192-168-1-20-8000", "model": "qwen", "api_key": "",
+                    "base_url": "http://192.168.1.20:8000/v1"}
+
+        def list_providers(self):
+            return []
+
+    assert compute_setup_status(_Reg())["ready"] is True
+
+    class _Cloud(_Reg):
+        def get_active_profile(self):
+            return {"provider": "cerebras", "model": "m", "api_key": "", "base_url": "https://api.cerebras.ai/v1"}
+
+    assert compute_setup_status(_Cloud())["ready"] is False  # control: a cloud address needs a key

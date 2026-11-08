@@ -657,7 +657,7 @@ Lists all available commands grouped by category.
 ℹ️ *Info*
 • `/help` — Show this list
 • `/status` — Gateway health overview
-• `/model` (`/models`) — Show and switch the model
+• `/model` (`/models`) — This chat's model: show, pick, `reset`; `default` sets the install's (admin)
 • `/memory` — Report memory usage; `/memory off` / `/memory on` — keep this chat out of memory, or let it back in
 • `/cost` — Tokens and cost of this chat
 
@@ -701,28 +701,44 @@ and `?` when the gateway could not be read.
 
 ### `/model`
 
-Shows the providers and their models, and switches the active model. On
-Telegram it opens a picker: tap a provider, then a model. Elsewhere it lists
-each provider with up to five of its models, the active one marked; switch
-with `/config model <name>`. `/models` is the same.
+The model of the chat it is sent in. Each chat keeps its own: a pick here
+changes this chat's model and no other, the web chats included. A chat with
+no pick of its own uses the default (Settings, or `/model default`).
+
+Models are named with their provider, `provider:model`, so the same model
+name from two providers is two choices. The list holds every model a working
+chat provider offers (switched on, with a key or on your network, not a
+speech service). On Telegram, `/model` opens a picker: tap a provider, then a
+model. Elsewhere it lists every model, numbered.
 
 **Usage:**
 ```
-/model
+/model                       this chat's model, and the list
+/model 3                     this chat uses the third model of the list
+/model groq:llama-3.3-70b    this chat uses that model
+/model reset                 this chat follows the default again
+/model default openrouter:google/gemini-2.5-flash
+                             the install's default (admin)
 ```
+
+A model name alone works when one provider offers it; when two do, Kazma
+asks you to name one.
 
 **Response (outside Telegram):**
 ```
-Available providers:
+This chat uses the default, `deepseek:deepseek-chat`.
 
-  DeepSeek — 2 models
-    deepseek-chat *(active)*
-    deepseek-reasoner
+DeepSeek:
+  1. deepseek:deepseek-chat (this chat)
+  2. deepseek:deepseek-reasoner
+Groq:
+  3. groq:llama-3.3-70b-versatile
 
-Use `/config model <model_name>` to switch.
+`/model <number>` sets this chat's model; `/model reset` follows the default.
 ```
 
-**Required permissions:** None.
+**Required permissions:** none for this chat's model; `/model default` is
+admin-only.
 
 ---
 
@@ -947,7 +963,7 @@ A chat app takes messages from the users its allowlist admits; an empty
 allowlist admits everyone in the chat. Within that:
 
 - A change that applies to every user and platform is admin-only: the
-  model (`/config model`, or a pick in the `/model` menu), `/config memory`,
+  default model (`/config model`, `/model default`), `/config memory`,
   `/config tools`, a personality switch, `/skill install` and `uninstall`,
   switching or cloning the active workspace (`/ide repo`), and the swarm's
   output routing (`/swarm config`). An admin is a user named in

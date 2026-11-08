@@ -452,6 +452,34 @@ class SettingsRouterBuilder:
                 "max": MAX_PRICE_PER_1M,
             }
 
+        @router.get("/api/settings/model-details")
+        def api_get_model_details() -> dict[str, Any]:
+            """Every chat model a person can choose, with what is known about
+            it and where each fact came from -- your override, the
+            provider's own list, Kazma's catalog (kazma_core.model_details,
+            providers stage 3): what the Model details card lists. Your
+            overrides are saved through ``PUT /api/settings/single``
+            (``models.details``, validated there)."""
+            from kazma_core.model_details import CATALOG_AS_OF, OVERRIDES_KEY, details_for, parse_overrides
+            from kazma_core.model_registry import get_model_registry
+            from kazma_core.models.options import model_options
+
+            registry = get_model_registry()
+            overrides = parse_overrides(config_store.get(OVERRIDES_KEY))
+            rows = []
+            listed = model_options(registry, details=False)
+            for o in listed["options"]:
+                row = registry.get_provider(o["provider"]) or {}
+                known = details_for(o["provider"], o["model"], preset=str(row.get("preset") or ""),
+                                    store=config_store)
+                rows.append({
+                    "ref": o["ref"], "provider_label": o["provider_label"], "model": o["model"],
+                    "local": o["local"], **known.as_dict(),
+                    "override": overrides.get(o["ref"].lower()) or overrides.get(o["model"].lower()) or {},
+                })
+            return {"key": OVERRIDES_KEY, "models": rows, "catalog_as_of": CATALOG_AS_OF,
+                    "default": listed["default"]}
+
         @router.get("/api/settings/outside-watch")
         def api_get_outside_watch(fresh: bool = False) -> dict[str, Any]:
             """The outside watch (resilience plan B1): paired or not, the

@@ -39,8 +39,6 @@ from .commands import (
     _handle_swarm_config_command,
     _get_visible_providers,
     _try_model_command,
-    _get_provider_models,
-    _is_active_model,
     _send_model_reply,
     _build_slash_ctx,
 )
@@ -76,8 +74,6 @@ __all__ = [
     "_handle_swarm_config_command",
     "_get_visible_providers",
     "_try_model_command",
-    "_get_provider_models",
-    "_is_active_model",
     "_send_model_reply",
     "_build_slash_ctx",
 ]

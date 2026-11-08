@@ -213,11 +213,11 @@
                 x-model="activeModel"
                 @change="onModelChange($event)"
                 translate="no"
-                class="sidebar-model-dropdown" aria-label="{{ t('agents.active_model') }}">
+                class="sidebar-model-dropdown" aria-label="{{ t('settings.default_model') }}" title="{{ t('settings.default_model') }}">
                 <template x-for="group in modelOptions" :key="group.label">
                     <optgroup :label="group.label">
-                        <template x-for="m in group.models" :key="m">
-                            <option :value="m" x-text="m"></option>
+                        <template x-for="m in group.models" :key="m.ref">
+                            <option :value="m.ref" x-text="m.model"></option>
                         </template>
                     </optgroup>
                 </template>

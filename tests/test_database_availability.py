@@ -476,7 +476,8 @@ DECLARED = {
         _ONE_REQUEST,
     "kazma-core/kazma_core/documents/worker.py::DocumentWorker._heartbeat": _ONE_REQUEST,
     "kazma-core/kazma_core/lifecycle_notifier.py::_settled": _ONE_REQUEST,
-    "kazma-core/kazma_core/llm_provider.py::LLMProvider.chat_stream": _ONE_REQUEST,
+    # The stream's retry loop moved under the key switch (providers stage 4).
+    "kazma-core/kazma_core/llm_provider.py::LLMProvider._chat_stream_once": _ONE_REQUEST,
     "kazma-core/kazma_core/safety/bus_bridge.py::request_approval_via_registry": _ONE_REQUEST,
     "kazma-core/kazma_core/stores/knowledge_ingest.py::_fetch_with_retries": _ONE_REQUEST,
     "kazma-core/kazma_core/stores/knowledge_ingest.py::_ingest_site_impl": _ONE_REQUEST,

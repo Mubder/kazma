@@ -279,13 +279,13 @@
       modelSelectorEl.addEventListener('change', onModelChange);
     }
 
-    // Listen for model changes from sidebar or other components
+    // The default changed (the sidebar's picker, Settings): a chat with no
+    // pick of its own and no model of its own follows it (stage 3).
     document.addEventListener('model-changed', function(e) {
       var model = e.detail || (e.target && e.target.value) || '';
-      if (model && model !== selectedModel) {
-        selectedModel = model;
-        if (modelSelectorEl) modelSelectorEl.value = model;
-        try { localStorage.setItem(MODEL_LS_KEY, model); } catch(err) {}
+      if (model) {
+        _modelOptions.default = String(model);
+        _applyChatModel();
       }
     }, _onPage);
 
@@ -2657,89 +2657,85 @@
   }
 
   // ── Model selector ───────────────────────────────────
+  // This chat's model (providers stage 3). The picker changes the model of
+  // the chat it is in, never the install's default (Settings, or the
+  // sidebar's picker, change that): a pick here used to switch every chat,
+  // Telegram included. Values are ``provider:model`` from the one list
+  // (/api/models/options), so one name under two providers is two choices.
+  // What the picker shows is what the next message runs with: the chat's own
+  // pick, else the model the chat last ran with, else the default.
+  var _modelOptions = { default: '', options: [] };
+  var _chatRunModel = {};  // session id -> the model its last reply ran with
+
+  function _chatModelKey(sid) { return 'kazma.chatModel.' + String(sid || ''); }
+
+  function _storedChatModel(sid) {
+    try { return localStorage.getItem(_chatModelKey(sid)) || ''; } catch (e) { return ''; }
+  }
+
+  function _offered(ref) {
+    return !!ref && _modelOptions.options.some(function(o) { return o.ref === ref; });
+  }
+
+  // The model this chat runs with now.
+  function _chatModelFor(sid) {
+    var picked = _storedChatModel(sid);
+    if (_offered(picked)) return picked;
+    var ran = _chatRunModel[sid] || '';
+    if (_offered(ran)) return ran;
+    return _modelOptions.default || '';
+  }
+
+  function _applyChatModel() {
+    selectedModel = _chatModelFor(chatSessionId);
+    if (modelSelectorEl && selectedModel) modelSelectorEl.value = selectedModel;
+  }
+
+  // A reply's ``run_model`` (history rows): what this chat ran with.
+  function _noteChatRunModel(sid, model) {
+    if (sid && model) {
+      _chatRunModel[sid] = String(model);
+      if (sid === chatSessionId && !_storedChatModel(sid)) _applyChatModel();
+    }
+  }
+
   function loadModels() {
     if (!modelSelectorEl) return;
+    try { localStorage.removeItem(MODEL_LS_KEY); } catch (e) {}  // the old install-wide pick
 
-    // Restore persisted selection
-    try { selectedModel = localStorage.getItem(MODEL_LS_KEY) || ''; } catch(e) { selectedModel = ''; }
-
-    // Fetch saved profiles first (these take priority in the dropdown)
     var savedModels = [];
     fetch('/api/models/saved')
       .then(function(r) { return r.ok ? r.json() : []; })
       .then(function(profiles) {
-        if (!Array.isArray(profiles)) profiles = [];
         if (Array.isArray(profiles)) {
           profiles.forEach(function(p) {
             if (p.model) {
-              var label = p.name + ' (' + p.model + ')';
-              savedModels.push({ value: p.model, label: label, isProfile: true });
+              var ref = p.provider ? (p.provider + ':' + p.model) : p.model;
+              savedModels.push({ value: ref, label: p.name + ' (' + p.model + ')', isProfile: true });
             }
           });
         }
-        return fetch('/api/provider/active');
+        return fetch('/api/models/options');
       })
-      .then(function(r) { return r.ok ? r.json() : {}; })
-      .then(function(active) {
-        // Per-session pick (localStorage) wins. Process-wide /api/provider/active
-        // is only the default when this mouth has not chosen a model.
-        if (!selectedModel && active && active.model) {
-          selectedModel = active.model;
-          try { localStorage.setItem(MODEL_LS_KEY, selectedModel); } catch(e) {}
-        }
-
-        // Fetch all providers so we can group models by provider
-        // A refused read is a failed read, never "no providers": the list
-        // below decides whether a persisted model is still offered.
-        fetch('/api/providers')
-          .then(function(r) {
-            if (!r.ok) throw new Error('providers read ' + r.status);
-            return r.json();
-          })
-          .then(function(providers) {
-            // Build provider groups: [{ name, label, models: [] }]
-            var providerGroups = [];
-            if (Array.isArray(providers)) {
-              var _localProv = { ollama: 1, 'lm-studio': 1, lmstudio: 1, local: 1 };
-              providers.forEach(function(p) {
-                if (!p.enabled) return;
-                var pname = String(p.name || '').toLowerCase();
-                // Keyless cloud providers in the dropdown pin gpt-4o-mini and
-                // 401 chat even after DeepSeek Test succeeded. A server on this
-                // computer or its network needs no key (``local``, from the
-                // server's url_is_local; the name alone hid a LAN vLLM).
-                if (!p.api_key && !p.local && !_localProv[pname]) return;
-                var models = [];
-                var visible = p.visible_models || [];
-                var disc = p.discovered_models || [];
-                var manual = p.models || [];
-                if (Array.isArray(visible) && visible.length) {
-                  visible.forEach(function(m) { if (m && models.indexOf(m) === -1) models.push(m); });
-                } else {
-                  if (Array.isArray(disc)) {
-                    disc.forEach(function(m) { if (m && models.indexOf(m) === -1) models.push(m); });
-                  }
-                  if (Array.isArray(manual)) {
-                    manual.forEach(function(m) { if (m && models.indexOf(m) === -1) models.push(m); });
-                  }
-                }
-                if (models.length > 0) {
-                  providerGroups.push({
-                    name: p.name || 'unknown',
-                    label: p.display_name || p.name || ti('provider_unknown', 'Unknown'),
-                    models: models
-                  });
-                }
-              });
-            }
-            populateModelSelector(providerGroups, savedModels, true);
-          })
-          .catch(function() { populateModelSelector(_persistedModelGroup(), savedModels, false); });
+      .then(function(r) {
+        if (!r.ok) throw new Error('models read ' + r.status);
+        return r.json();
       })
-      .catch(function() {
-        // If both fetches fail, at least show the persisted model
-        populateModelSelector(_persistedModelGroup(), savedModels, false);
-      });
+      .then(function(data) {
+        _modelOptions = { default: String((data && data.default) || ''),
+                          options: Array.isArray(data && data.options) ? data.options : [] };
+        var groups = [];
+        var byProvider = {};
+        _modelOptions.options.forEach(function(o) {
+          if (!byProvider[o.provider]) {
+            byProvider[o.provider] = { name: o.provider, label: o.provider_label || o.provider, models: [] };
+            groups.push(byProvider[o.provider]);
+          }
+          byProvider[o.provider].models.push(o);
+        });
+        populateModelSelector(groups, savedModels, true);
+      })
+      .catch(function() { populateModelSelector([], savedModels, false); });
 
     // ?new=1 asks for a fresh session (New Chat, Ctrl+N from another page);
     // otherwise resume the last active session and HYDRATE its messages.
@@ -2762,95 +2758,52 @@
     }
   }
 
-  // The model this page last chose, offered on its own when the provider
-  // list could not be read.
-  function _persistedModelGroup() {
-    return selectedModel
-      ? [{ name: 'active', label: ti('models_active', 'Active'), models: [selectedModel] }]
-      : [];
-  }
-
-  // `complete`: the provider list was read. Only a complete list may drop a
-  // persisted model it no longer offers (a keyless default would pin a 401);
-  // after a failed read -- a 502 while the server restarts -- the user's
-  // choice is kept (2026-10-15: a partial list erased it from storage).
+  // `complete`: the model list was read. After a failed read -- a 502 while
+  // the server restarts -- the picker keeps what it had.
   function populateModelSelector(providerGroups, savedProfiles, complete) {
     if (!modelSelectorEl) return;
     savedProfiles = savedProfiles || [];
     providerGroups = providerGroups || [];
-    var hasProviders = providerGroups.some(function(g) { return g.models && g.models.length > 0; });
-    var allEmpty = !hasProviders && savedProfiles.length === 0;
-    if (allEmpty) {
+    if (!complete) return;
+    var hasModels = providerGroups.some(function(g) { return g.models && g.models.length > 0; });
+    if (!hasModels && savedProfiles.length === 0) {
       modelSelectorEl.innerHTML = '<option value="">' + escapeHtml(ti('model_default_option', '— default —')) + '</option>';
+      selectedModel = '';
       return;
     }
     var html = '';
-    // Saved profiles first
     if (savedProfiles.length > 0) {
-      html += '<optgroup label="Saved Profiles">';
+      html += '<optgroup label="' + escapeHtml(ti('model_saved_profiles', 'Saved profiles')) + '">';
       savedProfiles.forEach(function(p) {
-        var sel = (p.value === selectedModel) ? ' selected' : '';
-        html += '<option value="' + escapeHtml(p.value) + '"' + sel + '>' + escapeHtml(p.label) + '</option>';
+        html += '<option value="' + escapeHtml(p.value) + '">' + escapeHtml(p.label) + '</option>';
       });
       html += '</optgroup>';
     }
-    // Models grouped by provider
     providerGroups.forEach(function(g) {
       if (!g.models || g.models.length === 0) return;
       html += '<optgroup label="' + escapeHtml(g.label) + '">';
-      g.models.forEach(function(m) {
-        var sel = (m === selectedModel) ? ' selected' : '';
-        html += '<option value="' + escapeHtml(m) + '"' + sel + '>' + escapeHtml(m) + '</option>';
+      g.models.forEach(function(o) {
+        var label = o.model + (o.ref === _modelOptions.default ? ' · ' + ti('model_default_mark', 'default') : '');
+        html += '<option value="' + escapeHtml(o.ref) + '">' + escapeHtml(label) + '</option>';
       });
       html += '</optgroup>';
     });
     modelSelectorEl.innerHTML = html;
-    // Ensure dropdown reflects persisted value. If localStorage still has a
-    // model that is not in the list (keyless OpenAI default), drop it so
-    // send() does not pin a 401.
-    if (selectedModel) {
-      modelSelectorEl.value = selectedModel;
-      if (complete === true && modelSelectorEl.value !== selectedModel) {
-        selectedModel = modelSelectorEl.value || '';
-        try { localStorage.setItem(MODEL_LS_KEY, selectedModel); } catch (eLs) {}
-      }
-    }
+    _applyChatModel();
   }
 
   function onModelChange() {
     if (!modelSelectorEl) return;
-    var previous = selectedModel;
-    selectedModel = modelSelectorEl.value || '';
-    try { localStorage.setItem(MODEL_LS_KEY, selectedModel); } catch(e) {}
-    // Notify other components immediately (optimistic)
-    document.dispatchEvent(new CustomEvent('model-changed', { detail: selectedModel }));
-    // Sync to backend — await ack; revert UI on failure / env lock
-    if (selectedModel) {
-      fetch('/api/settings/active_model', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ active_model: selectedModel }),
-      }).then(function(r) { return r.json().then(function(data) { return { ok: r.ok, data: data }; }); })
-        .then(function(res) {
-          var data = res.data || {};
-          if (data.status === 'error' || data.ok === false) {
-            selectedModel = previous;
-            if (modelSelectorEl) modelSelectorEl.value = previous || '';
-            try { localStorage.setItem(MODEL_LS_KEY, previous || ''); } catch(e) {}
-            document.dispatchEvent(new CustomEvent('model-changed', { detail: previous || '' }));
-            var msg = data.error || data.error_code || 'Model switch failed';
-            if (window.KS && KS.toast) KS.toast(msg, 'error', 4000);
-            else if (window.showToast) window.showToast(msg, 'error', 4000);
-            return;
-          }
-          if (data.active_model || data.model) {
-            selectedModel = data.active_model || data.model;
-            if (modelSelectorEl) modelSelectorEl.value = selectedModel;
-            try { localStorage.setItem(MODEL_LS_KEY, selectedModel); } catch(e) {}
-          }
-        }).catch(function() {
-          if (window.KS && KS.toast) KS.toast(ti('model_switch_failed', 'Model switch request failed'), 'error', 3000);
-        });
+    var picked = modelSelectorEl.value || '';
+    selectedModel = picked;
+    // This chat's model only: the default stays what Settings says.
+    try {
+      if (picked && picked !== _modelOptions.default) localStorage.setItem(_chatModelKey(chatSessionId), picked);
+      else localStorage.removeItem(_chatModelKey(chatSessionId));
+    } catch (e) {}
+    document.dispatchEvent(new CustomEvent('chat-model-changed', { detail: picked }));
+    if (picked && window.KS && KS.toast) {
+      KS.toast(tiFmt('model_this_chat', 'This chat now uses {model}. Other chats keep theirs.', { model: picked }), 'info', 3000);
     }
   }
 
@@ -7057,6 +7010,7 @@
     // chatSessionId is still the OLD session, and pointing the preference
     // store at it there would have loaded the session being left.
     _syncPrefsSession();
+    _applyChatModel();
 
     // Connect to Central WebSocket Telemetry Bus for THIS session
     // (connect is a no-op if already OPEN on the same sessionId).
@@ -7183,6 +7137,7 @@
             // bubble does at its end; ts is when its bubble was created.
             var shownAt = (role === 'assistant' && msg.closed_at)
               || msg.ts || msg.timestamp || msg.created_at || null;
+            if (role === 'assistant' && msg.run_model) _noteChatRunModel(sessionId, msg.run_model);
             var painted = appendMessage(role, content, null, shownAt, {
               activity: (window.KazmaTurnDocument && KazmaTurnDocument.activityForMessage)
                 ? KazmaTurnDocument.activityForMessage(msg)
@@ -7338,6 +7293,7 @@
     chatSessionId = generateSessionId();
     persistSessionId();
     _syncPrefsSession();
+    _applyChatModel();
     messagesEl.innerHTML =
       '<div class="chat-welcome">' +
         '<div class="welcome-icon"><img src="/static/img/kazma-icon.png" alt="Kazma" class="welcome-logo"></div>' +

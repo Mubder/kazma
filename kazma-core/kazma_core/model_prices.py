@@ -106,10 +106,15 @@ def _owner_prices(store: Any = None) -> dict[str, Price]:
         return {}
 
 
-def price_for(provider: str, base_url: str, model: str, *, store: Any = None) -> Price | None:
+def price_for(
+    provider: str, base_url: str, model: str, *, store: Any = None, details: Any = None,
+) -> Price | None:
     """The price of *model* served by *provider* at *base_url*, or None when
-    it is not known. The vendor tables are the clients' own (step 3 is
-    :func:`table_price`, asked by the Anthropic and Bedrock clients)."""
+    it is not known: the owner's, free on this network, then the model's
+    known details (*details*: a :class:`kazma_core.model_details.ModelDetails`
+    -- the provider's own list, or Kazma's dated catalog on the vendor's own
+    API; providers stage 3). The vendor tables are the clients' own (asked
+    by the Anthropic and Bedrock clients)."""
     name = str(model or "").strip().lower()
     prov = str(provider or "").strip().lower()
     prices = _owner_prices(store)
@@ -121,6 +126,11 @@ def price_for(provider: str, base_url: str, model: str, *, store: Any = None) ->
 
     if url_is_local(base_url):
         return Price(0.0, 0.0, "local")
+    inp = getattr(details, "input_per_1m", None)
+    outp = getattr(details, "output_per_1m", None)
+    if inp is not None and outp is not None:
+        source = (getattr(details, "sources", {}) or {}).get("input_per_1m") or "catalog"
+        return Price(float(inp), float(outp), str(source))
     return None
 
 

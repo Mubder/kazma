@@ -142,14 +142,6 @@ gateway:
     slack: 30
   suggestions:
     enabled: true
-  voice:
-    enabled: false
-    tts_reply: true
-    stt_provider: openai
-    tts_provider: edgetts
-    tts_voice: default
-    stt_language: auto
-    tts_output_format: mp3
 safety:
   hitl:
     enabled: true
@@ -329,3 +321,14 @@ backups:
     rclone_remote: ''
     keep: 7
   extra_paths: research
+# Voice (Settings -> Voice): one setting for every surface. It was
+# gateway.voice, read once at boot (providers stage 2); a stored
+# gateway.voice value moves here at the next boot.
+voice:
+  enabled: false
+  tts_reply: true
+  stt_provider: openai
+  tts_provider: edgetts
+  tts_voice: default
+  stt_language: auto
+  tts_output_format: mp3

@@ -123,6 +123,44 @@ def _daily_cost_limit(value: Any) -> Any:
 MAX_OWNER_PRICES = 500
 
 
+def _model_details(value: Any) -> dict[str, dict[str, Any]]:
+    """``models.details``: the owner's details for a model
+    (kazma_core.model_details, providers stage 3): a context window and an
+    output limit in tokens (1,024 to 100 million), whether it sees images,
+    whether it uses tools. Refused whole, never saved with an entry
+    dropped."""
+    import json
+
+    from kazma_core.model_details import parse_overrides
+
+    if isinstance(value, str):
+        try:
+            value = json.loads(value) if value.strip() else {}
+        except ValueError as exc:
+            raise SettingRejected("Model details must be a list of models and what is known about each.") from exc
+    if not isinstance(value, dict):
+        raise SettingRejected("Model details must be a list of models and what is known about each.")
+    if len(value) > MAX_OWNER_PRICES:
+        raise SettingRejected(f"At most {MAX_OWNER_PRICES} models can have details.")
+    parsed = parse_overrides(value)
+    out: dict[str, dict[str, Any]] = {}
+    for name, entry in value.items():
+        key = str(name or "").strip().lower()
+        given = {k for k, v in (entry or {}).items() if v not in (None, "")} if isinstance(entry, dict) else {None}
+        kept = set((parsed.get(key) or {}).keys())
+        unknown = given - {"context_window", "max_output", "vision", "tools"}
+        too_small = any(
+            isinstance((entry or {}).get(f), (int, float)) and not isinstance((entry or {}).get(f), bool)
+            and 0 < float(entry[f]) < 1024 for f in ("context_window", "max_output"))
+        if not key or len(key) > 200 or unknown or given != kept or too_small:
+            raise SettingRejected(
+                "Each model needs a name and only these, each valid: a context window and an output limit "
+                f"(1,024 to 100,000,000 tokens), vision and tools (true or false) ({str(name)[:80]!r} has not)."
+            )
+        out[key] = parsed[key]
+    return out
+
+
 def _model_prices(value: Any) -> dict[str, dict[str, float]]:
     """``models.prices``: the owner's price per million tokens for a model
     (kazma_core.model_prices). Every entry must be a model name and two
@@ -366,6 +404,7 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
     from kazma_core.lifecycle_notifier import EVENTS_KEY
     from kazma_core.memory.config import TENANT_MODE_KEY
     from kazma_core.memory.embedder import API_KEY_ENV_KEY
+    from kazma_core.model_details import OVERRIDES_KEY as MODEL_DETAILS_KEY
     from kazma_core.model_prices import OWNER_PRICES_KEY
     from kazma_core.runs.runbooks import RUNBOOKS_KEY, validate_runbooks
     from kazma_core.swarm.task_store import TASK_RETENTION_KEY
@@ -389,6 +428,7 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
         "agent.language": (_agent_language, "agent"),
         "agent.max_iterations": (_max_iterations, "agent"),
         OWNER_PRICES_KEY: (_model_prices, "models"),
+        MODEL_DETAILS_KEY: (_model_details, "models"),
         OFFSITE_KEEP_KEY: (_offsite_keep, "backups"),
     }
 

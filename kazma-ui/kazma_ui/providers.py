@@ -114,17 +114,15 @@ def _activate_tested_provider(registry: Any, name: str) -> None:
 
 def _can_be_called(registry: Any, name: str) -> bool:
     """A saved provider chat can call: on this computer or its network, or
-    with a key Kazma would send (the vault, ``<PROVIDER>_API_KEY``). A cloud
-    provider switched on with no key was a provider that failed every
+    with what its sign-in needs -- a key Kazma would send (the vault,
+    ``<PROVIDER>_API_KEY``), Bedrock's AWS keys, a Vertex project
+    (``provider_check.credentials_problem``, one rule with the check). A
+    cloud provider switched on with no key was a provider that failed every
     message and that Kazma might fall back to (providers stage 1)."""
-    from kazma_core.provider_check import LOCAL_NAMES
-    from kazma_core.runtime.live_llm import key_is_usable, url_is_local
+    from kazma_core.provider_check import credentials_problem
 
-    entry = registry.get_provider(name) or {}
-    if name.lower() in LOCAL_NAMES or url_is_local(str(entry.get("base_url") or "")):
-        return True
-    _url, key = registry.resolve_provider_credentials(name)
-    return key_is_usable(key)
+    entry = registry.get_provider(name) or {"name": name}
+    return credentials_problem(registry, entry) is None
 
 
 def _same_address(providers: list[dict[str, Any]], name: str, base_url: str) -> list[str]:
@@ -151,14 +149,56 @@ def _same_address(providers: list[dict[str, Any]], name: str, base_url: str) -> 
 
 
 def _mask_provider_entry(provider: dict[str, Any]) -> dict[str, Any]:
-    """Return a copy of a provider entry with the API key and any password in
-    its base URL masked (the save restores an unchanged masked URL)."""
+    """Return a copy of a provider entry with every secret masked: the API
+    key, any password in its base URL (the save restores an unchanged masked
+    URL), each header's value, the AWS secret and token, each extra key
+    (providers stages 2 and 4). The save keeps a masked value as stored."""
     safe = dict(provider)
     if safe.get("api_key"):
         safe["api_key"] = _mask_secret(str(safe["api_key"]))
     if safe.get("base_url"):
         safe["base_url"] = mask_url_credentials(safe["base_url"])
+    headers = safe.pop("secret_headers", None)
+    if isinstance(headers, dict):
+        safe["headers"] = {k: _mask_secret(str(v)) for k, v in headers.items()}
+    for field in ("aws_secret_access_key", "aws_session_token"):
+        if safe.get(field):
+            safe[field] = _mask_secret(str(safe[field]))
+    if isinstance(safe.get("api_keys"), list):
+        safe["api_keys"] = [
+            {"id": str(k.get("id") or ""), "label": str(k.get("label") or ""),
+             "api_key": _mask_secret(str(k.get("api_key") or ""))}
+            for k in safe["api_keys"] if isinstance(k, dict)
+        ]
     return safe
+
+
+def _provider_fields(data: dict[str, Any], existing: dict[str, Any]) -> dict[str, Any]:
+    """A save's fields as a provider row holds them: ``headers`` stored as
+    ``secret_headers`` (every value vaulted), masked secrets kept as stored
+    (``provider_check.merge_typed_secrets``), the preset named, the kind
+    checked. Raises 400 for a header that could split a request line."""
+    from kazma_core.provider_check import merge_typed_secrets
+    from kazma_core.providers import PROVIDER_PRESETS
+
+    headers = data.pop("headers", None) or {}
+    for name, value in headers.items():
+        if any(c in str(name) for c in "\r\n:") or any(c in str(value) for c in "\r\n"):
+            raise HTTPException(status_code=400, detail="headers: a name holds a colon or line break, or a value a line break")
+    data["secret_headers"] = headers
+    if data.get("api_keys") is None:
+        data.pop("api_keys", None)
+    data = merge_typed_secrets(data, existing)
+    kind = str(data.get("kind") or "").strip().lower()
+    if kind and kind not in ("chat", "speech"):
+        raise HTTPException(status_code=400, detail="kind: chat or speech")
+    preset = str(data.get("preset") or "").strip().lower()
+    if not preset and data["name"].lower() in PROVIDER_PRESETS:
+        preset = data["name"].lower()
+    if preset and preset not in PROVIDER_PRESETS:
+        raise HTTPException(status_code=400, detail=f"preset: no such preset {preset!r}")
+    data["preset"] = preset
+    return data
 
 
 def _restore_url(field: str, posted: Any, stored: Any) -> Any:
@@ -358,10 +398,38 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
             # was hidden from the chat's model picker (providers stage 1).
             from kazma_core.runtime.live_llm import url_is_local
 
-            entry["local"] = url_is_local(str(p.get("base_url") or ""))
+            from kazma_core.models.modality import row_is_speech
+            from kazma_core.providers import PROVIDER_PRESETS, is_local_preset
+
+            preset_id = str(p.get("preset") or "").strip().lower() or name.lower()
+            entry["local"] = is_local_preset(preset_id) or url_is_local(str(p.get("base_url") or ""))
             entry["same_address_as"] = _same_address(all_rows, name, str(p.get("base_url") or ""))
+            # Providers stage 2: what it serves (speech is kept out of every
+            # chat model list) and which form the dialog shows for it.
+            entry["kind"] = "speech" if row_is_speech(p, discovered) else "chat"
+            entry["form"] = str((PROVIDER_PRESETS.get(preset_id) or {}).get("form") or "key")
             providers.append(entry)
         return providers
+
+    @router.get("/api/models/options")
+    def model_choice_options() -> dict[str, Any]:
+        """Every model a person can choose, named ``provider:model``, with
+        what is known about it, and the default (kazma_core.models.options,
+        providers stage 3): the one list the chat's picker, the sidebar's,
+        the chat apps' /model menu and the terminal app read."""
+        from kazma_core.models.options import model_options
+
+        return model_options(get_model_registry())
+
+    @router.get("/api/providers/catalog")
+    def provider_catalog() -> list[dict[str, Any]]:
+        """Every provider Kazma knows (kazma_core.providers.catalog): the one
+        list the Settings dialog and the setup guide read (providers stage
+        2). The page kept ten presets of its own, already different from the
+        server's twenty."""
+        from kazma_core.providers import catalog
+
+        return catalog()
 
     @router.post("/api/providers")
     def upsert_provider(req: ProviderUpdateRequest) -> dict[str, Any]:
@@ -378,6 +446,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         if _is_masked_placeholder(data.get("api_key", "")) and existing.get("api_key"):
             data["api_key"] = existing["api_key"]
         data["base_url"] = _restore_url("base_url", data.get("base_url"), existing.get("base_url"))
+        data = _provider_fields(data, existing)
 
         result = registry.upsert_provider(data)
         if "error" in result:
@@ -482,11 +551,15 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         if isinstance(fields, JSONResponse):
             return fields
         registry = get_model_registry()
+        typed = {k: v for k, v in fields.items() if k not in ("name", "base_url", "api_key", "model")}
+        if isinstance(typed.get("headers"), dict):
+            typed["secret_headers"] = typed.pop("headers")
         try:
             entry = await asyncio.to_thread(
                 candidate_entry, registry, str(fields.get("name") or ""),
                 base_url=str(fields.get("base_url") or ""),
                 api_key=_sanitize_api_key(str(fields.get("api_key") or "")),
+                typed=typed,
             )
         except CandidateRefused as exc:
             return {"success": False, "error_code": exc.code, "error": exc.message}

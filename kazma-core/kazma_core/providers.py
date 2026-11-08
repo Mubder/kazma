@@ -1,15 +1,59 @@
-"""Provider presets with default base URLs and model discovery endpoints."""
+"""The provider catalog: every provider Kazma knows, as data (providers stage 2).
 
-__all__ = ["GEMINI_MODELS", "PROVIDER_PRESETS", "env_key_for", "get_base_url", "get_preset", "list_providers"]
+One list, read by every screen and every code path: the server's presets,
+the Settings dialog (``GET /api/providers/catalog``), the setup guide, the
+client builder and model discovery. Until 2026-11-08 the Settings page kept
+its own ten presets, already different from these twenty, and a provider's
+wire format, sign-in and default model lived in three other tables.
+
+Each entry says:
+
+* ``name`` -- what the pages show; ``docs`` -- where the provider hands out
+  keys (or its documentation);
+* ``base_url`` -- its address (empty when the client computes it: Azure,
+  Bedrock, Vertex); ``models_endpoint`` -- where its model list is;
+* ``api_style`` -- the wire format the client speaks (``openai``,
+  ``anthropic``, ``azure``, ``bedrock``, ``google``);
+* ``auth`` -- how it signs in: ``bearer``, ``x-api-key``, ``api-key``,
+  ``aws`` (SigV4), ``google`` (an AI Studio key or Vertex credentials) or
+  ``none``; ``auth_header`` is the older spelling, kept for readers of it;
+* ``form`` -- which fields the Settings dialog asks for: ``key`` (an address
+  and a key), ``azure`` (endpoint, key, API version, deployment),
+  ``bedrock`` (region and AWS keys), ``google`` (AI Studio key, or Vertex
+  project and region), ``local`` (an address, no key);
+* ``kind`` -- ``chat``, or ``speech`` for a speech-to-text service (kept out
+  of every chat model list);
+* ``local`` -- a server on this computer or network (no key, no cost);
+* ``default_model`` -- the model to try when nothing else names one;
+* ``url_hint`` -- what to change in the address, when it has a placeholder.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+__all__ = [
+    "GEMINI_MODELS",
+    "PROVIDER_PRESETS",
+    "RETIRED_PRESET_URLS",
+    "catalog",
+    "default_model_for",
+    "env_key_for",
+    "get_base_url",
+    "get_preset",
+    "is_local_preset",
+    "is_speech_provider",
+    "list_providers",
+]
 
 # Well-known Gemini models available via Vertex AI.
 # These are hardcoded because Vertex AI does not expose a static /models
-# REST endpoint — the base URL is computed dynamically per project/location.
+# REST endpoint -- the base URL is computed dynamically per project/location.
 GEMINI_MODELS: list[str] = [
     "gemini-2.5-flash",
     "gemini-2.5-pro",
+    "gemini-2.5-flash-lite",
     "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
 ]
 
 
@@ -20,153 +64,120 @@ RETIRED_PRESET_URLS: dict[str, tuple[str, ...]] = {
     "cohere": ("https://api.cohere.ai/v1",),
 }
 
-PROVIDER_PRESETS: dict[str, dict[str, str]] = {
-    "openai": {
-        "name": "OpenAI",
-        "base_url": "https://api.openai.com/v1",
-        "models_endpoint": "/models",
-        "auth_header": "Bearer",
-        "docs": "https://platform.openai.com/api-keys",
-    },
-    "anthropic": {
-        "name": "Anthropic",
-        "base_url": "https://api.anthropic.com/v1",
-        "models_endpoint": "/models",
-        "auth_header": "x-api-key",
-        "docs": "https://console.anthropic.com/keys",
-    },
-    "groq": {
-        "name": "Groq (Free Tier)",
-        "base_url": "https://api.groq.com/openai/v1",
-        "models_endpoint": "/models",
-        "auth_header": "Bearer",
-        "docs": "https://console.groq.com/keys",
-    },
-    "deepseek": {
-        "name": "DeepSeek",
-        "base_url": "https://api.deepseek.com/v1",
-        "models_endpoint": "/models",
-        "auth_header": "Bearer",
-        "docs": "https://platform.deepseek.com/api_keys",
-    },
-    "google": {
-        "name": "Google Gemini",
-        "base_url": "",  # computed by GeminiProvider from project/location
-        "models_endpoint": "",  # models are hardcoded below (Vertex AI has no static /models)
-        "auth_header": "Bearer",
-        "docs": "https://console.cloud.google.com/vertex-ai",
-    },
-    "xai": {
-        "name": "xAI / Grok",
-        "base_url": "https://api.x.ai/v1",
-        "models_endpoint": "/models",
-        "auth_header": "Bearer",
-        "docs": "https://console.x.ai",
-    },
-    # Z.AI serves its OpenAI-compatible API at /v4, not /v1. Declared here so
+
+def _p(name: str, base_url: str, docs: str = "", *, api_style: str = "openai", auth: str = "bearer",
+       form: str = "key", kind: str = "chat", local: bool = False, default_model: str = "",
+       models_endpoint: str = "/models", url_hint: str = "") -> dict[str, Any]:
+    header = {"bearer": "Bearer", "x-api-key": "x-api-key", "api-key": "api-key", "aws": "Bearer",
+              "google": "Bearer", "none": ""}[auth]
+    return {
+        "name": name, "base_url": base_url, "docs": docs, "api_style": api_style, "auth": auth,
+        "auth_header": header, "form": form, "kind": kind, "local": local,
+        "default_model": default_model, "models_endpoint": models_endpoint, "url_hint": url_hint,
+    }
+
+
+PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
+    # ── Model makers ────────────────────────────────────────────────────
+    "openai": _p("OpenAI", "https://api.openai.com/v1", "https://platform.openai.com/api-keys",
+                 default_model="gpt-5-mini"),
+    "anthropic": _p("Anthropic", "https://api.anthropic.com/v1", "https://console.anthropic.com/keys",
+                    api_style="anthropic", auth="x-api-key", default_model="claude-sonnet-5-5"),
+    "google": _p("Google Gemini", "", "https://aistudio.google.com/apikey", api_style="google",
+                 auth="google", form="google", default_model="gemini-2.5-flash", models_endpoint=""),
+    "deepseek": _p("DeepSeek", "https://api.deepseek.com/v1", "https://platform.deepseek.com/api_keys",
+                   default_model="deepseek-chat"),
+    "xai": _p("xAI / Grok", "https://api.x.ai/v1", "https://console.x.ai", default_model="grok-4"),
+    "mistral": _p("Mistral AI", "https://api.mistral.ai/v1", "https://console.mistral.ai/api-keys",
+                  default_model="mistral-large-latest"),
+    "cohere": _p("Cohere", "https://api.cohere.ai/compatibility/v1", "https://dashboard.cohere.com/api-keys",
+                 default_model="command-a-03-2025"),
+    # Z.AI serves its OpenAI-compatible API at /v4, not /v1: declared here so
     # nothing appends a version to it -- the mistake that made every GLM call
     # 404 while the Settings page reported the provider healthy.
-    "zai": {
-        "name": "Z.AI (GLM)",
-        "base_url": "https://api.z.ai/api/paas/v4",
-        "models_endpoint": "/models",
-        "auth_header": "Bearer",
-        "docs": "https://docs.z.ai",
-    },
-    "openrouter": {
-        "name": "OpenRouter",
-        "base_url": "https://openrouter.ai/api/v1",
-        "models_endpoint": "/models",
-        "auth_header": "Bearer",
-        "docs": "https://openrouter.ai/keys",
-    },
-    "ollama": {
-        "name": "Ollama (Local)",
-        "base_url": "http://127.0.0.1:11434/v1",
-        "models_endpoint": "/models",
-        "auth_header": "",
-        "docs": "",
-    },
-    "lm-studio": {
-        "name": "LM Studio (Local)",
-        "base_url": "http://localhost:1234/v1",
-        "models_endpoint": "/models",
-        "auth_header": "",
-        "docs": "",
-    },
-    "nvidia": {
-        "name": "NVIDIA NIM",
-        "base_url": "https://integrate.api.nvidia.com/v1",
-        "models_endpoint": "/models",
-        "auth_header": "Bearer",
-        "docs": "https://build.nvidia.com",
-    },
-    "mistral": {
-        "name": "Mistral AI",
-        "base_url": "https://api.mistral.ai/v1",
-        "models_endpoint": "/models",
-        "auth_header": "Bearer",
-        "docs": "https://console.mistral.ai/api-keys",
-    },
-    "together": {
-        "name": "Together AI",
-        "base_url": "https://api.together.xyz/v1",
-        "models_endpoint": "/models",
-        "auth_header": "Bearer",
-        "docs": "https://api.together.ai/settings/api-keys",
-    },
-    "cohere": {
-        "name": "Cohere",
-        # Cohere's OpenAI-compatible API (docs.cohere.com/docs/compatibility-api).
-        # The preset named its own API's /v1, which has no /chat/completions.
-        "base_url": "https://api.cohere.ai/compatibility/v1",
-        "models_endpoint": "/models",
-        "auth_header": "Bearer",
-        "docs": "https://dashboard.cohere.com/api-keys",
-    },
-    "fireworks": {
-        "name": "Fireworks AI",
-        "base_url": "https://api.fireworks.ai/inference/v1",
-        "models_endpoint": "/models",
-        "auth_header": "Bearer",
-        "docs": "https://fireworks.ai/account/api-keys",
-    },
-    "perplexity": {
-        "name": "Perplexity",
-        "base_url": "https://api.perplexity.ai",
-        "models_endpoint": "/models",
-        "auth_header": "Bearer",
-        "docs": "https://www.perplexity.ai/settings/api",
-    },
-    "ai21": {
-        "name": "AI21 Labs",
-        "base_url": "https://api.ai21.com/studio/v1",
-        "models_endpoint": "/models",
-        "auth_header": "Bearer",
-        "docs": "https://studio.ai21.com/account/api-key",
-    },
-    "azure": {
-        "name": "Azure OpenAI",
-        "base_url": "",  # computed by AzureProvider from resource name + deployment
-        "models_endpoint": "",
-        "auth_header": "api-key",
-        "docs": "https://learn.microsoft.com/azure/ai-services/openai",
-    },
-    "bedrock": {
-        "name": "AWS Bedrock",
-        "base_url": "",  # computed by BedrockProvider from region
-        "models_endpoint": "",
-        "auth_header": "Bearer",  # SigV4 signing applied by BedrockProvider
-        "docs": "https://console.aws.amazon.com/bedrock",
-    },
-    "custom": {
-        "name": "Custom Endpoint",
-        "base_url": "",
-        "models_endpoint": "/models",
-        "auth_header": "Bearer",
-        "docs": "",
-    },
+    "zai": _p("Z.AI (GLM)", "https://api.z.ai/api/paas/v4", "https://z.ai/manage-apikey/apikey-list",
+              default_model="glm-4.6"),
+    "moonshot": _p("Moonshot AI (Kimi)", "https://api.moonshot.ai/v1", "https://platform.moonshot.ai/console/api-keys",
+                   default_model="kimi-k2-0905-preview"),
+    "minimax": _p("MiniMax", "https://api.minimax.io/v1", "https://www.minimax.io/platform/user-center/basic-information/interface-key",
+                  default_model="MiniMax-M2"),
+    "dashscope": _p("Qwen (Alibaba Cloud Model Studio)", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+                    "https://modelstudio.console.alibabacloud.com/?tab=playground#/api-key",
+                    default_model="qwen-plus"),
+    "perplexity": _p("Perplexity", "https://api.perplexity.ai", "https://www.perplexity.ai/settings/api",
+                     default_model="sonar"),
+    "ai21": _p("AI21 Labs", "https://api.ai21.com/studio/v1", "https://studio.ai21.com/account/api-key",
+               default_model="jamba-large"),
+    # ── Model hosts and routers ────────────────────────────────────────
+    "openrouter": _p("OpenRouter", "https://openrouter.ai/api/v1", "https://openrouter.ai/keys",
+                     default_model="openai/gpt-5-mini"),
+    "groq": _p("Groq", "https://api.groq.com/openai/v1", "https://console.groq.com/keys",
+               default_model="llama-3.3-70b-versatile"),
+    "cerebras": _p("Cerebras", "https://api.cerebras.ai/v1", "https://cloud.cerebras.ai/platform",
+                   default_model="llama-3.3-70b"),
+    "together": _p("Together AI", "https://api.together.xyz/v1", "https://api.together.ai/settings/api-keys",
+                   default_model="meta-llama/Llama-3.3-70B-Instruct-Turbo"),
+    "fireworks": _p("Fireworks AI", "https://api.fireworks.ai/inference/v1", "https://fireworks.ai/account/api-keys"),
+    "deepinfra": _p("DeepInfra", "https://api.deepinfra.com/v1/openai", "https://deepinfra.com/dash/api_keys",
+                    default_model="meta-llama/Llama-3.3-70B-Instruct"),
+    "huggingface": _p("Hugging Face Inference Providers", "https://router.huggingface.co/v1",
+                      "https://huggingface.co/settings/tokens"),
+    "nvidia": _p("NVIDIA NIM", "https://integrate.api.nvidia.com/v1", "https://build.nvidia.com",
+                 default_model="meta/llama-3.3-70b-instruct"),
+    "sambanova": _p("SambaNova Cloud", "https://api.sambanova.ai/v1", "https://cloud.sambanova.ai/apis",
+                    default_model="Meta-Llama-3.3-70B-Instruct"),
+    "siliconflow": _p("SiliconFlow", "https://api.siliconflow.com/v1", "https://cloud.siliconflow.com/account/ak"),
+    "novita": _p("Novita AI", "https://api.novita.ai/openai/v1", "https://novita.ai/settings/key-management"),
+    "hyperbolic": _p("Hyperbolic", "https://api.hyperbolic.xyz/v1", "https://app.hyperbolic.xyz/settings"),
+    "cloudflare": _p("Cloudflare Workers AI", "https://api.cloudflare.com/client/v4/accounts/ACCOUNT_ID/ai/v1",
+                     "https://dash.cloudflare.com/profile/api-tokens",
+                     default_model="@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+                     url_hint="Replace ACCOUNT_ID with your Cloudflare account id."),
+    # ── Cloud platforms with their own sign-in ────────────────────────
+    "azure": _p("Azure OpenAI", "", "https://learn.microsoft.com/azure/ai-services/openai",
+                api_style="azure", auth="api-key", form="azure", models_endpoint=""),
+    "bedrock": _p("AWS Bedrock", "", "https://console.aws.amazon.com/bedrock",
+                  api_style="bedrock", auth="aws", form="bedrock", models_endpoint=""),
+    # ── On this computer or network ───────────────────────────────────
+    "ollama": _p("Ollama (Local)", "http://127.0.0.1:11434/v1", "https://ollama.com/download",
+                 auth="none", form="local", local=True),
+    "lm-studio": _p("LM Studio (Local)", "http://localhost:1234/v1", "https://lmstudio.ai",
+                    auth="none", form="local", local=True),
+    "vllm": _p("vLLM", "http://localhost:8000/v1", "https://docs.vllm.ai", auth="none", form="local", local=True),
+    "llamacpp": _p("llama.cpp server", "http://localhost:8080/v1", "https://github.com/ggml-org/llama.cpp",
+                   auth="none", form="local", local=True),
+    "localai": _p("LocalAI", "http://localhost:8080/v1", "https://localai.io", auth="none", form="local", local=True),
+    "jan": _p("Jan", "http://localhost:1337/v1", "https://jan.ai", auth="none", form="local", local=True),
+    # ── Your own ──────────────────────────────────────────────────────
+    "custom": _p("Custom Endpoint", "", ""),
 }
+
+
+def catalog() -> list[dict[str, Any]]:
+    """Every preset as the pages read it (``GET /api/providers/catalog``):
+    ``custom`` last, as the dialog's "any other" choice."""
+    rows = [{"id": pid, **meta} for pid, meta in PROVIDER_PRESETS.items() if pid != "custom"]
+    rows.append({"id": "custom", **PROVIDER_PRESETS["custom"]})
+    return rows
+
+
+def is_local_preset(provider: str) -> bool:
+    """True for a preset that runs on this computer or network."""
+    return bool((PROVIDER_PRESETS.get((provider or "").strip().lower()) or {}).get("local"))
+
+
+def is_speech_provider(entry: Any) -> bool:
+    """True for a provider row (or preset id) that serves speech, not chat.
+
+    A row says so itself (``kind: speech``, providers stage 2); rows written
+    before carry no kind and are chat."""
+    if isinstance(entry, str):
+        return str((PROVIDER_PRESETS.get(entry.strip().lower()) or {}).get("kind") or "chat") == "speech"
+    if isinstance(entry, dict):
+        from kazma_core.models.modality import row_is_speech
+
+        return row_is_speech(entry)
+    return False
 
 
 def env_key_for(provider: str) -> str:
@@ -238,11 +249,8 @@ CAPABILITY_DEFAULTS: dict[str, object] = {
 
 #: Only what is known. An entry here is either structural (the adapter that
 #: serves it) or measured — never assumed.
+#: The wire format (``api_style``) is the catalog's (``PROVIDER_PRESETS``).
 CAPABILITY_OVERRIDES: dict[str, dict[str, object]] = {
-    "anthropic": {"api_style": "anthropic"},
-    "bedrock": {"api_style": "bedrock"},
-    "google": {"api_style": "google"},
-    "azure": {"api_style": "azure"},
     # Measured 2026-09-13 by scripts/provider_conformance.py against
     # glm-5.3: chat, system turn and tool calling all pass. `developer` is
     # rejected with `400 Incorrect role information`, so system_role is not a
@@ -289,6 +297,9 @@ def capabilities(provider: str) -> dict[str, object]:
         "supports": dict(CAPABILITY_DEFAULTS["supports"]),  # type: ignore[arg-type]
         "max_context": CAPABILITY_DEFAULTS["max_context"],
     }
+    preset = PROVIDER_PRESETS.get(provider.lower()) or {}
+    if preset.get("api_style"):
+        merged["api_style"] = preset["api_style"]
     override = CAPABILITY_OVERRIDES.get(provider.lower(), {})
     for key, value in override.items():
         if key == "supports" and isinstance(value, dict):
@@ -301,7 +312,7 @@ def capabilities(provider: str) -> dict[str, object]:
 #: The model to use for a provider when NOTHING else has said which.
 #:
 #: This is data about a vendor -- "openai's small chat model is called
-#: gpt-4o-mini" -- and belongs in one place. It lived in two: an inline dict
+#: gpt-5-mini" -- and belongs in one place: the catalog's ``default_model``. It lived in two: an inline dict
 #: in `model_registry` (5 providers) and `_FALLBACK_CHAT_MODEL` in
 #: `runtime/model_switch` (8). They had already drifted; the registry copy
 #: was missing xai, openrouter and mistral, so the same question got
@@ -314,14 +325,7 @@ def capabilities(provider: str) -> dict[str, object]:
 #: setting. Ask this map for the provider IN HAND; if the provider is not
 #: known, the answer is "" and the caller must say so out loud.
 DEFAULT_MODEL_FOR: dict[str, str] = {
-    "deepseek": "deepseek-chat",
-    "openai": "gpt-4o-mini",
-    "anthropic": "claude-sonnet-4",
-    "google": "gemini-2.0-flash",
-    "groq": "llama-3.3-70b-versatile",
-    "xai": "grok-3",
-    "openrouter": "openai/gpt-4o-mini",
-    "mistral": "mistral-large-latest",
+    pid: str(meta["default_model"]) for pid, meta in PROVIDER_PRESETS.items() if meta.get("default_model")
 }
 
 

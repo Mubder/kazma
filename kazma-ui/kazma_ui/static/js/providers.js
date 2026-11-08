@@ -12,18 +12,16 @@
 // Assign to window so soft-nav can re-inject this file without
 // "Identifier has already been declared" on top-level const.
 var ProvidersManager = window.ProvidersManager = {
-    /** Provider presets with default base URLs */
-    PRESETS: {
-        openai: { name: 'OpenAI', base_url: 'https://api.openai.com/v1', docs: 'https://platform.openai.com/api-keys' },
-        anthropic: { name: 'Anthropic', base_url: 'https://api.anthropic.com/v1', docs: 'https://console.anthropic.com/keys' },
-        deepseek: { name: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', docs: 'https://platform.deepseek.com/api_keys' },
-        google: { name: 'Google Gemini', base_url: 'https://generativelanguage.googleapis.com/v1beta', docs: 'https://aistudio.google.com/apikey' },
-        xai: { name: 'xAI / Grok', base_url: 'https://api.x.ai/v1', docs: 'https://console.x.ai' },
-        openrouter: { name: 'OpenRouter', base_url: 'https://openrouter.ai/api/v1', docs: 'https://openrouter.ai/keys' },
-        ollama: { name: 'Ollama (Local)', base_url: 'http://127.0.0.1:11434/v1', docs: '' },
-        'lm-studio': { name: 'LM Studio (Local)', base_url: 'http://localhost:1234/v1', docs: '' },
-        nvidia: { name: 'NVIDIA NIM', base_url: 'https://integrate.api.nvidia.com/v1', docs: 'https://build.nvidia.com' },
-        custom: { name: 'Custom Endpoint', base_url: '', docs: '' },
+    /**
+     * The server's provider catalog (GET /api/providers/catalog, providers
+     * stage 2): the one list. This page kept ten presets of its own, already
+     * different from the server's twenty. Empty until setCatalog().
+     */
+    catalog: [],
+
+    /** @param {Array<Object>} rows the catalog route's answer */
+    setCatalog(rows) {
+        this.catalog = Array.isArray(rows) ? rows : [];
     },
 
     // NOTE: loadAll / add / remove / toggle / test used to sit here, wrapping
@@ -203,7 +201,8 @@ var ProvidersManager = window.ProvidersManager = {
      * @returns {Object|null} Preset data or null
      */
     getPreset(presetKey) {
-        return this.PRESETS[presetKey] || null;
+        const key = String(presetKey || '').toLowerCase();
+        return this.catalog.find(row => row.id === key) || null;
     },
 
     /**
@@ -211,7 +210,7 @@ var ProvidersManager = window.ProvidersManager = {
      * @returns {Array<{key: string, name: string}>}
      */
     getPresetKeys() {
-        return Object.entries(this.PRESETS).map(([key, val]) => ({ key, name: val.name }));
+        return this.catalog.map(row => ({ key: row.id, name: row.name, local: !!row.local, form: row.form || 'key' }));
     },
 
     /**
