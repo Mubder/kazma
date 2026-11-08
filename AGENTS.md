@@ -2811,6 +2811,19 @@ takeover, without the sweep its rows stay), the real-Postgres races in
 container -- frozen with `docker pause`, or cut off the network -- is taken
 over on the database's clock and fenced when it returns; with its renewals
 blind the fence alone refuses it; blind and unfenced it publishes (control).
+**A stop waits for the sweep, and this process's own leftovers are taken
+back** (2026-11-08, the drill VM's 48-hour soak, which restarts the service
+in one process). The sweep's pass runs in a thread, and cancelling its task
+did not stop it: `close()` took the database away under it ("could not be
+rolled back (ProgrammingError)"), and the intake it had just claimed named
+this process as owner, so every later sweep here skipped it as running until
+the process exited. `stop_workers` now sets the sweep's stop flag and waits
+for the pass (`wait_then_cancel`, 30 s), which stops between intakes; and
+`admission.is_live` -- the tokens `reserve` hands out until `finish`, and the
+one a sweep is rolling back (`holding`) -- tells an intake this process is
+working on from one it left: a "self" owner not live is rolled back like a
+dead one. Gate: `tests/test_document_intake_sweep_stop.py` (the old stop and
+the old "self is always running" rule as controls).
 
 **B3. Admission, scratch and claims are bounded and fair** (2026-10-13, F08).
 The Web upload refuses a declared length past the limit, a disabled platform,

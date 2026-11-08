@@ -52,7 +52,7 @@ from typing import Any, BinaryIO
 from kazma_core.db.pg_helpers import store_errors
 
 from . import live_scratch, ocr_progress, telemetry
-from .admission import IntakeAdmissionStore, current_owner, lease_lapsed, owner_state
+from .admission import IntakeAdmissionStore, current_owner, holding, is_live, lease_lapsed, owner_state
 from .audit import DocumentAuditStore
 from .capacity import CapacityError, DocumentCapacityGuard
 from .config import DocumentConfig, get_document_rollout
@@ -233,6 +233,9 @@ class DocumentIngestionService:
         self.audit = DocumentAuditStore(self.repository)
         self.admissions = IntakeAdmissionStore(self.jobs)
         self.admissions.reconcile_published()
+        #: Set to stop the intake sweep: its pass runs in a thread, and
+        #: cancelling the task does not stop the thread (2026-11-08).
+        self._intake_sweep_stop = threading.Event()
         self._recover_stranded_intakes()
         self.capacity = DocumentCapacityGuard(
             config=initial,
@@ -290,6 +293,7 @@ class DocumentIngestionService:
             await self._manager.start()
         from kazma_core.background import spawn_background
 
+        self._intake_sweep_stop.clear()
         self._intake_sweeper = spawn_background(
             self._sweep_stranded_intakes(), name="documents:stranded-intakes", never_completes=True
         )
@@ -313,9 +317,11 @@ class DocumentIngestionService:
         never raced.
         """
         from kazma_core.db import availability
+        from kazma_core.shutdown import sleep_or_shutdown
 
-        while True:
-            await asyncio.sleep(_INTAKE_SWEEP_SECONDS)
+        while not self._intake_sweep_stop.is_set():
+            if await sleep_or_shutdown(_INTAKE_SWEEP_SECONDS) or self._intake_sweep_stop.is_set():
+                return
             # The intake reservations are in the job store: a sweep while the
             # database is away only fails. The outage is said once, elsewhere.
             if await availability.wait_while_away():
@@ -323,7 +329,8 @@ class DocumentIngestionService:
             try:
                 await asyncio.to_thread(self._recover_stranded_intakes)
             except store_errors() as exc:
-                logger.warning("[documents.ingestion] stranded intake sweep failed (%s)", type(exc).__name__)
+                logger.warning("[documents.ingestion] stranded intake sweep failed (%s: %s)",
+                               type(exc).__name__, exc)
 
     async def _reconcile_index_once(self) -> None:
         """Bring the knowledge index back to what this store records, once
@@ -507,8 +514,16 @@ class DocumentIngestionService:
         """Stop the worker pool, awaiting in-flight stages (idempotent)."""
         sweeper, self._intake_sweeper = self._intake_sweeper, None
         if sweeper is not None:
-            sweeper.cancel()
-            await asyncio.gather(sweeper, return_exceptions=True)
+            # Ask the sweep to stop, and let a pass in its thread end before
+            # ``close()`` takes the database away. Cancelling the task left the
+            # thread running: its next statement met a closed database
+            # (ProgrammingError), and an intake it had just claimed was held
+            # until the process exited (the drill VM's soak, 2026-11-08). A
+            # pass stops between intakes.
+            from kazma_core.bounded_cancel import wait_then_cancel
+
+            self._intake_sweep_stop.set()
+            await wait_then_cancel(sweeper, what="documents intake sweep", wait=_INTAKE_SWEEP_STOP_WAIT_S)
         reconcile, self._index_reconcile = self._index_reconcile, None
         if reconcile is not None:
             # The thread finishes the document it is on and stops.
@@ -1030,34 +1045,41 @@ class DocumentIngestionService:
             rows = self.admissions.unpublished()
             now = self.admissions.now_epoch()
         except store_errors() as exc:
-            logger.warning("[documents.ingestion] stranded intake scan failed (%s)", type(exc).__name__)
+            logger.warning("[documents.ingestion] stranded intake scan failed (%s: %s)", type(exc).__name__, exc)
             return 0
         recovered = 0
         for row in rows:
+            if self._intake_sweep_stop.is_set():
+                return recovered  # stopping: the next start or sweep takes the rest
             owner = str(row.get("owner") or "")
+            token = str(row["token"])
             state = owner_state(owner)
-            if state == "dead":
+            if state == "dead" or (state == "self" and not is_live(token)):
+                # A "self" owner no code here works on was left by a service of
+                # this process that stopped: no one will finish it (2026-11-08).
                 expected_heartbeat = None
             elif state != "self" and lease_lapsed(row, now):
                 expected_heartbeat = float(row["heartbeat_epoch"])
             else:
                 continue
-            token = str(row["token"])
-            if not self.admissions.claim(
-                token, expected_owner=owner, expected_heartbeat=expected_heartbeat
-            ):
-                continue  # another recoverer took it, its lease was renewed, or it published
-            try:
-                if self._rollback_intake(row):
-                    recovered += 1
-            except store_errors() + (RuntimeError, ValueError, OSError) as exc:
-                logger.warning(
-                    "[documents.ingestion] stranded intake %s could not be rolled back (%s); "
-                    "a later start retries it",
-                    token, type(exc).__name__,
-                )
+            with holding(token):  # a concurrent sweep here leaves it alone
+                if not self.admissions.claim(
+                    token, expected_owner=owner, expected_heartbeat=expected_heartbeat
+                ):
+                    continue  # another recoverer took it, its lease was renewed, or it published
+                try:
+                    if self._rollback_intake(row):
+                        recovered += 1
+                except store_errors() + (RuntimeError, ValueError, OSError) as exc:
+                    logger.warning(
+                        "[documents.ingestion] stranded intake %s could not be rolled back (%s: %s); "
+                        "the next sweep or start retries it",
+                        token, type(exc).__name__, exc,
+                    )
         if recovered:
             logger.info("[documents.ingestion] rolled back %d intake(s) left by a stopped process", recovered)
+        if self._intake_sweep_stop.is_set():
+            return recovered
         try:
             for row in self.admissions.fenced_recent():
                 if self._discard_tagged(row):
@@ -1066,7 +1088,7 @@ class DocumentIngestionService:
                         row["token"],
                     )
         except store_errors() + (RuntimeError, ValueError, OSError) as exc:
-            logger.warning("[documents.ingestion] fenced intake sweep failed (%s)", type(exc).__name__)
+            logger.warning("[documents.ingestion] fenced intake sweep failed (%s: %s)", type(exc).__name__, exc)
         return recovered
 
     def _audit_intake_rejection(
@@ -3218,6 +3240,9 @@ def _clean(value: str, name: str) -> str:
 
 #: How often a running service looks for intakes whose owner died.
 _INTAKE_SWEEP_SECONDS = 60.0
+#: How long stopping the workers waits for a sweep pass to end on its own; a
+#: pass stops between intakes, so it ends within one intake's rollback.
+_INTAKE_SWEEP_STOP_WAIT_S = 30.0
 
 
 class _SystemActor:

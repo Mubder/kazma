@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Stopping documents no longer strands an upload.** Stopping the document
+  service while its minute-by-minute cleanup was undoing an abandoned upload
+  closed the database under it ("could not be rolled back
+  (ProgrammingError)"), and that upload's reservation then stayed held until
+  Kazma's process exited. A stop now waits for the cleanup, and an upload
+  this process left behind is undone at the next cleanup. Found by the
+  48-hour document soak on the drill machine.
 - **One provider list, and 15 more providers.** The Settings dialog, the setup
   guide and the server read one catalog (it kept its own ten): Cerebras,
   DeepInfra, Hugging Face, Cloudflare Workers AI, Moonshot (Kimi), MiniMax,
