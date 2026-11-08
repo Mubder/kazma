@@ -25,7 +25,13 @@ from typing import Any
 
 from kazma_core.config_store import apply_sqlite_pragmas
 
-__all__ = ["WorkspaceStore", "get_workspace_store", "reset_workspace_store"]
+__all__ = [
+    "WorkspaceStore",
+    "get_workspace_store",
+    "peek_workspace_store",
+    "reset_workspace_store",
+    "set_workspace_store",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -476,6 +482,22 @@ def get_workspace_store() -> WorkspaceStore:
             if _workspace_store is None:
                 _workspace_store = WorkspaceStore()
     return _workspace_store
+
+
+def peek_workspace_store() -> WorkspaceStore | None:
+    """Return the live singleton WITHOUT creating one (None if not yet made).
+
+    Test harnesses capture-and-restore via this + :func:`set_workspace_store`
+    (the root conftest, after every test); never calls
+    :func:`get_workspace_store`'s lazy constructor, which would seed a row.
+    """
+    return _workspace_store
+
+
+def set_workspace_store(store: WorkspaceStore | None) -> None:
+    """Replace the shared singleton (used by test harnesses)."""
+    global _workspace_store
+    _workspace_store = store
 
 
 def reset_workspace_store() -> None:

@@ -128,12 +128,19 @@ def test_the_providers_list_says_which_are_local(monkeypatch):
 
     rows = [{"name": "server-gpu", "base_url": "http://192.168.1.20:8000/v1", "api_key": "", "enabled": True},
             {"name": "deepseek", "base_url": "https://api.deepseek.com/v1", "api_key": "", "enabled": True}]
+    by_name = {r["name"]: r for r in rows}
     fake = SimpleNamespace(
         list_providers=lambda: rows, get_discovered_models=lambda n: [], get_selected_models=lambda n: [],
         get_visible_models=lambda n: [],
+        # The list says whether chat could call each one (2026-11-08), through
+        # the one credentials rule, which asks the registry for its key.
+        get_provider=lambda n: by_name.get(n),
+        resolve_provider_credentials=lambda n: (by_name[n]["base_url"], by_name[n]["api_key"]),
     )
     monkeypatch.setattr(ui_providers, "get_model_registry", lambda: fake)
     app = FastAPI()
     app.include_router(ui_providers.create_providers_router(SimpleNamespace(get=lambda *a, **k: None)))
-    out = {p["name"]: p["local"] for p in TestClient(app).get("/api/providers").json()}
-    assert out == {"server-gpu": True, "deepseek": False}
+    listed = TestClient(app).get("/api/providers").json()
+    assert {p["name"]: p["local"] for p in listed} == {"server-gpu": True, "deepseek": False}
+    # A server on this network needs no key; a cloud provider without one cannot be called.
+    assert {p["name"]: p["callable"] for p in listed} == {"server-gpu": True, "deepseek": False}

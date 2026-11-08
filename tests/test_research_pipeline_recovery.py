@@ -97,7 +97,7 @@ asyncio.run(pipeline.run_research_pipeline('fixture topic',**{OPTIONS!r}))
 """
     # The child is a process of THIS install (its data dir): the crawl
     # journal is scoped per install since Knowledge audit KB-E07.
-    allowed = {'systemroot', 'windir', 'temp', 'tmp', 'path', 'kazma_data_dir'}
+    allowed = {'systemroot', 'windir', 'temp', 'tmp', 'path', 'kazma_data_dir', 'kazma_workspace'}
     result = await run_bounded_async([sys.executable, '-I', '-X', 'utf8', '-c', program],
         env={key: value for key, value in os.environ.items() if key.lower() in allowed},
         timeout=45, output_bytes=32768, memory_bytes=1024**3, text=True)
