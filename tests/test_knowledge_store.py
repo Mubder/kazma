@@ -492,7 +492,7 @@ def _kill_during_delete(db: str, point: str, *, without_mark: bool = False) -> N
     from kazma_core.security.process_budget import run_bounded
 
     core = str(Path(__file__).resolve().parents[1] / "kazma-core")
-    allowed = {"systemroot", "windir", "temp", "tmp", "path", "kazma_data_dir"}
+    allowed = {"systemroot", "windir", "temp", "tmp", "path", "kazma_data_dir", "kazma_workspace"}
     result = run_bounded(
         [sys.executable, "-I", "-c", _KILL_CHILD.format(core=core, db=db, point=point, without_mark=without_mark)],
         env={k: v for k, v in os.environ.items() if k.lower() in allowed},

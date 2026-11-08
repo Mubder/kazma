@@ -7212,7 +7212,8 @@ Read the named test before changing the code it guards.
   subscribers, the bound MCP root and the MCP rebind's executor and asyncio
   lock are module globals, and an agent-building test left its rebind
   subscribed for every later test (the probe pair in
-  `tests/test_order_independence.py`, with its negative control).
+  `tests/test_order_independence.py`, with its negative control). So are the
+  workspace store's singleton and rows (2026-11-08, §56).
   **No test reads a real `.env`** — two Postgres tests did, one the LIVE
   install's by hard-coded path. **`@pytest.mark.postgres` is the Postgres
   job's list** (`scripts/postgres_suite.py`), per test, verified on a real
@@ -9234,7 +9235,18 @@ has a gate that fails on the old code.
   under pytest the working folder is this repository, and a test's relative
   `file_write` landed in it. The seed takes `KAZMA_WORKSPACE` first, and the
   root conftest pins it to a temp folder. Gate:
-  `tests/test_install_data_shield.py` (no variable as the control).
+  `tests/test_install_data_shield.py` (no variable as the control). **And
+  what a test leaves in the store is put back** (2026-11-08): a research
+  recovery test's child process, handed the session's `KAZMA_DATA_DIR` but
+  not `KAZMA_WORKSPACE`, was first to open the session's store file and
+  seeded the checkout, and a later test wrote `d2-<hex>/report.md` into the
+  repository. The root conftest makes the store before the first test and,
+  after every test, restores the singleton (`peek_workspace_store` /
+  `set_workspace_store`) and the file's workspace rows, whoever wrote them
+  (`KAZMA_TEST_WORKSPACE_GUARD=0` turns it off); a child given the session
+  data folder is given the session workspace too. Gates:
+  `tests/test_order_independence.py` (three planted shapes, each with the
+  guard off as its control), `tests/test_install_data_shield.py`.
 
 ### 57. The weak-spot roadmap of 2026-11 (`docs/plans/FUNCTIONAL_AUDIT_2026-11_REMEDIATION.md`)
 

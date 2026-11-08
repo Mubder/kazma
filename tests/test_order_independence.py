@@ -16,10 +16,15 @@ test to the next; each is now closed for every test at once:
   module before the first test.
 * module attributes: ``mod.attr = fake`` in a test was never undone.
   ``tests/test_debt_ratchet.py`` holds that count at zero.
+* the active workspace: the workspace store's file and singleton outlived
+  their test, and the checkout left active in them (2026-11-08) sent a later
+  test's file_write into the repository. The root conftest makes the store
+  before the first test and puts its singleton and rows back after every one.
 
-The first two are shown working here, and shown to be what makes it work:
-each negative control runs the same tests in a child pytest with the guard
-off and watches them fail.
+The environment, import timing, the workspace binding and the active
+workspace are shown working here, and shown to be what makes it work: each
+negative control runs the same tests in a child pytest with the guard off and
+watches them fail.
 """
 
 from __future__ import annotations
@@ -66,7 +71,7 @@ def test_the_environment_guard_is_set_up_first_and_torn_down_last(request):
     """
     names = request.fixturenames
     guard = names.index("_environment_restored")
-    for other in ("_isolate_process_singletons", "_isolated_tenant_context",
+    for other in ("_isolate_process_singletons", "_isolate_workspace_store", "_isolated_tenant_context",
                   "_reset_shutdown_event", "_isolated_config_store", "monkeypatch"):
         if other in names:
             assert names.index(other) > guard, f"{other} is set up before the environment guard"
@@ -123,6 +128,108 @@ def test_without_the_guard_the_binding_reaches_the_next_test():
     )
     assert proc.returncode == 1, proc.stdout[-2000:]
     assert "1 failed, 1 passed" in proc.stdout, proc.stdout[-2000:]
+
+
+# ── the active workspace ───────────────────────────────────────────────────
+# The workspace store is one singleton over one file, and its active row
+# outranks the pin (resolve_active_root). On 2026-11-08 a research recovery
+# test's child process -- handed the session data folder but not
+# KAZMA_WORKSPACE, run in the checkout -- seeded the checkout into that file,
+# and a later test's relative file_write put a report.md in the repository.
+# The binding guard above put the pin back; the row stayed. The root conftest
+# now makes the store before the first test, seeded from the pinned
+# KAZMA_WORKSPACE, and puts its singleton and rows back after every test.
+# Three shapes: nothing made the store yet (the child was first to seed it),
+# the file written by a writer that is not the singleton (as the child was),
+# and a singleton of the test's own left in place.
+
+
+def _the_session_workspace_is_active() -> None:
+    from kazma_core.stores.workspaces import peek_workspace_store
+    from kazma_core.workspace.binding import resolve_active_root
+
+    store = peek_workspace_store()  # before resolving, which would make one
+    assert not resolve_active_root().resolve().is_relative_to(REPO), "the checkout is the workspace"
+    assert store is not None, "no store before the test: whatever opens its file first seeds it"
+    active = store.get_active_workspace()
+    assert active is not None, "the table was emptied, not put back"
+    assert Path(active["root_path"]).resolve() == Path(os.environ["KAZMA_WORKSPACE"]).resolve()
+
+
+def test_the_store_is_made_before_the_test():
+    _the_session_workspace_is_active()
+
+
+def test_without_the_guard_nothing_makes_the_store_first():
+    """Negative control: alone in a fresh process with the workspace guard
+    off, no store exists when the test starts -- the state in which a child
+    process seeded its working folder."""
+    proc = _child_pytest(
+        f"{HERE}::test_the_store_is_made_before_the_test",
+        KAZMA_TEST_WORKSPACE_GUARD="0",
+    )
+    assert proc.returncode == 1, proc.stdout[-2000:]
+    assert "no store before the test" in proc.stdout, proc.stdout[-2000:]
+
+
+def test_the_checkout_is_made_active_in_the_store_file_here():
+    """First of a pair: another writer on the store's file makes the checkout
+    the active workspace and never undoes it."""
+    from kazma_core.stores.workspaces import WorkspaceStore
+    from kazma_core.workspace.binding import resolve_active_root
+
+    writer = WorkspaceStore()
+    try:
+        writer.set_active_workspace(writer.create_workspace("checkout", str(REPO))["id"])
+    finally:
+        writer.close()
+    assert resolve_active_root().resolve() == REPO
+
+
+def test_and_the_row_does_not_reach_the_next_test():
+    _the_session_workspace_is_active()
+
+
+def test_a_store_seeded_from_the_checkout_is_left_here(tmp_path, monkeypatch):
+    """First of a pair: a store of the test's own, seeded with no
+    KAZMA_WORKSPACE in the checkout (its working folder), left as the
+    singleton."""
+    from kazma_core.stores.workspaces import WorkspaceStore, set_workspace_store
+    from kazma_core.workspace.binding import resolve_active_root
+
+    monkeypatch.delenv("KAZMA_WORKSPACE", raising=False)
+    monkeypatch.chdir(REPO)
+    set_workspace_store(WorkspaceStore(db_path=str(tmp_path / "ws.db")))
+    assert resolve_active_root().resolve() == REPO
+
+
+def test_and_the_store_does_not_reach_the_next_test():
+    _the_session_workspace_is_active()
+
+
+def test_without_the_guard_a_row_in_the_store_file_reaches_the_next_test():
+    """Negative control: the file pair with the workspace guard off (the
+    binding guard stays on, so the pin is put back: the row alone leaks)."""
+    proc = _child_pytest(
+        f"{HERE}::test_the_checkout_is_made_active_in_the_store_file_here",
+        f"{HERE}::test_and_the_row_does_not_reach_the_next_test",
+        KAZMA_TEST_WORKSPACE_GUARD="0",
+    )
+    assert proc.returncode == 1, proc.stdout[-2000:]
+    assert "1 failed, 1 passed" in proc.stdout, proc.stdout[-2000:]
+    assert "the checkout is the workspace" in proc.stdout, proc.stdout[-2000:]
+
+
+def test_without_the_guard_a_store_left_behind_reaches_the_next_test():
+    """Negative control: the singleton pair with the workspace guard off."""
+    proc = _child_pytest(
+        f"{HERE}::test_a_store_seeded_from_the_checkout_is_left_here",
+        f"{HERE}::test_and_the_store_does_not_reach_the_next_test",
+        KAZMA_TEST_WORKSPACE_GUARD="0",
+    )
+    assert proc.returncode == 1, proc.stdout[-2000:]
+    assert "1 failed, 1 passed" in proc.stdout, proc.stdout[-2000:]
+    assert "the checkout is the workspace" in proc.stdout, proc.stdout[-2000:]
 
 
 # ── import timing ──────────────────────────────────────────────────────────

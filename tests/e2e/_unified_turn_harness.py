@@ -371,7 +371,8 @@ def _isolate_workspace_store(tmp_dir: str) -> Iterator[None]:
     try:
         import kazma_core.stores.workspaces as _ws
 
-        _ws.reset_workspace_store()
+        # No reset_workspace_store() first: it closed and dropped the
+        # session's store, which the patch below then "restored" as None.
         store = _ws.WorkspaceStore(
             db_path=os.path.join(tmp_dir, "workspaces.db")
         )

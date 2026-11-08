@@ -137,6 +137,11 @@
   Windows the first start downloaded it and did not answer for 5.5 minutes.
   The install's wait for Kazma now ends at its limit (it counted only its
   pauses, so 4 minutes became 5.5).
+- **A test run no longer writes into the repository it runs in.** One test's
+  helper process made the checkout the coding workspace for the rest of the
+  run, so a later test's file landed in the repository (in an install, that
+  is the install folder). Every test now starts and ends with the same
+  workspace.
 
 ## 0.21.0 — Install Kazma in one run: Express, Full or Custom (2026-11-07)
 

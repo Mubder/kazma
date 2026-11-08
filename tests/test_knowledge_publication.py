@@ -223,7 +223,7 @@ def test_a_killed_process_leaves_the_old_page_or_the_new_one(tmp_path, point):
     v1 = [f"version one paragraph {i} about tokens" for i in range(3)]
     store.publish_page("api", url, _page("api", url, v1))
     store.close()
-    allowed = {"systemroot", "windir", "temp", "tmp", "path", "kazma_data_dir"}
+    allowed = {"systemroot", "windir", "temp", "tmp", "path", "kazma_data_dir", "kazma_workspace"}
     result = run_bounded([sys.executable, "-I", "-c", _CHILD.format(core=CORE, db=db, point=point)],
                          env={k: v for k, v in os.environ.items() if k.lower() in allowed},
                          timeout=60, output_bytes=32768, memory_bytes=1024**3)
