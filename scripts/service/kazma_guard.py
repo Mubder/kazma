@@ -931,12 +931,21 @@ def format_operator_card(
     severity: str,
     title: str,
     detail: str = "",
+    *,
+    form: str = "page",
+    since: str = "",
+    duration: str = "",
+    link: str = "",
 ) -> str:
     """Operator-visible card. Layout matches kazma_core.observability.alert_card.
 
-    Stdlib-only copy: the guard must not import kazma_core.
+    Stdlib-only copy: the guard must not import kazma_core. The three forms
+    (page, ``reminder``, ``recovery``) and the "Since ... · Open: ..." line
+    are held to ``tests/fixtures/alert_card/cards.json`` with the other two
+    copies (tests/test_alert_catalog.py).
     """
-    sources = {"guard": "Guard", "ops": "Ops", "system": "System"}
+    sources = {"guard": "Guard", "ops": "Ops", "system": "System",
+               "watch": "Watch", "cloudflare": "Cloudflare"}
     severities = {
         "info": "Info",
         "success": "Success",
@@ -958,14 +967,53 @@ def format_operator_card(
     src = sources.get(src_key, str(source or "Guard").strip() or "Guard")
     if src.lower() == "gaurd":
         src = "Guard"
-    sev_key = str(severity or "warn").strip().lower()
+    form = str(form or "page").strip().lower()
+    sev_key = "success" if form == "recovery" else str(severity or "warn").strip().lower()
     icon = icon_overrides.get(src_key, {}).get(sev_key) or icons.get(sev_key, icons["warn"])
     head = str(title or "").strip() or severities.get(sev_key, "Warn")
-    lines = [f"{icon} [{src}] {head}"]
+    lasted = str(duration or "").strip()
+    if form == "reminder":
+        first = f"{icon} ⏰ Still: [{src}] {head}"
+    elif form == "recovery":
+        first = f"{icon} [{src}] {head} is back" + (f": it lasted {lasted}." if lasted else ".")
+    else:
+        first = f"{icon} [{src}] {head}"
+    lines = [first]
     body = str(detail or "").strip()
     if body:
         lines.append(body)
+    footer = []
+    when = str(since or "").strip()
+    if when and form != "recovery":
+        footer.append(f"Since {when}" + (f" ({lasted})" if lasted else ""))
+    target = str(link or "").strip()
+    if target:
+        footer.append(f"Open: {target}")
+    if footer:
+        lines.append(" · ".join(footer))
     return "\n".join(lines)
+
+
+#: The guard's copy of Kazma's alert catalog (kazma_core/observability/
+#: alert_catalog.py, written by ``python -m kazma_core.observability.
+#: alert_catalog --write``). Every page names its kind there; the kinds of
+#: the ``_page`` calls below are held to it by tests/test_alert_catalog.py.
+ALERT_CATALOG_PATH = Path(__file__).resolve().with_name("alert_catalog.json")
+_alert_catalog: dict[str, dict] | None = None
+_UNKNOWN_KINDS_SAID: set[str] = set()
+
+
+def guard_alert_kinds() -> dict[str, dict]:
+    """The guard's entries of the alert catalog, by kind. Read once; {} when
+    the copy cannot be read (a page is sent either way)."""
+    global _alert_catalog
+    if _alert_catalog is None:
+        try:
+            data = json.loads(ALERT_CATALOG_PATH.read_text(encoding="utf-8"))
+            _alert_catalog = {str(a["key"]): a for a in data["alerts"] if a.get("sender") == "guard"}
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            _alert_catalog = {}
+    return _alert_catalog
 
 
 def _failing_checks(data: dict) -> list[str]:
@@ -2470,8 +2518,8 @@ class DocumentBroker:
             self.log("info", "broker.recovered", after=self._episode)
         if self._paged:
             self.guard._page("success", "Kazma's document broker is running again",
-                             f"{self._paged} -- recovered.", fingerprint="broker:recovered",
-                             force=True)
+                             f"{self._paged} -- recovered.", kind="broker.recovered",
+                             fingerprint="broker:recovered", force=True)
         self._episode, self._paged = "", ""
         self._write()
 
@@ -2537,7 +2585,8 @@ class DocumentBroker:
                 "warn", "Docker does not answer: documents are refused",
                 f"Kazma's document broker needs the Docker engine and it has not answered "
                 f"for {int(BROKER_ENGINE_PAGE_AFTER_S // 60)} min. Start Docker; the guard "
-                "keeps trying.", fingerprint="broker:docker", force=True)
+                "keeps trying.", kind="broker.docker_unavailable", fingerprint="broker:docker",
+                force=True)
         self._write()
 
     def _failed(self, detail: str, tail: str | None) -> None:
@@ -2556,7 +2605,7 @@ class DocumentBroker:
                 f"It {detail} ({self.failures} times in a row). The guard keeps trying "
                 f"every {int(BROKER_BACKOFF_S[-1] // 60)} min at most.\n"
                 f"Its log ({_broker_log_path().name}):\n{last}",
-                fingerprint="broker:failing", force=True)
+                kind="broker.failed", fingerprint="broker:failing", force=True)
         self._write()
 
     def stop(self, reason: str) -> None:
@@ -3032,7 +3081,7 @@ class Dependencies:
                             f"{down_s // 60} min. " if self._launches else
                             f"The engine answers again after {down_s // 60} min. ")
                     self.guard._page("success", "Docker is back", what + "Kazma follows.",
-                                     fingerprint="deps:recovered", force=True)
+                                     kind="deps.engine_up", fingerprint="deps:recovered", force=True)
                 self._recovered = True
             self._launched_at, self._launch_failures, self._next_launch = None, 0, 0.0
             self._launches, self._nudged, self._paged, self._said = 0, False, False, ""
@@ -3053,7 +3102,7 @@ class Dependencies:
                 f"The Docker engine has not answered for {int(down_for // 60)} min, and Kazma "
                 f"needs it ({', '.join(self.containers) or 'the document broker'}). "
                 f"{self.detail.rstrip('.')}. The guard keeps trying.",
-                fingerprint="deps:docker", force=True)
+                kind="deps.engine_down", fingerprint="deps:docker", force=True)
 
     def _maybe_launch(self, now: float, down_for: float) -> None:
         if down_for < DEPS_ENGINE_GRACE_S:
@@ -3136,6 +3185,7 @@ class Dependencies:
                 if self._start_failures.pop(name, 0) and name in self._container_paged:
                     self._container_paged.discard(name)
                     self.guard._page("success", f"Container {name} runs again", "",
+                                     kind="deps.container_recovered",
                                      fingerprint=f"deps:container:{name}:recovered", force=True)
                 self._left_alone.discard(name)
                 continue
@@ -3175,7 +3225,7 @@ class Dependencies:
             self.guard._page(
                 "warn", f"Container {name} will not start",
                 f"Kazma needs it, and `docker start {name}` failed {failures} times: {why}",
-                fingerprint=f"deps:container:{name}", force=True)
+                kind="deps.container_start_failed", fingerprint=f"deps:container:{name}", force=True)
 
     # -- the state file ------------------------------------------------------
 
@@ -3313,7 +3363,8 @@ class DatabaseServiceWatch:
                          after_s=round(now - self._down_since))
                 if self._paged:
                     self.guard._page("success", "Kazma's database is running again",
-                                     f"The {service} service answers again.", fingerprint="dbsvc:ok", force=True)
+                                     f"The {service} service answers again.", kind="dbsvc.back",
+                                     fingerprint="dbsvc:ok", force=True)
             self._down_since, self._started_this_outage, self._paged = None, False, False
             self._set("running")
             return
@@ -3334,7 +3385,7 @@ class DatabaseServiceWatch:
             self.guard._page("critical", "Kazma's database service is down",
                              f"The {service} service has not answered for {int(down_for // 60)} minutes; "
                              f"{what}. Chats, settings and memory wait until it is back.",
-                             fingerprint="dbsvc:down", force=True)
+                             kind="dbsvc.down", fingerprint="dbsvc:down", force=True)
         self._set("down")
 
     def _set(self, state: str) -> None:
@@ -3537,7 +3588,7 @@ class DiskWatch:
                 self._paged.discard(key)
                 self.guard._page("success", f"Disk space is back on {key}",
                                  f"{pct}% ({gb} GB) free where {where} is kept.",
-                                 fingerprint=f"disk:{key}:ok", force=True)
+                                 kind="disk.back", fingerprint=f"disk:{key}:ok", force=True)
             return
         self._paged.add(key)
         severity = "critical" if level == "critical" else "warn"
@@ -3545,6 +3596,7 @@ class DiskWatch:
                  else f"Disk space low on {key}")
         self.guard._page(severity, title,
                          f"{pct}% ({gb} GB) free where {where} is kept. {self._what_stops(role)}",
+                         kind="disk.critical" if level == "critical" else "disk.low",
                          fingerprint=f"disk:{key}:{level}", force=True)
 
     @staticmethod
@@ -3793,7 +3845,7 @@ class PowerWatch:
                 self.guard._page("success", "Power is back",
                                  f"The machine runs on mains power again ({pct} battery)."
                                  + (" Kazma starts again." if stopped else ""),
-                                 fingerprint="power:back", force=True)
+                                 kind="power.back", fingerprint="power:back", force=True)
             self._write()
             return
         low = self.percent is not None and self.percent <= POWER_STOP_PERCENT
@@ -3804,14 +3856,14 @@ class PowerWatch:
             self.guard._page("critical", f"Stopping Kazma: battery at {pct}",
                              "The machine has been on battery and the UPS is running low. "
                              "Kazma is stopped cleanly now; it starts again when power is back.",
-                             fingerprint="power:stopped", force=True)
+                             kind="power.stopping", fingerprint="power:stopped", force=True)
         elif before not in ("battery", "stopped"):
             self.state = "battery"
             self.log("warn", "power.on_battery", percent=self.percent)
             self.guard._page("warn", f"On battery power ({pct})",
                              f"The machine lost mains power. Kazma keeps running; below "
                              f"{POWER_STOP_PERCENT}% it is stopped cleanly and started again when power "
-                             "is back.", fingerprint="power:battery", force=True)
+                             "is back.", kind="power.on_battery", fingerprint="power:battery", force=True)
         self._write()
 
     def record(self) -> dict:
@@ -4196,7 +4248,7 @@ class Guard:
         self._page("warn", "Kazma is up and needs setup",
                    f"{detail}. Open {home} and go to Settings -> Providers. "
                    "Not restarting: a restart cannot add what is missing.",
-                   fingerprint="needs-setup")
+                   kind="health.needs_setup", fingerprint="needs-setup")
 
     def _page(
         self,
@@ -4204,14 +4256,23 @@ class Guard:
         title: str,
         detail: str = "",
         *,
+        kind: str,
         fingerprint: str = "",
         force: bool = False,
     ) -> bool:
         """Send a Guard operator card. Same fingerprint inside the cooldown
-        is logged, not sent. Crash-loop callers pass force=True."""
+        is logged, not sent. Crash-loop callers pass force=True.
+
+        *kind* is the page's entry in Kazma's alert catalog (the guard's
+        copy, ``alert_catalog.json``); a kind the copy does not hold is said
+        once in guard.log, and the page is sent either way."""
+        known = guard_alert_kinds()
+        if known and kind not in known and kind not in _UNKNOWN_KINDS_SAID:
+            _UNKNOWN_KINDS_SAID.add(kind)
+            self.log("warn", "guard.page_kind_unknown", kind=kind, catalog=str(ALERT_CATALOG_PATH))
         fp = fingerprint or f"{title}\n{detail}"
         if not force and not self._should_page(fp):
-            self.log("info", "guard.page_suppressed", title=title[:120])
+            self.log("info", "guard.page_suppressed", title=title[:120], kind=kind)
             return False
         if force:
             self._last_page_fp = fp
@@ -4230,7 +4291,7 @@ class Guard:
         if tail:
             last = "\n".join(tail.splitlines()[-8:])[-600:]
             detail += f"\nIts last words (server.stderr.log):\n{last}"
-        sent = self._page("warn", title, detail, fingerprint=reason)
+        sent = self._page("warn", title, detail, kind="guard.restarting", fingerprint=reason)
         self._awaiting_recovery = reason
         return sent
 
@@ -4242,7 +4303,7 @@ class Guard:
         self._awaiting_recovery = ""
         title = "Kazma is healthy again"
         detail = f"It answers again after: {reason}."
-        return self._page("success", title, detail, fingerprint=f"recovered:{reason}")
+        return self._page("success", title, detail, kind="guard.recovered", fingerprint=f"recovered:{reason}")
 
     def _raise_own_priority(self) -> None:
         """Run at the priority of an interactive program (2026-09-30).
@@ -4363,7 +4424,7 @@ class Guard:
                     self._page("success", "Kazma is up: its database answers again",
                                f"The boot waited {round(time.monotonic() - started)} s "
                                "for its database and went on by itself.",
-                               fingerprint="boot-db-wait-over")
+                               kind="child.database_answers", fingerprint="boot-db-wait-over")
                 return True
             last = detail
             status = read_boot_status(spawned_at)
@@ -4383,7 +4444,7 @@ class Guard:
                                "database; it goes on by itself the moment it answers. "
                                "Not restarting it."
                                + (f" The database said: {reason}" if reason else ""),
-                               fingerprint="boot-db-wait")
+                               kind="child.waiting_for_database", fingerprint="boot-db-wait")
                     wait_paged = True
             # Heartbeat while waiting, so a slow boot is visibly different
             # from a hang when someone reads this log at 3am.
@@ -4654,7 +4715,7 @@ class Guard:
                 "otherwise it would supervise a process it did not launch."
             )
             self.log("error", "guard.refused_to_start")
-            self._page("error", title, detail, force=True)
+            self._page("error", title, detail, kind="guard.refused_to_start", force=True)
             print(format_operator_card("Guard", "error", title, detail), file=sys.stderr)
             return 2
         # Only a guard that will supervise touches the broker: a refused one
@@ -4715,6 +4776,7 @@ class Guard:
                                     "serving the old build — the guard cannot kill it "
                                     "(likely elevated). From an admin terminal: "
                                     f"taskkill /PID {_stale_pid} /F, then restart the guard.",
+                                    kind="guard.port_still_held",
                                     fingerprint=f"stale:{_stale_pid}",
                                     force=True,
                                 )
@@ -4806,6 +4868,7 @@ class Guard:
                                 "info",
                                 "Kazma is restarting for an operator reload.",
                                 "Back in a moment — no action needed.",
+                                kind="guard.operator_reload",
                                 fingerprint="reload",
                             )
                         except Exception:
@@ -4822,6 +4885,7 @@ class Guard:
                         f"{CRASH_LOOP_WINDOW_S // 60} min)",
                         f"Last reason: {reason}. Pausing "
                         f"{CRASH_LOOP_COOLDOWN_S // 60} min — this needs a human.",
+                        kind="guard.crash_loop",
                         force=True,
                     )
                     self.recent.clear()
@@ -4881,6 +4945,7 @@ class Guard:
                 "Kazma's guard hit an error in its own code",
                 f"{type(exc).__name__}: {exc}. It keeps supervising; "
                 "guard.log has the traceback (guard.internal_error).",
+                kind="guard.internal_error",
                 fingerprint=(
                     f"internal:{type(exc).__name__}:"
                     f"{where.name if where else '?'}:{where.lineno if where else 0}"
@@ -4934,6 +4999,7 @@ class Guard:
             "Kazma supervision paused",
             f"{pause.get('reason')}. It will not be restarted until resumed. "
             f"Expires: {human_until}.",
+            kind="maintenance.active",
             fingerprint="pause",
             force=True,
         )
@@ -4958,6 +5024,7 @@ class Guard:
                     "info",
                     "Kazma supervision resumed",
                     "Restarting the server.",
+                    kind="maintenance.resumed",
                     fingerprint="resume",
                     force=True,
                 )
@@ -4970,6 +5037,7 @@ class Guard:
                     "warn",
                     "Kazma is still paused",
                     f"Paused for {mins} min and is not being supervised.",
+                    kind="maintenance.still_paused",
                     fingerprint=f"pause-nag:{mins // 60}",
                 )
         return True
@@ -5065,6 +5133,7 @@ class Guard:
                         "success",
                         "Kazma is ready again",
                         "The dependency it was waiting for is back; no restart was needed.",
+                        kind="health.ready_again",
                         fingerprint="not-ready-recovered",
                     )
                 if held_logged_at is not None and outage_since is not None:
@@ -5097,6 +5166,7 @@ class Guard:
                         "Kazma is down, but because Windows has no free local "
                         "port. Restarting Kazma would not help. guard.log "
                         "health.port_exhaustion names who holds the sockets.",
+                        kind="health.probe_unrunnable",
                         fingerprint="probe-unrunnable",
                     )
                 continue
@@ -5166,6 +5236,7 @@ class Guard:
                     "Kazma is up, but not ready",
                     f"{detail}. Not restarting: Kazma answers, and a restart "
                     f"cannot bring back what it is waiting for. {tail}",
+                    kind="health.dependency_down",
                     fingerprint="not-ready",
                 )
         return "guard shutting down"
@@ -6003,6 +6074,7 @@ def _run_supervisor(guard: Guard) -> int:
                 f"{type(exc).__name__}: {exc}. Kazma keeps running WITHOUT "
                 "supervision until the guard is started again: "
                 "schtasks /Run /TN KazmaAgent.",
+                kind="guard.crashed",
                 force=True,
             )
         except Exception:

@@ -13,6 +13,8 @@
 // With no install paired the probe alone decides, and cannot tell the
 // machine from the tunnel (``unreachable``).
 
+import { CATALOG } from "./catalog.js";
+
 // A heartbeat older than this is missing. The guard sends one a minute; 90 s
 // allows one late beat. Any longer and a machine that just went off still
 // reads as alive when the incident opens, and the page blames the tunnel.
@@ -151,19 +153,22 @@ export function diagnose({ live, ready, heartbeat, now, expectHeartbeat = true }
   return { condition: "tunnel_down", detail: `the tunnel cannot reach Kazma (HTTP ${live.status})` };
 }
 
+// What a page says for each condition, and how bad it is: Kazma's alert
+// catalog (kazma_core/observability/alert_catalog.py), whose generated copy
+// is catalog.js. Every condition above is an entry there ("watch.<condition>");
+// tests/test_alert_catalog.py holds the two to each other.
+const WATCH = new Map(CATALOG.alerts
+  .filter((a) => a.sender === "watch")
+  .map((a) => [a.key.slice("watch.".length), a]));
+
 /** What a page says for each condition. */
-export const TITLES = {
-  machine_unreachable: "Kazma's machine is not reachable (power, network or sleep)",
-  tunnel_down: "The tunnel is down; Kazma itself is running",
-  kazma_restarting: "Kazma is down; the guard is restarting it",
-  kazma_down: "Kazma is down",
-  dependency_down: "Kazma is up; a dependency is away",
-  guard_gone: "The guard stopped; Kazma is unsupervised",
-  disk_critical: "Kazma's disk is almost full",
-  observer_refused: "The observer cannot pass Cloudflare Access",
-  unreachable: "Kazma is not reachable",
-};
+export const TITLES = Object.fromEntries([...WATCH].map(([condition, a]) => [condition, a.title]));
 
 export function titleOf(condition) {
-  return TITLES[condition] || `Kazma: ${condition}`;
+  return (WATCH.get(condition) || {}).title || `Kazma: ${condition}`;
+}
+
+/** The card's severity for a condition ("warn" for one the catalog lacks). */
+export function severityOf(condition) {
+  return (WATCH.get(condition) || {}).severity || "warn";
 }

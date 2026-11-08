@@ -7,7 +7,8 @@
 // diagnosis now, and returns the new state and the pages to send. The run
 // (index.js) sends them and records which went out (``settle``).
 
-import { GOOD, titleOf } from "./diagnose.js";
+import { formatOperatorCard } from "./card.js";
+import { GOOD, severityOf, titleOf } from "./diagnose.js";
 
 // Three failed minutes: the runs are a minute apart, so the third bad
 // reading (120 s after the first) opens the incident; 10 s of slack.
@@ -24,6 +25,8 @@ export function duration(seconds) {
   return m ? `${h} h ${m} min` : `${h} h`;
 }
 
+// Times are UTC until the owner's zone reaches Kazma Watch (Settings ->
+// Alerts, the unified alerts plan's Stage 3).
 function clock(epoch) {
   return new Date(epoch * 1000).toISOString().slice(0, 16).replace("T", " ") + " UTC";
 }
@@ -96,19 +99,27 @@ function finish(state, diag, now, pages) {
   return { state, pages: pages.map((p) => ({ ...p, text: pageText(p.kind, state.incident, now) })) };
 }
 
+/**
+ * The page for ``kind`` ("open", "remind", "recovered"): Kazma's operator
+ * card with the source Watch (card.js), its title and severity from the
+ * alert catalog.
+ */
 export function pageText(kind, incident, now) {
   if (!incident) return "";
-  const title = titleOf(incident.cause);
-  const detail = incident.detail ? `\n${incident.detail}` : "";
-  if (kind === "open") {
-    return `⚠️ ${title}${detail}\nSince ${clock(incident.started_at)} (${duration(now - incident.started_at)}).`;
-  }
-  if (kind === "remind") {
-    return `⏰ Still: ${title}${detail}\nFor ${duration(now - incident.started_at)}.`;
+  if (kind === "open" || kind === "remind") {
+    return formatOperatorCard("watch", severityOf(incident.cause), titleOf(incident.cause),
+      incident.detail || "", {
+        form: kind === "remind" ? "reminder" : "page",
+        since: clock(incident.started_at),
+        duration: duration(now - incident.started_at),
+      });
   }
   const end = incident.ended_at || now;
-  const causes = incident.causes.length > 1 ? `\nOn the way: ${incident.causes.map(titleOf).join("; ")}.` : "";
-  return `✅ Kazma is back. ${titleOf(incident.causes[0] || incident.cause)}: it lasted ${duration(end - incident.started_at)}.${causes}`;
+  const lines = [`It was: ${titleOf(incident.causes[0] || incident.cause)}.`];
+  if (incident.causes.length > 1) lines.push(`On the way: ${incident.causes.map(titleOf).join("; ")}.`);
+  // "🟢 [Watch] Kazma is back: it lasted 12 min." (watch.recovered)
+  return formatOperatorCard("watch", "success", "Kazma", lines.join("\n"),
+    { form: "recovery", duration: duration(end - incident.started_at) });
 }
 
 /** Record that ``page`` went out (``sent``) on the state's incident. */

@@ -503,6 +503,8 @@ DECLARED: dict[str, str] = {
     M + "majlis_runtime.py": "an Arabic farewell of the Majlis persona",
     M + "memory/recall.py": "an Arabic example (\"انشرها\") in guidance to the model, beside the English",
     M + "msa_tokenizer.py": "Arabic letter normalisation: Arabic-only by nature",
+    M + "observability/alert_catalog.py": "each alert's card title in both languages (title / title_ar); "
+                                          "tests/test_alert_catalog.py checks every entry has both",
     M + "pacing.py": "Gulf greetings for pacing: Arabic content by design",
     M + "personalities.py": "each personality's description in both languages (description / description_ar)",
     M + "product_knowledge.py": "the product's Arabic name and its Arabic facts for the model",
