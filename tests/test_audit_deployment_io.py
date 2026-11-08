@@ -14,7 +14,6 @@ from kazma_gateway.adapters import callback_store, telegram
 from kazma_gateway.routers.workspace import create_workspace_select_router
 from kazma_gateway.routers.workspaces import create_workspaces_router
 from kazma_core.backup import rclone_policy
-from kazma_core.provider_probe import probe_chat_completion
 
 
 class CountingStream(httpx.AsyncByteStream):
@@ -180,14 +179,30 @@ def test_callback_failures_do_not_log_token_or_exception_payload(monkeypatch, ca
 
 @pytest.mark.asyncio
 async def test_provider_probe_preserves_status_without_echoing_remote_text(monkeypatch):
+    """The provider check (kazma_core.provider_check, which replaced the
+    Bearer probe in providers stage 1) says the status, never the reply."""
+    from kazma_core import provider_adapters
+    from kazma_core.provider_check import check_model
+
     def handle(request):
         return httpx.Response(403, text="private-internal-file-content token=synthetic-secret")
 
-    original = httpx.AsyncClient
-    monkeypatch.setattr(httpx, "AsyncClient",
-                        lambda **kwargs: original(transport=httpx.MockTransport(handle), **kwargs))
-    result = await probe_chat_completion("http://127.0.0.1:11434/v1", "synthetic-key", "proof")
-    assert result["ok"] is False
+    real_build = provider_adapters.build_client
+
+    def build(name, config, entry=None):
+        client = real_build(name, config, entry)
+        http = httpx.AsyncClient(base_url=config.base_url, transport=httpx.MockTransport(handle))
+
+        async def _get_client():
+            return http
+
+        client._get_client = _get_client
+        return client
+
+    monkeypatch.setattr(provider_adapters, "build_client", build)
+    result = await check_model({"name": "ollama", "base_url": "http://127.0.0.1:11434/v1",
+                                "api_key": "synthetic-key"}, "proof")
+    assert result["ok"] is False and result["error_code"] == "key_refused"
     assert "403" in result["error"]
     assert "private-internal" not in str(result)
     assert "synthetic-secret" not in str(result)

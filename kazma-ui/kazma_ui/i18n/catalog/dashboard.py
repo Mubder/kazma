@@ -924,6 +924,30 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "الأقصى: {n} رمز",
         "en": "{n} tokens max",
     },
+    "dashboard.spend_unpriced.zero": {
+        "ar": "لا طلبات بسعر غير معروف",
+        "en": "no calls with no known price",
+    },
+    "dashboard.spend_unpriced.one": {
+        "ar": "طلب واحد بسعر غير معروف",
+        "en": "1 call with no known price",
+    },
+    "dashboard.spend_unpriced.two": {
+        "ar": "طلبان بسعر غير معروف",
+        "en": "{n} calls with no known price",
+    },
+    "dashboard.spend_unpriced.few": {
+        "ar": "{n} طلبات بسعر غير معروف",
+        "en": "{n} calls with no known price",
+    },
+    "dashboard.spend_unpriced.many": {
+        "ar": "{n} طلبًا بسعر غير معروف",
+        "en": "{n} calls with no known price",
+    },
+    "dashboard.spend_unpriced.other": {
+        "ar": "{n} طلب بسعر غير معروف",
+        "en": "{n} calls with no known price",
+    },
     "dashboard.chart_cost_max": {
         "ar": "الأقصى {n}",
         "en": "{n} max",

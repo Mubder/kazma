@@ -131,7 +131,7 @@ def friendly_llm_error(
         target = f" by {where}" if where else ""
         return (
             f"⚠️ The model request was rejected{target} due to an invalid or "
-            "missing API key. Go to Settings > Models/Providers and update the "
+            "missing API key. Go to Settings > Providers & Connectors and update the "
             "credentials for that provider."
         )
 
@@ -148,7 +148,7 @@ def friendly_llm_error(
         return (
             f"⚠️ The model provider{where} is limiting how often Kazma may call it "
             f"(HTTP 429).{tried} Send your message again in a minute, or switch "
-            "provider in Settings > Models/Providers."
+            "provider in Settings > Providers & Connectors."
         )
 
     if getattr(exc, "kind", "") == "unusable_answer":
@@ -160,7 +160,7 @@ def friendly_llm_error(
             f"⚠️ The model provider{where} answered, but not with a model answer: it "
             f"sent {sent}. Kazma asked again and got the same. Send your message "
             "again in a minute; if it keeps happening, check the provider (or a "
-            "proxy in front of it), or switch provider in Settings > Models/Providers."
+            "proxy in front of it), or switch provider in Settings > Providers & Connectors."
         )
 
     if getattr(exc, "kind", "") == "stream_truncated":

@@ -1951,6 +1951,218 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "تم الحفظ",
         "en": "Saved",
     },
+    "settings.model_prices_title": {
+        "ar": "أسعار النماذج",
+        "en": "Model prices",
+    },
+    "settings.model_prices_lede": {
+        "ar": "سعر النموذج لكل مليون رمز، للنماذج التي لا يذكر مزوّدها تكلفة الطلب. بلا سعر تُعرض تكلفة الطلب على أنها غير معروفة، لا صفرًا ولا سعر نموذج آخر.",
+        "en": "What a model costs per million tokens, for the models whose provider does not report a call's cost. Without a price, a call's cost is shown as unknown: never zero, never another model's price.",
+    },
+    "settings.model_prices_model": {
+        "ar": "النموذج",
+        "en": "Model",
+    },
+    "settings.model_prices_input": {
+        "ar": "الإدخال: دولار لكل مليون رمز",
+        "en": "Input: US$ per million tokens",
+    },
+    "settings.model_prices_output": {
+        "ar": "الإخراج: دولار لكل مليون رمز",
+        "en": "Output: US$ per million tokens",
+    },
+    "settings.model_prices_add": {
+        "ar": "أضف نموذجًا",
+        "en": "Add a model",
+    },
+    "settings.model_prices_save": {
+        "ar": "احفظ الأسعار",
+        "en": "Save prices",
+    },
+    "settings.model_prices_saved": {
+        "ar": "حُفظت الأسعار",
+        "en": "Prices saved",
+    },
+    "settings.model_prices_failed": {
+        "ar": "لم تُحفظ الأسعار: ",
+        "en": "Prices not saved: ",
+    },
+    "settings.model_prices_incomplete": {
+        "ar": "لكل نموذج اسم وسعران.",
+        "en": "Each model needs a name and both prices.",
+    },
+    "settings.model_prices_empty": {
+        "ar": "لم تُحدَّد أسعار.",
+        "en": "No prices set.",
+    },
+    "settings.model_prices_unpriced_title": {
+        "ar": "نماذج استُخدمت في آخر 30 يومًا بلا سعر معروف",
+        "en": "Used in the last 30 days with no known price",
+    },
+    "settings.model_prices_set": {
+        "ar": "حدّد سعره",
+        "en": "Set its price",
+    },
+    "settings.model_prices_none": {
+        "ar": "كل نموذج استُخدم في آخر 30 يومًا له سعر معروف.",
+        "en": "Every model used in the last 30 days has a known price.",
+    },
+    "settings.model_prices_unreadable": {
+        "ar": "تعذّرت قراءة سجل الطلبات.",
+        "en": "The call ledger could not be read.",
+    },
+    "settings.model_prices_load_failed": {
+        "ar": "تعذّر تحميل أسعار النماذج.",
+        "en": "Model prices could not be loaded.",
+    },
+    "settings.model_prices_where": {
+        "ar": "الأسعار في صفحة المزوّد. تسري على الطلبات القادمة، لا على ما سُجّل من قبل.",
+        "en": "Prices are on the provider's own pricing page. They apply to calls from now on, not to calls already recorded.",
+    },
+    "settings.model_prices_calls.zero": {
+        "ar": "لا طلبات",
+        "en": "no calls",
+    },
+    "settings.model_prices_calls.one": {
+        "ar": "طلب واحد",
+        "en": "1 call",
+    },
+    "settings.model_prices_calls.two": {
+        "ar": "طلبان",
+        "en": "{n} calls",
+    },
+    "settings.model_prices_calls.few": {
+        "ar": "{n} طلبات",
+        "en": "{n} calls",
+    },
+    "settings.model_prices_calls.many": {
+        "ar": "{n} طلبًا",
+        "en": "{n} calls",
+    },
+    "settings.model_prices_calls.other": {
+        "ar": "{n} طلب",
+        "en": "{n} calls",
+    },
+    "settings.provider_check.api_key_required": {
+        "ar": "هذا المزوّد يحتاج إلى مفتاح API.",
+        "en": "This provider needs an API key.",
+    },
+    "settings.provider_check.key_undecryptable": {
+        "ar": "يوجد مفتاح محفوظ، لكن الخزنة لا تستطيع فك تشفيره: KAZMA_VAULT_KEY مفقود أو تغيّر. أعده بدل لصق المفتاح من جديد.",
+        "en": "A key is saved, but the vault cannot decrypt it: KAZMA_VAULT_KEY is missing or changed. Restore it rather than pasting the key again.",
+    },
+    "settings.provider_check.unknown_provider": {
+        "ar": "لا يوجد مزوّد بهذا الاسم.",
+        "en": "There is no provider by that name.",
+    },
+    "settings.provider_check.no_base_url": {
+        "ar": "ليس للمزوّد عنوان.",
+        "en": "The provider has no address.",
+    },
+    "settings.provider_check.key_refused": {
+        "ar": "رفض المزوّد هذا المفتاح.",
+        "en": "The provider refused this key.",
+    },
+    "settings.provider_check.not_found": {
+        "ar": "ليس لدى المزوّد هذا النموذج، أو أن العنوان خاطئ.",
+        "en": "The provider has no such model, or the address is wrong.",
+    },
+    "settings.provider_check.rate_limited": {
+        "ar": "المزوّد يحدّ من عدد الطلبات. اختبر بعد دقيقة.",
+        "en": "The provider is limiting how often it may be called. Test again in a minute.",
+    },
+    "settings.provider_check.unreachable": {
+        "ar": "تعذّر الوصول إلى المزوّد: تحقق من العنوان والشبكة.",
+        "en": "The provider could not be reached: check the address and the network.",
+    },
+    "settings.provider_check.empty": {
+        "ar": "أجاب المزوّد بلا شيء.",
+        "en": "The provider answered with nothing.",
+    },
+    "settings.provider_check.provider_error": {
+        "ar": "أخفق المزوّد في الإجابة.",
+        "en": "The provider failed to answer.",
+    },
+    "settings.provider_check.request_refused": {
+        "ar": "رفض المزوّد الطلب.",
+        "en": "The provider refused the request.",
+    },
+    "settings.provider_check.unusable_answer": {
+        "ar": "أجاب المزوّد، لكن ليس بإجابة نموذج.",
+        "en": "The provider answered, but not with a model answer.",
+    },
+    "settings.provider_check.timeout": {
+        "ar": "لم يُجب النموذج خلال دقيقة.",
+        "en": "The model did not answer within a minute.",
+    },
+    "settings.provider_check.failed": {
+        "ar": "أخفق الاختبار.",
+        "en": "The test failed.",
+    },
+    "settings.provider_check.speech_only": {
+        "ar": "النماذج المعروضة نماذج كلام، لا محادثة. اكتب نموذج محادثة.",
+        "en": "The listed models are speech models, not chat. Type a chat model.",
+    },
+    "settings.provider_check.list_failed": {
+        "ar": "تعذّر عرض نماذج المزوّد. اكتب نموذجًا واختبر.",
+        "en": "The provider's models could not be listed. Type a model and test.",
+    },
+    "settings.provider_check.no_model": {
+        "ar": "لا نموذج لتجربته: اكتب واحدًا واختبر.",
+        "en": "There is no model to try: type one and test.",
+    },
+    "settings.save_untested": {
+        "ar": "احفظ على أي حال",
+        "en": "Save anyway",
+    },
+    "settings.save_untested_title": {
+        "ar": "الحفظ بلا اختبار ناجح؟",
+        "en": "Save without a working test?",
+    },
+    "settings.save_untested_body": {
+        "ar": "لم يحصل الاختبار على إجابة من هذا المزوّد. يحفظه كاظمه كما هو، وتفشل المحادثة معه حتى يُجيب.",
+        "en": "The test did not get an answer from this provider. Kazma saves it as it is; chat will fail on it until it answers.",
+    },
+    "settings.backup_served_by": {
+        "ar": "يخدمه",
+        "en": "served by",
+    },
+    "settings.backup_unusable": {
+        "ar": "لا مزوّد يمكن الاتصال به يخدم هذا النموذج: لن يعمل احتياطيًا.",
+        "en": "no provider that can be called serves this model: it cannot answer as a backup.",
+    },
+    "settings.backup_same_vendor": {
+        "ar": "من مزوّد النموذج المستخدم نفسه: انقطاع واحد يوقفهما معًا.",
+        "en": "the same vendor as the model in use: one outage stops both.",
+    },
+    "settings.backup_suggest": {
+        "ar": "نماذج احتياطية تعمل لديك الآن:",
+        "en": "Backups that work for you now:",
+    },
+    "settings.provider_no_key_on": {
+        "ar": "ليس لهذا المزوّد مفتاح API: أضف مفتاحه قبل تشغيله.",
+        "en": "This provider has no API key: add its key before switching it on.",
+    },
+    "settings.provider_saved_off": {
+        "ar": "حُفظ المزوّد، لكنه بقي متوقفًا: ليس له مفتاح API.",
+        "en": "The provider is saved, but left off: it has no API key.",
+    },
+    "settings.provider_same_address": {
+        "ar": "بالعنوان نفسه:",
+        "en": "Same address as:",
+    },
+    "settings.use_profile": {
+        "ar": "استخدمه",
+        "en": "Use",
+    },
+    "settings.profile_in_use": {
+        "ar": "يستخدم كاظمه الآن {model}",
+        "en": "Kazma now uses {model}",
+    },
+    "settings.profile_not_used": {
+        "ar": "تعذّر على كاظمه التحول إلى {model}: ",
+        "en": "Kazma could not switch to {model}: ",
+    },
     "settings.saved_profiles": {
         "ar": "ملفات النماذج المحفوظة",
         "en": "Saved Model Profiles",

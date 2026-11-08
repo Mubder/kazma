@@ -303,8 +303,10 @@ def daily_spend() -> dict[str, Any]:
     if usage is None:
         out["reason"] = "ledger_unreadable"
         return out
+    # ``unpriced``: calls with no known price (kazma_core.model_prices),
+    # whose dollars are not in ``cost``: the limit counts only what is known.
     out.update(measured=True, cost=float(usage["cost"]), tokens=int(usage["tokens"]),
-               calls=int(usage["calls"]))
+               calls=int(usage["calls"]), unpriced=int(usage.get("unpriced") or 0))
     return out
 
 
@@ -354,7 +356,16 @@ def daily_limit_check() -> dict[str, Any]:
             )
             return verdict
         spent = float(spend["cost"])
-        verdict.update(spent=spent, measured=True, over=spent >= limit, date=spend["date"])
+        unpriced = int(spend.get("unpriced") or 0)
+        verdict.update(spent=spent, measured=True, over=spent >= limit, date=spend["date"],
+                       unpriced=unpriced)
+        if unpriced:
+            _warn_once(
+                f"unpriced:{spend['date']}",
+                "[turn-tokens] %d model calls today have no known price and are not in the "
+                "daily cost limit's $%.2f (Settings -> Providers & Connectors -> Model prices)",
+                unpriced, spent,
+            )
         if spent >= limit * DAILY_ALERT_FRACTION:
             _alert_once_today(str(spend["date"]), spent, limit)
     except store_errors():  # a store the check cannot read must not stop a turn

@@ -11,13 +11,10 @@ agent:
     enabled: true
     pre_tool: []
     post_tool: []
-models:
-  default: gpt-4o-mini
-  # Native Kazma router (keyword + models.defaults). Not a LiteLLM import.
-  # Optional proxy egress: KAZMA_LITELLM_URL=http://127.0.0.1:4000
-  # Native anthropic/azure/bedrock/google stay on the 4-branch registry.
-  router: kazma
-  fallback: gpt-4o-mini
+# models.default / models.router / models.fallback were read by nothing but
+# a model list (a stale gpt-4o-mini entry); retired 2026-11-08 (providers
+# stage 1, kazma_core.config_defaults). Optional proxy egress:
+# KAZMA_LITELLM_URL=http://127.0.0.1:4000.
 llm:
   base_url: https://api.openai.com/v1
   api_key: ''
@@ -25,8 +22,6 @@ llm:
   max_tokens: 4096
   temperature: 0.7
   timeout: 60.0
-  input_cost_per_1m: 0.15
-  output_cost_per_1m: 0.6
   # Optional LiteLLM *proxy* for OpenAI-compatible providers only.
   # Native anthropic/azure/bedrock/google never go through this.
   # Env KAZMA_LITELLM_URL wins. Kill-switch: KAZMA_LITELLM=0.

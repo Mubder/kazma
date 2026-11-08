@@ -392,6 +392,8 @@ def usage_over_time(request: Request, range: str = "hour") -> JSONResponse:  # n
             "tokens": sum(b["tokens"] for b in buckets),
             "cost": sum(b["cost"] for b in buckets),
             "calls": sum(b["calls"] for b in buckets),
+            # Calls with no known price: not in "cost" (kazma_core.model_prices).
+            "unpriced": sum(b.get("unpriced", 0) for b in buckets),
         },
     })
 
@@ -421,6 +423,7 @@ def spend_today(request: Request) -> JSONResponse:
         "cost": spend.get("cost", 0.0),
         "tokens": spend.get("tokens", 0),
         "calls": spend.get("calls", 0),
+        "unpriced": spend.get("unpriced", 0),
         "date": spend.get("date"),
         "zone": spend.get("zone"),
         "limit_usd": limit["usd"],

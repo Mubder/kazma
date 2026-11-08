@@ -18,6 +18,53 @@
   "Not chosen", not "Missing" (or "Partial", for Postgres, whose driver the
   database tools bring); each part is added with `kazma setup install --with
   <part>`, and everything with `kazma setup install --mode full`.
+- **Model costs are the model's own, or "unknown".** Every OpenAI-compatible
+  call was priced as gpt-4o-mini ($0.15 / $0.60 per million tokens), DeepSeek
+  and OpenRouter included, and Anthropic's and Bedrock's tables priced any
+  model they did not name exactly as Sonnet. A price is now yours (Settings →
+  Providers & Connectors → Model prices, which also lists the models used
+  with no known price), free for a model server on your own network, the
+  Anthropic/Bedrock tables for the models they name, or what OpenRouter
+  reports for the call. Otherwise the chat, the cost badge, the Dashboard and
+  `/cost` say the price is unknown, never $0.00, and the daily cost limit says
+  how many calls it could not count. Calls recorded before, priced the old
+  way, are marked unknown. The call ledger now names the provider that served
+  each call (it named "LLMProvider").
+- **Test checks a provider the way chat uses it, before saving it.** Test
+  sent every provider OpenAI's request, so Anthropic, Azure and Bedrock
+  failed it while chat worked; and the Add / Edit dialog saved the provider,
+  key and all, before testing, so a refused key stayed saved. Test now sends
+  one short message through the same client chat uses, with the values as
+  typed and nothing saved; Save opens when it answered, and a failure offers
+  "Save anyway". A failure says what failed (key refused, no such model, rate
+  limited, unreachable, an empty answer) in your language, never the
+  provider's reply text. The setup guide works the same way: nothing is
+  saved until the chosen model answers.
+- **Model servers on your network need no key.** A vLLM, llama.cpp, LocalAI
+  or other server at a private address, a Tailscale address or a local host
+  name was taken for a cloud provider with no key: replaced by another
+  provider, refused by Test, hidden from the model picker, and its models
+  could not be listed. Now it works like Ollama, and the setup guide finds one
+  on another computer by its address. Cloud metadata addresses never count.
+- **The backup model is checked.** Settings shows which provider would answer
+  for each backup model, refuses to save one nothing can serve, and offers a
+  working model of each of your other providers. The monthly failover drill
+  now says when failover is switched off or the backup cannot answer (it said
+  "No backup model is configured" for both).
+- **Newer models and more addresses work.** OpenAI's reasoning models
+  (o-series, GPT-5) get the request fields they accept; any endpoint that
+  refuses `max_tokens` or a temperature is asked once more without it. Vision
+  models whose names end in "-instruct", DeepSeek's vision models and ids with
+  a vendor prefix (`openai/gpt-4o`) are recognised as seeing. An address that
+  already names a version (DeepInfra's `/v1/openai`) is used as given, and the
+  Cohere preset points at Cohere's OpenAI-compatible API.
+- **No switched-on provider without a key, and duplicates named.** A cloud
+  provider saved with no key is left off, and cannot be switched on until it
+  has one; two providers at one address are named on the list. A saved
+  profile's **Use** switches to it (Load filled fields nothing showed). Five
+  model settings that nothing read (two prices and `models.default` /
+  `fallback` / `router`) are retired, and the stale `llm.model` is no longer
+  any provider's fallback model.
 - **A reloaded reply names the model that answered it.** Live, the reply named
   the model that answered; after a reload it named the model the page had asked
   for, because the page's stream saved the reply once more and wrote that over

@@ -198,7 +198,7 @@ class TestFriendlyErrors:
         msg = friendly_llm_error(exc)
         assert "api key" in msg.lower()
         assert "settings" in msg.lower()
-        assert "models/providers" in msg.lower()
+        assert "providers & connectors" in msg.lower()  # the Settings tab's name
 
     def test_friendly_llm_error_forbidden_403(self) -> None:
         """403 errors also map to credential guidance."""

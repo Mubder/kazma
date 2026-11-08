@@ -285,7 +285,7 @@
           $('replay-detail-title').textContent = stepLabel(step);
           $('replay-detail-meta').innerHTML =
             '<span>' + esc(tx('replay.meta_model', 'Model')) + ': <strong translate="no">' + esc(data.model || '—') + '</strong></span> · ' +
-            '<span>' + esc(tx('replay.meta_cost', 'Cost')) + ': $' + (data.cost_usd || 0).toFixed(4) + '</span> · ' +
+            '<span>' + esc(tx('replay.meta_cost', 'Cost')) + ': ' + (data.cost_usd ? '$' + Number(data.cost_usd).toFixed(4) : '—') + '</span> · ' +
             '<span>' + esc(tx('replay.messages_n', 'Messages: {n}', { n: data.message_count })) + '</span>';
           var msgs = data.messages || [];
           $('replay-detail-messages').innerHTML = msgs.map(function (m) {

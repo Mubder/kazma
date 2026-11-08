@@ -2,12 +2,15 @@
  *
  * Welcome, the model, optional extras, done. The model is a cloud provider
  * (its key, then the model chosen from the provider's own list) or one on
- * this computer (Ollama or LM Studio, found by /api/setup/local). Choosing
- * it: /api/setup/provider saves the provider and its key, the existing
- * /api/providers/{name}/discover lists its models, /api/setup/bootstrap
- * makes the chosen model the one Kazma uses (model and provider together),
- * and /api/setup/check sends it one short message through the client
- * Kazma's chat uses. Every word is the catalog's (setup.*).
+ * this computer or its network (Ollama or LM Studio, found by
+ * /api/setup/local; another computer's server by its address,
+ * /api/setup/local/address). Choosing it, with nothing saved until it
+ * answered (providers stage 1): /api/setup/models lists the provider's
+ * models with the key as typed, /api/setup/check sends the chosen model one
+ * short message through the client Kazma's chat would use, and only then
+ * /api/setup/bootstrap saves the provider and its key and makes the model
+ * the one Kazma uses (model and provider together). Every word is the
+ * catalog's (setup.*).
  */
 (function () {
   'use strict';
@@ -17,7 +20,21 @@
   }
 
   // The error codes the setup routes answer with, worded by the page.
-  var CODES = ['api_key_required', 'unknown_provider', 'save_failed', 'not_configured', 'timeout'];
+  var CODES = ['api_key_required', 'unknown_provider', 'save_failed', 'not_configured', 'timeout',
+    'bad_address', 'not_own_network', 'no_server', 'key_refused', 'not_found', 'rate_limited',
+    'unreachable', 'empty', 'provider_error', 'request_refused', 'unusable_answer', 'failed',
+    'key_undecryptable', 'no_base_url', 'blocked_url', 'bad_answer', 'no_model'];
+
+  // A model list's HTTP refusal (``http_401``...) in the check's words.
+  function httpCode(code) {
+    var m = /^http_(\d+)$/.exec(String(code || ''));
+    if (!m) return code;
+    var status = Number(m[1]);
+    if (status === 401 || status === 403) return 'key_refused';
+    if (status === 404) return 'not_found';
+    if (status === 429) return 'rate_limited';
+    return status >= 500 ? 'provider_error' : 'request_refused';
+  }
 
   async function postJson(url, body) {
     var resp = await fetch(url, {
@@ -45,6 +62,7 @@
       apiKey: '',
       servers: [],
       localLoading: false,
+      lanAddress: '',
       models: [],
       listed: false,
       model: '',
@@ -138,10 +156,10 @@
         this.status = '';
       },
 
-      codeText(code) {
-        var text = String(code || '');
-        if (CODES.indexOf(text) >= 0) return tr('setup.err.' + text, text);
-        return text;
+      codeText(code, detail) {
+        var text = String(httpCode(code) || '');
+        if (CODES.indexOf(text) >= 0) return tr('setup.err.' + text, detail || text);
+        return detail || text;
       },
 
       async findLocal() {
@@ -163,21 +181,42 @@
         return this.list(id, '');
       },
 
+      // A server on another computer of this network: found and saved as a
+      // provider of its own (/api/setup/local/address), then listed as
+      // Ollama is.
+      async useLan() {
+        var address = String(this.lanAddress || '').trim();
+        if (!address) return;
+        this.resetModel();
+        this.busy = true;
+        this.status = tr('setup.lan_looking', 'Looking for a model server there…');
+        try {
+          var found = await postJson('/api/setup/local/address', { address: address });
+          if (!found.data.ok) {
+            this.fail('setup.lan_failed', 'No server there:', this.codeText(found.data.error || found.status));
+            return;
+          }
+          this.provider = String(found.data.provider || '');
+        } catch (e) {
+          this.fail('', '', tr('setup.err.network', 'Kazma did not answer. Is it still running?'));
+          return;
+        }
+        this.busy = false;
+        return this.list(this.provider, '');
+      },
+
       async list(provider, key) {
         if (!provider) return;
         this.resetModel();
         this.busy = true;
         this.status = tr('setup.listing', 'Asking for the models…');
         try {
-          var saved = await postJson('/api/setup/provider', { provider: provider, api_key: key || '' });
-          if (!saved.data.ok) {
-            this.fail('setup.save_failed', 'Could not save:', this.codeText(saved.data.error || saved.status));
-            return;
-          }
-          var found = await postJson('/api/providers/' + encodeURIComponent(provider) + '/discover', {});
+          // Listed with the key as typed: nothing is saved until the chosen
+          // model answers (useModel).
+          var found = await postJson('/api/setup/models', { provider: provider, api_key: key || '' });
           if (!found.ok || !found.data.ok) {
             this.fail('setup.list_failed', 'Could not list the models:',
-              String(found.data.detail || found.data.error || found.status));
+              this.codeText(found.data.error || found.status, found.data.detail));
             return;
           }
           this.models = Array.isArray(found.data.models) ? found.data.models.map(String) : [];
@@ -210,22 +249,21 @@
         this.error = '';
         this.errorLead = '';
         this.busy = true;
-        this.status = tr('setup.saving', 'Saving…');
+        var key = this.where === 'cloud' ? this.apiKey : '';
         try {
-          var boot = await postJson('/api/setup/bootstrap', {
-            provider: this.provider,
-            api_key: this.where === 'cloud' ? this.apiKey : '',
-            model: model,
-          });
-          if (boot.data.error || !boot.ok) {
-            this.fail('setup.save_failed', 'Could not save:', this.codeText(boot.data.error || boot.status));
-            return;
-          }
+          // The check first, with the key as typed: a model that does not
+          // answer leaves nothing saved and Kazma on the model it had.
           this.status = tr('setup.checking', 'Sending the model a short test message…');
-          var check = await postJson('/api/setup/check', { provider: this.provider, model: model });
+          var check = await postJson('/api/setup/check', { provider: this.provider, api_key: key, model: model });
           if (!check.data.ok) {
             this.fail('setup.check_failed', 'The model did not answer:',
-              this.codeText(check.data.error || check.status));
+              this.codeText(check.data.error || check.status, check.data.detail));
+            return;
+          }
+          this.status = tr('setup.saving', 'Saving…');
+          var boot = await postJson('/api/setup/bootstrap', { provider: this.provider, api_key: key, model: model });
+          if (boot.data.error || !boot.ok) {
+            this.fail('setup.save_failed', 'Could not save:', this.codeText(boot.data.error || boot.status));
             return;
           }
         } catch (e) {

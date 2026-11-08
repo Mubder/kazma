@@ -48,7 +48,25 @@ TEXT_ONLY_PATTERNS: tuple[str, ...] = (
     "o3-mini-*",
     "gpt-3.5*",           # legacy, no vision
     "text-*",             # text-only family (embedding/text completion)
-    "*-instruct",         # generic instruct variants (text-only by convention)
+)
+
+# ── A guess, not a family: weaker than the allow-list ─────────────────
+# "-instruct" is a fine-tune's suffix, text-only by convention -- and the
+# suffix of qwen2.5-vl-72b-instruct and llama-3.2-11b-vision-instruct, which
+# a deny-list match made text-only (providers stage 1, 2026-11-08).
+TEXT_ONLY_GUESSES: tuple[str, ...] = (
+    "*-instruct",
+)
+
+# ── A name that says it sees: wins over every deny ───────────────────
+# deepseek-vl2 and deepseek-v4-flash-vision-exp (113 calls on the live
+# install) matched "deepseek*" and had their images replaced by a note.
+VISION_MARKERS: tuple[str, ...] = (
+    "*vision*",
+    "*-vl",
+    "*-vl-*",
+    "*-vl2*",
+    "*vl-*b*",
 )
 
 # ── Allow-list: models known to accept `image_url` vision input ───────
@@ -63,11 +81,15 @@ VISION_PATTERNS: tuple[str, ...] = (
     "gpt-4-turbo-*",
     "gpt-4-vision*",
     "gpt-4.5*",
-    # Anthropic Claude (all 3.x / Sonnet / Opus / Haiku accept images)
-    "claude-3*",
-    "claude-sonnet*",
-    "claude-opus*",
-    "claude-haiku*",
+    "gpt-5*",
+    "o1",
+    "o1-20*",
+    "o3",
+    "o3-20*",
+    "o3-pro*",
+    "o4-mini*",
+    # Anthropic Claude (every model since 3.x accepts images)
+    "claude-*",
     # Google Gemini
     "gemini*",
     # Mistral vision
@@ -86,6 +108,11 @@ VISION_PATTERNS: tuple[str, ...] = (
     # Grok vision
     "grok-vision*",
     "grok-2-vision*",
+    "grok-4*",
+    # Zhipu GLM vision (GLM-4V, GLM-4.5V)
+    "glm-4v*",
+    "glm-*v",
+    "minicpm-v*",
 )
 
 
@@ -96,37 +123,46 @@ def _extra_env_patterns() -> tuple[str, ...]:
 
 
 def _matches_any(model_id: str, patterns: tuple[str, ...]) -> bool:
-    """Case-insensitive fnmatch of *model_id* against *patterns*."""
+    """Case-insensitive fnmatch of *model_id* against *patterns* -- the whole
+    id and the name after a vendor prefix (``openai/gpt-4o``,
+    ``accounts/fireworks/models/llama-4-scout``), which matched nothing."""
     mid = (model_id or "").strip().lower()
     if not mid:
         return False
-    for pat in patterns:
-        if fnmatch.fnmatch(mid, pat.lower()):
-            return True
-    return False
+    names = {mid, mid.rsplit("/", 1)[-1]}
+    return any(fnmatch.fnmatch(name, pat.lower()) for name in names for pat in patterns)
+
+
+def classify(model_id: str | None) -> str:
+    """``"vision"``, ``"text"`` or ``"unknown"``, in one order: a name that
+    says it sees (:data:`VISION_MARKERS`, and ``KAZMA_VISION_MODELS``), then
+    the text-only families, then the allow-list, then the text-only guesses.
+    Unknown is never downgraded (fail-open)."""
+    if not model_id:
+        return "unknown"
+    if _matches_any(model_id, VISION_MARKERS) or _matches_any(model_id, _extra_env_patterns()):
+        return "vision"
+    if _matches_any(model_id, TEXT_ONLY_PATTERNS):
+        return "text"
+    if _matches_any(model_id, VISION_PATTERNS):
+        return "vision"
+    if _matches_any(model_id, TEXT_ONLY_GUESSES):
+        return "text"
+    return "unknown"
 
 
 def is_text_only(model_id: str | None) -> bool:
     """Return True if *model_id* is a known text-only model.
 
-    Only explicit deny-list matches return True; unknown models return
-    False (fail-open: do not downgrade what we don't recognize).
+    Unknown models return False (fail-open: do not downgrade what we don't
+    recognize). See :func:`classify` for the order.
     """
-    if not model_id:
-        return False
-    return _matches_any(model_id, TEXT_ONLY_PATTERNS)
+    return classify(model_id) == "text"
 
 
 def is_vision_capable(model_id: str | None) -> bool:
     """Return True if *model_id* is known to accept ``image_url`` input."""
-    if not model_id:
-        return False
-    # A text-only model is never vision-capable, even if also allow-listed.
-    if is_text_only(model_id):
-        return False
-    if _matches_any(model_id, VISION_PATTERNS):
-        return True
-    return _matches_any(model_id, _extra_env_patterns())
+    return classify(model_id) == "vision"
 
 
 def find_configured_vision_model(

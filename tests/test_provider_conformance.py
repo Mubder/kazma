@@ -196,43 +196,41 @@ class TestTheTestButtonExercisesChat:
     """
 
     def test_the_endpoint_sends_a_completion_before_claiming_success(self):
+        """Since providers stage 1 (2026-11-08) the completion goes through the
+        client chat would build (kazma_core.provider_check.check_model), not
+        an OpenAI-shaped probe: both Test routes call it."""
         import inspect
 
         from kazma_ui import providers as mod
 
         src = inspect.getsource(mod)
-        assert "_probe_chat_completion" in src
-        # and it must be called from the success path, not merely defined
-        assert src.count("_probe_chat_completion") >= 2, (
-            "the chat probe is defined but never called"
-        )
+        assert src.count("await check_model(") >= 2, "a Test route does not send a completion"
 
     def test_a_reachable_but_broken_provider_is_not_success(self):
-        """The state that had no representation: model list fine, chat dead."""
+        """The state that had no representation: it answered, not as a model."""
         import inspect
 
         from kazma_ui import providers as mod
 
         src = inspect.getsource(mod)
-        assert '"chat_ok": False' in src
-        assert "Reachable, but chat is failing" in src
-        assert '"reachable": True' in src
+        assert '"chat_failing" if check.get("reachable") else "down"' in src
+        assert '"chat_ok": bool(check["ok"])' in src
 
     def test_the_probe_budgets_tokens_for_a_reasoning_model(self):
         """glm-5.3 spent 16 reasoning tokens before its first content token. A
         tight budget returns an empty completion and blames the provider for
         the probe's own mistake."""
-        from kazma_core.provider_probe import PROBE_MAX_TOKENS
+        from kazma_core.provider_check import CHECK_MAX_TOKENS
 
-        assert PROBE_MAX_TOKENS >= 120, "the probe's token budget is too tight to be safe"
+        assert CHECK_MAX_TOKENS >= 120, "the check's token budget is too tight to be safe"
 
     def test_an_empty_completion_counts_as_a_failure(self):
         """A 200 with no content is not a working provider."""
         import inspect
 
-        from kazma_core.provider_probe import probe_chat_completion
+        from kazma_core.provider_check import check_model
 
-        assert "empty completion" in inspect.getsource(probe_chat_completion)
+        assert "empty completion" in inspect.getsource(check_model)
 
 
 # ── the frontend can express the third state ────────────────────────────────
@@ -287,12 +285,18 @@ class TestThereIsOnlyOneProbe:
     one concept costs, and it cost it during this very refactor."""
 
     def test_both_routes_share_the_same_function_object(self):
-        from kazma_core.provider_probe import probe_chat_completion
-        from kazma_ui.providers import _probe_chat_completion
+        """Settings' Test, its dialog's check and the setup guide's check are
+        one function (kazma_core.provider_check.check_model): the guide's own
+        copy and the Bearer probe disagreed (providers stage 1)."""
+        import inspect
 
-        assert _probe_chat_completion is probe_chat_completion, (
-            "the UI route has its own copy of the probe again"
-        )
+        from kazma_ui import providers as ui_providers
+        from kazma_ui import setup_api
+
+        for mod in (ui_providers, setup_api):
+            src = inspect.getsource(mod)
+            assert "from kazma_core.provider_check import" in src, mod.__name__
+            assert ".chat(" not in src, f"{mod.__name__} sends its own check again"
 
     def test_there_is_only_one_test_route_left(self):
         """The duplicate was not fixed, it was deleted.
@@ -317,19 +321,19 @@ class TestThereIsOnlyOneProbe:
         from kazma_ui import providers as ui_providers
 
         src = inspect.getsource(ui_providers)
-        assert "probe_chat_completion" in src
-        assert "Reachable, but chat is failing" in src
+        assert "check_model" in src
+        assert '"error_code"' in src and '"chat_failing"' in src
 
     def test_the_probe_never_raises(self):
         """A health check that throws cannot report a health status."""
         import ast
         import inspect
 
-        from kazma_core.provider_probe import probe_chat_completion
+        from kazma_core.provider_check import check_model
 
         # Parsed, not grepped: an earlier version of this test matched the word
         # "raise" inside the comment explaining that it must not raise.
-        tree = ast.parse(inspect.getsource(probe_chat_completion).lstrip())
+        tree = ast.parse(inspect.getsource(check_model).lstrip())
         raises = [n for n in ast.walk(tree) if isinstance(n, ast.Raise)]
         assert not raises, f"the probe can raise ({len(raises)} raise statements)"
         handlers = [n for n in ast.walk(tree) if isinstance(n, ast.ExceptHandler)]

@@ -922,7 +922,7 @@ async def tool_worker_node(
                 f"⚠️ The model's '{_cut_twice}' call was cut off by its output limit "
                 "twice in a row this turn, so it never ran. Ask for the work in "
                 "smaller pieces, or raise the model's output limit (max tokens) in "
-                "Settings > Models/Providers."
+                "Settings > Providers & Connectors."
             )
             logger.warning("[ToolWorker] %s cut off twice by max_tokens — ending the turn", _cut_twice)
         # The gate loads constraint beliefs (SQLite) and authorizes each

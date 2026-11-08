@@ -171,34 +171,78 @@ class _Client:
         if self.behaviour == "slow":
             await asyncio.sleep(1.0)
         if self.behaviour == "refused":
+            import httpx
+
             from kazma_core.llm_provider import LLMError
 
-            raise LLMError("401 invalid key", transient=False)
-        return SimpleNamespace(content="OK")
+            request = httpx.Request("POST", "https://api.deepseek.com/v1/chat/completions")
+            raise LLMError("LLM call failed (HTTP 401): invalid key", transient=False) from httpx.HTTPStatusError(
+                "401", request=request, response=httpx.Response(401, request=request))
+        return SimpleNamespace(content="OK", tool_calls=[])
+
+    async def close(self):
+        return None
 
 
-def test_the_check_sends_the_chosen_model_one_message(monkeypatch):
+def test_the_check_uses_the_typed_key_and_saves_nothing(monkeypatch):
+    """The guide checks the chosen model with the key as typed, through the
+    client chat would build, before anything is saved (providers stage 1):
+    it saved the key first, and a refused key stayed saved."""
+    from kazma_core import provider_adapters
+    from kazma_core import provider_check as pc
+
+    built: list[tuple[str, str]] = []
     client = _Client()
-    reg = SimpleNamespace(get_client_by_provider=lambda provider, model: client)
-    out = asyncio.run(sa._check_model("ollama", "llama3.2", reg))
-    assert out["ok"] is True and isinstance(out["ms"], int)
-    assert client.calls == [{"max_tokens": 32, "model": "llama3.2", "reasoning": "off"}]
 
-    refused = asyncio.run(sa._check_model("deepseek", "m", SimpleNamespace(
-        get_client_by_provider=lambda p, m: _Client("refused"))))
-    assert refused["ok"] is False and refused["error"].startswith("⚠️")
+    def build(name, config, entry=None):
+        built.append((name, config.api_key))
+        return client
 
-    monkeypatch.setattr(sa, "_CHECK_TIMEOUT_S", 0.05)
-    slow = asyncio.run(sa._check_model("deepseek", "m", SimpleNamespace(
-        get_client_by_provider=lambda p, m: _Client("slow"))))
-    assert slow == {"ok": False, "error": "timeout"}
+    monkeypatch.setattr(provider_adapters, "build_client", build)
+    reg = FakeRegistry()
+    http, _ = _client(monkeypatch, reg)
+    out = http.post("/api/setup/check", json={"provider": "deepseek", "api_key": "sk-typed", "model": "deepseek-chat"})
+    assert out.json()["ok"] is True and isinstance(out.json()["ms"], int)
+    assert built == [("deepseek", "sk-typed")]
+    assert client.calls == [{"max_tokens": pc.CHECK_MAX_TOKENS, "model": "deepseek-chat", "reasoning": "off"}]
+    assert reg.upserts == [], "the check saved something"
 
-    missing = asyncio.run(sa._check_model("deepseek", "m", SimpleNamespace(get_client_by_provider=lambda p, m: None)))
-    assert missing == {"ok": False, "error": "not_configured"}
+    client.behaviour = "refused"
+    refused = http.post("/api/setup/check", json={"provider": "deepseek", "api_key": "sk-bad", "model": "m"}).json()
+    assert refused["ok"] is False and refused["error"] == "key_refused" and reg.upserts == []
+
+    monkeypatch.setattr(pc, "CHECK_TIMEOUT_S", 0.05)
+    client.behaviour = "slow"
+    monkeypatch.setattr(pc.check_model, "__kwdefaults__", {"timeout": 0.05})
+    assert http.post("/api/setup/check", json={"provider": "deepseek", "api_key": "k", "model": "m"}).json()[
+        "error"] == "timeout"
+
+    # A cloud provider with no key, none stored: refused before any call.
+    assert http.post("/api/setup/check", json={"provider": "deepseek", "model": "m"}).json() == {
+        "ok": False, "error": "api_key_required"}
+
+
+def test_the_models_are_listed_with_the_typed_key_and_nothing_saved(monkeypatch):
+    from kazma_core.model_registry import DiscoveryResult
+
+    asked: list[dict] = []
+    reg = FakeRegistry()
+
+    async def discover(name, candidate=None):
+        asked.append(dict(candidate or {}))
+        return DiscoveryResult(True, ["deepseek-chat", "whisper-1"])
+
+    reg.discover = discover
+    reg.resolve_provider_credentials = lambda name: ("", "")
+    reg.stored_key_is_undecryptable = lambda name: False
+    http, _ = _client(monkeypatch, reg)
+    out = http.post("/api/setup/models", json={"provider": "deepseek", "api_key": "sk-typed"}).json()
+    assert out == {"ok": True, "models": ["deepseek-chat"]}
+    assert asked and asked[0]["api_key"] == "sk-typed" and reg.upserts == []
 
 
 @pytest.mark.parametrize("path,method", [
-    ("/setup", "GET"), ("/api/setup/local", "GET"), ("/api/setup/provider", "POST"),
+    ("/setup", "GET"), ("/api/setup/local", "GET"), ("/api/setup/models", "POST"),
     ("/api/setup/bootstrap", "POST"), ("/api/setup/check", "POST"),
 ])
 def test_the_guide_is_the_admins(path, method):

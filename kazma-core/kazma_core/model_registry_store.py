@@ -252,10 +252,21 @@ def seed_missing_presets(
     stored: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], bool]:
     """Append any missing preset providers to *stored*. Returns (list, changed)."""
+    from kazma_core.providers import RETIRED_PRESET_URLS
+
     stored_by_name = {p.get("name", ""): p for p in stored} if stored else {}
     changed = False
     for key, preset in PROVIDER_PRESETS.items():
-        if key == "custom" or key in stored_by_name:
+        row = stored_by_name.get(key)
+        if row is not None:
+            # A preset that moved: its row still on the old address it gave.
+            old = {u.rstrip("/") for u in RETIRED_PRESET_URLS.get(key, ())}
+            if str(row.get("base_url") or "").rstrip("/") in old:
+                row["base_url"] = preset.get("base_url", "")
+                changed = True
+                logger.info("[ModelRegistry] Preset provider %s moved to %s", key, row["base_url"])
+            continue
+        if key == "custom":
             continue
         entry: dict[str, Any] = {
             "name": key,

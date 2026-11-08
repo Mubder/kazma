@@ -110,6 +110,7 @@ CLIENT_ROW_FIELDS: tuple[str, ...] = (
     "schema",
     "tokens",
     "cost",
+    "cost_known",
     "duration_ms",
 )
 
@@ -446,6 +447,7 @@ def upsert_reply(
     run_model: str | None = None,
     tokens: int | None = None,
     cost: float | None = None,
+    cost_known: bool | None = None,
     duration_ms: float | None = None,
     allow_shrink: bool = False,
 ) -> bool:
@@ -551,6 +553,10 @@ def upsert_reply(
                 row["tokens"] = int(tokens or 0)
             if cost is not None:
                 row["cost"] = round(float(cost or 0.0), 6)
+            if cost_known is not None:
+                # False: a call of the turn had no known price, and ``cost``
+                # holds only the priced calls (kazma_core.model_prices).
+                row["cost_known"] = bool(cost_known)
             if duration_ms is not None:
                 row["duration_ms"] = int(round(float(duration_ms or 0.0)))
 

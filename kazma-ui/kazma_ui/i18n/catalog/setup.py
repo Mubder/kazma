@@ -74,6 +74,94 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "setup.server_not_running": {"en": "Not running on this computer", "ar": "لا يعمل على هذا الجهاز"},
     "setup.use_server": {"en": "Use it", "ar": "استخدمه"},
     "setup.download": {"en": "Download it", "ar": "نزّله"},
+    "setup.err.key_refused": {
+        "ar": "رفض المزوّد هذا المفتاح.",
+        "en": "The provider refused this key.",
+    },
+    "setup.err.not_found": {
+        "ar": "ليس لدى المزوّد هذا النموذج، أو أن عنوانه خاطئ.",
+        "en": "The provider has no such model, or its address is wrong.",
+    },
+    "setup.err.rate_limited": {
+        "ar": "المزوّد يحدّ من عدد الطلبات. حاول بعد دقيقة.",
+        "en": "The provider is limiting how often it may be called. Try again in a minute.",
+    },
+    "setup.err.unreachable": {
+        "ar": "تعذّر الوصول إلى المزوّد.",
+        "en": "The provider could not be reached.",
+    },
+    "setup.err.empty": {
+        "ar": "أجاب النموذج بلا شيء.",
+        "en": "The model answered with nothing.",
+    },
+    "setup.err.provider_error": {
+        "ar": "أخفق المزوّد في الإجابة.",
+        "en": "The provider failed to answer.",
+    },
+    "setup.err.request_refused": {
+        "ar": "رفض المزوّد الطلب.",
+        "en": "The provider refused the request.",
+    },
+    "setup.err.unusable_answer": {
+        "ar": "أجاب المزوّد، لكن ليس بإجابة نموذج.",
+        "en": "The provider answered, but not with a model answer.",
+    },
+    "setup.err.failed": {
+        "ar": "أخفق الفحص.",
+        "en": "The check failed.",
+    },
+    "setup.err.key_undecryptable": {
+        "ar": "يوجد مفتاح محفوظ، لكن كاظمه هذا لا يستطيع فك تشفيره (تغيّر مفتاح الخزنة).",
+        "en": "A key is saved, but this Kazma cannot decrypt it (its vault key changed).",
+    },
+    "setup.err.no_base_url": {
+        "ar": "ليس للمزوّد عنوان.",
+        "en": "The provider has no address.",
+    },
+    "setup.err.blocked_url": {
+        "ar": "لا يرسل كاظمه طلبات إلى هذا العنوان.",
+        "en": "Kazma does not send requests to that address.",
+    },
+    "setup.err.bad_answer": {
+        "ar": "لم تكن إجابة المزوّد قائمة نماذج.",
+        "en": "The provider's answer was not a list of models.",
+    },
+    "setup.err.no_model": {
+        "ar": "اختر نموذجًا أولًا.",
+        "en": "Choose a model first.",
+    },
+    "setup.lan_label": {
+        "ar": "خادم على جهاز آخر في شبكتك",
+        "en": "A server on another computer on your network",
+    },
+    "setup.lan_use": {
+        "ar": "ابحث هناك",
+        "en": "Look there",
+    },
+    "setup.lan_hint": {
+        "ar": "عنوانه ومنفذه، مثل 192.168.1.20:8000: خادم vLLM أو llama.cpp أو LocalAI أو LM Studio أو Ollama على ذلك الجهاز. لا يحتاج إلى مفتاح.",
+        "en": "Its address and port, such as 192.168.1.20:8000: vLLM, llama.cpp, LocalAI, LM Studio or Ollama on that computer. It needs no key.",
+    },
+    "setup.lan_looking": {
+        "ar": "يبحث عن خادم نماذج هناك…",
+        "en": "Looking for a model server there…",
+    },
+    "setup.lan_failed": {
+        "ar": "لا خادم هناك:",
+        "en": "No server there:",
+    },
+    "setup.err.bad_address": {
+        "ar": "هذا ليس عنوانًا.",
+        "en": "That is not an address.",
+    },
+    "setup.err.not_own_network": {
+        "ar": "هذا العنوان ليس على شبكة هذا الجهاز. لا يسأل الدليل إلا الأجهزة في شبكتك.",
+        "en": "That address is not on this computer's network. The guide only asks computers on your network.",
+    },
+    "setup.err.no_server": {
+        "ar": "لم يُجب خادم نماذج على هذا العنوان. تأكد من أنه يعمل ومن المنفذ.",
+        "en": "No model server answered at that address. Check that it is running, and its port.",
+    },
     "setup.local_hint": {
         "en": "Install one and start it, download a model in it, then look again. In Ollama a model is "
               "downloaded with a command such as the one below; LM Studio also needs its local server "

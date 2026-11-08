@@ -105,6 +105,12 @@ async def run_drill(*, registry: Any = None, chain: list[str] | None = None) -> 
 
         failover = (await asyncio.to_thread(get_nonstop_config)).failover  # settings
         chain = list(failover.chain) if failover.enabled else []
+        if not failover.enabled and failover.chain:
+            # Said for what it is (providers stage 1): a chain set with
+            # failover off read "No backup model is configured".
+            return done(False, "failover_off",
+                        f"A backup model is set ({', '.join(failover.chain)}) but failover is off: turn "
+                        "agent.nonstop.failover on (Settings -> System -> Non-stop).")
     if not chain:
         return done(False, "not_configured",
                     "No backup model is configured: set agent.nonstop.failover.chain to a model of another "
@@ -113,6 +119,16 @@ async def run_drill(*, registry: Any = None, chain: list[str] | None = None) -> 
         from kazma_core.model_registry import get_model_registry
 
         registry = await asyncio.to_thread(get_model_registry)  # settings and the vault
+    from kazma_core.failover_backup import suggest_backups, unusable_backups
+
+    bad = await asyncio.to_thread(unusable_backups, registry, chain)
+    if len(bad) == len(chain):
+        offers = await asyncio.to_thread(suggest_backups, registry)
+        offer = (" Usable instead: " + ", ".join(f"{o['model']} ({o['display_name']})" for o in offers) + ".")             if offers else ""
+        return done(False, "backup_unusable",
+                    "No provider that can be called serves the backup model "
+                    + ", ".join(repr(row["model"]) for row in bad)
+                    + " (switched on, with a key or on this network, listing the model)." + offer)
     primary = str((await asyncio.to_thread(registry.get_active_profile)).get("model") or "")
     vendors = await asyncio.to_thread(lambda: {m: _vendor(registry, m) for m in {primary, *chain}})
     own = vendors.get(primary, "")

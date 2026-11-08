@@ -74,6 +74,9 @@ class TestTheRouteUsesIt:
 
         from kazma_ui import providers as ui_providers
 
+        # Since providers stage 1 (2026-11-08) the check lists the provider's
+        # models with what was typed and tries the first chat model; only a
+        # provider that lists none is "no_model", still reachable.
         src = inspect.getsource(ui_providers)
-        assert "no model is selected for this" in src
-        assert "tick at least one model" in src
+        assert '"error_code": "no_model", "reachable": True' in src
+        assert "Type one and test again" in src

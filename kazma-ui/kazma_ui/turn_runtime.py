@@ -144,6 +144,7 @@ def persist_reply(
     run_model: str = "",
     tokens: int | None = None,
     cost: float | None = None,
+    cost_known: bool | None = None,
     duration_ms: float | None = None,
     activity: list[dict[str, Any]] | None = None,
     parts: list[dict[str, Any]] | None = None,
@@ -187,6 +188,7 @@ def persist_reply(
             run_model=run_model or None,
             tokens=tokens,
             cost=cost,
+            cost_known=cost_known,
             duration_ms=duration_ms,
             allow_shrink=allow_shrink,
         )

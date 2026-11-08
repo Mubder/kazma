@@ -214,7 +214,7 @@ def test_concurrent_calls_of_one_turn_are_all_counted(ledger):
         return await asyncio.to_thread(llm_ledger.turn_usage, "turn-par")
 
     usage = asyncio.run(_in_turn("turn-par", run))
-    assert usage == {"calls": 8, "tokens": 120, "cost": pytest.approx(0.008)}
+    assert usage == {"calls": 8, "tokens": 120, "cost": pytest.approx(0.008), "unpriced": 0}
     assert sorted(r[0] for r in _rows(ledger.conn, "turn-par")) == list(range(8))
     assert ledger.on_loop == []
 

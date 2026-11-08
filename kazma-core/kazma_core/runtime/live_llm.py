@@ -81,12 +81,48 @@ def key_is_usable(key: Any) -> bool:
     return True
 
 
+#: Name endings of hosts on this computer's own network (RFC 6762 ``.local``,
+#: RFC 8375 ``.home.arpa``, Docker's ``host.docker.internal``, routers' ``.lan``).
+_NETWORK_SUFFIXES = (".local", ".lan", ".home", ".home.arpa", ".internal", ".localhost", ".localdomain")
+
+
 def url_is_local(url: str) -> bool:
-    u = (url or "").lower()
-    return any(
-        tok in u
-        for tok in ("localhost", "127.0.0.1", "0.0.0.0", "lmstudio", "lm-studio", ":11434")
-    )
+    """True for a model server on this computer or its own network.
+
+    Such a server may be called without a key, and its tokens cost nothing
+    (``kazma_core.model_prices``). It was decided by text in the address
+    (localhost, 127.0.0.1, :11434), so a keyless vLLM or llama.cpp on
+    192.168.1.20 was taken for a cloud provider with no key: swapped for
+    another provider, refused by Test, hidden by the chat picker (providers
+    stage 1, 2026-11-08). Now: loopback, private and link-local addresses,
+    a host name with no dot (``gpu-box``), and the network name endings
+    above -- and the old name checks, kept for addresses already saved.
+    Never link-local (169.254.169.254 is cloud metadata).
+    """
+    u = (url or "").strip().lower()
+    if not u:
+        return False
+    if any(tok in u for tok in ("localhost", "127.0.0.1", "0.0.0.0", "lmstudio", "lm-studio", ":11434")):
+        return True
+    import ipaddress
+    from urllib.parse import urlsplit
+
+    try:
+        host = (urlsplit(u if "://" in u else f"http://{u}").hostname or "").strip(".")
+    except ValueError:
+        return False
+    if not host:
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return "." not in host or host.endswith(_NETWORK_SUFFIXES)
+    # One rule with model discovery (kazma_core.security.ssrf.own_network_ip):
+    # loopback, private, Tailscale's shared space; never link-local or a
+    # cloud metadata address.
+    from kazma_core.security.ssrf import own_network_ip
+
+    return own_network_ip(ip)
 
 
 def url_is_cloud(url: str) -> bool:

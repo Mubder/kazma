@@ -522,7 +522,7 @@ From `kazma-core/kazma_core/providers.py`. Most presets speak the OpenAI Chat Co
 | `groq` | Groq | `https://api.groq.com/openai/v1` | `Bearer` | no |
 | `mistral` | Mistral AI | `https://api.mistral.ai/v1` | `Bearer` | no |
 | `together` | Together AI | `https://api.together.xyz/v1` | `Bearer` | no |
-| `cohere` | Cohere | `https://api.cohere.ai/v1` | `Bearer` | no |
+| `cohere` | Cohere | `https://api.cohere.ai/compatibility/v1` | `Bearer` | no |
 | `fireworks` | Fireworks AI | `https://api.fireworks.ai/inference/v1` | `Bearer` | no |
 | `perplexity` | Perplexity | `https://api.perplexity.ai` | `Bearer` | no |
 | `ai21` | AI21 Labs | `https://api.ai21.com/studio/v1` | `Bearer` | no |

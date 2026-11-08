@@ -48,10 +48,26 @@ class _Registry:
         self.clients.update(clients)
 
     def get_active_profile(self):
-        return {"model": PRIMARY}
+        return {"model": PRIMARY, "provider": "deepseek"}
 
     def find_provider_for_model(self, model):
         return self.PROVIDERS.get(model)
+
+    def get_provider(self, name):
+        return next((p for p in self.PROVIDERS.values() if p["name"] == name), None)
+
+    def list_providers(self):
+        return list(self.PROVIDERS.values())
+
+    def resolve_provider_credentials(self, name):
+        entry = self.get_provider(name) or {}
+        return entry.get("base_url", ""), str(entry.get("key", "sk-drill-test-key"))
+
+    def get_visible_models(self, name):
+        return [m for m, p in self.PROVIDERS.items() if p["name"] == name]
+
+    def probe_model_for(self, name):
+        return ""
 
     def get_client(self, model=None):
         return self.clients[model]
@@ -192,3 +208,30 @@ def test_the_drill_runs_in_a_process_of_its_own(tmp_path):
     assert lines, done.stderr[-2000:]
     assert done.returncode == 1
     assert json.loads(lines[-1])["step"] == "not_configured"
+
+
+def test_a_backup_set_with_failover_off_says_so(monkeypatch):
+    """Providers stage 1: a chain set with failover off read "No backup model
+    is configured" (the live install's drill of 2026-11-06)."""
+    from kazma_core.agent import nonstop
+
+    config = nonstop.NonStopConfig()
+    config.failover.enabled = False
+    config.failover.chain = [BACKUP]
+    monkeypatch.setattr(nonstop, "get_nonstop_config", lambda *a, **k: config)
+    result = asyncio.run(drill.run_drill(registry=_Registry()))
+    assert result.step == "failover_off" and BACKUP in result.detail
+
+
+def test_a_backup_no_usable_provider_serves_is_named_with_one_that_could(monkeypatch):
+    class _Keyless(_Registry):
+        PROVIDERS = {
+            PRIMARY: {"name": "deepseek", "base_url": "https://api.deepseek.com/v1"},
+            "gemini-x": {"name": "google", "base_url": "https://generativelanguage.googleapis.com/v1beta",
+                         "key": ""},
+            BACKUP: {"name": "anthropic", "base_url": "https://api.anthropic.com"},
+        }
+
+    result = asyncio.run(drill.run_drill(registry=_Keyless(), chain=["gemini-x"]))
+    assert result.step == "backup_unusable"
+    assert "'gemini-x'" in result.detail and BACKUP in result.detail  # the usable one, offered

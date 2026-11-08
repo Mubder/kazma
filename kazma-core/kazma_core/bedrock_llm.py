@@ -274,9 +274,16 @@ class BedrockProvider(LLMProvider):
         usage = resp.get("usage") or {}
         usage_in = usage.get("inputTokens", 0)
         usage_out = usage.get("outputTokens", 0)
-        key = next((k for k in _MODEL_COSTS if k in model_id.lower()), "")
-        in_cost, out_cost = _MODEL_COSTS.get(key, (3.0, 15.0))
-        cost = (usage_in / 1_000_000) * in_cost + (usage_out / 1_000_000) * out_cost
+        # The configured price (the owner's), else this module's table
+        # (kazma_core.model_prices.table_price), else unknown: an unlisted
+        # model was priced as Sonnet ($3 / $15).
+        from kazma_core.model_prices import table_price
+
+        in_cost, out_cost = self.config.input_cost_per_1m, self.config.output_cost_per_1m
+        if in_cost is None or out_cost is None:
+            in_cost, out_cost = table_price(_MODEL_COSTS, model_id) or (None, None)
+        cost_known = in_cost is not None and out_cost is not None
+        cost = ((usage_in / 1_000_000) * in_cost + (usage_out / 1_000_000) * out_cost) if cost_known else 0.0
 
         return LLMResponse(
             content="".join(text_parts),
@@ -289,6 +296,7 @@ class BedrockProvider(LLMProvider):
                 "total_tokens": usage_in + usage_out,
             },
             cost_usd=cost,
+            cost_known=cost_known,
             duration_ms=(time.monotonic() - start) * 1000,
         )
 

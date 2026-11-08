@@ -106,6 +106,17 @@
              rel="noopener noreferrer">{{ t('setup.download') }}</a>
         </div>
       </template>
+      {#- A server on another computer of this network (vLLM, llama.cpp,
+          LocalAI, LM Studio, Ollama): its address, checked to be on this
+          network, then saved as a provider of its own. -#}
+      <label class="setup-label" for="setup-lan-address">{{ t('setup.lan_label') }}</label>
+      <div class="setup-row">
+        <input id="setup-lan-address" class="form-input" type="text" dir="ltr" translate="no" autocomplete="off"
+               x-model="lanAddress" placeholder="192.168.1.20:8000" @keydown.enter="useLan()">
+        <button type="button" class="btn btn-secondary" id="setup-lan-use" @click="useLan()"
+                :disabled="busy || !String(lanAddress || '').trim()">{{ t('setup.lan_use') }}</button>
+      </div>
+      <p class="setup-muted">{{ t('setup.lan_hint') }}</p>
       <p class="setup-muted" x-show="!localLoading">{{ t('setup.local_hint') }}</p>
       <code class="setup-command" dir="ltr" translate="no" x-show="!localLoading">ollama pull llama3.2</code>
       <div class="setup-row">

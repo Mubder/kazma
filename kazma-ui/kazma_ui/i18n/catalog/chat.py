@@ -858,6 +858,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "رمز",
         "en": "tok",
     },
+    "chat.cost_unknown": {
+        "ar": "السعر غير معروف",
+        "en": "price unknown",
+    },
+    "chat.cost_badge_unknown": {
+        "ar": "$ —",
+        "en": "$ —",
+    },
+    "chat.cost_unknown_title": {
+        "ar": "بعض طلبات هذه المحادثة إلى النموذج ليس لها سعر معروف. أضفه في الإعدادات ← المزودون والموصلات ← أسعار النماذج.",
+        "en": "Some of this chat’s model calls have no known price. Add it in Settings → Providers & Connectors → Model prices.",
+    },
     "chat.ctx_unit": {
         "ar": "سياق",
         "en": "ctx",

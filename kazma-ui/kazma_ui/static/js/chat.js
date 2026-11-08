@@ -76,7 +76,7 @@
   // Cumulative session usage (tokens/cost). Preferred source: the server's
   // session_tokens/session_cost payload keys; falls back to local accumulation
   // when only per-turn values arrive (old backends).
-  var _sessionTotals = { tokens: 0, cost: 0 };
+  var _sessionTotals = { tokens: 0, cost: 0, costKnown: true };
   // Per-turn usage captured from done/turn_complete — powers the turn
   // summary bar rendered by finalizeProgress().
   var _lastTurnStats = null;
@@ -2705,8 +2705,10 @@
                 if (!p.enabled) return;
                 var pname = String(p.name || '').toLowerCase();
                 // Keyless cloud providers in the dropdown pin gpt-4o-mini and
-                // 401 chat even after DeepSeek Test succeeded.
-                if (!p.api_key && !_localProv[pname]) return;
+                // 401 chat even after DeepSeek Test succeeded. A server on this
+                // computer or its network needs no key (``local``, from the
+                // server's url_is_local; the name alone hid a LAN vLLM).
+                if (!p.api_key && !p.local && !_localProv[pname]) return;
                 var models = [];
                 var visible = p.visible_models || [];
                 var disc = p.discovered_models || [];
@@ -3420,11 +3422,12 @@
           }, 600);
         }
         if (data) {
-          updateSessionStats(data.tokens, data.cost, data.session_tokens, data.session_cost);
+          updateSessionStats(data.tokens, data.cost, data.session_tokens, data.session_cost, data.cost_known);
           // Capture per-turn usage for the workbench summary bar (finalizeProgress).
           _lastTurnStats = {
             tokens: Number(data.tokens) || 0,
             cost: Number(data.cost) || 0,
+            costKnown: data.cost_known,
             durationMs: Number(data.duration_ms) || 0,
           };
           _paintTurnStatsFor(data, currentMsgEl);
@@ -4525,7 +4528,9 @@
         }
         if (elapsed) parts.push(elapsed);
         if (_lastTurnStats) {
-          if (_lastTurnStats.cost) parts.push(KS.formatCost(_lastTurnStats.cost));
+          if (_lastTurnStats.cost || _lastTurnStats.costKnown === false) {
+            parts.push(_costText(_lastTurnStats.cost, _lastTurnStats.costKnown));
+          }
           if (_lastTurnStats.tokens) parts.push(_tokensText(_lastTurnStats.tokens));
         }
         titleEl.textContent = parts.join(' \u00B7 ');
@@ -4786,11 +4791,32 @@
     return tiCount('count_tokens', n, '{n} token', '{n} tokens', { n: KS.formatTokens(n) });
   }
 
-  function _turnStatsText(tokens, cost, durationMs) {
+  // A cost as the page says it (kazma_core.model_prices): a known price as
+  // dollars; with a call of no known price, "price unknown" -- or "at least"
+  // the priced calls' share when there is one. An unknown price read "$0.0000"
+  // or, before 2026-11-08, gpt-4o-mini's price for every model.
+  function _costText(cost, known) {
+    var dollars = Number(cost) || 0;
+    if (known !== false) return KS.formatCost(dollars);
+    if (dollars > 0) return '\u2265 ' + KS.formatCost(dollars);
+    return ti('cost_unknown', 'price unknown');
+  }
+
+  // A saved reply's cost: a row saved before the price was checked has no
+  // ``cost_known`` and a made-up cost (every model was priced as gpt-4o-mini):
+  // its price is unknown, and its number is not shown.
+  function _savedCost(msg) {
+    if (msg && (msg.cost_known === true || msg.cost_known === false)) {
+      return { cost: msg.cost, known: msg.cost_known };
+    }
+    return Number(msg && msg.cost) > 0 ? { cost: 0, known: false } : { cost: msg && msg.cost, known: true };
+  }
+
+  function _turnStatsText(tokens, cost, durationMs, costKnown) {
     var bits = [];
-    if (Number(tokens) > 0 || Number(cost) > 0) {
+    if (Number(tokens) > 0 || Number(cost) > 0 || costKnown === false) {
       bits.push(_tokensText(tokens));
-      bits.push(KS.formatCost(Number(cost) || 0));
+      bits.push(_costText(cost, costKnown));
     }
     if (Number(durationMs) > 0) bits.push(KS.formatDuration(Number(durationMs)));
     return bits.join(' · ');
@@ -4809,7 +4835,7 @@
     el = el || fallbackEl || null;
     var meta = (el && el.querySelector) ? el.querySelector('.message-meta') : null;
     if (!meta) return;
-    var fields = { stats: _turnStatsText(data.tokens, data.cost, data.duration_ms) };
+    var fields = { stats: _turnStatsText(data.tokens, data.cost, data.duration_ms, data.cost_known) };
     if (data.model) fields.model = data.model;
     _paintMetaTail(meta, fields);
   }
@@ -4882,7 +4908,7 @@
     var statsText = '';
     var usage = (opts && opts.usage) || null;
     if (role === 'assistant' && usage) {
-      statsText = _turnStatsText(usage.tokens, usage.cost, usage.duration_ms);
+      statsText = _turnStatsText(usage.tokens, usage.cost, usage.duration_ms, usage.cost_known);
     }
     if (role === 'assistant' && opts && opts.turn_id) {
       wrapper.setAttribute('data-turn-id', String(opts.turn_id));
@@ -7069,7 +7095,12 @@
         var messages = payload;
         if (payload && !Array.isArray(payload) && Array.isArray(payload.messages)) {
           messages = payload.messages;
-          updateSessionStats(null, null, payload.total_tokens, payload.total_cost);
+          // The chat's price is known only when every saved reply's is.
+          var unknownCost = payload.messages.some(function (m) {
+            return m && m.role === 'assistant' && _savedCost(m).known === false;
+          });
+          _sessionTotals.costKnown = true;
+          updateSessionStats(null, null, payload.total_tokens, payload.total_cost, unknownCost ? false : undefined);
         }
 
         messagesEl.innerHTML = '';
@@ -7159,7 +7190,8 @@
               parts: msg.parts,
               model: msg.model || '',
               turn_id: msg.turn_id || '',
-              usage: { tokens: msg.tokens, cost: msg.cost, duration_ms: msg.duration_ms },
+              usage: { tokens: msg.tokens, cost: _savedCost(msg).cost, cost_known: _savedCost(msg).known,
+                       duration_ms: msg.duration_ms },
             });
             if (role === 'assistant' && window.KazmaTurnDocument && KazmaTurnDocument.fromMessage) {
               var hydratedDoc = KazmaTurnDocument.fromMessage(msg);
@@ -7387,7 +7419,10 @@
    * show a growing total on old backends. Missing usage renders as 0 —
    * never undefined (the dead-badge regression).
    */
-  function updateSessionStats(tokens, cost, sessionTokens, sessionCost) {
+  function updateSessionStats(tokens, cost, sessionTokens, sessionCost, costKnown) {
+    // Once a call of the chat had no known price, the chat's total is not
+    // its cost: the badge says so until another chat is opened.
+    if (costKnown === false) _sessionTotals.costKnown = false;
     if (sessionTokens != null || sessionCost != null) {
       _sessionTotals.tokens = Math.max(0, Number(sessionTokens) || 0);
       _sessionTotals.cost = Math.max(0, Number(sessionCost) || 0);
@@ -7395,18 +7430,27 @@
       _sessionTotals.tokens += Math.max(0, Number(tokens) || 0);
       _sessionTotals.cost += Math.max(0, Number(cost) || 0);
     }
-    if (costBadge) costBadge.textContent = KS.formatCost(_sessionTotals.cost);
+    _paintCostBadge();
     if (tokensBadge) {
       tokensBadge.textContent = formatCompactCount(_sessionTotals.tokens) + ' ' + ti('tok_unit', 'tok');
       tokensBadge.title = _tokensText(_sessionTotals.tokens);
     }
   }
 
+  function _paintCostBadge() {
+    if (!costBadge) return;
+    var known = _sessionTotals.costKnown !== false;
+    costBadge.textContent = known ? KS.formatCost(_sessionTotals.cost) : ti('cost_badge_unknown', '$ \u2014');
+    costBadge.title = known ? '' : ti('cost_unknown_title',
+      'Some of this chat\u2019s model calls have no known price. Add it in Settings \u2192 Providers & Connectors \u2192 Model prices.');
+  }
+
   /** Zero the badges + running totals (new session / /reset / session load). */
   function resetSessionStats() {
     _sessionTotals.tokens = 0;
     _sessionTotals.cost = 0;
-    if (costBadge) costBadge.textContent = KS.formatCost(0);
+    _sessionTotals.costKnown = true;
+    _paintCostBadge();
     if (tokensBadge) {
       tokensBadge.textContent = '0 ' + ti('tok_unit', 'tok');
       tokensBadge.title = _tokensText(0);
@@ -8884,11 +8928,12 @@
      */
     applyTurnStats: function(data) {
       if (!data) return;
-      updateSessionStats(data.tokens, data.cost, data.session_tokens, data.session_cost);
+      updateSessionStats(data.tokens, data.cost, data.session_tokens, data.session_cost, data.cost_known);
       if (data.tokens != null || data.duration_ms != null) {
         _lastTurnStats = {
           tokens: Number(data.tokens) || 0,
           cost: Number(data.cost) || 0,
+          costKnown: data.cost_known,
           durationMs: Number(data.duration_ms) || 0,
         };
       }

@@ -163,20 +163,6 @@
             if (Array.isArray(saved)) this.savedModels = saved;
         },
 
-        loadModelProfile(name) {
-            const profile = this.savedModels.find(p => p.name === name);
-            if (!profile) return;
-            if (profile.base_url) this.currentModel.base_url = profile.base_url;
-            if (profile.model) this.currentModel.model = profile.model;
-            if (profile.provider) {
-                this.modelProvider = profile.provider;
-            }
-            // api_key is masked (***), so only overwrite if it's a real key
-            if (profile.api_key && profile.api_key !== '***') {
-                this.currentModel.api_key = profile.api_key;
-            }
-            showToast(_k('settings.hub.loaded_profile', 'Loaded profile "{name}"', { name: name }), 'success');
-        },
 
         async runModelComparison() {
             if (!this.comparePrompt || this.compareModels.length === 0) {
@@ -660,6 +646,57 @@
                 : _k('settings.hub.open_in_discord', 'Open this conversation in Discord');
         },
 
+        // ── Model prices (kazma_core.model_prices) ──
+        async loadModelPrices() {
+            this.modelPricesFailed = false;
+            const data = window.kazmaGetJson ? await window.kazmaGetJson('/api/settings/model-prices') : null;
+            if (!data) {
+                this.modelPricesFailed = true;
+                return;
+            }
+            this.modelPrices = (data.prices || []).map((p) => ({ model: p.model, input: p.input, output: p.output }));
+            this.modelPricesUnpriced = Array.isArray(data.unpriced) ? data.unpriced : null;
+            this.modelPricesMax = Number(data.max) || 1000;
+            this.modelPricesLoaded = true;
+        },
+
+        addModelPrice(model) {
+            const name = String(model || '').trim().toLowerCase();
+            if (name && this.modelPrices.some((p) => String(p.model || '').trim().toLowerCase() === name)) return;
+            this.modelPrices.push({ model: name, input: '', output: '' });
+        },
+
+        removeModelPrice(index) {
+            this.modelPrices.splice(index, 1);
+        },
+
+        async saveModelPrices() {
+            const value = {};
+            for (const p of this.modelPrices) {
+                const name = String(p.model || '').trim().toLowerCase();
+                const blank = (v) => v === '' || v === null || v === undefined;
+                if (!name && blank(p.input) && blank(p.output)) continue;
+                if (!name || blank(p.input) || blank(p.output)) {
+                    showToast(_k('settings.model_prices_incomplete', 'Each model needs a name and both prices.'), 'error');
+                    return;
+                }
+                value[name] = { input: Number(p.input), output: Number(p.output) };
+            }
+            this.modelPricesSaving = true;
+            try {
+                await window.kazmaSave('/api/settings/single', {
+                    method: 'PUT',
+                    body: { key: 'models.prices', value: value, category: 'models' },
+                });
+                showToast(_k('settings.model_prices_saved', 'Prices saved'), 'success');
+                await this.loadModelPrices();
+            } catch (e) {
+                showToast(_k('settings.model_prices_failed', 'Prices not saved: ') + e.message, 'error');
+            } finally {
+                this.modelPricesSaving = false;
+            }
+        },
+
         async loadHubProfiles() {
             try {
                 const data = await this._fetch('/api/models/profiles');
@@ -757,7 +794,16 @@
                 } else {
                     this.hubProviderModal = false;
                     await this.loadHubProviders();
-                    showToast(_k('settings.hub.provider_saved', 'Provider saved'), 'success');
+                    // Saved, but left off: no key (a provider that fails every
+                    // message is not switched on); a second row at one address.
+                    if (result.switched_off === 'no_key') {
+                        showToast(_k('settings.provider_saved_off', 'The provider is saved, but left off: it has no API key.'), 'warning');
+                    } else {
+                        showToast(_k('settings.hub.provider_saved', 'Provider saved'), 'success');
+                    }
+                    if (Array.isArray(result.same_address_as) && result.same_address_as.length) {
+                        showToast(_k('settings.provider_same_address', 'Same address as:') + ' ' + result.same_address_as.join(', '), 'info');
+                    }
                 }
             } catch (e) {
                 showToast(_k('settings.hub.failed_to_save_provider', 'Failed to save provider: ') + e.message, 'error');
@@ -790,7 +836,12 @@
                 });
                 await this.loadHubProviders();
             } catch (e) {
-                showToast(_k('settings.hub.toggle_failed', 'Toggle failed: ') + e.message, 'error');
+                const detail = e && e.body && e.body.detail;
+                if (detail && detail.code === 'no_key') {
+                    showToast(_k('settings.provider_no_key_on', 'This provider has no API key: add its key before switching it on.'), 'error');
+                } else {
+                    showToast(_k('settings.hub.toggle_failed', 'Toggle failed: ') + e.message, 'error');
+                }
             }
         },
 
@@ -885,51 +936,42 @@
             return result.latency_ms != null ? result.latency_ms + ' ms' : '';
         },
 
+        // Test checks the provider AS TYPED, without saving it
+        // (POST /api/providers/check, kazma_core.provider_check): one short
+        // message through the client chat would build for it. The dialog
+        // used to save the provider, typed key and all, before testing, and
+        // Save opened after any attempt -- a refused key stayed saved.
         async testHubProviderFromModal() {
-            const name = this.hubEditingProvider.name;
-            if (!name || (!this.hubEditingProvider.base_url && name !== 'google')) {
+            const p = this.hubEditingProvider;
+            const name = String(p.name || '').trim();
+            if (!name || (!p.base_url && name !== 'google')) {
                 showToast(_k('settings.hub.enter_a_provider_name_and', 'Enter a provider name and base URL first'), 'error');
                 return;
             }
             this.hubTestingProvider = 'modal';
             this.hubTestResult = null;
             try {
-                // Upsert a temporary provider so the test can run against the modal values.
-                const temp = { ...this.hubEditingProvider };
-                if (typeof temp.models === 'string') {
-                    temp.models = temp.models.split(',').map(m => m.trim()).filter(Boolean);
-                }
-                delete temp._existing;
-                delete temp._has_stored_key;
-                const upsertResp = await fetch('/api/providers', {
+                const typedModels = typeof p.models === 'string'
+                    ? p.models.split(',').map(m => m.trim()).filter(Boolean)
+                    : (Array.isArray(p.models) ? p.models : []);
+                const typed = String(p.api_key || '').trim();
+                const body = { name: name, base_url: p.base_url || '', model: typedModels[0] || '' };
+                if (typed && !this._isMaskedApiKey(typed)) body.api_key = typed;
+                const resp = await fetch('/api/providers/check', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                    body: JSON.stringify(temp),
+                    body: JSON.stringify(body),
                 });
-                if (!upsertResp.ok) {
-                    const upsertData = await upsertResp.json();
-                    let errMsg = upsertData.error || upsertData.detail || `HTTP ${upsertResp.status}`;
-                    if (typeof errMsg === 'object') errMsg = JSON.stringify(errMsg);
-                    throw new Error(errMsg);
+                let result = {};
+                try { result = (await resp.json()) || {}; } catch (e) { result = {}; }
+                const success = !!result.success;
+                const errorMsg = success ? null : this.providerCheckError(result, resp);
+                this.hubTestResult = { type: 'provider', source: 'modal', ...result, success, error: errorMsg };
+                // Save opens on an answer; a failure offers "Save anyway".
+                this.hubProviderTested = success;
+                if (success && !typedModels.length && result.chat_model) {
+                    p.models = String(result.chat_model);  // the model that answered
                 }
-                const typed = String(temp.api_key || '').trim();
-                const testBody = {};
-                if (typed && !this._isMaskedApiKey(typed)) {
-                    testBody.api_key = typed;
-                }
-                const resp = await fetch(`/api/providers/${encodeURIComponent(name)}/test`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                    body: JSON.stringify(testBody),
-                });
-                const result = await resp.json();
-                let success = !!result.success;
-                let errorMsg = result.error || result.detail || (resp.ok ? null : `HTTP ${resp.status}`);
-                if (typeof errorMsg === 'object') {
-                    errorMsg = JSON.stringify(errorMsg);
-                }
-                this.hubTestResult = { type: 'provider', source: 'modal', success, error: errorMsg, ...result };
-                this.hubProviderTested = true; // attempt completed: enable save
                 if (success) {
                     showToast(_k('settings.hub.connection_test_succeeded', 'Connection test succeeded'), 'success');
                 } else {
@@ -937,10 +979,32 @@
                 }
             } catch (e) {
                 this.hubTestResult = { type: 'provider', source: 'modal', success: false, error: e.message };
-                this.hubProviderTested = true; // attempt completed on exception: enable save
+                this.hubProviderTested = false;
                 showToast(_k('settings.hub.test_failed', 'Test failed: ') + e.message, 'error');
             }
             this.hubTestingProvider = null;
+        },
+
+        /** A failed check's words: its code in the page's language
+         *  (kazma_core.provider_check), else what the server said. */
+        providerCheckError(result, resp) {
+            const code = String((result && result.error_code) || '');
+            const said = (result && (result.error || result.detail)) || (resp ? 'HTTP ' + resp.status : '');
+            return code ? _k('settings.provider_check.' + code, said || code) : said;
+        },
+
+        /** Save a provider whose test failed (a provider down for now, a key
+         *  to be paid for later) -- after saying so. */
+        async saveHubProviderAnyway() {
+            const ok = await window.kazmaConfirm({
+                title: _k('settings.save_untested_title', 'Save without a working test?'),
+                message: _k('settings.save_untested_body',
+                    'The test did not get an answer from this provider. Kazma saves it as it is; chat will fail on it until it answers.'),
+                confirmText: _k('settings.save_untested', 'Save anyway'),
+                danger: true,
+            });
+            if (!ok) return;
+            await this.saveHubProvider();
         },
 
         /** The page's words for a failed discovery's code (FA-107). */
@@ -1258,14 +1322,22 @@
             this.openHubProfileModal(name);
         },
 
-        loadHubProfile(name) {
+        // "Use": Kazma switches to the profile's model, and the provider that
+        // serves it (the chat picker's route). "Load" filled fields no part of
+        // the page showed, said "Loaded", and changed nothing (providers stage 1).
+        async loadHubProfile(name) {
             const p = this.hubProfiles.find(x => x.name === name);
-            if (!p) return;
-            this.currentModel.base_url = p.base_url || '';
-            this.currentModel.model = p.model || '';
-            this.currentModel.api_key = (p.api_key && p.api_key !== '***') ? p.api_key : this.currentModel.api_key;
-            this.modelProvider = p.provider || '';
-            showToast(_k('settings.hub.loaded_profile', 'Loaded profile "{name}"', { name: name }), 'success');
+            if (!p || !p.model) return;
+            try {
+                await window.kazmaSave('/api/settings/active_model', {
+                    method: 'PUT',
+                    body: { active_model: p.model },
+                });
+                showToast(_k('settings.profile_in_use', 'Kazma now uses {model}', { model: p.model }), 'success');
+                document.dispatchEvent(new CustomEvent('model-changed', { detail: p.model }));
+            } catch (e) {
+                showToast(_k('settings.profile_not_used', 'Kazma could not switch to {model}: ', { model: p.model }) + e.message, 'error');
+            }
         },
 
         async saveHubProfile() {

@@ -16,7 +16,9 @@ class TestAgentE2E:
 
         assert config.version == get_version()  # canonicalized base+gSHA
         assert config.language in ("ar", "en")  # default is 'en' (English-first)
-        assert config.default_model in ("gpt-4o-mini", "gpt-4o", "default")
+        # models.default is retired (providers stage 1, 2026-11-08): the
+        # registry's active model is the model; this is only a fallback name.
+        assert config.default_model == ""
 
     async def test_agent_init_with_config(self) -> None:
         config = load_config()
