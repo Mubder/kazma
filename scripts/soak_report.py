@@ -4,6 +4,11 @@ A soak runs for hours or days, and a reboot, an update or a kill can end it
 early. Each harness therefore rewrites its whole report as it goes
 (``"status": "running"``), and once more at the end (``passed`` or
 ``failed``): the file on disk is always a complete report of the run so far.
+A ``running`` report also names its process (``pid``, and ``pid_started``:
+when that process loaded these helpers), so a reader can tell a run still
+going from one that stopped without its final report -- a closed window, a
+reboot, Ctrl+C. The drill VM's document soak (2026-11-08) stopped that way,
+and its report said "running" with nothing to check it against.
 The memory, document, swarm, scheduled, time-travel and knowledge soaks
 share these helpers, so a reader finds the same fields in every report.
 
@@ -28,6 +33,11 @@ def utc_stamp() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
+#: When this process loaded the harness helpers: a harness imports them at its
+#: start, so a process with this ``pid`` that started later is another one.
+_PID_STARTED = utc_stamp()
+
+
 #: How long a rename refused by a reader is retried (on Windows a reader that
 #: holds the file open -- an editor, a script reading it -- refuses it).
 _REPLACE_RETRY_S = 2.0
@@ -37,7 +47,9 @@ def write_report(path: str | os.PathLike[str] | None, report: dict[str, Any]) ->
     """Replace the report file whole (a reader never sees half of one).
 
     Written to a temporary name beside it, then renamed over it. No path,
-    no file: a harness run without ``--report`` prints its report only.
+    no file: a harness run without ``--report`` prints its report only. A
+    ``running`` report is written with this process's ``pid`` and
+    ``pid_started``.
 
     Never raises: a report write must not end a multi-day soak. A rename a
     reader refuses is retried for ``_REPLACE_RETRY_S``; a write that still
@@ -46,6 +58,8 @@ def write_report(path: str | os.PathLike[str] | None, report: dict[str, Any]) ->
     """
     if not path:
         return True
+    if report.get("status") == RUNNING:
+        report = {**report, "pid": os.getpid(), "pid_started": _PID_STARTED}
     target = Path(path)
     tmp = target.with_name(target.name + ".tmp")
     text = json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False, default=str)

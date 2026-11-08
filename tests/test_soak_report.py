@@ -94,6 +94,44 @@ def test_negative_control_a_plain_rename_raises_while_a_reader_holds_the_file(tm
     reader.join()
 
 
+def test_a_running_report_names_its_process(tmp_path: Path) -> None:
+    target = tmp_path / "report.json"
+    soak_report.write_report(target, {"status": soak_report.RUNNING, "n": 1})
+    running = json.loads(target.read_text(encoding="utf-8"))
+    assert running["pid"] == os.getpid() and running["pid_started"] <= soak_report.utc_stamp()
+    soak_report.write_report(target, soak_report.finished({"n": 2}, healthy=True))
+    assert "pid" not in json.loads(target.read_text(encoding="utf-8")), "only a running report names it"
+
+
+def test_a_soak_that_stopped_without_its_report_can_be_told_apart(tmp_path: Path) -> None:
+    """The drill VM's case (2026-11-08): the soak's process ended with its
+    report still "running". The pid it names is no running process now."""
+    import subprocess
+
+    import psutil
+
+    target = tmp_path / "report.json"
+    script = (
+        "import sys; sys.path.insert(0, sys.argv[1]); import soak_report; "
+        "soak_report.write_report(sys.argv[2], {'status': soak_report.RUNNING})"
+    )
+    scripts = str(Path(__file__).resolve().parents[1] / "scripts")
+    subprocess.run([sys.executable, "-I", "-c", script, scripts, str(target)], check=True, timeout=60)
+    report = json.loads(target.read_text(encoding="utf-8"))
+    assert report["status"] == "running"
+    pid = report["pid"]
+    gone = not psutil.pid_exists(pid) or time.strftime(
+        "%Y-%m-%dT%H:%M:%SZ", time.gmtime(psutil.Process(pid).create_time())) > report["pid_started"]
+    assert gone, "the report's process ended, and the report says which it was"
+
+
+def test_control_a_report_without_its_process_cannot_be_checked(tmp_path: Path, monkeypatch) -> None:
+    target = tmp_path / "report.json"
+    monkeypatch.setattr(soak_report, "RUNNING", "no such status")  # the writer before 2026-11-08
+    soak_report.write_report(target, {"status": "running"})
+    assert "pid" not in json.loads(target.read_text(encoding="utf-8"))
+
+
 def test_percentiles_and_the_latency_summary() -> None:
     values = [float(v) for v in range(1, 101)]
     assert soak_report.percentile([], 0.5) is None
