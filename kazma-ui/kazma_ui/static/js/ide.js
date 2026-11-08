@@ -115,6 +115,8 @@ function ideApp() {
       this.chatStream = null;
       try { if (this._themeObs) this._themeObs.disconnect(); } catch (e) {}
       this._themeObs = null;
+      if (this._onThemeChange) document.removeEventListener('kazma:themechange', this._onThemeChange);
+      this._onThemeChange = null;
       try {
         if (this._onWinResize) window.removeEventListener('resize', this._onWinResize);
       } catch (e) {}
@@ -181,10 +183,19 @@ function ideApp() {
     },
 
     // ── Editor: textarea first, CodeMirror if present ──
+    // One theme, `kazma` (ide.html): every colour in it is a token, so the
+    // editor follows light and dark, and the owner's accent, with the page.
     _cmTheme() {
-      return document.documentElement.getAttribute('data-theme') === 'light'
-        ? 'eclipse'
-        : 'nord';
+      return 'kazma';
+    },
+
+    /* Re-apply the theme when the page's theme or accent changes: the
+       tokens already moved, CodeMirror re-measures and repaints. */
+    _applyEditorTheme() {
+      var cm = _ed();
+      if (!cm || typeof cm.setOption !== 'function') return;
+      cm.setOption('theme', this._cmTheme());
+      if (typeof cm.refresh === 'function') cm.refresh();
     },
 
     /* Indentation guides. CodeMirror 5 ships none, so draw one marker per
@@ -282,12 +293,15 @@ function ideApp() {
         // reports enabled. Nothing below the editor depends on it.
         self._bindLsp();
         self._themeObs = new MutationObserver(function () {
-          if (_ed()) _ed().setOption('theme', self._cmTheme());
+          self._applyEditorTheme();
         });
         self._themeObs.observe(document.documentElement, {
           attributes: true,
           attributeFilter: ['data-theme'],
         });
+        // The shell announces a theme or accent change (detail: {theme}).
+        self._onThemeChange = function () { self._applyEditorTheme(); };
+        document.addEventListener('kazma:themechange', self._onThemeChange);
       } catch (err) {
         console.warn('[ide] CodeMirror init failed — plain textarea', err);
         _ideCM = null;
