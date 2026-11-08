@@ -760,6 +760,24 @@ button { cursor: pointer; font-family: inherit; }
 .notif-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .notif-item-title { display: flex; align-items: center; gap: 6px; }
 .notif-item-reason { font-size: 0.75rem; opacity: 0.7; }
+/* Read: a problem stays, dimmed, until it is fixed (2026-11-08). */
+.notif-item.is-read { opacity: 0.6; }
+.notif-head {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px var(--sp-3);
+  border-bottom: 1px solid var(--border);
+}
+.notif-mark-all {
+  font: inherit;
+  font-size: 0.74rem;
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  color: var(--accent);
+  cursor: pointer;
+}
+.notif-mark-all:hover { text-decoration: underline; }
 
 /* User dropdown */
 .user-menu {

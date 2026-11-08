@@ -51,15 +51,25 @@
                 <template x-if="!$store.notifications.loaded && !$store.notifications.error">
                     <div class="dropdown-item" role="status" style="cursor:default;opacity:0.7">{{ t('common.loading') }}</div>
                 </template>
-                <template x-if="$store.notifications.loaded && $store.notifications.items.length === 0">
+                {# "Mark all as read" while something is unread (2026-11-08). #}
+                <template x-if="$store.notifications.loaded && $store.notifications.count > 0">
+                    <div class="notif-head">
+                        <button type="button" class="notif-mark-all" id="notifications-mark-all"
+                                @click="$store.notifications.markAllRead()">{{ t('common.mark_all_read') }}</button>
+                    </div>
+                </template>
+                <template x-if="$store.notifications.loaded && $store.notifications.visibleItems().length === 0">
                     <div class="dropdown-item" style="cursor:default;opacity:0.7">{{ t('common.no_system_alerts') }}</div>
                 </template>
                 {# Each notification opens the page it is about
                    ($store.notifications.href: the server's link, else the
-                   Dashboard's open problems), 2026-11-08. #}
-                <template x-for="item in $store.notifications.items" :key="item.id">
+                   Dashboard's open problems), and opening it marks it read:
+                   the badge counts the unread, read news leaves, a read
+                   problem stays dimmed until it is fixed (2026-11-08). #}
+                <template x-for="item in $store.notifications.visibleItems()" :key="item.id">
                     <a class="dropdown-item notif-item" :href="$store.notifications.href(item)"
-                       @click="$store.notifications.open = false">
+                       :class="{ 'is-read': $store.notifications.isRead(item) }"
+                       @click="$store.notifications.openItem(item)">
                         <span class="notif-item-title">
                             <span aria-hidden="true" style="font-weight:700" :style="{ color: $store.notifications.tone(item).color }" x-text="$store.notifications.tone(item).mark"></span>
                             <span translate="no" x-text="item.title || item.subsystem || t('common.alert')"></span>

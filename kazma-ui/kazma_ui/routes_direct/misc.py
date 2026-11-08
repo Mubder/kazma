@@ -334,7 +334,14 @@ def register_misc_routes(self: Any) -> None:
             logger.warning("[alerts] run incidents could not be read: %s", exc)
             incidents = []
         from kazma_core.observability.alerts import FALLBACK_PAGE, alert_link
+        from kazma_core.db.pg_helpers import store_errors
+        from kazma_core.observability.notification_reads import read_ids
 
+        try:
+            read = read_ids()
+        except store_errors() as exc:  # a store that cannot answer: everything counts as unread
+            logger.warning("[alerts] the read notifications could not be read: %s", type(exc).__name__)
+            read = set()
         for a in [*AlertDispatcher.get_recent_alerts(), *recent_alerts(current_language()), *incidents]:
             item = a.to_dict() if hasattr(a, "to_dict") else a
             try:
@@ -346,8 +353,29 @@ def register_misc_routes(self: Any) -> None:
             # else its subsystem's page, else the Dashboard's open problems.
             if isinstance(encoded, dict):
                 encoded["link"] = alert_link(encoded)
+                # Opened, or marked with "Mark all as read" (2026-11-08): the
+                # bell counts the rest.
+                encoded["read"] = str(encoded.get("id") or "") in read
             out.append(encoded)
         return out
+
+    @self.app.post("/api/alerts/read")
+    async def _mark_alerts_read(request: Request):
+        """Record notifications as read: ``{"ids": [...]}``, at most 200
+        (kazma_core.observability.notification_reads). The bell sends it when
+        one is opened and for "Mark all as read"."""
+        from kazma_core.observability.notification_reads import clean_ids, mark_read
+
+        try:
+            body = await read_json(request)
+        except InvalidJsonBody:
+            return invalid_json_response()
+        try:
+            ids = clean_ids((body or {}).get("ids") if isinstance(body, dict) else None)
+        except ValueError as exc:
+            return _JSONResponse({"ok": False, "error": str(exc), "code": "invalid_ids"}, status_code=400)
+        marked = await asyncio.to_thread(mark_read, ids)
+        return {"ok": True, "read": marked}
     @self.app.get("/packages")
     def _packages_redirect() -> RedirectResponse:
         """Legacy /packages page → Settings Packages tab."""

@@ -119,7 +119,10 @@ def test_notifications_store_fetches_live_alerts():
         / "header.html"
     ).read_text(encoding="utf-8")
     assert "/api/alerts/recent" in js
-    assert "$store.notifications.items" in header
+    # The bell lists the live alerts through visibleItems() since 2026-11-08
+    # (the unread, then the read problems).
+    assert "$store.notifications.visibleItems()" in header
+    assert "return (this.items || []).filter(" in js
 
 
 def test_exec_cwd_resolution_failure_is_clarify_not_allow(tmp_path, monkeypatch):
