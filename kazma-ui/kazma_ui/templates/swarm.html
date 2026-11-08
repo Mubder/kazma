@@ -8,7 +8,7 @@
 
   <!-- ── Setup Banner ── -->
   {% if single_operator_refusal %}
-  <div id="swarm-single-operator" role="alert" style="background:rgba(210,153,34,0.08);border:1px solid var(--warning);border-radius:8px;padding:12px 16px;margin-bottom:16px;color:var(--warning);">{{ t('swarm.single_operator') }}</div>
+  <div id="swarm-single-operator" role="alert" class="notice tone-warning swarm-block"><span class="ki" data-icon="alert" aria-hidden="true"></span><span>{{ t('swarm.single_operator') }}</span></div>
   {% endif %}
 
   {# A chat approval card's link (Swarm audit SW-S03): the whole call and the
@@ -16,7 +16,7 @@
      page script before the address bar changes. #}
   {% if approval_id %}
   <div class="card" id="swarm-approval" data-approval-id="{{ approval_id }}" style="margin-bottom:1.5rem;">
-    <h3 style="margin:0 0 10px;display:flex;align-items:center;gap:8px;"><span class="ki" data-icon="swarm" aria-hidden="true"></span> {{ t('swarm.approval.title') }}</h3>
+    <h3 class="card-title swarm-card-title"><span class="ki" data-icon="swarm" aria-hidden="true"></span> {{ t('swarm.approval.title') }}</h3>
     <div id="swarm-approval-body" aria-live="polite">{{ t('swarm.approval.loading') }}</div>
     <div id="swarm-approval-actions" style="display:none;gap:8px;margin-top:12px;flex-wrap:wrap;">
       <button type="button" class="btn btn-primary" data-action="approval-approve">{{ t('swarm.approval.approve') }}</button>
@@ -24,44 +24,46 @@
     </div>
   </div>
   {% endif %}
-  <div id="setup-banner" style="display:none;background:rgba(210,153,34,0.08);border:1px solid var(--warning);border-radius:8px;padding:12px 16px;margin-bottom:16px;">
-    <div style="display:flex;align-items:center;gap:8px;color:var(--warning);">
-      <span style="font-size:1.2rem;"><span x-html="KazmaIcons.alert()"></span></span>
+  {# swarm.js shows and hides the wrapper (display); the notice inside keeps its own layout. #}
+  <div id="setup-banner" class="swarm-block" style="display:none;">
+    <div class="notice tone-warning">
+      <span class="ki" data-icon="alert" aria-hidden="true"></span>
       <span class="setup-text"></span>
     </div>
   </div>
 
   <!-- ── Metrics Bar ── -->
-  <div class="metrics-grid swarm-metrics-grid" style="margin-bottom:1.5rem;display:grid;gap:12px;">
-    <div class="metric-card">
-      <div class="metric-icon"><span class="ki" data-icon="swarm" aria-hidden="true"></span></div>
-      <div class="metric-label">{{ t('swarm.workers') }}</div>
-      <div class="metric-value" id="metric-worker-count" style="color:var(--text-primary);">{{ worker_count }}</div>
-      <div class="metric-sub"><span id="metric-busy">0</span> {{ t('swarm.busy') }}</div>
+  {% set on_demand = not started and not worker_count and template_count %}
+  <div class="metrics-grid swarm-metrics-grid swarm-block">
+    <div class="stat-tile tone-accent">
+      <div class="stat-tile-icon"><span class="ki" data-icon="swarm" aria-hidden="true"></span></div>
+      <div class="stat-tile-label">{{ t('swarm.workers') }}</div>
+      <div class="stat-tile-value" id="metric-worker-count">{{ worker_count }}</div>
+      <div class="swarm-tile-sub"><span id="metric-busy">0</span> {{ t('swarm.busy') }}</div>
     </div>
-    <div class="metric-card">
-      <div class="metric-icon"><span x-html="KazmaIcons.zap()"></span></div>
-      <div class="metric-label">{{ t('swarm.status') }}</div>
-      {% set on_demand = not started and not worker_count and template_count %}
-      <div class="metric-value" id="metric-swarm-status" style="color:var(--text-muted);">{{ t('swarm.running') if started else (t('swarm.on_demand') if on_demand else t('swarm.stopped')) }}</div>
-      <div class="metric-sub" id="metric-swarm-status-sub">{{ t('swarm.swarm_active') if started else (t('swarm.on_demand_sub') if on_demand else t('swarm.swarm_idle')) }}</div>
+    {# swarm.js keeps the tile's tone in step: running, on demand or stopped. #}
+    <div id="swarm-status-tile" class="stat-tile {{ 'tone-success' if started else ('tone-accent' if on_demand else 'tone-neutral') }}">
+      <div class="stat-tile-icon"><span x-html="KazmaIcons.zap()"></span></div>
+      <div class="stat-tile-label">{{ t('swarm.status') }}</div>
+      <div class="stat-tile-value" id="metric-swarm-status">{{ t('swarm.running') if started else (t('swarm.on_demand') if on_demand else t('swarm.stopped')) }}</div>
+      <div class="swarm-tile-sub" id="metric-swarm-status-sub">{{ t('swarm.swarm_active') if started else (t('swarm.on_demand_sub') if on_demand else t('swarm.swarm_idle')) }}</div>
     </div>
-    <div class="metric-card">
-      <div class="metric-icon"><span class="ki" data-icon="bar-chart" aria-hidden="true"></span></div>
-      <div class="metric-label">{{ t('swarm.tasks_today') }}</div>
-      <div class="metric-value" id="metric-tasks-today" style="color:var(--text-primary);">0</div>
-      <div class="metric-sub">{{ t('swarm.completed') }}</div>
+    <div class="stat-tile tone-info">
+      <div class="stat-tile-icon"><span class="ki" data-icon="bar-chart" aria-hidden="true"></span></div>
+      <div class="stat-tile-label">{{ t('swarm.tasks_today') }}</div>
+      <div class="stat-tile-value" id="metric-tasks-today">0</div>
+      <div class="swarm-tile-sub">{{ t('swarm.completed') }}</div>
     </div>
-    <div class="metric-card">
-      <div class="metric-icon"><span class="ki" data-icon="dollar-sign" aria-hidden="true"></span></div>
-      <div class="metric-label">{{ t('swarm.total_cost') }}</div>
-      <div class="metric-value" id="metric-total-cost" style="color:var(--text-primary);">$0.00</div>
-      <div class="metric-sub">{{ t('swarm.today') }}</div>
+    <div class="stat-tile tone-success">
+      <div class="stat-tile-icon"><span class="ki" data-icon="dollar-sign" aria-hidden="true"></span></div>
+      <div class="stat-tile-label">{{ t('swarm.total_cost') }}</div>
+      <div class="stat-tile-value" id="metric-total-cost">$0.00</div>
+      <div class="swarm-tile-sub">{{ t('swarm.today') }}</div>
     </div>
   </div>
 
   <!-- ── Controls ── -->
-  <div class="card" style="margin-bottom:1.5rem;">
+  <div class="card swarm-block">
     <div class="swarm-controls-row" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
       <div>
         <span id="swarm-status-text" style="font-size:0.9rem;color:var(--text-muted);display:inline-flex;align-items:center;gap:6px"><span class="ki" data-icon="dot" aria-hidden="true"></span> {{ t('swarm.loading_status') }}</span>
@@ -75,7 +77,7 @@
   </div>
 
   <!-- ── Tab Navigation ── -->
-  <div class="tabs" id="swarm-tabs" style="margin-bottom:0;">
+  <div class="tabs" id="swarm-tabs" style="margin-bottom:16px;">
     <button class="tab active" data-tab="task-builder" onclick="KazmaSwarm.switchTab('task-builder')"><span class="ki" data-icon="wrench" aria-hidden="true"></span> {{ t('swarm.tab_task_builder') }}</button>
     <button class="tab" data-tab="workflow-editor" onclick="KazmaSwarm.switchTab('workflow-editor')"><span class="ki" data-icon="palette" aria-hidden="true"></span> {{ t('swarm.tab_workflow_editor') }}</button>
     <button class="tab" data-tab="playground" onclick="KazmaSwarm.switchTab('playground')"><span class="ki" data-icon="gamepad" aria-hidden="true"></span> {{ t('swarm.tab_playground') }}</button>
@@ -94,7 +96,7 @@
 
       <!-- Left: Task Configuration -->
       <div class="card">
-        <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:16px;"><span class="ki" data-icon="upload" aria-hidden="true"></span> {{ t('swarm.create_task') }}</h3>
+        <h3 class="card-title swarm-card-title"><span class="ki" data-icon="upload" aria-hidden="true"></span> {{ t('swarm.create_task') }}</h3>
         <form id="dispatch-form" onsubmit="return false;">
 
           <!-- Orchestration Pattern Selector (VAL-UI-001, VAL-ORCH-042) -->
@@ -113,13 +115,13 @@
           <!-- Worker Multi-Select with Capability Badges (VAL-UI-002, VAL-ORCH-043) -->
           <div class="form-group">
             <label class="form-label">{{ t('swarm.workers_label') }} *</label>
-            <div id="worker-select-container" style="border:1px solid var(--border);border-radius:var(--radius);padding:8px;min-height:80px;background:rgba(255,255,255,0.02);max-height:200px;overflow-y:auto;">
+            <div id="worker-select-container" class="swarm-picker" style="max-height:200px;">
               <!-- Worker checkboxes rendered by JS with capability badges -->
               <div id="worker-checkboxes" style="display:flex;flex-direction:column;gap:4px;">
                 <label style="display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:0.85rem;" class="worker-check-label">
                   <input type="checkbox" name="selected_workers" value="auto" {% if not workers %}checked{% endif %} style="accent-color:var(--accent);">
                   <span style="font-weight:500;">{{ t('swarm.auto_worker') }}</span>
-                  <span style="font-size:0.7rem;color:var(--text-muted);margin-left:auto;">{{ t('swarm.auto_worker_hint') }}</span>
+                  <span style="font-size:0.7rem;color:var(--text-muted);margin-inline-start:auto;">{{ t('swarm.auto_worker_hint') }}</span>
                 </label>
                 {% for w in workers %}
                 <label style="display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:0.85rem;" class="worker-check-label">
@@ -131,7 +133,7 @@
                     <span translate="no" class="badge badge-info" style="font-size:0.65rem;">{{ tag }}</span>
                     {% endfor %}
                   {% endif %}
-                  <span translate="no" style="font-size:0.7rem;color:var(--text-muted);margin-left:auto;">{{ w.get('model', '?') }}</span>
+                  <span translate="no" style="font-size:0.7rem;color:var(--text-muted);margin-inline-start:auto;">{{ w.get('model', '?') }}</span>
                 </label>
                 {% endfor %}
                 {% if not workers %}
@@ -161,8 +163,8 @@
           </div>
 
           <!-- Advanced Options (VAL-UI-004) -->
-          <details style="margin-top:12px;border:1px solid var(--border);border-radius:var(--radius);padding:0;">
-            <summary style="padding:10px 12px;cursor:pointer;font-size:0.85rem;font-weight:500;color:var(--text-secondary);background:rgba(255,255,255,0.02);border-radius:var(--radius);">
+          <details class="swarm-fold">
+            <summary>
               <span class="ki" data-icon="settings" aria-hidden="true"></span> {{ t('swarm.advanced_options') }}
             </summary>
             <div class="two-col-grid" style="padding:12px;display:grid;grid-template-columns:1fr 1fr;gap:12px;">
@@ -203,7 +205,7 @@
       <!-- Right: Recent Results Preview -->
       <div style="display:flex;flex-direction:column;gap:16px;">
         <div class="card" id="task-results-card">
-          <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:12px;"><span class="ki" data-icon="clipboard" aria-hidden="true"></span> {{ t('swarm.recent_results') }}</h3>
+          <h3 class="card-title swarm-card-title"><span class="ki" data-icon="clipboard" aria-hidden="true"></span> {{ t('swarm.recent_results') }}</h3>
           <div id="task-results-container">
             <div id="task-results-status" style="text-align:center;padding:24px;color:var(--text-muted);font-size:0.85rem;">{{ t('common.loading') }}</div>
             <div id="task-results-empty" style="display:none;text-align:center;padding:24px;color:var(--text-muted);">
@@ -226,7 +228,7 @@
       <!-- Visual Pipeline Editor Left Column -->
       <div class="card" style="display:flex;flex-direction:column;gap:12px;min-height:550px;">
         <div style="display:flex;justify-content:space-between;align-items:center;">
-          <h3 style="font-size:0.95rem;font-weight:600;margin:0;"><span class="ki" data-icon="edit" aria-hidden="true"></span> {{ t('swarm.visual_pipeline_editor') }}</h3>
+          <h3 class="card-title swarm-card-title swarm-flush"><span class="ki" data-icon="edit" aria-hidden="true"></span> {{ t('swarm.visual_pipeline_editor') }}</h3>
           <div style="display:flex;gap:6px;">
             <button class="btn btn-sm btn-secondary" onclick="KazmaSwarm.loadPipelineExample()"><span class="ki" data-icon="clipboard" aria-hidden="true"></span> {{ t('swarm.example') }}</button>
             <button class="btn btn-sm btn-danger" onclick="KazmaSwarm.clearPipeline()"><span class="ki" data-icon="trash" aria-hidden="true"></span> {{ t('swarm.clear_all') }}</button>
@@ -236,18 +238,18 @@
         <!-- Pipeline Prompt -->
         <div class="form-group" style="margin-bottom:8px;">
           <label for="pipeline-prompt" class="form-label" style="font-size:0.8rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);"><span class="ki" data-icon="file-text" aria-hidden="true"></span> {{ t('swarm.master_task_prompt') }} *</label>
-          <textarea id="pipeline-prompt" class="form-textarea" style="font-size:0.8rem;padding:8px 12px;background:rgba(0,0,0,0.15);border:1px solid var(--border);border-radius:var(--radius);resize:vertical;min-height:70px;" placeholder="{{ t('swarm.master_task_ph') }}"></textarea>
+          <textarea id="pipeline-prompt" class="form-textarea" style="resize:vertical;min-height:70px;" placeholder="{{ t('swarm.master_task_ph') }}"></textarea>
         </div>
 
         <!-- Global Timeout & Fallback Worker side-by-side -->
         <div style="display:flex;gap:12px;margin-bottom:8px;align-items:flex-end;">
           <div class="form-group" style="flex:1;margin-bottom:0;">
             <label for="pipeline-timeout" class="form-label" style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;"><span x-html="KazmaIcons.clock()"></span> {{ t('swarm.step_timeout') }}</label>
-            <input type="number" id="pipeline-timeout" class="form-input" style="height:32px;font-size:0.8rem;padding:4px 8px;background:rgba(0,0,0,0.15);border:1px solid var(--border);border-radius:var(--radius);" value="300">
+            <input type="number" id="pipeline-timeout" class="form-input" value="300">
           </div>
           <div class="form-group" style="flex:1.5;margin-bottom:0;">
             <label for="pipeline-fallback-select" class="form-label" style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;"><span class="ki" data-icon="shield" aria-hidden="true"></span> {{ t('swarm.fallback_worker') }}</label>
-            <select id="pipeline-fallback-select" class="form-select" style="height:32px;font-size:0.8rem;padding:4px 8px;background:rgba(0,0,0,0.15);border:1px solid var(--border);border-radius:var(--radius);">
+            <select id="pipeline-fallback-select" class="form-select">
               <option value="">{{ t('swarm.none_fail_closed') }}</option>
               {% for w in workers %}
               <option translate="no" value="{{ w.name }}">{% if w.name == 'auto' %}{{ t('swarm.auto_worker') }}{% else %}{{ w.name }}{% endif %}</option>
@@ -259,11 +261,11 @@
         <!-- Steps Header & Add Step -->
         <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;margin-bottom:4px;">
           <span style="font-size:0.8rem;font-weight:600;color:var(--text-secondary);"><span class="ki" data-icon="link" aria-hidden="true"></span> {{ t('swarm.pipeline_stages') }}</span>
-          <button class="btn btn-sm btn-primary" onclick="KazmaSwarm.addPipelineStage()" style="padding:4px 10px;font-size:0.75rem;"><span x-html="KazmaIcons.plus()"></span> {{ t('swarm.add_step') }}</button>
+          <button class="btn btn-sm btn-primary" onclick="KazmaSwarm.addPipelineStage()"><span x-html="KazmaIcons.plus()"></span> {{ t('swarm.add_step') }}</button>
         </div>
 
         <!-- Steps Drag and Drop Container -->
-        <div id="pipeline-steps-container" style="flex:1;overflow-y:auto;max-height:220px;border:1px dashed var(--border);border-radius:var(--radius);padding:8px;background:rgba(0,0,0,0.1);min-height:100px;">
+        <div id="pipeline-steps-container" class="swarm-well swarm-dropzone">
           <!-- steps will be populated by JS -->
         </div>
 
@@ -272,33 +274,38 @@
 
         <!-- Run Dispatch Section -->
         <div style="margin-top:8px;">
-          <button id="btn-pipeline-run" class="btn btn-primary" onclick="KazmaSwarm.dispatchVisualPipeline()" style="width:100%;font-weight:600;height:38px;"><span class="ki" data-icon="rocket" aria-hidden="true"></span> {{ t('swarm.run_pipeline') }}</button>
+          <button id="btn-pipeline-run" class="btn btn-primary btn-full" onclick="KazmaSwarm.dispatchVisualPipeline()"><span class="ki" data-icon="rocket" aria-hidden="true"></span> {{ t('swarm.run_pipeline') }}</button>
         </div>
 
         <!-- Inline HITL Approval Gating Panel -->
-        <div id="pipeline-hitl-gate" class="alert alert-warning" style="display:none;margin-top:10px;border:1px solid var(--warning);background:rgba(245,158,11,0.05);padding:10px 12px;border-radius:var(--radius);">
-          <div style="font-weight:600;color:var(--warning);margin-bottom:4px;font-size:0.8rem;"><span x-html="KazmaIcons.square()"></span> {{ t('swarm.pipeline_gated') }}</div>
-          <pre id="pipeline-hitl-preview" style="background:rgba(0,0,0,0.3);padding:6px;border-radius:4px;font-size:0.7rem;font-family:var(--font-mono);margin-bottom:8px;max-height:80px;overflow-y:auto;white-space:pre-wrap;color:var(--text-secondary);"></pre>
-          <div style="display:flex;gap:8px;">
-            <button class="btn btn-sm btn-primary" onclick="KazmaSwarm.approvePipelineCheck()" style="padding:2px 8px;font-size:0.75rem;">{{ t('swarm.approve') }}</button>
-            <button class="btn btn-sm btn-danger" onclick="KazmaSwarm.rejectPipelineCheck()" style="padding:2px 8px;font-size:0.75rem;">{{ t('swarm.reject') }}</button>
+        {# swarm.js shows and hides the wrapper; the notice inside keeps its layout. #}
+        <div id="pipeline-hitl-gate" style="display:none;">
+          <div class="notice tone-warning swarm-gate">
+            <div class="swarm-gate-title"><span x-html="KazmaIcons.square()"></span> {{ t('swarm.pipeline_gated') }}</div>
+            <pre id="pipeline-hitl-preview" class="swarm-well swarm-preview"></pre>
+            <div class="swarm-actions">
+              <button class="btn btn-sm btn-primary" onclick="KazmaSwarm.approvePipelineCheck()">{{ t('swarm.approve') }}</button>
+              <button class="btn btn-sm btn-danger" onclick="KazmaSwarm.rejectPipelineCheck()">{{ t('swarm.reject') }}</button>
+            </div>
           </div>
         </div>
 
         <!-- Inline Run Logs/Terminal -->
-        <div id="pipeline-terminal-card" style="display:none;margin-top:10px;background:rgba(0,0,0,0.2);border:1px solid var(--border);border-radius:var(--radius);padding:10px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-            <span style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);"><span class="ki" data-icon="monitor" aria-hidden="true"></span> {{ t('swarm.pipeline_logs') }}</span>
-            <span id="pipeline-live-timer" class="badge badge-info" style="font-size:0.65rem;">0s</span>
+        <div id="pipeline-terminal-card" class="card-nested swarm-log-card" style="display:none;">
+          <div class="swarm-row">
+            <span class="swarm-log-title"><span class="ki" data-icon="monitor" aria-hidden="true"></span> {{ t('swarm.pipeline_logs') }}</span>
+            <span id="pipeline-live-timer" class="badge badge-info">0s</span>
           </div>
-          <div id="pipeline-terminal" style="font-family:var(--font-mono);font-size:0.7rem;background:#060611;border-radius:4px;padding:8px;height:120px;overflow-y:auto;border:1px solid rgba(255,255,255,0.03);line-height:1.4;color:var(--text-secondary);"></div>
+          {# A terminal is a well in either theme (the page's sunken surface):
+             it was a fixed near-black box, one of two blacks on this page. #}
+          <div id="pipeline-terminal" class="swarm-terminal" style="height:120px;"></div>
         </div>
       </div>
 
       <!-- Live Rendered Right Column -->
       <div class="card" style="display:flex;flex-direction:column;gap:12px;min-height:550px;">
-        <h3 style="font-size:0.95rem;font-weight:600;margin:0;"><span class="ki" data-icon="bar-chart" aria-hidden="true"></span> {{ t('swarm.workflow_mermaid_visual') }}</h3>
-        <div id="workflow-mermaid-container" style="flex:1;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.01);border:1px dashed var(--border);border-radius:var(--radius);padding:16px;overflow:auto;min-height:400px;position:relative;">
+        <h3 class="card-title swarm-card-title swarm-flush"><span class="ki" data-icon="bar-chart" aria-hidden="true"></span> {{ t('swarm.workflow_mermaid_visual') }}</h3>
+        <div id="workflow-mermaid-container" class="swarm-diagram">
           <div id="workflow-mermaid-spinner" style="display:none;position:absolute;color:var(--text-muted);font-size:0.85rem;"><span class="ki" data-icon="refresh" aria-hidden="true"></span> {{ t('swarm.rerendering') }}</div>
           <div id="workflow-mermaid" class="swarm-mermaid-diagram" style="width:100%;text-align:center;"></div>
         </div>
@@ -314,7 +321,7 @@
       
       <!-- Playground Config Left Column -->
       <div class="card" style="min-height:550px;">
-        <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:16px;"><span class="ki" data-icon="gamepad" aria-hidden="true"></span> {{ t('swarm.playground_title') }}</h3>
+        <h3 class="card-title swarm-card-title"><span class="ki" data-icon="gamepad" aria-hidden="true"></span> {{ t('swarm.playground_title') }}</h3>
         <form id="playground-form" onsubmit="return false;">
           
           <!-- Orchestration Pattern Selector -->
@@ -333,12 +340,12 @@
           <!-- Workers Select dropdown -->
           <div class="form-group">
             <label class="form-label">{{ t('swarm.workers_label') }} *</label>
-            <div id="play-worker-select-container" style="border:1px solid var(--border);border-radius:var(--radius);padding:8px;min-height:80px;background:rgba(255,255,255,0.02);max-height:150px;overflow-y:auto;">
+            <div id="play-worker-select-container" class="swarm-picker" style="max-height:150px;">
               <div id="play-worker-checkboxes" style="display:flex;flex-direction:column;gap:4px;">
                 <label style="display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:0.85rem;" class="worker-check-label">
                   <input type="checkbox" name="play_selected_workers" value="auto" {% if not workers %}checked{% endif %} style="accent-color:var(--accent);">
                   <span style="font-weight:500;">{{ t('swarm.auto_worker') }}</span>
-                  <span style="font-size:0.7rem;color:var(--text-muted);margin-left:auto;">{{ t('swarm.auto_worker_hint') }}</span>
+                  <span style="font-size:0.7rem;color:var(--text-muted);margin-inline-start:auto;">{{ t('swarm.auto_worker_hint') }}</span>
                 </label>
                 {% for w in workers %}
                 <label style="display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:0.85rem;" class="worker-check-label">
@@ -350,7 +357,7 @@
                     <span translate="no" class="badge badge-info" style="font-size:0.65rem;">{{ tag }}</span>
                     {% endfor %}
                   {% endif %}
-                  <span translate="no" style="font-size:0.7rem;color:var(--text-muted);margin-left:auto;">{{ w.get('model', '?') }}</span>
+                  <span translate="no" style="font-size:0.7rem;color:var(--text-muted);margin-inline-start:auto;">{{ w.get('model', '?') }}</span>
                 </label>
                 {% endfor %}
                 {% if not workers %}
@@ -368,8 +375,8 @@
           </div>
 
           <!-- Advanced collapsible variables -->
-          <details style="margin-top:12px;border:1px solid var(--border);border-radius:var(--radius);padding:0;">
-            <summary style="padding:10px 12px;cursor:pointer;font-size:0.85rem;font-weight:500;color:var(--text-secondary);background:rgba(255,255,255,0.02);border-radius:var(--radius);">
+          <details class="swarm-fold">
+            <summary>
               <span class="ki" data-icon="settings" aria-hidden="true"></span> {{ t('swarm.advanced_options') }}
             </summary>
             <div style="padding:12px;display:flex;flex-direction:column;gap:12px;">
@@ -405,52 +412,54 @@
         <!-- Live SSE Terminal Panel -->
         <div class="card" style="flex:1.2;display:flex;flex-direction:column;gap:10px;">
           <div style="display:flex;justify-content:space-between;align-items:center;">
-            <h3 style="font-size:0.95rem;font-weight:600;margin:0;"><span class="ki" data-icon="scroll" aria-hidden="true"></span> {{ t('swarm.logs_live') }}</h3>
+            <h3 class="card-title swarm-card-title swarm-flush"><span class="ki" data-icon="scroll" aria-hidden="true"></span> {{ t('swarm.logs_live') }}</h3>
             <span id="play-live-timer" style="font-family:var(--font-mono);font-size:0.8rem;color:var(--text-muted);display:none;">0s</span>
           </div>
           
           <!-- Monospace terminal container -->
-          <div id="playground-terminal" style="flex:1;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:12px;font-family:var(--font-mono);font-size:0.8rem;line-height:1.5;color:#c9d1d9;overflow-y:auto;height:250px;min-height:220px;box-shadow:inset 0 0 10px rgba(0,0,0,0.5);">
+          <div id="playground-terminal" class="swarm-terminal" style="flex:1;height:250px;min-height:220px;">
             <div style="color:var(--text-muted);">{{ t('swarm.playground_idle') }}</div>
           </div>
         </div>
 
         <!-- State Inspector & HITL Panel -->
         <div class="card" style="flex:1;display:flex;flex-direction:column;gap:12px;">
-          <h3 style="font-size:0.95rem;font-weight:600;margin:0;"><span class="ki" data-icon="search" aria-hidden="true"></span> {{ t('swarm.state_inspector') }}</h3>
+          <h3 class="card-title swarm-card-title swarm-flush"><span class="ki" data-icon="search" aria-hidden="true"></span> {{ t('swarm.state_inspector') }}</h3>
           
           <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-            <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle);border-radius:6px;padding:8px 10px;">
-              <div style="font-size:0.75rem;color:var(--text-muted);">{{ t('swarm.status') }}</div>
+            <div class="card-nested swarm-state-tile">
+              <div class="swarm-state-label">{{ t('swarm.status') }}</div>
               <span id="play-state-status" class="badge badge-secondary" style="margin-top:4px;">{{ t('swarm.state_idle') }}</span>
             </div>
-            <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle);border-radius:6px;padding:8px 10px;">
-              <div style="font-size:0.75rem;color:var(--text-muted);">{{ t('swarm.active_node') }}</div>
+            <div class="card-nested swarm-state-tile">
+              <div class="swarm-state-label">{{ t('swarm.active_node') }}</div>
               <span id="play-state-node" style="font-size:0.85rem;font-weight:600;color:var(--text-primary);margin-top:4px;display:block;">—</span>
             </div>
           </div>
 
           <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-            <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle);border-radius:6px;padding:8px 10px;">
-              <div style="font-size:0.75rem;color:var(--text-muted);">{{ t('swarm.token_usage') }}</div>
+            <div class="card-nested swarm-state-tile">
+              <div class="swarm-state-label">{{ t('swarm.token_usage') }}</div>
               <span id="play-state-tokens" style="font-size:0.85rem;font-weight:600;color:var(--text-primary);margin-top:4px;display:block;">{{ t('swarm.tokens_zero') }}</span>
             </div>
-            <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle);border-radius:6px;padding:8px 10px;">
-              <div style="font-size:0.75rem;color:var(--text-muted);">{{ t('swarm.accumulated_cost') }}</div>
+            <div class="card-nested swarm-state-tile">
+              <div class="swarm-state-label">{{ t('swarm.accumulated_cost') }}</div>
               <span id="play-state-cost" style="font-size:0.85rem;font-weight:600;color:var(--success);margin-top:4px;display:block;">$0.0000</span>
             </div>
           </div>
 
           <!-- HITL approval container inside the playground -->
-          <div id="play-hitl-gate" style="display:none;padding:12px;border:1px solid var(--warning);border-radius:var(--radius);background:rgba(210,153,34,0.06);margin-top:8px;">
-            <div style="font-weight:600;font-size:0.85rem;color:var(--warning);display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+          <div id="play-hitl-gate" style="display:none;">
+           <div class="notice tone-warning swarm-gate">
+            <div class="swarm-gate-title">
               <span class="ki" data-icon="alert" aria-hidden="true"></span> {{ t('swarm.hitl_approval') }}
             </div>
-            <div id="play-hitl-preview" style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-secondary);background:rgba(0,0,0,0.15);border:1px solid var(--border-subtle);border-radius:4px;padding:6px;max-height:80px;overflow-y:auto;margin-bottom:10px;"></div>
-            <div style="display:flex;gap:8px;">
+            <div id="play-hitl-preview" class="swarm-well swarm-preview"></div>
+            <div class="swarm-actions">
               <button id="btn-play-approve" class="btn btn-primary btn-sm" onclick="KazmaSwarm.approvePlaygroundHitl()"><span class="ki" data-icon="check" aria-hidden="true"></span> {{ t('swarm.approve_continue') }}</button>
               <button id="btn-play-reject" class="btn btn-danger btn-sm" onclick="KazmaSwarm.rejectPlaygroundHitl()"><span class="ki" data-icon="x" aria-hidden="true"></span> {{ t('swarm.reject_stop') }}</button>
             </div>
+           </div>
           </div>
           
         </div>
@@ -510,7 +519,7 @@
 
       <!-- Left: Worker Cards -->
       <div>
-        <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:12px;"><span class="ki" data-icon="bot" aria-hidden="true"></span> {{ t('swarm.registered_workers') }}</h3>
+        <h3 class="card-title swarm-card-title"><span class="ki" data-icon="bot" aria-hidden="true"></span> {{ t('swarm.registered_workers') }}</h3>
         <div id="worker-cards-container" class="worker-list-body">
           {% if workers %}
           {% for w in workers %}
@@ -529,7 +538,7 @@
                         title="{{ t('swarm.cb_failures', n=(cb.get('consecutive_failures', 0) if cb else 0), max=(cb.get('failure_threshold', 5) if cb else 5)) }}"><span x-html="KazmaIcons.zap()"></span> <span class="cb-label">{{ t('swarm.cb_' ~ ((cb.state if cb and cb.state != 'closed' else 'closed')|replace('-', '_'))) }}</span></span>
                   {# An open breaker stops sending the worker tasks until it
                      cools down; the reset route existed and nothing called it. #}
-                  <button type="button" class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:1px 6px;"
+                  <button type="button" class="btn btn-xs btn-secondary"
                           data-action="reset-breaker" data-worker="{{ w.name }}" data-cb-reset="{{ w.name }}"
                           title="{{ t('swarm.cb_reset_hint') }}"{% if not (cb and cb.state != 'closed') %} hidden{% endif %}>{{ t('swarm.cb_reset') }}</button>
                 </div>
@@ -576,7 +585,7 @@
       <div style="display:flex;flex-direction:column;gap:16px;">
         <!-- Unified Add Worker Form -->
         <div class="card">
-          <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:16px;"><span x-html="KazmaIcons.plus()"></span> {{ t('swarm.add_worker') }}</h3>
+          <h3 class="card-title swarm-card-title"><span x-html="KazmaIcons.plus()"></span> {{ t('swarm.add_worker') }}</h3>
           <form id="add-worker-form" onsubmit="return false;">
             <div class="form-group">
               <label for="add-name" class="form-label">{{ t('swarm.worker_name') }} *</label>
@@ -634,7 +643,7 @@
      Platform Connectors (Delivery & Routing card, 2026-09-03). Kept as a
      pointer so existing muscle-memory finds it. -->
         <div class="card" id="output-routing-card">
-          <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:8px;"><span class="ki" data-icon="upload" aria-hidden="true"></span> {{ t('swarm.output_routing') }}</h3>
+          <h3 class="card-title swarm-card-title"><span class="ki" data-icon="upload" aria-hidden="true"></span> {{ t('swarm.output_routing') }}</h3>
           <p style="font-size:0.8rem;color:var(--text-muted);">
             {{ t('swarm.output_routing_moved') | safe }}
           </p>
@@ -647,15 +656,15 @@
   <!-- TAB: Templates (Auto-scaler)                                    -->
   <!-- ═══════════════════════════════════════════════════════════════ -->
   <div class="tab-panel" id="panel-templates" style="display:none;">
-    <div style="margin-bottom:12px;padding:10px 14px;background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.2);border-radius:var(--radius-card);font-size:0.82rem;color:var(--text-muted);">
+    <div class="notice tone-info swarm-block">
       <span class="ki" data-icon="info" aria-hidden="true"></span>
-      {{ t('swarm.templates_hint') }}
+      <span>{{ t('swarm.templates_hint') }}</span>
     </div>
     <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
       <!-- Left: Template Cards -->
       <div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-          <h3 style="font-size:0.95rem;font-weight:600;"><span class="ki" data-icon="layers" aria-hidden="true"></span> {{ t('swarm.templates_title') }}</h3>
+          <h3 class="card-title swarm-card-title swarm-flush"><span class="ki" data-icon="layers" aria-hidden="true"></span> {{ t('swarm.templates_title') }}</h3>
           <button class="btn btn-sm btn-secondary" onclick="KazmaSwarm.reapIdle()">{{ t('swarm.reap_idle') }}</button>
         </div>
         <div id="template-cards-container" class="worker-list-body">
@@ -664,7 +673,7 @@
       </div>
       <!-- Right: Add/Edit Template Form -->
       <div>
-        <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:12px;"><span class="ki" data-icon="plus-circle" aria-hidden="true"></span> <span id="template-form-title">{{ t('swarm.add_template') }}</span></h3>
+        <h3 class="card-title swarm-card-title"><span class="ki" data-icon="plus-circle" aria-hidden="true"></span> <span id="template-form-title">{{ t('swarm.add_template') }}</span></h3>
         <div class="card" style="padding:16px;">
           <input type="hidden" id="tmpl-edit-name" value="">
           <div class="form-group" style="margin-bottom:12px;">
@@ -751,18 +760,18 @@
     </div>
 
     <!-- History Table -->
-    <div class="card" style="padding:0;overflow:hidden;">
-      <div style="overflow-x:auto;">
-        <table style="width:100%;border-collapse:collapse;font-size:0.85rem;" id="history-table">
+    <div class="card">
+      <div class="table-container">
+        <table class="data-table" id="history-table">
           <thead>
-            <tr style="border-bottom:1px solid var(--border-subtle);">
-              <th style="padding:10px 16px;text-align:start;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('swarm.task_id') }}</th>
-              <th style="padding:10px 16px;text-align:start;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('swarm.type') }}</th>
-              <th style="padding:10px 16px;text-align:start;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('swarm.prompt_col') }}</th>
-              <th style="padding:10px 16px;text-align:start;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('swarm.workers_col') }}</th>
-              <th style="padding:10px 16px;text-align:start;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('swarm.status_col') }}</th>
-              <th style="padding:10px 16px;text-align:right;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('swarm.duration') }}</th>
-              <th style="padding:10px 16px;text-align:right;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('swarm.cost') }}</th>
+            <tr>
+              <th>{{ t('swarm.task_id') }}</th>
+              <th>{{ t('swarm.type') }}</th>
+              <th>{{ t('swarm.prompt_col') }}</th>
+              <th>{{ t('swarm.workers_col') }}</th>
+              <th>{{ t('swarm.status_col') }}</th>
+              <th class="swarm-num">{{ t('swarm.duration') }}</th>
+              <th class="swarm-num">{{ t('swarm.cost') }}</th>
             </tr>
           </thead>
           <tbody id="history-table-body">
@@ -775,7 +784,7 @@
         </table>
       </div>
       <!-- Pagination -->
-      <div id="history-pagination" style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-top:1px solid var(--border-subtle);font-size:0.8rem;color:var(--text-muted);">
+      <div id="history-pagination" class="swarm-pagination">
         <span id="history-count">0 {{ t('swarm.tasks_count') }}</span>
         <div style="display:flex;gap:8px;">
           <button class="btn btn-sm btn-secondary" id="history-prev" onclick="KazmaSwarm.historyPrev()" disabled><span class="ki" data-icon="chevron-right" aria-hidden="true" style="transform:rotate(180deg);display:inline-flex"></span> {{ t('swarm.prev') }}</button>
@@ -842,6 +851,57 @@
     </div>
   </div>
 </div>
+{# Inside the content block: a soft navigation carries .page-body and
+   head styles, never the body's script block (modules/nav.js), so a
+   style there never reached a page opened from the sidebar. #}
+<style>
+  /* The Swarm page on the shared components (UI refresh, 2026-11): cards
+     are the wall's colour (.card, .card-nested), tinted surfaces are the
+     shared tones (.stat-tile, .notice, .badge), wells and terminals are the
+     page's sunken surface. It was written for the dark theme only: white
+     and black washes that vanished or turned grey in light, and two fixed
+     near-black terminals. Only layout lives here -- no colour of its own. */
+  .swarm-block { margin-bottom: 24px; }
+  .swarm-metrics-grid { gap: 24px; margin-top: 0; }
+  .swarm-tile-sub { font-size: 12px; color: var(--text-secondary); }
+  .swarm-card-title { display: flex; align-items: center; gap: 8px; margin: 0 0 16px; }
+  .swarm-card-title.swarm-flush { margin: 0; }
+  .swarm-picker {
+    border: 1px solid var(--input-border); border-radius: var(--input-radius);
+    padding: 8px; min-height: 80px; overflow-y: auto;
+  }
+  .swarm-fold { margin-top: 12px; border: 1px solid var(--card-hairline); border-radius: var(--tile-radius); }
+  .swarm-fold > summary { padding: 10px 12px; cursor: pointer; font-size: 14px; font-weight: 500; color: var(--text-secondary); }
+  .swarm-well { background: var(--surface-sunken); border: 1px solid var(--card-hairline); border-radius: var(--tile-radius); }
+  .swarm-dropzone { flex: 1; overflow-y: auto; max-height: 220px; min-height: 100px; padding: 8px; border-style: dashed; }
+  .swarm-gate { flex-direction: column; align-items: stretch; gap: 8px; margin-top: 10px; }
+  .swarm-gate-title { font-weight: 600; color: var(--warning); display: flex; align-items: center; gap: 6px; }
+  .swarm-preview {
+    margin: 0; padding: 6px 8px; font-family: var(--font-mono); font-size: 12px;
+    max-height: 80px; overflow-y: auto; white-space: pre-wrap; color: var(--text-secondary);
+  }
+  .swarm-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .swarm-log-card { margin-top: 10px; padding: 12px; }
+  .swarm-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .swarm-log-title { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+  .swarm-terminal {
+    background: var(--surface-sunken); border: 1px solid var(--card-hairline); border-radius: var(--tile-radius);
+    padding: 12px; font-family: var(--font-mono); font-size: 13px; line-height: 1.5;
+    color: var(--text-secondary); overflow-y: auto;
+  }
+  .swarm-diagram {
+    flex: 1; display: flex; align-items: center; justify-content: center; position: relative;
+    border: 1px dashed var(--card-hairline); border-radius: var(--tile-radius);
+    padding: 16px; overflow: auto; min-height: 400px;
+  }
+  .swarm-state-tile { padding: 8px 10px; }
+  .swarm-state-label { font-size: 12px; color: var(--text-muted); }
+  .swarm-num { text-align: end; }
+  .swarm-pagination {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding-top: 12px; font-size: 13px; color: var(--text-muted);
+  }
+</style>
 {% endblock %}
 
 {% block scripts %}

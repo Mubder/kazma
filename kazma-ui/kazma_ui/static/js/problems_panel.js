@@ -76,24 +76,40 @@
     load();
   }
 
+  // The problem's tone on an icon tile (the Dashboard's shared components):
+  // a critical one in the danger tone, the rest in the warning tone.
+  function tile(critical) {
+    var box = el('span', 'icon-tile ' + (critical ? 'tone-danger' : 'tone-warning'));
+    box.setAttribute('aria-hidden', 'true');
+    var name = critical ? 'alert-circle' : 'alert';
+    if (window.KazmaIcons && typeof window.KazmaIcons.span === 'function') {
+      box.innerHTML = window.KazmaIcons.span(name);
+    }
+    return box;
+  }
+
   function row(problem) {
-    var item = el('li', 'problems-item problems-' + (problem.severity === 'critical' ? 'critical' : 'warn'));
+    var critical = problem.severity === 'critical';
+    var item = el('li', 'problems-item problems-' + (critical ? 'critical' : 'warn'));
     item.id = 'problem-' + problem.id;
+    item.appendChild(tile(critical));
+    var main = el('div', 'problems-main');
+    item.appendChild(main);
     var head = el('div', 'problems-head');
     head.appendChild(el('span', 'problems-source', sourceLabel(problem.source)));
     var title = content('strong', 'problems-title', problem.title || '');
     head.appendChild(title);
     if (problem.since) head.appendChild(el('span', 'problems-since', when(problem.since)));
-    item.appendChild(head);
-    if (problem.detail) item.appendChild(content('p', 'problems-detail', problem.detail));
+    main.appendChild(head);
+    if (problem.detail) main.appendChild(content('p', 'problems-detail', problem.detail));
     if (problem.fix) {
       var fix = el('p', 'problems-fix', tr('problems.fix', 'What fixes it:') + ' ');
       var code = content('code', '', problem.fix);
       code.setAttribute('dir', 'ltr');
       fix.appendChild(code);
-      item.appendChild(fix);
+      main.appendChild(fix);
     }
-    item.appendChild(el('p', 'problems-resolved', resolvedLine(problem.source)));
+    main.appendChild(el('p', 'problems-resolved', resolvedLine(problem.source)));
     var tools = el('div', 'problems-tools');
     var link = safeLink(problem.link);
     if (link) {
@@ -115,7 +131,7 @@
       tools.appendChild(ack);
       tools.appendChild(snooze);
     }
-    item.appendChild(tools);
+    main.appendChild(tools);
     return item;
   }
 

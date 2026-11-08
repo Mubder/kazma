@@ -111,6 +111,12 @@
     if (_docListeners) { try { _docListeners.abort(); } catch (e) {} }
     _docListeners = new AbortController();
     var once = { signal: _docListeners.signal };
+    // icons.js fills [data-icon] once, at the first page load: a Swarm page
+    // opened from the sidebar showed its stat tiles' icon wells empty.
+    // Filled nodes are skipped (data-ki-done).
+    if (window.KazmaIcons && typeof window.KazmaIcons.hydrate === 'function') {
+      try { window.KazmaIcons.hydrate(document.querySelector('.page-body') || document); } catch (e) { /* icons are decoration */ }
+    }
     fetchModels();
     refreshStatus();
     pollInterval = setInterval(refreshStatus, 5000);
@@ -134,6 +140,8 @@
 
     // Start/Stop All are wired in the template (onclick="KazmaSwarm.start()");
     // a second listener here sent every click twice (2026-09-28).
+
+    document.addEventListener('kazma:themechange', onThemeChange, once);
 
     // Event delegation for worker actions (cards and tables)
     document.addEventListener('click', function(e) {
@@ -289,11 +297,7 @@
     if (tabId === 'worker-registry') loadWorkerMetrics();
     if (tabId === 'templates') loadTemplates();
     if (tabId === 'workflow-editor') {
-      if (typeof mermaid !== 'undefined') {
-        try {
-          mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' });
-        } catch (e) { console.error("Mermaid init error:", e); }
-      }
+      initMermaid();
       initVisualPipeline();
     }
     if (tabId === 'active-tasks') {
@@ -524,8 +528,12 @@
     setText('metric-worker-count', String(data.count || 0));
     setText('metric-swarm-status', data.started ? t('swarm.running') : (ready ? t('swarm.on_demand') : t('swarm.stopped')));
     setText('metric-swarm-status-sub', data.started ? t('swarm.swarm_active') : (ready ? t('swarm.on_demand_sub') : t('swarm.swarm_idle')));
-    var sc = $('metric-swarm-status');
-    if (sc) sc.style.color = data.started ? 'var(--success)' : (ready ? 'var(--text-primary)' : 'var(--text-muted)');
+    // The status tile's tone follows the swarm: running, on demand, stopped.
+    var tile = $('swarm-status-tile');
+    if (tile) {
+      var tone = data.started ? 'tone-success' : (ready ? 'tone-accent' : 'tone-neutral');
+      tile.className = String(tile.className || '').replace(/\btone-[a-z]+\b/g, '').trim() + ' ' + tone;
+    }
     var busy = workers.filter(function(w) { return w.status === 'busy'; }).length;
     setText('metric-busy', String(busy));
     // Fetch aggregated metrics for tasks-today and total-cost
@@ -978,7 +986,7 @@
         // Cap the chain at 8 badges — innerHTML += used to grow unboundedly
         // within a card's lifetime.
         while (hfEl.children.length >= 8) hfEl.removeChild(hfEl.firstChild);
-        hfEl.innerHTML += '<span class="badge badge-info" translate="no" style="margin-right:4px;">' + esc(data.from) + ' -> ' + esc(data.to) + '</span>';
+        hfEl.innerHTML += '<span class="badge badge-info" translate="no" style="margin-inline-end:4px;">' + esc(data.from) + ' -> ' + esc(data.to) + '</span>';
       }
     });
 
@@ -1204,18 +1212,28 @@
     var statusBg = good ? 'var(--success-subtle)' : bad ? 'var(--danger-subtle)' : 'var(--warning-subtle)';
     var output = recentResultOutput(task);
     var card = document.createElement('div');
-    card.className = 'task-result-card';
+    card.className = 'task-result-card card-nested';
     card.setAttribute('data-task-id', String(task.id || task.task_id || ''));
-    card.style.cssText = 'padding:12px;margin-bottom:8px;border:1px solid var(--border-subtle);border-radius:6px;background:rgba(255,255,255,0.02);cursor:pointer;';
+    card.style.cssText = 'padding:12px;margin-bottom:8px;cursor:pointer;';
     card.innerHTML =
       '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px;">' +
         '<span translate="no" style="font-weight:600;font-size:0.85rem;color:var(--accent);">' + esc(workerLabels(task.workers) || '?') + '</span>' +
         '<span class="badge" style="background:' + statusBg + ';color:' + statusColor + ';">• ' + esc(stateLabel(task.status)) + '</span>' +
       '</div>' +
       '<div translate="no" style="font-size:0.8rem;color:var(--text-muted);">' + esc(String(task.prompt || '').slice(0, 120)) + '</div>' +
-      (output ? '<div translate="no" style="margin-top:6px;padding:8px;background:rgba(0,0,0,0.15);border-radius:4px;font-family:var(--font-mono);font-size:0.75rem;color:var(--text-secondary);white-space:pre-wrap;max-height:150px;overflow-y:auto;">' + esc(output.slice(0, 500)) + '</div>' : '') +
+      (output ? '<div translate="no" style="margin-top:6px;padding:8px;background:var(--surface-sunken);border-radius:var(--tile-radius);font-family:var(--font-mono);font-size:0.75rem;color:var(--text-secondary);white-space:pre-wrap;max-height:150px;overflow-y:auto;">' + esc(output.slice(0, 500)) + '</div>' : '') +
       (!output && task.error ? '<div translate="no" style="margin-top:4px;padding:8px;background:var(--danger-subtle);border-radius:4px;font-size:0.75rem;color:var(--danger);">[!]  ' + esc(String(task.error).slice(0, 500)) + '</div>' : '');
     return card;
+  }
+
+  // An active task's status as a shared badge, in its state's tone.
+  function activeStatusClass(status) {
+    var s = String(status || 'running').toLowerCase();
+    var tone = s === 'paused' ? 'badge-info'
+      : (s === 'completed' || s === 'success') ? 'badge-success'
+      : (s === 'failed' || s === 'error' || s === 'cancelled' || s === 'timeout') ? 'badge-danger'
+      : 'badge-warning';
+    return ['active-task-status', 'status-' + s, 'badge', tone].join(' ');
   }
 
   function hasResultCard(listEl, taskId) {
@@ -1262,9 +1280,9 @@
     var listEl = $('task-results-list');
     if (!listEl) return;
     var card = document.createElement('div');
-    card.className = 'task-result-card';
+    card.className = 'task-result-card card-nested';
     card.setAttribute('data-pending', '1');
-    card.style.cssText = 'padding:12px;margin-bottom:8px;border:1px solid var(--border-subtle);border-radius:6px;background:rgba(255,255,255,0.02);';
+    card.style.cssText = 'padding:12px;margin-bottom:8px;';
     card.innerHTML =
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
         '<span translate="no" style="font-weight:600;font-size:0.85rem;color:var(--accent);">' + esc(workerLabels(workerNames)) + '</span>' +
@@ -1288,14 +1306,14 @@
       var statusColor = r.status === 'success' ? 'var(--success)' : r.status === 'error' ? 'var(--danger)' : 'var(--warning)';
       var statusBg = r.status === 'success' ? 'var(--success-subtle)' : r.status === 'error' ? 'var(--danger-subtle)' : 'var(--warning-subtle)';
       var card = document.createElement('div');
-      card.className = 'task-result-card';
-      card.style.cssText = 'padding:12px;margin-bottom:8px;border:1px solid var(--border-subtle);border-radius:6px;background:rgba(255,255,255,0.02);';
+      card.className = 'task-result-card card-nested';
+      card.style.cssText = 'padding:12px;margin-bottom:8px;';
       card.innerHTML =
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
           '<span translate="no" style="font-weight:600;font-size:0.85rem;color:var(--accent);">' + esc(workerLabel(r.worker || '?')) + '</span>' +
           '<span class="badge" style="background:' + statusBg + ';color:' + statusColor + ';">• ' + esc(stateLabel(r.status)) + '</span>' +
         '</div>' +
-        (r.output ? '<div translate="no" style="padding:8px;background:rgba(0,0,0,0.15);border-radius:4px;font-family:var(--font-mono);font-size:0.75rem;color:var(--text-secondary);white-space:pre-wrap;max-height:150px;overflow-y:auto;">' + esc(r.output.slice(0, 500)) + '</div>' : '') +
+        (r.output ? '<div translate="no" style="padding:8px;background:var(--surface-sunken);border-radius:var(--tile-radius);font-family:var(--font-mono);font-size:0.75rem;color:var(--text-secondary);white-space:pre-wrap;max-height:150px;overflow-y:auto;">' + esc(r.output.slice(0, 500)) + '</div>' : '') +
         (r.error ? '<div translate="no" style="padding:8px;background:var(--danger-subtle);border-radius:4px;font-size:0.75rem;color:var(--danger);margin-top:4px;">[!]  ' + esc(r.error) + '</div>' : '');
       listEl.insertBefore(card, listEl.firstChild);
     });
@@ -1379,14 +1397,14 @@
     container.innerHTML = results.map(function(r) {
       var pattern = r.type || r._pattern || 'dispatch';
       var status = r.status || 'unknown';
-      var statusColor = status === 'success' ? 'var(--success)' : status === 'failed' ? 'var(--danger)' : 'var(--warning)';
+      var statusBadge = status === 'success' ? 'badge-success' : status === 'failed' ? 'badge-danger' : 'badge-warning';
       var patternLabel = {dispatch:t('swarm.pattern.dispatch_short'),broadcast:t('swarm.pattern.broadcast_short'),pipeline:t('swarm.pattern.pipeline_short'),fan_out:t('swarm.pattern.fan_out_short'),consult:t('swarm.pattern.consult_short'),conditional:t('swarm.pattern.conditional_short')}[pattern] || pattern;
 
       var html = '<div class="card result-card" data-pattern="' + esc(pattern) + '" data-task-id="' + esc(r.task_id || r.id) + '" style="margin-bottom:12px;cursor:pointer;">';
       html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
       html += '<div style="display:flex;align-items:center;gap:8px;">';
       html += '<span style="font-weight:600;font-size:0.85rem;">' + esc(patternLabel) + '</span>';
-      html += '<span class="badge" style="color:' + statusColor + ';">' + esc(stateLabel(status)) + '</span>';
+      html += '<span class="badge ' + statusBadge + '">' + esc(stateLabel(status)) + '</span>';
       html += '</div>';
       html += '<span style="font-size:0.75rem;color:var(--text-muted);">' + (r.duration_seconds ? r.duration_seconds.toFixed(1) + 's' : '') + '</span>';
       html += '</div>';
@@ -1397,7 +1415,7 @@
         html += '<div style="display:flex;gap:4px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">';
         r.worker_results.forEach(function(wr, idx) {
           var stepColor = wr.status === 'success' ? 'var(--success)' : 'var(--danger)';
-          html += '<span style="padding:4px 8px;border-radius:var(--radius-xs);background:rgba(255,255,255,0.04);font-size:0.75rem;border:1px solid var(--border-subtle);">';
+          html += '<span style="padding:4px 8px;border-radius:var(--radius-xs);background:var(--tint-strong);font-size:0.75rem;">';
           html += '<span translate="no" style="color:' + stepColor + ';">' + esc(workerLabel(wr.worker)) + '</span>';
           html += '</span>';
           if (idx < r.worker_results.length - 1) html += '<span style="color:var(--text-muted);">-></span>';
@@ -1408,7 +1426,7 @@
         html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;margin-bottom:8px;">';
         r.worker_results.forEach(function(wr) {
           var wColor = wr.status === 'success' ? 'var(--success)' : 'var(--danger)';
-          html += '<div style="padding:6px 8px;border-radius:var(--radius-xs);background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);font-size:0.75rem;">';
+          html += '<div style="padding:6px 8px;border-radius:var(--radius-xs);border:1px solid var(--card-hairline);font-size:0.75rem;">';
           html += '<span style="color:' + wColor + ';">•</span> <span translate="no">' + esc(workerLabel(wr.worker)) + '</span>';
           html += '</div>';
         });
@@ -1419,7 +1437,7 @@
         if (opinions.length) {
           html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px;margin-bottom:8px;">';
           opinions.forEach(function(op) {
-            html += '<div style="padding:6px 8px;border-radius:var(--radius-xs);background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);font-size:0.75rem;max-height:60px;overflow:hidden;">';
+            html += '<div style="padding:6px 8px;border-radius:var(--radius-xs);border:1px solid var(--card-hairline);font-size:0.75rem;max-height:60px;overflow:hidden;">';
             html += '<div translate="no" style="font-weight:500;color:var(--accent);margin-bottom:2px;">' + esc(workerLabel(op.worker)) + '</div>';
             html += '<div translate="no" style="color:var(--text-tertiary);">' + esc((op.output || '').slice(0, 80)) + '</div>';
             html += '</div>';
@@ -1719,20 +1737,20 @@
     var patternIcons = {dispatch:'',broadcast:'',pipeline:'',fan_out:'',consult:'',conditional:''};
     tbody.innerHTML = tasks.map(function(task) {
       var icon = patternIcons[task.type] || '';
-      var statusColor = task.status === 'completed' ? 'var(--success)' : (task.status === 'failed' || task.status === 'cancelled') ? 'var(--danger)' : 'var(--warning)';
+      var statusBadge = task.status === 'completed' ? 'badge-success' : (task.status === 'failed' || task.status === 'cancelled') ? 'badge-danger' : 'badge-warning';
       var prompt = (task.prompt || '').slice(0, 80);
       var workers = workerLabels(task.workers);
       var dur = task.duration_seconds ? task.duration_seconds.toFixed(1) + 's' : '—';
       var cost = task.total_cost ? '$' + task.total_cost.toFixed(4) : '—';
 
-      return '<tr data-task-id="' + esc(task.id) + '" style="cursor:pointer;border-bottom:1px solid var(--border-subtle);">' +
-        '<td style="padding:8px 12px;font-family:var(--font-mono);font-size:0.75rem;color:var(--text-tertiary);">' + esc((task.id || '').slice(0, 16)) + '</td>' +
-        '<td style="padding:8px 12px;">' + icon + ' ' + esc(patternLabel(task.type)) + '</td>' +
-        '<td translate="no" style="padding:8px 12px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(prompt) + '</td>' +
-        '<td translate="no" style="padding:8px 12px;font-size:0.8rem;">' + esc(workers) + '</td>' +
-        '<td style="padding:8px 12px;"><span style="color:' + statusColor + ';">• ' + esc(stateLabel(task.status)) + '</span></td>' +
-        '<td style="padding:8px 12px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;">' + dur + '</td>' +
-        '<td style="padding:8px 12px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;">' + cost + '</td>' +
+      return '<tr data-task-id="' + esc(task.id) + '" style="cursor:pointer;">' +
+        '<td style="font-family:var(--font-mono);font-size:13px;color:var(--text-tertiary);">' + esc((task.id || '').slice(0, 16)) + '</td>' +
+        '<td>' + icon + ' ' + esc(patternLabel(task.type)) + '</td>' +
+        '<td translate="no" style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(prompt) + '</td>' +
+        '<td translate="no" style="font-size:13px;">' + esc(workers) + '</td>' +
+        '<td><span class="badge ' + statusBadge + '">' + esc(stateLabel(task.status)) + '</span></td>' +
+        '<td style="text-align:end;font-family:var(--font-mono);font-size:13px;">' + dur + '</td>' +
+        '<td style="text-align:end;font-family:var(--font-mono);font-size:13px;">' + cost + '</td>' +
       '</tr>';
     }).join('');
   }
@@ -1802,17 +1820,17 @@
     var diagnostics = task.metadata && task.metadata.routing_diagnostics;
     if (diagnostics) {
       html += '<h4 style="margin-top:16px;margin-bottom:8px;display:flex;align-items:center;gap:6px;">' + esc(t('swarm.routing_diagnostics')) + '</h4>';
-      html += '<div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle);border-radius:var(--radius);padding:12px;margin-bottom:16px;">';
+      html += '<div style="border:1px solid var(--card-hairline);border-radius:var(--tile-radius);padding:12px;margin-bottom:16px;">';
 
       html += '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">';
       var strategy = diagnostics.strategy_used || 'keyword';
-      var stratColor = strategy === 'semantic' ? 'var(--accent)' : 'var(--warning)';
-      html += '<span class="badge" style="background:' + stratColor + '22;color:' + stratColor + ';border:1px solid ' + stratColor + '44;text-transform:capitalize;font-weight:600;padding:4px 8px;font-size:0.75rem;">' + esc(t('swarm.strategy')) + esc(strategy) + '</span>';
+      var stratBadge = strategy === 'semantic' ? 'badge-accent' : 'badge-warning';
+      html += '<span class="badge ' + stratBadge + '" style="text-transform:capitalize;">' + esc(t('swarm.strategy')) + esc(strategy) + '</span>';
 
       if (diagnostics.dialect_detected) {
         var dialectName = diagnostics.dialect_detected === 'msa' ? t('swarm.dialect_msa') : t('swarm.dialect_khaleeji');
         var dialectConf = diagnostics.dialect_confidence ? (diagnostics.dialect_confidence * 100).toFixed(0) + '%' : '100%';
-        html += '<span class="badge" style="background:var(--success)22;color:var(--success);border:1px solid var(--success)44;font-weight:600;padding:4px 8px;font-size:0.75rem;">' + esc(t('swarm.arabic_dialect')) + esc(dialectName) + ' (' + dialectConf + ')</span>';
+        html += '<span class="badge badge-success">' + esc(t('swarm.arabic_dialect')) + esc(dialectName) + ' (' + dialectConf + ')</span>';
       }
       html += '</div>';
 
@@ -1842,7 +1860,7 @@
       sortedWorkers.forEach(function(wName) {
         var scoreInfo = scores[wName] || {};
         var isRouted = routedWorkers.indexOf(wName) !== -1;
-        var rowBg = isRouted ? 'rgba(var(--accent-rgb), 0.05)' : 'transparent';
+        var rowBg = isRouted ? 'var(--accent-subtle)' : 'transparent';
         html += '<tr style="border-bottom:1px solid var(--border-subtle);background:' + rowBg + ';">';
         html += '<td translate="no" style="padding:8px;font-weight:500;">' + esc(wName) + '</td>';
         
@@ -1857,7 +1875,7 @@
           var semSimPct = Math.min(100, Math.max(0, (semSim * 100))).toFixed(0) + '%';
           html += '<td style="padding:8px;vertical-align:middle;">';
           html += '<div style="display:flex;align-items:center;gap:8px;">';
-          html += '<div style="flex:1;background:rgba(255,255,255,0.05);height:6px;border-radius:3px;overflow:hidden;min-width:60px;">';
+          html += '<div style="flex:1;background:var(--border);height:6px;border-radius:3px;overflow:hidden;min-width:60px;">';
           html += '<div style="background:var(--accent);width:' + semSimPct + ';height:100%;"></div>';
           html += '</div>';
           html += '<span style="font-family:var(--font-mono);font-size:0.75rem;">' + semSim.toFixed(3) + '</span>';
@@ -1898,7 +1916,7 @@
         html += '<span style="font-weight:500;">' + esc(t('swarm.step_n', {n: (idx + 1)})) + ': <span translate="no">' + esc(workerLabel(wr.worker)) + '</span></span>';
         html += '<span style="color:' + statusColor + ';">• ' + esc(stateLabel(wr.status)) + '</span>';
         html += '</div>';
-        if (wr.output) html += '<div translate="no" style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-secondary);white-space:pre-wrap;max-height:200px;overflow-y:auto;background:rgba(0,0,0,0.15);padding:8px;border-radius:4px;">' + esc(wr.output) + '</div>';
+        if (wr.output) html += '<div translate="no" style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-secondary);white-space:pre-wrap;max-height:200px;overflow-y:auto;background:var(--surface-sunken);padding:8px;border-radius:var(--tile-radius);">' + esc(wr.output) + '</div>';
         if (wr.error) html += '<div translate="no" style="color:var(--danger);font-size:0.8rem;margin-top:4px;">[!]  ' + esc(wr.error) + '</div>';
         // Handoffs
         if (wr.handoffs && wr.handoffs.length) {
@@ -1932,13 +1950,13 @@
     // Aggregated output
     if (task.aggregated_output && !task.synthesized_output) {
       html += '<h4 style="margin-bottom:8px;">' + icon('bar-chart') + ' ' + esc(t('swarm.aggregated_output')) + '</h4>';
-      html += '<div translate="no" style="padding:12px;background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:var(--radius);white-space:pre-wrap;">' + esc(task.aggregated_output) + '</div>';
+      html += '<div translate="no" style="padding:12px;border:1px solid var(--card-hairline);border-radius:var(--tile-radius);white-space:pre-wrap;">' + esc(task.aggregated_output) + '</div>';
     }
 
     // Metadata
     if (task.metadata && Object.keys(task.metadata).length) {
       html += '<h4 style="margin-top:16px;margin-bottom:8px;">' + icon('clipboard') + ' ' + esc(t('swarm.metadata')) + '</h4>';
-      html += '<pre translate="no" style="font-family:var(--font-mono);font-size:0.75rem;padding:8px;background:rgba(0,0,0,0.15);border-radius:4px;overflow-x:auto;">' + esc(JSON.stringify(task.metadata, null, 2)) + '</pre>';
+      html += '<pre translate="no" style="font-family:var(--font-mono);font-size:0.75rem;padding:8px;background:var(--surface-sunken);border-radius:var(--tile-radius);overflow-x:auto;">' + esc(JSON.stringify(task.metadata, null, 2)) + '</pre>';
     }
 
     // Action buttons (cancel for running, retry for failed/timeout/cancelled)
@@ -2071,15 +2089,14 @@
             var statusEl = existing.querySelector('.active-task-status');
             if (statusEl) {
               statusEl.textContent = task.status ? stateLabel(task.status) : t('swarm.running_lower');
-              statusEl.className = 'active-task-status status-' + (task.status || 'running');
+              statusEl.className = activeStatusClass(task.status);
             }
           } else {
             var card = document.createElement('div');
             card.className = 'card';
             card.id = cardId;
-            card.style.cssText = 'margin-bottom:12px;padding:12px;border-left:3px solid var(--warning);';
+            card.style.cssText = 'margin-bottom:12px;padding:16px;';
             var workers = (task.workers || []).join(', ') || t('swarm.all_workers');
-            var statusColor = task.status === 'paused' ? 'var(--info)' : 'var(--warning)';
             card.innerHTML =
               '<div style="display:flex;justify-content:space-between;align-items:center;">' +
                 '<div>' +
@@ -2088,8 +2105,7 @@
                     esc(t('swarm.workers_label_inline')) + esc(workers) + esc(t('swarm.type_inline')) + esc(patternLabel(task.type || 'dispatch')) +
                   '</div>' +
                 '</div>' +
-                '<span class="active-task-status status-' + esc(task.status || 'running') + '" ' +
-                  'style="padding:2px 8px;border-radius:4px;background:' + statusColor + ';color:#fff;font-size:0.75rem;">' +
+                '<span class="' + esc(activeStatusClass(task.status)) + '">' +
                   esc(task.status ? stateLabel(task.status) : t('swarm.running_lower')) +
                 '</span>' +
               '</div>';
@@ -2319,12 +2335,12 @@
       var errors = (result.data && result.data.errors) || [];
       panel.style.display = 'block';
       panel.innerHTML = 
-        '<div style="padding: 10px 14px; border-radius: var(--radius); border: 1px solid ' + (valid ? 'var(--success)' : 'var(--danger)') + '; background: ' + (valid ? 'var(--success-subtle)' : 'var(--danger-subtle)') + '; box-shadow: 0 0 12px ' + (valid ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)') + '; transition: all 0.3s ease;">' +
+        '<div style="padding: 10px 14px; border-radius: var(--radius); border: 1px solid ' + (valid ? 'var(--success)' : 'var(--danger)') + '; background: ' + (valid ? 'var(--success-subtle)' : 'var(--danger-subtle)') + '; box-shadow: 0 0 12px ' + (valid ? 'var(--success-subtle)' : 'var(--danger-subtle)') + '; transition: all 0.3s ease;">' +
           '<div style="display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 0.8rem; color: ' + (valid ? 'var(--success)' : 'var(--danger)') + ';">' +
             '<span>' + icon(valid ? 'check-circle' : 'x') + ' ' + esc(valid ? t('swarm.pipeline_verified') : t('swarm.validation_issues')) + '</span>' +
           '</div>' +
           (errors.length > 0 ? 
-            '<ul style="margin: 6px 0 0 0; padding-left: 18px; font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4;">' +
+            '<ul style="margin: 6px 0 0 0; padding-inline-start: 18px; font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4;">' +
               errors.map(function(err) { return '<li translate="no">' + esc(err) + '</li>'; }).join('') +
             '</ul>' : 
             '<div style="margin-top: 4px; font-size: 0.75rem; color: var(--text-secondary);">' + esc(t('swarm.verified_desc')) + '</div>'
@@ -2358,15 +2374,15 @@
       card.setAttribute('draggable', 'true');
       card.dataset.index = index;
       
-      card.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:var(--radius);margin-bottom:8px;cursor:grab;transition:all 0.2s ease;position:relative;user-select:none;';
+      card.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--surface-card);border:1px solid var(--card-hairline);border-radius:var(--tile-radius);margin-bottom:8px;cursor:grab;transition:all 0.2s ease;position:relative;user-select:none;';
       
       card.onmouseenter = function() { 
-        card.style.background = 'rgba(255,255,255,0.06)'; 
-        card.style.borderColor = 'var(--accent-subtle)'; 
+        card.style.background = 'var(--tint-strong)'; 
+        card.style.borderColor = 'var(--accent)'; 
       };
       card.onmouseleave = function() { 
-        card.style.background = 'rgba(255,255,255,0.03)'; 
-        card.style.borderColor = 'var(--border-subtle)'; 
+        card.style.background = 'var(--surface-card)'; 
+        card.style.borderColor = 'var(--card-hairline)'; 
       };
       
       card.addEventListener('dragstart', handleDragStart);
@@ -2378,7 +2394,7 @@
 
       var dragHandle = document.createElement('div');
       dragHandle.innerHTML = '';
-      dragHandle.style.cssText = 'color:var(--text-muted);cursor:grab;font-size:0.9rem;padding-right:4px;';
+      dragHandle.style.cssText = 'color:var(--text-muted);cursor:grab;font-size:0.9rem;padding-inline-end:4px;';
       card.appendChild(dragHandle);
 
       var stepBadge = document.createElement('span');
@@ -2389,7 +2405,7 @@
 
       var workerSelect = document.createElement('select');
       workerSelect.className = 'form-select';
-      workerSelect.style.cssText = 'flex:1;height:28px;font-size:0.75rem;padding:2px 6px;background:rgba(0,0,0,0.2);border:1px solid var(--border);border-radius:var(--radius);min-width:110px;';
+      workerSelect.style.cssText = 'flex:1;height:32px;font-size:13px;padding:2px 6px;min-width:110px;';
       
       if (window.KAZMA_WORKERS && window.KAZMA_WORKERS.length) {
         window.KAZMA_WORKERS.forEach(function(w) {
@@ -2432,7 +2448,8 @@
       timeoutInput.type = 'number';
       timeoutInput.placeholder = t('swarm.timeout_placeholder');
       timeoutInput.value = stage.timeout || 300;
-      timeoutInput.style.cssText = 'width:60px;height:28px;font-size:0.75rem;padding:2px 6px;background:rgba(0,0,0,0.2);border:1px solid var(--border);border-radius:var(--radius);text-align:center;';
+      timeoutInput.className = 'form-input';
+      timeoutInput.style.cssText = 'width:64px;height:32px;font-size:13px;padding:2px 6px;text-align:center;';
       timeoutInput.onchange = function() {
         stage.timeout = parseInt(timeoutInput.value, 10) || 300;
       };
@@ -2442,9 +2459,8 @@
       reorderGroup.style.cssText = 'display:flex;gap:2px;';
 
       var btnUp = document.createElement('button');
-      btnUp.className = 'btn btn-sm btn-secondary';
-      btnUp.innerHTML = '';
-      btnUp.style.cssText = 'padding:2px 6px;font-size:0.65rem;height:24px;line-height:1;';
+      btnUp.className = 'btn btn-xs btn-secondary';
+      btnUp.innerHTML = icon('chevron-up');
       btnUp.disabled = (index === 0);
       btnUp.onclick = function(e) {
         e.stopPropagation();
@@ -2453,9 +2469,8 @@
       reorderGroup.appendChild(btnUp);
 
       var btnDown = document.createElement('button');
-      btnDown.className = 'btn btn-sm btn-secondary';
-      btnDown.innerHTML = '';
-      btnDown.style.cssText = 'padding:2px 6px;font-size:0.65rem;height:24px;line-height:1;';
+      btnDown.className = 'btn btn-xs btn-secondary';
+      btnDown.innerHTML = icon('chevron-down');
       btnDown.disabled = (index === pipelineStages.length - 1);
       btnDown.onclick = function(e) {
         e.stopPropagation();
@@ -2465,9 +2480,10 @@
       card.appendChild(reorderGroup);
 
       var btnDelete = document.createElement('button');
-      btnDelete.className = 'btn btn-sm btn-danger';
-      btnDelete.innerHTML = '';
-      btnDelete.style.cssText = 'padding:2px 6px;font-size:0.7rem;height:24px;line-height:1;';
+      btnDelete.className = 'btn btn-xs btn-danger';
+      btnDelete.innerHTML = icon('x');
+      btnDelete.setAttribute('aria-label', t('common.remove'));
+      btnDelete.title = t('common.remove');
       btnDelete.onclick = function(e) {
         e.stopPropagation();
         removePipelineStage(index);
@@ -2496,12 +2512,12 @@
 
   function handleDragEnter(e) {
     this.style.border = '1px dashed var(--accent)';
-    this.style.background = 'rgba(var(--accent-rgb), 0.1)';
+    this.style.background = 'var(--accent-subtle)';
   }
 
   function handleDragLeave(e) {
-    this.style.border = '1px solid var(--border-subtle)';
-    this.style.background = 'rgba(255,255,255,0.03)';
+    this.style.border = '1px solid var(--card-hairline)';
+    this.style.background = 'var(--surface-card)';
   }
 
   function handleDrop(e) {
@@ -2521,8 +2537,8 @@
     this.style.opacity = '1';
     var cols = document.querySelectorAll('.pipeline-stage-card');
     cols.forEach(function (col) {
-      col.style.border = '1px solid var(--border-subtle)';
-      col.style.background = 'rgba(255,255,255,0.03)';
+      col.style.border = '1px solid var(--card-hairline)';
+      col.style.background = 'var(--surface-card)';
     });
   }
 
@@ -2586,10 +2602,14 @@
     pipelineStages.forEach(function(stage, index) {
       var stepNum = index + 1;
       var nodeName = 'Step' + stepNum;
+      // A step that waits for approval in the warning tone, the others in
+      // the success tone (tokens, read now; Mermaid takes hex only).
+      var tone = tokenHex(stage.hitl ? '--warning' : '--success');
+      if (!tone) return;
       if (stage.hitl) {
-        lines.push('  style ' + nodeName + ' fill:#f59e0b,fill-opacity:0.1,stroke:#f59e0b,stroke-width:2px');
+        lines.push('  style ' + nodeName + ' fill:' + tone + ',fill-opacity:0.12,stroke:' + tone + ',stroke-width:2px');
       } else {
-        lines.push('  style ' + nodeName + ' fill:#10b981,fill-opacity:0.05,stroke:#10b981,stroke-width:1px');
+        lines.push('  style ' + nodeName + ' fill:' + tone + ',fill-opacity:0.06,stroke:' + tone + ',stroke-width:1px');
       }
     });
 
@@ -2599,6 +2619,61 @@
   function updatePipelineDiagram() {
     var code = generateMermaidCode();
     updateMermaidDiagram(code);
+  }
+
+  // The diagram's colours are the theme's tokens. Mermaid takes hex colours
+  // only (its 'base' theme and a node's style line), so each token is
+  // painted on a 1x1 probe and read back; the dashboard's charts and the
+  // memory graph do the same. Mermaid was always 'dark' here, its HITL and
+  // step colours fixed amber and green (UI refresh, 2026-11).
+  var _tokenProbe = null;
+  function tokenHex(name) {
+    try {
+      var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      if (!v) return '';
+      if (!_tokenProbe) {
+        var cv = document.createElement('canvas');
+        cv.width = cv.height = 1;
+        _tokenProbe = cv.getContext('2d', { willReadFrequently: true });
+      }
+      _tokenProbe.clearRect(0, 0, 1, 1);
+      _tokenProbe.fillStyle = v;
+      _tokenProbe.fillRect(0, 0, 1, 1);
+      var d = _tokenProbe.getImageData(0, 0, 1, 1).data;
+      if (!d[3]) return '';
+      return '#' + [d[0], d[1], d[2]].map(function(c) { return ('0' + c.toString(16)).slice(-2); }).join('');
+    } catch (e) { return ''; }
+  }
+
+  function isLightTheme() {
+    return (document.documentElement.getAttribute('data-theme') || '') === 'light';
+  }
+
+  function initMermaid() {
+    if (typeof mermaid === 'undefined') return;
+    var vars = {
+      background: tokenHex('--surface-card'),
+      primaryColor: tokenHex('--surface-card'),
+      primaryTextColor: tokenHex('--text-primary'),
+      primaryBorderColor: tokenHex('--card-hairline'),
+      lineColor: tokenHex('--text-muted'),
+      textColor: tokenHex('--text-primary'),
+    };
+    var complete = Object.keys(vars).every(function(k) { return !!vars[k]; });
+    try {
+      mermaid.initialize(complete
+        ? { startOnLoad: false, securityLevel: 'strict', theme: 'base',
+            themeVariables: Object.assign({ darkMode: !isLightTheme() }, vars) }
+        : { startOnLoad: false, securityLevel: 'strict', theme: isLightTheme() ? 'default' : 'dark' });
+    } catch (e) { console.error("Mermaid init error:", e); }
+  }
+
+  // A theme or accent change redraws the open diagram in the new tokens.
+  function onThemeChange() {
+    var panel = $('panel-workflow-editor');
+    if (!panel || panel.style.display === 'none') return;
+    initMermaid();
+    updatePipelineDiagram();
   }
 
   function updateMermaidDiagram(mermaidCode) {
@@ -2621,7 +2696,7 @@
           }
         }).catch(function(err) {
           console.error("Mermaid render failed:", err);
-          target.innerHTML = '<div style="color:var(--danger);font-family:var(--font-mono);font-size:0.75rem;padding:8px;border:1px dashed var(--border-subtle);border-radius:var(--radius);background:rgba(239,68,68,0.02);">' +
+          target.innerHTML = '<div style="color:var(--danger);font-family:var(--font-mono);font-size:0.75rem;padding:8px;border-radius:var(--radius);background:var(--danger-subtle);">' +
             '<div style="font-weight:600;margin-bottom:4px;">' + esc(t('swarm.mermaid_render_error')) + '</div>' +
             '<pre style="margin:0;font-family:inherit;white-space:pre-wrap;color:var(--text-secondary);">' + esc(err.message || err) + '</pre>' +
             '</div>';
@@ -2810,7 +2885,7 @@
       
       var res = d.result || {};
       var summary = res.synthesized_output || res.aggregated_output || t('swarm.no_synthesis');
-      addPipelineTerminalLine('', '<strong>' + esc(t('swarm.synthesis_output')) + '</strong><div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:4px;padding:8px;margin-top:6px;max-height:150px;overflow-y:auto;white-space:pre-wrap;color:var(--text-secondary);">' + esc(summary) + '</div>');
+      addPipelineTerminalLine('', '<strong>' + esc(t('swarm.synthesis_output')) + '</strong><div style="border:1px solid var(--card-hairline);border-radius:var(--tile-radius);padding:8px;margin-top:6px;max-height:150px;overflow-y:auto;white-space:pre-wrap;color:var(--text-secondary);">' + esc(summary) + '</div>');
       
       cleanupPipelineSession();
     });
@@ -3105,7 +3180,7 @@
       }
       
       var summary = res.synthesized_output || res.aggregated_output || t('swarm.no_synthesis');
-      addTerminalLine('', '<strong>' + esc(t('swarm.synthesis_output')) + '</strong><div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:4px;padding:8px;margin-top:6px;max-height:150px;overflow-y:auto;white-space:pre-wrap;color:var(--text-secondary);">' + esc(summary) + '</div>');
+      addTerminalLine('', '<strong>' + esc(t('swarm.synthesis_output')) + '</strong><div style="border:1px solid var(--card-hairline);border-radius:var(--tile-radius);padding:8px;margin-top:6px;max-height:150px;overflow-y:auto;white-space:pre-wrap;color:var(--text-secondary);">' + esc(summary) + '</div>');
       
       cleanupPlaygroundSession();
     });

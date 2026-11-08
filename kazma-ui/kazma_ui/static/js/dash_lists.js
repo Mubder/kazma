@@ -64,7 +64,7 @@
     return (
       '<article class="dash-mobile-card" data-thread-id="' + escapeHtml(tid) + '">' +
         '<div class="dash-mobile-card-top">' +
-          '<span class="badge badge-basic">' + escapeHtml(platformLabel(s.platform)) + "</span>" +
+          '<span class="badge badge-neutral">' + escapeHtml(platformLabel(s.platform)) + "</span>" +
           title +
         "</div>" +
         '<code class="dash-mobile-card-id" translate="no">' + escapeHtml(tid) + "</code>" +
@@ -84,7 +84,7 @@
     return (
       '<article class="dash-mobile-card">' +
         '<div class="dash-mobile-card-top">' +
-          '<span class="badge badge-basic">' + traceWord("dashboard.trace_type_", t.trace_type || t.type) + "</span>" +
+          '<span class="badge badge-neutral">' + traceWord("dashboard.trace_type_", t.trace_type || t.type) + "</span>" +
           '<span class="badge ' + escapeHtml(t.badge_class || "") + '">' +
             traceWord("dashboard.trace_status_", t.status) + "</span>" +
         "</div>" +
