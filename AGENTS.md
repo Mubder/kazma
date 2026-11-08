@@ -9873,6 +9873,28 @@ counts the active provider's address (`setup_api.compute_setup_status`).
   template compiles in node; `<template x-for>` scope; no second `init()`),
   `tests/js/test_settings_mixins.js`, `tests/test_vendor_codemirror.py` —
   each with a negative control.
+- **A page reads its deep link from the page, not the address** (2026-11-08).
+  Soft navigation runs the incoming page's scripts BEFORE it pushes the new
+  address, so `location.search` at start is the page before: the bell's link
+  to `/settings?tab=agent` opened Settings on its first tab, as did every
+  in-app link to a Settings tab, Chat's `?s=`/`?new=1` and Replay's
+  `?thread=`. Each page's root element carries what it was asked for
+  (`data-*` from the request: `settings-root` `data-tab`, `chat-root`
+  `data-s`/`data-new`, `replay-root` `data-thread`, as Research, Knowledge and
+  the Dashboard's incident already did), read first; an address rewrite
+  (`replaceState`) runs only on the page's own path, or it rewrote the page
+  before. Gate: `tests/test_deep_links_survive_soft_navigation.py` (a planted
+  bare read as the control); behaviour: `tests/e2e/test_bell_opens_the_page.py`
+  (the old Replay script fails it).
+- **A notification opens the page it is about** (2026-11-08, the owner). Every
+  item `/api/alerts/recent` returns carries `link`
+  (`observability.alerts.alert_link`): its own `link:/...` callback, else its
+  subsystem's page (`SUBSYSTEM_PAGES`, `SUBSYSTEM_PREFIX_PAGES`), else the
+  Dashboard, whose open-problems card lists every alert; always a path of this
+  site. The bell's rows are links to it (`$store.notifications.href`, which
+  refuses another site), closing the bell. A new subsystem put in the bell
+  needs a page or a link: `tests/test_bell_notifications_open_their_page.py`
+  (a planted one as the control), `tests/js/test_bell_links.js`.
 - **A page reached by soft navigation has every script it includes**
   (`modules/nav.js`, 2026-10-03). A sidebar link swaps the page and runs its
   scripts; each is one of three kinds: the base shell's (`GLOBAL_LIB_PATHS`,

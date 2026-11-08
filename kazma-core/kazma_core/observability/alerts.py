@@ -10,7 +10,7 @@ import threading
 import time
 from typing import Any
 
-__all__ = ["AlertChannel", "AlertDispatcher", "AlertPayload", "BusAlertChannel", "LogAlertChannel", "PassThroughAlertChannel", "SseAlertChannel", "trigger_system_alert"]
+__all__ = ["FALLBACK_PAGE", "SUBSYSTEM_PAGES", "SUBSYSTEM_PREFIX_PAGES", "AlertChannel", "AlertDispatcher", "AlertPayload", "BusAlertChannel", "LogAlertChannel", "PassThroughAlertChannel", "SseAlertChannel", "alert_link", "trigger_system_alert"]
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,63 @@ class AlertPayload:
     def to_dict(self) -> dict[str, Any]:
         """Convert the structured alert payload into a standard dictionary."""
         return asdict(self)
+
+
+#: The page a notification opens when it names none, by its subsystem
+#: (lower case), 2026-11-08 (the owner: "clicking on that notification takes
+#: you to the related page"). An alert that carries its own page
+#: (``callback_id`` ``link:/...``: a model fallback, a research or crawl
+#: result, a run incident) opens that one.
+SUBSYSTEM_PAGES: dict[str, str] = {
+    "memory": "/memory",
+    "system": "/dashboard",
+    "autoscaler": "/swarm",
+    "runs": "/dashboard",
+    "acquisition": "/research",
+    "acquisitionmonitor": "/settings?tab=system",
+}
+
+#: Subsystems named with a suffix (``llm-failover:<provider>``).
+SUBSYSTEM_PREFIX_PAGES: tuple[tuple[str, str], ...] = (
+    ("llm-failover:", "/settings?tab=agent"),  # the backup model lives there
+    ("llm-fallback:", "/settings?tab=providers_connectors"),
+    ("llm-rebind:", "/settings?tab=providers_connectors"),
+)
+
+#: Installing the ML packages a "Permission Required" alert names.
+_CALLBACK_PAGES: dict[str, str] = {"sentence-transformers": "/settings?tab=packages"}
+
+#: Any other notification: the Dashboard, whose open-problems card lists it.
+FALLBACK_PAGE = "/dashboard"
+
+
+def _local_page(path: str) -> str:
+    """*path* when it is one of this site's own pages, else ""."""
+    text = str(path or "").strip()
+    return text if text.startswith("/") and not text.startswith("//") and "\\" not in text else ""
+
+
+def alert_link(item: Any) -> str:
+    """The page a bell notification opens: its own link, else its subsystem's
+    page, else the Dashboard. Always a path of this site."""
+    def field(name: str) -> str:
+        value = item.get(name) if hasattr(item, "get") else getattr(item, name, "")
+        return str(value or "")
+
+    callback = field("callback_id")
+    if callback.startswith("link:"):
+        own = _local_page(callback[5:])
+        if own:
+            return own
+    if callback in _CALLBACK_PAGES:
+        return _CALLBACK_PAGES[callback]
+    subsystem = field("subsystem").strip().lower()
+    if subsystem in SUBSYSTEM_PAGES:
+        return SUBSYSTEM_PAGES[subsystem]
+    for prefix, page in SUBSYSTEM_PREFIX_PAGES:
+        if subsystem.startswith(prefix):
+            return page
+    return FALLBACK_PAGE
 
 
 class AlertChannel(abc.ABC):

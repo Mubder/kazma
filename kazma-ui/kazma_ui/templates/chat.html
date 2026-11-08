@@ -13,7 +13,10 @@
 
 {% block content %}
 <script id="kazma-command-catalog" type="application/json">{{ command_catalog|tojson }}</script>
-<div class="chat-container">
+{# data-s / data-new: what this page was asked for. A soft navigation runs the
+   page script before it pushes the new address (chat.js). #}
+<div class="chat-container" id="chat-root" data-s="{{ request.query_params.get('s', '') | e }}"
+     data-new="{{ '1' if request.query_params.get('new') == '1' else '' }}">
 <div class="setup-wall" id="setup-wall"
      x-data="setupWall()"
      x-cloak

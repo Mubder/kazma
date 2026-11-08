@@ -76,7 +76,11 @@
     init: function () {
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
       try {
-        this._linked = new URLSearchParams(window.location.search).get('thread') || '';
+        // The incoming page's own ?thread= (data-thread): a soft navigation
+        // from the chat's /replay link runs this before the push (2026-11-08).
+        var root = document.getElementById('replay-root');
+        this._linked = (root && root.hasAttribute('data-thread')
+          ? root.getAttribute('data-thread') : new URLSearchParams(window.location.search).get('thread')) || '';
       } catch (e) { this._linked = ''; }
       this.loadThreads();
       pollTimer = setInterval(this.loadThreads.bind(this), 10000);
