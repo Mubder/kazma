@@ -13,7 +13,10 @@
   full. And a slow connection no longer cuts off the package download after
   30 minutes (a step gets 3 hours, and one that runs out says so instead of
   "could not run"). Setup also no longer says "pip failed" on a machine with
-  no Python.
+  no Python, and it ends with the install's own exit code: an install that
+  left parts out says "Setup Stopped Short" and exits non-zero, where it said
+  "Setup Complete" and exited 0. A second clean install on the fixed code put
+  all 14 Express parts in place and started Kazma in 43 minutes.
 - **Stopping documents no longer strands an upload.** Stopping the document
   service while its minute-by-minute cleanup was undoing an abandoned upload
   closed the database under it ("could not be rolled back

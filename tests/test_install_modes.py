@@ -646,6 +646,18 @@ def _fading_colours(text: str) -> list[str]:
     return [m.group(0) for m in _FADING_ON_WHITE.finditer(text)]
 
 
+def test_setup_scripts_end_with_the_install_s_exit_code():
+    """The clean VM (2026-11-08): seven parts were left out, and setup still
+    said "Setup Complete" and exited 0, so a script that ran it could not
+    tell. Both scripts now end with the install's own code."""
+    ps1 = (ROOT / "setup.ps1").read_text(encoding="utf-8")
+    sh = (ROOT / "setup.sh").read_text(encoding="utf-8")
+    assert "$installExit = $LASTEXITCODE" in ps1 and ps1.rstrip().endswith("exit $installExit")
+    assert '|| INSTALL_EXIT=$?' in sh and sh.rstrip().endswith('exit "$INSTALL_EXIT"')
+    for text in (ps1, sh):
+        assert "Setup Stopped Short" in text, "a short install is not called complete"
+
+
 def test_setup_scripts_use_colours_a_light_terminal_shows():
     root = Path(__file__).resolve().parent.parent
     for name in ("setup.ps1", "setup.sh"):

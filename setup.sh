@@ -326,7 +326,9 @@ if [[ "$YES" == "1" ]]; then
 elif [[ ! -t 0 ]]; then
     INSTALL_ARGS+=(--packages-only)
 fi
-if ! $VENV_PYTHON "${INSTALL_ARGS[@]}"; then
+INSTALL_EXIT=0
+$VENV_PYTHON "${INSTALL_ARGS[@]}" || INSTALL_EXIT=$?
+if [[ "$INSTALL_EXIT" -ne 0 ]]; then
     log_warn "Not everything was installed: run ./setup.sh again to finish (it continues where it stopped)"
     log_info "What happened is in .kazma/install.log"
 fi
@@ -347,7 +349,13 @@ fi
 
 # ── 5. Summary ──────────────────────────────────────────────────────────────
 
-log_header "5. Setup Complete"
+# The install's own exit code is setup's: on the clean Windows VM (2026-11-08)
+# seven parts were left out and setup still said "Setup Complete" and exited 0.
+if [[ "$INSTALL_EXIT" -eq 0 ]]; then
+    log_header "5. Setup Complete"
+else
+    log_header "5. Setup Stopped Short (run ./setup.sh again to finish)"
+fi
 echo ""
 log_info "First visit:    the chat page asks for a provider key (or edit .env)"
 log_info "Run Web UI:     .venv/bin/kazma serve          # http://127.0.0.1:9090"
@@ -359,3 +367,4 @@ log_info "Docs:           https://kazma.ai/docs/"
 echo ""
 echo -e "${BRAND}🇰🇼 كاظمه — Built to remember. Built to last.${NC}"
 echo ""
+exit "$INSTALL_EXIT"

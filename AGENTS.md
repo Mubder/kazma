@@ -4169,7 +4169,12 @@ checks there,
 `test_control_without_the_runtime_meaning_search_and_neural_ocr_fail`
 (`tests/test_install_modes.py`, whose bare Windows now has no runtime), and
 `test_the_task_names_its_account_in_full`
-(`tests/test_windows_task_registration.py`).
+(`tests/test_windows_task_registration.py`). **Setup ends with the
+install's exit code**: run 1 left seven parts out and `setup.ps1` still said
+"Setup Complete" and exited 0; both scripts now say "Setup Stopped Short" and
+exit with it (`test_setup_scripts_end_with_the_install_s_exit_code`). Run 2
+on the fixed code: all 14 Express parts, Kazma up as a service ("needs
+setup"), 0 errors in its log, 43 minutes.
 
 **A re-run of setup removes nothing** (the same day, the owner: "uv sync
 always removes what is there every time it is used again"). A plain `uv sync`
