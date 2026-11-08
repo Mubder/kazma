@@ -2206,16 +2206,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Less",
     },
     "memory.console.hub_shortcut": {
-        "ar": "<strong style=\"color:#fbbf24;\">اختصار إلى المحور</strong> — رابط مباشر بالمحور مع ارتباط أيضًا بـ {parents}.",
-        "en": "<strong style=\"color:#fbbf24;\">Hub shortcut</strong> — direct link to hub while also linked to {parents}.",
+        "ar": "<strong>اختصار إلى المحور</strong> — رابط مباشر بالمحور مع ارتباط أيضًا بـ {parents}.",
+        "en": "<strong>Hub shortcut</strong> — direct link to hub while also linked to {parents}.",
     },
     "memory.console.hub_shortcut_hint": {
         "ar": "الأفضل: هذه ← الأصل ← المحور (أنت). استخدم <b>اقطع المحور</b> لإزالة حافة الاختصار.",
         "en": "Preferred: this → parent → hub (you). Use <b>Cut hub</b> to drop the shortcut edge.",
     },
     "memory.console.hub_only": {
-        "ar": "مرتبطة بالمحور فقط. استخدم <b style=\"color:#f87171;\">قطع</b> في صف الاتصال لفصلها.",
-        "en": "Linked only to hub. Use <b style=\"color:#f87171;\">Cut</b> on the connection row to detach.",
+        "ar": "مرتبطة بالمحور فقط. استخدم <b>قطع</b> في صف الاتصال لفصلها.",
+        "en": "Linked only to hub. Use <b>Cut</b> on the connection row to detach.",
     },
     "memory.console.contents": {
         "ar": "المحتوى",

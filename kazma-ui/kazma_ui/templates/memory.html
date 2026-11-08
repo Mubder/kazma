@@ -2,7 +2,7 @@
 {% set active_page = "memory" %}
 {% block title %}Kazma — {{ t('memory.title') }}{% endblock %}
 {% block page_title %}
-  <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5" style="vertical-align:middle;margin-right:6px;">
+  <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5" style="vertical-align:middle;margin-inline-end:6px;">
     <path d="M12 2a7 7 0 0 0-7 7c0 4 7 13 7 13s7-9 7-13a7 7 0 0 0-7-7z"/>
     <circle cx="12" cy="9" r="2.5"/>
   </svg>
@@ -160,9 +160,23 @@
     gap: 4px;
   }
   .memory-page .mem-actions .btn { white-space: nowrap; }
+  /* The chosen row: the accent's wash and a bar on its start edge. */
   .memory-page .mem-row-selected {
-    background: rgba(205, 160, 42, 0.14) !important;
-    box-shadow: inset 3px 0 0 var(--accent, #cda02a);
+    background: var(--accent-subtle) !important;
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+  [dir="rtl"] .memory-page .mem-row-selected {
+    box-shadow: inset -3px 0 0 var(--accent);
+  }
+  /* An entity left alone by its links, and one that holds nothing. */
+  .memory-page .mem-row-isolated { background: var(--warning-subtle); }
+  .memory-page .mem-row-empty { background: var(--tint-strong); }
+  .memory-page .mem-ops-tabs {
+    margin: 0;
+    border-bottom: 0;
+    gap: 4px;
+    flex-wrap: wrap;
+    overflow: visible;
   }
   .memory-page tr[data-entity-id],
   .memory-page tr[data-belief-id] {
@@ -170,7 +184,7 @@
   }
   .memory-page tr[data-entity-id]:hover,
   .memory-page tr[data-belief-id]:hover {
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--bg-hover);
   }
   .memory-page .mem-ops-strip {
     border-color: var(--border-subtle);
@@ -211,22 +225,27 @@
       <div style="display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;">
         <strong style="font-size:0.85rem;white-space:nowrap;display:inline-flex;align-items:center;gap:6px;" title="{{ t('memory.pg.browse_entities_beliefs_merges_hygiene') }}"><span class="ki" data-icon="brain" aria-hidden="true"></span> {{ t('memory.pg.ops') }}</strong>
         <template x-for="chip in summaryChips" :key="chip.k">
-          <span style="font-size:0.68rem;font-family:var(--font-mono);padding:2px 8px;border-radius:999px;background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle);" :title="chip.k">
-            <span style="color:var(--text-muted);" x-text="chip.k"></span>
-            <strong style="margin-left:3px;" x-text="chip.v"></strong>
+          <span class="badge badge-neutral" style="font-size:0.68rem;font-family:var(--font-mono);" :title="chip.k">
+            <span style="color:var(--text-secondary);font-weight:400;" x-text="chip.k"></span>
+            <strong style="margin-inline-start:3px;" x-text="chip.v"></strong>
           </span>
         </template>
         <span style="flex:1;min-width:4px;"></span>
-        <template x-for="t in tabs" :key="t.id">
-          <button
-            class="btn btn-sm"
-            :class="tab === t.id ? 'btn-primary' : 'btn-secondary'"
-            style="font-size:0.72rem;padding:3px 10px;"
-            @click="tab = t.id; onTab()"
-            :id="'mem-tab-' + t.id"
-            x-text="t.label"
-          ></button>
-        </template>
+        <div class="tabs mem-ops-tabs" role="tablist">
+          <template x-for="t in tabs" :key="t.id">
+            <button
+              type="button"
+              role="tab"
+              class="tab-btn"
+              :class="tab === t.id ? 'active' : ''"
+              :aria-selected="tab === t.id ? 'true' : 'false'"
+              style="font-size:0.72rem;padding:3px 10px;"
+              @click="tab = t.id; onTab()"
+              :id="'mem-tab-' + t.id"
+              x-text="t.label"
+            ></button>
+          </template>
+        </div>
         <button class="btn btn-secondary btn-sm" style="font-size:0.72rem;padding:3px 10px;" @click="loadAll()" :disabled="loading" x-text="S.refresh || 'Refresh'"></button>
         <a href="#console" class="btn btn-secondary btn-sm" style="font-size:0.72rem;padding:3px 10px;text-decoration:none;">{{ t('memory.pg.graph') }}</a>
       </div>
@@ -240,7 +259,7 @@
         <button class="btn btn-danger btn-sm" @click="invalidateSelected()" :disabled="!selectedBeliefs.length" x-text="(S.invalidate || 'Invalidate') + ' (' + selectedBeliefs.length + ')'"></button>
       </div>
       <div class="card" style="padding:0;overflow:auto;max-height:50vh;-webkit-overflow-scrolling:touch;">
-        <table class="table" style="width:100%;font-size:0.85rem;min-width:560px;">
+        <table class="table data-table" style="width:100%;font-size:0.85rem;min-width:560px;">
           <caption class="sr-only" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;">{{ t('memory.pg.active_beliefs_select_to_invalidate') }}</caption>
           <thead>
             <tr>
@@ -312,7 +331,7 @@
         <span x-show="canLinkOrMerge" style="font-size:0.72rem;font-family:var(--font-mono);color:var(--text-muted);" title="{{ t('memory.pg.source_target_title') }}" x-text="(mergeSource || '') + ' → ' + (mergeTarget || '')"></span>
       </div>
       <div class="card mem-table-wrap" style="padding:0;width:100%;max-width:100%;min-width:0;box-sizing:border-box;">
-        <table class="mem-table">
+        <table class="mem-table data-table">
           <caption class="sr-only" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;">{{ t('memory.pg.entities_click_a_row_to') }}</caption>
           <thead>
             <tr>
@@ -329,8 +348,7 @@
             <template x-for="e in entities" :key="e.id">
               <tr
                 :data-entity-id="e.id"
-                :class="selectedEntityId === e.id ? 'mem-row-selected' : ''"
-                :style="selectedEntityId === e.id ? '' : (e.isolated ? 'background:rgba(245,158,11,0.08)' : (e.empty ? 'background:rgba(148,163,184,0.08)' : ''))"
+                :class="selectedEntityId === e.id ? 'mem-row-selected' : (e.isolated ? 'mem-row-isolated' : (e.empty ? 'mem-row-empty' : ''))"
                 @click="focusEntity(e.id, { entity: e })"
                 :title="(e.is_self ? t('memory.pg.memory_hub_on_graph') : t('memory.pg.show_on_graph')) + ': ' + (e.graph_id || e.id) + (e.name ? ' (' + e.name + ')' : '')"
               >
@@ -341,10 +359,10 @@
                 <td x-text="e.belief_count"></td>
                 <td x-text="e.linked_others"></td>
                 <td style="font-size:0.72rem;">
-                  <span x-show="e.empty" class="badge">{{ t('memory.pg.empty') }}</span>
-                  <span x-show="e.merged_into" x-cloak class="badge" title="{{ t('memory.pg.merged_into_hint') }}">{{ t('memory.pg.merged') }}</span>
-                  <span x-show="e.isolated" class="badge" style="background:var(--warning,#f59e0b);">{{ t('memory.pg.isolated') }}</span>
-                  <span x-show="e.protected" class="badge">{{ t('memory.pg.protected') }}</span>
+                  <span x-show="e.empty" class="badge badge-neutral">{{ t('memory.pg.empty') }}</span>
+                  <span x-show="e.merged_into" x-cloak class="badge badge-neutral" title="{{ t('memory.pg.merged_into_hint') }}">{{ t('memory.pg.merged') }}</span>
+                  <span x-show="e.isolated" class="badge badge-warning">{{ t('memory.pg.isolated') }}</span>
+                  <span x-show="e.protected" class="badge badge-accent">{{ t('memory.pg.protected') }}</span>
                 </td>
                 <td @click.stop>
                   <div class="mem-actions">
@@ -377,7 +395,7 @@
     {# MERGES #}
     <div x-show="tab === 'merges'" x-cloak>
       <div class="card" style="padding:0;overflow:auto;max-height:50vh;-webkit-overflow-scrolling:touch;">
-        <table class="table" style="width:100%;font-size:0.85rem;min-width:560px;">
+        <table class="table data-table" style="width:100%;font-size:0.85rem;min-width:560px;">
           <thead>
             <tr><th scope="col">ID</th><th scope="col">{{ t('memory.source') }}</th><th scope="col">{{ t('memory.target') }}</th><th scope="col">{{ t('memory.pg.tier') }}</th><th scope="col">{{ t('memory.pg.conf') }}</th><th scope="col"><span class="sr-only" aria-hidden="true">{{ t('chat.actions') }}</span></th></tr>
           </thead>
@@ -433,16 +451,16 @@
           </label>
         </div>
         <button class="btn btn-primary btn-sm" @click="runHygiene()" :disabled="hygieneRunning" x-text="S.run_hygiene || 'Run hygiene'"></button>
-        <button class="btn btn-secondary btn-sm" @click="loadHygiene()" style="margin-left:6px;" x-text="S.refresh || 'Refresh'"></button>
+        <button class="btn btn-secondary btn-sm" @click="loadHygiene()" style="margin-inline-start:6px;" x-text="S.refresh || 'Refresh'"></button>
       </div>
       <div class="card" style="padding:1rem;margin-bottom:0.75rem;" x-show="(hygienePreview.isolated_entities || []).length">
         <strong>{{ t('memory.pg.isolated_entities') }}</strong>
-        <ul style="margin:0.5rem 0 0;padding-left:1.2rem;font-size:0.85rem;">
+        <ul style="margin:0.5rem 0 0;padding-inline-start:1.2rem;font-size:0.85rem;">
           <template x-for="e in (hygienePreview.isolated_entities || []).slice(0,40)" :key="e.id">
             <li>
               <code x-text="e.id"></code>
               <span x-text="' · ' + kazmaCount('memory.console.beliefs_n', e.belief_count || 0)"></span>
-              <button class="btn btn-sm btn-secondary" style="margin-left:6px;" @click="tab='entities'; mergeSource=e.id; loadEntities()">{{ t('common.open') }}</button>
+              <button class="btn btn-sm btn-secondary" style="margin-inline-start:6px;" @click="tab='entities'; mergeSource=e.id; loadEntities()">{{ t('common.open') }}</button>
             </li>
           </template>
         </ul>
@@ -450,7 +468,7 @@
     </div>
 
     <div x-show="loading" role="status" aria-live="polite" style="padding:0.5rem;color:var(--text-muted);font-size:0.85rem;">{{ t('common.loading') }}</div>
-    <div translate="no" x-show="error" role="alert" aria-live="assertive" style="padding:0.5rem;color:#ef4444;font-size:0.85rem;" x-text="error"></div>
+    <div translate="no" x-show="error" role="alert" aria-live="assertive" style="padding:0.5rem;color:var(--danger);font-size:0.85rem;" x-text="error"></div>
   </div>
 </div>
 {% endblock %}
