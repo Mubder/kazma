@@ -20,6 +20,10 @@
   opens the page it is about: the research or crawl result, the run to act
   on, Memory, the providers, the Agent tab for a model failover, or the
   Dashboard's open problems. The rows were text with nothing to click.
+  Opening one marks it read: the badge counts only the unread, a result or
+  other news leaves the bell once read, and a problem stays, dimmed, until it
+  is fixed. "Mark all as read" marks the rest. Read is kept on the server, so
+  it holds on every device.
 - **Links to a Settings tab open that tab.** A link inside Kazma to
   `/settings?tab=...` (from the bell, the Agents page, Memory, the Dashboard,
   Documents) opened Settings on its first tab; so did the Dashboard's links to

@@ -9906,7 +9906,16 @@ counts the active provider's address (`setup_api.compute_setup_status`).
   site. The bell's rows are links to it (`$store.notifications.href`, which
   refuses another site), closing the bell. A new subsystem put in the bell
   needs a page or a link: `tests/test_bell_notifications_open_their_page.py`
-  (a planted one as the control), `tests/js/test_bell_links.js`.
+  (a planted one as the control), `tests/js/test_bell_links.js`. **Opening
+  one marks it read** (the owner: "the notification still there with a bell
+  badge showing"): `POST /api/alerts/read` records the ids in
+  `observability.notification_reads` (`system.notifications.read`, runtime,
+  at most 500, the oldest read dropped), the list says `read` per item, the
+  badge counts the unread, read news (a success or information) leaves the
+  bell and a read problem stays dimmed until it is fixed; "Mark all as read"
+  marks the rest. Gates: `tests/test_notification_reads.py`, the store's half
+  in `tests/js/test_bell_links.js` (the old count as the control), the
+  browser walk in `tests/e2e/test_bell_opens_the_page.py`.
 - **A page reached by soft navigation has every script it includes**
   (`modules/nav.js`, 2026-10-03). A sidebar link swaps the page and runs its
   scripts; each is one of three kinds: the base shell's (`GLOBAL_LIB_PATHS`,

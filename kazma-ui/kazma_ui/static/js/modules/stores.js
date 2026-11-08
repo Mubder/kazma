@@ -486,6 +486,8 @@ export function registerStores() {
             // (tests/js/test_notifications_stale.js).
             _failures: 0,
             _retry: null,
+            // Read here before the server's next answer says so (2026-11-08).
+            _readHere: [],
 
             init() {
                 this.refresh();
@@ -515,7 +517,7 @@ export function registerStores() {
                     return;
                 }
                 this.items = Array.isArray(alerts) ? alerts : [];
-                this.count = this.items.length;
+                this.count = this.unreadItems().length;
                 this._toastSuccesses();
                 this.loaded = true;
                 this.error = '';
@@ -533,6 +535,62 @@ export function registerStores() {
                 if (severity === 'ERROR' || severity === 'CRITICAL') return { color: 'var(--danger)', mark: '✕' };
                 if (severity === 'INFO') return { color: 'var(--accent, #3b82f6)', mark: 'ⓘ' };
                 return { color: 'var(--warning)', mark: '⚠' };
+            },
+
+            // Read: opened, or "Mark all as read" (the server's `read`, or this
+            // page's own click before the next answer). The badge counted
+            // every alert, and a read one kept it up (2026-11-08).
+            isRead(item) {
+                return !!(item && (item.read === true || this._readHere.indexOf(item.id) >= 0));
+            },
+
+            // News -- a success or information -- has been seen once read; a
+            // problem stays until it is fixed.
+            isNews(item) {
+                const severity = String((item && item.severity) || '').toUpperCase();
+                return severity === 'SUCCESS' || severity === 'INFO';
+            },
+
+            unreadItems() {
+                return (this.items || []).filter((item) => item && !this.isRead(item));
+            },
+
+            // What the bell lists: the unread, newest first, then the read
+            // problems (dimmed); read news has left.
+            visibleItems() {
+                const newest = (a, b) => (Number(b.timestamp) || 0) - (Number(a.timestamp) || 0);
+                const read = (this.items || []).filter((item) => item && this.isRead(item) && !this.isNews(item));
+                return this.unreadItems().slice().sort(newest).concat(read.sort(newest));
+            },
+
+            // Record *items* as read: here at once, on the server for every
+            // device. `keepalive` lets the request finish while the link
+            // opens its page.
+            markRead(items) {
+                const ids = (items || []).filter((item) => item && typeof item.id === 'string' && !this.isRead(item))
+                    .map((item) => item.id);
+                if (!ids.length) return;
+                this._readHere = this._readHere.concat(ids).slice(-500);
+                this.count = this.unreadItems().length;
+                try {
+                    fetch('/api/alerts/read', {
+                        method: 'POST',
+                        keepalive: true,
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                        body: JSON.stringify({ ids: ids.slice(0, 200) }),
+                    }).catch(() => { /* the next open marks it again */ });
+                } catch (e) { /* no fetch in some tests */ }
+            },
+
+            // A notification opened: it is read, and the bell closes.
+            openItem(item) {
+                this.markRead([item]);
+                this.open = false;
+            },
+
+            markAllRead() {
+                this.markRead(this.unreadItems());
             },
 
             // The page a notification opens (2026-11-08): the one the server

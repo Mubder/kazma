@@ -987,6 +987,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "لا توجد تنبيهات للنظام",
         "en": "No system alerts",
     },
+    "common.mark_all_read": {
+        "ar": "تعليم الكل كمقروء",
+        "en": "Mark all as read",
+    },
     "common.alert": {
         "ar": "تنبيه",
         "en": "alert",
