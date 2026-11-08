@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import threading
 import uuid
 from contextlib import contextmanager
 from functools import lru_cache
@@ -91,6 +92,44 @@ def _process_identity() -> tuple[str, str, int, str]:
         install = ""
     started = f"{psutil.Process(os.getpid()).create_time():.3f}"
     return install, socket.gethostname(), os.getpid(), started
+
+
+#: The intakes code in this process is working on: reserved and not yet
+#: finished or released, or being rolled back by a sweep here. A reservation
+#: this process owns that is NOT here was left by a service of this process
+#: that stopped -- a store closed under its sweep's rollback, an in-process
+#: restart: no one will finish it, and a sweep here takes it back
+#: (``ingestion._recover_stranded_intakes``). Before 2026-11-08 an owner of
+#: "self" was always skipped as live, so such a reservation was held until
+#: the process exited (the drill VM's 48-hour document soak).
+_LIVE_INTAKES: set[str] = set()
+_LIVE_LOCK = threading.Lock()
+
+
+def _hold(token: str) -> None:
+    with _LIVE_LOCK:
+        _LIVE_INTAKES.add(token)
+
+
+def _drop(token: str) -> None:
+    with _LIVE_LOCK:
+        _LIVE_INTAKES.discard(token)
+
+
+def is_live(token: str) -> bool:
+    """True while code in this process works on intake *token*."""
+    with _LIVE_LOCK:
+        return token in _LIVE_INTAKES
+
+
+@contextmanager
+def holding(token: str):
+    """*token* is live for the block: a sweep here leaves it alone."""
+    _hold(token)
+    try:
+        yield
+    finally:
+        _drop(token)
 
 
 def current_owner() -> str:
@@ -223,6 +262,9 @@ class IntakeAdmissionStore:
     ) -> str:
         """Atomically bind a request key and consume queue/rate/byte budgets."""
         token = uuid.uuid4().hex
+        # Live before its row exists: a sweep in this process must never see
+        # a reservation of ours that no one is working on in between.
+        _hold(token)
         try:
             with self._transaction() as cur:
                 self._serialize(cur)
@@ -274,8 +316,10 @@ class IntakeAdmissionStore:
                 )
             return token
         except CapacityError:
+            _drop(token)
             raise
         except store_errors() as exc:
+            _drop(token)
             raise _refuse(
                 "capacity_unavailable",
                 503,
@@ -497,18 +541,23 @@ class IntakeAdmissionStore:
 
         A failed partial publication stays active. Never silently expire it
         and allow another publisher to overwrite metadata with different bytes.
+        Its upload is over either way: no code here works on it any more, so
+        a sweep in this process may roll it back (:func:`is_live`).
         """
-        with self._transaction() as cur:
-            self._execute(
-                cur,
-                """UPDATE document_intake_reservations SET active = 0
-                WHERE token = ? AND owner = ? AND (publishing = 0 OR EXISTS (
-                    SELECT 1 FROM document_jobs j WHERE
-                    j.tenant_id = document_intake_reservations.tenant_id
-                    AND j.id = document_intake_reservations.job_id
-                    AND j.request_digest = document_intake_reservations.request_digest))""",
-                (token, current_owner()),
-            )
+        try:
+            with self._transaction() as cur:
+                self._execute(
+                    cur,
+                    """UPDATE document_intake_reservations SET active = 0
+                    WHERE token = ? AND owner = ? AND (publishing = 0 OR EXISTS (
+                        SELECT 1 FROM document_jobs j WHERE
+                        j.tenant_id = document_intake_reservations.tenant_id
+                        AND j.id = document_intake_reservations.job_id
+                        AND j.request_digest = document_intake_reservations.request_digest))""",
+                    (token, current_owner()),
+                )
+        finally:
+            _drop(token)
 
     def reconcile_published(self) -> None:
         """Jobs are durable proof; age alone never proves a publisher is gone."""
