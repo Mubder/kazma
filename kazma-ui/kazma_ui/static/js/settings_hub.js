@@ -658,16 +658,16 @@
                 return;
             }
             const str = (v) => (v === undefined || v === null ? '' : String(v));
-            this.modelDetails = (data.models || []).map((m) => ({
-                ...m,
-                _editing: false,
-                override: {
+            this.modelDetails = (data.models || []).map((m) => {
+                const override = {
                     context_window: str((m.override || {}).context_window),
                     max_output: str((m.override || {}).max_output),
                     vision: str((m.override || {}).vision),
                     tools: str((m.override || {}).tools),
-                },
-            }));
+                };
+                // What was saved, to tell an unsaved change from it.
+                return { ...m, _editing: false, override: override, _saved: JSON.stringify(override) };
+            });
             this.defaultModelRef = String(data.default || '');
             this.modelDetailsLoaded = true;
         },
@@ -689,6 +689,157 @@
                 this.defaultModelRef = previous;
                 showToast(_k('settings.default_model_failed', 'The default model was not changed: ') + e.message, 'error');
             }
+        },
+
+        /** The Model details table's rows (2026-11-08: it listed every model
+         *  of every working provider, OpenRouter's 425 among them, and was
+         *  most of the page). A provider or words narrow it; otherwise "In
+         *  use" lists the default, the models used in the last 30 days, those
+         *  you changed and the one you are editing, and "All models" every
+         *  one. The table scrolls under its own header. */
+        shownModelDetails() {
+            let rows = this.modelDetails || [];
+            if (this.modelDetailsProvider) rows = rows.filter(m => m.provider === this.modelDetailsProvider);
+            const words = String(this.modelDetailsQuery || '').toLowerCase().split(/\s+/).filter(Boolean);
+            if (words.length) {
+                rows = rows.filter(m => {
+                    const text = (String(m.ref) + ' ' + String(m.provider_label || '')).toLowerCase();
+                    return words.every(w => text.includes(w));
+                });
+            } else if (!this.modelDetailsShowAll && !this.modelDetailsProvider) {
+                const short = rows.filter(m => m.ref === this.defaultModelRef || Number(m.used) > 0
+                    || m._editing || this.modelDetailChanged(m));
+                rows = short.length ? short : rows.slice(0, 10);
+            }
+            return this.sortedModelDetails(rows);
+        },
+
+        /** The rows in the column's order, or the tab's own: the default
+         *  first, then the most used, then the ones you changed. A value not
+         *  known sorts last whichever way. */
+        sortedModelDetails(rows) {
+            const key = this.modelDetailsSort;
+            const dir = this.modelDetailsSortDir;
+            const known = (v) => v !== null && v !== undefined && v !== '';
+            const value = (m) => {
+                if (key === 'model') return String(m.model || '').toLowerCase();
+                if (key === 'window') return m.context_window;
+                if (key === 'price') return m.local ? 0 : m.input_per_1m;
+                if (key === 'calls') return Number(m.used) || 0;
+                return null;
+            };
+            const out = rows.slice();
+            if (!key) {
+                return out.sort((a, b) => (b.ref === this.defaultModelRef) - (a.ref === this.defaultModelRef)
+                    || (Number(b.used) || 0) - (Number(a.used) || 0)
+                    || this.modelDetailChanged(b) - this.modelDetailChanged(a));
+            }
+            return out.sort((a, b) => {
+                const va = value(a), vb = value(b);
+                if (!known(va) || !known(vb)) return known(va) ? -1 : (known(vb) ? 1 : 0);
+                if (typeof va === 'string') return va.localeCompare(vb) * dir;
+                return (va - vb) * dir;
+            });
+        },
+
+        /** A column header's click: that column, then the other way, then
+         *  the tab's own order. Numbers start with the largest. */
+        sortModelDetails(key) {
+            const first = key === 'model' ? 1 : -1;
+            if (this.modelDetailsSort !== key) {
+                this.modelDetailsSort = key;
+                this.modelDetailsSortDir = first;
+            } else if (this.modelDetailsSortDir === first) {
+                this.modelDetailsSortDir = -first;
+            } else {
+                this.modelDetailsSort = '';
+            }
+        },
+
+        modelDetailsSortMark(key) {
+            if (this.modelDetailsSort !== key) return '';
+            return this.modelDetailsSortDir > 0 ? ' ▲' : ' ▼';
+        },
+
+        modelDetailsAriaSort(key) {
+            if (this.modelDetailsSort !== key) return 'none';
+            return this.modelDetailsSortDir > 0 ? 'ascending' : 'descending';
+        },
+
+        /** The providers of the models, in the list's order, each with its
+         *  models: the default model's choice and the provider filter. */
+        modelDetailGroups() {
+            const groups = [];
+            const seen = {};
+            for (const m of this.modelDetails || []) {
+                const name = String(m.provider || String(m.ref).split(':')[0]);
+                if (!seen[name]) {
+                    seen[name] = { provider: name, label: String(m.provider_label || name), models: [] };
+                    groups.push(seen[name]);
+                }
+                seen[name].models.push(m);
+            }
+            return groups;
+        },
+
+        defaultModelDetail() {
+            return (this.modelDetails || []).find(m => m.ref === this.defaultModelRef) || null;
+        },
+
+        /** The four numbers at the top of the tab. */
+        modelDetailsStats() {
+            const all = this.modelDetails || [];
+            return {
+                total: all.length,
+                used: all.filter(m => Number(m.used) > 0).length,
+                changed: all.filter(m => this.modelDetailChanged(m)).length,
+                unpriced: all.filter(m => !m.local && (m.input_per_1m === null || m.input_per_1m === undefined)).length,
+            };
+        },
+
+        /** True when the owner set any of this model's details. */
+        modelDetailChanged(m) {
+            const o = (m && m.override) || {};
+            return ['context_window', 'max_output', 'vision', 'tools'].some(k => String(o[k] || '').trim() !== '');
+        },
+
+        /** True while a row's values differ from what was saved. */
+        modelDetailsDirty() {
+            return (this.modelDetails || []).some(m => JSON.stringify(m.override) !== m._saved);
+        },
+
+        /** A table cell's value, short: the facts' sentences are the default
+         *  model's, and the row reads by its column header. */
+        modelDetailCell(m, field) {
+            const num = (v) => (window.KazmaFormat ? window.KazmaFormat.number(v) : String(v));
+            if (field === 'context_window' || field === 'max_output') return m[field] ? num(m[field]) : '—';
+            if (field === 'calls') return Number(m.used) > 0 ? num(Number(m.used)) : '—';
+            if (m.local) return _k('settings.model_details_free', 'Free (on your network)');
+            if (m.input_per_1m === null || m.input_per_1m === undefined) return _k('settings.models_cell_unknown', 'Not known');
+            return _k('settings.models_price_pair', 'in ${input} · out ${output}',
+                { input: m.input_per_1m, output: m.output_per_1m });
+        },
+
+        /** Where a cell's value came from, in the page's words, or nothing. */
+        modelDetailSource(m, field) {
+            const s = (m.sources || {})[field];
+            return s ? _k('settings.model_details_source_' + s, s) : '';
+        },
+
+        modelDetailFlag(v) {
+            if (v === true) return _k('settings.model_details_yes', 'yes');
+            if (v === false) return _k('settings.model_details_no', 'no');
+            return _k('settings.model_details_unknown', 'not known');
+        },
+
+        modelDetailFlagClass(v) {
+            return v === true ? 'flag-yes' : (v === false ? 'flag-no' : 'flag-unknown');
+        },
+
+        modelDetailsCountLine() {
+            const total = (this.modelDetails || []).length;
+            const shown = this.shownModelDetails().length;
+            return window.kazmaCount ? window.kazmaCount('settings.model_details_shown', total, { shown: shown }) : '';
         },
 
         /** One fact of a model, with where it came from, in the page's words. */
@@ -926,13 +1077,35 @@
         /** The provider list, chat providers first, then speech services
          *  (providers stage 2). */
         orderedHubProviders() {
-            const chat = this.hubProviders.filter(p => p.kind !== 'speech');
-            return chat.concat(this.hubProviders.filter(p => p.kind === 'speech'));
+            const shown = this.hubShowOffProviders
+                ? this.hubProviders : this.hubProviders.filter(p => !this.providerFoldedAway(p));
+            const chat = shown.filter(p => p.kind !== 'speech');
+            return chat.concat(shown.filter(p => p.kind === 'speech'));
         },
 
-        /** The first speech service's name: the section's heading goes above it. */
+        /** Off, and chat could not call it (no key, no sign-in): folded away
+         *  until asked for. Most of a list of every provider Kazma knows
+         *  (2026-11-08: 20 of live's 26 rows). The one open stays. */
+        providerFoldedAway(p) {
+            if (!p || p.enabled !== false || p.callable !== false) return false;
+            return this.hubSelectedProvider !== p.name;
+        },
+
+        foldedProviderCount() {
+            return this.hubProviders.filter(p => this.providerFoldedAway(p)).length;
+        },
+
+        foldedProvidersLabel() {
+            if (this.hubShowOffProviders) {
+                return _k('settings.providers_off_hide', 'Hide the providers that are off and have no key');
+            }
+            const n = this.foldedProviderCount();
+            return window.kazmaCount ? window.kazmaCount('settings.providers_off_show', n) : '';
+        },
+
+        /** The first speech service shown: the section's heading goes above it. */
         firstSpeechProvider() {
-            const first = this.hubProviders.find(p => p.kind === 'speech');
+            const first = this.orderedHubProviders().find(p => p.kind === 'speech');
             return first ? first.name : '';
         },
 
@@ -1094,7 +1267,8 @@
             const list = this.hubProviders || [];
             if (!list.length) return null;
             const found = list.find(p => p.name === this.hubSelectedProvider);
-            return found || list[0];
+            // With none chosen, the first provider the list shows.
+            return found || this.orderedHubProviders()[0] || list[0];
         },
 
         providerStateCounts() {
@@ -1154,13 +1328,19 @@
                 const success = !!result.success;
                 const errorMsg = success ? null : this.providerCheckError(result, resp);
                 this.hubTestResult = { type: 'provider', source: 'modal', ...result, success, error: errorMsg };
-                // Save opens on an answer; a failure offers "Save anyway".
-                this.hubProviderTested = success;
+                // Save opens on an answer; a failure offers "Save anyway". A
+                // speech service takes no chat message: nothing to test, and
+                // Save opens.
+                const speech = result.error_code === 'speech_provider';
+                this.hubProviderTested = success || speech;
                 if (success && !typedModels.length && result.chat_model) {
                     p.models = String(result.chat_model);  // the model that answered
                 }
+                if (speech) p.kind = 'speech';
                 if (success) {
                     showToast(_k('settings.hub.connection_test_succeeded', 'Connection test succeeded'), 'success');
+                } else if (speech) {
+                    showToast(errorMsg, 'info');
                 } else {
                     showToast(_k('settings.hub.test_failed_error', 'Test failed: {error}', { error: errorMsg }), 'error');
                 }

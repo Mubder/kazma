@@ -1268,8 +1268,104 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "LLM Providers",
     },
     "settings.llm_providers_models": {
-        "ar": "مزودو النماذج والملفات",
-        "en": "LLM Providers & Models",
+        "ar": "مزوّدو النماذج",
+        "en": "LLM Providers",
+    },
+    "settings.models_subtab": {
+        "ar": "النماذج",
+        "en": "Models",
+    },
+    "settings.models_lede": {
+        "ar": "ما تضبطه بنفسك للنماذج التي يمكنك اختيارها: أيها تستخدمه المحادثات الجديدة، وما يقدر عليه كل نموذج، وكم يكلّف. لا يغيّر كاظمه قيمك؛ ما يذكره المزوّد يملأ ما تتركه فارغًا فقط.",
+        "en": "What you set by hand for the models you can choose: which one new chats use, what each model can do, and what it costs. Kazma never changes your values; what a provider reports fills in only what you leave empty.",
+    },
+    "settings.models_stat_models": {
+        "ar": "النماذج",
+        "en": "Models",
+    },
+    "settings.models_stat_used": {
+        "ar": "مستخدمة خلال 30 يومًا",
+        "en": "Used in 30 days",
+    },
+    "settings.models_stat_changed": {
+        "ar": "بقيمك",
+        "en": "Your values",
+    },
+    "settings.models_stat_unpriced": {
+        "ar": "بلا سعر معروف",
+        "en": "No known price",
+    },
+    "settings.models_change_default": {
+        "ar": "غيّر النموذج الافتراضي",
+        "en": "Change the default model",
+    },
+    "settings.models_filter_in_use": {
+        "ar": "قيد الاستخدام",
+        "en": "In use",
+    },
+    "settings.models_filter_all": {
+        "ar": "كل النماذج",
+        "en": "All models",
+    },
+    "settings.models_filter_provider": {
+        "ar": "المزوّد",
+        "en": "Provider",
+    },
+    "settings.models_all_providers": {
+        "ar": "كل المزوّدين",
+        "en": "All providers",
+    },
+    "settings.models_col_model": {
+        "ar": "النموذج",
+        "en": "Model",
+    },
+    "settings.models_col_window": {
+        "ar": "نافذة السياق",
+        "en": "Context window",
+    },
+    "settings.models_col_output": {
+        "ar": "حد المخرجات",
+        "en": "Output limit",
+    },
+    "settings.models_col_images": {
+        "ar": "الصور",
+        "en": "Images",
+    },
+    "settings.models_col_tools": {
+        "ar": "الأدوات",
+        "en": "Tools",
+    },
+    "settings.models_col_price": {
+        "ar": "السعر لكل مليون رمز",
+        "en": "Price per 1M tokens",
+    },
+    "settings.models_col_calls": {
+        "ar": "الطلبات خلال 30 يومًا",
+        "en": "Calls, 30 days",
+    },
+    "settings.models_tag_default": {
+        "ar": "الافتراضي",
+        "en": "Default",
+    },
+    "settings.models_cell_unknown": {
+        "ar": "غير معروف",
+        "en": "Not known",
+    },
+    "settings.models_price_pair": {
+        "ar": "مدخلات ${input} · مخرجات ${output}",
+        "en": "in ${input} · out ${output}",
+    },
+    "settings.models_none_match": {
+        "ar": "لا نموذج يطابق.",
+        "en": "No model matches.",
+    },
+    "settings.models_unsaved": {
+        "ar": "تغييرات غير محفوظة",
+        "en": "Unsaved changes",
+    },
+    "settings.models_edit_hint": {
+        "ar": "اترك الحقل فارغًا ليُستخدم ما يقوله المزوّد أو كتالوج كاظمه.",
+        "en": "Leave a field empty to use what the provider or Kazma's catalog says.",
     },
     "settings.load": {
         "ar": "تحميل",
@@ -2102,6 +2198,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.provider_check.speech_only": {
         "ar": "النماذج المعروضة نماذج كلام، لا محادثة. اكتب نموذج محادثة.",
         "en": "The listed models are speech models, not chat. Type a chat model.",
+    },
+    "settings.provider_check.speech_provider": {
+        "ar": "هذا المزوّد يقدّم خدمات الكلام، لا الدردشة: لا يرسل له Kazma رسالة دردشة، فلا شيء يُختبر هنا. اضبط الكلام في الإعدادات ← الصوت.",
+        "en": "This provider serves speech, not chat: Kazma sends it no chat message, so there is nothing to test here. Set speech up in Settings → Voice.",
     },
     "settings.provider_check.list_failed": {
         "ar": "تعذّر عرض نماذج المزوّد. اكتب نموذجًا واختبر.",
@@ -6479,6 +6579,66 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.model_details_title": {
         "ar": "تفاصيل النماذج",
         "en": "Model details",
+    },
+    "settings.model_details_search": {
+        "ar": "ابحث عن نموذج",
+        "en": "Find a model",
+    },
+    "settings.model_details_short_hint": {
+        "ar": "المعروض: النموذج الافتراضي، والنماذج المستخدمة في آخر 30 يومًا، والنماذج التي غيّرت تفاصيلها. ابحث لتجد أي نموذج آخر.",
+        "en": "Listed: the default model, the models used in the last 30 days and the ones whose details you changed. Search to find any other.",
+    },
+    "settings.model_details_shown.zero": {
+        "ar": "لا نماذج",
+        "en": "No models",
+    },
+    "settings.model_details_shown.one": {
+        "ar": "يُعرض {shown} من نموذج واحد",
+        "en": "Showing {shown} of 1 model",
+    },
+    "settings.model_details_shown.two": {
+        "ar": "يُعرض {shown} من نموذجين",
+        "en": "Showing {shown} of {n} models",
+    },
+    "settings.model_details_shown.few": {
+        "ar": "يُعرض {shown} من {n} نماذج",
+        "en": "Showing {shown} of {n} models",
+    },
+    "settings.model_details_shown.many": {
+        "ar": "يُعرض {shown} من {n} نموذجًا",
+        "en": "Showing {shown} of {n} models",
+    },
+    "settings.model_details_shown.other": {
+        "ar": "يُعرض {shown} من {n} نموذج",
+        "en": "Showing {shown} of {n} models",
+    },
+    "settings.providers_off_hide": {
+        "ar": "أخفِ المزوّدين المتوقفين بلا مفتاح",
+        "en": "Hide the providers that are off and have no key",
+    },
+    "settings.providers_off_show.zero": {
+        "ar": "لا مزوّدين متوقفين بلا مفتاح",
+        "en": "No providers are off without a key",
+    },
+    "settings.providers_off_show.one": {
+        "ar": "اعرض مزوّدًا واحدًا متوقفًا بلا مفتاح",
+        "en": "Show 1 provider that is off and has no key",
+    },
+    "settings.providers_off_show.two": {
+        "ar": "اعرض مزوّدَين متوقفَين بلا مفتاح",
+        "en": "Show {n} providers that are off and have no key",
+    },
+    "settings.providers_off_show.few": {
+        "ar": "اعرض {n} مزوّدين متوقفين بلا مفتاح",
+        "en": "Show {n} providers that are off and have no key",
+    },
+    "settings.providers_off_show.many": {
+        "ar": "اعرض {n} مزوّدًا متوقفًا بلا مفتاح",
+        "en": "Show {n} providers that are off and have no key",
+    },
+    "settings.providers_off_show.other": {
+        "ar": "اعرض {n} مزوّد متوقف بلا مفتاح",
+        "en": "Show {n} providers that are off and have no key",
     },
     "settings.model_details_lede": {
         "ar": "ما يعرفه كاظمه عن كل نموذج يمكنك اختياره، ومن أين: قيمتك أنت، أو قائمة نماذج المزوّد، أو كتالوج كاظمه (أسعار الموردين المعلنة على واجهاتهم، مؤرخة). ونافذة السياق هي ما يذكره المزوّد أو ما تضعه أنت، لا تخمين أبدًا. ولا يرسل كاظمه أكثر من النافذة المعروفة للنموذج أو حد مخرجاته.",

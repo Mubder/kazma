@@ -169,8 +169,8 @@ def is_local_preset(provider: str) -> bool:
 def is_speech_provider(entry: Any) -> bool:
     """True for a provider row (or preset id) that serves speech, not chat.
 
-    A row says so itself (``kind: speech``, providers stage 2); rows written
-    before carry no kind and are chat."""
+    A row is speech by its address, its ``kind`` or its models
+    (``models.modality.row_is_speech``)."""
     if isinstance(entry, str):
         return str((PROVIDER_PRESETS.get(entry.strip().lower()) or {}).get("kind") or "chat") == "speech"
     if isinstance(entry, dict):

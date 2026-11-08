@@ -399,6 +399,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
             from kazma_core.runtime.live_llm import url_is_local
 
             from kazma_core.models.modality import row_is_speech
+            from kazma_core.provider_check import credentials_problem
             from kazma_core.providers import PROVIDER_PRESETS, is_local_preset
 
             preset_id = str(p.get("preset") or "").strip().lower() or name.lower()
@@ -407,6 +408,10 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
             # Providers stage 2: what it serves (speech is kept out of every
             # chat model list) and which form the dialog shows for it.
             entry["kind"] = "speech" if row_is_speech(p, discovered) else "chat"
+            # Whether chat could call it now (a key, a sign-in, or this
+            # network): the page folds away the providers that are off and
+            # cannot be called (2026-11-08: 20 of live's 26 rows).
+            entry["callable"] = credentials_problem(registry, p) is None
             entry["form"] = str((PROVIDER_PRESETS.get(preset_id) or {}).get("form") or "key")
             providers.append(entry)
         return providers
@@ -486,10 +491,16 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         """``(model, models listed or None, refusal or None)``: the model typed,
         else the provider's own (``probe_model_for``), else the first chat
         model its list offers -- listed with what was typed, not saved."""
-        from kazma_core.models.modality import chat_models, speech_models
+        from kazma_core.models.modality import chat_models, row_is_speech, speech_models
         from kazma_core.provider_check import list_models
         from kazma_core.providers import default_model_for
 
+        if row_is_speech(entry):
+            # A speech service takes no chat message: there is nothing for
+            # this check to send, and its health is left as it was.
+            return "", [], {"error_code": "speech_provider", "reachable": None, "error": (
+                "This provider serves speech, not chat: Kazma sends it no chat message, "
+                "so there is nothing to test here. Set speech up under Settings -> Voice.")}
         model = str(typed_model or "").strip()
         if model:
             return model, None, None

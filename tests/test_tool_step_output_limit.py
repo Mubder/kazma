@@ -61,23 +61,30 @@ def test_a_cut_off_call_is_told_to_write_in_parts():
     assert "file_append" in text and "SMALLER pieces" in text
 
 
-def test_a_60kb_report_goes_through_parts():
+def test_a_60kb_report_goes_through_parts(tmp_path):
     from kazma_core.agent.tool_builtins.filesystem import register_filesystem_tools
     from kazma_core.agent.tool_registry import LocalToolRegistry
+    from kazma_core.ide.workspace_scope import workspace_path_scope
     from kazma_core.workspace.binding import resolve_active_root
 
     registry = LocalToolRegistry()
     register_filesystem_tools(registry)
-    path = str(resolve_active_root() / f"d2-{uuid.uuid4().hex[:8]}" / "report.md")
     parts = [f"## Part {i}\n\n" + (f"Paragraph {i}. " * 500) + "\n\n" for i in range(10)]
     assert sum(len(p) for p in parts) > 60_000
 
-    async def write_in_parts():
-        await registry.get_tool("file_write").func(path=path, content=parts[0])
-        for part in parts[1:]:
-            await registry.get_tool("file_append").func(path=path, content=part)
+    async def write_in_parts() -> str:
+        # In a workspace of its own: the active one may be this checkout
+        # when an earlier test left it active (2026-11-08: a report.md
+        # turned up in the repository).
+        async with workspace_path_scope(tmp_path):
+            path = str(resolve_active_root() / f"d2-{uuid.uuid4().hex[:8]}" / "report.md")
+            await registry.get_tool("file_write").func(path=path, content=parts[0])
+            for part in parts[1:]:
+                await registry.get_tool("file_append").func(path=path, content=part)
+            return path
 
-    asyncio.run(write_in_parts())
+    path = asyncio.run(write_in_parts())
     from pathlib import Path
 
+    assert Path(path).is_relative_to(tmp_path)
     assert Path(path).read_text(encoding="utf-8") == "".join(parts)

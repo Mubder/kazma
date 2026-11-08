@@ -258,6 +258,8 @@
         hubSubtab: 'providers',
         hubProviders: [],
         hubProvidersLoaded: false,
+        // Providers that are off and cannot be called fold away (2026-11-08).
+        hubShowOffProviders: false,
         hubConnectors: [],
         hubConnectorsLoaded: false,
         // Delivery & Routing (Settings → Providers & Connectors →
@@ -304,6 +306,13 @@
         modelDetailsLoaded: false,
         modelDetailsFailed: false,
         modelDetailsSaving: false,
+        // The card lists the models that matter first; search finds the rest.
+        modelDetailsQuery: '',
+        modelDetailsShowAll: false,
+        modelDetailsProvider: '',
+        // '' = the tab's own order: the default, then by calls, then yours.
+        modelDetailsSort: '',
+        modelDetailsSortDir: 1,
         defaultModelRef: '',
         hubProviderModal: false,
         hubConnectorModal: false,
@@ -859,8 +868,14 @@
         async onTabChange(newTab) {
             // Legacy deep-links → consolidated homes
             var scrollEmbedder = false;
+            var subtabParam = '';
             if (newTab === 'connectors' || newTab === 'provider_connectors') {
                 this.hubSubtab = 'connectors';
+                newTab = 'providers_connectors';
+            } else if (newTab === 'models') {
+                // Providers & Connectors -> Models (2026-11-08).
+                this.hubSubtab = 'models';
+                subtabParam = 'models';
                 newTab = 'providers_connectors';
             } else if (newTab === 'embedder') {
                 scrollEmbedder = true;
@@ -871,6 +886,8 @@
                 const url = new URL(window.location.href);
                 if (newTab && newTab !== 'providers_connectors') {
                     url.searchParams.set('tab', newTab);
+                } else if (subtabParam) {
+                    url.searchParams.set('tab', subtabParam);
                 } else {
                     url.searchParams.delete('tab');
                 }

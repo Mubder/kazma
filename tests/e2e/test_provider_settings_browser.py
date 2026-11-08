@@ -117,7 +117,13 @@ def test_provider_settings_in_a_browser(kazma) -> None:
     from playwright.sync_api import sync_playwright
 
     base, fake_url = kazma
-    llm_ledger.record_llm_call(provider="deepseek", model="mystery-model", prompt_tokens=10, priced=False)
+    # A model a working provider serves, called with no known price.
+    # (A cloud address with a key: a server on this network is free.)
+    saved = httpx.post(f"{base}/api/providers", json={
+        "name": "pricedserver", "base_url": "https://api.priced.example/v1", "api_key": "sk-demo-priced-key",
+        "models": ["mystery-model"], "enabled": True}, timeout=10)
+    assert saved.status_code == 200, saved.text
+    llm_ledger.record_llm_call(provider="pricedserver", model="mystery-model", prompt_tokens=10, priced=False)
     host = base.split("//", 1)[1].split(":", 1)[0]
     errors: list[str] = []
     with sync_playwright() as p:
@@ -129,7 +135,9 @@ def test_provider_settings_in_a_browser(kazma) -> None:
             pg.locator("a.nav-link[href='/settings']").first.click()
             pg.wait_for_function("location.pathname === '/settings'", timeout=15000)
 
-            # Model prices: the model used with no known price, priced here.
+            # Model prices, on the Models sub-tab: the model used with no
+            # known price, priced here.
+            pg.locator("#hub-subtab-models").click()
             prices = pg.locator("#model-prices")
             prices.get_by_text("mystery-model", exact=True).wait_for(state="visible", timeout=30000)
             prices.locator("button", has_text="Set its price").first.click()
@@ -145,6 +153,7 @@ def test_provider_settings_in_a_browser(kazma) -> None:
             assert saved == [{"model": "mystery-model", "input": 0.27, "output": 1.1}]
 
             # The dialog: Save opens only when the test answered.
+            pg.locator("#hub-subtab-providers").click()
             pg.locator("#provider-add").click()
             pg.locator("#provider-name").fill("fakeserver")
             pg.locator("#provider-base-url").fill(fake_url)
@@ -173,7 +182,7 @@ def test_provider_settings_in_a_browser(kazma) -> None:
             ctx.add_cookies([{"name": "kazma-lang", "value": "ar", "domain": host, "path": "/"}])
             ar = ctx.new_page()
             ar.on("pageerror", lambda exc: errors.append(str(exc)))
-            ar.goto(base + "/settings?tab=providers_connectors", wait_until="domcontentloaded")
+            ar.goto(base + "/settings?tab=models", wait_until="domcontentloaded")
             ar.locator("#model-prices h3").wait_for(state="visible", timeout=30000)
             assert ar.evaluate("document.documentElement.dir") == "rtl"
             assert ar.locator("#model-prices h3").inner_text() == "أسعار النماذج"
@@ -221,10 +230,10 @@ def test_stage_two_to_four_in_a_browser(kazma) -> None:
             pg.keyboard.press("Escape")
             pg.locator(".modal-overlay").first.evaluate("e => e.click()")
 
-            # Model details and the default model.
+            # Model details and the default model, on the Models sub-tab.
+            pg.locator("#hub-subtab-models").click()
             details = pg.locator("#model-details")
-            details.locator(".model-detail-row span", has_text=f"fakeserver:{MODEL}").first.wait_for(
-                state="visible", timeout=30000)
+            details.locator(".model-detail-row", has_text=MODEL).first.wait_for(state="visible", timeout=30000)
             assert "Free (on your network)" in details.inner_text()
             pg.locator("#default-model-select").select_option(f"fakeserver:{MODEL}")
             pg.wait_for_function(
@@ -244,6 +253,99 @@ def test_stage_two_to_four_in_a_browser(kazma) -> None:
             pg.locator("#new-session-btn").click()
             pg.wait_for_function(
                 f"document.querySelector('#model-selector').value === 'fakeserver:{MODEL}'", timeout=15000)
+        finally:
+            browser.close()
+    assert errors == [], errors
+
+
+def test_speech_folded_providers_and_the_models_tab_in_a_browser(kazma) -> None:
+    """2026-11-08, reached by the sidebar: a speech service known by its
+    address is listed under Speech services; providers that are off and have
+    no key fold away; a catalog provider deleted stays deleted after a reload;
+    the default model, Model details (searchable) and prices are their own
+    Models sub-tab."""
+    from playwright.sync_api import sync_playwright
+
+    base, fake_url = kazma
+    for row in (
+        {"name": "fakeserver", "base_url": fake_url, "models": [MODEL, "fake-two"], "enabled": True},
+        {"name": "Cohere Transcriptions", "base_url": "https://api.cohere.com/v2/audio/transcriptions",
+         "enabled": False},
+    ):
+        saved = httpx.post(f"{base}/api/providers", json=row, timeout=10)
+        assert saved.status_code == 200, saved.text
+    host = base.split("//", 1)[1].split(":", 1)[0]
+    errors: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            pg = browser.new_context(viewport={"width": 1280, "height": 900}, locale="en-US").new_page()
+            pg.on("pageerror", lambda exc: errors.append(str(exc)))
+            pg.goto(base + "/", wait_until="domcontentloaded")
+            pg.locator("a.nav-link[href='/settings']").first.click()
+            pg.wait_for_function("location.pathname === '/settings'", timeout=15000)
+
+            # Off and no key: folded away until asked for.
+            rows = pg.locator(".pc-row")
+            rows.filter(has_text="fakeserver").first.wait_for(state="visible", timeout=30000)
+            assert not rows.filter(has_text="Cohere Transcriptions").first.is_visible()
+            fold = pg.locator("#provider-show-off")
+            assert "providers that are off and have no key" in fold.inner_text()
+            fold.click()
+
+            # The speech service sits under Speech services, by its address.
+            cohere = rows.filter(has_text="Cohere Transcriptions").first
+            cohere.wait_for(state="visible", timeout=10000)
+            assert pg.evaluate("""() => {
+                const head = document.querySelector('.pc-speech-head:not([style*="display: none"])');
+                const row = [...document.querySelectorAll('.pc-row')].find(r => r.textContent.includes('Cohere Transcriptions'));
+                return !!head && !!row && !!(head.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING);
+            }""")
+
+            # A catalog provider deleted stays deleted, after a reload too.
+            rows.filter(has_text="Z.AI (GLM)").first.click()
+            pg.locator(".pc-actions .btn-danger").click()
+            pg.locator(".modal-footer button.btn-danger").click()
+            pg.wait_for_function(
+                "fetch('/api/providers').then(r => r.json()).then(l => !l.some(p => p.name === 'zai'))",
+                timeout=15000)
+            pg.reload(wait_until="domcontentloaded")
+            rows.filter(has_text="fakeserver").first.wait_for(state="visible", timeout=30000)
+            pg.locator("#provider-show-off").click()
+            rows.filter(has_text="OpenAI").first.wait_for(state="visible", timeout=10000)
+            assert rows.filter(has_text="Z.AI (GLM)").count() == 0
+
+            # The Models sub-tab: the default model, details found by search.
+            assert not pg.locator("#model-details").is_visible()
+            pg.locator("#hub-subtab-models").click()
+            pg.locator("#default-model-select").wait_for(state="visible", timeout=15000)
+            search = pg.locator("#model-details-search")
+            search.fill("fake-two")
+            shown = pg.locator("#model-details .model-detail-row")
+            pg.wait_for_function(
+                "document.querySelectorAll('#model-details .model-detail-row').length === 1", timeout=10000)
+            row = shown.first.inner_text()
+            assert "fake-two" in row and "fakeserver" in row
+            assert "of 2 models" in pg.locator("#model-details-count").inner_text()
+            # All models, sorted by name both ways from the column header.
+            search.fill("")
+            pg.locator("#model-details-all").click()
+            pg.wait_for_function(
+                "document.querySelectorAll('#model-details .model-detail-row').length === 2", timeout=10000)
+            header = pg.locator("#model-details .mc-thead button").first
+            header.click()
+            assert shown.first.locator(".mc-model").inner_text() == "fake-model"
+            header.click()
+            assert shown.first.locator(".mc-model").inner_text() == "fake-two"
+
+            # Arabic: the sub-tab's name.
+            ctx = browser.new_context(viewport={"width": 1280, "height": 900})
+            ctx.add_cookies([{"name": "kazma-lang", "value": "ar", "domain": host, "path": "/"}])
+            ar = ctx.new_page()
+            ar.on("pageerror", lambda exc: errors.append(str(exc)))
+            ar.goto(base + "/settings?tab=models", wait_until="domcontentloaded")
+            ar.locator("#model-details-search").wait_for(state="visible", timeout=30000)
+            assert ar.locator("#hub-subtab-models").inner_text().strip() == "النماذج"
         finally:
             browser.close()
     assert errors == [], errors

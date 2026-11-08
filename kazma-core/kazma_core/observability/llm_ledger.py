@@ -369,7 +369,7 @@ def usage_since(since: datetime) -> dict[str, Any] | None:
 
 def unpriced_models(days: int = 30) -> list[dict[str, Any]] | None:
     """The models called in the last *days* with no known price, most calls
-    first: what Settings -> Providers & Connectors -> Model prices offers to
+    first: what Settings -> Providers & Connectors -> Models -> Model prices offers to
     price. ``None`` when the ledger cannot be read. Blocking."""
     from datetime import timedelta
 
@@ -386,6 +386,28 @@ def unpriced_models(days: int = 30) -> list[dict[str, Any]] | None:
         logger.warning("[llm-ledger] models without a price are unreadable: %s", exc)
         return None
     return [{"model": str(m), "calls": int(n or 0), "last": str(last or "")} for m, n, last in rows]
+
+
+def used_models(days: int = 30) -> dict[str, int] | None:
+    """Every model called in the last *days*, priced or not, with its number
+    of calls: the models Settings' Model details lists first (2026-11-08:
+    the card listed every model of every working provider, OpenRouter's 425
+    among them, and was most of the page). ``None`` when the ledger cannot be
+    read. Blocking."""
+    from datetime import timedelta
+
+    since = (datetime.now(UTC) - timedelta(days=max(1, int(days)))).isoformat()
+    try:
+        with _lock:
+            conn = _get_conn()
+            rows = conn.execute(
+                "SELECT model, COUNT(*) FROM llm_calls WHERE ts >= ? AND model != '' GROUP BY model",
+                (since,),
+            ).fetchall()
+    except (sqlite3.Error, OSError) as exc:
+        logger.warning("[llm-ledger] models used are unreadable: %s", exc)
+        return None
+    return {str(m): int(n or 0) for m, n in rows}
 
 
 def usage_series(

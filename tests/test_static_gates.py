@@ -1045,6 +1045,9 @@ _LOOP_STALL_HELPERS = frozenset({
     # turn's totals and the recent rows are SQLite reads of the same file.
     "record_llm_call", "_record_if_enabled", "turn_usage", "turn_totals",
     "query_recent", "turn_started_epoch",
+    # Settings' Models sub-tab (2026-11-08): the models used, and those
+    # with no known price, are reads of the same file.
+    "used_models", "unpriced_models",
     # The Dashboard's usage over time (2026-10-22): the same file, read by
     # a plain-def route.
     "usage_series",

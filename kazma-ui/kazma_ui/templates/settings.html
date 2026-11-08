@@ -38,7 +38,8 @@
         <!-- Sub-tab switcher -->
         <div class="settings-group" style="padding-bottom:0">
             <div style="display:flex;gap:8px;margin-bottom:8px">
-                <button class="btn btn-sm" :class="hubSubtab === 'providers' ? 'btn-primary' : 'btn-secondary'" @click="hubSubtab = 'providers'">{{ t('settings.llm_providers_models') }}</button>
+                <button class="btn btn-sm" id="hub-subtab-providers" :class="hubSubtab === 'providers' ? 'btn-primary' : 'btn-secondary'" @click="hubSubtab = 'providers'">{{ t('settings.llm_providers_models') }}</button>
+                <button class="btn btn-sm" id="hub-subtab-models" :class="hubSubtab === 'models' ? 'btn-primary' : 'btn-secondary'" @click="hubSubtab = 'models'">{{ t('settings.models_subtab') }}</button>
                 <button class="btn btn-sm" :class="hubSubtab === 'connectors' ? 'btn-primary' : 'btn-secondary'" @click="hubSubtab = 'connectors'">{{ t('settings.platform_connectors') }}</button>
                 <a href="/setup" class="btn btn-sm btn-secondary" id="settings-setup-guide" style="margin-inline-start:auto"
                    title="{{ t('setup.reopen_hint') }}">{{ t('setup.reopen') }}</a>
@@ -107,6 +108,13 @@
                             </button>
                             </div>
                         </template>
+                        <!-- Providers that are off and cannot be called fold away
+                             (2026-11-08: 20 of live's 26 rows). -->
+                        <button type="button" class="pc-fold" id="provider-show-off"
+                                :aria-expanded="hubShowOffProviders ? 'true' : 'false'"
+                                x-show="hubShowOffProviders || foldedProviderCount() > 0" x-cloak
+                                @click="hubShowOffProviders = !hubShowOffProviders"
+                                x-text="foldedProvidersLabel()"></button>
                     </section>
 
                     <!-- ── detail: the open provider ── -->
@@ -277,136 +285,268 @@
                 </div>
             </div>
 
-            <!-- Model prices (kazma_core.model_prices): the owner's price per
-                 million tokens for a model whose provider reports no cost. -->
-            <div class="settings-group" id="model-prices">
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px">
-                    <h3>{{ t('settings.model_prices_title') }}</h3>
-                    <button type="button" class="btn btn-secondary btn-sm" @click="addModelPrice('')">+ {{ t('settings.model_prices_add') }}</button>
-                </div>
-                <p class="setting-desc">{{ t('settings.model_prices_lede') }}</p>
-                <p class="setting-desc">{{ t('settings.model_prices_where') }}</p>
-                <p class="text-error" x-show="modelPricesFailed" x-cloak>{{ t('settings.model_prices_load_failed') }}</p>
-                <div x-show="modelPricesLoaded && modelPrices.length === 0" class="empty-state" style="padding:12px" x-cloak>
-                    {{ t('settings.model_prices_empty') }}
-                </div>
-                <template x-for="(p, i) in modelPrices" :key="i">
-                    <div class="model-price-row" style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px;margin-bottom:8px">
-                        <label style="flex:2 1 180px">
-                            <span class="setting-desc">{{ t('settings.model_prices_model') }}</span>
-                            <input class="form-input" type="text" dir="ltr" translate="no" x-model="p.model" autocomplete="off">
-                        </label>
-                        <label style="flex:1 1 120px">
-                            <span class="setting-desc">{{ t('settings.model_prices_input') }}</span>
-                            <input class="form-input" type="number" min="0" :max="modelPricesMax" step="0.0001" dir="ltr" x-model="p.input">
-                        </label>
-                        <label style="flex:1 1 120px">
-                            <span class="setting-desc">{{ t('settings.model_prices_output') }}</span>
-                            <input class="form-input" type="number" min="0" :max="modelPricesMax" step="0.0001" dir="ltr" x-model="p.output">
-                        </label>
-                        <button type="button" class="btn btn-danger btn-sm" @click="removeModelPrice(i)"
-                                aria-label="{{ t('common.remove') }}" title="{{ t('common.remove') }}">&times;</button>
-                    </div>
-                </template>
-                <div style="margin-bottom:12px">
-                    <button type="button" class="btn btn-primary btn-sm" id="model-prices-save" @click="saveModelPrices()"
-                            :disabled="modelPricesSaving || !modelPricesLoaded">{{ t('settings.model_prices_save') }}</button>
-                </div>
-                <h4 style="margin:8px 0">{{ t('settings.model_prices_unpriced_title') }}</h4>
-                <p class="setting-desc" x-show="modelPricesLoaded && modelPricesUnpriced === null" x-cloak>{{ t('settings.model_prices_unreadable') }}</p>
-                <p class="setting-desc" x-show="modelPricesLoaded && Array.isArray(modelPricesUnpriced) && modelPricesUnpriced.length === 0" x-cloak>{{ t('settings.model_prices_none') }}</p>
-                <template x-for="u in (modelPricesUnpriced || [])" :key="u.model">
-                    <div style="display:flex;align-items:center;gap:12px;padding:6px 0">
-                        <span translate="no" dir="ltr" style="flex:1;font-weight:600" x-text="u.model"></span>
-                        <span class="setting-desc" x-text="window.kazmaCount ? window.kazmaCount('settings.model_prices_calls', u.calls) : u.calls"></span>
-                        <button type="button" class="btn btn-secondary btn-sm" @click="addModelPrice(u.model)">{{ t('settings.model_prices_set') }}</button>
-                    </div>
-                </template>
-            </div>
+        </div>
 
-            <!-- Model details (kazma_core.model_details, providers stage 3):
-                 each chat model's window, output limit, vision, tools and
-                 price, where each came from, and the owner's overrides. -->
-            <div class="settings-group" id="model-details">
-                <div class="form-group" id="default-model" x-show="modelDetailsLoaded && modelDetails.length" x-cloak>
-                    <label for="default-model-select">{{ t('settings.default_model') }}</label>
-                    <select class="form-select" id="default-model-select" translate="no" dir="ltr"
-                            @change="setDefaultModel($event.target.value)">
-                        <template x-for="m in modelDetails" :key="'d-' + m.ref">
-                            <option :value="m.ref" x-text="m.ref" :selected="m.ref === defaultModelRef"></option>
-                        </template>
-                    </select>
-                    <p class="setting-desc">{{ t('settings.default_model_hint') }}</p>
+        <!-- ═══════════════════════════════════════════════════════════
+             SUB-SECTION: Models -- the default model, each model's details,
+             prices and saved profiles: what the owner sets by hand, apart
+             from the providers (2026-11-08, the owner: the providers page
+             was too long, and these are edited, not updated by Kazma).
+             ═══════════════════════════════════════════════════════════ -->
+        <div :class="{ hidden: hubSubtab !== 'models' }" x-cloak>
+            <div class="settings-group mc-scope" id="models-tab">
+                <!-- What the tab holds, and four numbers that say where it stands. -->
+                <div class="pc-top">
+                    <div class="pc-lede">
+                        <h3>{{ t('settings.models_subtab') }}</h3>
+                        <p>{{ t('settings.models_lede') }}</p>
+                    </div>
+                    <div class="pc-states" x-show="modelDetailsLoaded && modelDetails.length" x-cloak>
+                        <span class="pc-stat">{{ t('settings.models_stat_models') }} <b x-text="modelDetailsStats().total"></b></span>
+                        <span class="pc-stat"><span class="state-dot dot-working"></span>{{ t('settings.models_stat_used') }} <b x-text="modelDetailsStats().used"></b></span>
+                        <span class="pc-stat"><span class="state-dot dot-untested"></span>{{ t('settings.models_stat_changed') }} <b x-text="modelDetailsStats().changed"></b></span>
+                        <span class="pc-stat"><span class="state-dot dot-chat_failing"></span>{{ t('settings.models_stat_unpriced') }} <b x-text="modelDetailsStats().unpriced"></b></span>
+                    </div>
                 </div>
-                <h3>{{ t('settings.model_details_title') }}</h3>
-                <p class="setting-desc">{{ t('settings.model_details_lede') }}</p>
                 <p class="text-error" x-show="modelDetailsFailed" x-cloak>{{ t('settings.model_details_load_failed') }}</p>
                 <div x-show="modelDetailsLoaded && modelDetails.length === 0" class="empty-state" style="padding:12px" x-cloak>
                     {{ t('settings.model_details_empty') }}
                 </div>
-                <template x-for="m in modelDetails" :key="m.ref">
-                    <div class="model-detail-row" style="padding:8px 0;border-bottom:1px solid var(--border)">
-                        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
-                            <span translate="no" dir="ltr" style="flex:1 1 220px;font-weight:600" x-text="m.ref"></span>
-                            <span class="setting-desc" x-text="modelDetailFact(m, 'context_window')"></span>
-                            <span class="setting-desc" x-text="modelDetailFact(m, 'vision')"></span>
-                            <span class="setting-desc" x-text="modelDetailFact(m, 'tools')"></span>
-                            <span class="setting-desc" x-text="modelDetailFact(m, 'price')"></span>
-                            <button type="button" class="btn btn-secondary btn-sm" @click="m._editing = !m._editing">{{ t('settings.model_details_edit') }}</button>
-                        </div>
-                        <div x-show="m._editing" x-cloak style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
-                            <label style="flex:1 1 140px">
-                                <span class="setting-desc">{{ t('settings.model_details_window') }}</span>
-                                <input class="form-input" type="number" min="1024" step="1" dir="ltr" x-model="m.override.context_window">
-                            </label>
-                            <label style="flex:1 1 140px">
-                                <span class="setting-desc">{{ t('settings.model_details_output') }}</span>
-                                <input class="form-input" type="number" min="1024" step="1" dir="ltr" x-model="m.override.max_output">
-                            </label>
-                            <label style="flex:1 1 120px">
-                                <span class="setting-desc">{{ t('settings.model_details_vision') }}</span>
-                                <select class="form-select" x-model="m.override.vision">
-                                    <option value="">{{ t('settings.model_details_not_set') }}</option>
-                                    <option value="true">{{ t('settings.model_details_yes') }}</option>
-                                    <option value="false">{{ t('settings.model_details_no') }}</option>
-                                </select>
-                            </label>
-                            <label style="flex:1 1 120px">
-                                <span class="setting-desc">{{ t('settings.model_details_tools') }}</span>
-                                <select class="form-select" x-model="m.override.tools">
-                                    <option value="">{{ t('settings.model_details_not_set') }}</option>
-                                    <option value="true">{{ t('settings.model_details_yes') }}</option>
-                                    <option value="false">{{ t('settings.model_details_no') }}</option>
-                                </select>
-                            </label>
-                        </div>
-                    </div>
-                </template>
-                <div style="margin-top:12px">
-                    <button type="button" class="btn btn-primary btn-sm" id="model-details-save" @click="saveModelDetails()"
-                            :disabled="modelDetailsSaving || !modelDetailsLoaded">{{ t('settings.model_details_save') }}</button>
-                </div>
-            </div>
 
-            <div class="settings-group">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-                    <h3>{{ t('settings.saved_profiles') }}</h3>
-                    <button class="btn btn-primary btn-sm" @click="openHubProfileModal()">+ {{ t('settings.save_profile') }}</button>
-                </div>
-                <div x-show="hubProfilesLoaded && hubProfiles.length === 0" class="empty-state" style="padding:16px" x-cloak>
-                    {{ t('settings.no_saved_profiles') }}
-                </div>
-                <template x-for="p in hubProfiles" :key="p.name">
-                    <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px">
-                        <div style="flex:1">
-                            <div translate="no" style="font-weight:600;font-size:0.9rem" x-text="p.name"></div>
-                            <div translate="no" style="font-size:0.8rem;color:var(--text-muted)" x-text="(p.provider || 'custom') + ' / ' + (p.model || '?')"></div>
-                            <div style="font-size:0.75rem;color:var(--text-tertiary)" x-text="p.base_url || ''"></div>
+                <!-- The default model: what new chats and chat apps use. -->
+                <section class="pc-panel" id="default-model" x-show="modelDetailsLoaded && modelDetails.length" x-cloak>
+                    <div class="pc-phead"><h4 class="pc-ptitle">{{ t('settings.default_model') }}</h4></div>
+                    <div class="mc-default-body">
+                        <div class="mc-default-now">
+                            <span class="mc-model" translate="no" dir="ltr"
+                                  x-text="defaultModelDetail() ? defaultModelDetail().model : (defaultModelRef || '—')"></span>
+                            <span class="mc-prov" translate="no" x-text="defaultModelDetail() ? defaultModelDetail().provider_label : ''"></span>
+                            <div class="mc-chips" x-show="defaultModelDetail()" x-cloak>
+                                <span class="mc-chip" x-text="defaultModelDetail() ? modelDetailFact(defaultModelDetail(), 'context_window') : ''"></span>
+                                <span class="mc-chip" x-text="defaultModelDetail() ? modelDetailFact(defaultModelDetail(), 'vision') : ''"></span>
+                                <span class="mc-chip" x-text="defaultModelDetail() ? modelDetailFact(defaultModelDetail(), 'tools') : ''"></span>
+                                <span class="mc-chip" x-text="defaultModelDetail() ? modelDetailFact(defaultModelDetail(), 'price') : ''"></span>
+                            </div>
                         </div>
-                        <button class="btn btn-secondary btn-sm" @click="loadHubProfile(p.name)">{{ t('settings.use_profile') }}</button>
-                        <button class="btn btn-danger btn-sm" @click="deleteHubProfile(p.name)">×</button>
+                        <div class="mc-default-pick">
+                            <label for="default-model-select" class="setting-desc">{{ t('settings.models_change_default') }}</label>
+                            <select class="form-select" id="default-model-select" translate="no" dir="ltr"
+                                    @change="setDefaultModel($event.target.value)">
+                                <template x-for="g in modelDetailGroups()" :key="'dg-' + g.provider">
+                                    <optgroup :label="g.label">
+                                        <template x-for="m in g.models" :key="'d-' + m.ref">
+                                            <option :value="m.ref" x-text="m.model" :selected="m.ref === defaultModelRef"></option>
+                                        </template>
+                                    </optgroup>
+                                </template>
+                            </select>
+                            <p class="setting-desc">{{ t('settings.default_model_hint') }}</p>
+                        </div>
                     </div>
-                </template>
+                </section>
+
+                <!-- Model details (kazma_core.model_details, providers stage 3):
+                     one table, the models that matter first, filtered by use,
+                     provider and words, sorted by column. The owner's values
+                     are edited in the row and saved together. -->
+                <section class="pc-panel" id="model-details" x-show="modelDetailsLoaded && modelDetails.length" x-cloak>
+                    <div class="pc-phead">
+                        <h4 class="pc-ptitle">{{ t('settings.model_details_title') }}</h4>
+                        <div class="mc-tools">
+                            <div class="mc-seg" role="group" aria-label="{{ t('settings.model_details_title') }}">
+                                <button type="button" id="model-details-in-use" :aria-pressed="modelDetailsShowAll ? 'false' : 'true'"
+                                        @click="modelDetailsShowAll = false">{{ t('settings.models_filter_in_use') }}</button>
+                                <button type="button" id="model-details-all" :aria-pressed="modelDetailsShowAll ? 'true' : 'false'"
+                                        @click="modelDetailsShowAll = true">{{ t('settings.models_filter_all') }}</button>
+                            </div>
+                            <select class="form-select" id="model-details-provider" x-model="modelDetailsProvider"
+                                    aria-label="{{ t('settings.models_filter_provider') }}">
+                                <option value="">{{ t('settings.models_all_providers') }}</option>
+                                <template x-for="g in modelDetailGroups()" :key="'fg-' + g.provider">
+                                    <option :value="g.provider" translate="no" x-text="g.label"></option>
+                                </template>
+                            </select>
+                            <input class="form-input mc-search" type="search" id="model-details-search"
+                                   placeholder="{{ t('settings.model_details_search') }}" aria-label="{{ t('settings.model_details_search') }}"
+                                   x-model="modelDetailsQuery">
+                        </div>
+                    </div>
+                    <p class="mc-lede">{{ t('settings.model_details_lede') }}</p>
+                    <div class="mc-table" role="table" aria-label="{{ t('settings.model_details_title') }}">
+                        <div class="mc-thead" role="row">
+                            <span role="columnheader" :aria-sort="modelDetailsAriaSort('model')">
+                                <button type="button" @click="sortModelDetails('model')">{{ t('settings.models_col_model') }}<span aria-hidden="true" x-text="modelDetailsSortMark('model')"></span></button>
+                            </span>
+                            <span role="columnheader" class="mc-num" :aria-sort="modelDetailsAriaSort('window')">
+                                <button type="button" @click="sortModelDetails('window')">{{ t('settings.models_col_window') }}<span aria-hidden="true" x-text="modelDetailsSortMark('window')"></span></button>
+                            </span>
+                            <span role="columnheader" class="mc-num">{{ t('settings.models_col_output') }}</span>
+                            <span role="columnheader">{{ t('settings.models_col_images') }}</span>
+                            <span role="columnheader">{{ t('settings.models_col_tools') }}</span>
+                            <span role="columnheader" class="mc-num" :aria-sort="modelDetailsAriaSort('price')">
+                                <button type="button" @click="sortModelDetails('price')">{{ t('settings.models_col_price') }}<span aria-hidden="true" x-text="modelDetailsSortMark('price')"></span></button>
+                            </span>
+                            <span role="columnheader" class="mc-num" :aria-sort="modelDetailsAriaSort('calls')">
+                                <button type="button" @click="sortModelDetails('calls')">{{ t('settings.models_col_calls') }}<span aria-hidden="true" x-text="modelDetailsSortMark('calls')"></span></button>
+                            </span>
+                            <span role="columnheader"><span class="sr-only">{{ t('settings.model_details_edit') }}</span></span>
+                        </div>
+                        <template x-for="m in shownModelDetails()" :key="m.ref">
+                            <div role="rowgroup">
+                                <div class="mc-row model-detail-row" role="row"
+                                     :class="{ 'is-default': m.ref === defaultModelRef, 'is-editing': m._editing }">
+                                    <div class="mc-cell mc-cell-model" role="cell">
+                                        <span class="mc-model" translate="no" dir="ltr" x-text="m.model"></span>
+                                        <span class="mc-prov">
+                                            <span translate="no" x-text="m.provider_label"></span>
+                                            <span class="mc-tag" x-show="m.ref === defaultModelRef">{{ t('settings.models_tag_default') }}</span>
+                                            <span class="mc-tag tag-yours" x-show="modelDetailChanged(m)">{{ t('settings.model_details_source_owner') }}</span>
+                                        </span>
+                                    </div>
+                                    <div class="mc-cell mc-num" role="cell" data-label="{{ t('settings.models_col_window') }}">
+                                        <span x-text="modelDetailCell(m, 'context_window')"></span>
+                                        <span class="mc-src" x-text="modelDetailSource(m, 'context_window')"></span>
+                                    </div>
+                                    <div class="mc-cell mc-num" role="cell" data-label="{{ t('settings.models_col_output') }}">
+                                        <span x-text="modelDetailCell(m, 'max_output')"></span>
+                                        <span class="mc-src" x-text="modelDetailSource(m, 'max_output')"></span>
+                                    </div>
+                                    <div class="mc-cell" role="cell" data-label="{{ t('settings.models_col_images') }}">
+                                        <span class="mc-flag" :class="modelDetailFlagClass(m.vision)" x-text="modelDetailFlag(m.vision)"></span>
+                                    </div>
+                                    <div class="mc-cell" role="cell" data-label="{{ t('settings.models_col_tools') }}">
+                                        <span class="mc-flag" :class="modelDetailFlagClass(m.tools)" x-text="modelDetailFlag(m.tools)"></span>
+                                    </div>
+                                    <div class="mc-cell mc-num" role="cell" data-label="{{ t('settings.models_col_price') }}">
+                                        <span :class="{ 'mc-text': m.local, 'mc-unknown': !m.local && (m.input_per_1m === null || m.input_per_1m === undefined) }"
+                                              x-text="modelDetailCell(m, 'price')"></span>
+                                        <span class="mc-src" x-text="modelDetailSource(m, 'input_per_1m')"></span>
+                                    </div>
+                                    <div class="mc-cell mc-num" role="cell" data-label="{{ t('settings.models_col_calls') }}">
+                                        <span x-text="modelDetailCell(m, 'calls')"></span>
+                                    </div>
+                                    <div class="mc-cell mc-act" role="cell">
+                                        <button type="button" class="btn btn-ghost btn-sm" :aria-expanded="m._editing ? 'true' : 'false'"
+                                                @click="m._editing = !m._editing">{{ t('settings.model_details_edit') }}</button>
+                                    </div>
+                                </div>
+                                <div class="mc-edit" x-show="m._editing" x-cloak>
+                                    <label>
+                                        <span class="setting-desc">{{ t('settings.model_details_window') }}</span>
+                                        <input class="form-input" type="number" min="1024" step="1" dir="ltr" x-model="m.override.context_window">
+                                    </label>
+                                    <label>
+                                        <span class="setting-desc">{{ t('settings.model_details_output') }}</span>
+                                        <input class="form-input" type="number" min="1024" step="1" dir="ltr" x-model="m.override.max_output">
+                                    </label>
+                                    <label>
+                                        <span class="setting-desc">{{ t('settings.model_details_vision') }}</span>
+                                        <select class="form-select" x-model="m.override.vision">
+                                            <option value="">{{ t('settings.model_details_not_set') }}</option>
+                                            <option value="true">{{ t('settings.model_details_yes') }}</option>
+                                            <option value="false">{{ t('settings.model_details_no') }}</option>
+                                        </select>
+                                    </label>
+                                    <label>
+                                        <span class="setting-desc">{{ t('settings.model_details_tools') }}</span>
+                                        <select class="form-select" x-model="m.override.tools">
+                                            <option value="">{{ t('settings.model_details_not_set') }}</option>
+                                            <option value="true">{{ t('settings.model_details_yes') }}</option>
+                                            <option value="false">{{ t('settings.model_details_no') }}</option>
+                                        </select>
+                                    </label>
+                                    <p class="setting-desc mc-edit-hint">{{ t('settings.models_edit_hint') }}</p>
+                                </div>
+                            </div>
+                        </template>
+                        <div class="mc-none" x-show="modelDetailsLoaded && shownModelDetails().length === 0" x-cloak>{{ t('settings.models_none_match') }}</div>
+                    </div>
+                    <div class="mc-foot">
+                        <span class="setting-desc" id="model-details-count" x-text="modelDetailsCountLine()"></span>
+                        <span class="setting-desc" x-show="!modelDetailsShowAll && !modelDetailsQuery && !modelDetailsProvider">{{ t('settings.model_details_short_hint') }}</span>
+                        <span class="mc-dirty" x-show="modelDetailsDirty()" x-cloak>{{ t('settings.models_unsaved') }}</span>
+                        <button type="button" class="btn btn-primary btn-sm" id="model-details-save" @click="saveModelDetails()"
+                                :disabled="modelDetailsSaving || !modelDetailsLoaded || !modelDetailsDirty()">{{ t('settings.model_details_save') }}</button>
+                    </div>
+                </section>
+
+                <div class="mc-pair">
+                    <!-- Model prices (kazma_core.model_prices): the owner's price per
+                         million tokens for a model whose provider reports no cost. -->
+                    <section class="pc-panel" id="model-prices">
+                        <div class="pc-phead">
+                            <h3 class="pc-ptitle">{{ t('settings.model_prices_title') }}</h3>
+                            <button type="button" class="btn btn-secondary btn-sm" @click="addModelPrice('')">+ {{ t('settings.model_prices_add') }}</button>
+                        </div>
+                        <div class="mc-body">
+                            <p class="mc-note">{{ t('settings.model_prices_lede') }}</p>
+                            <p class="mc-note">{{ t('settings.model_prices_where') }}</p>
+                            <p class="text-error" x-show="modelPricesFailed" x-cloak>{{ t('settings.model_prices_load_failed') }}</p>
+                            <div x-show="modelPricesLoaded && modelPrices.length === 0" class="empty-state" style="padding:12px" x-cloak>
+                                {{ t('settings.model_prices_empty') }}
+                            </div>
+                            <div class="mc-price-head" x-show="modelPrices.length" x-cloak>
+                                <span>{{ t('settings.model_prices_model') }}</span>
+                                <span>{{ t('settings.model_prices_input') }}</span>
+                                <span>{{ t('settings.model_prices_output') }}</span>
+                                <span></span>
+                            </div>
+                            <template x-for="(p, i) in modelPrices" :key="i">
+                                <div class="model-price-row mc-price-row">
+                                    <input class="form-input" type="text" dir="ltr" translate="no" x-model="p.model" autocomplete="off"
+                                           aria-label="{{ t('settings.model_prices_model') }}">
+                                    <input class="form-input" type="number" min="0" :max="modelPricesMax" step="0.0001" dir="ltr" x-model="p.input"
+                                           aria-label="{{ t('settings.model_prices_input') }}">
+                                    <input class="form-input" type="number" min="0" :max="modelPricesMax" step="0.0001" dir="ltr" x-model="p.output"
+                                           aria-label="{{ t('settings.model_prices_output') }}">
+                                    <button type="button" class="btn btn-ghost btn-sm" @click="removeModelPrice(i)"
+                                            aria-label="{{ t('common.remove') }}" title="{{ t('common.remove') }}">&times;</button>
+                                </div>
+                            </template>
+                            <div class="mc-actions-row">
+                                <button type="button" class="btn btn-primary btn-sm" id="model-prices-save" @click="saveModelPrices()"
+                                        :disabled="modelPricesSaving || !modelPricesLoaded">{{ t('settings.model_prices_save') }}</button>
+                            </div>
+                        </div>
+                        <div class="mc-subhead"><h4 class="pc-ptitle">{{ t('settings.model_prices_unpriced_title') }}</h4></div>
+                        <div class="mc-body">
+                            <p class="mc-note" x-show="modelPricesLoaded && modelPricesUnpriced === null" x-cloak>{{ t('settings.model_prices_unreadable') }}</p>
+                            <p class="mc-note" x-show="modelPricesLoaded && Array.isArray(modelPricesUnpriced) && modelPricesUnpriced.length === 0" x-cloak>{{ t('settings.model_prices_none') }}</p>
+                            <template x-for="u in (modelPricesUnpriced || [])" :key="u.model">
+                                <div class="mc-line">
+                                    <span class="mc-model" translate="no" dir="ltr" x-text="u.model"></span>
+                                    <span class="setting-desc" x-text="window.kazmaCount ? window.kazmaCount('settings.model_prices_calls', u.calls) : u.calls"></span>
+                                    <button type="button" class="btn btn-secondary btn-sm" @click="addModelPrice(u.model)">{{ t('settings.model_prices_set') }}</button>
+                                </div>
+                            </template>
+                        </div>
+                    </section>
+
+                    <!-- Saved profiles: a model and its provider kept under a name. -->
+                    <section class="pc-panel" id="model-profiles">
+                        <div class="pc-phead">
+                            <h3 class="pc-ptitle">{{ t('settings.saved_profiles') }}</h3>
+                            <button type="button" class="btn btn-primary btn-sm" @click="openHubProfileModal()">+ {{ t('settings.save_profile') }}</button>
+                        </div>
+                        <div class="mc-body">
+                            <div x-show="hubProfilesLoaded && hubProfiles.length === 0" class="empty-state" style="padding:12px" x-cloak>
+                                {{ t('settings.no_saved_profiles') }}
+                            </div>
+                            <template x-for="p in hubProfiles" :key="p.name">
+                                <div class="mc-line">
+                                    <div class="mc-profile">
+                                        <span class="mc-profile-name" translate="no" x-text="p.name"></span>
+                                        <span class="mc-prov" translate="no" dir="ltr" x-text="(p.provider || 'custom') + ':' + (p.model || '?')"></span>
+                                        <span class="pc-rurl" translate="no" dir="ltr" x-text="p.base_url || ''"></span>
+                                    </div>
+                                    <button type="button" class="btn btn-secondary btn-sm" @click="loadHubProfile(p.name)">{{ t('settings.use_profile') }}</button>
+                                    <button type="button" class="btn btn-ghost btn-sm" @click="deleteHubProfile(p.name)"
+                                            aria-label="{{ t('common.remove') }}" title="{{ t('common.remove') }}">&times;</button>
+                                </div>
+                            </template>
+                        </div>
+                    </section>
+                </div>
             </div>
         </div>
 

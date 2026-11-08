@@ -4,7 +4,7 @@ Every model got a 1M-token context window, a 16,384-token output limit and a
 guessed price; the context sizes and prices the providers' own model lists
 carry were thrown away. A model's details now come from, the first that says:
 
-1. **your override** (Settings -> Providers & Connectors -> Model details:
+1. **your override** (Settings -> Providers & Connectors -> Models -> Model details:
    ``models.details``, under ``provider:model`` or the bare model name);
 2. **the provider's own model list** -- OpenRouter's context length, output
    limit, input kinds, tool support and per-token price, Groq's and

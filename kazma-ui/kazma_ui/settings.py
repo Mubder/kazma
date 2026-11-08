@@ -442,15 +442,45 @@ class SettingsRouterBuilder:
             from kazma_core.observability.llm_ledger import unpriced_models
 
             prices = parse_owner_prices(config_store.get(OWNER_PRICES_KEY))
+            unpriced = unpriced_models(30)
             return {
                 "key": OWNER_PRICES_KEY,
                 "prices": [
                     {"model": name, "input": p.input_per_1m, "output": p.output_per_1m}
                     for name, p in sorted(prices.items())
                 ],
-                "unpriced": unpriced_models(30),
+                "unpriced": None if unpriced is None else _still_to_price(unpriced, prices),
                 "max": MAX_PRICE_PER_1M,
             }
+
+        def _still_to_price(unpriced: list[dict[str, Any]], prices: dict[str, Any]) -> list[dict[str, Any]]:
+            """The unpriced calls' models that a working provider still offers
+            and that still have no price: one priced since (yours, or the
+            provider's own list) or served by no provider now -- the
+            2026-11-01 audit's ``fault-*`` drill models on live -- has nothing
+            to set (2026-11-08)."""
+            from kazma_core.model_details import details_for
+            from kazma_core.model_registry import get_model_registry
+            from kazma_core.models.options import model_options
+
+            registry = get_model_registry()
+            offered: dict[str, list[dict[str, Any]]] = {}
+            for o in model_options(registry, details=False)["options"]:
+                offered.setdefault(str(o["model"]).lower(), []).append(o)
+            priced = {str(k).lower() for k in prices}
+            kept = []
+            for u in unpriced:
+                model = str(u.get("model") or "")
+                serving = offered.get(model.lower()) or []
+                if not serving or model.lower() in priced or any(o["ref"].lower() in priced for o in serving):
+                    continue
+                if any(o["local"] or details_for(
+                        o["provider"], o["model"],
+                        preset=str((registry.get_provider(o["provider"]) or {}).get("preset") or ""),
+                        store=config_store).input_per_1m is not None for o in serving):
+                    continue
+                kept.append(u)
+            return kept
 
         @router.get("/api/settings/model-details")
         def api_get_model_details() -> dict[str, Any]:
@@ -464,8 +494,11 @@ class SettingsRouterBuilder:
             from kazma_core.model_registry import get_model_registry
             from kazma_core.models.options import model_options
 
+            from kazma_core.observability.llm_ledger import used_models
+
             registry = get_model_registry()
             overrides = parse_overrides(config_store.get(OVERRIDES_KEY))
+            used = used_models(30) or {}
             rows = []
             listed = model_options(registry, details=False)
             for o in listed["options"]:
@@ -473,9 +506,12 @@ class SettingsRouterBuilder:
                 known = details_for(o["provider"], o["model"], preset=str(row.get("preset") or ""),
                                     store=config_store)
                 rows.append({
-                    "ref": o["ref"], "provider_label": o["provider_label"], "model": o["model"],
+                    "ref": o["ref"], "provider": o["provider"], "provider_label": o["provider_label"], "model": o["model"],
                     "local": o["local"], **known.as_dict(),
                     "override": overrides.get(o["ref"].lower()) or overrides.get(o["model"].lower()) or {},
+                    # Calls in the last 30 days: the card lists these first,
+                    # with the default and the models you changed.
+                    "used": int(used.get(o["model"]) or 0),
                 })
             return {"key": OVERRIDES_KEY, "models": rows, "catalog_as_of": CATALOG_AS_OF,
                     "default": listed["default"]}

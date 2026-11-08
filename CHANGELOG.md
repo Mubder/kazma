@@ -13,8 +13,20 @@
 - **Speech is not chat.** A speech-to-text service is listed under Speech
   services and kept out of every chat model list, backup suggestion and
   fallback; voice is one setting (`voice.*`; `gateway.voice` moves there at
-  the next start).
-- **Each model's details.** Settings → Providers & Connectors → Model details
+  the next start). A provider whose address is a speech endpoint
+  (`/audio/transcriptions` and the like) is one whatever its models say, and
+  Test sends it no chat message.
+- **A shorter providers page.** The default model, Model details, Model
+  prices and saved profiles have their own sub-tab, Settings → Providers &
+  Connectors → Models. Model details lists the default model, the models used
+  in the last 30 days and the ones you changed, and searches the rest (it
+  listed every model of every provider, OpenRouter's 425 among them).
+  Providers that are off and have no key fold away behind one button, and
+  Model prices offers only models a working provider still serves.
+- **A deleted provider stays deleted.** Deleting one of the providers Kazma
+  lists by itself (Z.AI, Cohere, NVIDIA...) did nothing: it was back at once
+  and at every start. It now stays away until it is added again.
+- **Each model's details.** Settings → Providers & Connectors → Models → Model details
   shows every model's context window, output limit, image and tool support and
   price, and where each came from: your value, the provider's own model list,
   or Kazma's catalog. Kazma sends no more than a model's known window or
@@ -53,7 +65,7 @@
   call was priced as gpt-4o-mini ($0.15 / $0.60 per million tokens), DeepSeek
   and OpenRouter included, and Anthropic's and Bedrock's tables priced any
   model they did not name exactly as Sonnet. A price is now yours (Settings →
-  Providers & Connectors → Model prices, which also lists the models used
+  Providers & Connectors → Models → Model prices, which also lists the models used
   with no known price), free for a model server on your own network, the
   Anthropic/Bedrock tables for the models they name, or what OpenRouter
   reports for the call. Otherwise the chat, the cost badge, the Dashboard and

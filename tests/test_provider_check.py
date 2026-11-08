@@ -229,7 +229,10 @@ def test_the_dialog_saves_only_after_an_answer():
     body = js[start:js.index("providerCheckError(result, resp) {", start)]
     assert "/api/providers/check" in body and "method: 'POST'" in body
     assert "fetch('/api/providers'," not in body, "Test writes the provider again"
-    assert "this.hubProviderTested = success;" in body
+    # Save opens on an answer, or for a speech service, which takes no chat
+    # message to test (2026-11-08) -- and on nothing else.
+    assert "this.hubProviderTested = success || speech;" in body
+    assert "const speech = result.error_code === 'speech_provider';" in body
     html = (root / "templates" / "settings.html").read_text(encoding="utf-8")
     assert 'id="provider-save-anyway"' in html and "saveHubProviderAnyway()" in html
     # Every field the check reads closes Save again when edited (stage 2
