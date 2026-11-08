@@ -1,6 +1,11 @@
 # CHANGELOG
 
-## Unreleased
+## 0.21.1 — Any provider, a setup guide, and setup on a fresh Windows (2026-11-08)
+
+A clean Express install on a fresh Windows 11 virtual machine now puts all 14
+parts in place and starts Kazma in about 45 minutes; the first run found five
+problems, fixed below. The provider list became one catalog of 35 providers,
+with per-model details, several keys per provider, and a model per chat.
 
 - **Setup works on a brand-new Windows.** A clean install on a fresh virtual
   machine found four things. winget had never set up its package list and
