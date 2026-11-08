@@ -453,7 +453,11 @@ if ($LASTEXITCODE -eq 0) {
 
 # ── 5. Summary ───────────────────────────────────────────────────────────────
 
-Log-Header "5. Setup Complete"
+# The install's own exit code is setup's: on the clean VM (2026-11-08) seven
+# parts were left out and setup still said "Setup Complete" and exited 0, so a
+# script that ran it could not tell.
+if ($installExit -eq 0) { Log-Header "5. Setup Complete" }
+else { Log-Header "5. Setup Stopped Short (run .\setup.cmd again to finish)" }
 Write-Host ""
 $ScriptsDir = Split-Path $VenvPython
 Log-Info "First visit:    the chat page asks for a provider key (or edit .env)"
@@ -467,3 +471,4 @@ Log-Info "Docs:           https://kazma.ai/docs/"
 Write-Host ""
 Write-Kazma "🇰🇼 كاظمه — Built to remember. Built to last." brand -Bold
 Write-Host ""
+exit $installExit
