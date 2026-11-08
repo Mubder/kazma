@@ -9587,10 +9587,39 @@ The rest of the plan in §60, done the same day.
   save, the toggle (`_can_be_called`), the backup (`failover_backup._usable`),
   the pickers and the background check all use it.
 - **Speech is not chat** (`models/modality.row_is_speech`). A row whose
-  `kind` is speech, or whose every model is a speech model, is kept out of
-  model lookup, the fallback choice, the pickers and backups, and is listed
-  under Speech services. `is_speech_model` also matches a vendor-prefixed id
-  (`nvidia/parakeet-...`).
+  address is a speech endpoint (`_is_speech_address`: a path with an `audio`
+  part or ending at a speech endpoint, `SPEECH_PATH_ENDS`, or a speech-only
+  host, `SPEECH_HOSTS`; it wins over `kind: chat`), whose `kind` is speech,
+  or whose every model is a speech model, is kept out of model lookup, the
+  fallback choice, the pickers and backups, and is listed under Speech
+  services. `is_speech_model` also matches a vendor-prefixed id
+  (`nvidia/parakeet-...`). Test sends a speech row no chat message (code
+  `speech_provider`, health untouched) and the dialog's Save opens without
+  it. Live's "Cohere Transcriptions" (`/v2/audio/transcriptions`, no models,
+  no kind) passed the model rule as chat (2026-11-08). Gate:
+  `tests/test_speech_address_and_deleted_presets.py` (the model-only rule as
+  the control).
+- **A deleted catalog provider stays deleted**
+  (`model_registry_store.REMOVED_PRESETS_KEY`, a list of the deleted names).
+  `list_providers` merges every missing seeded preset in and every start
+  seeds them, so Delete did nothing for `zai`, `cohere` and the rest. Deleting
+  a `SEEDED_PRESETS` row records it in the same `batch_set` as the list; the
+  list and `seed_missing_presets` skip it; adding it again takes it off.
+  Same gate (no record as the control).
+- **The providers page stays short** (2026-11-08, the owner: "why the
+  providers page is too long"; live's ran to ~2,000 lines). The default
+  model, Model details, Model prices and saved profiles are the Models
+  sub-tab (`hubSubtab` `models`, deep link `?tab=models`). Model details
+  lists `shownModelDetails()`: the default, models with calls in the last 30
+  days (`llm_ledger.used_models`, the route's `used`), the ones you changed
+  and the one being edited; a search (50 at most) or Show all for the rest.
+  A provider that is off and cannot be called (`callable`, from
+  `provider_check.credentials_problem`) folds away (`providerFoldedAway`)
+  unless it is the one open. Model prices offers a model only when a working
+  provider serves it with no price known (the route's `_still_to_price`:
+  live listed the 1 November audit's `fault-*` drill models). Gates:
+  `tests/test_providers_page_short.py` (the ledger's raw list as the
+  control), the browser case in `tests/e2e/test_provider_settings_browser.py`.
 - **Voice is one setting, `voice.*`.** `gateway.voice.*` is moved by
   `config_store._MOVED_KEYS`. `reconcile_from_yaml` now moves keys BEFORE it
   seeds: kazma.yaml's `voice.enabled: false` would otherwise win over an

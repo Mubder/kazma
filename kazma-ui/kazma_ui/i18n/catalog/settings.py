@@ -1268,8 +1268,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "LLM Providers",
     },
     "settings.llm_providers_models": {
-        "ar": "مزودو النماذج والملفات",
-        "en": "LLM Providers & Models",
+        "ar": "مزوّدو النماذج",
+        "en": "LLM Providers",
+    },
+    "settings.models_subtab": {
+        "ar": "النماذج",
+        "en": "Models",
     },
     "settings.load": {
         "ar": "تحميل",
@@ -2102,6 +2106,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.provider_check.speech_only": {
         "ar": "النماذج المعروضة نماذج كلام، لا محادثة. اكتب نموذج محادثة.",
         "en": "The listed models are speech models, not chat. Type a chat model.",
+    },
+    "settings.provider_check.speech_provider": {
+        "ar": "هذا المزوّد يقدّم خدمات الكلام، لا الدردشة: لا يرسل له Kazma رسالة دردشة، فلا شيء يُختبر هنا. اضبط الكلام في الإعدادات ← الصوت.",
+        "en": "This provider serves speech, not chat: Kazma sends it no chat message, so there is nothing to test here. Set speech up in Settings → Voice.",
     },
     "settings.provider_check.list_failed": {
         "ar": "تعذّر عرض نماذج المزوّد. اكتب نموذجًا واختبر.",
@@ -6479,6 +6487,74 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.model_details_title": {
         "ar": "تفاصيل النماذج",
         "en": "Model details",
+    },
+    "settings.model_details_search": {
+        "ar": "ابحث عن نموذج",
+        "en": "Find a model",
+    },
+    "settings.model_details_show_all": {
+        "ar": "اعرض الكل",
+        "en": "Show all",
+    },
+    "settings.model_details_show_fewer": {
+        "ar": "اعرض أقل",
+        "en": "Show fewer",
+    },
+    "settings.model_details_short_hint": {
+        "ar": "المعروض: النموذج الافتراضي، والنماذج المستخدمة في آخر 30 يومًا، والنماذج التي غيّرت تفاصيلها. ابحث لتجد أي نموذج آخر.",
+        "en": "Listed: the default model, the models used in the last 30 days and the ones whose details you changed. Search to find any other.",
+    },
+    "settings.model_details_shown.zero": {
+        "ar": "لا نماذج",
+        "en": "No models",
+    },
+    "settings.model_details_shown.one": {
+        "ar": "يُعرض {shown} من نموذج واحد",
+        "en": "Showing {shown} of 1 model",
+    },
+    "settings.model_details_shown.two": {
+        "ar": "يُعرض {shown} من نموذجين",
+        "en": "Showing {shown} of {n} models",
+    },
+    "settings.model_details_shown.few": {
+        "ar": "يُعرض {shown} من {n} نماذج",
+        "en": "Showing {shown} of {n} models",
+    },
+    "settings.model_details_shown.many": {
+        "ar": "يُعرض {shown} من {n} نموذجًا",
+        "en": "Showing {shown} of {n} models",
+    },
+    "settings.model_details_shown.other": {
+        "ar": "يُعرض {shown} من {n} نموذج",
+        "en": "Showing {shown} of {n} models",
+    },
+    "settings.providers_off_hide": {
+        "ar": "أخفِ المزوّدين المتوقفين بلا مفتاح",
+        "en": "Hide the providers that are off and have no key",
+    },
+    "settings.providers_off_show.zero": {
+        "ar": "لا مزوّدين متوقفين بلا مفتاح",
+        "en": "No providers are off without a key",
+    },
+    "settings.providers_off_show.one": {
+        "ar": "اعرض مزوّدًا واحدًا متوقفًا بلا مفتاح",
+        "en": "Show 1 provider that is off and has no key",
+    },
+    "settings.providers_off_show.two": {
+        "ar": "اعرض مزوّدَين متوقفَين بلا مفتاح",
+        "en": "Show {n} providers that are off and have no key",
+    },
+    "settings.providers_off_show.few": {
+        "ar": "اعرض {n} مزوّدين متوقفين بلا مفتاح",
+        "en": "Show {n} providers that are off and have no key",
+    },
+    "settings.providers_off_show.many": {
+        "ar": "اعرض {n} مزوّدًا متوقفًا بلا مفتاح",
+        "en": "Show {n} providers that are off and have no key",
+    },
+    "settings.providers_off_show.other": {
+        "ar": "اعرض {n} مزوّد متوقف بلا مفتاح",
+        "en": "Show {n} providers that are off and have no key",
     },
     "settings.model_details_lede": {
         "ar": "ما يعرفه كاظمه عن كل نموذج يمكنك اختياره، ومن أين: قيمتك أنت، أو قائمة نماذج المزوّد، أو كتالوج كاظمه (أسعار الموردين المعلنة على واجهاتهم، مؤرخة). ونافذة السياق هي ما يذكره المزوّد أو ما تضعه أنت، لا تخمين أبدًا. ولا يرسل كاظمه أكثر من النافذة المعروفة للنموذج أو حد مخرجاته.",

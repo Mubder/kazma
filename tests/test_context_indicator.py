@@ -96,6 +96,9 @@ class TestContextIndicator:
             "model": "gpt-4o-mini",
             "provider": "openai",
         }
+        # The window is capped at a model's known size (providers stage 3):
+        # this registry knows none.
+        fake_reg.model_details = lambda model: type("D", (), {"context_window": None})()  # type: ignore[attr-defined]
         with (
             patch("kazma_core.config_store.ConfigStore", side_effect=Exception("no config")),
             patch(

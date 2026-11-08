@@ -363,7 +363,7 @@ def daily_limit_check() -> dict[str, Any]:
             _warn_once(
                 f"unpriced:{spend['date']}",
                 "[turn-tokens] %d model calls today have no known price and are not in the "
-                "daily cost limit's $%.2f (Settings -> Providers & Connectors -> Model prices)",
+                "daily cost limit's $%.2f (Settings -> Providers & Connectors -> Models -> Model prices)",
                 unpriced, spent,
             )
         if spent >= limit * DAILY_ALERT_FRACTION:

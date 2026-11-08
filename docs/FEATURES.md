@@ -39,7 +39,7 @@ Every line below describes that setup.
 | Feature | Status | Where |
 |---|---|---|
 | 35 providers in one list: OpenAI, Anthropic, Google Gemini (AI Studio or Vertex), DeepSeek, xAI, Mistral, Cohere, Z.AI, Moonshot (Kimi), MiniMax, Qwen, Perplexity, AI21, OpenRouter, Groq, Cerebras, Together, Fireworks, DeepInfra, Hugging Face, NVIDIA, SambaNova, SiliconFlow, Novita, Hyperbolic, Cloudflare Workers AI, Azure OpenAI and AWS Bedrock (each with its own Settings form), Ollama, LM Studio, vLLM, llama.cpp, LocalAI, Jan, and any OpenAI-compatible endpoint, with headers of its own | Shipped | Settings → Providers |
-| Each model's context window, output limit, image and tool support and price, from your value, the provider's own model list or Kazma's catalog | Shipped | Settings → Providers → Model details |
+| Each model's context window, output limit, image and tool support and price, from your value, the provider's own model list or Kazma's catalog | Shipped | Settings → Providers & Connectors → Models |
 | A model per chat: models named `provider:model`, the chat's picker and `/model` in a chat app change that chat only; one default for the rest | Shipped | chat picker, `/model`, Settings |
 | Several keys per provider: a refused, spent or rate-limited key gives way to the next, and you are told; providers checked hourly in the background | Shipped | Settings → Providers → Advanced |
 | Local models through Ollama and LM Studio, and any OpenAI-compatible model server on your own network (vLLM, llama.cpp, LocalAI...), with no key | Shipped | Settings → Providers, the setup guide |
@@ -47,7 +47,7 @@ Every line below describes that setup.
 | The backup model is checked: Settings shows which provider would answer it, refuses one nothing serves, and suggests working ones | Shipped | Settings → System → Non-stop |
 | Best model per task for multi-agent workers; image questions go to a vision-capable model | Shipped | `models/selection.py`, `vision_capability.py` |
 | When a model fails over to another, you are told (page + banner) | Shipped | `observability/model_fallback.py` |
-| Token and cost per answer, each cost the model's own price or shown as unknown (you can set a model's price); a cost breaker that halts runaway spending | Shipped | chat footer, dashboard, Settings → Providers → Model prices |
+| Token and cost per answer, each cost the model's own price or shown as unknown (you can set a model's price); a cost breaker that halts runaway spending | Shipped | chat footer, dashboard, Settings → Providers & Connectors → Models → Model prices |
 
 ## Safety and control
 

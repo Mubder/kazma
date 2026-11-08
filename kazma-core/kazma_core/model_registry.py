@@ -1386,7 +1386,8 @@ class ModelRegistry:
         (preserving user customisations like api_key, enabled status).
         """
         stored = self._load_providers()
-        defaults = self._default_provider_entries()
+        removed = self._removed_presets()
+        defaults = [p for p in self._default_provider_entries() if p.get("name", "") not in removed]
 
         merged: list[dict[str, Any]] = []
         seen: set[str] = set()
@@ -1582,7 +1583,12 @@ class ModelRegistry:
             if key not in provider and key != "name":
                 provider[key] = val
         providers.append(provider)
-        self._save_providers(providers)
+        removed = self._removed_presets()
+        if name in removed:
+            # Added again: the provider the owner deleted is wanted after all.
+            self._save_providers(providers, removed=removed - {name})
+        else:
+            self._save_providers(providers)
         try:
             from kazma_core.runtime.model_switch import notify_credentials_changed
 
@@ -1596,8 +1602,15 @@ class ModelRegistry:
         clean_name = (name or "").strip()
         if not clean_name:
             return
+        from kazma_core.model_registry_store import SEEDED_PRESETS
+
         providers = [p for p in self.list_providers() if p.get("name") != clean_name]
-        self._save_providers(providers)
+        if clean_name in SEEDED_PRESETS:
+            # A catalog provider every install is given: remembered as
+            # deleted, or the list and the next start bring it back.
+            self._save_providers(providers, removed=self._removed_presets() | {clean_name})
+        else:
+            self._save_providers(providers)
         self._clients.pop(clean_name, None)
 
     def toggle_provider(self, name: str, enabled: bool) -> None:
@@ -1835,11 +1848,17 @@ class ModelRegistry:
         set_as_typed_urls(r.get("base_url") for r in rows if r.get("url_as_typed"))
         return rows
 
-    def _save_providers(self, providers: list[dict[str, Any]]) -> None:
+    def _save_providers(self, providers: list[dict[str, Any]], *, removed: frozenset[str] | set[str] | None = None) -> None:
         from kazma_core.model_registry_store import save_providers
 
-        save_providers(self._config_store, providers)
+        save_providers(self._config_store, providers, removed=removed)
         self._config_changed()
+
+    def _removed_presets(self) -> frozenset[str]:
+        """The catalog providers the owner deleted (never listed or seeded)."""
+        from kazma_core.model_registry_store import removed_presets
+
+        return removed_presets(self._config_store)
 
     def _default_provider_entries(self) -> list[dict[str, Any]]:
         from kazma_core.model_registry_store import default_provider_entries
@@ -1851,7 +1870,7 @@ class ModelRegistry:
         from kazma_core.model_registry_store import seed_missing_presets
 
         stored = self._load_providers()
-        stored, changed = seed_missing_presets(stored)
+        stored, changed = seed_missing_presets(stored, self._removed_presets())
         # Bookkeeping, so a diagnostic (kazma doctor, /health/*) that happens
         # to build the registry first skips it rather than being refused:
         # list_providers() merges the presets in memory either way, and the

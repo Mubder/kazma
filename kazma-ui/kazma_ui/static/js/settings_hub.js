@@ -691,6 +691,35 @@
             }
         },
 
+        /** The Model details card's rows (2026-11-08: it listed every model
+         *  of every working provider, OpenRouter's 425 among them, and was
+         *  most of the page). A search finds any model (50 at most);
+         *  otherwise the default, the models used in the last 30 days, those
+         *  you changed and the one you are editing -- or all, when asked. */
+        shownModelDetails() {
+            const all = this.modelDetails || [];
+            const words = String(this.modelDetailsQuery || '').toLowerCase().split(/\s+/).filter(Boolean);
+            if (words.length) {
+                return all.filter(m => words.every(w => String(m.ref).toLowerCase().includes(w))).slice(0, 50);
+            }
+            if (this.modelDetailsShowAll) return all;
+            const short = all.filter(m => m.ref === this.defaultModelRef || Number(m.used) > 0
+                || m._editing || this.modelDetailChanged(m));
+            return short.length ? short : all.slice(0, 10);
+        },
+
+        /** True when the owner set any of this model's details. */
+        modelDetailChanged(m) {
+            const o = (m && m.override) || {};
+            return ['context_window', 'max_output', 'vision', 'tools'].some(k => String(o[k] || '').trim() !== '');
+        },
+
+        modelDetailsCountLine() {
+            const total = (this.modelDetails || []).length;
+            const shown = this.shownModelDetails().length;
+            return window.kazmaCount ? window.kazmaCount('settings.model_details_shown', total, { shown: shown }) : '';
+        },
+
         /** One fact of a model, with where it came from, in the page's words. */
         modelDetailFact(m, field) {
             const src = (f) => {
@@ -926,13 +955,35 @@
         /** The provider list, chat providers first, then speech services
          *  (providers stage 2). */
         orderedHubProviders() {
-            const chat = this.hubProviders.filter(p => p.kind !== 'speech');
-            return chat.concat(this.hubProviders.filter(p => p.kind === 'speech'));
+            const shown = this.hubShowOffProviders
+                ? this.hubProviders : this.hubProviders.filter(p => !this.providerFoldedAway(p));
+            const chat = shown.filter(p => p.kind !== 'speech');
+            return chat.concat(shown.filter(p => p.kind === 'speech'));
         },
 
-        /** The first speech service's name: the section's heading goes above it. */
+        /** Off, and chat could not call it (no key, no sign-in): folded away
+         *  until asked for. Most of a list of every provider Kazma knows
+         *  (2026-11-08: 20 of live's 26 rows). The one open stays. */
+        providerFoldedAway(p) {
+            if (!p || p.enabled !== false || p.callable !== false) return false;
+            return this.hubSelectedProvider !== p.name;
+        },
+
+        foldedProviderCount() {
+            return this.hubProviders.filter(p => this.providerFoldedAway(p)).length;
+        },
+
+        foldedProvidersLabel() {
+            if (this.hubShowOffProviders) {
+                return _k('settings.providers_off_hide', 'Hide the providers that are off and have no key');
+            }
+            const n = this.foldedProviderCount();
+            return window.kazmaCount ? window.kazmaCount('settings.providers_off_show', n) : '';
+        },
+
+        /** The first speech service shown: the section's heading goes above it. */
         firstSpeechProvider() {
-            const first = this.hubProviders.find(p => p.kind === 'speech');
+            const first = this.orderedHubProviders().find(p => p.kind === 'speech');
             return first ? first.name : '';
         },
 
@@ -1094,7 +1145,8 @@
             const list = this.hubProviders || [];
             if (!list.length) return null;
             const found = list.find(p => p.name === this.hubSelectedProvider);
-            return found || list[0];
+            // With none chosen, the first provider the list shows.
+            return found || this.orderedHubProviders()[0] || list[0];
         },
 
         providerStateCounts() {
@@ -1154,13 +1206,19 @@
                 const success = !!result.success;
                 const errorMsg = success ? null : this.providerCheckError(result, resp);
                 this.hubTestResult = { type: 'provider', source: 'modal', ...result, success, error: errorMsg };
-                // Save opens on an answer; a failure offers "Save anyway".
-                this.hubProviderTested = success;
+                // Save opens on an answer; a failure offers "Save anyway". A
+                // speech service takes no chat message: nothing to test, and
+                // Save opens.
+                const speech = result.error_code === 'speech_provider';
+                this.hubProviderTested = success || speech;
                 if (success && !typedModels.length && result.chat_model) {
                     p.models = String(result.chat_model);  // the model that answered
                 }
+                if (speech) p.kind = 'speech';
                 if (success) {
                     showToast(_k('settings.hub.connection_test_succeeded', 'Connection test succeeded'), 'success');
+                } else if (speech) {
+                    showToast(errorMsg, 'info');
                 } else {
                     showToast(_k('settings.hub.test_failed_error', 'Test failed: {error}', { error: errorMsg }), 'error');
                 }

@@ -90,6 +90,8 @@ setup guide read (`GET /api/providers/catalog`).
 A fresh install lists the providers it always listed; the newer ones are
 added from the dialog. A provider added under a name of your own ("Work
 Azure") keeps the type it was made from, and speaks that type's format.
+A provider you delete stays deleted, one Kazma lists by itself included:
+it is not listed or added back at the next start until you add it again.
 
 ### Headers, and an address as typed
 
@@ -103,7 +105,11 @@ Under **Advanced** in the dialog:
 - **This provider serves speech, not chat** keeps a speech-to-text service
   out of every chat model list. Such providers are listed under **Speech
   services**; Settings → Voice chooses which one Kazma uses. A provider
-  whose every model is a speech model counts as one without the switch.
+  counts as one without the switch when its address is a speech endpoint
+  (`/audio/transcriptions`, `/audio/speech`, any path with `audio`, Deepgram,
+  ElevenLabs or AssemblyAI) or when every model it lists is a speech model.
+  Kazma sends a speech service no chat message, so **Test** has nothing to
+  check and **Save** opens without it.
 
 ### Model servers on this computer or your network
 
@@ -143,9 +149,10 @@ until it has one. Two providers at one address are named on the list.
 
 A call's cost is the model's own price, or it is shown as **unknown**:
 
-1. your price for the model (**Settings → Providers & Connectors → Model
-   prices**, in US dollars per million tokens). That card also lists the
-   models used in the last 30 days with no known price;
+1. your price for the model (**Settings → Providers & Connectors → Models →
+   Model prices**, in US dollars per million tokens). That card also lists the
+   models used in the last 30 days that a working provider serves with no
+   known price;
 2. free, for a server on this computer or your network;
 3. the price table of the Anthropic and Bedrock clients, for the models they
    name (a dated id such as `claude-sonnet-4-20250514` matches
@@ -234,8 +241,12 @@ per project/location. Hardcoded model list: `gemini-2.5-flash`,
 
 ## Model details
 
-Settings → Providers & Connectors → **Model details** lists every model you
-can choose with what Kazma knows about it, and where each fact came from:
+Settings → Providers & Connectors → **Models** holds what you set by hand:
+the default model, Model details, Model prices and saved profiles.
+**Model details** shows every model you can choose with what Kazma knows
+about it, and where each fact came from. It lists the default model, the
+models used in the last 30 days and the ones whose details you changed;
+search finds any other, and **Show all** lists every one:
 
 1. **your value** (Edit, on the model's row): its context window, output
    limit, whether it sees images, whether it uses tools;
@@ -257,7 +268,7 @@ two choices. A name alone still works: it goes to the provider in use when
 that one lists it.
 
 - **The default model** is the one new chats and chat apps with no model of
-  their own use: Settings → Providers & Connectors → Model details, the
+  their own use: Settings → Providers & Connectors → Models, the
   sidebar's picker, or `/model default` in a chat app (admin).
 - **The chat's picker** sets the model of the chat it is in, and no other.
   A chat opened again shows the model it runs with.

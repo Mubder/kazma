@@ -14,7 +14,7 @@ from typing import Any
 
 from kazma_core.providers import PROVIDER_PRESETS
 
-__all__ = ["default_provider_entries", "detect_gcp_project_id", "load_providers", "normalize_models", "normalize_provider_entry", "parse_providers_raw", "save_providers", "seed_missing_presets"]
+__all__ = ["REMOVED_PRESETS_KEY", "default_provider_entries", "detect_gcp_project_id", "load_providers", "normalize_models", "normalize_provider_entry", "parse_providers_raw", "removed_presets", "save_providers", "seed_missing_presets"]
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +145,29 @@ def load_providers_unresolved(config_store: Any) -> list[dict[str, Any]]:
     return []
 
 
-def save_providers(config_store: Any, providers: list[dict[str, Any]]) -> None:
+#: The catalog providers the owner deleted (2026-11-08). A seeded preset
+#: (:data:`SEEDED_PRESETS`) came back the moment it was deleted -- the list
+#: merges every missing preset in, and every start seeds it again -- so the
+#: Delete button did nothing for them, and a second row for one service
+#: (live's "Z.AI" beside the catalog's "zai") could only be tidied one way.
+#: Adding the provider again takes it off this list.
+REMOVED_PRESETS_KEY = "providers.removed_presets"
+
+
+def removed_presets(config_store: Any) -> frozenset[str]:
+    """The seeded presets the owner deleted."""
+    raw = config_store.get(REMOVED_PRESETS_KEY)
+    if not isinstance(raw, list):
+        return frozenset()
+    return frozenset(str(name).strip() for name in raw if str(name).strip())
+
+
+def save_providers(
+    config_store: Any,
+    providers: list[dict[str, Any]],
+    *,
+    removed: frozenset[str] | set[str] | None = None,
+) -> None:
     """Persist providers list, refusing to blank an api_key that is on disk.
 
     **Why this guard exists.** Every provider mutation -- ``toggle_provider``,
@@ -191,7 +213,16 @@ def save_providers(config_store: Any, providers: list[dict[str, Any]]) -> None:
             )
         protected.append(entry)
 
-    config_store.set("providers.list", protected, category="providers")
+    if removed is None:
+        config_store.set("providers.list", protected, category="providers")
+        return
+    # The list and the deleted presets in one write: a delete recorded in
+    # one but not the other would bring the provider back, or keep it away
+    # after it was added again.
+    config_store.batch_set([
+        ("providers.list", protected, "providers"),
+        (REMOVED_PRESETS_KEY, sorted(removed), "providers"),
+    ])
 
 
 _GCP_PROJECT_TTL_S = 300.0
@@ -311,14 +342,16 @@ SEEDED_PRESETS: frozenset[str] = frozenset({
 
 def seed_missing_presets(
     stored: list[dict[str, Any]],
+    removed: frozenset[str] | set[str] = frozenset(),
 ) -> tuple[list[dict[str, Any]], bool]:
-    """Append any missing preset providers to *stored*. Returns (list, changed)."""
+    """Append any missing preset providers to *stored*, except those the owner
+    deleted (*removed*). Returns (list, changed)."""
     from kazma_core.providers import RETIRED_PRESET_URLS
 
     stored_by_name = {p.get("name", ""): p for p in stored} if stored else {}
     changed = False
     for key, preset in PROVIDER_PRESETS.items():
-        if key not in SEEDED_PRESETS and key not in stored_by_name:
+        if key not in stored_by_name and (key not in SEEDED_PRESETS or key in removed):
             continue
         row = stored_by_name.get(key)
         if row is not None:

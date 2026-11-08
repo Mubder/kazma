@@ -867,8 +867,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "$ —",
     },
     "chat.cost_unknown_title": {
-        "ar": "بعض طلبات هذه المحادثة إلى النموذج ليس لها سعر معروف. أضفه في الإعدادات ← المزودون والموصلات ← أسعار النماذج.",
-        "en": "Some of this chat’s model calls have no known price. Add it in Settings → Providers & Connectors → Model prices.",
+        "ar": "بعض طلبات هذه المحادثة إلى النموذج ليس لها سعر معروف. أضفه في الإعدادات ← المزودون والموصلات ← النماذج ← أسعار النماذج.",
+        "en": "Some of this chat’s model calls have no known price. Add it in Settings → Providers & Connectors → Models → Model prices.",
     },
     "chat.ctx_unit": {
         "ar": "سياق",
