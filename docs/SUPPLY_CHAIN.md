@@ -93,7 +93,7 @@ first eight went up in four rounds.
 This is the check that matters most, and it is one command:
 
 ```bash
-gh attestation verify kazma-0.21.0-py3-none-any.whl --repo Mubder/kazma
+gh attestation verify kazma-0.21.1-py3-none-any.whl --repo Mubder/kazma
 ```
 
 A pass means GitHub's transparency log agrees the file was produced by the
@@ -115,8 +115,8 @@ pip install sigstore
 
 python -m sigstore verify github \
   --repository Mubder/kazma \
-  --bundle kazma-0.21.0-py3-none-any.whl.sigstore.json \
-  kazma-0.21.0-py3-none-any.whl
+  --bundle kazma-0.21.1-py3-none-any.whl.sigstore.json \
+  kazma-0.21.1-py3-none-any.whl
 ```
 
 The explicit form, if you want to pin the exact identity rather than let the
@@ -124,10 +124,10 @@ The explicit form, if you want to pin the exact identity rather than let the
 
 ```bash
 python -m sigstore verify identity \
-  --cert-identity "https://github.com/Mubder/kazma/.github/workflows/release.yml@refs/tags/v0.21.0" \
+  --cert-identity "https://github.com/Mubder/kazma/.github/workflows/release.yml@refs/tags/v0.21.1" \
   --cert-oidc-issuer "https://token.actions.githubusercontent.com" \
-  --bundle kazma-0.21.0-py3-none-any.whl.sigstore.json \
-  kazma-0.21.0-py3-none-any.whl
+  --bundle kazma-0.21.1-py3-none-any.whl.sigstore.json \
+  kazma-0.21.1-py3-none-any.whl
 ```
 
 The `@refs/...` suffix is the git ref the release was built from. Check the
@@ -160,14 +160,14 @@ Feed it to whatever your organisation already uses. For a quick look:
 # Component count and licences
 python - <<'PY'
 import json
-d = json.load(open("kazma-0.21.0.cdx.json", encoding="utf-8"))
+d = json.load(open("kazma-0.21.1.cdx.json", encoding="utf-8"))
 comps = d.get("components") or []
 print(f"{len(comps)} components, CycloneDX {d['specVersion']}")
 PY
 
 # Known vulnerabilities, via any CycloneDX-aware scanner
-grype sbom:kazma-0.21.0.cdx.json
-trivy sbom kazma-0.21.0.cdx.json
+grype sbom:kazma-0.21.1.cdx.json
+trivy sbom kazma-0.21.1.cdx.json
 ```
 
 ---

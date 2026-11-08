@@ -6,6 +6,16 @@ description: Dated changes and links to the Kazma upgrade guides.
 
 > This page is published at [kazma.ai/docs/release-notes/](https://kazma.ai/docs/release-notes/) ([Arabic](https://kazma.ai/ar/docs/release-notes/)).
 
+## What's new (2026-11-08): 0.21.1
+
+| Area | Change |
+|---|---|
+| **Setup on a brand-new Windows** | A clean install on a fresh Windows 11 machine now puts every Express part in place. Setup sets up winget's package list when a new Windows has none, installs the Microsoft Visual C++ runtime that PyTorch and ONNX Runtime need, registers the service whatever the Windows account is called, gives a slow download the time it needs, and says "Setup Stopped Short" (and exits with an error) when a part is left out. |
+| **A setup guide in the web app** | A fresh install opens a guide that connects the AI model: a cloud provider with its key (it lists the provider's models and sends the one you pick a test message), or Ollama, LM Studio or another model server on your network, then the optional extras. |
+| **Any provider** | One catalog of 35 providers for Settings, the setup guide and the server, Azure OpenAI and AWS Bedrock among them. Test checks a provider the way chat uses it, before anything is saved. A provider can hold several keys, used in turn when one is refused or out of credit, and providers are checked in the background. |
+| **Models** | Settings → Models shows each model's details (context window, output limit, vision, tools, price) as the provider states them, and you can set your own. A model is named with its provider (`openrouter:...`), each chat can use its own model, and a model's cost is its own price or "unknown", never a guess. |
+| **Notifications** | Clicking a notification in the bell opens the page it is about and marks it read; the badge counts only the unread. |
+
 ## What's new (2026-11-07): 0.21.0
 
 | Area | Change |
