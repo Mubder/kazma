@@ -11,14 +11,20 @@ import { dirname, join } from "node:path";
 
 import { d1 } from "./d1_standin.mjs";
 import { handle, runMinute, scheduledRun, SITE } from "../src/index.js";
-import { classifyLive, diagnose, sanitize } from "../src/diagnose.js";
-import { duration, OPEN_AFTER_S } from "../src/incidents.js";
+import { classifyLive, diagnose, sanitize, severityOf, titleOf } from "../src/diagnose.js";
+import { duration, OPEN_AFTER_S, pageText } from "../src/incidents.js";
 import { forgetCerts } from "../src/access.js";
+import { formatOperatorCard } from "../src/card.js";
+import { CATALOG } from "../src/catalog.js";
 import { sign } from "../src/verify.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const VECTOR = JSON.parse(readFileSync(
   join(here, "..", "..", "..", "tests", "fixtures", "observer", "heartbeat_vector.json"), "utf8"));
+// The operator card's exact text, shared with Kazma's card and the guard's
+// copy (tests/test_alert_catalog.py checks the Python two).
+const CARDS = JSON.parse(readFileSync(
+  join(here, "..", "..", "..", "tests", "fixtures", "alert_card", "cards.json"), "utf8"));
 
 const INSTALL = "a1b2c3d4e5f6a7b8";
 const KEY = "pairing-key-0123456789abcdefghijklmnopqrstuv";
@@ -229,6 +235,55 @@ test("without the heartbeat the probe alone cannot tell the machine from the tun
   assert.equal(tunnel.condition, "unreachable");
   assert.equal(classifyLive({ status: 530 }), "tunnel");
   assert.equal(diagnose({ live: { status: 502 }, now: NOW, expectHeartbeat: false }).condition, "kazma_down");
+});
+
+// -- the card (the unified alerts plan, "One card") ------------------------------
+
+test("the card matches Kazma's and the guard's, word for word", () => {
+  assert.ok(CARDS.cards.length >= 20);
+  const forms = new Set(CARDS.cards.map((c) => c.options.form || "page"));
+  for (const form of ["page", "reminder", "recovery"]) assert.ok(forms.has(form), form);
+  for (const c of CARDS.cards) {
+    assert.equal(formatOperatorCard(c.source, c.severity, c.title, c.detail, c.options), c.text, c.name);
+  }
+});
+
+test("control: the fixture tells the forms apart (a reminder sent as a page fails it)", () => {
+  const c = CARDS.cards.find((x) => x.options.form === "reminder");
+  assert.notEqual(formatOperatorCard(c.source, c.severity, c.title, c.detail, {}), c.text);
+});
+
+function utc(epoch) {
+  return new Date(epoch * 1000).toISOString().slice(0, 16).replace("T", " ") + " UTC";
+}
+
+test("every page is the card, source Watch, with its title and severity from the catalog", () => {
+  const incident = { cause: "machine_unreachable", detail: "HTTP 530", started_at: T0, ended_at: null,
+    causes: ["machine_unreachable", "tunnel_down"] };
+  assert.equal(pageText("open", incident, T0 + 180),
+    `🔴 [Watch] Kazma's machine is not reachable (power, network or sleep)\nHTTP 530\nSince ${utc(T0)} (3 min)`);
+  assert.equal(pageText("remind", incident, T0 + 3780),
+    `🔴 ⏰ Still: [Watch] Kazma's machine is not reachable (power, network or sleep)\nHTTP 530\n`
+    + `Since ${utc(T0)} (1 h 3 min)`);
+  assert.equal(pageText("recovered", { ...incident, ended_at: T0 + 3780 }, T0 + 3840),
+    "🟢 [Watch] Kazma is back: it lasted 1 h 3 min.\n"
+    + "It was: Kazma's machine is not reachable (power, network or sleep).\n"
+    + "On the way: Kazma's machine is not reachable (power, network or sleep); "
+    + "The tunnel is down; Kazma itself is running.");
+  // A full disk is critical: the catalog says so, not the incident code.
+  assert.ok(pageText("open", { ...incident, cause: "disk_critical" }, T0 + 180).startsWith("🚨 [Watch] "));
+});
+
+test("titles and severities are the catalog's, and an unknown condition still pages", () => {
+  const watch = CATALOG.alerts.filter((a) => a.sender === "watch");
+  assert.ok(watch.length >= 9);
+  for (const a of watch) {
+    const condition = a.key.slice("watch.".length);
+    assert.equal(titleOf(condition), a.title);
+    assert.equal(severityOf(condition), a.severity);
+  }
+  assert.equal(titleOf("no_such_condition"), "Kazma: no_such_condition");
+  assert.equal(severityOf("no_such_condition"), "warn");
 });
 
 // -- incidents and pages ----------------------------------------------------------

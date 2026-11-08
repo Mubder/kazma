@@ -1,0 +1,305 @@
+{
+ "about": "Kazma's operator card: each input and the exact text. Checked against kazma_core/observability/alert_card.py, the guard's copy in scripts/service/kazma_guard.py (tests/test_alert_catalog.py) and deploy/observer/src/card.js (deploy/observer/test/observer.test.mjs).",
+ "cards": [
+  {
+   "name": "guard info is orange",
+   "source": "guard",
+   "severity": "info",
+   "title": "Kazma is restarting for an operator reload.",
+   "detail": "Back in a moment — no action needed.",
+   "options": {},
+   "text": "🟠 [Guard] Kazma is restarting for an operator reload.\nBack in a moment — no action needed."
+  },
+  {
+   "name": "guard warn with detail",
+   "source": "Guard",
+   "severity": "warn",
+   "title": "Kazma stopped: unhealthy (database: ping timed out)",
+   "detail": "Restarting in 15s (attempt 2).",
+   "options": {},
+   "text": "🟡 [Guard] Kazma stopped: unhealthy (database: ping timed out)\nRestarting in 15s (attempt 2)."
+  },
+  {
+   "name": "guard error",
+   "source": "GUARD",
+   "severity": "error",
+   "title": "Kazma failed to start",
+   "detail": "kazma serve exited (code 1) after 12.3s",
+   "options": {},
+   "text": "🔴 [Guard] Kazma failed to start\nkazma serve exited (code 1) after 12.3s"
+  },
+  {
+   "name": "guard success",
+   "source": "guard",
+   "severity": "success",
+   "title": "Kazma is healthy again",
+   "detail": "unhealthy recovered.",
+   "options": {},
+   "text": "🟢 [Guard] Kazma is healthy again\nunhealthy recovered."
+  },
+  {
+   "name": "critical without detail",
+   "source": "guard",
+   "severity": "critical",
+   "title": "Crash loop",
+   "detail": "",
+   "options": {},
+   "text": "🚨 [Guard] Crash loop"
+  },
+  {
+   "name": "no title: the severity",
+   "source": "ops",
+   "severity": "error",
+   "title": "",
+   "detail": "body only",
+   "options": {},
+   "text": "🔴 [Ops] Error\nbody only"
+  },
+  {
+   "name": "ops warn",
+   "source": "ops",
+   "severity": "warn",
+   "title": "MCP server down",
+   "detail": "still retrying",
+   "options": {},
+   "text": "🟡 [Ops] MCP server down\nstill retrying"
+  },
+  {
+   "name": "ops info is blue",
+   "source": "ops",
+   "severity": "info",
+   "title": "Daily digest sent",
+   "detail": "",
+   "options": {},
+   "text": "🔵 [Ops] Daily digest sent"
+  },
+  {
+   "name": "system info",
+   "source": "system",
+   "severity": "info",
+   "title": "Snapshot recorded",
+   "detail": "",
+   "options": {},
+   "text": "🔵 [System] Snapshot recorded"
+  },
+  {
+   "name": "unknown severity: the warn icon",
+   "source": "guard",
+   "severity": "unknown-severity",
+   "title": "Falls back to warn icon",
+   "detail": "body",
+   "options": {},
+   "text": "🟡 [Guard] Falls back to warn icon\nbody"
+  },
+  {
+   "name": "bracketed source",
+   "source": "[Guard]",
+   "severity": "warn",
+   "title": "bracketed source normalizes",
+   "detail": "",
+   "options": {},
+   "text": "🟡 [Guard] bracketed source normalizes"
+  },
+  {
+   "name": "misspelled guard",
+   "source": "gaurd",
+   "severity": "warn",
+   "title": "Spelled wrong",
+   "detail": "",
+   "options": {},
+   "text": "🟡 [Guard] Spelled wrong"
+  },
+  {
+   "name": "a source of its own",
+   "source": "Custom",
+   "severity": "warn",
+   "title": "Shown as given",
+   "detail": "",
+   "options": {},
+   "text": "🟡 [Custom] Shown as given"
+  },
+  {
+   "name": "multi-line detail",
+   "source": "ops",
+   "severity": "warn",
+   "title": "Backups are LOCAL ONLY",
+   "detail": "line one\nline two",
+   "options": {},
+   "text": "🟡 [Ops] Backups are LOCAL ONLY\nline one\nline two"
+  },
+  {
+   "name": "Arabic title",
+   "source": "system",
+   "severity": "success",
+   "title": "بدأ تشغيل كاظمه",
+   "detail": "تفاصيل",
+   "options": {},
+   "text": "🟢 [System] بدأ تشغيل كاظمه\nتفاصيل"
+  },
+  {
+   "name": "watch: the plan's example",
+   "source": "watch",
+   "severity": "error",
+   "title": "Kazma cannot be reached",
+   "detail": "The tunnel answers, the machine does not (no heartbeat for 4 min).",
+   "options": {
+    "since": "14:02",
+    "duration": "12 min",
+    "link": "https://my.kazma.ai/dashboard"
+   },
+   "text": "🔴 [Watch] Kazma cannot be reached\nThe tunnel answers, the machine does not (no heartbeat for 4 min).\nSince 14:02 (12 min) · Open: https://my.kazma.ai/dashboard"
+  },
+  {
+   "name": "watch: since only",
+   "source": "watch",
+   "severity": "error",
+   "title": "Kazma's machine is not reachable (power, network or sleep)",
+   "detail": "HTTP 530",
+   "options": {
+    "since": "2026-11-09 14:02 UTC"
+   },
+   "text": "🔴 [Watch] Kazma's machine is not reachable (power, network or sleep)\nHTTP 530\nSince 2026-11-09 14:02 UTC"
+  },
+  {
+   "name": "watch: since and duration",
+   "source": "watch",
+   "severity": "warn",
+   "title": "Kazma is up; a dependency is away",
+   "detail": "database",
+   "options": {
+    "since": "2026-11-09 14:02 UTC",
+    "duration": "3 min"
+   },
+   "text": "🟡 [Watch] Kazma is up; a dependency is away\ndatabase\nSince 2026-11-09 14:02 UTC (3 min)"
+  },
+  {
+   "name": "a link alone",
+   "source": "ops",
+   "severity": "warn",
+   "title": "Disk space is low",
+   "detail": "12% free",
+   "options": {
+    "link": "/settings?tab=system"
+   },
+   "text": "🟡 [Ops] Disk space is low\n12% free\nOpen: /settings?tab=system"
+  },
+  {
+   "name": "a duration alone says nothing",
+   "source": "ops",
+   "severity": "warn",
+   "title": "No since",
+   "detail": "",
+   "options": {
+    "duration": "5 min"
+   },
+   "text": "🟡 [Ops] No since"
+  },
+  {
+   "name": "reminder",
+   "source": "watch",
+   "severity": "error",
+   "title": "The tunnel is down; Kazma itself is running",
+   "detail": "cloudflared down",
+   "options": {
+    "form": "reminder",
+    "since": "2026-11-09 14:02 UTC",
+    "duration": "1 h 3 min"
+   },
+   "text": "🔴 ⏰ Still: [Watch] The tunnel is down; Kazma itself is running\ncloudflared down\nSince 2026-11-09 14:02 UTC (1 h 3 min)"
+  },
+  {
+   "name": "reminder of a guard info card is orange",
+   "source": "guard",
+   "severity": "info",
+   "title": "Kazma supervision paused",
+   "detail": "",
+   "options": {
+    "form": "reminder"
+   },
+   "text": "🟠 ⏰ Still: [Guard] Kazma supervision paused"
+  },
+  {
+   "name": "reminder, case and spaces",
+   "source": "ops",
+   "severity": "critical",
+   "title": "Offsite copy failing",
+   "detail": "",
+   "options": {
+    "form": " Reminder "
+   },
+   "text": "🚨 ⏰ Still: [Ops] Offsite copy failing"
+  },
+  {
+   "name": "recovery",
+   "source": "watch",
+   "severity": "success",
+   "title": "Kazma",
+   "detail": "It was: Kazma's machine is not reachable (power, network or sleep).",
+   "options": {
+    "form": "recovery",
+    "duration": "1 h 3 min"
+   },
+   "text": "🟢 [Watch] Kazma is back: it lasted 1 h 3 min.\nIt was: Kazma's machine is not reachable (power, network or sleep)."
+  },
+  {
+   "name": "recovery is green whatever the severity",
+   "source": "watch",
+   "severity": "critical",
+   "title": "Kazma's disk",
+   "detail": "",
+   "options": {
+    "form": "recovery",
+    "duration": "12 min"
+   },
+   "text": "🟢 [Watch] Kazma's disk is back: it lasted 12 min."
+  },
+  {
+   "name": "recovery without a duration",
+   "source": "guard",
+   "severity": "info",
+   "title": "Docker",
+   "detail": "Kazma follows.",
+   "options": {
+    "form": "recovery"
+   },
+   "text": "🟢 [Guard] Docker is back.\nKazma follows."
+  },
+  {
+   "name": "recovery shows a link, never since",
+   "source": "cloudflare",
+   "severity": "warn",
+   "title": "The tunnel",
+   "detail": "Cloudflare reports it healthy.",
+   "options": {
+    "form": "recovery",
+    "since": "14:02",
+    "duration": "4 min",
+    "link": "https://dash.cloudflare.com/"
+   },
+   "text": "🟢 [Cloudflare] The tunnel is back: it lasted 4 min.\nCloudflare reports it healthy.\nOpen: https://dash.cloudflare.com/"
+  },
+  {
+   "name": "cloudflare page",
+   "source": "Cloudflare",
+   "severity": "error",
+   "title": "Tunnel kazma-home is unhealthy",
+   "detail": "No connector for 5 min.",
+   "options": {
+    "since": "14:02 UTC",
+    "duration": "5 min"
+   },
+   "text": "🔴 [Cloudflare] Tunnel kazma-home is unhealthy\nNo connector for 5 min.\nSince 14:02 UTC (5 min)"
+  },
+  {
+   "name": "an unknown form is a page",
+   "source": "ops",
+   "severity": "warn",
+   "title": "Odd form",
+   "detail": "",
+   "options": {
+    "form": "digest"
+   },
+   "text": "🟡 [Ops] Odd form"
+  }
+ ]
+}

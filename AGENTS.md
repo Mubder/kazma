@@ -6663,6 +6663,44 @@ separate `swarm_notify` module (`SWARM_BOT_TOKEN`), a fourth notifier that
 reported a send Telegram refused as sent, was removed on 2026-10-14 (Swarm
 audit SW-S15); a set `SWARM_BOT_TOKEN` is a startup WARNING.
 
+**One catalog of alerts, one card** (2026-11-09, Stage 1 of
+`docs/plans/UNIFIED_ALERTS_PLAN.md`).
+- `kazma_core/observability/alert_catalog.py` names every alert the four
+  senders raise: Kazma's ops alerts by key (a part known only at run time is
+  a placeholder: `llm.provider_unreachable.{provider}`), the lifecycle events
+  (`lifecycle.started`), the guard's pages by the `kind=` every `_page` call
+  now passes, and Kazma Watch's conditions (`watch.tunnel_down`, and its
+  recovery). Each entry has its severity, a title in English and Arabic, the
+  page it is about, the entry that closes it (the same sender's recovery),
+  and for a problem two senders can see, its `condition` and whether this
+  sender is its `owner` (the plan's one page per problem; until Stage 2 a
+  non-owner still pages). Two inside owners of one condition are declared in
+  `SHARED_OWNERS` with why. An alert added anywhere goes into the table the
+  same day.
+- The guard (stdlib only) and Kazma Watch (Cloudflare) read generated
+  copies: `scripts/service/alert_catalog.json` and
+  `deploy/observer/src/catalog.js`, written by
+  `python -m kazma_core.observability.alert_catalog --write` (`--check`
+  says which is stale). The guard says a kind its copy lacks once
+  (`guard.page_kind_unknown` in guard.log) and pages anyway; Kazma Watch
+  takes each condition's title and severity from its copy.
+- One card: `alert_card.format_operator_card` knows the sources Watch and
+  Cloudflare, a reminder (`⏰ Still:` after the icon), a recovery
+  (`🟢 [Source] <what> is back: it lasted 12 min.`) and a last line "Since
+  <time> (<duration>) · Open: <link>". A call without the new options is the
+  old card byte for byte. The guard's stdlib copy and
+  `deploy/observer/src/card.js` must say the same:
+  `tests/fixtures/alert_card/cards.json` holds each input and its exact text.
+  Kazma Watch's pages are the card with the source Watch (times in UTC until
+  Stage 3 brings the owner's zone); its incident rules are unchanged.
+- Gates: `tests/test_alert_catalog.py` (the senders read by
+  `tests/_alert_senders.py`: ops keys through f-strings, wrappers and local
+  assignments, the guard's `_page` kinds, `diagnose.js`'s conditions, the
+  notifier's events; both directions, literal severities, owners, pages of
+  this site, the copies, the card in Python and the guard; each check run on
+  a planted violation first), and the observer's own Node tests for
+  `card.js` and the pages (`deploy/observer/test/observer.test.mjs`).
+
 **An alert reaches someone, or says it did not (2026-10-02).**
 - An alert raised in a worker thread is delivered ON the server's loop
   (`ops_alerts.bind_server_loop`, bound at the top of `_on_startup` and

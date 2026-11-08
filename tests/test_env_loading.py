@@ -209,6 +209,10 @@ ENV_FREE_ENTRY_POINTS: dict[str, str] = {
         "store; loading an install's .env could redirect recovery to live data"
     ),
     "kazma-core/kazma_core/documents/parser_worker.py": "sandboxed: parses untrusted documents with a scrubbed environment",
+    "kazma-core/kazma_core/observability/alert_catalog.py": (
+        "writes the alert catalog's copies for the guard and Kazma Watch from the "
+        "table in the code: no setting, key or store is read"
+    ),
     "scripts/record_osv_advisories.py": (
         "lists another interpreter's packages and asks OSV: no setting, key or store "
         "is read, and an install's .env has nothing it needs"
