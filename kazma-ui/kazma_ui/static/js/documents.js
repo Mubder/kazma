@@ -64,17 +64,20 @@ function documentsPage() {
       await this.loadOps();
     },
 
+    // The shared .badge tones. Cancelled is neutral, as on every page:
+    // someone stopped it, nothing failed.
     stateClass(state) {
-      if (!state) return "state-idle";
-      if (state === "ready") return "state-ready";
-      if (["dead_letter", "rejected", "cancelled"].includes(state)) return "state-fail";
-      return "state-active";
+      if (!state) return "badge-neutral";
+      if (state === "ready") return "badge-success";
+      if (state === "cancelled") return "badge-neutral";
+      if (["dead_letter", "rejected"].includes(state)) return "badge-danger";
+      return "badge-accent";
     },
 
     capClass(readiness) {
-      if (readiness === "ready") return "cap-ready";
-      if (readiness === "degraded") return "cap-degraded";
-      return "cap-unavailable";
+      if (readiness === "ready") return "badge-success";
+      if (readiness === "degraded") return "badge-warning";
+      return "badge-neutral";
     },
 
     // Where untrusted documents run (health.worker_isolation): the profile,
@@ -191,9 +194,9 @@ function documentsPage() {
     capStatusClass(status) {
       // Capacity says "ok", storage readiness says "ready": both are green.
       // Readiness used to fall through to the "unavailable" colour.
-      if (status === "ok" || status === "ready") return "cap-ready";
-      if (status === "degraded") return "cap-degraded";
-      return "cap-unavailable";
+      if (status === "ok" || status === "ready") return "badge-success";
+      if (status === "degraded") return "badge-warning";
+      return "badge-neutral";
     },
 
     async runGc() {

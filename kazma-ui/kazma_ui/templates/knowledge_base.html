@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% set active_page = "knowledge" %}
 {% block title %}Kazma — {{ t('knowledge.title') }}{% endblock %}
-{% block page_title %}<svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5" style="vertical-align:middle;margin-right:6px;"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>{{ t('knowledge.title') }}{% endblock %}
+{% block page_title %}<svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5" style="vertical-align:middle;margin-inline-end:6px;"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>{{ t('knowledge.title') }}{% endblock %}
 
 {% block content %}
 {# Per-library UI strings are bound via Alpine (x-text).  We expose them
@@ -52,16 +52,19 @@
   };
 </script>
 {% if kb_single_operator %}
-<div id="knowledge-single-operator" role="alert" style="max-width:1000px;margin:0 auto 1rem auto;background:rgba(210,153,34,0.08);border:1px solid var(--warning);border-radius:8px;padding:12px 16px;color:var(--warning);">{{ t('knowledge.single_operator') }}</div>
+<div id="knowledge-single-operator" role="alert" class="notice tone-warning" style="max-width:1000px;margin:0 auto 1rem auto;"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('alert')"></span><span>{{ t('knowledge.single_operator') }}</span></div>
 {% endif %}
 <div
   id="knowledge-root" data-job="{{ request.query_params.get('job', '') | e }}" x-data="knowledgePage()"
   style="max-width:1000px;margin:0 auto;padding:0 1rem;box-sizing:border-box;"
 >
 
-  {# ── Intro / what this is ── #}
-  <div class="card" style="padding:1rem 1.25rem;margin-bottom:1.25rem;">
-    <strong style="display:inline-flex;align-items:center;gap:6px;"><span class="ki" data-icon="book" aria-hidden="true"></span> {{ t('knowledge.title') }}</strong> — {{ t('knowledge.intro') }}
+  {# ── Intro / what this is: the page banner ── #}
+  <div class="page-banner" style="margin-bottom:1.25rem;">
+    <div>
+      <h2 class="page-banner-title" style="display:inline-flex;align-items:center;gap:8px;margin:0;"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('book')"></span> {{ t('knowledge.title') }}</h2>
+      <p class="page-banner-crumb" style="margin:4px 0 0;">{{ t('knowledge.intro') }}</p>
+    </div>
   </div>
 
   {# ── Add library form ── #}
@@ -94,11 +97,11 @@
         @click="ingest('site')"
         :disabled="creating || !form.id || !form.seed_url"
       >
-        <span class="ki" data-icon="spider" aria-hidden="true"></span> {{ t('knowledge.crawl_tree') }}
+        <span class="ki" aria-hidden="true" x-html="KazmaIcons.get('spider')"></span> {{ t('knowledge.crawl_tree') }}
       </button>
       <label style="display:inline-flex;align-items:center;gap:6px;font-size:0.85rem;">
         {{ t('knowledge.scope_label') }}
-        <select class="form-input" style="width:auto;" x-model="form.scope" :disabled="creating">
+        <select class="form-select" style="width:auto;" x-model="form.scope" :disabled="creating">
           <option value="">{{ t('knowledge.scope_default') }}</option>
           <option value="section">{{ t('knowledge.scope_section') }}</option>
           <option value="site">{{ t('knowledge.scope_site') }}</option>
@@ -115,7 +118,7 @@
       <span x-show="creating || previewing" class="spinner-inline" style="align-self:center;" x-cloak></span>
     </div>
     <template x-if="previewResult">
-      <div id="kb-preview" style="margin-top:0.75rem;border:1px solid var(--border);border-radius:6px;padding:8px 12px;font-size:0.85rem;">
+      <div id="kb-preview" class="card-nested" style="margin-top:0.75rem;padding:8px 12px;font-size:0.85rem;">
         <div style="font-weight:600;margin-bottom:2px;">{{ t('knowledge.preview_title') }}</div>
         <div style="color:var(--text-secondary);" x-text="previewSource()"></div>
         <template x-for="word in ['section', 'site', 'page']" :key="word">
@@ -143,7 +146,7 @@
 
   {# ── Active job progress ── #}
   <template x-if="activeJob">
-    <div class="card" style="padding:1rem 1.25rem;margin-bottom:1.25rem;border-inline-start:3px solid var(--primary);" :style="{ borderInlineStartColor: jobColor() }">
+    <div class="card" style="padding:1rem 1.25rem;margin-bottom:1.25rem;border-inline-start:3px solid var(--accent);" :style="{ borderInlineStartColor: jobColor() }">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
         <span class="spinner-inline" x-show="!jobDone()" x-cloak></span>
         <strong style="display:inline-flex;align-items:center;gap:6px;"><span class="ki" x-html="KazmaIcons.get(jobIcon())" aria-hidden="true"></span><span x-text="jobTitle()"></span></strong>
@@ -206,7 +209,7 @@
         {{ t('knowledge.job_skipped') }}: <span x-text="activeJob.skipped || 0"></span>
       </div>
       <template x-if="jobDone() && (activeJob.pages || []).length">
-        <div id="kb-crawl-report" style="margin-top:8px;border-top:1px dashed var(--border);padding-top:6px;font-size:0.8rem;">
+        <div id="kb-crawl-report" style="margin-top:8px;border-top:1px dashed var(--card-hairline);padding-top:6px;font-size:0.8rem;">
           <div style="display:flex;flex-wrap:wrap;gap:12px;">
             <template x-for="entry in reportCounts()" :key="entry.outcome">
               <span><span :style="{ color: outcomeColor(entry.outcome) }" x-text="outcomeLabel(entry.outcome)"></span>: <bdi x-text="KazmaFormat.number(entry.count)"></bdi></span>
@@ -234,7 +237,7 @@
         {{ t('knowledge.job_current') }} <code translate="no" dir="ltr"><bdi x-text="activeJob.current_url"></bdi></code>
       </div>
       <template x-if="activeJob.errors && activeJob.errors.length">
-        <div style="margin-top:8px;font-size:0.75rem;color:var(--danger,#e53935);border-top:1px dashed var(--border);padding-top:6px;">
+        <div style="margin-top:8px;font-size:0.75rem;color:var(--danger);border-top:1px dashed var(--card-hairline);padding-top:6px;">
           <div style="font-weight:600;margin-bottom:2px;">{{ t('knowledge.job_failures') }}</div>
           <template x-for="(err, idx) in activeJob.errors.slice(-3)" :key="idx">
             <div style="margin-bottom:2px;word-break:break-all;" translate="no" x-text="err"></div>
@@ -268,22 +271,20 @@
       {{ t('knowledge.loading') }}
     </div>
 
-    <div x-show="librariesLoaded && !loading && libraries.length === 0" style="padding:1.5rem;text-align:center;color:var(--text-secondary);" x-cloak>
+    <div x-show="librariesLoaded && !loading && libraries.length === 0" class="empty-state" x-cloak>
+      <span class="icon-tile" aria-hidden="true"><span class="ki" x-html="KazmaIcons.get('book')"></span></span>
       <span x-show="!viewArchived" x-cloak>{{ t('knowledge.empty') }}</span>
       <span x-show="viewArchived" x-text="S.archived_empty || 'No archived libraries.'" x-cloak></span>
     </div>
 
     <template x-for="lib in libraries" :key="lib.id">
-      <div style="border:1px solid var(--border);border-radius:6px;padding:0.9rem;margin-bottom:0.6rem;">
+      <div class="card-nested" style="padding:0.9rem;margin-bottom:0.6rem;">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;">
           <div style="min-width:0;flex:1;">
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
               <strong translate="no" x-text="lib.name"></strong>
               <code style="font-size:0.78rem;color:var(--text-secondary);" x-text="lib.id"></code>
-              <span
-                style="font-size:0.7rem;padding:1px 6px;border-radius:8px;background:var(--bg-accent,#2a2a3a);"
-                x-text="lib._t_chunk_count"
-              ></span>
+              <span class="badge badge-neutral" x-text="lib._t_chunk_count"></span>
               <span
                 x-show="lib._t_meaning"
                 style="font-size:0.7rem;color:var(--text-secondary);"
@@ -307,19 +308,19 @@
             </div>
           </div>
           <div style="display:flex;gap:4px;flex-shrink:0;">
-            <button class="btn btn-secondary btn-sm" @click="testSearch(lib)"><span class="ki" data-icon="search" aria-hidden="true"></span> <span x-text="lib._t_test"></span></button>
-            <button class="btn btn-secondary btn-sm" @click="refresh(lib)" :disabled="!lib.seed_url"><span class="ki" data-icon="refresh" aria-hidden="true"></span> <span x-text="lib._t_refresh"></span></button>
-            <button class="btn btn-secondary btn-sm" @click="browse(lib)"><span class="ki" data-icon="clipboard" aria-hidden="true"></span> <span x-text="lib._t_browse"></span></button>
+            <button class="btn btn-secondary btn-sm" @click="testSearch(lib)"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('search')"></span> <span x-text="lib._t_test"></span></button>
+            <button class="btn btn-secondary btn-sm" @click="refresh(lib)" :disabled="!lib.seed_url"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('refresh')"></span> <span x-text="lib._t_refresh"></span></button>
+            <button class="btn btn-secondary btn-sm" @click="browse(lib)"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('clipboard')"></span> <span x-text="lib._t_browse"></span></button>
             <template x-if="!viewArchived">
-              <button class="btn btn-secondary btn-sm" @click="archive(lib)"><span class="ki" data-icon="package" aria-hidden="true"></span> <span x-text="lib._t_archive"></span></button>
+              <button class="btn btn-secondary btn-sm" @click="archive(lib)"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('package')"></span> <span x-text="lib._t_archive"></span></button>
             </template>
             <template x-if="viewArchived">
-              <button class="btn btn-secondary btn-sm" @click="unarchive(lib)"><span class="ki" data-icon="refresh" aria-hidden="true"></span> <span x-text="lib._t_unarchive"></span></button>
+              <button class="btn btn-secondary btn-sm" @click="unarchive(lib)"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('refresh')"></span> <span x-text="lib._t_unarchive"></span></button>
             </template>
-            <button class="btn btn-secondary btn-sm" @click="del(lib)" style="color:var(--danger,#e53935);"><span class="ki" data-icon="trash" aria-hidden="true"></span> <span x-text="lib._t_delete"></span></button>
+            <button class="btn btn-danger btn-sm" @click="del(lib)"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('trash')"></span> <span x-text="lib._t_delete"></span></button>
           </div>
         </div>
-        <div x-show="lib._search_open" style="margin-top:0.75rem;border-top:1px dashed var(--border);padding-top:0.6rem;" x-cloak>
+        <div x-show="lib._search_open" style="margin-top:0.75rem;border-top:1px dashed var(--card-hairline);padding-top:0.6rem;" x-cloak>
           <div style="display:flex;gap:6px;margin-bottom:6px;">
             <input
               type="text" class="form-input" :placeholder="lib._t_search_placeholder"
@@ -334,28 +335,28 @@
             <div>
               <div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:4px;" x-text="kazmaCount('knowledge.hits_count', lib._hits.length)"></div>
               <template x-for="(h, i) in lib._hits" :key="h.chunk_id">
-                <div style="margin-bottom:0.5rem;border-left:2px solid var(--primary);padding-left:8px;">
+                <div style="margin-bottom:0.5rem;border-inline-start:2px solid var(--accent);padding-inline-start:8px;">
                   <div style="font-size:0.75rem;color:var(--text-secondary);word-break:break-all;">
                     [<span x-text="i + 1"></span>] {{ t('knowledge.hit_score') }} <span x-text="h.score.toFixed(4)"></span> ·
                     <a translate="no" dir="ltr" :href="safeHref(h.source_url)" target="_blank" rel="noopener noreferrer"><bdi x-text="h.source_url"></bdi></a>
                     <span x-show="h.section_header" x-cloak> — <span translate="no" x-text="h.section_header"></span></span>
                   </div>
-                  <pre style="margin:4px 0 0 0;font-size:0.78rem;white-space:pre-wrap;background:var(--bg-accent,#1e1e2a);padding:6px;border-radius:4px;max-height:240px;overflow:auto;" x-text="h.content"></pre>
+                  <pre style="margin:4px 0 0 0;font-size:0.78rem;white-space:pre-wrap;background:var(--surface-sunken);padding:6px;border-radius:4px;max-height:240px;overflow:auto;" x-text="h.content"></pre>
                 </div>
               </template>
             </div>
           </template>
         </div>
-        <div x-show="lib._browse_open" style="margin-top:0.75rem;border-top:1px dashed var(--border);padding-top:0.6rem;" x-cloak>
+        <div x-show="lib._browse_open" style="margin-top:0.75rem;border-top:1px dashed var(--card-hairline);padding-top:0.6rem;" x-cloak>
           <template x-if="lib._chunks">
             <div>
               <div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:6px;"
                    x-text="{{ t('knowledge.chunks_of') | tojson | forceescape }}.replace('{shown}', lib._chunks.length).replace('{total}', chunkCount(lib._chunk_total))"></div>
               <template x-for="c in lib._chunks" :key="c.id">
-                <div style="font-size:0.78rem;margin-bottom:4px;border-bottom:1px solid var(--border);padding-bottom:4px;">
+                <div style="font-size:0.78rem;margin-bottom:4px;border-bottom:1px solid var(--card-hairline);padding-bottom:4px;">
                   <code x-text="'#' + c.chunk_index"></code>
                   <span :translate="(c.section_header || c.document_title) ? 'no' : null" x-text="c.section_header || c.document_title || {{ t('knowledge.untitled') | tojson | forceescape }}"></span>
-                  <span x-show="c.has_code" style="color:var(--primary);" x-cloak>⌗</span>
+                  <span x-show="c.has_code" style="color:var(--accent-light);" x-cloak>⌗</span>
                   <div translate="no" style="color:var(--text-secondary);font-size:0.74rem;word-break:break-all;">
                     <a translate="no" dir="ltr" :href="safeHref(c.source_url)" target="_blank" rel="noopener noreferrer"><bdi x-text="c.source_url"></bdi></a>
                   </div>

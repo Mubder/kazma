@@ -401,7 +401,7 @@ function knowledgePage() {
     },
     // The card's accent: green done, yellow partial or empty, red failed.
     jobColor() {
-      if (!this.activeJob || !this.jobDone()) return "var(--primary)";
+      if (!this.activeJob || !this.jobDone()) return "var(--accent)";
       if (this.activeJob.phase === "error") return "var(--danger)";
       if (this.activeJob.phase === "interrupted" || this.jobPartial() || this.jobEmpty()) return "var(--warning)";
       return "var(--success)";
