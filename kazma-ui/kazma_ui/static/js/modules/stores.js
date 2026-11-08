@@ -535,6 +535,18 @@ export function registerStores() {
                 return { color: 'var(--warning)', mark: '⚠' };
             },
 
+            // The page a notification opens (2026-11-08): the one the server
+            // named (kazma_core.observability.alerts.alert_link), when it is
+            // a path of this site, else the Dashboard, whose open-problems
+            // card lists every alert. The rows were not links at all.
+            href(item) {
+                const own = String((item && item.link) || '');
+                if (own.startsWith('/') && !own.startsWith('//') && own.indexOf('\\') < 0) return own;
+                const id = String((item && item.callback_id) || '');
+                if (id.startsWith('link:/') && !id.startsWith('link://') && id.indexOf('\\') < 0) return id.slice(5);
+                return '/dashboard';
+            },
+
             // A success is news: a green toast that fades, once per alert in
             // this browser, and only while it is recent (an old success is
             // in the bell). "Crawl completed" held the yellow problem banner

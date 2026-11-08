@@ -369,7 +369,11 @@
     // (e.g., after page refresh or via the global search overlay ?s=)
     var initialSessionId = localStorage.getItem(SESSION_LS_KEY);
     try {
-      var sParam = new URLSearchParams(window.location.search).get('s');
+      // Soft navigation runs page scripts BEFORE it pushes the new address:
+      // the incoming page carries its own ?s= (data-s), 2026-11-08.
+      var chatRoot = document.getElementById('chat-root');
+      var sParam = chatRoot && chatRoot.hasAttribute('data-s')
+        ? chatRoot.getAttribute('data-s') : new URLSearchParams(window.location.search).get('s');
       if (sParam) initialSessionId = sParam;
     } catch (e) { /* ignore malformed URLs */ }
     if (initialSessionId) {
@@ -2742,8 +2746,16 @@
     // Previously we only set chatSessionId and showed a welcome screen —
     // sessions looked empty until a manual sidebar click/refresh.
     try {
-      if (/(?:^|[?&])new=1(?:&|$)/.test(location.search)) {
-        try { history.replaceState(null, '', location.pathname + location.hash); } catch (e2) {}
+      // The incoming page's own ?new=1 (data-new): a soft navigation runs
+      // this before it pushes the new address (2026-11-08).
+      var newRoot = document.getElementById('chat-root');
+      var wantNew = newRoot && newRoot.hasAttribute('data-new')
+        ? newRoot.getAttribute('data-new') === '1' : /(?:^|[?&])new=1(?:&|$)/.test(location.search);
+      if (wantNew) {
+        // Only the chat's own address: before the push this is the page before.
+        if (location.pathname === '/chat') {
+          try { history.replaceState(null, '', location.pathname + location.hash); } catch (e2) {}
+        }
         newSession();
       } else {
         var savedSid = localStorage.getItem(SESSION_LS_KEY);

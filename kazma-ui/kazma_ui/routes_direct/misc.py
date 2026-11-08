@@ -333,12 +333,20 @@ def register_misc_routes(self: Any) -> None:
             # A broken incident store must not erase the other alerts.
             logger.warning("[alerts] run incidents could not be read: %s", exc)
             incidents = []
+        from kazma_core.observability.alerts import FALLBACK_PAGE, alert_link
+
         for a in [*AlertDispatcher.get_recent_alerts(), *recent_alerts(current_language()), *incidents]:
             item = a.to_dict() if hasattr(a, "to_dict") else a
             try:
-                out.append(jsonable_encoder(item))
+                encoded = jsonable_encoder(item)
             except Exception:
-                out.append({"repr": repr(item), "error": "unserializable alert omitted"})
+                out.append({"repr": repr(item), "error": "unserializable alert omitted", "link": FALLBACK_PAGE})
+                continue
+            # The page a click in the bell opens (2026-11-08): its own link,
+            # else its subsystem's page, else the Dashboard's open problems.
+            if isinstance(encoded, dict):
+                encoded["link"] = alert_link(encoded)
+            out.append(encoded)
         return out
     @self.app.get("/packages")
     def _packages_redirect() -> RedirectResponse:

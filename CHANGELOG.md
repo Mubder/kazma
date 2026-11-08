@@ -16,6 +16,14 @@
   the next start). A provider whose address is a speech endpoint
   (`/audio/transcriptions` and the like) is one whatever its models say, and
   Test sends it no chat message.
+- **A notification opens its page.** Clicking a notification in the bell
+  opens the page it is about: the research or crawl result, the run to act
+  on, Memory, the providers, the Agent tab for a model failover, or the
+  Dashboard's open problems. The rows were text with nothing to click.
+- **Links to a Settings tab open that tab.** A link inside Kazma to
+  `/settings?tab=...` (from the bell, the Agents page, Memory, the Dashboard,
+  Documents) opened Settings on its first tab; so did the Dashboard's links to
+  a chat and the web chat's `/replay` link. They open what they name now.
 - **A shorter providers page.** The default model, Model details, Model
   prices and saved profiles have their own sub-tab, Settings → Providers &
   Connectors → Models. Model details lists the default model, the models used

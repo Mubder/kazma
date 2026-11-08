@@ -5,7 +5,9 @@
 {% block page_title %}{{ t('settings.title') }}{% endblock %}
 
 {% block content %}
-<div x-data="settingsApp()">
+{# data-tab: the tab this page was asked for. A soft navigation runs the
+   page script before it pushes the new address (settings_core.js). #}
+<div id="settings-root" data-tab="{{ request.query_params.get('tab', '') | e }}" x-data="settingsApp()">
 
     <!-- ═══ Settings Navigation ═══ -->
     <nav class="settings-nav">
@@ -399,8 +401,8 @@
                                         <span class="mc-model" translate="no" dir="ltr" x-text="m.model"></span>
                                         <span class="mc-prov">
                                             <span translate="no" x-text="m.provider_label"></span>
-                                            <span class="mc-tag" x-show="m.ref === defaultModelRef">{{ t('settings.models_tag_default') }}</span>
-                                            <span class="mc-tag tag-yours" x-show="modelDetailChanged(m)">{{ t('settings.model_details_source_owner') }}</span>
+                                            <span class="mc-tag" x-show="m.ref === defaultModelRef" x-cloak>{{ t('settings.models_tag_default') }}</span>
+                                            <span class="mc-tag tag-yours" x-show="modelDetailChanged(m)" x-cloak>{{ t('settings.model_details_source_owner') }}</span>
                                         </span>
                                     </div>
                                     <div class="mc-cell mc-num" role="cell" data-label="{{ t('settings.models_col_window') }}">
@@ -463,7 +465,7 @@
                     </div>
                     <div class="mc-foot">
                         <span class="setting-desc" id="model-details-count" x-text="modelDetailsCountLine()"></span>
-                        <span class="setting-desc" x-show="!modelDetailsShowAll && !modelDetailsQuery && !modelDetailsProvider">{{ t('settings.model_details_short_hint') }}</span>
+                        <span class="setting-desc" x-show="!modelDetailsShowAll && !modelDetailsQuery && !modelDetailsProvider" x-cloak>{{ t('settings.model_details_short_hint') }}</span>
                         <span class="mc-dirty" x-show="modelDetailsDirty()" x-cloak>{{ t('settings.models_unsaved') }}</span>
                         <button type="button" class="btn btn-primary btn-sm" id="model-details-save" @click="saveModelDetails()"
                                 :disabled="modelDetailsSaving || !modelDetailsLoaded || !modelDetailsDirty()">{{ t('settings.model_details_save') }}</button>

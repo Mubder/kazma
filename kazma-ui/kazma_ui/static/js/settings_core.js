@@ -726,7 +726,14 @@
             // Deep-link: /settings?tab=packages (or any valid tab id)
             try {
                 const params = new URLSearchParams(window.location.search);
-                let requested = params.get('tab');
+                // Soft navigation runs page scripts BEFORE it pushes the new
+                // address, so the address here can still be the page before:
+                // a link to /settings?tab=agent from the bell, the Agents page
+                // or the Dashboard opened the first tab (2026-11-08). The
+                // incoming page carries its own query (data-tab).
+                const root = document.getElementById('settings-root');
+                let requested = root && root.hasAttribute('data-tab')
+                    ? (root.getAttribute('data-tab') || null) : params.get('tab');
                 // OAuth round-trip from Backup → Offsite (flag set by
                 // connectGoogleDrive/connectOneDrive): the email callback
                 // always returns to ?tab=email, but the user was connecting a
@@ -883,6 +890,9 @@
             }
             this.tab = newTab;
             try {
+                // Only Settings' own address: before a soft navigation has
+                // pushed it, this would rewrite the page the owner came from.
+                if (window.location.pathname !== '/settings') throw new Error('not yet on Settings');
                 const url = new URL(window.location.href);
                 if (newTab && newTab !== 'providers_connectors') {
                     url.searchParams.set('tab', newTab);

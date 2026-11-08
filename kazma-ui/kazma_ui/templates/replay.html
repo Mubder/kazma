@@ -4,7 +4,9 @@
 {% block page_title %}<span class="ki" data-icon="clock" aria-hidden="true"></span> {{ t('replay.title') }}{% endblock %}
 
 {% block content %}
-<div class="replay-container" style="max-width:1200px;margin:0 auto;">
+{# data-thread: the chat this page was asked for (replay.js reads it: a soft
+   navigation runs the script before it pushes the new address). #}
+<div class="replay-container" id="replay-root" data-thread="{{ request.query_params.get('thread', '') | e }}" style="max-width:1200px;margin:0 auto;">
 
   <!-- ── Thread Picker ── -->
   <div class="card" style="margin-bottom:1rem;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
