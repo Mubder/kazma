@@ -214,6 +214,13 @@ def windows_task_ps1(*, elevated: bool = True) -> str:
         "(New-ScheduledTaskTrigger -Once -At (Get-Date) "
         f"-RepetitionInterval (New-TimeSpan -Minutes {KEEP_ALIVE_MINUTES}))"
     )
+    # The account by its full name (computer or domain, then user), read
+    # from Windows itself. A bare $env:USERNAME is ambiguous when the account
+    # is named like the computer: on the clean VM (2026-11-08), account and
+    # computer were both KazmaDrill_1, and Register-ScheduledTask refused
+    # "The parameter is incorrect" (UserId). Over SSH $env:USERDOMAIN reads
+    # WORKGROUP, so it cannot build the name either.
+    account = "([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)"
     if elevated:
         triggers = f"""@(
     (New-ScheduledTaskTrigger -AtStartup),
@@ -221,7 +228,7 @@ def windows_task_ps1(*, elevated: bool = True) -> str:
     {keep_alive}
 )"""
         principal = (
-            "New-ScheduledTaskPrincipal -UserId $env:USERNAME "
+            f"New-ScheduledTaskPrincipal -UserId {account} "
             "-LogonType S4U -RunLevel Highest"
         )
         header = """\
@@ -233,7 +240,7 @@ def windows_task_ps1(*, elevated: bool = True) -> str:
     else:
         triggers = f"@( (New-ScheduledTaskTrigger -AtLogOn), {keep_alive} )"
         principal = (
-            "New-ScheduledTaskPrincipal -UserId $env:USERNAME "
+            f"New-ScheduledTaskPrincipal -UserId {account} "
             "-LogonType Interactive -RunLevel Limited"
         )
         header = """\

@@ -210,6 +210,7 @@ class Box:
         self.models = self.chromium = self.service = self.kazma_up = self.pg = self.searxng = False
         self.embedding_model = False
         self.container = False
+        self.vcruntime: tuple[int, int] | None = None  # a fresh Windows has none (the clean VM, 2026-11-08)
         self.virtualization = _facts("Dell Inc. OptiPlex", True, True)
         self.wsl = True
         self.fail: dict[str, int] = {}  # winget package -> times it fails
@@ -230,7 +231,8 @@ class Box:
 
     def finders(self):
         return {"soffice": lambda: "C:/LO/soffice.com" if self.soffice else None,
-                "docker": lambda: "C:/Docker/docker.exe" if self.docker else None}
+                "docker": lambda: "C:/Docker/docker.exe" if self.docker else None,
+                "vcruntime": lambda: self.vcruntime}
 
     def run(self, argv, **kw):
         argv = [str(a) for a in argv]
@@ -245,7 +247,8 @@ class Box:
                 return done(0x80004004, "Cancelled\n")
             setattr_for = {"UB-Mannheim.TesseractOCR": ("langs", ("eng", "osd")),
                            "TheDocumentFoundation.LibreOffice": ("soffice", True), "Cisco.ClamAV": ("clam", True),
-                           "OpenJS.NodeJS.LTS": ("node", True), "Docker.DockerDesktop": ("docker", True)}
+                           "OpenJS.NodeJS.LTS": ("node", True), "Docker.DockerDesktop": ("docker", True),
+                           "Microsoft.VCRedist.2015+.x64": ("vcruntime", (14, 44))}
             attr, value = setattr_for[package]
             setattr(self, attr, value)
             return done(0, "Successfully installed\n")
@@ -268,10 +271,17 @@ class Box:
         if argv[:2] == ["schtasks", "/Run"]:
             self.kazma_up = True
             return done()
+        # PyTorch and ONNX Runtime load the Visual C++ runtime: without it the
+        # model steps fail as they did on the clean VM (2026-11-08).
         if "ocr_models.py" in line:
+            if not self.vcruntime:
+                return done(1, "ImportError: DLL load failed while importing onnxruntime_pybind11_state\n")
             self.models = True
             return done()
         if "download_local_model" in line:
+            if not self.vcruntime:
+                return done(1, 'OSError: [WinError 126] Error loading "torch\\lib\\c10.dll" or one of its '
+                               "dependencies.\n")
             self.embedding_model = True
             return done()
         if "install_service.py" in line:
@@ -377,9 +387,9 @@ def test_express_installs_everything_but_docker_and_a_second_run_does_nothing(bo
     out = capsys.readouterr().out
     assert machine.asked == ["Choose 1, 2 or 3 [1]: ", "Install now? [Y/n] "]
     assert box.extras == set(ic.extras_for(ic.components_for("express")))
-    assert _installs(box) == ["UB-Mannheim.TesseractOCR", "TheDocumentFoundation.LibreOffice",
-                              "Cisco.ClamAV", "OpenJS.NodeJS.LTS"]
-    assert box.models and box.service and box.scheduled and box.langs and "ara" in box.langs
+    assert _installs(box) == ["Microsoft.VCRedist.2015+.x64", "UB-Mannheim.TesseractOCR",
+                              "TheDocumentFoundation.LibreOffice", "Cisco.ClamAV", "OpenJS.NodeJS.LTS"]
+    assert box.models and box.embedding_model and box.service and box.scheduled and box.langs and "ara" in box.langs
     assert "Docker.DockerDesktop" not in _installs(box)
     assert box.opened == ["http://127.0.0.1:9090/setup"], out  # the setup guide
     record = json.loads((box.home / "setup_record.json").read_text(encoding="utf-8"))["install"]
@@ -396,6 +406,24 @@ def test_express_installs_everything_but_docker_and_a_second_run_does_nothing(bo
     assert install(_options(), again) == 0
     assert again.asked == [] and not _installs(box)
     assert "Installed as Express" in capsys.readouterr().out
+
+
+def test_control_without_the_runtime_meaning_search_and_neural_ocr_fail(box, capsys, monkeypatch):
+    """Negative control: the part table before 2026-11-08 named no Visual C++
+    runtime. On a fresh Windows PyTorch and ONNX Runtime could not load, so
+    the model downloads failed, as on the clean VM."""
+    import dataclasses
+
+    from kazma_cli.install import install
+
+    old = tuple(dataclasses.replace(c, system=tuple(d for d in c.system if d != "vcruntime"))
+                for c in ic.COMPONENTS)
+    monkeypatch.setattr(ic, "COMPONENTS", old)
+    monkeypatch.setattr(ic, "_BY_ID", {c.id: c for c in old})
+    machine = _machine(box, answers=["", ""])
+    install(_options(), machine)
+    assert "Microsoft.VCRedist.2015+.x64" not in _installs(box)
+    assert not box.embedding_model and not box.models, "the model steps failed without the runtime"
 
 
 def test_problems_are_said_before_anything_is_done(box, capsys):

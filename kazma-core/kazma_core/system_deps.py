@@ -34,13 +34,18 @@ from kazma_core.postgres_service import Platform, Step
 
 __all__ = ["DEPENDENCIES", "PACKAGES", "TESSDATA", "DepState", "DockerReadiness", "check_all",
            "docker_readiness", "fetch_tessdata", "freshclam_agent_plist", "install_plan", "installs_package",
-           "package_is_in", "record_system", "tessdata_folder", "wsl_install_step"]
+           "needed_here", "package_is_in", "record_system", "tessdata_folder",
+           "wsl_install_step"]
 
 Runner = Callable[..., subprocess.CompletedProcess]
 
-#: What Kazma needs from the system, in install order.
-DEPENDENCIES = ("ocr", "office", "malware", "fonts", "node", "docker")
+#: What Kazma needs from the system, in install order. ``vcruntime`` is
+#: Windows only, and first: PyTorch and ONNX Runtime load it.
+DEPENDENCIES = ("vcruntime", "ocr", "office", "malware", "fonts", "node", "docker")
+#: Dependencies that exist on one OS only (the others never list them).
+WINDOWS_ONLY = ("vcruntime",)
 LABELS = {
+    "vcruntime": "Microsoft Visual C++ runtime (PyTorch and ONNX Runtime need it)",
     "ocr": "OCR (Tesseract, Arabic and English)",
     "office": "Office conversion (LibreOffice)",
     "malware": "Malware scan (ClamAV and its daily signature refresh)",
@@ -53,6 +58,7 @@ LABELS = {
 #: install there (the fonts are bundled with Kazma on Windows and macOS).
 PACKAGES: dict[str, dict[str, tuple[str, ...] | None]] = {
     "winget": {
+        "vcruntime": ("Microsoft.VCRedist.2015+.x64",),
         "ocr": ("UB-Mannheim.TesseractOCR",),
         "office": ("TheDocumentFoundation.LibreOffice",),
         "malware": ("Cisco.ClamAV",),
@@ -61,6 +67,7 @@ PACKAGES: dict[str, dict[str, tuple[str, ...] | None]] = {
         "docker": ("Docker.DockerDesktop",),
     },
     "brew": {
+        "vcruntime": None,
         "ocr": ("tesseract", "tesseract-lang"),
         "office": ("--cask", "libreoffice"),
         "malware": ("clamav",),
@@ -69,6 +76,7 @@ PACKAGES: dict[str, dict[str, tuple[str, ...] | None]] = {
         "docker": ("--cask", "docker"),
     },
     "apt": {
+        "vcruntime": None,
         "ocr": ("tesseract-ocr", "tesseract-ocr-ara", "tesseract-ocr-eng"),
         "office": ("libreoffice-writer",),
         "malware": ("clamav", "clamav-freshclam"),
@@ -77,6 +85,7 @@ PACKAGES: dict[str, dict[str, tuple[str, ...] | None]] = {
         "docker": ("docker.io",),
     },
     "dnf": {
+        "vcruntime": None,
         "ocr": ("tesseract", "tesseract-langpack-ara"),
         "office": ("libreoffice-writer",),
         "malware": ("clamav", "clamav-update"),
@@ -119,6 +128,49 @@ def _out(run: Runner, argv: list[str], timeout: float = 30) -> tuple[int, str]:
     except (OSError, subprocess.SubprocessError):
         return 127, ""
     return done.returncode, (done.stdout or "") + (done.stderr or "")
+
+
+#: The oldest x64 Visual C++ runtime accepted (major, minor): Visual Studio
+#: 2022's. A newer runtime runs what an older toolset built, never the reverse.
+VCRUNTIME_MIN = (14, 40)
+_VCRUNTIME_KEY = r"SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64"
+
+
+def _vcruntime_version() -> tuple[int, int] | None:
+    """The x64 Visual C++ runtime installed on this Windows, as (major,
+    minor), or None. A fresh Windows has none (Python brings vcruntime140.dll
+    only), and PyTorch then fails to load c10.dll: on the clean VM
+    (2026-11-08) the meaning-search model could not download. An earlier VM
+    had it only because a winget install before it had brought it along."""
+    if os.name != "nt":
+        return None
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, _VCRUNTIME_KEY, 0,
+                            winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:
+            installed = winreg.QueryValueEx(key, "Installed")[0]
+            major = winreg.QueryValueEx(key, "Major")[0]
+            minor = winreg.QueryValueEx(key, "Minor")[0]
+    except OSError:
+        return None
+    return (int(major), int(minor)) if installed else None
+
+
+def _check_vcruntime(find: Callable[[], tuple[int, int] | None]) -> DepState:
+    version = find()
+    if version is None:
+        return DepState("vcruntime", False, "the Microsoft Visual C++ runtime is not installed", ["vcruntime"])
+    shown = f"{version[0]}.{version[1]}"
+    if tuple(version) < VCRUNTIME_MIN:
+        return DepState("vcruntime", False, f"the Visual C++ runtime is {shown}, older than "
+                        f"{VCRUNTIME_MIN[0]}.{VCRUNTIME_MIN[1]}", ["vcruntime"])
+    return DepState("vcruntime", True, f"Microsoft Visual C++ runtime {shown}")
+
+
+def needed_here(dep: str, platform: Platform) -> bool:
+    """Whether *dep* exists on *platform* at all (the Visual C++ runtime is Windows's)."""
+    return dep not in WINDOWS_ONLY or platform.os == "windows"
 
 
 def _tesseract(which: Callable[[str], str | None]) -> str | None:
@@ -231,14 +283,18 @@ def _check_docker(run: Runner, find: Callable[[], str | None]) -> DepState:
 def check_all(platform: Platform, *, run: Runner = subprocess.run,
               which: Callable[[str], str | None] = shutil.which,
               soffice: Callable[[], str | None] | None = None,
-              docker: Callable[[], str | None] | None = None) -> list[DepState]:
-    """Every dependency as found on this machine. *soffice* and *docker* find
-    those programs (Kazma's own finders by default)."""
+              docker: Callable[[], str | None] | None = None,
+              vcruntime: Callable[[], tuple[int, int] | None] | None = None) -> list[DepState]:
+    """Every dependency as found on this machine. *soffice*, *docker* and
+    *vcruntime* find those (Kazma's own finders by default). The Visual C++
+    runtime is listed on Windows only, first: what loads it comes after."""
     if soffice is None:
         from kazma_core.documents.binaries import find_soffice as soffice
     if docker is None:
         from kazma_core.docker_cli import find_docker_cli as docker
+    first = [_check_vcruntime(vcruntime or _vcruntime_version)] if platform.os == "windows" else []
     return [
+        *first,
         _check_ocr(run, which),
         _check_office(soffice),
         _check_malware(platform.os, run, which),
@@ -314,8 +370,8 @@ def install_plan(platform: Platform, states: list[DepState]) -> list[Step]:
 
 #: The name each check puts in ``missing`` while the dependency's own package
 #: is not installed (the models and the signature schedule come after it).
-_PACKAGE_MISSING = {"ocr": "tesseract", "office": "libreoffice", "malware": "clamav", "fonts": "fonts",
-                    "node": "node", "docker": "docker"}
+_PACKAGE_MISSING = {"vcruntime": "vcruntime", "ocr": "tesseract", "office": "libreoffice", "malware": "clamav",
+                    "fonts": "fonts", "node": "node", "docker": "docker"}
 
 
 def installs_package(step: Step) -> bool:

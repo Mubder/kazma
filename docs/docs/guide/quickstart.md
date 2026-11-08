@@ -176,6 +176,7 @@ The system programs come from the OS's package manager:
 
 | What | Windows (winget) | macOS (Homebrew) | Debian / Ubuntu / WSL (apt) | Fedora (dnf) |
 |---|---|---|---|---|
+| Visual C++ runtime (PyTorch and ONNX Runtime load it) | `Microsoft.VCRedist.2015+.x64`, first | not needed | not needed | not needed |
 | OCR | `UB-Mannheim.TesseractOCR`, plus the Arabic and English models (a pinned release, checked by SHA-256) | `tesseract`, `tesseract-lang` | `tesseract-ocr`, `tesseract-ocr-ara`, `tesseract-ocr-eng` | `tesseract`, `tesseract-langpack-ara` |
 | Office conversion | `TheDocumentFoundation.LibreOffice` | `--cask libreoffice` | `libreoffice-writer` | `libreoffice-writer` |
 | Malware scan | `Cisco.ClamAV`, plus a daily `freshclam` task | `clamav`, plus a daily `freshclam` launchd job | `clamav`, `clamav-freshclam` | `clamav`, `clamav-update` |
@@ -185,7 +186,9 @@ The system programs come from the OS's package manager:
 
 `kazma setup system` installs these programs alone (`--check`, `--dry-run`,
 `-y` as above), and `kazma doctor` shows the same checks and names the command
-for anything missing. Postgres as a service on its own is
+for anything missing. On a brand-new Windows, winget may not have set up its
+package list yet (it answers 0x8A15000F to every install); setup registers
+the list itself and carries on. Postgres as a service on its own is
 `kazma setup postgres` (the operations guide, "Postgres as an OS service").
 
 ### Path B — Editable install (manual)

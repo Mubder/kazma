@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Setup works on a brand-new Windows.** A clean install on a fresh virtual
+  machine found four things. winget had never set up its package list and
+  refused every install (0x8A15000F), so setup left out OCR, LibreOffice,
+  ClamAV and Node.js: setup now registers the list itself and carries on. A
+  fresh Windows has no Microsoft Visual C++ runtime, which PyTorch and ONNX
+  Runtime need, so meaning search and neural OCR could not install: setup
+  now installs the runtime first. The service would not register when the
+  Windows account is named like the computer: it now names the account in
+  full. And a slow connection no longer cuts off the package download after
+  30 minutes (a step gets 3 hours, and one that runs out says so instead of
+  "could not run"). Setup also no longer says "pip failed" on a machine with
+  no Python.
 - **Stopping documents no longer strands an upload.** Stopping the document
   service while its minute-by-minute cleanup was undoing an abandoned upload
   closed the database under it ("could not be rolled back
