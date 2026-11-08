@@ -1275,6 +1275,98 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "النماذج",
         "en": "Models",
     },
+    "settings.models_lede": {
+        "ar": "ما تضبطه بنفسك للنماذج التي يمكنك اختيارها: أيها تستخدمه المحادثات الجديدة، وما يقدر عليه كل نموذج، وكم يكلّف. لا يغيّر كاظمه قيمك؛ ما يذكره المزوّد يملأ ما تتركه فارغًا فقط.",
+        "en": "What you set by hand for the models you can choose: which one new chats use, what each model can do, and what it costs. Kazma never changes your values; what a provider reports fills in only what you leave empty.",
+    },
+    "settings.models_stat_models": {
+        "ar": "النماذج",
+        "en": "Models",
+    },
+    "settings.models_stat_used": {
+        "ar": "مستخدمة خلال 30 يومًا",
+        "en": "Used in 30 days",
+    },
+    "settings.models_stat_changed": {
+        "ar": "بقيمك",
+        "en": "Your values",
+    },
+    "settings.models_stat_unpriced": {
+        "ar": "بلا سعر معروف",
+        "en": "No known price",
+    },
+    "settings.models_change_default": {
+        "ar": "غيّر النموذج الافتراضي",
+        "en": "Change the default model",
+    },
+    "settings.models_filter_in_use": {
+        "ar": "قيد الاستخدام",
+        "en": "In use",
+    },
+    "settings.models_filter_all": {
+        "ar": "كل النماذج",
+        "en": "All models",
+    },
+    "settings.models_filter_provider": {
+        "ar": "المزوّد",
+        "en": "Provider",
+    },
+    "settings.models_all_providers": {
+        "ar": "كل المزوّدين",
+        "en": "All providers",
+    },
+    "settings.models_col_model": {
+        "ar": "النموذج",
+        "en": "Model",
+    },
+    "settings.models_col_window": {
+        "ar": "نافذة السياق",
+        "en": "Context window",
+    },
+    "settings.models_col_output": {
+        "ar": "حد المخرجات",
+        "en": "Output limit",
+    },
+    "settings.models_col_images": {
+        "ar": "الصور",
+        "en": "Images",
+    },
+    "settings.models_col_tools": {
+        "ar": "الأدوات",
+        "en": "Tools",
+    },
+    "settings.models_col_price": {
+        "ar": "السعر لكل مليون رمز",
+        "en": "Price per 1M tokens",
+    },
+    "settings.models_col_calls": {
+        "ar": "الطلبات خلال 30 يومًا",
+        "en": "Calls, 30 days",
+    },
+    "settings.models_tag_default": {
+        "ar": "الافتراضي",
+        "en": "Default",
+    },
+    "settings.models_cell_unknown": {
+        "ar": "غير معروف",
+        "en": "Not known",
+    },
+    "settings.models_price_pair": {
+        "ar": "مدخلات ${input} · مخرجات ${output}",
+        "en": "in ${input} · out ${output}",
+    },
+    "settings.models_none_match": {
+        "ar": "لا نموذج يطابق.",
+        "en": "No model matches.",
+    },
+    "settings.models_unsaved": {
+        "ar": "تغييرات غير محفوظة",
+        "en": "Unsaved changes",
+    },
+    "settings.models_edit_hint": {
+        "ar": "اترك الحقل فارغًا ليُستخدم ما يقوله المزوّد أو كتالوج كاظمه.",
+        "en": "Leave a field empty to use what the provider or Kazma's catalog says.",
+    },
     "settings.load": {
         "ar": "تحميل",
         "en": "Load",
@@ -6491,14 +6583,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.model_details_search": {
         "ar": "ابحث عن نموذج",
         "en": "Find a model",
-    },
-    "settings.model_details_show_all": {
-        "ar": "اعرض الكل",
-        "en": "Show all",
-    },
-    "settings.model_details_show_fewer": {
-        "ar": "اعرض أقل",
-        "en": "Show fewer",
     },
     "settings.model_details_short_hint": {
         "ar": "المعروض: النموذج الافتراضي، والنماذج المستخدمة في آخر 30 يومًا، والنماذج التي غيّرت تفاصيلها. ابحث لتجد أي نموذج آخر.",

@@ -243,10 +243,15 @@ per project/location. Hardcoded model list: `gemini-2.5-flash`,
 
 Settings → Providers & Connectors → **Models** holds what you set by hand:
 the default model, Model details, Model prices and saved profiles.
-**Model details** shows every model you can choose with what Kazma knows
-about it, and where each fact came from. It lists the default model, the
+The tab opens with four counts (models, used in the last 30 days, with your
+values, with no known price) and the default model with what is known about
+it. **Model details** is one table: each model's context window, output
+limit, image and tool support, price and calls in the last 30 days, each
+value with where it came from. **In use** lists the default model, the
 models used in the last 30 days and the ones whose details you changed;
-search finds any other, and **Show all** lists every one:
+**All models**, a provider or a search lists the rest, and a column header
+sorts by it. **Edit** opens a row's own values, saved together. The facts
+come from:
 
 1. **your value** (Edit, on the model's row): its context window, output
    limit, whether it sees images, whether it uses tools;

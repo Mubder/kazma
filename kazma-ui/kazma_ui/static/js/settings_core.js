@@ -309,6 +309,10 @@
         // The card lists the models that matter first; search finds the rest.
         modelDetailsQuery: '',
         modelDetailsShowAll: false,
+        modelDetailsProvider: '',
+        // '' = the tab's own order: the default, then by calls, then yours.
+        modelDetailsSort: '',
+        modelDetailsSortDir: 1,
         defaultModelRef: '',
         hubProviderModal: false,
         hubConnectorModal: false,

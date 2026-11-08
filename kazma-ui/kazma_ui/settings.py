@@ -506,7 +506,7 @@ class SettingsRouterBuilder:
                 known = details_for(o["provider"], o["model"], preset=str(row.get("preset") or ""),
                                     store=config_store)
                 rows.append({
-                    "ref": o["ref"], "provider_label": o["provider_label"], "model": o["model"],
+                    "ref": o["ref"], "provider": o["provider"], "provider_label": o["provider_label"], "model": o["model"],
                     "local": o["local"], **known.as_dict(),
                     "override": overrides.get(o["ref"].lower()) or overrides.get(o["model"].lower()) or {},
                     # Calls in the last 30 days: the card lists these first,

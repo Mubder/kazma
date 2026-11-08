@@ -3810,6 +3810,305 @@ details.kazma-working > summary {
   background-position: 12px center;
 }
 
+/* The providers that are off and cannot be called, folded into one row at
+   the end of the list (2026-11-08). */
+.pc-fold {
+  display: block;
+  width: 100%;
+  padding: 10px 13px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: none;
+  font: inherit;
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+  text-align: start;
+  cursor: pointer;
+}
+.pc-fold:hover { background: var(--tint-strong); color: var(--text); }
+.pc-fold:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* ── 21c. Models (Settings → Providers & Connectors → Models) ─────────
+   What the owner sets by hand for the models they can choose, apart from
+   the providers (2026-11-08: the providers page ran to ~2,000 lines).
+   The provider control plane's language: panels, uppercase panel titles,
+   semantic colour for states only. One table for every model, its header
+   sticky inside its own scroll, so 400 models never lengthen the page;
+   on a narrow panel each row becomes a card that names its values. */
+.mc-scope {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.mc-scope > .pc-top { margin-bottom: 0; }
+/* A panel's title is the control plane's small label, whether it is an
+   h3 or an h4: the settings page's own h3 rule (1rem, underlined) made
+   two panels shout beside the others. */
+.mc-scope .pc-phead > .pc-ptitle,
+.mc-scope .mc-subhead > .pc-ptitle {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.mc-foot .setting-desc,
+.mc-default-pick .setting-desc { font-size: 0.76rem; margin: 0; }
+
+.mc-model {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.mc-prov {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+.mc-tag {
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+.mc-tag.tag-yours { border-color: var(--warning); color: var(--warning); }
+
+/* The default model */
+.mc-default-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: var(--sp-4);
+  padding: 14px 15px;
+  align-items: start;
+}
+.mc-default-now { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.mc-default-now .mc-model { font-size: 1.05rem; }
+.mc-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.mc-chip {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  background: var(--tint);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+.mc-default-pick { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.mc-default-pick .form-select { width: 100%; }
+
+/* The table's tools: in use / all, a provider, words */
+.mc-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.mc-tools .form-select,
+.mc-tools .form-input { width: auto; min-width: 0; font-size: 0.78rem; padding: 5px 9px; }
+.mc-search { flex: 1 1 200px; }
+.mc-seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  overflow: hidden;
+}
+.mc-seg button {
+  font: inherit;
+  font-size: 0.74rem;
+  padding: 5px 11px;
+  background: none;
+  border: 0;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.mc-seg button + button { border-inline-start: 1px solid var(--border); }
+.mc-seg button[aria-pressed="true"] { background: var(--tint-strong); color: var(--text); font-weight: 600; }
+.mc-seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.mc-lede,
+.mc-note {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  max-width: 90ch;
+}
+.mc-lede { padding: 10px 15px 0; }
+
+/* The table */
+.mc-table {
+  margin-top: 10px;
+  max-height: min(68vh, 640px);
+  overflow: auto;
+  border-top: 1px solid var(--border);
+}
+.mc-thead,
+.mc-row {
+  display: grid;
+  grid-template-columns:
+    minmax(190px, 2.4fr) minmax(88px, 1fr) minmax(80px, 0.9fr)
+    minmax(64px, 0.6fr) minmax(64px, 0.6fr) minmax(130px, 1.3fr) minmax(64px, 0.7fr) 64px;
+  column-gap: 12px;
+  align-items: center;
+  padding-block: 8px;
+  padding-inline: 12px 15px;
+  border-inline-start: 3px solid transparent;
+}
+.mc-thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-elevated, var(--bg));
+  border-bottom: 1px solid var(--border);
+  font-size: 0.64rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.mc-thead button {
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.mc-thead button:hover { color: var(--text); }
+.mc-thead [aria-sort="ascending"],
+.mc-thead [aria-sort="descending"] { color: var(--text); }
+.mc-row {
+  border-bottom: 1px solid var(--border);
+  font-size: 0.78rem;
+}
+.mc-row:hover { background: var(--tint); }
+.mc-row.is-default { border-inline-start-color: var(--accent); }
+.mc-row.is-editing { background: var(--tint); }
+.mc-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mc-num {
+  align-items: flex-end;
+  text-align: end;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.mc-thead .mc-num { font-family: inherit; }
+.mc-src { font-family: var(--font-sans); font-size: 0.62rem; color: var(--text-muted); }
+.mc-text { font-family: var(--font-sans); }
+.mc-unknown { font-family: var(--font-sans); color: var(--warning); }
+.mc-flag {
+  width: max-content;
+  font-size: 0.68rem;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  color: var(--text-muted);
+}
+.mc-flag.flag-yes { color: var(--success); background: var(--success-subtle); border-color: transparent; }
+.mc-flag.flag-unknown { border-style: dashed; font-weight: 400; }
+.mc-act { align-items: flex-end; }
+.mc-edit {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  padding: 10px 15px 14px;
+  background: var(--tint);
+  border-bottom: 1px solid var(--border);
+  align-items: end;
+}
+.mc-edit label { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.mc-edit .setting-desc { font-size: 0.72rem; margin: 0; }
+.mc-edit-hint { grid-column: 1 / -1; margin: 0; }
+.mc-none { padding: 18px 15px; color: var(--text-muted); font-size: 0.8rem; }
+.mc-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 10px 15px;
+  border-top: 1px solid var(--border);
+}
+.mc-foot .btn-primary { margin-inline-start: auto; }
+.mc-dirty { font-size: 0.7rem; font-weight: 600; color: var(--warning); }
+
+/* Prices and profiles, side by side */
+.mc-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: var(--sp-3);
+  align-items: start;
+}
+.mc-body { padding: 12px 15px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.mc-subhead { padding: 10px 15px 0; border-top: 1px solid var(--border); }
+.mc-price-head,
+.mc-price-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) 36px;
+  gap: 8px;
+  align-items: center;
+}
+.mc-price-head {
+  font-size: 0.64rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.mc-actions-row { display: flex; justify-content: flex-end; }
+.mc-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+}
+.mc-line:last-child { border-bottom: 0; }
+.mc-line > .mc-model,
+.mc-profile { flex: 1; min-width: 0; }
+.mc-profile { display: flex; flex-direction: column; gap: 2px; }
+.mc-profile-name { font-size: 0.84rem; font-weight: 600; }
+
+/* A narrow panel: a row is a card naming its values */
+@container (max-width: 980px) {
+  .mc-pair { grid-template-columns: 1fr; }
+}
+@container (max-width: 760px) {
+  .mc-default-body { grid-template-columns: 1fr; }
+  .mc-thead { display: none; }
+  .mc-row {
+    grid-template-columns: 1fr 1fr;
+    row-gap: 10px;
+    padding-block: 12px;
+    padding-inline: 12px 15px;
+  }
+  .mc-cell-model,
+  .mc-act { grid-column: 1 / -1; }
+  .mc-act { align-items: flex-start; }
+  .mc-num { align-items: flex-start; text-align: start; }
+  .mc-cell[data-label]::before {
+    content: attr(data-label);
+    font-family: var(--font-sans);
+    font-size: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  .mc-edit { grid-template-columns: 1fr 1fr; }
+  .mc-price-head { display: none; }
+  .mc-price-row { grid-template-columns: 1fr 1fr 36px; }
+  .mc-price-row > input[type="text"] { grid-column: 1 / -1; }
+}
+
 /* ── 22. Theme Toggle ───────────────────────────────────────────── */
 .theme-toggle {
   background: none;

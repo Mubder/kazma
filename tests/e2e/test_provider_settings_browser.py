@@ -233,8 +233,7 @@ def test_stage_two_to_four_in_a_browser(kazma) -> None:
             # Model details and the default model, on the Models sub-tab.
             pg.locator("#hub-subtab-models").click()
             details = pg.locator("#model-details")
-            details.locator(".model-detail-row span", has_text=f"fakeserver:{MODEL}").first.wait_for(
-                state="visible", timeout=30000)
+            details.locator(".model-detail-row", has_text=MODEL).first.wait_for(state="visible", timeout=30000)
             assert "Free (on your network)" in details.inner_text()
             pg.locator("#default-model-select").select_option(f"fakeserver:{MODEL}")
             pg.wait_for_function(
@@ -325,8 +324,19 @@ def test_speech_folded_providers_and_the_models_tab_in_a_browser(kazma) -> None:
             shown = pg.locator("#model-details .model-detail-row")
             pg.wait_for_function(
                 "document.querySelectorAll('#model-details .model-detail-row').length === 1", timeout=10000)
-            assert "fakeserver:fake-two" in shown.first.inner_text()
+            row = shown.first.inner_text()
+            assert "fake-two" in row and "fakeserver" in row
             assert "of 2 models" in pg.locator("#model-details-count").inner_text()
+            # All models, sorted by name both ways from the column header.
+            search.fill("")
+            pg.locator("#model-details-all").click()
+            pg.wait_for_function(
+                "document.querySelectorAll('#model-details .model-detail-row').length === 2", timeout=10000)
+            header = pg.locator("#model-details .mc-thead button").first
+            header.click()
+            assert shown.first.locator(".mc-model").inner_text() == "fake-model"
+            header.click()
+            assert shown.first.locator(".mc-model").inner_text() == "fake-two"
 
             # Arabic: the sub-tab's name.
             ctx = browser.new_context(viewport={"width": 1280, "height": 900})

@@ -9609,10 +9609,15 @@ The rest of the plan in §60, done the same day.
 - **The providers page stays short** (2026-11-08, the owner: "why the
   providers page is too long"; live's ran to ~2,000 lines). The default
   model, Model details, Model prices and saved profiles are the Models
-  sub-tab (`hubSubtab` `models`, deep link `?tab=models`). Model details
-  lists `shownModelDetails()`: the default, models with calls in the last 30
-  days (`llm_ledger.used_models`, the route's `used`), the ones you changed
-  and the one being edited; a search (50 at most) or Show all for the rest.
+  sub-tab (`hubSubtab` `models`, deep link `?tab=models`), styled as the
+  provider control plane (`.mc-*` in kazma.css, 21c): four counts, the
+  default model's panel, and Model details as one table that scrolls under
+  its own header and becomes labelled cards on a narrow panel. The table
+  lists `shownModelDetails()`: In use is the default, models with calls in
+  the last 30 days (`llm_ledger.used_models`, the route's `used`), the ones
+  you changed and the one being edited; All models, a provider or words
+  for the rest; a header sorts (`sortModelDetails`); unsaved edits are
+  said and Save opens only then (`modelDetailsDirty`).
   A provider that is off and cannot be called (`callable`, from
   `provider_check.credentials_problem`) folds away (`providerFoldedAway`)
   unless it is the one open. Model prices offers a model only when a working

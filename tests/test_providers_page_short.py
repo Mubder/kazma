@@ -110,8 +110,9 @@ def test_the_page_lists_the_short_list_and_folds_what_cannot_be_called():
     (tests/e2e/test_provider_settings_browser.py runs them)."""
     js = (ROOT / "kazma-ui" / "kazma_ui" / "static" / "js" / "settings_hub.js").read_text(encoding="utf-8")
     html = (ROOT / "kazma-ui" / "kazma_ui" / "templates" / "settings.html").read_text(encoding="utf-8")
-    shown = _slice(js, "shownModelDetails() {", "modelDetailChanged(m) {")
-    assert "Number(m.used) > 0" in shown and "this.defaultModelRef" in shown and "slice(0, 50)" in shown
+    shown = _slice(js, "shownModelDetails() {", "sortedModelDetails(rows) {")
+    assert "Number(m.used) > 0" in shown and "this.defaultModelRef" in shown
+    assert "!this.modelDetailsShowAll" in shown and "modelDetailsProvider" in shown
     folded = _slice(js, "providerFoldedAway(p) {", "foldedProviderCount() {")
     assert "p.callable !== false" in folded and "p.enabled !== false" in folded
     assert 'x-for="m in shownModelDetails()"' in html, "the card lists every model again"
