@@ -1832,13 +1832,23 @@ def create_graph_handler(
             try:
                 try:
                     from kazma_core.agent.turn import run_agent_turn
+                    from kazma_core.chat_model_choice import chat_model_for
+                    from kazma_core.runtime.turn_model import pin_turn_model, reset_turn_model
 
-                    _turn = await run_agent_turn(
-                        graph=graph,
-                        thread_id=thread_id,
-                        state=state,
-                        config=config,
-                    )
+                    # This chat's own model (providers stage 3: /model), as
+                    # the web chat pins the one its picker shows. None: the
+                    # default.
+                    _chat_ref = await asyncio.to_thread(chat_model_for, thread_id)
+                    _model_pin = pin_turn_model(_chat_ref)
+                    try:
+                        _turn = await run_agent_turn(
+                            graph=graph,
+                            thread_id=thread_id,
+                            state=state,
+                            config=config,
+                        )
+                    finally:
+                        reset_turn_model(_model_pin)
                     result_state = _turn.state or {}
                     # What the agent did, for the gateway's tool hints: a
                     # turn that used a tool needs no "I can read that URL".

@@ -15,9 +15,19 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["compute_setup_status", "create_setup_router"]
 
-_LOCAL = frozenset({"ollama", "lm-studio", "lmstudio"})
-#: Providers that need more than a key (an endpoint, AWS credentials): Settings.
-_NOT_GUIDED = frozenset({"custom", "azure", "bedrock"})
+#: The catalog's local presets (kazma_core.providers, providers stage 2), and
+#: the old spelling of LM Studio's id.
+_LOCAL = frozenset({pid for pid, meta in PROVIDER_PRESETS.items() if meta.get("local")} | {"lmstudio"})
+
+
+def _guided(pid: str, meta: dict[str, Any]) -> bool:
+    """A cloud provider whose key is all the guide asks for. One that needs
+    more -- an endpoint of one's own (custom, Azure), AWS keys (Bedrock), an
+    account id in its address (Cloudflare) -- is set up in Settings. Read
+    from the catalog's form (providers stage 2), never a list of names."""
+    if pid == "custom" or meta.get("local") or meta.get("url_hint"):
+        return False
+    return str(meta.get("form") or "key") in ("key", "google")
 
 
 def _has_key(value: Any) -> bool:
@@ -35,7 +45,14 @@ def compute_setup_status(registry: Any | None = None) -> dict[str, Any]:
     profile = registry.get_active_profile() if hasattr(registry, "get_active_profile") else {}
     provider = str(profile.get("provider") or "").strip().lower()
     has_model = bool(str(profile.get("model") or "").strip())
-    has_provider = _has_key(profile.get("api_key")) or provider in _LOCAL
+    # A server on this computer or network is ready by its ADDRESS
+    # (providers stage 3): a vLLM the owner added, or one the guide found by
+    # address, has a name of its own, and the name rule kept the setup wall
+    # up over a working server.
+    from kazma_core.runtime.live_llm import url_is_local
+
+    has_provider = (_has_key(profile.get("api_key")) or provider in _LOCAL
+                    or url_is_local(str(profile.get("base_url") or "")))
 
     # Another provider's key counts (Kazma falls back to a provider that has
     # one, and says so). A local server counts only as the provider in use:
@@ -68,7 +85,7 @@ def compute_setup_status(registry: Any | None = None) -> dict[str, Any]:
             "default_model": default_model_for(pid) or "",
             # A key is all the guide asks for: an endpoint of one's own (custom,
             # Azure) or AWS credentials (Bedrock) are set up in Settings.
-            "guided": pid not in _LOCAL and pid not in _NOT_GUIDED,
+            "guided": _guided(pid, meta),
         }
         for pid, meta in PROVIDER_PRESETS.items()
     ]

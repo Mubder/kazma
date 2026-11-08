@@ -351,21 +351,22 @@ async def _handle_swarm_config_command(
 
 
 def _get_visible_providers() -> list[dict[str, Any]]:
-    """Return providers that have selected (visible) models."""
+    """The model list every picker reads (kazma_core.models.options,
+    providers stage 3), by provider: ``{name, display_name, models, refs}``.
+    Only providers that can answer a chat: keyless cloud providers and
+    speech services were offered here and failed when picked. Blocking:
+    callers run it off the loop."""
     try:
         from kazma_core.model_registry import get_model_registry
-        reg = get_model_registry()
-        result: list[dict[str, Any]] = []
-        for p in reg.list_providers():
-            name = p.get("name", "")
-            display = p.get("display_name", name)
-            enabled = p.get("enabled", True)
-            if not enabled or not name:
-                continue
-            models = reg.get_visible_models(name)
-            if models:
-                result.append({"name": name, "display_name": display, "models": models})
-        return result
+        from kazma_core.models.options import model_options
+
+        groups: dict[str, dict[str, Any]] = {}
+        for o in model_options(get_model_registry(), details=False)["options"]:
+            g = groups.setdefault(o["provider"], {
+                "name": o["provider"], "display_name": o["provider_label"], "models": [], "refs": []})
+            g["models"].append(o["model"])
+            g["refs"].append(o["ref"])
+        return list(groups.values())
     except Exception as exc:
         logger.warning("[agent-handler] Failed to get providers: %s", exc)
         return []
@@ -1580,158 +1581,185 @@ async def _try_model_command(
     manager: Any,
     thread_id: str,
 ) -> bool:
-    """Handle /models, /_models_provider, /_models_select commands.
+    """``/model``: this chat's model (providers stage 3).
 
-    Flow:
-        /models                → show provider buttons
-        /_models_provider <p>  → show model buttons for provider
-        /_models_select <m>    → switch active model, confirm
+        /model, /models          → this chat's model, then the providers
+                                   (Telegram: buttons; elsewhere every model,
+                                   numbered)
+        /model <n | provider:model | model>
+                                 → this chat runs with it from its next turn
+        /model reset             → this chat follows the default again
+        /model default <model>   → the install's default (admin)
+        /_models_provider <p>    → a provider's model buttons (Telegram)
+        /_models_select <ref>    → a button's pick: this chat's model
 
-    Returns True if handled.
+    A pick used to switch the model for the whole install (admin-only), and
+    Discord and Slack listed five models per provider. Returns True if
+    handled.
     """
     text = (msg.text or "").strip()
     if not text.startswith("/"):
         return False
-
-    cmd = text.split(None, 1)[0].lower()
-
+    parts = text.split(None, 2)
+    cmd = parts[0].lower().split("@", 1)[0]
     if cmd not in ("/models", "/model", "/_models_provider", "/_models_select"):
         return False
 
     ctx = await store.get(thread_id)
     if not ctx:
         ctx = msg.context_metadata
+    from kazma_core.chat_model_choice import chat_model_for, clear_chat_model, set_chat_model
+    from kazma_core.db.pg_helpers import store_errors
 
-    # ── /models: Show provider keyboard ───────────────────────────
-    if cmd in ("/models", "/model"):
-        providers = _get_visible_providers()
-        if not providers:
-            await _send_model_reply(msg, store, manager, thread_id,
-                "No providers with models configured. "
-                "Use the Web UI Settings to add providers and select models.")
-            return True
+    groups = await asyncio.to_thread(_get_visible_providers)
+    refs = [ref for g in groups for ref in g["refs"]]
 
-        # Build inline keyboard for Telegram
-        if msg.platform == "telegram":
-            try:
-                from kazma_gateway.adapters.telegram import TelegramAdapter
-                keyboard = TelegramAdapter.build_provider_keyboard(providers)
-                reply_ctx = dict(ctx)
-                reply_ctx["reply_markup"] = keyboard
-                model_lines = "\n".join(
-                    f"  • {p['display_name']} ({count_noun(len(p['models']), 'model')})"
-                    for p in providers
-                )
-                await manager.send(OutboundMessage(
-                    target_id=_build_target_id(msg.platform, ctx),
-                    text=f"Select a provider:\n\n{model_lines}",
-                    context_metadata=reply_ctx,
-                ))
-                return True
-            except Exception as exc:
-                logger.debug("Interactive provider selection failed: %s", exc, exc_info=True)
-                # fall through to text
+    async def reply(body: str) -> None:
+        await _send_model_reply(msg, store, manager, thread_id, body)
+
+    async def choose(ref: str) -> None:
+        try:
+            await asyncio.to_thread(set_chat_model, thread_id, ref)
+        except store_errors() as exc:  # said to the person who asked
+            logger.warning("[agent-handler] /model could not keep this chat's model: %s", type(exc).__name__)
+            await reply("⚠️ The model could not be saved for this chat; it is unchanged.")
+            return
+        await reply(f"✅ This chat now uses `{ref}`. Other chats keep theirs.")
+
+    def resolve(arg: str) -> tuple[str, list[str]]:
+        """``(ref, candidates)``: a number from the list, a reference, or a
+        model name one provider offers."""
+        a = arg.strip()
+        if a.isdigit() and 1 <= int(a) <= len(refs):
+            return refs[int(a) - 1], []
+        if a in refs:
+            return a, []
+        by_name = [r for g in groups for r, m in zip(g["refs"], g["models"]) if m == a]
+        if len(by_name) == 1:
+            return by_name[0], []
+        return "", by_name
+
+    # ── A button's pick ───────────────────────────────────────────
+    if cmd == "/_models_select":
+        arg = parts[1].strip() if len(parts) > 1 else ""
+        ref, _candidates = resolve(arg)
+        if not ref:
+            await reply(f"⚠️ `{arg}` is not offered any more. Send /model for the list.")
         else:
-            pass
-
-        # Text fallback (non-Telegram or keyboard build failed)
-        lines = ["Available providers:\n"]
-        for p in providers:
-            lines.append(f"  {p['display_name']} — {count_noun(len(p['models']), 'model')}")
-            for m in p["models"][:5]:
-                active = " *(active)*" if _is_active_model(m) else ""
-                lines.append(f"    {m}{active}")
-        lines.append("\nUse `/config model <model_name>` to switch.")
-        await _send_model_reply(msg, store, manager, thread_id, "\n".join(lines))
+            await choose(ref)
         return True
 
-    # ── /_models_provider: Show model buttons ─────────────────────
     if cmd == "/_models_provider":
         provider_name = text.split(None, 1)[1].strip() if len(text.split(None, 1)) > 1 else ""
-        if not provider_name:
+        group = next((g for g in groups if g["name"] == provider_name), None)
+        if group is None:
+            await reply(f"No models found for provider '{provider_name}'.")
             return True
-
-        models = _get_provider_models(provider_name)
-        if not models:
-            await _send_model_reply(msg, store, manager, thread_id,
-                f"No models found for provider '{provider_name}'.")
-            return True
-
         if msg.platform == "telegram":
             try:
                 from kazma_gateway.adapters.telegram import TelegramAdapter
-                keyboard = TelegramAdapter.build_model_keyboard(provider_name, models)
+
+                keyboard = TelegramAdapter.build_model_keyboard(provider_name, group["models"])
                 reply_ctx = dict(ctx)
                 reply_ctx["reply_markup"] = keyboard
-                model_lines = "\n".join(f"  • {m}" for m in models)
                 await manager.send(OutboundMessage(
                     target_id=_build_target_id(msg.platform, ctx),
-                    text=f"Select a model from {provider_name}:\n\n{model_lines}",
+                    text=f"Pick a model from {group['display_name']} for this chat:",
                     context_metadata=reply_ctx,
                 ))
                 return True
             except Exception as exc:
                 logger.debug("Interactive model selection failed: %s", exc)
-
-        lines = [f"Models for {provider_name}:\n"]
-        for m in models:
-            active = " *(active)*" if _is_active_model(m) else ""
-            lines.append(f"  {m}{active}")
-        await _send_model_reply(msg, store, manager, thread_id, "\n".join(lines))
+        await reply("\n".join([f"Models for {group['display_name']}:", *[f"  {r}" for r in group["refs"]]]))
         return True
 
-    # ── /_models_select: Switch active model ──────────────────────
-    if cmd == "/_models_select":
-        # Global model switch is admin-grade (audit H-8): it changes the
-        # active model for EVERY user and platform.
+    # ── /model ... ────────────────────────────────────────────────
+    sub = parts[1].strip().lower() if len(parts) > 1 else ""
+    if sub == "reset":
+        try:
+            await asyncio.to_thread(clear_chat_model, thread_id)
+        except store_errors() as exc:  # said
+            logger.warning("[agent-handler] /model reset failed: %s", type(exc).__name__)
+            await reply("⚠️ This chat's model could not be reset; it is unchanged.")
+            return True
+        await reply("✅ This chat follows the default model again.")
+        return True
+    if sub == "default":
+        # The install's default: every chat with no model of its own, the
+        # web's new chats included -- admin-grade (audit H-8).
         from kazma_gateway.agent_handler.graph import _sender_is_gateway_admin
 
         if not await asyncio.to_thread(_sender_is_gateway_admin, msg):  # a settings read (AUD-111)
-            await _send_model_reply(
-                msg, store, manager, thread_id,
-                "⛔ Switching the active model is admin-only. Set "
-                "`KAZMA_GATEWAY_ADMINS` or join the platform user allowlist.",
-            )
+            await reply("⛔ Changing the default model is admin-only. `/model <model>` sets this chat's.")
             return True
-        model_id = text.split(None, 1)[1].strip() if len(text.split(None, 1)) > 1 else ""
-        if not model_id:
+        arg = text.split(None, 2)[2].strip() if len(text.split(None, 2)) > 2 else ""
+        ref, candidates = resolve(arg)
+        if not ref:
+            await reply(_unresolved(arg, candidates))
             return True
-
-        # The one switch (model AND provider, the live agent rebound), shared
-        # with /config model. Off the loop: it writes settings and recompiles
-        # the graph.
         from kazma_gateway.slash_commands import switch_model_from_chat
 
         try:
-            reply = await asyncio.to_thread(switch_model_from_chat, model_id)
+            answer = await asyncio.to_thread(switch_model_from_chat, ref)
         except Exception as exc:
-            reply = f"⚠️ Failed to switch model: {exc}"
-        await _send_model_reply(msg, store, manager, thread_id, reply)
+            answer = f"⚠️ Failed to switch the default model: {exc}"
+        await reply(answer)
+        return True
+    if sub:
+        arg = text.split(None, 1)[1].strip()
+        ref, candidates = resolve(arg)
+        if not ref:
+            await reply(_unresolved(arg, candidates))
+            return True
+        await choose(ref)
         return True
 
-    return False
+    # The list.
+    if not groups:
+        await reply("No providers with models configured. Use the Web UI Settings to add providers.")
+        return True
+    own = await asyncio.to_thread(chat_model_for, thread_id)
+    from kazma_core.model_registry import get_model_registry
+    from kazma_core.model_refs import format_ref
+
+    profile = await asyncio.to_thread(lambda: get_model_registry().get_active_profile() or {})
+    default = format_ref(str(profile.get("provider") or ""), str(profile.get("model") or ""))
+    head = (f"This chat uses `{own}`." if own else f"This chat uses the default, `{default}`.")
+    if msg.platform == "telegram":
+        try:
+            from kazma_gateway.adapters.telegram import TelegramAdapter
+
+            keyboard = TelegramAdapter.build_provider_keyboard(groups)
+            reply_ctx = dict(ctx)
+            reply_ctx["reply_markup"] = keyboard
+            lines = "\n".join(f"  • {g['display_name']} ({count_noun(len(g['models']), 'model')})" for g in groups)
+            await manager.send(OutboundMessage(
+                target_id=_build_target_id(msg.platform, ctx),
+                text=f"{head}\n\nPick a provider:\n\n{lines}",
+                context_metadata=reply_ctx,
+            ))
+            return True
+        except Exception as exc:
+            logger.debug("Interactive provider selection failed: %s", exc, exc_info=True)
+    lines = [head, ""]
+    n = 0
+    for g in groups:
+        lines.append(f"{g['display_name']}:")
+        for ref in g["refs"]:
+            n += 1
+            mark = " (this chat)" if ref == (own or default) else ""
+            lines.append(f"  {n}. {ref}{mark}")
+    lines.append("\n`/model <number>` sets this chat's model; `/model reset` follows the default.")
+    await reply("\n".join(lines))
+    return True
 
 
-def _get_provider_models(provider_name: str) -> list[str]:
-    """Return visible models for a provider."""
-    try:
-        from kazma_core.model_registry import get_model_registry
-        reg = get_model_registry()
-        return reg.get_visible_models(provider_name)
-    except Exception as exc:
-        logger.debug("Failed to get provider models for %s: %s", provider_name, exc, exc_info=True)
-        return []
-
-
-def _is_active_model(model_id: str) -> bool:
-    """Check if a model is the active model."""
-    try:
-        from kazma_core.model_registry import get_model_registry
-        reg = get_model_registry()
-        return reg._active_model == model_id
-    except Exception as exc:
-        logger.debug("Failed to check if model %s is active: %s", model_id, exc, exc_info=True)
-        return False
+def _unresolved(arg: str, candidates: list[str]) -> str:
+    """Why a /model argument named no single model."""
+    if candidates:
+        return "`{}` is offered by more than one provider. Name one: {}".format(
+            arg, ", ".join(f"`{c}`" for c in candidates))
+    return f"⚠️ `{arg}` is not offered. Send /model for the list."
 
 
 def _normalize_slash_text(text: str) -> str:

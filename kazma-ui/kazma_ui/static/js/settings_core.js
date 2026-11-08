@@ -299,10 +299,16 @@
         modelPricesFailed: false,
         modelPricesSaving: false,
         modelPricesMax: 1000,
+        // Model details (kazma_core.model_details, providers stage 3).
+        modelDetails: [],
+        modelDetailsLoaded: false,
+        modelDetailsFailed: false,
+        modelDetailsSaving: false,
+        defaultModelRef: '',
         hubProviderModal: false,
         hubConnectorModal: false,
         hubProfileModal: false,
-        hubEditingProvider: { name: '', display_name: '', base_url: '', api_key: '', models: '', enabled: true, google_mode: 'ai_studio', project_id: '', location: 'us-central1', _existing: false },
+        hubEditingProvider: { name: '', display_name: '', base_url: '', api_key: '', models: '', enabled: true, google_mode: 'ai_studio', project_id: '', location: 'us-central1', preset: '', form: 'key', kind: 'chat', url_as_typed: false, headerRows: [], api_version: '', region: '', aws_access_key_id: '', aws_secret_access_key: '', aws_session_token: '', extraKeys: [], url_hint: '', _existing: false, _has_stored_key: false },
         hubEditingConnector: { name: '', token: '', enabled: true, extras: {} },
         hubEditingProfile: { name: '', provider: '', base_url: '', api_key: '', model: '', _existing: false },
         hubShowProviderKey: false,
@@ -639,7 +645,10 @@
                 const saved = await self._fetch('/api/models/saved');
                 if (Array.isArray(saved)) self.savedModels = saved;
 
-                if (window.ProvidersManager && typeof ProvidersManager.getPresetKeys === 'function') {
+                // The server's catalog, the one provider list (providers stage 2).
+                const catalog = await self._fetch('/api/providers/catalog');
+                if (window.ProvidersManager && typeof ProvidersManager.setCatalog === 'function') {
+                    ProvidersManager.setCatalog(catalog);
                     self.providerPresets = ProvidersManager.getPresetKeys();
                 } else {
                     self.providerPresets = [];
@@ -690,6 +699,7 @@
                         self.loadHubProfiles(),
                         self.loadAdapterRouting(),
                         self.loadModelPrices(),
+                        self.loadModelDetails(),
                     ]);
                 }
             } catch (e) {
@@ -878,6 +888,7 @@
                         this.loadHubConnectors(),
                         this.loadHubProfiles(),
                         this.loadModelPrices(),
+                        this.loadModelDetails(),
                     ]);
                     break;
                 case 'models': break; // Loaded on init

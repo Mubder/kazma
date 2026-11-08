@@ -34,6 +34,7 @@ import httpx
 
 from kazma_core.http_tls import shared_ssl_context
 from kazma_core.llm_provider import LLMConfig, LLMProvider
+from kazma_core.model_details import from_listing
 from kazma_core.provider_adapters import build_client
 from kazma_core.providers import PROVIDER_PRESETS
 from kazma_core.runtime.live_llm import coerce_api_key
@@ -195,6 +196,9 @@ class ModelRegistry:
     caching, and model discovery.
     """
 
+    #: Details a discovery found, until it saves them (providers stage 3).
+    _pending_details: dict[str, dict[str, dict[str, Any]]]
+
     def __init__(self, config_store: ConfigStore | Any) -> None:
         self._config_store = config_store
         self._clients: dict[str, LLMProvider] = {}
@@ -207,6 +211,7 @@ class ModelRegistry:
         self._active_provider: str = ""
         self._active_model: str = ""
         self._discovered_models: dict[str, list[str]] = {}
+        self._pending_details = {}
         # Reentrant lock guards read-modify-write of the active
         # provider/model and the client cache. This registry is a
         # process-wide singleton consumed concurrently by the swarm engine
@@ -313,6 +318,11 @@ class ModelRegistry:
         if provider_entry:
             base_url = str(provider_entry.get("base_url", "") or "")
             api_key = coerce_api_key(provider_entry.get("api_key", ""))
+            if provider_entry.get("api_keys"):
+                # Several keys (providers stage 4): the first not resting.
+                from kazma_core.provider_keys import current_key
+
+                api_key = current_key(self._config_store, provider_name, api_key, provider_entry)
         else:
             # Fallback: legacy llm.* keys
             base_url = str(self._config_store.get("llm.base_url", "") or "")
@@ -375,12 +385,16 @@ class ModelRegistry:
         """
         exclude_l = (exclude or "").strip().lower()
         scored: list[tuple[int, str, dict[str, Any]]] = []
+        from kazma_core.models.modality import row_is_speech
+
         for p in self.list_providers():
             if p.get("enabled") is False:
                 continue
             name = str(p.get("name") or "")
             if not name or name.lower() == exclude_l:
                 continue
+            if row_is_speech(p, self._discovered_models.get(name, [])):
+                continue  # a speech service never answers a chat (stage 2)
             _, _url, api_key, _ = self._resolve_provider_config(name, "")
             if not self._key_is_usable(api_key):
                 continue
@@ -515,6 +529,18 @@ class ModelRegistry:
                 "matching provider card."
             )
         with self._lock:
+            # ``provider:model`` names its provider (providers stage 3): the
+            # model is stored bare, beside the provider it was named with.
+            named, bare = self.split_model_ref(clean_model)
+            if named:
+                self._active_model = bare
+                self._config_store.set("registry.active_model", bare, category="registry")
+                if named != self._active_provider:
+                    self._active_provider = named
+                    self._config_store.set("registry.active_provider", named, category="registry")
+                self._clients.clear()
+                self._config_changed()
+                return
             self._active_model = clean_model
             self._config_store.set("registry.active_model", self._active_model, category="registry")
 
@@ -591,6 +617,11 @@ class ModelRegistry:
         with self._lock:
             provider_name = self._active_provider or "custom"
             effective_model = model or self._active_model
+            named = ""
+            if effective_model:
+                named, effective_model = self.split_model_ref(effective_model)
+                if named:
+                    provider_name = named
 
             # Safety: if the model belongs to a DIFFERENT provider,
             # auto-correct the provider so we don't send cross-provider
@@ -598,7 +629,7 @@ class ModelRegistry:
             # This runs regardless of whether *model* was passed — the
             # previous `not model` guard defeated this safety net exactly
             # when the swarm path (which always passes model=) needed it.
-            if effective_model:
+            if effective_model and not named:
                 owner = self.find_provider_for_model(effective_model)
                 if owner:
                     owner_name = owner.get("name", "")
@@ -695,15 +726,14 @@ class ModelRegistry:
 
                 effective_model = default_model_for(provider_name)
 
-            config = self._client_config(provider_name, base_url, api_key, effective_model)
+            entry = self.get_provider(provider_name)
+            config = self._client_config(provider_name, base_url, api_key, effective_model, entry)
 
             # The client class comes from the provider's declared `api_style`
             # (see kazma_core.provider_adapters). This used to be a four-way
             # branch on the vendor's name, written out again in get_model and
             # get_client_by_provider.
-            client = build_client(
-                provider_name, config, self.get_provider(provider_name)
-            )
+            client = build_client(provider_name, config, entry)
 
             if model is None and (
                 self._key_is_usable(api_key) or self._url_is_local(base_url)
@@ -722,6 +752,12 @@ class ModelRegistry:
         clean_id = (model_id or "").strip()
         if not clean_id:
             raise ValueError("model_id is required")
+        named, bare = self.split_model_ref(clean_id)
+        if named:
+            pinned = self.get_client_by_provider(named, bare)
+            if pinned is not None:
+                return pinned
+            clean_id = bare
 
         # Search providers for one that lists this model (manual + discovered)
         owner = self.find_provider_for_model(clean_id)
@@ -729,7 +765,7 @@ class ModelRegistry:
             owner_name = str(owner.get("name", "")).lower()
             config = self._client_config(
                 owner_name, str(owner.get("base_url", "")),
-                coerce_api_key(owner.get("api_key", "")), clean_id,
+                coerce_api_key(owner.get("api_key", "")), clean_id, owner,
             )
             return self._track(build_client(owner_name, config, owner), owner_name)
 
@@ -766,17 +802,40 @@ class ModelRegistry:
                 or default_model_for(provider_name)
             )
         base_url, api_key = self.resolve_provider_credentials(provider_name)
-        config = self._client_config(provider_name, base_url, api_key, effective_model)
+        config = self._client_config(provider_name, base_url, api_key, effective_model, entry)
         return self._track(build_client(provider_name, config, entry), provider_name)
 
-    def _client_config(self, provider_name: str, base_url: str, api_key: str, model: str) -> LLMConfig:
+    def _client_config(
+        self, provider_name: str, base_url: str, api_key: str, model: str,
+        entry: dict[str, Any] | None = None,
+    ) -> LLMConfig:
         """The config a client is built from, with the model's price when one
         is known (kazma_core.model_prices: the owner's, or free for a server
-        on this network). Without it every call was priced as gpt-4o-mini."""
+        on this network). Without it every call was priced as gpt-4o-mini.
+
+        The provider row's own settings ride along (providers stage 2): its
+        headers, and Azure's API version."""
         from kazma_core.model_prices import price_for
 
         fields: dict[str, Any] = {"base_url": base_url, "api_key": api_key, "model": model}
-        price = price_for(provider_name, base_url, str(model or ""), store=self._config_store)
+        row = entry if entry is not None else (self.get_provider(provider_name) or {})
+        from kazma_core.model_details import details_for
+
+        if row.get("api_keys"):
+            # A key that fails for its key gives way to the next (stage 4).
+            fields["key_switch"] = lambda failed, exc, _p=provider_name: self.switch_provider_key(_p, failed, exc)
+
+        preset_id = str(row.get("preset") or "").strip().lower()
+        known = details_for(provider_name, str(model or ""), preset=preset_id, store=self._config_store)
+        # A model that writes less than the default limit is asked for no
+        # more (a provider refuses a request over its model's limit).
+        if known.max_output and known.max_output < LLMConfig.max_tokens:
+            fields["max_tokens"] = known.max_output
+        if isinstance(row.get("secret_headers"), dict) and row["secret_headers"]:
+            fields["extra_headers"] = dict(row["secret_headers"])
+        if row.get("api_version"):
+            fields["api_version"] = str(row["api_version"])
+        price = price_for(provider_name, base_url, str(model or ""), store=self._config_store, details=known)
         if price is not None:
             fields["input_cost_per_1m"] = price.input_per_1m
             fields["output_cost_per_1m"] = price.output_per_1m
@@ -817,17 +876,50 @@ class ModelRegistry:
         clean_id = (model_id or "").strip()
         if not clean_id:
             return None
-        for provider in self.list_providers():
+        from kazma_core.models.modality import row_is_speech
+
+        rows = self.list_providers()
+        named, bare = self.split_model_ref(clean_id, rows)
+        if named:
+            # ``provider:model`` (providers stage 3): that provider, listed
+            # or not -- the owner named it.
+            row = next((r for r in rows if str(r.get("name") or "") == named), None)
+            return dict(row) if row is not None and row.get("enabled", True) else None
+        owners: list[dict[str, Any]] = []
+        for provider in rows:
             # Skip disabled providers — they should not be considered
             # for model resolution (fixes auto-switch to disabled providers)
             if not provider.get("enabled", True):
                 continue
             name = provider.get("name", "")
+            discovered_ids = self._discovered_models.get(name, [])
+            # A speech service is never a chat model's owner (stage 2).
+            if row_is_speech(provider, discovered_ids):
+                continue
             manual = set(self._normalize_models(provider.get("models", [])))
-            discovered = set(self._discovered_models.get(name, []))
-            if clean_id in manual or clean_id in discovered:
-                return dict(provider)
-        return None
+            if clean_id in manual or clean_id in set(discovered_ids):
+                owners.append(provider)
+        if not owners:
+            return None
+        # One name under two providers: the provider in use, else the first
+        # (a reference says which; the pickers send one).
+        active = (self._active_provider or "").strip().lower()
+        for row in owners:
+            if str(row.get("name") or "").strip().lower() == active:
+                return dict(row)
+        return dict(owners[0])
+
+    def split_model_ref(
+        self, ref: str, rows: list[dict[str, Any]] | None = None,
+    ) -> tuple[str, str]:
+        """``(provider, model)`` for a ``provider:model`` reference, else
+        ``("", ref)`` (kazma_core.model_refs)."""
+        from kazma_core.model_refs import split_ref
+
+        if ":" not in str(ref or ""):
+            return "", str(ref or "").strip()
+        names = [str(r.get("name") or "") for r in (rows if rows is not None else self.list_providers())]
+        return split_ref(ref, names)
 
     # ── Model discovery ────────────────────────────────────────────
 
@@ -859,9 +951,13 @@ class ModelRegistry:
         def failed(code: str, detail: str) -> DiscoveryResult:
             return DiscoveryResult.failed(code, detail, cached=cached)
 
-        def keep(ids: list[str]) -> None:
+        def keep(ids: list[str], details: dict[str, dict[str, Any]] | None = None) -> None:
             if candidate is None:
                 self._discovered_models[clean_name] = ids
+                if details:
+                    # What the provider's own list says about each model
+                    # (providers stage 3, kazma_core.model_details).
+                    self._pending_details[clean_name] = details
 
         # The provider list is settings and vault reads (audit 2026-10-26 AUD-111).
         provider_entry = candidate if candidate is not None else await asyncio.to_thread(
@@ -890,15 +986,19 @@ class ModelRegistry:
                             if resp.status_code == 200:
                                 data = resp.json()
                                 model_ids = []
+                                google_details: dict[str, dict[str, Any]] = {}
                                 for m_entry in data.get("models", []):
                                     full_name = m_entry.get("name", "")
-                                    if full_name.startswith("models/"):
-                                        model_ids.append(full_name[7:])
-                                    elif full_name:
-                                        model_ids.append(full_name)
+                                    short = full_name[7:] if full_name.startswith("models/") else full_name
+                                    if short:
+                                        model_ids.append(short)
+                                        listed = from_listing(m_entry)
+                                        if listed:
+                                            google_details[short] = listed
                                 if model_ids:
                                     found = sorted(set(model_ids))
-                                    keep(found)
+                                    keep(found, google_details)
+                                    await self._save_reported_details(clean_name)
                                     if candidate is None:
                                         await asyncio.to_thread(
                                             self._prune_stale_selected_models, clean_name, found
@@ -922,9 +1022,17 @@ class ModelRegistry:
             logger.warning("discover_models: no base_url for %r", clean_name)
             return failed("no_base_url", "The provider has no base URL.")
 
-        # Resolve the models endpoint
-        preset = PROVIDER_PRESETS.get(clean_name, {})
+        # Resolve the models endpoint: the row's preset when it was made
+        # from one under another name (providers stage 2).
+        preset_id = str(provider_entry.get("preset") or "").strip().lower() or clean_name
+        preset = PROVIDER_PRESETS.get(preset_id, {})
         models_path = preset.get("models_endpoint", "/models")
+        if preset and not models_path:
+            # Azure deployments and Bedrock model ids are the owner's own
+            # list: there is no endpoint that lists them for a key.
+            own = self._normalize_models(provider_entry.get("models", []))
+            return DiscoveryResult(True, own, source="manual") if own else failed(
+                "no_models_endpoint", "This provider has no model list: type its models.")
 
         # Build the full URL — base_url + models_path.
         # Most OpenAI-compatible APIs expect {base_url}/models where base_url
@@ -969,6 +1077,8 @@ class ModelRegistry:
         # ``Authorization: x-api-key <key>``, a guaranteed 401 (audit M-6).
         auth_header_type = preset.get("auth_header", "Bearer")
         headers: dict[str, str] = {}
+        if isinstance(provider_entry.get("secret_headers"), dict):
+            headers.update({str(k): str(v) for k, v in provider_entry["secret_headers"].items()})
         if api_key:
             if auth_header_type == "Bearer" or not auth_header_type:
                 headers["Authorization"] = f"Bearer {api_key}"
@@ -992,16 +1102,24 @@ class ModelRegistry:
                 return failed("bad_answer", "The provider's answer was not a list of models.")
 
             model_ids: list[str] = []
+            listed_details: dict[str, dict[str, Any]] = {}
             for item in data.get("data", []):
+                if not isinstance(item, dict):
+                    continue
                 model_id = item.get("id", "")
                 if model_id:
                     # Strip :latest suffix for Ollama to prevent duplicate/stale tags
                     if clean_name == "ollama" and str(model_id).endswith(":latest"):
                         model_id = str(model_id)[:-7]
                     model_ids.append(str(model_id))
+                    listed = from_listing(item)
+                    if listed:
+                        listed_details[str(model_id)] = listed
 
             model_ids = sorted(set(model_ids))
-            keep(model_ids)
+            keep(model_ids, listed_details)
+            if candidate is None:
+                await self._save_reported_details(clean_name)
             if candidate is None:
                 await asyncio.to_thread(self._prune_stale_selected_models, clean_name, model_ids)  # audit 2026-10-26 AUD-111
             return DiscoveryResult(True, list(model_ids))
@@ -1012,6 +1130,66 @@ class ModelRegistry:
         except Exception as exc:  # no answer: network, TLS, a client that failed
             logger.error("discover_models failed for %r: %s", clean_name, exc)
             return failed("unreachable", f"The provider could not be reached ({type(exc).__name__}).")
+
+    async def _save_reported_details(self, provider_name: str) -> None:
+        """Keep what the provider's list said about its models (providers
+        stage 3): a settings write, off the loop. A failure loses only these
+        details, said at WARNING."""
+        from kazma_core.model_details import reported_key
+
+        details = self._pending_details.pop(provider_name, None)
+        if not details:
+            return
+        from kazma_core.db.pg_helpers import store_errors
+
+        try:
+            await asyncio.to_thread(
+                self._config_store.set, reported_key(provider_name), details, category="providers")
+        except store_errors() as exc:  # the list itself was found
+            logger.warning("[providers] could not keep %s's model details: %s", provider_name, type(exc).__name__)
+
+    def switch_provider_key(self, provider_name: str, failed_key: str, exc: BaseException) -> str | None:
+        """The next key of *provider_name* after *failed_key* failed for
+        its key (providers stage 4, kazma_core.provider_keys), or None. The
+        failed key rests, the cached client is dropped, and the switch is
+        said once: an ops alert and the web banner. Blocking: off the loop."""
+        from kazma_core.provider_keys import key_failure, next_key
+
+        why, retry_after = key_failure(exc)
+        if not why:
+            return None
+        row = self.get_provider(provider_name) or {}
+        primary = coerce_api_key(row.get("api_key", ""))
+        found = next_key(self._config_store, provider_name, primary, row, failed_key, why, retry_after)
+        if found is None:
+            return None
+        label, key = found
+        with self._lock:
+            self._clients.pop(provider_name, None)
+        words = {"refused": "was refused", "no_credit": "has no credit left", "rate_limited": "is out of requests"}
+        message = (f"{provider_name}: a key {words.get(why, 'failed')}; Kazma switched to "
+                   f"{('the key ' + repr(label)) if label else 'its next key'} and sent the call again.")
+        logger.warning("[providers] %s", message)
+        from kazma_core.observability.ops_alerts import alert
+
+        alert(f"llm.key_switched.{provider_name}", "Provider key switched", message, severity="warn")  # never raises
+        return key
+
+    def model_details(self, model: str) -> Any:
+        """What is known about *model* (a bare name or ``provider:model``):
+        its provider's row decides whose list and catalog apply
+        (kazma_core.model_details). Blocking: off the loop."""
+        from kazma_core.model_details import ModelDetails, details_for
+
+        named, bare = self.split_model_ref(model)
+        row = self.get_provider(named) if named else self.find_provider_for_model(bare)
+        if row is None and not named:
+            row = self.get_provider(self._active_provider or "")
+        if not bare:
+            return ModelDetails()
+        name = str((row or {}).get("name") or named or "")
+        preset = str((row or {}).get("preset") or "").strip().lower()
+        return details_for(name, bare, preset=preset, store=self._config_store)
 
     def _prune_stale_selected_models(self, provider_name: str, discovered_ids: list[str]) -> None:
         """Prune any models in selected_models that are no longer discovered or manual."""
@@ -1650,8 +1828,12 @@ class ModelRegistry:
     def _load_providers(self) -> list[dict[str, Any]]:
         """Load the provider list from ConfigStore (read-only; never writes)."""
         from kazma_core.model_registry_store import load_providers
+        from kazma_core.url_utils import set_as_typed_urls
 
-        return load_providers(self._config_store)
+        rows = load_providers(self._config_store)
+        # One set every normalizer asks (url_utils.is_as_typed).
+        set_as_typed_urls(r.get("base_url") for r in rows if r.get("url_as_typed"))
+        return rows
 
     def _save_providers(self, providers: list[dict[str, Any]]) -> None:
         from kazma_core.model_registry_store import save_providers

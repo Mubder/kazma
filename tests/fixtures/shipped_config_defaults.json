@@ -19,13 +19,6 @@
  "gateway.rate_limits.slack": 30,
  "gateway.rate_limits.telegram": 30,
  "gateway.suggestions.enabled": true,
- "gateway.voice.enabled": false,
- "gateway.voice.stt_language": "auto",
- "gateway.voice.stt_provider": "openai",
- "gateway.voice.tts_output_format": "mp3",
- "gateway.voice.tts_provider": "edgetts",
- "gateway.voice.tts_reply": true,
- "gateway.voice.tts_voice": "default",
  "git.bot_identity.email": "305657551+kazma-agent[bot]@users.noreply.github.com",
  "git.bot_identity.enabled": false,
  "git.bot_identity.name": "Kazma Agent",
@@ -225,5 +218,12 @@
  "ui.host": "127.0.0.1",
  "ui.port": 9090,
  "ui.rtl": true,
- "ui.title": "Kazma Dashboard"
+ "ui.title": "Kazma Dashboard",
+ "voice.enabled": false,
+ "voice.stt_language": "auto",
+ "voice.stt_provider": "openai",
+ "voice.tts_output_format": "mp3",
+ "voice.tts_provider": "edgetts",
+ "voice.tts_reply": true,
+ "voice.tts_voice": "default"
 }

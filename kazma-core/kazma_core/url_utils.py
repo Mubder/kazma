@@ -7,6 +7,7 @@ correctly formatted before being used by httpx or LiteLLM.
 from __future__ import annotations
 
 import re
+from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 __all__ = ["get_dummy_api_key", "normalize_model_name", "normalize_provider_url"]
@@ -43,6 +44,37 @@ _PRESET_URLS: frozenset[str] | None = None
 
 def _is_declared_preset_url(url: str) -> bool:
     return url.strip().rstrip("/").lower() in _declared_preset_urls()
+
+
+#: Addresses the owner asked to be used exactly as typed (a provider row's
+#: ``url_as_typed``, providers stage 2): one set, so every path that
+#: normalizes an address -- the client, the egress gateway, discovery, the
+#: check before saving -- leaves them alone. The model registry fills it
+#: from the provider list (:func:`set_as_typed_urls`); the check adds the
+#: address it is checking (:func:`remember_as_typed`).
+_AS_TYPED: set[str] = set()
+
+
+def _as_typed_key(url: str) -> str:
+    return str(url or "").strip().rstrip("/").lower()
+
+
+def set_as_typed_urls(urls: Any) -> None:
+    """Replace the set of as-typed addresses with *urls*."""
+    global _AS_TYPED
+    _AS_TYPED = {_as_typed_key(u) for u in (urls or ()) if _as_typed_key(u)}
+
+
+def remember_as_typed(url: str) -> None:
+    """Add one address to the as-typed set."""
+    key = _as_typed_key(url)
+    if key:
+        _AS_TYPED.add(key)
+
+
+def is_as_typed(url: str) -> bool:
+    """True when *url* is to be used exactly as typed."""
+    return _as_typed_key(url) in _AS_TYPED
 
 
 def normalize_provider_url(
@@ -96,7 +128,7 @@ def normalize_provider_url(
     # Perplexity, whose OpenAI-compatible path carries no version segment at
     # all. Each 404'd on every request while the models endpoint kept answering,
     # so the UI reported the provider as healthy.
-    if _is_declared_preset_url(url):
+    if _is_declared_preset_url(url) or is_as_typed(url):
         return url.rstrip("/")
 
     # Step 1: Add scheme if missing

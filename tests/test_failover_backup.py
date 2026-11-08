@@ -69,7 +69,9 @@ def test_each_backup_says_who_serves_it_and_whether_it_can_answer():
 def test_usable_backups_of_other_vendors_are_offered():
     offers = fb.suggest_backups(_Registry())
     assert [(o["provider"], o["model"]) for o in offers] == [
-        ("openrouter", "google/gemini-2.5-flash"), ("groq", "llama-3.3-70b"), ("server-gpu", "qwen2.5-32b")]
+        # Named with their provider (providers stage 3).
+        ("openrouter", "openrouter:google/gemini-2.5-flash"), ("groq", "groq:llama-3.3-70b"),
+        ("server-gpu", "server-gpu:qwen2.5-32b")]
 
 
 

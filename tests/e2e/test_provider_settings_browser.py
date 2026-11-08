@@ -180,3 +180,70 @@ def test_provider_settings_in_a_browser(kazma) -> None:
         finally:
             browser.close()
     assert errors == [], errors
+
+
+def test_stage_two_to_four_in_a_browser(kazma) -> None:
+    """Providers stages 2-4, reached by the sidebar: the dialog reads the
+    server's catalog and shows each provider type's own form; the Model
+    details card and the default model; and the chat's picker changes only
+    the chat it is in."""
+    from playwright.sync_api import sync_playwright
+
+    base, fake_url = kazma
+    saved = httpx.post(f"{base}/api/providers", json={
+        "name": "fakeserver", "base_url": fake_url, "models": [MODEL, "fake-two"], "enabled": True}, timeout=10)
+    assert saved.status_code == 200, saved.text
+    errors: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            pg = browser.new_context(viewport={"width": 1280, "height": 900}, locale="en-US").new_page()
+            pg.on("pageerror", lambda exc: errors.append(str(exc)))
+            pg.goto(base + "/", wait_until="domcontentloaded")
+            pg.locator("a.nav-link[href='/settings']").first.click()
+            pg.wait_for_function("location.pathname === '/settings'", timeout=15000)
+
+            # The dialog's presets are the server's catalog, each with its form.
+            pg.locator("#provider-add").click()
+            preset = pg.locator(".modal select.form-select").first
+            preset.locator("option[value='cerebras']").wait_for(state="attached", timeout=15000)
+            preset.select_option("cerebras")
+            assert pg.locator("#provider-base-url").input_value() == "https://api.cerebras.ai/v1"
+            preset.select_option("bedrock")
+            pg.locator("#provider-region").wait_for(state="visible", timeout=5000)
+            assert not pg.locator("#provider-base-url").is_visible()
+            preset.select_option("openrouter")
+            pg.locator(".provider-advanced summary").click()
+            pg.locator("#provider-add-header").click()
+            assert pg.locator(".provider-header-row").count() == 1
+            pg.locator("#provider-add-key").click()
+            assert pg.locator(".provider-key-row").count() == 1
+            pg.keyboard.press("Escape")
+            pg.locator(".modal-overlay").first.evaluate("e => e.click()")
+
+            # Model details and the default model.
+            details = pg.locator("#model-details")
+            details.locator(".model-detail-row span", has_text=f"fakeserver:{MODEL}").first.wait_for(
+                state="visible", timeout=30000)
+            assert "Free (on your network)" in details.inner_text()
+            pg.locator("#default-model-select").select_option(f"fakeserver:{MODEL}")
+            pg.wait_for_function(
+                f"fetch('/api/provider/active').then(r => r.json()).then(d => d.model === '{MODEL}')",
+                timeout=15000)
+
+            # The chat's picker: this chat's model, never the install's.
+            pg.locator("a.nav-link[href='/chat']").first.click()
+            pg.wait_for_function("location.pathname === '/chat'", timeout=15000)
+            picker = pg.locator("#model-selector")
+            picker.locator("option[value='fakeserver:fake-two']").wait_for(state="attached", timeout=30000)
+            pg.wait_for_function(
+                f"document.querySelector('#model-selector').value === 'fakeserver:{MODEL}'", timeout=15000)
+            picker.select_option("fakeserver:fake-two")
+            active = httpx.get(f"{base}/api/provider/active", timeout=10).json()
+            assert active["model"] == MODEL, "the chat's picker changed the install's default"
+            pg.locator("#new-session-btn").click()
+            pg.wait_for_function(
+                f"document.querySelector('#model-selector').value === 'fakeserver:{MODEL}'", timeout=15000)
+        finally:
+            browser.close()
+    assert errors == [], errors

@@ -179,9 +179,15 @@ class TestSourceContracts:
         assert "pollBackgroundTurn" not in js
 
     def test_chat_js_awaits_model_put_errors(self):
+        # The chat's picker sets that chat's model and writes no install-wide
+        # model (providers stage 3); the default's pickers -- the sidebar's
+        # and Settings' -- await the switch's answer and say a failure.
         js = _CHAT_JS.read_text(encoding="utf-8")
-        assert "status === 'error'" in js or 'status === "error"' in js
-        assert "error_code" in js or "Model switch failed" in js
+        assert "/api/settings/active_model" not in js
+        side = (_CHAT_JS.parent / "modules" / "components.js").read_text(encoding="utf-8")
+        assert "status === 'error'" in side and "error_code" in side
+        hub = (_CHAT_JS.parent / "settings_hub.js").read_text(encoding="utf-8")
+        assert "kazmaSave('/api/settings/active_model'" in hub
 
     def test_sse_has_llm_provider_getter(self):
         src = module_source(_SSE)

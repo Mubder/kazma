@@ -26,6 +26,54 @@ def normalize_models(models: Any) -> list[str]:
     return []
 
 
+#: Fields a provider row may carry beyond the common ones (providers stages
+#: 2 and 4). Kept only when set, so a row without them reads as before.
+#: Secrets among them are vaulted by name like ``api_key``
+#: (``config_store.is_sensitive_config_key``): ``secret_headers`` (every
+#: header value), ``aws_secret_access_key``, ``aws_session_token``, and each
+#: extra key's ``api_key``.
+OPTIONAL_FIELDS: tuple[str, ...] = (
+    "preset",  # the catalog entry the row was made from (kazma_core.providers)
+    "kind",  # "chat" | "speech"
+    "url_as_typed",  # the address is used exactly as typed (no /v1 added)
+    "secret_headers",  # {header: value}, sent on every request
+    "api_version",  # Azure
+    "region", "aws_access_key_id", "aws_secret_access_key", "aws_session_token",  # Bedrock
+    "api_keys",  # [{"id", "label", "api_key"}]: keys tried after the first
+)
+
+
+def _optional_fields(provider: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for field in OPTIONAL_FIELDS:
+        value = provider.get(field)
+        if value in (None, "", [], {}, False):
+            continue
+        if field == "url_as_typed":
+            out[field] = bool(value)
+        elif field == "kind":
+            kind = str(value).strip().lower()
+            if kind in ("chat", "speech"):
+                out[field] = kind
+        elif field == "secret_headers":
+            if isinstance(value, dict):
+                headers = {str(k).strip(): str(v) for k, v in value.items() if str(k).strip()}
+                if headers:
+                    out[field] = headers
+        elif field == "api_keys":
+            if isinstance(value, list):
+                keys = [
+                    {"id": str(k.get("id") or "").strip(), "label": str(k.get("label") or ""),
+                     "api_key": str(k.get("api_key") or "")}
+                    for k in value if isinstance(k, dict) and str(k.get("id") or "").strip()
+                ]
+                if keys:
+                    out[field] = keys
+        else:
+            out[field] = str(value)
+    return out
+
+
 def normalize_provider_entry(provider: dict[str, Any]) -> dict[str, Any]:
     """Normalize a single provider dict to the canonical shape."""
     name = str(provider.get("name") or "").strip()
@@ -40,6 +88,7 @@ def normalize_provider_entry(provider: dict[str, Any]) -> dict[str, Any]:
         "project_id": str(provider.get("project_id") or ""),
         "location": str(provider.get("location") or "us-central1"),
         "google_mode": str(provider.get("google_mode") or ""),
+        **_optional_fields(provider),
     }
 
 
@@ -209,7 +258,7 @@ def default_provider_entries() -> list[dict[str, Any]]:
 
     providers: list[dict[str, Any]] = []
     for key, preset in PROVIDER_PRESETS.items():
-        if key == "custom":
+        if key == "custom" or key not in SEEDED_PRESETS:
             continue
         models: list[str] = []
         project_id = ""
@@ -248,6 +297,18 @@ def default_provider_entries() -> list[dict[str, Any]]:
     return providers
 
 
+#: The presets every install gets a (switched-off) row for: the ones it had
+#: before providers stage 2. The catalog's later presets (Cerebras, vLLM,
+#: Kimi...) are offered by Settings' Add dialog and the setup guide, and get
+#: a row when the owner adds one: 35 rows of switched-off providers made the
+#: list a chore to read.
+SEEDED_PRESETS: frozenset[str] = frozenset({
+    "openai", "anthropic", "groq", "deepseek", "google", "xai", "zai", "openrouter", "ollama",
+    "lm-studio", "nvidia", "mistral", "together", "cohere", "fireworks", "perplexity", "ai21",
+    "azure", "bedrock",
+})
+
+
 def seed_missing_presets(
     stored: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], bool]:
@@ -257,6 +318,8 @@ def seed_missing_presets(
     stored_by_name = {p.get("name", ""): p for p in stored} if stored else {}
     changed = False
     for key, preset in PROVIDER_PRESETS.items():
+        if key not in SEEDED_PRESETS and key not in stored_by_name:
+            continue
         row = stored_by_name.get(key)
         if row is not None:
             # A preset that moved: its row still on the old address it gave.

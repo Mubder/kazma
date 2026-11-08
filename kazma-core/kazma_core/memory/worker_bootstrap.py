@@ -1231,6 +1231,15 @@ def _settings_snapshot() -> None:
     snapshot_sweep()
 
 
+def _provider_health() -> None:
+    # Providers stage 4: once an hour every switched-on chat provider is
+    # asked for its model list (no tokens); unreachable twice is said, a
+    # refused key gives way to the provider's next.
+    from kazma_core.provider_health import health_sweep
+
+    health_sweep()
+
+
 def _model_failover_drill() -> None:
     # Resilience plan F2: once a month the failover chain is taken for real,
     # in a process of its own, and the result kept and logged for the weekly
@@ -1300,6 +1309,7 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("malware signatures", _malware_signatures),
     ("dependency advisories", _dependency_advisories),
     ("model failover drill", _model_failover_drill),
+    ("provider health", _provider_health),
     ("settings snapshot", _settings_snapshot),
     ("forget convergence", _converge_forgets),
     ("memory vector repair", _repair_memory_vectors),

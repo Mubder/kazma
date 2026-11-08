@@ -39,15 +39,12 @@ def _vendor(entry: dict[str, Any]) -> str:
 
 
 def _usable(registry: Any, entry: dict[str, Any]) -> bool:
-    from kazma_core.runtime.live_llm import key_is_usable, url_is_local
+    from kazma_core.provider_check import credentials_problem
+    from kazma_core.providers import is_speech_provider
 
-    if not entry or not entry.get("enabled", True):
+    if not entry or not entry.get("enabled", True) or is_speech_provider(entry):
         return False
-    base_url = str(entry.get("base_url") or "")
-    if url_is_local(base_url):
-        return True
-    _url, key = registry.resolve_provider_credentials(str(entry.get("name") or ""))
-    return key_is_usable(key)
+    return credentials_problem(registry, entry) is None
 
 
 def _active_vendor(registry: Any) -> str:
@@ -108,7 +105,12 @@ def suggest_backups(registry: Any, limit: int = 4) -> list[dict[str, str]]:
         if not model or str((owner or {}).get("name") or "") != name:
             continue
         seen.add(vendor)
-        out.append({"provider": name, "display_name": str(entry.get("display_name") or name), "model": model})
+        # Named with its provider (providers stage 3): the chain entry goes
+        # to this provider whoever else lists the same name.
+        from kazma_core.model_refs import format_ref
+
+        out.append({"provider": name, "display_name": str(entry.get("display_name") or name),
+                    "model": format_ref(name, model)})
         if len(out) >= limit:
             break
     return out

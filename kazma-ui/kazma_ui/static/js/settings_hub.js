@@ -647,6 +647,106 @@
         },
 
         // ── Model prices (kazma_core.model_prices) ──
+        /** The Model details card (providers stage 3): every chat model,
+         *  what is known about it and where from, and the owner's overrides
+         *  (kept as the form's strings until saved). */
+        async loadModelDetails() {
+            this.modelDetailsFailed = false;
+            const data = window.kazmaGetJson ? await window.kazmaGetJson('/api/settings/model-details') : null;
+            if (!data) {
+                this.modelDetailsFailed = true;
+                return;
+            }
+            const str = (v) => (v === undefined || v === null ? '' : String(v));
+            this.modelDetails = (data.models || []).map((m) => ({
+                ...m,
+                _editing: false,
+                override: {
+                    context_window: str((m.override || {}).context_window),
+                    max_output: str((m.override || {}).max_output),
+                    vision: str((m.override || {}).vision),
+                    tools: str((m.override || {}).tools),
+                },
+            }));
+            this.defaultModelRef = String(data.default || '');
+            this.modelDetailsLoaded = true;
+        },
+
+        /** The install's default model (new chats, chat apps with no model of
+         *  their own): the one switch, model and provider together. */
+        async setDefaultModel(ref) {
+            if (!ref) return;
+            const previous = this.defaultModelRef;
+            try {
+                await window.kazmaSave('/api/settings/active_model', {
+                    method: 'PUT',
+                    body: { active_model: ref },
+                });
+                this.defaultModelRef = ref;
+                document.dispatchEvent(new CustomEvent('model-changed', { detail: ref }));
+                showToast(_k('settings.default_model_saved', 'Default model: {model}', { model: ref }), 'success');
+            } catch (e) {
+                this.defaultModelRef = previous;
+                showToast(_k('settings.default_model_failed', 'The default model was not changed: ') + e.message, 'error');
+            }
+        },
+
+        /** One fact of a model, with where it came from, in the page's words. */
+        modelDetailFact(m, field) {
+            const src = (f) => {
+                const s = (m.sources || {})[f];
+                return s ? ' (' + _k('settings.model_details_source_' + s, s) + ')' : '';
+            };
+            if (field === 'context_window') {
+                if (!m.context_window) return _k('settings.model_details_window_unknown', 'Window: not known');
+                const n = window.KazmaFormat ? window.KazmaFormat.number(m.context_window) : String(m.context_window);
+                const said = window.kazmaCount
+                    ? window.kazmaCount('settings.model_details_window_is', m.context_window, { n: n })
+                    : 'Window: ' + n;
+                return said + src('context_window');
+            }
+            if (field === 'vision' || field === 'tools') {
+                const v = m[field];
+                const label = field === 'vision' ? _k('settings.model_details_vision', 'Sees images')
+                    : _k('settings.model_details_tools', 'Uses tools');
+                const answer = v === true ? _k('settings.model_details_yes', 'yes')
+                    : (v === false ? _k('settings.model_details_no', 'no') : _k('settings.model_details_unknown', 'not known'));
+                return label + ': ' + answer + (v === null || v === undefined ? '' : src(field));
+            }
+            if (m.local) return _k('settings.model_details_free', 'Free (on your network)');
+            if (m.input_per_1m === null || m.input_per_1m === undefined) {
+                return _k('settings.model_details_price_unknown', 'Price: not known');
+            }
+            return _k('settings.model_details_price_is', 'Price per million tokens: input ${input}, output ${output}',
+                { input: m.input_per_1m, output: m.output_per_1m }) + src('input_per_1m');
+        },
+
+        async saveModelDetails() {
+            const value = {};
+            for (const m of this.modelDetails) {
+                const o = m.override || {};
+                const entry = {};
+                if (String(o.context_window || '').trim()) entry.context_window = Number(o.context_window);
+                if (String(o.max_output || '').trim()) entry.max_output = Number(o.max_output);
+                if (o.vision === 'true' || o.vision === 'false') entry.vision = o.vision === 'true';
+                if (o.tools === 'true' || o.tools === 'false') entry.tools = o.tools === 'true';
+                if (Object.keys(entry).length) value[String(m.ref).toLowerCase()] = entry;
+            }
+            this.modelDetailsSaving = true;
+            try {
+                await window.kazmaSave('/api/settings/single', {
+                    method: 'PUT',
+                    body: { key: 'models.details', value: value, category: 'models' },
+                });
+                showToast(_k('settings.model_details_saved', 'Model details saved'), 'success');
+                await this.loadModelDetails();
+            } catch (e) {
+                showToast(_k('settings.model_details_not_saved', 'Model details not saved: ') + e.message, 'error');
+            } finally {
+                this.modelDetailsSaving = false;
+            }
+        },
+
         async loadModelPrices() {
             this.modelPricesFailed = false;
             const data = window.kazmaGetJson ? await window.kazmaGetJson('/api/settings/model-prices') : null;
@@ -734,6 +834,7 @@
                 const p = this.hubProviders.find(x => x.name === name);
                 if (p) {
                     const stored = String(p.api_key || '');
+                    const preset = ProvidersManager.getPreset(p.preset || p.name) || {};
                     this.hubEditingProvider = {
                         name: p.name,
                         display_name: p.display_name || '',
@@ -746,13 +847,27 @@
                         google_mode: p.google_mode || (p.project_id ? 'vertex_ai' : 'ai_studio'),
                         project_id: p.project_id || '',
                         location: p.location || 'us-central1',
+                        // Providers stages 2 and 4: masked secrets stay masked
+                        // in the form, and a masked value posted back is kept.
+                        preset: p.preset || (preset.id || ''),
+                        form: p.form || preset.form || 'key',
+                        kind: p.kind === 'speech' ? 'speech' : 'chat',
+                        url_as_typed: !!p.url_as_typed,
+                        headerRows: Object.entries(p.headers || {}).map(([name, value]) => ({ name: name, value: value })),
+                        api_version: p.api_version || '',
+                        region: p.region || '',
+                        aws_access_key_id: p.aws_access_key_id || '',
+                        aws_secret_access_key: p.aws_secret_access_key || '',
+                        aws_session_token: p.aws_session_token || '',
+                        extraKeys: (p.api_keys || []).map(k => ({ id: k.id, label: k.label || '', api_key: k.api_key || '' })),
+                        url_hint: preset.url_hint || '',
                         _existing: true,
                         _has_stored_key: !!(stored && stored !== '—' && stored !== '***'),
                     };
                     this.hubProviderTested = true; // editing an existing tested provider is acceptable
                 }
             } else {
-                this.hubEditingProvider = { name: '', display_name: '', base_url: '', api_key: '', models: '', enabled: true, google_mode: 'ai_studio', project_id: '', location: 'us-central1', _existing: false, _has_stored_key: false };
+                this.hubEditingProvider = { name: '', display_name: '', base_url: '', api_key: '', models: '', enabled: true, google_mode: 'ai_studio', project_id: '', location: 'us-central1', preset: '', form: 'key', kind: 'chat', url_as_typed: false, headerRows: [], api_version: '', region: '', aws_access_key_id: '', aws_secret_access_key: '', aws_session_token: '', extraKeys: [], url_hint: '', _existing: false, _has_stored_key: false };
             }
             this.hubProviderModal = true;
         },
@@ -764,25 +879,96 @@
         applyHubProviderPreset(presetKey) {
             const preset = ProvidersManager.getPreset(presetKey);
             if (preset) {
-                this.hubEditingProvider.name = presetKey;
-                this.hubEditingProvider.display_name = preset.name;
-                this.hubEditingProvider.base_url = preset.base_url;
+                const p = this.hubEditingProvider;
+                // A second account of one preset needs its own name.
+                const taken = this.hubProviders.some(x => x.name === presetKey);
+                p.name = presetKey === 'custom' ? '' : (taken ? presetKey + '-2' : presetKey);
+                p.display_name = presetKey === 'custom' ? '' : preset.name;
+                p.base_url = preset.base_url || '';
+                p.preset = presetKey;
+                p.form = preset.form || 'key';
+                p.url_hint = preset.url_hint || '';
+                p.models = preset.default_model || '';
+                this.hubProviderTested = false;
             }
         },
 
+        /** The dialog's fields as the save and the check take them
+         *  (providers stages 2 and 4): headers and extra keys from their
+         *  rows, a masked secret left masked (the server keeps it). */
+        providerFormBody() {
+            const p = this.hubEditingProvider;
+            const headers = {};
+            (p.headerRows || []).forEach(row => {
+                const n = String(row.name || '').trim();
+                if (n) headers[n] = String(row.value || '');
+            });
+            const body = {
+                name: String(p.name || '').trim(), display_name: p.display_name || '', base_url: p.base_url || '',
+                enabled: p.enabled !== false, preset: p.preset || '', kind: p.kind === 'speech' ? 'speech' : 'chat',
+                url_as_typed: !!p.url_as_typed, headers: headers,
+                api_version: p.api_version || '', region: p.region || '',
+                aws_access_key_id: p.aws_access_key_id || '', aws_secret_access_key: p.aws_secret_access_key || '',
+                aws_session_token: p.aws_session_token || '',
+                google_mode: p.google_mode || '', project_id: p.project_id || '', location: p.location || '',
+                api_keys: (p.extraKeys || []).filter(k => String(k.api_key || '').trim())
+                    .map((k, i) => ({ id: k.id || ('k' + Date.now().toString(36) + i), label: k.label || '', api_key: k.api_key })),
+            };
+            const typed = String(p.api_key || '').trim();
+            body.api_key = typed && !this._isMaskedApiKey(typed) ? typed : '';
+            const models = typeof p.models === 'string'
+                ? p.models.split(',').map(m => m.trim()).filter(Boolean)
+                : (Array.isArray(p.models) ? p.models : []);
+            body.models = models;
+            return body;
+        },
+
+        /** The provider list, chat providers first, then speech services
+         *  (providers stage 2). */
+        orderedHubProviders() {
+            const chat = this.hubProviders.filter(p => p.kind !== 'speech');
+            return chat.concat(this.hubProviders.filter(p => p.kind === 'speech'));
+        },
+
+        /** The first speech service's name: the section's heading goes above it. */
+        firstSpeechProvider() {
+            const first = this.hubProviders.find(p => p.kind === 'speech');
+            return first ? first.name : '';
+        },
+
+        /** True when the dialog's form needs an address (Google and Bedrock
+         *  compute theirs). */
+        providerNeedsAddress() {
+            const form = this.hubEditingProvider.form || 'key';
+            return form !== 'google' && form !== 'bedrock';
+        },
+
+        addProviderHeader() {
+            this.hubEditingProvider.headerRows.push({ name: '', value: '' });
+            this.hubProviderTested = false;
+        },
+
+        removeProviderHeader(i) {
+            this.hubEditingProvider.headerRows.splice(i, 1);
+            this.hubProviderTested = false;
+        },
+
+        addProviderKey() {
+            this.hubEditingProvider.extraKeys.push({ id: '', label: '', api_key: '' });
+        },
+
+        removeProviderKey(i) {
+            this.hubEditingProvider.extraKeys.splice(i, 1);
+        },
+
         async saveHubProvider() {
-            if (!this.hubEditingProvider.name || (!this.hubEditingProvider.base_url && this.hubEditingProvider.name !== 'google')) {
+            if (!this.hubEditingProvider.name || (!this.hubEditingProvider.base_url && this.providerNeedsAddress())) {
                 showToast(_k('settings.hub.name_and_base_url_are', 'Name and Base URL are required'), 'error');
                 return;
             }
             this.saving = true;
             try {
-                const data = { ...this.hubEditingProvider };
-                if (typeof data.models === 'string') {
-                    data.models = data.models.split(',').map(m => m.trim()).filter(Boolean);
-                }
-                delete data._existing;
-                delete data._has_stored_key;
+                const data = this.providerFormBody();
                 const resp = await fetch('/api/providers', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
@@ -944,19 +1130,20 @@
         async testHubProviderFromModal() {
             const p = this.hubEditingProvider;
             const name = String(p.name || '').trim();
-            if (!name || (!p.base_url && name !== 'google')) {
+            if (!name || (!p.base_url && this.providerNeedsAddress())) {
                 showToast(_k('settings.hub.enter_a_provider_name_and', 'Enter a provider name and base URL first'), 'error');
                 return;
             }
             this.hubTestingProvider = 'modal';
             this.hubTestResult = null;
             try {
-                const typedModels = typeof p.models === 'string'
-                    ? p.models.split(',').map(m => m.trim()).filter(Boolean)
-                    : (Array.isArray(p.models) ? p.models : []);
-                const typed = String(p.api_key || '').trim();
-                const body = { name: name, base_url: p.base_url || '', model: typedModels[0] || '' };
-                if (typed && !this._isMaskedApiKey(typed)) body.api_key = typed;
+                // Every field as typed (providers stage 2): Azure's version,
+                // Bedrock's keys, headers -- checked before anything is saved.
+                const body = this.providerFormBody();
+                const typedModels = body.models;
+                body.model = typedModels[0] || '';
+                delete body.models;
+                delete body.api_keys;
                 const resp = await fetch('/api/providers/check', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },

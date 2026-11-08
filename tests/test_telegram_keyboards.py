@@ -43,5 +43,6 @@ def test_provider_keyboard_two_per_row():
 def test_model_keyboard_shortens_display():
     kb = build_model_keyboard("openai", ["openai/gpt-4o", "mini"])
     assert kb["inline_keyboard"][0][0]["text"] == "gpt-4o"
-    assert kb["inline_keyboard"][0][0]["callback_data"] == "model_select:openai/gpt-4o"
+    # provider:model (providers stage 3): the same name elsewhere is another pick.
+    assert kb["inline_keyboard"][0][0]["callback_data"] == "model_select:openai:openai/gpt-4o"
     assert kb["inline_keyboard"][1][0]["text"] == "mini"

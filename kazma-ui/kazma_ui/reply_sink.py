@@ -112,16 +112,15 @@ CLIENT_ROW_FIELDS: tuple[str, ...] = (
     "cost",
     "cost_known",
     "duration_ms",
+    # The model the chat runs with (providers stage 3): the chat's picker
+    # shows it when the chat is opened; ``model`` is the one that answered.
+    "run_model",
 )
 
 #: Row fields kept for the server alone, and why.
 SERVER_ROW_FIELDS: dict[str, str] = {
     _LIFECYCLE: "the client reads the legacy `open` flag written beside it",
     "kind": "an instant turn's origin (a capacity reply); no client reads it",
-    "run_model": (
-        "the model the turn ran with; a client that names none continues with "
-        "it (sse_chat). `model` is the one that answered, shown on the reply"
-    ),
 }
 
 #: A turn's lifecycle is a JOIN-SEMILATTICE, not a field: it only ever moves

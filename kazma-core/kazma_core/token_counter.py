@@ -24,7 +24,13 @@ def resolve_context_window(raw_config: dict | None = None, model: str | None = N
       3. YAML: ``memory.max_context_tokens``.
       4. ``DEFAULT_CONTEXT_WINDOW`` (1,000,000).
 
-    No guessed per-model table (removed 2026-10-18, the owner's decision).
+    Steps 2-4 are capped at the model's own window when it is KNOWN
+    (providers stage 3, ``kazma_core.model_details``): the owner's Model
+    details, or the window the provider's own model list states. Sending
+    more than the model takes is refused by the provider.
+
+    No guessed per-model table (removed 2026-10-18, the owner's decision):
+    the built-in catalog holds no sizes.
 
     Never raises; always returns >= 1024. Shared by ``agent_runner`` (the
     ContextAuthority gate) and the graph's saturation routing so every
@@ -39,6 +45,11 @@ def resolve_context_window(raw_config: dict | None = None, model: str | None = N
                 return per_model
         except Exception:
             pass
+    return _capped_at_known_window(_configured_window(raw_config), model)
+
+
+def _configured_window(raw_config: dict | None) -> int:
+    """Steps 2-4 of :func:`resolve_context_window`."""
     try:
         from kazma_core.config_store import get_config_store
 
@@ -58,6 +69,20 @@ def resolve_context_window(raw_config: dict | None = None, model: str | None = N
             except (TypeError, ValueError):
                 pass
     return DEFAULT_CONTEXT_WINDOW
+
+
+def _capped_at_known_window(window: int, model: str | None) -> int:
+    """*window*, or the model's own when it is known and smaller."""
+    if not model:
+        return window
+    from kazma_core.db.pg_helpers import store_errors
+    from kazma_core.model_registry import get_model_registry
+
+    try:
+        known = get_model_registry().model_details(str(model)).context_window
+    except store_errors():  # not knowing is the default
+        return window
+    return max(1024, min(window, int(known))) if known else window
 
 # Try to import tiktoken; fall back to None if not installed
 try:

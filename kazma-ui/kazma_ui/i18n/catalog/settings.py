@@ -6368,4 +6368,248 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "Kazma يتوقف عن العمل",
         "en": "Kazma is shutting down",
     },
+    "settings.hub.custom_endpoint": {
+        "ar": "عنوان آخر (متوافق مع OpenAI)",
+        "en": "Any other (an OpenAI-compatible address)",
+    },
+    "settings.hub.aws_region": {
+        "ar": "منطقة AWS",
+        "en": "AWS region",
+    },
+    "settings.hub.aws_access_key_id": {
+        "ar": "معرّف مفتاح الوصول في AWS",
+        "en": "AWS access key id",
+    },
+    "settings.hub.aws_secret_access_key": {
+        "ar": "مفتاح الوصول السري في AWS",
+        "en": "AWS secret access key",
+    },
+    "settings.hub.aws_session_token": {
+        "ar": "رمز جلسة AWS (اختياري)",
+        "en": "AWS session token (optional)",
+    },
+    "settings.hub.bedrock_hint": {
+        "ar": "إذا تُركت فارغة يستخدم كاظمه بيانات اعتماد AWS على هذا الجهاز (متغيرات البيئة أو ملف بيانات الاعتماد المشترك أو دور IAM). ومعرّفات النماذج هي معرّفات Bedrock، مثل anthropic.claude-3-5-sonnet-20241022-v2:0.",
+        "en": "Left empty, Kazma uses the AWS credentials on this computer (environment, shared credentials file or an IAM role). Model ids are Bedrock's, such as anthropic.claude-3-5-sonnet-20241022-v2:0.",
+    },
+    "settings.hub.azure_endpoint": {
+        "ar": "عنوان Azure",
+        "en": "Azure endpoint",
+    },
+    "settings.hub.azure_deployments": {
+        "ar": "أسماء عمليات النشر (مفصولة بفواصل)",
+        "en": "Deployment names (comma-separated)",
+    },
+    "settings.hub.api_version": {
+        "ar": "إصدار الواجهة البرمجية",
+        "en": "API version",
+    },
+    "settings.hub.api_key_optional": {
+        "ar": "مفتاح API (اختياري)",
+        "en": "API key (optional)",
+    },
+    "settings.hub.url_hint_account_id": {
+        "ar": "استبدل ACCOUNT_ID في العنوان بمعرّف حسابك.",
+        "en": "Replace ACCOUNT_ID in the address with your account id.",
+    },
+    "settings.hub.advanced": {
+        "ar": "إعدادات متقدمة",
+        "en": "Advanced",
+    },
+    "settings.hub.url_as_typed": {
+        "ar": "استخدم هذا العنوان كما كُتب تمامًا",
+        "en": "Use this address exactly as typed",
+    },
+    "settings.hub.url_as_typed_hint": {
+        "ar": "يضيف كاظمه /v1 إلى العنوان الذي لا يذكر إصدارًا. ضع علامة هنا لخادم لا يحتوي مساره على إصدار.",
+        "en": "Kazma adds /v1 to an address that names no version. Tick this for a server whose path has none.",
+    },
+    "settings.hub.headers": {
+        "ar": "الترويسات",
+        "en": "Headers",
+    },
+    "settings.hub.headers_hint": {
+        "ar": "تُرسل مع كل طلب إلى هذا المزوّد. وتُحفظ قيمها كأسرار.",
+        "en": "Sent with every request to this provider. Values are kept as secrets.",
+    },
+    "settings.hub.header_name": {
+        "ar": "الترويسة",
+        "en": "Header",
+    },
+    "settings.hub.header_value": {
+        "ar": "القيمة",
+        "en": "Value",
+    },
+    "settings.hub.add_header": {
+        "ar": "أضف ترويسة",
+        "en": "Add a header",
+    },
+    "settings.hub.remove": {
+        "ar": "إزالة",
+        "en": "Remove",
+    },
+    "settings.hub.extra_keys": {
+        "ar": "مفاتيح إضافية",
+        "en": "More keys",
+    },
+    "settings.hub.extra_keys_hint": {
+        "ar": "حين يُرفض مفتاح أو ينفد رصيده أو عدد طلباته، ينتقل كاظمه إلى المفتاح التالي ويخبرك.",
+        "en": "When a key is refused, out of credit or out of requests, Kazma switches to the next one and tells you.",
+    },
+    "settings.hub.extra_key_label": {
+        "ar": "الوصف (اسم الحساب)",
+        "en": "Label (an account's name)",
+    },
+    "settings.hub.add_key": {
+        "ar": "أضف مفتاحًا",
+        "en": "Add a key",
+    },
+    "settings.hub.kind_speech": {
+        "ar": "هذا المزوّد يقدّم خدمات الكلام، لا الدردشة",
+        "en": "This provider serves speech, not chat",
+    },
+    "settings.hub.kind_speech_hint": {
+        "ar": "يُستبعد من كل قوائم نماذج الدردشة، وتستخدمه الإعدادات ← الصوت.",
+        "en": "Kept out of every chat model list; Settings → Voice uses it.",
+    },
+    "settings.default_model": {
+        "ar": "النموذج الافتراضي (الدردشات الجديدة وتطبيقات الدردشة)",
+        "en": "Default model (new chats, chat apps)",
+    },
+    "settings.model_details_title": {
+        "ar": "تفاصيل النماذج",
+        "en": "Model details",
+    },
+    "settings.model_details_lede": {
+        "ar": "ما يعرفه كاظمه عن كل نموذج يمكنك اختياره، ومن أين: قيمتك أنت، أو قائمة نماذج المزوّد، أو كتالوج كاظمه (أسعار الموردين المعلنة على واجهاتهم، مؤرخة). ونافذة السياق هي ما يذكره المزوّد أو ما تضعه أنت، لا تخمين أبدًا. ولا يرسل كاظمه أكثر من النافذة المعروفة للنموذج أو حد مخرجاته.",
+        "en": "What Kazma knows about each model you can choose, and where from: your own value, the provider's model list, or Kazma's catalog (vendors' list prices on their own API, dated). A context window is the provider's own or yours, never a guess. Kazma sends no more than a model's known window or output limit.",
+    },
+    "settings.model_details_load_failed": {
+        "ar": "تعذّرت قراءة تفاصيل النماذج.",
+        "en": "Model details could not be read.",
+    },
+    "settings.model_details_empty": {
+        "ar": "لا يوجد نموذج يمكن اختياره بعد: أضف مزوّدًا له مفتاح، أو خادمًا في شبكتك.",
+        "en": "No model can be chosen yet: add a provider with a key, or a server on your network.",
+    },
+    "settings.model_details_edit": {
+        "ar": "تعديل",
+        "en": "Edit",
+    },
+    "settings.model_details_window": {
+        "ar": "نافذة السياق (رموز)",
+        "en": "Context window (tokens)",
+    },
+    "settings.model_details_output": {
+        "ar": "حد المخرجات (رموز)",
+        "en": "Output limit (tokens)",
+    },
+    "settings.model_details_vision": {
+        "ar": "يرى الصور",
+        "en": "Sees images",
+    },
+    "settings.model_details_tools": {
+        "ar": "يستخدم الأدوات",
+        "en": "Uses tools",
+    },
+    "settings.model_details_not_set": {
+        "ar": "غير محدد",
+        "en": "Not set",
+    },
+    "settings.model_details_yes": {
+        "ar": "نعم",
+        "en": "yes",
+    },
+    "settings.model_details_no": {
+        "ar": "لا",
+        "en": "no",
+    },
+    "settings.model_details_unknown": {
+        "ar": "غير معروف",
+        "en": "not known",
+    },
+    "settings.model_details_window_unknown": {
+        "ar": "النافذة: غير معروفة",
+        "en": "Window: not known",
+    },
+    "settings.model_details_window_is.zero": {
+        "ar": "النافذة: لا رموز",
+        "en": "Window: no tokens",
+    },
+    "settings.model_details_window_is.one": {
+        "ar": "النافذة: رمز واحد",
+        "en": "Window: 1 token",
+    },
+    "settings.model_details_window_is.two": {
+        "ar": "النافذة: رمزان",
+        "en": "Window: {n} tokens",
+    },
+    "settings.model_details_window_is.few": {
+        "ar": "النافذة: {n} رموز",
+        "en": "Window: {n} tokens",
+    },
+    "settings.model_details_window_is.many": {
+        "ar": "النافذة: {n} رمزًا",
+        "en": "Window: {n} tokens",
+    },
+    "settings.model_details_window_is.other": {
+        "ar": "النافذة: {n} رمز",
+        "en": "Window: {n} tokens",
+    },
+    "settings.model_details_free": {
+        "ar": "مجاني (في شبكتك)",
+        "en": "Free (on your network)",
+    },
+    "settings.model_details_price_unknown": {
+        "ar": "السعر: غير معروف",
+        "en": "Price: not known",
+    },
+    "settings.model_details_price_is": {
+        "ar": "السعر لكل مليون رمز: المدخلات ${input}، والمخرجات ${output}",
+        "en": "Price per million tokens: input ${input}, output ${output}",
+    },
+    "settings.model_details_source_owner": {
+        "ar": "قيمتك",
+        "en": "yours",
+    },
+    "settings.model_details_source_provider": {
+        "ar": "من المزوّد",
+        "en": "the provider's",
+    },
+    "settings.model_details_source_catalog": {
+        "ar": "كتالوج كاظمه",
+        "en": "Kazma's catalog",
+    },
+    "settings.model_details_save": {
+        "ar": "احفظ تفاصيل النماذج",
+        "en": "Save model details",
+    },
+    "settings.model_details_saved": {
+        "ar": "حُفظت تفاصيل النماذج",
+        "en": "Model details saved",
+    },
+    "settings.model_details_not_saved": {
+        "ar": "لم تُحفظ تفاصيل النماذج: ",
+        "en": "Model details not saved: ",
+    },
+    "settings.speech_services": {
+        "ar": "خدمات الكلام",
+        "en": "Speech services",
+    },
+    "settings.speech_services_hint": {
+        "ar": "مزوّدو تحويل الكلام إلى نص. تُستبعد من كل قوائم نماذج الدردشة، وتختار الإعدادات ← الصوت ما يستخدمه كاظمه منها.",
+        "en": "Speech-to-text providers. Kept out of every chat model list; Settings → Voice chooses which one Kazma uses.",
+    },
+    "settings.default_model_hint": {
+        "ar": "تستخدمه الدردشات الجديدة وتطبيقات الدردشة التي ليس لها نموذج خاص. ومنتقي الدردشة يغيّر تلك الدردشة وحدها.",
+        "en": "New chats and chat apps with no model of their own use it. A chat's own picker changes only that chat.",
+    },
+    "settings.default_model_saved": {
+        "ar": "النموذج الافتراضي: {model}",
+        "en": "Default model: {model}",
+    },
+    "settings.default_model_failed": {
+        "ar": "لم يتغيّر النموذج الافتراضي: ",
+        "en": "The default model was not changed: ",
+    },
 }

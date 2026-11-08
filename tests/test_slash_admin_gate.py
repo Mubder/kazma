@@ -37,7 +37,9 @@ def test_only_admins_change_kazma_for_everyone():
         "/ide repo Mubder/kazma",
         "/swarm config group -1001234",
         "/swarm config clear",
-        "/_models_select deepseek-chat",
+        # The install's default model (providers stage 3); a chat's own
+        # model (/model <x>, a button's /_models_select) is that chat's.
+        "/model default deepseek:deepseek-chat",
     ):
         assert changes_global_config(text), text
     for text in (
@@ -46,6 +48,7 @@ def test_only_admins_change_kazma_for_everyone():
         "/skill", "/skill list", "/skill activate improve", "/skill info improve",
         "/ide", "/ide repo", "/ide repo list", "/ide ls", "/ide open README.md",
         "/swarm", "/swarm config", "/swarm status", "/kb list",
+        "/model", "/model deepseek:deepseek-chat", "/model reset", "/_models_select deepseek:deepseek-chat",
     ):
         assert not changes_global_config(text), text
 

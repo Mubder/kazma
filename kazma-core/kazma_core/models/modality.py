@@ -17,6 +17,7 @@ __all__ = [
     "SPEECH_PATTERNS",
     "chat_models",
     "is_speech_model",
+    "row_is_speech",
     "speech_models",
 ]
 
@@ -45,7 +46,11 @@ def is_speech_model(model_id: str | None) -> bool:
     raw = (model_id or "").strip().lower()
     if not raw:
         return False
-    return any(fnmatch.fnmatch(raw, pat) for pat in SPEECH_PATTERNS)
+    # The id with its vendor prefix, and without it: "nvidia/parakeet-ctc"
+    # and "nvidia/canary-1b" are speech too (a glob must match the whole id,
+    # so "parakeet*" missed them; providers stage 2).
+    tail = raw.rsplit("/", 1)[-1]
+    return any(fnmatch.fnmatch(raw, pat) or fnmatch.fnmatch(tail, pat) for pat in SPEECH_PATTERNS)
 
 
 def chat_models(ids: Iterable[str] | None) -> list[str]:
@@ -72,3 +77,18 @@ def speech_models(ids: Iterable[str] | None) -> list[str]:
         seen.add(text)
         out.append(text)
     return out
+
+
+def row_is_speech(entry: dict | None, discovered: Iterable[str] | None = ()) -> bool:
+    """True for a provider row that serves speech, not chat (providers
+    stage 2): it says so (``kind: speech``), or every model it lists or
+    found is a speech model. Rows like "NVIDIA ASR" and "Cohere
+    Transcriptions" were added as providers because speech had nowhere else
+    to go, and sat in every chat model list."""
+    if not isinstance(entry, dict):
+        return False
+    kind = str(entry.get("kind") or "").strip().lower()
+    if kind:
+        return kind == "speech"
+    ids = [str(m).strip() for m in [*(entry.get("models") or []), *(discovered or ())] if str(m).strip()]
+    return bool(ids) and all(is_speech_model(m) for m in ids)

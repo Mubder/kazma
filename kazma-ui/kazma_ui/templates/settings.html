@@ -76,7 +76,15 @@
                             {{ t('settings.no_providers') }}
                         </div>
 
-                        <template x-for="p in hubProviders" :key="p.name">
+                        <!-- Chat providers first, then speech services under their
+                             own heading (providers stage 2: speech had nowhere
+                             else to go and sat among the chat providers). -->
+                        <template x-for="p in orderedHubProviders()" :key="p.name">
+                            <div>
+                            <div class="pc-phead pc-speech-head" x-show="p.kind === 'speech' && firstSpeechProvider() === p.name" x-cloak>
+                                <span class="pc-ptitle">{{ t('settings.speech_services') }}</span>
+                                <span class="setting-desc">{{ t('settings.speech_services_hint') }}</span>
+                            </div>
                             <button type="button" class="pc-row"
                                     :class="providerState(p)"
                                     :aria-selected="selectedHubProvider() && selectedHubProvider().name === p.name"
@@ -97,6 +105,7 @@
                                     <span class="pc-rlat" x-text="providerRowMeta(p)"></span>
                                 </span>
                             </button>
+                            </div>
                         </template>
                     </section>
 
@@ -313,6 +322,70 @@
                         <button type="button" class="btn btn-secondary btn-sm" @click="addModelPrice(u.model)">{{ t('settings.model_prices_set') }}</button>
                     </div>
                 </template>
+            </div>
+
+            <!-- Model details (kazma_core.model_details, providers stage 3):
+                 each chat model's window, output limit, vision, tools and
+                 price, where each came from, and the owner's overrides. -->
+            <div class="settings-group" id="model-details">
+                <div class="form-group" id="default-model" x-show="modelDetailsLoaded && modelDetails.length" x-cloak>
+                    <label for="default-model-select">{{ t('settings.default_model') }}</label>
+                    <select class="form-select" id="default-model-select" translate="no" dir="ltr"
+                            @change="setDefaultModel($event.target.value)">
+                        <template x-for="m in modelDetails" :key="'d-' + m.ref">
+                            <option :value="m.ref" x-text="m.ref" :selected="m.ref === defaultModelRef"></option>
+                        </template>
+                    </select>
+                    <p class="setting-desc">{{ t('settings.default_model_hint') }}</p>
+                </div>
+                <h3>{{ t('settings.model_details_title') }}</h3>
+                <p class="setting-desc">{{ t('settings.model_details_lede') }}</p>
+                <p class="text-error" x-show="modelDetailsFailed" x-cloak>{{ t('settings.model_details_load_failed') }}</p>
+                <div x-show="modelDetailsLoaded && modelDetails.length === 0" class="empty-state" style="padding:12px" x-cloak>
+                    {{ t('settings.model_details_empty') }}
+                </div>
+                <template x-for="m in modelDetails" :key="m.ref">
+                    <div class="model-detail-row" style="padding:8px 0;border-bottom:1px solid var(--border)">
+                        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+                            <span translate="no" dir="ltr" style="flex:1 1 220px;font-weight:600" x-text="m.ref"></span>
+                            <span class="setting-desc" x-text="modelDetailFact(m, 'context_window')"></span>
+                            <span class="setting-desc" x-text="modelDetailFact(m, 'vision')"></span>
+                            <span class="setting-desc" x-text="modelDetailFact(m, 'tools')"></span>
+                            <span class="setting-desc" x-text="modelDetailFact(m, 'price')"></span>
+                            <button type="button" class="btn btn-secondary btn-sm" @click="m._editing = !m._editing">{{ t('settings.model_details_edit') }}</button>
+                        </div>
+                        <div x-show="m._editing" x-cloak style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
+                            <label style="flex:1 1 140px">
+                                <span class="setting-desc">{{ t('settings.model_details_window') }}</span>
+                                <input class="form-input" type="number" min="1024" step="1" dir="ltr" x-model="m.override.context_window">
+                            </label>
+                            <label style="flex:1 1 140px">
+                                <span class="setting-desc">{{ t('settings.model_details_output') }}</span>
+                                <input class="form-input" type="number" min="1024" step="1" dir="ltr" x-model="m.override.max_output">
+                            </label>
+                            <label style="flex:1 1 120px">
+                                <span class="setting-desc">{{ t('settings.model_details_vision') }}</span>
+                                <select class="form-select" x-model="m.override.vision">
+                                    <option value="">{{ t('settings.model_details_not_set') }}</option>
+                                    <option value="true">{{ t('settings.model_details_yes') }}</option>
+                                    <option value="false">{{ t('settings.model_details_no') }}</option>
+                                </select>
+                            </label>
+                            <label style="flex:1 1 120px">
+                                <span class="setting-desc">{{ t('settings.model_details_tools') }}</span>
+                                <select class="form-select" x-model="m.override.tools">
+                                    <option value="">{{ t('settings.model_details_not_set') }}</option>
+                                    <option value="true">{{ t('settings.model_details_yes') }}</option>
+                                    <option value="false">{{ t('settings.model_details_no') }}</option>
+                                </select>
+                            </label>
+                        </div>
+                    </div>
+                </template>
+                <div style="margin-top:12px">
+                    <button type="button" class="btn btn-primary btn-sm" id="model-details-save" @click="saveModelDetails()"
+                            :disabled="modelDetailsSaving || !modelDetailsLoaded">{{ t('settings.model_details_save') }}</button>
+                </div>
             </div>
 
             <div class="settings-group">
@@ -713,7 +786,7 @@
                     <select class="form-select" @change="applyHubProviderPreset($event.target.value); $event.target.value = ''">
                         <option value="">{{ t('settings.choose_preset_placeholder') }}</option>
                         <template x-for="preset in providerPresets" :key="preset.key">
-                            <option :value="preset.key" x-text="preset.name" translate="no" x-show="preset.key !== 'custom'" x-cloak></option>
+                            <option :value="preset.key" x-text="preset.key === 'custom' ? t('settings.hub.custom_endpoint') : preset.name" translate="no"></option>
                         </template>
                     </select>
                 </div>
@@ -728,7 +801,7 @@
                     </div>
                 </div>
                 <!-- Google Specific Settings -->
-                <template x-if="hubEditingProvider.name === 'google'">
+                <template x-if="hubEditingProvider.form === 'google'">
                     <div style="margin-bottom: 16px; padding: 12px; background: rgba(255, 255, 255, 0.03); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.08);">
                         <div class="form-group" style="margin-bottom: 12px;">
                             <label style="font-weight: 600; color: var(--accent);">{{ t('settings.hub.google_mode') }}</label>
@@ -772,15 +845,45 @@
                     </div>
                 </template>
 
-                <!-- Standard Provider Settings -->
-                <template x-if="hubEditingProvider.name !== 'google'">
-                    <div>
+                <!-- AWS Bedrock (providers stage 2): a region and AWS keys -->
+                <template x-if="hubEditingProvider.form === 'bedrock'">
+                    <div class="provider-form-part">
                         <div class="form-group" style="margin-bottom: 12px;">
-                            <label>{{ t('settings.base_url') }}</label>
-                            <input type="text" class="form-input" id="provider-base-url" x-model="hubEditingProvider.base_url" @input="hubProviderTested = false" translate="no" placeholder="https://api.openai.com/v1">
+                            <label>{{ t('settings.hub.aws_region') }}</label>
+                            <input type="text" class="form-input" id="provider-region" x-model="hubEditingProvider.region" @input="hubProviderTested = false" translate="no" placeholder="us-east-1">
+                        </div>
+                        <div class="form-row" style="gap: 12px;">
+                            <div class="form-group" style="flex: 1;">
+                                <label>{{ t('settings.hub.aws_access_key_id') }}</label>
+                                <input type="text" class="form-input" id="provider-aws-key-id" x-model="hubEditingProvider.aws_access_key_id" @input="hubProviderTested = false" translate="no" autocomplete="off" spellcheck="false">
+                            </div>
+                            <div class="form-group" style="flex: 1;">
+                                <label>{{ t('settings.hub.aws_secret_access_key') }}</label>
+                                <input type="password" class="form-input" id="provider-aws-secret" x-model="hubEditingProvider.aws_secret_access_key" @input="hubProviderTested = false" autocomplete="off" spellcheck="false">
+                            </div>
                         </div>
                         <div class="form-group" style="margin-bottom: 12px;">
-                            <label>{{ t('settings.api_key') }}</label>
+                            <label>{{ t('settings.hub.aws_session_token') }}</label>
+                            <input type="password" class="form-input" x-model="hubEditingProvider.aws_session_token" @input="hubProviderTested = false" autocomplete="off" spellcheck="false">
+                        </div>
+                        <p class="setting-desc">{{ t('settings.hub.bedrock_hint') }}</p>
+                    </div>
+                </template>
+
+                <!-- Standard Provider Settings -->
+                <template x-if="hubEditingProvider.form !== 'google' && hubEditingProvider.form !== 'bedrock'">
+                    <div>
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label x-text="hubEditingProvider.form === 'azure' ? t('settings.hub.azure_endpoint') : t('settings.base_url')"></label>
+                            <input type="text" class="form-input" id="provider-base-url" x-model="hubEditingProvider.base_url" @input="hubProviderTested = false" translate="no" :placeholder="hubEditingProvider.form === 'azure' ? 'https://my-resource.openai.azure.com' : 'https://api.openai.com/v1'">
+                            <div class="setting-desc" x-show="hubEditingProvider.url_hint" x-cloak x-text="t('settings.hub.url_hint_account_id')"></div>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 12px;" x-show="hubEditingProvider.form === 'azure'" x-cloak>
+                            <label>{{ t('settings.hub.api_version') }}</label>
+                            <input type="text" class="form-input" id="provider-api-version" x-model="hubEditingProvider.api_version" @input="hubProviderTested = false" translate="no" placeholder="2024-10-21">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label x-text="hubEditingProvider.form === 'local' ? t('settings.hub.api_key_optional') : t('settings.api_key')"></label>
                             <div class="input-with-toggle">
                                 <input :type="hubShowProviderKey ? 'text' : 'password'" class="form-input" x-model="hubEditingProvider.api_key" @input="hubProviderTested = false" :placeholder="hubEditingProvider._has_stored_key ? t('settings.hub.keep_key') : 'sk-...'" autocomplete="off" spellcheck="false">
                                 <button class="btn btn-icon" type="button" @click="hubShowProviderKey = !hubShowProviderKey" :title="hubShowProviderKey ? t('settings.hub.hide') : t('settings.hub.show')" x-html="hubShowProviderKey ? KazmaIcons.get('eye-off') : KazmaIcons.get('eye')"></button>
@@ -790,9 +893,52 @@
                     </div>
                 </template>
                 <div class="form-group">
-                    <label>{{ t('settings.models_comma') }}</label>
-                    <input type="text" class="form-input" id="provider-models" x-model="hubEditingProvider.models" placeholder="gpt-4o, gpt-4o-mini">
+                    <label x-text="hubEditingProvider.form === 'azure' ? t('settings.hub.azure_deployments') : t('settings.models_comma')"></label>
+                    <input type="text" class="form-input" id="provider-models" x-model="hubEditingProvider.models" placeholder="gpt-5-mini, gpt-5">
                 </div>
+
+                <!-- Advanced (providers stages 2 and 4) -->
+                <details class="provider-advanced" style="margin-bottom: 12px;">
+                    <summary>{{ t('settings.hub.advanced') }}</summary>
+                    <div class="form-group" x-show="hubEditingProvider.form !== 'google' && hubEditingProvider.form !== 'bedrock' && hubEditingProvider.form !== 'azure'" x-cloak>
+                        <label style="display:flex;align-items:center;gap:8px">
+                            <input type="checkbox" id="provider-url-as-typed" x-model="hubEditingProvider.url_as_typed" @change="hubProviderTested = false">
+                            <span>{{ t('settings.hub.url_as_typed') }}</span>
+                        </label>
+                        <div class="setting-desc">{{ t('settings.hub.url_as_typed_hint') }}</div>
+                    </div>
+                    <div class="form-group" x-show="hubEditingProvider.form !== 'bedrock'" x-cloak>
+                        <label>{{ t('settings.hub.headers') }}</label>
+                        <div class="setting-desc">{{ t('settings.hub.headers_hint') }}</div>
+                        <template x-for="(row, i) in hubEditingProvider.headerRows" :key="i">
+                            <div class="form-row provider-header-row" style="gap: 8px; margin-top: 6px;">
+                                <input type="text" class="form-input" x-model="row.name" @input="hubProviderTested = false" :placeholder="t('settings.hub.header_name')" translate="no" autocomplete="off">
+                                <input type="password" class="form-input" x-model="row.value" @input="hubProviderTested = false" :placeholder="t('settings.hub.header_value')" autocomplete="off">
+                                <button class="btn btn-icon" type="button" @click="removeProviderHeader(i)" :title="t('settings.hub.remove')" x-html="KazmaIcons.get('x')"></button>
+                            </div>
+                        </template>
+                        <button class="btn btn-secondary btn-sm" type="button" id="provider-add-header" style="margin-top: 6px;" @click="addProviderHeader()">{{ t('settings.hub.add_header') }}</button>
+                    </div>
+                    <div class="form-group" x-show="hubEditingProvider.form !== 'google' && hubEditingProvider.form !== 'bedrock' && hubEditingProvider.form !== 'local'" x-cloak>
+                        <label>{{ t('settings.hub.extra_keys') }}</label>
+                        <div class="setting-desc">{{ t('settings.hub.extra_keys_hint') }}</div>
+                        <template x-for="(key, i) in hubEditingProvider.extraKeys" :key="i">
+                            <div class="form-row provider-key-row" style="gap: 8px; margin-top: 6px;">
+                                <input type="text" class="form-input" x-model="key.label" :placeholder="t('settings.hub.extra_key_label')" autocomplete="off">
+                                <input type="password" class="form-input" x-model="key.api_key" :placeholder="t('settings.api_key')" autocomplete="off" spellcheck="false">
+                                <button class="btn btn-icon" type="button" @click="removeProviderKey(i)" :title="t('settings.hub.remove')" x-html="KazmaIcons.get('x')"></button>
+                            </div>
+                        </template>
+                        <button class="btn btn-secondary btn-sm" type="button" id="provider-add-key" style="margin-top: 6px;" @click="addProviderKey()">{{ t('settings.hub.add_key') }}</button>
+                    </div>
+                    <div class="form-group">
+                        <label style="display:flex;align-items:center;gap:8px">
+                            <input type="checkbox" id="provider-kind-speech" :checked="hubEditingProvider.kind === 'speech'" @change="hubEditingProvider.kind = $event.target.checked ? 'speech' : 'chat'">
+                            <span>{{ t('settings.hub.kind_speech') }}</span>
+                        </label>
+                        <div class="setting-desc">{{ t('settings.hub.kind_speech_hint') }}</div>
+                    </div>
+                </details>
                 <div class="form-group">
                     <label style="display:flex;align-items:center;gap:8px">
                         <span>{{ t('settings.enabled_label') }}</span>

@@ -111,22 +111,24 @@ class ModelPicker(ModalScreen[str | None]):
         self.query_one(Input).focus()
 
     def _load_models(self) -> None:
-        """Load all models from the registry."""
+        """Load the one model list every picker reads
+        (kazma_core.models.options, providers stage 3). Each model is its
+        ``provider:model`` reference: the list dropped a name the second
+        time it saw it, so a model two providers offer showed under one."""
         try:
-            from kazma_core.settings.model_registry import get_universal_models
-            models = get_universal_models()
-            # Group by provider
+            from kazma_core.model_registry import get_model_registry
+            from kazma_core.models.options import model_options
+
             by_provider: dict[str, list[str]] = {}
-            for m in models:
-                provider = m.get("provider", "unknown")
-                name = m.get("name", "")
-                if name:
-                    by_provider.setdefault(provider, []).append(name)
+            labels: dict[str, str] = {}
+            for o in model_options(get_model_registry(), details=False)["options"]:
+                by_provider.setdefault(o["provider"], []).append(o["ref"])
+                labels[o["provider"]] = o["provider_label"]
             # Build items: provider headers + model entries
-            for provider in sorted(by_provider):
-                self._all_items.append(("provider", provider, ""))
-                for model_name in sorted(by_provider[provider]):
-                    self._all_items.append(("model", model_name, provider))
+            for provider in sorted(by_provider, key=lambda p: labels[p].lower()):
+                self._all_items.append(("provider", labels[provider], ""))
+                for ref in sorted(by_provider[provider]):
+                    self._all_items.append(("model", ref, labels[provider]))
         except Exception as exc:
             logger.debug("Model picker load failed: %s", exc)
 

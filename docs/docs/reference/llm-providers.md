@@ -49,7 +49,9 @@ Loopback Ollama / LM Studio stay direct unless `KAZMA_LITELLM_LOCAL=1`.
 ## OpenAI-compatible providers
 
 All work with a single API key env var (or configured in the UI). No code
-changes — just set the base URL + key.
+changes — just set the base URL + key. Settings → Providers & Connectors →
+Add provider offers every one below, from the same list the server and the
+setup guide read (`GET /api/providers/catalog`).
 
 | Provider | `base_url` | Env var |
 |---|---|---|
@@ -65,9 +67,43 @@ changes — just set the base URL + key.
 | Perplexity | `https://api.perplexity.ai` | `PERPLEXITY_API_KEY` |
 | AI21 Labs | `https://api.ai21.com/studio/v1` | `AI21_API_KEY` |
 | NVIDIA NIM | `https://integrate.api.nvidia.com/v1` | `NVIDIA_API_KEY` |
+| Z.AI (GLM) | `https://api.z.ai/api/paas/v4` | `ZAI_API_KEY` |
+| Moonshot AI (Kimi) | `https://api.moonshot.ai/v1` | `MOONSHOT_API_KEY` |
+| MiniMax | `https://api.minimax.io/v1` | `MINIMAX_API_KEY` |
+| Qwen (Alibaba Cloud Model Studio) | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
+| Cerebras | `https://api.cerebras.ai/v1` | `CEREBRAS_API_KEY` |
+| DeepInfra | `https://api.deepinfra.com/v1/openai` | `DEEPINFRA_API_KEY` |
+| Hugging Face Inference Providers | `https://router.huggingface.co/v1` | `HUGGINGFACE_API_KEY` |
+| SambaNova Cloud | `https://api.sambanova.ai/v1` | `SAMBANOVA_API_KEY` |
+| SiliconFlow | `https://api.siliconflow.com/v1` | `SILICONFLOW_API_KEY` |
+| Novita AI | `https://api.novita.ai/openai/v1` | `NOVITA_API_KEY` |
+| Hyperbolic | `https://api.hyperbolic.xyz/v1` | `HYPERBOLIC_API_KEY` |
+| Cloudflare Workers AI | `https://api.cloudflare.com/client/v4/accounts/ACCOUNT_ID/ai/v1` (your account id in place of `ACCOUNT_ID`) | `CLOUDFLARE_API_KEY` |
 | Ollama (local) | `http://127.0.0.1:11434/v1` | *(none)* |
 | LM Studio (local) | `http://localhost:1234/v1` | *(none)* |
+| vLLM (local) | `http://localhost:8000/v1` | *(none)* |
+| llama.cpp server (local) | `http://localhost:8080/v1` | *(none)* |
+| LocalAI (local) | `http://localhost:8080/v1` | *(none)* |
+| Jan (local) | `http://localhost:1337/v1` | *(none)* |
 | Custom | *(any)* | *(any)* |
+
+A fresh install lists the providers it always listed; the newer ones are
+added from the dialog. A provider added under a name of your own ("Work
+Azure") keeps the type it was made from, and speaks that type's format.
+
+### Headers, and an address as typed
+
+Under **Advanced** in the dialog:
+
+- **Headers** are sent with every request to the provider: a gateway's own
+  sign-in, an organisation id, OpenRouter's app name. Their values are kept
+  as secrets (encrypted, shown masked).
+- **Use this address exactly as typed** stops Kazma adding `/v1` to an
+  address that names no version, for a server whose path has none.
+- **This provider serves speech, not chat** keeps a speech-to-text service
+  out of every chat model list. Such providers are listed under **Speech
+  services**; Settings → Voice chooses which one Kazma uses. A provider
+  whose every model is a speech model counts as one without the switch.
 
 ### Model servers on this computer or your network
 
@@ -153,6 +189,11 @@ OpenAI-compatible payload but with Azure-specific routing: `api-key` header
 (`.../openai/deployments/<deployment>/chat/completions`), and a required
 `api-version` query parameter.
 
+Set up in Settings → Providers & Connectors → Add provider → Azure OpenAI:
+the endpoint, the key, the API version and the deployment names (Azure routes
+by deployment, so a deployment name is the model name). The environment still
+works for an install configured by it; Settings' values win.
+
 ```bash
 export AZURE_OPENAI_ENDPOINT=https://<resource>.openai.azure.com
 export AZURE_OPENAI_API_KEY=<key>
@@ -166,6 +207,11 @@ Uses the **Converse API** for a uniform interface across Bedrock-hosted models
 (Claude, Llama, Mistral, ...). Requests are SigV4-signed via the standard
 `boto3` credential chain (env vars, shared-credentials file, or IAM role).
 Requires `pip install boto3` — degrades with a clear message when absent.
+
+Set up in Settings → Providers & Connectors → Add provider → AWS Bedrock:
+the region and an access key id and secret (a session token for temporary
+credentials). Left empty, the AWS credentials of this computer are used
+(environment, shared credentials file, or an IAM role):
 
 ```bash
 export AWS_REGION=us-east-1
@@ -186,13 +232,59 @@ per project/location. Hardcoded model list: `gemini-2.5-flash`,
 
 ---
 
-## Switching providers/models at runtime
+## Model details
+
+Settings → Providers & Connectors → **Model details** lists every model you
+can choose with what Kazma knows about it, and where each fact came from:
+
+1. **your value** (Edit, on the model's row): its context window, output
+   limit, whether it sees images, whether it uses tools;
+2. **the provider's own model list**: OpenRouter states each model's
+   context length, output limit, input kinds, tool support and price; Groq,
+   Mistral, vLLM and Gemini state context windows and limits;
+3. **Kazma's catalog**: whether well-known models see images and use tools,
+   and the vendor's own list price, on its own API only (dated).
+
+A context window is the provider's own or yours, never a guess: the catalog
+holds no sizes. When a window is known, Kazma sends no more than it, and no
+more than a known output limit.
+
+## Choosing a model
+
+Models are named with their provider, `provider:model` (`openrouter:google/gemini-2.5-flash`,
+`groq:llama-3.3-70b-versatile`), so the same model name from two providers is
+two choices. A name alone still works: it goes to the provider in use when
+that one lists it.
+
+- **The default model** is the one new chats and chat apps with no model of
+  their own use: Settings → Providers & Connectors → Model details, the
+  sidebar's picker, or `/model default` in a chat app (admin).
+- **The chat's picker** sets the model of the chat it is in, and no other.
+  A chat opened again shows the model it runs with.
+- **In a chat app**, `/model` sets that chat's model; `/model reset` makes it
+  follow the default again ([slash commands](./slash-commands#model)).
 
 The registry auto-corrects provider/model mismatches: calling a model owned
-by a different provider than the active one switches both. Use **Settings →
-Providers** in the UI, `/config model <name>` (chat), or the Model selector in
-the sidebar. A saved profile's **Use** switches to its model, and to the
-provider that serves it.
+by a different provider than the active one switches both. A saved
+profile's **Use** switches to its model, and to the provider that serves it.
+
+## More than one key
+
+A provider can hold several keys (Advanced → **More keys** in the dialog),
+each with a label of your own. When a call fails for its key -- the key is
+refused, out of credit, or out of requests after Kazma's own waits -- that
+key rests and Kazma sends the call again with the next key, and tells you
+once. A refused key rests a day, one out of credit six hours, one out of
+requests fifteen minutes or as long as the provider asked.
+
+## Checked in the background
+
+Once an hour Kazma asks every switched-on chat provider that has what its
+sign-in needs for its model list: no model call, no tokens. A provider that
+does not answer twice in a row is shown as Unreachable, and when it is the
+provider in use you are told once, and again when it answers. A key the
+provider refused gives way to its next key, if it has one. Providers with no
+model list (Azure, Bedrock, Vertex) are not checked this way.
 
 **The backup model** (Settings → System → Non-stop → failover) must be one a
 provider can answer for: switched on, with a key or on your network, listing

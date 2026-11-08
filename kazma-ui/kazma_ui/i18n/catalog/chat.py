@@ -1609,4 +1609,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "اعرض أوامر الشرطة المائلة المتاحة",
         "en": "List available slash commands",
     },
+    "chat.model_saved_profiles": {
+        "ar": "الملفات المحفوظة",
+        "en": "Saved profiles",
+    },
+    "chat.model_default_mark": {
+        "ar": "الافتراضي",
+        "en": "default",
+    },
+    "chat.model_this_chat": {
+        "ar": "تستخدم هذه الدردشة الآن {model}. وتحتفظ الدردشات الأخرى بنماذجها.",
+        "en": "This chat now uses {model}. Other chats keep theirs.",
+    },
 }

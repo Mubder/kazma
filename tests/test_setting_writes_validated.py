@@ -67,6 +67,7 @@ def test_the_table_names_the_keys_the_owning_modules_define() -> None:
     from kazma_core.lifecycle_notifier import EVENTS_KEY
     from kazma_core.memory.config import TENANT_MODE_KEY
     from kazma_core.memory.embedder import API_KEY_ENV_KEY
+    from kazma_core.model_details import OVERRIDES_KEY as MODEL_DETAILS_KEY
     from kazma_core.model_prices import OWNER_PRICES_KEY
     from kazma_core.runs.runbooks import RUNBOOKS_KEY
     from kazma_core.swarm.task_store import TASK_RETENTION_KEY
@@ -82,12 +83,15 @@ def test_the_table_names_the_keys_the_owning_modules_define() -> None:
     # every copy), the turn's token budget and the daily spend limit
     # 2026-11-05 (resilience plan E1: a budget below the floor would stop
     # every turn), the owner's model prices 2026-11-08 (providers stage 1: a
-    # price that is not a number would price nothing, or every call wrongly),
+    # price that is not a number would price nothing, or every call wrongly)
+    # and model details (stage 3: a window below the floor would trim every
+    # turn to nothing),
     # each named by the module that reads it.
     assert set(_rules()) == {"cron.timezone", RETENTION_KEY, EVENTS_KEY, TASK_RETENTION_KEY, TENANT_MODE_KEY,
                              *SETTING_BOUNDS, FIRE_WITHOUT_HITL_KEY, TURN_TIMEOUT_KEY, OCR_ENGINE_KEY,
                              RUNBOOKS_KEY, API_KEY_ENV_KEY, CHAT_REASONING_KEY, OFFSITE_KEEP_KEY,
                              TURN_TOKEN_BUDGET_KEY, DAILY_COST_LIMIT_KEY, OWNER_PRICES_KEY,
+                             MODEL_DETAILS_KEY,
                              "agent.language", "agent.max_iterations"}
 
 

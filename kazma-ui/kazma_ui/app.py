@@ -1150,7 +1150,7 @@ class KazmaAppBuilder:
             self.chat_adapters = ChatAdapters(
                 self.gateway,
                 self.config_store,
-                voice=self.config.raw.get("gateway", {}).get("voice", {}),
+                voice=self.config.raw.get("voice", {}),
                 swarm_bus=_swarm_bus,
             )
             try:
