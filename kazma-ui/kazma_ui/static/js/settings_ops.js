@@ -142,7 +142,7 @@
                 await window.kazmaSave('/api/settings/appearance', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                    body: JSON.stringify(this.appearance),
+                    body: JSON.stringify(this._appearanceToSave()),
                 });
             } catch (e) {
                 showToast(_t('settings.save_failed', 'Save failed'), 'error');
@@ -150,6 +150,8 @@
                 return;
             }
             this.saving = false;
+            const accentChanged = (this.appearance.accent_color || '') !== (this._accentLoaded || '');
+            this._accentLoaded = this.appearance.accent_color || '';
             // The save succeeded. Applying it to this page is a separate
             // step, and a failure there must not report the save as failed.
             try {
@@ -168,11 +170,22 @@
                         document.documentElement.setAttribute('data-theme', resolved);
                     }
                 }
-                this._applyAccentColor(this.appearance.accent_color);
+                if (accentChanged) this._applyAccentColor(this.appearance.accent_color || '');
             } catch (e) {
                 console.warn('[settings] appearance saved; applying it to this page failed:', e);
             }
             showToast(_t('settings.appearance_saved', 'Appearance saved'), 'success');
+        },
+
+        /* The appearance fields to save: the accent only when the owner
+         * changed it ('' = back to the theme's accent). Saving the theme
+         * used to store whatever default the page held as the "chosen"
+         * accent (the retired indigo #5e6ad2, on every page after that). */
+        _appearanceToSave() {
+            const body = { theme: this.appearance.theme, font_size: this.appearance.font_size };
+            const accent = this.appearance.accent_color || '';
+            if (accent !== (this._accentLoaded || '')) body.accent_color = accent;
+            return body;
         },
 
         previewTheme(theme) {

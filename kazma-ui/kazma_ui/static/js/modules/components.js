@@ -7,7 +7,7 @@
 // iOS Safari paints its UA canvas from these metas (not from CSS html
 // background). Listing both schemes, or leaving color-scheme: dark on
 // :root, is what made Light theme show a dark-gray page on a phone.
-const _THEME_COLOR = { light: '#f0f4fa', dark: '#0e1626' };
+const _THEME_COLOR = { light: '#ffffff', dark: '#0e1626' };
 
 export function syncDocumentColorScheme(theme) {
     const scheme = theme === 'dark' ? 'dark' : 'light';
@@ -35,18 +35,87 @@ function _setMeta(name, content) {
     el.setAttribute('content', content);
 }
 
-/* The owner's accent colour on <html> (Settings > Appearance). Every page
- * applies it; it was applied only when the Settings page itself loaded. */
+/* The owner's accent colour (Settings > Appearance), as the two theme
+ * variants the stylesheet reads: kazma.css derives --accent and every
+ * accent shade from --accent-chosen-dark / --accent-chosen-light, per
+ * theme. Setting --accent itself on <html> would beat both theme blocks and
+ * give light and dark the same, sometimes unreadable, colour.
+ *
+ * The rules are kazma_ui/accent_colors.py's (the server renders the same
+ * variables on <html>, so a chosen accent paints on the first frame); the
+ * two are held equal by tests/fixtures/accent_variants.json:
+ *   dark  - the colour, lightened toward white in 5% steps until it stands
+ *           3:1 off the dark wall and white or near-black ink reads 4.5:1
+ *           on it; ink: the one that reads better.
+ *   light - the colour, darkened toward navy in 5% steps until white ink
+ *           on it reaches 4.5:1; ink: white. */
+const _ACCENT_PROPS = [
+    '--accent-chosen-dark', '--accent-chosen-dark-rgb', '--accent-chosen-dark-on',
+    '--accent-chosen-light', '--accent-chosen-light-rgb', '--accent-chosen-light-on',
+];
+// Written by builds before 2026-11-09; cleared so they never pin a colour.
+const _LEGACY_ACCENT_PROPS = ['--accent', '--accent-rgb', '--accent-subtle', '--accent-glow'];
+const _DARK_WALL = [0x0e, 0x16, 0x26];
+const _NAVY = [0x0c, 0x15, 0x26];
+const _WHITE = [255, 255, 255];
+const _DARK_INK = [0x04, 0x08, 0x15];
+
+function _channel(c) {
+    const s = c / 255;
+    return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+}
+function _luminance(rgb) {
+    return 0.2126 * _channel(rgb[0]) + 0.7152 * _channel(rgb[1]) + 0.0722 * _channel(rgb[2]);
+}
+function _contrast(a, b) {
+    const la = _luminance(a), lb = _luminance(b);
+    return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+function _mix(a, b, t) {
+    return a.map((x, i) => Math.floor(x + (b[i] - x) * t + 0.5));
+}
+function _hex(rgb) {
+    return '#' + rgb.map((c) => c.toString(16).padStart(2, '0')).join('');
+}
+
+export function accentVariants(hex) {
+    if (typeof hex !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(hex.trim())) return null;
+    const v = hex.trim().toLowerCase();
+    const base = [parseInt(v.slice(1, 3), 16), parseInt(v.slice(3, 5), 16), parseInt(v.slice(5, 7), 16)];
+    let dark = base;
+    for (let step = 1; step <= 20; step++) {
+        if (_contrast(dark, _DARK_WALL) >= 3.0 &&
+            Math.max(_contrast(dark, _WHITE), _contrast(dark, _DARK_INK)) >= 4.5) break;
+        dark = _mix(base, _WHITE, step / 20);
+    }
+    const darkOn = _contrast(dark, _WHITE) >= _contrast(dark, _DARK_INK) ? '#ffffff' : '#040815';
+    let light = base;
+    for (let step = 1; step <= 20; step++) {
+        if (_contrast(light, _WHITE) >= 4.5) break;
+        light = _mix(base, _NAVY, step / 20);
+    }
+    return {
+        '--accent-chosen-dark': _hex(dark),
+        '--accent-chosen-dark-rgb': dark.join(', '),
+        '--accent-chosen-dark-on': darkOn,
+        '--accent-chosen-light': _hex(light),
+        '--accent-chosen-light-rgb': light.join(', '),
+        '--accent-chosen-light-on': '#ffffff',
+    };
+}
+
+/* Apply the owner's accent to <html>, or clear it (empty / malformed =
+ * the theme's own accent). Only these custom properties are touched: the
+ * element's other inline styles (font size, --app-ivh) stay. */
 export function applyAccentColor(hex) {
-    if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return;
-    const r = parseInt(hex.slice(1, 3), 16);
-    const g = parseInt(hex.slice(3, 5), 16);
-    const b = parseInt(hex.slice(5, 7), 16);
     const root = document.documentElement;
-    root.style.setProperty('--accent', hex);
-    root.style.setProperty('--accent-rgb', r + ', ' + g + ', ' + b);
-    root.style.setProperty('--accent-subtle', 'rgba(' + r + ', ' + g + ', ' + b + ', 0.12)');
-    root.style.setProperty('--accent-glow', 'rgba(' + r + ', ' + g + ', ' + b + ', 0.28)');
+    const props = accentVariants(hex);
+    _LEGACY_ACCENT_PROPS.forEach((name) => root.style.removeProperty(name));
+    if (!props) {
+        _ACCENT_PROPS.forEach((name) => root.style.removeProperty(name));
+        return;
+    }
+    Object.keys(props).forEach((name) => root.style.setProperty(name, props[name]));
 }
 
 export function kazmaApp() {
@@ -81,7 +150,10 @@ export function kazmaApp() {
                 .then(r => r.json())
                 .then(d => {
                     if (d && d.font_size) this.fontSize = d.font_size;
+                    // The server rendered the chosen accent on <html>; this
+                    // re-confirms it (or clears it when none is chosen).
                     if (d && d.accent_color_chosen) applyAccentColor(d.accent_color);
+                    else if (d) applyAccentColor('');
                     // 'auto' resolves to the OS preference (SSR guessed dark;
                     // correct it here so an Auto user on a Light OS doesn't
                     // see a one-frame dark flash stay). light/dark apply as-is.

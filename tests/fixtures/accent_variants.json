@@ -1,0 +1,141 @@
+{
+  "note": "kazma_ui/accent_colors.py and modules/components.js accentVariants must give these (tests/test_ui_color_tokens.py, tests/js/test_accent_family.js). Regenerate from the Python rules only when the rules change on purpose.",
+  "cases": {
+    "#3b82f6": {
+      "--accent-chosen-dark": "#3b82f6",
+      "--accent-chosen-dark-rgb": "59, 130, 246",
+      "--accent-chosen-dark-on": "#040815",
+      "--accent-chosen-light": "#3472d7",
+      "--accent-chosen-light-rgb": "52, 114, 215",
+      "--accent-chosen-light-on": "#ffffff"
+    },
+    "#60a5fa": {
+      "--accent-chosen-dark": "#60a5fa",
+      "--accent-chosen-dark-rgb": "96, 165, 250",
+      "--accent-chosen-dark-on": "#040815",
+      "--accent-chosen-light": "#4373b0",
+      "--accent-chosen-light-rgb": "67, 115, 176",
+      "--accent-chosen-light-on": "#ffffff"
+    },
+    "#0969da": {
+      "--accent-chosen-dark": "#0969da",
+      "--accent-chosen-dark-rgb": "9, 105, 218",
+      "--accent-chosen-dark-on": "#ffffff",
+      "--accent-chosen-light": "#0969da",
+      "--accent-chosen-light-rgb": "9, 105, 218",
+      "--accent-chosen-light-on": "#ffffff"
+    },
+    "#10b981": {
+      "--accent-chosen-dark": "#10b981",
+      "--accent-chosen-dark-rgb": "16, 185, 129",
+      "--accent-chosen-dark-on": "#040815",
+      "--accent-chosen-light": "#0f8061",
+      "--accent-chosen-light-rgb": "15, 128, 97",
+      "--accent-chosen-light-on": "#ffffff"
+    },
+    "#f85149": {
+      "--accent-chosen-dark": "#f85149",
+      "--accent-chosen-dark-rgb": "248, 81, 73",
+      "--accent-chosen-dark-on": "#040815",
+      "--accent-chosen-light": "#c94542",
+      "--accent-chosen-light-rgb": "201, 69, 66",
+      "--accent-chosen-light-on": "#ffffff"
+    },
+    "#d29922": {
+      "--accent-chosen-dark": "#d29922",
+      "--accent-chosen-dark-rgb": "210, 153, 34",
+      "--accent-chosen-dark-on": "#040815",
+      "--accent-chosen-light": "#8d6b23",
+      "--accent-chosen-light-rgb": "141, 107, 35",
+      "--accent-chosen-light-on": "#ffffff"
+    },
+    "#0ea5e9": {
+      "--accent-chosen-dark": "#0ea5e9",
+      "--accent-chosen-dark-rgb": "14, 165, 233",
+      "--accent-chosen-dark-on": "#040815",
+      "--accent-chosen-light": "#0d7aaf",
+      "--accent-chosen-light-rgb": "13, 122, 175",
+      "--accent-chosen-light-on": "#ffffff"
+    },
+    "#93c5fd": {
+      "--accent-chosen-dark": "#93c5fd",
+      "--accent-chosen-dark-rgb": "147, 197, 253",
+      "--accent-chosen-dark-on": "#040815",
+      "--accent-chosen-light": "#56769c",
+      "--accent-chosen-light-rgb": "86, 118, 156",
+      "--accent-chosen-light-on": "#ffffff"
+    },
+    "#facc15": {
+      "--accent-chosen-dark": "#facc15",
+      "--accent-chosen-dark-rgb": "250, 204, 21",
+      "--accent-chosen-dark-on": "#040815",
+      "--accent-chosen-light": "#83711e",
+      "--accent-chosen-light-rgb": "131, 113, 30",
+      "--accent-chosen-light-on": "#ffffff"
+    },
+    "#ffffff": {
+      "--accent-chosen-dark": "#ffffff",
+      "--accent-chosen-dark-rgb": "255, 255, 255",
+      "--accent-chosen-dark-on": "#040815",
+      "--accent-chosen-light": "#6d737d",
+      "--accent-chosen-light-rgb": "109, 115, 125",
+      "--accent-chosen-light-on": "#ffffff"
+    },
+    "#000000": {
+      "--accent-chosen-dark": "#666666",
+      "--accent-chosen-dark-rgb": "102, 102, 102",
+      "--accent-chosen-dark-on": "#ffffff",
+      "--accent-chosen-light": "#000000",
+      "--accent-chosen-light-rgb": "0, 0, 0",
+      "--accent-chosen-light-on": "#ffffff"
+    },
+    "#5e6ad2": {
+      "--accent-chosen-dark": "#5e6ad2",
+      "--accent-chosen-dark-rgb": "94, 106, 210",
+      "--accent-chosen-dark-on": "#ffffff",
+      "--accent-chosen-light": "#5e6ad2",
+      "--accent-chosen-light-rgb": "94, 106, 210",
+      "--accent-chosen-light-on": "#ffffff"
+    },
+    "#1E3A8A": {
+      "--accent-chosen-dark": "#4b61a1",
+      "--accent-chosen-dark-rgb": "75, 97, 161",
+      "--accent-chosen-dark-on": "#ffffff",
+      "--accent-chosen-light": "#1e3a8a",
+      "--accent-chosen-light-rgb": "30, 58, 138",
+      "--accent-chosen-light-on": "#ffffff"
+    },
+    "#ec4899": {
+      "--accent-chosen-dark": "#ec4899",
+      "--accent-chosen-dark-rgb": "236, 72, 153",
+      "--accent-chosen-dark-on": "#040815",
+      "--accent-chosen-light": "#ca4088",
+      "--accent-chosen-light-rgb": "202, 64, 136",
+      "--accent-chosen-light-on": "#ffffff"
+    },
+    "#22d3ee": {
+      "--accent-chosen-dark": "#22d3ee",
+      "--accent-chosen-dark-rgb": "34, 211, 238",
+      "--accent-chosen-dark-on": "#040815",
+      "--accent-chosen-light": "#187e94",
+      "--accent-chosen-light-rgb": "24, 126, 148",
+      "--accent-chosen-light-on": "#ffffff"
+    },
+    "#777777": {
+      "--accent-chosen-dark": "#7e7e7e",
+      "--accent-chosen-dark-rgb": "126, 126, 126",
+      "--accent-chosen-dark-on": "#040815",
+      "--accent-chosen-light": "#727273",
+      "--accent-chosen-light-rgb": "114, 114, 115",
+      "--accent-chosen-light-on": "#ffffff"
+    }
+  },
+  "not_chosen": [
+    "",
+    "  ",
+    "#abc",
+    "blue",
+    "#12345g",
+    null
+  ]
+}

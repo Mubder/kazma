@@ -347,7 +347,11 @@
         skillFilter: '',
 
         // ── Appearance Tab ──
-        appearance: { theme: 'dark', accent_color: '#3b82f6', font_size: 14 },
+        // accent_color '' = the theme's own accent. _accentLoaded is what the
+        // server holds: Save sends the accent only when the owner changed it,
+        // so a default nobody chose is never applied or stored.
+        appearance: { theme: 'dark', accent_color: '', font_size: 14 },
+        _accentLoaded: '',
 
         // ── Shortcuts Tab ──
         shortcuts: {},
@@ -620,7 +624,12 @@
                     if (settings.connectors) Object.assign(self.connectors, settings.connectors);
                     if (appearanceCfg) {
                         Object.assign(self.appearance, appearanceCfg);
-                        if (typeof self._applyAccentColor === 'function') {
+                        // Only the owner's own choice is shown in the picker
+                        // and applied; the server default is not a choice.
+                        if (!appearanceCfg.accent_color_chosen) self.appearance.accent_color = '';
+                        self._accentLoaded = self.appearance.accent_color || '';
+                        delete self.appearance.accent_color_chosen;
+                        if (appearanceCfg.accent_color_chosen && typeof self._applyAccentColor === 'function') {
                             self._applyAccentColor(self.appearance.accent_color);
                         }
                         if (appearanceCfg.font_size) {

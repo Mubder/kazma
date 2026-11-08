@@ -67,6 +67,17 @@ class RetiredDefault:
 
 RETIRED_DEFAULTS: tuple[RetiredDefault, ...] = (
     RetiredDefault(
+        key="appearance.accent_color",
+        removed=True,
+        old=("#5e6ad2",),
+        since="2026-11-09",
+        why=(
+            "the indigo the v5 palette retired was the code's default accent; Settings "
+            "applied it as chosen and any Appearance save stored it, so a stored copy is "
+            "the default nobody picked (it is on no swatch): the theme's own accent applies"
+        ),
+    ),
+    RetiredDefault(
         key="llm.input_cost_per_1m",
         removed=True,
         old=(0.15,),

@@ -9929,6 +9929,26 @@ counts the active provider's address (`setup_api.compute_setup_status`).
   scan the asset files on `/health/live`: it is the guard's probe, on the
   loop. Gates: `tests/js/test_build_watch.js`, `tests/e2e/test_update_notice.py`
   (EN/AR, after a sidebar navigation, Refresh reloads).
+- **One colour system: a card is the colour of the wall** (2026-11-09, the
+  owner's refresh, `docs/plans/UI_DESIGN_REFRESH.md`). Every colour is a token
+  in `kazma.css` (dark in `:root`, light in `[data-theme="light"]`): the
+  surface scale (card, overlay and chrome equal the wall -- white in light,
+  `#0e1626` in dark; `--surface-sunken` is the one surface below it, for
+  wells, code and table heads; inputs are transparent), status colours with
+  `-subtle` and `-border` variants and `--on-*` inks for fills, `--cat-1..6`,
+  and the card shape (`--card-radius` 12px, `--card-padding`, `--card-shadow`,
+  `--card-hairline`). A card stands apart by the hairline and the soft shadow,
+  never by its own fill: one grouped card rule paints `.card` and every card
+  family, and no family paints itself. The accent is six `--accent-chosen-*`
+  seeds (a dark and a light variant, each with its own readable ink,
+  `kazma_ui/accent_colors.py` and `components.js` share
+  `tests/fixtures/accent_variants.json`), rendered on `<html>` by the server;
+  CSS derives every accent shade with `color-mix()`, and Settings applies or
+  saves an accent only when the owner chose one (the retired indigo is a
+  `RetiredDefault`). Gate: `tests/test_ui_color_tokens.py` (every `var(--x)`
+  defined, both themes, the surface order, the card rule, 4.5:1 text in both
+  themes, no selector coloured differently in the two stylesheets; each with
+  its negative control) and `tests/js/test_accent_family.js`.
 - **`x-cloak` is GLOBAL — do not re-introduce the blink.** The rule
   `[x-cloak] { display: none !important; }` lives once in `kazma.css`
   (`base.html` then loads `kazma.v5.css` — last-wins for overlapping

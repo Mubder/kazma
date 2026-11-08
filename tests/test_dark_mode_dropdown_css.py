@@ -48,18 +48,19 @@ class TestDarkModeOptionRules:
         """A [data-theme="dark"] rule targets option with a dark background.
 
         The selector must include both [data-theme="dark"] and the option
-        element, and the declaration block must set a background using a
-        dark-themed variable (var(--bg-surface) or similar).
+        element, and the declaration block must set an opaque dark background
+        from a token: the overlay surface (2026-11-09; it was --bg-surface,
+        which is now an alias of it).
         """
         # Match a selector block that contains data-theme="dark" and option,
         # followed by a declaration block.
         pattern = re.compile(
             r'\[data-theme\s*=\s*"dark"\][^{]*\boption\b[^{]*\{[^}]*'
-            r'background[^;}]+var\(--bg-surface\)',
+            r'background[^;}]+var\(--(?:surface-overlay|bg-surface)\)',
             re.IGNORECASE | re.DOTALL,
         )
         assert pattern.search(css_text), (
-            "No [data-theme=\"dark\"] option { background: var(--bg-surface) } "
+            "No [data-theme=\"dark\"] option { background: var(--surface-overlay) } "
             "rule found. Native <option> elements need an explicit dark "
             "background in dark mode."
         )

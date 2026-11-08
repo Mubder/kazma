@@ -87,14 +87,10 @@ html[data-theme="light"] { color-scheme: only light; }
 }
 .setup-wall-card {
   width: min(28rem, 100%);
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
   padding: var(--sp-6);
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
-  box-shadow: var(--shadow);
 }
 .setup-wall-card h2 { margin: 0; font-size: 1.25rem; }
 .setup-wall-card p { margin: 0; color: var(--text-muted); font-size: 0.9rem; }
@@ -111,7 +107,7 @@ html[data-theme="light"] { color-scheme: only light; }
   border-block-end: 3px solid var(--border); color: var(--text-muted);
   font-size: 0.85rem; font-weight: 600;
 }
-.setup-steps li.is-current { border-color: var(--accent); color: var(--text); }
+.setup-steps li.is-current { border-color: var(--accent); color: var(--text-primary); }
 .setup-steps li.is-done { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
 .setup-card { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-6); }
 .setup-card[x-cloak] { display: none !important; }
@@ -124,14 +120,14 @@ html[data-theme="light"] { color-scheme: only light; }
 .setup-muted { color: var(--text-muted); font-size: 0.9rem; }
 .setup-label { font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); }
 .setup-error { color: var(--error); font-size: 0.9rem; }
-.setup-ok { color: var(--success, #16a34a); font-weight: 600; }
+.setup-ok { color: var(--success); font-weight: 600; }
 .setup-row { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
 .setup-actions { display: flex; gap: var(--sp-2); justify-content: flex-end; flex-wrap: wrap; margin-top: var(--sp-2); }
 .setup-choice { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: var(--sp-3); }
 .setup-option {
   display: flex; flex-direction: column; gap: var(--sp-1); text-align: start;
   padding: var(--sp-4); border: 1px solid var(--border); border-radius: var(--radius);
-  background: var(--bg-elevated); color: var(--text); cursor: pointer; font: inherit;
+  background: var(--surface-card); color: var(--text-primary); cursor: pointer; font: inherit;
 }
 .setup-option span { color: var(--text-muted); font-size: 0.85rem; }
 .setup-option.is-selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
@@ -144,13 +140,13 @@ html[data-theme="light"] { color-scheme: only light; }
 .setup-extras { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
 .setup-extras a {
   display: flex; flex-direction: column; gap: 2px; padding: var(--sp-3);
-  border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); text-decoration: none;
+  border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); text-decoration: none;
 }
 .setup-extras a:hover { border-color: var(--accent); }
 .setup-extras span { color: var(--text-muted); font-size: 0.85rem; }
 .setup-try { margin: 0; padding-inline-start: 1.2rem; display: grid; gap: var(--sp-1); }
 .setup-command { font-family: var(--font-mono, monospace); font-size: 0.85rem; padding: var(--sp-2) var(--sp-3);
-  background: var(--bg-elevated); border-radius: var(--radius); align-self: flex-start; }
+  background: var(--surface-sunken); border-radius: var(--radius); align-self: flex-start; }
 
 /* Hands tape — HITL patch review stack (v5 only; do not copy into kazma.css). */
 .hitl-diff {
@@ -185,9 +181,6 @@ html[data-theme="light"] { color-scheme: only light; }
 .ide-review {
   margin: 0 0 10px 0;
   padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-panel);
 }
 .ide-review-head {
   display: flex;
@@ -259,7 +252,7 @@ html[data-theme="light"] { color-scheme: only light; }
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
-  .chat-sessions-btn:active { color: var(--accent); background: var(--bg-elevated); }
+  .chat-sessions-btn:active { color: var(--accent); background: var(--bg-active); }
 
   /* In-drawer close button (v4 hides .sidebar-toggle on mobile — bring
      it back only while the drawer is open) */
@@ -268,7 +261,6 @@ html[data-theme="light"] { color-scheme: only light; }
   /* Drawer presentation — slightly wider, deeper shadow */
   .sidebar {
     width: min(300px, 85vw);
-    box-shadow: 0 0 48px rgba(0, 0, 0, 0.55);
   }
 
   /* Bottom tab bar — opaque token surface (P2c: was color-mix 92%
@@ -299,9 +291,6 @@ html[data-theme="light"] { color-scheme: only light; }
   align-items: flex-start;
   text-align: start;
   padding: 18px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
   transition: border-color var(--transition-fast),
               box-shadow var(--transition-fast),
               transform var(--transition-fast);
@@ -345,13 +334,6 @@ html[data-theme="light"] { color-scheme: only light; }
   font-weight: 600;
 }
 
-/* Chart cards — real surface treatment */
-.chart-card {
-  background: var(--bg-panel);
-  border-color: var(--border-subtle);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
-}
 .chart-title {
   color: var(--text-tertiary);
   font-weight: 700;
@@ -374,7 +356,6 @@ html[data-theme="light"] { color-scheme: only light; }
   color: var(--text-inverse);
   box-shadow: 0 2px 8px -2px rgba(var(--accent-rgb), 0.5);
 }
-[data-theme="light"] .range-btn.active { color: #ffffff; }
 
 /* Progress bars — brand gradient fill */
 .progress-fill {
@@ -406,7 +387,8 @@ html[data-theme="light"] { color-scheme: only light; }
 /* Composer — deeper radius + real glow on focus */
 .input-wrapper {
   border-radius: var(--radius-xl);
-  background: var(--bg-surface);
+  background: var(--input-bg);
+  border-color: var(--input-border);
 }
 .input-wrapper:focus-within {
   border-color: rgba(var(--accent-rgb), 0.55);
@@ -419,13 +401,10 @@ html[data-theme="light"] { color-scheme: only light; }
   color: var(--text-inverse);
   border-radius: 12px;
 }
-[data-theme="light"] .send-btn { color: #ffffff; }
 
 /* Bubbles — gradient user bubble ink adapts to theme */
 .message-user .message-text { color: var(--text-inverse); }
-[data-theme="light"] .message-user .message-text { color: #ffffff; }
 .message-avatar-user, .message-avatar.u { color: var(--text-inverse); }
-[data-theme="light"] .message-avatar-user, [data-theme="light"] .message-avatar.u { color: #ffffff; }
 
 /* Welcome screen — logo tile. Dark theme keeps the app-icon dark tile
    (matches the sidebar badge). Light theme swaps to an elevated surface
@@ -484,7 +463,7 @@ html[data-theme="light"] { color-scheme: only light; }
 
 /* Global search result kind chip — was indigo */
 .search-result-kind {
-  color: var(--accent);
+  color: var(--accent-light);
   background: var(--accent-subtle);
 }
 
@@ -494,13 +473,6 @@ html[data-theme="light"] { color-scheme: only light; }
   border-color: transparent;
 }
 
-/* Settings group cards — surfaced */
-.settings-group {
-  background: var(--bg-panel);
-  border-color: var(--border-subtle);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
-}
 
 /* ═══════════════════════════════════════════════════════════════════
    Chat as the product — immersive shell + composer dock + message craft
@@ -604,16 +576,16 @@ html[data-theme="light"] { color-scheme: only light; }
 .composer-voice-btn.is-recording #mic-icon { display: none; }
 .composer-voice-btn.is-recording .composer-mic-recording { display: block; }
 .composer-voice-btn.is-recording {
-  background: rgba(239, 68, 68, 0.2);
-  border-color: #ef4444;
+  background: var(--danger-subtle);
+  border-color: var(--danger);
 }
 .composer-voice-btn.is-live-disabled {
   opacity: 0.5;
   pointer-events: none;
 }
 .composer-voice-btn.is-live {
-  background: rgba(34, 197, 94, 0.2);
-  color: #22c55e;
+  background: var(--success-subtle);
+  color: var(--success);
 }
 .composer-chrome { margin-top: 0; }
 /* Touch tap targets for the always-visible capacity controls (a11y). */
@@ -697,7 +669,7 @@ html[data-theme="light"] { color-scheme: only light; }
   color: var(--text-muted);
 }
 .sessions-kbd-hint kbd {
-  background: var(--bg-elevated);
+  background: var(--surface-sunken);
   border: 1px solid var(--border);
   padding: 1px 5px;
   border-radius: 3px;
@@ -783,7 +755,7 @@ html[data-theme="light"] { color-scheme: only light; }
   display: flex;
   flex-direction: column;
   gap: 6px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--tint);
 }
 .runs-incident-failed, .runs-incident-dead { border-inline-start-color: var(--danger, #ef4444); }
 .runs-incident-focus { box-shadow: 0 0 0 2px var(--accent, #22d3ee); }

@@ -2123,7 +2123,7 @@
         <div class="settings-group">
             <h3>{{ t('settings.accent_color') }}</h3>
             <div style="display:flex;gap:12px;align-items:center">
-                <input type="color" x-model="appearance.accent_color" style="width:48px;height:36px;border:none;cursor:pointer;background:none">
+                <input type="color" :value="appearance.accent_color || '#3b82f6'" @input="appearance.accent_color = $event.target.value" style="width:48px;height:36px;border:none;cursor:pointer;background:none">
                 <input type="text" class="form-input" x-model="appearance.accent_color" style="width:120px" placeholder="#3b82f6">
                 <div style="display:flex;gap:6px">
                     <template x-for="color in ['#3b82f6', '#60a5fa', '#0969da', '#10b981', '#f85149', '#d29922', '#0ea5e9', '#93c5fd']" :key="color">

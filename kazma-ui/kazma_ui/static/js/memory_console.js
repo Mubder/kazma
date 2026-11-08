@@ -1824,10 +1824,31 @@
 
   // Palette follows site tokens (cyan accent + blue secondary).
   // The "user" node is intentionally warm amber so it stands out.
+  // A token's value is the text it was declared with: the accent shades are
+  // color-mix() expressions since 2026-11-09 (kazma.css derives them from
+  // --accent), and _v2gHexAlpha only adds alpha to #rrggbb. So any value
+  // that is not a hex is painted on a 1x1 canvas and read back as one.
+  var _v2gProbe = null;
+  function _v2gToHex(v) {
+    if (!v || v[0] === '#') return v;
+    try {
+      if (!_v2gProbe) {
+        var cv = document.createElement('canvas');
+        cv.width = cv.height = 1;
+        _v2gProbe = cv.getContext('2d', { willReadFrequently: true });
+      }
+      _v2gProbe.clearRect(0, 0, 1, 1);
+      _v2gProbe.fillStyle = '#000';
+      _v2gProbe.fillStyle = v;
+      _v2gProbe.fillRect(0, 0, 1, 1);
+      var d = _v2gProbe.getImageData(0, 0, 1, 1).data;
+      return '#' + [d[0], d[1], d[2]].map(function (c) { return c.toString(16).padStart(2, '0'); }).join('');
+    } catch (e) { return v; }
+  }
   function _v2gCss(name, fallback) {
     try {
       var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-      return v || fallback;
+      return _v2gToHex(v) || fallback;
     } catch (e) { return fallback; }
   }
   function _v2gTheme() {

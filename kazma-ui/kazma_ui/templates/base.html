@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="{{ lang()|default('en') }}" dir="{{ dir()|default('ltr') }}" data-theme="{{ theme()|default('light') }}" x-data="kazmaApp()" :style="'font-size: ' + effectiveFontSize() + 'px'">
+<html lang="{{ lang()|default('en') }}" dir="{{ dir()|default('ltr') }}" data-theme="{{ theme()|default('light') }}"{% set _accent = accent_style() if accent_style is defined else '' %}{% if _accent %} style="{{ _accent }}"{% endif %} x-data="kazmaApp()" :style="{ fontSize: effectiveFontSize() + 'px' }">
 <head>
     <meta charset="UTF-8">
     {# viewport-fit=cover is required for env(safe-area-inset-*) on iOS.
@@ -10,7 +10,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="color-scheme" content="{{ theme()|default('light') }}">
     <meta name="supported-color-schemes" content="{{ theme()|default('light') }}">
-    <meta name="theme-color" content="{{ '#0e1626' if theme() == 'dark' else '#f0f4fa' }}">
+    <meta name="theme-color" content="{{ '#0e1626' if theme() == 'dark' else '#ffffff' }}">
     {# The build that rendered this page: modules/build_watch.js compares it
        with /health/live and offers a Refresh after a deploy. A template
        environment without the global (a router built bare, as in a test)
@@ -26,7 +26,7 @@
        iOS then commits the canvas from the phone's dark system preference.
        color-scheme is set too for UA widgets. Keep in sync with login.html. #}
     <style>
-      html { background-color: {{ '#0e1626' if theme() == 'dark' else '#f0f4fa' }}; color-scheme: {{ 'only dark' if theme() == 'dark' else 'only light' }}; }
+      html { background-color: {{ '#0e1626' if theme() == 'dark' else '#ffffff' }}; color-scheme: {{ 'only dark' if theme() == 'dark' else 'only light' }}; }
     </style>
     <title>{% block title %}Kazma{% endblock %}</title>
     <link rel="icon" type="image/png" href="/static/img/favicon.png">

@@ -22,81 +22,166 @@
    See docs/plans/UI_MOBILE_OVERHAUL_HANDOFF.md §5 (P1). */
 :root {
 
-  /* Legacy aliases (kept — components reference them) */
-  --bg-deep: var(--bg);
-  --bg-primary: var(--bg);
-  /* Backgrounds — deep blue-black slate (Abyss) */
-  --bg: #0e1626;
-  --bg-2: #121b2e;
-  --bg-panel: #16223a;
-  --bg-surface: #1b2945;
-  --bg-elevated: #243456;
-  --bg-hover: rgba(59, 130, 246, 0.10);
-  --bg-active: rgba(59, 130, 246, 0.16);
+  /* ── Surfaces: one scale every box uses (2026-11-09) ─────────────
+     The look follows the owner's reference design: a card is the wall's
+     own colour and is told apart by a hairline and a soft layered shadow,
+     never by a different fill. So card, overlay and chrome ARE the wall;
+     the one surface of another colour is the well (code, a table head,
+     an inset block), and it sits BELOW the wall in both themes, so
+     nothing reads raised in one theme and sunken in the other. Inputs
+     are transparent with a border. tests/test_ui_color_tokens.py holds
+     the order, the contrast and the card rule. */
+  --surface-wall: #0e1626;
+  --surface-sunken: #0a1120;
+  --surface-card: var(--surface-wall);
+  --surface-chrome: var(--surface-wall);
+  --surface-overlay: var(--surface-wall);
+  --surface-raised: transparent;
+  --scrim: rgba(4, 8, 21, 0.62);
+
+  /* Card shape (measured from the reference; the shadow is the same in
+     both themes). A top-level card shows no border; a card nested in a
+     page section (settings groups, panels) shows the hairline. */
+  --card-radius: 12px;
+  --card-padding: 24px;
+  --card-hairline: #243456;
+  --card-border: transparent;
+  --card-border-nested: var(--card-hairline);
+  --card-shadow: 0 0 2px 0 rgba(145, 158, 171, 0.30), 0 12px 24px -4px rgba(145, 158, 171, 0.02);
+  /* Menus, popovers, dropdowns: the wall, the card's shadow, radius 8 */
+  --overlay-border: var(--card-hairline);
+  --overlay-radius: 8px;
+  --overlay-shadow: var(--card-shadow);
+  /* The phone drawers: one shadow, the same in LTR and RTL */
+  --drawer-shadow: 0 0 32px rgba(0, 0, 0, 0.45);
+  /* Inputs and selects: transparent, a 1px border, radius 8 (the form
+     rules read these). The reference's 40px height is named for the
+     controls restyle; no rule reads --input-height yet. */
+  --input-bg: var(--surface-raised);
+  --input-border: #2b3d63;
+  --input-radius: 8px;
+  --input-height: 40px;
+  /* Named for the shell and controls restyle (sidebar items, buttons,
+     badges, icon tiles); the rules do not read them yet. */
+  --btn-radius: 6px;
+  --nav-item-radius: 6px;
+  --nav-item-ink: var(--text-secondary);
+  --nav-item-hover-bg: var(--accent-subtle);
+  --nav-item-hover-ink: var(--accent-light);
+  --nav-item-active-bg: var(--accent);
+  --nav-item-active-ink: var(--on-accent);
+  --badge-radius: 6px;
+  --tile-radius: 8px;
+
+  /* Older surface names follow the scale (components and templates use
+     them). --bg-elevated / --bg-surface were raised in dark and BELOW the
+     wall in light; they are the overlay now, the same in both. */
+  --bg: var(--surface-wall);
+  --bg-deep: var(--surface-sunken);
+  --bg-primary: var(--surface-card);
+  --bg-2: var(--surface-sunken);
+  --bg-panel: var(--surface-card);
+  --bg-surface: var(--surface-overlay);
+  --bg-elevated: var(--surface-overlay);
+  --bg-card: var(--surface-card);
+  /* A neutral wash for hovers and chips: lightens in dark, darkens in
+     light (emphasis, not a surface; never a card fill). */
   --tint: rgba(255, 255, 255, 0.025);
   --tint-strong: rgba(255, 255, 255, 0.05);
+  /* Names templates and scripts use that no stylesheet defined: each is
+     the token for its role, so nothing falls back to a literal. */
+  --bg-secondary: var(--surface-sunken);
+  --bg-accent: var(--surface-sunken);
+  --surface-2: var(--surface-sunken);
+  --boost: var(--surface-sunken);
+  --card-bg: var(--surface-card);
+  --border-color: var(--border);
+  --text: var(--text-primary);
+  --text-danger: var(--danger);
+  --warn: var(--warning);
+  --ok: var(--success);
+  --err: var(--danger);
+  --primary: var(--accent);
 
-  /* Grid texture */
-  --grid: rgba(59, 130, 246, 0.04);
+  /* Grid texture (painted under the opaque shell; follows the accent) */
+  --grid: color-mix(in srgb, var(--accent) 4%, transparent);
 
   /* Text — cool ice blue-grays.
      Dark tertiary/muted used to sit at #5d6f8a / #4a5b78 — unreadable on
      #16223a panels (chat footer, hints, badges). Lifted to the same
-     family as --text-secondary so labels stay visible. Light theme
-     ([data-theme=light] / prefers-color-scheme) is unchanged. */
+     family as --text-secondary so labels stay visible. */
   --text-primary: #eef3fb;
   --text-secondary: #c5d0e0;
   --text-tertiary: #9fb0c9;
   --text-muted: #8b9bb3;
-  --text-inverse: #040815;
+  /* Ink on an accent fill (kept for the rules that already name it) */
+  --text-inverse: var(--on-accent);
 
-  /* Accent — royal blue */
-  --accent: #3b82f6;
-  --accent-hover: #60a5fa;
-  --accent-light: #93c5fd;
-  --accent-subtle: rgba(59, 130, 246, 0.12);
-  --accent-glow: rgba(59, 130, 246, 0.28);
-  --accent-rgb: 59, 130, 246;
-  --gradient-accent: linear-gradient(135deg, #60a5fa 0%, #3b82f6 55%, #38bdf8 100%);
+  /* Accent — royal blue. The owner's accent (Settings > Appearance) is
+     applied as --accent-chosen-dark/-light (modules/components.js, and
+     server-side on <html> by base.html); every accent shade below is
+     derived from --accent, so the one setting recolours them all, with
+     a readable variant per theme. */
+  --accent: var(--accent-chosen-dark, #3b82f6);
+  --accent-rgb: var(--accent-chosen-dark-rgb, 59, 130, 246);
+  --on-accent: var(--accent-chosen-dark-on, #040815);
+  --accent-hover: color-mix(in srgb, var(--accent) 75%, #ffffff);
+  --accent-light: color-mix(in srgb, var(--accent) 50%, #ffffff);
+  --accent-subtle: color-mix(in srgb, var(--accent) 12%, transparent);
+  --accent-glow: color-mix(in srgb, var(--accent) 28%, transparent);
+  --bg-hover: color-mix(in srgb, var(--accent) 10%, transparent);
+  --bg-active: color-mix(in srgb, var(--accent) 16%, transparent);
+  --gradient-accent: linear-gradient(135deg, var(--accent-hover) 0%, var(--accent) 55%, color-mix(in srgb, var(--accent) 70%, var(--secondary)) 100%);
+  --gradient-header: linear-gradient(135deg, var(--accent-hover) 0%, var(--accent) 50%, color-mix(in srgb, var(--accent) 60%, var(--secondary)) 100%);
+  --gradient-primary: var(--gradient-header);
+  /* Page titles: the header gradient in dark, solid ink in light */
+  --title-fill: var(--gradient-header);
+  --brand: var(--accent);
+  --text-link: var(--accent);
 
   /* Secondary — sky blue */
   --secondary: #38bdf8;
   --secondary-hover: #7dd3fc;
   --secondary-light: #bae6fd;
-  --secondary-subtle: rgba(56, 189, 248, 0.12);
-  --secondary-glow: rgba(56, 189, 248, 0.20);
+  --secondary-subtle: color-mix(in srgb, var(--secondary) 12%, transparent);
+  --secondary-glow: color-mix(in srgb, var(--secondary) 20%, transparent);
 
-  /* Brand gradient — azure → royal → sky */
-  --gradient-primary: linear-gradient(135deg, #60a5fa, #3b82f6, #38bdf8);
-  --gradient-header: linear-gradient(135deg, #60a5fa 0%, #3b82f6 50%, #38bdf8 100%);
-
-  /* Brand alias — var(--brand) with an indigo fallback used to live here;
-     aliasing to accent keeps every page in-family (agents.html etc.) */
-  --brand: var(--accent);
-
-  /* Status — warning yellow (amber family retired with the cyan purge) */
+  /* Status. Each colour is readable as text on a card (4.5:1, both
+     themes); -subtle is its 12% wash over the wall (tinted surfaces,
+     badges, toasts), -border its 35% edge, --on-* the ink on its fill. */
   --success: #10b981;
-  --success-subtle: rgba(16, 185, 129, 0.12);
   --warning: #facc15;
-  --warning-subtle: rgba(250, 204, 21, 0.12);
-  --danger: #ef4444;
-  --danger-subtle: rgba(239, 68, 68, 0.12);
+  --danger: #f87171;
   --info: #38bdf8;
-  --info-subtle: rgba(56, 189, 248, 0.12);
+  --success-subtle: color-mix(in srgb, var(--success) 12%, transparent);
+  --warning-subtle: color-mix(in srgb, var(--warning) 12%, transparent);
+  --danger-subtle: color-mix(in srgb, var(--danger) 12%, transparent);
+  --info-subtle: color-mix(in srgb, var(--info) 12%, transparent);
+  --success-border: color-mix(in srgb, var(--success) 35%, transparent);
+  --warning-border: color-mix(in srgb, var(--warning) 35%, transparent);
+  --danger-border: color-mix(in srgb, var(--danger) 35%, transparent);
+  --info-border: color-mix(in srgb, var(--info) 35%, transparent);
+  --warning-bg: var(--warning-subtle);
+  --error: var(--danger);
+  --on-success: #040815;
+  --on-warning: #040815;
+  --on-danger: #040815;
+  --on-info: #040815;
+  --on-secondary: #040815;
+
+  /* Categories (tool families, capabilities, graph kinds): six hues,
+     none of them a status colour. Light values are readable on white. */
+  --cat-1: #38bdf8;
+  --cat-2: #fbbf24;
+  --cat-3: #fb7185;
+  --cat-4: #a78bfa;
+  --cat-5: #22d3ee;
+  --cat-6: #34d399;
 
   /* Borders */
   --border-subtle: rgba(255, 255, 255, 0.06);
   --border: rgba(255, 255, 255, 0.1);
   --border-strong: rgba(255, 255, 255, 0.15);
-
-  /* Card background alias — referenced by .search-panel / global-search
-     chip; previously undefined (fell through to a hard #1b1e2e). */
-  --bg-card: var(--bg-elevated);
-
-  /* Error alias — referenced by .send-btn.stop-mode + agent-activity rules.
-     Aliased to --danger so all three call sites share one status color.
-     (Previously each var(--error, #ef4444) carried its own fallback.) */
-  --error: var(--danger);
 
   /* Radii */
   --radius-xs: 4px;
@@ -143,10 +228,6 @@
   /* Radii (supplement — --radius-md and --radius-card were referenced but undefined) */
   --radius-md: 8px;
   --radius-card: var(--radius-lg);
-
-  /* Semantic colors (supplement — referenced in templates but undefined) */
-  --warning-bg: rgba(250, 204, 21, 0.12);
-  --text-link: var(--accent);
 
   /* Transitions */
   --transition-fast: 150ms ease;
@@ -463,14 +544,10 @@ button { cursor: pointer; font-family: inherit; }
 }
 .nav-link:hover {
   background: var(--bg-hover);
-  color: var(--text-primary);
   text-decoration: none;
 }
 .nav-link.active {
-  background: var(--accent-subtle);
-  color: var(--accent-light);
   font-weight: 600;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 .nav-link.active::before {
   content: '';
@@ -480,7 +557,6 @@ button { cursor: pointer; font-family: inherit; }
   transform: translateY(-50%);
   width: 3px;
   height: 60%;
-  background: var(--accent);
   border-radius: 0 2px 2px 0;
 }
 .nav-icon {
@@ -495,8 +571,8 @@ button { cursor: pointer; font-family: inherit; }
   margin-left: auto;
   font-size: 0.65rem;
   font-family: var(--font-mono);
-  color: var(--text-muted);
-  background: var(--bg-elevated);
+  color: var(--text-tertiary);
+  background: var(--surface-sunken);
   padding: 1px 5px;
   border-radius: var(--radius-xs);
   border: 1px solid var(--border-subtle);
@@ -522,7 +598,6 @@ button { cursor: pointer; font-family: inherit; }
 .sidebar-model-dropdown {
   width: 100%;
   padding: 6px 8px;
-  border-radius: var(--radius-sm);
   border: 1px solid var(--border-subtle);
   background: var(--bg-surface);
   color: var(--text-primary);
@@ -530,12 +605,6 @@ button { cursor: pointer; font-family: inherit; }
   cursor: pointer;
   outline: none;
   transition: border-color var(--transition-fast);
-}
-.sidebar-model-dropdown:hover {
-  border-color: var(--accent);
-}
-.sidebar-model-dropdown:focus {
-  border-color: var(--accent);
 }
 .sidebar-model-dropdown optgroup {
   font-style: normal;
@@ -629,7 +698,6 @@ button { cursor: pointer; font-family: inherit; }
   padding: 0 var(--sp-6);
   padding-top: env(safe-area-inset-top, 0px);
   border-bottom: 1px solid var(--border-subtle);
-  background: color-mix(in srgb, var(--bg-panel) 78%, transparent);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   min-height: var(--header-height);
@@ -706,16 +774,10 @@ button { cursor: pointer; font-family: inherit; }
   padding: var(--sp-1) var(--sp-2);
   background: none;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
   color: var(--text-tertiary);
   font-size: 0.8rem;
   transition: all var(--transition-fast);
   position: relative;
-}
-.header-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-  border-color: var(--border-strong);
 }
 .header-btn svg {
   width: 16px;
@@ -727,7 +789,6 @@ button { cursor: pointer; font-family: inherit; }
   right: -2px;
   width: 8px;
   height: 8px;
-  background: var(--danger);
   border-radius: 50%;
   border: 2px solid var(--bg-panel);
 }
@@ -739,7 +800,7 @@ button { cursor: pointer; font-family: inherit; }
   font-size: 0.6rem;
   line-height: 14px;
   text-align: center;
-  color: #fff;
+  color: var(--on-secondary);
   border-radius: 8px;
 }
 .notif-dropdown {
@@ -808,10 +869,10 @@ button { cursor: pointer; font-family: inherit; }
   inset-inline-end: 0;
   margin-top: var(--sp-1);
   min-width: 200px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-lg);
+  background: var(--surface-overlay);
+  border: 1px solid var(--overlay-border);
+  border-radius: var(--overlay-radius);
+  box-shadow: var(--overlay-shadow);
   z-index: 200;
   padding: var(--sp-1);
   animation: dropdown-enter var(--transition-fast) ease;
@@ -844,11 +905,40 @@ button { cursor: pointer; font-family: inherit; }
 }
 
 /* ── 6. Cards ───────────────────────────────────────────────────── */
+/* THE card rule. A card is the wall's own colour (the reference design),
+   told apart by the soft layered shadow; a top-level card shows no edge,
+   a card nested in a page section (the second rule) shows the hairline.
+   Same tokens in both themes. A family's own rule keeps its layout and
+   must not set a background, border, radius or shadow of its own
+   (tests/test_ui_color_tokens.py); a state modifier (.pkg-metric-ok, a
+   hover) may. Template <style> blocks that repaint these are per-page
+   work. */
+.card,
+.metric-card,
+.chart-card,
+.skill-card,
+.mcp-card,
+.provider-card,
+.pkg-metric,
+.pkg-layer-card,
+.x-control-hero,
+.setup-wall-card,
+.dash-mobile-card,
+.settings-group,
+.pc-panel,
+.ide-review {
+  background: var(--surface-card);
+  border: 1px solid var(--card-border);
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
+}
+.settings-group,
+.pc-panel,
+.ide-review {
+  border-color: var(--card-border-nested);
+}
 .card {
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: var(--sp-5);
+  padding: var(--card-padding);
   transition: transform 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
 }
 .card:hover {
@@ -868,10 +958,7 @@ button { cursor: pointer; font-family: inherit; }
   margin-bottom: var(--sp-4);
 }
 .settings-group {
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: var(--sp-5);
+  padding: var(--card-padding);
 }
 .settings-group h3 {
   font-size: 1rem;
@@ -950,7 +1037,7 @@ button { cursor: pointer; font-family: inherit; }
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-tertiary);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--tint);
   border-bottom: 1px solid var(--border-subtle);
 }
 .account-list-row {
@@ -1106,7 +1193,7 @@ button { cursor: pointer; font-family: inherit; }
 
 .btn-primary {
   background: var(--accent);
-  color: #001016;
+  color: var(--on-accent);
   border-color: transparent;
   font-weight: 700;
 }
@@ -1131,11 +1218,11 @@ button { cursor: pointer; font-family: inherit; }
 .btn-danger {
   background: var(--danger-subtle);
   color: var(--danger);
-  border-color: rgba(248, 81, 73, 0.2);
+  border-color: var(--danger-border);
 }
 .btn-danger:hover:not(:disabled) {
   background: var(--danger);
-  color: #fff;
+  color: var(--on-danger);
   border-color: var(--danger);
 }
 
@@ -1203,7 +1290,6 @@ button { cursor: pointer; font-family: inherit; }
 .ki.icon-sm svg, .icon-sm.ki svg { width: 14px; height: 14px; }
 .ki.icon-md svg, .icon-md.ki svg { width: 16px; height: 16px; }
 .ki.icon-lg svg, .icon-lg.ki svg { width: 20px; height: 20px; }
-.metric-icon .ki svg { width: 1.25rem; height: 1.25rem; }
 .nav-icon .ki svg,
 .nav-icon svg { width: 18px; height: 18px; }
 .btn .ki { margin-inline-end: 0.15em; }
@@ -1235,9 +1321,9 @@ button { cursor: pointer; font-family: inherit; }
 .form-textarea,
 .form-control {
   padding: var(--sp-2) var(--sp-3);
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: var(--input-radius);
   color: var(--text-primary);
   font-family: var(--font-sans);
   font-size: 0.9rem;
@@ -1308,7 +1394,7 @@ thead th {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-muted);
-  background: var(--bg-elevated);
+  background: var(--surface-sunken);
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
@@ -1374,7 +1460,7 @@ tbody tr:last-child td {
 .tab-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 .tab-btn.active {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   border-color: var(--accent);
 }
 
@@ -1382,7 +1468,7 @@ tbody tr:last-child td {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: var(--scrim);
   backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
@@ -1391,9 +1477,9 @@ tbody tr:last-child td {
   animation: fade-in var(--transition-fast) ease;
 }
 .modal {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  background: var(--surface-overlay);
+  border: 1px solid var(--overlay-border);
+  border-radius: var(--card-radius);
   width: 100%;
   max-width: 560px;   /* default — prevents edge-to-edge; overridden by -sm/-lg/-xl */
   max-height: 85vh;
@@ -1493,7 +1579,9 @@ tbody tr:last-child td {
   max-width: 380px;
   pointer-events: auto;
   cursor: pointer;
-  border: 1px solid;
+  border: 1px solid var(--toast-edge, var(--overlay-border));
+  background: linear-gradient(var(--toast-wash, transparent), var(--toast-wash, transparent)), var(--surface-overlay);
+  color: var(--text-primary);
   animation: slide-up var(--transition) ease;
   box-shadow: var(--shadow-lg);
 }
@@ -1528,28 +1616,16 @@ tbody tr:last-child td {
   white-space: nowrap;
   flex-shrink: 0;
 }
-.toast-action:hover { background: rgba(127, 127, 127, 0.15); }
+.toast-action:hover { background: var(--tint-strong); }
 
-.toast-success {
-  background: rgba(63, 185, 80, 0.1);
-  border-color: rgba(63, 185, 80, 0.3);
-  color: var(--success);
-}
-.toast-error {
-  background: rgba(248, 81, 73, 0.1);
-  border-color: rgba(248, 81, 73, 0.3);
-  color: var(--danger);
-}
-.toast-warning {
-  background: rgba(210, 153, 34, 0.1);
-  border-color: rgba(210, 153, 34, 0.3);
-  color: var(--warning);
-}
-.toast-info {
-  background: rgba(88, 166, 255, 0.1);
-  border-color: rgba(88, 166, 255, 0.3);
-  color: var(--info);
-}
+.toast-success { --toast-wash: var(--success-subtle); --toast-edge: var(--success-border); }
+.toast-error { --toast-wash: var(--danger-subtle); --toast-edge: var(--danger-border); }
+.toast-warning { --toast-wash: var(--warning-subtle); --toast-edge: var(--warning-border); }
+.toast-info { --toast-wash: var(--accent-subtle); --toast-edge: color-mix(in srgb, var(--accent) 35%, transparent); }
+.toast-success .toast-icon { color: var(--success); }
+.toast-error .toast-icon { color: var(--danger); }
+.toast-warning .toast-icon { color: var(--warning); }
+.toast-info .toast-icon { color: var(--accent); }
 
 /* Toast progress bar */
 .toast-progress {
@@ -1595,7 +1671,6 @@ tbody tr:last-child td {
 }
 .session-item {
   padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background var(--transition-fast);
 }
@@ -1647,7 +1722,7 @@ tbody tr:last-child td {
   flex-shrink: 0;
   overflow: hidden;
 }
-.message-avatar-user { background: var(--accent); color: #001016; font-weight: 600; }
+.message-avatar-user { background: var(--accent); font-weight: 600; }
 .message-avatar-agent {
   background: transparent;
   border: 1px solid var(--border-subtle);
@@ -1797,7 +1872,7 @@ textarea {
   unicode-bidi: isolate;
   display: inline;
 }
-.message-user .message-text { background: var(--accent); color: #001016; font-weight: 500; }
+.message-user .message-text { background: var(--accent); font-weight: 500; }
 .message-assistant .message-text {
   background: var(--bg-panel);
   border: 1px solid var(--border);
@@ -1881,23 +1956,15 @@ textarea {
   vertical-align: top;
 }
 .message-text thead th {
-  background: var(--bg-elevated, rgba(255,255,255,0.06));
+  background: var(--surface-sunken);
   font-weight: 600;
   color: var(--text-primary);
   border-bottom: 1px solid var(--border-strong, var(--border));
   white-space: nowrap;
 }
-.message-text tbody tr:nth-child(even) td {
-  background: rgba(255,255,255,0.02);
-}
+/* Rows: a hairline under each, no stripes (the reference); a hover wash. */
 .message-text tbody tr:hover td {
-  background: rgba(255,255,255,0.04);
-}
-[data-theme="light"] .message-text tbody tr:nth-child(even) td {
-  background: rgba(0,0,0,0.02);
-}
-[data-theme="light"] .message-text tbody tr:hover td {
-  background: rgba(0,0,0,0.04);
+  background: var(--tint);
 }
 .message-text hr { border: none; border-top: 1px solid var(--border); margin: var(--sp-4) 0; }
 .message-text img,
@@ -1931,15 +1998,15 @@ textarea {
 /* ── HITL approval card (in-chat danger-tool gate) ─────────────── */
 .hitl-approval-body p { margin: var(--sp-1) 0; word-break: break-word; }
 .hitl-approval-body code {
-  background: var(--bg-elevated, rgba(0,0,0,0.05));
+  background: var(--surface-sunken);
   padding: 1px 4px;
   border-radius: 3px;
   font-size: 0.8rem;
 }
 .hitl-approval-actions .btn-warning {
-  background: var(--warning, #f59e0b);
-  border-color: var(--warning, #f59e0b);
-  color: #111;
+  background: var(--warning);
+  border-color: var(--warning);
+  color: var(--on-warning);
 }
 /* A public, irreversible action (X writes): its own look, so it is never read
    as one more routine approval (2026-10-16). */
@@ -2027,7 +2094,6 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: 10px;
 }
 .capacity-bar {
   display: flex;
@@ -2079,7 +2145,7 @@ textarea {
 .capacity-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 /* Active = muted danger (never gold). Mix keeps it readable, not neon. */
 .capacity-pill.is-on {
-  color: color-mix(in srgb, #e7b8b8 55%, var(--text-primary));
+  color: color-mix(in srgb, var(--danger) 55%, var(--text-primary));
   background: color-mix(in srgb, var(--danger) 20%, var(--bg-elevated));
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 38%, transparent);
 }
@@ -2215,15 +2281,9 @@ textarea {
   display: flex;
   gap: var(--sp-2);
   align-items: flex-end;
-  background: var(--tint);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
   padding: var(--sp-2) var(--sp-3);
   transition: border-color var(--transition-fast, 150ms ease), box-shadow var(--transition-fast, 150ms ease), background var(--transition-fast, 150ms ease);
-}
-.input-wrapper:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-glow);
 }
 .chat-input {
   flex: 1;
@@ -2271,10 +2331,8 @@ textarea {
 .send-btn {
   width: 36px;
   height: 36px;
-  border-radius: 50%;
   background: var(--accent);
   border: none;
-  color: #fff;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -2285,7 +2343,7 @@ textarea {
 .send-btn:hover { background: var(--accent-hover); }
 .send-btn:disabled { background: var(--bg-surface); cursor: not-allowed; }
 .send-btn.stop-mode { background: var(--error, #ef4444); }
-.send-btn.stop-mode:hover { background: #dc2626; }
+.send-btn.stop-mode:hover { background: color-mix(in srgb, var(--danger) 85%, #000000); }
 
 /* .input-footer / .chat-input-footer-hint removed: that row existed only to
    carry the composer char count and an "Enter to send" hint, and it cost a
@@ -2490,7 +2548,7 @@ details.kazma-working > summary {
   background: transparent;
 }
 .cot-phase.is-on {
-  color: #f8fbff;
+  color: var(--on-accent);
   background: var(--accent);
   border-color: var(--accent);
 }
@@ -2737,18 +2795,18 @@ details.kazma-working > summary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-elevated);
+  background: var(--surface-sunken);
   border: 1px solid var(--border);
   color: var(--accent-light, var(--accent));
   z-index: 1;
 }
 .agent-progress-step .step-icon .step-glyph { display: block; }
-.agent-progress-step .step-icon.fam-read { color: #38bdf8; border-color: color-mix(in srgb, #38bdf8 45%, var(--border)); }
-.agent-progress-step .step-icon.fam-write { color: #fbbf24; border-color: color-mix(in srgb, #fbbf24 45%, var(--border)); }
-.agent-progress-step .step-icon.fam-exec { color: #fb7185; border-color: color-mix(in srgb, #fb7185 45%, var(--border)); }
-.agent-progress-step .step-icon.fam-search { color: #a78bfa; border-color: color-mix(in srgb, #a78bfa 45%, var(--border)); }
-.agent-progress-step .step-icon.fam-browse { color: #22d3ee; border-color: color-mix(in srgb, #22d3ee 45%, var(--border)); }
-.agent-progress-step .step-icon.fam-memory { color: #34d399; border-color: color-mix(in srgb, #34d399 45%, var(--border)); }
+.agent-progress-step .step-icon.fam-read { color: var(--cat-1); border-color: color-mix(in srgb, var(--cat-1) 45%, var(--border)); }
+.agent-progress-step .step-icon.fam-write { color: var(--cat-2); border-color: color-mix(in srgb, var(--cat-2) 45%, var(--border)); }
+.agent-progress-step .step-icon.fam-exec { color: var(--cat-3); border-color: color-mix(in srgb, var(--cat-3) 45%, var(--border)); }
+.agent-progress-step .step-icon.fam-search { color: var(--cat-4); border-color: color-mix(in srgb, var(--cat-4) 45%, var(--border)); }
+.agent-progress-step .step-icon.fam-browse { color: var(--cat-5); border-color: color-mix(in srgb, var(--cat-5) 45%, var(--border)); }
+.agent-progress-step .step-icon.fam-memory { color: var(--cat-6); border-color: color-mix(in srgb, var(--cat-6) 45%, var(--border)); }
 .agent-progress-step .step-icon.fam-error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 50%, var(--border)); }
 @keyframes cotRowIn {
   from { opacity: 0; transform: translateY(5px); }
@@ -2955,9 +3013,6 @@ details.kazma-working > summary {
 }
 .skill-card,
 .mcp-card {
-  background: var(--tint);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
   padding: var(--sp-4);
   transition: border-color var(--transition-fast);
 }
@@ -3049,7 +3104,6 @@ details.kazma-working > summary {
 .badge-info { background: var(--info-subtle); color: var(--info); }
 .badge-basic { background: var(--accent-subtle); color: var(--accent-light); }
 .badge-standard { background: var(--warning-subtle); color: var(--warning); }
-.badge-premium { background: var(--secondary-subtle); color: var(--secondary); }
 .badge-stdio { background: var(--success-subtle); color: var(--success); }
 .badge-sse { background: var(--accent-subtle); color: var(--accent-light); }
 
@@ -3080,10 +3134,6 @@ details.kazma-working > summary {
   background: var(--text-tertiary);
   border-radius: 50%;
   transition: 0.2s;
-}
-.toggle input:checked + .toggle-slider {
-  background: var(--accent);
-  border-color: var(--accent);
 }
 .toggle input:checked + .toggle-slider::before {
   transform: translateX(16px);
@@ -3134,10 +3184,9 @@ details.kazma-working > summary {
   gap: var(--sp-3);
   margin-bottom: var(--sp-5);
 }
-.metric-value { font-size: 1.75rem; font-weight: 700; margin-bottom: var(--sp-1); }
+.metric-value { font-size: 1.75rem; margin-bottom: var(--sp-1); }
 .metric-label {
   font-size: 0.7rem;
-  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -3284,7 +3333,7 @@ details.kazma-working > summary {
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: var(--bg-elevated);
+  background: var(--border-strong);
   border-radius: var(--radius-sm);
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
@@ -3299,9 +3348,6 @@ details.kazma-working > summary {
   justify-content: flex-start;
   gap: var(--sp-3);
   padding: var(--sp-4);
-  background: var(--tint);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
   margin-bottom: var(--sp-3);
   width: 100%;
   box-sizing: border-box;
@@ -3401,9 +3447,6 @@ details.kazma-working > summary {
 @container (max-width: 760px) { .pc-grid { grid-template-columns: 1fr; } }
 
 .pc-panel {
-  background: var(--tint);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm, 6px);
   overflow: hidden;
   min-width: 0;
 }
@@ -3528,7 +3571,7 @@ details.kazma-working > summary {
 .pc-alert code {
   font-family: var(--font-mono);
   font-size: 0.72rem;
-  background: var(--bg-elevated, var(--tint-strong));
+  background: var(--surface-sunken);
   padding: 1px 5px;
   border-radius: 3px;
   border: 1px solid var(--border);
@@ -3778,7 +3821,7 @@ details.kazma-working > summary {
   padding: 4px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--surface-sunken);
 }
 .model-item-row {
   display: flex;
@@ -3790,7 +3833,7 @@ details.kazma-working > summary {
   transition: background 0.15s ease;
 }
 .model-item-row.selected {
-  background: rgba(99, 102, 241, 0.15);
+  background: var(--accent-subtle);
 }
 .model-check-label {
   display: flex;
@@ -3996,7 +4039,7 @@ details.kazma-working > summary {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: var(--bg-elevated, var(--bg));
+  background: var(--surface-sunken);
   border-bottom: 1px solid var(--border);
   font-size: 0.64rem;
   font-weight: 600;
@@ -4163,52 +4206,61 @@ details.kazma-working > summary {
    unification). text-secondary/tertiary/muted are intentionally dark
    (P0 contrast fix) — do NOT lighten them or Light body text goes pale. */
 [data-theme="light"] {
-  --bg: #f0f4fa;
-  --bg-2: #e6edf7;
-  --bg-deep: #f0f4fa;
-  --bg-primary: #ffffff;
-  --bg-panel: #ffffff;
-  --bg-surface: #ffffff;
-  --bg-elevated: #e6edf7;
-  --bg-card: var(--bg-elevated);
-  --bg-hover: rgba(37, 99, 235, 0.06);
-  --bg-active: rgba(37, 99, 235, 0.10);
-  --grid: rgba(12, 21, 38, 0.04);
+  /* Surfaces: the wall is white; cards, overlays and chrome are the wall
+     (they follow it); Kazma's ice blue is the well, below the wall. */
+  --surface-wall: #ffffff;
+  --surface-sunken: #f0f4fa;
+  --scrim: rgba(12, 21, 38, 0.40);
+  --card-hairline: #e5e9f0;
+  --drawer-shadow: 0 0 32px rgba(15, 23, 42, 0.16);
+  --input-border: #d5dce6;
   --tint: rgba(12, 21, 38, 0.025);
   --tint-strong: rgba(12, 21, 38, 0.05);
+  --grid: rgba(12, 21, 38, 0.04);
 
   --text-primary: #0c1526;
   --text-secondary: #334155;
   --text-tertiary: #475569;
-  --text-muted: #64748b;
-  --text-inverse: #ffffff;
+  --text-muted: #5b6b80;
 
-  --accent: #2563eb;
-  --accent-hover: #1d4ed8;
-  --accent-light: #2563eb;
-  --accent-subtle: rgba(37, 99, 235, 0.10);
-  --accent-glow: rgba(37, 99, 235, 0.22);
-  --accent-rgb: 37, 99, 235;
-  --gradient-accent: linear-gradient(135deg, #2563eb 0%, #0284c7 100%);
+  /* The accent's light variant stays readable on white (and under white
+     ink): the theme default, or the owner's accent darkened for light. */
+  --accent: var(--accent-chosen-light, #2563eb);
+  --accent-rgb: var(--accent-chosen-light-rgb, 37, 99, 235);
+  --on-accent: var(--accent-chosen-light-on, #ffffff);
+  --accent-hover: color-mix(in srgb, var(--accent) 82%, #0c1526);
+  /* Accent as text (links, active items, accent-tinted badges): the
+     darker shade, 4.5:1 on white and on the accent's own 12% tint. */
+  --accent-light: color-mix(in srgb, var(--accent) 82%, #0c1526);
+  --accent-glow: color-mix(in srgb, var(--accent) 22%, transparent);
+  --bg-hover: color-mix(in srgb, var(--accent) 6%, transparent);
+  --bg-active: color-mix(in srgb, var(--accent) 10%, transparent);
+  --gradient-accent: linear-gradient(135deg, var(--accent) 0%, color-mix(in srgb, var(--accent) 60%, var(--secondary)) 100%);
+  --gradient-header: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 50%, color-mix(in srgb, var(--accent) 60%, var(--secondary)) 100%);
+  --title-fill: linear-gradient(var(--text-primary), var(--text-primary));
 
-  --secondary: #0284c7;
-  --secondary-hover: #0369a1;
-  --secondary-light: #0284c7;
-  --secondary-subtle: rgba(2, 132, 199, 0.10);
-  --secondary-glow: rgba(2, 132, 199, 0.18);
+  --secondary: #0369a1;
+  --secondary-hover: #075985;
+  --secondary-light: #0369a1;
 
-  --gradient-primary: linear-gradient(135deg, #2563eb, #1d4ed8, #0284c7);
-  --gradient-header: linear-gradient(135deg, #2563eb 0%, #1d4ed8 50%, #0284c7 100%);
+  /* Status: dark shades, each 4.5:1 or more as text on white AND on its
+     own 12% tint (the 600 shades were 2.9-4.1:1 on white). */
+  --success: #047857;
+  --warning: #8a5a00;
+  --danger: #b91c1c;
+  --info: #0369a1;
+  --on-success: #ffffff;
+  --on-warning: #ffffff;
+  --on-danger: #ffffff;
+  --on-info: #ffffff;
+  --on-secondary: #ffffff;
 
-  --success: #059669;
-  --success-subtle: rgba(5, 150, 105, 0.12);
-  --warning: #ca8a04;
-  --warning-subtle: rgba(202, 138, 4, 0.12);
-  --warning-bg: rgba(202, 138, 4, 0.12);
-  --danger: #dc2626;
-  --danger-subtle: rgba(220, 38, 38, 0.10);
-  --info: #0284c7;
-  --info-subtle: rgba(2, 132, 199, 0.10);
+  --cat-1: #0369a1;
+  --cat-2: #b45309;
+  --cat-3: #be123c;
+  --cat-4: #6d28d9;
+  --cat-5: #0e7490;
+  --cat-6: #047857;
 
   --border-subtle: rgba(12, 21, 38, 0.07);
   --border: rgba(12, 21, 38, 0.10);
@@ -4216,70 +4268,11 @@ details.kazma-working > summary {
 
   --shadow-sm: 0 1px 2px rgba(15,23,42,0.06);
   --shadow: 0 4px 12px rgba(15,23,42,0.08);
+  --shadow-md: 0 4px 12px rgba(15,23,42,0.08);
   --shadow-lg: 0 8px 24px rgba(15,23,42,0.12);
   --shadow-xl: 0 16px 48px rgba(15,23,42,0.16);
 }
 
-/* Auto-detect system preference for light theme. Mirrors the block above
-   (same Abyss-light values, same dark muted text — P0 contrast fix applies
-   here too so Auto-light body text stays readable). */
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) {
-    --bg: #f0f4fa;
-    --bg-2: #e6edf7;
-    --bg-deep: #f0f4fa;
-    --bg-primary: #ffffff;
-    --bg-panel: #ffffff;
-    --bg-surface: #ffffff;
-    --bg-elevated: #e6edf7;
-    --bg-card: var(--bg-elevated);
-    --bg-hover: rgba(37, 99, 235, 0.06);
-    --bg-active: rgba(37, 99, 235, 0.10);
-    --grid: rgba(12, 21, 38, 0.04);
-    --tint: rgba(12, 21, 38, 0.025);
-    --tint-strong: rgba(12, 21, 38, 0.05);
-    --text-primary: #0c1526;
-    --text-secondary: #334155;
-    --text-tertiary: #475569;
-    --text-muted: #64748b;
-    --text-inverse: #ffffff;
-    --accent: #2563eb;
-    --accent-hover: #1d4ed8;
-    --accent-light: #2563eb;
-    --accent-subtle: rgba(37, 99, 235, 0.10);
-    --accent-glow: rgba(37, 99, 235, 0.22);
-    --accent-rgb: 37, 99, 235;
-    --gradient-accent: linear-gradient(135deg, #2563eb 0%, #0284c7 100%);
-    --secondary: #0284c7;
-    --secondary-hover: #0369a1;
-    --secondary-light: #0284c7;
-    --secondary-subtle: rgba(2, 132, 199, 0.10);
-    --secondary-glow: rgba(2, 132, 199, 0.18);
-    --gradient-primary: linear-gradient(135deg, #2563eb, #1d4ed8, #0284c7);
-    --gradient-header: linear-gradient(135deg, #2563eb 0%, #1d4ed8 50%, #0284c7 100%);
-    --warning: #ca8a04;
-    --warning-subtle: rgba(202, 138, 4, 0.12);
-    --warning-bg: rgba(202, 138, 4, 0.12);
-    --info: #0284c7;
-    --info-subtle: rgba(2, 132, 199, 0.10);
-    --border-subtle: rgba(12, 21, 38, 0.07);
-    --border: rgba(12, 21, 38, 0.10);
-    --border-strong: rgba(12, 21, 38, 0.16);
-  }
-}
-
-[data-theme="light"] .card,
-[data-theme="light"] .settings-group,
-[data-theme="light"] .skill-card,
-[data-theme="light"] .mcp-card,
-[data-theme="light"] .provider-card {
-  background: var(--bg-surface);
-  border-color: var(--border);
-}
-[data-theme="light"] .modal {
-  background: var(--bg-surface);
-  border-color: var(--border);
-}
 [data-theme="light"] .btn-secondary {
   background: rgba(0, 0, 0, 0.03);
   color: var(--text-secondary);
@@ -4289,31 +4282,11 @@ details.kazma-working > summary {
   background: rgba(0, 0, 0, 0.06);
   color: var(--text-primary);
 }
-[data-theme="light"] .form-input,
-[data-theme="light"] .form-select,
-[data-theme="light"] .form-textarea,
-[data-theme="light"] .form-control {
-  background: var(--bg-primary);
-  border-color: var(--border);
-}
 [data-theme="light"] .toggle-slider {
   background: rgba(0, 0, 0, 0.08);
   border-color: var(--border);
 }
 [data-theme="light"] .toggle-slider::before { background: #fff; }
-[data-theme="light"] .message-user .message-text { color: #fff; }
-[data-theme="light"] .message-assistant .message-text {
-  background: var(--bg-panel);
-}
-[data-theme="light"] .input-wrapper {
-  background: var(--bg-elevated);
-  border-color: var(--border-strong);
-}
-[data-theme="light"] .header-title {
-  background: none;
-  -webkit-text-fill-color: unset;
-  color: var(--text-primary);
-}
 
 /* ── 23b. Dark Mode Dropdown Options ────────────────────────────── */
 /* Bug 1: native <option> elements render with a browser-default white
@@ -4324,19 +4297,14 @@ details.kazma-working > summary {
 [data-theme="dark"] select option,
 [data-theme="dark"] .form-select option,
 [data-theme="dark"] select.form-select option {
-  background-color: var(--bg-surface);
+  background-color: var(--surface-overlay);
   color: var(--text-primary);
 }
 [data-theme="dark"] select option:checked,
 [data-theme="dark"] .form-select option:checked,
 [data-theme="dark"] select.form-select option:checked {
   background-color: var(--accent);
-  color: #fff;
-}
-/* Ensure the closed <select> itself keeps readable text in dark mode. */
-[data-theme="dark"] .form-select {
-  background-color: var(--bg-surface);
-  color: var(--text-primary);
+  color: var(--on-accent);
 }
 
 /* ── 24. RTL Overrides ──────────────────────────────────────────── */
@@ -4377,7 +4345,7 @@ details.kazma-working > summary {
 [data-theme="light"] .ide-results,
 [data-theme="light"] .ide-editor-wrap,
 [data-theme="light"] .ide-fallback {
-  background: var(--bg-elevated) !important;
+  background: var(--surface-sunken) !important;
   color: var(--text-primary);
 }
 [data-theme="light"] .ide-tab {
@@ -4393,17 +4361,11 @@ details.kazma-working > summary {
   background: var(--bg-elevated);
   border-color: var(--border-subtle);
 }
-[data-theme="light"] .chart-card {
-  background: var(--bg-surface);
-  border-color: var(--border-subtle);
-}
+/* Light: every <pre> is a well, whatever a page painted inline (dark
+   terminal literals in templates). Dark pres keep their own rules. */
 [data-theme="light"] pre:not(.ide-results) {
-  background: rgba(0,0,0,0.06) !important;
+  background: var(--surface-sunken) !important;
 }
-[data-theme="light"] .toast-success { background: var(--success-subtle); }
-[data-theme="light"] .toast-error { background: var(--danger-subtle); }
-[data-theme="light"] .toast-warning { background: var(--warning-bg); }
-[data-theme="light"] .toast-info { background: var(--accent-subtle); }
 
 /* ── RTL: Header ── */
 [dir="rtl"] .page-header .header-left,
@@ -4750,7 +4712,6 @@ details.kazma-working > summary {
     /* Opaque token bg (was a hardcoded rgba(14,20,27,.94) — wrong in Light AND
        translucent over the canvas). The dock sits over scrolling content and
        the iOS canvas, so it must be fully opaque in both themes. */
-    background: var(--bg-panel);
     border-top: 1px solid var(--border-subtle);
     padding: 6px 8px max(6px, env(safe-area-inset-bottom, 0px));
     justify-content: space-around;
@@ -4764,8 +4725,7 @@ details.kazma-working > summary {
     padding: 6px 0; min-height: var(--tap); justify-content: center;
     background: none; border: none; cursor: pointer; font-family: var(--font-sans);
   }
-  .bottom-nav a.active { color: var(--accent); }
-  .bottom-nav svg { width: 22px; height: 22px; }
+    .bottom-nav svg { width: 22px; height: 22px; }
   /* keep page content clear of the fixed bottom bar */
   .page-body { padding-bottom: calc(var(--sp-8) + var(--bottom-nav-height)); }
   /* Chat fills space above bottom nav; composer is sticky above the dock.
@@ -4784,7 +4744,7 @@ details.kazma-working > summary {
     flex-shrink: 0;
     /* Sit visually above the fixed bottom-nav */
     margin-bottom: 0;
-    box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.28);
+    box-shadow: var(--shadow);
     border-top: 1px solid var(--border-subtle);
     background: var(--bg-panel);
   }
@@ -4833,11 +4793,10 @@ details.kazma-working > summary {
     z-index: 200;
     transform: translateX(100%);          /* off-screen right (RTL default) */
     transition: transform 0.25s ease;
-    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.4);
+    box-shadow: var(--drawer-shadow);
   }
   [dir="ltr"] .sidebar {
     transform: translateX(-100%);         /* off-screen left for English */
-    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
   }
   .sidebar.mobile-open {
     transform: translateX(0) !important;   /* slide into view */
@@ -4849,7 +4808,7 @@ details.kazma-working > summary {
     display: block;
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background: var(--scrim);
     z-index: 199;                          /* below the drawer (200), above content */
   }
 
@@ -4866,13 +4825,12 @@ details.kazma-working > summary {
     z-index: 200;
     transform: translateX(100%);           /* off-screen right (RTL default) */
     transition: transform 0.25s ease;
-    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.4);
+    box-shadow: var(--drawer-shadow);
   }
   [dir="ltr"] .chat-sidebar {
     left: 0;
     right: auto;
     transform: translateX(-100%);
-    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
   }
   .chat-sidebar.mobile-open {
     transform: translateX(0) !important;
@@ -4929,9 +4887,6 @@ details.kazma-working > summary {
     flex-direction: column;
     gap: 6px;
     padding: 12px 14px;
-    border: 1px solid var(--border-subtle);
-    border-radius: 12px;
-    background: var(--bg-surface);
   }
   .dash-mobile-card-top {
     display: flex;
@@ -5092,17 +5047,10 @@ details.kazma-working > summary {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 .metric-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   font-size: 1.25rem;
-  margin: 0 auto 8px;
-  color: var(--text-secondary);
-  background: transparent;
-  border: none;
 }
-.metric-label { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
-.metric-value { font-size: 1.75rem; font-weight: 600; letter-spacing: -0.03em; margin-bottom: 2px; }
+.metric-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+.metric-value { font-size: 1.75rem; margin-bottom: 2px; }
 .metric-sub { font-size: 0.72rem; color: var(--text-tertiary); }
 .metric-value.text-success { color: var(--success); }
 .metric-value.text-error { color: var(--danger); }
@@ -5116,16 +5064,11 @@ details.kazma-working > summary {
   margin-bottom: 1.5rem;
 }
 .chart-card {
-  background: var(--tint);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
   padding: 16px;
 }
 .chart-title {
   font-size: 0.8rem;
-  color: var(--text-tertiary);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
   margin-bottom: 8px;
 }
 canvas { display: block; border-radius: 4px; }
@@ -5140,7 +5083,6 @@ canvas { display: block; border-radius: 4px; }
 }
 .progress-fill {
   height: 100%;
-  background: var(--accent);
   border-radius: 3px;
   transition: width 0.5s ease;
 }
@@ -5149,24 +5091,18 @@ canvas { display: block; border-radius: 4px; }
 .range-selector {
   display: flex;
   gap: 2px;
-  background: var(--tint);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 2px;
 }
 .range-btn {
-  padding: 4px 10px;
   font-size: 0.75rem;
   font-weight: 500;
   background: none;
   border: none;
-  border-radius: 3px;
   color: var(--text-tertiary);
   cursor: pointer;
   transition: all 0.15s;
 }
 .range-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
-.range-btn.active { background: var(--accent); color: #fff; }
 
 /* Skeleton Loading */
 .skeleton {
@@ -5199,11 +5135,6 @@ canvas { display: block; border-radius: 4px; }
   transition: all 0.15s;
   font-family: var(--font-sans);
 }
-.hint-chip:hover {
-  background: var(--accent-subtle);
-  border-color: var(--accent);
-  color: var(--text-primary);
-}
 
 /* Session Sidebar Enhancements */
 .chat-sidebar-header {
@@ -5230,7 +5161,6 @@ canvas { display: block; border-radius: 4px; }
   gap: 8px;
   padding: 8px 10px;
   padding-left: 12px;
-  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background 0.15s;
   z-index: 2;
@@ -5241,7 +5171,6 @@ canvas { display: block; border-radius: 4px; }
 }
 .session-item:hover { background: var(--bg-hover); }
 .session-item.active {
-  background: var(--accent-subtle);
   border-left: 3px solid var(--accent);
   padding-left: 9px;
 }
@@ -5256,7 +5185,6 @@ canvas { display: block; border-radius: 4px; }
   text-overflow: ellipsis;
 }
 .session-info .session-title mark {
-  background: rgba(var(--accent-rgb), 0.25);
   color: inherit;
   border-radius: 2px;
   padding: 0 1px;
@@ -5325,10 +5253,10 @@ canvas { display: block; border-radius: 4px; }
   z-index: 9999;
   min-width: 135px;
   padding: 4px;
-  background: var(--bg-elevated, var(--bg-card, #1b1e2e));
-  border: 1px solid var(--border-strong, rgba(255, 255, 255, 0.15));
-  border-radius: var(--radius-sm);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  background: var(--surface-overlay);
+  border: 1px solid var(--overlay-border);
+  border-radius: var(--overlay-radius);
+  box-shadow: var(--overlay-shadow);
   display: none;
 }
 .session-menu.open { display: block; }
@@ -5398,8 +5326,8 @@ canvas { display: block; border-radius: 4px; }
 .message-actions .speak-action { opacity: 1; }
 .message-actions .speak-action.is-speaking {
   opacity: 1;
-  border-color: #22c55e;
-  background: rgba(34, 197, 94, 0.18);
+  border-color: var(--success);
+  background: var(--success-subtle);
 }
 @media (prefers-reduced-motion: no-preference) {
   .message-actions .speak-action.is-speaking { animation: kazma-speak-pulse 1.2s ease-in-out infinite; }
@@ -5422,14 +5350,13 @@ canvas { display: block; border-radius: 4px; }
 }
 .msg-action:hover { background: var(--bg-hover); color: var(--text-primary); }
 .msg-action.active { color: var(--accent); }
-.reaction-btn.active { background: var(--accent-subtle); border-color: rgba(var(--accent-rgb), 0.3); }
 
 /* Code Blocks */
 .code-block {
   position: relative;
   padding: 12px 16px;
   padding-top: 24px;
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--surface-sunken);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow-x: auto;
@@ -5462,7 +5389,7 @@ canvas { display: block; border-radius: 4px; }
   transition: all 0.15s;
 }
 .copy-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
-.copy-btn.copied { color: var(--success); border-color: rgba(16,185,129,0.3); }
+.copy-btn.copied { color: var(--success); border-color: var(--success-border); }
 .inline-code {
   padding: 1px 4px;
   background: var(--tint-strong);
@@ -5473,8 +5400,8 @@ canvas { display: block; border-radius: 4px; }
 }
 .error-message {
   padding: 12px;
-  background: rgba(248, 81, 73, 0.08);
-  border: 1px solid rgba(248, 81, 73, 0.2);
+  background: var(--danger-subtle);
+  border: 1px solid var(--danger-border);
   border-radius: var(--radius);
   color: var(--danger);
 }
@@ -5486,8 +5413,8 @@ canvas { display: block; border-radius: 4px; }
   border-radius: 3px;
   margin-left: 4px;
 }
-.tool-status.running { background: rgba(210, 153, 34, 0.1); color: var(--warning); }
-.tool-status.done { background: rgba(16, 185, 129, 0.1); color: var(--success); }
+.tool-status.running { background: var(--warning-subtle); color: var(--warning); }
+.tool-status.done { background: var(--success-subtle); color: var(--success); }
 .tool-inputs {
   display: block;
   margin-top: 4px;
@@ -5526,9 +5453,6 @@ canvas { display: block; border-radius: 4px; }
   max-width: 380px;
   word-wrap: break-word;
 }
-.toast-success { background: rgba(16, 185, 129, 0.12); color: var(--success); border: 1px solid rgba(16, 185, 129, 0.3); }
-.toast-error { background: rgba(248, 81, 73, 0.12); color: var(--danger); border: 1px solid rgba(248, 81, 73, 0.3); }
-.toast-info { background: var(--accent-subtle); color: var(--accent-light); border: 1px solid rgba(var(--accent-rgb), 0.3); }
 @keyframes slideIn {
   from { transform: translateY(20px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
@@ -5552,11 +5476,11 @@ canvas { display: block; border-radius: 4px; }
   word-break: break-word;
   padding: 10px 12px;
   border-radius: 10px;
-  background: rgba(10, 15, 20, 0.94);
-  border: 1px solid var(--border-subtle);
+  background: var(--surface-overlay);
+  border: 1px solid var(--overlay-border);
   font-size: 0.72rem;
-  color: var(--text-muted);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  color: var(--text-secondary);
+  box-shadow: var(--shadow-lg);
   pointer-events: auto;
 }
 .v2g-inspect-head {
@@ -5596,7 +5520,7 @@ canvas { display: block; border-radius: 4px; }
     border-radius: 14px;
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
-    box-shadow: 0 -10px 28px rgba(0, 0, 0, 0.5);
+    box-shadow: var(--shadow-xl);
   }
   .v2g-inspect-contents { max-height: 64px; }
   .v2g-inspect-edges { max-height: 96px; }
@@ -5759,7 +5683,7 @@ canvas { display: block; border-radius: 4px; }
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: var(--scrim);
   backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
@@ -5767,15 +5691,15 @@ canvas { display: block; border-radius: 4px; }
   z-index: 1000;
 }
 .modal-content {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  background: var(--surface-overlay);
+  border: 1px solid var(--overlay-border);
+  border-radius: var(--card-radius);
   width: 100%;
   max-width: 600px;
   max-height: 80vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-xl);
 }
 .modal-header {
   display: flex;
@@ -5908,7 +5832,7 @@ canvas { display: block; border-radius: 4px; }
 }
 .btn-success:hover:not(:disabled) {
   background: var(--success);
-  color: #fff;
+  color: var(--on-success);
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -6111,8 +6035,8 @@ textarea:focus-visible,
    with the v4 token purge; the two tones now both live in the blue family) */
 body {
   background:
-    radial-gradient(1100px 620px at 82% -12%, rgba(59,130,246,0.10), transparent 60%),
-    radial-gradient(900px 520px at 0% 0%, rgba(56,189,248,0.07), transparent 55%),
+    radial-gradient(1100px 620px at 82% -12%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 60%),
+    radial-gradient(900px 520px at 0% 0%, color-mix(in srgb, var(--secondary) 7%, transparent), transparent 55%),
     var(--bg);
   background-attachment: fixed;
 }
@@ -6121,20 +6045,15 @@ body {
 .header-title,
 .section-head h1,
 .page-header .header-title {
-  background: var(--gradient-header);
+  background: var(--title-fill);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
   letter-spacing: -0.02em;
 }
 
-/* Glassy, elevated cards with hover lift + accent glow */
+/* Cards: the surface is the §6 card rule; this keeps the hover motion. */
 .card {
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--bg-panel) 94%, #ffffff 3%), var(--bg-panel));
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
   transition: border-color var(--transition), transform var(--transition), box-shadow var(--transition);
 }
 .card:hover {
@@ -6143,27 +6062,6 @@ body {
   transform: translateY(-2px);
 }
 
-/* Neutral icon row above metric values — no accent/green “emoji plate” */
-.metric-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 auto 8px;
-  width: auto;
-  height: auto;
-  padding: 0;
-  background: transparent;
-  color: var(--text-secondary);
-  border: none;
-  border-radius: 0;
-  box-shadow: none;
-}
-.metric-icon svg,
-.metric-icon .ki svg {
-  width: 20px;
-  height: 20px;
-  opacity: 0.9;
-}
 .metric-value { font-size: var(--fs-fluid-2xl); }
 
 /* Primary buttons — clean, no glow */
@@ -6191,22 +6089,14 @@ body {
   padding: var(--sp-2) var(--sp-4) var(--sp-3);
 }
 .input-wrapper {
-  background: color-mix(in srgb, var(--bg-surface) 70%, transparent);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
   padding: var(--sp-2) var(--sp-3);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
-}
-.input-wrapper:focus-within {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 .send-btn {
   width: 42px;
   height: 42px;
-  border-radius: var(--radius);
   background: var(--gradient-accent);
-  color: #001016;
   box-shadow: var(--shadow-sm);
   transition: transform var(--transition-fast), box-shadow var(--transition-fast), filter var(--transition-fast);
 }
@@ -6228,13 +6118,11 @@ body {
      #0c1526 (near-black) in Light / #eef3fb (ice) in Dark — high contrast
      on the panel bubble in both. */
   color: var(--text-primary);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--bg-panel) 92%, #ffffff 3%), var(--bg-panel));
+  background: var(--surface-card);
   border: 1px solid var(--border-subtle);
 }
 .message-user .message-text {
   background: var(--gradient-accent);
-  color: #001016;
   border: none;
   font-weight: 600;
   box-shadow: 0 6px 22px var(--accent-glow);
@@ -6244,7 +6132,7 @@ body {
   box-shadow: var(--shadow-sm);
 }
 .message-avatar.a { background: var(--accent-subtle); color: var(--accent); }
-.message-avatar.u { background: var(--gradient-accent); color: #001016; }
+.message-avatar.u { background: var(--gradient-accent); }
 
 /* ── Soft-nav progress bar (body.kazma-soft-nav while navigating) ── */
 body.kazma-soft-nav::before {
@@ -6302,9 +6190,6 @@ html.kazma-soft-nav #main-content {
   max-width: 160px;
   padding: 12px 14px;
   text-align: center;
-  border-radius: 10px;
-  border: 1px solid var(--border-subtle);
-  background: var(--bg-elevated);
   box-sizing: border-box;
 }
 .pkg-metric-ok {
@@ -6405,9 +6290,6 @@ html.kazma-soft-nav #main-content {
   min-width: 0;
   min-height: 72px;
   padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid var(--border-subtle);
-  background: var(--bg-elevated);
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -6702,7 +6584,7 @@ html.kazma-soft-nav #main-content {
   position: fixed;
   inset: 0;
   z-index: 300;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--scrim);
   backdrop-filter: blur(2px);
   display: flex;
   align-items: flex-start;
@@ -6712,10 +6594,10 @@ html.kazma-soft-nav #main-content {
 .search-panel {
   width: 100%;
   max-width: 560px;
-  background: var(--bg-card, #1b1e2e);
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
-  border-radius: var(--radius-md, 10px);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  background: var(--surface-overlay);
+  border: 1px solid var(--overlay-border);
+  border-radius: var(--card-radius);
+  box-shadow: var(--shadow-xl);
   overflow: hidden;
 }
 .search-box {
@@ -6780,8 +6662,6 @@ html.kazma-soft-nav #main-content {
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--accent);
-  background: var(--accent-subtle);
   padding: 2px 6px;
   border-radius: 4px;
 }
@@ -6833,9 +6713,9 @@ html.kazma-soft-nav #main-content {
   max-width: min(34rem, 86vw);
   padding: 0.45rem 0.7rem;
   border-radius: 0.5rem;
-  background: var(--bg-elevated, #1b2230);
-  border: 1px solid var(--border, #2a3345);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  background: var(--surface-overlay);
+  border: 1px solid var(--overlay-border);
+  box-shadow: var(--overlay-shadow);
   font-size: 0.72rem;
   line-height: 1.45;
   color: var(--text-primary, #dbe4f0);
@@ -6974,7 +6854,7 @@ html.kazma-soft-nav #main-content {
 /* The cards keep their own styling; inside the region they lose the outer
    margin that spaced them as siblings of the answer. */
 .turn-approvals-rows > .hitl-approval-card { margin: 0; }
-.x-control-hero { display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;padding:24px;margin-bottom:18px;border:1px solid var(--border);border-radius:14px;background:var(--bg-elevated); }
+.x-control-hero { display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;padding:24px;margin-bottom:18px; }
 .x-control-hero h2 { margin:0 0 8px;text-wrap:balance; }
 .x-control-hero p { max-width:65ch;margin:0;color:var(--text-secondary); }
 .x-control-hero nav { display:flex;gap:10px;flex-wrap:wrap; }
@@ -6985,7 +6865,7 @@ html.kazma-soft-nav #main-content {
 .x-policy-card { border:1px solid var(--border);border-radius:12px;padding:18px;margin-top:12px; }
 .x-policy-card > div:first-child { flex-wrap:wrap; }
 .x-policy-summary { display:flex;gap:8px;flex-wrap:wrap;margin-top:12px; }
-.x-policy-summary span { font-size:.76rem;padding:4px 8px;border-radius:6px;background:var(--bg-elevated);color:var(--text-secondary);overflow-wrap:anywhere; }
+.x-policy-summary span { font-size:.76rem;padding:4px 8px;border-radius:6px;background:var(--surface-sunken);color:var(--text-secondary);overflow-wrap:anywhere; }
 /* X settings and Studio share the Kazma palette, including native controls.
    Keep real inputs for keyboard/assistive technology; toggle sliders retain
    their existing markup and styling. */
@@ -7026,7 +6906,7 @@ html.kazma-soft-nav #main-content {
 .x-controls textarea { resize: vertical; line-height: 1.5; }
 .x-controls select:not([multiple]) { cursor: pointer; }
 .x-controls select option { background: var(--bg-panel); color: var(--text-primary); }
-.x-controls select option:checked { background: var(--accent); color: #fff; }
+.x-controls select option:checked { background: var(--accent); color: var(--on-accent); }
 .x-controls :is(.checkbox-label, .xd-check, .xs-checkbox-filter) {
   display: flex;
   align-items: flex-start;
@@ -7055,8 +6935,8 @@ html.kazma-soft-nav #main-content {
   content: '';
   width: 9px;
   height: 5px;
-  border-inline-start: 2px solid #fff;
-  border-bottom: 2px solid #fff;
+  border-inline-start: 2px solid var(--on-accent);
+  border-bottom: 2px solid var(--on-accent);
   transform: translateY(-1px) rotate(-45deg);
   opacity: 0;
 }
@@ -7064,7 +6944,7 @@ html.kazma-soft-nav #main-content {
 [dir="rtl"] .x-controls input[type="checkbox"]:not(.toggle input)::before {
   border-inline-start: 0;
   border-right: 0;
-  border-left: 2px solid #fff;
+  border-left: 2px solid var(--on-accent);
 }
 .x-controls input[type="checkbox"]:not(.toggle input):checked {
   background: var(--accent);
