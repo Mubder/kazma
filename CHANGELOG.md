@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Workflows hold only the access they use, and a release is published
+  last.** Three of the six GitHub workflows declared no permissions and took
+  the repository's default token, which could write. Each now declares its
+  own (CI and the skill review only read), so the repository's default can be
+  set to read-only. The release workflow builds a draft, attaches every file
+  and publishes last, and it refuses to replace the files of a release that
+  is already published; a re-run used to replace them. GitHub's immutable
+  releases can now be turned on.
 - **A new look: cards the colour of the page, one set of controls.** Pages
   painted their own colours: in dark the Dashboard's cards were the page's
   colour while every other page's were a lighter navy, Settings used eight

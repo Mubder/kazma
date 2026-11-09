@@ -63,6 +63,19 @@ class _Toy:
     def encode_batch(self, texts):
         return [self.encode(t) for t in texts]
 
+import contextlib, importlib.util
+from kazma_core.paths import vector_memory_path  # KAZMA_VECTOR_PATH (_env sets it)
+
+_vectors = contextlib.ExitStack()
+if importlib.util.find_spec("chromadb") is None:
+    # No Chroma here (CI installs no ``rag`` extra, 2026-11-09: the sweep
+    # reported the store unavailable and embedded nothing). The Knowledge
+    # benchmark's exact in-process client stands in for this private vector
+    # folder, so the sweep still rebuilds every vector through the product's
+    # own path; the real Chroma is used wherever it is installed.
+    from kazma_core.stores.knowledge_benchmark import _ExactVectorClient
+    _vectors.enter_context(vsg.directory_client(vector_memory_path(), _ExactVectorClient()))
+
 store = KnowledgeStore()  # the target's own default file: it must open
 libs = [lib["id"] for lib in store.list_libraries()]
 chunks = store.list_chunks("docs", limit=50, offset=0)
@@ -76,6 +89,7 @@ print(json.dumps({"libs": libs, "chunks": len(chunks), "en": len(en), "ar": len(
                   "documents": len(documents), "embedded": report["embedded"],
                   "unavailable": report["unavailable"], "fold_ok": store.fts_coverage()["ok"]}))
 store.close()
+_vectors.close()
 """
 
 

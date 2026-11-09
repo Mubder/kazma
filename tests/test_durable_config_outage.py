@@ -120,6 +120,9 @@ def test_failed_postgres_pools_are_closed_before_retry(monkeypatch):
 
     monkeypatch.setattr(module, "_pool", None)
     monkeypatch.setattr(module, "get_database_url", lambda: "postgresql://isolated")
+    # The driver is there (the pool is a stand-in): CI installs no psycopg,
+    # and a missing driver is refused before any pool (2026-11-09).
+    monkeypatch.setattr(module, "driver_missing", lambda *a, **k: None)
     monkeypatch.setattr(module, "PostgresPool", Pool)
     monkeypatch.setattr(module, "_ensure_core_schema", schema)
     monkeypatch.setenv("KAZMA_PG_POOL_RETRY_DELAY", "0")

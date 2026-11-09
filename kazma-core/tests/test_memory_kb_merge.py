@@ -45,9 +45,14 @@ def test_kb_hits_are_never_promoted_into_memory():
     assert not hasattr(federated_search, "promote_kb_hits_to_episodes")
 
 
-def test_neo4j_capability_primary_wording():
+def test_neo4j_capability_primary_wording(monkeypatch):
+    from kazma_core.memory import graph_backend
     from kazma_core.memory.graph_backend import graph_capability
 
+    # The wording with the driver there; without it the answer is
+    # driver_missing (tests/test_neo4j_driver_missing.py). CI installs no
+    # neo4j driver, so the test says which case it is about (2026-11-09).
+    monkeypatch.setattr(graph_backend, "_neo4j_driver_installed", lambda: True)
     cap = graph_capability(
         {"graph": {"provider": "neo4j", "url": "bolt://localhost:7687"}}
     )

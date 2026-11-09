@@ -480,7 +480,11 @@ def unified_turn_server(
     import uvicorn
     from kazma_core.config_store import ConfigStore, set_config_store
     from kazma_ui.app import create_app
+    from kazma_ui.dashboard import get_dashboard_context, set_dashboard_context
 
+    # The app's startup hands the Dashboard its stores (one in the temp dir
+    # this harness deletes); the caller's come back at the end.
+    orig_dashboard = get_dashboard_context()
     orig_env = {
         k: os.environ.get(k)
         for k in ("KAZMA_SECRET", "KAZMA_DATA_DIR", "KAZMA_DB_BACKEND",
@@ -489,6 +493,7 @@ def unified_turn_server(
     os.environ.pop("KAZMA_SECRET", None)
     os.environ["KAZMA_DB_BACKEND"] = "sqlite"
     os.environ[HARNESS_ENV_FLAG] = "1"
+    _release_data_dir_stores()
 
     with TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir, contextlib.ExitStack() as stack:
         os.environ["KAZMA_DATA_DIR"] = tmp_dir
@@ -605,6 +610,7 @@ def unified_turn_server(
                     else:
                         os.environ[key] = val
                 _reset_process_singletons()
+                set_dashboard_context(**orig_dashboard)
 
 
 def _server_await_chain() -> str:
@@ -641,29 +647,97 @@ def _server_await_chain() -> str:
     return "\n".join(lines) or "(no uvicorn task found)"
 
 
-def _reset_process_singletons() -> None:
-    """Same teardown as the sibling e2e fixtures; each reset is optional."""
-    resets = (
-        ("kazma_core.shutdown", "uninstall_shutdown_signal_hooks"),
-        ("kazma_core.shutdown", "reset_shutdown"),
-        ("kazma_ui.session_manager", "reset_session_manager"),
-        ("kazma_core.config_store", "reset_config_store"),
-        ("kazma_core.model_registry", "reset_model_registry"),
-        ("kazma_ui.delivery", "reset_turn_broker"),
-        # Drafts (save_proposal): the store binds the data dir it first saw,
-        # so the next harness server saved into the previous one's deleted
-        # temp folder and x_post found no draft (2026-10-16, the first
-        # harness script to post).
-        ("kazma_core.agent.artifacts", "reset_artifact_store"),
-        # ...and hand the operator's own workspace store back.
-        ("kazma_core.stores.workspaces", "reset_workspace_store"),
-    )
-    for mod, fn in resets:
+#: Process-wide singletons the harness resets, each with the call that does
+#: it. Most are stores that bind the data dir they first saw: the harness
+#: deletes that dir when its test ends, and a store left bound to it serves
+#: the NEXT test from a folder that is gone. On Linux that is "unable to
+#: open database file"; on Windows the delete fails quietly
+#: (``ignore_cleanup_errors``) and the stale store keeps working on a dead
+#: folder, so the suite ran green there. Found 2026-11-09: the bell of a
+#: Dashboard test bound the run-incident store, and the next test's
+#: problems card could not read it. ``tests/test_harness_lets_go_of_its_data_dir.py``
+#: walks every GET route and a turn, then fails on a store left bound.
+_PROCESS_SINGLETON_RESETS: tuple[tuple[str, str], ...] = (
+    ("kazma_core.shutdown", "uninstall_shutdown_signal_hooks"),
+    ("kazma_core.shutdown", "reset_shutdown"),
+    ("kazma_ui.session_manager", "reset_session_manager"),
+    ("kazma_core.config_store", "reset_config_store"),
+    ("kazma_core.model_registry", "reset_model_registry"),
+    ("kazma_ui.delivery", "reset_turn_broker"),
+    # Drafts (save_proposal): the store binds the data dir it first saw,
+    # so the next harness server saved into the previous one's deleted
+    # temp folder and x_post found no draft (2026-10-16, the first
+    # harness script to post).
+    ("kazma_core.agent.artifacts", "reset_artifact_store"),
+    # ...and hand the operator's own workspace store back.
+    ("kazma_core.stores.workspaces", "reset_workspace_store"),
+)
+
+#: The rest of the stores bound to the harness's data dir (2026-11-09),
+#: each with the reset that lets go of it (closing what it holds open).
+_DATA_DIR_STORE_RESETS: tuple[tuple[str, str], ...] = (
+    ("kazma_core.runs.incidents", "reset_incident_store"),
+    ("kazma_core.stores.knowledge", "reset_knowledge_store"),
+    ("kazma_core.stores.bookmarks", "reset_bookmark_store"),
+    ("kazma_core.ide.service", "reset_ide_service"),
+    ("kazma_core.ide.file_checkpoints", "reset_file_checkpoint_store"),
+    ("kazma_core.division_runtime", "reset_division_runtime"),
+)
+
+#: Lazily built stores whose own reset builds a replacement: the global goes
+#: back to None, and the getter builds the next one from the data dir it
+#: then sees. They open a connection per call, so nothing is left open.
+_DATA_DIR_STORE_GLOBALS: tuple[tuple[str, str], ...] = (
+    ("kazma_core.x_api.audit", "_audit"),
+    ("kazma_core.x_api.ledger", "_ledger"),
+    ("kazma_core.x_api.reply_store", "_store"),
+    ("kazma_core.x_api.schedule", "_store"),
+    ("kazma_core.agent.task_ledger", "_store"),
+)
+
+
+def _release_process_recorder() -> None:
+    """The server registers its Time Travel recorder for the process; it
+    holds a connection to the harness's ``snapshots.db``."""
+    from kazma_core import time_travel
+
+    recorder = time_travel._process_recorder
+    time_travel.set_process_recorder(None)
+    if recorder is not None:
+        recorder.close()
+
+
+def _release_data_dir_stores() -> None:
+    """Let go of every store bound to a data dir. Run when the harness stops,
+    and when it starts too: a server fixture of another file may have left
+    one bound to ITS deleted folder. Each release is optional."""
+    for mod, fn in _DATA_DIR_STORE_RESETS:
         try:
             module = __import__(mod, fromlist=[fn])
             getattr(module, fn)()
         except Exception:  # noqa: BLE001 - teardown is best-effort
             pass
+    for mod, name in _DATA_DIR_STORE_GLOBALS:
+        try:
+            module = __import__(mod, fromlist=[name])
+            setattr(module, name, None)
+        except Exception:  # noqa: BLE001 - teardown is best-effort
+            pass
+    try:
+        _release_process_recorder()
+    except Exception:  # noqa: BLE001 - teardown is best-effort
+        pass
+
+
+def _reset_process_singletons() -> None:
+    """Same teardown as the sibling e2e fixtures; each reset is optional."""
+    for mod, fn in _PROCESS_SINGLETON_RESETS:
+        try:
+            module = __import__(mod, fromlist=[fn])
+            getattr(module, fn)()
+        except Exception:  # noqa: BLE001 - teardown is best-effort
+            pass
+    _release_data_dir_stores()
 
     # ...and the PIN, which is a separate thing from the store.
     #
@@ -680,6 +754,43 @@ def _reset_process_singletons() -> None:
         configure_workspace(None)  # None clears the pin
     except Exception:  # noqa: BLE001 - teardown is best-effort
         pass
+
+
+def paths_left_in(root: str) -> list[str]:
+    """Every module global of Kazma's packages that names a path inside
+    *root*, itself or as an attribute of the object it holds -- a process
+    singleton still bound to that folder. ``module.global[.attribute] = path``
+    for each."""
+    import sys
+
+    base = os.path.normcase(os.path.abspath(root))
+
+    def inside(value: Any) -> bool:
+        if not isinstance(value, (str, os.PathLike)):
+            return False
+        try:
+            path = os.path.normcase(os.path.abspath(os.fspath(value)))
+        except (TypeError, ValueError):
+            return False
+        return path == base or path.startswith(base + os.sep)
+
+    found: list[str] = []
+    for mod_name, module in list(sys.modules.items()):
+        if module is None or not mod_name.startswith("kazma_"):
+            continue
+        for name, value in list(vars(module).items()):
+            if inside(value):
+                found.append(f"{mod_name}.{name} = {value}")
+                continue
+            if not getattr(type(value), "__module__", "").startswith("kazma_"):
+                continue
+            try:
+                attrs = list(vars(value).items())
+            except TypeError:  # no __dict__ (slots)
+                continue
+            found.extend(f"{mod_name}.{name}.{attr} = {held}"
+                         for attr, held in attrs if inside(held))
+    return found
 
 
 # ══════════════════════════════════════════════════════════════════════════

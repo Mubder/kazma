@@ -9480,6 +9480,16 @@ has a gate that fails on the old code.
   `tests/test_python_exec_description_is_true.py`,
   `tests/test_prompt_rules_reach_the_model.py`,
   `tests/test_knowledge_footer_language.py`.
+- **A workflow's token is its own, and a release is published last**
+  (2026-11-09). Every workflow declares its permissions (CI and the skill
+  review read only; each write is listed with its reason in the gate), so the
+  repository's default token can be read-only: three of six declared nothing
+  and took a default that could write. The release workflow creates a draft
+  with every file attached, publishes last, and refuses a release that is
+  already published; a re-run used to replace a published release's files,
+  which the updater checks against that release's SHA256SUMS, and GitHub's
+  immutable releases refuse. Gates: `tests/test_workflow_permissions.py`,
+  `tests/test_release_supply_chain.py` (the old publish step as the control).
 - **AGENTS.md names what exists** (FA-151/152/154). §2 states the `_gateway`
   exception; the stale names, counts and paths of §1-§45 are corrected.
   Every backticked code name here -- a dotted path, a name after its file

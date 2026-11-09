@@ -106,6 +106,61 @@ def test_signing_covers_every_published_artifact(steps: list[dict[str, Any]]) ->
         assert expected in inputs, f"{expected} is published but never signed"
 
 
+def _publish_problems(run: str) -> list[str]:
+    """What is wrong with a publish step's commands (comments are not read)."""
+    lines = [
+        line.strip() for line in run.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    commands = [line for line in lines if line.startswith("gh release ")]
+    problems: list[str] = []
+    creates = [c for c in commands if c.startswith("gh release create")]
+    if not creates:
+        problems.append("no release is created")
+    elif not all("--draft" in c and "dist/" in c for c in creates):
+        problems.append("the release is created published, or without its files")
+    if not commands or "--draft=false" not in commands[-1]:
+        problems.append("publishing is not the last release command: files change after it")
+    if any("|| true" in line for line in lines):
+        problems.append("a failed command is swallowed (|| true)")
+    if "isDraft" not in run or "exit 1" not in lines:
+        problems.append("a release that is already published is not refused")
+    return problems
+
+
+_OLD_PUBLISH = """
+gh release create "${TAG}" --title "${TAG}" --notes "${NOTES}" \\
+  || gh release edit "${TAG}" --notes "${NOTES}" \\
+  || true
+# --clobber so re-running the workflow replaces assets instead of failing.
+gh release upload "${TAG}" dist/* --clobber
+"""
+
+
+def test_release_is_a_draft_until_every_file_is_attached(
+    steps: list[dict[str, Any]],
+) -> None:
+    """Draft, files, then publish; a published release is never rewritten.
+
+    With GitHub's immutable releases on, a published release takes no more
+    files: the old step published first and uploaded after, so it would have
+    published an empty release and failed. And the updater checks a wheel
+    against the release's SHA256SUMS: files replaced under a published tag
+    are what it must never meet. Until 2026-11-09 a re-run replaced them.
+    """
+    publish = [s for s in steps if "gh release create" in str(s.get("run") or "")]
+    assert len(publish) == 1, "one step creates the release"
+    assert _publish_problems(str(publish[0]["run"])) == []
+    # Nothing after it touches the release.
+    later = steps[steps.index(publish[0]) + 1:]
+    assert not any("gh release" in str(s.get("run") or "") for s in later)
+
+
+def test_negative_control_the_old_publish_step_fails() -> None:
+    problems = _publish_problems(_OLD_PUBLISH)
+    assert len(problems) == 4, problems
+
+
 def test_third_party_actions_are_pinned_to_a_version(steps: list[dict[str, Any]]) -> None:
     """A bare `uses: org/action` floats on that action's default branch."""
     unpinned = [u for u in _uses(steps) if "@" not in u]

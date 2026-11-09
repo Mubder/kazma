@@ -1363,7 +1363,9 @@ def _child(plan_path: str) -> int:
     cycle = _Cycle(plan)
     if sys.platform == "win32":
         # The server's loop kind (AGENTS §23).
-        asyncio.run(cycle.run(), loop_factory=asyncio.SelectorEventLoop)
+        # asyncio.Runner: asyncio.run(loop_factory=) is Python 3.12+.
+        with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop) as runner:
+            runner.run(cycle.run())
     else:
         asyncio.run(cycle.run())
     return 0

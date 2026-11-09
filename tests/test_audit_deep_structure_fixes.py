@@ -21,10 +21,38 @@ from kazma_core.swarm.engine import SwarmEngine
 from kazma_core.swarm.task import TaskStatus
 from kazma_core.swarm.task_lifecycle import record_task as _hist_record_task
 
+from tests._no_models import finish_turn_memory, keep_models_out
+
+
+@pytest.fixture(autouse=True)
+def _no_models(monkeypatch):
+    """No real embedder or model behind this file's swarm paths
+    (tests/_no_models.py; tests/_egress_guard.py refuses the real ones)."""
+    keep_models_out(monkeypatch)
+    yield
+    finish_turn_memory()  # a turn's memory write ends inside its test
+
 
 @pytest.fixture
 def empty_config() -> SwarmConfig:
     return SwarmConfig(enabled=True, workers=[])
+
+
+async def _finish_swarm_memory_writes() -> None:
+    """Wait for the memory writes the engine's workers started.
+
+    A worker that succeeds hands its result to a background task
+    (``worker_dispatch._index_worker_l4_memory``) that embeds it as a memory.
+    On Python 3.11 the released worker of a cancelled broadcast finishes
+    before the cancel reaches it (CI, 2026-11-09): its write must end inside
+    the test, with the test's stand-in embedder, not after its stand-ins are
+    undone.
+    """
+    from kazma_core.swarm import worker_dispatch
+
+    pending = list(worker_dispatch._MEMORY_INDEX_TASKS)
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
 
 
 # ── Fix #4: broadcast cancellation finalizes ────────────────────────────
@@ -55,6 +83,7 @@ async def test_broadcast_cancel_finalizes_as_cancelled(empty_config):
     # locks is the leak: a cancelled broadcast left RUNNING in _active_tasks.
     with pytest.raises(asyncio.CancelledError):
         await outer
+    await _finish_swarm_memory_writes()
 
     assert task.id not in engine._active_tasks
     assert task.status == TaskStatus.CANCELLED

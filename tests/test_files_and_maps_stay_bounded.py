@@ -247,6 +247,11 @@ def test_a_store_opened_through_the_helper_has_a_journal_size_limit(tmp_path):
 
 def _settings_with_dropped_text(path: Path) -> None:
     conn = sqlite3.connect(path, isolation_level=None)
+    # SQLite's own default, which the install's Python ships; Debian and
+    # Ubuntu build their SQLite with secure_delete on, which zeroes a dropped
+    # table at once and left this negative control nothing to find (CI,
+    # 2026-11-09).
+    conn.execute("PRAGMA secure_delete = OFF")
     conn.execute("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)")
     conn.execute("CREATE TABLE knowledge_chunks (id INTEGER PRIMARY KEY, text TEXT)")
     conn.executemany("INSERT INTO knowledge_chunks (text) VALUES (?)",

@@ -215,7 +215,9 @@ def deploy(live: Path, *, dev: Path = DEV, revert: bool = True, skip_turn: bool 
     shipped_from = git(live, "rev-parse", "origin/main")
     say(f"live is at {before[:12]}")
     say("-> pull")
-    git(live, "pull", "--no-edit")
+    # A merge, named: with no `pull.rebase` set (a fresh machine) git refuses
+    # to pick for a checkout with its own commit.
+    git(live, "pull", "--no-rebase", "--no-edit")
     after = git(live, "rev-parse", "HEAD")
     shipped = (shipped_from, git(live, "rev-parse", "origin/main"))
     if after == before:
@@ -266,7 +268,7 @@ def fail(live: Path, dev: Path, shipped: tuple[str, str], after: str, problem: s
         git(dev, "fetch", "origin")
         git(dev, "revert", "--no-edit", f"{first}..{last}")
         git(dev, "push", "origin", "HEAD:main")
-        git(live, "pull", "--no-edit")
+        git(live, "pull", "--no-rebase", "--no-edit")
         code, out = run_live(live, "scripts/service/kazma_guard.py", "--reload", "--when-idle", timeout=1200)
         reverted = code == 0
     except RuntimeError as exc:
