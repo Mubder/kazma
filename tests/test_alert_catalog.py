@@ -253,7 +253,9 @@ def test_a_lifecycle_entry_has_the_notifiers_head_and_severity():
 # -- the guard ------------------------------------------------------------------------
 
 #: Guard pages sent outside ``_page``, and the function that sends them.
-GUARD_KINDS_OUTSIDE_PAGE = {"guard.page_command": "_cmd_page"}
+#: ``guard.test_page`` is Settings -> Alerts' test page (PagerTest), sent through
+#: a notifier of its own, so it proves the credentials a page would use now.
+GUARD_KINDS_OUTSIDE_PAGE = {"guard.page_command": "_cmd_page", "guard.test_page": "_test_page_card"}
 
 
 def _guard_problems(pages: list[senders.GuardPage], catalog) -> list[str]:

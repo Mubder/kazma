@@ -248,8 +248,12 @@ GUARD_ACK_S = 20.0
 #                 record (state ``database_service``; DatabaseServiceWatch).
 #   outside_watch -- the heartbeat to the outside observer (state
 #                 ``outside_watch``; see OutsideWatch).
+#   pager_test -- answers Settings -> Alerts' "Send a test page" (state
+#                 ``pager_test``; see PagerTest) and records each page's outcome
+#                 (state ``pager``).
 GUARD_FEATURES = ("pause_held", "document_broker", "dependencies", "boot_wait",
-                  "database_hold", "disk_watch", "outside_watch", "database_service", "power_watch")
+                  "database_hold", "disk_watch", "outside_watch", "database_service", "power_watch",
+                  "pager_test")
 # What the supervisor loop returns when it stopped the child for --reload.
 RELOAD_REASON = "operator reload"
 
@@ -767,6 +771,16 @@ class Notifier:
         ).strip()
         self._source = "env" if (self.token and self.chat) else "unresolved"
         self._held: list[tuple[float, str]] = []
+        # Every page's outcome is heard in one place (``_heard``), and told to
+        # two listeners: ``on_outcome`` gets the last page's outcome (the
+        # guard keeps it in its state file, ``pager``, which Settings ->
+        # Alerts reads; never the text), ``on_delivered`` the text of a held
+        # page that went out after all (its page receipt now says delivered).
+        self.last_outcome: dict | None = None
+        self.on_outcome: Callable[[dict], None] | None = None
+        self.on_delivered: Callable[[str], None] | None = None
+        # Why the last post failed (``_post``), for its outcome.
+        self._post_error = ""
 
     def _resolve(self) -> None:
         """Fill in missing credentials from the app's settings. Lazily, retried.
@@ -844,7 +858,10 @@ class Notifier:
             return "not configured"
         return f"telegram via {self._source} -> chat {self.chat}"
 
-    def send(self, text: str) -> None:
+    def send(self, text: str) -> bool:
+        """Page *text*. True when Telegram took it; False when it failed or
+        is held until the credentials resolve. Either way its outcome is
+        heard (``_heard``)."""
         if not self.configured:
             # Held, not dropped: the credentials live in Kazma's settings
             # database, so the guard cannot page while it is down -- the
@@ -855,9 +872,52 @@ class Notifier:
                 self._held.pop(0)
             self._held.append((time.time(), text))
             self._log("info", "notify.skipped", reason="not configured", text=text, held=True)
-            return
+            self._heard(text, False, error="not configured", held=len(self._held))
+            return False
         self._flush_held()
-        self._post(text)
+        return self._send_and_hear(text)
+
+    def send_now(self, text: str) -> tuple[bool, str]:
+        """Send *text* now, never held: ``(taken, why not)``. The test page
+        (``PagerTest``) proves the path a page takes, so a guard that cannot
+        page says so instead of keeping it for later."""
+        if not self.configured:
+            return False, self.describe()
+        ok = self._send_and_hear(text)
+        return ok, "" if ok else str((self.last_outcome or {}).get("error") or "not sent")
+
+    def _send_and_hear(self, text: str, *, held_page: str = "") -> bool:
+        """Post *text* and hear its outcome. *held_page*: the page a delayed
+        post carries (``_flush_held``), whose outcome this is."""
+        self._post_error = ""
+        ok = self._post(text, delayed=bool(held_page)) is True
+        self._heard(held_page or text, ok, error="" if ok else (self._post_error or "not sent"),
+                    delayed=bool(held_page))
+        return ok
+
+    def _heard(self, text: str, ok: bool, *, error: str = "", delayed: bool = False,
+               **extra: object) -> None:
+        """The one place a page's outcome is recorded (``last_outcome``) and
+        told: ``on_outcome`` always, ``on_delivered`` when a held page went
+        out after all. Never raises: a record must never stop a page."""
+        self.last_outcome = {
+            "at": time.time(), "ok": bool(ok), "head": text.split("\n", 1)[0][:160],
+            "source": self._source, "chat": self.chat, "delayed": bool(delayed), **extra,
+        }
+        if error:
+            # The state file reaches a web page: never the bot's token, even
+            # inside an error that quotes the request's address.
+            self.last_outcome["error"] = (error.replace(self.token, "***") if self.token else error)[:200]
+        if self.on_outcome is not None:
+            try:
+                self.on_outcome(dict(self.last_outcome))
+            except (OSError, ValueError, TypeError):
+                pass
+        if ok and delayed and self.on_delivered is not None:
+            try:
+                self.on_delivered(text)
+            except Exception as exc:  # a receipt must not stop the pager
+                self._log("warn", "notify.receipt_failed", error=str(exc)[:200])
 
     def retry_lookup(self) -> None:
         """Let the next page look the credentials up again whatever the
@@ -876,10 +936,15 @@ class Notifier:
         now = time.time()
         for at, text in held:
             minutes = max(1, round((now - at) / 60))
-            self._post(f"⏳ Delayed {minutes} min (the guard could not page then):\n{text}",
-                       delayed=True)
+            self._send_and_hear(f"⏳ Delayed {minutes} min (the guard could not page then):\n{text}",
+                                held_page=text)
 
-    def _post(self, text: str, *, delayed: bool = False) -> None:
+    def _post(self, text: str, *, delayed: bool = False) -> bool:
+        """Send *text*; True when Telegram took it (else ``_post_error`` says
+        why). The log line names the card's first line (``head``): Settings ->
+        Alerts lists the guard's pages from it."""
+        lines = text.split("\n")
+        head = (lines[1] if delayed and len(lines) > 1 else lines[0])[:160]
         try:
             url = f"https://api.telegram.org/bot{self.token}/sendMessage"
             body = urllib.parse.urlencode(
@@ -889,12 +954,15 @@ class Notifier:
             with urllib.request.urlopen(req, timeout=10):
                 pass
             if delayed:
-                self._log("info", "notify.sent", delayed=True)
+                self._log("info", "notify.sent", delayed=True, head=head)
             else:
-                self._log("info", "notify.sent")
+                self._log("info", "notify.sent", head=head)
+            return True
         except Exception as exc:
             # An alert that fails must not take the supervisor down with it.
-            self._log("warn", "notify.failed", error=str(exc)[:200])
+            self._log("warn", "notify.failed", error=str(exc)[:200], head=head)
+            self._post_error = f"{type(exc).__name__}: {exc}"
+            return False
 
 
 # -- health probe -----------------------------------------------------
@@ -1014,6 +1082,167 @@ def guard_alert_kinds() -> dict[str, dict]:
         except (OSError, ValueError, TypeError, KeyError, AttributeError):
             _alert_catalog = {}
     return _alert_catalog
+
+
+# -- one page per problem: holds and page receipts (unified alerts, Stage 2) --
+#
+# Kazma, this guard and Kazma Watch can each see some problems (a database
+# outage, a restart, a full disk), and each paged on its own. Now a page
+# whose catalog entry has a condition goes through _inside_hold first (a
+# stdlib copy of alert_catalog.inside_hold, both held to
+# tests/fixtures/alert_receipts/holds.json): the owner pages, a non-owner
+# records it while an owner can speak, and of two inside owners the first to
+# page it pages. A page that opens an incident is a receipt (its catalog key,
+# when, whether a channel took it) until its recovery; Kazma writes its own
+# to the file handed over in KAZMA_GUARD_PAGES_FILE, this guard keeps its
+# own in its state file (``pages``), and the heartbeat carries both, so Kazma
+# Watch stays quiet about what was already told.
+
+#: Receipts the heartbeat carries at most.
+PAGE_RECEIPTS_MAX = 16
+#: An open receipt older than this is dropped: its recovery never came.
+PAGE_RECEIPT_MAX_AGE_S = 24 * 3600.0
+#: Kazma Watch watches when it answered a heartbeat this recently.
+WATCH_ANSWERED_S = 180.0
+_alert_table_cache: dict[str, dict] | None = None
+_RECEIPT_KEY_RE = re.compile(r"^[a-z_]+(\.[a-z_:{}]+)+$")
+
+
+def _pages_path() -> Path:
+    """Where the server writes its page receipts (page_receipts.py): beside
+    the state file, as the server finds it when only that is handed over."""
+    env = os.environ.get("KAZMA_GUARD_PAGES_FILE")
+    if env:
+        return Path(env)
+    return _state_path().with_name("kazma_pages.json")
+
+
+def _alert_table() -> dict[str, dict]:
+    """Every entry of the guard's copy of the catalog, by key ({} unread)."""
+    global _alert_table_cache
+    if _alert_table_cache is None:
+        try:
+            data = json.loads(ALERT_CATALOG_PATH.read_text(encoding="utf-8"))
+            _alert_table_cache = {str(a["key"]): a for a in data["alerts"]}
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            _alert_table_cache = {}
+    return _alert_table_cache
+
+
+def _inside_hold(key: str, receipts: list[dict], speaks: dict[str, bool]) -> str:
+    """Who pages *key*'s condition instead of its sender; "" to page it.
+
+    The stdlib copy of ``alert_catalog.inside_hold`` (the guard cannot import
+    kazma_core): a non-owner records while an owning sender can speak; an
+    owner records when another entry of its condition has an open page that
+    reached someone.
+    """
+    table = _alert_table()
+    entry = table.get(key)
+    if not entry or not entry.get("condition"):
+        return ""
+    condition = entry["condition"]
+    if not entry.get("owner", True):
+        owners = sorted({str(e.get("sender")) for e in table.values()
+                         if e.get("condition") == condition and e.get("owner", True)})
+        return next((owner for owner in owners if speaks.get(owner)), "")
+    for receipt in receipts or ():
+        other = table.get(str(receipt.get("key") or ""))
+        if (other and other.get("key") != key and other.get("condition") == condition
+                and receipt.get("delivered") is True):
+            return str(other.get("key"))
+    return ""
+
+
+def _opens_incident(entry: dict | None) -> bool:
+    return bool(entry and entry.get("sender") in ("ops", "guard")
+                and (entry.get("closed_by") or entry.get("condition")))
+
+
+def receipts_allowlist(pages: object) -> list[dict]:
+    """Page receipts cut to what may leave the machine: a catalog key of an
+    inside sender, a time, whether it was delivered. Nothing when the copy of
+    the catalog cannot be read (a key is checked against it, not trusted)."""
+    table = _alert_table()
+    if not table or not isinstance(pages, list):
+        return []
+    out: dict[str, dict] = {}
+    for page in pages:
+        if not isinstance(page, dict):
+            continue
+        key, at = page.get("key"), page.get("paged_at")
+        entry = table.get(key) if isinstance(key, str) and _RECEIPT_KEY_RE.match(key) else None
+        if not _opens_incident(entry) or isinstance(at, bool) or not isinstance(at, (int, float)):
+            continue
+        if not 1_000_000_000 <= at < 10_000_000_000:
+            continue
+        out[key] = {"key": key, "paged_at": int(at), "delivered": page.get("delivered") is True}
+    return sorted(out.values(), key=lambda r: r["key"])[:PAGE_RECEIPTS_MAX]
+
+
+class PageReceipts:
+    """The guard's open page receipts, and Kazma's (read from its file)."""
+
+    def __init__(self) -> None:
+        self._open: dict[str, dict] = {}
+        # Pages held by the notifier (no credentials yet): text -> receipt key.
+        self._waiting: dict[str, tuple[str, int]] = {}
+
+    def paged(self, key: str, delivered: bool, text: str, *, now: float | None = None) -> None:
+        """This guard sent *key*: keep its receipt, or settle what it closes."""
+        table = _alert_table()
+        entry = table.get(key)
+        closes = [k for k, e in table.items() if e.get("closed_by") and e.get("closed_by") == key]
+        changed = bool([k for k in closes if self._open.pop(k, None) is not None])
+        if _opens_incident(entry):
+            at = int(time.time() if now is None else now)
+            self._open[key] = {"key": key, "paged_at": at, "delivered": bool(delivered)}
+            if not delivered:
+                self._waiting[text] = (key, at)
+                while len(self._waiting) > _NOTIFY_HELD_MAX:  # the notifier holds no more
+                    self._waiting.pop(next(iter(self._waiting)))
+            changed = True
+        if changed:
+            self._write()
+
+    def delivered_later(self, text: str) -> None:
+        """A held page went out (Notifier.on_delivered): its receipt says so."""
+        key, at = self._waiting.pop(text, (None, 0))
+        rec = self._open.get(key) if key else None
+        if rec is not None and rec["paged_at"] == at:
+            rec["delivered"] = True
+            self._write()
+
+    def own(self, now: float | None = None) -> list[dict]:
+        now = time.time() if now is None else now
+        for key in [k for k, r in self._open.items() if now - r["paged_at"] > PAGE_RECEIPT_MAX_AGE_S]:
+            self._open.pop(key, None)
+        return sorted((dict(r) for r in self._open.values()), key=lambda r: r["key"])
+
+    @staticmethod
+    def kazma(spawned_at: float, *, now: float | None = None) -> list[dict]:
+        """The receipts of the server this guard runs now: a file an earlier
+        server wrote says nothing about this one."""
+        try:
+            data = json.loads(_pages_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+        if not isinstance(data, dict) or not spawned_at:
+            return []
+        started = data.get("process_started")
+        if not isinstance(started, (int, float)) or started < spawned_at - 1.0:
+            return []
+        now = time.time() if now is None else now
+        pages = data.get("pages") if isinstance(data.get("pages"), list) else []
+        return [p for p in receipts_allowlist(pages) if now - p["paged_at"] <= PAGE_RECEIPT_MAX_AGE_S]
+
+    def clear(self) -> None:
+        self._open.clear()
+        self._waiting.clear()
+        self._write()
+
+    def _write(self) -> None:
+        _update_state(pages=self.own())
 
 
 def _failing_checks(data: dict) -> list[str]:
@@ -1779,6 +2008,9 @@ def spawn(cmd: list[str], cwd: Path, log: GuardLog,
     # it, the boot waits for its database as long as the guard lets it.
     _clear_boot_status()
     env["KAZMA_GUARD_BOOT_FILE"] = str(_boot_status_path())
+    # ...and where to write what it paged (its page receipts: one page per
+    # problem, PageReceipts).
+    env["KAZMA_GUARD_PAGES_FILE"] = str(_pages_path())
     # ...and the document worker broker's address, token file and request
     # file (DocumentBroker.server_env), so .env needs nothing for it.
     env.update(extra_env or {})
@@ -3379,13 +3611,15 @@ class DatabaseServiceWatch:
             started = self._start(os_name, service)
             self.log("warn" if started else "error", "dbsvc.start_tried", service=service, accepted=started)
         if down_for >= DBSVC_PAGE_AFTER_S and not self._paged:
-            self._paged = True
             what = ("the guard asked the OS to start it" if self._started_this_outage
                     else "the OS's own restart rule is the one that starts it")
-            self.guard._page("critical", "Kazma's database service is down",
-                             f"The {service} service has not answered for {int(down_for // 60)} minutes; "
-                             f"{what}. Chats, settings and memory wait until it is back.",
-                             kind="dbsvc.down", fingerprint="dbsvc:down", force=True)
+            # False while Kazma's own page has this outage (one page per
+            # problem): asked again next check, and no recovery for it.
+            self._paged = self.guard._page(
+                "critical", "Kazma's database service is down",
+                f"The {service} service has not answered for {int(down_for // 60)} minutes; "
+                f"{what}. Chats, settings and memory wait until it is back.",
+                kind="dbsvc.down", fingerprint="dbsvc:down", force=True)
         self._set("down")
 
     def _set(self, state: str) -> None:
@@ -3920,6 +4154,9 @@ def heartbeat_body(snapshot: dict) -> bytes:
             "on_battery": power.get("on_battery") is True,
             "percent": number(power.get("percent")),
         },
+        # The open inside pages (unified alerts, Stage 2): catalog keys,
+        # times, delivered -- receipts_allowlist, never a title or text.
+        "pages": receipts_allowlist(snapshot.get("pages")),
     }
     return json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
@@ -4147,6 +4384,145 @@ def _outside_status_lines(state: dict) -> list[str]:
     return [line]
 
 
+# -- the pager's test page (unified alerts plan, Stage 3) --------------------
+#
+# Settings -> Alerts' "Send a test page" proves the path the guard pages by
+# when Kazma is down. The server writes a request beside the reload request
+# (``guard.test_page``: an id and the time it was asked); the running guard
+# sends one card through a notifier of its own -- the credentials as a page
+# would resolve them now, so a chat just changed in Settings is the one
+# tested -- on a thread, and records the answer in its state file
+# (``pager_test``), which the page reads. A request older than
+# ``PAGER_TEST_MAX_AGE_S`` is answered "expired", never sent late.
+
+PAGER_TEST_MAX_AGE_S = 300.0
+_PAGER_TEST_ID = re.compile(r"^[0-9a-f]{8,32}$")
+
+
+def _pager_test_path() -> Path:
+    """``guard.test_page``, in the reload request's folder."""
+    return _reload_path().with_name("guard.test_page")
+
+
+def _test_page_card() -> str:
+    """The test page (alert catalog ``guard.test_page``)."""
+    return format_operator_card(
+        "Guard", "info", "Test page",
+        "Sent from Settings -> Alerts to check that the guard can reach you when Kazma cannot. "
+        "Nothing is wrong.")
+
+
+class PagerTest:
+    """Answers the test page requests (see the section comment). Ticked from
+    the guard's loop; the send runs on its own thread. Never raises out of a
+    tick."""
+
+    def __init__(self, guard: Guard, *, notifier_factory=None, path: Path | None = None) -> None:
+        self.guard = guard
+        self.log = guard.log
+        self.path = path or _pager_test_path()
+        self._factory = notifier_factory or (lambda: Notifier(
+            guard.log, cwd=getattr(guard, "cwd", None), python=getattr(guard, "server_python", None)))
+        self._seen: tuple[int, int] | None = None
+        self._thread: threading.Thread | None = None
+        self._lock = threading.Lock()
+        self._result: dict | None = None
+        self._notifier: Notifier | None = None
+
+    def tick(self) -> None:
+        _tick_safely(self._tick, self._internal)
+
+    def _internal(self, exc: BaseException) -> None:
+        self.log("error", "pager_test.internal_error", error=f"{type(exc).__name__}: {exc}"[:300])
+
+    def _signature(self) -> tuple[int, int] | None:
+        try:
+            st = self.path.stat()
+        except OSError:
+            return None
+        return (int(st.st_mtime_ns), int(st.st_size))
+
+    def _tick(self) -> None:
+        self._take_result()
+        sig = self._signature()
+        if sig is None or sig == self._seen:
+            return
+        if self._thread is not None and self._thread.is_alive():
+            return  # one test at a time; the next tick takes this request
+        self._seen = sig
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8") or "{}")
+        except (OSError, ValueError):
+            data = {}
+        try:
+            self.path.unlink()
+        except OSError:
+            pass
+        req_id = str(data.get("id") or "") if isinstance(data, dict) else ""
+        try:
+            asked = float(data.get("ts") or 0.0) if isinstance(data, dict) else 0.0
+        except (TypeError, ValueError):
+            asked = 0.0
+        if not _PAGER_TEST_ID.match(req_id):
+            self.log("warn", "pager_test.bad_request")
+            return
+        if time.time() - asked > PAGER_TEST_MAX_AGE_S:
+            self._write({"id": req_id, "state": "expired", "requested_at": asked, "at": time.time()})
+            self.log("info", "pager_test.expired", id=req_id)
+            return
+        self._write({"id": req_id, "state": "sending", "requested_at": asked, "at": time.time()})
+        self.log("info", "pager_test.requested", id=req_id)
+        thread = threading.Thread(target=self._run, args=(req_id, asked),
+                                  name="kazma-guard-pager-test", daemon=True)
+        self._thread = thread
+        thread.start()
+
+    def _run(self, req_id: str, asked: float) -> None:
+        """On the test's thread: a fresh notifier (a lookup of its own), one card."""
+        result: dict = {"id": req_id, "requested_at": asked}
+        try:
+            notifier = self._factory()
+            ok, why = notifier.send_now(_test_page_card())
+            result.update(state="sent" if ok else "failed", source=notifier._source,
+                          chat=notifier.chat)
+            if not ok:
+                result["error"] = (why.replace(notifier.token, "***") if notifier.token else why)[:200]
+            # A test page is a page: the last one, as Settings shows it.
+            result["outcome"] = notifier.last_outcome
+            with self._lock:
+                self._notifier = notifier if ok else None
+        except Exception as exc:  # noqa: BLE001 -- a test on its own thread must never raise
+            result.update(state="failed", error=f"{type(exc).__name__}"[:200])
+        result["at"] = time.time()
+        with self._lock:
+            self._result = result
+
+    def _take_result(self) -> None:
+        with self._lock:
+            result, self._result = self._result, None
+            fresh, self._notifier = self._notifier, None
+        if result is None:
+            return
+        outcome = result.pop("outcome", None)
+        if isinstance(outcome, dict):
+            _update_state(pager_test=result, pager=outcome)
+        else:
+            self._write(result)
+        self.log("info" if result.get("state") == "sent" else "warn",
+                 f"pager_test.{result.get('state')}", id=result.get("id"),
+                 source=result.get("source"), error=result.get("error"))
+        main = getattr(self.guard, "notify", None)
+        if fresh is not None and main is not None and getattr(main, "_source", "") != "env" \
+                and fresh._source == "vault":
+            # The settings the test just proved are the pager's from now on
+            # (a chat changed in Settings -> Alerts): the guard's own
+            # notifier resolved them once, at its first page.
+            main.token, main.chat, main._source = fresh.token, fresh.chat, "vault"
+
+    def _write(self, record: dict) -> None:
+        _update_state(pager_test=record)
+
+
 # -- supervisor -------------------------------------------------------
 
 
@@ -4221,8 +4597,23 @@ class Guard:
         self.dbsvc = DatabaseServiceWatch(self)
         # The power source: a UPS on battery (PowerWatch, plan B2c).
         self.power = PowerWatch(self)
+        # What this guard paged for an incident still open (PageReceipts,
+        # Stage 2), and Settings -> Alerts' test page (PagerTest, Stage 3).
+        # Every page's outcome is heard once (Notifier._heard) and reaches
+        # both records: the last page's outcome in the state file (``pager``,
+        # which Settings -> Alerts reads) and, for a held page that went out
+        # after all, its page receipt (``pages``, which the heartbeat carries).
+        self.receipts = PageReceipts()
+        self._held_kinds: set[str] = set()
+        self.notify.on_delivered = self.receipts.delivered_later
+        self.pager_test = PagerTest(self)
+        self.notify.on_outcome = self._note_page_outcome
 
     # -- lifecycle ----------------------------------------------------
+
+    def _note_page_outcome(self, outcome: dict) -> None:
+        """The last page's outcome, for Settings -> Alerts (state ``pager``)."""
+        _update_state(pager=outcome)
 
     def _should_page(self, fingerprint: str) -> bool:
         """True if this fingerprint is new or the cooldown has elapsed."""
@@ -4265,11 +4656,27 @@ class Guard:
 
         *kind* is the page's entry in Kazma's alert catalog (the guard's
         copy, ``alert_catalog.json``); a kind the copy does not hold is said
-        once in guard.log, and the page is sent either way."""
+        once in guard.log, and the page is sent either way.
+
+        One page per problem: a kind whose condition another sender pages
+        (``_page_held_by``) is recorded, not sent (``guard.page_held``, once
+        a kind until it pages), and False is returned, so the caller sends
+        no recovery for it. A page sent that opens an incident is a receipt
+        until its recovery (``PageReceipts``)."""
         known = guard_alert_kinds()
         if known and kind not in known and kind not in _UNKNOWN_KINDS_SAID:
             _UNKNOWN_KINDS_SAID.add(kind)
             self.log("warn", "guard.page_kind_unknown", kind=kind, catalog=str(ALERT_CATALOG_PATH))
+        held = self._page_held_by(kind)
+        held_kinds = getattr(self, "_held_kinds", None)
+        if held_kinds is None:  # a Guard built without __init__ (tests)
+            held_kinds = self._held_kinds = set()
+        if held:
+            if kind not in held_kinds:
+                held_kinds.add(kind)
+                self.log("info", "guard.page_held", kind=kind, paged_by=held, title=title[:120])
+            return False
+        held_kinds.discard(kind)
         fp = fingerprint or f"{title}\n{detail}"
         if not force and not self._should_page(fp):
             self.log("info", "guard.page_suppressed", title=title[:120], kind=kind)
@@ -4277,8 +4684,48 @@ class Guard:
         if force:
             self._last_page_fp = fp
             self._last_page_at = time.monotonic()
-        self.notify.send(format_operator_card("Guard", severity, title, detail))
+        text = format_operator_card("Guard", severity, title, detail)
+        delivered = self.notify.send(text) is True
+        receipts = getattr(self, "receipts", None)
+        if receipts is not None:
+            receipts.paged(kind, delivered, text)
         return True
+
+    def _page_held_by(self, kind: str) -> str:
+        """Who pages *kind*'s condition instead of this guard ("" for the
+        guard itself): ``_inside_hold`` over the guard's receipts and its
+        current server's, with who can speak now. Never raises."""
+        try:
+            receipts = getattr(self, "receipts", None)
+            if receipts is None or not (_alert_table().get(kind) or {}).get("condition"):
+                return ""
+            speaks = {"guard": True, "ops": self._server_speaks(), "watch": self._watch_answers()}
+            pages = receipts.own() + PageReceipts.kazma(getattr(self, "spawned_at", 0.0))
+            return _inside_hold(kind, pages, speaks)
+        except Exception as exc:  # a page is never lost to this check
+            self.log("warn", "guard.page_hold_failed", kind=kind, error=f"{type(exc).__name__}: {exc}"[:200])
+            return ""
+
+    def _server_speaks(self) -> bool:
+        """The server runs and answers: it can page what it sees."""
+        proc = getattr(self, "proc", None)
+        note = getattr(self, "_probe_note", None) or {}
+        return bool(proc is not None and proc.poll() is None and note.get("answered")
+                    and float(note.get("at") or 0.0) >= getattr(self, "spawned_at", 0.0))
+
+    def _watch_answers(self) -> bool:
+        """Kazma Watch answered this guard's heartbeat recently."""
+        outside = getattr(self, "outside", None)
+        ack = getattr(outside, "last_ack", None)
+        return bool(outside is not None and outside.state == "reached" and isinstance(ack, (int, float))
+                    and time.time() - ack <= WATCH_ANSWERED_S)
+
+    def _open_page_receipts(self) -> list[dict]:
+        """For the heartbeat: this guard's open receipts and its server's."""
+        receipts = getattr(self, "receipts", None)
+        if receipts is None:
+            return []
+        return receipts.own() + PageReceipts.kazma(getattr(self, "spawned_at", 0.0))
 
     def notify_restart(self, reason: str, delay_s: float, *, tail: str = "") -> bool:
         """Page a restart. Collapses identical ``reason`` inside the cooldown."""
@@ -4439,13 +4886,16 @@ class Guard:
                              reason=reason, since=status.get("since"))
                     wait_logged = True
                 if not wait_paged and time.monotonic() - started >= BOOT_WAIT_PAGE_S:
-                    self._page("warn", "Kazma is waiting for its database",
-                               "The server started and is waiting for its settings "
-                               "database; it goes on by itself the moment it answers. "
-                               "Not restarting it."
-                               + (f" The database said: {reason}" if reason else ""),
-                               kind="child.waiting_for_database", fingerprint="boot-db-wait")
-                    wait_paged = True
+                    self._page(
+                        "warn", "Kazma is waiting for its database",
+                        "The server started and is waiting for its settings "
+                        "database; it goes on by itself the moment it answers. "
+                        "Not restarting it."
+                        + (f" The database said: {reason}" if reason else ""),
+                        kind="child.waiting_for_database", fingerprint="boot-db-wait")
+                    # Not while another page has this outage (one page per
+                    # problem): asked again next try, and no recovery for it.
+                    wait_paged = "child.waiting_for_database" not in self._held_kinds
             # Heartbeat while waiting, so a slow boot is visibly different
             # from a hang when someone reads this log at 3am.
             if time.monotonic() >= next_progress:
@@ -4529,6 +4979,9 @@ class Guard:
         broker = getattr(self, "broker", None)
         if broker is not None:
             broker.tick()
+        pager_test = getattr(self, "pager_test", None)
+        if pager_test is not None:
+            pager_test.tick()
         deps = getattr(self, "deps", None)
         if deps is not None:
             deps.tick()
@@ -4601,6 +5054,7 @@ class Guard:
             "database": {"state": db.get("state"), "confirmed": db.get("confirmed") is True},
             "docker": {True: "up", False: "down"}.get(engine, "unknown"),
             "disk": disk.worst() if disk is not None else None,
+            "pages": self._open_page_receipts(),
         }
 
     def _beat(self, *, force: bool = False) -> None:
@@ -4726,6 +5180,8 @@ class Guard:
         self.power.on_guard_start()
         self.outside.on_guard_start()
         self.dbsvc.on_guard_start()
+        # An earlier guard's receipts: its watches start over and page again.
+        self.receipts.clear()
 
         first = True
         while not self._stop:

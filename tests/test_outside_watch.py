@@ -305,7 +305,11 @@ def test_the_observer_worker_tests_pass():
     node = _node_with_sqlite()
     if node is None:
         pytest.skip("needs Node 22.5+ (node:sqlite) for the observer Worker's tests")
-    result = subprocess.run([node, "--test", "test/observer.test.mjs"],
+    # Every test file the Worker has (*.test.mjs), not a list kept by hand.
+    files = sorted(p.name for p in (ROOT / "deploy" / "observer" / "test").glob("*.test.mjs"))
+    assert "observer.test.mjs" in files and "one_page.test.mjs" in files
+    assert "watch_settings.test.mjs" in files
+    result = subprocess.run([node, "--test", *(f"test/{name}" for name in files)],
                             cwd=ROOT / "deploy" / "observer", capture_output=True, text=True,
                             encoding="utf-8", errors="replace", timeout=300, check=False)
     assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-2000:]

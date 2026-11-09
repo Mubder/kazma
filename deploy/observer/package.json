@@ -4,7 +4,7 @@
   "description": "The outside observer for a Kazma install (resilience plan B1).",
   "type": "module",
   "scripts": {
-    "test": "node --test test/observer.test.mjs",
+    "test": "node --test \"test/*.test.mjs\"",
     "deploy": "wrangler deploy"
   },
   "engines": {

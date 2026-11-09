@@ -6,9 +6,15 @@
 // ``step`` is pure: it takes what the observer knew a minute ago and the
 // diagnosis now, and returns the new state and the pages to send. The run
 // (index.js) sends them and records which went out (``settle``).
+//
+// One page per problem (Stage 2, receipts.js): an incident Kazma or its
+// guard already paged, or a Cloudflare notice Kazma Watch already paged, is
+// held -- recorded (``held_by``), never paged, and closed with no recovery
+// page: the sender that paged sends it.
 
 import { formatOperatorCard } from "./card.js";
 import { GOOD, severityOf, titleOf } from "./diagnose.js";
+import { decide, titleOfKey } from "./receipts.js";
 
 // Three failed minutes: the runs are a minute apart, so the third bad
 // reading (120 s after the first) opens the incident; 10 s of slack.
@@ -25,23 +31,49 @@ export function duration(seconds) {
   return m ? `${h} h ${m} min` : `${h} h`;
 }
 
-// Times are UTC until the owner's zone reaches Kazma Watch (Settings ->
-// Alerts, the unified alerts plan's Stage 3).
-function clock(epoch) {
-  return new Date(epoch * 1000).toISOString().slice(0, 16).replace("T", " ") + " UTC";
+// Times are in the owner's zone once Kazma told it (Settings -> Alerts,
+// POST /v1/settings: the unified alerts plan's Stage 3), else UTC:
+// "2026-11-09 17:02 Asia/Kuwait", "2026-11-09 14:02 UTC".
+export function clock(epoch, timeZone = "") {
+  const utc = new Date(epoch * 1000).toISOString().slice(0, 16).replace("T", " ") + " UTC";
+  const zone = String(timeZone || "").trim();
+  if (!zone || zone === "UTC" || zone === "Etc/UTC") return utc;
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+    }).formatToParts(new Date(epoch * 1000));
+    const part = (type) => (parts.find((p) => p.type === type) || {}).value || "";
+    return `${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")} ${zone}`;
+  } catch {
+    return utc;
+  }
 }
 
 /**
  * prev: {condition, detail, bad_since, incident}; incident:
  * {id, cause, detail, causes[], started_at, paged_at, last_page_at, ended_at,
- *  recovery_paged_at} or null.
+ *  recovery_paged_at, held_by, note, inside[], witnesses[]} or null.
+ *
+ * diag: the diagnosis ({condition, detail}) and what answers for it:
+ * ``pages`` (the fresh heartbeat's receipts, null when it carries none),
+ * ``inside`` (the inside pages open when the heartbeats stopped) and
+ * ``notices`` (Cloudflare notices Kazma Watch paged, still open).
+ *
+ * ``timeZone``: the zone the cards' times are written in, as Kazma's
+ * Settings -> Alerts told it (watch_settings.js); UTC when none was.
  */
-export function step(prev, diag, now) {
+export function step(prev, diag, now, { timeZone = "" } = {}) {
   const state = {
     condition: diag.condition,
     detail: diag.detail || null,
     bad_since: prev.bad_since ?? null,
-    incident: prev.incident ? { ...prev.incident, causes: [...(prev.incident.causes || [])] } : null,
+    incident: prev.incident ? {
+      ...prev.incident,
+      causes: [...(prev.incident.causes || [])],
+      inside: [...(prev.incident.inside || [])],
+      witnesses: [...(prev.incident.witnesses || [])],
+    } : null,
   };
   const pages = [];
   const incident = state.incident;
@@ -52,7 +84,7 @@ export function step(prev, diag, now) {
       state.incident = null;
     } else {
       pages.push({ kind: "recovered" });
-      return finish(state, diag, now, pages);
+      return finish(state, now, pages, timeZone);
     }
   }
 
@@ -60,9 +92,15 @@ export function step(prev, diag, now) {
     state.bad_since = null;
     if (state.incident && diag.condition === "up") {
       state.incident.ended_at = now;
-      pages.push({ kind: "recovered" });
+      if (state.incident.paged_at === null && state.incident.held_by) {
+        // Held all along: the sender that paged sends the recovery.
+        state.closed = state.incident;
+        state.incident = null;
+      } else {
+        pages.push({ kind: "recovered" });
+      }
     }
-    return finish(state, diag, now, pages);
+    return finish(state, now, pages, timeZone);
   }
 
   if (state.bad_since === null) state.bad_since = now;
@@ -78,10 +116,14 @@ export function step(prev, diag, now) {
         last_page_at: null,
         ended_at: null,
         recovery_paged_at: null,
+        held_by: null,
+        note: null,
+        inside: [],
+        witnesses: [],
       };
-      pages.push({ kind: "open" });
+      openOrHold(state.incident, diag, now, state.bad_since, pages);
     }
-    return finish(state, diag, now, pages);
+    return finish(state, now, pages, timeZone);
   }
 
   const open = state.incident;
@@ -90,13 +132,46 @@ export function step(prev, diag, now) {
     if (!open.causes.includes(diag.condition)) open.causes.push(diag.condition);
   }
   open.detail = diag.detail || null;
-  if (open.paged_at === null) pages.push({ kind: "open" });
+  if (open.paged_at === null) openOrHold(open, diag, now, state.bad_since ?? open.started_at, pages);
   else if (now - (open.last_page_at || open.paged_at) >= REMIND_EVERY_S) pages.push({ kind: "remind" });
-  return finish(state, diag, now, pages);
+  return finish(state, now, pages, timeZone);
 }
 
-function finish(state, diag, now, pages) {
-  return { state, pages: pages.map((p) => ({ ...p, text: pageText(p.kind, state.incident, now) })) };
+/** An incident Kazma Watch has not paged: page it, or hold it (receipts.js). */
+function openOrHold(incident, diag, now, badSince, pages) {
+  const d = decide(diag.condition, {
+    pages: diag.pages, notices: diag.notices, now, badSince, openAfter: OPEN_AFTER_S,
+  });
+  if (d.act === "hold") {
+    incident.held_by = d.by;
+    return;
+  }
+  if (d.act === "wait") {
+    // A page from inside may still come: say nothing yet, and nothing at
+    // the end if it never had to (held_by "pending").
+    if (!incident.held_by) incident.held_by = "pending";
+    return;
+  }
+  // Paging after all: what was held, and what was open inside when the
+  // heartbeats stopped, is said on the page.
+  const said = [];
+  if (incident.held_by && incident.held_by !== "pending") {
+    said.push(`Paged before by: ${titleOfKey(incident.held_by)}.`);
+  }
+  for (const key of diag.inside || []) {
+    if (!incident.inside.includes(key)) incident.inside.push(key);
+  }
+  if (d.note) said.push(d.note);
+  incident.note = said.length ? said.join("\n") : null;
+  incident.held_by = null;
+  pages.push({ kind: "open" });
+}
+
+function finish(state, now, pages, timeZone) {
+  return {
+    state,
+    pages: pages.map((p) => ({ ...p, text: pageText(p.kind, state.incident, now, { timeZone }) })),
+  };
 }
 
 /**
@@ -104,13 +179,13 @@ function finish(state, diag, now, pages) {
  * card with the source Watch (card.js), its title and severity from the
  * alert catalog.
  */
-export function pageText(kind, incident, now) {
+export function pageText(kind, incident, now, { timeZone = "" } = {}) {
   if (!incident) return "";
   if (kind === "open" || kind === "remind") {
     return formatOperatorCard("watch", severityOf(incident.cause), titleOf(incident.cause),
-      incident.detail || "", {
+      [incident.detail || "", ...notes(incident)].filter(Boolean).join("\n"), {
         form: kind === "remind" ? "reminder" : "page",
-        since: clock(incident.started_at),
+        since: clock(incident.started_at, timeZone),
         duration: duration(now - incident.started_at),
       });
   }
@@ -120,6 +195,20 @@ export function pageText(kind, incident, now) {
   // "🟢 [Watch] Kazma is back: it lasted 12 min." (watch.recovered)
   return formatOperatorCard("watch", "success", "Kazma", lines.join("\n"),
     { form: "recovery", duration: duration(end - incident.started_at) });
+}
+
+/** What a page says beyond the condition: what was paged before, what was
+ * open inside when the heartbeats stopped, and Cloudflare's word for it. */
+function notes(incident) {
+  const out = [];
+  if (incident.note) out.push(incident.note);
+  if ((incident.inside || []).length) {
+    out.push(`Open on Kazma when its heartbeats stopped: ${incident.inside.map(titleOfKey).join("; ")}.`);
+  }
+  if ((incident.witnesses || []).length) {
+    out.push(`Cloudflare says so too: ${incident.witnesses.map(titleOfKey).join("; ")}.`);
+  }
+  return out;
 }
 
 /** Record that ``page`` went out (``sent``) on the state's incident. */

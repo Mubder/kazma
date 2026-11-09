@@ -40,8 +40,13 @@ DECLARED: dict[str, str] = {
         "a run incident's recovery note follows its row in run_incidents.db, which "
         "outlives a restart (runs/incidents.py)",
     "kazma-core/kazma_core/observability/alert_catalog.py":
-        "the alert catalog only names each alert and the recovery that closes it; "
-        "it sends nothing (its senders mark their own pages)",
+        "the alert catalog only names each alert and the recovery that closes it "
+        "(a key ending .resolved); it sends nothing, and each sender keeps its own "
+        "outage state",
+    "kazma-core/kazma_core/observability/recent_alerts.py":
+        "Settings -> Alerts' recent alerts list Kazma Watch's past recovery notes "
+        "(watch.recovered) from its /v1/summary; it sends nothing, and the incidents "
+        "live in the observer's D1",
 }
 
 

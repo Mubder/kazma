@@ -13,15 +13,26 @@ Four senders page the owner, each with its own reach:
 * ``watch``: Kazma Watch, the outside observer (``deploy/observer``), one
   entry per condition its diagnosis returns (``watch.tunnel_down``) and its
   recovery page (``watch.recovered``).
+* ``cloudflare``: Cloudflare's own notifications, which reach Kazma Watch's
+  webhook (``POST /v1/cloudflare``, ``deploy/observer/src/cloudflare.js``)
+  and are paged by it with the source Cloudflare; never sent to Kazma, which
+  is behind the tunnel they report on.
 
 Each entry says how bad it is, its card title in English and Arabic, the page
 of this site it is about, and the entry that says it is over (its recovery,
 from the same sender), if one does. ``condition`` names the problem when more
-than one sender can see it; ``owner`` marks the sender that pages it once
-Stage 2 lands ("one page per problem"). Until then a sender marked
-``owner=False`` still pages it, and the owner table is the plan Stage 2
-carries out. Two inside senders owning one condition is declared in
-``SHARED_OWNERS`` with why.
+than one sender can see it; ``owner`` marks the sender that pages it (Stage
+2, "one page per problem"): a sender marked ``owner=False`` records it
+instead while an owner can speak (``inside_hold``). Two inside senders
+owning one condition is declared in ``SHARED_OWNERS`` with why: the first to
+page it pages, the other records it.
+
+Stage 2's page receipts (``page_receipts``, the guard's heartbeat) carry the
+keys of the inside pages open now, so Kazma Watch stays quiet about what
+Kazma or its guard already told the owner: ``ANSWERED_BY`` names the inside
+conditions that answer for one of its conditions, ``SAME_CAUSE`` the
+conditions one cause shows as (a Cloudflare notice of one joins an incident
+of another).
 
 The guard cannot import kazma_core and the observer runs on Cloudflare: each
 reads a generated copy of this table (``COPIES``), written by
@@ -42,14 +53,24 @@ from dataclasses import dataclass
 from pathlib import Path
 
 __all__ = [
+    "ANSWERED_BY",
     "CATALOG",
     "COPIES",
+    "INSIDE_SENDERS",
+    "SAME_CAUSE",
     "SENDERS",
     "SEVERITIES",
     "SHARED_OWNERS",
+    "closed_by_key",
+    "entry_for",
+    "inside_hold",
+    "opens_incident",
+    "recovery_keys",
 ]
 
-SENDERS = ("ops", "lifecycle", "guard", "watch")
+SENDERS = ("ops", "lifecycle", "guard", "watch", "cloudflare")
+#: The senders on Kazma's machine: their open pages are the page receipts.
+INSIDE_SENDERS = ("ops", "guard")
 SEVERITIES = ("info", "success", "warn", "error", "critical")
 
 
@@ -108,6 +129,13 @@ def _life(key, severity, title, title_ar):
 
 def _watch(key, severity, title, title_ar, condition="", owner=True, closed_by="watch.recovered"):
     return _Entry(key, "watch", severity, title, title_ar, "/dashboard", closed_by, condition, owner)
+
+
+def _cf(key, severity, title, title_ar, condition="", closed_by=""):
+    # Kazma Watch pages a Cloudflare notice; a notice of one of Kazma Watch's
+    # own conditions is a second witness of it, never a second owner.
+    return _Entry(key, "cloudflare", severity, title, title_ar, "/dashboard", closed_by, condition,
+                  owner=not condition)
 
 
 # Research and crawl results (``web_acquire/monitor._LABELS``): the titles are
@@ -297,6 +325,7 @@ CATALOG: tuple[_Entry, ...] = (
            "واجه حارس كاظمه خطأً في شيفرته"),
     _guard("guard.crashed", "critical", "Kazma's guard crashed", "تعطّل حارس كاظمه"),
     _guard("guard.page_command", "error", "A page sent through the guard's --page", "تنبيه أُرسل عبر --page في الحارس"),
+    _guard("guard.test_page", "info", "Test page", "صفحة تجريبية", page="/settings?tab=alerts"),
     _guard("health.dependency_down", "warn", "Kazma is up, but not ready", "كاظمه يعمل لكنه غير جاهز",
            closed_by="health.ready_again", condition="dependency_down"),
     _guard("health.ready_again", "success", "Kazma is ready again", "عاد كاظمه جاهزًا"),
@@ -304,7 +333,7 @@ CATALOG: tuple[_Entry, ...] = (
     _guard("health.probe_unrunnable", "warn", "This machine has run out of network ports",
            "نفدت منافذ الشبكة على هذا الجهاز"),
     _guard("child.waiting_for_database", "warn", "Kazma is waiting for its database", "ينتظر كاظمه قاعدة بياناته",
-           page=_SYSTEM, closed_by="child.database_answers"),
+           page=_SYSTEM, closed_by="child.database_answers", condition="database_away"),
     _guard("child.database_answers", "success", "Kazma is up: its database answers again",
            "كاظمه يعمل: عادت قاعدة بياناته تستجيب", page=_SYSTEM),
     _guard("maintenance.active", "warn", "Kazma supervision paused", "أُوقفت مراقبة كاظمه مؤقتًا",
@@ -352,9 +381,28 @@ CATALOG: tuple[_Entry, ...] = (
     _watch("watch.disk_critical", "critical", "Kazma's disk is almost full", "قرص كاظمه ممتلئ تقريبًا",
            condition="disk_critical", owner=False),
     _watch("watch.observer_refused", "warn", "The observer cannot pass Cloudflare Access",
-           "لا يستطيع المراقب اجتياز Cloudflare Access"),
+           "لا يستطيع المراقب اجتياز Cloudflare Access", condition="observer_refused"),
     _watch("watch.unreachable", "error", "Kazma is not reachable", "كاظمه غير متاح"),
     _watch("watch.recovered", "success", "Kazma is back", "عاد كاظمه", closed_by=""),
+    # -- Cloudflare's notifications (deploy/observer/src/cloudflare.js) -----------------------------------
+    _cf("cloudflare.tunnel_down", "error", "Cloudflare says the tunnel is down", "تقول Cloudflare إن النفق متوقف",
+        condition="tunnel_down", closed_by="cloudflare.tunnel_healthy"),
+    _cf("cloudflare.tunnel_degraded", "warn", "Cloudflare says the tunnel is degraded",
+        "تقول Cloudflare إن النفق متراجع", condition="tunnel_down", closed_by="cloudflare.tunnel_healthy"),
+    _cf("cloudflare.tunnel_healthy", "success", "Cloudflare says the tunnel is healthy again",
+        "تقول Cloudflare إن النفق عاد سليمًا"),
+    _cf("cloudflare.tunnel_deleted", "error", "A Cloudflare tunnel was deleted", "حُذف نفق في Cloudflare"),
+    _cf("cloudflare.tunnel_changed", "info", "A Cloudflare tunnel was created or changed",
+        "أُنشئ نفق في Cloudflare أو تغيّر"),
+    _cf("cloudflare.access_expiring", "warn", "A Cloudflare Access credential expires soon",
+        "تنتهي قريبًا صلاحية أحد اعتمادات Cloudflare Access", condition="observer_refused"),
+    _cf("cloudflare.worker_errors", "warn", "Cloudflare reports Worker errors", "تبلغ Cloudflare عن أخطاء في Worker",
+        closed_by="cloudflare.worker_errors_resolved"),
+    _cf("cloudflare.worker_errors_resolved", "success", "Cloudflare says the Worker errors are resolved",
+        "تقول Cloudflare إن أخطاء Worker انتهت"),
+    _cf("cloudflare.notification", "warn", "A Cloudflare notification", "إشعار من Cloudflare"),
+    _cf("cloudflare.notification_resolved", "success", "A Cloudflare notification is resolved",
+        "انتهى إشعار من Cloudflare"),
 )
 
 
@@ -369,11 +417,78 @@ SHARED_OWNERS: dict[str, str] = {
 }
 
 
+#: A Kazma Watch condition, and the inside conditions whose page answers for
+#: it: Kazma not ready, or down while it boots, because its database is away
+#: is the database's page (``database.away``, the guard's ``dbsvc.down`` or
+#: ``child.waiting_for_database``), not a second one.
+ANSWERED_BY: dict[str, tuple[str, ...]] = {
+    "dependency_down": ("database_away",),
+    "kazma_restarting": ("database_away",),
+}
+
+#: Kazma Watch's conditions one cause shows as: the probe reads the tunnel's
+#: 530 whether the tunnel or the whole machine is gone, so a Cloudflare
+#: "tunnel down" notice joins an incident of either (one incident, two
+#: witnesses).
+SAME_CAUSE: dict[str, tuple[str, ...]] = {
+    "tunnel_down": ("machine_unreachable", "unreachable"),
+}
+
+
 _PLACEHOLDER = re.compile(r"\{[a-z_]+\}")
 
 
 def _key_regex(key: str) -> re.Pattern[str]:
     return re.compile("^" + ".+?".join(re.escape(p) for p in _PLACEHOLDER.split(key)) + "$")
+
+
+def entry_for(key: str) -> _Entry | None:
+    """The catalog entry a raised *key* belongs to (``_entry_for``): page
+    receipts and the holds read its condition and owner, Settings -> Alerts'
+    recent alerts its severity, titles and page (``as_dict``)."""
+    return _entry_for(key)
+
+
+def opens_incident(entry: _Entry | None) -> bool:
+    """An inside page that opens an incident: one a recovery closes, or one
+    another sender can see. Its page is a receipt until the recovery."""
+    return bool(entry is not None and entry.sender in INSIDE_SENDERS
+                and (entry.closed_by or entry.condition))
+
+
+def closed_by_key(key: str) -> list[str]:
+    """The entries the recovery *key* closes: their receipts are settled
+    when it is sent."""
+    entry = _entry_for(key)
+    if entry is None:
+        return []
+    return sorted(e.key for e in CATALOG if e.closed_by and e.closed_by == entry.key)
+
+
+def inside_hold(key: str, receipts: list[dict] | tuple, speaks: dict[str, bool]) -> str:
+    """Who pages *key*'s condition instead of its sender; "" to page it.
+
+    One page per problem on Kazma's machine (Stage 2): an entry marked
+    ``owner=False`` records its condition while an owning sender can speak
+    (``speaks``: ``"ops"``, ``"guard"``, ``"watch"``); an owning entry records
+    it when another entry of the same condition has an open page that
+    reached someone (``receipts``: both inside senders' open page receipts,
+    ``{"key", "paged_at", "delivered"}``). The guard keeps a stdlib copy
+    (``kazma_guard._inside_hold``); both are held to
+    ``tests/fixtures/alert_receipts/holds.json``.
+    """
+    entry = _entry_for(key)
+    if entry is None or not entry.condition:
+        return ""
+    if not entry.owner:
+        owners = sorted({e.sender for e in CATALOG if e.condition == entry.condition and e.owner})
+        return next((owner for owner in owners if speaks.get(owner)), "")
+    for receipt in receipts or ():
+        other = _entry_for(str(receipt.get("key") or ""))
+        if (other is not None and other.key != entry.key and other.condition == entry.condition
+                and receipt.get("delivered") is True):
+            return other.key
+    return ""
 
 
 def _entry_for(key: str) -> _Entry | None:
@@ -389,6 +504,11 @@ def _entry_for(key: str) -> _Entry | None:
         if _key_regex(entry.key).match(key):
             return entry
     return None
+
+
+def recovery_keys() -> frozenset[str]:
+    """The keys that say a condition is over (some entry's ``closed_by``)."""
+    return frozenset(e.closed_by for e in CATALOG if e.closed_by)
 
 
 # -- the copies the guard and the observer read --------------------------------
@@ -407,6 +527,8 @@ def _export_table() -> dict[str, object]:
     return {
         "version": 1,
         "generated_by": _GENERATOR,
+        "answered_by": {k: list(v) for k, v in sorted(ANSWERED_BY.items())},
+        "same_cause": {k: list(v) for k, v in sorted(SAME_CAUSE.items())},
         "alerts": [e.as_dict() for e in sorted(CATALOG, key=lambda e: e.key)],
     }
 

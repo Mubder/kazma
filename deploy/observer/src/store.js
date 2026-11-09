@@ -30,10 +30,13 @@ export class Store {
 
   /** Stop watching ``install``; with ``forget`` remove everything kept about it. */
   async unpair(install, forget) {
-    const tables = ["installs", "heartbeats", "watch_state"];
-    if (forget) tables.push("readings", "hourly", "incidents");
-    await this.db.batch(tables.map(
-      (t) => this.db.prepare(`DELETE FROM ${t} WHERE install = ?`).bind(install)));
+    const tables = ["installs", "heartbeats", "watch_state", "install_settings"];
+    if (forget) tables.push("readings", "hourly", "cloudflare_notices", "incidents");
+    const notes = forget ? [this.db.prepare(
+      "DELETE FROM incident_notes WHERE incident_id IN (SELECT id FROM incidents WHERE install = ?)",
+    ).bind(install)] : [];
+    await this.db.batch([...notes, ...tables.map(
+      (t) => this.db.prepare(`DELETE FROM ${t} WHERE install = ?`).bind(install))]);
   }
 
   /**
@@ -70,7 +73,7 @@ export class Store {
     let incident = null;
     if (row && row.incident_id) {
       const inc = await this.db.prepare("SELECT * FROM incidents WHERE id = ?").bind(row.incident_id).first();
-      if (inc) incident = { ...inc, causes: JSON.parse(inc.causes || "[]") };
+      if (inc) incident = { ...inc, causes: JSON.parse(inc.causes || "[]"), ...(await this.notes(inc.id)) };
     }
     return {
       condition: row ? row.condition : "up",
@@ -100,6 +103,7 @@ export class Store {
           inc.paged_at, inc.last_page_at, inc.ended_at, inc.recovery_paged_at).run();
         inc.id = res.meta.last_row_id;
       }
+      await this.saveNotes(inc);
       if (inc === state.incident) incidentId = inc.id;
     }
     await this.db.prepare(
@@ -136,12 +140,25 @@ export class Store {
 
   // -- reading back ---------------------------------------------------------
 
+  /** The incidents of ``install`` open since ``since``, newest first; each
+   * with ``held_by`` (its notes: who paged it instead, unified alerts
+   * Stage 2), so a reader can tell a page that failed from one never due. */
   async incidents(install, since, limit = 50) {
     const { results } = await this.db.prepare(
-      "SELECT id, cause, detail, causes, started_at, ended_at FROM incidents "
-      + "WHERE install = ? AND (ended_at IS NULL OR ended_at >= ?) ORDER BY started_at DESC LIMIT ?",
+      "SELECT i.id, i.cause, i.detail, i.causes, i.started_at, i.ended_at, i.paged_at, i.recovery_paged_at, "
+      + "n.notes FROM incidents i LEFT JOIN incident_notes n ON n.incident_id = i.id "
+      + "WHERE i.install = ? AND (i.ended_at IS NULL OR i.ended_at >= ?) ORDER BY i.started_at DESC LIMIT ?",
     ).bind(install, since, limit).all();
-    return (results || []).map((r) => ({ ...r, causes: JSON.parse(r.causes || "[]") }));
+    return (results || []).map(({ notes, ...r }) => {
+      let heldBy = null;
+      try {
+        const n = notes ? JSON.parse(notes) : {};
+        heldBy = typeof n.held_by === "string" ? n.held_by : null;
+      } catch {
+        heldBy = null;
+      }
+      return { ...r, causes: JSON.parse(r.causes || "[]"), held_by: heldBy };
+    });
   }
 
   /** Per day: the share of watched minutes up (or in planned maintenance). */
@@ -159,5 +176,136 @@ export class Store {
       "SELECT hour, minutes, up_minutes, ms_total, ms_count FROM hourly WHERE install = ? AND hour >= ? ORDER BY hour",
     ).bind(install, since).all();
     return results || [];
+  }
+
+  // -- one page per problem: an incident's notes (unified alerts, Stage 2) --
+
+  /** What an incident's pages say beyond its condition (incident_notes). */
+  async notes(incidentId) {
+    const raw = await this.db.prepare("SELECT notes FROM incident_notes WHERE incident_id = ?")
+      .bind(incidentId).first("notes");
+    let n = {};
+    try {
+      n = raw ? JSON.parse(raw) : {};
+    } catch {
+      n = {};
+    }
+    return {
+      held_by: typeof n.held_by === "string" ? n.held_by : null,
+      note: typeof n.note === "string" ? n.note : null,
+      inside: Array.isArray(n.inside) ? n.inside : [],
+      witnesses: Array.isArray(n.witnesses) ? n.witnesses : [],
+    };
+  }
+
+  /** Keep an incident's notes, when it has any. */
+  async saveNotes(inc) {
+    const notes = {
+      held_by: inc.held_by || null,
+      note: inc.note || null,
+      inside: inc.inside || [],
+      witnesses: inc.witnesses || [],
+    };
+    if (!notes.held_by && !notes.note && !notes.inside.length && !notes.witnesses.length) return;
+    await this.db.prepare(
+      "INSERT INTO incident_notes (incident_id, notes) VALUES (?, ?) "
+      + "ON CONFLICT(incident_id) DO UPDATE SET notes = excluded.notes",
+    ).bind(inc.id, JSON.stringify(notes)).run();
+  }
+
+  /** When the incident ``id`` ended: null while it is open, 0 when it is gone. */
+  async incidentEnded(id) {
+    const row = await this.db.prepare("SELECT ended_at FROM incidents WHERE id = ?").bind(id).first();
+    return row ? row.ended_at ?? null : 0;
+  }
+
+  // -- Cloudflare's notifications (unified alerts, Stage 4) -----------------
+
+  /** Take a request body's digest once. True when it is new. */
+  async takeDigest(digest, now) {
+    const res = await this.db.prepare(
+      "INSERT OR IGNORE INTO cloudflare_seen (digest, received_at) VALUES (?, ?)",
+    ).bind(digest, now).run();
+    return !!(res.meta && res.meta.changes);
+  }
+
+  async addNotice(n) {
+    const res = await this.db.prepare(
+      "INSERT INTO cloudflare_notices (key, alert_type, correlation, event, detail, received_at) "
+      + "VALUES (?, ?, ?, ?, ?, ?)",
+    ).bind(n.key, n.alert_type, n.correlation, n.event, n.detail ?? null, n.received_at).run();
+    return { ...n, id: res.meta.last_row_id, install: null, incident_id: null, paged_at: null,
+      last_try_at: null, ended_at: null, closer: null, recovery_due: 0, recovery_paged_at: null };
+  }
+
+  async saveNotice(n) {
+    await this.db.prepare(
+      "UPDATE cloudflare_notices SET key = ?, install = ?, incident_id = ?, paged_at = ?, last_try_at = ?, "
+      + "ended_at = ?, closer = ?, recovery_due = ?, recovery_paged_at = ? WHERE id = ?",
+    ).bind(n.key, n.install ?? null, n.incident_id ?? null, n.paged_at ?? null, n.last_try_at ?? null,
+      n.ended_at ?? null, n.closer ?? null, n.recovery_due ? 1 : 0, n.recovery_paged_at ?? null, n.id).run();
+  }
+
+  /** The open start notice of ``correlation``, if any. */
+  async openNotice(correlation) {
+    return this.db.prepare(
+      "SELECT * FROM cloudflare_notices WHERE correlation = ? AND ended_at IS NULL AND event = 'start' "
+      + "ORDER BY id DESC LIMIT 1",
+    ).bind(correlation).first();
+  }
+
+  /** Notices with something left to do: open, or a recovery page due. */
+  async activeNotices() {
+    const { results } = await this.db.prepare(
+      "SELECT * FROM cloudflare_notices WHERE ended_at IS NULL OR recovery_due = 1 ORDER BY id",
+    ).all();
+    return results || [];
+  }
+
+  /** How many notices were paged since ``since`` (the hourly cap). */
+  async noticesPagedSince(since) {
+    return this.db.prepare("SELECT COUNT(*) AS n FROM cloudflare_notices WHERE paged_at >= ?")
+      .bind(since).first("n");
+  }
+
+  async pruneNotices(now) {
+    await this.db.batch([
+      this.db.prepare("DELETE FROM cloudflare_seen WHERE received_at < ?").bind(now - 7 * DAY),
+      this.db.prepare("DELETE FROM cloudflare_notices WHERE ended_at IS NOT NULL AND ended_at < ? "
+        + "AND recovery_due = 0").bind(now - 90 * DAY),
+    ]);
+  }
+
+  // -- what Kazma told Kazma Watch (Settings -> Alerts, watch_settings.js) --
+
+  async watchSettings(install) {
+    const row = await this.db.prepare(
+      "SELECT timezone, email_to, updated_at FROM install_settings WHERE install = ?").bind(install).first();
+    return {
+      timezone: row && row.timezone ? row.timezone : null,
+      email_to: row && row.email_to ? row.email_to : null,
+      updated_at: row && row.updated_at ? row.updated_at : null,
+    };
+  }
+
+  /** Keep the settings sent at ``ts``, only when newer than the last kept. */
+  async saveWatchSettings(install, ts, settings, now) {
+    const res = await this.db.prepare(
+      "INSERT INTO install_settings (install, timezone, email_to, settings_ts, updated_at) VALUES (?, ?, ?, ?, ?) "
+      + "ON CONFLICT(install) DO UPDATE SET timezone = excluded.timezone, email_to = excluded.email_to, "
+      + "settings_ts = excluded.settings_ts, updated_at = excluded.updated_at "
+      + "WHERE install_settings.settings_ts < excluded.settings_ts",
+    ).bind(install, settings.timezone, settings.email_to, ts, now).run();
+    return !!(res.meta && res.meta.changes);
+  }
+
+  /** Claim a test page asked at ``ts``: newer than the last by ``gap`` seconds. */
+  async claimTest(install, ts, now, gap) {
+    const res = await this.db.prepare(
+      "INSERT INTO install_settings (install, test_ts, updated_at) VALUES (?, ?, ?) "
+      + "ON CONFLICT(install) DO UPDATE SET test_ts = excluded.test_ts "
+      + "WHERE excluded.test_ts >= install_settings.test_ts + ?",
+    ).bind(install, ts, now, gap).run();
+    return !!(res.meta && res.meta.changes);
   }
 }

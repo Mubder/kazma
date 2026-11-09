@@ -272,19 +272,9 @@
                         ? key.slice(prefix.length + 1) : key;
                     return section[short];
                 };
-                let alerts = grouped(notif, 'notifications', 'notifications.ops.channels');
-                if (typeof alerts === 'string') {
-                    alerts = alerts.split(',').map(x => x.trim()).filter(Boolean);
-                }
                 let swarmRoutes = grouped(notif, 'notifications', 'notifications.swarm.routes');
                 if (typeof swarmRoutes === 'string') {
                     swarmRoutes = swarmRoutes.split(',').map(x => x.trim()).filter(Boolean);
-                }
-                // Server status messages: unset means Kazma's default (one
-                // start card, and a failed start); [] means all off.
-                let lifecycle = grouped(notif, 'notifications', 'notifications.lifecycle.events');
-                if (typeof lifecycle === 'string') {
-                    lifecycle = lifecycle.split(',').map(x => x.trim()).filter(Boolean);
                 }
                 const r = this.adapterRouting;
                 const ex = (name, key) => String(((byName[name] || {}).extras || {})[key] || '');
@@ -303,11 +293,7 @@
                 r.tgMainChat = String(grouped(conn, 'connectors', 'connectors.telegram.swarm_chat_id') || '');
                 r.discordChannel = String(grouped(conn, 'connectors', 'connectors.discord.swarm_channel_id') || '');
                 r.slackChannel = String(grouped(conn, 'connectors', 'connectors.slack.swarm_channel_id') || '');
-                r.alertRoutes = Array.isArray(alerts) ? alerts : [];
                 r.swarmRoutes = Array.isArray(swarmRoutes) ? swarmRoutes : [];
-                r.lifecycleEvents = Array.isArray(lifecycle)
-                    ? lifecycle.filter(ev => this.lifecycleEventNames.includes(ev))
-                    : ['started', 'startup_failed'];
                 // Group route lives in swarm.output_target (masked token).
                 r.tgGroupChat = '';
                 r.tgGroupToken = '';
@@ -351,9 +337,7 @@
                 slackWorkspace: String(r.slackWorkspace || '').trim(),
                 slackAllowed: String(r.slackAllowed || '').trim(),
                 slackChannel: String(r.slackChannel || '').trim(),
-                alertRoutes: [...(r.alertRoutes || [])].sort(),
                 swarmRoutes: [...(r.swarmRoutes || [])].sort(),
-                lifecycleEvents: this.lifecycleEventNames.filter(ev => (r.lifecycleEvents || []).includes(ev)),
             };
         },
 
@@ -482,9 +466,7 @@
                 if (changed('tgMainChat')) single('connectors.telegram.swarm_chat_id', curr.tgMainChat, 'connectors');
                 if (changed('discordChannel')) single('connectors.discord.swarm_channel_id', curr.discordChannel, 'connectors');
                 if (changed('slackChannel')) single('connectors.slack.swarm_channel_id', curr.slackChannel, 'connectors');
-                if (changed('alertRoutes')) single('notifications.ops.channels', (r.alertRoutes || []).join(','), 'notifications');
                 if (changed('swarmRoutes')) single('notifications.swarm.routes', (r.swarmRoutes || []).join(','), 'notifications');
-                if (changed('lifecycleEvents')) single('notifications.lifecycle.events', curr.lifecycleEvents, 'notifications');
 
                 // Group route (swarm.output_target) — only when it changed.
                 if (changed('tgGroupEnabled') || changed('tgGroupChat') || changed('tgGroupToken')) {
@@ -566,49 +548,6 @@
                 showToast(_k('settings.hub.test_failed', 'Test failed: ') + e.message, 'error');
             }
             this.adapterRoutingTesting = '';
-        },
-
-        async sendTestAlert() {
-            // One alert along the SAVED routes (the server reads them), sent
-            // the way an alert raised by a background job is. Until
-            // 2026-10-02 a real failure was the only proof alerts arrived.
-            if (this.opsTestAlert.sending) return;
-            this.opsTestAlert = { sending: true, result: null };
-            let result;
-            try {
-                const resp = await fetch('/api/settings/notifications/test-alert', {
-                    method: 'POST',
-                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
-                });
-                result = resp.ok
-                    ? await resp.json()
-                    : { ok: false, sent: [], failed: [], error: 'HTTP ' + resp.status };
-            } catch (e) {
-                result = { ok: false, sent: [], failed: [], error: e.message };
-            }
-            this.opsTestAlert = { sending: false, result };
-        },
-
-        testAlertSummary() {
-            const res = this.opsTestAlert.result;
-            if (!res) return '';
-            const label = (route) => ({
-                telegram: 'Telegram',
-                'telegram-group': _k('settings.hub.route_tg_group', 'Telegram (group)'),
-                discord: 'Discord',
-                slack: 'Slack',
-            })[route] || route;
-            const sent = (res.sent || []).map(label).join(', ');
-            const failed = (res.failed || []).map(label).join(', ');
-            const parts = [];
-            if (sent) parts.push(_k('settings.hub.test_alert_sent', 'Delivered to {routes}.', { routes: sent }));
-            if (failed) parts.push(_k('settings.hub.test_alert_failed', 'Not delivered to {routes}: its Test button above says why.', { routes: failed }));
-            if (res.error) {
-                parts.push(_k('settings.hub.test_alert_error', 'The test alert was not sent: {error}', { error: res.error }));
-            } else if (!sent && !failed) {
-                parts.push(_k('settings.hub.test_alert_nowhere', 'No alert route sends anywhere. Tick a channel and save, or set up a chat app above.'));
-            }
-            return parts.join(' ');
         },
 
         connectorCheckTitle(key) {

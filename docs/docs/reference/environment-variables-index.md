@@ -11,7 +11,7 @@ description: Every KAZMA_* variable the code reads, where, and its default. Gene
 > `python scripts/generate_env_reference.py` after adding or removing a variable;
 > `tests/test_env_reference.py` fails while this page is stale.
 
-**286** variables are read by the product code; **286** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
+**287** variables are read by the product code; **287** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
 the undocumented count is on a ratchet that may only go down.
 
 | Variable | Default in code | Read in | Described |
@@ -113,8 +113,9 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_GUARD_BROKER_REQUEST_FILE` | (none) | `kazma_core.documents.broker_supervision` | yes |
 | `KAZMA_GUARD_DEPENDENCIES_FILE` | (none) | `kazma_core.guard_dependencies` | yes |
 | `KAZMA_GUARD_LOG` | (none) | `kazma_core.observability.daily_digest` | yes |
-| `KAZMA_GUARD_RELOAD_FILE` | (none) | `kazma_core.observability.supervisor_watch` | yes |
-| `KAZMA_GUARD_STATE_FILE` | (none) | `kazma_core.documents.broker_supervision`, `kazma_core.install_requirements`, `kazma_core.observability.outside_watch` +1 | yes |
+| `KAZMA_GUARD_PAGES_FILE` | (none) | `kazma_core.observability.page_receipts` | yes |
+| `KAZMA_GUARD_RELOAD_FILE` | (none) | `kazma_core.observability.guard_pager`, `kazma_core.observability.supervisor_watch` | yes |
+| `KAZMA_GUARD_STATE_FILE` | (none) | `kazma_core.documents.broker_supervision`, `kazma_core.install_requirements`, `kazma_core.observability.outside_watch` +2 | yes |
 | `KAZMA_HARD_MAX_COST` | (none) | `kazma_core.cost_breaker` | yes |
 | `KAZMA_HITL_CANONICAL_FLOOR` | `""` | `kazma_core.safety.hitl` | yes |
 | `KAZMA_HITL_GRANT_TTL_SECONDS` | (none) | `kazma_core.safety.hitl_grants` | yes |

@@ -495,7 +495,7 @@ def test_alert_totals_and_held_back_repeats_are_reported(tmp_path, monkeypatch, 
     # opt back in, as tests/test_ops_alerts.py does; `_dispatch` is stubbed,
     # so nothing is delivered and no thread starts.
     monkeypatch.delenv("KAZMA_OPS_ALERTS", raising=False)
-    monkeypatch.setattr(ops_alerts, "_dispatch", lambda _t: None)
+    monkeypatch.setattr(ops_alerts, "_dispatch", lambda *_a, **_k: None)
     caplog.set_level(logging.INFO, logger="kazma_core.observability.ops_alerts")
     for _ in range(12):
         ops_alerts.alert("mcp.down", "MCP down", cooldown_s=3600)
@@ -514,7 +514,7 @@ def test_alert_totals_and_held_back_repeats_are_reported(tmp_path, monkeypatch, 
 def _raise_alerts(monkeypatch, caplog, calls) -> list[tuple[str, str]]:
     """Run the real alert() for each ``(key, title, severity)``; its lines."""
     monkeypatch.delenv("KAZMA_OPS_ALERTS", raising=False)
-    monkeypatch.setattr(ops_alerts, "_dispatch", lambda *_a: None)
+    monkeypatch.setattr(ops_alerts, "_dispatch", lambda *_a, **_k: None)
     caplog.set_level(logging.INFO, logger="kazma_core.observability.ops_alerts")
     for key, title, severity in calls:
         ops_alerts.alert(key, title, severity=severity, cooldown_s=0)

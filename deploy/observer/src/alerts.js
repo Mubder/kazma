@@ -40,11 +40,13 @@ function mime(from, to, subject, text, now) {
   ].join("\r\n");
 }
 
-async function email(env, text, now, makeMessage) {
+async function email(env, text, now, makeMessage, emailTo = null) {
   if (!env.EMAIL || !env.EMAIL_FROM) return false;
   try {
     const subject = text.split("\n")[0].slice(0, 120);
-    const to = env.EMAIL_TO || "owner";
+    // The recipient Kazma's Settings -> Alerts set (watch_settings.js), else
+    // the one in wrangler.jsonc.
+    const to = emailTo || env.EMAIL_TO || "owner";
     const make = makeMessage || (async (from, rcpt, raw) => {
       const { EmailMessage } = await import("cloudflare:email");
       return new EmailMessage(from, rcpt, raw);
@@ -57,8 +59,23 @@ async function email(env, text, now, makeMessage) {
   }
 }
 
+/**
+ * Send ``text`` on every configured channel: ``{telegram, email}``, each
+ * true (taken), false (refused) or null (that channel is not set up).
+ */
+export async function pageChannels(env, text, now,
+  { fetcher = fetch, makeMessage = null, emailTo = null } = {}) {
+  const hasTelegram = !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID);
+  const hasEmail = !!(env.EMAIL && env.EMAIL_FROM);
+  const [tg, mail] = await Promise.all([
+    hasTelegram ? telegram(env, text, fetcher || fetch) : null,
+    hasEmail ? email(env, text, now, makeMessage, emailTo) : null,
+  ]);
+  return { telegram: tg, email: mail };
+}
+
 /** Send ``text`` on every configured channel. True when one took it. */
-export async function page(env, text, now, { fetcher = fetch, makeMessage = null } = {}) {
-  const [tg, mail] = await Promise.all([telegram(env, text, fetcher), email(env, text, now, makeMessage)]);
-  return tg || mail;
+export async function page(env, text, now, opts = {}) {
+  const sent = await pageChannels(env, text, now, opts);
+  return sent.telegram === true || sent.email === true;
 }

@@ -35,6 +35,13 @@ from kazma_core.settings_validation import SettingRejected, _rules, validate_set
     ("agent.language", " AR ", ("ar", "agent")),
     ("agent.max_iterations", "30", (30, "agent")),
     ("documents.ocr.engine", "Neural", ("neural", "documents")),
+    # Settings -> Alerts (the unified alerts plan, Stage 3).
+    ("notifications.ops.channels", "Telegram, slack, telegram", ("telegram,slack", "notifications")),
+    ("notifications.ops.channels", ["discord"], (["discord"], "notifications")),
+    ("notifications.ops.notices_to_chats", "false", (False, "notifications")),
+    ("guard.telegram.chat_id", " -1001234567890 ", ("-1001234567890", "guard")),
+    ("guard.telegram.chat_id", "@kazma_owner", ("@kazma_owner", "guard")),
+    ("notifications.watch.email_to", "owner@example.com", ("owner@example.com", "notifications")),
 ])
 def test_values_a_setting_can_hold(key, value, expect) -> None:
     assert validate_setting(key, value) == expect
@@ -50,6 +57,11 @@ def test_values_a_setting_can_hold(key, value, expect) -> None:
     ("notifications.lifecycle.events", 7),
     ("memory.tenant_mode", "per_galaxy"),
     ("documents.ocr.engine", "easyocr"),
+    ("notifications.ops.channels", "telegram,pager"),
+    ("notifications.ops.notices_to_chats", "sometimes"),
+    ("guard.telegram.chat_id", "my chat"),
+    ("guard.telegram.chat_id", "@ab"),
+    ("notifications.watch.email_to", "owner at example dot com"),
 ])
 def test_values_a_setting_cannot_hold(key, value) -> None:
     with pytest.raises(SettingRejected):
@@ -69,6 +81,8 @@ def test_the_table_names_the_keys_the_owning_modules_define() -> None:
     from kazma_core.memory.embedder import API_KEY_ENV_KEY
     from kazma_core.model_details import OVERRIDES_KEY as MODEL_DETAILS_KEY
     from kazma_core.model_prices import OWNER_PRICES_KEY
+    from kazma_core.observability.ops_alerts import NOTICES_TO_CHATS_KEY
+    from kazma_core.observability.outside_watch import EMAIL_TO_KEY
     from kazma_core.runs.runbooks import RUNBOOKS_KEY
     from kazma_core.swarm.task_store import TASK_RETENTION_KEY
 
@@ -85,13 +99,16 @@ def test_the_table_names_the_keys_the_owning_modules_define() -> None:
     # every turn), the owner's model prices 2026-11-08 (providers stage 1: a
     # price that is not a number would price nothing, or every call wrongly)
     # and model details (stage 3: a window below the floor would trim every
-    # turn to nothing),
+    # turn to nothing), and Settings -> Alerts' keys 2026-11-09 (the unified
+    # alerts plan, Stage 3: a route no sender answers to, a chat id the guard
+    # cannot page, an address the observer cannot mail),
     # each named by the module that reads it.
     assert set(_rules()) == {"cron.timezone", RETENTION_KEY, EVENTS_KEY, TASK_RETENTION_KEY, TENANT_MODE_KEY,
                              *SETTING_BOUNDS, FIRE_WITHOUT_HITL_KEY, TURN_TIMEOUT_KEY, OCR_ENGINE_KEY,
                              RUNBOOKS_KEY, API_KEY_ENV_KEY, CHAT_REASONING_KEY, OFFSITE_KEEP_KEY,
                              TURN_TOKEN_BUDGET_KEY, DAILY_COST_LIMIT_KEY, OWNER_PRICES_KEY,
-                             MODEL_DETAILS_KEY,
+                             MODEL_DETAILS_KEY, NOTICES_TO_CHATS_KEY, EMAIL_TO_KEY,
+                             "notifications.ops.channels", "guard.telegram.chat_id",
                              "agent.language", "agent.max_iterations"}
 
 

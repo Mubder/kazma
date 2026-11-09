@@ -2705,17 +2705,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "حدود الإنفاق",
         "en": "Spending limits",
     },
-    "settings.outside_watch_title": {
-        "ar": "المراقبة من الخارج",
-        "en": "Outside watch",
-    },
     "settings.outside_watch_hint": {
         "ar": "كل ما يراقب Kazma غير هذا يعمل على هذا الجهاز نفسه، فلا شيء منه يستطيع أن يخبرك أن الجهاز توقف أو نام أو انقطع عن الشبكة. بعد الربط بالمراقب يرسل إليه الحارس نبضة كل دقيقة، ويراسلك المراقب من خارج الجهاز عبر بوت خاص به.",
         "en": "Everything else that watches Kazma runs on this machine, so none of it can say the machine is off, asleep or cut off from the network. Paired with the observer, the guard sends it a heartbeat every minute, and the observer messages you from outside through a bot of its own.",
-    },
-    "settings.outside_watch_not_paired": {
-        "ar": "غير مربوط: لا شيء خارج هذا الجهاز يراقبه. اربطه مرة واحدة من سطر الأوامر على هذا الجهاز:",
-        "en": "Not paired: nothing outside this machine is watching it. Pair it once from a terminal on this machine:",
     },
     "settings.outside_watch_observer": {
         "ar": "المراقب",
@@ -2852,14 +2844,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.outside_watch_observer_error": {
         "ar": "لم يرد المراقب. سجل الحارس نفسه أعلاه.",
         "en": "The observer did not answer. The guard's own record is above.",
-    },
-    "settings.outside_watch_load_error": {
-        "ar": "تعذّرت قراءة حالة المراقبة من الخارج.",
-        "en": "The outside watch could not be read.",
-    },
-    "settings.outside_watch_refresh": {
-        "ar": "تحقق مرة أخرى",
-        "en": "Check again",
     },
     "settings.turn_timeout_env": {
         "ar": "هذه القيمة مضبوطة بالمتغير KAZMA_TURN_TIMEOUT_SECONDS في بيئة الخادم؛ غيّرها هناك.",
@@ -4297,14 +4281,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.hub.routes_blurb": {
         "ar": "توجيه التوصيل — اختر المنصات التي تستقبل كل نوع من الرسائل. لا يوصل المسار إلا إذا ضُبطت وجهته أعلاه.",
         "en": "Delivery routing — pick which platforms receive each kind of message. A route only delivers when its destination above is set.",
-    },
-    "settings.hub.alerts_go_to": {
-        "ar": "تذهب التنبيهات إلى",
-        "en": "Alerts go to",
-    },
-    "settings.hub.alerts_hint": {
-        "ar": "تنبيهات التشغيل وانقطاعات MCP وبدء الخادم وإيقافه. اترك الكل دون تحديد للتوصيل إلى كل منصة مُعدّة.",
-        "en": "Ops pages, MCP outages, and server start/stop. Leave ALL unchecked to deliver to every configured platform.",
     },
     "settings.hub.test_alert": {
         "ar": "إرسال تنبيه تجريبي",

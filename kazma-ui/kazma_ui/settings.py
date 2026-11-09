@@ -516,15 +516,9 @@ class SettingsRouterBuilder:
             return {"key": OVERRIDES_KEY, "models": rows, "catalog_as_of": CATALOG_AS_OF,
                     "default": listed["default"]}
 
-        @router.get("/api/settings/outside-watch")
-        def api_get_outside_watch(fresh: bool = False) -> dict[str, Any]:
-            """The outside watch (resilience plan B1): paired or not, the
-            guard's record of its heartbeats and the observer's summary
-            (kazma_core.observability.outside_watch; blocking, so a plain
-            ``def`` FastAPI runs in its threadpool). Never the key."""
-            from kazma_core.observability.outside_watch import outside_status
-
-            return outside_status(fresh=fresh)
+        # The outside watch (Kazma Watch) moved to Settings -> Alerts, which
+        # reads it through GET /api/settings/alerts (settings_alerts.py, the
+        # unified alerts plan's Stage 3); System's read-only card is gone.
 
         @router.get("/api/settings/chat-reasoning")
         def api_get_chat_reasoning() -> dict[str, Any]:
@@ -948,7 +942,7 @@ class SettingsRouterBuilder:
         @router.post("/api/settings/notifications/test-alert")
         def api_send_test_alert() -> dict[str, Any]:
             """Send one test alert through the saved alert routes and say
-            which took it (Settings -> Adapters & Routes).
+            which took it (Settings -> Alerts).
 
             A plain ``def`` on purpose: it runs in a worker thread, the place
             an alert raised by a background job is delivered from (on the
@@ -957,6 +951,12 @@ class SettingsRouterBuilder:
             from kazma_core.observability.ops_alerts import send_test_alert
 
             return send_test_alert()
+
+        # Settings -> Alerts: routes, status messages, notices, the guard's
+        # pager and Kazma Watch (the unified alerts plan, Stage 3).
+        from kazma_ui.settings_alerts import register_alert_routes
+
+        register_alert_routes(router, config_store)
 
         # ══════════════════════════════════════════════════════════════
         # EMBEDDER — memory vector model (Web UI Embedder settings page)

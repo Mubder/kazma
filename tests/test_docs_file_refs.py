@@ -44,6 +44,7 @@ NOT_REPOSITORY_FILES = {
     "kazma-data/update-state.json": "written by kazma update",
     ".kazma/guard_dependencies.json": "the containers Kazma uses, written by the server for its guard",
     ".kazma/boot_status.json": "what a booting server waits for, written by the server for its guard",
+    "kazma_pages.json": "Kazma's page receipts, written by the server beside the guard's state file",
     "settings_snapshot.yaml": "the settings' local copy, written every 15 minutes in the data folder",
     "kazma-data/setup_record.json": "what kazma setup postgres installed, written by it",
     "topgrade.toml": "the operator's own topgrade configuration",
