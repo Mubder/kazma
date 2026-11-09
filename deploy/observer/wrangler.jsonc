@@ -31,9 +31,10 @@
     // the status page refuses every request.
     "ACCESS_TEAM_DOMAIN": "",
     "ACCESS_AUD": "",
-    // Email pages (optional): the sender address on kazma.ai's Email
-    // Routing; the recipient is the send_email binding's destination.
-    "EMAIL_FROM": "",
+    // Email pages (README step 8): the sender, an address on a subdomain
+    // onboarded to Cloudflare Email Service's Email Sending. The recipient
+    // comes from Kazma's Settings -> Alerts; EMAIL_TO is only the fallback.
+    "EMAIL_FROM": "watch@alerts.kazma.ai",
     "EMAIL_TO": ""
   },
 
@@ -45,8 +46,9 @@
   //   ACCESS_CLIENT_SECRET
   //   HEALTHCHECKS_URL      the Healthchecks.io ping URL (watches this Worker)
 
-  // Email pages: uncomment with the owner's verified address.
-  // "send_email": [{ "name": "EMAIL", "destination_address": "owner@example.com" }],
+  // Email pages: Email Service's binding, allowed to send only as
+  // EMAIL_FROM (any recipient: Email Sending on Workers Paid).
+  "send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["watch@alerts.kazma.ai"] }],
 
   "observability": { "enabled": true }
 }

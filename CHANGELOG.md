@@ -47,6 +47,11 @@
   tunnel, expiring Access tokens and Worker errors arrive as the same card,
   joined to Kazma Watch's own incident when they are about the same thing.
   It needs a webhook destination added in the Cloudflare dashboard.
+- **Kazma Watch emails its pages.** It sends through Cloudflare Email
+  Service from `watch@alerts.kazma.ai` (a subdomain of its own, so
+  kazma.ai's own mail records are untouched) to the address in Settings ->
+  Alerts. Its test page says whether the email went and, if Cloudflare
+  refused it, why (for example, the subdomain is not verified yet).
 
 ## 0.21.1 — Any provider, a setup guide, and setup on a fresh Windows (2026-11-08)
 

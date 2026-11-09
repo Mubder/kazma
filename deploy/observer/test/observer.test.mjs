@@ -371,12 +371,24 @@ test("the email channel carries a page when configured", async () => {
   net.live = 530;
   await pair(e);
   for (let i = 0; i < 4; i += 1) {
-    await runMinute(e, T0 + i * 60, { fetcher: net.fetcher,
-      makeMessage: async (from, to, raw) => ({ from, to, raw }) });
+    await runMinute(e, T0 + i * 60, { fetcher: net.fetcher });
   }
   assert.equal(sent.length, 1);
-  assert.match(sent[0].raw, /Subject: .*not reachable/);
+  // Email Service's structured send: the card's first line is the subject,
+  // the whole card the text.
+  assert.match(sent[0].subject, /not reachable/);
+  assert.ok(!sent[0].subject.includes("\n"));
+  assert.ok(sent[0].text.startsWith(sent[0].subject));
   assert.equal(sent[0].to, "owner@example.com");
+  assert.deepEqual(sent[0].from, { email: "watch@kazma.example", name: "Kazma Watch" });
+});
+
+test("a long first line is cut for the subject", async () => {
+  const { emailSubject } = await import("../src/alerts.js");
+  assert.equal(emailSubject("🔴 [Watch] short\nmore"), "🔴 [Watch] short");
+  const long = emailSubject(`${"x".repeat(300)}\nrest`);
+  assert.equal(long.length, 120);
+  assert.ok(long.endsWith("…"));
 });
 
 test("the pull probe sends the Access service token, and readiness every five minutes", async () => {

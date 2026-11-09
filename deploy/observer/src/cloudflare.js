@@ -154,7 +154,7 @@ async function readBody(request) {
 }
 
 /** POST /v1/cloudflare. ``installs``: the watched installs (or the site). */
-export async function handleCloudflare(request, env, now, { installs, fetcher, makeMessage } = {}) {
+export async function handleCloudflare(request, env, now, { installs, fetcher } = {}) {
   const secret = String(env.CF_WEBHOOK_SECRET || "").trim();
   if (secret.length < SECRET_MIN_CHARS) return json({ error: "cloudflare_not_configured" }, 503);
   if (!sameText(request.headers.get("cf-webhook-auth") || "", secret)) return json({ error: "bad_secret" }, 401);
@@ -176,7 +176,7 @@ export async function handleCloudflare(request, env, now, { installs, fetcher, m
   if (!(await store.takeDigest(digest, now))) return json({ ok: true, duplicate: true });
   const notice = mapNotification(body, digest.slice(0, 24));
   const taken = await takeNotice(store, notice, now);
-  const pages = await processNotices(env, now, { installs, fetcher, makeMessage });
+  const pages = await processNotices(env, now, { installs, fetcher });
   return json({ ok: true, key: notice.key, ...taken, paged: pages.filter((p) => p.ok).length });
 }
 
@@ -224,7 +224,7 @@ function closerText(n) {
  * page what nobody has said, send recovery cards that are due. Called by the
  * route and by every minute's run. Returns what it sent.
  */
-export async function processNotices(env, now, { installs = [], fetcher, makeMessage } = {}) {
+export async function processNotices(env, now, { installs = [], fetcher } = {}) {
   const store = new Store(env.DB);
   const states = [];
   for (const install of installs) states.push({ install, state: await store.state(install) });
@@ -232,7 +232,7 @@ export async function processNotices(env, now, { installs = [], fetcher, makeMes
   const sent = [];
   // The owner's zone and email recipient, as for Kazma Watch's own cards.
   const told = await ownerSettings(store, installs);
-  const send = async (text) => page(env, text, now, { fetcher, makeMessage, emailTo: told.email_to });
+  const send = async (text) => page(env, text, now, { fetcher, emailTo: told.email_to });
   for (const n of await store.activeNotices()) {
     const entry = entryOf(n.key) || entryOf("cloudflare.notification");
     if (n.recovery_due) {

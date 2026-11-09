@@ -110,6 +110,16 @@ function component(source) {
   ok("the answer is said", !app.guardTest.busy && app.guardTest.tone === "tone-success"
     && app.guardTest.note.includes("111"), app.guardTest);
 
+  // Kazma Watch's test page: a refused email says Cloudflare's reason.
+  const refused = (reason) => app._watchChannels({ channels: { telegram: "sent", email: "failed" },
+    reasons: reason ? { email: reason } : {} });
+  ok("an unverified sender is worded", refused("E_SENDER_NOT_VERIFIED").includes("not verified for sending"),
+    refused("E_SENDER_NOT_VERIFIED"));
+  ok("an unknown code is named", refused("E_DELIVERY_FAILED").includes("(E_DELIVERY_FAILED)"));
+  ok("no reason keeps the plain word", refused("").includes("Email: refused it."), refused(""));
+  ok("a sent email has no reason", !app._watchChannels({ channels: { telegram: "sent", email: "sent" },
+    reasons: { email: "E_SENDER_NOT_VERIFIED" } }).includes("verified"));
+
   if (fail) {
     console.error(`${fail} failed`);
     process.exit(1);

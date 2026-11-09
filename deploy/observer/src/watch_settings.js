@@ -107,11 +107,14 @@ export async function handleTestPage(request, env, now, deps = {}) {
   }
   const settings = await req.store.watchSettings(req.install);
   const sent = await pageChannels(env, testCard(now, settings.timezone), now, {
-    fetcher: deps.fetcher, makeMessage: deps.makeMessage, emailTo: settings.email_to,
+    fetcher: deps.fetcher, emailTo: settings.email_to,
   });
   const word = (v) => (v === null ? "off" : v ? "sent" : "failed");
   const channels = { telegram: word(sent.telegram), email: word(sent.email) };
-  return json({ ok: sent.telegram === true || sent.email === true, channels });
+  // Why an email was refused, as Email Service's code (alerts.js): Settings
+  // shows it while the sending domain is being set up.
+  const reasons = sent.emailCode ? { email: sent.emailCode } : {};
+  return json({ ok: sent.telegram === true || sent.email === true, channels, reasons });
 }
 
 export async function handleLeave(request, env, now) {

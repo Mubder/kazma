@@ -49,6 +49,7 @@ class _Watch(BaseHTTPRequestHandler):
     settings: dict[str, dict] = {}
     seen: list[dict] = []
     channels = {"telegram": "sent", "email": "off"}
+    reasons: dict[str, str] = {}
 
     def _reply(self, status: int, body: dict) -> None:
         raw = json.dumps(body).encode()
@@ -88,7 +89,7 @@ class _Watch(BaseHTTPRequestHandler):
             self.settings[install] = {"timezone": body.get("timezone"), "email_to": body.get("email_to")}
             return self._reply(200, {"ok": True, "settings": self.settings[install]})
         if self.path == "/v1/test-page":
-            return self._reply(200, {"ok": True, "channels": dict(self.channels)})
+            return self._reply(200, {"ok": True, "channels": dict(self.channels), "reasons": dict(self.reasons)})
         if self.path == "/v1/leave":
             self.keys.pop(install, None)
             return self._reply(200, {"ok": True, "unpaired": install, "forgotten": body.get("forget") is True})
@@ -127,7 +128,7 @@ def _own_home(tmp_path, monkeypatch):
 @pytest.fixture
 def watch():
     handler = type("W", (_Watch,), {"keys": {}, "settings": {}, "seen": [],
-                                    "channels": {"telegram": "sent", "email": "off"}})
+                                    "channels": {"telegram": "sent", "email": "off"}, "reasons": {}})
     server = HTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -253,9 +254,18 @@ def test_a_refused_pairing_says_why_and_keeps_nothing(client, watch):
 def test_the_test_page_and_what_kazma_watch_is_told(client, watch):
     assert client.post("/api/settings/alerts/watch/pair", json={"token": TOKEN, "url": watch.url}).status_code == 200
     res = client.post("/api/settings/alerts/watch/test")
-    assert res.json() == {"ok": True, "channels": {"telegram": "sent", "email": "off"}}
+    assert res.json() == {"ok": True, "channels": {"telegram": "sent", "email": "off"}, "reasons": {}}
     watch.channels = {"telegram": "failed", "email": "off"}
     assert client.post("/api/settings/alerts/watch/test").json()["ok"] is False
+    # A refused email says Cloudflare's reason; anything that is not one of
+    # Email Service's codes, or a reason for a channel that did not fail, is dropped.
+    watch.channels = {"telegram": "sent", "email": "failed"}
+    watch.reasons = {"email": "E_SENDER_NOT_VERIFIED"}
+    assert client.post("/api/settings/alerts/watch/test").json()["reasons"] == {"email": "E_SENDER_NOT_VERIFIED"}
+    watch.reasons = {"email": "<img src=x onerror=alert(1)>", "telegram": "E_X"}
+    assert client.post("/api/settings/alerts/watch/test").json()["reasons"] == {}
+    watch.channels, watch.reasons = {"telegram": "sent", "email": "sent"}, {"email": "E_SEND_FAILED"}
+    assert client.post("/api/settings/alerts/watch/test").json()["reasons"] == {}
     # The email recipient: refused when it is not one, kept and told when it is.
     bad = client.put("/api/settings/alerts/watch/settings", json={"email_to": "not an address"})
     assert bad.status_code == 400 and client.store.get("notifications.watch.email_to") is None
