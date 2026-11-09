@@ -175,6 +175,7 @@ def load_fence():
     if spec is None or spec.loader is None:
         raise SystemExit(f"could not load {_FENCE_SRC}")
     mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod  # a dataclass looks its module up by name
     spec.loader.exec_module(mod)
     return mod.fence_untrusted
 

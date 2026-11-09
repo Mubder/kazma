@@ -1117,6 +1117,10 @@ def _reinstall_via_subprocess(cwd: str) -> bool:
         "    sys.exit(0 if _reinstall_local(cwd) else 1)\n"
         "spec = importlib.util.spec_from_file_location('kazma_cli_update_postpull', path)\n"
         "mod = importlib.util.module_from_spec(spec)\n"
+        # A dataclass looks its module up by name while it is being defined:
+        # unregistered, update.py's first @dataclass raised and every update
+        # fell back to the pre-pull installer (the drill VM, 2026-11-09).
+        "sys.modules[spec.name] = mod\n"
         "spec.loader.exec_module(mod)\n"
         "ok = bool(mod._reinstall_local(cwd))\n"
         "sys.exit(0 if ok else 1)\n"

@@ -111,6 +111,13 @@ def _service_record(install: Path, os_name: str = "windows") -> None:
         {"version": 1, "postgres": {"os": os_name, "service": "postgresql-x64-16", "port": 5432}}), encoding="utf-8")
 
 
+def _postgres_env(install: Path) -> None:
+    """The install keeps its data in Postgres (a container, no service record)."""
+    install.mkdir(parents=True, exist_ok=True)
+    (install / ".env").write_text("KAZMA_DATABASE_URL=postgresql://kazma_app@127.0.0.1:5432/kazma\n",
+                                  encoding="utf-8")
+
+
 def _drill(module, target, install):
     return module.Drill("http://127.0.0.1:9191", install, run=target.run, sleep=target.sleep,
                         now=target.now, get=target.get, **({"wall": target.wall} if module is chaos else {}))
@@ -152,6 +159,7 @@ def test_an_unready_target_is_refused_before_any_fault(tmp_path, monkeypatch, ca
 
 
 def test_a_container_outage_ridden_out_passes(tmp_path):
+    _postgres_env(tmp_path)
     target = _Target(OUTAGE)
     result = chaos.step_postgres(_drill(chaos, target, tmp_path))
     assert result.ok, result
@@ -159,6 +167,7 @@ def test_a_container_outage_ridden_out_passes(tmp_path):
 
 
 def test_a_crash_restart_during_the_outage_fails(tmp_path):
+    _postgres_env(tmp_path)
     _guard_log(tmp_path, [(60, "guard.restarting", {"reason": "unhealthy (3 probes)"})])
     result = chaos.step_postgres(_drill(chaos, _Target(OUTAGE), tmp_path))
     assert not result.ok and "crash restarts: 1" in result.observed
@@ -213,8 +222,32 @@ def test_a_launchd_service_is_skipped_not_failed(tmp_path):
 
 
 def test_old_events_before_the_step_do_not_count(tmp_path):
+    _postgres_env(tmp_path)
     _guard_log(tmp_path, [(-3600, "guard.restarting", {"reason": "yesterday"})])
     assert chaos.step_postgres(_drill(chaos, _Target(OUTAGE), tmp_path)).ok
+
+
+def test_an_sqlite_install_skips_the_database_step(tmp_path, monkeypatch):
+    """The drill VM, 2026-11-09: an Express install keeps its data in SQLite,
+    and the step failed trying to stop a container it never had."""
+    monkeypatch.delenv("KAZMA_DATABASE_URL", raising=False)
+    target = _Target(OUTAGE)
+    result = chaos.step_postgres(_drill(chaos, target, tmp_path))
+    assert result.skipped and result.ok and "SQLite" in result.observed
+    assert target.ran == [], "nothing is stopped"
+    # An empty value is no database either; a value is one. (The suite's
+    # shield keeps the variable itself out of the test's environment.)
+    (tmp_path / ".env").write_text("KAZMA_DATABASE_URL=\n", encoding="utf-8")
+    assert chaos.step_postgres(_drill(chaos, _Target(OUTAGE), tmp_path)).skipped
+    _postgres_env(tmp_path)
+    assert not chaos.step_postgres(_drill(chaos, _Target(OUTAGE), tmp_path)).skipped
+
+
+def test_negative_control_the_old_drill_tried_to_stop_a_container_on_sqlite(tmp_path, monkeypatch):
+    monkeypatch.delenv("KAZMA_DATABASE_URL", raising=False)
+    target = _Target(OUTAGE)
+    _old_drill().step_postgres(_drill(_old_drill(), target, tmp_path))
+    assert ["docker", "stop", "kazma-db"] in target.ran
 
 
 # -- the server, Docker, the network, the disk, a reload -----------------------

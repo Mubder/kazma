@@ -165,6 +165,24 @@ class Drill:
                     found.append(rec)
         return found
 
+    def uses_postgres(self) -> bool:
+        """Whether the install keeps its data in Postgres: ``KAZMA_DATABASE_URL``
+        set in its ``.env`` or this process's environment (the name only; its
+        value is never read out)."""
+        import os
+
+        if str(os.environ.get("KAZMA_DATABASE_URL") or "").strip():
+            return True
+        try:
+            text = (self.install / ".env").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return False
+        for line in text.splitlines():
+            name, _, value = line.strip().partition("=")
+            if name.strip() == "KAZMA_DATABASE_URL" and value.strip().strip('"').strip("'"):
+                return True
+        return False
+
     def setup_record(self) -> dict:
         """The database service ``kazma setup postgres`` recorded, or {}."""
         try:
@@ -207,6 +225,11 @@ def _database_control(drill: Drill) -> tuple[list[str], list[str], str, bool] | 
             return f"the {service} service is a launchd job: launchd starts it again at once"
         return (["sudo", "systemctl", "stop", service], ["sudo", "systemctl", "start", service],
                 f"the {service} service", True)
+    if not drill.uses_postgres():
+        # An Express install keeps its data in SQLite: there is no database
+        # server to stop, and stopping a container it never had is no test
+        # (the drill VM, 2026-11-09: "could not stop the kazma-db container").
+        return "this install keeps its data in SQLite (no KAZMA_DATABASE_URL): no database server to stop"
     name = drill.db_container
     return ["docker", "stop", name], ["docker", "start", name], f"the {name} container", False
 
