@@ -36,7 +36,15 @@ def _git(repo: Path, *args: str) -> str:
 
 
 @pytest.fixture
-def repos(tmp_path):
+def repos(tmp_path, monkeypatch):
+    # The machine's git settings do not decide the deploy: with none (a fresh
+    # machine, CI on 2026-11-09), a pull into a checkout with its own commit
+    # stopped at "Need to specify how to reconcile divergent branches". The
+    # developer's own `pull.rebase` had hidden it.
+    empty = tmp_path / "gitconfig"
+    empty.write_text("", encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     origin = tmp_path / "origin.git"
     subprocess.run(["git", "init", "--bare", "-b", "main", str(origin)], capture_output=True, check=True)
     dev = tmp_path / "dev"
