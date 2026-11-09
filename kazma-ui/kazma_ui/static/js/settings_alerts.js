@@ -91,8 +91,17 @@
             };
         },
 
+        // The email field is on the page like the others, so the page's Save
+        // takes it too (live 2026-11-09: the owner typed an address, Save
+        // stayed greyed out, and Kazma Watch never got it).
+        get watchEmailDirty() {
+            return this.alerts.loaded && !!this.alerts.watch && !!this.alerts.watch.paired
+                && String(this.alerts.watchEmail || '').trim() !== this._watchEmailSaved;
+        },
+
         get alertsDirty() {
-            return this.alerts.loaded && JSON.stringify(this._alertsDiffable()) !== this.alertsSnapshot;
+            return this.alerts.loaded && (JSON.stringify(this._alertsDiffable()) !== this.alertsSnapshot
+                || this.watchEmailDirty);
         },
 
         toggleAlertList(which, item, on) {
@@ -110,6 +119,7 @@
             a.lifecycle = (snap.lifecycle_events || []).slice();
             a.noticesChoice = snap.notices_to_chats === false ? 'bell' : 'chats';
             a.guardChat = String(snap.guard_chat || '');
+            a.watchEmail = this._watchEmailSaved;
         },
 
         async saveAlerts() {
@@ -121,21 +131,29 @@
             for (const field of Object.keys(curr)) {
                 if (JSON.stringify(curr[field]) !== JSON.stringify(prev[field])) body[field] = curr[field];
             }
-            if (!Object.keys(body).length) {
+            const emailChanged = this.watchEmailDirty;
+            if (!Object.keys(body).length && !emailChanged) {
                 showToast(_k('settings.hub.nothing_to_save_no_changes', 'Nothing to save — no changes.'), 'info');
                 return;
             }
             this.alerts.saving = true;
-            try {
-                await window.kazmaSave('/api/settings/alerts', { method: 'PUT', body });
-                this.alertsSnapshot = JSON.stringify(curr);
-                showToast(_k('settings.hub.saved', 'Saved.'), 'success');
-                // The guard reads its chat at its next page; the page shows
-                // what is stored now.
-                await this.loadAlerts();
-            } catch (e) {
-                showToast(_k('settings.alerts.save_failed', 'Not saved: {error}', { error: e.message }), 'error');
+            let saved = true;
+            if (Object.keys(body).length) {
+                try {
+                    await window.kazmaSave('/api/settings/alerts', { method: 'PUT', body });
+                    this.alertsSnapshot = JSON.stringify(curr);
+                } catch (e) {
+                    saved = false;
+                    showToast(_k('settings.alerts.save_failed', 'Not saved: {error}', { error: e.message }), 'error');
+                }
             }
+            // The email is kept and told to Kazma Watch by its own route; its
+            // answer is shown under the Kazma Watch buttons.
+            if (saved && emailChanged) saved = await this.saveWatchSettings();
+            if (saved) showToast(_k('settings.hub.saved', 'Saved.'), 'success');
+            // The guard reads its chat at its next page; the page shows
+            // what is stored now.
+            if (saved && !emailChanged) await this.loadAlerts();
             this.alerts.saving = false;
         },
 
@@ -367,9 +385,14 @@
                 off: _k('settings.alerts.channel_off', 'not set up'),
             })[v] || String(v || '');
             const reason = ((res.reasons || {}).email) || '';
-            const email = ch.email === 'failed' && reason
-                ? _k('settings.alerts.channel_failed_because', 'refused it: {reason}', { reason: this._emailReason(reason) })
-                : state(ch.email);
+            let email = state(ch.email);
+            if (ch.email === 'failed' && reason) {
+                email = _k('settings.alerts.channel_failed_because', 'refused it: {reason}', { reason: this._emailReason(reason) });
+            } else if (ch.email === 'off' && !this._watchEmailSaved) {
+                // Off because Kazma Watch was told no address, not because its
+                // email is missing on Cloudflare's side.
+                email = _k('settings.alerts.channel_off_no_address', 'no address yet: enter one above and press Save');
+            }
             return _k('settings.alerts.watch_test_result', 'Kazma Watch sent a test page. Telegram: {telegram}. Email: {email}.', {
                 telegram: state(ch.telegram), email,
             });
@@ -392,15 +415,19 @@
             return _k('settings.alerts.email_reason_other', 'Cloudflare refused it ({code})', { code });
         },
 
+        /** Keep the email and tell Kazma Watch it and the zone. True when it did. */
         async saveWatchSettings() {
-            if (this.watchBusy) return;
+            if (this.watchBusy) return false;
             this.watchBusy = 'tell';
             this.watchResult = { note: '', tone: '' };
+            let ok = false;
             try {
                 const res = await window.kazmaSave('/api/settings/alerts/watch/settings', {
-                    method: 'PUT', body: { email_to: this.alerts.watchEmail },
+                    method: 'PUT', body: { email_to: String(this.alerts.watchEmail || '').trim() },
                 });
                 this.watchResult = { note: _k('settings.alerts.watch_told', 'Kazma Watch now writes times in {zone}.', { zone: (res.told && res.told.settings && res.told.settings.timezone) || 'UTC' }), tone: 'tone-success' };
+                ok = true;
+                this._watchEmailSaved = String(this.alerts.watchEmail || '').trim();
                 await this.loadAlerts();
             } catch (e) {
                 const body = e.body || {};
@@ -413,6 +440,7 @@
                 };
             }
             this.watchBusy = '';
+            return ok;
         },
 
         _OUTSIDE_CONDITIONS: {

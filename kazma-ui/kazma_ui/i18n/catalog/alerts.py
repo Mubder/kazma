@@ -195,6 +195,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.alerts.channel_failed": {"en": "refused it", "ar": "رفضها"},
     "settings.alerts.channel_off": {"en": "not set up", "ar": "غير مُعدّ"},
     "settings.alerts.channel_failed_because": {"en": "refused it: {reason}", "ar": "رفضها: {reason}"},
+    "settings.alerts.channel_off_no_address": {
+        "en": "no address yet: enter one above and press Save",
+        "ar": "لا عنوان بعد: اكتبه أعلاه واضغط حفظ",
+    },
     "settings.alerts.email_reason_sender": {
         "en": "alerts.kazma.ai is not verified for sending in Cloudflare yet",
         "ar": "لم يُوثَّق alerts.kazma.ai للإرسال في Cloudflare بعد",
