@@ -211,6 +211,8 @@ KEY_RULES: tuple[KeyRule, ...] = (
     KeyRule("connectors.", SETTING, "chat apps and integrations (their keys follow the key rule)"),
     KeyRule("context.", SETTING, "how much of a chat the model is given"),
     KeyRule("cron.timezone", SETTING, "the reminders' time zone"),
+    KeyRule("guard.telegram.chat_id", SETTING, "the Telegram chat the guard pages when Kazma is "
+            "down (Settings -> Alerts), and Kazma's direct alert fallback"),
     KeyRule("runs.runbooks", SETTING, "which automatic first steps the run supervisor may take "
             "on a stuck or failed run (all off by default)"),
     KeyRule("cron.catchup_minutes", SETTING, "how late a scheduled job may still run after downtime"),

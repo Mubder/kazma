@@ -29,7 +29,7 @@ def _clean(monkeypatch):
 def sent(monkeypatch):
     """Capture dispatched messages instead of delivering them."""
     out: list[str] = []
-    monkeypatch.setattr(ops_alerts, "_dispatch", out.append)
+    monkeypatch.setattr(ops_alerts, "_dispatch", lambda text, *_a, **_k: out.append(text))
     return out
 
 
@@ -81,7 +81,7 @@ def test_key_describes_the_condition_not_the_instance(sent):
 
 
 def test_alert_never_raises_even_when_delivery_explodes(monkeypatch):
-    def _boom(_text):
+    def _boom(_text, *_a, **_k):
         raise RuntimeError("bus is gone")
 
     monkeypatch.setattr(ops_alerts, "_dispatch", _boom)

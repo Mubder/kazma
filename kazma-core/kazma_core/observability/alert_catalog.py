@@ -65,6 +65,7 @@ __all__ = [
     "entry_for",
     "inside_hold",
     "opens_incident",
+    "recovery_keys",
 ]
 
 SENDERS = ("ops", "lifecycle", "guard", "watch", "cloudflare")
@@ -324,6 +325,7 @@ CATALOG: tuple[_Entry, ...] = (
            "واجه حارس كاظمه خطأً في شيفرته"),
     _guard("guard.crashed", "critical", "Kazma's guard crashed", "تعطّل حارس كاظمه"),
     _guard("guard.page_command", "error", "A page sent through the guard's --page", "تنبيه أُرسل عبر --page في الحارس"),
+    _guard("guard.test_page", "info", "Test page", "صفحة تجريبية", page="/settings?tab=alerts"),
     _guard("health.dependency_down", "warn", "Kazma is up, but not ready", "كاظمه يعمل لكنه غير جاهز",
            closed_by="health.ready_again", condition="dependency_down"),
     _guard("health.ready_again", "success", "Kazma is ready again", "عاد كاظمه جاهزًا"),
@@ -441,7 +443,9 @@ def _key_regex(key: str) -> re.Pattern[str]:
 
 
 def entry_for(key: str) -> _Entry | None:
-    """The catalog entry a raised *key* belongs to (``_entry_for``)."""
+    """The catalog entry a raised *key* belongs to (``_entry_for``): page
+    receipts and the holds read its condition and owner, Settings -> Alerts'
+    recent alerts its severity, titles and page (``as_dict``)."""
     return _entry_for(key)
 
 
@@ -500,6 +504,11 @@ def _entry_for(key: str) -> _Entry | None:
         if _key_regex(entry.key).match(key):
             return entry
     return None
+
+
+def recovery_keys() -> frozenset[str]:
+    """The keys that say a condition is over (some entry's ``closed_by``)."""
+    return frozenset(e.closed_by for e in CATALOG if e.closed_by)
 
 
 # -- the copies the guard and the observer read --------------------------------

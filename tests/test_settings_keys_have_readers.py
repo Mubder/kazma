@@ -37,6 +37,8 @@ WRITERS = (
     "kazma-core/kazma_core/settings_manager.py",
     "kazma-ui/kazma_ui/settings.py",
     "kazma-ui/kazma_ui/routes_direct/settings.py",
+    # Settings -> Alerts (the unified alerts plan, Stage 3).
+    "kazma-ui/kazma_ui/settings_alerts.py",
 )
 PAGE_SCRIPTS = re.compile(r"kazma-ui/kazma_ui/static/js/settings[^/]*\.js$")
 PRODUCT = re.compile(r"kazma-(core|ui|gateway|tui|cli|skills)/kazma_[a-z]+/.+\.py$")

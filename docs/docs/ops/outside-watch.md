@@ -56,15 +56,19 @@ not signed with it, is more than five minutes old, or was already received.
 The observer runs on your Cloudflare account, so setting it up needs your
 Cloudflare, Telegram and (optionally) Healthchecks.io accounts. The steps,
 from creating its database to deploying it, are in
-`deploy/observer/README.md`. Then, on the machine Kazma runs on:
+`deploy/observer/README.md`. Then pair this install, in **Settings → Alerts
+→ Kazma Watch** (paste the pairing token you gave the observer and press
+**Pair**), or on the machine Kazma runs on:
 
 ```bash
 kazma observer pair
 ```
 
-It asks for the pairing token you gave the observer, registers this install
-and writes the pairing key into Kazma's own folder, readable by your
-account only. Within a minute the guard is sending heartbeats.
+Either way the token is used once and never kept: Kazma registers this
+install and writes the pairing key into Kazma's own folder, readable by your
+account only, then tells the observer your time zone (Settings → Memory's
+reminders zone), so its messages give times in it. Within a minute the guard
+is sending heartbeats.
 
 To see what it sees:
 
@@ -72,16 +76,25 @@ To see what it sees:
 kazma observer status
 ```
 
-The same is in **Settings → System → Outside watch**: the last heartbeat the
-observer took, what it concludes now, this week's uptime and incidents. The
-daily digest gains a line too ("Outside watch: up 99.9 % this week, 1
-incident (machine not reachable, 14 min)").
+The same is in **Settings → Alerts → Kazma Watch**: the last heartbeat the
+observer took, what it concludes now, this week's uptime and incidents, and
+the time zone its messages use. **Send a test page** has the observer send
+one message through its own bot (and email, once set up) and says which
+took it; **Tell Kazma Watch** sends it the time zone again and the email
+address to page. The daily digest gains a line too ("Outside watch: up
+99.9 % this week, 1 incident (machine not reachable, 14 min)").
 
-To stop it, and to delete everything the observer kept about this install:
+To stop it, press **Unpair** there (tick "Also delete" to delete everything
+the observer kept about this install), or:
 
 ```bash
 kazma observer unpair --forget
 ```
+
+The page needs no token for these: each request is signed with the
+install's own pairing key (`POST /v1/settings`, `/v1/test-page`,
+`/v1/leave`). An observer deployed before them needs `schema.sql` applied
+once more (it adds the `install_settings` table) and `npx wrangler deploy`.
 
 ## The status page
 

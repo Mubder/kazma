@@ -372,14 +372,18 @@ def test_the_app_sends_the_card_in_the_background_with_the_adapters():
 
 
 def test_settings_offers_every_message_and_saves_the_list():
+    # Settings -> Alerts (the unified alerts plan, Stage 3): the tab lists the
+    # names the server gives (EVENT_NAMES), and its route saves the list
+    # (tests/test_settings_alerts.py saves it through the real route).
     html = (REPO / "kazma-ui/kazma_ui/templates/settings.html").read_text(encoding="utf-8")
-    core = (REPO / "kazma-ui/kazma_ui/static/js/settings_core.js").read_text(encoding="utf-8")
-    hub = (REPO / "kazma-ui/kazma_ui/static/js/settings_hub.js").read_text(encoding="utf-8")
-    assert 'x-for="ev in lifecycleEventNames"' in html
-    assert "toggleRoutingList(adapterRouting.lifecycleEvents, ev" in html
-    assert "lifecycleEventNames: ['started', 'startup_failed', 'starting', 'shutting_down']" in core
+    page = (REPO / "kazma-ui/kazma_ui/static/js/settings_alerts.js").read_text(encoding="utf-8")
+    route = (REPO / "kazma-ui/kazma_ui/settings_alerts.py").read_text(encoding="utf-8")
+    assert 'x-for="ev in alerts.lifecycleNames"' in html
+    assert "toggleAlertList('lifecycle', ev" in html
+    assert "lifecycleNames: ['started', 'startup_failed', 'starting', 'shutting_down']" in page
     assert list(ln.EVENT_NAMES) == ["started", "startup_failed", "starting", "shutting_down"]
-    assert "single('notifications.lifecycle.events', curr.lifecycleEvents, 'notifications')" in hub
+    assert '"names": list(EVENT_NAMES)' in route
+    assert '("notifications.lifecycle.events", value, category or "notifications")' in route
 
 
 @pytest.fixture

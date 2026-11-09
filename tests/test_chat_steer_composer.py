@@ -1497,10 +1497,13 @@ def test_ops_alert_channel_routing_and_adapter_page() -> None:
     assert '"telegram" not in channels' in src
 
     settings_html = _settings_page_english()
-    assert "toggleRoutingList" in settings_html  # v2 selector helper
+    assert "toggleRoutingList" in settings_html  # v2 selector helper (the swarm's routes)
+    # Where alerts go moved to Settings -> Alerts (the unified alerts plan,
+    # Stage 3): the tab's switches, saved by its route.
+    assert "toggleAlertList('routes', r" in settings_html
     assert "notifications.ops.channels" in (
         Path(__file__).resolve().parent.parent
-        / "kazma-ui" / "kazma_ui" / "static" / "js" / "settings_hub.js"
+        / "kazma-ui" / "kazma_ui" / "settings_alerts.py"
     ).read_text(encoding="utf-8")
     life = (
         Path(__file__).resolve().parent.parent
@@ -1508,7 +1511,8 @@ def test_ops_alert_channel_routing_and_adapter_page() -> None:
     ).read_text(encoding="utf-8")
     assert "bus_send_targets" in life
     assert "_ops_channels" in life
-    assert "Alerts go to" in settings_html
+    # "Alerts go to" is Settings -> Alerts' section now (unified alerts, Stage 3).
+    assert "Where Kazma&#39;s alerts go" in settings_html and "Server status messages" in settings_html
     assert "Adapters &amp; Routes" in settings_html
     assert "Delivery routing" in settings_html
     # The swarm output form is GONE from the Swarm page (moved, not
@@ -1634,7 +1638,7 @@ def test_four_delivery_routes_complete_fields() -> None:
         "testRoute('telegram')",
         "testRoute('discord')",
         "testRoute('slack')",
-        "alertRoutes",
+        "alerts.routes",                      # Settings -> Alerts (unified alerts, Stage 3)
         "swarmRoutes",
         "telegram-group",
     ):
@@ -1656,14 +1660,16 @@ def test_four_delivery_routes_complete_fields() -> None:
         "connectors.telegram.swarm_chat_id",
         "connectors.discord.swarm_channel_id",
         "connectors.slack.swarm_channel_id",
-        "notifications.ops.channels",
         "notifications.swarm.routes",
     ):
         assert key in hub, key
     # The loader must read the GROUPED shape get_all() actually produces
     # (full dotted keys under the category) — the stripped read was the
     # "routing choices don't hold after save" bug (2026-09-03 v5).
-    assert "grouped(notif, 'notifications', 'notifications.ops.channels')" in hub
+    assert "grouped(notif, 'notifications', 'notifications.swarm.routes')" in hub
+    # Where alerts go is Settings -> Alerts' (unified alerts, Stage 3): one
+    # writer, so the two tabs cannot save it over each other.
+    assert "single('notifications.ops.channels'" not in hub
     assert "grouped(conn, 'connectors', 'connectors.telegram.swarm_chat_id')" in hub
 
 

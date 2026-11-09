@@ -87,6 +87,12 @@ owner's credentials; Kazma never holds them.
    npx wrangler d1 execute kazma-observer --remote --file=schema.sql
    ```
 
+   Every statement is idempotent: run it again after an update that adds a
+   table (one page per problem added `incident_notes`, Cloudflare's
+   notifications `cloudflare_notices` and `cloudflare_seen`, Settings ->
+   Alerts `install_settings`, which keeps the time zone and email address
+   Kazma tells the observer).
+
 2. **The watch bot.** In Telegram, create a bot with @BotFather and call it
    "Kazma Watch" (a bot of its own, so a fault in Kazma's bot cannot silence
    the observer). Send it any message, then read your chat id from
@@ -149,7 +155,8 @@ owner's credentials; Kazma never holds them.
     registers the install, and writes `<install>/.kazma/observer.key`,
     readable by this account only. The guard sends its first heartbeat
     within a minute. `kazma observer status` shows what the guard and the
-    observer see; Settings → System → Outside watch shows the same.
+    observer see; Settings → Alerts → Kazma Watch shows the same, and can
+    pair (and unpair) from the page too.
 
 ## Cloudflare's notifications
 

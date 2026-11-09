@@ -704,12 +704,55 @@ html[data-theme="light"] { color-scheme: only light; }
 .runs-runbook-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .runs-runbook { display: flex; align-items: flex-start; gap: 8px; font-size: 0.85rem; }
 
-/* Settings -> System -> Outside watch: the paired observer's facts. A class,
-   never an inline display: the element is x-show'n (an inline display wins
-   over Alpine's display:none). */
+/* Settings -> Alerts: facts as a two-column list (the guard's pager, Kazma
+   Watch). A class, never an inline display: the element is x-show'n (an
+   inline display wins over Alpine's display:none). */
 .outside-watch-grid {
   display: grid;
   grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
   gap: 4px 16px;
   margin: 8px 0;
+}
+/* A card a third of the page wide: the label column gets its share, and an
+   address or a long fact wraps inside its own (a dd's default inset took 40px). */
+.alerts-grid .outside-watch-grid { grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); }
+.outside-watch-grid dt { color: var(--text-secondary); }
+.outside-watch-grid dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+/* Settings -> Alerts (the unified alerts plan, Stage 3): the sections as
+   cards side by side, a route row (icon tile, name and line, switch), the
+   buttons under a section, and the Save row. Layout only: the colours are
+   the shared classes'. */
+.alerts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+  gap: var(--sp-5);
+  align-items: start;
+}
+.alerts-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  cursor: pointer;
+}
+.alerts-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.alerts-row-name { font-weight: 600; color: var(--text-primary); }
+.alerts-row-line { font-size: 0.86rem; color: var(--text-muted); }
+.alerts-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: var(--sp-4);
+}
+.alerts-save {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: var(--sp-5);
 }

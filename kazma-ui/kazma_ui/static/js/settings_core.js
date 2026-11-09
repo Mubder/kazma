@@ -150,7 +150,6 @@
         turnSpendingSaving: false,
         chatReasoning: { level: 'default', applies: null, provider: '' },
         chatReasoningSaving: false,
-        outsideWatch: { loaded: false, failed: false, paired: false, guard: null, observer: null },
         proxy: { provider: 'none', host: 'portal.anyip.io', port: '1080', username: '', password: '', network: 'mixed', country: '', session_sticky: false },
         proxyTestResult: null,
         proxyTesting: false,
@@ -273,16 +272,10 @@
             tgGroupEnabled: false, tgGroupChat: '', tgGroupToken: '',
             discordToken: '', discordEnabled: true, discordGuild: '', discordAllowed: '', discordChannel: '',
             slackToken: '', slackAppToken: '', slackWorkspace: '', slackAllowed: '', slackEnabled: true, slackChannel: '',
-            alertRoutes: [], swarmRoutes: [],
-            // Server status messages (notifications.lifecycle.events).
-            lifecycleEvents: ['started', 'startup_failed'],
+            // Where alerts go and the server status messages moved to
+            // Settings -> Alerts (settings_alerts.js).
+            swarmRoutes: [],
         },
-        // Every server status message, in the order the card lists them
-        // (kazma_core.lifecycle_notifier.EVENT_NAMES).
-        lifecycleEventNames: ['started', 'startup_failed', 'starting', 'shutting_down'],
-        // "Send a test alert": one alert through the saved routes; the
-        // result names the routes that took it.
-        opsTestAlert: { sending: false, result: null },
         adapterRoutingSaving: false,
         adapterRoutingSnapshot: '',
         routingShow: { tgToken: false, tgGroupToken: false, discordToken: false, slackToken: false, slackAppToken: false },
@@ -929,6 +922,7 @@
                     break;
                 case 'models': break; // Loaded on init
                 case 'agent': break;
+                case 'alerts': await this.loadAlerts(); break;
                 case 'memory':
                     await Promise.all([this.loadAboutMe(), this.loadEmbedder(), this.loadTimeTravel(), this.loadCronTimezone()]);
                     if (scrollEmbedder || (window.location.hash || '').includes('embedder')) {
@@ -944,7 +938,7 @@
                 case 'shortcuts': this.shortcutConflicts = this.detectConflicts(); break;
                 case 'account': await this.loadAccount(); break;
                 case 'tools': await this.loadTools(); break;
-                case 'system': await this.loadDiagnostics(); await this.loadLogs(); await this.loadVaultStatus(); await this.loadLogging(); await this.loadSwarmRetention(); await this.loadCheckpointRetention(); await this.loadTurnTimeout(); await this.loadTurnSpending(); await this.loadChatReasoning(); await this.loadOutsideWatch(); await this.loadProxy(); await this.loadRestoreUndo(); break;
+                case 'system': await this.loadDiagnostics(); await this.loadLogs(); await this.loadVaultStatus(); await this.loadLogging(); await this.loadSwarmRetention(); await this.loadCheckpointRetention(); await this.loadTurnTimeout(); await this.loadTurnSpending(); await this.loadChatReasoning(); await this.loadProxy(); await this.loadRestoreUndo(); break;
                 case 'backup': await Promise.all([this.loadBackupList(), this.loadOffsiteConfig(), this.syncBackupState()]); break;
                 case 'packages': await this.loadPackages(); break;
                 case 'import': break;

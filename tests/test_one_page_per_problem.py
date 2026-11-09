@@ -77,7 +77,7 @@ def inside(monkeypatch, tmp_path):
     sent: list[str] = []
     box = SimpleNamespace(sent=sent, outcome=True, pages=tmp_path / "kazma_pages.json")
 
-    def _dispatch(text, on_delivery=None):
+    def _dispatch(text, on_delivery=None, **_kw):  # notice=: Settings -> Alerts' Notices
         sent.append(text)
         if on_delivery is not None:
             on_delivery(box.outcome)
@@ -263,6 +263,48 @@ def test_kazma_keeps_a_receipt_until_the_recovery(inside):
     page_receipts._reset_for_tests()
     ops_alerts.alert("backup.offsite_failed", "Backups are local only")
     assert _file_pages(inside) == []
+
+
+def test_one_delivery_receipt_feeds_the_heartbeat_and_recent_alerts(inside, caplog):
+    """Stages 2 and 3 meet in ``ops_alerts._Receipt``: told an alert's outcome
+    once, it writes the receipt line Settings -> Alerts' recent alerts read
+    and the open page receipt the heartbeat carries, and they agree."""
+    caplog.set_level(logging.INFO, logger="kazma_core.observability.ops_alerts")
+    told: list = []
+    inside.outcome = False
+    ops_alerts.alert("database.away", "Kazma's database is not answering", severity="error",
+                     on_delivery=told.append)
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith(ops_alerts.RECEIPT_MARKER)]
+    assert lines == [f"{ops_alerts.RECEIPT_MARKER}database.away: not delivered"]
+    assert {p["key"]: p["delivered"] for p in _file_pages(inside)} == {"database.away": False}
+    assert told == [False]
+    # An alert that opens no incident still leaves its line, and no receipt.
+    inside.outcome = True
+    page_receipts._reset_for_tests()
+    ops_alerts.alert("backup.offsite_failed", "Backups are local only")
+    assert caplog.records[-1].getMessage() == f"{ops_alerts.RECEIPT_MARKER}backup.offsite_failed: delivered"
+    assert _file_pages(inside) == []
+
+
+def test_one_outcome_feeds_the_pager_record_and_the_held_pages_receipt(monkeypatch):
+    """The guard hears a page's outcome once (``Notifier._heard``): the state
+    file's ``pager`` (Settings -> Alerts) and, for a held page that went out
+    after all, its receipt (the heartbeat) both say delivered."""
+    g = _bare_guard(monkeypatch)
+    g.notify.on_outcome = g._note_page_outcome
+    monkeypatch.setattr(g.notify, "_post", lambda text, delayed=False: True)
+    monkeypatch.setattr(g.notify, "_resolve", lambda: None)
+    assert g._page("critical", "Disk almost full on C:", kind="disk.critical", force=True)
+    state = guard._read_state()
+    assert state["pages"][0]["delivered"] is False and state["pager"]["ok"] is False
+    assert state["pager"]["held"] == 1 and state["pager"]["error"] == "not configured"
+    g.notify.token, g.notify.chat = "1:x", "42"
+    g.notify.flush_held()
+    state = guard._read_state()
+    assert state["pages"][0]["delivered"] is True
+    assert state["pager"]["ok"] is True and state["pager"]["delayed"] is True
+    # The record names the page, not the "Delayed" line wrapped around it.
+    assert state["pager"]["head"] == "\U0001f6a8 [Guard] Disk almost full on C:"
 
 
 def test_a_server_no_guard_started_writes_no_receipts(monkeypatch, tmp_path):

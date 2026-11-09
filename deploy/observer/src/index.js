@@ -11,6 +11,8 @@
 //   POST /v1/pair, /v1/unpair  `kazma observer pair` / `unpair` (PAIRING_TOKEN)
 //   POST /v1/cloudflare  Cloudflare's notifications (CF_WEBHOOK_SECRET;
 //                  cloudflare.js)
+//   POST /v1/settings, /v1/test-page, /v1/leave  Kazma's Settings -> Alerts,
+//                  signed with the install's key (watch_settings.js)
 //
 // Each run pings Healthchecks.io, which emails the owner if the runs stop.
 
@@ -23,6 +25,7 @@ import { openInside } from "./receipts.js";
 import { ninetyDays, statusPage, uptimePct } from "./page.js";
 import { Store } from "./store.js";
 import { INSTALL_RE, sameText, signingHeaders, verify } from "./verify.js";
+import { handleLeave, handleTestPage, handleWatchSettings } from "./watch_settings.js";
 
 const DAY = 86400;
 const MAX_BODY = 4096;
@@ -139,7 +142,13 @@ async function handleSummary(request, env, now) {
       causes: i.causes,
       started_at: i.started_at,
       ended_at: i.ended_at,
+      paged_at: i.paged_at ?? null,
+      recovery_paged_at: i.recovery_paged_at ?? null,
+      // Who paged it instead of Kazma Watch (an inside page's catalog key, a
+      // Cloudflare notice's, "pending"): no page of Kazma Watch's was due.
+      held_by: i.held_by ?? null,
     })),
+    settings: await store.watchSettings(h.install),
   });
 }
 
@@ -179,6 +188,11 @@ export async function handle(request, env, now, deps = {}) {
     return handleCloudflare(request, env, now, {
       installs: paired.length ? paired : [SITE], fetcher: d.fetcher, makeMessage: deps.makeMessage });
   }
+  if (route === "POST /v1/settings") return handleWatchSettings(request, env, now);
+  if (route === "POST /v1/test-page") {
+    return handleTestPage(request, env, now, { fetcher: d.fetcher, makeMessage: deps.makeMessage });
+  }
+  if (route === "POST /v1/leave") return handleLeave(request, env, now);
   if (route === "GET /") return handleStatusPage(request, env, now, d);
   return json({ error: "not_found" }, 404);
 }
@@ -234,17 +248,22 @@ export async function runMinute(env, now, deps = {}) {
     // carries, those open when the heartbeats stopped, Cloudflare's notices.
     const fresh = !!(heartbeat && now - heartbeat.received_at <= FRESH_S);
     const body = heartbeat ? heartbeat.body || {} : {};
+    // The owner's zone and email recipient, as Kazma's Settings -> Alerts
+    // told them (watch_settings.js): the cards' times, the email's address.
+    const told = install === SITE ? null : await store.watchSettings(install);
     let { state, pages } = step(prev, {
       ...diag,
       pages: fresh ? body.pages ?? null : null,
       inside: heartbeat && !fresh ? openInside(body.pages) : [],
       notices,
-    }, now);
+    }, now, { timeZone: told ? told.timezone || "" : "" });
     state.ready = readyNow;
     await closeHeldNotice(store, state.closed, now);
     const sent = [];
     for (const p of pages) {
-      const ok = await page(env, p.text, now, { fetcher, makeMessage: deps.makeMessage });
+      const ok = await page(env, p.text, now, {
+        fetcher, makeMessage: deps.makeMessage, emailTo: told ? told.email_to : null,
+      });
       sent.push({ kind: p.kind, ok, text: p.text });
       state = settle(state, p, ok, now);
     }

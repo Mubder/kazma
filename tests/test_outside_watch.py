@@ -308,6 +308,7 @@ def test_the_observer_worker_tests_pass():
     # Every test file the Worker has (*.test.mjs), not a list kept by hand.
     files = sorted(p.name for p in (ROOT / "deploy" / "observer" / "test").glob("*.test.mjs"))
     assert "observer.test.mjs" in files and "one_page.test.mjs" in files
+    assert "watch_settings.test.mjs" in files
     result = subprocess.run([node, "--test", *(f"test/{name}" for name in files)],
                             cwd=ROOT / "deploy" / "observer", capture_output=True, text=True,
                             encoding="utf-8", errors="replace", timeout=300, check=False)

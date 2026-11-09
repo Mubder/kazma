@@ -76,6 +76,15 @@ def run(args: list[str]) -> int:
             done = outside_watch.pair_with_observer(options.url, _token())
             print(f"Paired as install {done['install']} with {done['url']}.")
             print(f"The key is in {done['path']} (readable by this account only).")
+            # Kazma Watch writes its cards' times in the owner's zone once told
+            # (Settings -> Alerts does the same after pairing from the page).
+            told = outside_watch.push_watch_settings()
+            if told.get("ok"):
+                zone = (told.get("settings") or {}).get("timezone") or "UTC"
+                print(f"Kazma Watch was told your time zone ({zone}).")
+            else:
+                print(f"Kazma Watch was not told your time zone ({told.get('error')}): "
+                      "press Tell Kazma Watch in Settings -> Alerts.")
             print("The guard sends its first heartbeat within a minute; check with: kazma observer status")
             return 0
         if options.action == "unpair":

@@ -114,3 +114,17 @@ CREATE TABLE IF NOT EXISTS cloudflare_seen (
   digest       TEXT PRIMARY KEY,
   received_at  INTEGER NOT NULL
 );
+
+-- What Kazma told Kazma Watch of its owner (Settings -> Alerts, the unified
+-- alerts plan's Stage 3; src/watch_settings.js): the time zone its cards'
+-- times are written in, and the email recipient. ``settings_ts`` and
+-- ``test_ts`` are the signed timestamps of the last settings and test page
+-- accepted: a recorded request cannot be sent again. Removed on unpair.
+CREATE TABLE IF NOT EXISTS install_settings (
+  install      TEXT PRIMARY KEY,
+  timezone     TEXT,
+  email_to     TEXT,
+  settings_ts  INTEGER NOT NULL DEFAULT 0,
+  test_ts      INTEGER NOT NULL DEFAULT 0,
+  updated_at   INTEGER NOT NULL DEFAULT 0
+);

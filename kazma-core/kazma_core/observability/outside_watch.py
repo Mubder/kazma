@@ -13,9 +13,16 @@ is what Kazma itself does with it:
   account. The guard reads it and starts sending (``OutsideWatch`` in
   ``scripts/service/kazma_guard.py``). Pairing is the switch: an install not
   paired sends nothing.
-* :func:`outside_status` -- Settings -> System, "Outside watch": the guard's view
+* :func:`outside_status` -- Settings -> Alerts, "Kazma Watch": the guard's view
   (the last heartbeat the observer acknowledged) and the observer's (the
-  condition now, the last incident), read with a request signed by the key.
+  condition now, the week's incidents, what it knows of the owner), read
+  with a request signed by the key.
+* :func:`push_watch_settings`, :func:`watch_test_page`, :func:`leave_observer`
+  -- Settings -> Alerts (the unified alerts plan, Stage 3): tell Kazma Watch
+  the owner's time zone (``cron.timezone``: its cards' times) and the email
+  recipient (``notifications.watch.email_to``); have it send one test card
+  through its own channels and say which took it; stop being watched. Each is
+  a request signed by the install's key, never the pairing token.
 * :func:`outside_digest_line` -- the daily digest's line: up % this week and the
   week's incidents.
 
@@ -29,6 +36,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import secrets
 import subprocess
 import threading
@@ -45,9 +53,13 @@ __all__ = [
     "DEFAULT_OBSERVER_URL",
     "PairingError",
     "outside_digest_line",
+    "EMAIL_TO_KEY",
+    "leave_observer",
     "outside_status",
     "pair_with_observer",
+    "push_watch_settings",
     "unpair_from_observer",
+    "watch_test_page",
 ]
 
 DEFAULT_OBSERVER_URL = "https://status.kazma.ai"
@@ -69,12 +81,24 @@ _CAUSE_WORDS = {
     "unreachable": "not reachable",
 }
 
+#: Who Kazma Watch emails (Settings -> Alerts): kept here so it is told again
+#: after a new pairing, and sent to the observer with the time zone.
+EMAIL_TO_KEY = "notifications.watch.email_to"
+_EMAIL_RE = re.compile(r"^[^\s@<>\"(),;:]{1,64}@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+                       r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$")
+
 _cache_lock = threading.Lock()
 _cache: dict[str, Any] = {"at": 0.0, "key": None, "value": None}
 
 
 class PairingError(RuntimeError):
-    """Pairing or unpairing did not happen; the message says why."""
+    """Pairing or unpairing did not happen; the message says why, ``code``
+    in a word a page can say in its own language (``bad_url``, ``bad_token``,
+    ``unreachable``, ``refused``, ``not_restricted``)."""
+
+    def __init__(self, message: str, code: str = "failed") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 def _pairing_path() -> Path:
@@ -172,7 +196,8 @@ def _write_pairing(data: dict[str, Any]) -> Path:
     os.close(fd)
     try:
         if not _restrict_to_owner(tmp):
-            raise PairingError(f"could not restrict {tmp} to this account; the key was not written")
+            raise PairingError(f"could not restrict {tmp} to this account; the key was not written",
+                               "not_restricted")
         with tmp.open("w", encoding="utf-8") as fh:
             json.dump(data, fh)
         os.replace(tmp, path)
@@ -180,25 +205,27 @@ def _write_pairing(data: dict[str, Any]) -> Path:
         tmp.unlink(missing_ok=True)
     if not _restrict_to_owner(path):
         path.unlink(missing_ok=True)
-        raise PairingError(f"could not restrict {path} to this account; the pairing was removed")
+        raise PairingError(f"could not restrict {path} to this account; the pairing was removed",
+                           "not_restricted")
     return path
 
 
 def _post_pairing(url: str, token: str, route: str, body: dict[str, Any]) -> dict[str, Any]:
     if not _allowed_url(url):
-        raise PairingError(f"the observer's address must be https: {url}")
+        raise PairingError(f"the observer's address must be https: {url}", "bad_url")
     try:
         with httpx.Client(timeout=_TIMEOUT_S, follow_redirects=False, trust_env=False) as client:
             res = client.post(f"{url}{route}", json=body, headers={"Authorization": f"Bearer {token}"})
     except httpx.HTTPError as exc:
-        raise PairingError(f"the observer did not answer ({type(exc).__name__})") from exc
+        raise PairingError(f"the observer did not answer ({type(exc).__name__})", "unreachable") from exc
     try:
         data = res.json()
     except ValueError:
         data = {}
     if res.status_code != 200 or not isinstance(data, dict) or not data.get("ok"):
         code = data.get("error") if isinstance(data, dict) else None
-        raise PairingError(f"the observer refused: HTTP {res.status_code} {code or ''}".strip())
+        raise PairingError(f"the observer refused: HTTP {res.status_code} {code or ''}".strip(),
+                           "bad_token" if code == "bad_pairing_token" else "refused")
     return data
 
 
@@ -207,7 +234,8 @@ def pair_with_observer(url: str, token: str) -> dict[str, str]:
     and write the pairing file. Returns ``{"install", "url", "path"}``."""
     url = (url or DEFAULT_OBSERVER_URL).rstrip("/")
     if not token or len(token.strip()) < 32:
-        raise PairingError("the pairing token is missing or too short (the observer's PAIRING_TOKEN)")
+        raise PairingError("the pairing token is missing or too short (the observer's PAIRING_TOKEN)",
+                           "bad_token")
     install = _install_hash()
     key = secrets.token_urlsafe(32)
     _post_pairing(url, token.strip(), "/v1/pair", {"install": install, "key": key})
@@ -265,7 +293,7 @@ def _observer_summary(pairing: dict[str, str] | None = None, *, fresh: bool = Fa
     else:
         if isinstance(data, dict):
             value = {"ok": True, **{k: data.get(k) for k in (
-                "condition", "detail", "heartbeat_age_s", "up_7d_pct", "incidents_7d")}}
+                "condition", "detail", "heartbeat_age_s", "up_7d_pct", "incidents_7d", "settings")}}
         else:
             value = {"ok": False, "error": "refused", "status": res.status_code}
     with _cache_lock:
@@ -304,7 +332,7 @@ def _guard_view() -> dict[str, Any] | None:
 
 
 def outside_status(*, fresh: bool = False) -> dict[str, Any]:
-    """What Settings -> System shows: paired or not, the guard's view, the
+    """What Settings -> Alerts shows: paired or not, the guard's view, the
     observer's (``fresh`` skips the minute's cache). Blocking (files, a
     signed request)."""
     pairing = _read_pairing()
@@ -351,3 +379,108 @@ def outside_digest_line(now: float | None = None) -> str | None:
     )
     more = f" and {len(incidents) - 5} more" if len(incidents) > 5 else ""
     return f"Outside watch: {up}, {count_noun(len(incidents), 'incident')} ({parts}{more})"
+
+
+# -- Settings -> Alerts (the unified alerts plan, Stage 3) -----------------------------
+
+
+def _signed_post(pairing: dict[str, str], route: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    """POST *body* to the observer's *route*, signed by the install's key the
+    way the heartbeat is (``"<ts>." + body``). ``(status, answer)``; status 0
+    when the observer did not answer."""
+    raw = json.dumps({"v": 1, "install": pairing["install"], **body},
+                     sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ts = int(time.time())
+    headers = {
+        "Content-Type": "application/json",
+        "X-Kazma-Install": pairing["install"],
+        "X-Kazma-Timestamp": str(ts),
+        "X-Kazma-Signature": _sign(pairing["key"], ts, raw),
+    }
+    try:
+        with httpx.Client(timeout=_TIMEOUT_S, follow_redirects=False, trust_env=False) as client:
+            res = client.post(f"{pairing['url']}{route}", content=raw, headers=headers)
+    except httpx.HTTPError as exc:
+        return 0, {"error": "unreachable", "detail": type(exc).__name__}
+    try:
+        data = res.json()
+    except ValueError:
+        data = {}
+    return res.status_code, data if isinstance(data, dict) else {}
+
+
+def valid_email(value: str) -> bool:
+    """A plain address (``name@domain.tld``), 254 characters at most."""
+    return len(value) <= 254 and bool(_EMAIL_RE.match(value))
+
+
+def watch_settings_wanted(store: Any = None) -> dict[str, str | None]:
+    """What Kazma Watch should know: the owner's time zone (``cron.timezone``,
+    else the scheduler's own answer) and the email recipient."""
+    from kazma_core.cron.scheduler import resolve_cron_timezone_name
+
+    if store is None:
+        from kazma_core.config_store import get_config_store
+
+        store = get_config_store()
+    zone = str(store.get("cron.timezone") or "").strip() or resolve_cron_timezone_name()[0]
+    email = str(store.get(EMAIL_TO_KEY) or "").strip()
+    return {"timezone": zone or None, "email_to": email if email and valid_email(email) else None}
+
+
+def push_watch_settings(store: Any = None) -> dict[str, Any]:
+    """Tell Kazma Watch the time zone and the email recipient. ``{"ok": True,
+    "settings"}`` or ``{"ok": False, "error"}`` (``not_paired``,
+    ``unreachable``, ``refused``, ``replayed``, ``bad_timezone``, ...)."""
+    pairing = _read_pairing()
+    if pairing is None:
+        return {"ok": False, "error": "not_paired"}
+    wanted = watch_settings_wanted(store)
+    status, data = _signed_post(pairing, "/v1/settings", wanted)
+    _forget_cached_summary()
+    if status == 200 and data.get("ok"):
+        logger.info("[outside_watch] Kazma Watch was told the time zone %s", wanted["timezone"])
+        return {"ok": True, "settings": data.get("settings") or wanted}
+    error = str(data.get("error") or ("unreachable" if status == 0 else "refused"))
+    logger.warning("[outside_watch] Kazma Watch was not told the settings: %s (HTTP %s)", error, status)
+    return {"ok": False, "error": error, "status": status}
+
+
+def watch_test_page() -> dict[str, Any]:
+    """Have Kazma Watch send one test card through its own channels.
+    ``{"ok", "channels": {"telegram": "sent|failed|off", "email": ...}}`` or
+    ``{"ok": False, "error"}`` (``too_soon`` within 20 s of the last)."""
+    pairing = _read_pairing()
+    if pairing is None:
+        return {"ok": False, "error": "not_paired"}
+    status, data = _signed_post(pairing, "/v1/test-page", {})
+    if status == 200 and isinstance(data.get("channels"), dict):
+        channels = {k: v for k, v in data["channels"].items()
+                    if k in ("telegram", "email") and v in ("sent", "failed", "off")}
+        ok = any(v == "sent" for v in channels.values())
+        logger.info("[outside_watch] Kazma Watch test page: %s",
+                    ", ".join(f"{k} {v}" for k, v in sorted(channels.items())) or "no channel")
+        return {"ok": ok, "channels": channels}
+    error = str(data.get("error") or ("unreachable" if status == 0 else "refused"))
+    return {"ok": False, "error": error, "status": status}
+
+
+def leave_observer(*, forget: bool = False) -> dict[str, Any]:
+    """Stop Kazma Watch watching this install, with a request signed by its
+    own key (the page has no pairing token), then remove the pairing file.
+    The file stays when the observer did not agree: removed alone, the guard
+    stops its heartbeats and the observer pages "machine unreachable"."""
+    pairing = _read_pairing()
+    if pairing is None:
+        return {"ok": False, "error": "not_paired"}
+    status, data = _signed_post(pairing, "/v1/leave", {"forget": bool(forget)})
+    # An install the observer no longer knows (unpaired from the command line,
+    # or its key replaced) is not watched there: the file is all that is left.
+    gone = status == 401 and data.get("error") == "unknown_install"
+    if not gone and (status != 200 or not data.get("ok")):
+        error = str(data.get("error") or ("unreachable" if status == 0 else "refused"))
+        return {"ok": False, "error": error, "status": status}
+    _pairing_path().unlink(missing_ok=True)
+    _forget_cached_summary()
+    logger.info("[outside_watch] left %s (install %s, forget=%s)", pairing["url"], pairing["install"], forget)
+    return {"ok": True, "install": pairing["install"], "url": pairing["url"], "forgotten": bool(forget)}

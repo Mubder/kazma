@@ -50,6 +50,7 @@ __all__ = [
     "alert_state",
     "bus_send_targets",
     "send_test_alert",
+    "notices_to_chats",
 ]
 
 # How long the same key stays quiet after being reported. Long enough that a
@@ -124,6 +125,107 @@ def _delivery_receipt(callback: Any, result: bool | None) -> None:
             callback(result)
         except Exception:
             logger.warning("[ops_alerts] delivery receipt could not be recorded", exc_info=True)
+
+
+#: The receipt line every alert leaves when its delivery ends (Settings ->
+#: Alerts lists the last 7 days of alerts from the log, each with whether a
+#: channel took it): ``[ops_alerts] receipt <key>: <outcome>``. Never the
+#: ``[ops_alert] `` marker the daily digest and the weekly report count.
+RECEIPT_MARKER = "[ops_alerts] receipt "
+RECEIPT_OUTCOMES = {True: "delivered", False: "not delivered", None: "uncertain"}
+RECEIPT_KEPT = "kept off the chats"
+
+
+class _Receipt:
+    """An alert's one delivery receipt (the unified alerts plan, Stages 2
+    and 3). Told the outcome once, when the delivery ends, it records it for
+    the two readers of "did a channel take it", each with its own horizon:
+
+    * the receipt line under the alert's key in the log, which Settings ->
+      Alerts' recent alerts read for the last 7 days;
+    * the open page receipt (``page``: ``page_receipts.record_page``'s
+      callback, when the alert opened an incident), which the guard's
+      heartbeat carries to Kazma Watch until the recovery settles it;
+
+    then tells the caller's ``on_delivery`` (if any)."""
+
+    def __init__(self, key: str, then: Any = None, *, page: Any = None) -> None:
+        self.key = key
+        self.then = then
+        self.page = page
+
+    def __call__(self, result: bool | None) -> None:
+        logger.info("%s%s: %s", RECEIPT_MARKER, self.key, RECEIPT_OUTCOMES.get(result, "uncertain"))
+        _delivery_receipt(self.page, result)
+        _delivery_receipt(self.then, result)
+
+    def kept(self) -> None:
+        """A notice the owner keeps off the chat apps: the bell and the daily
+        digest have it, which is where it was meant to go."""
+        logger.info("%s%s: %s", RECEIPT_MARKER, self.key, RECEIPT_KEPT)
+        _delivery_receipt(self.page, True)
+        _delivery_receipt(self.then, True)
+
+
+#: Settings -> Alerts, "Notices": False keeps info and success cards (a crawl
+#: finished, a check passing again) off the chat apps; they reach the bell and
+#: the daily digest only. Unset or True: the chats too, as before the setting.
+#: A recovery note (an entry some page names as its ``closed_by``) always goes:
+#: the page it ends went to the chats.
+NOTICES_TO_CHATS_KEY = "notifications.ops.notices_to_chats"
+#: Notices whose sender already shows them in the bell (the research and crawl
+#: monitor's records, the run supervisor's incidents).
+_IN_THE_BELL_ALREADY = ("acquisition.", "runs.")
+
+
+def notices_to_chats(store: Any = None) -> bool:
+    """Whether info and success cards go to the chat apps (blocking: a
+    settings read; never on the loop). Never raises: True when unknown."""
+    from kazma_core.db.pg_helpers import store_errors
+
+    try:
+        if store is None:
+            from kazma_core.config_store import get_config_store
+
+            store = get_config_store()
+        value = store.get(NOTICES_TO_CHATS_KEY, True)
+    except store_errors():  # a routing read must never mute an alert
+        logger.debug("[ops_alerts] notices setting not read; sending notices", exc_info=True)
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() not in ("false", "0", "no", "off")
+    return value is not False
+
+
+def _is_notice(key: str, severity: str) -> bool:
+    """An info or success card that is not a recovery note."""
+    if severity not in _NOTICE_SEVERITIES:
+        return False
+    from kazma_core.observability.alert_catalog import entry_for, recovery_keys
+
+    entry = entry_for(key)
+    return entry is None or entry.key not in recovery_keys()
+
+
+def _keep_notice(notice: tuple[str, str, str, str]) -> None:
+    """Show a notice kept off the chats in the bell (blocking: call it off the loop)."""
+    key, title, detail, severity = notice
+    if key.startswith(_IN_THE_BELL_ALREADY):
+        return
+    from kazma_core.observability.alert_catalog import entry_for
+    from kazma_core.observability.alerts import AlertDispatcher
+
+    entry = entry_for(key)
+    page = entry.page if entry is not None else ""
+    AlertDispatcher.post_banner(subsystem=f"notice:{key}", title=title, reason=detail[:MAX_DETAIL_CHARS],
+                                severity=severity.upper(), status="OK", link=page)
+
+
+def _kept(on_delivery: Any) -> None:
+    if isinstance(on_delivery, _Receipt):
+        on_delivery.kept()
+    else:
+        _delivery_receipt(on_delivery, True)
 
 
 def _on_server_loop(coro_text: str, on_delivery: Any = None) -> bool:
@@ -501,16 +603,28 @@ def _say_no_sink() -> None:
     )
 
 
-async def _deliver_from_the_loop(text: str) -> Any:
-    """``_deliver`` for an alert raised on a loop: the sink check first, in a thread."""
+#: What the loop's delivery task returns for a notice kept off the chats.
+_KEPT = object()
+
+
+async def _deliver_from_the_loop(text: str, notice: tuple[str, str, str, str] | None = None) -> Any:
+    """``_deliver`` for an alert raised on a loop: the notice and sink checks
+    first, in a thread."""
+    if notice is not None and not await asyncio.to_thread(notices_to_chats):
+        await asyncio.to_thread(_keep_notice, notice)
+        return _KEPT
     if not await asyncio.to_thread(_has_any_sink):
         _say_no_sink()
         return _NO_SINK
     return await _deliver(text)
 
 
-def _dispatch(text: str, on_delivery: Any = None) -> None:
-    """Deliver without blocking or raising, from sync OR async callers."""
+def _dispatch(text: str, on_delivery: Any = None, *,
+              notice: tuple[str, str, str, str] | None = None) -> None:
+    """Deliver without blocking or raising, from sync OR async callers.
+
+    *notice* (key, title, detail, severity) marks an info or success card:
+    with Settings -> Alerts' "Notices" off it goes to the bell only."""
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -526,7 +640,7 @@ def _dispatch(text: str, on_delivery: Any = None) -> None:
         # the loop it is called on (audit 2026-10-26 AUD-111).
         from kazma_core.background import spawn_background
 
-        task = spawn_background(_deliver_from_the_loop(text), name="ops-alert")
+        task = spawn_background(_deliver_from_the_loop(text, notice), name="ops-alert")
 
         def _report(t: asyncio.Task) -> None:
             if t.cancelled():
@@ -535,6 +649,9 @@ def _dispatch(text: str, on_delivery: Any = None) -> None:
             if t.exception() is not None:
                 _delivery_receipt(on_delivery, None)
                 return  # spawn_background already logs the exception
+            if t.result() is _KEPT:
+                _kept(on_delivery)
+                return
             if t.result() is _NO_SINK:
                 _delivery_receipt(on_delivery, False)
                 return
@@ -543,6 +660,11 @@ def _dispatch(text: str, on_delivery: Any = None) -> None:
             _delivery_receipt(on_delivery, t.result() is True)
 
         task.add_done_callback(_report)
+        return
+
+    if notice is not None and not notices_to_chats():
+        _keep_notice(notice)
+        _kept(on_delivery)
         return
 
     if not _has_any_sink():
@@ -731,11 +853,14 @@ def alert(
         if not send:
             return False
         formatted = _format(severity, title, detail, suppressed, cooldown, max_detail)
-        callback = _with_receipt(on_delivery, _record_page(key))
-        if callback is None:
-            _dispatch(formatted)
+        # Every delivery ends in one receipt (_Receipt): the line under the
+        # key Settings -> Alerts reads, and, for a page that opens an
+        # incident, the page receipt the heartbeat carries to Kazma Watch.
+        receipt = _Receipt(key, on_delivery, page=_record_page(key))
+        if _is_notice(key, severity):
+            _dispatch(formatted, receipt, notice=(key, title, detail, severity))
         else:
-            _dispatch(formatted, callback)
+            _dispatch(formatted, receipt)
         return True
     except Exception as exc:  # noqa: BLE001 — alerting must never propagate
         logger.debug("[ops_alerts] alert() failed for %s: %s", key, exc)
@@ -754,20 +879,3 @@ def _record_page(key: str) -> Any:
     from kazma_core.observability import page_receipts
 
     return page_receipts.record_page(key)
-
-
-def _with_receipt(on_delivery: Any, receipt: Any) -> Any:
-    """One delivery callback for the caller's and the receipt's (either may
-    be None; None when both are, so ``_dispatch`` keeps its old call)."""
-    if receipt is None:
-        return on_delivery
-    if on_delivery is None:
-        return receipt
-
-    def _both(ok: bool | None) -> None:
-        try:
-            receipt(ok)
-        finally:
-            on_delivery(ok)
-
-    return _both

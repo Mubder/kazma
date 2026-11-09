@@ -30,7 +30,7 @@ export class Store {
 
   /** Stop watching ``install``; with ``forget`` remove everything kept about it. */
   async unpair(install, forget) {
-    const tables = ["installs", "heartbeats", "watch_state"];
+    const tables = ["installs", "heartbeats", "watch_state", "install_settings"];
     if (forget) tables.push("readings", "hourly", "cloudflare_notices", "incidents");
     const notes = forget ? [this.db.prepare(
       "DELETE FROM incident_notes WHERE incident_id IN (SELECT id FROM incidents WHERE install = ?)",
@@ -140,12 +140,25 @@ export class Store {
 
   // -- reading back ---------------------------------------------------------
 
+  /** The incidents of ``install`` open since ``since``, newest first; each
+   * with ``held_by`` (its notes: who paged it instead, unified alerts
+   * Stage 2), so a reader can tell a page that failed from one never due. */
   async incidents(install, since, limit = 50) {
     const { results } = await this.db.prepare(
-      "SELECT id, cause, detail, causes, started_at, ended_at FROM incidents "
-      + "WHERE install = ? AND (ended_at IS NULL OR ended_at >= ?) ORDER BY started_at DESC LIMIT ?",
+      "SELECT i.id, i.cause, i.detail, i.causes, i.started_at, i.ended_at, i.paged_at, i.recovery_paged_at, "
+      + "n.notes FROM incidents i LEFT JOIN incident_notes n ON n.incident_id = i.id "
+      + "WHERE i.install = ? AND (i.ended_at IS NULL OR i.ended_at >= ?) ORDER BY i.started_at DESC LIMIT ?",
     ).bind(install, since, limit).all();
-    return (results || []).map((r) => ({ ...r, causes: JSON.parse(r.causes || "[]") }));
+    return (results || []).map(({ notes, ...r }) => {
+      let heldBy = null;
+      try {
+        const n = notes ? JSON.parse(notes) : {};
+        heldBy = typeof n.held_by === "string" ? n.held_by : null;
+      } catch {
+        heldBy = null;
+      }
+      return { ...r, causes: JSON.parse(r.causes || "[]"), held_by: heldBy };
+    });
   }
 
   /** Per day: the share of watched minutes up (or in planned maintenance). */
@@ -261,5 +274,38 @@ export class Store {
       this.db.prepare("DELETE FROM cloudflare_notices WHERE ended_at IS NOT NULL AND ended_at < ? "
         + "AND recovery_due = 0").bind(now - 90 * DAY),
     ]);
+  }
+
+  // -- what Kazma told Kazma Watch (Settings -> Alerts, watch_settings.js) --
+
+  async watchSettings(install) {
+    const row = await this.db.prepare(
+      "SELECT timezone, email_to, updated_at FROM install_settings WHERE install = ?").bind(install).first();
+    return {
+      timezone: row && row.timezone ? row.timezone : null,
+      email_to: row && row.email_to ? row.email_to : null,
+      updated_at: row && row.updated_at ? row.updated_at : null,
+    };
+  }
+
+  /** Keep the settings sent at ``ts``, only when newer than the last kept. */
+  async saveWatchSettings(install, ts, settings, now) {
+    const res = await this.db.prepare(
+      "INSERT INTO install_settings (install, timezone, email_to, settings_ts, updated_at) VALUES (?, ?, ?, ?, ?) "
+      + "ON CONFLICT(install) DO UPDATE SET timezone = excluded.timezone, email_to = excluded.email_to, "
+      + "settings_ts = excluded.settings_ts, updated_at = excluded.updated_at "
+      + "WHERE install_settings.settings_ts < excluded.settings_ts",
+    ).bind(install, settings.timezone, settings.email_to, ts, now).run();
+    return !!(res.meta && res.meta.changes);
+  }
+
+  /** Claim a test page asked at ``ts``: newer than the last by ``gap`` seconds. */
+  async claimTest(install, ts, now, gap) {
+    const res = await this.db.prepare(
+      "INSERT INTO install_settings (install, test_ts, updated_at) VALUES (?, ?, ?) "
+      + "ON CONFLICT(install) DO UPDATE SET test_ts = excluded.test_ts "
+      + "WHERE excluded.test_ts >= install_settings.test_ts + ?",
+    ).bind(install, ts, now, gap).run();
+    return !!(res.meta && res.meta.changes);
   }
 }

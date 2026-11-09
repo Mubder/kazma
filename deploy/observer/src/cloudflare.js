@@ -32,6 +32,7 @@ import { clock, duration, OPEN_AFTER_S, RECOVERY_RETRY_S } from "./incidents.js"
 import { entryOf, sameCause } from "./receipts.js";
 import { Store } from "./store.js";
 import { sameText } from "./verify.js";
+import { ownerSettings } from "./watch_settings.js";
 
 export const MAX_CF_BODY = 16384;
 export const SECRET_MIN_CHARS = 16;
@@ -204,9 +205,12 @@ export async function takeNotice(store, notice, now) {
   return { recorded: true };
 }
 
-function noticeText(n, entry) {
+// The operator card with the source Cloudflare, its time in the owner's zone
+// as Kazma's Settings -> Alerts told it (watch_settings.js), like Kazma
+// Watch's own cards.
+function noticeText(n, entry, timeZone = "") {
   return formatOperatorCard("cloudflare", entry.severity, entry.title, n.detail || "",
-    n.event === "start" ? { since: clock(n.received_at) } : {});
+    n.event === "start" ? { since: clock(n.received_at, timeZone) } : {});
 }
 
 function closerText(n) {
@@ -226,7 +230,9 @@ export async function processNotices(env, now, { installs = [], fetcher, makeMes
   for (const install of installs) states.push({ install, state: await store.state(install) });
   let budget = PAGES_PER_HOUR - Number((await store.noticesPagedSince(now - 3600)) || 0);
   const sent = [];
-  const send = async (text) => page(env, text, now, { fetcher, makeMessage });
+  // The owner's zone and email recipient, as for Kazma Watch's own cards.
+  const told = await ownerSettings(store, installs);
+  const send = async (text) => page(env, text, now, { fetcher, makeMessage, emailTo: told.email_to });
   for (const n of await store.activeNotices()) {
     const entry = entryOf(n.key) || entryOf("cloudflare.notification");
     if (n.recovery_due) {
@@ -277,7 +283,7 @@ export async function processNotices(env, now, { installs = [], fetcher, makeMes
     }
     n.last_try_at = now;
     if (budget > 0) {
-      const ok = await send(noticeText(n, entry));
+      const ok = await send(noticeText(n, entry, told.timezone || ""));
       sent.push({ id: n.id, kind: "notice", ok });
       if (ok) {
         budget -= 1;

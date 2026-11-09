@@ -276,7 +276,7 @@ safety:
 
 ### `notifications.lifecycle`
 
-Server status messages — one card each time Kazma is back up (how long it was down, whether each chat app connected, the build and the model) and one when startup fails. Sent where alerts go. Settings → Providers & Connectors → Platform Connectors → Adapters & Routes → **Server status messages**. See [Deployment → Lifecycle notifications](deployment#10-lifecycle-status-notifications).
+Server status messages — one card each time Kazma is back up (how long it was down, whether each chat app connected, the build and the model) and one when startup fails. Sent where alerts go. Settings → Alerts → **Server status messages**. See [Deployment → Lifecycle notifications](deployment#10-lifecycle-status-notifications).
 
 | Key | Type | Default | Description |
 |---|---|---|---|

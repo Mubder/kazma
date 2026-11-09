@@ -457,7 +457,7 @@ The repo's notes mention "resource constraints on 24 GB VRAM setups." Practical 
 
 ## 10. Lifecycle status notifications
 
-Kazma sends one card to your alert routes (Telegram/Discord/Slack, as chosen under **Alerts go to**) each time it is back up, and one when startup fails -- so you can tell from chat that a restart finished, how long it took, and whether every chat app came back:
+Kazma sends one card to your alert routes (Telegram/Discord/Slack, as chosen in Settings → Alerts under **Where Kazma's alerts go**) each time it is back up, and one when startup fails -- so you can tell from chat that a restart finished, how long it took, and whether every chat app came back:
 
 ```
 🟢 [System] Kazma restarted
@@ -473,7 +473,7 @@ Model: deepseek-flash
 
 The card waits until every chat app has connected or failed (up to 45 s; they usually connect within a few seconds) and marks each one with what its connection said. It is green when everything connected and the last run stopped cleanly, yellow otherwise. "Down for" runs from the stop to the moment Kazma was serving again; the wait for the chat apps is not counted. Until 2026-09-30 it ran to the card's send, so one slow chat app turned a 35-second reload into "started".
 
-To check the routes without waiting for a restart, press **Send a test alert** under **Alerts go to**: one message goes along the saved routes the way a real alert does, and the page names each route that took it.
+To check the routes without waiting for a restart, press **Send a test alert** in Settings → Alerts: one message goes along the saved routes the way a real alert does, and the page names each route that took it.
 
 ### Messages
 
@@ -486,7 +486,7 @@ To check the routes without waiting for a restart, press **Send a test alert** u
 
 The start and the stop are recorded whether or not their messages are on: that is how the next card knows the downtime, and whether the last run ended cleanly. Until 2026-09-29 all four were on, three messages per restart; an install still holding that stored default is moved to the new one once, at boot.
 
-Switch them in **Settings → Providers & Connectors → Platform Connectors → Adapters & Routes → Server status messages**.
+Switch them in **Settings → Alerts → Server status messages**.
 
 ### How it works
 

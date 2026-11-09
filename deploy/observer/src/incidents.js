@@ -31,10 +31,23 @@ export function duration(seconds) {
   return m ? `${h} h ${m} min` : `${h} h`;
 }
 
-// Times are UTC until the owner's zone reaches Kazma Watch (Settings ->
-// Alerts, the unified alerts plan's Stage 3).
-export function clock(epoch) {
-  return new Date(epoch * 1000).toISOString().slice(0, 16).replace("T", " ") + " UTC";
+// Times are in the owner's zone once Kazma told it (Settings -> Alerts,
+// POST /v1/settings: the unified alerts plan's Stage 3), else UTC:
+// "2026-11-09 17:02 Asia/Kuwait", "2026-11-09 14:02 UTC".
+export function clock(epoch, timeZone = "") {
+  const utc = new Date(epoch * 1000).toISOString().slice(0, 16).replace("T", " ") + " UTC";
+  const zone = String(timeZone || "").trim();
+  if (!zone || zone === "UTC" || zone === "Etc/UTC") return utc;
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+    }).formatToParts(new Date(epoch * 1000));
+    const part = (type) => (parts.find((p) => p.type === type) || {}).value || "";
+    return `${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")} ${zone}`;
+  } catch {
+    return utc;
+  }
 }
 
 /**
@@ -46,8 +59,11 @@ export function clock(epoch) {
  * ``pages`` (the fresh heartbeat's receipts, null when it carries none),
  * ``inside`` (the inside pages open when the heartbeats stopped) and
  * ``notices`` (Cloudflare notices Kazma Watch paged, still open).
+ *
+ * ``timeZone``: the zone the cards' times are written in, as Kazma's
+ * Settings -> Alerts told it (watch_settings.js); UTC when none was.
  */
-export function step(prev, diag, now) {
+export function step(prev, diag, now, { timeZone = "" } = {}) {
   const state = {
     condition: diag.condition,
     detail: diag.detail || null,
@@ -68,7 +84,7 @@ export function step(prev, diag, now) {
       state.incident = null;
     } else {
       pages.push({ kind: "recovered" });
-      return finish(state, diag, now, pages);
+      return finish(state, now, pages, timeZone);
     }
   }
 
@@ -84,7 +100,7 @@ export function step(prev, diag, now) {
         pages.push({ kind: "recovered" });
       }
     }
-    return finish(state, diag, now, pages);
+    return finish(state, now, pages, timeZone);
   }
 
   if (state.bad_since === null) state.bad_since = now;
@@ -107,7 +123,7 @@ export function step(prev, diag, now) {
       };
       openOrHold(state.incident, diag, now, state.bad_since, pages);
     }
-    return finish(state, diag, now, pages);
+    return finish(state, now, pages, timeZone);
   }
 
   const open = state.incident;
@@ -118,7 +134,7 @@ export function step(prev, diag, now) {
   open.detail = diag.detail || null;
   if (open.paged_at === null) openOrHold(open, diag, now, state.bad_since ?? open.started_at, pages);
   else if (now - (open.last_page_at || open.paged_at) >= REMIND_EVERY_S) pages.push({ kind: "remind" });
-  return finish(state, diag, now, pages);
+  return finish(state, now, pages, timeZone);
 }
 
 /** An incident Kazma Watch has not paged: page it, or hold it (receipts.js). */
@@ -151,8 +167,11 @@ function openOrHold(incident, diag, now, badSince, pages) {
   pages.push({ kind: "open" });
 }
 
-function finish(state, diag, now, pages) {
-  return { state, pages: pages.map((p) => ({ ...p, text: pageText(p.kind, state.incident, now) })) };
+function finish(state, now, pages, timeZone) {
+  return {
+    state,
+    pages: pages.map((p) => ({ ...p, text: pageText(p.kind, state.incident, now, { timeZone }) })),
+  };
 }
 
 /**
@@ -160,13 +179,13 @@ function finish(state, diag, now, pages) {
  * card with the source Watch (card.js), its title and severity from the
  * alert catalog.
  */
-export function pageText(kind, incident, now) {
+export function pageText(kind, incident, now, { timeZone = "" } = {}) {
   if (!incident) return "";
   if (kind === "open" || kind === "remind") {
     return formatOperatorCard("watch", severityOf(incident.cause), titleOf(incident.cause),
       [incident.detail || "", ...notes(incident)].filter(Boolean).join("\n"), {
         form: kind === "remind" ? "reminder" : "page",
-        since: clock(incident.started_at),
+        since: clock(incident.started_at, timeZone),
         duration: duration(now - incident.started_at),
       });
   }

@@ -248,8 +248,12 @@ GUARD_ACK_S = 20.0
 #                 record (state ``database_service``; DatabaseServiceWatch).
 #   outside_watch -- the heartbeat to the outside observer (state
 #                 ``outside_watch``; see OutsideWatch).
+#   pager_test -- answers Settings -> Alerts' "Send a test page" (state
+#                 ``pager_test``; see PagerTest) and records each page's outcome
+#                 (state ``pager``).
 GUARD_FEATURES = ("pause_held", "document_broker", "dependencies", "boot_wait",
-                  "database_hold", "disk_watch", "outside_watch", "database_service", "power_watch")
+                  "database_hold", "disk_watch", "outside_watch", "database_service", "power_watch",
+                  "pager_test")
 # What the supervisor loop returns when it stopped the child for --reload.
 RELOAD_REASON = "operator reload"
 
@@ -767,9 +771,16 @@ class Notifier:
         ).strip()
         self._source = "env" if (self.token and self.chat) else "unresolved"
         self._held: list[tuple[float, str]] = []
-        # Told the text of a held page once it went out (the guard's page
-        # receipts: a page held then sent reached someone after all).
-        self.on_delivered = None
+        # Every page's outcome is heard in one place (``_heard``), and told to
+        # two listeners: ``on_outcome`` gets the last page's outcome (the
+        # guard keeps it in its state file, ``pager``, which Settings ->
+        # Alerts reads; never the text), ``on_delivered`` the text of a held
+        # page that went out after all (its page receipt now says delivered).
+        self.last_outcome: dict | None = None
+        self.on_outcome: Callable[[dict], None] | None = None
+        self.on_delivered: Callable[[str], None] | None = None
+        # Why the last post failed (``_post``), for its outcome.
+        self._post_error = ""
 
     def _resolve(self) -> None:
         """Fill in missing credentials from the app's settings. Lazily, retried.
@@ -849,7 +860,8 @@ class Notifier:
 
     def send(self, text: str) -> bool:
         """Page *text*. True when Telegram took it; False when it failed or
-        is held until the credentials resolve."""
+        is held until the credentials resolve. Either way its outcome is
+        heard (``_heard``)."""
         if not self.configured:
             # Held, not dropped: the credentials live in Kazma's settings
             # database, so the guard cannot page while it is down -- the
@@ -860,9 +872,52 @@ class Notifier:
                 self._held.pop(0)
             self._held.append((time.time(), text))
             self._log("info", "notify.skipped", reason="not configured", text=text, held=True)
+            self._heard(text, False, error="not configured", held=len(self._held))
             return False
         self._flush_held()
-        return self._post(text)
+        return self._send_and_hear(text)
+
+    def send_now(self, text: str) -> tuple[bool, str]:
+        """Send *text* now, never held: ``(taken, why not)``. The test page
+        (``PagerTest``) proves the path a page takes, so a guard that cannot
+        page says so instead of keeping it for later."""
+        if not self.configured:
+            return False, self.describe()
+        ok = self._send_and_hear(text)
+        return ok, "" if ok else str((self.last_outcome or {}).get("error") or "not sent")
+
+    def _send_and_hear(self, text: str, *, held_page: str = "") -> bool:
+        """Post *text* and hear its outcome. *held_page*: the page a delayed
+        post carries (``_flush_held``), whose outcome this is."""
+        self._post_error = ""
+        ok = self._post(text, delayed=bool(held_page)) is True
+        self._heard(held_page or text, ok, error="" if ok else (self._post_error or "not sent"),
+                    delayed=bool(held_page))
+        return ok
+
+    def _heard(self, text: str, ok: bool, *, error: str = "", delayed: bool = False,
+               **extra: object) -> None:
+        """The one place a page's outcome is recorded (``last_outcome``) and
+        told: ``on_outcome`` always, ``on_delivered`` when a held page went
+        out after all. Never raises: a record must never stop a page."""
+        self.last_outcome = {
+            "at": time.time(), "ok": bool(ok), "head": text.split("\n", 1)[0][:160],
+            "source": self._source, "chat": self.chat, "delayed": bool(delayed), **extra,
+        }
+        if error:
+            # The state file reaches a web page: never the bot's token, even
+            # inside an error that quotes the request's address.
+            self.last_outcome["error"] = (error.replace(self.token, "***") if self.token else error)[:200]
+        if self.on_outcome is not None:
+            try:
+                self.on_outcome(dict(self.last_outcome))
+            except (OSError, ValueError, TypeError):
+                pass
+        if ok and delayed and self.on_delivered is not None:
+            try:
+                self.on_delivered(text)
+            except Exception as exc:  # a receipt must not stop the pager
+                self._log("warn", "notify.receipt_failed", error=str(exc)[:200])
 
     def retry_lookup(self) -> None:
         """Let the next page look the credentials up again whatever the
@@ -881,15 +936,15 @@ class Notifier:
         now = time.time()
         for at, text in held:
             minutes = max(1, round((now - at) / 60))
-            sent = self._post(f"⏳ Delayed {minutes} min (the guard could not page then):\n{text}",
-                              delayed=True)
-            if sent and self.on_delivered is not None:
-                try:
-                    self.on_delivered(text)
-                except Exception as exc:  # a receipt must not stop the pager
-                    self._log("warn", "notify.receipt_failed", error=str(exc)[:200])
+            self._send_and_hear(f"⏳ Delayed {minutes} min (the guard could not page then):\n{text}",
+                                held_page=text)
 
     def _post(self, text: str, *, delayed: bool = False) -> bool:
+        """Send *text*; True when Telegram took it (else ``_post_error`` says
+        why). The log line names the card's first line (``head``): Settings ->
+        Alerts lists the guard's pages from it."""
+        lines = text.split("\n")
+        head = (lines[1] if delayed and len(lines) > 1 else lines[0])[:160]
         try:
             url = f"https://api.telegram.org/bot{self.token}/sendMessage"
             body = urllib.parse.urlencode(
@@ -899,13 +954,14 @@ class Notifier:
             with urllib.request.urlopen(req, timeout=10):
                 pass
             if delayed:
-                self._log("info", "notify.sent", delayed=True)
+                self._log("info", "notify.sent", delayed=True, head=head)
             else:
-                self._log("info", "notify.sent")
+                self._log("info", "notify.sent", head=head)
             return True
         except Exception as exc:
             # An alert that fails must not take the supervisor down with it.
-            self._log("warn", "notify.failed", error=str(exc)[:200])
+            self._log("warn", "notify.failed", error=str(exc)[:200], head=head)
+            self._post_error = f"{type(exc).__name__}: {exc}"
             return False
 
 
@@ -4328,6 +4384,145 @@ def _outside_status_lines(state: dict) -> list[str]:
     return [line]
 
 
+# -- the pager's test page (unified alerts plan, Stage 3) --------------------
+#
+# Settings -> Alerts' "Send a test page" proves the path the guard pages by
+# when Kazma is down. The server writes a request beside the reload request
+# (``guard.test_page``: an id and the time it was asked); the running guard
+# sends one card through a notifier of its own -- the credentials as a page
+# would resolve them now, so a chat just changed in Settings is the one
+# tested -- on a thread, and records the answer in its state file
+# (``pager_test``), which the page reads. A request older than
+# ``PAGER_TEST_MAX_AGE_S`` is answered "expired", never sent late.
+
+PAGER_TEST_MAX_AGE_S = 300.0
+_PAGER_TEST_ID = re.compile(r"^[0-9a-f]{8,32}$")
+
+
+def _pager_test_path() -> Path:
+    """``guard.test_page``, in the reload request's folder."""
+    return _reload_path().with_name("guard.test_page")
+
+
+def _test_page_card() -> str:
+    """The test page (alert catalog ``guard.test_page``)."""
+    return format_operator_card(
+        "Guard", "info", "Test page",
+        "Sent from Settings -> Alerts to check that the guard can reach you when Kazma cannot. "
+        "Nothing is wrong.")
+
+
+class PagerTest:
+    """Answers the test page requests (see the section comment). Ticked from
+    the guard's loop; the send runs on its own thread. Never raises out of a
+    tick."""
+
+    def __init__(self, guard: Guard, *, notifier_factory=None, path: Path | None = None) -> None:
+        self.guard = guard
+        self.log = guard.log
+        self.path = path or _pager_test_path()
+        self._factory = notifier_factory or (lambda: Notifier(
+            guard.log, cwd=getattr(guard, "cwd", None), python=getattr(guard, "server_python", None)))
+        self._seen: tuple[int, int] | None = None
+        self._thread: threading.Thread | None = None
+        self._lock = threading.Lock()
+        self._result: dict | None = None
+        self._notifier: Notifier | None = None
+
+    def tick(self) -> None:
+        _tick_safely(self._tick, self._internal)
+
+    def _internal(self, exc: BaseException) -> None:
+        self.log("error", "pager_test.internal_error", error=f"{type(exc).__name__}: {exc}"[:300])
+
+    def _signature(self) -> tuple[int, int] | None:
+        try:
+            st = self.path.stat()
+        except OSError:
+            return None
+        return (int(st.st_mtime_ns), int(st.st_size))
+
+    def _tick(self) -> None:
+        self._take_result()
+        sig = self._signature()
+        if sig is None or sig == self._seen:
+            return
+        if self._thread is not None and self._thread.is_alive():
+            return  # one test at a time; the next tick takes this request
+        self._seen = sig
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8") or "{}")
+        except (OSError, ValueError):
+            data = {}
+        try:
+            self.path.unlink()
+        except OSError:
+            pass
+        req_id = str(data.get("id") or "") if isinstance(data, dict) else ""
+        try:
+            asked = float(data.get("ts") or 0.0) if isinstance(data, dict) else 0.0
+        except (TypeError, ValueError):
+            asked = 0.0
+        if not _PAGER_TEST_ID.match(req_id):
+            self.log("warn", "pager_test.bad_request")
+            return
+        if time.time() - asked > PAGER_TEST_MAX_AGE_S:
+            self._write({"id": req_id, "state": "expired", "requested_at": asked, "at": time.time()})
+            self.log("info", "pager_test.expired", id=req_id)
+            return
+        self._write({"id": req_id, "state": "sending", "requested_at": asked, "at": time.time()})
+        self.log("info", "pager_test.requested", id=req_id)
+        thread = threading.Thread(target=self._run, args=(req_id, asked),
+                                  name="kazma-guard-pager-test", daemon=True)
+        self._thread = thread
+        thread.start()
+
+    def _run(self, req_id: str, asked: float) -> None:
+        """On the test's thread: a fresh notifier (a lookup of its own), one card."""
+        result: dict = {"id": req_id, "requested_at": asked}
+        try:
+            notifier = self._factory()
+            ok, why = notifier.send_now(_test_page_card())
+            result.update(state="sent" if ok else "failed", source=notifier._source,
+                          chat=notifier.chat)
+            if not ok:
+                result["error"] = (why.replace(notifier.token, "***") if notifier.token else why)[:200]
+            # A test page is a page: the last one, as Settings shows it.
+            result["outcome"] = notifier.last_outcome
+            with self._lock:
+                self._notifier = notifier if ok else None
+        except Exception as exc:  # noqa: BLE001 -- a test on its own thread must never raise
+            result.update(state="failed", error=f"{type(exc).__name__}"[:200])
+        result["at"] = time.time()
+        with self._lock:
+            self._result = result
+
+    def _take_result(self) -> None:
+        with self._lock:
+            result, self._result = self._result, None
+            fresh, self._notifier = self._notifier, None
+        if result is None:
+            return
+        outcome = result.pop("outcome", None)
+        if isinstance(outcome, dict):
+            _update_state(pager_test=result, pager=outcome)
+        else:
+            self._write(result)
+        self.log("info" if result.get("state") == "sent" else "warn",
+                 f"pager_test.{result.get('state')}", id=result.get("id"),
+                 source=result.get("source"), error=result.get("error"))
+        main = getattr(self.guard, "notify", None)
+        if fresh is not None and main is not None and getattr(main, "_source", "") != "env" \
+                and fresh._source == "vault":
+            # The settings the test just proved are the pager's from now on
+            # (a chat changed in Settings -> Alerts): the guard's own
+            # notifier resolved them once, at its first page.
+            main.token, main.chat, main._source = fresh.token, fresh.chat, "vault"
+
+    def _write(self, record: dict) -> None:
+        _update_state(pager_test=record)
+
+
 # -- supervisor -------------------------------------------------------
 
 
@@ -4402,12 +4597,23 @@ class Guard:
         self.dbsvc = DatabaseServiceWatch(self)
         # The power source: a UPS on battery (PowerWatch, plan B2c).
         self.power = PowerWatch(self)
-        # What this guard paged for an incident still open (PageReceipts).
+        # What this guard paged for an incident still open (PageReceipts,
+        # Stage 2), and Settings -> Alerts' test page (PagerTest, Stage 3).
+        # Every page's outcome is heard once (Notifier._heard) and reaches
+        # both records: the last page's outcome in the state file (``pager``,
+        # which Settings -> Alerts reads) and, for a held page that went out
+        # after all, its page receipt (``pages``, which the heartbeat carries).
         self.receipts = PageReceipts()
         self._held_kinds: set[str] = set()
         self.notify.on_delivered = self.receipts.delivered_later
+        self.pager_test = PagerTest(self)
+        self.notify.on_outcome = self._note_page_outcome
 
     # -- lifecycle ----------------------------------------------------
+
+    def _note_page_outcome(self, outcome: dict) -> None:
+        """The last page's outcome, for Settings -> Alerts (state ``pager``)."""
+        _update_state(pager=outcome)
 
     def _should_page(self, fingerprint: str) -> bool:
         """True if this fingerprint is new or the cooldown has elapsed."""
@@ -4773,6 +4979,9 @@ class Guard:
         broker = getattr(self, "broker", None)
         if broker is not None:
             broker.tick()
+        pager_test = getattr(self, "pager_test", None)
+        if pager_test is not None:
+            pager_test.tick()
         deps = getattr(self, "deps", None)
         if deps is not None:
             deps.tick()

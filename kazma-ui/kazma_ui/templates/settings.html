@@ -13,6 +13,7 @@
     <nav class="settings-nav tabs" role="tablist">
         <button class="settings-tab tab" role="tab" :aria-selected="tab === 'providers_connectors' ? 'true' : 'false'" :class="{ active: tab === 'providers_connectors' }" @click="onTabChange('providers_connectors')">{{ t('settings.tab_providers_connectors') }}</button>
         <button class="settings-tab tab" role="tab" :aria-selected="tab === 'agent' ? 'true' : 'false'" :class="{ active: tab === 'agent' }" @click="onTabChange('agent')">{{ t('settings.tab_agent') }}</button>
+        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'alerts' ? 'true' : 'false'" :class="{ active: tab === 'alerts' }" @click="onTabChange('alerts')">{{ t('settings.tab_alerts') }}</button>
         <button class="settings-tab tab" role="tab" :aria-selected="tab === 'memory' ? 'true' : 'false'" :class="{ active: tab === 'memory' }" @click="onTabChange('memory')">{{ t('settings.tab_memory') }}</button>
         <button class="settings-tab tab" role="tab" :aria-selected="tab === 'mcp' ? 'true' : 'false'" :class="{ active: tab === 'mcp' }" @click="onTabChange('mcp')">{{ t('settings.tab_mcp') }}</button>
         <button class="settings-tab tab" role="tab" :aria-selected="tab === 'skills' ? 'true' : 'false'" :class="{ active: tab === 'skills' }" @click="onTabChange('skills')">{{ t('settings.tab_skills') }}</button>
@@ -811,53 +812,19 @@
                 <div class="card-nested mb-4">
                     <strong style="font-size:0.9rem">{{ t('settings.hub.adapters_routes') }}</strong>
                     <p class="form-hint" style="margin:2px 0 10px">{{ t('settings.hub.routes_blurb') }}</p>
-                    <div class="two-col-grid">
-                        <div>
-                            <label class="form-label">{{ t('settings.hub.alerts_go_to') }}</label>
-                            <p class="form-hint" style="margin:0 0 6px">{{ t('settings.hub.alerts_hint') }}</p>
-                            <template x-for="r in ['telegram', 'telegram-group', 'discord', 'slack']" :key="'a' + r">
-                                <label class="toggle-row" style="margin-bottom:8px">
-                                    <span class="toggle">
-                                        <input type="checkbox" :checked="(adapterRouting.alertRoutes || []).includes(r)"
-                                               @change="toggleRoutingList(adapterRouting.alertRoutes, r, $event.target.checked)">
-                                        <span class="toggle-slider"></span>
-                                    </span>
-                                    <span x-text="({telegram: 'Telegram', 'telegram-group': t('settings.hub.route_tg_group'), discord: 'Discord', slack: 'Slack'})[r] || r"></span>
-                                </label>
-                            </template>
-                            <button class="btn btn-secondary btn-sm" style="margin-top:8px" @click="sendTestAlert()" :disabled="opsTestAlert.sending"
-                                    x-text="opsTestAlert.sending ? t('settings.hub.test_alert_sending') : t('settings.hub.test_alert')"></button>
-                            <p class="form-hint">{{ t('settings.hub.test_alert_hint') }}</p>
-                            <p style="font-size:0.75rem;margin:4px 0 0" x-show="opsTestAlert.result" x-cloak
-                               :class="opsTestAlert.result && opsTestAlert.result.ok ? 'text-success' : 'text-error'"
-                               x-text="testAlertSummary()"></p>
-                        </div>
-                        <div>
-                            <label class="form-label">{{ t('settings.hub.swarm_goes_to') }}</label>
-                            <p class="form-hint" style="margin:0 0 6px">{{ t('settings.hub.swarm_hint') }}</p>
-                            <template x-for="r in ['telegram', 'telegram-group', 'discord', 'slack']" :key="'s' + r">
-                                <label class="toggle-row" style="margin-bottom:8px">
-                                    <span class="toggle">
-                                        <input type="checkbox" :checked="(adapterRouting.swarmRoutes || []).includes(r)"
-                                               @change="toggleRoutingList(adapterRouting.swarmRoutes, r, $event.target.checked)">
-                                        <span class="toggle-slider"></span>
-                                    </span>
-                                    <span x-text="({telegram: 'Telegram', 'telegram-group': t('settings.hub.route_tg_group'), discord: 'Discord', slack: 'Slack'})[r] || r"></span>
-                                </label>
-                            </template>
-                        </div>
-                    </div>
-                    <div style="margin-top:12px">
-                        <label class="form-label">{{ t('settings.hub.status_messages') }}</label>
-                        <p class="form-hint" style="margin:0 0 6px">{{ t('settings.hub.status_messages_hint') }}</p>
-                        <template x-for="ev in lifecycleEventNames" :key="'l' + ev">
+                    <p class="form-hint">{{ t('settings.alerts.moved_hint') }}
+                        <a href="/settings?tab=alerts" @click.prevent="onTabChange('alerts')">{{ t('settings.tab_alerts') }}</a></p>
+                    <div>
+                        <label class="form-label">{{ t('settings.hub.swarm_goes_to') }}</label>
+                        <p class="form-hint" style="margin:0 0 6px">{{ t('settings.hub.swarm_hint') }}</p>
+                        <template x-for="r in ['telegram', 'telegram-group', 'discord', 'slack']" :key="'s' + r">
                             <label class="toggle-row" style="margin-bottom:8px">
                                 <span class="toggle">
-                                    <input type="checkbox" :checked="(adapterRouting.lifecycleEvents || []).includes(ev)"
-                                           @change="toggleRoutingList(adapterRouting.lifecycleEvents, ev, $event.target.checked)">
+                                    <input type="checkbox" :checked="(adapterRouting.swarmRoutes || []).includes(r)"
+                                           @change="toggleRoutingList(adapterRouting.swarmRoutes, r, $event.target.checked)">
                                     <span class="toggle-slider"></span>
                                 </span>
-                                <span x-text="t('settings.hub.status_' + ev)"></span>
+                                <span x-text="({telegram: 'Telegram', 'telegram-group': t('settings.hub.route_tg_group'), discord: 'Discord', slack: 'Slack'})[r] || r"></span>
                             </label>
                         </template>
                     </div>
@@ -2400,6 +2367,255 @@
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════════
+         ALERTS (the unified alerts plan, Stage 3): where Kazma's alerts go,
+         the server status messages, the guard's pager, Kazma Watch, notices
+         and the last week's alerts from every sender. settings_alerts.js;
+         the routes are kazma_ui/settings_alerts.py.
+         ═══════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'alerts'" x-transition x-cloak id="alerts-tab">
+        <div class="notice tone-danger mb-4" x-show="alerts.failed" x-cloak role="alert">
+            <span class="ki" data-icon="alert-circle" aria-hidden="true"></span>
+            <span>{{ t('settings.alerts.load_error') }}</span>
+        </div>
+
+        <div class="alerts-grid">
+            <!-- 1. Where Kazma's alerts go -->
+            <section class="card-nested" id="alerts-routes" aria-labelledby="alerts-routes-title">
+                <h3 class="card-title" id="alerts-routes-title">{{ t('settings.alerts.routes_title') }}</h3>
+                <p class="card-sub">{{ t('settings.alerts.routes_sub') }}</p>
+                <template x-for="r in alerts.routeNames" :key="'ar-' + r">
+                    <label class="alerts-row" :data-route="r">
+                        <span class="icon-tile icon-tile-sm" :class="alerts.ready[r] ? 'tone-accent' : 'tone-neutral'"
+                              x-html="KazmaIcons.get(r === 'telegram-group' ? 'users' : 'send')" aria-hidden="true"></span>
+                        <span class="alerts-row-text">
+                            <span class="alerts-row-name" x-text="alertRouteName(r)"></span>
+                            <span class="alerts-row-line" x-text="alertRouteLine(r)"></span>
+                        </span>
+                        <span class="toggle">
+                            <input type="checkbox" :checked="alerts.routes.includes(r)" :aria-label="alertRouteName(r)"
+                                   @change="toggleAlertList('routes', r, $event.target.checked)">
+                            <span class="toggle-slider"></span>
+                        </span>
+                    </label>
+                </template>
+                <p class="form-hint" x-show="alerts.loaded && !alerts.routes.length" x-cloak>{{ t('settings.alerts.routes_none') }}</p>
+                <p class="form-hint" x-show="alerts.loaded && alerts.routeNames.some(r => !alerts.ready[r])" x-cloak>{{ t('settings.alerts.routes_setup') }}
+                    <a href="/settings?tab=connectors" @click.prevent="onTabChange('connectors')">{{ t('settings.platform_connectors') }}</a></p>
+                <div class="alerts-actions">
+                    <button class="btn btn-secondary" type="button" id="alerts-test-alert" @click="sendTestAlert()" :disabled="opsTestAlert.sending"
+                            x-text="opsTestAlert.sending ? t('settings.hub.test_alert_sending') : t('settings.hub.test_alert')"></button>
+                </div>
+                <p class="form-hint">{{ t('settings.hub.test_alert_hint') }}</p>
+                <div class="notice mt-2" x-show="opsTestAlert.result" x-cloak role="status"
+                     :class="opsTestAlert.result && opsTestAlert.result.ok ? 'tone-success' : 'tone-danger'">
+                    <span x-text="testAlertSummary()"></span>
+                </div>
+            </section>
+
+            <!-- 2. Server status messages -->
+            <section class="card-nested" id="alerts-status" aria-labelledby="alerts-status-title">
+                <h3 class="card-title" id="alerts-status-title">{{ t('settings.hub.status_messages') }}</h3>
+                <p class="card-sub">{{ t('settings.hub.status_messages_hint') }}</p>
+                <template x-for="ev in alerts.lifecycleNames" :key="'al-' + ev">
+                    <label class="toggle-row">
+                        <span class="toggle">
+                            <input type="checkbox" :checked="alerts.lifecycle.includes(ev)"
+                                   @change="toggleAlertList('lifecycle', ev, $event.target.checked)">
+                            <span class="toggle-slider"></span>
+                        </span>
+                        <span x-text="t('settings.hub.status_' + ev)"></span>
+                    </label>
+                </template>
+            </section>
+
+            <!-- 3. The guard's pager -->
+            <section class="card-nested" id="alerts-guard" aria-labelledby="alerts-guard-title">
+                <h3 class="card-title" id="alerts-guard-title">{{ t('settings.alerts.guard_title') }}</h3>
+                <p class="card-sub">{{ t('settings.alerts.guard_sub') }}</p>
+                <dl class="outside-watch-grid" x-show="alerts.loaded" x-cloak>
+                    <dt>{{ t('settings.alerts.guard_bot') }}</dt>
+                    <dd x-text="alerts.guard && alerts.guard.bot ? t('settings.alerts.guard_bot_ready') : t('settings.alerts.guard_bot_missing')"></dd>
+                    <dt>{{ t('settings.alerts.guard_running') }}</dt>
+                    <dd x-text="guardRunningText()"></dd>
+                </dl>
+                <div class="form-group">
+                    <label class="form-label" for="alerts-guard-chat">{{ t('settings.alerts.guard_chat') }}</label>
+                    <input id="alerts-guard-chat" type="text" class="form-input" dir="ltr" translate="no" inputmode="text" autocomplete="off"
+                           x-model.trim="alerts.guardChat" placeholder="123456789">
+                    <div class="form-hint">{{ t('settings.alerts.guard_chat_hint') }}</div>
+                    <div class="form-hint" x-show="alerts.loaded && !alerts.guardChat && alerts.guard && alerts.guard.fallback_chat" x-cloak
+                         x-text="t('settings.alerts.guard_chat_fallback', { chat: alerts.guard ? alerts.guard.fallback_chat : '' })"></div>
+                </div>
+                <div class="notice tone-warning mb-3" x-show="alerts.guard && alerts.guard.pager && alerts.guard.pager.source === 'env'" x-cloak>
+                    <span class="ki" data-icon="info" aria-hidden="true"></span>
+                    <span>{{ t('settings.alerts.guard_env') }}</span>
+                </div>
+                <div class="notice" id="alerts-guard-last" x-show="alerts.loaded" x-cloak :class="guardLastTone()">
+                    <span class="ki" x-html="KazmaIcons.get(guardLastTone() === 'tone-success' ? 'check' : 'info')" aria-hidden="true"></span>
+                    <span x-text="guardLastPageText()"></span>
+                </div>
+                <div class="alerts-actions">
+                    <button class="btn btn-secondary" type="button" id="alerts-guard-test" @click="sendGuardTestPage()"
+                            :disabled="guardTest.busy || !alerts.loaded"
+                            x-text="guardTest.busy ? t('settings.alerts.test_page_sending') : t('settings.alerts.test_page')"></button>
+                </div>
+                <div class="notice mt-2" id="alerts-guard-test-result" x-show="guardTest.note" x-cloak role="status" :class="guardTest.tone">
+                    <span x-text="guardTest.note"></span>
+                </div>
+            </section>
+
+            <!-- 4. Kazma Watch -->
+            <section class="card-nested" id="alerts-watch" aria-labelledby="alerts-watch-title">
+                <h3 class="card-title" id="alerts-watch-title">{{ t('settings.alerts.watch_title') }}</h3>
+                <p class="card-sub">{{ t('settings.outside_watch_hint') }}</p>
+
+                <!-- Not paired: pair from here -->
+                <div x-show="alerts.loaded && alerts.watch && !alerts.watch.paired" x-cloak data-watch-not-paired>
+                    <p>{{ t('settings.alerts.watch_not_paired') }}</p>
+                    <div class="form-group">
+                        <label class="form-label" for="alerts-watch-token">{{ t('settings.alerts.watch_token') }}</label>
+                        <input id="alerts-watch-token" type="password" class="form-input" dir="ltr" autocomplete="off"
+                               x-model="watchPair.token">
+                        <div class="form-hint">{{ t('settings.alerts.watch_token_hint') }}</div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="alerts-watch-url">{{ t('settings.alerts.watch_url') }}</label>
+                        <input id="alerts-watch-url" type="url" class="form-input" dir="ltr" translate="no" autocomplete="off"
+                               x-model.trim="watchPair.url" placeholder="https://status.kazma.ai">
+                    </div>
+                    <div class="alerts-actions">
+                        <button class="btn btn-primary" type="button" id="alerts-watch-pair" @click="pairWatch()"
+                                :disabled="watchBusy !== '' || !watchPair.token"
+                                x-text="watchBusy === 'pair' ? t('settings.alerts.watch_pairing') : t('settings.alerts.watch_pair')"></button>
+                    </div>
+                </div>
+
+                <!-- Paired -->
+                <div x-show="alerts.loaded && alerts.watch && alerts.watch.paired" x-cloak data-watch-paired>
+                    <dl class="outside-watch-grid">
+                        <dt>{{ t('settings.outside_watch_observer') }}</dt>
+                        <dd><bdi dir="ltr" translate="no" x-text="alerts.watch ? alerts.watch.url : ''"></bdi></dd>
+                        <dt>{{ t('settings.outside_watch_guard') }}</dt>
+                        <dd x-text="outsideGuardState(alerts.watch ? alerts.watch.guard : null)"></dd>
+                        <dt>{{ t('settings.outside_watch_last_heartbeat') }}</dt>
+                        <dd x-text="outsideLastAck(alerts.watch ? alerts.watch.guard : null)"></dd>
+                        <template x-if="watchObserver().ok">
+                            <div style="display:contents">
+                                <dt>{{ t('settings.outside_watch_now') }}</dt>
+                                <dd><span x-text="outsideCondition(watchObserver().condition)"></span>
+                                    <span class="form-hint" translate="no" x-show="watchObserver().detail" x-cloak x-text="watchObserver().detail"></span></dd>
+                                <dt>{{ t('settings.outside_watch_week') }}</dt>
+                                <dd x-text="outsideUptime(watchObserver())"></dd>
+                                <dt>{{ t('settings.outside_watch_incidents') }}</dt>
+                                <dd>
+                                    <span x-show="!(watchObserver().incidents_7d || []).length">{{ t('settings.outside_watch_no_incidents') }}</span>
+                                    <ul x-show="(watchObserver().incidents_7d || []).length" x-cloak>
+                                        <template x-for="(inc, i) in (watchObserver().incidents_7d || [])" :key="i">
+                                            <li><span x-text="outsideCondition(inc.cause)"></span>: <span x-text="outsideIncidentWhen(inc)"></span></li>
+                                        </template>
+                                    </ul>
+                                </dd>
+                                <dt>{{ t('settings.alerts.watch_zone') }}</dt>
+                                <dd x-text="watchZoneText()"></dd>
+                            </div>
+                        </template>
+                    </dl>
+                    <div class="notice tone-warning mb-3" x-show="!watchObserver().ok" x-cloak>
+                        <span class="ki" data-icon="alert-circle" aria-hidden="true"></span>
+                        <span>{{ t('settings.outside_watch_observer_error') }}</span>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="alerts-watch-email">{{ t('settings.alerts.watch_email') }}</label>
+                        <input id="alerts-watch-email" type="email" class="form-input" dir="ltr" translate="no" autocomplete="off"
+                               x-model.trim="alerts.watchEmail" placeholder="name@example.com">
+                        <div class="form-hint">{{ t('settings.alerts.watch_email_hint') }}</div>
+                    </div>
+                    <div class="alerts-actions">
+                        <button class="btn btn-secondary" type="button" id="alerts-watch-tell" @click="saveWatchSettings()"
+                                :disabled="watchBusy !== ''">{{ t('settings.alerts.watch_tell') }}</button>
+                        <button class="btn btn-secondary" type="button" id="alerts-watch-test" @click="testWatch()"
+                                :disabled="watchBusy !== ''"
+                                x-text="watchBusy === 'test' ? t('settings.alerts.test_page_sending') : t('settings.alerts.test_page')"></button>
+                        <button class="btn btn-danger" type="button" id="alerts-watch-unpair" @click="unpairWatch()"
+                                :disabled="watchBusy !== ''">{{ t('settings.alerts.watch_unpair') }}</button>
+                    </div>
+                </div>
+                <div class="notice mt-2" id="alerts-watch-result" x-show="watchResult.note" x-cloak role="status" :class="watchResult.tone">
+                    <span x-text="watchResult.note"></span>
+                </div>
+            </section>
+
+            <!-- 5. Notices -->
+            <section class="card-nested" id="alerts-notices" aria-labelledby="alerts-notices-title">
+                <h3 class="card-title" id="alerts-notices-title">{{ t('settings.alerts.notices_title') }}</h3>
+                <p class="card-sub">{{ t('settings.alerts.notices_sub') }}</p>
+                <div class="form-group">
+                    <label class="form-label" for="alerts-notices-choice">{{ t('settings.alerts.notices_label') }}</label>
+                    <select id="alerts-notices-choice" class="form-select" x-model="alerts.noticesChoice">
+                        <option value="chats">{{ t('settings.alerts.notices_chats') }}</option>
+                        <option value="bell">{{ t('settings.alerts.notices_bell') }}</option>
+                    </select>
+                    <div class="form-hint">{{ t('settings.alerts.notices_hint') }}</div>
+                </div>
+            </section>
+        </div>
+
+        <div class="alerts-save">
+            <button class="btn btn-danger" type="button" @click="resetAlerts()" :disabled="!alertsDirty || alerts.saving">{{ t('common.cancel') }}</button>
+            <button class="btn btn-primary" type="button" id="alerts-save" @click="saveAlerts()" :disabled="!alertsDirty || alerts.saving"
+                    x-text="alerts.saving ? t('settings.saving') : t('settings.save')"></button>
+        </div>
+
+        <!-- 6. Recent alerts -->
+        <section class="card-nested mt-6" id="alerts-recent" aria-labelledby="alerts-recent-title">
+            <div class="card-header">
+                <div>
+                    <h3 class="card-title" id="alerts-recent-title">{{ t('settings.alerts.recent_title') }}</h3>
+                    <p class="card-sub">{{ t('settings.alerts.recent_sub') }}</p>
+                </div>
+                <button class="btn btn-secondary btn-sm" type="button" @click="loadRecentAlerts()" :disabled="recentAlerts.loading">{{ t('settings.alerts.refresh') }}</button>
+            </div>
+            <div class="notice tone-warning mb-3" x-show="recentAlerts.loaded && recentAlerts.errors.length" x-cloak>
+                <span class="ki" data-icon="alert-circle" aria-hidden="true"></span>
+                <span x-text="recentErrorsText()"></span>
+            </div>
+            <div class="notice tone-danger" x-show="recentAlerts.failed" x-cloak role="alert">
+                <span>{{ t('settings.alerts.recent_failed') }}</span>
+            </div>
+            <div class="empty-state" x-show="recentAlerts.loaded && !recentAlerts.failed && !recentAlerts.items.length" x-cloak>
+                <span class="icon-tile tone-success"><span class="ki" data-icon="check" aria-hidden="true"></span></span>
+                <span>{{ t('settings.alerts.recent_none') }}</span>
+            </div>
+            <div class="table-container" x-show="recentAlerts.loaded && recentAlerts.items.length" x-cloak>
+                <table class="data-table" id="alerts-recent-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">{{ t('settings.alerts.col_when') }}</th>
+                            <th scope="col">{{ t('settings.alerts.col_sender') }}</th>
+                            <th scope="col">{{ t('settings.alerts.col_alert') }}</th>
+                            <th scope="col">{{ t('settings.alerts.col_taken') }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="(a, i) in recentAlerts.items" :key="'ra-' + i">
+                            <tr :data-source="a.source">
+                                <td><time :datetime="new Date(a.at * 1000).toISOString()" x-text="recentWhen(a)"></time></td>
+                                <td><span class="badge" :class="a.source === 'watch' ? 'badge-info' : 'badge-accent'" x-text="recentSource(a)"></span></td>
+                                <td>
+                                    <span class="badge" :class="recentSeverityClass(a)" x-text="recentSeverity(a)"></span>
+                                    <a :href="a.link" x-text="recentTitle(a)" :translate="recentTitleIsCatalog(a) ? 'yes' : 'no'"></a>
+                                    <span class="form-hint" x-show="a.held" x-cloak x-text="recentHeld(a)"></span>
+                                </td>
+                                <td x-text="recentTaken(a)"></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
          TAB 11: SYSTEM
          ═══════════════════════════════════════════════════════════════ -->
     <div x-show="tab === 'system'" x-transition x-cloak>
@@ -2585,45 +2801,6 @@
                 <div class="form-hint" x-show="chatReasoning.applies === false" x-cloak>{{ t('settings.chat_reasoning_not_applied') }}</div>
             </div>
             <button class="btn btn-primary" @click="saveChatReasoning()" :disabled="chatReasoningSaving">{{ t('settings.save_chat_reasoning') }}</button>
-        </div>
-
-        <!-- The outside watch (kazma_core.observability.outside_watch, plan B1) -->
-        <div class="settings-group mb-6" id="outside-watch-section">
-            <h3>{{ t('settings.outside_watch_title') }}</h3>
-            <div class="form-hint">{{ t('settings.outside_watch_hint') }}</div>
-            <div class="form-hint" x-show="outsideWatch.failed" x-cloak style="color:var(--danger)">{{ t('settings.outside_watch_load_error') }}</div>
-            <div x-show="outsideWatch.loaded && !outsideWatch.paired" x-cloak data-outside-not-paired>
-                <p>{{ t('settings.outside_watch_not_paired') }}</p>
-                <pre translate="no" dir="ltr"><code>kazma observer pair</code></pre>
-            </div>
-            <dl x-show="outsideWatch.loaded && outsideWatch.paired" x-cloak data-outside-paired class="outside-watch-grid">
-                <dt>{{ t('settings.outside_watch_observer') }}</dt>
-                <dd><bdi dir="ltr" translate="no" x-text="outsideWatch.url"></bdi></dd>
-                <dt>{{ t('settings.outside_watch_guard') }}</dt>
-                <dd x-text="outsideGuardState(outsideWatch.guard)"></dd>
-                <dt>{{ t('settings.outside_watch_last_heartbeat') }}</dt>
-                <dd x-text="outsideLastAck(outsideWatch.guard)"></dd>
-                <template x-if="outsideWatch.observer && outsideWatch.observer.ok">
-                    <div style="display:contents">
-                        <dt>{{ t('settings.outside_watch_now') }}</dt>
-                        <dd><span x-text="outsideCondition(outsideWatch.observer.condition)"></span>
-                            <span class="form-hint" translate="no" x-show="outsideWatch.observer.detail" x-cloak x-text="outsideWatch.observer.detail"></span></dd>
-                        <dt>{{ t('settings.outside_watch_week') }}</dt>
-                        <dd x-text="outsideUptime(outsideWatch.observer)"></dd>
-                        <dt>{{ t('settings.outside_watch_incidents') }}</dt>
-                        <dd>
-                            <span x-show="outsideWatch.loaded && !(outsideWatch.observer.incidents_7d || []).length" x-cloak>{{ t('settings.outside_watch_no_incidents') }}</span>
-                            <ul x-show="(outsideWatch.observer.incidents_7d || []).length" x-cloak>
-                                <template x-for="(inc, i) in (outsideWatch.observer.incidents_7d || [])" :key="i">
-                                    <li><span x-text="outsideCondition(inc.cause)"></span>: <span x-text="outsideIncidentWhen(inc)"></span></li>
-                                </template>
-                            </ul>
-                        </dd>
-                    </div>
-                </template>
-            </dl>
-            <div class="form-hint" x-show="outsideWatch.loaded && outsideWatch.paired && outsideWatch.observer && !outsideWatch.observer.ok" x-cloak>{{ t('settings.outside_watch_observer_error') }}</div>
-            <button class="btn btn-secondary" x-show="outsideWatch.loaded && outsideWatch.paired" x-cloak @click="loadOutsideWatch(true)">{{ t('settings.outside_watch_refresh') }}</button>
         </div>
 
         <!-- Proxy Provider -->
@@ -4724,5 +4901,6 @@
 <script src="/static/js/settings_agent.js?v={{ js_version() }}"></script>
 <script src="/static/js/settings_integrations.js?v={{ js_version() }}"></script>
 <script src="/static/js/settings_ops.js?v={{ js_version() }}"></script>
+<script src="/static/js/settings_alerts.js?v={{ js_version() }}"></script>
 <script src="/static/js/settings.js?v={{ js_version() }}"></script>
 {% endblock %}

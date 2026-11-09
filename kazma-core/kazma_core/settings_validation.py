@@ -224,6 +224,53 @@ def _cron_bound(key: str) -> Callable[[Any], Any]:
     return normalize
 
 
+#: Where Kazma's alerts go (``ops_alerts._ops_channels``; Settings -> Alerts).
+ALERT_ROUTES = ("telegram", "telegram-group", "discord", "slack")
+
+
+def _alert_routes(value: Any) -> Any:
+    # A name no route answers to would route alerts nowhere without a word.
+    # Kept as written (a comma list or a list): ops_alerts reads both.
+    if isinstance(value, str):
+        names = [p.strip().lower() for p in value.split(",") if p.strip()]
+    elif isinstance(value, (list, tuple)):
+        names = [str(p).strip().lower() for p in value if str(p).strip()]
+    else:
+        raise SettingRejected("Alert routes are a list of: " + ", ".join(ALERT_ROUTES) + ".")
+    unknown = [n for n in names if n not in ALERT_ROUTES]
+    if unknown:
+        raise SettingRejected("Alert routes are a list of: " + ", ".join(ALERT_ROUTES)
+                              + f" (not {', '.join(unknown)}).")
+    names = list(dict.fromkeys(names))
+    return ",".join(names) if isinstance(value, str) else names
+
+
+def _telegram_chat(value: Any) -> Any:
+    # The guard's pager (Settings -> Alerts): a chat id (a group's starts -100)
+    # or a public @name. A typo here is a pager that pages nobody.
+    import re
+
+    text = str(value if value is not None else "").strip()
+    if not text:
+        return ""  # unset: the guard falls back to swarm.group_chat_id
+    if re.fullmatch(r"-?\d{1,20}", text) or re.fullmatch(r"@[A-Za-z][A-Za-z0-9_]{4,31}", text):
+        return text
+    raise SettingRejected("A Telegram chat is a number (like 123456789, or -100... for a group) "
+                          "or a public @name.")
+
+
+def _email_address(value: Any) -> Any:
+    # Kazma Watch's email recipient (Settings -> Alerts, sent to the observer).
+    from kazma_core.observability.outside_watch import valid_email
+
+    text = str(value if value is not None else "").strip()
+    if not text:
+        return ""
+    if not valid_email(text):
+        raise SettingRejected("An email address looks like name@example.com.")
+    return text
+
+
 def _strict_bool(value: Any) -> Any:
     if isinstance(value, bool):
         return value
@@ -406,6 +453,8 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
     from kazma_core.memory.embedder import API_KEY_ENV_KEY
     from kazma_core.model_details import OVERRIDES_KEY as MODEL_DETAILS_KEY
     from kazma_core.model_prices import OWNER_PRICES_KEY
+    from kazma_core.observability.ops_alerts import NOTICES_TO_CHATS_KEY
+    from kazma_core.observability.outside_watch import EMAIL_TO_KEY
     from kazma_core.runs.runbooks import RUNBOOKS_KEY, validate_runbooks
     from kazma_core.swarm.task_store import TASK_RETENTION_KEY
 
@@ -424,6 +473,11 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
         DAILY_COST_LIMIT_KEY: (_daily_cost_limit, "agent"),
         CHAT_REASONING_KEY: (_chat_reasoning, "agent"),
         EVENTS_KEY: (_lifecycle_events, "notifications"),
+        # Settings -> Alerts (the unified alerts plan, Stage 3).
+        "notifications.ops.channels": (_alert_routes, "notifications"),
+        NOTICES_TO_CHATS_KEY: (_strict_bool, "notifications"),
+        EMAIL_TO_KEY: (_email_address, "notifications"),
+        "guard.telegram.chat_id": (_telegram_chat, "guard"),
         RUNBOOKS_KEY: (validate_runbooks, None),
         "agent.language": (_agent_language, "agent"),
         "agent.max_iterations": (_max_iterations, "agent"),

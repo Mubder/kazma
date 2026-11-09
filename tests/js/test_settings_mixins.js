@@ -19,7 +19,7 @@ const vm = require("vm");
 
 const jsDir = path.join(__dirname, "..", "..", "kazma-ui", "kazma_ui", "static", "js");
 const MIXINS = ["settings_core.js", "settings_hub.js", "settings_agent.js",
-  "settings_integrations.js", "settings_ops.js"];
+  "settings_integrations.js", "settings_ops.js", "settings_alerts.js"];
 
 let fail = 0;
 function ok(name, cond, detail) {
