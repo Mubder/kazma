@@ -616,13 +616,18 @@ async def test_cancelled_dispatch_releases_worker_busy(empty_config):
     assert worker.busy is True
 
     outer.cancel()
-    release.set()
     # The caller's cancellation stops the work, records the ending, and is
     # then raised to the caller (Swarm audit SW-E02/SW-E04: it used to be
     # swallowed as a "Cancelled by user" result, so a caller's own deadline
     # never raised).
     with pytest.raises(asyncio.CancelledError):
         await outer
+    # Released only after the stop landed. Released in the same tick as the
+    # cancel, the worker finished first on Python 3.11 (its wait_for hands
+    # back a result that is ready when the cancel arrives; 3.12 cancels) and
+    # the task was rightly recorded "success": a race, not this test's
+    # subject (CI on 3.11, 2026-11-09).
+    release.set()
     result = engine.list_tasks()[0].result
 
     assert result.status == "cancelled"
