@@ -12,7 +12,8 @@ const _THEME_COLOR = { light: '#ffffff', dark: '#0e1626' };
 export function syncDocumentColorScheme(theme) {
     const scheme = theme === 'dark' ? 'dark' : 'light';
     const root = document.documentElement;
-    if (root.getAttribute('data-theme') !== scheme) {
+    const changed = root.getAttribute('data-theme') !== scheme;
+    if (changed) {
         root.setAttribute('data-theme', scheme);
     }
     _setMeta('color-scheme', scheme);
@@ -23,6 +24,10 @@ export function syncDocumentColorScheme(theme) {
         if (computed) canvas = computed;
     } catch (_) { /* computed style unavailable in some test harnesses */ }
     _setMeta('theme-color', canvas);
+    // Every path that changes the theme passes here (the header's toggle,
+    // Settings' save and preview, Auto following the OS): pages that draw
+    // with tokens on a canvas or an SVG redraw on the event.
+    if (changed) announceThemeChange('theme');
 }
 
 function _setMeta(name, content) {
@@ -104,23 +109,55 @@ export function accentVariants(hex) {
     };
 }
 
+/* `kazma:themechange` on document, detail {theme, reason}: the theme
+ * ('light' | 'dark') or the accent changed. Charts, canvases and SVGs that
+ * read colour tokens with getComputedStyle redraw on it (the colours they
+ * read are the old theme's until then). Dispatched by
+ * syncDocumentColorScheme when data-theme changes and by applyAccentColor
+ * when the accent's variables change; never for a call that changes
+ * nothing. Safe where there is no DOM event support (a test sandbox). */
+export function announceThemeChange(reason) {
+    if (typeof document === 'undefined' || !document || typeof document.dispatchEvent !== 'function') return;
+    if (typeof CustomEvent !== 'function') return;
+    const root = document.documentElement;
+    const attr = root && typeof root.getAttribute === 'function' ? root.getAttribute('data-theme') : null;
+    const theme = attr === 'dark' ? 'dark' : 'light';
+    try {
+        document.dispatchEvent(new CustomEvent('kazma:themechange', { detail: { theme, reason: reason || 'theme' } }));
+    } catch (_) { /* a listener's error must not break the theme switch */ }
+}
+
 /* Apply the owner's accent to <html>, or clear it (empty / malformed =
  * the theme's own accent). Only these custom properties are touched: the
  * element's other inline styles (font size, --app-ivh) stay. */
 export function applyAccentColor(hex) {
     const root = document.documentElement;
     const props = accentVariants(hex);
+    const before = _ACCENT_PROPS.map((name) => root.style.getPropertyValue(name)).join('|');
     _LEGACY_ACCENT_PROPS.forEach((name) => root.style.removeProperty(name));
     if (!props) {
         _ACCENT_PROPS.forEach((name) => root.style.removeProperty(name));
-        return;
+    } else {
+        Object.keys(props).forEach((name) => root.style.setProperty(name, props[name]));
     }
-    Object.keys(props).forEach((name) => root.style.setProperty(name, props[name]));
+    const after = _ACCENT_PROPS.map((name) => root.style.getPropertyValue(name)).join('|');
+    if (after !== before) announceThemeChange('accent');
+}
+
+// The OS's light/dark preference: the theme an 'auto' choice resolves to.
+function _systemTheme() {
+    try {
+        return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+    } catch (_) {
+        return null;
+    }
 }
 
 export function kazmaApp() {
     return {
         theme: 'dark',
+        // What the owner chose: 'light', 'dark' or 'auto' (follows the OS).
+        themePreference: null,
         lang: 'ar',
         sidebarCollapsed: false,
         mobileNavOpen: false,
@@ -159,14 +196,11 @@ export function kazmaApp() {
                     // see a one-frame dark flash stay). light/dark apply as-is.
                     let resolved = null;
                     if (d && d.theme === 'auto') {
-                        try {
-                            resolved = (window.matchMedia &&
-                                window.matchMedia('(prefers-color-scheme: dark)').matches)
-                                ? 'dark' : 'light';
-                        } catch (_) { resolved = null; }
+                        resolved = _systemTheme();
                     } else if (d && (d.theme === 'light' || d.theme === 'dark')) {
                         resolved = d.theme;
                     }
+                    if (d && d.theme) this.themePreference = d.theme;
                     if (resolved && resolved !== this.theme) {
                         this.theme = resolved;
                         this._applyTheme();
@@ -189,6 +223,26 @@ export function kazmaApp() {
             // Restore sidebar state
             this.sidebarCollapsed = localStorage.getItem('kazma-sidebar-collapsed') === 'true';
 
+            // A theme applied elsewhere (Settings' save or preview calls
+            // syncDocumentColorScheme directly) moves the header's toggle too:
+            // its icon reads `theme`.
+            document.addEventListener('kazma:themechange', (e) => {
+                const t = e && e.detail && e.detail.theme;
+                if ((t === 'light' || t === 'dark') && t !== this.theme) this.theme = t;
+            });
+
+            // Auto follows the OS while the page is open: a change of the
+            // system's light/dark setting re-resolves the theme (and the
+            // theme change is announced, kazma:themechange).
+            try {
+                const mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+                if (mq) {
+                    const onSystemChange = () => this._followSystemTheme();
+                    if (typeof mq.addEventListener === 'function') mq.addEventListener('change', onSystemChange);
+                    else if (typeof mq.addListener === 'function') mq.addListener(onSystemChange);
+                }
+            } catch (_) { /* no matchMedia: Auto resolves at load only */ }
+
             // Global keyboard shortcuts
             document.addEventListener('keydown', (e) => this._handleKeyboard(e));
 
@@ -201,8 +255,27 @@ export function kazmaApp() {
             });
         },
 
+        // The OS switched light/dark. Only an 'auto' choice follows it. The
+        // choice is read again from the server first: Settings may have
+        // saved Auto (or a fixed theme) since this page loaded.
+        async _followSystemTheme() {
+            try {
+                if (typeof window.kazmaGetJson === 'function') {
+                    const d = await window.kazmaGetJson('/api/settings/appearance');
+                    if (d && d.theme) this.themePreference = d.theme;
+                }
+            } catch (_) { /* keep the preference this page knows */ }
+            if (this.themePreference !== 'auto') return;
+            const resolved = _systemTheme();
+            if (resolved && resolved !== this.theme) {
+                this.theme = resolved;
+                this._applyTheme();
+            }
+        },
+
         toggleTheme() {
             this.theme = this.theme === 'dark' ? 'light' : 'dark';
+            this.themePreference = this.theme;
             localStorage.setItem('kazma-theme', this.theme);
             this._applyTheme();
             // Persist to the account (server) so the choice travels across
@@ -541,12 +614,11 @@ export function systemAlertsBanner() {
             return severity === 'ERROR' || severity === 'CRITICAL' ? 'var(--danger)' : 'var(--warning)';
         },
 
+        // The banner is a .notice (kazma.css): this names its tone class, so
+        // the tint and the icon follow the tokens in both themes (it was an
+        // inline rgba wash with a coloured stripe).
         bannerTone() {
-            const red = this.bannerColor() === 'var(--danger)';
-            return {
-                background: red ? 'rgba(239, 68, 68, 0.1)' : 'rgba(245, 158, 11, 0.1)',
-                borderLeft: '4px solid ' + this.bannerColor(),
-            };
+            return this.bannerColor() === 'var(--danger)' ? 'tone-danger' : 'tone-warning';
         },
 
         // Behind the shown alert can wait a backlog (a day of failed test

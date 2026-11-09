@@ -104,7 +104,7 @@ def parse_css(text: str) -> list[Rule]:
                 stack.append(("at", pre))
             else:
                 ctx = "|".join(str(p) for k, p in stack if k == "at")
-                rule = Rule([" ".join(s.split()) for s in pre.split(",")], ctx)
+                rule = Rule([" ".join(s.split()) for s in _split_args(pre)], ctx)
                 rules.append(rule)
                 stack.append(("rule", rule))
             buf = i + 1
@@ -485,7 +485,12 @@ TEXT_ON_CARD = ("--text-primary", "--text-secondary", "--text-tertiary", "--text
 TEXT_ON_WELL = ("--text-primary", "--text-secondary", "--text-tertiary", "--text-muted")
 ON_OWN_TINT = (("--success", "--success-subtle"), ("--warning", "--warning-subtle"),
                ("--danger", "--danger-subtle"), ("--info", "--info-subtle"),
-               ("--accent-light", "--accent-subtle"))
+               ("--accent-light", "--accent-subtle"), ("--neutral", "--neutral-subtle")) + tuple(
+    # the text of a notice, the alerts banner, the page banner, the sidebar's
+    # agent row and an approval card: ink on every tint
+    (ink, tint) for ink in ("--text-primary", "--text-secondary")
+    for tint in ("--accent-subtle", "--success-subtle", "--warning-subtle", "--danger-subtle",
+                 "--info-subtle", "--neutral-subtle"))
 INK_ON_FILL = (("--on-accent", "--accent"), ("--on-success", "--success"), ("--on-danger", "--danger"),
                ("--on-warning", "--warning"), ("--on-info", "--info"), ("--on-secondary", "--secondary"),
                ("--text-inverse", "--accent"))
@@ -565,6 +570,46 @@ def test_every_chosen_accent_reads_in_both_themes(tables):
             if contrast(over(colour(table, "--accent-light"), card), card) < 4.5:
                 problems.append(f"{name}: accent text on the card")
         assert not problems, f"{hex_value}: {problems}"
+
+
+#: The theme's own accent and its ink, what an install with no chosen
+#: accent renders (base.html writes the --accent-chosen-* seeds only when
+#: the owner chose one).
+THEME_ACCENT = {"dark": ("#3b82f6", "#040815"), "light": ("#2563eb", "#ffffff")}
+
+
+def no_accent_problems(dark: dict[str, str], light: dict[str, str]) -> list[str]:
+    problems = []
+    for name, table in _themes(dark, light).items():
+        accent, ink = THEME_ACCENT[name]
+        try:
+            got_accent = colour(table, "--accent")
+            got_ink = colour(table, "--on-accent")
+        except Undefined as exc:
+            problems.append(f"{name}: with no accent chosen, {exc} is undefined (--accent is invalid)")
+            continue
+        if not _same(got_accent, parse_colour(accent)):
+            problems.append(f"{name}: --accent is {got_accent}, not the theme's {accent}")
+        if not _same(got_ink, parse_colour(ink)):
+            problems.append(f"{name}: --on-accent is {got_ink}, not {ink}")
+        for token in ("--accent-light", "--accent-subtle", "--accent-hover", "--nav-item-active-bg"):
+            try:
+                colour(table, token)
+            except Undefined as exc:
+                problems.append(f"{name}: {token} needs {exc}")
+    return problems
+
+
+def test_no_chosen_accent_renders_the_theme_accent(tables):
+    """Every var(--accent-chosen-*) falls back to the theme's default."""
+    dark, light, _ = tables
+    assert not no_accent_problems(dark, light)
+
+
+def test_negative_control_an_accent_seed_without_a_fallback_is_caught():
+    stripped = _read(KAZMA_CSS).replace("var(--accent-chosen-dark, #3b82f6)", "var(--accent-chosen-dark)")
+    dark, light, _ = _token_tables(stripped)
+    assert any("dark: with no accent chosen" in p for p in no_accent_problems(dark, light))
 
 
 def test_negative_control_an_unadjusted_accent_is_caught(tables):

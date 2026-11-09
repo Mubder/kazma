@@ -95,6 +95,23 @@ export function scriptKey(src) {
     return kept.length ? text.slice(0, at) + '?' + kept.join('&') : text.slice(0, at);
 }
 
+/**
+ * Fill the [data-icon] spans under *root* (icons.js's KazmaIcons.hydrate).
+ * icons.js hydrates the document once, at DOM ready, and soft navigation
+ * swaps in new nodes: every static icon of a page reached by the sidebar was
+ * blank (32 on Workspace, dialog close buttons and card-title icons among
+ * them) and filled on a load. Idempotent per node.
+ */
+export function hydrateIcons(root) {
+    try {
+        if (root && window.KazmaIcons && typeof window.KazmaIcons.hydrate === 'function') {
+            window.KazmaIcons.hydrate(root);
+        }
+    } catch (e) {
+        console.warn('[soft-nav] icon hydrate:', e);
+    }
+}
+
 /** A page may veto navigation before its editor, sockets or DOM are torn down. */
 export async function canLeavePage() {
     if (typeof window.kazmaBeforeNavigate !== 'function') return true;
@@ -195,6 +212,7 @@ export function initSoftNav() {
         if (newTitle && oldTitle) {
             // innerHTML: some page titles carry an icon span/svg.
             oldTitle.innerHTML = newTitle.innerHTML;
+            hydrateIcons(oldTitle);
         }
 
         // Sync the shell class (e.g. `is-chat`): it is stamped server-side
@@ -633,6 +651,7 @@ export function initSoftNav() {
                 if (!newBody || !oldBody) {
                     destroyAlpineOn(oldMain);
                     oldMain.innerHTML = newMain.innerHTML;
+                    hydrateIcons(oldMain);
                     if (doc.title) document.title = doc.title;
                     window.scrollTo(0, 0);
                     mergePageHead(doc);
@@ -641,9 +660,14 @@ export function initSoftNav() {
                     runIncomingBodyScripts(doc);
                     if (gen !== softNavGeneration) return;
                     await bindPageAlpine(oldMain, gen);
+                    hydrateIcons(oldMain);
                 } else {
                     destroyAlpineOn(oldBody);
                     oldBody.innerHTML = newBody.innerHTML;
+                    // icons.js fills [data-icon] once, at DOM ready: the
+                    // swapped-in page's static icons are new nodes (blank
+                    // after a sidebar navigation, filled on a load).
+                    hydrateIcons(oldBody);
                     syncChrome(doc);
                     window.scrollTo(0, 0);
 
@@ -654,6 +678,8 @@ export function initSoftNav() {
                     if (gen !== softNavGeneration) return;
 
                     await bindPageAlpine(oldBody, gen);
+                    // ...and what Alpine rendered from the page's templates.
+                    hydrateIcons(oldBody);
                 }
             } finally {
                 resumeAlpineMutations();
