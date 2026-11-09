@@ -596,9 +596,12 @@ button { cursor: pointer; font-family: inherit; }
   border-radius: var(--radius-xs);
   border: 0;
 }
+/* On the filled pill the hint is an outline: a wash of the ink lightened the
+   pill under the text (white on #4c7fef read 3.76:1, measured 2026-11-09). */
 .nav-link.active .nav-kbd {
   color: var(--nav-item-active-ink);
-  background: color-mix(in srgb, var(--nav-item-active-ink) 18%, transparent);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--nav-item-active-ink) 45%, transparent);
 }
 .sidebar.collapsed .nav-links {
   padding-inline: var(--sp-2);
@@ -1788,6 +1791,11 @@ button { cursor: pointer; font-family: inherit; }
   color: var(--text-primary);
 }
 .form-label { margin-bottom: var(--sp-2); }
+/* On a phone a field is a touch target: 44px. At 40px everywhere the refresh
+   shrank X Studio's phone fields below the 42px its browser test holds. */
+@media (max-width: 768px) {
+  :root { --input-height: 44px; }
+}
 .form-input,
 .form-select,
 .form-textarea,
@@ -6635,6 +6643,9 @@ html.kazma-soft-nav #main-content {
 }
 /* Packages' badges are the shared badges (§15), a size smaller. */
 .pkg-badge {
+  /* Packages rows are tinted by their state: the badge's wash sits on the
+     wall, like every badge on a tinted surface ("Installed" read 3.93:1). */
+  background: linear-gradient(var(--badge-tint), var(--badge-tint)), var(--surface-card);
   font-size: 0.79rem;
   padding: 2px 9px;
   white-space: nowrap;

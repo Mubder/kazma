@@ -609,8 +609,7 @@ html[data-theme="light"] { color-scheme: only light; }
 .build-badge {
   margin-top: 6px;
   font-size: 0.65rem;
-  color: var(--text-muted);
-  opacity: 0.75;
+  color: var(--text-muted);  /* no extra opacity: at 0.75 it read 3.24:1 */
   user-select: all;
   cursor: default;
 }

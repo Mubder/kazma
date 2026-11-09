@@ -39,6 +39,9 @@ DECLARED: dict[str, str] = {
     "kazma-core/kazma_core/runs/notify.py":
         "a run incident's recovery note follows its row in run_incidents.db, which "
         "outlives a restart (runs/incidents.py)",
+    "kazma-core/kazma_core/observability/alert_catalog.py":
+        "the alert catalog only names each alert and the recovery that closes it; "
+        "it sends nothing (its senders mark their own pages)",
 }
 
 
