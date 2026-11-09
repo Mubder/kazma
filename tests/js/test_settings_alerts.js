@@ -35,13 +35,13 @@ function server(state) {
     lifecycle: { events: state.lifecycle, names: ["started", "startup_failed", "starting", "shutting_down"] },
     notices_to_chats: state.notices,
     guard: { chat: state.chat, guard: "running", tests: true, pager: null },
-    watch: { paired: false, email_to: state.email || "" },
+    watch: { paired: !!state.paired, email_to: state.email || "" },
   };
 }
 
-function component(source) {
+function component(source, extra = {}) {
   const sent = [];
-  const stored = { routes: ["telegram"], lifecycle: ["started"], notices: true, chat: "111", email: "" };
+  const stored = { routes: ["telegram"], lifecycle: ["started"], notices: true, chat: "111", email: "", ...extra };
   const sb = {
     console, setTimeout: (fn) => { fn(); return 0; }, clearTimeout() {},
     showToast() {},
@@ -60,6 +60,10 @@ function component(source) {
   sb.kazmaSave = async (url, init) => {
     sent.push({ url, init });
     if (url === "/api/settings/alerts/guard-test") return { ok: true, id: "abcd1234", requested_at: 1 };
+    if (url === "/api/settings/alerts/watch/settings") {
+      stored.email = init.body.email_to;
+      return { ok: true, told: { ok: true, settings: { timezone: "Asia/Kuwait", email_to: init.body.email_to } } };
+    }
     return { ok: true };
   };
   vm.runInNewContext(source, sb, { filename: "settings_alerts.js" });
@@ -109,6 +113,34 @@ function component(source) {
   await app.sendGuardTestPage();
   ok("the answer is said", !app.guardTest.busy && app.guardTest.tone === "tone-success"
     && app.guardTest.note.includes("111"), app.guardTest);
+
+  // The email field counts as an unsaved change, and Save tells Kazma Watch.
+  ({ app, sent } = component(SOURCE, { paired: true }));
+  await app.loadAlerts();
+  ok("nothing typed, nothing to save", !app.alertsDirty);
+  app.alerts.watchEmail = "owner@example.com";
+  ok("a typed email turns Save on", app.alertsDirty);
+  await app.saveAlerts();
+  const told = sent.find((s) => s.url === "/api/settings/alerts/watch/settings");
+  ok("Save tells Kazma Watch the address", told && told.init.body.email_to === "owner@example.com", sent);
+  ok("only the email was sent", !sent.some((s) => s.url === "/api/settings/alerts"));
+  ok("and it is saved", !app.alertsDirty && app.watchResult.tone === "tone-success", app.watchResult);
+  app.alerts.watchEmail = "other@example.com";
+  app.resetAlerts();
+  ok("Cancel puts the stored address back", app.alerts.watchEmail === "owner@example.com" && !app.alertsDirty);
+  // Control: the page as it was, where the email did not count.
+  const before = SOURCE.replace("|| this.watchEmailDirty);", ");");
+  ok("control: the replacement applies", before !== SOURCE);
+  ({ app } = component(before, { paired: true }));
+  await app.loadAlerts();
+  app.alerts.watchEmail = "owner@example.com";
+  ok("control: without it Save stays off", !app.alertsDirty);
+
+  // A test page with no address told says what to do.
+  ({ app } = component(SOURCE, { paired: true }));
+  await app.loadAlerts();
+  ok("no address yet is said", app._watchChannels({ channels: { telegram: "sent", email: "off" } })
+    .includes("no address yet"));
 
   // Kazma Watch's test page: a refused email says Cloudflare's reason.
   const refused = (reason) => app._watchChannels({ channels: { telegram: "sent", email: "failed" },
