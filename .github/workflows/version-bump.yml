@@ -18,6 +18,9 @@ on:
         required: false
         default: "disabled"
 
+# Prints a notice and exits: it needs no access to the repository at all.
+permissions: {}
+
 jobs:
   disabled:
     runs-on: ubuntu-latest

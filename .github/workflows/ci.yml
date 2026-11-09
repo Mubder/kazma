@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+# Every job here reads the code and runs it; none writes to the repository.
+# Declared so the jobs get a read-only token whatever the repository's own
+# default is (tests/test_workflow_permissions.py).
+permissions:
+  contents: read
+
 env:
   PYTHON_VERSION: "3.11"
 

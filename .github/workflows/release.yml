@@ -146,7 +146,7 @@ jobs:
             ./dist/kazma-*.cdx.json
             ./dist/SHA256SUMS
 
-      - name: Create / update GitHub Release
+      - name: Publish the GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.ver.outputs.tag }}
@@ -174,8 +174,23 @@ jobs:
 
           \`kazma-${{ steps.ver.outputs.base }}.cdx.json\` is a CycloneDX 1.6 SBOM of the locked dependency set."
           fi
-          gh release create "${TAG}" --title "${TAG}" --notes "${NOTES}" \
-            || gh release edit "${TAG}" --notes "${NOTES}" \
-            || true
-          # --clobber so re-running the workflow replaces assets instead of failing.
-          gh release upload "${TAG}" dist/* --clobber
+          # A draft first, every file attached, published last. A published
+          # release's files are never replaced: with GitHub's immutable
+          # releases on they cannot be, and an updater that checks SHA256SUMS
+          # must never meet a release whose files changed under it.
+          STATE=$(gh release view "${TAG}" --json isDraft --jq .isDraft 2>/dev/null || echo missing)
+          case "${STATE}" in
+            missing)
+              gh release create "${TAG}" --draft --title "${TAG}" --notes "${NOTES}" dist/*
+              ;;
+            true)
+              # A draft an earlier run left behind: finish it.
+              gh release edit "${TAG}" --title "${TAG}" --notes "${NOTES}"
+              gh release upload "${TAG}" dist/* --clobber
+              ;;
+            *)
+              echo "::error::Release ${TAG} is already published and its files are not replaced. Raise the version in pyproject.toml and run again."
+              exit 1
+              ;;
+          esac
+          gh release edit "${TAG}" --draft=false
