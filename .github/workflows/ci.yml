@@ -104,6 +104,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Negative controls read the code a fix replaced out of git
+          # (`git show <commit>:<file>`: the chaos drill, the dependency
+          # floors, the voice providers, the failover template, the
+          # Knowledge guide). A depth-1 checkout has none of those commits;
+          # on 2026-11-09 they failed, or skipped, on every one.
+          fetch-depth: 0
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -136,11 +143,14 @@ jobs:
         # `fonts-noto-core`; verify that rather than trust the name, so a
         # future rename fails loudly here instead of silently re-skipping the
         # Arabic visual tests.
+        # ripgrep (2026-11-09): codebase search's engine. The secret-file test
+        # (tests/test_kazma_secret_files_refused.py) checks what it reads; the
+        # Python fallback reads no dot file, so without rg that check is empty.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libreoffice-writer fonts-noto-core fontconfig \
-            tesseract-ocr tesseract-ocr-ara tesseract-ocr-eng
+            tesseract-ocr tesseract-ocr-ara tesseract-ocr-eng ripgrep
           if ! fc-list | grep -qi "naskh"; then
             echo "::error::Noto Naskh Arabic is missing — tests/test_docx_rtl_visual.py would skip silently."
             fc-list | grep -i noto | head -20

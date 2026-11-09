@@ -175,7 +175,11 @@ async def test_the_real_tools_refuse_the_live_calls(install):
         pdf = await answer(generate_pdf(title="t", markdown_path=".env"))
         assert "demo-vault-key-value" not in pdf and "secret" in pdf.lower(), pdf
         hits = "\n".join(search_text(install, "KAZMA_VAULT_KEY", limit=50)).replace("\\", "/")
-        assert "settings.txt:" in hits, hits  # the search itself ran
+        # The search itself ran. The secret files are dot files and the like,
+        # which only ripgrep reads (`--hidden`); without it the Python
+        # fallback reads source types alone and this whole check would be
+        # empty -- CI installs ripgrep for it (2026-11-09).
+        assert "settings.txt:" in hits, f"no hit at all (is ripgrep, rg, installed?): {hits!r}"
         for rel in SECRETS:
             assert f"{(install / rel).as_posix()}:" not in hits and f"\n{rel}:" not in (
                 "\n" + hits
