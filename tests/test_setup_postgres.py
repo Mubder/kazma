@@ -168,6 +168,10 @@ def install(tmp_path, monkeypatch):
     monkeypatch.setattr(pgs, "restart_service", lambda *a, **kw: True)
     monkeypatch.setattr("kazma_core.db.postgres_pool.refusal_reason", lambda dsn: None)
     monkeypatch.setattr("kazma_core.observability.outside_watch._restrict_to_owner", lambda path: True)
+    # Kazma's Postgres driver is installed here, whatever the test machine has
+    # (CI installs none, 2026-11-09); the driver tests take it away themselves
+    # (_driver_missing_here).
+    monkeypatch.setattr("kazma_core.db.postgres_pool.driver_missing", lambda modules=None: None)
     return root
 
 

@@ -243,12 +243,21 @@ def test_mask_deep_handles_json_encoded_values():
         ("git config core.fsmonitor whoami", "git config"),
     ],
 )
-async def test_shell_exec_blocks_exec_capable_arguments(command, blocked_flag):
+async def test_shell_exec_blocks_exec_capable_arguments(command, blocked_flag, monkeypatch):
     """F-03: an allowlisted binary must not be able to run another program."""
     from kazma_core.agent.tool_builtins import register_builtin_tools
     from kazma_core.agent.tool_registry import LocalToolRegistry
+    from kazma_core.safety import post_hitl
 
     from kazma_core.agent.tool_refusal import RefusedBeforeEffect
+
+    # The policy is about the arguments, not about what this machine has
+    # installed: on CI (no uv, 2026-11-09) "could not resolve 'uv'" refused
+    # first and the uv rule was never reached. A binary the machine lacks
+    # keeps its bare name; nothing runs, the refusal comes before.
+    real_resolve = post_hitl.resolve_shell_binary
+    monkeypatch.setattr(post_hitl, "resolve_shell_binary",
+                        lambda argv0, **kw: real_resolve(argv0, **kw) or argv0)
 
     registry = LocalToolRegistry()
     register_builtin_tools(registry)

@@ -81,7 +81,18 @@ async def test_command_queue_includes_the_blocked_write_and_refuses_more_data(fa
 
 
 def test_driver_environment_does_not_receive_install_credentials_or_node_overrides(monkeypatch):
+    import importlib.util
+    import types
+
     from kazma_core.web_acquire import browser_cgroup
+    if importlib.util.find_spec('playwright') is None:
+        # The driver is never started here; only its path is asked for. Where
+        # Playwright is not installed (CI, 2026-11-09) a stand-in names one.
+        driver = types.ModuleType('playwright._impl._driver')
+        driver.compute_driver_executable = lambda: ('node', 'cli.js')
+        for name in ('playwright', 'playwright._impl'):
+            monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
+        monkeypatch.setitem(sys.modules, 'playwright._impl._driver', driver)
     captured = []
     def start(command, **kwargs):
         captured.append(kwargs['env'])

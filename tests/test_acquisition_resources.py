@@ -406,7 +406,18 @@ async def test_endpoint_cleanup_error_is_typed_and_keeps_quarantined_capacity(mo
 @pytest.mark.asyncio
 async def test_cleanup_failure_cannot_escalate_to_remote_recovery(monkeypatch):
     import importlib
+    import importlib.util
+    import sys
+    import types
 
+    if importlib.util.find_spec('playwright') is None:
+        # The renderer below is a stand-in; only its timeout class is imported
+        # first. Where Playwright is not installed (CI, 2026-11-09) the ladder
+        # answered "unavailable" before the stand-in ran.
+        api = types.ModuleType('playwright.async_api')
+        api.TimeoutError = type('TimeoutError', (Exception,), {})
+        monkeypatch.setitem(sys.modules, 'playwright', types.ModuleType('playwright'))
+        monkeypatch.setitem(sys.modules, 'playwright.async_api', api)
     ru = importlib.import_module('kazma_core.tools.read_url')
     monkeypatch.setenv('KAZMA_ACQUISITION_MODE', 'local_first_with_remote_fallback')
     monkeypatch.setenv('KAZMA_ACQUISITION_REMOTE_PROVIDERS', 'jina,firecrawl')
