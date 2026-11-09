@@ -60,6 +60,18 @@
   kazma.ai's own mail records are untouched) to the address in Settings ->
   Alerts. Its test page says whether the email went and, if Cloudflare
   refused it, why (for example, the subdomain is not verified yet).
+- **One Telegram group for every alert.** Settings -> Alerts has an alerts
+  group: the "Telegram (group)" route sends Kazma's alerts there, and the
+  swarm's results stay where they were.
+- **`kazma update` uses its fresh-process installer again.** The step that
+  installs with the newly pulled code failed on Python's dataclasses and
+  every update fell back to the older code path; it now runs as designed.
+- **PDF reading is protected from PyMuPDF 2.** Its new table finder crashed
+  Kazma's PDF reader; Kazma asks for PyMuPDF below 2 until that upgrade is
+  tested.
+- **The weekly chaos drill ran end to end** on a clean machine, on SQLite
+  and on Postgres: every recovery behaved as expected. An SQLite install
+  now skips the drill's database step instead of failing it.
 
 ## 0.21.1 — Any provider, a setup guide, and setup on a fresh Windows (2026-11-08)
 
