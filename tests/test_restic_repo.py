@@ -12,6 +12,7 @@ without silently pretending the round trip happened.
 from __future__ import annotations
 
 import os
+import stat
 
 import pytest
 from kazma_core.backup import restic_repo as rr
@@ -168,7 +169,11 @@ def test_check_read_data_catches_a_corrupted_pack(repo, payload):
     raw = bytearray(victim.read_bytes())
     for i in range(0, min(len(raw), 512)):
         raw[i] ^= 0xFF
+    # restic stores packs read-only (0o444 on POSIX; Windows keeps them
+    # writable), so the bit rot needs the write bit first.
+    victim.chmod(stat.S_IMODE(victim.stat().st_mode) | stat.S_IWUSR)
     victim.write_bytes(bytes(raw))
+    assert victim.read_bytes() == bytes(raw), "the corruption must land on disk"
 
     assert not rr.check(repo, _PW, read_data=True).ok, (
         "--read-data must notice a corrupted pack"
