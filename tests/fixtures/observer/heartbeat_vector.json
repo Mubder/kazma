@@ -1,7 +1,33 @@
 {
-  "_comment": "One signed heartbeat, shared by the guard's signer (tests/test_observer_heartbeat.py) and the observer Worker's verifier (deploy/observer). Signature = 'v1=' + hex HMAC-SHA256 under key of '<timestamp>.<body>'.",
+  "_comment": "One signed heartbeat, shared by the guard's signer (tests/test_observer_heartbeat.py) and the observer Worker's verifier (deploy/observer). Signature = 'v1=' + hex HMAC-SHA256 under key of '<timestamp>.<body>'. 'pages' is the page receipts allowlist (unified alerts, Stage 2): the guard's receipts_allowlist and the observer's sanitizePages both cut 'in' to 'out' -- catalog keys of inside pages that open an incident, a time, delivered; nothing else.",
   "key": "test-observer-key-0123456789abcdef0123456789",
   "timestamp": 1700000000,
   "body": "{\"v\":1}",
-  "signature": "v1=caefa36c8191c535b8c6fe24654547ee1edc72edfdba1ac3843db34994dc060e"
+  "signature": "v1=caefa36c8191c535b8c6fe24654547ee1edc72edfdba1ac3843db34994dc060e",
+  "pages": {
+    "in": [
+      {"key": "database.away", "paged_at": 1800000120, "delivered": true, "title": "CANARY Kazma's database is not answering"},
+      {"key": "guard.restarting", "paged_at": 1800000060.7, "delivered": "yes"},
+      {"key": "disk.critical", "paged_at": 1800000000, "delivered": false, "detail": "C:/Users/someone 2% free"},
+      {"key": "disk.critical", "paged_at": 1800000030, "delivered": true},
+      {"key": "llm.provider_unreachable.deepseek", "paged_at": 1800000000, "delivered": true},
+      {"key": "llm.provider_unreachable.{provider}", "paged_at": 1800000000, "delivered": true},
+      {"key": "backup.offsite_failed", "paged_at": 1800000000, "delivered": true},
+      {"key": "watch.tunnel_down", "paged_at": 1800000000, "delivered": true},
+      {"key": "database.back", "paged_at": 1800000000, "delivered": true},
+      {"key": "guard.recovered", "paged_at": 1800000000, "delivered": true},
+      {"key": "dbsvc.down", "paged_at": "1800000000", "delivered": true},
+      {"key": "child.waiting_for_database", "paged_at": true, "delivered": true},
+      {"key": "maintenance.active", "paged_at": 99, "delivered": true},
+      {"key": "no.such_key", "paged_at": 1800000000, "delivered": true},
+      {"key": "Disk; rm -rf /", "paged_at": 1800000000, "delivered": true},
+      "not a receipt"
+    ],
+    "out": [
+      {"key": "database.away", "paged_at": 1800000120, "delivered": true},
+      {"key": "disk.critical", "paged_at": 1800000030, "delivered": true},
+      {"key": "guard.restarting", "paged_at": 1800000060, "delivered": false},
+      {"key": "llm.provider_unreachable.{provider}", "paged_at": 1800000000, "delivered": true}
+    ]
+  }
 }

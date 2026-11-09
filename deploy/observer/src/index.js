@@ -9,13 +9,17 @@
 //   GET /v1/summary  the install's own summary, signed with its key
 //                  (Settings and the daily digest read it)
 //   POST /v1/pair, /v1/unpair  `kazma observer pair` / `unpair` (PAIRING_TOKEN)
+//   POST /v1/cloudflare  Cloudflare's notifications (CF_WEBHOOK_SECRET;
+//                  cloudflare.js)
 //
 // Each run pings Healthchecks.io, which emails the owner if the runs stop.
 
 import { checkAccess } from "./access.js";
 import { page } from "./alerts.js";
-import { diagnose, GOOD, sanitize } from "./diagnose.js";
+import { closeHeldNotice, handleCloudflare, pagedNotices, processNotices } from "./cloudflare.js";
+import { diagnose, FRESH_S, GOOD, sanitize } from "./diagnose.js";
 import { settle, step } from "./incidents.js";
+import { openInside } from "./receipts.js";
 import { ninetyDays, statusPage, uptimePct } from "./page.js";
 import { Store } from "./store.js";
 import { INSTALL_RE, sameText, signingHeaders, verify } from "./verify.js";
@@ -170,6 +174,11 @@ export async function handle(request, env, now, deps = {}) {
   if (route === "POST /v1/pair") return handlePair(request, env, now, false);
   if (route === "POST /v1/unpair") return handlePair(request, env, now, true);
   if (route === "GET /v1/summary") return handleSummary(request, env, now);
+  if (route === "POST /v1/cloudflare") {
+    const paired = await new Store(env.DB).listInstalls();
+    return handleCloudflare(request, env, now, {
+      installs: paired.length ? paired : [SITE], fetcher: d.fetcher, makeMessage: deps.makeMessage });
+  }
   if (route === "GET /") return handleStatusPage(request, env, now, d);
   return json({ error: "not_found" }, 404);
 }
@@ -213,14 +222,26 @@ export async function runMinute(env, now, deps = {}) {
   const minute = Math.floor(now / 60);
   const ready = minute % 5 === 0 ? await probe(env, "/health/ready", fetcher) : null;
   const installs = await store.listInstalls();
+  const watched = installs.length ? installs : [SITE];
   const seen = {};
-  for (const install of installs.length ? installs : [SITE]) {
+  const notices = await pagedNotices(store);
+  for (const install of watched) {
     const prev = await store.state(install);
     const heartbeat = install === SITE ? null : await store.heartbeat(install);
     const readyNow = ready ? { status: ready.status || 0, at: now } : prev.ready;
     const diag = diagnose({ live, ready: readyNow, heartbeat, now, expectHeartbeat: install !== SITE });
-    let { state, pages } = step(prev, diag, now);
+    // What answers for it (receipts.js): the inside pages a fresh heartbeat
+    // carries, those open when the heartbeats stopped, Cloudflare's notices.
+    const fresh = !!(heartbeat && now - heartbeat.received_at <= FRESH_S);
+    const body = heartbeat ? heartbeat.body || {} : {};
+    let { state, pages } = step(prev, {
+      ...diag,
+      pages: fresh ? body.pages ?? null : null,
+      inside: heartbeat && !fresh ? openInside(body.pages) : [],
+      notices,
+    }, now);
     state.ready = readyNow;
+    await closeHeldNotice(store, state.closed, now);
     const sent = [];
     for (const p of pages) {
       const ok = await page(env, p.text, now, { fetcher, makeMessage: deps.makeMessage });
@@ -232,8 +253,13 @@ export async function runMinute(env, now, deps = {}) {
       heartbeat ? now - heartbeat.received_at : null, countsAsUp(diag.condition));
     seen[install] = { ...diag, pages: sent };
   }
-  if (minute % 60 === 7) await store.prune(now);
-  return { live, seen };
+  const cloudflare = await processNotices(env, now, {
+    installs: watched, fetcher, makeMessage: deps.makeMessage });
+  if (minute % 60 === 7) {
+    await store.prune(now);
+    await store.pruneNotices(now);
+  }
+  return { live, seen, cloudflare };
 }
 
 async function pingHealthchecks(env, ok, fetcher) {

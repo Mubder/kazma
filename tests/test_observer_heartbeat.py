@@ -378,7 +378,8 @@ def test_the_heartbeat_carries_only_the_allowlist():
     assert "someone" not in text and "secret" not in text and "rm -rf" not in text
     data = json.loads(text)
     assert set(data) == {"v", "install", "sent_at", "seq", "guard", "kazma", "maintenance",
-                         "database", "docker", "cloudflared", "disk", "power"}
+                         "database", "docker", "cloudflared", "disk", "power", "pages"}
+    assert data["pages"] == []
     assert data["kazma"]["why"] == ["database"]
     assert data["kazma"]["build"] == "0123456789ab"
     assert data["docker"] is None
@@ -388,6 +389,46 @@ def test_the_heartbeat_carries_only_the_allowlist():
     assert data["guard"]["code"] == "abcdef012345"
     # Control: the snapshot sent as it is would carry all of it.
     assert CANARY in json.dumps(_planted_snapshot())
+
+
+def test_the_page_receipts_are_cut_as_the_observer_cuts_them(monkeypatch):
+    """Unified alerts, Stage 2: the heartbeat carries the open inside pages
+    -- a catalog key, a time, delivered -- and nothing else. The observer's
+    sanitizePages cuts the same input to the same output (its Node tests
+    read this vector too)."""
+    vector = VECTOR["pages"]
+    snap = {**_planted_snapshot(), "pages": vector["in"]}
+    body = json.loads(guard.heartbeat_body(snap))
+    assert body["pages"] == vector["out"]
+    text = json.dumps(body)
+    assert CANARY not in text and "someone" not in text and "deepseek" not in text
+    # Control: the receipts as they came in carry a title, a path and a name.
+    raw = json.dumps(vector["in"])
+    assert "CANARY" in raw and "someone" in raw and "deepseek" in raw
+    # A key is checked against the catalog, never trusted: with no readable
+    # copy nothing leaves.
+    monkeypatch.setattr(guard, "_alert_table_cache", {})
+    assert json.loads(guard.heartbeat_body(snap))["pages"] == []
+
+
+def test_the_snapshot_carries_the_guards_and_its_servers_receipts(monkeypatch, tmp_path):
+    h = _Harness(monkeypatch, tmp_path)
+    g = h.g
+    pages_file = tmp_path / "kazma_pages.json"
+    monkeypatch.setenv("KAZMA_GUARD_PAGES_FILE", str(pages_file))
+    g.proc = _Proc()
+    g.spawned_at = guard.time.time() - 60
+    g.receipts.paged("disk.critical", True, "card")
+    pages_file.write_text(json.dumps({
+        "v": 1, "process_started": g.spawned_at + 2, "pages": [
+            {"key": "database.away", "paged_at": int(guard.time.time()), "delivered": True}]}),
+        encoding="utf-8")
+    keys = [p["key"] for p in json.loads(guard.heartbeat_body(g._heartbeat_snapshot(1)))["pages"]]
+    assert keys == ["database.away", "disk.critical"]
+    # Control: a file an earlier server wrote says nothing about this one.
+    g.spawned_at = guard.time.time() + 10
+    keys = [p["key"] for p in json.loads(guard.heartbeat_body(g._heartbeat_snapshot(2)))["pages"]]
+    assert keys == ["disk.critical"]
 
 
 def test_a_build_that_is_not_a_commit_is_dropped():

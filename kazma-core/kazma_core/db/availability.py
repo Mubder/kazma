@@ -98,6 +98,8 @@ class _State:
         self.last_outage_s: float | None = None
         self.last_back_wall: float | None = None
         self.last_paged = False
+        #: The outage whose page another sender holds, once said.
+        self.held_said = 0
 
 
 _state = _State()
@@ -450,6 +452,20 @@ def _maybe_page(outage_id: int) -> None:
         s.page_requested = True
         cause = s.cause or "no answer"
         since = s.away_wall
+    held = _held_by_another("database.away")
+    if held:
+        # The guard paged this outage (its database service, or the boot
+        # waiting for it): one page per problem. Asked again at the next
+        # probe, so the page is Kazma's once the guard's has closed.
+        say = False
+        with _lock:
+            if _state.outage_id == outage_id:
+                _state.page_requested = False
+                say = _state.held_said != outage_id
+                _state.held_said = outage_id
+        if say:
+            logger.info("[database] the outage is paged by %s: Kazma records it", held)
+        return
     when = time.strftime("%H:%M UTC", time.gmtime(since)) if since else "a while"
     detail = (
         f"Not answering since {when}: {cause}. Chats that need history, settings saves, "
@@ -512,6 +528,19 @@ def _after_back(ended: tuple[int, float, bool, bool] | None) -> None:
         logger.debug("[database] Postgres answered again after %s", _duration(duration))
     if paged:
         _page_back(duration)
+    else:
+        # No recovery from a page that reached nobody (or was never sent):
+        # its receipt must not outlive the outage it was about.
+        from kazma_core.observability import page_receipts
+
+        page_receipts.settle("database.back")
+
+
+def _held_by_another(key: str) -> str:
+    """Who pages *key*'s problem instead of Kazma (``page_receipts.held_by``)."""
+    from kazma_core.observability import page_receipts
+
+    return page_receipts.held_by(key)
 
 
 def _page_back(duration: float) -> None:

@@ -698,11 +698,23 @@ def alert(
             4,096 with the card around it); a diagnosis passes more than the
             default.
 
+    One page per problem (the unified alerts plan, Stage 2): an alert whose
+    catalog entry another sender pages instead (``page_receipts.held_by``)
+    is recorded, not sent, and leaves the ``[ops_alert_held]`` line; one
+    sent that opens an incident is a page receipt the guard's heartbeat
+    carries to Kazma Watch, settled by its recovery.
+
     Never raises. Ever. This is called from exception handlers guarding the
     very paths it reports on.
     """
     try:
         if not ops_alerts_enabled():
+            return False
+        held = _held_by(key)
+        if held:
+            # Recorded, not sent: whoever pages it says it once, and its
+            # recovery. Not the "[ops_alert]" line the digest counts.
+            logger.info("[ops_alert_held] %s | %s (paged by %s)", key, title, held)
             return False
         cooldown = DEFAULT_COOLDOWN_S if cooldown_s is None else cooldown_s
         send, suppressed = _should_send(key, cooldown)
@@ -719,11 +731,43 @@ def alert(
         if not send:
             return False
         formatted = _format(severity, title, detail, suppressed, cooldown, max_detail)
-        if on_delivery is None:
+        callback = _with_receipt(on_delivery, _record_page(key))
+        if callback is None:
             _dispatch(formatted)
         else:
-            _dispatch(formatted, on_delivery)
+            _dispatch(formatted, callback)
         return True
     except Exception as exc:  # noqa: BLE001 — alerting must never propagate
         logger.debug("[ops_alerts] alert() failed for %s: %s", key, exc)
         return False
+
+
+def _held_by(key: str) -> str:
+    """Who pages *key*'s condition instead of Kazma ("" for Kazma itself)."""
+    from kazma_core.observability import page_receipts
+
+    return page_receipts.held_by(key)
+
+
+def _record_page(key: str) -> Any:
+    """The page receipt of a sent alert: its delivery callback, or None."""
+    from kazma_core.observability import page_receipts
+
+    return page_receipts.record_page(key)
+
+
+def _with_receipt(on_delivery: Any, receipt: Any) -> Any:
+    """One delivery callback for the caller's and the receipt's (either may
+    be None; None when both are, so ``_dispatch`` keeps its old call)."""
+    if receipt is None:
+        return on_delivery
+    if on_delivery is None:
+        return receipt
+
+    def _both(ok: bool | None) -> None:
+        try:
+            receipt(ok)
+        finally:
+            on_delivery(ok)
+
+    return _both

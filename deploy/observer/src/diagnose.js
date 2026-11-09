@@ -14,6 +14,7 @@
 // machine from the tunnel (``unreachable``).
 
 import { CATALOG } from "./catalog.js";
+import { sanitizePages } from "./receipts.js";
 
 // A heartbeat older than this is missing. The guard sends one a minute; 90 s
 // allows one late beat. Any longer and a machine that just went off still
@@ -77,6 +78,8 @@ export function sanitize(body) {
     cloudflared: word(b.cloudflared),
     disk: { free_pct: number(disk.free_pct), level: word(disk.level) },
     power: power ? { on_battery: power.on_battery === true, percent: number(power.percent) } : null,
+    // The open inside pages (receipts.js); null from a guard that sends none.
+    pages: sanitizePages(b.pages),
   };
 }
 
