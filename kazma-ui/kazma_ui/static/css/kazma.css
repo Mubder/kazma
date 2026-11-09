@@ -3604,7 +3604,8 @@ details.kazma-working > summary {
 /* On another tinted surface (the page banner, a notice, a stat tile, an
    approval card) the badge's wash sits on the wall's colour, not on the
    surface's wash: stacked, a success badge on the banner read 3.96:1. */
-:is(.page-banner, .notice, .alert, .stat-tile, .hitl-approval-card, .turn-approvals, .sidebar-user) .badge {
+:is(.page-banner, .notice, .alert, .stat-tile, .hitl-approval-card, .turn-approvals, .sidebar-user,
+    .pkg-metric-ok, .pkg-metric-warn, .pkg-layer-ok, .pkg-layer-warn, .pkg-layer-err) .badge {
   background: linear-gradient(var(--badge-tint), var(--badge-tint)), var(--surface-card);
 }
 
@@ -3744,9 +3745,21 @@ details.kazma-working > summary {
 .validation-result {
   margin-top: var(--sp-4);
   padding: var(--sp-4);
-  background: var(--tint);
-  border: 1px solid var(--border);
+  background: transparent;
+  border: 1px solid var(--card-hairline);
   border-radius: var(--radius);
+}
+
+/* A secret field with its show/hide button: the field takes the row. No rule
+   laid it out, so it kept the input's natural width (about 130px). */
+.input-with-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.input-with-toggle > .form-input {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* Metrics */
@@ -4268,7 +4281,7 @@ details.kazma-working > summary {
 /* "Not tested" is deliberately quiet — it is an absence of evidence, not a
    problem, and painting it amber would teach operators to ignore amber. */
 .state-pill.state-untested {
-  color: var(--text-muted);
+  color: var(--text-secondary);  /* quiet, but 4.5:1 on its pill (muted read 4.45) */
 }
 
 /* Declared wire facts: how Kazma talks to this provider. */

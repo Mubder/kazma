@@ -14,7 +14,8 @@ const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
 
-const src = fs.readFileSync(path.join(__dirname, "..", "..", "kazma-ui", "kazma_ui", "static", "js", "chat.js"), "utf8");
+// Normalised: a Windows checkout has CRLF, and the slice below looks for "\n  }\n".
+const src = fs.readFileSync(path.join(__dirname, "..", "..", "kazma-ui", "kazma_ui", "static", "js", "chat.js"), "utf8").replace(/\r\n/g, "\n");
 const start = src.indexOf("  function _endedRows(rows, doc) {");
 const end = src.indexOf("\n  }\n", start) + 4;
 if (start < 0 || end <= start) { console.log("FAIL _endedRows not found"); process.exit(1); }

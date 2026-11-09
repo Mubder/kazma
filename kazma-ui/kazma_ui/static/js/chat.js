@@ -1471,7 +1471,7 @@
         sendMessage();
       });
       btn.addEventListener('mouseenter', function() {
-        btn.style.background = 'var(--bg-surface)';
+        btn.style.background = 'var(--bg-hover)';
       });
       btn.addEventListener('mouseleave', function() {
         btn.style.background = 'transparent';

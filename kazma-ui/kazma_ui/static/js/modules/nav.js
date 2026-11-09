@@ -760,9 +760,15 @@ export function initSoftNav() {
             window.location.reload();
             return;
         }
-        softNav(location.pathname + location.search, { pushHistory: false })
+        // A Back/Forward swap joins the same queue as a click (navigateTo):
+        // run on its own, a click right after Back started a second swap at
+        // once and the superseded page's scripts ran on the new page's DOM
+        // (Memory's console on Time Travel, 2026-11-09).
+        const target = location.pathname + location.search;
+        const run = () => softNav(target, { pushHistory: false })
             .then(updateActiveNav)
             .catch(() => window.location.reload());
+        navInFlight = (navInFlight || Promise.resolve()).then(run, run);
     });
 
     const NAV_SHORTCUTS = {
