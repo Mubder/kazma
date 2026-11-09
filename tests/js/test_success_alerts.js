@@ -102,11 +102,13 @@ const failure = { id: "f1", title: "Crawl failed", severity: "ERROR", timestamp:
   ok("a success never takes the banner", banner().activeAlert === null);
   items.push(failure);
   const b = banner();
+  // The banner is a .notice in the alert's tone (2026-11-09 refresh): the
+  // tone class, never an inline colour.
   ok("an error takes it, red", b.activeAlert.id === "f1" && b.bannerColor() === "var(--danger)"
-    && b.bannerTone().borderLeft === "4px solid var(--danger)");
+    && b.bannerTone() === "tone-danger");
   items.length = 0;
   items.push({ id: "w1", severity: "WARNING", timestamp: 1 });
-  ok("a warning is yellow", banner().bannerColor() === "var(--warning)");
+  ok("a warning is yellow", banner().bannerColor() === "var(--warning)" && banner().bannerTone() === "tone-warning");
 
   process.exit(fail ? 1 : 0);
 })();

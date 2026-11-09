@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import secrets
 import time
 from datetime import UTC, datetime
@@ -78,13 +79,20 @@ _SAFETY_FIELDS = ("hitl_enabled", "require_approval_for", "approval_timeout", "a
 _PROXY_FIELDS = ("provider", "network", "host", "port", "username", "password", "session_sticky",
                  "country")
 
+#: A chosen accent: one "#rrggbb" colour (Settings > Appearance).
+_ACCENT_HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
+
 DEFAULT_APPEARANCE: dict[str, Any] = {
     # "light" is the safe default; the frontend makes this server-stored
     # value authoritative on load so a user's choice persists across
     # devices/browsers (not just one browser's localStorage). Users who
     # prefer dark toggle once and it sticks everywhere.
     "theme": "light",
-    "accent_color": "#5e6ad2",
+    # Empty = the theme's own accent (royal blue, a readable shade per
+    # theme). It was "#5e6ad2", the indigo the v5 palette retired: Settings
+    # applied it as if chosen and a Save stored it (config_defaults retires
+    # a stored copy).
+    "accent_color": "",
     "font_size": 14,
 }
 
@@ -894,10 +902,15 @@ class SettingsManager:
         result["accent_color_chosen"] = False
         for key in DEFAULT_APPEARANCE:
             val = self._cs.get(f"appearance.{key}", None)
-            if val is not None:
-                result[key] = val
-                if key == "accent_color":
-                    result["accent_color_chosen"] = True
+            if val is None:
+                continue
+            if key == "accent_color":
+                # Chosen only when it is a colour; "" is the theme's own.
+                if not (isinstance(val, str) and _ACCENT_HEX.match(val.strip())):
+                    continue
+                val = val.strip()
+                result["accent_color_chosen"] = True
+            result[key] = val
         return result
 
     def save_appearance(self, data: dict[str, Any]) -> None:
@@ -905,8 +918,13 @@ class SettingsManager:
         (``DEFAULT_APPEARANCE``). Anything else is not saved -- the page's
         sidebar position and custom CSS were, and took effect nowhere."""
         for key, value in data.items():
-            if key in DEFAULT_APPEARANCE and value is not None:
-                self._cs.set(f"appearance.{key}", value, category="appearance")
+            if key not in DEFAULT_APPEARANCE or value is None:
+                continue
+            if key == "accent_color" and not str(value).strip():
+                # Back to the theme's accent: no stored choice at all.
+                self._cs.delete("appearance.accent_color")
+                continue
+            self._cs.set(f"appearance.{key}", value, category="appearance")
 
     # ══════════════════════════════════════════════════════════════════
     # SHORTCUTS

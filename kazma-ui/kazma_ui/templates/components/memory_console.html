@@ -1,156 +1,433 @@
+  {# Memory console. Every surface is a shared class (card, card-nested,
+     stat-tile, notice, badge, btn, form-input, data-table) or a token; the
+     console's own rules below read tokens only, so both themes come from the
+     stylesheet (UI refresh, 2026-11-09). #}
+  <style>
+    .mem-console .mem-section-label {
+      font-size: 0.68rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-tertiary);
+    }
+    .mem-console .mem-kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+    }
+    .mem-console .mem-kpi .stat-tile-value { overflow-wrap: anywhere; }
+    .mem-console .mem-kpi-sub {
+      font-size: 0.72rem;
+      color: var(--text-secondary);
+      overflow-wrap: anywhere;
+    }
+    .mem-console .mem-muted { color: var(--text-muted); }
+    .mem-console .mem-hairline { border-bottom: 1px solid var(--card-hairline); }
+    .mem-console .mem-row { padding: 4px 0; border-bottom: 1px solid var(--card-hairline); }
+    .mem-console .mem-row:last-child { border-bottom: 0; }
+    .mem-console .mem-dot {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      background: var(--mem-c, currentColor);
+    }
+    .mem-console .mem-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    /* A category chip: a data colour (--mem-c) as ink on its own wash. */
+    .mem-console .mem-chip {
+      --mem-c: var(--text-muted);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 1px 7px;
+      border-radius: 999px;
+      font-size: 0.65rem;
+      font-weight: 600;
+      color: var(--mem-c);
+      background: color-mix(in srgb, var(--mem-c) 12%, var(--surface-card));
+    }
+    .mem-console .mem-chip-plain {
+      color: var(--text-secondary);
+      background: transparent;
+      border: 1px solid var(--card-hairline);
+      font-weight: 500;
+    }
+    /* A search hit: its kind's colour as a wash behind the row. */
+    .mem-console .mem-hit {
+      --mem-c: var(--text-muted);
+      margin-bottom: 6px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      background: color-mix(in srgb, var(--mem-c) 9%, var(--surface-card));
+    }
+    .mem-console .mem-hit-kind {
+      color: var(--mem-c);
+      font-size: 0.65rem;
+      font-weight: 700;
+    }
+    .mem-console .mem-link { color: var(--accent-light); }
+    .mem-console .notice .mem-link,
+    .mem-console .notice a { color: inherit; text-decoration: underline; }
+    .mem-console .mem-strip.is-alert { border-color: var(--danger-border); }
+    .mem-console .mem-ok { color: var(--success); }
+    .mem-console .mem-warn { color: var(--warning); }
+    .mem-console .mem-bad { color: var(--danger); }
+    /* Compact controls inside the console's toolbars. */
+    .mem-console .form-input.mem-input-sm {
+      height: 30px;
+      min-height: 0;
+      padding: 3px 8px;
+      font-size: 0.72rem;
+    }
+    .mem-console .mem-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--card-hairline);
+    }
+    .mem-console .mem-slot {
+      font-size: 0.68rem;
+      font-family: var(--font-mono);
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--card-hairline);
+      color: var(--text-secondary);
+      max-width: 120px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .mem-console .mem-slot-src { background: var(--accent-subtle); }
+    .mem-console .mem-slot-tgt { background: var(--secondary-subtle); }
+    .mem-console .mem-slot-src.is-set { border-color: var(--accent); }
+    .mem-console .mem-slot-tgt.is-set { border-color: var(--secondary); }
+    .mem-console .mem-hint-link { color: var(--accent-light); }
+    .mem-console .mem-hint-merge { color: var(--warning); }
+    .mem-console .mem-hint-ready { color: var(--text-secondary); }
+    .mem-console .mem-hint-idle { color: var(--text-muted); }
+    /* The graph: drawn on a well, its tooltip an overlay. */
+    .mem-console .mem-canvas-wrap { background: var(--surface-sunken); }
+    .mem-console #v2g-tooltip {
+      background: var(--surface-overlay);
+      border: 1px solid var(--overlay-border);
+      box-shadow: var(--overlay-shadow);
+      color: var(--text-primary);
+    }
+    .mem-console .mem-legend-dot {
+      display: inline-block;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      margin-inline-end: 4px;
+      vertical-align: -1px;
+      background: var(--mem-c, var(--accent));
+    }
+    .mem-console .v2g-chip {
+      font-size: 0.62rem;
+      font-family: var(--font-mono);
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--card-hairline);
+      background: transparent;
+      color: var(--text-secondary);
+      cursor: pointer;
+    }
+    .mem-console .v2g-chip.chip-sel {
+      border-color: var(--accent);
+      background: var(--accent-subtle);
+      color: var(--text-primary);
+    }
+    .mem-console .v2g-chip:hover { background: var(--bg-hover); }
+    /* Filter toggles: a hairline pill; the type's colour on its dot and,
+       when on, on its edge. */
+    #v2g-filters-entity label,
+    #v2g-filters-predicate label {
+      display: inline-flex !important;
+      align-items: center;
+      gap: 3px;
+      margin: 0 !important;
+      padding: 2px 7px !important;
+      border-radius: 999px;
+      border: 1px solid var(--card-hairline);
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 0.65rem !important;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    #v2g-filters-entity label.is-on,
+    #v2g-filters-predicate label.is-on {
+      border-color: var(--mem-c);
+      background: var(--tint-strong);
+      color: var(--text-primary);
+    }
+    .mem-filter-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      border: 1px solid var(--mem-c);
+      background: transparent;
+    }
+    label.is-on > .mem-filter-dot { background: var(--mem-c); }
+    #v2g-filters-entity input,
+    #v2g-filters-predicate input {
+      margin: 0 !important;
+      width: 12px;
+      height: 12px;
+    }
+    .mem-console .mem-filter-chip { cursor: pointer; }
+    #v2-tier-breakdown > * {
+      font-size: 0.68rem !important;
+    }
+    /* Known beliefs list: a hairline row, a tint on hover, the accent on the
+       start edge when chosen (both directions). */
+    .mem-console .v2-belief-row {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--card-hairline);
+      border-inline-start: 3px solid transparent;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .mem-console .v2-belief-row:hover { background: var(--bg-hover); }
+    .mem-console .v2-belief-row.is-selected {
+      background: var(--bg-active);
+      border-inline-start-color: var(--accent);
+    }
+    .mem-console .mem-ptype {
+      --mem-c: var(--text-muted);
+      font-size: 0.62rem;
+      padding: 2px 6px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      font-weight: 600;
+      flex-shrink: 0;
+      margin-top: 2px;
+      color: var(--mem-c);
+      background: color-mix(in srgb, var(--mem-c) 12%, var(--surface-card));
+    }
+    .mem-console .mem-drawer {
+      border-top: 1px solid var(--card-hairline);
+      background: var(--surface-sunken);
+    }
+    .mem-console .mem-well {
+      background: var(--surface-sunken);
+      border: 1px solid var(--card-hairline);
+      border-radius: 6px;
+    }
+    .mem-console .data-table tbody tr:hover { background: var(--tint); }
+    .mem-console .mem-spinner {
+      display: none;
+      width: 12px;
+      height: 12px;
+      border: 2px solid currentColor;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    /* The graph inspector's rows (it is an overlay: kazma.css .v2g-inspect). */
+    .v2g-inspect .v2g-belief-row {
+      color: var(--text-secondary);
+      line-height: 1.35;
+      font-size: 0.72rem;
+      word-break: break-word;
+      padding: 5px 6px;
+      border-radius: 6px;
+      cursor: pointer;
+      border: 1px solid transparent;
+    }
+    .v2g-inspect .v2g-belief-row:hover { background: var(--bg-hover); }
+    /* A hub shortcut: a warning edge, no fill (a tint under the row's own
+       badge and danger button dropped them below 4.5:1). */
+    .v2g-inspect .v2g-belief-row.is-hub-shortcut {
+      border-color: var(--warning-border);
+      border-inline-start: 3px solid var(--warning);
+    }
+    .v2g-inspect .mem-contents-line { padding: 3px 0; border-bottom: 1px solid var(--card-hairline); line-height: 1.4; }
+    .v2g-inspect .mem-contents-line:last-child { border-bottom: 0; }
+    .v2g-inspect .mem-major-on { border-color: var(--cat-2); color: var(--cat-2); }
+    .v2g-inspect .notice { display: block; }
+    @media (max-width: 720px) {
+      #v2g-canvas-wrap {
+        min-height: 280px !important;
+        height: 42vh !important;
+      }
+      #v2-belief-list { max-height: 160px !important; }
+    }
+  </style>
+
   <!-- ── Memory & Governance ── -->
-  <div id="memory-governance-section" class="chart-card" style="margin-bottom:1.5rem;">
-    <h3 class="chart-title" style="display:flex;align-items:center;justify-content:space-between;margin:0;gap:12px;flex-wrap:wrap;">
-      <span><span class="ki" data-icon="brain" aria-hidden="true"></span> {{ t('dashboard.memory_governance') }}</span>
+  <div id="memory-governance-section" class="card mem-console" style="margin-bottom:1.5rem;">
+    <div class="card-header" style="gap:12px;flex-wrap:wrap;margin:0;padding:0;border-bottom:0;">
+      <div class="card-title" role="heading" aria-level="3" style="display:inline-flex;align-items:center;gap:8px;margin:0;"><span class="ki" data-icon="brain" aria-hidden="true"></span> {{ t('dashboard.memory_governance') }}</div>
       <span style="display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;">
-        <span id="memory-status-badge" style="font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;">{{ t('dashboard.memory_active') }}</span>
-        <button type="button" id="memory-refresh-btn" class="btn btn-sm" style="font-size:0.72rem;padding:4px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);border-radius:6px;" title="{{ t('dashboard.memory_refresh') }}">{{ t('dashboard.memory_refresh') }}</button>
+        <span id="memory-status-badge" class="badge badge-success">{{ t('dashboard.memory_active') }}</span>
+        <button type="button" id="memory-refresh-btn" class="btn btn-outline btn-sm" title="{{ t('dashboard.memory_refresh') }}">{{ t('dashboard.memory_refresh') }}</button>
       </span>
-    </h3>
-    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-top:12px;gap:16px;flex-wrap:wrap;border-bottom:1px solid var(--border-subtle);padding-bottom:14px;">
+    </div>
+    <div class="mem-hairline" style="display:flex;align-items:flex-start;justify-content:space-between;margin-top:12px;gap:16px;flex-wrap:wrap;padding-bottom:14px;">
       <div style="flex:1;min-width:200px;">
         <div style="font-size:0.85rem;color:var(--text-secondary);line-height:1.45;" id="memory-status-desc">
           {{ t('dashboard.memory_desc_active') }}
         </div>
         <div id="memory-pipeline" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;"></div>
       </div>
-      <button id="install-ml-btn" class="btn btn-sm btn-primary" style="display:none;white-space:nowrap;padding:6px 14px;border-radius:6px;font-size:0.8rem;">
+      <button id="install-ml-btn" class="btn btn-sm btn-primary" style="display:none;white-space:nowrap;">
         {{ t('dashboard.install_ml') }}
       </button>
     </div>
 
     <!-- KPI strip: V2-aligned labels (embeddings / FTS / beliefs / health) -->
-    <div id="memory-kpi-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:14px;">
-      <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
-        <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('memory.mc.embeddings') }}</div>
-        <div id="kpi-vector-count" style="font-size:1.35rem;font-weight:700;margin-top:6px;font-family:var(--font-mono);">–</div>
-        <div id="kpi-vector-size" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">{{ t('memory.mc.vector_backend') }}</div>
+    <div id="memory-kpi-grid" class="mem-kpi-grid" style="margin-top:16px;">
+      <div class="stat-tile tone-accent mem-kpi">
+        <div class="stat-tile-icon"><span class="ki" data-icon="brain" aria-hidden="true"></span></div>
+        <div class="stat-tile-label">{{ t('memory.mc.embeddings') }}</div>
+        <div id="kpi-vector-count" class="stat-tile-value">–</div>
+        <div id="kpi-vector-size" class="mem-kpi-sub">{{ t('memory.mc.vector_backend') }}</div>
       </div>
-      <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
-        <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('memory.mc.fts_index') }}</div>
-        <div id="kpi-fts-count" style="font-size:1.35rem;font-weight:700;margin-top:6px;font-family:var(--font-mono);">–</div>
-        <div id="kpi-fts-size" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">{{ t('memory.mc.episodes_working') }}</div>
+      <div class="stat-tile tone-info mem-kpi">
+        <div class="stat-tile-icon"><span class="ki" data-icon="search" aria-hidden="true"></span></div>
+        <div class="stat-tile-label">{{ t('memory.mc.fts_index') }}</div>
+        <div id="kpi-fts-count" class="stat-tile-value">–</div>
+        <div id="kpi-fts-size" class="mem-kpi-sub">{{ t('memory.mc.episodes_working') }}</div>
       </div>
-      <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
-        <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('memory.mc.belief_graph') }}</div>
-        <div id="kpi-graph-nodes" style="font-size:1.35rem;font-weight:700;margin-top:6px;font-family:var(--font-mono);">–</div>
-        <div id="kpi-graph-edges" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">{{ t('memory.mc.active_triples') }}</div>
+      <div class="stat-tile tone-neutral mem-kpi">
+        <div class="stat-tile-icon"><span class="ki" data-icon="hexagon" aria-hidden="true"></span></div>
+        <div class="stat-tile-label">{{ t('memory.mc.belief_graph') }}</div>
+        <div id="kpi-graph-nodes" class="stat-tile-value">–</div>
+        <div id="kpi-graph-edges" class="mem-kpi-sub">{{ t('memory.mc.active_triples') }}</div>
       </div>
-      <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
-        <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('dashboard.memory_health_kpi') }}</div>
-        <div id="kpi-health-summary" style="font-size:1.05rem;font-weight:700;margin-top:8px;font-family:var(--font-mono);">–</div>
-        <div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">{{ t('dashboard.memory_components') }}</div>
+      <div id="kpi-health-tile" class="stat-tile tone-neutral mem-kpi">
+        <div class="stat-tile-icon"><span class="ki" data-icon="activity" aria-hidden="true"></span></div>
+        <div class="stat-tile-label">{{ t('dashboard.memory_health_kpi') }}</div>
+        <div id="kpi-health-summary" class="stat-tile-value">–</div>
+        <div class="mem-kpi-sub">{{ t('dashboard.memory_components') }}</div>
       </div>
     </div>
 
     <!-- Live component health board (grouped, collapsed by default) -->
     <div style="margin-top:16px;">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
-        <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);">{{ t('dashboard.memory_components') }}</span>
+        <span class="mem-section-label">{{ t('dashboard.memory_components') }}</span>
         <span style="display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          <span id="memory-health-summary" style="font-size:0.72rem;color:var(--text-muted);font-family:var(--font-mono);"></span>
-          <button type="button" id="memory-components-toggle-all" class="btn btn-sm" style="font-size:0.68rem;padding:3px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);border-radius:6px;" title="{{ t('memory.mc.expand_or_collapse_all_health') }}">{{ t('memory.mc.expand_all') }}</button>
+          <span id="memory-health-summary" class="mem-muted" style="font-size:0.72rem;font-family:var(--font-mono);"></span>
+          <button type="button" id="memory-components-toggle-all" class="btn btn-outline btn-xs" title="{{ t('memory.mc.expand_or_collapse_all_health') }}">{{ t('memory.mc.expand_all') }}</button>
         </span>
       </div>
       <div id="memory-components-grid" style="display:flex;flex-direction:column;gap:8px;">
-        <div style="padding:10px 12px;border-radius:8px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.02);font-size:0.75rem;color:var(--text-muted);">
+        <div class="card-nested mem-muted" style="padding:10px 12px;font-size:0.75rem;">
           {{ t('dashboard.memory_probing') }}
         </div>
       </div>
-      <div id="memory-issues-list" style="display:none;margin-top:10px;padding:10px 12px;border-radius:8px;border:1px solid rgba(245,158,11,0.25);background:rgba(245,158,11,0.06);font-size:0.75rem;color:#fbbf24;line-height:1.45;"></div>
+      <div id="memory-issues-list" class="notice tone-warning" style="display:none;margin-top:10px;font-size:0.75rem;line-height:1.45;"></div>
     </div>
 
     <!-- V2 Cognitive Engine Panel -->
-    <div id="v2-memory-section" class="chart-card" style="margin-top:18px;padding:18px;">
+    <div id="v2-memory-section" class="card-nested" style="margin-top:18px;padding:18px;">
       <!-- ── Header ── -->
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
         <div style="display:flex;align-items:center;gap:10px;">
-          <span style="font-size:1.05rem;font-weight:700;color:var(--text-primary);">{{ t('memory.mc.v2_cognitive_engine') }}</span>
-          <span id="v2-status-badge" style="font-size:0.68rem;font-weight:700;padding:3px 9px;border-radius:999px;background:rgba(148,163,184,0.15);color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;">—</span>
+          <span class="card-title" style="font-size:1.05rem;margin:0;">{{ t('memory.mc.v2_cognitive_engine') }}</span>
+          <span id="v2-status-badge" class="badge badge-neutral" style="text-transform:uppercase;letter-spacing:0.04em;">—</span>
         </div>
-        <button id="v2-refresh-btn" style="background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle);color:var(--text-secondary);font-size:0.75rem;padding:5px 12px;border-radius:8px;cursor:pointer;">{{ t('common.refresh') }}</button>
+        <button id="v2-refresh-btn" type="button" class="btn btn-outline btn-sm">{{ t('common.refresh') }}</button>
       </div>
-      <div id="v2-status-desc" style="font-size:0.8rem;color:var(--text-muted);margin-bottom:14px;">{{ t('memory.mc.loading_v2_status') }}</div>
+      <div id="v2-status-desc" class="mem-muted" style="font-size:0.8rem;margin-bottom:14px;">{{ t('memory.mc.loading_v2_status') }}</div>
 
       <!-- ── KPI grid ── -->
-      <div id="v2-kpi-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:16px;">
-        <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
-          <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('memory.mc.active_beliefs') }}</div>
-          <div id="v2-kpi-beliefs-active" style="font-size:1.35rem;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);">–</div>
-          <div id="v2-kpi-beliefs-meta" style="font-size:0.72rem;color:var(--text-muted);">…</div>
+      <div id="v2-kpi-grid" class="mem-kpi-grid" style="margin-bottom:16px;">
+        <div class="stat-tile tone-accent mem-kpi">
+          <div class="stat-tile-icon"><span class="ki" data-icon="brain" aria-hidden="true"></span></div>
+          <div class="stat-tile-label">{{ t('memory.mc.active_beliefs') }}</div>
+          <div id="v2-kpi-beliefs-active" class="stat-tile-value">–</div>
+          <div id="v2-kpi-beliefs-meta" class="mem-kpi-sub">…</div>
         </div>
-        <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
-          <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('memory.mc.recall_episodes') }}</div>
-          <div id="v2-kpi-episodes-recall" style="font-size:1.35rem;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);">–</div>
-          <div id="v2-kpi-episodes-meta" style="font-size:0.72rem;color:var(--text-muted);">…</div>
+        <div class="stat-tile tone-info mem-kpi">
+          <div class="stat-tile-icon"><span class="ki" data-icon="clock" aria-hidden="true"></span></div>
+          <div class="stat-tile-label">{{ t('memory.mc.recall_episodes') }}</div>
+          <div id="v2-kpi-episodes-recall" class="stat-tile-value">–</div>
+          <div id="v2-kpi-episodes-meta" class="mem-kpi-sub">…</div>
         </div>
-        <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
-          <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('dashboard.memory_graph_title') }}</div>
-          <div id="v2-kpi-entities" style="font-size:1.35rem;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);">–</div>
-          <div id="v2-kpi-procedural-meta" style="font-size:0.72rem;color:var(--text-muted);">…</div>
+        <div class="stat-tile tone-neutral mem-kpi">
+          <div class="stat-tile-icon"><span class="ki" data-icon="hexagon" aria-hidden="true"></span></div>
+          <div class="stat-tile-label">{{ t('dashboard.memory_graph_title') }}</div>
+          <div id="v2-kpi-entities" class="stat-tile-value">–</div>
+          <div id="v2-kpi-procedural-meta" class="mem-kpi-sub">…</div>
         </div>
-        <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
-          <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('memory.mc.queue') }}</div>
-          <div id="v2-kpi-queue" style="font-size:1.35rem;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);">–</div>
-          <div id="v2-kpi-queue-meta" style="font-size:0.72rem;color:var(--text-muted);">…</div>
+        <div id="v2-kpi-queue-tile" class="stat-tile tone-neutral mem-kpi">
+          <div class="stat-tile-icon"><span class="ki" data-icon="list" aria-hidden="true"></span></div>
+          <div class="stat-tile-label">{{ t('memory.mc.queue') }}</div>
+          <div id="v2-kpi-queue" class="stat-tile-value">–</div>
+          <div id="v2-kpi-queue-meta" class="mem-kpi-sub">…</div>
         </div>
       </div>
 
       <!-- Sticky alert when post-turn failed or queue has dead-letters -->
-      <div id="v2-alert-banner" style="display:none;margin-bottom:12px;padding:10px 12px;border-radius:8px;border:1px solid rgba(248,113,113,0.45);background:rgba(248,113,113,0.1);font-size:0.8rem;color:#fecaca;">
+      <div id="v2-alert-banner" class="notice tone-danger" style="display:none;margin-bottom:12px;font-size:0.8rem;">
         <strong>{{ t('memory.mc.memory_needs_attention') }}</strong>
         <span id="v2-alert-banner-text"></span>
-        <a href="#v2-queue-table" style="margin-left:8px;color:#fca5a5;">{{ t('memory.mc.jump_to_queue') }}</a>
+        <a href="#v2-queue-table" style="margin-inline-start:8px;">{{ t('memory.mc.jump_to_queue') }}</a>
       </div>
 
       <!-- Post-turn health strip -->
-      <div id="v2-post-turn-strip" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px;padding:10px 12px;border-radius:8px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.02);font-size:0.78rem;">
+      <div id="v2-post-turn-strip" class="card-nested mem-strip" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px;padding:10px 12px;font-size:0.78rem;">
         <span style="font-weight:600;color:var(--text-secondary);">{{ t('memory.mc.post_turn') }}</span>
-        <span id="v2-post-turn-ok" style="color:var(--text-muted);">–</span>
-        <span id="v2-post-turn-err" style="color:var(--text-muted);">{{ t('memory.mc.last_error') }}</span>
-        <span id="v2-embedder-ready" style="color:var(--text-muted);">{{ t('memory.mc.embedder') }}</span>
-        <span id="v2-reconsol-meta" style="color:var(--text-muted);">{{ t('memory.mc.reconsol') }}</span>
-        <span id="v2-graph-backend" style="color:var(--text-muted);">{{ t('memory.mc.graph') }}</span>
-        <span id="v2-backends-mode" style="color:var(--text-muted);">{{ t('memory.mc.backends') }}</span>
-        <a href="/settings?tab=memory" style="margin-left:auto;font-size:0.72rem;color:var(--accent);">{{ t('memory.mc.memory_settings') }}</a>
+        <span id="v2-post-turn-ok" class="mem-muted">–</span>
+        <span id="v2-post-turn-err" class="mem-muted">{{ t('memory.mc.last_error') }}</span>
+        <span id="v2-embedder-ready" class="mem-muted">{{ t('memory.mc.embedder') }}</span>
+        <span id="v2-reconsol-meta" class="mem-muted">{{ t('memory.mc.reconsol') }}</span>
+        <span id="v2-graph-backend" class="mem-muted">{{ t('memory.mc.graph') }}</span>
+        <span id="v2-backends-mode" class="mem-muted">{{ t('memory.mc.backends') }}</span>
+        <a href="/settings?tab=memory" class="mem-link" style="margin-inline-start:auto;font-size:0.72rem;">{{ t('memory.mc.memory_settings') }}</a>
       </div>
 
       <!-- ── Full-width V2 Belief Topology Graph ── -->
       <div id="v2-beliefs-graph-row" style="width:100%;margin-bottom:12px;">
-        <div id="v2g-panel" style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);overflow:hidden;display:flex;flex-direction:column;width:100%;">
-          <div style="padding:8px 12px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+        <div id="v2g-panel" class="card-nested" style="padding:0;overflow:hidden;display:flex;flex-direction:column;width:100%;">
+          <div class="mem-hairline" style="padding:8px 12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
             <div>
-              <span style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;">{{ t('memory.mc.v2_belief_topology') }}</span>
-              <div id="v2g-stats-line" style="font-size:0.7rem;color:var(--text-muted);font-family:var(--font-mono);">–</div>
+              <span class="mem-section-label" style="color:var(--text-secondary);">{{ t('memory.mc.v2_belief_topology') }}</span>
+              <div id="v2g-stats-line" class="mem-muted" style="font-size:0.7rem;font-family:var(--font-mono);">–</div>
             </div>
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-              <input id="v2g-search" type="search" placeholder="{{ t('memory.mc.filter') }}" style="min-width:100px;padding:4px 8px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(0,0,0,0.2);color:var(--text-primary);font-size:0.72rem;">
-              <button id="v2g-path-query" type="button" class="btn btn-sm" style="font-size:0.68rem;padding:4px 8px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);" title="{{ t('memory.mc.highlight_entities_from_last_probe') }}">{{ t('memory.mc.path_from_query') }}</button>
-              <label style="font-size:0.68rem;color:var(--text-muted);display:inline-flex;align-items:center;gap:4px;cursor:pointer;user-select:none;">
+              <input id="v2g-search" type="search" class="form-input mem-input-sm" placeholder="{{ t('memory.mc.filter') }}" style="min-width:100px;width:140px;">
+              <button id="v2g-path-query" type="button" class="btn btn-outline btn-xs" title="{{ t('memory.mc.highlight_entities_from_last_probe') }}">{{ t('memory.mc.path_from_query') }}</button>
+              <label class="mem-muted" style="font-size:0.68rem;display:inline-flex;align-items:center;gap:4px;cursor:pointer;user-select:none;">
                 <input type="checkbox" id="v2g-episode-overlay" style="accent-color:var(--accent);"> {{ t('dashboard.fts5_db') }}
               </label>
-              <button id="v2g-refresh" class="btn btn-sm" style="font-size:0.7rem;padding:4px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);">↻</button>
-              <button id="v2g-export-png" type="button" class="btn btn-sm" style="font-size:0.68rem;padding:4px 8px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);" translate="no">PNG</button>
-              <button id="v2g-export-svg" type="button" class="btn btn-sm" style="font-size:0.68rem;padding:4px 8px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);" translate="no">SVG</button>
-              <a id="v2g-export-json" href="/api/memory/v2/graph/export?format=json" class="btn btn-sm" style="font-size:0.7rem;padding:4px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);text-decoration:none;">{{ t('settings.logging_format_json') }}</a>
-              <a id="v2g-export-graphml" href="/api/memory/v2/graph/export?format=graphml" class="btn btn-sm" style="font-size:0.7rem;padding:4px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);text-decoration:none;" translate="no">GraphML</a>
+              <button id="v2g-refresh" type="button" class="btn btn-outline btn-xs">↻</button>
+              <button id="v2g-export-png" type="button" class="btn btn-outline btn-xs" translate="no">PNG</button>
+              <button id="v2g-export-svg" type="button" class="btn btn-outline btn-xs" translate="no">SVG</button>
+              <a id="v2g-export-json" href="/api/memory/v2/graph/export?format=json" class="btn btn-outline btn-xs" style="text-decoration:none;">{{ t('settings.logging_format_json') }}</a>
+              <a id="v2g-export-graphml" href="/api/memory/v2/graph/export?format=graphml" class="btn btn-outline btn-xs" style="text-decoration:none;" translate="no">GraphML</a>
             </div>
           </div>
-          <div id="v2g-legend" style="padding:4px 12px;border-bottom:1px solid var(--border-subtle);display:flex;flex-wrap:wrap;gap:8px;font-size:0.65rem;color:var(--text-muted);align-items:center;">
-            <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--warning,#f59e0b);margin-right:4px;box-shadow:0 0 6px rgba(245,158,11,0.45);"></span>{{ t('ide.you') }}</span>
-            <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--accent,#22d3ee);margin-right:4px;box-shadow:0 0 6px var(--accent-glow);"></span>{{ t('dashboard.memory_legend_entity') }}</span>
-            <span style="opacity:0.75;">{{ t('memory.mc.edges_accent_blue') }}</span>
+          <div id="v2g-legend" class="mem-hairline mem-muted" style="padding:4px 12px;display:flex;flex-wrap:wrap;gap:8px;font-size:0.65rem;align-items:center;">
+            <span><span class="mem-legend-dot" style="--mem-c:var(--warning);"></span>{{ t('ide.you') }}</span>
+            <span><span class="mem-legend-dot" style="--mem-c:var(--accent);"></span>{{ t('dashboard.memory_legend_entity') }}</span>
+            <span>{{ t('memory.mc.edges_accent_blue') }}</span>
           </div>
-          <div id="v2g-ops-bar" style="padding:6px 10px;border-bottom:1px solid var(--border-subtle);display:flex;flex-wrap:wrap;gap:6px;align-items:center;background:rgba(0,0,0,0.18);">
-            <span style="font-size:0.65rem;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;color:var(--text-tertiary);margin-right:2px;">{{ t('memory.mc.ops') }}</span>
-            <span id="v2g-ops-source" title="{{ t('memory.mc.source_entity') }}" style="font-size:0.68rem;font-family:var(--font-mono);padding:2px 8px;border-radius:999px;border:1px solid var(--border-subtle);background:rgba(34,211,238,0.08);color:var(--text-secondary);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ t('memory.mc.src') }}</span>
-            <span id="v2g-ops-target" title="{{ t('memory.mc.target_entity') }}" style="font-size:0.68rem;font-family:var(--font-mono);padding:2px 8px;border-radius:999px;border:1px solid var(--border-subtle);background:rgba(59,130,246,0.08);color:var(--text-secondary);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ t('memory.mc.tgt') }}</span>
-            <input id="v2g-ops-predicate" type="text" value="related_to" placeholder="{{ t('memory.mc.predicate') }}" title="{{ t('memory.mc.link_predicate') }}" style="width:100px;padding:3px 8px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(0,0,0,0.25);color:var(--text-primary);font-size:0.68rem;font-family:var(--font-mono);">
-            <button type="button" id="v2g-ops-link" class="btn btn-sm btn-primary" style="font-size:0.68rem;padding:3px 10px;" title="{{ t('memory.mc.link_source_pred_target_or') }}">{{ t('memory.mc.link') }}</button>
-            <button type="button" id="v2g-ops-merge" class="btn btn-sm btn-secondary" style="font-size:0.68rem;padding:3px 10px;" title="{{ t('memory.mc.merge_source_into_target') }}">{{ t('memory.mc.merge') }}</button>
-            <button type="button" id="v2g-ops-swap" class="btn btn-sm btn-secondary" style="font-size:0.68rem;padding:3px 8px;" title="{{ t('memory.mc.swap_source_target') }}">⇄</button>
-            <button type="button" id="v2g-ops-clear" class="btn btn-sm btn-secondary" style="font-size:0.68rem;padding:3px 8px;" title="{{ t('memory.mc.clear_source_target_and_cancel') }}">{{ t('ide.clear') }}</button>
-            <span id="v2g-ops-hint" style="font-size:0.65rem;color:var(--text-muted);flex:1;min-width:140px;">{{ t('memory.mc.click_node_inspect_click_edge') }}</span>
+          <div id="v2g-ops-bar" class="mem-toolbar">
+            <span class="mem-section-label" style="font-size:0.65rem;margin-inline-end:2px;">{{ t('memory.mc.ops') }}</span>
+            <span id="v2g-ops-source" class="mem-slot mem-slot-src" title="{{ t('memory.mc.source_entity') }}">{{ t('memory.mc.src') }}</span>
+            <span id="v2g-ops-target" class="mem-slot mem-slot-tgt" title="{{ t('memory.mc.target_entity') }}">{{ t('memory.mc.tgt') }}</span>
+            <input id="v2g-ops-predicate" type="text" class="form-input mem-input-sm" value="related_to" placeholder="{{ t('memory.mc.predicate') }}" title="{{ t('memory.mc.link_predicate') }}" style="width:110px;font-family:var(--font-mono);">
+            <button type="button" id="v2g-ops-link" class="btn btn-sm btn-primary" title="{{ t('memory.mc.link_source_pred_target_or') }}">{{ t('memory.mc.link') }}</button>
+            <button type="button" id="v2g-ops-merge" class="btn btn-sm btn-secondary" title="{{ t('memory.mc.merge_source_into_target') }}">{{ t('memory.mc.merge') }}</button>
+            <button type="button" id="v2g-ops-swap" class="btn btn-sm btn-secondary" title="{{ t('memory.mc.swap_source_target') }}">⇄</button>
+            <button type="button" id="v2g-ops-clear" class="btn btn-sm btn-secondary" title="{{ t('memory.mc.clear_source_target_and_cancel') }}">{{ t('ide.clear') }}</button>
+            <span id="v2g-ops-hint" class="mem-hint-idle" style="font-size:0.65rem;flex:1;min-width:140px;">{{ t('memory.mc.click_node_inspect_click_edge') }}</span>
           </div>
           <!-- F4: predicate chips — sourced from /vocab so the operator reuses
                existing predicate names instead of inventing near-duplicates
@@ -158,266 +435,235 @@
                and refreshed after each link op. Clicking a chip sets the
                predicate input value; the input stays free-text for genuinely
                new predicates. -->
-          <div id="v2g-pred-chips" style="padding:5px 10px;border-bottom:1px solid var(--border-subtle);display:flex;flex-wrap:wrap;gap:4px;align-items:center;background:rgba(0,0,0,0.12);max-height:64px;overflow-y:auto;">
-            <span style="font-size:0.6rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);margin-right:2px;">{{ t('memory.mc.pred') }}</span>
+          <div id="v2g-pred-chips" class="mem-toolbar" style="gap:4px;padding:5px 10px;max-height:64px;overflow-y:auto;">
+            <span class="mem-section-label" style="font-size:0.6rem;margin-inline-end:2px;">{{ t('memory.mc.pred') }}</span>
             <span id="v2g-pred-chips-list" translate="no" style="display:flex;flex-wrap:wrap;gap:4px;"></span>
           </div>
           <!-- Canvas + floating inspect -->
-          <div id="v2g-canvas-wrap" style="position:relative;flex:1;min-height:min(68vh,720px);height:min(68vh,720px);width:100%;border-radius:0;background:radial-gradient(ellipse at 50% 40%, rgba(34,211,238,0.09) 0%, rgba(59,130,246,0.04) 42%, rgba(0,0,0,0.35) 100%);overflow:hidden;">
+          <div id="v2g-canvas-wrap" class="mem-canvas-wrap" style="position:relative;flex:1;min-height:min(68vh,720px);height:min(68vh,720px);width:100%;border-radius:0;overflow:hidden;">
             <canvas id="v2g-canvas" width="1200" height="700" tabindex="0" role="img" aria-label="{{ t('memory.mc.v2_belief_topology_graph_arrow') }}" style="width:100%;height:100%;display:block;cursor:grab;touch-action:none;outline:none;"></canvas>
-            <div id="v2g-tooltip" style="display:none;position:absolute;z-index:5;pointer-events:none;max-width:280px;padding:8px 12px;border-radius:8px;background:rgba(10,15,20,0.94);border:1px solid rgba(34,211,238,0.25);color:var(--text-primary);font-size:0.75rem;line-height:1.4;box-shadow:0 8px 28px rgba(0,0,0,0.45), 0 0 0 1px rgba(34,211,238,0.08);"></div>
-            <div id="v2g-empty" style="display:none;position:absolute;inset:0;flex-direction:column;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.85rem;text-align:center;padding:20px;gap:12px;">
+            <div id="v2g-tooltip" style="display:none;position:absolute;z-index:5;pointer-events:none;max-width:280px;padding:8px 12px;border-radius:8px;font-size:0.75rem;line-height:1.4;"></div>
+            <div id="v2g-empty" class="mem-muted" style="display:none;position:absolute;inset:0;flex-direction:column;align-items:center;justify-content:center;font-size:0.85rem;text-align:center;padding:20px;gap:12px;">
               <div>{{ t('memory.mc.no_beliefs_yet_the_graph') }}</div>
-              <a href="/chat" class="btn btn-sm btn-primary" style="font-size:0.78rem;text-decoration:none;" title="{{ t('memory.mc.remember_my_favorite_color_is') }}">{{ t('memory.mc.teach_me_a_fact') }}</a>
+              <a href="/chat" class="btn btn-sm btn-primary" style="text-decoration:none;" title="{{ t('memory.mc.remember_my_favorite_color_is') }}">{{ t('memory.mc.teach_me_a_fact') }}</a>
             </div>
             <!-- Inspect docked on the canvas (doesn't steal layout from filters) -->
             <div id="v2g-inspect" class="v2g-inspect" hidden>{{ t('memory.mc.click_a_node_or_edge') }}</div>
-            <div style="position:absolute;bottom:8px;left:10px;font-size:0.62rem;color:var(--text-muted);opacity:0.75;pointer-events:none;">{{ t('memory.mc.pan_zoom_edge_click_edit') }}</div>
+            <div class="mem-muted" style="position:absolute;bottom:8px;inset-inline-start:10px;font-size:0.62rem;pointer-events:none;">{{ t('memory.mc.pan_zoom_edge_click_edit') }}</div>
           </div>
-          <div id="v2g-trunc-banner" style="display:none;margin-top:6px;padding:5px 10px;font-size:0.7rem;border-radius:6px;background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.35);color:var(--text-secondary);" role="status"></div>
+          <div id="v2g-trunc-banner" class="notice tone-warning" style="display:none;margin:6px;font-size:0.7rem;" role="status"></div>
         </div>
       </div>
 
       <!-- Compact filter / meta strip (small + informative) -->
       <div id="v2g-meta-strip" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;margin-bottom:12px;">
-        <div class="v2g-meta-card" style="border:1px solid var(--border-subtle);border-radius:8px;background:rgba(0,0,0,0.12);padding:8px 10px;font-size:0.72rem;min-width:0;">
-          <div style="font-size:0.62rem;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">{{ t('dashboard.memory_graph_title') }}</div>
+        <div class="card-nested v2g-meta-card" style="padding:8px 10px;font-size:0.72rem;min-width:0;">
+          <div class="mem-section-label" style="font-size:0.62rem;margin-bottom:4px;">{{ t('dashboard.memory_graph_title') }}</div>
           <div id="v2g-filters-entity" style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;"></div>
         </div>
-        <div class="v2g-meta-card" style="border:1px solid var(--border-subtle);border-radius:8px;background:rgba(0,0,0,0.12);padding:8px 10px;font-size:0.72rem;min-width:0;">
-          <div style="font-size:0.62rem;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">{{ t('memory.mc.predicates') }}</div>
+        <div class="card-nested v2g-meta-card" style="padding:8px 10px;font-size:0.72rem;min-width:0;">
+          <div class="mem-section-label" style="font-size:0.62rem;margin-bottom:4px;">{{ t('memory.mc.predicates') }}</div>
           <div id="v2g-filters-predicate" style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;"></div>
           <div id="v2g-active-filters" style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;min-height:0;"></div>
         </div>
-        <div class="v2g-meta-card" style="border:1px solid var(--border-subtle);border-radius:8px;background:rgba(0,0,0,0.12);padding:8px 10px;font-size:0.72rem;min-width:0;">
-          <div style="font-size:0.62rem;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">{{ t('memory.mc.tiers_procedural') }}</div>
+        <div class="card-nested v2g-meta-card" style="padding:8px 10px;font-size:0.72rem;min-width:0;">
+          <div class="mem-section-label" style="font-size:0.62rem;margin-bottom:4px;">{{ t('memory.mc.tiers_procedural') }}</div>
           <div id="v2-tier-breakdown" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;"></div>
-          <div id="v2-procedural-breakdown" style="font-size:0.68rem;color:var(--text-muted);margin-top:4px;line-height:1.3;">–</div>
+          <div id="v2-procedural-breakdown" class="mem-muted" style="font-size:0.68rem;margin-top:4px;line-height:1.3;">–</div>
         </div>
-        <div class="v2g-meta-card" style="border:1px solid var(--border-subtle);border-radius:8px;background:rgba(0,0,0,0.12);padding:8px 10px;font-size:0.72rem;min-width:0;">
-          <div style="font-size:0.62rem;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">{{ t('dashboard.memory_bitemporal') }}</div>
-          <input id="v2g-time-slider" type="range" min="0" max="100" value="100" step="0.5" style="width:100%;accent-color:var(--text-link,#60a5fa);height:18px;" aria-label="{{ t('memory.mc.bi_temporal_scrub') }}" title="{{ t('dashboard.memory_bitemporal_hint') }}">
+        <div class="card-nested v2g-meta-card" style="padding:8px 10px;font-size:0.72rem;min-width:0;">
+          <div class="mem-section-label" style="font-size:0.62rem;margin-bottom:4px;">{{ t('dashboard.memory_bitemporal') }}</div>
+          <input id="v2g-time-slider" type="range" min="0" max="100" value="100" step="0.5" style="width:100%;accent-color:var(--accent);height:18px;" aria-label="{{ t('memory.mc.bi_temporal_scrub') }}" title="{{ t('dashboard.memory_bitemporal_hint') }}">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px;gap:4px;flex-wrap:wrap;">
-            <span id="v2g-time-label" style="font-size:0.65rem;color:var(--text-muted);font-family:var(--font-mono);">{{ t('dashboard.memory_live_now') }}</span>
+            <span id="v2g-time-label" class="mem-muted" style="font-size:0.65rem;font-family:var(--font-mono);">{{ t('dashboard.memory_live_now') }}</span>
             <span style="display:inline-flex;gap:3px;">
-              <button id="v2g-time-play" type="button" class="btn btn-sm" style="font-size:0.62rem;padding:2px 8px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);" aria-label="{{ t('memory.mc.play_scrub') }}">{{ t('dashboard.memory_play') }}</button>
-              <button id="v2g-time-live" class="btn btn-sm" style="font-size:0.62rem;padding:2px 8px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);">{{ t('dashboard.memory_live') }}</button>
+              <button id="v2g-time-play" type="button" class="btn btn-outline btn-xs" aria-label="{{ t('memory.mc.play_scrub') }}">{{ t('dashboard.memory_play') }}</button>
+              <button id="v2g-time-live" type="button" class="btn btn-outline btn-xs">{{ t('dashboard.memory_live') }}</button>
             </span>
           </div>
         </div>
       </div>
 
       <!-- Known Beliefs — compact browser below the graph (not competing for width) -->
-      <div id="v2-known-beliefs" style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);overflow:hidden;margin-bottom:8px;">
-        <div style="padding:6px 12px;border-bottom:1px solid var(--border-subtle);font-size:0.68rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      <div id="v2-known-beliefs" class="card-nested" style="padding:0;overflow:hidden;margin-bottom:8px;">
+        <div class="mem-hairline" style="padding:6px 12px;font-size:0.68rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
           {{ t('memory.mc.known_beliefs') }}
-          <span style="font-weight:400;text-transform:none;color:var(--text-muted);letter-spacing:0;">{{ t('memory.mc.currently_valid_click_to_focus') }}</span>
-          <input id="v2-belief-search" type="text" placeholder="{{ t('memory.mc.filter_2') }}" style="margin-left:auto;background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle);border-radius:6px;color:var(--text-primary);font-size:0.72rem;padding:3px 8px;width:140px;outline:none;">
+          <span class="mem-muted" style="font-weight:400;text-transform:none;letter-spacing:0;">{{ t('memory.mc.currently_valid_click_to_focus') }}</span>
+          <input id="v2-belief-search" type="text" class="form-input mem-input-sm" placeholder="{{ t('memory.mc.filter_2') }}" style="margin-inline-start:auto;width:140px;text-transform:none;letter-spacing:0;font-weight:400;">
         </div>
         <div id="v2-belief-list" style="max-height:220px;overflow-y:auto;font-size:0.78rem;padding:4px 8px;"></div>
-        <div id="v2-belief-empty-cta" style="display:none;padding:12px;text-align:center;border-top:1px solid var(--border-subtle);">
-          <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:8px;">{{ t('memory.mc.no_beliefs_yet_teach_kazma') }}</div>
-          <a href="/chat" class="btn btn-sm btn-primary" style="font-size:0.75rem;text-decoration:none;">{{ t('memory.mc.teach_me_a_fact_2') }}</a>
+        <div id="v2-belief-empty-cta" style="display:none;padding:12px;text-align:center;border-top:1px solid var(--card-hairline);">
+          <div class="mem-muted" style="font-size:0.8rem;margin-bottom:8px;">{{ t('memory.mc.no_beliefs_yet_teach_kazma') }}</div>
+          <a href="/chat" class="btn btn-sm btn-primary" style="text-decoration:none;">{{ t('memory.mc.teach_me_a_fact_2') }}</a>
         </div>
-        <div id="v2-belief-drawer" style="display:none;border-top:1px solid var(--border-subtle);padding:8px 12px;background:rgba(0,0,0,0.2);font-size:0.75rem;max-height:160px;overflow-y:auto;">
+        <div id="v2-belief-drawer" class="mem-drawer" style="display:none;padding:8px 12px;font-size:0.75rem;max-height:160px;overflow-y:auto;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
             <strong style="color:var(--text-secondary);">{{ t('memory.mc.belief_detail') }}</strong>
             <button type="button" id="v2-belief-drawer-close" style="background:none;border:none;color:var(--text-muted);cursor:pointer;" aria-label="{{ t('common.close') }}"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
           </div>
           <div id="v2-belief-drawer-body" style="color:var(--text-primary);line-height:1.45;"></div>
-          <button type="button" id="v2-belief-invalidate" class="btn btn-sm" style="margin-top:8px;font-size:0.7rem;color:#f87171;border-color:rgba(248,113,113,0.4);">{{ t('memory.mc.unlink_belief') }}</button>
+          <button type="button" id="v2-belief-invalidate" class="btn btn-sm btn-danger" style="margin-top:8px;">{{ t('memory.mc.unlink_belief') }}</button>
         </div>
       </div>
 
       <!-- Search + ops cards — below known beliefs (graph stays primary above) -->
       <div id="v2-search-ops" style="margin-top:12px;">
         <!-- Live recall probe + federated search (memory + KB, labeled) -->
-        <div style="margin-bottom:12px;border:1px solid var(--border-subtle);border-radius:10px;padding:12px;background:rgba(0,0,0,0.12);">
+        <div class="card-nested" style="margin-bottom:12px;padding:12px;">
           <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
-            <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;color:var(--text-secondary);">{{ t('dashboard.memory_search_all') }}</div>
-            <label style="font-size:0.72rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;cursor:pointer;">
+            <div class="mem-section-label" style="font-size:0.72rem;color:var(--text-secondary);">{{ t('dashboard.memory_search_all') }}</div>
+            <label class="mem-muted" style="font-size:0.72rem;display:flex;align-items:center;gap:6px;cursor:pointer;">
               <input type="checkbox" id="v2-fed-include-kb" checked style="accent-color:var(--accent);"> {{ t('dashboard.memory_include_kb') }}
             </label>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <input id="v2-probe-input" type="text" placeholder="{{ t('memory.mc.what_color_do_i_like') }}" style="flex:1;min-width:180px;padding:6px 10px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.04);color:var(--text-primary);font-size:0.8rem;" />
-            <button id="v2-probe-btn" type="button" class="btn btn-sm" style="padding:6px 14px;font-size:0.78rem;" title="{{ t('memory.mc.memory_only') }}">{{ t('dashboard.memory_probe_memory') }}</button>
-            <button id="v2-federated-btn" type="button" class="btn btn-sm btn-primary" style="padding:6px 14px;font-size:0.78rem;" title="{{ t('memory.mc.memory_knowledge_library') }}">{{ t('dashboard.memory_probe_federated') }}</button>
+            <input id="v2-probe-input" type="text" class="form-input" placeholder="{{ t('memory.mc.what_color_do_i_like') }}" style="flex:1;min-width:180px;font-size:0.8rem;" />
+            <button id="v2-probe-btn" type="button" class="btn btn-sm btn-secondary" title="{{ t('memory.mc.memory_only') }}">{{ t('dashboard.memory_probe_memory') }}</button>
+            <button id="v2-federated-btn" type="button" class="btn btn-sm btn-primary" title="{{ t('memory.mc.memory_knowledge_library') }}">{{ t('dashboard.memory_probe_federated') }}</button>
           </div>
-          <div id="v2-fed-summary" style="margin-top:8px;font-size:0.72rem;color:var(--text-muted);font-family:var(--font-mono);"></div>
+          <div id="v2-fed-summary" class="mem-muted" style="margin-top:8px;font-size:0.72rem;font-family:var(--font-mono);"></div>
           <div id="v2-probe-results" style="margin-top:10px;font-size:0.78rem;color:var(--text-secondary);max-height:220px;overflow-y:auto;"></div>
         </div>
 
         <!-- Queue + entity merges + procedural + quality -->
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-bottom:8px;">
-          <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);">
+          <div class="card-nested" style="padding:12px;">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:6px;flex-wrap:wrap;">
-              <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">{{ t('memory.mc.task_queue') }}</span>
+              <span class="mem-section-label" style="font-size:0.72rem;color:var(--text-secondary);">{{ t('memory.mc.task_queue') }}</span>
               <span style="display:inline-flex;gap:4px;">
-                <button id="v2-queue-clear-failed" type="button" class="btn btn-sm" style="font-size:0.65rem;padding:2px 8px;" title="{{ t('memory.mc.delete_failed_dead_letter_tasks') }}">{{ t('memory.mc.clear_failed') }}</button>
-                <button id="v2-queue-refresh" type="button" class="btn btn-sm" style="font-size:0.7rem;padding:2px 8px;">↻</button>
+                <button id="v2-queue-clear-failed" type="button" class="btn btn-outline btn-xs" title="{{ t('memory.mc.delete_failed_dead_letter_tasks') }}">{{ t('memory.mc.clear_failed') }}</button>
+                <button id="v2-queue-refresh" type="button" class="btn btn-outline btn-xs">↻</button>
               </span>
             </div>
-            <div id="v2-queue-table" style="font-size:0.72rem;font-family:var(--font-mono);max-height:140px;overflow-y:auto;color:var(--text-muted);">–</div>
-            <button id="v2-reconsolidate-btn" type="button" class="btn btn-sm" style="margin-top:8px;font-size:0.72rem;">{{ t('memory.mc.run_reconsolidation') }}</button>
+            <div id="v2-queue-table" class="mem-muted" style="font-size:0.72rem;font-family:var(--font-mono);max-height:140px;overflow-y:auto;">–</div>
+            <button id="v2-reconsolidate-btn" type="button" class="btn btn-sm btn-secondary" style="margin-top:8px;">{{ t('memory.mc.run_reconsolidation') }}</button>
           </div>
-          <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);">
+          <div class="card-nested" style="padding:12px;">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-              <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">{{ t('memory.mc.pending_entity_merges') }}</span>
-              <button id="v2-merges-refresh" type="button" class="btn btn-sm" style="font-size:0.7rem;padding:2px 8px;">↻</button>
+              <span class="mem-section-label" style="font-size:0.72rem;color:var(--text-secondary);">{{ t('memory.mc.pending_entity_merges') }}</span>
+              <button id="v2-merges-refresh" type="button" class="btn btn-outline btn-xs">↻</button>
             </div>
-            <div id="v2-merges-list" style="font-size:0.72rem;max-height:140px;overflow-y:auto;color:var(--text-muted);">–</div>
+            <div id="v2-merges-list" class="mem-muted" style="font-size:0.72rem;max-height:140px;overflow-y:auto;">–</div>
           </div>
-          <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);">
+          <div class="card-nested" style="padding:12px;">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-              <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">{{ t('memory.mc.procedural_skills') }}</span>
-              <button id="v2-procedural-refresh" type="button" class="btn btn-sm" style="font-size:0.7rem;padding:2px 8px;">↻</button>
+              <span class="mem-section-label" style="font-size:0.72rem;color:var(--text-secondary);">{{ t('memory.mc.procedural_skills') }}</span>
+              <button id="v2-procedural-refresh" type="button" class="btn btn-outline btn-xs">↻</button>
             </div>
-            <div id="v2-procedural-list" style="font-size:0.72rem;max-height:140px;overflow-y:auto;color:var(--text-muted);">–</div>
+            <div id="v2-procedural-list" class="mem-muted" style="font-size:0.72rem;max-height:140px;overflow-y:auto;">–</div>
           </div>
-          <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);">
-            <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);margin-bottom:8px;">{{ t('memory.mc.memory_quality') }}</div>
-            <div id="v2-quality-score" style="font-size:1.4rem;font-weight:700;font-family:var(--font-mono);">–</div>
-            <div id="v2-quality-detail" style="font-size:0.72rem;color:var(--text-muted);margin-top:4px;">–</div>
+          <div class="card-nested" style="padding:12px;">
+            <div class="mem-section-label" style="font-size:0.72rem;color:var(--text-secondary);margin-bottom:8px;">{{ t('memory.mc.memory_quality') }}</div>
+            <div id="v2-quality-score" style="font-size:1.4rem;font-weight:600;font-family:var(--font-mono);color:var(--text-primary);">–</div>
+            <div id="v2-quality-detail" class="mem-muted" style="font-size:0.72rem;margin-top:4px;">–</div>
           </div>
         </div>
         <!-- What Kazma remembers of conversations: forget one, or take it all
              away (plan U1, kazma_core/memory/forget.py). -->
-        <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);margin-bottom:8px;">
+        <div class="card-nested" style="padding:12px;margin-bottom:8px;">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:6px;flex-wrap:wrap;">
-            <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">{{ t('memory.mc.memories_of_conversations') }}</span>
+            <span class="mem-section-label" style="font-size:0.72rem;color:var(--text-secondary);">{{ t('memory.mc.memories_of_conversations') }}</span>
             <span style="display:inline-flex;gap:4px;">
-              <a id="v2-memory-export" class="btn btn-sm" href="/api/memory/v2/export" download style="font-size:0.65rem;padding:2px 8px;" title="{{ t('memory.mc.download_everything_kazma_remembers_as') }}">{{ t('dashboard.export') }}</a>
-              <button id="v2-memories-refresh" type="button" class="btn btn-sm" style="font-size:0.7rem;padding:2px 8px;">↻</button>
+              <a id="v2-memory-export" class="btn btn-outline btn-xs" href="/api/memory/v2/export" download title="{{ t('memory.mc.download_everything_kazma_remembers_as') }}">{{ t('dashboard.export') }}</a>
+              <button id="v2-memories-refresh" type="button" class="btn btn-outline btn-xs">↻</button>
             </span>
           </div>
-          <input id="v2-memories-search" type="search" class="form-input" dir="auto" autocomplete="off"
+          <input id="v2-memories-search" type="search" class="form-input mem-input-sm" dir="auto" autocomplete="off"
                  placeholder="{{ t('memory.mc.search_memories') }}" aria-label="{{ t('memory.mc.search_memories') }}"
-                 style="width:100%;font-size:0.72rem;padding:3px 8px;margin-bottom:6px;">
-          <div id="v2-memories-list" style="font-size:0.72rem;max-height:220px;overflow-y:auto;color:var(--text-muted);">–</div>
-          <div style="display:flex;gap:6px;align-items:center;justify-content:space-between;margin-top:6px;font-size:0.65rem;color:var(--text-muted);">
-            <button id="v2-memories-newer" type="button" class="btn btn-sm" style="font-size:0.65rem;padding:1px 8px;" disabled>{{ t('memory.mc.newer') }}</button>
+                 style="width:100%;margin-bottom:6px;">
+          <div id="v2-memories-list" class="mem-muted" style="font-size:0.72rem;max-height:220px;overflow-y:auto;">–</div>
+          <div class="mem-muted" style="display:flex;gap:6px;align-items:center;justify-content:space-between;margin-top:6px;font-size:0.65rem;">
+            <button id="v2-memories-newer" type="button" class="btn btn-outline btn-xs" disabled>{{ t('memory.mc.newer') }}</button>
             <span id="v2-memories-range"></span>
-            <button id="v2-memories-older" type="button" class="btn btn-sm" style="font-size:0.65rem;padding:1px 8px;" disabled>{{ t('memory.mc.older') }}</button>
+            <button id="v2-memories-older" type="button" class="btn btn-outline btn-xs" disabled>{{ t('memory.mc.older') }}</button>
           </div>
         </div>
         <!-- What each week's conversations said about each topic, written by
              Kazma a day after the week ends (plan C2,
              kazma_core/memory/topic_summaries.py). -->
-        <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);margin-bottom:8px;">
+        <div class="card-nested" style="padding:12px;margin-bottom:8px;">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:6px;flex-wrap:wrap;">
-            <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">{{ t('memory.mc.weekly_summaries') }}</span>
+            <span class="mem-section-label" style="font-size:0.72rem;color:var(--text-secondary);">{{ t('memory.mc.weekly_summaries') }}</span>
             <span style="display:inline-flex;gap:6px;align-items:center;">
-              <span id="v2-summaries-state" style="font-size:0.65rem;color:var(--text-muted);"></span>
-              <button id="v2-summaries-refresh" type="button" class="btn btn-sm" style="font-size:0.7rem;padding:2px 8px;">↻</button>
+              <span id="v2-summaries-state" class="mem-muted" style="font-size:0.65rem;"></span>
+              <button id="v2-summaries-refresh" type="button" class="btn btn-outline btn-xs">↻</button>
             </span>
           </div>
-          <div id="v2-summaries-list" style="font-size:0.72rem;max-height:320px;overflow-y:auto;color:var(--text-muted);">–</div>
-          <div style="display:flex;gap:6px;align-items:center;justify-content:space-between;margin-top:6px;font-size:0.65rem;color:var(--text-muted);">
-            <button id="v2-summaries-newer" type="button" class="btn btn-sm" style="font-size:0.65rem;padding:1px 8px;" disabled>{{ t('memory.mc.newer') }}</button>
+          <div id="v2-summaries-list" class="mem-muted" style="font-size:0.72rem;max-height:320px;overflow-y:auto;">–</div>
+          <div class="mem-muted" style="display:flex;gap:6px;align-items:center;justify-content:space-between;margin-top:6px;font-size:0.65rem;">
+            <button id="v2-summaries-newer" type="button" class="btn btn-outline btn-xs" disabled>{{ t('memory.mc.newer') }}</button>
             <span id="v2-summaries-range"></span>
-            <button id="v2-summaries-older" type="button" class="btn btn-sm" style="font-size:0.65rem;padding:1px 8px;" disabled>{{ t('memory.mc.older') }}</button>
+            <button id="v2-summaries-older" type="button" class="btn btn-outline btn-xs" disabled>{{ t('memory.mc.older') }}</button>
           </div>
         </div>
       </div>
-
-      <style>
-        @media (max-width: 720px) {
-          #v2g-canvas-wrap {
-            min-height: 280px !important;
-            height: 42vh !important;
-          }
-          #v2-belief-list { max-height: 160px !important; }
-        }
-        /* Compact filter chips from JS */
-        #v2g-filters-entity label,
-        #v2g-filters-predicate label {
-          display: inline-flex !important;
-          align-items: center;
-          gap: 3px;
-          margin: 0 !important;
-          padding: 2px 7px !important;
-          border-radius: 999px;
-          border: 1px solid var(--border-subtle);
-          background: rgba(255,255,255,0.03);
-          font-size: 0.65rem !important;
-          white-space: nowrap;
-          cursor: pointer;
-        }
-        #v2g-filters-entity input,
-        #v2g-filters-predicate input {
-          margin: 0 !important;
-          width: 12px;
-          height: 12px;
-        }
-        #v2-tier-breakdown > * {
-          font-size: 0.68rem !important;
-        }
-      </style>
     </div>
 
     <!-- Expansion Deck Toggle -->
     <div style="margin-top:14px;">
-      <button id="toggle-maintenance-deck" style="background:transparent;border:none;color:var(--text-link);font-size:0.85rem;font-weight:600;cursor:pointer;padding:4px 0;display:flex;align-items:center;gap:6px;outline:none;">
+      <button id="toggle-maintenance-deck" type="button" style="background:transparent;border:none;color:var(--accent-light);font-size:0.85rem;font-weight:600;cursor:pointer;padding:4px 0;display:flex;align-items:center;gap:6px;outline:none;">
         <span id="deck-toggle-arrow"><span class="ki" data-icon="play" aria-hidden="true"></span></span> {{ t('dashboard.backup_maintenance') }}
       </button>
     </div>
 
     <!-- Collapsible Maintenance Deck -->
     <div id="maintenance-deck" style="display:none;margin-top:14px;padding-top:10px;animation: fadeIn 0.3s ease;">
-      
+
       <!-- Metrics & Actions Grid -->
       <div style="display:grid;grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));gap:16px;margin-bottom:16px;">
-        <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:8px;padding:12px 16px;">
-          <h4 style="font-size:0.75rem;color:var(--text-tertiary);text-transform:uppercase;margin:0;font-weight:600;letter-spacing:0.03em;">{{ t('dashboard.fts5_db') }}</h4>
-          <div style="font-size:1.4rem;font-weight:700;margin-top:8px;" id="fts5-size-metric">–</div>
-          <span style="font-size:0.75rem;color:var(--text-muted);" id="fts5-count-metric">0 {{ t('dashboard.records') }}</span>
+        <div class="stat-tile tone-info mem-kpi">
+          <div class="stat-tile-icon"><span class="ki" data-icon="database" aria-hidden="true"></span></div>
+          <h4 class="stat-tile-label" style="margin:0;">{{ t('dashboard.fts5_db') }}</h4>
+          <div class="stat-tile-value" id="fts5-size-metric">–</div>
+          <span class="mem-kpi-sub" id="fts5-count-metric">0 {{ t('dashboard.records') }}</span>
         </div>
-        <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:8px;padding:12px 16px;">
-          <h4 style="font-size:0.75rem;color:var(--text-tertiary);text-transform:uppercase;margin:0;font-weight:600;letter-spacing:0.03em;">{{ t('dashboard.vector_store') }}</h4>
-          <div style="font-size:1.4rem;font-weight:700;margin-top:8px;" id="vector-size-metric">–</div>
-          <span style="font-size:0.75rem;color:var(--text-muted);" id="vector-count-metric">0 {{ t('dashboard.vectors') }}</span>
+        <div class="stat-tile tone-accent mem-kpi">
+          <div class="stat-tile-icon"><span class="ki" data-icon="layers" aria-hidden="true"></span></div>
+          <h4 class="stat-tile-label" style="margin:0;">{{ t('dashboard.vector_store') }}</h4>
+          <div class="stat-tile-value" id="vector-size-metric">–</div>
+          <span class="mem-kpi-sub" id="vector-count-metric">0 {{ t('dashboard.vectors') }}</span>
         </div>
-        <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:8px;padding:12px 16px;">
-          <h4 style="font-size:0.75rem;color:var(--text-tertiary);text-transform:uppercase;margin:0;font-weight:600;letter-spacing:0.03em;">{{ t('dashboard.memory_graph_title') }}</h4>
-          <div style="font-size:1.4rem;font-weight:700;margin-top:8px;" id="graph-size-metric">–</div>
-          <span style="font-size:0.75rem;color:var(--text-muted);" id="graph-count-metric">0 {{ t('dashboard.memory_graph_edges') }}</span>
+        <div class="stat-tile tone-neutral mem-kpi">
+          <div class="stat-tile-icon"><span class="ki" data-icon="hexagon" aria-hidden="true"></span></div>
+          <h4 class="stat-tile-label" style="margin:0;">{{ t('dashboard.memory_graph_title') }}</h4>
+          <div class="stat-tile-value" id="graph-size-metric">–</div>
+          <span class="mem-kpi-sub" id="graph-count-metric">0 {{ t('dashboard.memory_graph_edges') }}</span>
         </div>
-        <div style="display:flex;flex-direction:column;justify-content:center;gap:10px;background:rgba(255,255,255,0.01);border:1px dashed var(--border-subtle);border-radius:8px;padding:12px 16px;">
-          <button id="trigger-backup-btn" class="btn btn-sm btn-success" style="width:100%;font-size:0.8rem;padding:8px;border-radius:6px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
-            <span class="spinner" id="backup-spinner" style="display:none;width:12px;height:12px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;"></span>
+        <div class="card-nested" style="display:flex;flex-direction:column;justify-content:center;gap:10px;padding:12px 16px;">
+          <button id="trigger-backup-btn" type="button" class="btn btn-sm btn-success" style="width:100%;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
+            <span class="mem-spinner" id="backup-spinner"></span>
             <span class="ki" data-icon="save" aria-hidden="true"></span> {{ t('dashboard.create_backup') }}
           </button>
-          <button id="trigger-optimize-btn" class="btn btn-sm btn-primary" style="width:100%;font-size:0.8rem;padding:8px;border-radius:6px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
-            <span class="spinner" id="optimize-spinner" style="display:none;width:12px;height:12px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;"></span>
+          <button id="trigger-optimize-btn" type="button" class="btn btn-sm btn-primary" style="width:100%;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
+            <span class="mem-spinner" id="optimize-spinner"></span>
             <span x-html="KazmaIcons.zap()"></span> {{ t('dashboard.optimize_db') }}
           </button>
-          <button id="trigger-snapshots-btn" class="btn btn-sm" style="width:100%;font-size:0.8rem;padding:8px;border-radius:6px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--border-subtle);background:rgba(168,85,247,0.08);color:var(--text-secondary);">
-            <span class="spinner" id="snapshots-spinner" style="display:none;width:12px;height:12px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;"></span>
+          <button id="trigger-snapshots-btn" type="button" class="btn btn-sm btn-secondary" style="width:100%;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
+            <span class="mem-spinner" id="snapshots-spinner"></span>
             <span class="ki" data-icon="clock" aria-hidden="true"></span> {{ t('dashboard.snapshot_maintain') }}
           </button>
         </div>
       </div>
 
       <!-- Backups List Table Container -->
-      <div style="border:1px solid var(--border-subtle);border-radius:8px;overflow:hidden;background:rgba(0,0,0,0.15);">
-        <div style="padding:10px 16px;background:rgba(255,255,255,0.02);border-bottom:1px solid var(--border-subtle);font-weight:600;font-size:0.8rem;color:var(--text-secondary);">
+      <div class="card-nested" style="padding:0;overflow:hidden;">
+        <div class="mem-hairline" style="padding:10px 16px;font-weight:600;font-size:0.8rem;color:var(--text-primary);">
           {{ t('dashboard.available_backups') }}
         </div>
-        <div style="max-height:220px;overflow-y:auto;overflow-x:auto;">
-          <table style="width:100%;border-collapse:collapse;font-size:0.8rem;text-align:start;">
+        <div class="table-container" style="max-height:220px;overflow-y:auto;overflow-x:auto;">
+          <table class="data-table" style="width:100%;border-collapse:collapse;font-size:0.8rem;text-align:start;">
             <thead>
-              <tr style="border-bottom:1px solid var(--border-subtle);background:rgba(255,255,255,0.01);">
-                <th style="padding:8px 16px;color:var(--text-tertiary);font-weight:500;">{{ t('dashboard.col_name') }}</th>
-                <th style="padding:8px 16px;color:var(--text-tertiary);font-weight:500;">{{ t('dashboard.col_keyword') }}</th>
-                <th style="padding:8px 16px;color:var(--text-tertiary);font-weight:500;">{{ t('dashboard.col_vector') }}</th>
-                <th style="padding:8px 16px;color:var(--text-tertiary);font-weight:500;">{{ t('dashboard.col_date') }}</th>
-                <th style="padding:8px 16px;color:var(--text-tertiary);font-weight:500;text-align:center;">{{ t('dashboard.col_action') }}</th>
+              <tr>
+                <th style="padding:8px 16px;">{{ t('dashboard.col_name') }}</th>
+                <th style="padding:8px 16px;">{{ t('dashboard.col_keyword') }}</th>
+                <th style="padding:8px 16px;">{{ t('dashboard.col_vector') }}</th>
+                <th style="padding:8px 16px;">{{ t('dashboard.col_date') }}</th>
+                <th style="padding:8px 16px;text-align:center;">{{ t('dashboard.col_action') }}</th>
               </tr>
             </thead>
             <tbody id="backups-tbody">
               <tr>
-                <td colspan="5" style="text-align:center;padding:20px;color:var(--text-muted);">{{ t('dashboard.loading_backups') }}</td>
+                <td colspan="5" class="mem-muted" style="text-align:center;padding:20px;">{{ t('dashboard.loading_backups') }}</td>
               </tr>
             </tbody>
           </table>

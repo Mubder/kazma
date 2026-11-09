@@ -4,7 +4,7 @@
 
 {% block content %}
 <div class="mcp-container" x-data="mcpApp()">
-    <div class="mcp-header-actions">
+    <div class="mcp-header-actions" style="display:flex;justify-content:flex-end;margin-bottom:1rem;">
         <button class="btn btn-primary" @click="showAddModal = true">{{ t('mcp.add_btn') }}</button>
     </div>
 
@@ -14,7 +14,7 @@
             <div class="mcp-card-header">
                 <div class="status-dot status-{{ server.status }}"></div>
                 <h3 translate="no">{{ server.name }}</h3>
-                <span class="badge badge-{{ server.transport }}" translate="no">{{ server.transport }}</span>
+                <span class="badge badge-neutral" translate="no">{{ server.transport }}</span>
                 <span class="tool-count">{{ t_plural('mcp.tool_count', server.tool_count) }}</span>
             </div>
             <div class="mcp-card-body">
@@ -68,6 +68,7 @@
 
         {% if not servers %}
         <div class="empty-state">
+            <span class="icon-tile" aria-hidden="true"><span class="ki" x-html="KazmaIcons.get('plug')"></span></span>
             <p>{{ t('mcp.empty') }}</p>
         </div>
         {% endif %}
@@ -115,7 +116,7 @@
                         </p>
                     </div>
                     <template x-if="rewriteNotice">
-                        <div style="background:rgba(79,140,255,0.1);border-left:3px solid var(--primary);padding:8px 12px;margin:6px 0;border-radius:4px;font-size:0.82rem;color:var(--text-primary);" x-text="rewriteNotice"></div>
+                        <div class="notice tone-info" style="margin:6px 0;font-size:0.82rem;"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('info')"></span><span x-text="rewriteNotice"></span></div>
                     </template>
                     <div class="form-group">
                         <label>{{ t('mcp.field_working_dir') }}</label>
@@ -169,7 +170,7 @@
                 </select>
             </div>
             <template x-if="addError">
-                <div translate="no" style="background:rgba(229,57,53,0.1);border-left:3px solid var(--danger,#e53935);padding:8px 12px;margin:6px 0;border-radius:4px;font-size:0.82rem;color:var(--text-primary);white-space:pre-wrap;font-family:var(--font-mono,monospace);" x-text="addError"></div>
+                <div class="notice tone-danger" style="margin:6px 0;font-size:0.82rem;"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('alert-circle')"></span><span translate="no" style="white-space:pre-wrap;font-family:var(--font-mono,monospace);" x-text="addError"></span></div>
             </template>
             <div class="modal-actions">
                 <button class="btn btn-secondary" @click="showAddModal = false" :disabled="adding">{{ t('mcp.cancel') }}</button>

@@ -374,7 +374,7 @@
         if (statusEl) {
           statusEl.innerHTML =
             (window.KazmaIcons ? KazmaIcons.span('alert') : '') + ' ' + escapeHtml(errText) +
-            ' <a href="#" class="hitl-dismiss-link" style="margin-left:8px;color:var(--text-danger);text-decoration:underline;">' +
+            ' <a href="#" class="hitl-dismiss-link" style="margin-inline-start:8px;color:var(--danger);text-decoration:underline;">' +
             t('dashboard.hitl_dismiss', 'Dismiss') + '</a>';
           statusEl.className = 'hitl-approval-status hitl-status-error';
           statusEl.style.display = 'inline-block';
@@ -406,7 +406,7 @@
         statusEl.innerHTML =
           (window.KazmaIcons ? KazmaIcons.span('alert') : '') + ' ' +
           escapeHtml(String((err && err.message) || err || (window.kazmaT ? window.kazmaT('chat.approval_failed', 'Approval failed') : 'Approval failed'))) +
-          ' <a href="#" class="hitl-dismiss-link" style="margin-left:8px;color:var(--text-danger);text-decoration:underline;">' +
+          ' <a href="#" class="hitl-dismiss-link" style="margin-inline-start:8px;color:var(--danger);text-decoration:underline;">' +
           t('dashboard.hitl_dismiss', 'Dismiss') + '</a>';
         statusEl.className = 'hitl-approval-status hitl-status-error';
         statusEl.style.display = 'inline-block';

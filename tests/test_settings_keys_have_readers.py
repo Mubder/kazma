@@ -52,7 +52,7 @@ DECLARED: dict[str, tuple[str, str, str]] = {
     "appearance.theme": (
         "kazma-ui/kazma_ui/static/js/modules/components.js", "d.theme",
         "every page reads it through /api/settings/appearance (kazmaApp); the "
-        "server renders it too (app.py _read_theme)",
+        "server renders it too (app.py _read_appearance)",
     ),
     "appearance.font_size": (
         "kazma-ui/kazma_ui/static/js/modules/components.js", "d.font_size",

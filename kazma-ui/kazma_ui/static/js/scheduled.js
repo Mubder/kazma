@@ -40,6 +40,14 @@ const STATUS_CLASS = {
     expired: 'failed',
 };
 
+const STATUS_TONE = {
+    upcoming: 'badge-info',
+    attention: 'badge-warning',
+    done: 'badge-success',
+    failed: 'badge-danger',
+    cancelled: 'badge-neutral',
+};
+
 function statusClass(task) {
     if (task && task.class) return task.class;
     const st = (task && task.status) || '';
@@ -251,8 +259,11 @@ function scheduledPage() {
             return (fallback && fallback !== 'scheduled.st_attention') ? fallback : st;
         },
 
+        /* The shared .badge tone of a status class: upcoming is information,
+           attention a warning, done a success, failed a danger; cancelled is
+           neutral, as on every page (someone stopped it, nothing failed). */
         statusBadge(task) {
-            return 'st-' + statusClass(task);
+            return STATUS_TONE[statusClass(task)] || 'badge-warning';
         },
 
         /* What the job does when it fires, and how often (SCH-S07). */

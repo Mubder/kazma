@@ -405,9 +405,11 @@ def test_a_card_borrowing_the_chart_class_follows_the_page(harness: Harness) -> 
         try:
             pg = context.new_page()
             pg.goto(f"{harness.base}/dashboard", wait_until="domcontentloaded", timeout=30000)
-            pg.wait_for_selector(".chart-card .chart-title", timeout=20000)
+            # The Dashboard's chart cards carry the shared card title since
+            # the UI refresh (2026-11); the rule under test is the same.
+            pg.wait_for_selector(".chart-card .card-title", timeout=20000)
             got = pg.evaluate(
-                "() => ({titles: [...document.querySelectorAll('.chart-card .chart-title')]"
+                "() => ({titles: [...document.querySelectorAll('.chart-card .card-title')]"
                 ".map((e) => getComputedStyle(e).direction),"
                 " canvases: [...document.querySelectorAll('.chart-card canvas')]"
                 ".map((e) => getComputedStyle(e).direction)})"

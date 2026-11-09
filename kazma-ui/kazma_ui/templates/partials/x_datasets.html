@@ -1,12 +1,12 @@
 <div id="xs-panel-datasets" role="tabpanel" aria-labelledby="xs-tab-datasets" x-show="tab === 'datasets'" x-cloak>
   <section x-data="xDatasetPage()" class="xd-workspace" aria-label="{{ t('x_dataset.title') }}">
-    <div class="xs-card">
+    <div class="card xs-card">
       <h2>{{ t('x_dataset.title') }}</h2>
       <p>{{ t('x_dataset.intro') }}</p>
       <a href="https://kazma.ai{{ '/ar' if lang() == 'ar' else '' }}/docs/x-evaluation-dataset/">{{ t('x_dataset.guide') }}</a>
       <div class="xd-grid" style="margin-top:16px;">
         <div><label for="xd-name">{{ t('x_dataset.name') }}</label><input id="xd-name" name="dataset_name" autocomplete="off" maxlength="120" class="form-input" x-model="name" :disabled="busy"></div>
-        <div><label for="xd-purpose">{{ t('x_dataset.purpose') }}</label><select id="xd-purpose" class="form-input" x-model="purpose" :disabled="busy">
+        <div><label for="xd-purpose">{{ t('x_dataset.purpose') }}</label><select id="xd-purpose" class="form-select" x-model="purpose" :disabled="busy">
           <option value="collection">{{ t('x_dataset.collection') }}</option><option value="tuning">{{ t('x_dataset.tuning') }}</option><option value="release">{{ t('x_dataset.release') }}</option>
         </select></div>
       </div>
@@ -18,7 +18,7 @@
       <p x-show="notice" role="status" aria-live="polite" x-text="notice"></p>
     </div>
     <div class="xd-layout">
-      <aside class="xs-card"><h3>{{ t('x_dataset.collections') }}</h3>
+      <aside class="card xs-card"><h3>{{ t('x_dataset.collections') }}</h3>
         <button class="btn btn-secondary btn-sm" @click="load()" :disabled="busy">{{ t('common.refresh') }}</button>
         <p x-show="loading" role="status">{{ t('common.loading') }}</p>
         <p x-show="!loading && !error && !rows.length">{{ t('x_dataset.empty') }}</p>
@@ -27,7 +27,7 @@
           <span x-text="row.reviewed + ' / ' + row.cases"></span>
         </button></template>
       </aside>
-      <div class="xs-card" style="min-width:0;">
+      <div class="card xs-card" style="min-width:0;">
         <template x-if="dataset"><div>
           <h3 translate="no" x-text="dataset.name"></h3><p x-text="t(dataset.purpose)"></p>
           <div class="xd-metrics"><span>{{ t('x_dataset.cases') }} <strong x-text="stats.total"></strong></span><span>{{ t('x_dataset.reviewed') }} <strong x-text="stats.reviewed"></strong></span>
@@ -75,20 +75,20 @@
               <button class="btn btn-secondary btn-sm" type="button" @click="form.case.context.quotes.push({id:'',author_id:'',text:''})" :disabled="form.case.context.quotes.length >= 10">{{ t('x_dataset.add_quote') }}</button>
             </details>
             <div class="xd-grid">
-              <div><label for="xd-language">{{ t('x_dataset.language') }} <span class="xd-required">{{ t('x_dataset.required_review') }}</span></label><select id="xd-language" class="form-input" x-model="form.case.language" :aria-required="reviewed"><option value="">{{ t('x_dataset.unlabeled') }}</option><option value="en">{{ t('x_dataset.english') }}</option><option value="ar">{{ t('x_dataset.arabic') }}</option><option value="mixed">{{ t('x_dataset.mixed') }}</option></select></div>
-              <div><label for="xd-fault">{{ t('x_dataset.fault') }}</label><select id="xd-fault" class="form-input" x-model="form.case.fault"><option value="">{{ t('x_dataset.no_fault') }}</option><option value="checker_outage">{{ t('x_dataset.checker_outage') }}</option></select></div>
+              <div><label for="xd-language">{{ t('x_dataset.language') }} <span class="badge badge-neutral xd-required">{{ t('x_dataset.required_review') }}</span></label><select id="xd-language" class="form-select" x-model="form.case.language" :aria-required="reviewed"><option value="">{{ t('x_dataset.unlabeled') }}</option><option value="en">{{ t('x_dataset.english') }}</option><option value="ar">{{ t('x_dataset.arabic') }}</option><option value="mixed">{{ t('x_dataset.mixed') }}</option></select></div>
+              <div><label for="xd-fault">{{ t('x_dataset.fault') }}</label><select id="xd-fault" class="form-select" x-model="form.case.fault"><option value="">{{ t('x_dataset.no_fault') }}</option><option value="checker_outage">{{ t('x_dataset.checker_outage') }}</option></select></div>
             </div>
-            <fieldset class="xd-categories"><legend>{{ t('x_dataset.categories') }} <span class="xd-required">{{ t('x_dataset.required_review') }}</span></legend><template x-for="category in categories" :key="category"><label class="xd-check"><input type="checkbox" :value="category" x-model="form.case.categories"><span x-text="t('category_' + category)"></span></label></template></fieldset>
-            <label class="xd-check"><input type="checkbox" x-model="form.targetLabeled">{{ t('x_dataset.target_labeled') }} <span class="xd-required">{{ t('x_dataset.required_review') }}</span></label>
+            <fieldset class="xd-categories"><legend>{{ t('x_dataset.categories') }} <span class="badge badge-neutral xd-required">{{ t('x_dataset.required_review') }}</span></legend><template x-for="category in categories" :key="category"><label class="xd-check"><input type="checkbox" :value="category" x-model="form.case.categories"><span x-text="t('category_' + category)"></span></label></template></fieldset>
+            <label class="xd-check"><input type="checkbox" x-model="form.targetLabeled">{{ t('x_dataset.target_labeled') }} <span class="badge badge-neutral xd-required">{{ t('x_dataset.required_review') }}</span></label>
             <label for="xd-target">{{ t('x_dataset.target') }}</label><input id="xd-target" class="form-input" x-model="form.target" :disabled="!form.targetLabeled" autocomplete="off" maxlength="200">
-            <div class="xd-grid"><template x-for="label in ['auto','evidence','safety']" :key="label"><div><label :for="'xd-' + label" ><span x-text="t('expected_' + label)"></span> <span class="xd-required">{{ t('x_dataset.required_review') }}</span></label><select :id="'xd-' + label" class="form-input" x-model="form[label]" :aria-required="reviewed"><option value="">{{ t('x_dataset.unlabeled') }}</option><option value="true">{{ t('x_dataset.yes') }}</option><option value="false">{{ t('x_dataset.no') }}</option></select></div></template></div>
-            <label for="xd-rationale">{{ t('x_dataset.rationale') }} <span class="xd-required">{{ t('x_dataset.required_review') }}</span></label><textarea id="xd-rationale" class="form-input" x-model="form.case.rationale" rows="3" maxlength="4000" :aria-required="reviewed"></textarea>
+            <div class="xd-grid"><template x-for="label in ['auto','evidence','safety']" :key="label"><div><label :for="'xd-' + label" ><span x-text="t('expected_' + label)"></span> <span class="badge badge-neutral xd-required">{{ t('x_dataset.required_review') }}</span></label><select :id="'xd-' + label" class="form-select" x-model="form[label]" :aria-required="reviewed"><option value="">{{ t('x_dataset.unlabeled') }}</option><option value="true">{{ t('x_dataset.yes') }}</option><option value="false">{{ t('x_dataset.no') }}</option></select></div></template></div>
+            <label for="xd-rationale">{{ t('x_dataset.rationale') }} <span class="badge badge-neutral xd-required">{{ t('x_dataset.required_review') }}</span></label><textarea id="xd-rationale" class="form-input" x-model="form.case.rationale" rows="3" maxlength="4000" :aria-required="reviewed"></textarea>
             <label for="xd-notes">{{ t('x_dataset.notes') }}</label><textarea id="xd-notes" class="form-input" x-model="form.case.review_notes" rows="2" maxlength="4000"></textarea>
             <label class="xd-check"><input type="checkbox" x-model="form.case.held_out" :disabled="dataset.purpose !== 'release'">{{ t('x_dataset.held_out') }}</label>
             <div class="xd-observation" x-show="form.case.actual">
               <h4>{{ t('x_dataset.outcome') }}</h4><p>{{ t('x_dataset.outcome_help') }}</p><p translate="no" x-text="form.case.candidate || form.case.observed_candidate || ''"></p>
               <pre translate="no" x-text="JSON.stringify(form.case.actual, null, 2)"></pre>
-              <label for="xd-critical">{{ t('x_dataset.critical') }} <span class="xd-required">{{ t('x_dataset.required_review') }}</span></label><input id="xd-critical" type="number" min="0" max="1000" class="form-input" x-model="critical" :aria-required="reviewed && !!form.case.actual">
+              <label for="xd-critical">{{ t('x_dataset.critical') }} <span class="badge badge-neutral xd-required">{{ t('x_dataset.required_review') }}</span></label><input id="xd-critical" type="number" min="0" max="1000" class="form-input" x-model="critical" :aria-required="reviewed && !!form.case.actual">
             </div>
             <label class="xd-check"><input id="xd-reviewed" type="checkbox" x-model="reviewed">{{ t('x_dataset.attestation') }}</label>
             <p>{{ t('x_dataset.review_help') }}</p>

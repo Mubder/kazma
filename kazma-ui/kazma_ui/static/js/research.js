@@ -832,20 +832,20 @@
       })
         .then(function (r) { return r.json(); })
         .then(function (data) {
-          if (data.error) { $('research-cmp-result').innerHTML = '<div translate="no" style="color:var(--error);">' + esc(data.error) + '</div>'; return; }
+          if (data.error) { $('research-cmp-result').innerHTML = '<div translate="no" style="color:var(--danger);">' + esc(data.error) + '</div>'; return; }
           var d = data.diff;
           function arrow(v) { return v > 0 ? '+' + v : String(v); }
           function row(label, a, b, delta) {
-            return '<tr><td style="padding:8px;border-bottom:1px solid var(--border);">' + esc(label) + '</td>' +
-              '<td style="text-align:right;padding:8px;border-bottom:1px solid var(--border);">' + esc(a) + '</td>' +
-              '<td style="text-align:right;padding:8px;border-bottom:1px solid var(--border);">' + esc(b) + '</td>' +
-              '<td style="text-align:right;padding:8px;border-bottom:1px solid var(--border);font-weight:600;">' + esc(delta) + '</td></tr>';
+            return '<tr><td style="padding:8px;border-bottom:1px solid var(--card-hairline);">' + esc(label) + '</td>' +
+              '<td style="text-align:end;padding:8px;border-bottom:1px solid var(--card-hairline);">' + esc(a) + '</td>' +
+              '<td style="text-align:end;padding:8px;border-bottom:1px solid var(--card-hairline);">' + esc(b) + '</td>' +
+              '<td style="text-align:end;padding:8px;border-bottom:1px solid var(--card-hairline);font-weight:600;">' + esc(delta) + '</td></tr>';
           }
           var html = '<table class="data-table" style="width:100%;border-collapse:collapse;font-size:0.9rem;">' +
             '<thead><tr><th style="text-align:start;padding:8px;">' + esc(i18n('research.metric')) + '</th>' +
-            '<th style="text-align:right;padding:8px;">' + esc(i18n('research.run_a')) + '</th>' +
-            '<th style="text-align:right;padding:8px;">' + esc(i18n('research.run_b')) + '</th>' +
-            '<th style="text-align:right;padding:8px;">' + esc(i18n('research.delta')) + '</th></tr></thead><tbody>' +
+            '<th style="text-align:end;padding:8px;">' + esc(i18n('research.run_a')) + '</th>' +
+            '<th style="text-align:end;padding:8px;">' + esc(i18n('research.run_b')) + '</th>' +
+            '<th style="text-align:end;padding:8px;">' + esc(i18n('research.delta')) + '</th></tr></thead><tbody>' +
             // AUD-120: the row labels and yes/no are interface words, from
             // the catalog (they were English on Arabic pages).
             row(i18n('research.cmp_cost_usd'), d.a_cost.toFixed(4), d.b_cost.toFixed(4), arrow(d.cost_delta.toFixed(4))) +
@@ -856,7 +856,7 @@
             row(i18n('research.cmp_output_changed'), '', '', i18n(d.output_changed ? 'research.cmp_yes' : 'research.cmp_no')) +
             '</tbody></table>';
           if (d.output_diff) {
-            html += '<h4 style="margin-top:1.5rem;">' + esc(i18n('research.text_diff')) + '</h4><pre style="background:rgba(0,0,0,0.1);padding:12px;border-radius:6px;font-size:0.8rem;overflow-x:auto;max-height:300px;">' + esc(d.output_diff) + '</pre>';
+            html += '<h4 style="margin-top:1.5rem;">' + esc(i18n('research.text_diff')) + '</h4><pre style="background:var(--surface-sunken);padding:12px;border-radius:var(--radius-sm);font-size:0.8rem;overflow-x:auto;max-height:300px;">' + esc(d.output_diff) + '</pre>';
           }
           if (d.identical) html += '<p style="color:var(--success);display:flex;align-items:center;gap:4px;">' + CHECK_SVG + ' ' + esc(i18n('research.identical')) + '</p>';
           $('research-cmp-result').innerHTML = html;
@@ -1035,6 +1035,18 @@
     };
   }
 
+  /** A run's state as the shared .badge tone: finished green, failed red,
+   *  stopped part way amber, cancelled neutral (as on every page: someone
+   *  stopped it, nothing failed), anything still going the accent. */
+  function stateBadge(s) {
+    var v = String(s || '').toLowerCase();
+    if (v === 'done' || v === 'complete' || v === 'completed') return 'badge-success';
+    if (v === 'failed' || v === 'error') return 'badge-danger';
+    if (v === 'partial' || v === 'interrupted') return 'badge-warning';
+    if (v === 'cancelled' || v === 'cancelling' || !v) return 'badge-neutral';
+    return 'badge-accent';
+  }
+
   /** A run's state in the reader's language; an unknown one as it is. */
   function stateLabel(s) {
     var v = String(s || '');
@@ -1129,11 +1141,11 @@
     var shown = el.querySelector ? el.querySelector('details.research-searches') : null;
     if (shown) searchesOpen = !!shown.open;
     if (!tasks.length && !searches.length) {
-      el.innerHTML = listIncomplete ? '' : '<div style="padding:2rem;text-align:center;color:var(--text-muted);">' + esc(i18n('research_no_results')) + '</div>';
+      el.innerHTML = listIncomplete ? '' : '<div class="empty-state">' + esc(i18n('research_no_results')) + '</div>';
       return;
     }
     var html = tasks.length ? tasks.map(cardHtml).join('')
-      : (listIncomplete ? '' : '<div style="padding:1rem;text-align:center;color:var(--text-muted);">' + esc(i18n('research_no_results')) + '</div>');
+      : (listIncomplete ? '' : '<div class="empty-state">' + esc(i18n('research_no_results')) + '</div>');
     el.innerHTML = html + (searches.length ? searchesHtml(searches) : '');
   }
 
@@ -1169,19 +1181,19 @@
     var actions;
     if (isPaper || (isSession && t.report_path)) {
       actions = (t.final && t.final.pdf_path
-        ? '<a class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" href="' + esc(paperFileUrl(t.final.pdf_path)) + '" onclick="event.stopPropagation();" target="_blank" title="' + esc(i18n('research.ui.open_pdf', 'Open the paper (PDF)')) + '">PDF</a>'
+        ? '<a class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-inline-start:4px;padding:2px 8px;font-size:0.75rem;" href="' + esc(paperFileUrl(t.final.pdf_path)) + '" onclick="event.stopPropagation();" target="_blank" title="' + esc(i18n('research.ui.open_pdf', 'Open the paper (PDF)')) + '">PDF</a>'
         : '') +
         (t.report_path
-        ? '<a class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" href="/api/research/papers/file?path=' + encodeURIComponent(t.report_path) + '" onclick="event.stopPropagation();" target="_blank" title="' + esc(i18n('research.open_md', 'Open report')) + '">MD</a>'
+        ? '<a class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-inline-start:4px;padding:2px 8px;font-size:0.75rem;" href="/api/research/papers/file?path=' + encodeURIComponent(t.report_path) + '" onclick="event.stopPropagation();" target="_blank" title="' + esc(i18n('research.open_md', 'Open report')) + '">MD</a>'
         : '') +
         (t.docx_path
-          ? '<a class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" href="/api/research/papers/file?path=' + encodeURIComponent(t.docx_path) + '" onclick="event.stopPropagation();" target="_blank" title="DOCX">DOCX</a>'
+          ? '<a class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-inline-start:4px;padding:2px 8px;font-size:0.75rem;" href="/api/research/papers/file?path=' + encodeURIComponent(t.docx_path) + '" onclick="event.stopPropagation();" target="_blank" title="DOCX">DOCX</a>'
           : '');
     } else if (isSession) {
       actions = '';
     } else {
-      actions = '<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;display:flex;align-items:center;" data-act="archive" data-task-id="' + esc(t.id) + '" title="' + esc(i18n('research.ui.archive', 'Archive')) + '">' + ARCHIVE_SVG + '</button>' +
-        '<button class="btn btn-danger btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" data-act="del" data-task-id="' + esc(t.id) + '" title="' + esc(i18n('research.ui.delete', 'Delete')) + '">×</button>';
+      actions = '<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-inline-start:4px;padding:2px 8px;font-size:0.75rem;display:flex;align-items:center;" data-act="archive" data-task-id="' + esc(t.id) + '" title="' + esc(i18n('research.ui.archive', 'Archive')) + '">' + ARCHIVE_SVG + '</button>' +
+        '<button class="btn btn-danger btn-sm" style="flex-shrink:0;margin-inline-start:4px;padding:2px 8px;font-size:0.75rem;" data-act="del" data-task-id="' + esc(t.id) + '" title="' + esc(i18n('research.ui.delete', 'Delete')) + '">×</button>';
     }
     if (isSession && t.status === 'interrupted') actions += '<button class="btn btn-primary btn-sm" data-act="resume" data-task-id="' + esc(t.id) + '">' + esc(i18n('research.ui.resume')) + '</button>';
     return '<div class="card" style="padding:12px 16px;cursor:pointer;max-width:100%;overflow:hidden;box-sizing:border-box;" data-act="view-detail" data-task-id="' + esc(t.id) + '">' +
@@ -1192,7 +1204,7 @@
             meta +
           '</div>' +
         '</div>' +
-        (t.search ? '' : '<span style="font-size:0.75rem;color:var(--text-muted);background:var(--surface-2);padding:2px 8px;border-radius:4px;flex-shrink:0;">' + esc(stateLabel(t.status)) + '</span>') +
+        (t.search ? '' : '<span class="badge ' + stateBadge(t.status) + '" style="flex-shrink:0;">' + esc(stateLabel(t.status)) + '</span>') +
         actions +
       '</div>' +
     '</div>';
@@ -1202,7 +1214,7 @@
     var el = $('research-archived-list');
     if (!el) return;
     if (!tasks.length) {
-      el.innerHTML = archivedIncomplete ? '' : '<div style="padding:2rem;text-align:center;color:var(--text-muted);">' + esc(i18n('research_no_archived')) + '</div>';
+      el.innerHTML = archivedIncomplete ? '' : '<div class="empty-state">' + esc(i18n('research_no_archived')) + '</div>';
       return;
     }
     el.innerHTML = tasks.map(function (t) {
@@ -1216,9 +1228,9 @@
               '<span>' + timeAgo(t.completed_at || t.created_at) + '</span>' +
             '</div>' +
           '</div>' +
-          '<span style="font-size:0.75rem;color:var(--text-muted);background:var(--surface-2);padding:2px 8px;border-radius:4px;flex-shrink:0;">' + esc(stateLabel(t.status)) + '</span>' +
-          '<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;display:flex;align-items:center;" data-act="restore" data-task-id="' + esc(t.id) + '" title="' + esc(i18n('research.ui.restore', 'Restore')) + '">' + RESTORE_SVG + '</button>' +
-          '<button class="btn btn-danger btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" data-act="del-archived" data-task-id="' + esc(t.id) + '" title="' + esc(i18n('research.ui.delete', 'Delete')) + '">×</button>' +
+          '<span class="badge ' + stateBadge(t.status) + '" style="flex-shrink:0;">' + esc(stateLabel(t.status)) + '</span>' +
+          '<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-inline-start:4px;padding:2px 8px;font-size:0.75rem;display:flex;align-items:center;" data-act="restore" data-task-id="' + esc(t.id) + '" title="' + esc(i18n('research.ui.restore', 'Restore')) + '">' + RESTORE_SVG + '</button>' +
+          '<button class="btn btn-danger btn-sm" style="flex-shrink:0;margin-inline-start:4px;padding:2px 8px;font-size:0.75rem;" data-act="del-archived" data-task-id="' + esc(t.id) + '" title="' + esc(i18n('research.ui.delete', 'Delete')) + '">×</button>' +
         '</div>' +
       '</div>';
     }).join('');

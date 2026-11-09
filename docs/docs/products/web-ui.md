@@ -235,9 +235,11 @@ in `kazma.v5.css`. The same tokens are mirrored onto the docs site
 
 | Aspect | Details |
 |---|---|
-| **Dark palette** | Deep blue-black slate — bg `#0e1626`, panel `#16223a`, text `#eef3fb`. Layered depth (panel → surface → elevated). |
-| **Light palette** | Ice-blue paper — bg `#f0f4fa`, panel `#ffffff`, ink `#0c1526`. Muted text kept dark for P0 contrast. |
-| **Accents** | Royal blue `#3b82f6` (dark) / `#2563eb` (light) + sky `#38bdf8`. Brand gradient `azure → royal → sky`. |
+| **Cards are the colour of the page** | Since the 2026-11 refresh a card, a menu and the sidebar share the page's colour and stand apart by a hairline and a soft shadow (radius 12px), never by a fill of their own. Only tinted things have a colour: stat tiles, icon tiles, badges, notices, soft buttons and the page banner, each a status or accent colour at about 12%. |
+| **Dark palette** | Kazma's navy — page and cards `#0e1626`, hairline `#243456`, text `#eef3fb`; wells (code, table heads) a deeper `#0a1120`. |
+| **Light palette** | White — page and cards `#ffffff`, hairline `#e5e9f0`, ink `#0c1526`; wells `#f0f4fa`. Status colours are dark enough to read 4.5:1 as text. |
+| **Accents** | Royal blue `#3b82f6` (dark) / `#2563eb` (light), or the colour you choose in Settings → Appearance: Kazma derives every accent shade from it, with a readable ink, in both themes, from the first paint. |
+| **Controls** | The active menu item is a filled accent pill; buttons are filled for the main action and soft (tinted) for the rest; fields are transparent with a hairline; tabs are pills. |
 | **Type + mark** | IBM Plex Sans / IBM Plex Sans Arabic (`--font-sans` / `--font-arabic`) + JetBrains Mono. Letterhead K is logo, favicon, and avatar. Same pairing as generated documents and Docusaurus. |
 | **Single token table** | One source of truth per theme — the old v4 cyan palette and the "Abyss" set were **folded into one table** so they no longer fight (design-token unification, P1). |
 | **Server-authoritative theme** | Theme is resolved **server-side**, not just client-side, so your choice **persists across devices and browsers** (a switch on one machine holds on another). |

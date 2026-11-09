@@ -35,6 +35,13 @@ function agentsPage() {
     _pollInterval: null,
 
     init() {
+      // icons.js fills [data-icon] once, at the first page load: the page
+      // opened from the sidebar showed its stat tiles' icon wells empty.
+      // Filled nodes are skipped (data-ki-done).
+      if (window.KazmaIcons && typeof window.KazmaIcons.hydrate === 'function') {
+        try { window.KazmaIcons.hydrate(this.$el || document); } catch (e) { /* icons are decoration */ }
+      }
+
       // Load personality templates
       fetch('/api/settings/agent/personalities', {
         headers: { 'X-Requested-With': 'XMLHttpRequest' }

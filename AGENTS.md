@@ -9929,6 +9929,62 @@ counts the active provider's address (`setup_api.compute_setup_status`).
   scan the asset files on `/health/live`: it is the guard's probe, on the
   loop. Gates: `tests/js/test_build_watch.js`, `tests/e2e/test_update_notice.py`
   (EN/AR, after a sidebar navigation, Refresh reloads).
+- **One colour system: a card is the colour of the wall** (2026-11-09, the
+  owner's refresh, `docs/plans/UI_DESIGN_REFRESH.md`). Every colour is a token
+  in `kazma.css` (dark in `:root`, light in `[data-theme="light"]`): the
+  surface scale (card, overlay and chrome equal the wall -- white in light,
+  `#0e1626` in dark; `--surface-sunken` is the one surface below it, for
+  wells, code and table heads; inputs are transparent), status colours with
+  `-subtle` and `-border` variants and `--on-*` inks for fills, `--cat-1..6`,
+  and the card shape (`--card-radius` 12px, `--card-padding`, `--card-shadow`,
+  `--card-hairline`). A card stands apart by the hairline and the soft shadow,
+  never by its own fill: one grouped card rule paints `.card` and every card
+  family, and no family paints itself. The accent is six `--accent-chosen-*`
+  seeds (a dark and a light variant, each with its own readable ink,
+  `kazma_ui/accent_colors.py` and `components.js` share
+  `tests/fixtures/accent_variants.json`), rendered on `<html>` by the server;
+  CSS derives every accent shade with `color-mix()`, and Settings applies or
+  saves an accent only when the owner chose one (the retired indigo is a
+  `RetiredDefault`). Gate: `tests/test_ui_color_tokens.py` (every `var(--x)`
+  defined, both themes, the surface order, the card rule, 4.5:1 text in both
+  themes, no selector coloured differently in the two stylesheets; each with
+  its negative control) and `tests/js/test_accent_family.js`.
+- **The shell and the shared components are defined once, in `kazma.css`**
+  (2026-11-09, the refresh's stage 2). The shell: the sidebar is the wall
+  with a hairline on its inner edge; menu items are 45px pills, hover takes
+  the accent ink and moves 4px along the reading direction, the active item
+  is a filled accent pill with the `--on-accent` ink; the header is
+  transparent over the wall, with round 40px icon buttons, a search field
+  that opens the Ctrl+K palette, and menus (the bell, the account) that are
+  the wall with the overlay shadow, rows leading with an icon tile. The
+  shared classes a page uses and never redefines (nor `kazma.v5.css`, which
+  loads last): `.btn` with `.btn-primary` (filled), `.btn-secondary` /
+  `-success` / `-warning` / `-danger` (soft: the colour's 12% tint and its
+  ink), `.btn-danger-solid` (a destructive confirm), `.btn-outline`,
+  `.btn-ghost`, `.btn-icon`; `.badge-*` pills (an error is `.badge-danger`;
+  the legacy names are aliases); `.tone-*` for `.icon-tile`, `.stat-tile` and
+  `.notice` (`.alert` is the same thing: tinted, never a stripe);
+  `.page-banner`; `.card-header` / `.card-title` / `.card-sub` /
+  `.card-nested`; the 40px form fields, `.form-label`; `.toggle`; `.tabs`
+  pills; `.segmented`; `.data-table`; `.dropdown`; `.empty-state`;
+  `.progress` (the track) with `.progress-bar` (the fill). A soft button or
+  a badge on another tinted surface (an approval card, a notice, the page
+  banner, a stat tile) lays its wash over the wall's colour, never over the
+  surface's: two washes stacked put its ink under 4.5:1. A card does not
+  lift on hover, and titles and numbers are plain ink. Every
+  `--accent-chosen-*` seed falls back to the theme's accent (an install
+  with no chosen accent has no seeds). Logical properties only: the shell mirrors in Arabic with no
+  `[dir="rtl"]` override. Canvas and SVG drawings that read tokens redraw on
+  `kazma:themechange` (on `document`, detail `{theme, reason}`), dispatched
+  by `syncDocumentColorScheme` when the theme changes and `applyAccentColor`
+  when the accent does (Auto follows the OS while the page is open). Gates:
+  `tests/test_ui_shared_components.py` (every shared class defined, none in
+  v5, the active item and the chosen tab filled pills, soft buttons, no lift,
+  no gradient text, soft buttons and badges 4.5:1 on every tinted surface,
+  no literal colour outside the token blocks but the declared brand marks, a
+  ratchet at 0; each with its negative control),
+  `tests/test_ui_color_tokens.py::test_no_chosen_accent_renders_the_theme_accent`
+  and `tests/js/test_theme_change_event.js`.
 - **`x-cloak` is GLOBAL — do not re-introduce the blink.** The rule
   `[x-cloak] { display: none !important; }` lives once in `kazma.css`
   (`base.html` then loads `kazma.v5.css` — last-wins for overlapping
@@ -9948,7 +10004,13 @@ counts the active provider's address (`setup_api.compute_setup_status`).
     row). Build markup in a component method and bind it with `x-html`.
   - **Icons inserted after load come from `KazmaIcons.span(name)`**, which
     returns them filled. `icons.js` hydrates `[data-icon]` only on DOM ready,
-    so a bare `<span data-icon>` inserted later stays empty.
+    so a bare `<span data-icon>` inserted later stays empty. A page reached
+    by the sidebar is such an insert: soft navigation fills the swapped-in
+    body and the header title (`hydrateIcons` in `nav.js`, after the swap
+    and after Alpine renders the page); without it 32 of the Workspace's
+    icons were blank by the sidebar and none on a load (2026-11-09,
+    `tests/e2e/test_soft_nav_icons.py`, the old soft navigation as its
+    control).
   - **A `<template x-for>` carries only `x-for` and `:key`.** Any other
     binding on it runs OUTSIDE the loop ("s is not defined").
   - **Declare every field a template reads in the component's initial

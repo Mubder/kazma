@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% set active_page = "setup" %}
 {% block title %}Kazma — {{ t('setup.title') }}{% endblock %}
-{% block page_title %}<span class="ki" data-icon="sparkles" aria-hidden="true"></span> {{ t('setup.title') }}{% endblock %}
+{% block page_title %}<span class="ki" aria-hidden="true" x-html="KazmaIcons.get('sparkles')"></span> {{ t('setup.title') }}{% endblock %}
 
 {% block content %}
 {#- The first-run setup guide: welcome, the model (a cloud provider or one on

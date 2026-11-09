@@ -574,8 +574,10 @@ function memoryPage() {
         return this._submitBeliefEdit(b, subject, predicate, object);
       }
       const fid = "mem-edit-" + b.id;
-      const fieldStyle = "width:100%;padding:6px 10px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.04);color:var(--text-primary);font-size:0.85rem;box-sizing:border-box;margin-top:3px;";
-      const labelStyle = "font-size:0.72rem;color:var(--text-muted);";
+      // The shared field (.form-input: transparent, hairline, both themes);
+      // only its width and spacing are this dialog's.
+      const fieldStyle = "width:100%;box-sizing:border-box;margin-top:3px;font-size:0.85rem;";
+      const labelStyle = "font-size:0.72rem;color:var(--text-secondary);";
       const escHtml = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
       store.show({
         title: S.edit || tx("memory.page.edit_title", "Edit belief"),
@@ -583,11 +585,11 @@ function memoryPage() {
         body:
           '<div style="display:flex;flex-direction:column;gap:10px;">' +
           '<div><label style="' + labelStyle + '">' + escHtml(tx("memory.page.label_subject", "Subject (entity id)")) + '</label>' +
-          '<input id="' + fid + '-subject" type="text" value="' + escHtml(b.subject) + '" style="' + fieldStyle + '" placeholder="user"></div>' +
+          '<input id="' + fid + '-subject" type="text" class="form-input" value="' + escHtml(b.subject) + '" style="' + fieldStyle + '" placeholder="user"></div>' +
           '<div><label style="' + labelStyle + '">' + escHtml(tx("memory.page.prompt_predicate", "Predicate")) + '</label>' +
-          '<input id="' + fid + '-predicate" type="text" value="' + escHtml(b.predicate) + '" style="' + fieldStyle + '" placeholder="has_project"></div>' +
+          '<input id="' + fid + '-predicate" type="text" class="form-input" value="' + escHtml(b.predicate) + '" style="' + fieldStyle + '" placeholder="has_project"></div>' +
           '<div><label style="' + labelStyle + '">' + escHtml(tx("memory.page.prompt_object", "Object (fact text)")) + '</label>' +
-          '<input id="' + fid + '-object" type="text" value="' + escHtml(b.object) + '" style="' + fieldStyle + '" placeholder="' + escHtml(tx("memory.page.label_object_ph", "e.g. what the fact says…")) + '"></div>' +
+          '<input id="' + fid + '-object" type="text" class="form-input" value="' + escHtml(b.object) + '" style="' + fieldStyle + '" placeholder="' + escHtml(tx("memory.page.label_object_ph", "e.g. what the fact says…")) + '"></div>' +
           '</div>',
         actions: [
           { label: tx('memory.page.cancel', 'Cancel'), variant: 'btn-secondary', close: true },

@@ -65,8 +65,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "No libraries yet — choose “New library…”.",
     },
     "documents.intro": {
-        "ar": "— ارفع مستندًا؛ يوضع في الحجر ويُتحقق منه ويُحلَّل في عملية منفصلة ثم يُتاح بمعرّف معتم. المعالجة دائمة وتصمد أمام إعادة التشغيل.",
-        "en": "— upload a document; it is quarantined, validated, parsed out-of-process, and made available by opaque ID. Processing is durable and restart-safe.",
+        "ar": "ارفع مستندًا؛ يوضع في الحجر ويُتحقق منه ويُحلَّل في عملية منفصلة ثم يُتاح بمعرّف معتم. المعالجة دائمة وتصمد أمام إعادة التشغيل.",
+        "en": "Upload a document; it is quarantined, validated, parsed out-of-process, and made available by opaque ID. Processing is durable and restart-safe.",
     },
     "documents.upload_region": {
         "ar": "رفع مستند",

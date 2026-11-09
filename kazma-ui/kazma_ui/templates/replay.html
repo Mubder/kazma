@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% set active_page = "replay" %}
 {% block title %}Kazma — {{ t('replay.title') }}{% endblock %}
-{% block page_title %}<span class="ki" data-icon="clock" aria-hidden="true"></span> {{ t('replay.title') }}{% endblock %}
+{% block page_title %}<span class="ki" aria-hidden="true" x-html="KazmaIcons.get('clock')"></span> {{ t('replay.title') }}{% endblock %}
 
 {% block content %}
 {# data-thread: the chat this page was asked for (replay.js reads it: a soft
@@ -15,9 +15,9 @@
       <option value="">{{ t('replay.select_thread') }}</option>
     </select>
     <button class="btn btn-secondary" onclick="KazmaReplay.loadThreads()" title="{{ t('common.refresh') }}">
-      <span class="ki" data-icon="refresh" aria-hidden="true"></span>
+      <span class="ki" aria-hidden="true" x-html="KazmaIcons.get('refresh')"></span>
     </button>
-    <span id="replay-snapshot-count" style="font-size:0.85rem;color:var(--text-muted);margin-left:auto;"></span>
+    <span id="replay-snapshot-count" style="font-size:0.85rem;color:var(--text-muted);margin-inline-start:auto;"></span>
   </div>
 
   <!-- ── Tabs ── -->
@@ -30,8 +30,9 @@
   <!-- ══ TAB: Timeline ══ -->
   <div class="tab-panel" id="panel-timeline" style="display:block;">
     <div id="replay-timeline-list" style="display:grid;gap:8px;">
-      <div style="padding:2rem;text-align:center;color:var(--text-muted);">
-        {{ t('replay.pick_thread_hint') }}
+      <div class="empty-state" style="margin-top:1rem;">
+        <span class="icon-tile" aria-hidden="true"><span class="ki" x-html="KazmaIcons.get('clock')"></span></span>
+        <span>{{ t('replay.pick_thread_hint') }}</span>
       </div>
     </div>
 
@@ -71,7 +72,7 @@
   <!-- ══ TAB: About ══ -->
   <div class="tab-panel" id="panel-about" style="display:none;">
     <div class="card" style="padding:1.5rem;line-height:1.7;">
-      <h3 style="margin-top:0;display:flex;align-items:center;gap:8px;"><span class="ki" data-icon="clock" aria-hidden="true"></span> {{ t('replay.about_title') }}</h3>
+      <h3 style="margin-top:0;display:flex;align-items:center;gap:8px;"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('clock')"></span> {{ t('replay.about_title') }}</h3>
       <p>{{ t('replay.about_desc') }}</p>
       <ul>
         <li>{{ t('replay.about_browse') | safe }}</li>

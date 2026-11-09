@@ -13,7 +13,11 @@
   <link rel="stylesheet" href="/static/vendor/codemirror/codemirror.bundle.css?v={{ css_version() }}">
   <script src="/static/vendor/codemirror/codemirror.bundle.js?v={{ js_version() }}"></script>
   <style>
-    [x-cloak] { display: none !important; }
+    /* The IDE's own layout and the editor's theme. Every colour is a token
+       (kazma.css), so the editor follows light and dark with the rest of the
+       page; ide.js re-applies the theme on kazma:themechange. The editor, its
+       gutters, the output and the file glyphs are wells (--surface-sunken);
+       the panels are shared .card (the colour of the wall). */
     .ide-container { width: 100%; max-width: 100%; margin: 0; padding: 0 1px; container-type: inline-size; }
     .ide-layout { display: grid; grid-template-columns: var(--ide-tree-w, 260px) 4px 1fr; gap: 0 8px; height: calc(100vh - 160px); min-height: 480px; }
     .ide-layout.with-chat { grid-template-columns: var(--ide-tree-w, 260px) 4px 1fr 4px var(--ide-chat-w, 380px); }
@@ -22,7 +26,12 @@
        it shifts the tree/editor on every mouse-enter and feels broken. */
     .ide-tree:hover, .ide-main > .card:hover, .ide-chat:hover { transform: none !important; }
     .ide-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; gap: 12px; }
-    .ide-editor-wrap { flex: 1 1 0; min-height: 420px; height: min(62vh, 720px); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); overflow: hidden; background: var(--bg-deep); position: relative; }
+    .ide-panel { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+    .ide-editor-card { flex: 1; min-height: 260px; }
+    /* The editor's well draws the line under the header; the open tab sits
+       on that line and covers it, so the tab and the file read as one. */
+    .ide-editor-card > .ide-panel-header { border-bottom: 0; padding-bottom: 6px; }
+    .ide-editor-wrap { flex: 1 1 0; min-height: 420px; height: min(62vh, 720px); border-top: 1px solid var(--card-hairline); overflow: hidden; background: var(--surface-sunken); position: relative; }
     /* ── Editor surface ─────────────────────────────────────────────────────
        One font stack and one line-height shared by the textarea fallback and
        CodeMirror, so swapping between them does not reflow the file.
@@ -32,29 +41,32 @@
                      'SF Mono', 'Consolas', 'Liberation Mono', monospace;
       --ide-cm-size: 13.5px;
       --ide-cm-line: 1.6;
-      --ide-cm-gutter: color-mix(in srgb, var(--bg-deep) 88%, var(--text-primary) 12%);
-      --ide-cm-guide: color-mix(in srgb, var(--bg-deep) 62%, var(--text-primary) 38%);
-      --ide-cm-active: color-mix(in srgb, var(--bg-deep) 93%, var(--text-primary) 7%);
+      --ide-cm-bg: var(--surface-sunken);
+      --ide-cm-gutter: color-mix(in srgb, var(--surface-sunken) 88%, var(--text-primary) 12%);
+      --ide-cm-guide: color-mix(in srgb, var(--surface-sunken) 62%, var(--text-primary) 38%);
+      --ide-cm-active: color-mix(in srgb, var(--surface-sunken) 93%, var(--text-primary) 7%);
     }
-    .ide-fallback { width: 100%; height: 100%; min-height: 420px; border: none; resize: none; background: var(--bg-deep); color: var(--text-primary); font-family: var(--ide-cm-font); font-size: var(--ide-cm-size); line-height: var(--ide-cm-line); padding: 8px 12px 8px 16px; box-sizing: border-box; tab-size: 4; }
+    .ide-fallback { width: 100%; height: 100%; min-height: 420px; border: none; resize: none; background: var(--ide-cm-bg); color: var(--text-primary); font-family: var(--ide-cm-font); font-size: var(--ide-cm-size); line-height: var(--ide-cm-line); padding-block: 8px; padding-inline: 16px 12px; box-sizing: border-box; tab-size: 4; }
     .ide-editor-wrap .CodeMirror {
       height: 100%;
       font-family: var(--ide-cm-font);
       font-size: var(--ide-cm-size);
       line-height: var(--ide-cm-line);
-      background: var(--bg-deep);
+      background: var(--ide-cm-bg);
       color: var(--text-primary);
       font-variant-ligatures: contextual;
     }
-    .ide-editor-wrap .CodeMirror-scroll { background: var(--bg-deep); padding-bottom: 40px; }
+    .ide-editor-wrap .CodeMirror-scroll { background: var(--ide-cm-bg); padding-bottom: 40px; }
     .ide-editor-wrap .CodeMirror-lines { padding: 8px 0; }
     .ide-editor-wrap .CodeMirror pre.CodeMirror-line,
     .ide-editor-wrap .CodeMirror pre.CodeMirror-line-like { padding-left: 8px; }
 
-    /* ── Gutters: line numbers, fold arrows, a rule that reads as a margin ── */
+    /* ── Gutters: line numbers, fold arrows, a rule that reads as a margin ──
+       Code is always laid out left to right (CodeMirror sets direction: ltr),
+       so the gutter's edge stays physical. */
     .ide-editor-wrap .CodeMirror-gutters {
       background: var(--ide-cm-gutter);
-      border-right: 1px solid var(--border-subtle);
+      border-right: 1px solid var(--card-hairline);
       padding-right: 2px;
     }
     .ide-editor-wrap .CodeMirror-linenumber {
@@ -67,18 +79,20 @@
        cue in an editor, and the one every IDE ships. */
     .ide-editor-wrap .CodeMirror-activeline .CodeMirror-linenumber,
     .ide-editor-wrap .CodeMirror-linenumber.CodeMirror-activeline-gutter {
-      color: var(--accent);
+      color: var(--accent-light);
       font-weight: 600;
     }
     .ide-editor-wrap .CodeMirror-activeline-background { background: var(--ide-cm-active); }
+    .ide-editor-wrap .CodeMirror-guttermarker { color: var(--text-secondary); }
+    .ide-editor-wrap .CodeMirror-guttermarker-subtle { color: var(--text-muted); }
     .ide-editor-wrap .CodeMirror-foldgutter { width: 14px; }
     .ide-editor-wrap .CodeMirror-foldgutter-open,
     .ide-editor-wrap .CodeMirror-foldgutter-folded { color: var(--text-muted); cursor: pointer; }
     .ide-editor-wrap .CodeMirror-foldgutter-open:hover,
-    .ide-editor-wrap .CodeMirror-foldgutter-folded:hover { color: var(--accent); }
+    .ide-editor-wrap .CodeMirror-foldgutter-folded:hover { color: var(--accent-light); }
     .ide-editor-wrap .CodeMirror-foldmarker {
-      color: var(--accent); text-shadow: none; font-family: var(--ide-cm-font);
-      background: var(--bg-elevated); border: 1px solid var(--border-subtle);
+      color: var(--accent-light); text-shadow: none; font-family: var(--ide-cm-font);
+      background: var(--accent-subtle); border: 0;
       border-radius: 3px; padding: 0 5px; font-size: 0.8em;
     }
 
@@ -94,17 +108,55 @@
 
     /* ── Selection, brackets, search ── */
     .ide-editor-wrap .CodeMirror-selected,
-    .ide-editor-wrap .CodeMirror-line::selection { background: color-mix(in srgb, var(--accent) 26%, transparent); }
+    .ide-editor-wrap .CodeMirror-line::selection,
+    .ide-editor-wrap .CodeMirror-line > span::selection,
+    .ide-editor-wrap .CodeMirror-line > span > span::selection { background: color-mix(in srgb, var(--accent) 26%, transparent); }
     .ide-editor-wrap .CodeMirror-focused .CodeMirror-selected { background: color-mix(in srgb, var(--accent) 32%, transparent); }
     .ide-editor-wrap .CodeMirror-matchingbracket {
-      color: var(--accent) !important; font-weight: 700;
+      color: var(--accent-light) !important; font-weight: 700;
       border-bottom: 1px solid var(--accent); background: transparent;
     }
-    .ide-editor-wrap .CodeMirror-nonmatchingbracket { color: var(--danger, #ef4444) !important; }
+    .ide-editor-wrap .CodeMirror-nonmatchingbracket { color: var(--danger) !important; }
+    .ide-editor-wrap .CodeMirror-matchingtag { background: var(--accent-subtle); }
     .ide-editor-wrap .cm-matchhighlight { background: color-mix(in srgb, var(--accent) 18%, transparent); border-radius: 2px; }
+    .ide-editor-wrap .cm-searching { background: color-mix(in srgb, var(--warning) 30%, transparent); }
+    .ide-editor-wrap .CodeMirror-search-match { background: var(--warning); border-top: 0; border-bottom: 0; }
     .ide-editor-wrap .CodeMirror-cursor { border-left: 2px solid var(--accent); }
-    .ide-editor-wrap .cm-trailingspace { background: color-mix(in srgb, var(--danger, #ef4444) 22%, transparent); }
+    .ide-editor-wrap .cm-trailingspace { background: var(--danger-subtle); }
     .ide-editor-wrap .CodeMirror-ruler { border-left: 1px dashed var(--border-subtle); }
+    .ide-editor-wrap .CodeMirror-lint-line-error { background: var(--danger-subtle); }
+    .ide-editor-wrap .CodeMirror-lint-line-warning { background: var(--warning-subtle); }
+
+    /* ── The syntax theme: kazma ──
+       Token roles read the categorical palette (--cat-1..6, readable in each
+       theme) and the text inks, so the colours change with the theme. */
+    .cm-s-kazma span.cm-keyword { color: var(--cat-4); font-weight: 600; }
+    .cm-s-kazma span.cm-def,
+    .cm-s-kazma span.cm-property,
+    .cm-s-kazma span.cm-builtin { color: var(--cat-1); }
+    .cm-s-kazma span.cm-variable { color: var(--text-primary); }
+    .cm-s-kazma span.cm-variable-2,
+    .cm-s-kazma span.cm-variable-3,
+    .cm-s-kazma span.cm-type,
+    .cm-s-kazma span.cm-qualifier { color: var(--cat-5); }
+    .cm-s-kazma span.cm-string,
+    .cm-s-kazma span.cm-string-2,
+    .cm-s-kazma span.cm-quote { color: var(--cat-6); }
+    .cm-s-kazma span.cm-number,
+    .cm-s-kazma span.cm-attribute { color: var(--cat-2); }
+    .cm-s-kazma span.cm-atom,
+    .cm-s-kazma span.cm-tag { color: var(--cat-3); }
+    .cm-s-kazma span.cm-comment { color: var(--text-muted); font-style: italic; }
+    .cm-s-kazma span.cm-meta,
+    .cm-s-kazma span.cm-hr { color: var(--text-tertiary); }
+    .cm-s-kazma span.cm-operator,
+    .cm-s-kazma span.cm-bracket { color: var(--text-secondary); }
+    .cm-s-kazma span.cm-header { color: var(--cat-1); font-weight: 600; }
+    .cm-s-kazma span.cm-link { color: var(--accent-light); }
+    .cm-s-kazma span.cm-error,
+    .cm-s-kazma span.cm-invalidchar,
+    .cm-s-kazma span.cm-negative { color: var(--danger); }
+    .cm-s-kazma span.cm-positive { color: var(--success); }
 
     /* ── Overlay scrollbars + search dialog + completion popup ── */
     .ide-editor-wrap .CodeMirror-overlayscroll-horizontal div,
@@ -113,80 +165,114 @@
       border-radius: 4px;
     }
     .ide-editor-wrap .CodeMirror-dialog {
-      background: var(--bg-elevated); color: var(--text-primary);
-      border-bottom: 1px solid var(--border-subtle); padding: 6px 10px; font-size: 0.8rem;
+      background: var(--surface-overlay); color: var(--text-primary);
+      border-bottom: 1px solid var(--overlay-border); box-shadow: var(--overlay-shadow);
+      padding: 6px 10px; font-size: 0.8rem;
     }
     .ide-editor-wrap .CodeMirror-dialog input {
       font-family: var(--ide-cm-font); color: var(--text-primary);
-      background: var(--bg-deep); border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-xs); padding: 2px 6px;
+      background: var(--input-bg); border: 1px solid var(--input-border);
+      border-radius: var(--input-radius); padding: 2px 6px;
     }
+    /* The completion popup and the lint tooltip are appended to <body>. */
     .CodeMirror-hints {
       z-index: 30; font-family: var(--ide-cm-font); font-size: 0.8rem;
-      background: var(--bg-elevated); border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-sm); box-shadow: 0 8px 24px -8px rgba(0,0,0,.5);
+      background: var(--surface-overlay); border: 1px solid var(--overlay-border);
+      border-radius: var(--overlay-radius); box-shadow: var(--overlay-shadow);
     }
-    .CodeMirror-hint { color: var(--text-secondary); padding: 3px 8px; }
-    li.CodeMirror-hint-active { background: var(--accent); color: var(--bg-deep); }
+    .CodeMirror-hint { color: var(--text-secondary); padding: 3px 8px; border-radius: 4px; }
+    li.CodeMirror-hint-active { background: var(--accent); color: var(--on-accent); }
+    .CodeMirror-lint-tooltip {
+      background-color: var(--surface-overlay); color: var(--text-primary);
+      border: 1px solid var(--overlay-border); border-radius: var(--overlay-radius);
+      box-shadow: var(--overlay-shadow); font-family: var(--ide-cm-font); font-size: 0.78rem;
+    }
     /* ── Toolbar ── */
     .ide-toolbar { margin-bottom: 16px; padding: 8px 16px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .ide-toolbar-label { color: var(--text-muted); display: flex; align-items: center; }
-    .ide-toolbar-actions { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; align-items: center; }
+    .ide-toolbar-actions { display: flex; gap: 6px; margin-inline-start: auto; flex-wrap: wrap; align-items: center; }
     .ide-dirty-dot { color: var(--warning); display: flex; align-items: center; }
     .ide-dirty-text { color: var(--warning); font-size: 0.72rem; }
-    .code-chip { font-family: var(--font-mono); font-size: 0.78rem; background: var(--bg-elevated); padding: 3px 8px; border-radius: var(--radius-sm); color: var(--text-secondary); border: 1px solid var(--border-subtle); }
-    .ide-skill-select { max-width: 140px; font-size: 0.78rem; padding: 2px 6px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--text-primary); }
-    /* ── Tab bar ── */
-    .ide-tabs { display: flex; gap: 2px; overflow-x: auto; flex-shrink: 0; padding: 0 2px; max-height: 36px; }
-    .ide-tab { display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: var(--radius-xs) var(--radius-xs) 0 0; background: var(--bg-elevated); border: 1px solid var(--border-subtle); cursor: pointer; font-size: 0.75rem; white-space: nowrap; max-width: 200px; }
-    .ide-tab.active { background: var(--bg-deep); border-bottom-color: var(--bg-deep); font-weight: 600; color: var(--accent); }
-    .ide-tab:hover { background: var(--bg-hover); }
+    .code-chip { font-family: var(--font-mono); font-size: 0.78rem; background: var(--surface-sunken); padding: 3px 8px; border-radius: 6px; color: var(--text-secondary); }
+    .ide-skill-select { max-width: 160px; height: 32px; font-size: 0.78rem; padding-block: 0; }
+    /* ── Tab bar: the open tab is part of the editor's well ── */
+    .ide-tabs { display: flex; gap: 2px; overflow-x: auto; flex-shrink: 0; padding: 0 6px; max-height: 36px; margin-bottom: -1px; position: relative; z-index: 1; }
+    .ide-tabs .ide-tab { display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-start-start-radius: 6px; border-start-end-radius: 6px; background: transparent; border: 1px solid transparent; border-bottom: 0; color: var(--text-secondary); cursor: pointer; font-size: 0.75rem; white-space: nowrap; max-width: 200px; }
+    .ide-tabs .ide-tab.active { background: var(--surface-sunken); border-color: var(--card-hairline); font-weight: 600; color: var(--accent-light); }
+    .ide-tabs .ide-tab:hover { background: var(--bg-hover); }
+    .ide-tabs .ide-tab.active:hover { background: var(--surface-sunken); }
     .ide-tab-name { overflow: hidden; text-overflow: ellipsis; }
-    .ide-tab-close { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0 2px; font-size: 0.9rem; line-height: 1; border-radius: var(--radius-xs); }
-    .ide-tab-close:hover { color: var(--danger, #ef4444); background: var(--bg-hover); }
+    .ide-tab-close { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0 2px; font-size: 0.9rem; line-height: 1; border-radius: 4px; }
+    .ide-tab-close:hover { color: var(--danger); background: var(--danger-subtle); }
     .ide-tab-dot { color: var(--warning); font-size: 0.6rem; }
+    /* ── Panel headers (file tree, editor, chat) ── */
+    .ide-panel-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--card-hairline); padding: 10px 12px; flex-shrink: 0; }
+    .ide-panel-title { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--text-muted); }
+    .ide-panel-title h3 { margin: 0; font-size: 0.9rem; font-weight: 600; color: var(--text-primary); }
+    .ide-panel-note { font-size: 0.72rem; color: var(--text-muted); }
+    .ide-panel-note-end { margin-inline-start: auto; }
+    .ide-panel-actions { display: flex; gap: 6px; }
     /* ── File tree ── */
-    /* ── File tree ── */
-    .ide-panel-header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding: 8px 12px; }
-    .ide-panel-title { display: flex; align-items: center; gap: 6px; color: var(--text-muted); }
-    .ide-panel-title h3 { margin: 0; font-size: 0.85rem; font-weight: 600; color: var(--text-primary); }
-    .ide-breadcrumb { padding: 5px 10px; background: var(--bg-elevated); border-bottom: 1px solid var(--border-subtle); font-size: 0.72rem; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
-    .ide-breadcrumb code { font-family: var(--font-mono); color: var(--accent); }
-    .ide-tree-row { width:100%; border:0; background:transparent; color:inherit; font-family:inherit; text-align:start; display: flex; align-items: center; gap: 6px; padding: 5px 12px; cursor: pointer; font-size: 0.8rem; transition: background var(--transition-fast); box-sizing: border-box; overflow: hidden; }
+    .ide-breadcrumb { padding: 6px 12px; border-bottom: 1px solid var(--card-hairline); font-size: 0.72rem; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
+    .ide-breadcrumb code { font-family: var(--font-mono); color: var(--accent-light); }
+    .ide-tree-row { width:100%; border:0; border-inline-start: 2px solid transparent; background:transparent; color:inherit; font-family:inherit; text-align:start; display: flex; align-items: center; gap: 6px; padding-block: 5px; padding-inline: 10px 12px; cursor: pointer; font-size: 0.8rem; transition: background var(--transition-fast); box-sizing: border-box; overflow: hidden; }
     .ide-tree-row:hover { background: var(--bg-hover); }
-    .ide-tree-active { background: var(--accent-subtle); box-shadow: inset 2px 0 0 var(--accent); padding-left: 10px; }
+    .ide-tree-active { background: var(--accent-subtle); border-inline-start-color: var(--accent); color: var(--accent-light); }
     .ide-tree-up { color: var(--text-secondary); }
     .ide-tree-icon { width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
     .ide-file-glyph {
       width: 16px; height: 16px; border-radius: 3px; flex-shrink: 0;
       font-size: 7px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;
-      background: var(--bg-deep); color: var(--text-muted);
+      background: var(--surface-sunken); color: var(--text-muted);
     }
-    .ide-file-glyph[data-ext="dir"]::after { content: "▸"; font-size: 10px; color: var(--accent); }
+    .ide-file-glyph[data-ext="dir"]::after { content: "▸"; font-size: 10px; color: var(--accent-light); }
     .ide-file-glyph[data-ext="up"]::after { content: "↑"; font-size: 10px; }
-    .ide-file-glyph[data-ext="py"]::after { content: "py"; color: #3776ab; }
-    .ide-file-glyph[data-ext="js"]::after { content: "js"; color: #b8860b; }
-    .ide-file-glyph[data-ext="ts"]::after { content: "ts"; color: #3178c6; }
+    .ide-file-glyph[data-ext="py"]::after { content: "py"; color: var(--cat-1); }
+    .ide-file-glyph[data-ext="js"]::after { content: "js"; color: var(--cat-2); }
+    .ide-file-glyph[data-ext="ts"]::after { content: "ts"; color: var(--cat-5); }
     .ide-file-glyph[data-ext="md"]::after { content: "md"; }
     .ide-file-glyph[data-ext="json"]::after { content: "{}"; }
     .ide-file-glyph:not([data-ext])::after,
     .ide-file-glyph[data-ext=""]::after { content: "·"; }
     .ide-tree-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-    .ide-tree-empty { padding: 24px; text-align: center; color: var(--text-muted); font-size: 0.78rem; }
+    .ide-tree-empty { margin: 12px; }
+    /* ── Command bar and output ── */
+    .ide-commands { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+    .ide-command-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .ide-command-row .form-input { flex: 1; min-width: 160px; font-size: 0.8rem; }
+    .ide-command-row .ide-glob { flex: 0 1 120px; min-width: 90px; }
+    .ide-mono { font-family: var(--font-mono); }
+    .ide-output { padding: 12px 14px; }
+    .ide-output-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+    .ide-output-title { font-size: 0.85rem; font-weight: 600; color: var(--text-primary); }
+    .ide-results { background: var(--surface-sunken); color: var(--text-primary); font-family: var(--font-mono); font-size: 0.78rem; padding: 12px; border-radius: 8px; border: 0; max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 0; }
     /* ── Chat panel ── */
-    .ide-chat { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
-    .ide-chat-msgs { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
-    .chat-bubble { width: fit-content; max-width: 88%; padding: 6px 12px; border-radius: var(--radius-sm); font-size: 0.82rem; line-height: 1.45; word-break: break-word; }
-    .chat-bubble.user { background: var(--accent-subtle); border: 1px solid var(--border-subtle); align-self: flex-end; }
-    .chat-bubble.assistant { background: var(--bg-deep); border: 1px solid var(--border-subtle); align-self: flex-start; }
-    .chat-bubble.system { background: transparent; color: var(--text-muted); font-size: 0.72rem; font-style: italic; border: 1px dashed var(--border-subtle); align-self: center; max-width: 100%; width: auto; padding: 4px 10px; }
-    .chat-bubble p:first-child { margin-top: 0; } .chat-bubble p:last-child { margin-bottom: 0; }
-    .chat-bubble pre { font-size: 0.72rem; max-height: 200px; overflow: auto; white-space: pre-wrap; }
-    .chat-bubble code { font-size: 0.72rem; }
-    .chat-tool { width: fit-content; max-width: 88%; font-size: 0.72rem; border-left: 3px solid var(--accent); padding: 5px 10px; background: var(--bg-elevated); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
-    .chat-tool pre { margin: 4px 0 0 0; white-space: pre-wrap; font-family: var(--font-mono); font-size: 0.68rem; max-height: 120px; overflow: auto; }
-    .chat-input-row { flex-shrink: 0; display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border-subtle); }
-    .ide-results { background: var(--bg-deep); color: var(--text-primary); font-family: var(--font-mono); font-size: 0.78rem; padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 0; }
+    .ide-chat { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; padding: 0; }
+    .ide-chat-file { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ide-chat-msgs { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+    .ide-chat-msgs .chat-bubble { width: fit-content; max-width: 88%; padding: 8px 12px; border-radius: 12px; font-size: 0.82rem; line-height: 1.45; word-break: break-word; }
+    .ide-chat-msgs .chat-bubble.user { background: var(--accent-subtle); border: 0; border-end-end-radius: 4px; align-self: flex-end; }
+    .ide-chat-msgs .chat-bubble.assistant { background: var(--surface-card); border: 1px solid var(--card-hairline); align-self: flex-start; }
+    .ide-chat-msgs .chat-bubble.system { background: transparent; color: var(--text-muted); font-size: 0.72rem; font-style: italic; border: 1px dashed var(--card-hairline); align-self: center; max-width: 100%; width: auto; padding: 4px 10px; }
+    .ide-chat-msgs .chat-bubble.approval { background: var(--warning-subtle); border: 0; align-self: stretch; max-width: 100%; }
+    .ide-chat-msgs .chat-bubble p:first-child { margin-top: 0; } .ide-chat-msgs .chat-bubble p:last-child { margin-bottom: 0; }
+    .ide-chat-msgs pre { background: var(--surface-sunken); border-radius: 6px; padding: 6px 8px; }
+    .ide-chat-msgs .chat-bubble pre { font-size: 0.72rem; max-height: 200px; overflow: auto; white-space: pre-wrap; }
+    .ide-chat-msgs .chat-bubble code { font-size: 0.72rem; }
+    .ide-chat-who { font-weight: 600; font-size: 0.7rem; }
+    .ide-chat-who-you { color: var(--accent-light); }
+    .ide-chat-who-kazma { color: var(--success); }
+    .ide-chat-thinking { color: var(--text-muted); font-size: 0.75rem; }
+    .ide-chat-hint { margin-top: 6px; font-size: 0.72rem; color: var(--text-secondary); }
+    .ide-chat-approval-text { font-size: 0.78rem; margin-top: 4px; }
+    .ide-chat-msgs .chat-tool { width: fit-content; max-width: 88%; font-size: 0.72rem; border: 0; border-inline-start: 3px solid var(--accent); padding: 5px 10px; background: transparent; border-start-end-radius: 6px; border-end-end-radius: 6px; }
+    .ide-chat-msgs .chat-tool.result { border-inline-start-color: var(--text-muted); }
+    .ide-chat-tool-name { font-weight: 600; color: var(--accent-light); }
+    .ide-chat-msgs .chat-tool.result .ide-chat-tool-name { color: var(--text-muted); }
+    .ide-chat-msgs .chat-tool pre { margin: 4px 0 0 0; white-space: pre-wrap; font-family: var(--font-mono); font-size: 0.68rem; max-height: 120px; overflow: auto; }
+    .ide-chat .chat-input-row { flex-shrink: 0; display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--card-hairline); }
+    .ide-chat .chat-input-row .form-input { flex: 1; resize: none; font-size: 0.82rem; font-family: inherit; }
+    .ide-chat-send { display: flex; flex-direction: column; gap: 4px; }
     /* ── Resizable pane dividers ── */
     .ide-resizer { width: 4px; cursor: col-resize; background: transparent; position: relative; z-index: 10; flex-shrink: 0; transition: background var(--transition-fast); border-radius: 2px; }
     .ide-resizer:hover, .ide-resizer.dragging { background: var(--accent); }
@@ -222,7 +308,7 @@
       .ide-editor-wrap { min-height: 46vh; }
       .ide-chat { min-height: 280px; max-height: 50vh; }
       .ide-toolbar { gap: 6px; padding: 8px 10px; }
-      .ide-toolbar-actions { width: 100%; margin-left: 0; }
+      .ide-toolbar-actions { width: 100%; margin-inline-start: 0; }
       .ide-toolbar-actions .btn { flex: 1 1 auto; }
     }
   </style>
@@ -266,7 +352,7 @@
         <span x-html="KazmaIcons.diff()"></span> {{ t('ide.git_diff') }}
       </button>
       <span class="toolbar-sep" aria-hidden="true"></span>
-      <select class="form-input ide-skill-select" x-model="selectedSkill" x-show="skills.length" x-cloak>
+      <select class="form-select ide-skill-select" aria-label="{{ t('ide.skill') }}" x-model="selectedSkill" x-show="skills.length" x-cloak>
         <template x-for="s in skills" :key="s.name">
           <option :value="s.name" translate="no" x-text="s.name"></option>
         </template>
@@ -312,7 +398,7 @@
           <span x-html="KazmaIcons.folder({class:'icon-md'})"></span>
           <h3>{{ t('ide.files') }}</h3>
         </div>
-        <button class="btn btn-xs btn-secondary" @click="loadTree(treePath)" title="{{ t('common.refresh') }}">
+        <button class="btn btn-xs btn-secondary" @click="loadTree(treePath)" title="{{ t('common.refresh') }}" aria-label="{{ t('common.refresh') }}">
           <span x-html="KazmaIcons.refresh()"></span>
         </button>
       </div>
@@ -331,7 +417,10 @@
             <span class="ide-tree-name" translate="no" x-text="item.name"></span>
           </button>
         </template>
-        <div x-show="treeLoaded && tree.length === 0 && !busy" x-cloak class="ide-tree-empty">{{ t('ide.empty') }}</div>
+        <div x-show="treeLoaded && tree.length === 0 && !busy" x-cloak class="empty-state ide-tree-empty">
+          <span class="icon-tile tone-neutral"><span x-html="KazmaIcons.folder({class:'icon-md'})"></span></span>
+          <p>{{ t('ide.empty') }}</p>
+        </div>
       </div>
     </div>
 
@@ -340,20 +429,20 @@
 
     <!-- ── Editor + Panels ── -->
     <div class="ide-main">
-      <div class="card" style="flex:1;display:flex;flex-direction:column;padding:0;overflow:hidden;border:1px solid var(--border-subtle);min-height:260px;">
-        <div class="card-header" style="display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border-subtle);padding:6px 8px;">
-          <span style="font-size:0.85rem;font-weight:600;color:var(--text-primary);">{{ t('ide.editor') }}</span>
-          <span x-show="!cmReady" style="font-size:0.7rem;color:var(--text-muted);" x-cloak>{{ t('ide.plain_file') }}</span>
-          <span style="font-size:0.68rem;color:var(--text-muted);margin-left:auto;" x-show="cmReady" x-cloak>{{ t('ide.editor_features') }}</span>
+      <div class="card ide-panel ide-editor-card">
+        <div class="ide-panel-header">
+          <div class="ide-panel-title"><h3>{{ t('ide.editor') }}</h3></div>
+          <span x-show="!cmReady" class="ide-panel-note" x-cloak>{{ t('ide.plain_file') }}</span>
+          <span class="ide-panel-note ide-panel-note-end" x-show="cmReady" x-cloak>{{ t('ide.editor_features') }}</span>
         </div>
         <!-- ── Tab bar ── -->
-        <div class="ide-tabs" x-show="tabs.length > 0" x-cloak style="padding:4px 6px 0 6px;">
+        <div class="ide-tabs" x-show="tabs.length > 0" x-cloak>
           <template x-for="tab in tabs" :key="tab.path">
             <div class="ide-tab" :class="{ 'active': tab.path === activeTabPath }"
                  @click="switchTab(tab.path)" @mousedown.middle.prevent="closeTab(tab.path)">
               <span class="ide-tab-dot" x-show="tab.dirty || (tab.path === activeTabPath && dirty)" x-cloak>●</span>
               <span class="ide-tab-name" translate="no" x-text="tab.name" :title="tab.path"></span>
-              <button class="ide-tab-close" @click.stop="closeTab(tab.path)" title="{{ t('ide.close_tab') }}">×</button>
+              <button class="ide-tab-close" @click.stop="closeTab(tab.path)" title="{{ t('ide.close_tab') }}" aria-label="{{ t('ide.close_tab') }}">×</button>
             </div>
           </template>
         </div>
@@ -367,30 +456,30 @@
       </div>
 
       <!-- Command + Grep + Swarm bar -->
-      <div class="card" style="padding:10px 12px;display:flex;flex-direction:column;gap:8px;border:1px solid var(--border-subtle);">
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <input type="text" class="form-input" placeholder="{{ t('ide.command_ph') }}"
-                 x-model="command" @keydown.enter="runCommand()" style="flex:1;min-width:180px;font-family:var(--font-mono);font-size:0.8rem;">
+      <div class="card ide-commands">
+        <div class="ide-command-row">
+          <input type="text" class="form-input ide-mono" placeholder="{{ t('ide.command_ph') }}" aria-label="{{ t('ide.command_ph') }}"
+                 x-model="command" @keydown.enter="runCommand()">
           <button class="btn btn-sm btn-secondary" @click="runCommand()" :disabled="busy">{{ t('ide.run_command') }}</button>
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <input type="text" class="form-input" placeholder="{{ t('ide.grep_ph') }}"
-                 x-model="grepPattern" @keydown.enter="grep()" style="flex:1;min-width:140px;font-size:0.8rem;">
-          <input type="text" class="form-input" placeholder="{{ t('ide.glob_ph') }}"
-                 x-model="grepGlob" style="max-width:120px;font-size:0.8rem;font-family:var(--font-mono);">
+        <div class="ide-command-row">
+          <input type="text" class="form-input" placeholder="{{ t('ide.grep_ph') }}" aria-label="{{ t('ide.grep_ph') }}"
+                 x-model="grepPattern" @keydown.enter="grep()">
+          <input type="text" class="form-input ide-mono ide-glob" placeholder="{{ t('ide.glob_ph') }}" aria-label="{{ t('ide.glob_ph') }}"
+                 x-model="grepGlob">
           <button class="btn btn-sm btn-secondary" @click="grep()" :disabled="busy">{{ t('ide.grep') }}</button>
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <input type="text" class="form-input" placeholder="{{ t('ide.swarm_ph') }}"
-                 x-model="swarmInstruction" @keydown.enter="sendToSwarm()" style="flex:1;min-width:180px;font-size:0.8rem;">
+        <div class="ide-command-row">
+          <input type="text" class="form-input" placeholder="{{ t('ide.swarm_ph') }}" aria-label="{{ t('ide.swarm_ph') }}"
+                 x-model="swarmInstruction" @keydown.enter="sendToSwarm()">
           <button class="btn btn-sm btn-primary" @click="sendToSwarm()" :disabled="busy"><span class="ki" data-icon="swarm" aria-hidden="true"></span> {{ t('ide.send_to_swarm') }}</button>
         </div>
       </div>
 
       <!-- Results -->
-      <div class="card" style="padding:10px 12px;border:1px solid var(--border-subtle);">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-          <span style="font-size:0.8rem;font-weight:600;color:var(--text-primary);" :translate="resultRaw ? 'no' : null" x-text="resultTitle || t('ide.output')"></span>
+      <div class="card ide-output">
+        <div class="ide-output-head">
+          <span class="ide-output-title" :translate="resultRaw ? 'no' : null" x-text="resultTitle || t('ide.output')"></span>
           <button class="btn btn-xs btn-secondary" @click="result=''" x-cloak x-show="result">{{ t('ide.clear') }}</button>
         </div>
         <pre class="ide-results" x-text="result || t('ide.no_output')"></pre>
@@ -401,65 +490,63 @@
     <div class="ide-resizer ide-resizer-chat" x-show="chatOpen" x-cloak @mousedown="startResize('chat', $event)" title="{{ t('ide.drag_resize') }}"></div>
 
     <!-- ── AI Chat panel (third column; reuses /api/chat/stream) ── -->
-    <div class="card ide-chat" x-show="chatOpen" x-cloak
-         style="padding:0;border:1px solid var(--border-subtle);flex-direction:column;display:flex;">
-      <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:8px 12px;">
-        <div style="display:flex;align-items:center;gap:6px;">
+    <div class="card ide-chat" x-show="chatOpen" x-cloak>
+      <div class="ide-panel-header">
+        <div class="ide-panel-title">
           <span><span class="ki" data-icon="message" aria-hidden="true"></span></span>
-          <h3 style="margin:0;font-size:0.9rem;font-weight:600;">{{ t('ide.ai_chat') }}</h3>
-          <span x-cloak x-show="currentFile" style="font-size:0.68rem;color:var(--text-muted);"
+          <h3>{{ t('ide.ai_chat') }}</h3>
+          <span x-cloak x-show="currentFile" class="ide-chat-file"
                 translate="no" x-text="'· ' + currentFile"></span>
         </div>
-        <div style="display:flex;gap:6px;">
-          <button class="btn btn-xs btn-secondary" @click="clearChat()" title="{{ t('ide.clear_chat_title') }}"><span class="ki" data-icon="sparkles" aria-hidden="true"></span></button>
-          <button class="btn btn-xs btn-secondary" @click="toggleChat()" title="{{ t('ide.close_panel_title') }}"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
+        <div class="ide-panel-actions">
+          <button class="btn btn-xs btn-secondary" @click="clearChat()" title="{{ t('ide.clear_chat_title') }}" aria-label="{{ t('ide.clear_chat_title') }}"><span class="ki" data-icon="sparkles" aria-hidden="true"></span></button>
+          <button class="btn btn-xs btn-secondary" @click="toggleChat()" title="{{ t('ide.close_panel_title') }}" aria-label="{{ t('ide.close_panel_title') }}"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
         </div>
       </div>
-      <div id="ide-chat-messages" class="ide-chat-msgs" style="padding:12px;flex:1;">
+      <div id="ide-chat-messages" class="ide-chat-msgs">
         <template x-for="(m, i) in chatMessages" :key="i">
           <div>
             <!-- user / assistant bubbles -->
             <template x-if="m.role === 'user' || m.role === 'assistant' || m.role === 'system'">
               <div class="chat-bubble" :class="m.role">
-                <span x-show="m.role === 'user'" style="font-weight:600;font-size:0.7rem;color:var(--accent);">{{ t('ide.you') }}</span>
-                <span x-show="m.role === 'assistant' && m.content" style="font-weight:600;font-size:0.7rem;color:var(--success);">Kazma</span>
+                <span x-show="m.role === 'user'" class="ide-chat-who ide-chat-who-you">{{ t('ide.you') }}</span>
+                <span x-show="m.role === 'assistant' && m.content" class="ide-chat-who ide-chat-who-kazma">Kazma</span>
                 <div translate="no" x-html="_renderMd(m.content)"></div>
                 <span x-show="m.role === 'assistant' && chatBusy && i === chatMessages.length - 1 && !m.content"
-                      style="color:var(--text-muted);font-size:0.75rem;">{{ t('ide.thinking') }}</span>
+                      class="ide-chat-thinking">{{ t('ide.thinking') }}</span>
               </div>
             </template>
             <!-- tool call -->
             <template x-if="m.role === 'tool_call'">
               <div class="chat-tool">
-                <span style="font-weight:600;color:var(--accent);"><span class="ki" data-icon="wrench" aria-hidden="true"></span> <span translate="no" x-text="m.tool"></span></span>
+                <span class="ide-chat-tool-name"><span x-html="KazmaIcons.span('wrench')"></span> <span translate="no" x-text="m.tool"></span></span>
                 <pre x-text="_fmtToolArgs(m.args)"></pre>
               </div>
             </template>
             <!-- tool result -->
             <template x-if="m.role === 'tool_result'">
-              <div class="chat-tool" style="border-left-color:var(--text-muted);">
-                <span style="font-weight:600;color:var(--text-muted);">↳ <span translate="no" x-text="m.tool"></span> {{ t('ide.result') }}</span>
+              <div class="chat-tool result">
+                <span class="ide-chat-tool-name">↳ <span translate="no" x-text="m.tool"></span> {{ t('ide.result') }}</span>
                 <pre x-text="String(m.result).slice(0, 2000)"></pre>
               </div>
             </template>
             <!-- HITL approval -->
             <template x-if="m.role === 'approval'">
-              <div class="chat-bubble" style="background:var(--warning-bg, #fef3c7);border:1px solid var(--warning);">
-                <span style="font-weight:600;"><span class="ki" data-icon="alert" aria-hidden="true"></span> {{ t('ide.approval_required') }}</span>
-                <div translate="no" x-text="m.message || t('ide.tool').replace('{tool}', m.tool)" style="font-size:0.78rem;margin-top:4px;"></div>
-                <div style="margin-top:6px;font-size:0.72rem;color:var(--text-muted);">{{ t('ide.approve_hint') }}</div>
+              <div class="chat-bubble approval">
+                <span class="ide-chat-who"><span x-html="KazmaIcons.span('alert')"></span> {{ t('ide.approval_required') }}</span>
+                <div translate="no" x-text="m.message || t('ide.tool').replace('{tool}', m.tool)" class="ide-chat-approval-text"></div>
+                <div class="ide-chat-hint">{{ t('ide.approve_hint') }}</div>
               </div>
             </template>
           </div>
         </template>
       </div>
-      <div class="chat-input-row" style="padding:10px 12px;">
+      <div class="chat-input-row">
         <textarea id="ide-chat-input" aria-label="{{ t('ide.chat_ph') }}" class="form-input" rows="2"
                   placeholder="{{ t('ide.chat_ph') }}"
                   x-model="chatInput" @keydown="chatKeydown($event)"
-                  :disabled="chatBusy"
-                  style="flex:1;resize:none;font-size:0.82rem;font-family:inherit;"></textarea>
-        <div style="display:flex;flex-direction:column;gap:4px;">
+                  :disabled="chatBusy"></textarea>
+        <div class="ide-chat-send">
           <button class="btn btn-sm btn-primary" aria-label="{{ t('common.send') }}" @click="sendChat()" :disabled="chatBusy || !chatInput.trim()"><span class="ki" data-icon="chevron-right" aria-hidden="true"></span></button>
           <button class="btn btn-sm btn-secondary" aria-label="{{ t('common.cancel') }}" @click="abortChat()" x-show="chatBusy" x-cloak>⏹</button>
         </div>

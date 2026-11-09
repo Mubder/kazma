@@ -1,5 +1,36 @@
 # CHANGELOG
 
+## Unreleased
+
+- **A new look: cards the colour of the page, one set of controls.** Pages
+  painted their own colours: in dark the Dashboard's cards were the page's
+  colour while every other page's were a lighter navy, Settings used eight
+  shades for one kind of note, and the Memory console and Swarm were written
+  for dark only. Four audits counted about 650 literal colours in templates
+  and scripts, thirteen colour names used but never defined, and 710 places
+  in light (279 in dark) where text was too faint to read. Following a design
+  the owner chose: every card, menu and the sidebar share the page's colour
+  and stand apart by a hairline and a soft shadow; the light page is white;
+  the active menu item is a filled pill; buttons are filled for the main
+  action and soft for the rest; fields are transparent with a hairline;
+  badges, notices and tiles are soft tints of their colour. Every page uses
+  one set of shared classes, and charts, the memory graph, the IDE's editor
+  and the swarm diagrams follow light and dark as you switch. Faint text went
+  from 710 to 0 in light and from 279 to 0 in dark, in English and Arabic. A
+  build gate now refuses any new literal colour in a template or script.
+- **Your accent colour follows on every page.** Settings brought back an old
+  indigo accent that nobody chose and kept it on every page after a visit; it
+  is retired, and an install that stored it returns to Kazma's blue. A colour
+  you choose is drawn from the first paint, in both themes with readable
+  text, and no longer disappears when the text size changes.
+- **Pages reached from the sidebar are whole.** Icons on a page opened from
+  the sidebar stayed blank, and a page's own styles could be lost; both are
+  fixed. Pressing Back and then clicking quickly could run the previous
+  page's scripts on the new page; a Back now waits its turn.
+- **One card for every alert.** Kazma, its guard and Kazma Watch send the
+  same card format, from one catalog of every alert (the first stage of the
+  unified alerts plan).
+
 ## 0.21.1 — Any provider, a setup guide, and setup on a fresh Windows (2026-11-08)
 
 A clean Express install on a fresh Windows 11 virtual machine now puts all 14

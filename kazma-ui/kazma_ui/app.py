@@ -715,7 +715,7 @@ class KazmaAppBuilder:
         # already matches their choice on every device (no dark flash, and
         # no dependence on browser localStorage / device preference). The
         # frontend makes this same value authoritative after JS boot.
-        def _read_theme() -> str:
+        def _read_appearance() -> dict[str, str]:
             # Read via the same SettingsManager path as /api/settings/appearance
             # so SSR and the API always agree (stored choice wins; else default).
             # 'auto' is resolved to a concrete light/dark here so SSR always
@@ -724,21 +724,26 @@ class KazmaAppBuilder:
             # preference, so 'auto' defaults to dark (the :root canvas default);
             # the client re-resolves it from matchMedia on boot
             # (settings.js previewTheme/_resolveAutoTheme) and corrects if needed.
+            # The owner's accent is rendered on <html> too, as the theme
+            # variants kazma.css reads (accent_colors), so the first paint is
+            # already in it -- it used to arrive after a fetch, default blue
+            # first.
             try:
                 from kazma_core.settings_manager import SettingsManager
-                t = SettingsManager(self.config_store).get_appearance().get("theme")
-                if t in ("light", "dark"):
-                    return t
-                if t == "auto":
-                    return "dark"
-                return "light"
+                from kazma_ui.accent_colors import accent_style
+
+                appearance = SettingsManager(self.config_store).get_appearance()
+                t = appearance.get("theme")
+                theme = t if t in ("light", "dark") else ("dark" if t == "auto" else "light")
+                accent = accent_style(appearance.get("accent_color")) if appearance.get("accent_color_chosen") else ""
+                return {"theme": theme, "accent": accent}
             except Exception:
-                return "light"
+                return {"theme": "light", "accent": ""}
 
         _theme_cache: dict[str, Any] = {"value": None, "at": 0.0, "refreshing": False}
 
-        def _dynamic_theme() -> str:
-            """The theme for server-side rendering, never re-read on the event loop.
+        def _appearance_now() -> dict[str, str]:
+            """The appearance (theme, accent) for server-side rendering, never re-read on the event loop.
 
             A template global runs while an async route renders, on the loop,
             and reading the stored choice is a database read on a Postgres
@@ -753,11 +758,11 @@ class KazmaAppBuilder:
             try:
                 asyncio.get_running_loop()
             except RuntimeError:  # rendering in a worker thread: read it here
-                value = _read_theme()
+                value = _read_appearance()
                 _theme_cache.update(value=value, at=now)
                 return value
             if value is None:  # first render of this process
-                value = _read_theme()
+                value = _read_appearance()
                 _theme_cache.update(value=value, at=now)
                 return value
             if not _theme_cache["refreshing"]:
@@ -765,7 +770,7 @@ class KazmaAppBuilder:
 
                 async def _refresh() -> None:
                     try:
-                        fresh = await asyncio.to_thread(_read_theme)
+                        fresh = await asyncio.to_thread(_read_appearance)
                         _theme_cache.update(value=fresh, at=time.monotonic())
                     finally:
                         _theme_cache["refreshing"] = False
@@ -774,6 +779,13 @@ class KazmaAppBuilder:
 
                 spawn_background(_refresh(), name="ssr-theme-refresh")
             return value
+
+        def _dynamic_theme() -> str:
+            return _appearance_now()["theme"]
+
+        def _dynamic_accent_style() -> str:
+            """The owner's accent as inline custom properties for <html> ('' = none)."""
+            return _appearance_now()["accent"]
 
         # Inject the full translation dict as JSON so Alpine.js expressions
         # can call a client-side t() — server-side t() only covers Jinja2.
@@ -796,6 +808,7 @@ class KazmaAppBuilder:
         self.templates.env.globals["lang"] = _dynamic_lang
         self.templates.env.globals["dir"] = _dynamic_dir
         self.templates.env.globals["theme"] = _dynamic_theme
+        self.templates.env.globals["accent_style"] = _dynamic_accent_style
         self.templates.env.globals["translations_json"] = _translations_json
 
         # Cache-busting versions for static assets. Derived from file mtimes

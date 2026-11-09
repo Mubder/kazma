@@ -4,17 +4,17 @@
 
 {% block content %}
 <div class="skills-container" x-data="skillsApp()">
-    <div class="skills-tabs">
-        <button class="tab-btn" :class="{ active: tab === 'installed' }" @click="tab = 'installed'">
+    <div class="tabs skills-tabs">
+        <button class="tab" :class="{ active: tab === 'installed' }" @click="tab = 'installed'">
             {{ t('skills.tab_installed') }} ({{ installed_skills|length }})
         </button>
-        <button class="tab-btn" :class="{ active: tab === 'hub' }" @click="tab = 'hub'">
+        <button class="tab" :class="{ active: tab === 'hub' }" @click="tab = 'hub'">
             {{ t('skills.tab_hub') }}
         </button>
-        <button class="tab-btn" :class="{ active: tab === 'marketplace' }" @click="tab = 'marketplace'">
+        <button class="tab" :class="{ active: tab === 'marketplace' }" @click="tab = 'marketplace'">
             {{ t('skills.tab_marketplace') }}
         </button>
-        <button class="tab-btn" :class="{ active: tab === 'validate' }" @click="tab = 'validate'">
+        <button class="tab" :class="{ active: tab === 'validate' }" @click="tab = 'validate'">
             {{ t('skills.tab_validate') }}
         </button>
     </div>
@@ -27,7 +27,11 @@
                 <div class="skill-header">
                     <h3 translate="no">{{ skill.name }}</h3>
                     {% set _ck = 'skills.cert_' ~ skill.certification_level %}{% set _cv = t(_ck) %}
-                    <span class="badge badge-{{ skill.certification_level }}">{{ _cv if _cv != _ck else skill.certification_level }}</span>
+                    {#- The shared badge tone of a certification: verified green, a
+                        skill not checked amber, the rest (native, community, an
+                        Agent Skill, basic) neutral. -#}
+                    {% set _ct = {'verified': 'badge-success', 'unverified': 'badge-warning'} %}
+                    <span class="badge {{ _ct.get(skill.certification_level, 'badge-neutral') }}">{{ _cv if _cv != _ck else skill.certification_level }}</span>
                 </div>
                 {# A native skill's description is in the catalog; any other
                    skill's is its SKILL.md text, shown as its author wrote it. #}
@@ -63,6 +67,7 @@
             {% endfor %}
             {% if not installed_skills %}
             <div class="empty-state">
+                <span class="icon-tile" aria-hidden="true"><span class="ki" x-html="KazmaIcons.get('zap')"></span></span>
                 <p>{{ t('skills.empty_installed') }}</p>
             </div>
             {% endif %}
@@ -71,8 +76,8 @@
 
     <!-- Hub Browse + Agent Skills install -->
     <div x-show="tab === 'hub'" x-cloak>
-        <div class="settings-group" style="margin-bottom:1.25rem">
-            <h3>{{ t('skills.install_heading') }}</h3>
+        <div class="card" style="margin-bottom:1.25rem">
+            <h3 class="card-title">{{ t('skills.install_heading') }}</h3>
             <p class="text-muted" style="margin-bottom:0.75rem">
                 {{ t('skills.install_hint') }}
                 <a href="https://agentskills.io/" target="_blank" rel="noopener" translate="no">Agent Skills</a>
@@ -114,8 +119,8 @@
 
     <!-- Marketplace (open Agent Skills ecosystem — GitHub topic:agent-skills) -->
     <div x-show="tab === 'marketplace'" x-cloak>
-        <div class="settings-group" style="margin-bottom:1.25rem">
-            <h3>{{ t('skills.marketplace_heading') }}</h3>
+        <div class="card" style="margin-bottom:1.25rem">
+            <h3 class="card-title">{{ t('skills.marketplace_heading') }}</h3>
             <p class="text-muted" style="margin-bottom:0.75rem">
                 {{ t('skills.marketplace_hint') }}
                 <a href="https://agentskills.io/" target="_blank" rel="noopener">agentskills.io</a>
@@ -130,7 +135,7 @@
                 <div class="skill-card">
                     <div class="skill-header">
                         <h3 translate="no"><a :href="skill.html_url" target="_blank" rel="noopener" x-text="skill.name"></a></h3>
-                        <span class="badge">★ <span x-text="skill.stars"></span></span>
+                        <span class="badge badge-neutral">★ <span x-text="skill.stars"></span></span>
                     </div>
                     <p class="skill-desc" dir="auto" translate="no" x-text="skill.description"></p>
                     <div class="skill-actions">
@@ -149,8 +154,8 @@
 
     <!-- Validate -->
     <div x-show="tab === 'validate'" x-cloak>
-        <div class="settings-group">
-            <h3>{{ t('skills.validate_heading') }}</h3>
+        <div class="card">
+            <h3 class="card-title">{{ t('skills.validate_heading') }}</h3>
             <div class="form-row">
                 <div class="form-group" style="flex:1">
                     <label>{{ t('skills.validate_path') }}</label>

@@ -10,24 +10,24 @@
 <div id="settings-root" data-tab="{{ request.query_params.get('tab', '') | e }}" x-data="settingsApp()">
 
     <!-- ═══ Settings Navigation ═══ -->
-    <nav class="settings-nav">
-        <button class="settings-tab" :class="{ active: tab === 'providers_connectors' }" @click="onTabChange('providers_connectors')">{{ t('settings.tab_providers_connectors') }}</button>
-        <button class="settings-tab" :class="{ active: tab === 'agent' }" @click="onTabChange('agent')">{{ t('settings.tab_agent') }}</button>
-        <button class="settings-tab" :class="{ active: tab === 'memory' }" @click="onTabChange('memory')">{{ t('settings.tab_memory') }}</button>
-        <button class="settings-tab" :class="{ active: tab === 'mcp' }" @click="onTabChange('mcp')">{{ t('settings.tab_mcp') }}</button>
-        <button class="settings-tab" :class="{ active: tab === 'skills' }" @click="onTabChange('skills')">{{ t('settings.tab_skills') }}</button>
-        <button class="settings-tab" :class="{ active: tab === 'appearance' }" @click="onTabChange('appearance')">{{ t('settings.tab_appearance') }}</button>
-        <button class="settings-tab" :class="{ active: tab === 'shortcuts' }" @click="onTabChange('shortcuts')">{{ t('settings.tab_shortcuts') }}</button>
-        <button class="settings-tab" :class="{ active: tab === 'account' }" @click="onTabChange('account')">{{ t('settings.tab_account') }}</button>
-        <button class="settings-tab" :class="{ active: tab === 'tools' }" @click="onTabChange('tools')">{{ t('settings.tab_tools') }}</button>
-        <button class="settings-tab" :class="{ active: tab === 'system' }" @click="onTabChange('system')">{{ t('settings.tab_system') }}</button>
-        <button class="settings-tab" :class="{ active: tab === 'backup' }" @click="onTabChange('backup')">{{ t('settings.tab_backup') }}</button>
-        <button class="settings-tab" :class="{ active: tab === 'packages' }" @click="onTabChange('packages')">{{ t('settings.tab_packages') }}</button>
-        <button class="settings-tab" :class="{ active: tab === 'import' }" @click="onTabChange('import')">{{ t('settings.tab_import') }}</button>
-        <button class="settings-tab" :class="{ active: tab === 'voice' }" @click="onTabChange('voice')">{{ t('settings.tab_voice') }}</button>
-        <button class="settings-tab" :class="{ active: tab === 'email' }" @click="onTabChange('email')">{{ t('settings.tab_email') }}</button>
-        <button class="settings-tab" :class="{ active: tab === 'x' }" @click="onTabChange('x')">{{ t('settings.tab_x') }}</button>
-        <button class="settings-tab" :class="{ active: tab === 'documents' }" @click="onTabChange('documents')">{{ t('settings.tab_documents') }}</button>
+    <nav class="settings-nav tabs" role="tablist">
+        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'providers_connectors' ? 'true' : 'false'" :class="{ active: tab === 'providers_connectors' }" @click="onTabChange('providers_connectors')">{{ t('settings.tab_providers_connectors') }}</button>
+        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'agent' ? 'true' : 'false'" :class="{ active: tab === 'agent' }" @click="onTabChange('agent')">{{ t('settings.tab_agent') }}</button>
+        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'memory' ? 'true' : 'false'" :class="{ active: tab === 'memory' }" @click="onTabChange('memory')">{{ t('settings.tab_memory') }}</button>
+        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'mcp' ? 'true' : 'false'" :class="{ active: tab === 'mcp' }" @click="onTabChange('mcp')">{{ t('settings.tab_mcp') }}</button>
+        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'skills' ? 'true' : 'false'" :class="{ active: tab === 'skills' }" @click="onTabChange('skills')">{{ t('settings.tab_skills') }}</button>
+        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'appearance' ? 'true' : 'false'" :class="{ active: tab === 'appearance' }" @click="onTabChange('appearance')">{{ t('settings.tab_appearance') }}</button>
+        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'shortcuts' ? 'true' : 'false'" :class="{ active: tab === 'shortcuts' }" @click="onTabChange('shortcuts')">{{ t('settings.tab_shortcuts') }}</button>
+        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'account' ? 'true' : 'false'" :class="{ active: tab === 'account' }" @click="onTabChange('account')">{{ t('settings.tab_account') }}</button>
+        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'tools' ? 'true' : 'false'" :class="{ active: tab === 'tools' }" @click="onTabChange('tools')">{{ t('settings.tab_tools') }}</button>
+        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'system' ? 'true' : 'false'" :class="{ active: tab === 'system' }" @click="onTabChange('system')">{{ t('settings.tab_system') }}</button>
+        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'backup' ? 'true' : 'false'" :class="{ active: tab === 'backup' }" @click="onTabChange('backup')">{{ t('settings.tab_backup') }}</button>
+        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'packages' ? 'true' : 'false'" :class="{ active: tab === 'packages' }" @click="onTabChange('packages')">{{ t('settings.tab_packages') }}</button>
+        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'import' ? 'true' : 'false'" :class="{ active: tab === 'import' }" @click="onTabChange('import')">{{ t('settings.tab_import') }}</button>
+        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'voice' ? 'true' : 'false'" :class="{ active: tab === 'voice' }" @click="onTabChange('voice')">{{ t('settings.tab_voice') }}</button>
+        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'email' ? 'true' : 'false'" :class="{ active: tab === 'email' }" @click="onTabChange('email')">{{ t('settings.tab_email') }}</button>
+        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'x' ? 'true' : 'false'" :class="{ active: tab === 'x' }" @click="onTabChange('x')">{{ t('settings.tab_x') }}</button>
+        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'documents' ? 'true' : 'false'" :class="{ active: tab === 'documents' }" @click="onTabChange('documents')">{{ t('settings.tab_documents') }}</button>
     </nav>
 
     <!-- Loading indicator -->
@@ -38,21 +38,19 @@
          ═══════════════════════════════════════════════════════════════ -->
     <div :class="{ hidden: tab !== 'providers_connectors' }" x-cloak>
         <!-- Sub-tab switcher -->
-        <div class="settings-group" style="padding-bottom:0">
-            <div style="display:flex;gap:8px;margin-bottom:8px">
-                <button class="btn btn-sm" id="hub-subtab-providers" :class="hubSubtab === 'providers' ? 'btn-primary' : 'btn-secondary'" @click="hubSubtab = 'providers'">{{ t('settings.llm_providers_models') }}</button>
-                <button class="btn btn-sm" id="hub-subtab-models" :class="hubSubtab === 'models' ? 'btn-primary' : 'btn-secondary'" @click="hubSubtab = 'models'">{{ t('settings.models_subtab') }}</button>
-                <button class="btn btn-sm" :class="hubSubtab === 'connectors' ? 'btn-primary' : 'btn-secondary'" @click="hubSubtab = 'connectors'">{{ t('settings.platform_connectors') }}</button>
-                <a href="/setup" class="btn btn-sm btn-secondary" id="settings-setup-guide" style="margin-inline-start:auto"
-                   title="{{ t('setup.reopen_hint') }}">{{ t('setup.reopen') }}</a>
-            </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:var(--sp-5)">
+            <button class="btn btn-sm" id="hub-subtab-providers" :class="hubSubtab === 'providers' ? 'btn-primary' : 'btn-secondary'" @click="hubSubtab = 'providers'">{{ t('settings.llm_providers_models') }}</button>
+            <button class="btn btn-sm" id="hub-subtab-models" :class="hubSubtab === 'models' ? 'btn-primary' : 'btn-secondary'" @click="hubSubtab = 'models'">{{ t('settings.models_subtab') }}</button>
+            <button class="btn btn-sm" :class="hubSubtab === 'connectors' ? 'btn-primary' : 'btn-secondary'" @click="hubSubtab = 'connectors'">{{ t('settings.platform_connectors') }}</button>
+            <a href="/setup" class="btn btn-sm btn-secondary" id="settings-setup-guide" style="margin-inline-start:auto"
+               title="{{ t('setup.reopen_hint') }}">{{ t('setup.reopen') }}</a>
         </div>
 
         <!-- ═══════════════════════════════════════════════════════════
              SUB-SECTION: LLM Providers & Models
              ═══════════════════════════════════════════════════════════ -->
         <div :class="{ hidden: hubSubtab !== 'providers' }" x-cloak>
-            <div class="settings-group pc-scope">
+            <div class="settings-group mb-6 pc-scope">
                 <header class="pc-top">
                     <div class="pc-lede">
                         <h3>{{ t('settings.llm_providers') }}</h3>
@@ -221,17 +219,17 @@
                                          x-cloak class="discovered-models-panel">
                                         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;flex-wrap:wrap">
                                             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                                                <span class="badge" style="background:var(--accent,#6366f1);color:#fff;font-size:0.65rem;padding:2px 8px;border-radius:999px;font-weight:600"
+                                                <span class="badge badge-accent"
                                                       x-text="t('settings.hub.discovered_n').replace('{n}', selectedHubProvider().discovered_models.length)"></span>
-                                                <span class="badge" style="background:rgba(255,255,255,0.08);color:var(--text-muted);font-size:0.65rem;padding:2px 8px;border-radius:999px"
+                                                <span class="badge badge-neutral"
                                                       x-show="(selectedHubProvider().selected_models || []).length"
                                                       x-text="t('settings.hub.selected_n').replace('{n}', (selectedHubProvider().selected_models || []).length)" x-cloak></span>
-                                                <span class="badge" data-discovery-stale style="background:rgba(245,158,11,0.15);color:var(--warning,#f59e0b);font-size:0.65rem;padding:2px 8px;border-radius:999px"
+                                                <span class="badge badge-warning" data-discovery-stale
                                                       x-show="hubDiscoveryStale[selectedHubProvider().name]" x-cloak>{{ t('settings.hub.discovered_cached') }}</span>
                                             </div>
                                             <div style="display:flex;align-items:center;gap:4px">
-                                                <button type="button" class="btn btn-secondary btn-sm" style="font-size:0.65rem;padding:2px 8px" @click="toggleAllModels(selectedHubProvider().name)" x-text="t('settings.all_none')"></button>
-                                                <button type="button" class="btn btn-secondary btn-sm" style="font-size:0.65rem;padding:2px 8px" @click="clearHubDiscovered(selectedHubProvider().name)" :title="t('settings.clear_discovered')" x-text="t('settings.clear_discovered')"></button>
+                                                <button type="button" class="btn btn-secondary btn-xs" @click="toggleAllModels(selectedHubProvider().name)" x-text="t('settings.all_none')"></button>
+                                                <button type="button" class="btn btn-secondary btn-xs" @click="clearHubDiscovered(selectedHubProvider().name)" :title="t('settings.clear_discovered')" x-text="t('settings.clear_discovered')"></button>
                                             </div>
                                         </div>
                                         <div class="input-with-icon" style="margin-bottom:6px">
@@ -282,7 +280,7 @@
                         <span class="text-success">{{ t('settings.connected_latency') }} <span x-text="hubTestResult.latency_ms"></span>ms</span>
                     </template>
                     <template x-if="hubTestResult && !hubTestResult.success">
-                        <span class="text-error"><span class="ki" data-icon="x" aria-hidden="true"></span> <span translate="no" x-text="hubTestResult.error"></span></span>
+                        <span class="text-error"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('x')"></span> <span translate="no" x-text="hubTestResult.error"></span></span>
                     </template>
                 </div>
             </div>
@@ -296,7 +294,7 @@
              was too long, and these are edited, not updated by Kazma).
              ═══════════════════════════════════════════════════════════ -->
         <div :class="{ hidden: hubSubtab !== 'models' }" x-cloak>
-            <div class="settings-group mc-scope" id="models-tab">
+            <div class="settings-group mb-6 mc-scope" id="models-tab">
                 <!-- What the tab holds, and four numbers that say where it stands. -->
                 <div class="pc-top">
                     <div class="pc-lede">
@@ -556,7 +554,7 @@
              SUB-SECTION: Platform Connectors
              ═══════════════════════════════════════════════════════════ -->
         <div :class="{ hidden: hubSubtab !== 'connectors' }" x-cloak>
-            <div class="settings-group">
+            <div class="settings-group mb-6">
                 <!-- Platform Adapters (2026-09-04, v5): ONE professional
                      interface. Every platform's complete settings — bot
                      token (vault-masked, with show/hide), destinations,
@@ -603,11 +601,11 @@
                 {% endmacro %}
 
                 <!-- Telegram main bot -->
-                <div style="padding:14px;border:1px solid var(--border);border-radius:var(--radius-card);margin-bottom:10px">
+                <div class="card-nested mb-4">
                     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
-                        <span style="font-size:1.1rem" aria-hidden="true">✈️</span>
+                        <span class="icon-tile icon-tile-sm" aria-hidden="true"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('send')"></span></span>
                         <strong style="font-size:0.95rem">{{ t('settings.hub.tg_main') }}</strong>
-                        <span class="badge" :class="adapterRouting.tgToken ? 'badge-stdio' : 'badge-premium'"
+                        <span class="badge" :class="adapterRouting.tgToken ? 'badge-success' : 'badge-warning'"
                               x-text="adapterRouting.tgToken ? t('settings.hub.configured') : t('settings.hub.not_configured')"></span>
                         <label class="toggle" title="{{ t('settings.hub.enable_adapter') }}">
                             <input type="checkbox" :checked="adapterRouting.tgEnabled" @change="adapterRouting.tgEnabled = $event.target.checked">
@@ -625,7 +623,7 @@
                     {{ connector_checks('telegram') }}
                     <div class="two-col-grid">
                         <div>
-                            <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">{{ t('settings.bot_token') }}</label>
+                            <label class="form-label">{{ t('settings.bot_token') }}</label>
                             <div class="input-with-toggle">
                                 <input :type="routingShow.tgToken ? 'text' : 'password'" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
                                        :value="adapterRouting.tgToken" @input="adapterRouting.tgToken = $event.target.value"
@@ -634,18 +632,18 @@
                                         :title="routingShow.tgToken ? t('settings.hub.hide') : t('settings.hub.show')"
                                         x-html="routingShow.tgToken ? KazmaIcons.get('eye-off') : KazmaIcons.get('eye')"></button>
                             </div>
-                            <p class="text-muted" style="font-size:0.68rem;margin:3px 0 0">{{ t('settings.hub.masked_hint') }}</p>
+                            <p class="form-hint">{{ t('settings.hub.masked_hint') }}</p>
                         </div>
                         <div>
-                            <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">{{ t('settings.hub.chat_id') }} <span class="text-muted">{{ t('settings.hub.delivery_destination') }}</span></label>
+                            <label class="form-label">{{ t('settings.hub.chat_id') }} <span class="text-muted">{{ t('settings.hub.delivery_destination') }}</span></label>
                             <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
                                    :value="adapterRouting.tgMainChat" @input="adapterRouting.tgMainChat = $event.target.value"
                                    placeholder="{{ t('settings.hub.tg_chat_ph') }}">
-                            <p class="text-muted" style="font-size:0.68rem;margin:3px 0 0">{{ t('settings.hub.tg_chat_hint') }}</p>
+                            <p class="form-hint">{{ t('settings.hub.tg_chat_hint') }}</p>
                         </div>
                     </div>
                     <div style="margin-top:8px">
-                        <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">{{ t('settings.hub.allowed_user_ids') }}</label>
+                        <label class="form-label">{{ t('settings.hub.allowed_user_ids') }}</label>
                         <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
                                :value="adapterRouting.tgAllowed" @input="adapterRouting.tgAllowed = $event.target.value"
                                placeholder="{{ t('settings.hub.tg_allowed_ph') }}">
@@ -653,11 +651,11 @@
                 </div>
 
                 <!-- Telegram group -->
-                <div style="padding:14px;border:1px solid var(--border);border-radius:var(--radius-card);margin-bottom:10px">
+                <div class="card-nested mb-4">
                     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
-                        <span style="font-size:1.1rem" aria-hidden="true">👥</span>
+                        <span class="icon-tile icon-tile-sm" aria-hidden="true"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('users')"></span></span>
                         <strong style="font-size:0.95rem">{{ t('settings.hub.tg_group') }}</strong>
-                        <span class="badge" :class="adapterRouting.tgGroupEnabled && adapterRouting.tgGroupChat ? 'badge-stdio' : 'badge-sse'"
+                        <span class="badge" :class="adapterRouting.tgGroupEnabled && adapterRouting.tgGroupChat ? 'badge-success' : 'badge-neutral'"
                               x-text="adapterRouting.tgGroupEnabled && adapterRouting.tgGroupChat ? t('settings.hub.active') : t('settings.hub.off')"></span>
                         <label class="toggle" title="{{ t('settings.hub.enable_group') }}">
                             <input type="checkbox" :checked="adapterRouting.tgGroupEnabled" @change="adapterRouting.tgGroupEnabled = $event.target.checked">
@@ -667,13 +665,13 @@
                     </div>
                     <div class="two-col-grid">
                         <div>
-                            <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">{{ t('settings.hub.group_chat_id') }}</label>
+                            <label class="form-label">{{ t('settings.hub.group_chat_id') }}</label>
                             <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
                                    :value="adapterRouting.tgGroupChat" @input="adapterRouting.tgGroupChat = $event.target.value"
                                    placeholder="{{ t('settings.hub.group_chat_ph') }}">
                         </div>
                         <div>
-                            <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">{{ t('settings.hub.dedicated_token') }} <span class="text-muted">{{ t('settings.hub.optional') }}</span></label>
+                            <label class="form-label">{{ t('settings.hub.dedicated_token') }} <span class="text-muted">{{ t('settings.hub.optional') }}</span></label>
                             <div class="input-with-toggle">
                                 <input :type="routingShow.tgGroupToken ? 'text' : 'password'" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
                                        :value="adapterRouting.tgGroupToken" @input="adapterRouting.tgGroupToken = $event.target.value"
@@ -687,11 +685,11 @@
                 </div>
 
                 <!-- Discord -->
-                <div style="padding:14px;border:1px solid var(--border);border-radius:var(--radius-card);margin-bottom:10px">
+                <div class="card-nested mb-4">
                     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
-                        <span style="font-size:1.1rem" aria-hidden="true">🎮</span>
+                        <span class="icon-tile icon-tile-sm" aria-hidden="true"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('gamepad')"></span></span>
                         <strong style="font-size:0.95rem">Discord</strong>
-                        <span class="badge" :class="adapterRouting.discordToken ? 'badge-stdio' : 'badge-premium'"
+                        <span class="badge" :class="adapterRouting.discordToken ? 'badge-success' : 'badge-warning'"
                               x-text="adapterRouting.discordToken ? t('settings.hub.configured') : t('settings.hub.not_configured')"></span>
                         <label class="toggle" title="{{ t('settings.hub.enable_adapter') }}">
                             <input type="checkbox" :checked="adapterRouting.discordEnabled" @change="adapterRouting.discordEnabled = $event.target.checked">
@@ -709,7 +707,7 @@
                     {{ connector_checks('discord') }}
                     <div class="two-col-grid">
                         <div>
-                            <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">{{ t('settings.bot_token') }}</label>
+                            <label class="form-label">{{ t('settings.bot_token') }}</label>
                             <div class="input-with-toggle">
                                 <input :type="routingShow.discordToken ? 'text' : 'password'" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
                                        :value="adapterRouting.discordToken" @input="adapterRouting.discordToken = $event.target.value"
@@ -720,7 +718,7 @@
                             </div>
                         </div>
                         <div>
-                            <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">{{ t('settings.hub.channel_id') }} <span class="text-muted">{{ t('settings.hub.delivery_destination') }}</span></label>
+                            <label class="form-label">{{ t('settings.hub.channel_id') }} <span class="text-muted">{{ t('settings.hub.delivery_destination') }}</span></label>
                             <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
                                    :value="adapterRouting.discordChannel" @input="adapterRouting.discordChannel = $event.target.value"
                                    placeholder="{{ t('settings.hub.discord_channel_ph') }}">
@@ -728,13 +726,13 @@
                     </div>
                     <div class="two-col-grid" style="margin-top:8px">
                         <div>
-                            <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">{{ t('settings.guild_id') }}</label>
+                            <label class="form-label">{{ t('settings.guild_id') }}</label>
                             <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
                                    :value="adapterRouting.discordGuild" @input="adapterRouting.discordGuild = $event.target.value"
                                    placeholder="{{ t('settings.hub.discord_guild_ph') }}">
                         </div>
                         <div>
-                            <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">{{ t('settings.hub.allowed_user_ids') }}</label>
+                            <label class="form-label">{{ t('settings.hub.allowed_user_ids') }}</label>
                             <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
                                    :value="adapterRouting.discordAllowed" @input="adapterRouting.discordAllowed = $event.target.value"
                                    placeholder="{{ t('settings.hub.discord_allowed_ph') }}">
@@ -743,11 +741,11 @@
                 </div>
 
                 <!-- Slack -->
-                <div style="padding:14px;border:1px solid var(--border);border-radius:var(--radius-card);margin-bottom:10px">
+                <div class="card-nested mb-4">
                     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
-                        <span style="font-size:1.1rem" aria-hidden="true">💬</span>
+                        <span class="icon-tile icon-tile-sm" aria-hidden="true"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('message')"></span></span>
                         <strong style="font-size:0.95rem">Slack</strong>
-                        <span class="badge" :class="adapterRouting.slackToken ? 'badge-stdio' : 'badge-premium'"
+                        <span class="badge" :class="adapterRouting.slackToken ? 'badge-success' : 'badge-warning'"
                               x-text="adapterRouting.slackToken ? t('settings.hub.configured') : t('settings.hub.not_configured')"></span>
                         <label class="toggle" title="{{ t('settings.hub.enable_adapter') }}">
                             <input type="checkbox" :checked="adapterRouting.slackEnabled" @change="adapterRouting.slackEnabled = $event.target.checked">
@@ -765,7 +763,7 @@
                     {{ connector_checks('slack') }}
                     <div class="two-col-grid">
                         <div>
-                            <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">{{ t('settings.bot_token') }}</label>
+                            <label class="form-label">{{ t('settings.bot_token') }}</label>
                             <div class="input-with-toggle">
                                 <input :type="routingShow.slackToken ? 'text' : 'password'" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
                                        :value="adapterRouting.slackToken" @input="adapterRouting.slackToken = $event.target.value"
@@ -776,7 +774,7 @@
                             </div>
                         </div>
                         <div>
-                            <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">{{ t('settings.hub.app_token') }} <span class="text-muted">{{ t('settings.hub.app_token_hint') }}</span></label>
+                            <label class="form-label">{{ t('settings.hub.app_token') }} <span class="text-muted">{{ t('settings.hub.app_token_hint') }}</span></label>
                             <div class="input-with-toggle">
                                 <input :type="routingShow.slackAppToken ? 'text' : 'password'" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
                                        :value="adapterRouting.slackAppToken" @input="adapterRouting.slackAppToken = $event.target.value"
@@ -789,20 +787,20 @@
                     </div>
                     <div class="two-col-grid" style="margin-top:8px">
                         <div>
-                            <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">{{ t('settings.hub.slack_workspace') }}</label>
+                            <label class="form-label">{{ t('settings.hub.slack_workspace') }}</label>
                             <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
                                    :value="adapterRouting.slackWorkspace" @input="adapterRouting.slackWorkspace = $event.target.value"
                                    placeholder="workspace-name">
                         </div>
                         <div>
-                            <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">{{ t('settings.hub.channel_id') }} <span class="text-muted">{{ t('settings.hub.delivery_destination') }}</span></label>
+                            <label class="form-label">{{ t('settings.hub.channel_id') }} <span class="text-muted">{{ t('settings.hub.delivery_destination') }}</span></label>
                             <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
                                    :value="adapterRouting.slackChannel" @input="adapterRouting.slackChannel = $event.target.value"
                                    placeholder="{{ t('settings.hub.slack_channel_ph') }}">
                         </div>
                     </div>
                     <div style="margin-top:8px">
-                        <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">{{ t('settings.hub.allowed_user_ids') }}</label>
+                        <label class="form-label">{{ t('settings.hub.allowed_user_ids') }}</label>
                         <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
                                :value="adapterRouting.slackAllowed" @input="adapterRouting.slackAllowed = $event.target.value"
                                placeholder="{{ t('settings.hub.slack_allowed_ph') }}">
@@ -810,46 +808,55 @@
                 </div>
 
                 <!-- Adapters & Routes (Delivery routing) -->
-                <div style="padding:14px;border:1px solid var(--border);border-radius:var(--radius-card);margin-bottom:10px">
+                <div class="card-nested mb-4">
                     <strong style="font-size:0.9rem">{{ t('settings.hub.adapters_routes') }}</strong>
-                    <p class="text-muted" style="font-size:0.72rem;margin:2px 0 10px">{{ t('settings.hub.routes_blurb') }}</p>
+                    <p class="form-hint" style="margin:2px 0 10px">{{ t('settings.hub.routes_blurb') }}</p>
                     <div class="two-col-grid">
                         <div>
-                            <label class="form-label" style="font-size:0.75rem;margin-bottom:4px">{{ t('settings.hub.alerts_go_to') }}</label>
-                            <p class="text-muted" style="font-size:0.68rem;margin:0 0 6px">{{ t('settings.hub.alerts_hint') }}</p>
+                            <label class="form-label">{{ t('settings.hub.alerts_go_to') }}</label>
+                            <p class="form-hint" style="margin:0 0 6px">{{ t('settings.hub.alerts_hint') }}</p>
                             <template x-for="r in ['telegram', 'telegram-group', 'discord', 'slack']" :key="'a' + r">
-                                <label style="display:flex;align-items:center;gap:8px;font-size:0.8rem;padding:2px 0;cursor:pointer">
-                                    <input type="checkbox" :checked="(adapterRouting.alertRoutes || []).includes(r)"
-                                           @change="toggleRoutingList(adapterRouting.alertRoutes, r, $event.target.checked)">
+                                <label class="toggle-row" style="margin-bottom:8px">
+                                    <span class="toggle">
+                                        <input type="checkbox" :checked="(adapterRouting.alertRoutes || []).includes(r)"
+                                               @change="toggleRoutingList(adapterRouting.alertRoutes, r, $event.target.checked)">
+                                        <span class="toggle-slider"></span>
+                                    </span>
                                     <span x-text="({telegram: 'Telegram', 'telegram-group': t('settings.hub.route_tg_group'), discord: 'Discord', slack: 'Slack'})[r] || r"></span>
                                 </label>
                             </template>
                             <button class="btn btn-secondary btn-sm" style="margin-top:8px" @click="sendTestAlert()" :disabled="opsTestAlert.sending"
                                     x-text="opsTestAlert.sending ? t('settings.hub.test_alert_sending') : t('settings.hub.test_alert')"></button>
-                            <p class="text-muted" style="font-size:0.68rem;margin:4px 0 0">{{ t('settings.hub.test_alert_hint') }}</p>
+                            <p class="form-hint">{{ t('settings.hub.test_alert_hint') }}</p>
                             <p style="font-size:0.75rem;margin:4px 0 0" x-show="opsTestAlert.result" x-cloak
                                :class="opsTestAlert.result && opsTestAlert.result.ok ? 'text-success' : 'text-error'"
                                x-text="testAlertSummary()"></p>
                         </div>
                         <div>
-                            <label class="form-label" style="font-size:0.75rem;margin-bottom:4px">{{ t('settings.hub.swarm_goes_to') }}</label>
-                            <p class="text-muted" style="font-size:0.68rem;margin:0 0 6px">{{ t('settings.hub.swarm_hint') }}</p>
+                            <label class="form-label">{{ t('settings.hub.swarm_goes_to') }}</label>
+                            <p class="form-hint" style="margin:0 0 6px">{{ t('settings.hub.swarm_hint') }}</p>
                             <template x-for="r in ['telegram', 'telegram-group', 'discord', 'slack']" :key="'s' + r">
-                                <label style="display:flex;align-items:center;gap:8px;font-size:0.8rem;padding:2px 0;cursor:pointer">
-                                    <input type="checkbox" :checked="(adapterRouting.swarmRoutes || []).includes(r)"
-                                           @change="toggleRoutingList(adapterRouting.swarmRoutes, r, $event.target.checked)">
+                                <label class="toggle-row" style="margin-bottom:8px">
+                                    <span class="toggle">
+                                        <input type="checkbox" :checked="(adapterRouting.swarmRoutes || []).includes(r)"
+                                               @change="toggleRoutingList(adapterRouting.swarmRoutes, r, $event.target.checked)">
+                                        <span class="toggle-slider"></span>
+                                    </span>
                                     <span x-text="({telegram: 'Telegram', 'telegram-group': t('settings.hub.route_tg_group'), discord: 'Discord', slack: 'Slack'})[r] || r"></span>
                                 </label>
                             </template>
                         </div>
                     </div>
                     <div style="margin-top:12px">
-                        <label class="form-label" style="font-size:0.75rem;margin-bottom:4px">{{ t('settings.hub.status_messages') }}</label>
-                        <p class="text-muted" style="font-size:0.68rem;margin:0 0 6px">{{ t('settings.hub.status_messages_hint') }}</p>
+                        <label class="form-label">{{ t('settings.hub.status_messages') }}</label>
+                        <p class="form-hint" style="margin:0 0 6px">{{ t('settings.hub.status_messages_hint') }}</p>
                         <template x-for="ev in lifecycleEventNames" :key="'l' + ev">
-                            <label style="display:flex;align-items:center;gap:8px;font-size:0.8rem;padding:2px 0;cursor:pointer">
-                                <input type="checkbox" :checked="(adapterRouting.lifecycleEvents || []).includes(ev)"
-                                       @change="toggleRoutingList(adapterRouting.lifecycleEvents, ev, $event.target.checked)">
+                            <label class="toggle-row" style="margin-bottom:8px">
+                                <span class="toggle">
+                                    <input type="checkbox" :checked="(adapterRouting.lifecycleEvents || []).includes(ev)"
+                                           @change="toggleRoutingList(adapterRouting.lifecycleEvents, ev, $event.target.checked)">
+                                    <span class="toggle-slider"></span>
+                                </span>
                                 <span x-text="t('settings.hub.status_' + ev)"></span>
                             </label>
                         </template>
@@ -857,12 +864,12 @@
                 </div>
 
                 <!-- Gateway runtime refresh -->
-                <div style="padding:12px 16px;background:rgba(34,211,238,0.06);border:1px solid rgba(34,211,238,0.22);border-radius:var(--radius-card);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+                <div class="notice tone-info" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
                     <div style="text-align:start;">
                         <strong>{{ t('settings.gateway_adapters') }}</strong>
                         <p class="text-muted" style="font-size:0.8rem;margin:4px 0 0">{{ t('settings.hub.restart_hint') }}</p>
                     </div>
-                    <button class="btn btn-primary" @click="refreshGateway()" :disabled="saving"><span class="ki" data-icon="refresh" aria-hidden="true"></span> <span x-text="saving ? t('settings.refreshing') : t('settings.refresh_gateway')"></span></button>
+                    <button class="btn btn-primary" @click="refreshGateway()" :disabled="saving"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('refresh')"></span> <span x-text="saving ? t('settings.refreshing') : t('settings.refresh_gateway')"></span></button>
                 </div>
 
                 <!-- Other integrations (Email / Webhook) -->
@@ -870,17 +877,17 @@
                     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
                         <div>
                             <strong style="font-size:0.9rem">{{ t('settings.hub.other_integrations') }}</strong>
-                            <p class="text-muted" style="font-size:0.72rem;margin:2px 0 0">{{ t('settings.hub.other_hint') }}</p>
+                            <p class="form-hint" style="margin:2px 0 0">{{ t('settings.hub.other_hint') }}</p>
                         </div>
                         <button class="btn btn-primary btn-sm" @click="openHubConnectorModal()">+ {{ t('settings.add_connector') }}</button>
                     </div>
                     <template x-for="c in hubConnectors.filter(x => x.name === 'email' || x.name === 'webhook')" :key="c.name">
-                        <div style="display:flex;align-items:center;gap:12px;padding:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius-card);margin-bottom:8px">
+                        <div class="card-nested" style="display:flex;align-items:center;gap:12px;padding:12px 16px;margin-bottom:8px">
                             <div style="flex:1">
                                 <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
                                     <strong x-text="tOr('settings.connector_' + c.name, c.name)" style="font-size:0.95rem;text-transform:capitalize"></strong>
-                                    <span class="badge" :class="c.enabled ? 'badge-stdio' : 'badge-sse'" x-text="c.enabled ? t('common.enabled') : t('common.disabled')"></span>
-                                    <span class="badge" :class="c.status === 'configured' ? 'badge-stdio' : 'badge-premium'" x-text="c.status ? tOr('settings.connector_status_' + c.status, c.status) : t('settings.unknown')"></span>
+                                    <span class="badge" :class="c.enabled ? 'badge-success' : 'badge-neutral'" x-text="c.enabled ? t('common.enabled') : t('common.disabled')"></span>
+                                    <span class="badge" :class="c.status === 'configured' ? 'badge-success' : 'badge-warning'" x-text="c.status ? tOr('settings.connector_status_' + c.status, c.status) : t('settings.unknown')"></span>
                                 </div>
                                 <div style="font-size:0.8rem;color:var(--text-muted);margin-top:2px" translate="no" x-text="c.endpoint || '—'"></div>
                                 <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px" x-show="Object.keys(c.extras || {}).length" x-cloak>
@@ -908,7 +915,7 @@
                             <span class="text-success">{{ t('settings.connected') }} <span translate="no" x-text="hubTestResult.bot_name ? '(' + hubTestResult.bot_name + ')' : ''"></span></span>
                         </template>
                         <template x-if="hubTestResult && !hubTestResult.success">
-                            <span class="text-error"><span class="ki" data-icon="x" aria-hidden="true"></span> <span translate="no" x-text="hubTestResult.error"></span></span>
+                            <span class="text-error"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('x')"></span> <span translate="no" x-text="hubTestResult.error"></span></span>
                         </template>
                     </div>
                 </div>
@@ -944,7 +951,7 @@
                 </div>
                 <!-- Google Specific Settings -->
                 <template x-if="hubEditingProvider.form === 'google'">
-                    <div style="margin-bottom: 16px; padding: 12px; background: rgba(255, 255, 255, 0.03); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.08);">
+                    <div class="card-nested" style="margin-bottom:16px;padding:16px">
                         <div class="form-group" style="margin-bottom: 12px;">
                             <label style="font-weight: 600; color: var(--accent);">{{ t('settings.hub.google_mode') }}</label>
                             <select class="form-select" x-model="hubEditingProvider.google_mode" @change="if (hubEditingProvider.google_mode === 'ai_studio') { hubEditingProvider.base_url = 'https://generativelanguage.googleapis.com/v1beta'; } else { hubEditingProvider.base_url = ''; }">
@@ -1247,16 +1254,16 @@
          TAB 3: AGENT
          ═══════════════════════════════════════════════════════════════ -->
     <div x-show="tab === 'agent'" x-transition x-cloak>
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.cron_tz_title') }}</h3>
-            <div style="margin-bottom:12px;padding:10px 12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.2);border-radius:var(--radius);font-size:0.8rem;color:var(--text-muted);text-align:start;">
-                <span class="ki" data-icon="info" aria-hidden="true"></span>
+            <div class="notice tone-info" style="margin-bottom:12px;">
+                <span class="ki" aria-hidden="true" x-html="KazmaIcons.get('info')"></span>
                 {{ t('settings.cron_tz_hint') }}
             </div>
             <div class="form-group">
                 <label>{{ t('settings.cron_tz_label') }}</label>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;">
-                    <select class="form-input" x-model="cronTz.value" @change="cronTzPreview()"
+                    <select class="form-select" x-model="cronTz.value" @change="cronTzPreview()"
                             style="max-width:320px" dir="ltr">
                         <template x-for="g in cronTzGroups" :key="g.label">
                             <optgroup :label="g.label">
@@ -1295,7 +1302,7 @@
         </div>
 
         <!-- Basic Config -->
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.agent_config') }}</h3>
             <div class="form-row">
                 <div class="form-group">
@@ -1324,17 +1331,17 @@
                           x-text="(agent.max_iterations || 15) + ' / 100'"></span>
                 </div>
                 <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;" role="group" :aria-label="t('settings.max_tool_rounds_presets')">
-                    <button type="button" class="btn btn-secondary" style="font-size:0.78rem;padding:6px 12px;"
+                    <button type="button" class="btn btn-sm"
                             @click="agent.max_iterations = 15"
-                            :style="(agent.max_iterations || 15) === 15 ? 'border-color:var(--border-strong);background:var(--bg-hover)' : ''"
+                            :class="(agent.max_iterations || 15) === 15 ? 'btn-primary' : 'btn-secondary'"
                             x-text="t('settings.depth_chat')"></button>
-                    <button type="button" class="btn btn-secondary" style="font-size:0.78rem;padding:6px 12px;"
+                    <button type="button" class="btn btn-sm"
                             @click="agent.max_iterations = 30"
-                            :style="(agent.max_iterations || 15) === 30 ? 'border-color:var(--border-strong);background:var(--bg-hover)' : ''"
+                            :class="(agent.max_iterations || 15) === 30 ? 'btn-primary' : 'btn-secondary'"
                             x-text="t('settings.depth_deep')"></button>
-                    <button type="button" class="btn btn-secondary" style="font-size:0.78rem;padding:6px 12px;"
+                    <button type="button" class="btn btn-sm"
                             @click="agent.max_iterations = 40"
-                            :style="(agent.max_iterations || 15) === 40 ? 'border-color:var(--border-strong);background:var(--bg-hover)' : ''"
+                            :class="(agent.max_iterations || 15) === 40 ? 'btn-primary' : 'btn-secondary'"
                             x-text="t('settings.depth_research')"></button>
                 </div>
                 <p class="form-help" style="margin-top:6px;font-size:0.78rem;color:var(--text-muted);line-height:1.45;">
@@ -1346,8 +1353,8 @@
             </div>
             <div class="form-group" style="margin-top:1rem;">
                 <label>{{ t('settings.long_task_mode') }}</label>
-                <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;cursor:pointer;">
-                    <input type="checkbox" x-model="agent.long_task_default_enabled">
+                <label class="toggle-row" style="margin-bottom:4px">
+                    <span class="toggle"><input type="checkbox" x-model="agent.long_task_default_enabled"><span class="toggle-slider"></span></span>
                     <span x-text="t('settings.long_task_default_on')"></span>
                 </label>
                 <div style="margin-top:8px;max-width:220px;" x-show="agent.long_task_default_enabled" x-cloak>
@@ -1365,11 +1372,11 @@
         </div>
 
         <!-- Personality Templates -->
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.personality_templates') }}</h3>
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px">
                 <template x-for="p in personalities" :key="p.name">
-                    <div @click="setPersonality(p.name)" class="personality-card" :class="{ 'is-selected': agent.personality === p.name }" style="padding:14px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius-card);cursor:pointer;transition:all 0.15s" :style="agent.personality === p.name ? 'border-color:var(--border-strong);background:var(--bg-hover)' : ''">
+                    <div @click="setPersonality(p.name)" class="personality-card card-nested" :class="{ 'is-selected': agent.personality === p.name }" style="padding:16px;cursor:pointer;transition:border-color 0.15s,box-shadow 0.15s" :style="agent.personality === p.name ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' } : {}">
                         <div class="personality-card-icon" style="margin-bottom:8px;color:var(--text-secondary)" x-html="(window.KazmaIcons && KazmaIcons.fromEmoji(p.emoji)) || ''"></div>
                         <div translate="no" style="font-weight:600;font-size:0.9rem;margin-bottom:4px" x-text="p.display_name_ar && window.KAZMA_LANG === 'ar' ? p.display_name_ar : p.name"></div>
                         <div translate="no" style="font-size:0.8rem;color:var(--text-tertiary)" x-text="p.description_ar && window.KAZMA_LANG === 'ar' ? p.description_ar : p.description"></div>
@@ -1379,7 +1386,7 @@
         </div>
 
         <!-- Safety Settings -->
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.safety_hitl') }}</h3>
             <div class="form-group">
                 <label style="display:flex;align-items:center;gap:8px">
@@ -1432,7 +1439,7 @@
             <div class="form-group" style="margin-top:16px" x-show="(soulPending || []).length" x-cloak>
                 <label>{{ t('settings.soul_pending') }}</label>
                 <template x-for="row in soulPending" :key="row.commitment_id">
-                    <div class="card" style="padding:10px 12px;margin:8px 0;display:flex;gap:8px;align-items:flex-start;justify-content:space-between">
+                    <div class="card-nested" style="padding:12px 16px;margin:8px 0;display:flex;gap:8px;align-items:flex-start;justify-content:space-between">
                         <div style="min-width:0">
                             <div translate="no" style="font-size:0.8rem;color:var(--text-muted)" x-text="row.agent_id || row.worker_name || row.commitment_id"></div>
                             <div style="font-size:0.85rem;white-space:pre-wrap" x-text="row.delta_preview || row.goal_text || ''"></div>
@@ -1447,7 +1454,7 @@
         </div>
 
         <!-- Context Window -->
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.context_window') }}</h3>
             <div class="form-row">
                 <div class="form-group">
@@ -1459,7 +1466,7 @@
         </div>
 
         <!-- Non-Stop & Self-Healing -->
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.nonstop_title') }}</h3>
             <p style="font-size:0.8rem;color:var(--text-muted);margin:0 0 12px 0;">
                 {{ t('settings.nonstop_hint') }}
@@ -1565,10 +1572,11 @@
             <button class="btn btn-primary" @click="saveNonstop()">{{ t('settings.save_nonstop') }}</button>
         </div>
 
-        <div class="settings-group" style="padding:12px 16px;background:var(--accent-subtle);border:1px solid var(--border);border-radius:var(--radius-card);">
-            <p style="font-size:0.85rem;color:var(--text-muted);margin:0;">
+        <div class="notice tone-accent">
+            <span class="ki" aria-hidden="true" x-html="KazmaIcons.get('info')"></span>
+            <p style="margin:0;">
                 {{ t('settings.memory_moved_hint') }}
-                <button type="button" class="btn btn-sm btn-primary" style="margin-left:8px;" @click="onTabChange('memory')">{{ t('settings.tab_memory') }} →</button>
+                <button type="button" class="btn btn-sm btn-primary" style="margin-inline-start:8px;" @click="onTabChange('memory')">{{ t('settings.tab_memory') }} →</button>
             </p>
         </div>
     </div>
@@ -1578,7 +1586,7 @@
          ═══════════════════════════════════════════════════════════════ -->
     <div x-show="tab === 'memory'" x-transition x-cloak>
         <!-- About me (plan C1): the user's own words, read on every reply -->
-        <div class="settings-group" id="memory-about-me-section">
+        <div class="settings-group mb-6" id="memory-about-me-section">
             <h3>{{ t('settings.about_me_title') }}</h3>
             <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:10px;">
                 {{ t('settings.about_me_hint') }}
@@ -1598,7 +1606,7 @@
         </div>
 
         <!-- Memory Tenant Mode -->
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.memory_isolation_title') }}</h3>
             <div class="form-group">
                 <label>{{ t('settings.memory_tenant_mode') }}</label>
@@ -1614,23 +1622,23 @@
         </div>
 
         <!-- Knowledge merge + recall UX (left-aligned toggles) -->
-        <div class="settings-group" id="memory-kb-merge-section" style="text-align:start;">
+        <div class="settings-group mb-6" id="memory-kb-merge-section" style="text-align:start;">
             <h3 style="justify-content:flex-start;">{{ t('settings.memory_kb_merge_title') }}</h3>
             <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:12px;text-align:start;">
                 {{ t('settings.memory_kb_merge_hint') }}
             </p>
             <div style="display:flex;flex-direction:column;align-items:flex-start;gap:12px;width:100%;">
-                <label for="mem-merge-kb" style="display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:10px;cursor:pointer;margin:0;width:100%;max-width:520px;text-align:start;">
-                    <input type="checkbox" id="mem-merge-kb" x-model="memoryMergeKb" @change="saveMemoryKbMerge()" style="accent-color:var(--accent);width:16px;height:16px;flex-shrink:0;margin:0;">
-                    <span style="color:var(--text-secondary);font-size:0.9rem;line-height:1.35;">{{ t('settings.memory_kb_inject') }}</span>
+                <label for="mem-merge-kb" class="toggle-row" style="margin:0;max-width:520px;">
+                    <span class="toggle"><input type="checkbox" id="mem-merge-kb" x-model="memoryMergeKb" @change="saveMemoryKbMerge()"><span class="toggle-slider"></span></span>
+                    <span>{{ t('settings.memory_kb_inject') }}</span>
                 </label>
-                <label for="mem-smart-search" style="display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:10px;cursor:pointer;margin:0;width:100%;max-width:520px;text-align:start;">
-                    <input type="checkbox" id="mem-smart-search" x-model="memorySmartSearch" @change="saveMemoryKbMerge()" style="accent-color:var(--accent);width:16px;height:16px;flex-shrink:0;margin:0;">
-                    <span style="color:var(--text-secondary);font-size:0.9rem;line-height:1.35;">{{ t('settings.memory_kb_smart_search') }}</span>
+                <label for="mem-smart-search" class="toggle-row" style="margin:0;max-width:520px;">
+                    <span class="toggle"><input type="checkbox" id="mem-smart-search" x-model="memorySmartSearch" @change="saveMemoryKbMerge()"><span class="toggle-slider"></span></span>
+                    <span>{{ t('settings.memory_kb_smart_search') }}</span>
                 </label>
-                <label for="mem-explain-recall" style="display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:10px;cursor:pointer;margin:0;width:100%;max-width:520px;text-align:start;">
-                    <input type="checkbox" id="mem-explain-recall" x-model="memoryExplainRecall" @change="saveMemoryKbMerge()" style="accent-color:var(--accent);width:16px;height:16px;flex-shrink:0;margin:0;">
-                    <span style="color:var(--text-secondary);font-size:0.9rem;line-height:1.35;">{{ t('settings.memory_explain_recall') }}</span>
+                <label for="mem-explain-recall" class="toggle-row" style="margin:0;max-width:520px;">
+                    <span class="toggle"><input type="checkbox" id="mem-explain-recall" x-model="memoryExplainRecall" @change="saveMemoryKbMerge()"><span class="toggle-slider"></span></span>
+                    <span>{{ t('settings.memory_explain_recall') }}</span>
                 </label>
             </div>
             <p style="font-size:0.72rem;color:var(--text-muted);margin-top:10px;text-align:start;">
@@ -1639,16 +1647,14 @@
         </div>
 
         <!-- Memory backends -->
-        <div class="settings-group" id="memory-backends-section">
+        <div class="settings-group mb-6" id="memory-backends-section">
             <h3>{{ t('settings.memory_backends_title') }}</h3>
             <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:12px;">
                 {{ t('settings.memory_backends_hint') }}
             </p>
-            <div x-show="memoryBackendsCapability.vector_status"
-                 style="margin-bottom:12px;padding:8px 12px;border-radius:8px;border:1px solid var(--border);font-size:0.78rem;"
-                 :style="memoryBackendsCapability.vector_write_ready
-                   ? 'background:rgba(46,213,115,0.08);border-color:rgba(46,213,115,0.3)'
-                   : 'background:rgba(245,158,11,0.08);border-color:rgba(245,158,11,0.35)'" x-cloak>
+            <div x-show="memoryBackendsCapability.vector_status" class="notice"
+                 style="margin-bottom:12px;flex-wrap:wrap;"
+                 :class="memoryBackendsCapability.vector_write_ready ? 'tone-success' : 'tone-warning'" x-cloak>
               <strong x-text="t(({full: 'settings.vector_status_full', remote_ready: 'settings.vector_status_remote_ready', unchecked: 'settings.vector_status_checking', unreachable: 'settings.vector_status_unreachable'})[memoryBackendsCapability.vector_status] || 'settings.vector_status_needs_setup')"></strong>
               <span style="color:var(--text-muted)" :translate="(memoryBackendsCapability.vector_status === 'full' && memoryBackends.vector.provider === 'sqlite_vec') ? null : 'no'" x-text="' — ' + (memoryBackendsCapability.vector_status === 'full' && memoryBackends.vector.provider === 'sqlite_vec' ? t('settings.cap_vector_local') : (memoryBackendsCapability.vector_status_detail || ''))"></span>
             </div>
@@ -1707,13 +1713,13 @@
                     {{ t('settings.mem.mirror_hint') }}
                 </p>
                 <div style="display:flex;flex-wrap:wrap;gap:8px;">
-                    <button type="button" class="btn btn-sm" @click="syncMemoryState()" x-text="t('settings.memory_sync_postgres')"></button>
+                    <button type="button" class="btn btn-secondary btn-sm" @click="syncMemoryState()" x-text="t('settings.memory_sync_postgres')"></button>
                 </div>
-                <p translate="no" style="font-size:0.75rem;margin-top:8px;" x-text="memoryStateSyncStatus" :style="memoryStateSyncOk ? 'color:#2ed573' : 'color:var(--text-muted)'"></p>
+                <p translate="no" style="font-size:0.75rem;margin-top:8px;" x-text="memoryStateSyncStatus" :style="{ color: memoryStateSyncOk ? 'var(--success)' : 'var(--text-muted)' }"></p>
             </div>
 
             <!-- Neo4j — always visible (not only after dropdown pick) -->
-            <div id="memory-neo4j-section" style="margin-top:16px;padding:14px 16px;border:1px solid var(--border);border-radius:var(--radius-card);background:rgba(99,102,241,0.06);">
+            <div id="memory-neo4j-section" class="card-nested" style="margin-top:16px;">
                 <h4 style="margin:0 0 6px;font-size:0.95rem;">{{ t('settings.memory_neo4j_title') }}</h4>
                 <p style="font-size:0.78rem;color:var(--text-muted);margin:0 0 12px;">
                     {{ t('settings.memory_neo4j_hint') }}
@@ -1743,7 +1749,7 @@
                 <p style="font-size:0.72rem;color:var(--text-muted);margin:8px 0 0;">
                     {{ t('settings.memory_neo4j_driver_hint') }}
                 </p>
-                <ol style="font-size:0.75rem;color:var(--text-muted);margin:10px 0 0;padding-left:1.2rem;line-height:1.5;">
+                <ol style="font-size:0.75rem;color:var(--text-muted);margin:10px 0 0;padding-inline-start:1.2rem;line-height:1.5;">
                     <li>{{ t('settings.memory_neo4j_step1') }}</li>
                     <li>{{ t('settings.memory_neo4j_step2') }}</li>
                     <li>{{ t('settings.memory_neo4j_step3') }}</li>
@@ -1751,9 +1757,9 @@
                 </ol>
                 <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;">
                     <button type="button" class="btn btn-sm btn-primary" @click="testMemoryNeo4j()" x-text="t('settings.memory_test_neo4j')"></button>
-                    <button type="button" class="btn btn-sm" @click="syncMemoryNeo4j()" x-text="t('settings.memory_sync_neo4j')"></button>
+                    <button type="button" class="btn btn-secondary btn-sm" @click="syncMemoryNeo4j()" x-text="t('settings.memory_sync_neo4j')"></button>
                 </div>
-                <p translate="no" style="font-size:0.75rem;margin-top:8px;" x-text="memoryNeo4jStatus" :style="memoryNeo4jOk ? 'color:#2ed573' : 'color:var(--text-muted)'"></p>
+                <p translate="no" style="font-size:0.75rem;margin-top:8px;" x-text="memoryNeo4jStatus" :style="{ color: memoryNeo4jOk ? 'var(--success)' : 'var(--text-muted)' }"></p>
             </div>
 
             <div class="form-group" style="margin-top:14px;">
@@ -1773,25 +1779,25 @@
             </p>
             <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">
                 <button class="btn btn-primary" @click="saveMemoryBackends()" :disabled="memoryBackendsSaving" x-text="memoryBackendsSaving ? '…' : t('settings.memory_save_backends')"></button>
-                <button class="btn" @click="testMemoryEmbed()" x-text="t('settings.memory_test_embed')"></button>
-                <button class="btn" @click="testMemoryVector()" x-text="t('settings.memory_test_vector')"></button>
-                <button class="btn" @click="resetMemoryBackendsLocal()" x-text="t('settings.memory_reset_local')"></button>
-                <button class="btn" @click="rebuildMemoryEmbeddings()" x-text="t('settings.memory_rebuild')"></button>
+                <button class="btn btn-secondary" @click="testMemoryEmbed()" x-text="t('settings.memory_test_embed')"></button>
+                <button class="btn btn-secondary" @click="testMemoryVector()" x-text="t('settings.memory_test_vector')"></button>
+                <button class="btn btn-secondary" @click="resetMemoryBackendsLocal()" x-text="t('settings.memory_reset_local')"></button>
+                <button class="btn btn-secondary" @click="rebuildMemoryEmbeddings()" x-text="t('settings.memory_rebuild')"></button>
             </div>
             <p translate="no" style="font-size:0.75rem;color:var(--text-muted);margin-top:8px;" x-text="memoryBackendsStatus"></p>
             <p style="font-size:0.75rem;color:var(--text-muted);margin-top:10px;">
                 {{ t('settings.memory_embedder_crosslink') }}
-                <button type="button" class="btn btn-sm" style="margin-left:6px;" @click="document.getElementById('memory-embedder-section')?.scrollIntoView({behavior:'smooth'})">{{ t('settings.tab_embedder') }} ↓</button>
+                <button type="button" class="btn btn-secondary btn-sm" style="margin-inline-start:6px;" @click="document.getElementById('memory-embedder-section')?.scrollIntoView({behavior:'smooth'})">{{ t('settings.tab_embedder') }} ↓</button>
             </p>
         </div>
 
         <!-- Embedder + rebuild (merged here — was a separate Settings tab) -->
         <div id="memory-embedder-section">
         <!-- Active embedder status -->
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.embedder_title') }}</h3>
-            <div style="margin-bottom:12px;padding:10px 12px;background:rgba(34,211,238,0.06);border:1px solid rgba(34,211,238,0.2);border-radius:var(--radius);font-size:0.8rem;color:var(--text-muted);text-align:start;">
-                <span class="ki" data-icon="info" aria-hidden="true"></span>
+            <div class="notice tone-info" style="margin-bottom:12px;">
+                <span class="ki" aria-hidden="true" x-html="KazmaIcons.get('info')"></span>
                 {{ t('settings.embedder_hint') }}
             </div>
             <div class="metrics-row" style="margin-bottom:16px">
@@ -1814,13 +1820,15 @@
             </div>
         </div>
 
-        <div x-show="embedderRestartNeeded()" x-cloak style="margin-bottom:16px;padding:12px 14px;background:rgba(255,193,7,0.08);border:1px solid rgba(255,193,7,0.35);border-radius:var(--radius);font-size:0.85rem;text-align:start;">
-            <span class="ki" data-icon="alert-triangle" aria-hidden="true"></span>
-            <strong style="color:var(--warning)">{{ t('settings.embedder_restart_needed') }}</strong>
-            <div style="color:var(--text-muted);margin-top:4px">{{ t('settings.embedder_restart_needed_hint') }}</div>
+        <div x-show="embedderRestartNeeded()" x-cloak class="notice tone-warning" style="margin-bottom:24px;">
+            <span class="ki" aria-hidden="true" x-html="KazmaIcons.get('alert-triangle')"></span>
+            <div>
+                <strong>{{ t('settings.embedder_restart_needed') }}</strong>
+                <div style="margin-top:4px">{{ t('settings.embedder_restart_needed_hint') }}</div>
+            </div>
         </div>
 
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.embedder_config_title') }}</h3>
             <div class="form-group">
                 <label>{{ t('settings.embedder_provider') }}</label>
@@ -1868,10 +1876,10 @@
             </div>
         </div>
 
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.time_travel_title') }}</h3>
-            <div style="margin-bottom:12px;padding:10px 12px;background:rgba(168,85,247,0.06);border:1px solid rgba(168,85,247,0.2);border-radius:var(--radius);font-size:0.8rem;color:var(--text-muted);text-align:start;">
-                <span class="ki" data-icon="info" aria-hidden="true"></span>
+            <div class="notice tone-info" style="margin-bottom:12px;">
+                <span class="ki" aria-hidden="true" x-html="KazmaIcons.get('info')"></span>
                 {{ t('settings.time_travel_hint') }}
             </div>
             <div class="form-group">
@@ -1885,16 +1893,18 @@
                 <div class="form-hint">{{ t('settings.time_travel_retention_days_hint') }}</div>
             </div>
             <div class="form-group">
-                <label style="display:flex;align-items:center;gap:10px;cursor:pointer;justify-content:flex-start;">
-                    <input type="checkbox" class="form-check" x-model="timeTravel.auto_maintain" style="width:16px;height:16px;accent-color:var(--success);">
-                    {{ t('settings.time_travel_auto_maintain') }}
+                <label class="toggle-row" style="margin-bottom:4px">
+                    <span class="toggle"><input type="checkbox" x-model="timeTravel.auto_maintain"><span class="toggle-slider"></span></span>
+                    <span>{{ t('settings.time_travel_auto_maintain') }}</span>
                 </label>
                 <div class="form-hint">{{ t('settings.time_travel_auto_maintain_hint') }}</div>
             </div>
-            <div x-show="timeTravelRestartNeeded()" x-cloak style="margin-top:12px;padding:12px 14px;background:rgba(255,193,7,0.08);border:1px solid rgba(255,193,7,0.35);border-radius:var(--radius);font-size:0.85rem;text-align:start;">
-                <span class="ki" data-icon="alert-triangle" aria-hidden="true"></span>
-                <strong style="color:var(--warning)">{{ t('settings.time_travel_restart_needed') }}</strong>
-                <div style="color:var(--text-muted);margin-top:4px">{{ t('settings.time_travel_restart_needed_hint') }}</div>
+            <div x-show="timeTravelRestartNeeded()" x-cloak class="notice tone-warning" style="margin-top:12px;">
+                <span class="ki" aria-hidden="true" x-html="KazmaIcons.get('alert-triangle')"></span>
+                <div>
+                    <strong>{{ t('settings.time_travel_restart_needed') }}</strong>
+                    <div style="margin-top:4px">{{ t('settings.time_travel_restart_needed_hint') }}</div>
+                </div>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
                 <button class="btn btn-primary" @click="saveTimeTravel()" :disabled="timeTravelSaving" x-text="timeTravelSaving ? '…' : t('settings.time_travel_save')"></button>
@@ -1908,48 +1918,48 @@
             </div>
         </div>
 
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.turn_notify_title') }}</h3>
-            <div style="margin-bottom:12px;padding:10px 12px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.2);border-radius:var(--radius);font-size:0.8rem;color:var(--text-muted);text-align:start;">
-                <span class="ki" data-icon="info" aria-hidden="true"></span>
+            <div class="notice tone-info" style="margin-bottom:12px;">
+                <span class="ki" aria-hidden="true" x-html="KazmaIcons.get('info')"></span>
                 {{ t('settings.turn_notify_hint') }}
             </div>
             <div class="form-group">
-                <label style="display:flex;align-items:center;gap:10px;cursor:pointer;justify-content:flex-start;">
-                    <input type="checkbox" class="form-check" x-model="turnNotify.enabled" style="width:16px;height:16px;accent-color:var(--success);">
-                    {{ t('settings.turn_notify_label') }}
+                <label class="toggle-row" style="margin-bottom:4px">
+                    <span class="toggle"><input type="checkbox" x-model="turnNotify.enabled"><span class="toggle-slider"></span></span>
+                    <span>{{ t('settings.turn_notify_label') }}</span>
                 </label>
                 <div class="form-hint">{{ t('settings.turn_notify_hint2') }}</div>
             </div>
             <button class="btn btn-primary" @click="saveTurnNotify()" :disabled="turnNotifySaving" x-text="turnNotifySaving ? '…' : t('settings.turn_notify_save')"></button>
         </div>
 
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.embedder_db_title') }}</h3>
             <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:10px">{{ t('settings.embedder_db_hint') }}</div>
-            <table style="width:100%;border-collapse:collapse;font-size:0.85rem">
+            <table class="data-table" style="width:100%">
                 <thead>
-                    <tr style="color:var(--text-muted);text-align:start;border-bottom:1px solid var(--border)">
-                        <th style="padding:6px 8px">{{ t('settings.embedder_db_version') }}</th>
-                        <th style="padding:6px 8px">{{ t('settings.embedder_db_episodes') }}</th>
-                        <th style="padding:6px 8px">{{ t('settings.embedder_db_beliefs') }}</th>
+                    <tr>
+                        <th>{{ t('settings.embedder_db_version') }}</th>
+                        <th>{{ t('settings.embedder_db_episodes') }}</th>
+                        <th>{{ t('settings.embedder_db_beliefs') }}</th>
                     </tr>
                 </thead>
                 <tbody>
                     <template x-for="v in embedderDbVersions()" :key="v.version">
-                        <tr style="border-bottom:1px solid rgba(255,255,255,0.05)">
-                            <td style="padding:6px 8px;font-family:var(--font-mono)" x-text="v.version" :style="v.version === (embedderStatus.config.model || '') ? 'color:var(--success)' : 'color:var(--warning)'"></td>
-                            <td style="padding:6px 8px" x-text="v.episodes"></td>
-                            <td style="padding:6px 8px" x-text="v.beliefs"></td>
+                        <tr>
+                            <td style="font-family:var(--font-mono)" x-text="v.version" :style="{ color: v.version === (embedderStatus.config.model || '') ? 'var(--success)' : 'var(--warning)' }"></td>
+                            <td x-text="v.episodes"></td>
+                            <td x-text="v.beliefs"></td>
                         </tr>
                     </template>
                     <tr x-show="embedderLoaded && embedderDbVersions().length === 0" x-cloak>
-                        <td colspan="3" style="padding:10px 8px;color:var(--text-muted)">{{ t('settings.embedder_db_empty') }}</td>
+                        <td colspan="3" style="color:var(--text-muted)">{{ t('settings.embedder_db_empty') }}</td>
                     </tr>
                 </tbody>
             </table>
-            <div style="margin-top:12px;padding:10px 12px;background:rgba(255,193,7,0.06);border:1px solid rgba(255,193,7,0.25);border-radius:var(--radius);font-size:0.8rem;color:var(--text-muted);text-align:start;">
-                <span class="ki" data-icon="info" aria-hidden="true"></span>
+            <div class="notice tone-warning" style="margin-top:12px;">
+                <span class="ki" aria-hidden="true" x-html="KazmaIcons.get('info')"></span>
                 {{ t('settings.embedder_rebuild_hint') }}
             </div>
             <div style="margin-top:12px">
@@ -1964,20 +1974,20 @@
                         <span x-text="embedderRebuildStatus.state === 'done' ? t('settings.embedder_rebuild_done') : (embedderRebuildStatus.state === 'error' ? t('settings.embedder_rebuild_error') : (embedderRebuildStatus.done + ' / ' + (embedderRebuildStatus.total || '…')))"></span>
                         <span translate="no" x-show="embedderRebuildStatus.model" x-text="embedderRebuildStatus.model" x-cloak></span>
                     </div>
-                    <div style="background:var(--bg-deep);border:1px solid var(--border);border-radius:999px;height:10px;overflow:hidden">
-                        <div style="height:100%;background:var(--accent,#22d3ee);transition:width .5s;width:0%" :style="{ width: rebuildPercent() + '%' }"></div>
+                    <div style="background:var(--surface-sunken);border:1px solid var(--border);border-radius:999px;height:10px;overflow:hidden">
+                        <div style="height:100%;background:var(--accent);transition:width .5s;width:0%" :style="{ width: rebuildPercent() + '%' }"></div>
                     </div>
                     <div translate="no" x-show="embedderRebuildStatus.error" x-cloak style="margin-top:6px;color:var(--danger);font-size:0.8rem" x-text="embedderRebuildStatus.error"></div>
                 </div>
             </div>
         </div>
 
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.embedder_manual_title') }}</h3>
             <div style="font-size:0.8rem;color:var(--text-muted);text-align:start;">
                 {{ t('settings.embedder_manual_hint') }}
             </div>
-            <div style="background:var(--bg-deep);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;font-family:var(--font-mono);font-size:0.78rem;margin-top:8px;text-align:left;">
+            <div style="background:var(--surface-sunken);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;font-family:var(--font-mono);font-size:0.78rem;margin-top:8px;text-align:start;" dir="ltr">
                 <code translate="no">python scripts/reembed.py</code>
             </div>
         </div>
@@ -1988,20 +1998,20 @@
          MCP
          ═══════════════════════════════════════════════════════════════ -->
     <div x-show="tab === 'mcp'" x-transition x-cloak>
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
                 <h3>{{ t('settings.mcp_servers') }}</h3>
                 <button class="btn btn-primary btn-sm" @click="openAddMcpServer()">+ {{ t('settings.add_server') }}</button>
             </div>
 
             <template x-for="s in mcpServers" :key="s.name">
-                <div style="padding:14px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius-card);margin-bottom:10px">
+                <div class="card-nested mb-3" style="padding:16px">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
                         <span class="status-dot" role="img" :class="s.status === 'running' ? 'status-ok' : 'status-stopped'"
                               :title="s.status === 'running' ? t('settings.mcp_state_running') : t('settings.mcp_state_stopped')"
                               :aria-label="s.status === 'running' ? t('settings.mcp_state_running') : t('settings.mcp_state_stopped')"></span>
                         <strong translate="no" x-text="s.name"></strong>
-                        <span class="badge" translate="no" :class="s.transport === 'stdio' ? 'badge-stdio' : 'badge-sse'" x-text="s.transport"></span>
+                        <span class="badge badge-neutral" translate="no" x-text="s.transport"></span>
                         <span style="font-size:0.8rem;color:var(--text-muted)" x-text="kazmaCount('mcp.tool_count', s.tool_count || 0)"></span>
                     </div>
                     <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:8px" translate="no" x-text="s.transport === 'stdio' ? (s.command || []).join(' ') : s.url"></div>
@@ -2069,7 +2079,7 @@
          TAB 6: SKILLS
          ═══════════════════════════════════════════════════════════════ -->
     <div x-show="tab === 'skills'" x-transition x-cloak>
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.installed_skills') }}</h3>
             <div class="search-bar">
                 <input type="text" class="form-input" x-model="skillFilter" placeholder="{{ t('settings.search_skills') }}">
@@ -2111,31 +2121,31 @@
          TAB 7: APPEARANCE
          ═══════════════════════════════════════════════════════════════ -->
     <div x-show="tab === 'appearance'" x-transition x-cloak>
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.theme') }}</h3>
             <div style="display:flex;gap:12px;margin-bottom:16px">
-                <button class="btn" :class="appearance.theme === 'dark' ? 'btn-primary' : 'btn-secondary'" @click="appearance.theme = 'dark'; previewTheme('dark')"><span class="ki" data-icon="moon" aria-hidden="true"></span> {{ t('settings.dark') }}</button>
-                <button class="btn" :class="appearance.theme === 'light' ? 'btn-primary' : 'btn-secondary'" @click="appearance.theme = 'light'; previewTheme('light')"><span class="ki" data-icon="sun" aria-hidden="true"></span> {{ t('settings.light') }}</button>
-                <button class="btn" :class="appearance.theme === 'auto' ? 'btn-primary' : 'btn-secondary'" @click="appearance.theme = 'auto'; previewTheme('auto')"><span class="ki" data-icon="refresh" aria-hidden="true"></span> {{ t('settings.auto') }}</button>
+                <button class="btn" :class="appearance.theme === 'dark' ? 'btn-primary' : 'btn-secondary'" @click="appearance.theme = 'dark'; previewTheme('dark')"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('moon')"></span> {{ t('settings.dark') }}</button>
+                <button class="btn" :class="appearance.theme === 'light' ? 'btn-primary' : 'btn-secondary'" @click="appearance.theme = 'light'; previewTheme('light')"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('sun')"></span> {{ t('settings.light') }}</button>
+                <button class="btn" :class="appearance.theme === 'auto' ? 'btn-primary' : 'btn-secondary'" @click="appearance.theme = 'auto'; previewTheme('auto')"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('refresh')"></span> {{ t('settings.auto') }}</button>
             </div>
         </div>
 
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.accent_color') }}</h3>
             <div style="display:flex;gap:12px;align-items:center">
-                <input type="color" x-model="appearance.accent_color" style="width:48px;height:36px;border:none;cursor:pointer;background:none">
+                <input type="color" :value="appearance.accent_color || '#3b82f6'" @input="appearance.accent_color = $event.target.value" style="width:48px;height:36px;border:none;cursor:pointer;background:none">
                 <input type="text" class="form-input" x-model="appearance.accent_color" style="width:120px" placeholder="#3b82f6">
                 <div style="display:flex;gap:6px">
                     <template x-for="color in ['#3b82f6', '#60a5fa', '#0969da', '#10b981', '#f85149', '#d29922', '#0ea5e9', '#93c5fd']" :key="color">
-                        <div @click="appearance.accent_color = color" style="width:28px;height:28px;border-radius:50%;cursor:pointer;border:2px solid transparent" :style="appearance.accent_color === color ? 'border-color:var(--text-primary)' : ''" :key="color">
-                            <div style="width:100%;height:100%;border-radius:50%" :style="'background:' + color"></div>
+                        <div @click="appearance.accent_color = color" style="width:28px;height:28px;border-radius:50%;cursor:pointer;border:2px solid transparent" :style="appearance.accent_color === color ? { borderColor: 'var(--text-primary)' } : {}" :key="color">
+                            <div style="width:100%;height:100%;border-radius:50%" :style="{ background: color }"></div>
                         </div>
                     </template>
                 </div>
             </div>
         </div>
 
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.font_size') }}</h3>
             <div class="form-group">
                 <label>{{ t('settings.base_font_size') }} <span x-text="appearance.font_size"></span>px</label>
@@ -2150,18 +2160,21 @@
          TAB 8: SHORTCUTS
          ═══════════════════════════════════════════════════════════════ -->
     <div x-show="tab === 'shortcuts'" x-transition x-cloak>
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
                 <h3>{{ t('settings.keyboard_shortcuts') }}</h3>
                 <button class="btn btn-secondary btn-sm" @click="resetShortcuts()">{{ t('settings.reset_to_defaults') }}</button>
             </div>
 
             <!-- Conflict warnings -->
-            <div x-show="shortcutConflicts.length > 0" style="padding:12px;background:rgba(210,153,34,0.08);border:1px solid var(--warning);border-radius:var(--radius);margin-bottom:16px" x-cloak>
-                <div style="color:var(--warning);font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:6px"><span class="ki" data-icon="alert" aria-hidden="true"></span> {{ t('settings.conflicts_detected') }}</div>
-                <template x-for="c in shortcutConflicts" :key="c.action1 + c.action2">
-                    <div style="font-size:0.85rem;color:var(--text-secondary)" x-text="conflictLine(c)"></div>
-                </template>
+            <div x-show="shortcutConflicts.length > 0" class="notice tone-warning" style="margin-bottom:16px" x-cloak>
+                <span class="ki" aria-hidden="true" x-html="KazmaIcons.get('alert')"></span>
+                <div>
+                    <div style="font-weight:600;margin-bottom:4px">{{ t('settings.conflicts_detected') }}</div>
+                    <template x-for="c in shortcutConflicts" :key="c.action1 + c.action2">
+                        <div style="font-size:0.85rem" x-text="conflictLine(c)"></div>
+                    </template>
+                </div>
             </div>
 
             <template x-for="(keys, action) in shortcuts" :key="action">
@@ -2184,7 +2197,7 @@
          ═══════════════════════════════════════════════════════════════ -->
     <div x-show="tab === 'account'" x-transition x-cloak>
         <!-- Password -->
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.change_password') }}</h3>
             <div class="form-group">
                 <label>{{ t('settings.current_password') }}</label>
@@ -2204,7 +2217,7 @@
         </div>
 
         <!-- API Tokens -->
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.api_tokens') }}</h3>
             <p style="font-size:0.8rem;color:var(--text-muted);margin:0 0 12px 0;line-height:1.45;">
               {{ t('settings.api_tokens_hint') | safe }}
@@ -2214,13 +2227,15 @@
                 <button class="btn btn-primary" @click="createToken()">{{ t('settings.create_token') }}</button>
             </div>
             <!-- One-time full token reveal -->
-            <div x-show="lastCreatedToken" x-cloak style="margin-bottom:14px;padding:12px 14px;border-radius:8px;border:1px solid rgba(16,185,129,0.35);background:rgba(16,185,129,0.08);">
-              <div style="font-size:0.75rem;font-weight:700;color:#34d399;margin-bottom:6px;">{{ t('settings.token_created_once') }}</div>
+            <div x-show="lastCreatedToken" x-cloak class="notice tone-success" style="margin-bottom:14px;">
+              <div style="flex:1;min-width:0;">
+              <div style="font-size:0.75rem;font-weight:700;margin-bottom:6px;">{{ t('settings.token_created_once') }}</div>
               <code style="display:block;word-break:break-all;font-size:0.78rem;color:var(--text-primary);margin-bottom:8px;" x-text="lastCreatedToken"></code>
               <div style="display:flex;gap:8px;flex-wrap:wrap;">
                 <button type="button" class="btn btn-sm btn-primary" @click="copyLastToken()">{{ t('settings.copy_token') }}</button>
                 <button type="button" class="btn btn-sm btn-secondary" @click="copyTokenCurl()">{{ t('settings.copy_curl') }}</button>
                 <button type="button" class="btn btn-sm btn-secondary" @click="lastCreatedToken=''">{{ t('common.dismiss') }}</button>
+              </div>
               </div>
             </div>
             <!-- Column-aligned token table (not free-form flex rows) -->
@@ -2246,7 +2261,7 @@
         </div>
 
         <!-- Sessions -->
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.active_sessions') }}</h3>
             <div class="account-list-table account-sessions-table" x-show="sessions.length > 0" x-cloak>
               <div class="account-list-head account-sessions-head">
@@ -2259,7 +2274,7 @@
                   <span class="account-list-name" x-text="sessionOrigin(s.platform)"></span>
                   <span class="account-list-meta" x-text="window.KazmaFormat ? KazmaFormat.dateTime(s.started_at) : ''"></span>
                   <span class="account-list-actions">
-                    <span class="badge badge-stdio" x-show="s.current" x-cloak>{{ t('settings.current') }}</span>
+                    <span class="badge badge-success" x-show="s.current" x-cloak>{{ t('settings.current') }}</span>
                   </span>
                 </div>
               </template>
@@ -2268,7 +2283,7 @@
         </div>
 
         <!-- Platform users (SaaS multi-user) — admin only -->
-        <div class="settings-group" x-show="saasStatus && (saasStatus.principal?.role === 'admin' || saasStatus.principal?.source === 'secret')" x-cloak>
+        <div class="settings-group mb-6" x-show="saasStatus && (saasStatus.principal?.role === 'admin' || saasStatus.principal?.source === 'secret')" x-cloak>
             <h3>{{ t('settings.platform_users') }}</h3>
             <p style="font-size:0.8rem;color:var(--text-muted);margin:0 0 12px 0;line-height:1.45;">
               {{ t('settings.platform_users_help') }} {{ t('settings.backend_label') }}
@@ -2279,7 +2294,7 @@
             <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
                 <input type="text" class="form-input" x-model="newUser.username" placeholder="{{ t('settings.username') }}" style="flex:1;min-width:120px">
                 <input type="password" class="form-input" x-model="newUser.password" placeholder="{{ t('settings.password_min8') }}" style="flex:1;min-width:120px">
-                <select class="form-input" x-model="newUser.role" style="width:auto">
+                <select class="form-select" x-model="newUser.role" style="width:auto">
                   <option value="viewer">{{ t('settings.role_viewer') }}</option>
                   <option value="operator" selected>{{ t('settings.role_operator') }}</option>
                   <option value="admin">{{ t('settings.role_admin') }}</option>
@@ -2297,7 +2312,7 @@
                 <div class="account-list-row">
                   <span translate="no" class="account-list-name" x-text="u.username"></span>
                   <span>
-                    <select class="form-input" style="width:auto;padding:4px 8px;font-size:0.8rem"
+                    <select class="form-select" style="width:auto"
                             :value="u.role"
                             @change="patchPlatformUser(u.username, { role: $event.target.value })">
                       <option value="viewer">{{ t('settings.role_viewer') }}</option>
@@ -2325,7 +2340,7 @@
                 <input type="text" class="form-input" x-model="newTenant.name" placeholder="{{ t('settings.display_name_tenant') }}" style="flex:1;min-width:100px">
                 <button class="btn btn-primary" type="button" @click="createTenant()">{{ t('settings.add_tenant') }}</button>
             </div>
-            <ul style="margin:0;padding-left:18px;color:var(--text-secondary);font-size:0.85rem;">
+            <ul style="margin:0;padding-inline-start:18px;color:var(--text-secondary);font-size:0.85rem;">
               <template x-for="t in tenants" :key="t.id">
                 <li translate="no"><strong x-text="t.id"></strong> — <span x-text="t.name"></span></li>
               </template>
@@ -2337,7 +2352,7 @@
          TAB 10: TOOLS
          ═══════════════════════════════════════════════════════════════ -->
     <div x-show="tab === 'tools'" x-transition x-cloak>
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.tool_registry') }}</h3>
             <div class="search-bar">
                 <input type="text" class="form-input" x-model="toolSearch" aria-label="{{ t('settings.search_tools') }}" placeholder="{{ t('settings.search_tools') }}">
@@ -2345,14 +2360,14 @@
 
             <div style="display:flex;flex-direction:column;gap:6px">
                 <template x-for="tool in filteredTools" :key="tool.name">
-                    <div style="padding:10px 14px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:border-color 0.15s" :style="selectedTool === tool.name ? 'border-color:var(--accent)' : ''" @click="selectedTool = selectedTool === tool.name ? null : tool.name">
+                    <div class="card-nested" style="padding:10px 14px;border-radius:var(--radius);cursor:pointer;transition:border-color 0.15s" :style="selectedTool === tool.name ? { borderColor: 'var(--accent)' } : {}" @click="selectedTool = selectedTool === tool.name ? null : tool.name">
                         <div style="display:flex;align-items:center;gap:8px">
                             <label class="toggle" @click.stop>
                                 <input type="checkbox" :aria-label="'{{ t('common.enable') }}: ' + tool.name" :checked="tool.enabled !== false" @change="toggleTool(tool.name, $event.target.checked)">
                                 <span class="toggle-slider"></span>
                             </label>
                             <span class="tool-name" translate="no" x-text="tool.name"></span>
-                            <span class="badge badge-basic" x-text="tOr('settings.category_' + String(tool.category || 'general').toLowerCase(), tool.category || 'general')" style="font-size:0.7rem"></span>
+                            <span class="badge badge-neutral" x-text="tOr('settings.category_' + String(tool.category || 'general').toLowerCase(), tool.category || 'general')"></span>
                             <span style="flex:1"></span>
                             <span class="bidi-content" dir="auto" translate="no" style="font-size:0.8rem;color:var(--text-muted);max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" x-text="tool.description || ''"></span>
                         </div>
@@ -2361,7 +2376,7 @@
                             <div class="bidi-content" dir="auto" translate="no" style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px" x-text="tool.description || ''"></div>
                             <div x-show="tool.parameters" style="margin-bottom:8px" x-cloak>
                                 <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:4px">{{ t('settings.parameters') }}</div>
-                                <pre style="font-size:0.75rem;color:var(--text-secondary);background:var(--bg-primary);padding:8px;border-radius:var(--radius);overflow-x:auto" x-text="JSON.stringify(tool.parameters || {}, null, 2)"></pre>
+                                <pre style="font-size:0.75rem;color:var(--text-secondary);background:var(--surface-sunken);padding:8px;border-radius:var(--radius);overflow-x:auto" x-text="JSON.stringify(tool.parameters || {}, null, 2)"></pre>
                             </div>
                             <div style="display:flex;gap:8px;align-items:end">
                                 <div class="form-group" style="flex:1;margin-bottom:0">
@@ -2370,7 +2385,7 @@
                                 </div>
                                 <button class="btn btn-secondary btn-sm" @click.stop="testTool(tool.name)" style="height:36px">{{ t('settings.test') }}</button>
                             </div>
-                            <div x-show="toolTestResult" style="margin-top:8px;padding:8px;background:var(--bg-primary);border-radius:var(--radius);font-size:0.8rem" x-cloak>
+                            <div x-show="toolTestResult" style="margin-top:8px;padding:8px;background:var(--surface-sunken);border-radius:var(--radius);font-size:0.8rem" x-cloak>
                                 <pre x-text="JSON.stringify(toolTestResult, null, 2)" style="white-space:pre-wrap"></pre>
                             </div>
                         </div>
@@ -2389,7 +2404,7 @@
          ═══════════════════════════════════════════════════════════════ -->
     <div x-show="tab === 'system'" x-transition x-cloak>
         <!-- Diagnostics -->
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.system_diagnostics') }}</h3>
             <div class="metrics-row">
                 <div class="metric-card">
@@ -2417,13 +2432,13 @@
         </div>
 
         <!-- Secret Vault -->
-        <div class="settings-group">
-            <h3><span class="ki" data-icon="lock" aria-hidden="true"></span> {{ t('settings.sys.secret_vault') }}</h3>
-            <div style="padding:12px 16px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius-card);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div class="settings-group mb-6">
+            <h3><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('lock')"></span> {{ t('settings.sys.secret_vault') }}</h3>
+            <div class="card-nested" style="padding:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
                 <div>
                     <div style="font-weight:600;font-size:0.95rem">
-                        <span x-show="vaultStatus.enabled" class="ic-row-xs" style="color:var(--success);gap:6px" x-cloak><span class="ki" data-icon="check-circle" aria-hidden="true"></span> {{ t('settings.sys.vault_enabled') }}</span>
-                        <span x-show="!vaultStatus.enabled" class="ic-row-xs" style="color:var(--danger);gap:6px" x-cloak><span class="ki" data-icon="alert-circle" aria-hidden="true"></span> {{ t('settings.sys.vault_disabled') }}</span>
+                        <span x-show="vaultStatus.enabled" class="ic-row-xs" style="color:var(--success);gap:6px" x-cloak><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('check-circle')"></span> {{ t('settings.sys.vault_enabled') }}</span>
+                        <span x-show="!vaultStatus.enabled" class="ic-row-xs" style="color:var(--danger);gap:6px" x-cloak><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('alert-circle')"></span> {{ t('settings.sys.vault_disabled') }}</span>
                     </div>
                     <div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px">
                         <span x-show="vaultStatus.enabled" x-text="kazmaCount('settings.sys.secrets_stored', vaultStatus.secret_count || 0)" x-cloak></span>
@@ -2437,7 +2452,7 @@
             </div>
         </div>
 
-        <div class="settings-group" id="acquisition-operations">
+        <div class="settings-group mb-6" id="acquisition-operations">
             <h3>{{ t('research.ui.acquisition_title') }}</h3>
             <p>{{ t('research.ui.acquisition_hint') }}</p>
             <button class="btn btn-secondary" @click="inspectAcquisition(false)" :disabled="acquisitionBusy">{{ t('research.ui.read_cached_status') }}</button>
@@ -2448,10 +2463,10 @@
             <button class="btn btn-secondary" @click="loadAcquisitionMonitor()" :disabled="acquisitionMonitorBusy">{{ t('research.monitor.load') }}</button>
             <template x-if="acquisitionMonitor">
                 <div>
-                    <label><input type="checkbox" x-model="acquisitionMonitor.enabled"> {{ t('research.monitor.enabled') }}</label>
-                    <label><input type="checkbox" x-model="acquisitionMonitor.notify_completed"> {{ t('research.monitor.completed') }}</label>
-                    <label>{{ t('research.monitor.stall') }} <input type="number" min="30" max="3600" x-model.number="acquisitionMonitor.stall_seconds"></label>
-                    <label>{{ t('research.monitor.credits') }} <input type="number" min="0" max="1000000000" x-model.number="acquisitionMonitor.low_credit_threshold"></label>
+                    <label class="toggle-row"><span class="toggle"><input type="checkbox" x-model="acquisitionMonitor.enabled"><span class="toggle-slider"></span></span><span>{{ t('research.monitor.enabled') }}</span></label>
+                    <label class="toggle-row"><span class="toggle"><input type="checkbox" x-model="acquisitionMonitor.notify_completed"><span class="toggle-slider"></span></span><span>{{ t('research.monitor.completed') }}</span></label>
+                    <label>{{ t('research.monitor.stall') }} <input type="number" min="30" max="3600" class="form-input" style="max-width:200px" x-model.number="acquisitionMonitor.stall_seconds"></label>
+                    <label>{{ t('research.monitor.credits') }} <input type="number" min="0" max="1000000000" class="form-input" style="max-width:200px" x-model.number="acquisitionMonitor.low_credit_threshold"></label>
                     <button class="btn btn-primary" @click="saveAcquisitionMonitor()" :disabled="acquisitionMonitorBusy">{{ t('research.monitor.save') }}</button>
                 </div>
             </template>
@@ -2461,7 +2476,7 @@
             <button class="btn btn-secondary" @click="loadCanary()" :disabled="canaryBusy">{{ t('research.canary.load') }}</button>
             <template x-if="canary">
                 <div>
-                    <label><input type="checkbox" x-model="canary.enabled"> {{ t('research.canary.enabled') }}</label>
+                    <label class="toggle-row"><span class="toggle"><input type="checkbox" x-model="canary.enabled"><span class="toggle-slider"></span></span><span>{{ t('research.canary.enabled') }}</span></label>
                     <label>{{ t('research.canary.url') }} <input type="url" class="form-input" dir="ltr" translate="no" x-model="canary.url"></label>
                     <label>{{ t('research.canary.marker') }} <input type="text" class="form-input" translate="no" x-model="canary.marker"></label>
                     <button class="btn btn-primary" @click="saveCanary()" :disabled="canaryBusy">{{ t('research.canary.save') }}</button>
@@ -2472,7 +2487,7 @@
         </div>
 
         <!-- Logging -->
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.logging_title') }}</h3>
             <div class="form-group">
                 <label>{{ t('settings.logging_level') }}</label>
@@ -2496,15 +2511,15 @@
                 <input type="number" class="form-input" x-model.number="logging.retention_days" min="1" max="365" step="1">
                 <div class="form-hint">{{ t('settings.logging_retention_hint') }}</div>
             </div>
-            <div style="margin-top:8px;padding:10px 12px;background:rgba(255,193,7,0.06);border:1px solid rgba(255,193,7,0.25);border-radius:var(--radius);font-size:0.8rem;color:var(--text-muted)">
-                <span class="ki" data-icon="info" aria-hidden="true"></span>
+            <div class="notice tone-warning" style="margin:8px 0 12px;">
+                <span class="ki" aria-hidden="true" x-html="KazmaIcons.get('info')"></span>
                 {{ t('settings.logging_restart_hint') }}
             </div>
             <button class="btn btn-primary" @click="saveLogging()">{{ t('settings.save_logging') }}</button>
         </div>
 
         <!-- Swarm task history retention -->
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.swarm_retention_title') }}</h3>
             <div class="form-group">
                 <label>{{ t('settings.swarm_retention_days') }}</label>
@@ -2515,7 +2530,7 @@
         </div>
 
         <!-- Chat step history (LangGraph checkpoints) retention -->
-        <div class="settings-group" id="checkpoint-retention-section">
+        <div class="settings-group mb-6" id="checkpoint-retention-section">
             <h3>{{ t('settings.checkpoint_retention_title') }}</h3>
             <div class="form-group">
                 <label>{{ t('settings.checkpoint_retention_days') }}</label>
@@ -2527,7 +2542,7 @@
         </div>
 
         <!-- Turn time limit (kazma_core.agent.turn_budget: every surface) -->
-        <div class="settings-group" id="turn-timeout-section">
+        <div class="settings-group mb-6" id="turn-timeout-section">
             <h3>{{ t('settings.turn_timeout_title') }}</h3>
             <div class="form-group">
                 <label for="turn-timeout-seconds">{{ t('settings.turn_timeout_seconds') }}</label>
@@ -2539,7 +2554,7 @@
         </div>
 
         <!-- What a turn and a day may spend (kazma_core.agent.turn_token_budget) -->
-        <div class="settings-group" id="turn-spending-section">
+        <div class="settings-group mb-6" id="turn-spending-section">
             <h3>{{ t('settings.turn_spending_title') }}</h3>
             <div class="form-group">
                 <label for="turn-token-budget">{{ t('settings.turn_token_budget') }}</label>
@@ -2555,7 +2570,7 @@
         </div>
 
         <!-- Reasoning before a chat answer (kazma_core.agent.chat_reasoning) -->
-        <div class="settings-group" id="chat-reasoning-section">
+        <div class="settings-group mb-6" id="chat-reasoning-section">
             <h3>{{ t('settings.chat_reasoning_title') }}</h3>
             <div class="form-group">
                 <label for="chat-reasoning-level">{{ t('settings.chat_reasoning_label') }}</label>
@@ -2573,10 +2588,10 @@
         </div>
 
         <!-- The outside watch (kazma_core.observability.outside_watch, plan B1) -->
-        <div class="settings-group" id="outside-watch-section">
+        <div class="settings-group mb-6" id="outside-watch-section">
             <h3>{{ t('settings.outside_watch_title') }}</h3>
             <div class="form-hint">{{ t('settings.outside_watch_hint') }}</div>
-            <div class="form-hint" x-show="outsideWatch.failed" x-cloak style="color:var(--error)">{{ t('settings.outside_watch_load_error') }}</div>
+            <div class="form-hint" x-show="outsideWatch.failed" x-cloak style="color:var(--danger)">{{ t('settings.outside_watch_load_error') }}</div>
             <div x-show="outsideWatch.loaded && !outsideWatch.paired" x-cloak data-outside-not-paired>
                 <p>{{ t('settings.outside_watch_not_paired') }}</p>
                 <pre translate="no" dir="ltr"><code>kazma observer pair</code></pre>
@@ -2612,15 +2627,15 @@
         </div>
 
         <!-- Proxy Provider -->
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.proxy_title') }}</h3>
-            <div style="margin-bottom:12px;padding:10px 12px;background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.2);border-radius:var(--radius);font-size:0.8rem;color:var(--text-muted);">
-                <span class="ki" data-icon="info" aria-hidden="true"></span>
+            <div class="notice tone-info" style="margin-bottom:12px;">
+                <span class="ki" aria-hidden="true" x-html="KazmaIcons.get('info')"></span>
                 {{ t('settings.proxy_hint') }}
             </div>
             <!-- The acquisition policy decides whether the proxy is used (FA-115). -->
             <div x-show="proxyPolicy" x-cloak data-proxy-policy style="margin-bottom:12px;font-size:0.8rem;"
-                 :style="proxyPolicy && proxyPolicy.proxy_allowed ? 'color:var(--success)' : 'color:var(--warning,#f59e0b)'">
+                 :style="{ color: proxyPolicy && proxyPolicy.proxy_allowed ? 'var(--success)' : 'var(--warning)' }">
                 <span x-show="proxyPolicy && proxyPolicy.proxy_allowed" x-cloak>{{ t('settings.proxy_policy_on') }}</span>
                 <span x-show="proxyPolicy && !proxyPolicy.proxy_allowed" x-cloak>{{ t('settings.proxy_policy_off') }}</span>
             </div>
@@ -2674,7 +2689,7 @@
                     </label>
                 </label>
             </div>
-            <div x-show="proxyTestResult" style="padding:8px 12px;border-radius:var(--radius);font-size:0.82rem;" :style="proxyTestResult?.success ? 'background:rgba(34,197,94,0.1);color:var(--success)' : 'background:rgba(220,80,80,0.1);color:var(--danger)'" x-cloak><span style="display:inline-flex;align-items:center;gap:6px"><span class="ki" :data-icon="proxyTestResult?.success ? 'check-circle' : 'x'" x-html="KazmaIcons.get(proxyTestResult?.success ? 'check-circle' : 'x')" aria-hidden="true"></span><span translate="no" x-text="proxyTestResult?.success ? ((window.t('settings.proxy_exit_ip') || 'Exit IP') + ': ' + proxyTestResult.exit_ip) : (proxyTestResult?.error === 'proxy_not_allowed' ? t('settings.proxy_policy_off') : (proxyTestResult?.message || proxyTestResult?.error || t('settings.sys.proxy_test_failed')))"></span></span></div>
+            <div x-show="proxyTestResult" class="notice" style="margin-bottom:12px;" :class="proxyTestResult?.success ? 'tone-success' : 'tone-danger'" x-cloak><span style="display:inline-flex;align-items:center;gap:6px"><span class="ki" :data-icon="proxyTestResult?.success ? 'check-circle' : 'x'" x-html="KazmaIcons.get(proxyTestResult?.success ? 'check-circle' : 'x')" aria-hidden="true"></span><span translate="no" x-text="proxyTestResult?.success ? ((window.t('settings.proxy_exit_ip') || 'Exit IP') + ': ' + proxyTestResult.exit_ip) : (proxyTestResult?.error === 'proxy_not_allowed' ? t('settings.proxy_policy_off') : (proxyTestResult?.message || proxyTestResult?.error || t('settings.sys.proxy_test_failed')))"></span></span></div>
             <div style="display:flex;gap:8px;">
                 <button class="btn btn-primary" @click="saveProxy()">{{ t('settings.proxy_save') }}</button>
                 <button class="btn btn-secondary" @click="testProxy()" :disabled="proxyTesting">{{ t('settings.proxy_test') }}</button>
@@ -2682,7 +2697,7 @@
         </div>
 
         <!-- Logs -->
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
                 <h3>{{ t('settings.system_logs') }}</h3>
                 <div style="display:flex;gap:8px">
@@ -2695,26 +2710,26 @@
                     <button class="btn btn-secondary btn-sm" @click="loadLogs()">{{ t('dashboard.refresh') }}</button>
                 </div>
             </div>
-            <div style="background:var(--bg-deep);border:1px solid var(--border);border-radius:var(--radius);padding:12px;max-height:400px;overflow-y:auto;font-family:var(--font-mono);font-size:0.8rem;line-height:1.6">
+            <div style="background:var(--surface-sunken);border:1px solid var(--border);border-radius:var(--radius);padding:12px;max-height:400px;overflow-y:auto;font-family:var(--font-mono);font-size:0.8rem;line-height:1.6">
                 <template x-for="(line, i) in logs" :key="i">
-                    <div translate="no" x-text="line" :style="line.includes('ERROR') || line.includes('error') ? 'color:var(--danger)' : line.includes('WARNING') ? 'color:var(--warning)' : 'color:var(--text-secondary)'"></div>
+                    <div translate="no" x-text="line" :style="{ color: line.includes('ERROR') || line.includes('error') ? 'var(--danger)' : line.includes('WARNING') ? 'var(--warning)' : 'var(--text-secondary)' }"></div>
                 </template>
                 <div x-show="logsLoaded && logs.length === 0" style="color:var(--text-muted)" x-cloak>{{ t('settings.no_logs_available') }}</div>
             </div>
         </div>
 
         <!-- Backup/Restore -->
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.backup_maintenance') }}</h3>
             <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 12px 0">{{ t('settings.settings_backup_hint') }}</p>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
-                <button class="btn btn-secondary" @click="createBackup()"><span class="ki" data-icon="package" aria-hidden="true"></span> {{ t('settings.download_backup') }}</button>
+                <button class="btn btn-secondary" @click="createBackup()"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('package')"></span> {{ t('settings.download_backup') }}</button>
                 <input type="file" accept=".yaml,.yml,.json" id="settings-restore-file" @change="onRestoreFile($event)" style="display:none">
-                <button class="btn btn-secondary" @click="document.getElementById('settings-restore-file').click()" :disabled="restoring"><span class="ki" data-icon="upload" aria-hidden="true"></span> <span x-show="!restoring" x-cloak>{{ t('settings.restore_backup') }}</span><span x-show="restoring" x-cloak>{{ t('settings.restoring') }}</span></button>
-                <button class="btn btn-secondary" x-show="restoreUndo" x-cloak @click="undoRestore()" :disabled="restoring"><span class="ki" data-icon="clock" aria-hidden="true"></span> {{ t('settings.undo_restore') }}</button>
-                <button class="btn btn-secondary" @click="checkUpdates()"><span class="ki" data-icon="refresh" aria-hidden="true"></span> {{ t('settings.check_updates') }}</button>
+                <button class="btn btn-secondary" @click="document.getElementById('settings-restore-file').click()" :disabled="restoring"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('upload')"></span> <span x-show="!restoring" x-cloak>{{ t('settings.restore_backup') }}</span><span x-show="restoring" x-cloak>{{ t('settings.restoring') }}</span></button>
+                <button class="btn btn-secondary" x-show="restoreUndo" x-cloak @click="undoRestore()" :disabled="restoring"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('clock')"></span> {{ t('settings.undo_restore') }}</button>
+                <button class="btn btn-secondary" @click="checkUpdates()"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('refresh')"></span> {{ t('settings.check_updates') }}</button>
             </div>
-            <div x-show="updateInfo" style="margin-top:12px;padding:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius)" x-cloak>
+            <div x-show="updateInfo" class="card-nested" style="margin-top:12px;padding:12px 16px" x-cloak>
                 <template x-if="updateInfo?.update_available">
                     <div>
                         <span class="text-warning">{{ t('settings.update_available') }}</span>
@@ -2724,7 +2739,7 @@
                     </div>
                 </template>
                 <template x-if="updateInfo && !updateInfo?.update_available && !updateInfo?.error">
-                    <span class="text-success" style="display:inline-flex;align-items:center;gap:6px"><span class="ki" data-icon="check-circle" aria-hidden="true"></span> {{ t('settings.running_latest') }}</span>
+                    <span class="text-success" style="display:inline-flex;align-items:center;gap:6px"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('check-circle')"></span> {{ t('settings.running_latest') }}</span>
                 </template>
                 <template x-if="updateInfo?.error">
                     <span class="text-error">{{ t('settings.update_check_failed') }} <bdi translate="no" x-text="updateInfo.error"></bdi></span>
@@ -2739,7 +2754,7 @@
          ═══════════════════════════════════════════════════════════════ -->
     <div x-show="tab === 'packages'" x-transition x-cloak class="pkg-tab">
         <!-- Summary -->
-        <div class="settings-group pkg-summary">
+        <div class="settings-group mb-6 pkg-summary">
             <div class="pkg-summary-text">
                 <h3>{{ t('packages.title') }}</h3>
                 <p class="pkg-muted">
@@ -2765,7 +2780,7 @@
         </div>
 
         <!-- Memory stack health (from live probe) -->
-        <div class="settings-group" x-show="pkgMemory && pkgMemory.status" x-cloak>
+        <div class="settings-group mb-6" x-show="pkgMemory && pkgMemory.status" x-cloak>
             <div class="pkg-section-head">
                 <div class="pkg-section-head-text">
                     <h4 class="pkg-h4">{{ t('packages.memory_stack') }}</h4>
@@ -2811,7 +2826,7 @@
         </div>
 
         <!-- Optional Dependencies -->
-        <div class="settings-group pkg-panel">
+        <div class="settings-group mb-6 pkg-panel">
             <div class="pkg-panel-head">
                 <h4 class="pkg-h4">{{ t('packages.optional_deps') }}</h4>
                 <p class="pkg-muted">{{ t('packages.optional_deps_hint') }}</p>
@@ -2865,7 +2880,7 @@
         </div>
 
         <!-- Core Dependencies -->
-        <div class="settings-group pkg-panel">
+        <div class="settings-group mb-6 pkg-panel">
             <div class="pkg-panel-head pkg-panel-head-row">
                 <h4 class="pkg-h4">{{ t('packages.core_deps') }}</h4>
                 <span class="pkg-muted" x-text="'(' + pkgCore.length + ')'"></span>
@@ -2897,7 +2912,7 @@
         </div>
 
         <!-- Install all -->
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h4 class="pkg-h4">{{ t('packages.install_all_title') }}</h4>
             <p class="pkg-muted" style="margin:0 0 10px 0;">{{ t('packages.install_all_desc') }}</p>
             {# The Full install from one table (kazma_core/install_components.py):
@@ -2921,7 +2936,7 @@
          ═══════════════════════════════════════════════════════════════ -->
     <div x-show="tab === 'import'" x-transition x-cloak>
         <!-- Export -->
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.export_config') }}</h3>
             <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:12px">{{ t('settings.download_complete_config') }}</p>
             <div style="display:flex;gap:8px;align-items:center">
@@ -2934,7 +2949,7 @@
         </div>
 
         <!-- Import -->
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.import_config') }}</h3>
             <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:12px">{{ t('settings.upload_or_paste') }}</p>
             <div class="form-group">
@@ -2944,7 +2959,7 @@
             <div style="display:flex;gap:12px;margin-bottom:12px">
                 <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem">
                     <input type="file" accept=".yaml,.yml,.json" @change="handleFileUpload($event)" style="display:none" id="import-file-input">
-                    <button class="btn btn-secondary btn-sm" @click="document.getElementById('import-file-input').click()"><span class="ki" data-icon="folder" aria-hidden="true"></span> {{ t('settings.upload_file') }}</button>
+                    <button class="btn btn-secondary btn-sm" @click="document.getElementById('import-file-input').click()"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('folder')"></span> {{ t('settings.upload_file') }}</button>
                 </label>
             </div>
             <div class="form-group">
@@ -2960,7 +2975,7 @@
                 <label>{{ t('settings.select_sections') }}</label>
                 <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">
                     <template x-for="section in availableSections" :key="section">
-                        <label style="display:flex;align-items:center;gap:4px;font-size:0.85rem;padding:4px 8px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer" :style="importSections.includes(section) ? 'border-color:var(--accent);background:rgba(59,130,246,0.08)' : ''">
+                        <label style="display:flex;align-items:center;gap:4px;font-size:0.85rem;padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-pill);cursor:pointer" :style="importSections.includes(section) ? { borderColor: 'var(--accent)', background: 'var(--accent-subtle)', color: 'var(--accent-light)' } : {}">
                             <input type="checkbox" :value="section" x-model="importSections" style="display:none">
                             <span translate="no" x-text="section"></span>
                         </label>
@@ -2975,12 +2990,12 @@
          TAB: EMAIL (Connect Gmail / Microsoft / status)
          ═══════════════════════════════════════════════════════════════ -->
     <div x-show="tab === 'documents'" x-transition x-cloak>
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.documents_title') }}</h3>
-            <div style="margin-bottom:12px;padding:10px 12px;background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.2);border-radius:var(--radius);font-size:0.8rem;color:var(--text-muted);">
-                <span class="ki" data-icon="info" aria-hidden="true"></span>
+            <div class="notice tone-info" style="margin-bottom:12px;">
+                <span class="ki" aria-hidden="true" x-html="KazmaIcons.get('info')"></span>
                 {{ t('settings.documents_hint') }}
-                <a href="/documents" style="margin-left:8px;">{{ t('settings.docs.open_documents_page') }}</a>
+                <a href="/documents" style="margin-inline-start:8px;">{{ t('settings.docs.open_documents_page') }}</a>
             </div>
             {# Where untrusted documents run (security.execution.document_worker_isolation). #}
             <div class="form-group" data-testid="document-worker-profile">
@@ -2999,8 +3014,8 @@
                 </div>
             </div>
             <div x-show="containerProfileNeeded()" x-cloak role="status"
-                 style="margin-bottom:12px;padding:10px 12px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.35);border-radius:var(--radius);font-size:0.8rem;">
-                <span class="ki" data-icon="alert-triangle" aria-hidden="true"></span>
+                 class="notice tone-warning" style="margin-bottom:12px;flex-wrap:wrap;">
+                <span class="ki" aria-hidden="true" x-html="KazmaIcons.get('alert-triangle')"></span>
                 {{ t('settings.docs.container_required_notice') }}
                 <button class="btn btn-sm btn-primary" style="margin-inline-start:8px;" @click="useContainerProfile()"
                         :disabled="documentsSaving || workerProfileFromEnvironment()">
@@ -3008,19 +3023,19 @@
                 </button>
             </div>
             <div class="form-group">
-                <label><input type="checkbox" x-model="documents.enabled"> {{ t('settings.docs.enabled_durable_writes') }}</label>
+                <label class="toggle-row"><span class="toggle"><input type="checkbox" x-model="documents.enabled"><span class="toggle-slider"></span></span><span>{{ t('settings.docs.enabled_durable_writes') }}</span></label>
             </div>
             <div class="form-group">
-                <label><input type="checkbox" x-model="documents.shadow"> {{ t('settings.docs.shadow_mode') }}</label>
+                <label class="toggle-row"><span class="toggle"><input type="checkbox" x-model="documents.shadow"><span class="toggle-slider"></span></span><span>{{ t('settings.docs.shadow_mode') }}</span></label>
             </div>
             <div class="form-group">
-                <label><input type="checkbox" x-model="documents.default_authoritative"> {{ t('settings.docs.default_authoritative') }}</label>
+                <label class="toggle-row"><span class="toggle"><input type="checkbox" x-model="documents.default_authoritative"><span class="toggle-slider"></span></span><span>{{ t('settings.docs.default_authoritative') }}</span></label>
             </div>
             <div class="form-group">
                 <label>{{ t('settings.docs.mode_live') }}</label>
                 <div class="form-hint" x-text="documents.mode ? tOr('settings.docs.mode_' + documents.mode, documents.mode) : '—'"></div>
             </div>
-            <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div class="two-col-grid">
                 <div class="form-group">
                     <label>{{ t('settings.docs.max_file_bytes') }}</label>
                     <input type="number" class="form-input" x-model.number="documents.intake_max_bytes" min="1024">
@@ -3051,13 +3066,13 @@
                 </div>
             </div>
             <div class="form-group">
-                <label><input type="checkbox" x-model="documents.security_malware_fail_closed"> {{ t('settings.docs.malware_fail_closed') }}</label>
+                <label class="toggle-row"><span class="toggle"><input type="checkbox" x-model="documents.security_malware_fail_closed"><span class="toggle-slider"></span></span><span>{{ t('settings.docs.malware_fail_closed') }}</span></label>
             </div>
             <div class="form-group">
-                <label><input type="checkbox" x-model="documents.ocr_enabled"> {{ t('settings.docs.ocr_enabled') }}</label>
+                <label class="toggle-row"><span class="toggle"><input type="checkbox" x-model="documents.ocr_enabled"><span class="toggle-slider"></span></span><span>{{ t('settings.docs.ocr_enabled') }}</span></label>
             </div>
             <div class="form-group">
-                <label><input type="checkbox" x-model="documents.ocr_tables"> {{ t('settings.docs.ocr_tables') }}</label>
+                <label class="toggle-row"><span class="toggle"><input type="checkbox" x-model="documents.ocr_tables"><span class="toggle-slider"></span></span><span>{{ t('settings.docs.ocr_tables') }}</span></label>
             </div>
             <div class="form-group">
                 <label>{{ t('settings.docs.ocr_engine') }}</label>
@@ -3069,10 +3084,10 @@
                 <div class="form-hint" x-text="documents.ocr_engine_health && documents.ocr_engine_health.neural_ready ? t('settings.docs.ocr_engine_neural_ready') : t('settings.docs.ocr_engine_neural_missing')"></div>
             </div>
             <div class="form-group">
-                <label><input type="checkbox" x-model="documents.gc_enabled"> {{ t('settings.docs.gc_enabled') }}</label>
+                <label class="toggle-row"><span class="toggle"><input type="checkbox" x-model="documents.gc_enabled"><span class="toggle-slider"></span></span><span>{{ t('settings.docs.gc_enabled') }}</span></label>
             </div>
             <div class="form-group">
-                <label><input type="checkbox" x-model="documents.indexing_enabled"> {{ t('settings.docs.indexing_enabled') }}</label>
+                <label class="toggle-row"><span class="toggle"><input type="checkbox" x-model="documents.indexing_enabled"><span class="toggle-slider"></span></span><span>{{ t('settings.docs.indexing_enabled') }}</span></label>
             </div>
             <div class="form-hint" style="margin-bottom:8px;">
                 {{ t('settings.docs.scanner') }}
@@ -3081,12 +3096,12 @@
             <button class="btn btn-primary" @click="saveDocuments()" :disabled="documentsSaving">
                 {{ t('settings.documents_save') }}
             </button>
-            <span translate="no" class="form-hint" style="margin-left:8px;" x-text="documentsStatus"></span>
+            <span translate="no" class="form-hint" style="margin-inline-start:8px;" x-text="documentsStatus"></span>
         </div>
     </div>
 
     <div x-show="tab === 'email'" x-transition x-cloak>
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px;flex-wrap:wrap;">
                 <div>
                     <h3 style="margin:0;">{{ t('settings.email_title') }}</h3>
@@ -3096,7 +3111,7 @@
             </div>
 
             <!-- Active mode banner -->
-            <div style="padding:12px 14px;border-radius:8px;border:1px solid var(--border-subtle);background:var(--bg-elevated);margin-bottom:20px;">
+            <div class="card-nested" style="padding:16px;margin-bottom:20px;">
                 <div style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-muted);margin-bottom:4px;">{{ t('settings.email_active_provider') }}</div>
                 <div style="font-family:var(--font-mono);font-size:1rem;font-weight:600;" translate="no" x-text="emailStatus.active_provider || 'sandbox'"></div>
                 <p style="margin:8px 0 0 0;font-size:0.8rem;color:var(--text-tertiary);">{{ t('settings.email_auto_hint') }}</p>
@@ -3104,26 +3119,26 @@
 
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;">
                 <!-- Sandbox card -->
-                <div class="card" style="padding:16px;border:1px solid var(--border-subtle);">
+                <div class="card-nested">
                     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
                         <h4 style="margin:0;">{{ t('settings.email_sandbox') }}</h4>
-                        <span class="badge badge-stdio" style="font-size:0.7rem;">{{ t('settings.email_always_on') }}</span>
+                        <span class="badge badge-success">{{ t('settings.email_always_on') }}</span>
                     </div>
                     <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 12px 0;">{{ t('settings.email_sandbox_desc') }}</p>
                     <p style="font-size:0.8rem;margin:0;color:var(--text-secondary);">{{ t('settings.email_sandbox_try') }}</p>
                 </div>
 
                 <!-- Gmail card -->
-                <div class="card" style="padding:16px;border:1px solid var(--border-subtle);">
+                <div class="card-nested">
                     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
                         <h4 style="margin:0;" translate="no">Gmail / Google Workspace</h4>
-                        <span class="badge" :class="emailStatus.gmail_configured ? 'badge-stdio' : 'badge-basic'" style="font-size:0.7rem;"
+                        <span class="badge" :class="emailStatus.gmail_configured ? 'badge-success' : 'badge-warning'"
                               x-text="emailStatus.gmail_configured ? t('settings.email_connected') : t('settings.email_not_connected')"></span>
                     </div>
                     <div x-show="emailStatus.gmail_configured" style="margin-bottom:12px;font-size:0.85rem;" x-cloak>
                         <span style="color:var(--text-tertiary);">{{ t('settings.email_address') }}:</span>
                         <code x-text="emailStatus.gmail_address || '—'"></code>
-                        <span class="badge badge-basic" style="font-size:0.65rem;margin-left:6px;"
+                        <span class="badge badge-neutral" style="margin-inline-start:6px;"
                               x-text="(emailStatus.gmail_auth_mode || '').toUpperCase() || '—'"></span>
                     </div>
                     <!-- Mode switcher -->
@@ -3139,8 +3154,8 @@
                         <p style="font-size:0.8rem;color:var(--text-tertiary);margin:0 0 12px 0;">{{ t('settings.calendar_gmail_oauth_note') }}</p>
                         <p style="font-size:0.8rem;margin:0 0 12px 0;">
                             <span style="color:var(--text-tertiary);">{{ t('settings.email_gmail_oauth_client_status') }}:</span>
-                            <span class="badge" style="font-size:0.65rem;margin-left:6px;"
-                                  :class="emailStatus.gmail_oauth_client_set ? 'badge-stdio' : 'badge-basic'"
+                            <span class="badge" style="margin-inline-start:6px;"
+                                  :class="emailStatus.gmail_oauth_client_set ? 'badge-success' : 'badge-warning'"
                                   x-text="emailStatus.gmail_oauth_client_set ? t('settings.email_gmail_oauth_client_ready') : t('settings.email_gmail_oauth_client_missing')"></span>
                         </p>
                         <div class="form-group" style="margin-bottom:8px;">
@@ -3197,16 +3212,16 @@
                 </div>
 
                 <!-- Microsoft card -->
-                <div class="card" style="padding:16px;border:1px solid var(--border-subtle);">
+                <div class="card-nested">
                     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
                         <h4 style="margin:0;" translate="no">Microsoft 365 / Outlook</h4>
-                        <span class="badge" :class="emailStatus.microsoft_configured ? 'badge-stdio' : 'badge-basic'" style="font-size:0.7rem;"
+                        <span class="badge" :class="emailStatus.microsoft_configured ? 'badge-success' : 'badge-warning'"
                               x-text="emailStatus.microsoft_configured ? t('settings.email_connected') : t('settings.email_not_connected')"></span>
                     </div>
                     <div x-show="emailStatus.microsoft_configured" style="margin-bottom:12px;font-size:0.85rem;" x-cloak>
                         <span style="color:var(--text-tertiary);">{{ t('settings.email_address') }}:</span>
                         <code x-text="emailStatus.microsoft_address || (emailStatus.microsoft_auth_mode === 'oauth' ? 'OAuth' : '—')"></code>
-                        <span class="badge badge-basic" style="font-size:0.65rem;margin-left:6px;"
+                        <span class="badge badge-neutral" style="margin-inline-start:6px;"
                               x-text="(emailStatus.microsoft_auth_mode || '').toUpperCase() || '—'"></span>
                     </div>
                     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
@@ -3240,7 +3255,7 @@
                             <div style="margin-top:12px;">
                                 <button class="btn btn-secondary btn-sm" @click="connectMicrosoft()" :disabled="emailMsConnecting || emailSaving"
                                         x-text="emailMsConnecting ? t('settings.email_waiting_auth') : t('settings.email_connect_microsoft_device')"></button>
-                                <div x-show="emailMsDevice.user_code" x-cloak style="margin-top:12px;padding:12px;border-radius:8px;background:var(--bg-primary);border:1px dashed var(--accent, #5e6ad2);">
+                                <div x-show="emailMsDevice.user_code" x-cloak class="notice tone-accent" style="margin-top:12px;"><div style="flex:1;min-width:0;">
                                     <p style="margin:0 0 8px 0;font-size:0.85rem;">{{ t('settings.email_ms_device_hint') }}</p>
                                     <div style="font-size:1.4rem;font-weight:700;letter-spacing:0.12em;font-family:var(--font-mono);" x-text="emailMsDevice.user_code"></div>
                                     <p style="margin:8px 0 0 0;font-size:0.85rem;">
@@ -3249,7 +3264,7 @@
                                         </a>
                                     </p>
                                     <p x-show="emailMsConnecting" style="margin:8px 0 0 0;font-size:0.8rem;color:var(--warning);" x-cloak>{{ t('settings.email_ms_polling') }}</p>
-                                </div>
+                                </div></div>
                             </div>
                         </details>
                     </div>
@@ -3293,7 +3308,7 @@
             </div>
 
             <!-- Calendar (Google / Outlook) — same Google OAuth client as Gmail -->
-            <div class="card" style="padding:16px;border:1px solid var(--border-subtle);margin-top:16px;">
+            <div class="card-nested" style="margin-top:16px;">
                 {# No card-wide badge: it said "Connected" when either calendar
                    was, beside a row saying Outlook was not. #}
                 <h4 style="margin:0 0 8px 0;">{{ t('settings.calendar_title') }}</h4>
@@ -3310,7 +3325,7 @@
                    (2026-09-28). #}
                 <div class="calendar-provider-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--border-subtle);">
                     <strong style="min-width:9rem;">{{ t('settings.calendar_google') }}</strong>
-                    <span class="badge" :class="calendarStatus.google_connected ? 'badge-stdio' : 'badge-basic'" style="font-size:0.7rem;"
+                    <span class="badge" :class="calendarStatus.google_connected ? 'badge-success' : 'badge-warning'"
                           x-text="calendarStatus.google_connected ? t('settings.email_connected') : t('settings.email_not_connected')"></span>
                     <code translate="no" x-show="calendarStatus.google_address" x-cloak x-text="calendarStatus.google_address"></code>
                     <span style="flex:1;"></span>
@@ -3322,7 +3337,7 @@
                 </div>
                 <div class="calendar-provider-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--border-subtle);">
                     <strong style="min-width:9rem;">{{ t('settings.calendar_outlook') }}</strong>
-                    <span class="badge" :class="calendarStatus.outlook_connected ? 'badge-stdio' : 'badge-basic'" style="font-size:0.7rem;"
+                    <span class="badge" :class="calendarStatus.outlook_connected ? 'badge-success' : 'badge-warning'"
                           x-text="calendarStatus.outlook_connected ? t('settings.email_connected') : t('settings.email_not_connected')"></span>
                     <code translate="no" x-show="calendarStatus.outlook_address" x-cloak x-text="calendarStatus.outlook_address"></code>
                     <span style="flex:1;"></span>
@@ -3339,7 +3354,7 @@
                     <summary style="cursor:pointer;font-size:0.8rem;color:var(--text-tertiary);">{{ t('settings.calendar_outlook_code_fallback') }}</summary>
                     <div style="margin-top:8px;">
                         <button class="btn btn-secondary btn-sm" @click="connectOutlookCalendarWithCode()" :disabled="calendarMsPolling || emailSaving">{{ t('settings.calendar_outlook_code_start') }}</button>
-                        <div x-show="calendarMsDevice.user_code" x-cloak style="margin-top:8px;padding:10px;border-radius:8px;background:var(--bg-primary);border:1px dashed var(--accent, #5e6ad2);">
+                        <div x-show="calendarMsDevice.user_code" x-cloak class="notice tone-accent" style="margin-top:8px;"><div style="flex:1;min-width:0;">
                             <p style="margin:0 0 6px 0;font-size:0.85rem;">{{ t('settings.email_ms_device_hint') }}</p>
                             <div translate="no" style="font-size:1.3rem;font-weight:700;letter-spacing:0.12em;font-family:var(--font-mono);" x-text="calendarMsDevice.user_code"></div>
                             <p style="margin:6px 0 0 0;font-size:0.85rem;">
@@ -3347,7 +3362,7 @@
                                    x-text="calendarMsDevice.verification_uri"></a>
                             </p>
                             <p x-show="calendarMsPolling" x-cloak style="margin:6px 0 0 0;font-size:0.8rem;color:var(--warning);">{{ t('settings.email_ms_polling') }}</p>
-                        </div>
+                        </div></div>
                     </div>
                 </details>
             </div>
@@ -3358,17 +3373,17 @@
                under a short name chat uses ("check my work inbox"), keeps its
                tokens under that name only, and brings its calendar with its
                sign-in. Accounts written in .env are listed, not changed. #}
-            <div class="card" style="padding:16px;border:1px solid var(--border-subtle);margin-top:16px;">
+            <div class="card-nested" style="margin-top:16px;">
                 <h4 style="margin:0 0 8px 0;">{{ t('settings.email_accounts_title') }}</h4>
                 <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 12px 0;">{{ t('settings.email_accounts_hint') }}</p>
                 <template x-for="a in otherEmailAccounts()" :key="a.alias">
                     <div class="email-account-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--border-subtle);">
                         <strong translate="no" style="min-width:7rem;" x-text="a.alias"></strong>
-                        <span class="badge" translate="no" style="font-size:0.7rem;" x-text="emailAccountKind(a.type)"></span>
+                        <span class="badge badge-neutral" translate="no" x-text="emailAccountKind(a.type)"></span>
                         <code translate="no" x-text="a.address || '—'"></code>
-                        <span class="badge" style="font-size:0.7rem;" :class="a.auth === 'incomplete' ? 'badge-basic' : 'badge-stdio'" x-text="emailAccountAuth(a)"></span>
-                        <span class="badge" style="font-size:0.7rem;" x-show="a.calendar" x-cloak>{{ t('settings.email_account_calendar') }}</span>
-                        <span class="badge" translate="no" style="font-size:0.7rem;" x-show="a.source === 'env'" x-cloak title="{{ t('settings.email_account_env_hint') }}">.env</span>
+                        <span class="badge" :class="a.auth === 'incomplete' ? 'badge-warning' : 'badge-success'" x-text="emailAccountAuth(a)"></span>
+                        <span class="badge badge-info" x-show="a.calendar" x-cloak>{{ t('settings.email_account_calendar') }}</span>
+                        <span class="badge badge-neutral" translate="no" x-show="a.source === 'env'" x-cloak title="{{ t('settings.email_account_env_hint') }}">.env</span>
                         <span style="flex:1;"></span>
                         <button class="btn btn-secondary btn-sm" x-show="a.removable && a.auth !== 'password' && (a.type === 'gmail' || a.type === 'microsoft')" x-cloak
                                 @click="reconnectEmailAccount(a)" :disabled="emailSaving">{{ t('settings.email_account_reconnect') }}</button>
@@ -3386,7 +3401,7 @@
                     <summary style="cursor:pointer;font-size:0.8rem;color:var(--text-tertiary);">{{ t('settings.email_account_code_fallback') }}</summary>
                     <div style="margin-top:8px;">
                         <button class="btn btn-secondary btn-sm" @click="addMicrosoftAccountWithCode()" :disabled="accountMsPolling || emailSaving">{{ t('settings.email_account_code_start') }}</button>
-                        <div x-show="accountMsDevice.user_code" x-cloak style="margin-top:8px;padding:10px;border-radius:8px;background:var(--bg-primary);border:1px dashed var(--accent, #5e6ad2);">
+                        <div x-show="accountMsDevice.user_code" x-cloak class="notice tone-accent" style="margin-top:8px;"><div style="flex:1;min-width:0;">
                             <p style="margin:0 0 6px 0;font-size:0.85rem;">{{ t('settings.email_ms_device_hint') }}</p>
                             <div translate="no" style="font-size:1.3rem;font-weight:700;letter-spacing:0.12em;font-family:var(--font-mono);" x-text="accountMsDevice.user_code"></div>
                             <p style="margin:6px 0 0 0;font-size:0.85rem;">
@@ -3394,7 +3409,7 @@
                                    x-text="accountMsDevice.verification_uri"></a>
                             </p>
                             <p x-show="accountMsPolling" x-cloak style="margin:6px 0 0 0;font-size:0.8rem;color:var(--warning);">{{ t('settings.email_ms_polling') }}</p>
-                        </div>
+                        </div></div>
                     </div>
                 </details>
                 <div x-show="emailAccountForm.open" x-cloak style="margin-top:12px;">
@@ -3453,7 +3468,7 @@
             <div><h2>{{ t('settings.xt.control_title') }}</h2><p>{{ t('settings.xt.control_intro') }}</p></div>
             <nav aria-label="{{ t('settings.xt.control_title') }}"><a class="btn btn-primary" href="/x">{{ t('settings.xt.open_studio') }}</a><a class="btn btn-secondary" href="/x?tab=datasets">{{ t('settings.xt.open_datasets') }}</a></nav>
         </section>
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px;flex-wrap:wrap;">
                 <div>
                     <h3 style="margin:0;" id="xr-connection-section">{{ t('settings.x_title') }}</h3>
@@ -3462,7 +3477,7 @@
                 <button class="btn btn-sm btn-secondary" @click="loadXStatus()" :disabled="xLoading" x-text="xLoading ? '…' : t('settings.x_refresh')"></button>
             </div>
 
-            <div style="padding:12px 14px;border-radius:8px;border:1px solid var(--border-subtle);background:var(--bg-elevated);margin-bottom:16px;">
+            <div class="card-nested" style="padding:16px;margin-bottom:16px;">
                 <div style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-muted);margin-bottom:4px;">{{ t('settings.x_status') }}</div>
                 <div style="font-weight:600;">
                     <span x-text="xStatus.configured ? t('settings.x_configured') : t('settings.x_not_configured')"></span>
@@ -3565,19 +3580,19 @@
                      a working preview and a completely inert feature at the same
                      time. That happened on the first live test and a real
                      mention went nowhere with nothing to explain it. -->
-                <p x-show="xReply.live_reason_code" x-cloak
-                   :style="xReply.poller_running && xReply.can_draft
-                           ? 'background:var(--bg-secondary);border-inline-start:3px solid var(--accent);'
-                           : 'background:var(--bg-secondary);border-inline-start:3px solid var(--warning,#c80);'"
-                   style="margin:0 0 16px;padding:10px 12px;border-radius:6px;font-size:0.84rem;">
+                <p x-show="xReply.live_reason_code" x-cloak class="notice"
+                   :class="xReply.poller_running && xReply.can_draft ? 'tone-accent' : 'tone-warning'"
+                   style="margin:0 0 16px;font-size:0.84rem;">
+                    <span>
                     <strong x-text="xReply.mode === 'auto' && xReply.auto_qualification_hold_code ? t('settings.xt.review_held') : (xReply.poller_running && xReply.can_draft) ? t('settings.xt.live') : t('settings.xt.not_live')"></strong>
                     <span x-text="' — ' + xReplyLiveReason()"></span>
                     <span translate="no" x-show="xReply.live_reason_code === 'policy_errors'" x-cloak
                           x-text="' ' + ((xReply.live_reason_values || {}).errors || '')"></span>
+                    </span>
                 </p>
 
                 <template x-if="!xReply.connector_ready">
-                    <p style="font-size:0.85rem;color:var(--warning,#c80);margin-bottom:12px;">
+                    <p style="font-size:0.85rem;color:var(--warning);margin-bottom:12px;">
                         {{ t('settings.xt.not_ready') }}
                     </p>
                 </template>
@@ -3685,7 +3700,7 @@
                             <option value="allowlist">{{ t('settings.xt.who_allowlist') }}</option>
                             <option value="anyone">{{ t('settings.xt.who_anyone') }}</option>
                         </select>
-                        <p style="font-size:0.78rem;color:var(--warning,#c80);margin-top:4px;"
+                        <p style="font-size:0.78rem;color:var(--warning);margin-top:4px;"
                            x-show="xReply.summoner_policy === 'anyone'" x-cloak>
                             {{ t('settings.xt.anyone_warning') }}
                         </p>
@@ -3763,9 +3778,9 @@
                 <p style="font-size:0.78rem;color:var(--text-tertiary);margin:4px 0 12px;">
                     {{ t('settings.xt.stance_hint') }}
                     <span x-show="xReply.mode === 'auto' && xReply.auto_qualification_hold_code" x-cloak
-                          style="display:block;color:var(--warning,#c80);" x-text="xReplyHoldText()"></span>
+                          style="display:block;color:var(--warning);" x-text="xReplyHoldText()"></span>
                     <span x-show="xReply.mode === 'auto' && !xReply.stance_check" x-cloak
-                          style="color:var(--warning,#c80);">
+                          style="color:var(--warning);">
                         {{ t('settings.xt.stance_off_warning') }}
                     </span>
                 </p>
@@ -4043,7 +4058,7 @@
                 </template>
 
                 <template x-if="xReplyProblems.length">
-                    <ul style="margin-top:12px;color:var(--danger,#c33);font-size:0.85rem;">
+                    <ul style="margin-top:12px;color:var(--danger);font-size:0.85rem;">
                         <template x-for="p in xReplyProblems" :key="p">
                             <li x-text="p"></li>
                         </template>
@@ -4126,7 +4141,7 @@
                                 </p>
                             </template>
                             <template x-if="xReplyPreview.result.saved_comparison">
-                                <section style="margin-bottom:12px;padding:12px;border:1px solid var(--border);border-radius:8px;">
+                                <section class="card-nested" style="margin-bottom:12px;padding:12px 16px;">
                                     <h5>{{ t('settings.xt.saved_result') }}</h5>
                                     <p translate="no" dir="auto" x-text="xReplyPreview.result.saved_comparison.draft || xReplyPreview.result.saved_comparison.reason"></p>
                                     <template x-for="check in (xReplyPreview.result.saved_comparison.checks || [])" :key="check.check">
@@ -4149,13 +4164,13 @@
                                             {{ t('settings.xt.kb_none') }}
                                         </span>
                                     </p>
-                                    <div style="padding:10px;border-radius:6px;background:var(--bg-secondary);white-space:pre-wrap;"
+                                    <div style="padding:10px;border-radius:6px;background:var(--surface-sunken);white-space:pre-wrap;"
                                          translate="no" x-text="xReplyPreview.result.draft"></div>
                                 </div>
                             </template>
                             <p translate="no" x-show="xReplyPreview.result.reason"
                                style="margin-top:8px;font-size:0.82rem;"
-                               :style="xReplyPreview.result.ok ? 'color:var(--text-tertiary)' : 'color:var(--warning,#c80)'"
+                               :style="{ color: xReplyPreview.result.ok ? 'var(--text-tertiary)' : 'var(--warning)' }"
                                x-text="xReplyPreview.result.reason" x-cloak></p>
                             <template x-for="check in (xReplyPreview.result.checks || [])" :key="check.check">
                                 <p :title="check.reason" style="font-size:0.78rem;"
@@ -4206,7 +4221,7 @@
          TAB 14: VOICE SETTINGS
          ═══════════════════════════════════════════════════════════════ -->
     <div x-show="tab === 'voice'" x-transition x-cloak>
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
                 <div>
                     <h3 style="margin:0;">{{ t('voice.title') }}</h3>
@@ -4229,7 +4244,7 @@
                 <div style="height:1px; background:var(--border-subtle); margin:16px 0;"></div>
 
                 <!-- Platform auto voice-note replies (Telegram/Discord/Slack) -->
-                <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:16px; padding:12px 14px; background:var(--surface-raised, var(--boost, #161d27)); border:1px solid var(--border-subtle, var(--border)); border-radius:8px;">
+                <div class="card-nested" style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px;padding:16px;">
                     <div style="flex:1; min-width:0;">
                         <div style="font-weight:600; margin-bottom:4px;">{{ t('voice.tts_reply_title') }}</div>
                         <p style="font-size:0.85rem;color:var(--text-muted);margin:0;">
@@ -4455,7 +4470,7 @@
 
     <!-- Backup tab — universal backup (all DBs + assets + Postgres) -->
     <div x-show="tab === 'backup'" x-transition x-cloak>
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.backup_heading') }}</h3>
             <p class="text-muted" style="margin-bottom:1rem">{{ t('settings.backup_desc') }}</p>
             <div style="display:flex;gap:10px;align-items:center;margin-bottom:1rem">
@@ -4477,15 +4492,17 @@
                 </button>
             </div>
             <!-- Live progress bar -->
-            <div x-show="backupRunning" x-cloak style="margin-bottom:1.25rem;padding:14px;background:rgba(79,140,255,0.06);border:1px solid var(--border);border-radius:var(--radius-card)">
+            <div x-show="backupRunning" x-cloak class="notice tone-accent" style="margin-bottom:1.25rem;">
+                <div style="flex:1;min-width:0;">
                 <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-                    <div class="spinner" style="width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--primary,#4f8cff);border-radius:50%;animation:spin 0.8s linear infinite"></div>
+                    <div class="spinner" style="width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite"></div>
                     <strong :translate="backupProgressText ? 'no' : null" x-text="backupProgressText || t('settings.bk.working')"></strong>
                 </div>
                 <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden">
-                    <div :style="'width:' + (backupProgressPhase === 'done' ? '100%' : backupProgressPhase === 'postgres' ? '85%' : backupProgressPhase === 'assets' ? '60%' : backupProgressPhase === 'databases' ? '35%' : '10%') + ';height:100%;background:var(--primary,#4f8cff);transition:width 0.5s ease'"></div>
+                    <div :style="'width:' + (backupProgressPhase === 'done' ? '100%' : backupProgressPhase === 'postgres' ? '85%' : backupProgressPhase === 'assets' ? '60%' : backupProgressPhase === 'databases' ? '35%' : '10%') + ';height:100%;background:var(--accent);transition:width 0.5s ease'"></div>
                 </div>
                 <p style="font-size:0.75rem;color:var(--text-muted);margin:6px 0 0 0" x-text="t('settings.bk.phase') + ': ' + tOr('settings.bk.phase_' + backupProgressPhase, backupProgressPhase)"></p>
+                </div>
             </div>
             <!-- Result message -->
             <div x-show="backupResult && !backupRunning" x-cloak style="margin-bottom:1.25rem">
@@ -4497,26 +4514,26 @@
                           : (t('settings.backup_failed') + ' ' + (backupResult?.error || ''))"></span>
             </div>
         </div>
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.backup_history') }}</h3>
             <div x-show="backupListLoaded && backupList.length === 0 && !backupRunning" class="empty-state" x-cloak>
                 <p>{{ t('settings.backup_none') }}</p>
             </div>
             <template x-for="b in backupList" :key="b.dir">
-                <div style="padding:10px 14px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius-card);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
+                <div class="card-nested" style="padding:12px 16px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
                     <div>
                         <strong x-text="KazmaFormat.dateTime(b.timestamp)"></strong>
-                        <span class="badge" style="margin-left:8px;font-size:0.7rem;padding:2px 8px;border-radius:10px"
-                              :style="b.trigger === 'manual' ? 'background:rgba(46,213,115,0.15);color:#2ed573' : 'background:rgba(79,140,255,0.15);color:#4f8cff'"
+                        <span class="badge" style="margin-inline-start:8px"
+                              :class="b.trigger === 'manual' ? 'badge-success' : 'badge-accent'"
                               x-text="b.trigger === 'manual' ? t('settings.bk.manual') : t('settings.bk.auto')"></span>
                         <!-- Cloud sync badge -->
-                        <span x-show="b.cloud_synced" class="badge" style="margin-left:4px;font-size:0.7rem;padding:2px 8px;border-radius:10px;background:rgba(155,89,182,0.15);color:#9b59b6"
+                        <span x-show="b.cloud_synced" class="badge badge-info" style="margin-inline-start:4px"
                               :title="t('settings.bk.synced_to_title').replace('{remote}', b.cloud_remote || t('settings.bk.cloud'))"
                               x-text="'☁ ' + (b.cloud_remote ? b.cloud_remote.split(':')[0] : t('settings.bk.cloud_label'))" x-cloak></span>
-                        <span x-show="!b.cloud_synced && b.cloud_skipped_reason" class="badge" style="margin-left:4px;font-size:0.7rem;padding:2px 8px;border-radius:10px;background:rgba(255,193,7,0.12);color:#b8860b"
+                        <span x-show="!b.cloud_synced && b.cloud_skipped_reason" class="badge badge-warning" style="margin-inline-start:4px"
                               title="{{ t('settings.bk.not_synced') }}"
                               x-text="t('settings.bk.local_only')" x-cloak></span>
-                        <span style="margin-left:12px;font-size:0.8rem;color:var(--text-muted)"
+                        <span style="margin-inline-start:12px;font-size:0.8rem;color:var(--text-muted)"
                               x-text="kazmaCount('settings.bk.row_summary', b.databases_ok || 0, { mb: b.size_mb }) + (b.postgres ? ' · PG ✓' : '') + (b.incomplete ? ' · ' + t('settings.bk.incomplete') : '')"></span>
                     </div>
                     <div style="display:flex;gap:6px">
@@ -4528,17 +4545,17 @@
             </template>
         </div>
         <!-- Offsite Backup — Native Cloud Providers -->
-        <div class="settings-group">
+        <div class="settings-group mb-6">
             <h3>{{ t('settings.offsite_heading') }}</h3>
             <p class="text-muted" style="margin-bottom:1rem">{{ t('settings.offsite_desc') }}</p>
 
             <!-- Active provider status banner -->
-            <div x-show="offsiteProvider" x-cloak
-                 style="padding:10px 16px;background:rgba(155,89,182,0.06);border:1px solid rgba(155,89,182,0.2);border-radius:var(--radius-card);margin-bottom:1rem;font-size:0.85rem;display:flex;align-items:center;gap:8px">
-                <span style="font-size:1.1em">☁️</span>
+            <div x-show="offsiteProvider" x-cloak class="notice tone-info"
+                 style="margin-bottom:1rem;">
+                <span class="ki" aria-hidden="true" x-html="KazmaIcons.get('cloud')"></span>
                 <div>
                     <strong x-text="offsiteEnabled ? t('settings.bk.sync_active') : t('settings.bk.sync_disabled')"></strong>
-                    <span style="color:var(--text-muted);margin-left:8px"
+                    <span style="color:var(--text-muted);margin-inline-start:8px"
                           translate="no" x-text="'→ ' + offsiteActiveProviderLabel"></span>
                 </div>
             </div>
@@ -4549,18 +4566,18 @@
             </p>
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:1rem">
                 <!-- Google Drive -->
-                <div style="padding:16px;background:rgba(255,255,255,0.02);border:2px solid var(--border);border-radius:var(--radius-card);cursor:pointer;transition:border-color 0.2s"
-                     :style="offsiteProvider === 'google_drive' ? 'border-color:#4285f4;background:rgba(66,133,244,0.06)' : ''"
+                <div class="card-nested" style="padding:16px;cursor:pointer;transition:border-color 0.2s,box-shadow 0.2s"
+                     :style="offsiteProvider === 'google_drive' ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' } : {}"
                      @click="selectOffsiteProvider('google_drive')">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="google_drive" @click.stop style="accent-color:#4285f4">
-                        <span style="font-size:1.4em">📁</span>
+                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="google_drive" @click.stop style="accent-color:var(--accent)">
+                        <span class="icon-tile icon-tile-sm" aria-hidden="true"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('folder')"></span></span>
                         <strong translate="no">Google Drive</strong>
                         <span x-show="offsiteProviderStatus('google_drive')?.connected && offsiteProviderStatus('google_drive')?.drive_ok !== false" class="text-success" style="font-size:0.8rem" x-cloak>✓</span>
                         <span x-show="offsiteProviderStatus('google_drive')?.connected && offsiteProviderStatus('google_drive')?.drive_ok === false"
-                              style="font-size:0.8rem;color:#ffa502"
+                              style="font-size:0.8rem;color:var(--warning)"
                               :title="offsiteProviderStatus('google_drive')?.drive_error || t('settings.bk.drive_blocked_title')" x-cloak>{{ t('settings.bk.drive_warning') }}</span>
-                        <span x-show="offsiteConfig?.provider === 'google_drive'" style="margin-left:auto;font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(66,133,244,0.15);color:#4285f4" x-cloak>{{ t('settings.bk.active') }}</span>
+                        <span x-show="offsiteConfig?.provider === 'google_drive'" class="badge badge-accent" style="margin-inline-start:auto" x-cloak>{{ t('settings.bk.active') }}</span>
                     </div>
                     <p style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px 0">
                         {{ t('settings.bk.drive_hint') }}
@@ -4572,20 +4589,20 @@
                                 : t('settings.bk.connect')">
                     </button>
                     <p x-show="offsiteProviderStatus('google_drive')?.connected && offsiteProviderStatus('google_drive')?.drive_ok === false" x-cloak
-                       style="font-size:0.72rem;color:#ffa502;margin:6px 0 0 0"
+                       style="font-size:0.72rem;color:var(--warning);margin:6px 0 0 0"
                        x-text="t('settings.bk.drive_blocked').replace('{reason}', offsiteProviderStatus('google_drive')?.drive_error || t('settings.bk.unknown_reason'))"></p>
                 </div>
 
                 <!-- OneDrive -->
-                <div style="padding:16px;background:rgba(255,255,255,0.02);border:2px solid var(--border);border-radius:var(--radius-card);cursor:pointer;transition:border-color 0.2s"
-                     :style="offsiteProvider === 'onedrive' ? 'border-color:#0078d4;background:rgba(0,120,212,0.06)' : ''"
+                <div class="card-nested" style="padding:16px;cursor:pointer;transition:border-color 0.2s,box-shadow 0.2s"
+                     :style="offsiteProvider === 'onedrive' ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' } : {}"
                      @click="selectOffsiteProvider('onedrive')">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="onedrive" @click.stop style="accent-color:#0078d4">
-                        <span style="font-size:1.4em">☁️</span>
+                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="onedrive" @click.stop style="accent-color:var(--accent)">
+                        <span class="icon-tile icon-tile-sm" aria-hidden="true"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('cloud')"></span></span>
                         <strong translate="no">OneDrive</strong>
                         <span x-show="offsiteProviderStatus('onedrive')?.connected" class="text-success" style="font-size:0.8rem" x-cloak>✓</span>
-                        <span x-show="offsiteConfig?.provider === 'onedrive'" style="margin-left:auto;font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(0,120,212,0.15);color:#0078d4" x-cloak>{{ t('settings.bk.active') }}</span>
+                        <span x-show="offsiteConfig?.provider === 'onedrive'" class="badge badge-accent" style="margin-inline-start:auto" x-cloak>{{ t('settings.bk.active') }}</span>
                     </div>
                     <p style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px 0">
                         {{ t('settings.bk.onedrive_hint') }}
@@ -4597,15 +4614,15 @@
                 </div>
 
                 <!-- WD MyCloud / WebDAV -->
-                <div style="padding:16px;background:rgba(255,255,255,0.02);border:2px solid var(--border);border-radius:var(--radius-card);cursor:pointer;transition:border-color 0.2s"
-                     :style="offsiteProvider === 'webdav' ? 'border-color:#2ed573;background:rgba(46,213,115,0.06)' : ''"
+                <div class="card-nested" style="padding:16px;cursor:pointer;transition:border-color 0.2s,box-shadow 0.2s"
+                     :style="offsiteProvider === 'webdav' ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' } : {}"
                      @click="selectOffsiteProvider('webdav')">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="webdav" @click.stop style="accent-color:#2ed573">
-                        <span style="font-size:1.4em">🏠</span>
+                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="webdav" @click.stop style="accent-color:var(--accent)">
+                        <span class="icon-tile icon-tile-sm" aria-hidden="true"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('home')"></span></span>
                         <strong translate="no">WD MyCloud / NAS</strong>
                         <span x-show="offsiteProviderStatus('webdav')?.connected" class="text-success" style="font-size:0.8rem" x-cloak>✓</span>
-                        <span x-show="offsiteConfig?.provider === 'webdav'" style="margin-left:auto;font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(46,213,115,0.15);color:#2ed573" x-cloak>{{ t('settings.bk.active') }}</span>
+                        <span x-show="offsiteConfig?.provider === 'webdav'" class="badge badge-accent" style="margin-inline-start:auto" x-cloak>{{ t('settings.bk.active') }}</span>
                     </div>
                     <div x-show="offsiteProvider === 'webdav'" x-cloak style="margin-top:6px" @click.stop>
                         <input type="text" class="form-input" x-model="offsiteWebdavUrl" translate="no" placeholder="https://nas:5005 / DavWWWRoot" style="width:100%;font-size:0.8rem;margin-bottom:6px">
@@ -4618,15 +4635,15 @@
                 </div>
 
                 <!-- FTP (WD MyCloud OS3 / any FTP server) -->
-                <div style="padding:16px;background:rgba(255,255,255,0.02);border:2px solid var(--border);border-radius:var(--radius-card);cursor:pointer;transition:border-color 0.2s"
-                     :style="offsiteProvider === 'ftp' ? 'border-color:#1abc9c;background:rgba(26,188,156,0.06)' : ''"
+                <div class="card-nested" style="padding:16px;cursor:pointer;transition:border-color 0.2s,box-shadow 0.2s"
+                     :style="offsiteProvider === 'ftp' ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' } : {}"
                      @click="selectOffsiteProvider('ftp')">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="ftp" @click.stop style="accent-color:#1abc9c">
-                        <span style="font-size:1.4em">📡</span>
+                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="ftp" @click.stop style="accent-color:var(--accent)">
+                        <span class="icon-tile icon-tile-sm" aria-hidden="true"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('server')"></span></span>
                         <strong translate="no">FTP / NAS</strong>
                         <span x-show="offsiteProviderStatus('ftp')?.connected" class="text-success" style="font-size:0.8rem" x-cloak>✓</span>
-                        <span x-show="offsiteConfig?.provider === 'ftp'" style="margin-left:auto;font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(26,188,156,0.15);color:#1abc9c" x-cloak>{{ t('settings.bk.active') }}</span>
+                        <span x-show="offsiteConfig?.provider === 'ftp'" class="badge badge-accent" style="margin-inline-start:auto" x-cloak>{{ t('settings.bk.active') }}</span>
                     </div>
                     <div x-show="offsiteProvider === 'ftp'" x-cloak style="margin-top:6px" @click.stop>
                         <div style="display:flex;gap:6px;margin-bottom:6px">
@@ -4643,15 +4660,15 @@
                 </div>
 
                 <!-- S3 / B2 -->
-                <div style="padding:16px;background:rgba(255,255,255,0.02);border:2px solid var(--border);border-radius:var(--radius-card);cursor:pointer;transition:border-color 0.2s"
-                     :style="offsiteProvider === 's3' ? 'border-color:#ff9900;background:rgba(255,153,0,0.06)' : ''"
+                <div class="card-nested" style="padding:16px;cursor:pointer;transition:border-color 0.2s,box-shadow 0.2s"
+                     :style="offsiteProvider === 's3' ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' } : {}"
                      @click="selectOffsiteProvider('s3')">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="s3" @click.stop style="accent-color:#ff9900">
-                        <span style="font-size:1.4em">🪣</span>
+                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="s3" @click.stop style="accent-color:var(--accent)">
+                        <span class="icon-tile icon-tile-sm" aria-hidden="true"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('database')"></span></span>
                         <strong translate="no">S3 / Backblaze B2</strong>
                         <span x-show="offsiteProviderStatus('s3')?.connected" class="text-success" style="font-size:0.8rem" x-cloak>✓</span>
-                        <span x-show="offsiteConfig?.provider === 's3'" style="margin-left:auto;font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(255,153,0,0.15);color:#ff9900" x-cloak>{{ t('settings.bk.active') }}</span>
+                        <span x-show="offsiteConfig?.provider === 's3'" class="badge badge-accent" style="margin-inline-start:auto" x-cloak>{{ t('settings.bk.active') }}</span>
                     </div>
                     <div x-show="offsiteProvider === 's3'" x-cloak style="margin-top:6px" @click.stop>
                         <input type="text" class="form-input" x-model="offsiteS3Key" placeholder="{{ t('settings.bk.s3_key_ph') }}" style="width:100%;font-size:0.8rem;margin-bottom:6px">
@@ -4667,9 +4684,9 @@
 
             <!-- Enable toggle + actions -->
             <div style="display:flex;gap:12px;align-items:center;margin-top:0.5rem">
-                <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem" :style="!offsiteProvider ? 'cursor:not-allowed;opacity:0.5' : 'cursor:pointer'" :title="!offsiteProvider ? t('settings.bk.pick_provider_first') : ''">
-                    <input type="checkbox" x-model="offsiteEnabled" :disabled="!offsiteProvider" @change="saveOffsite()" style="accent-color:var(--primary,#4f8cff)">
-                    {{ t('settings.offsite_enabled') }}
+                <label class="toggle-row" style="margin:0" :aria-disabled="!offsiteProvider ? 'true' : 'false'" :style="!offsiteProvider ? { cursor: 'not-allowed', opacity: '0.5' } : {}" :title="!offsiteProvider ? t('settings.bk.pick_provider_first') : ''">
+                    <span class="toggle"><input type="checkbox" x-model="offsiteEnabled" :disabled="!offsiteProvider" @change="saveOffsite()"><span class="toggle-slider"></span></span>
+                    <span>{{ t('settings.offsite_enabled') }}</span>
                 </label>
                 <span style="flex:1"></span>
                 <button class="btn btn-secondary" @click="testOffsite()" :disabled="offsiteTesting || !offsiteProvider">
@@ -4682,10 +4699,8 @@
             </div>
 
             <!-- Test result -->
-            <div x-show="offsiteTestResult" x-cloak style="margin-top:10px;padding:10px 14px;border-radius:var(--radius-card);font-size:0.85rem"
-                 :style="offsiteTestResult?.ok
-                     ? 'background:rgba(46,213,115,0.08);border:1px solid rgba(46,213,115,0.3)'
-                     : 'background:rgba(255,71,87,0.08);border:1px solid rgba(255,71,87,0.3)'">
+            <div x-show="offsiteTestResult" x-cloak class="notice" style="margin-top:10px;"
+                 :class="offsiteTestResult?.ok ? 'tone-success' : 'tone-danger'">
                 <span translate="no" :class="offsiteTestResult?.ok ? 'text-success' : 'text-error'"
                       x-text="offsiteTestResult?.ok ? '✓ ' + (offsiteTestResult.message || t('settings.bk.test_ok')) : '✗ ' + (offsiteTestResult?.error || t('settings.bk.test_failed'))"></span>
             </div>
@@ -4699,9 +4714,6 @@
 
 </div>
 
-<style>
-[x-cloak] { display: none !important; }
-</style>
 {% endblock %}
 
 {% block scripts %}

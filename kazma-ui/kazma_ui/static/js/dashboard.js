@@ -53,15 +53,23 @@
       }
     }, 60000));
 
-    // Time range selector
-    var rangeBtns = document.querySelectorAll('.range-btn');
+    // Time range selector (the banner's segmented control)
+    var rangeBtns = document.querySelectorAll('#dash-range [data-range]');
     rangeBtns.forEach(function(btn) {
       btn.addEventListener('click', function() {
-        rangeBtns.forEach(function(b) { b.classList.remove('active'); });
+        rangeBtns.forEach(function(b) {
+          b.classList.remove('active');
+          b.setAttribute('aria-pressed', 'false');
+        });
         btn.classList.add('active');
+        btn.setAttribute('aria-pressed', 'true');
         refreshCharts(btn.dataset.range);
       });
     });
+
+    // The charts are drawn from the theme's tokens: draw them again when
+    // the theme or the accent changes (removed by teardown()).
+    document.addEventListener('kazma:themechange', redrawCharts);
 
     // Refresh button
     var refreshBtn = $('dash-refresh');
@@ -95,35 +103,38 @@
       mcp: '<svg width="20" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>'
     };
 
+    // Each capability is a category of the shared palette (--cat-1..6), or
+    // 0 for the neutral tone; the template's list (DASH_CAPS) is the one
+    // shown. They were thirteen fixed hex colours, X's near-white on white.
     var fallback = [
-      { id: 'doc', name: 'Document Intelligence', desc: 'Intake, OCR, index, redact, generate PDF/DOCX', color: '#3b82f6' },
-      { id: 'web', name: 'Web research', desc: 'web_search, read_url, crawl + Firecrawl/Jina', color: '#0ea5e9' },
-      { id: 'memory', name: 'Cognitive memory', desc: 'V2 beliefs, episodes, PPR, sqlite-vec / pgvector', color: '#38bdf8' },
-      { id: 'swarm', name: 'Swarm engine', desc: 'Autoscaler, breakers, optional Temporal', color: '#f59e0b' },
-      { id: 'hitl', name: 'HITL + commitment', desc: 'Three gates, semantic confirm, MCP sampling HITL', color: '#ef4444' },
-      { id: 'time', name: 'Time travel', desc: 'Snapshot replay and fork', color: '#10b981' },
-      { id: 'email', name: 'Email', desc: 'Gmail / Microsoft OAuth + sandbox', color: '#3b82f6' },
-      { id: 'x', name: 'X publisher', desc: 'Official X API v2; always-on HITL', color: '#e7e9ea' },
-      { id: 'culture', name: 'Arabic & RTL', desc: 'Khaleeji dialect, RTL UI, Majlis, i18n', color: '#ec4899' },
-      { id: 'cua', name: 'Computer use', desc: 'Screenshot→action; Anthropic CUA / Gemini when active', color: '#22d3ee' },
-      { id: 'voice', name: 'Voice duplex', desc: 'LiveKit AEC + barge-in; graph still owns meaning', color: '#a78bfa' },
-      { id: 'ide', name: 'IDE + code index', desc: 'CodeMirror, apply-patch, codebase_search', color: '#34d399' },
-      { id: 'mcp', name: 'MCP + skills', desc: 'MCP tools/resources; sampling HITL; agentskills.io', color: '#fb7185' },
+      { id: 'doc', name: 'Document Intelligence', desc: 'Intake, OCR, index, redact, generate PDF/DOCX', cat: 1 },
+      { id: 'web', name: 'Web research', desc: 'web_search, read_url, crawl + Firecrawl/Jina', cat: 5 },
+      { id: 'memory', name: 'Cognitive memory', desc: 'V2 beliefs, episodes, PPR, sqlite-vec / pgvector', cat: 4 },
+      { id: 'swarm', name: 'Swarm engine', desc: 'Autoscaler, breakers, optional Temporal', cat: 2 },
+      { id: 'hitl', name: 'HITL + commitment', desc: 'Three gates, semantic confirm, MCP sampling HITL', cat: 3 },
+      { id: 'time', name: 'Time travel', desc: 'Snapshot replay and fork', cat: 6 },
+      { id: 'email', name: 'Email', desc: 'Gmail / Microsoft OAuth + sandbox', cat: 1 },
+      { id: 'x', name: 'X publisher', desc: 'Official X API v2; always-on HITL', cat: 0 },
+      { id: 'culture', name: 'Arabic & RTL', desc: 'Khaleeji dialect, RTL UI, Majlis, i18n', cat: 3 },
+      { id: 'cua', name: 'Computer use', desc: 'Screenshot→action; Anthropic CUA / Gemini when active', cat: 5 },
+      { id: 'voice', name: 'Voice duplex', desc: 'LiveKit AEC + barge-in; graph still owns meaning', cat: 4 },
+      { id: 'ide', name: 'IDE + code index', desc: 'CodeMirror, apply-patch, codebase_search', cat: 6 },
+      { id: 'mcp', name: 'MCP + skills', desc: 'MCP tools/resources; sampling HITL; agentskills.io', cat: 2 },
     ];
     var features = (window.DASH_CAPS && window.DASH_CAPS.length)
       ? window.DASH_CAPS
       : fallback;
 
     var dirAttr = isAr ? ' dir="rtl"' : '';
-    var textAlign = isAr ? 'text-align:right;' : '';
 
     var html = features.map(function(f) {
       var icon = svgIcons[f.id] || svgIcons.doc;
-      var color = f.color || '#3b82f6';
-      return '<div' + dirAttr + ' class="feature-cap-card" style="background:var(--card-bg, var(--bg-panel));border:1px solid var(--border-color, var(--border));border-radius:10px;padding:14px;transition:border-color 0.2s;cursor:default;' + textAlign + '" onmouseover="this.style.borderColor=\'' + color + '\'"; onmouseout="this.style.borderColor=\'var(--border-color, var(--border))\'">' +
-        '<div style="color:' + color + ';margin-bottom:8px;display:flex;align-items:center;">' + icon + '</div>' +
-        '<div style="font-weight:600;font-size:0.85rem;margin-bottom:4px;">' + escapeHtml(f.name) + '</div>' +
-        '<div style="font-size:0.72rem;color:var(--text-secondary);line-height:1.3;">' + escapeHtml(f.desc) + '</div>' +
+      var cat = Number(f.cat) || 0;
+      var tone = cat >= 1 && cat <= 6 ? 'dash-cat-' + cat : 'tone-neutral';
+      return '<div' + dirAttr + ' class="feature-cap-card card-nested dash-cap">' +
+        '<span class="icon-tile icon-tile-sm ' + tone + '" aria-hidden="true">' + icon + '</span>' +
+        '<div class="dash-cap-name">' + escapeHtml(f.name) + '</div>' +
+        '<div class="dash-cap-desc">' + escapeHtml(f.desc) + '</div>' +
         '</div>';
     }).join('');
     grid.innerHTML = html;
@@ -132,15 +143,15 @@
   function updateConnectionStatus(status) {
     var el = $('connection-status');
     if (!el) return;
-    var colors = {
-      'connected': 'var(--success)',
-      'disconnected': 'var(--danger)',
-      'connecting': 'var(--warning)',
-      'reconnecting': 'var(--warning)',
+    // A badge in the connection's tone (the banner's live pill).
+    var tones = {
+      'connected': 'badge-success',
+      'disconnected': 'badge-danger',
+      'connecting': 'badge-warning',
+      'reconnecting': 'badge-warning',
     };
-    var state = { text: window.tOr('dashboard.live_' + status, '• ' + status), color: colors[status] || 'var(--text-muted)' };
-    el.textContent = state.text;
-    el.style.color = state.color;
+    el.textContent = window.tOr('dashboard.live_' + status, '• ' + status);
+    el.className = 'badge ' + (tones[status] || 'badge-neutral');
   }
 
   // ── Data Fetching ─────────────────────────────────────
@@ -200,7 +211,8 @@
     ['empty_draft', 'empty_answer', 'argument_recheck', 'plan_block', 'paragraph_miss', 'paragraph_repaired', 'turn_failed'].forEach(function(signal) {
       var item = document.createElement('span');
       item.textContent = window.tOr('dashboard.quality_' + signal, signal) + ': ' + String(totals[signal] || 0);
-      if (totals[signal] && ['empty_answer', 'paragraph_miss', 'turn_failed'].indexOf(signal) >= 0) item.style.color = 'var(--warning)';
+      var attention = totals[signal] && ['empty_answer', 'paragraph_miss', 'turn_failed'].indexOf(signal) >= 0;
+      item.className = 'badge ' + (attention ? 'badge-warning' : 'badge-neutral');
       counts.appendChild(item);
     });
     (data.recent || []).forEach(function(row) {
@@ -342,10 +354,13 @@
       var breakerEl = $('metric-breaker');
       if (cb.is_halted) {
         if (breakerEl) { breakerEl.textContent = dashT('breakerHalted', 'HALTED'); breakerEl.style.color = 'var(--danger)'; }
+        setTileTone('breaker-tile', 'tone-danger');
       } else if (displayCost > 0 && headroom < 0.01 && data.cost) {
         if (breakerEl) { breakerEl.textContent = dashT('breakerWarning', 'WARNING'); breakerEl.style.color = 'var(--warning)'; }
+        setTileTone('breaker-tile', 'tone-warning');
       } else {
         if (breakerEl) { breakerEl.textContent = dashT('breakerOk', 'OK'); breakerEl.style.color = 'var(--success)'; }
+        setTileTone('breaker-tile', 'tone-success');
       }
     }
 
@@ -360,7 +375,7 @@
     if (costEl) {
       if (headroom < 0.01 && data.cost) costEl.style.color = 'var(--danger)';
       else if (headroom < 0.10 && data.cost) costEl.style.color = 'var(--warning)';
-      else costEl.style.color = 'var(--text-primary)';
+      else costEl.style.color = '';  // the tile's own tone
     }
 
   }
@@ -373,6 +388,13 @@
   function setMetric(id, value) {
     var el = document.getElementById(id);
     if (el) el.textContent = value;
+  }
+
+  // A stat tile's tone (.tone-*), kept in step with the reading it shows.
+  function setTileTone(id, tone) {
+    var tile = document.getElementById(id);
+    if (!tile) return;
+    tile.className = String(tile.className || '').replace(/\btone-[a-z]+\b/g, '').trim() + ' ' + tone;
   }
 
   // ── Trace Table ───────────────────────────────────────
@@ -400,28 +422,29 @@
     var tr = document.createElement('tr');
     tr.className = 'trace-row';
 
-    var badgeClass = 'badge-basic';
-    if (trace.status === 'success') badgeClass = 'badge-stdio';
-    else if (trace.status === 'error') badgeClass = 'badge-premium';
-    else if (trace.status === 'warning') badgeClass = 'badge-standard';
+    // A status is a status badge, the server's map (dashboard.py
+    // _get_trace_data): an error used to be the sky-blue "premium" badge.
+    var badgeClass = 'badge-neutral';
+    if (trace.status === 'success') badgeClass = 'badge-success';
+    else if (trace.status === 'error') badgeClass = 'badge-danger';
+    else if (trace.status === 'warning') badgeClass = 'badge-warning';
 
     tr.innerHTML =
-      '<td style="padding:10px 16px;font-family:var(--font-mono);font-size:0.8rem;color:var(--text-muted);white-space:nowrap;">' +
+      '<td class="dash-mono dash-muted" style="white-space:nowrap;">' +
         escapeHtml(trace.time || trace.timestamp || '') + '</td>' +
-      '<td style="padding:10px 16px;"><span class="badge badge-basic" style="font-size:0.7rem;">' +
+      '<td><span class="badge badge-neutral">' +
         traceWord('dashboard.trace_type_', trace.trace_type) + '</span></td>' +
-      '<td translate="no" style="padding:10px 16px;font-weight:500;max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' +
+      '<td translate="no" class="dash-label-cell">' +
         escapeHtml(trace.label || '') + '</td>' +
-      '<td style="padding:10px 16px;"><span class="badge ' + badgeClass + '" style="font-size:0.7rem;">' +
+      '<td><span class="badge ' + badgeClass + '">' +
         traceWord('dashboard.trace_status_', trace.status) + '</span></td>' +
-      '<td style="padding:10px 16px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;">' +
+      '<td class="dash-num dash-mono">' +
         escapeHtml(String(trace.duration_ms || '')) + 'ms</td>' +
-      '<td style="padding:10px 16px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;">' +
+      '<td class="dash-num dash-mono">' +
         escapeHtml(String(trace.tokens || '0')) + '</td>' +
-      '<td style="padding:10px 16px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;color:var(--text-tertiary);">' +
+      '<td class="dash-num dash-mono dash-muted">' +
         escapeHtml(String(trace.cost || '$0.00')) + '</td>';
 
-    tr.style.borderBottom = '1px solid var(--border-subtle)';
     tr.style.animation = 'fadeIn 0.3s ease';
     tbody.insertBefore(tr, tbody.firstChild);
   }
@@ -437,8 +460,7 @@
         if (!data || !data.available) throw new Error('unavailable');
         chartBuckets = Array.isArray(data.buckets) ? data.buckets : [];
         chartUnpriced = Number(data.totals && data.totals.unpriced) || 0;
-        drawTokenChart();
-        drawCostChart();
+        redrawCharts();
       })
       .catch(function() { /* keep the bars on screen; the next refresh tries again */ });
   }
@@ -448,6 +470,57 @@
 
   function chartSeries(field) {
     return chartBuckets.map(function(b) { return { t: b.start * 1000, v: Number(b[field]) || 0 }; });
+  }
+
+  // The charts' colours are the theme's tokens, read at every draw. A
+  // canvas cannot resolve var() or color-mix(), so each token is painted on
+  // a 1x1 probe and read back as its channels (memory_console.js does the
+  // same for the graph). They were fixed blues and greens, with a white
+  // grid that vanished on the light theme and an accent they never followed.
+  var _probe = null;
+  function tokenRgb(name) {
+    try {
+      var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      if (!v) return null;
+      if (!_probe) {
+        var cv = document.createElement('canvas');
+        cv.width = cv.height = 1;
+        _probe = cv.getContext('2d', { willReadFrequently: true });
+      }
+      _probe.clearRect(0, 0, 1, 1);
+      _probe.fillStyle = v;
+      _probe.fillRect(0, 0, 1, 1);
+      var d = _probe.getImageData(0, 0, 1, 1).data;
+      return d[3] ? [d[0], d[1], d[2]] : null;
+    } catch (e) { return null; }
+  }
+  function toHex(rgb) {
+    return '#' + rgb.map(function(c) { return ('0' + Math.round(c).toString(16)).slice(-2); }).join('');
+  }
+  // *a* over *b*: share 1 is all *a*, 0 all *b*.
+  function mixRgb(a, b, share) {
+    return [0, 1, 2].map(function(i) { return a[i] * share + b[i] * (1 - share); });
+  }
+  function chartColors() {
+    var wall = tokenRgb('--surface-card') || tokenRgb('--surface-wall');
+    var accent = tokenRgb('--accent');
+    var success = tokenRgb('--success');
+    var hairline = tokenRgb('--card-hairline');
+    var muted = tokenRgb('--text-muted');
+    if (!wall || !accent || !success || !hairline || !muted) return null;
+    return {
+      barTop: toHex(mixRgb(accent, wall, 0.85)),
+      barBottom: toHex(mixRgb(accent, wall, 0.18)),
+      barCap: toHex(accent),
+      grid: toHex(hairline),
+      line: toHex(success),
+      label: toHex(muted),
+    };
+  }
+
+  function redrawCharts() {
+    drawTokenChart();
+    drawCostChart();
   }
 
   function drawTokenChart() {
@@ -460,12 +533,14 @@
     var w = canvas.width, h = canvas.height;
     ctx.clearRect(0, 0, w, h);
     if (!data.length) return;
+    var colors = chartColors();
+    if (!colors) return;
 
     var max = Math.max.apply(null, data.map(function(d) { return d.v; })) || 1;
     var barW = Math.max(2, (w - 20) / data.length - 2);
 
     // Grid lines
-    ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+    ctx.strokeStyle = colors.grid;
     for (var i = 0; i < 4; i++) {
       var y = (h - 20) * (1 - i / 3);
       ctx.beginPath();
@@ -481,18 +556,17 @@
       var y = h - 15 - barH;
 
       var gradient = ctx.createLinearGradient(x, y, x, h - 15);
-      gradient.addColorStop(0, 'rgba(59, 130, 246, 0.85)');
-      gradient.addColorStop(1, 'rgba(56, 189, 248, 0.18)');
+      gradient.addColorStop(0, colors.barTop);
+      gradient.addColorStop(1, colors.barBottom);
       ctx.fillStyle = gradient;
       ctx.fillRect(x, y, barW, barH);
 
       // Rounded top
-      ctx.fillStyle = 'rgba(96, 165, 250, 1)';
+      ctx.fillStyle = colors.barCap;
       ctx.fillRect(x, y, barW, 2);
     });
 
-    // Label — canvas can't resolve CSS vars; read the computed token
-    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim() || '#8b9bb8';
+    ctx.fillStyle = colors.label;
     ctx.font = '10px "IBM Plex Sans", sans-serif';
     drawChartLabel(ctx, canvas, window.kazmaCount('dashboard.chart_tokens_max', max,
       { n: KS.formatTokens(max) }), 12);
@@ -518,12 +592,15 @@
     var w = canvas.width, h = canvas.height;
     ctx.clearRect(0, 0, w, h);
     if (!data.length) return;
+    var colors = chartColors();
+    if (!colors) return;
 
     var max = Math.max.apply(null, data.map(function(d) { return d.v; })) || 0.0001;
     var stepX = (w - 30) / Math.max(1, data.length - 1);
 
     // Grid
-    ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+    ctx.strokeStyle = colors.grid;
+    ctx.lineWidth = 1;
     for (var i = 0; i < 4; i++) {
       var y = (h - 20) * (1 - i / 3);
       ctx.beginPath();
@@ -534,7 +611,7 @@
 
     // Line
     ctx.beginPath();
-    ctx.strokeStyle = 'rgba(16, 185, 129, 0.8)';
+    ctx.strokeStyle = colors.line;
     ctx.lineWidth = 1.5;
     data.forEach(function(d, i) {
       var x = 18 + i * stepX;
@@ -548,13 +625,13 @@
     data.forEach(function(d, i) {
       var x = 18 + i * stepX;
       var y = 5 + (h - 20) * (1 - d.v / max);
-      ctx.fillStyle = 'rgba(16, 185, 129, 1)';
+      ctx.fillStyle = colors.line;
       ctx.beginPath();
       ctx.arc(x, y, 2, 0, Math.PI * 2);
       ctx.fill();
     });
 
-    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim() || '#8b9bb8';
+    ctx.fillStyle = colors.label;
     ctx.font = '10px "IBM Plex Sans", sans-serif';
     // Calls with no known price are not in the line: the label says how many.
     var costLabel = window.kazmaT('dashboard.chart_cost_max', '{n} max', { n: '$' + max.toFixed(4) });
@@ -703,7 +780,6 @@
       var lists = window.KazmaDashLists;
       visible.forEach(function(s) {
         var tr = document.createElement('tr');
-        tr.style.cssText = 'border-bottom:1px solid var(--border-subtle);transition:background 0.15s;';
         function makeTd(inner, style) {
           var td = document.createElement('td');
           td.style.cssText = style;
@@ -713,7 +789,7 @@
         // The chat: its title (the user's own words, not translated) linking
         // to it, the thread id under it. A thread no chat owns says so.
         var chatTd = document.createElement('td');
-        chatTd.style.cssText = 'padding:10px 12px;max-width:320px;';
+        chatTd.style.cssText = 'max-width:320px;';
         var titleEl = document.createElement(s.session_id ? 'a' : 'span');
         // chat.js opens a chat by ?s= (audit 2026-10-26 AUD-031: ?session= opened the last chat).
         if (s.session_id) titleEl.href = '/chat?s=' + encodeURIComponent(s.session_id);
@@ -730,31 +806,29 @@
         chatTd.appendChild(tidEl);
         tr.appendChild(chatTd);
         var platTd = document.createElement('td');
-        platTd.style.cssText = 'padding:10px 12px;';
         var badge = document.createElement('span');
-        badge.className = 'badge badge-basic';
-        badge.style.cssText = 'font-size:0.7rem;';
+        badge.className = 'badge badge-neutral';
         badge.textContent = platformLabel(s.platform);
         platTd.appendChild(badge);
         if (s.archived) {
           var arch = document.createElement('span');
-          arch.className = 'badge badge-subtle';
-          arch.style.cssText = 'font-size:0.65rem;margin-inline-start:4px;';
+          arch.className = 'badge badge-neutral';
+          arch.style.cssText = 'margin-inline-start:4px;';
           arch.textContent = label('dashboard.chat_archived', 'Archived');
           platTd.appendChild(arch);
         }
         tr.appendChild(platTd);
-        var numStyle = 'padding:10px 12px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;';
+        var numStyle = 'text-align:end;font-family:var(--font-mono);font-size:13px;';
         tr.appendChild(makeTd(s.message_count == null ? '—' : fmtNumber(s.message_count), numStyle));
         tr.appendChild(makeTd(fmtNumber(s.steps || 0), numStyle));
-        var whenTd = makeTd(fmtRelative(s.last_activity) || '—', 'padding:10px 12px;font-size:0.75rem;color:var(--text-muted);');
+        var whenTd = makeTd(fmtRelative(s.last_activity) || '—', 'font-size:13px;color:var(--text-muted);');
         whenTd.title = fmtDateTime(s.last_activity);
         tr.appendChild(whenTd);
         var delTd = document.createElement('td');
-        delTd.style.cssText = 'padding:10px 12px;text-align:center;';
+        delTd.style.cssText = 'text-align:center;';
         var btn = document.createElement('button');
+        btn.type = 'button';
         btn.className = 'btn btn-sm btn-danger';
-        btn.style.cssText = 'padding:4px 8px;font-size:0.7rem;';
         btn.textContent = label('dashboard.delete', 'Delete');
         btn.onclick = function() { window._deleteSession && window._deleteSession(s.thread_id); };
         delTd.appendChild(btn);
@@ -892,6 +966,7 @@
    * pollers and the telemetry stream (audit 2026-10-26 AUD-030).
    */
   function teardown() {
+    document.removeEventListener('kazma:themechange', redrawCharts);
     _timers.forEach(function (id) { clearInterval(id); });
     _timers = [];
     try { if (ws && ws.close) ws.close(); } catch (e) {}
@@ -902,6 +977,12 @@
 
   function boot() {
     window.kazmaAddLeaveHook(teardown);
+    // icons.js fills [data-icon] once, at the first page load: a Dashboard
+    // opened from the sidebar showed its stat tiles' and empty states' icon
+    // wells empty. Filled nodes are skipped (data-ki-done).
+    if (window.KazmaIcons && typeof window.KazmaIcons.hydrate === 'function') {
+      try { window.KazmaIcons.hydrate(document.querySelector('.dashboard-container') || document); } catch (e) { /* icons are decoration */ }
+    }
     init();
     startResourceMonitor();
     // The session list ends its own skeleton: with the rows, with "no

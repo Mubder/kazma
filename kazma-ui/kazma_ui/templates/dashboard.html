@@ -11,255 +11,251 @@
 {% block page_title %}{{ t('dashboard.title') }}{% endblock %}
 
 {% block content %}
+{#- The circuit breaker's stat tile takes the tone of its state (dashboard.js
+    keeps it in step with every reading). -#}
+{% set breaker_tone = {'text-success': 'tone-success', 'text-error': 'tone-danger', 'text-warning': 'tone-warning'}.get(breaker_color, 'tone-neutral') %}
 <div class="dashboard-container dash-pro">
 
-  <!-- ── Header ── -->
-  <div class="dash-pro-header">
-    <div>
-      <p class="dash-pro-kicker">{{ t('dashboard.control_plane') }}</p>
-      <h1 class="dash-pro-title">
-        {{ t('dashboard.observability') }}
-      </h1>
-      <p class="dash-pro-sub">
-        {{ t('dashboard.observability_sub') }}
-      </p>
+  <!-- ── Page banner: title, where it sits, the chart range and refresh ── -->
+  <section class="page-banner dash-banner" aria-labelledby="dash-title">
+    <div class="dash-banner-text">
+      <h1 id="dash-title" class="page-banner-title">{{ t('dashboard.observability') }}</h1>
+      <p class="page-banner-crumb">{{ t('nav.activity') }} • {{ t('nav.dashboard') }}</p>
+      <p class="dash-banner-sub">{{ t('dashboard.observability_sub') }}</p>
     </div>
-    <div class="dash-pro-toolbar">
-      <div class="range-selector">
-        <button class="range-btn active" data-range="hour">{{ t('dashboard.range_hour') }}</button>
-        <button class="range-btn" data-range="day">{{ t('dashboard.range_day') }}</button>
-        <button class="range-btn" data-range="week">{{ t('dashboard.range_week') }}</button>
+    <div class="dash-banner-actions">
+      <div id="dash-range" class="segmented" role="group">
+        <button type="button" class="active" aria-pressed="true" data-range="hour">{{ t('dashboard.range_hour') }}</button>
+        <button type="button" aria-pressed="false" data-range="day">{{ t('dashboard.range_day') }}</button>
+        <button type="button" aria-pressed="false" data-range="week">{{ t('dashboard.range_week') }}</button>
       </div>
-      <button id="dash-refresh" class="btn btn-sm btn-secondary" title="{{ t('dashboard.refresh') }}"><span x-html="KazmaIcons.refresh()"></span> {{ t('dashboard.refresh') }}</button>
-      <span id="connection-status" class="dash-live-pill" style="font-size:0.78rem;color:var(--text-muted);padding:4px 10px;border-radius:999px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.03);">● {{ t('dashboard.connecting') }}</span>
+      {# The badge sits on a wall-coloured pill: a status tint over the
+         banner's accent tint read 3.96:1 (success, light). #}
+      <span class="dash-live"><span id="connection-status" class="badge badge-warning" role="status">● {{ t('dashboard.connecting') }}</span></span>
+      <button id="dash-refresh" type="button" class="btn btn-primary" title="{{ t('dashboard.refresh') }}"><span class="ki" data-icon="refresh" aria-hidden="true"></span> {{ t('dashboard.refresh') }}</button>
     </div>
-  </div>
+  </section>
 
   <!-- ── HITL Pending Approvals Panel ── -->
-  <div id="hitl-approvals-panel" class="card hitl-panel dash-pro-card" style="padding:0;overflow:hidden;margin-bottom:1.5rem;">
-    <div class="hitl-panel-head">
-      <div style="display:flex;align-items:center;gap:8px;">
-        <h2 style="font-size:0.875rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.05em;font-weight:500;">
+  <section id="hitl-approvals-panel" class="card hitl-panel dash-section" aria-labelledby="hitl-approvals-title">
+    <div class="card-header">
+      <div class="dash-card-heading">
+        <h2 id="hitl-approvals-title" class="card-title">
           {{ t('dashboard.pending_approvals') }}
+          <span class="hitl-approval-count badge badge-warning" style="display:none;">0</span>
         </h2>
-        <span class="hitl-approval-count badge badge-premium" style="display:none;font-size:0.7rem;min-width:20px;text-align:center;">0</span>
+        <p class="card-sub">{{ t('dashboard.hitl_description') }}</p>
       </div>
-      <div class="hitl-panel-tools">
-        <button id="hitl-clear-all-btn" class="btn btn-sm btn-danger" style="display:none;font-size:0.75rem;padding:3px 10px;">{{ t('dashboard.clear_all') }}</button>
-        <span class="hitl-panel-desc">{{ t('dashboard.hitl_description') }}</span>
-      </div>
+      <button id="hitl-clear-all-btn" type="button" class="btn btn-sm btn-danger" style="display:none;">{{ t('dashboard.clear_all') }}</button>
     </div>
-    <div class="hitl-approval-list" style="padding:16px 20px;">
+    <div class="hitl-approval-list">
       <!-- Approval cards injected by hitl_approval.js -->
     </div>
     {# Hidden until /api/pending-approvals answers with none
        (hitl_approval.js renderApprovals): before that "No pending
        approvals" is a guess, and a question may be waiting. #}
-    <div class="hitl-approval-empty" style="display:none;text-align:center;padding:24px 20px;color:var(--text-muted);">
-      {# data-icon avoids Alpine x-html rendering the literal "undefined" when icons load late #}
-      <div style="display:flex;justify-content:center;margin-bottom:8px;"><span class="ki icon-lg" data-icon="check-circle" aria-hidden="true"></span></div>
-      <p style="margin:0;">{{ t('dashboard.no_pending_approvals') }}</p>
-      <p style="font-size:0.75rem;color:var(--text-tertiary);margin-top:4px;">
-        {{ t('dashboard.no_pending_approvals_hint') }}
-      </p>
-    </div>
-  </div>
-
-  <!-- ── Knowledge crawls: pages by outcome, the daily check (crawl_panel.js) ── -->
-  <section id="crawl-panel" class="card dash-pro-card" aria-labelledby="crawl-panel-title"
-           style="padding:12px 16px;margin-bottom:1.5rem;">
-    <h2 id="crawl-panel-title" style="font-size:0.875rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.05em;font-weight:500;margin:0 0 6px 0;">
-      {{ t('dashboard.crawls.title') }}
-    </h2>
-    <div id="crawl-panel-body" style="font-size:0.85rem;" role="status" aria-live="polite"></div>
-  </section>
-
-  <!-- ── Open problems (resilience plan G2, kazma_core.observability.open_problems) ── -->
-  <section id="problems-panel" class="card dash-pro-card runs-panel" aria-labelledby="problems-title"
-           style="padding:0;overflow:hidden;margin-bottom:1.5rem;">
-    <div class="hitl-panel-head">
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-        <h2 id="problems-title" style="font-size:0.875rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.05em;font-weight:500;">
-          {{ t('problems.title') }}
-        </h2>
+    <div class="hitl-approval-empty" style="display:none;">
+      <div class="empty-state">
+        {# data-icon avoids Alpine x-html rendering the literal "undefined" when icons load late #}
+        <span class="icon-tile tone-success"><span class="ki" data-icon="check-circle" aria-hidden="true"></span></span>
+        <p class="dash-empty-title">{{ t('dashboard.no_pending_approvals') }}</p>
+        <p class="dash-empty-hint">{{ t('dashboard.no_pending_approvals_hint') }}</p>
       </div>
-      <div class="hitl-panel-tools">
-        <span class="hitl-panel-desc">{{ t('problems.description') }}</span>
-      </div>
-    </div>
-    <div class="runs-body">
-      <p id="problems-loading" class="runs-note">{{ t('problems.loading') }}</p>
-      <p id="problems-error" class="runs-note runs-error" role="alert" hidden></p>
-      <p id="problems-unreadable" class="runs-note runs-error" hidden></p>
-      <ul id="problems-list" class="problems-list"></ul>
-      <p id="problems-empty" class="runs-note" hidden>{{ t('problems.empty') }}</p>
-      <div><button id="problems-show-hidden" type="button" class="btn btn-sm btn-secondary" hidden>{{ t('problems.show_hidden') }}</button></div>
     </div>
   </section>
 
-  <!-- ── Running work (run supervision, kazma_core.runs) ── -->
-  {# The incident to show comes from the template (data-incident-id), never
-     location.search: a soft navigation runs the script before the URL. #}
-  <section id="runs-panel" class="card dash-pro-card runs-panel" data-incident-id="{{ focus_incident }}"
-           aria-labelledby="runs-title" style="padding:0;overflow:hidden;margin-bottom:1.5rem;">
-    <div class="hitl-panel-head">
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-        <h2 id="runs-title" style="font-size:0.875rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.05em;font-weight:500;">
-          {{ t('runs.title') }}
-        </h2>
-        <span id="runs-summary" class="hitl-panel-desc" role="status" aria-live="polite"></span>
-      </div>
-      <div class="hitl-panel-tools">
-        <span class="hitl-panel-desc">{{ t('runs.description') }}</span>
-      </div>
+  <!-- ── Stat tiles ── -->
+  <div class="metrics-grid dash-tiles">
+    <div class="stat-tile tone-success">
+      <div class="stat-tile-icon"><span class="ki" data-icon="dollar-sign" aria-hidden="true"></span></div>
+      <div class="stat-tile-label">{{ t('dashboard.total_cost') }}</div>
+      <div class="stat-tile-value" id="metric-cost">${{ "%.4f"|format(cost_current) }}</div>
+      <div class="dash-tile-sub" id="metric-headroom">${{ "%.4f"|format(cost_headroom) }} {{ t('dashboard.headroom') }}</div>
     </div>
-    <div class="runs-body">
-      <p id="runs-loading" class="runs-note">{{ t('runs.loading') }}</p>
-      <p id="runs-error" class="runs-note runs-error" role="alert" hidden></p>
-      <p id="runs-supervisor-off" class="runs-note runs-error" hidden>{{ t('runs.supervisor_off') }}</p>
-      <div id="runs-incidents" class="runs-incidents"></div>
-      <p id="runs-empty" class="runs-note" hidden>{{ t('runs.empty') }}</p>
-      <ul id="runs-list" class="runs-list"></ul>
-      <details id="runs-history" class="runs-fold" hidden>
-        <summary>{{ t('runs.history_title') }}</summary>
-        <div id="runs-history-list" class="runs-incidents"></div>
-      </details>
-      <details id="runs-runbooks" class="runs-fold">
-        <summary>{{ t('runs.runbooks_title') }}</summary>
-        <p class="runs-note">{{ t('runs.runbooks_hint') }}</p>
-        <div id="runs-runbook-list" class="runs-runbook-list"></div>
-      </details>
+    <div class="stat-tile tone-accent" id="spend-today-card">
+      <div class="stat-tile-icon"><span class="ki" data-icon="trending-up" aria-hidden="true"></span></div>
+      <div class="stat-tile-label">{{ t('dashboard.spend_today') }}</div>
+      <div class="stat-tile-value" id="metric-spend-today">—</div>
+      <div class="dash-tile-sub" id="metric-spend-limit">{{ t('dashboard.spend_today_loading') }}</div>
     </div>
-  </section>
-
-  <!-- ── Metrics Row ── -->
-  <div class="metrics-grid">
-    <div class="metric-card">
-      <div class="metric-icon"><span class="ki" data-icon="dollar-sign" aria-hidden="true"></span></div>
-      <div class="metric-label">{{ t('dashboard.total_cost') }}</div>
-      <div class="metric-value" id="metric-cost">${{ "%.4f"|format(cost_current) }}</div>
-      <div class="metric-sub" id="metric-headroom">${{ "%.4f"|format(cost_headroom) }} {{ t('dashboard.headroom') }}</div>
+    <div class="stat-tile tone-info">
+      <div class="stat-tile-icon"><span class="ki" data-icon="hash" aria-hidden="true"></span></div>
+      <div class="stat-tile-label">{{ t('dashboard.total_tokens') }}</div>
+      <div class="stat-tile-value" id="metric-tokens">{{ metrics.total_tokens }}</div>
+      <div class="dash-tile-sub" id="metric-llm-calls">{{ t_plural('dashboard.count_llm_calls', metrics.total_llm_calls) }}</div>
     </div>
-    <div class="metric-card" id="spend-today-card">
-      <div class="metric-icon"><span class="ki" data-icon="trending-up" aria-hidden="true"></span></div>
-      <div class="metric-label">{{ t('dashboard.spend_today') }}</div>
-      <div class="metric-value" id="metric-spend-today">—</div>
-      <div class="metric-sub" id="metric-spend-limit">{{ t('dashboard.spend_today_loading') }}</div>
+    <div class="stat-tile tone-accent">
+      <div class="stat-tile-icon"><span class="ki" data-icon="wrench" aria-hidden="true"></span></div>
+      <div class="stat-tile-label">{{ t('dashboard.tool_calls') }}</div>
+      <div class="stat-tile-value" id="metric-tools">{{ metrics.total_tool_calls }}</div>
+      <div class="dash-tile-sub" id="metric-traces">{{ t_plural('dashboard.count_traces', metrics.total_traces) }}</div>
     </div>
-    <div class="metric-card">
-      <div class="metric-icon"><span class="ki" data-icon="hash" aria-hidden="true"></span></div>
-      <div class="metric-label">{{ t('dashboard.total_tokens') }}</div>
-      <div class="metric-value" id="metric-tokens">{{ metrics.total_tokens }}</div>
-      <div class="metric-sub" id="metric-llm-calls">{{ t_plural('dashboard.count_llm_calls', metrics.total_llm_calls) }}</div>
-    </div>
-    <div class="metric-card">
-      <div class="metric-icon"><span class="ki" data-icon="wrench" aria-hidden="true"></span></div>
-      <div class="metric-label">{{ t('dashboard.tool_calls') }}</div>
-      <div class="metric-value" id="metric-tools">{{ metrics.total_tool_calls }}</div>
-      <div class="metric-sub" id="metric-traces">{{ t_plural('dashboard.count_traces', metrics.total_traces) }}</div>
-    </div>
-    <div class="metric-card">
-      <div class="metric-icon"><span class="ki" data-icon="plug" aria-hidden="true"></span></div>
-      <div class="metric-label">{{ t('dashboard.circuit_breaker') }}</div>
-      <div class="metric-value {{ breaker_color }}" id="metric-breaker">{{ breaker_status }}</div>
+    <div class="stat-tile {{ breaker_tone }}" id="breaker-tile">
+      <div class="stat-tile-icon"><span class="ki" data-icon="plug" aria-hidden="true"></span></div>
+      <div class="stat-tile-label">{{ t('dashboard.circuit_breaker') }}</div>
+      <div class="stat-tile-value" id="metric-breaker">{{ breaker_status }}</div>
       {# The backend's name in each language's own word order, set apart:
          "console backend" read "console الخادم" in Arabic. #}
       {% set backend_parts = t('dashboard.backend_named').split('{name}') %}
-      <div class="metric-sub">{{ backend_parts[0] }}<bdi translate="no">{{ tracing_backend }}</bdi>{{ backend_parts[1] if backend_parts|length > 1 else '' }}</div>
+      <div class="dash-tile-sub">{{ backend_parts[0] }}<bdi translate="no">{{ tracing_backend }}</bdi>{{ backend_parts[1] if backend_parts|length > 1 else '' }}</div>
     </div>
-    <div class="metric-card">
-      <div class="metric-icon" x-html="KazmaIcons.clock()"></div>
-      <div class="metric-label">{{ t('dashboard.uptime') }}</div>
-      <div class="metric-value" id="metric-uptime" style="color:var(--text-primary);">{{ metrics.uptime }}</div>
-      <div class="metric-sub" id="silence-info">{{ silence_info }}</div>
+    <div class="stat-tile tone-info">
+      <div class="stat-tile-icon" x-html="KazmaIcons.clock()"></div>
+      <div class="stat-tile-label">{{ t('dashboard.uptime') }}</div>
+      <div class="stat-tile-value" id="metric-uptime">{{ metrics.uptime }}</div>
+      <div class="dash-tile-sub" id="silence-info">{{ silence_info }}</div>
     </div>
-    <div class="metric-card" title="{{ t('dashboard.active_model') }}">
-      <div class="metric-icon"><span class="ki" data-icon="cpu" aria-hidden="true"></span></div>
-      <div class="metric-label">{{ t('dashboard.active_model') }}</div>
-      <div class="metric-value" id="metric-active-model" translate="no" style="color:var(--text-primary);font-size:0.95rem;word-break:break-all;">{{ active_model or '—' }}</div>
-      <div class="metric-sub" id="metric-active-provider" translate="no">{{ active_provider or t('dashboard.provider') }}</div>
+    <div class="stat-tile tone-neutral" title="{{ t('dashboard.active_model') }}">
+      <div class="stat-tile-icon"><span class="ki" data-icon="cpu" aria-hidden="true"></span></div>
+      <div class="stat-tile-label">{{ t('dashboard.active_model') }}</div>
+      <div class="stat-tile-value dash-tile-value-text" id="metric-active-model" translate="no">{{ active_model or '—' }}</div>
+      <div class="dash-tile-sub" id="metric-active-provider" translate="no">{{ active_provider or t('dashboard.provider') }}</div>
     </div>
   </div>
-
-  <section class="chart-card" style="margin-bottom:1.5rem;" aria-labelledby="answer-quality-title">
-    <h2 id="answer-quality-title" class="chart-title">{{ t('dashboard.quality_title') }}</h2>
-    <p style="color:var(--text-secondary);font-size:0.82rem;">{{ t('dashboard.quality_scope') }}</p>
-    <div id="answer-quality-status" role="status" aria-live="polite">{{ t('dashboard.quality_loading') }}</div>
-    <div id="answer-quality-counts" style="display:flex;gap:16px;flex-wrap:wrap;margin:12px 0;"></div>
-    <ul id="answer-quality-recent" style="padding-inline-start:20px;"></ul>
-  </section>
 
   <!-- ── Charts Row ── -->
-  <div class="charts-row">
-    <div class="chart-card">
-      <h3 class="chart-title">{{ t('dashboard.tokens_over_time') }}</h3>
+  <div class="charts-row dash-grid-2">
+    <section class="card chart-card" aria-labelledby="token-chart-title">
+      <div class="card-header">
+        <h2 id="token-chart-title" class="card-title">{{ t('dashboard.tokens_over_time') }}</h2>
+      </div>
       <canvas id="token-chart" width="600" height="150" style="width:100%;height:150px;"></canvas>
-    </div>
-    <div class="chart-card">
-      <h3 class="chart-title">{{ t('dashboard.cost_over_time') }}</h3>
+    </section>
+    <section class="card chart-card" aria-labelledby="cost-chart-title">
+      <div class="card-header">
+        <h2 id="cost-chart-title" class="card-title">{{ t('dashboard.cost_over_time') }}</h2>
+      </div>
       <canvas id="cost-chart" width="600" height="150" style="width:100%;height:150px;"></canvas>
-    </div>
+    </section>
   </div>
 
-  <!-- ── Feature Cards: Active Skills ── -->
-  <div id="feature-cards-section" style="margin-bottom:1.25rem;">
-    <h3 class="chart-title" style="margin:0 0 10px 0;font-size:0.9rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;display:flex;align-items:center;gap:6px;"><span class="ki" data-icon="zap" aria-hidden="true"></span> {{ t('dashboard.active_capabilities') if t('dashboard.active_capabilities') else 'Active Capabilities' }}</h3>
+  <!-- ── Open problems + Running work ── -->
+  <div class="dash-grid-2">
+    <!-- Open problems (resilience plan G2, kazma_core.observability.open_problems) -->
+    <section id="problems-panel" class="card runs-panel dash-section" aria-labelledby="problems-title">
+      <div class="card-header">
+        <div class="dash-card-heading">
+          <h2 id="problems-title" class="card-title">{{ t('problems.title') }}</h2>
+          <p class="card-sub">{{ t('problems.description') }}</p>
+        </div>
+      </div>
+      <div class="runs-body">
+        <p id="problems-loading" class="runs-note">{{ t('problems.loading') }}</p>
+        <p id="problems-error" class="runs-note runs-error" role="alert" hidden></p>
+        <p id="problems-unreadable" class="runs-note runs-error" hidden></p>
+        <ul id="problems-list" class="problems-list"></ul>
+        <p id="problems-empty" class="runs-note" hidden>{{ t('problems.empty') }}</p>
+        <div><button id="problems-show-hidden" type="button" class="btn btn-sm btn-ghost" hidden>{{ t('problems.show_hidden') }}</button></div>
+      </div>
+    </section>
+
+    <!-- Running work (run supervision, kazma_core.runs) -->
+    {# The incident to show comes from the template (data-incident-id), never
+       location.search: a soft navigation runs the script before the URL. #}
+    <section id="runs-panel" class="card runs-panel dash-section" data-incident-id="{{ focus_incident }}"
+             aria-labelledby="runs-title">
+      <div class="card-header">
+        <div class="dash-card-heading">
+          <h2 id="runs-title" class="card-title">{{ t('runs.title') }}</h2>
+          <p class="card-sub">{{ t('runs.description') }}</p>
+          <span id="runs-summary" class="card-sub" role="status" aria-live="polite"></span>
+        </div>
+      </div>
+      <div class="runs-body">
+        <p id="runs-loading" class="runs-note">{{ t('runs.loading') }}</p>
+        <p id="runs-error" class="runs-note runs-error" role="alert" hidden></p>
+        <p id="runs-supervisor-off" class="runs-note runs-error" hidden>{{ t('runs.supervisor_off') }}</p>
+        <div id="runs-incidents" class="runs-incidents"></div>
+        <p id="runs-empty" class="runs-note" hidden>{{ t('runs.empty') }}</p>
+        <ul id="runs-list" class="runs-list"></ul>
+        <details id="runs-history" class="runs-fold" hidden>
+          <summary>{{ t('runs.history_title') }}</summary>
+          <div id="runs-history-list" class="runs-incidents"></div>
+        </details>
+        <details id="runs-runbooks" class="runs-fold">
+          <summary>{{ t('runs.runbooks_title') }}</summary>
+          <p class="runs-note">{{ t('runs.runbooks_hint') }}</p>
+          <div id="runs-runbook-list" class="runs-runbook-list"></div>
+        </details>
+      </div>
+    </section>
+  </div>
+
+  <!-- ── Answer quality + Knowledge crawls ── -->
+  <div class="dash-grid-2">
+    <section class="card dash-section" aria-labelledby="answer-quality-title">
+      <div class="card-header">
+        <div class="dash-card-heading">
+          <h2 id="answer-quality-title" class="card-title">{{ t('dashboard.quality_title') }}</h2>
+          <p class="card-sub">{{ t('dashboard.quality_scope') }}</p>
+        </div>
+      </div>
+      <div id="answer-quality-status" role="status" aria-live="polite">{{ t('dashboard.quality_loading') }}</div>
+      <div id="answer-quality-counts" class="dash-quality-counts"></div>
+      <ul id="answer-quality-recent" class="dash-quality-recent"></ul>
+    </section>
+
+    <!-- Knowledge crawls: pages by outcome, the daily check (crawl_panel.js) -->
+    <section id="crawl-panel" class="card dash-section" aria-labelledby="crawl-panel-title">
+      <div class="card-header">
+        <h2 id="crawl-panel-title" class="card-title">{{ t('dashboard.crawls.title') }}</h2>
+      </div>
+      <div id="crawl-panel-body" class="dash-crawl-body" role="status" aria-live="polite"></div>
+    </section>
+  </div>
+
+  <!-- ── Active capabilities ── -->
+  <section id="feature-cards-section" class="card dash-section" aria-labelledby="feature-cards-title">
+    <div class="card-header">
+      <h2 id="feature-cards-title" class="card-title">{{ t('dashboard.active_capabilities') }}</h2>
+    </div>
     <div id="feature-cards-grid" class="feature-cards-grid">
       <!-- Populated by dashboard.js initFeatureCards() -->
     </div>
-  </div>
+  </section>
 
   <!-- ── Two-column: Memory hub + System resources ── -->
   <div class="dash-pro-split two-col-grid">
-    <div id="memory-hub-card" class="chart-card dash-pro-card" style="margin:0;padding:18px 20px;">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">
-        <div style="flex:1;min-width:200px;">
-          <h3 class="chart-title" style="margin:0 0 6px 0;display:flex;align-items:center;gap:8px;">
-            <span class="ki" data-icon="brain" aria-hidden="true"></span>
-            {{ t('dashboard.memory_governance') }}
-          </h3>
-          <p style="margin:0;font-size:0.82rem;color:var(--text-secondary);line-height:1.45;">
-            {{ t('memory.hub_blurb') }}
-          </p>
-          <div id="memory-hub-kpis" class="dash-kpi-row" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:14px;">
-            <div class="dash-kpi-tile"><div class="dash-kpi-label">{{ t('dashboard.kpi_beliefs') }}</div><div class="dash-kpi-val" id="hub-beliefs">–</div></div>
-            <div class="dash-kpi-tile"><div class="dash-kpi-label">{{ t('dashboard.kpi_entities') }}</div><div class="dash-kpi-val" id="hub-entities">–</div></div>
-            <div class="dash-kpi-tile"><div class="dash-kpi-label">{{ t('dashboard.kpi_empty') }}</div><div class="dash-kpi-val" id="hub-empty">–</div></div>
-            <div class="dash-kpi-tile"><div class="dash-kpi-label">{{ t('dashboard.kpi_isolated') }}</div><div class="dash-kpi-val" id="hub-isolated">–</div></div>
-          </div>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:8px;min-width:140px;">
-          <a href="/memory" class="btn btn-primary btn-sm" style="text-decoration:none;text-align:center;padding:10px 16px;font-weight:600;">
-            {{ t('memory.open_console') }} →
-          </a>
-          <a href="/memory#hygiene" class="btn btn-secondary btn-sm" style="text-decoration:none;text-align:center;">
-            {{ t('memory.tab_hygiene') }}
-          </a>
-          <a href="/settings?tab=memory" class="btn btn-secondary btn-sm" style="text-decoration:none;text-align:center;font-size:0.75rem;">
-            {{ t('settings.tab_memory') }}
-          </a>
+    <section id="memory-hub-card" class="card dash-section" aria-labelledby="memory-hub-title">
+      <div class="card-header">
+        <div class="dash-card-heading">
+          <h2 id="memory-hub-title" class="card-title">{{ t('dashboard.memory_governance') }}</h2>
+          <p class="card-sub">{{ t('memory.hub_blurb') }}</p>
         </div>
       </div>
-    </div>
-    <div id="resources-section" class="chart-card dash-pro-card" style="margin:0;padding:18px 20px;">
-      <h3 class="chart-title" style="margin:0 0 12px 0;">{{ t('dashboard.system_resources') }}</h3>
-      <div style="display:flex;flex-direction:column;gap:14px;">
+      <div id="memory-hub-kpis" class="dash-kpi-row">
+        <div class="card-nested dash-kpi-tile"><div class="dash-kpi-label">{{ t('dashboard.kpi_beliefs') }}</div><div class="dash-kpi-val" id="hub-beliefs">–</div></div>
+        <div class="card-nested dash-kpi-tile"><div class="dash-kpi-label">{{ t('dashboard.kpi_entities') }}</div><div class="dash-kpi-val" id="hub-entities">–</div></div>
+        <div class="card-nested dash-kpi-tile"><div class="dash-kpi-label">{{ t('dashboard.kpi_empty') }}</div><div class="dash-kpi-val" id="hub-empty">–</div></div>
+        <div class="card-nested dash-kpi-tile"><div class="dash-kpi-label">{{ t('dashboard.kpi_isolated') }}</div><div class="dash-kpi-val" id="hub-isolated">–</div></div>
+      </div>
+      <div class="dash-hub-actions">
+        <a href="/memory" class="btn btn-primary btn-sm">{{ t('memory.open_console') }} →</a>
+        <a href="/memory#hygiene" class="btn btn-secondary btn-sm">{{ t('memory.tab_hygiene') }}</a>
+        <a href="/settings?tab=memory" class="btn btn-secondary btn-sm">{{ t('settings.tab_memory') }}</a>
+      </div>
+    </section>
+    <section id="resources-section" class="card dash-section" aria-labelledby="resources-title">
+      <div class="card-header">
+        <h2 id="resources-title" class="card-title">{{ t('dashboard.system_resources') }}</h2>
+      </div>
+      <div class="dash-resources">
         <div>
-          <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
-            <span style="font-size:0.8rem;color:var(--text-tertiary);">{{ t('dashboard.cpu') }}</span>
-            <span style="font-size:0.8rem;font-family:var(--font-mono);color:var(--text-secondary);" id="res-cpu">–</span>
+          <div class="dash-resource-row">
+            <span class="dash-resource-label">{{ t('dashboard.cpu') }}</span>
+            <span class="dash-resource-value" id="res-cpu">–</span>
           </div>
-          <div class="progress-bar"><div id="cpu-bar" class="progress-fill" style="width:0%;"></div></div>
+          <div class="progress"><div id="cpu-bar" class="progress-bar" style="width:0%;"></div></div>
         </div>
         <div>
-          <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
-            <span style="font-size:0.8rem;color:var(--text-tertiary);">{{ t('dashboard.memory') }} (RAM)</span>
-            <span style="font-size:0.8rem;font-family:var(--font-mono);color:var(--text-secondary);" id="res-memory">–</span>
+          <div class="dash-resource-row">
+            <span class="dash-resource-label">{{ t('dashboard.memory') }} (RAM)</span>
+            <span class="dash-resource-value" id="res-memory">–</span>
           </div>
-          <div class="progress-bar"><div id="mem-bar" class="progress-fill" style="width:0%;background:var(--accent,#22d3ee);"></div></div>
+          <div class="progress"><div id="mem-bar" class="progress-bar" style="width:0%;"></div></div>
         </div>
       </div>
-    </div>
+    </section>
   </div>
   <script>
   (function() {
@@ -276,68 +272,66 @@
   })();
   </script>
 
-  <!-- ── Session Management (show 5, expand rest) ── -->
-  <div class="card dash-pro-card" style="padding:0;overflow:hidden;margin-bottom:1.25rem;">
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border-subtle);gap:12px;flex-wrap:wrap;">
-      <div>
-        <h2 style="font-size:0.8rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.06em;font-weight:600;margin:0;">
-          {{ t('dashboard.session_management') }}
-        </h2>
-        <p id="sessions-summary" style="margin:4px 0 0;font-size:0.75rem;color:var(--text-muted);">—</p>
+  <!-- ── Recent chats (Session Management: show 5, expand rest) ── -->
+  <section class="card dash-section" aria-labelledby="sessions-title">
+    <div class="card-header">
+      <div class="dash-card-heading">
+        <h2 id="sessions-title" class="card-title">{{ t('dashboard.session_management') }}</h2>
+        <p id="sessions-summary" class="card-sub">—</p>
       </div>
-      <div style="display:flex;gap:8px;align-items:center;">
-        <a href="/chat" class="btn btn-sm btn-secondary" style="text-decoration:none;font-size:0.75rem;">{{ t('dashboard.open_chat') }}</a>
-        <button id="clear-all-btn" class="btn btn-sm btn-danger">{{ t('dashboard.clear_all') }}</button>
+      <div class="dash-card-actions">
+        <a href="/chat" class="btn btn-sm btn-secondary">{{ t('dashboard.open_chat') }}</a>
+        <button id="clear-all-btn" type="button" class="btn btn-sm btn-danger">{{ t('dashboard.clear_all') }}</button>
       </div>
     </div>
-    <div style="padding:12px 16px 8px;">
-      <div id="sessions-loading" style="text-align:center;padding:20px;color:var(--text-muted);">
-        <div class="skeleton" style="height:40px;margin-bottom:8px;"></div>
-        <div class="skeleton" style="height:40px;margin-bottom:8px;"></div>
-        <div class="skeleton" style="height:40px;"></div>
-      </div>
-      <div id="sessions-empty" style="display:none;text-align:center;padding:36px 20px;color:var(--text-muted);">
-        <div style="font-size:2rem;margin-bottom:8px;"><span class="ki" data-icon="inbox" aria-hidden="true"></span></div>
-        <p>{{ t('dashboard.no_active_sessions') }}</p>
-        <p style="font-size:0.8rem;color:var(--text-tertiary);">{{ t('dashboard.sessions_hint') }}</p>
-      </div>
-      <div id="sessions-cards" class="dash-card-list"></div>
-      <div class="dash-table-wrap" style="overflow-x:auto;width:100%;">
-        <table id="sessions-table" style="width:100%;border-collapse:collapse;font-size:0.85rem;display:none;">
-          <thead>
-            <tr style="border-bottom:1px solid var(--border-subtle);">
-              <th style="padding:10px 12px;text-align:start;font-weight:500;color:var(--text-tertiary);font-size:0.72rem;text-transform:uppercase;">{{ t('dashboard.col_chat') }}</th>
-              <th style="padding:10px 12px;text-align:start;font-weight:500;color:var(--text-tertiary);font-size:0.72rem;text-transform:uppercase;">{{ t('dashboard.col_platform') }}</th>
-              <th style="padding:10px 12px;text-align:right;font-weight:500;color:var(--text-tertiary);font-size:0.72rem;text-transform:uppercase;">{{ t('dashboard.col_messages') }}</th>
-              <th style="padding:10px 12px;text-align:right;font-weight:500;color:var(--text-tertiary);font-size:0.72rem;text-transform:uppercase;">{{ t('dashboard.col_steps') }}</th>
-              <th style="padding:10px 12px;text-align:start;font-weight:500;color:var(--text-tertiary);font-size:0.72rem;text-transform:uppercase;">{{ t('dashboard.col_last_activity') }}</th>
-              <th style="padding:10px 12px;text-align:center;font-weight:500;color:var(--text-tertiary);font-size:0.72rem;text-transform:uppercase;">{{ t('dashboard.col_actions') }}</th>
-            </tr>
-          </thead>
-          <tbody id="sessions-tbody"></tbody>
-        </table>
-      </div>
-      <div id="sessions-expand-wrap" style="display:none;padding:10px 4px 6px;text-align:center;border-top:1px solid var(--border-subtle);margin-top:4px;">
-        <button type="button" id="sessions-expand-btn" class="btn btn-sm btn-secondary" style="font-size:0.78rem;min-width:12rem;">
-          {{ t('dashboard.show_more_sessions') }}
-        </button>
+    <div id="sessions-loading" class="dash-skeletons">
+      <div class="skeleton" style="height:40px;margin-bottom:8px;"></div>
+      <div class="skeleton" style="height:40px;margin-bottom:8px;"></div>
+      <div class="skeleton" style="height:40px;"></div>
+    </div>
+    <div id="sessions-empty" style="display:none;">
+      <div class="empty-state">
+        <span class="icon-tile"><span class="ki" data-icon="inbox" aria-hidden="true"></span></span>
+        <p class="dash-empty-title">{{ t('dashboard.no_active_sessions') }}</p>
+        <p class="dash-empty-hint">{{ t('dashboard.sessions_hint') }}</p>
       </div>
     </div>
-  </div>
+    <div id="sessions-cards" class="dash-card-list"></div>
+    <div class="dash-table-wrap table-container">
+      <table id="sessions-table" class="data-table" style="display:none;">
+        <thead>
+          <tr>
+            <th>{{ t('dashboard.col_chat') }}</th>
+            <th>{{ t('dashboard.col_platform') }}</th>
+            <th class="dash-num">{{ t('dashboard.col_messages') }}</th>
+            <th class="dash-num">{{ t('dashboard.col_steps') }}</th>
+            <th>{{ t('dashboard.col_last_activity') }}</th>
+            <th class="dash-center">{{ t('dashboard.col_actions') }}</th>
+          </tr>
+        </thead>
+        <tbody id="sessions-tbody"></tbody>
+      </table>
+    </div>
+    <div id="sessions-expand-wrap" class="dash-expand" style="display:none;">
+      <button type="button" id="sessions-expand-btn" class="btn btn-sm btn-secondary">
+        {{ t('dashboard.show_more_sessions') }}
+      </button>
+    </div>
+  </section>
 
   <!-- ── Recent Traces ── -->
-  <div class="card dash-pro-card" style="padding:0;overflow:hidden;">
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border-subtle);">
-      <h2 style="font-size:0.8rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.06em;font-weight:600;margin:0;">
-        {{ t('dashboard.recent_traces') }}
-      </h2>
-      <span id="trace-count" style="font-size:0.8rem;color:var(--text-muted);">{{ t_plural('dashboard.count_traces', traces|length) }}</span>
+  <section class="card dash-section" aria-labelledby="traces-title">
+    <div class="card-header">
+      <div class="dash-card-heading">
+        <h2 id="traces-title" class="card-title">{{ t('dashboard.recent_traces') }}</h2>
+        <p id="trace-count" class="card-sub">{{ t_plural('dashboard.count_traces', traces|length) }}</p>
+      </div>
     </div>
     <div id="traces-cards" class="dash-card-list">
       {% for trace in traces %}
       <article class="dash-mobile-card">
         <div class="dash-mobile-card-top">
-          <span class="badge badge-basic">{{ trace_word('dashboard.trace_type_', trace.trace_type) }}</span>
+          <span class="badge badge-neutral">{{ trace_word('dashboard.trace_type_', trace.trace_type) }}</span>
           <span class="badge {{ trace.badge_class }}">{{ trace_word('dashboard.trace_status_', trace.status) }}</span>
         </div>
         <div class="dash-mobile-card-name" translate="no">{{ trace.label }}</div>
@@ -345,61 +339,140 @@
       </article>
       {% endfor %}
     </div>
-    <div class="dash-table-wrap" style="overflow-x:auto;">
-      <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+    <div class="dash-table-wrap table-container">
+      <table class="data-table">
         <thead>
-          <tr style="border-bottom:1px solid var(--border-subtle);">
-            <th style="padding:10px 16px;text-align:start;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('dashboard.col_time') }}</th>
-            <th style="padding:10px 16px;text-align:start;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('dashboard.col_type') }}</th>
-            <th style="padding:10px 16px;text-align:start;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('dashboard.col_label') }}</th>
-            <th style="padding:10px 16px;text-align:start;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('dashboard.col_status') }}</th>
-            <th style="padding:10px 16px;text-align:right;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('dashboard.col_duration') }}</th>
-            <th style="padding:10px 16px;text-align:right;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('dashboard.col_tokens') }}</th>
-            <th style="padding:10px 16px;text-align:right;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('dashboard.col_cost') }}</th>
+          <tr>
+            <th>{{ t('dashboard.col_time') }}</th>
+            <th>{{ t('dashboard.col_type') }}</th>
+            <th>{{ t('dashboard.col_label') }}</th>
+            <th>{{ t('dashboard.col_status') }}</th>
+            <th class="dash-num">{{ t('dashboard.col_duration') }}</th>
+            <th class="dash-num">{{ t('dashboard.col_tokens') }}</th>
+            <th class="dash-num">{{ t('dashboard.col_cost') }}</th>
           </tr>
         </thead>
         <tbody id="traces-tbody">
           {% for trace in traces %}
-          <tr class="trace-row" style="border-bottom:1px solid var(--border-subtle);transition:background 0.15s;">
-            <td style="padding:10px 16px;font-family:var(--font-mono);font-size:0.8rem;color:var(--text-muted);white-space:nowrap;">{{ trace.time }}</td>
-            <td style="padding:10px 16px;"><span class="badge badge-basic" style="font-size:0.7rem;">{{ trace_word('dashboard.trace_type_', trace.trace_type) }}</span></td>
-            <td translate="no" style="padding:10px 16px;font-weight:500;max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ trace.label }}</td>
-            <td style="padding:10px 16px;"><span class="badge {{ trace.badge_class }}" style="font-size:0.7rem;">{{ trace_word('dashboard.trace_status_', trace.status) }}</span></td>
-            <td style="padding:10px 16px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;">{{ trace.duration_ms }}ms</td>
-            <td style="padding:10px 16px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;">{{ trace.tokens }}</td>
-            <td style="padding:10px 16px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;color:var(--text-tertiary);">{{ trace.cost }}</td>
+          <tr class="trace-row">
+            <td class="dash-mono dash-muted">{{ trace.time }}</td>
+            <td><span class="badge badge-neutral">{{ trace_word('dashboard.trace_type_', trace.trace_type) }}</span></td>
+            <td translate="no" class="dash-label-cell">{{ trace.label }}</td>
+            <td><span class="badge {{ trace.badge_class }}">{{ trace_word('dashboard.trace_status_', trace.status) }}</span></td>
+            <td class="dash-num dash-mono">{{ trace.duration_ms }}ms</td>
+            <td class="dash-num dash-mono">{{ trace.tokens }}</td>
+            <td class="dash-num dash-mono dash-muted">{{ trace.cost }}</td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
     {% if not traces %}
-    <div style="text-align:center;padding:40px 20px;color:var(--text-muted);">
-      <div style="font-size:2rem;margin-bottom:8px;"><span class="ki" data-icon="bar-chart" aria-hidden="true"></span></div>
-      <p>{{ t('dashboard.no_traces') }}</p>
-      <p style="font-size:0.8rem;color:var(--text-tertiary);">{{ t('dashboard.no_traces_hint') }}</p>
+    <div class="empty-state">
+      <span class="icon-tile"><span class="ki" data-icon="bar-chart" aria-hidden="true"></span></span>
+      <p class="dash-empty-title">{{ t('dashboard.no_traces') }}</p>
+      <p class="dash-empty-hint">{{ t('dashboard.no_traces_hint') }}</p>
     </div>
     {% endif %}
-  </div>
+  </section>
 </div>
+{# Inside the content block: a soft navigation carries .page-body and
+   head styles, never the body's script block (modules/nav.js), so a
+   style there never reached a page opened from the sidebar. #}
+<style>
+  /* The Dashboard on the shared components (UI refresh, 2026-11): every
+     card is the wall's colour (.card, the card rule), tinted surfaces are
+     the shared tones (.stat-tile, .icon-tile, .badge, .page-banner). Only
+     layout lives here -- no colour of the page's own. */
+  .dash-pro { display: flex; flex-direction: column; gap: 24px; }
+  .dash-pro > * { margin: 0; }
+  .dash-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .dash-banner-text { min-width: 0; flex: 1 1 22rem; }
+  .dash-banner-sub { margin: 6px 0 0; font-size: 13px; color: var(--text-secondary); max-width: 40rem; }
+  .dash-banner-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .dash-live { display: inline-flex; border-radius: 999px; background: var(--surface-card); }
+  .dash-tiles { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 24px; margin: 0; }
+  .dash-tile-sub { font-size: 12px; color: var(--text-secondary); overflow-wrap: anywhere; }
+  .dash-tile-value-text { font-size: 15px; word-break: break-all; color: var(--text-primary); }
+  .dash-grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 24px; margin: 0; }
+  .dash-pro .charts-row { margin: 0; }
+  .dash-pro .chart-card { padding: var(--card-padding); }
+  .dash-section { min-width: 0; }
+  .dash-card-heading { min-width: 0; flex: 1 1 auto; }
+  .dash-card-heading .card-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .dash-card-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .dash-pro .runs-body { padding: 0; }
+  .dash-empty-title { margin: 0; color: var(--text-primary); font-weight: 600; }
+  .dash-empty-hint { margin: 0; font-size: 13px; color: var(--text-muted); }
+  .dash-quality-counts { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+  .dash-quality-recent { padding-inline-start: 20px; margin: 0; }
+  .dash-crawl-body { font-size: 14px; }
+  .dash-pro .feature-cards-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+  .dash-cap { padding: 16px; display: flex; flex-direction: column; gap: 6px; }
+  .dash-cap-name { font-weight: 600; color: var(--text-primary); }
+  .dash-cap-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.4; }
+  /* A capability's category: the shared tone pair, from the palette. */
+  .icon-tile.dash-cat-1 { --tone: var(--cat-1); --tone-subtle: color-mix(in srgb, var(--cat-1) 12%, transparent); }
+  .icon-tile.dash-cat-2 { --tone: var(--cat-2); --tone-subtle: color-mix(in srgb, var(--cat-2) 12%, transparent); }
+  .icon-tile.dash-cat-3 { --tone: var(--cat-3); --tone-subtle: color-mix(in srgb, var(--cat-3) 12%, transparent); }
+  .icon-tile.dash-cat-4 { --tone: var(--cat-4); --tone-subtle: color-mix(in srgb, var(--cat-4) 12%, transparent); }
+  .icon-tile.dash-cat-5 { --tone: var(--cat-5); --tone-subtle: color-mix(in srgb, var(--cat-5) 12%, transparent); }
+  .icon-tile.dash-cat-6 { --tone: var(--cat-6); --tone-subtle: color-mix(in srgb, var(--cat-6) 12%, transparent); }
+  .dash-kpi-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  .dash-kpi-tile { padding: 12px 14px; min-width: 0; }
+  .dash-kpi-label { font-size: 12px; color: var(--text-secondary); font-weight: 600; }
+  .dash-kpi-val { font-size: 20px; font-weight: 600; margin-top: 4px; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+  .dash-hub-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+  .dash-resources { display: flex; flex-direction: column; gap: 16px; }
+  .dash-resource-row { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+  .dash-resource-label { font-size: 13px; color: var(--text-secondary); }
+  .dash-resource-value { font-size: 13px; font-family: var(--font-mono); color: var(--text-primary); }
+  .dash-skeletons { padding: 4px 0; }
+  .dash-expand { padding-top: 12px; text-align: center; }
+  .dash-pro .data-table { width: 100%; font-size: 14px; }
+  .dash-pro .data-table .dash-num { text-align: end; }
+  .dash-pro .data-table .dash-center { text-align: center; }
+  .dash-mono { font-family: var(--font-mono); font-size: 13px; }
+  .dash-muted { color: var(--text-muted); }
+  .dash-label-cell { font-weight: 500; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Open problems: rows divided by the hairline, an icon tile in the
+     problem's tone, soft buttons (problems_panel.js builds them). */
+  #problems-panel .problems-list { gap: 0; }
+  #problems-panel .problems-item {
+    flex-direction: row; align-items: flex-start; gap: 12px;
+    border: 0; border-bottom: 1px solid var(--card-hairline); border-radius: 0;
+    padding: 14px 0;
+  }
+  #problems-panel .problems-item:last-child { border-bottom: 0; }
+  #problems-panel .problems-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+  #problems-panel .problems-title { font-weight: 600; }
+  /* Running work: an incident is a nested card (the hairline), never a stripe. */
+  #runs-panel .runs-incident { border: 1px solid var(--card-hairline); border-radius: var(--tile-radius); background: transparent; }
+  @media (max-width: 900px) {
+    .dash-kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+</style>
 {% endblock %}
 
 {% block scripts %}
 <script>
+  {#- Each capability's colour is a category of the shared palette
+      (--cat-1..6, readable in both themes) or the neutral tone: the page
+      used to carry thirteen fixed hex colours, one of them near-white. -#}
   window.DASH_CAPS = [
-    { id: "doc", name: {{ t('dashboard.cap.doc') | tojson }}, desc: {{ t('dashboard.cap.doc_desc') | tojson }}, color: "#3b82f6" },
-    { id: "web", name: {{ t('dashboard.cap.web') | tojson }}, desc: {{ t('dashboard.cap.web_desc') | tojson }}, color: "#0ea5e9" },
-    { id: "memory", name: {{ t('dashboard.cap.memory') | tojson }}, desc: {{ t('dashboard.cap.memory_desc') | tojson }}, color: "#38bdf8" },
-    { id: "swarm", name: {{ t('dashboard.cap.swarm') | tojson }}, desc: {{ t('dashboard.cap.swarm_desc') | tojson }}, color: "#f59e0b" },
-    { id: "hitl", name: {{ t('dashboard.cap.hitl') | tojson }}, desc: {{ t('dashboard.cap.hitl_desc') | tojson }}, color: "#ef4444" },
-    { id: "time", name: {{ t('dashboard.cap.time') | tojson }}, desc: {{ t('dashboard.cap.time_desc') | tojson }}, color: "#10b981" },
-    { id: "email", name: {{ t('dashboard.cap.email') | tojson }}, desc: {{ t('dashboard.cap.email_desc') | tojson }}, color: "#3b82f6" },
-    { id: "x", name: {{ t('dashboard.cap.x') | tojson }}, desc: {{ t('dashboard.cap.x_desc') | tojson }}, color: "#e7e9ea" },
-    { id: "culture", name: {{ t('dashboard.cap.culture') | tojson }}, desc: {{ t('dashboard.cap.culture_desc') | tojson }}, color: "#ec4899" },
-    { id: "cua", name: {{ t('dashboard.cap.cua') | tojson }}, desc: {{ t('dashboard.cap.cua_desc') | tojson }}, color: "#22d3ee" },
-    { id: "voice", name: {{ t('dashboard.cap.voice') | tojson }}, desc: {{ t('dashboard.cap.voice_desc') | tojson }}, color: "#a78bfa" },
-    { id: "ide", name: {{ t('dashboard.cap.ide') | tojson }}, desc: {{ t('dashboard.cap.ide_desc') | tojson }}, color: "#34d399" },
-    { id: "mcp", name: {{ t('dashboard.cap.mcp') | tojson }}, desc: {{ t('dashboard.cap.mcp_desc') | tojson }}, color: "#fb7185" },
+    { id: "doc", name: {{ t('dashboard.cap.doc') | tojson }}, desc: {{ t('dashboard.cap.doc_desc') | tojson }}, cat: 1 },
+    { id: "web", name: {{ t('dashboard.cap.web') | tojson }}, desc: {{ t('dashboard.cap.web_desc') | tojson }}, cat: 5 },
+    { id: "memory", name: {{ t('dashboard.cap.memory') | tojson }}, desc: {{ t('dashboard.cap.memory_desc') | tojson }}, cat: 4 },
+    { id: "swarm", name: {{ t('dashboard.cap.swarm') | tojson }}, desc: {{ t('dashboard.cap.swarm_desc') | tojson }}, cat: 2 },
+    { id: "hitl", name: {{ t('dashboard.cap.hitl') | tojson }}, desc: {{ t('dashboard.cap.hitl_desc') | tojson }}, cat: 3 },
+    { id: "time", name: {{ t('dashboard.cap.time') | tojson }}, desc: {{ t('dashboard.cap.time_desc') | tojson }}, cat: 6 },
+    { id: "email", name: {{ t('dashboard.cap.email') | tojson }}, desc: {{ t('dashboard.cap.email_desc') | tojson }}, cat: 1 },
+    { id: "x", name: {{ t('dashboard.cap.x') | tojson }}, desc: {{ t('dashboard.cap.x_desc') | tojson }}, cat: 0 },
+    { id: "culture", name: {{ t('dashboard.cap.culture') | tojson }}, desc: {{ t('dashboard.cap.culture_desc') | tojson }}, cat: 3 },
+    { id: "cua", name: {{ t('dashboard.cap.cua') | tojson }}, desc: {{ t('dashboard.cap.cua_desc') | tojson }}, cat: 5 },
+    { id: "voice", name: {{ t('dashboard.cap.voice') | tojson }}, desc: {{ t('dashboard.cap.voice_desc') | tojson }}, cat: 4 },
+    { id: "ide", name: {{ t('dashboard.cap.ide') | tojson }}, desc: {{ t('dashboard.cap.ide_desc') | tojson }}, cat: 6 },
+    { id: "mcp", name: {{ t('dashboard.cap.mcp') | tojson }}, desc: {{ t('dashboard.cap.mcp_desc') | tojson }}, cat: 2 },
   ];
 </script>
 <script src="/static/js/streaming.js?v={{ js_version() }}"></script>
@@ -512,49 +585,4 @@
 
 })();
 </script>
-<style>
-  /* Industry-grade dashboard polish */
-  .dash-pro .metric-card {
-    border-radius: 12px;
-    border: 1px solid var(--border-subtle);
-    background: linear-gradient(165deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.015) 100%);
-    padding: 14px 16px;
-    min-height: 100px;
-  }
-  .dash-pro .charts-row {
-    gap: 16px;
-    margin-bottom: 1.25rem;
-  }
-  .dash-pro .chart-card,
-  .dash-pro-card {
-    border-radius: 12px;
-    border: 1px solid var(--border-subtle);
-    background: rgba(255,255,255,0.02);
-  }
-  .dash-kpi-tile {
-    background: rgba(0,0,0,0.18);
-    border: 1px solid var(--border-subtle);
-    border-radius: 10px;
-    padding: 10px 12px;
-    min-width: 0;
-  }
-  .dash-kpi-label {
-    font-size: 0.65rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--text-tertiary);
-    font-weight: 600;
-  }
-  .dash-kpi-val {
-    font-size: 1.15rem;
-    font-weight: 700;
-    font-family: var(--font-mono);
-    margin-top: 4px;
-    color: var(--text-primary);
-  }
-  @media (max-width: 900px) {
-    .dash-pro-split { grid-template-columns: 1fr; }
-    .dash-kpi-row { grid-template-columns: repeat(2, minmax(0,1fr)) !important; }
-  }
-</style>
 {% endblock %}

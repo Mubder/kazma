@@ -7,12 +7,13 @@
 // iOS Safari paints its UA canvas from these metas (not from CSS html
 // background). Listing both schemes, or leaving color-scheme: dark on
 // :root, is what made Light theme show a dark-gray page on a phone.
-const _THEME_COLOR = { light: '#f0f4fa', dark: '#0e1626' };
+const _THEME_COLOR = { light: '#ffffff', dark: '#0e1626' };
 
 export function syncDocumentColorScheme(theme) {
     const scheme = theme === 'dark' ? 'dark' : 'light';
     const root = document.documentElement;
-    if (root.getAttribute('data-theme') !== scheme) {
+    const changed = root.getAttribute('data-theme') !== scheme;
+    if (changed) {
         root.setAttribute('data-theme', scheme);
     }
     _setMeta('color-scheme', scheme);
@@ -23,6 +24,10 @@ export function syncDocumentColorScheme(theme) {
         if (computed) canvas = computed;
     } catch (_) { /* computed style unavailable in some test harnesses */ }
     _setMeta('theme-color', canvas);
+    // Every path that changes the theme passes here (the header's toggle,
+    // Settings' save and preview, Auto following the OS): pages that draw
+    // with tokens on a canvas or an SVG redraw on the event.
+    if (changed) announceThemeChange('theme');
 }
 
 function _setMeta(name, content) {
@@ -35,23 +40,124 @@ function _setMeta(name, content) {
     el.setAttribute('content', content);
 }
 
-/* The owner's accent colour on <html> (Settings > Appearance). Every page
- * applies it; it was applied only when the Settings page itself loaded. */
-export function applyAccentColor(hex) {
-    if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return;
-    const r = parseInt(hex.slice(1, 3), 16);
-    const g = parseInt(hex.slice(3, 5), 16);
-    const b = parseInt(hex.slice(5, 7), 16);
+/* The owner's accent colour (Settings > Appearance), as the two theme
+ * variants the stylesheet reads: kazma.css derives --accent and every
+ * accent shade from --accent-chosen-dark / --accent-chosen-light, per
+ * theme. Setting --accent itself on <html> would beat both theme blocks and
+ * give light and dark the same, sometimes unreadable, colour.
+ *
+ * The rules are kazma_ui/accent_colors.py's (the server renders the same
+ * variables on <html>, so a chosen accent paints on the first frame); the
+ * two are held equal by tests/fixtures/accent_variants.json:
+ *   dark  - the colour, lightened toward white in 5% steps until it stands
+ *           3:1 off the dark wall and white or near-black ink reads 4.5:1
+ *           on it; ink: the one that reads better.
+ *   light - the colour, darkened toward navy in 5% steps until white ink
+ *           on it reaches 4.5:1; ink: white. */
+const _ACCENT_PROPS = [
+    '--accent-chosen-dark', '--accent-chosen-dark-rgb', '--accent-chosen-dark-on',
+    '--accent-chosen-light', '--accent-chosen-light-rgb', '--accent-chosen-light-on',
+];
+// Written by builds before 2026-11-09; cleared so they never pin a colour.
+const _LEGACY_ACCENT_PROPS = ['--accent', '--accent-rgb', '--accent-subtle', '--accent-glow'];
+const _DARK_WALL = [0x0e, 0x16, 0x26];
+const _NAVY = [0x0c, 0x15, 0x26];
+const _WHITE = [255, 255, 255];
+const _DARK_INK = [0x04, 0x08, 0x15];
+
+function _channel(c) {
+    const s = c / 255;
+    return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+}
+function _luminance(rgb) {
+    return 0.2126 * _channel(rgb[0]) + 0.7152 * _channel(rgb[1]) + 0.0722 * _channel(rgb[2]);
+}
+function _contrast(a, b) {
+    const la = _luminance(a), lb = _luminance(b);
+    return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+function _mix(a, b, t) {
+    return a.map((x, i) => Math.floor(x + (b[i] - x) * t + 0.5));
+}
+function _hex(rgb) {
+    return '#' + rgb.map((c) => c.toString(16).padStart(2, '0')).join('');
+}
+
+export function accentVariants(hex) {
+    if (typeof hex !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(hex.trim())) return null;
+    const v = hex.trim().toLowerCase();
+    const base = [parseInt(v.slice(1, 3), 16), parseInt(v.slice(3, 5), 16), parseInt(v.slice(5, 7), 16)];
+    let dark = base;
+    for (let step = 1; step <= 20; step++) {
+        if (_contrast(dark, _DARK_WALL) >= 3.0 &&
+            Math.max(_contrast(dark, _WHITE), _contrast(dark, _DARK_INK)) >= 4.5) break;
+        dark = _mix(base, _WHITE, step / 20);
+    }
+    const darkOn = _contrast(dark, _WHITE) >= _contrast(dark, _DARK_INK) ? '#ffffff' : '#040815';
+    let light = base;
+    for (let step = 1; step <= 20; step++) {
+        if (_contrast(light, _WHITE) >= 4.5) break;
+        light = _mix(base, _NAVY, step / 20);
+    }
+    return {
+        '--accent-chosen-dark': _hex(dark),
+        '--accent-chosen-dark-rgb': dark.join(', '),
+        '--accent-chosen-dark-on': darkOn,
+        '--accent-chosen-light': _hex(light),
+        '--accent-chosen-light-rgb': light.join(', '),
+        '--accent-chosen-light-on': '#ffffff',
+    };
+}
+
+/* `kazma:themechange` on document, detail {theme, reason}: the theme
+ * ('light' | 'dark') or the accent changed. Charts, canvases and SVGs that
+ * read colour tokens with getComputedStyle redraw on it (the colours they
+ * read are the old theme's until then). Dispatched by
+ * syncDocumentColorScheme when data-theme changes and by applyAccentColor
+ * when the accent's variables change; never for a call that changes
+ * nothing. Safe where there is no DOM event support (a test sandbox). */
+export function announceThemeChange(reason) {
+    if (typeof document === 'undefined' || !document || typeof document.dispatchEvent !== 'function') return;
+    if (typeof CustomEvent !== 'function') return;
     const root = document.documentElement;
-    root.style.setProperty('--accent', hex);
-    root.style.setProperty('--accent-rgb', r + ', ' + g + ', ' + b);
-    root.style.setProperty('--accent-subtle', 'rgba(' + r + ', ' + g + ', ' + b + ', 0.12)');
-    root.style.setProperty('--accent-glow', 'rgba(' + r + ', ' + g + ', ' + b + ', 0.28)');
+    const attr = root && typeof root.getAttribute === 'function' ? root.getAttribute('data-theme') : null;
+    const theme = attr === 'dark' ? 'dark' : 'light';
+    try {
+        document.dispatchEvent(new CustomEvent('kazma:themechange', { detail: { theme, reason: reason || 'theme' } }));
+    } catch (_) { /* a listener's error must not break the theme switch */ }
+}
+
+/* Apply the owner's accent to <html>, or clear it (empty / malformed =
+ * the theme's own accent). Only these custom properties are touched: the
+ * element's other inline styles (font size, --app-ivh) stay. */
+export function applyAccentColor(hex) {
+    const root = document.documentElement;
+    const props = accentVariants(hex);
+    const before = _ACCENT_PROPS.map((name) => root.style.getPropertyValue(name)).join('|');
+    _LEGACY_ACCENT_PROPS.forEach((name) => root.style.removeProperty(name));
+    if (!props) {
+        _ACCENT_PROPS.forEach((name) => root.style.removeProperty(name));
+    } else {
+        Object.keys(props).forEach((name) => root.style.setProperty(name, props[name]));
+    }
+    const after = _ACCENT_PROPS.map((name) => root.style.getPropertyValue(name)).join('|');
+    if (after !== before) announceThemeChange('accent');
+}
+
+// The OS's light/dark preference: the theme an 'auto' choice resolves to.
+function _systemTheme() {
+    try {
+        return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+    } catch (_) {
+        return null;
+    }
 }
 
 export function kazmaApp() {
     return {
         theme: 'dark',
+        // What the owner chose: 'light', 'dark' or 'auto' (follows the OS).
+        themePreference: null,
         lang: 'ar',
         sidebarCollapsed: false,
         mobileNavOpen: false,
@@ -81,20 +187,20 @@ export function kazmaApp() {
                 .then(r => r.json())
                 .then(d => {
                     if (d && d.font_size) this.fontSize = d.font_size;
+                    // The server rendered the chosen accent on <html>; this
+                    // re-confirms it (or clears it when none is chosen).
                     if (d && d.accent_color_chosen) applyAccentColor(d.accent_color);
+                    else if (d) applyAccentColor('');
                     // 'auto' resolves to the OS preference (SSR guessed dark;
                     // correct it here so an Auto user on a Light OS doesn't
                     // see a one-frame dark flash stay). light/dark apply as-is.
                     let resolved = null;
                     if (d && d.theme === 'auto') {
-                        try {
-                            resolved = (window.matchMedia &&
-                                window.matchMedia('(prefers-color-scheme: dark)').matches)
-                                ? 'dark' : 'light';
-                        } catch (_) { resolved = null; }
+                        resolved = _systemTheme();
                     } else if (d && (d.theme === 'light' || d.theme === 'dark')) {
                         resolved = d.theme;
                     }
+                    if (d && d.theme) this.themePreference = d.theme;
                     if (resolved && resolved !== this.theme) {
                         this.theme = resolved;
                         this._applyTheme();
@@ -117,6 +223,26 @@ export function kazmaApp() {
             // Restore sidebar state
             this.sidebarCollapsed = localStorage.getItem('kazma-sidebar-collapsed') === 'true';
 
+            // A theme applied elsewhere (Settings' save or preview calls
+            // syncDocumentColorScheme directly) moves the header's toggle too:
+            // its icon reads `theme`.
+            document.addEventListener('kazma:themechange', (e) => {
+                const t = e && e.detail && e.detail.theme;
+                if ((t === 'light' || t === 'dark') && t !== this.theme) this.theme = t;
+            });
+
+            // Auto follows the OS while the page is open: a change of the
+            // system's light/dark setting re-resolves the theme (and the
+            // theme change is announced, kazma:themechange).
+            try {
+                const mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+                if (mq) {
+                    const onSystemChange = () => this._followSystemTheme();
+                    if (typeof mq.addEventListener === 'function') mq.addEventListener('change', onSystemChange);
+                    else if (typeof mq.addListener === 'function') mq.addListener(onSystemChange);
+                }
+            } catch (_) { /* no matchMedia: Auto resolves at load only */ }
+
             // Global keyboard shortcuts
             document.addEventListener('keydown', (e) => this._handleKeyboard(e));
 
@@ -129,8 +255,27 @@ export function kazmaApp() {
             });
         },
 
+        // The OS switched light/dark. Only an 'auto' choice follows it. The
+        // choice is read again from the server first: Settings may have
+        // saved Auto (or a fixed theme) since this page loaded.
+        async _followSystemTheme() {
+            try {
+                if (typeof window.kazmaGetJson === 'function') {
+                    const d = await window.kazmaGetJson('/api/settings/appearance');
+                    if (d && d.theme) this.themePreference = d.theme;
+                }
+            } catch (_) { /* keep the preference this page knows */ }
+            if (this.themePreference !== 'auto') return;
+            const resolved = _systemTheme();
+            if (resolved && resolved !== this.theme) {
+                this.theme = resolved;
+                this._applyTheme();
+            }
+        },
+
         toggleTheme() {
             this.theme = this.theme === 'dark' ? 'light' : 'dark';
+            this.themePreference = this.theme;
             localStorage.setItem('kazma-theme', this.theme);
             this._applyTheme();
             // Persist to the account (server) so the choice travels across
@@ -469,12 +614,11 @@ export function systemAlertsBanner() {
             return severity === 'ERROR' || severity === 'CRITICAL' ? 'var(--danger)' : 'var(--warning)';
         },
 
+        // The banner is a .notice (kazma.css): this names its tone class, so
+        // the tint and the icon follow the tokens in both themes (it was an
+        // inline rgba wash with a coloured stripe).
         bannerTone() {
-            const red = this.bannerColor() === 'var(--danger)';
-            return {
-                background: red ? 'rgba(239, 68, 68, 0.1)' : 'rgba(245, 158, 11, 0.1)',
-                borderLeft: '4px solid ' + this.bannerColor(),
-            };
+            return this.bannerColor() === 'var(--danger)' ? 'tone-danger' : 'tone-warning';
         },
 
         // Behind the shown alert can wait a backlog (a day of failed test

@@ -36,7 +36,12 @@
   window.kazmaAddLeaveHook(function () {
     if (typeof window.__kazmaMemConsoleCleanup === 'function') window.__kazmaMemConsoleCleanup();
   });
-  var I18N =window.__DASH_MEM_I18N || window.I18N || {};
+  // Read when used, not when this script loads: a sidebar visit runs the
+  // page's script files before its inline ones, so __DASH_MEM_I18N did not
+  // exist yet and the console showed "0 undefined" until a reload.
+  var I18N = (typeof Proxy === 'function')
+    ? new Proxy({}, { get: function (_t, k) { return (window.__DASH_MEM_I18N || window.I18N || {})[k]; } })
+    : (window.__DASH_MEM_I18N || window.I18N || {});
   // Text this console builds: the catalog's text for *key* in the page's
   // language, else *fallback* (English), {name} placeholders from *vars*.
   function _mt(key, fallback, vars) {
@@ -78,6 +83,14 @@
   }
   // Visible build stamp — if missing in browser console, JS is stale/cached
   window.__KAZMA_MEMORY_CONSOLE_BUILD = 'comp-collapse-2026-08-04';
+  // Template icons ([data-icon]) are filled on DOM ready only, and a sidebar
+  // visit swaps this page in afterwards: fill the page's own (the stat
+  // tiles' wells were empty squares). Filling twice is a no-op.
+  try {
+    if (window.KazmaIcons && typeof window.KazmaIcons.hydrate === 'function') {
+      window.KazmaIcons.hydrate(document.querySelector('.memory-page') || document);
+    }
+  } catch (eIcons) { /* icons are decoration */ }
   // Memory & Governance Polling
   const memoryBadge = document.getElementById('memory-status-badge');
   const memoryDesc = document.getElementById('memory-status-desc');
@@ -92,41 +105,33 @@
     return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
   }
 
-  function _chipStyle(status) {
-    if (status === 'ok') {
-      return {
-        border: '1px solid rgba(46,213,115,0.35)',
-        bg: 'rgba(46,213,115,0.08)',
-        dot: '#2ed573',
-        label: '#2ed573',
-      };
-    }
-    if (status === 'warn') {
-      return {
-        border: '1px solid rgba(245,158,11,0.4)',
-        bg: 'rgba(245,158,11,0.08)',
-        dot: '#f59e0b',
-        label: '#fbbf24',
-      };
-    }
-    if (status === 'off') {
-      return {
-        border: '1px solid rgba(148,163,184,0.3)',
-        bg: 'rgba(148,163,184,0.06)',
-        dot: '#94a3b8',
-        label: '#94a3b8',
-      };
-    }
-    return {
-      border: '1px solid rgba(255,71,87,0.4)',
-      bg: 'rgba(255,71,87,0.08)',
-      dot: '#ff4757',
-      label: '#ff6b7a',
-    };
+  // A component's status as one of the shared tones (badge-<tone>,
+  // tone-<tone>): the stylesheet holds both themes' colours.
+  function _memTone(status) {
+    if (status === 'ok') return 'success';
+    if (status === 'warn') return 'warning';
+    if (status === 'off') return 'neutral';
+    return 'danger';
+  }
+
+  // Swap an element's tone-<x> class (a stat tile) for *tone*.
+  function _memSetTone(el, tone) {
+    if (!el) return;
+    ['accent', 'success', 'warning', 'danger', 'info', 'neutral'].forEach(function(t) {
+      el.classList.toggle('tone-' + t, t === tone);
+    });
+  }
+  // Swap a badge's badge-<x> class for *tone*.
+  function _memSetBadge(el, tone) {
+    if (!el) return;
+    ['accent', 'success', 'warning', 'danger', 'info', 'neutral', 'secondary'].forEach(function(t) {
+      el.classList.toggle('badge-' + t, t === tone);
+    });
+    el.classList.add('badge');
   }
 
   function _memCardHtml(c) {
-    const s = _chipStyle(c.status || (c.ok ? 'ok' : 'error'));
+    const tone = _memTone(c.status || (c.ok ? 'ok' : 'error'));
     const statusLabel = (c.status || (c.ok ? 'ok' : 'error')).toUpperCase();
     const detail = (c.detail || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const locName = (I18N.compNames && c.id && I18N.compNames[c.id]) || c.name || c.id || 'component';
@@ -135,12 +140,11 @@
       // min-width:0 + overflow-wrap so long details (e.g. Postgres DSNs in
       // the ConfigStore card) wrap INSIDE the card instead of widening the
       // grid track and drifting past the border.
-      '<div style="min-width:0;overflow-wrap:break-word;padding:10px 12px;border-radius:8px;border:' + s.border + ';background:' + s.bg + ';">' +
+      '<div class="card-nested" style="min-width:0;overflow-wrap:break-word;padding:10px 12px;">' +
         '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;min-width:0;">' +
           '<span style="min-width:0;overflow-wrap:break-word;font-size:0.78rem;font-weight:600;color:var(--text-primary);">' + name + '</span>' +
-          '<span style="flex-shrink:0;display:inline-flex;align-items:center;gap:5px;font-size:0.65rem;font-weight:700;letter-spacing:0.04em;color:' + s.label + ';">' +
-            '<span style="width:7px;height:7px;border-radius:50%;background:' + s.dot + ';box-shadow:0 0 6px ' + s.dot + ';"></span>' +
-            statusLabel +
+          '<span class="badge badge-' + tone + ' mem-pill" style="flex-shrink:0;font-size:0.65rem;letter-spacing:0.04em;">' +
+            '<span class="mem-dot"></span>' + statusLabel +
           '</span>' +
         '</div>' +
         '<div translate="no" style="font-size:0.7rem;line-height:1.4;color:var(--text-secondary);overflow-wrap:break-word;">' + detail + '</div>' +
@@ -163,10 +167,9 @@
     el.innerHTML = chips.map(function(ch) {
       var f = flags[ch.id] || {};
       var st = f.status || (f.ok ? 'ok' : 'off');
-      var s = _chipStyle(st);
       return (
-        '<span' + (f.detail ? ' translate="no"' : '') + ' title="' + _attr(f.detail || ch.label) + '" style="display:inline-flex;align-items:center;gap:5px;font-size:0.68rem;font-weight:600;padding:3px 8px;border-radius:999px;border:' + s.border + ';background:' + s.bg + ';color:' + s.label + ';">' +
-          '<span style="width:6px;height:6px;border-radius:50%;background:' + s.dot + ';"></span><span translate="yes">' + ch.label + '</span>' +
+        '<span' + (f.detail ? ' translate="no"' : '') + ' title="' + _attr(f.detail || ch.label) + '" class="badge badge-' + _memTone(st) + ' mem-pill" style="font-size:0.68rem;">' +
+          '<span class="mem-dot" style="width:6px;height:6px;"></span><span translate="yes">' + ch.label + '</span>' +
         '</span>'
       );
     }).join('');
@@ -206,6 +209,14 @@
     var comps = Array.isArray(data.components) ? data.components : [];
     var okN = comps.filter(function(c) { return c.status === 'ok'; }).length;
     set('kpi-health-summary', comps.length ? (okN + '/' + comps.length + ' ' + okLbl) : (data.summary || '–'));
+    // The health tile takes the worst component's tone.
+    var healthTile = document.getElementById('kpi-health-tile');
+    if (healthTile) {
+      var worst = !comps.length ? 'neutral'
+        : comps.some(function(c) { return c.status === 'error' || (!c.status && !c.ok); }) ? 'danger'
+        : comps.some(function(c) { return c.status === 'warn'; }) ? 'warning' : 'success';
+      _memSetTone(healthTile, worst);
+    }
     set('graph-size-metric', data.v2 ? window.kazmaCount('memory.console.beliefs_n', activeBeliefs) : '–');
     set('graph-count-metric', window.kazmaCount('memory.console.entities_n', data.v2 ? entitiesTotal : 0));
   }
@@ -242,10 +253,10 @@
       else if (st === 'warn') hasWarn = true;
       else if (st === 'off') hasOff = true;
     });
-    if (hasErr) return '#ff4757';
-    if (hasWarn) return '#f59e0b';
-    if (hasOff) return '#94a3b8';
-    return '#2ed573';
+    if (hasErr) return 'var(--danger)';
+    if (hasWarn) return 'var(--warning)';
+    if (hasOff) return 'var(--text-muted)';
+    return 'var(--success)';
   }
 
   function _memCompSyncToggleAllLabel() {
@@ -276,8 +287,8 @@
     if (key) _memCompOpen[key] = !!open;
     if (body) body.style.display = open ? 'grid' : 'none';
     if (chev) chev.textContent = open ? '▾' : '▸';
-    groupEl.style.borderColor = open ? 'var(--border-subtle)' : 'var(--border-subtle)';
-    groupEl.style.background = open ? 'rgba(0,0,0,0.14)' : 'rgba(255,255,255,0.02)';
+    var headBtn = groupEl.querySelector('.mem-comp-group-head');
+    if (headBtn) headBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
   }
 
   function _memCompWireGroups(grid) {
@@ -326,8 +337,8 @@
     var statusLine = _memGroupStatusLine(cards);
     var dot = _memGroupDotColor(cards);
     return (
-      '<div class="mem-comp-group" data-group-key="' + key.replace(/"/g, '') + '" data-open="' + (open ? '1' : '0') + '" ' +
-        'style="border:1px solid var(--border-subtle);border-radius:10px;background:' + (open ? 'rgba(0,0,0,0.14)' : 'rgba(255,255,255,0.02)') + ';overflow:hidden;">' +
+      '<div class="card-nested mem-comp-group" data-group-key="' + key.replace(/"/g, '') + '" data-open="' + (open ? '1' : '0') + '" ' +
+        'style="padding:0;overflow:hidden;">' +
         '<button type="button" class="mem-comp-group-head" aria-expanded="' + (open ? 'true' : 'false') + '" ' +
           'style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:none;background:transparent;cursor:pointer;text-align:start;color:inherit;font:inherit;">' +
           '<span style="display:inline-flex;align-items:center;gap:8px;min-width:0;">' +
@@ -335,7 +346,7 @@
             '<span style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-secondary);">' + String(title).replace(/</g, '&lt;') + '</span>' +
           '</span>' +
           '<span style="display:inline-flex;align-items:center;gap:6px;flex-shrink:0;font-size:0.68rem;font-family:var(--font-mono);color:var(--text-muted);">' +
-            '<span style="width:7px;height:7px;border-radius:50%;background:' + dot + ';box-shadow:0 0 6px ' + dot + ';"></span>' +
+            '<span class="mem-dot" style="--mem-c:' + dot + ';"></span>' +
             statusLine +
           '</span>' +
         '</button>' +
@@ -363,7 +374,7 @@
     renderMemoryKpis(data);
 
     if (!components.length) {
-      grid.innerHTML = '<div style="padding:10px 12px;border-radius:8px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.02);font-size:0.75rem;color:var(--text-muted);">' + (I18N.noComponentData || 'No component data yet.') + '</div>';
+      grid.innerHTML = '<div class="card-nested mem-muted" style="padding:10px 12px;font-size:0.75rem;">' + (I18N.noComponentData || 'No component data yet.') + '</div>';
     } else {
       var groups = [
         { title: I18N.groupFeatures || 'Features', ids: ['memory_enabled', 'per_turn_retrieval', 'auto_store', 'consolidation', 'kb_merge'] },
@@ -392,7 +403,7 @@
         issuesEl.style.display = 'block';
         issuesEl.innerHTML =
           '<div style="font-weight:700;margin-bottom:4px;">' + (I18N.issuesHeading || 'Needs attention') + '</div>' +
-          '<ul style="margin:0;padding-left:1.1rem;">' +
+          '<ul style="margin:0;padding-inline-start:1.1rem;">' +
           issues.map(function(i) {
             // The server's own diagnosis ("sentence_transformers not
             // installed -- Fix: pip install ..."): content, not interface.
@@ -416,7 +427,7 @@
 
       if (status === 'ACTIVE') {
         memoryBadge.textContent = I18N.memoryActive;
-        memoryBadge.style.cssText = 'font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;background:rgba(46, 213, 115, 0.15);color:#2ed573;border:1px solid rgba(46, 213, 115, 0.3);';
+        _memSetBadge(memoryBadge, 'success');
         // Prefer live headline (Postgres + vector status) over static Chroma-only copy
         memoryDesc.removeAttribute('translate');
         if (data.headline) {
@@ -442,13 +453,13 @@
         installBtn.textContent = I18N.installMl;
       } else if (status === 'DEMO') {
         memoryBadge.textContent = _mt('memory.console.demo_badge', 'DEMO');
-        memoryBadge.style.cssText = 'font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;background:rgba(59,130,246,0.15);color:#3b82f6;border:1px solid rgba(59,130,246,0.3);';
+        _memSetBadge(memoryBadge, 'accent');
         memoryDesc.removeAttribute('translate');
         memoryDesc.textContent = _mt('memory.console.demo_desc', 'Demo mode — RAG memory is disabled. The full version includes ChromaDB vector search and sentence-transformers.');
         installBtn.style.display = 'none';
       } else if (status === 'INSTALLING') {
         memoryBadge.textContent = I18N.memoryInstalling;
-        memoryBadge.style.cssText = 'font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;background:rgba(245, 158, 11, 0.15);color:#f59e0b;border:1px solid rgba(245, 158, 11, 0.3);';
+        _memSetBadge(memoryBadge, 'warning');
         memoryDesc.removeAttribute('translate');
         memoryDesc.textContent = I18N.memoryDescInstalling;
         installBtn.style.display = 'inline-block';
@@ -456,7 +467,7 @@
         installBtn.textContent = I18N.installing;
       } else {
         memoryBadge.textContent = I18N.memoryDegraded;
-        memoryBadge.style.cssText = 'font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;background:rgba(255, 71, 87, 0.15);color:#ff4757;border:1px solid rgba(255, 71, 87, 0.3);';
+        _memSetBadge(memoryBadge, 'danger');
         // Prefer first live issue as the headline reason.
         const firstIssue = data.issues && data.issues[0];
         // A live issue is the server's diagnostic, shown as written.
@@ -541,11 +552,8 @@
         const ftsSize = backup.fts5_size ? formatBytes(backup.fts5_size) : _mt('memory.console.none', 'None');
         const vecSize = backup.vector_size ? formatBytes(backup.vector_size) : _mt('memory.console.none', 'None');
         const created = window.KazmaFormat ? window.KazmaFormat.dateTime(backup.timestamp) : new Date(backup.timestamp).toLocaleString();
+        // Row hairline and hover come from .data-table (memory_console.html).
         const tr = document.createElement('tr');
-        tr.style.borderBottom = '1px solid var(--border-subtle)';
-        tr.style.transition = 'background 0.2s';
-        tr.onmouseover = function() { this.style.background = 'rgba(255,255,255,0.02)'; };
-        tr.onmouseout = function() { this.style.background = 'transparent'; };
 
         const tdName = document.createElement('td');
         tdName.style.padding = '10px 16px';
@@ -569,11 +577,8 @@
         tdAction.style.padding = '10px 16px';
         tdAction.style.textAlign = 'center';
         const btn = document.createElement('button');
-        btn.className = 'btn btn-sm btn-primary restore-btn';
         btn.dataset.name = backup.name;
-        btn.style.padding = '2px 8px';
-        btn.style.fontSize = '0.75rem';
-        btn.style.borderRadius = '4px';
+        btn.className = 'btn btn-xs btn-primary restore-btn';
         btn.textContent = I18N.restore;
         tdAction.appendChild(btn);
 
@@ -617,7 +622,7 @@
       });
       
     } catch (e) {
-      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;color:#ff4757;">${_esc(_mt('memory.console.backups_load_failed', 'Failed to load backups.'))}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--danger);">${_esc(_mt('memory.console.backups_load_failed', 'Failed to load backups.'))}</td></tr>`;
     }
   }
 
@@ -742,10 +747,10 @@
   // ── V2 Cognitive Engine panel ─────────────────────────────────
   function _v2ChipStyle(status) {
     const map = {
-      ACTIVE:      { bg:'rgba(46,213,115,0.12)', color:'#2ed573', label:_mt('memory.console.chip_active', 'Active') },
-      DUAL_WRITE:  { bg:'rgba(59,130,246,0.12)', color:'#60a5fa', label:_mt('memory.console.chip_dual_write', 'Dual-write') },
-      DEGRADED:    { bg:'rgba(245,158,11,0.12)', color:'#fbbf24', label:_mt('memory.console.chip_degraded', 'Degraded') },
-      OFF:         { bg:'rgba(148,163,184,0.12)', color:'#94a3b8', label:_mt('memory.console.chip_off', 'Off') },
+      ACTIVE:      { tone: 'success', label:_mt('memory.console.chip_active', 'Active') },
+      DUAL_WRITE:  { tone: 'info', label:_mt('memory.console.chip_dual_write', 'Dual-write') },
+      DEGRADED:    { tone: 'warning', label:_mt('memory.console.chip_degraded', 'Degraded') },
+      OFF:         { tone: 'neutral', label:_mt('memory.console.chip_off', 'Off') },
     };
     return map[status] || map.OFF;
   }
@@ -761,8 +766,7 @@
       const badge = document.getElementById('v2-status-badge');
       if (badge) {
         badge.textContent = chip.label + (h.use_new_stack ? ' · ' + _mt('memory.console.chip_live', 'LIVE') : '');
-        badge.style.background = chip.bg;
-        badge.style.color = chip.color;
+        _memSetBadge(badge, chip.tone);
       }
       const desc = document.getElementById('v2-status-desc');
       if (desc) {
@@ -790,6 +794,10 @@
       setEl('v2-kpi-queue-meta', q
         ? window.kazmaCount('memory.console.queue_meta', h.recent_audits || 0, { failed: q.failed || 0 })
         : _mt('memory.console.queue_admins_only', 'install queue: admins only'));
+      // Dead letters are a failure (the banner below says so too); work
+      // waiting is information.
+      _memSetTone(document.getElementById('v2-kpi-queue-tile'),
+        q && q.failed ? 'danger' : (q && ((q.pending || 0) + (q.processing || 0)) ? 'info' : 'neutral'));
       // Post-turn / embedder strip
       const pt = h.post_turn || {};
       const okEl = document.getElementById('v2-post-turn-ok');
@@ -809,7 +817,7 @@
         errEl.textContent = !installView ? '' : (le
           ? _mt('memory.console.last_error', 'last error: {error}', { error: String(le).slice(0, 80) })
           : _mt('memory.console.last_error_none', 'last error: none'));
-        errEl.style.color = le ? '#f87171' : 'var(--text-muted)';
+        errEl.style.color = le ? 'var(--danger)' : 'var(--text-muted)';
       }
       const embEl = document.getElementById('v2-embedder-ready');
       if (embEl) {
@@ -842,7 +850,7 @@
             ? _mt('memory.console.graph_online', 'online')
             : _mt('memory.console.graph_offline', 'offline→sqlite fallback');
           gEl.textContent = _mt('memory.console.graph_neo4j', 'graph: neo4j dual-write · {state} · paint sqlite', { state: on });
-          gEl.style.color = g.online ? '#2ed573' : '#fbbf24';
+          gEl.style.color = g.online ? 'var(--success)' : 'var(--warning)';
         } else {
           gEl.textContent = _mt('memory.console.graph_sqlite', 'graph: sqlite');
           gEl.style.color = 'var(--text-muted)';
@@ -860,7 +868,7 @@
       const failedQ = (h.queue && h.queue.failed) || 0;
       const hasErr = !!(pt.last_error || h.last_error || h.status_detail);
       if (strip && (failedQ > 0 || hasErr)) {
-        strip.style.borderColor = 'rgba(248,113,113,0.35)';
+        strip.classList.add('is-alert');
       }
       // Sticky alert banner (P0-2)
       const banner = document.getElementById('v2-alert-banner');
@@ -880,19 +888,20 @@
       // Tier breakdown bars
       const tb = document.getElementById('v2-tier-breakdown');
       if (tb) {
+        // Each tier is a category colour (--cat-*), the archived one muted.
         const tiers = [
-          ['working', 'Working', 'Work', h.episodes.working, '#60a5fa'],
-          ['episodic', 'Episodic', 'Epis', h.episodes.episodic, '#2ed573'],
-          ['recall', 'Recall', 'Reca', h.episodes.recall, '#fbbf24'],
-          ['archived', 'Archived', 'Arch', h.episodes.archived, '#94a3b8'],
+          ['working', 'Working', 'Work', h.episodes.working, 'var(--cat-1)'],
+          ['episodic', 'Episodic', 'Epis', h.episodes.episodic, 'var(--cat-6)'],
+          ['recall', 'Recall', 'Reca', h.episodes.recall, 'var(--cat-2)'],
+          ['archived', 'Archived', 'Arch', h.episodes.archived, 'var(--text-muted)'],
         ];
         const total = tiers.reduce((s,t) => s + (t[3]||0), 0) || 1;
         tb.innerHTML = tiers.map(([id, full, short, count, color]) => {
           const pct = Math.round(((count||0) / total) * 100);
           const name = _mt('memory.console.tier_' + id, full);
           const tip = _mt('memory.console.tier_title', '{name}: {count} ({pct}%)', { name: name, count: count || 0, pct: pct });
-          return '<span title="' + _attr(tip) + '" style="display:inline-flex;align-items:center;gap:4px;font-size:0.65rem;padding:2px 6px;border-radius:999px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.03);">' +
-                 '<span style="width:7px;height:7px;border-radius:50%;background:' + color + ';flex-shrink:0;"></span>' +
+          return '<span title="' + _attr(tip) + '" class="mem-chip mem-chip-plain">' +
+                 '<span class="mem-dot" style="--mem-c:' + color + ';"></span>' +
                  '<span style="color:var(--text-muted);">' + _esc(_mt('memory.console.tier_short_' + id, short)) + '</span>' +
                  '<span style="font-family:var(--font-mono);color:var(--text-primary);">' + (count||0) + '</span>' +
                  '</span>';
@@ -926,8 +935,8 @@
   // A Forget button for a memory or a weekly summary a search found.
   function _hitForget(kind, id) {
     if (!id || (kind !== 'episode' && kind !== 'summary')) return '';
-    return ' <button type="button" class="btn btn-sm v2-hit-forget" data-kind="' + kind + '" data-id="' + _attr(id) +
-      '" style="font-size:0.62rem;padding:0 6px;">' + _esc(_mt('memory.console.forget', 'Forget')) + '</button>';
+    return ' <button type="button" class="btn btn-xs btn-outline v2-hit-forget" data-kind="' + kind + '" data-id="' + _attr(id) +
+      '">' + _esc(_mt('memory.console.forget', 'Forget')) + '</button>';
   }
   function _wireHitForgets(out) {
     out.querySelectorAll('.v2-hit-forget').forEach(function(btn) {
@@ -960,32 +969,33 @@
       function _srcChips(h) {
         var arr = (h.sources && h.sources.length) ? h.sources : (h.source ? [h.source] : []);
         if (!arr.length) return '';
+        // Each retrieval channel is a category colour (--cat-*).
         return arr.map(function(s) {
-          var color = '#94a3b8';
+          var color = 'var(--text-muted)';
           var key = String(s || '').toLowerCase();
-          if (key.indexOf('ppr') >= 0 || key.indexOf('belief_ppr') >= 0) color = '#93c5fd';
-          else if (key.indexOf('dense') >= 0) color = '#38bdf8';
-          else if (key.indexOf('fts') >= 0 || key.indexOf('belief') >= 0) color = '#34d399';
-          else if (key.indexOf('session') >= 0) color = '#fbbf24';
-          return '<span translate="no" style="display:inline-block;margin-right:3px;padding:1px 6px;border-radius:999px;font-size:0.62rem;font-weight:600;background:rgba(255,255,255,0.06);color:' + color + ';">' + _esc(s) + '</span>';
+          if (key.indexOf('ppr') >= 0 || key.indexOf('belief_ppr') >= 0) color = 'var(--cat-4)';
+          else if (key.indexOf('dense') >= 0) color = 'var(--cat-1)';
+          else if (key.indexOf('fts') >= 0 || key.indexOf('belief') >= 0) color = 'var(--cat-6)';
+          else if (key.indexOf('session') >= 0) color = 'var(--cat-2)';
+          return '<span translate="no" class="mem-chip" style="--mem-c:' + color + ';margin-inline-end:3px;font-size:0.62rem;padding:1px 6px;">' + _esc(s) + '</span>';
         }).join('');
       }
       (data.beliefs || []).forEach(function(h) {
-        lines.push('<div style="margin-bottom:6px;padding:6px 8px;border-radius:6px;background:rgba(46,213,115,0.06);"><span style="color:#2ed573;font-size:0.65rem;font-weight:700;">' + _esc(_mt('memory.console.hit_belief', 'BELIEF')) + '</span> ' +
+        lines.push('<div class="mem-hit" style="--mem-c:var(--cat-6);"><span class="mem-hit-kind">' + _esc(_mt('memory.console.hit_belief', 'BELIEF')) + '</span> ' +
           '<span translate="no">' + _esc(h.content || '') + '</span>' +
           '<div style="margin-top:3px;">' + _srcChips(h) +
-          ' <span style="color:var(--text-muted);font-size:0.68rem;">' +
+          ' <span class="mem-muted" style="font-size:0.68rem;">' +
           _esc(_mt('memory.console.score', 'score {n}', { n: h.score != null ? Number(h.score).toFixed(3) : '' })) + '</span></div></div>');
       });
       (data.episodes || []).forEach(function(h) {
-        lines.push('<div style="margin-bottom:6px;padding:6px 8px;border-radius:6px;background:rgba(96,165,250,0.06);"><span style="color:#60a5fa;font-size:0.65rem;font-weight:700;">' + _esc(_mt('memory.console.hit_episode', 'EPISODE')) + '</span> ' +
+        lines.push('<div class="mem-hit" style="--mem-c:var(--cat-1);"><span class="mem-hit-kind">' + _esc(_mt('memory.console.hit_episode', 'EPISODE')) + '</span> ' +
           '<span translate="no">' + _esc((h.content || '').slice(0, 200)) + '</span>' + _hitForget('episode', h.id) +
           '<div style="margin-top:3px;">' + _srcChips(h) + '</div></div>');
       });
       // Weekly topic summaries, as the model is shown them (Memory audit M32:
       // the panel dropped them).
       (data.weekly_summaries || []).forEach(function(h) {
-        lines.push('<div style="margin-bottom:6px;padding:6px 8px;border-radius:6px;background:rgba(251,191,36,0.06);"><span style="color:#fbbf24;font-size:0.65rem;font-weight:700;">' + _esc(_mt('memory.console.hit_summary', 'WEEKLY SUMMARY')) + '</span> ' +
+        lines.push('<div class="mem-hit" style="--mem-c:var(--cat-2);"><span class="mem-hit-kind">' + _esc(_mt('memory.console.hit_summary', 'WEEKLY SUMMARY')) + '</span> ' +
           '<span translate="no">' + _esc((h.content || '').slice(0, 300)) + '</span>' + _hitForget('summary', h.id) + '</div>');
       });
       if (data.degraded) {
@@ -993,14 +1003,14 @@
       }
       if (!lines.length) {
         const hints = (data.hints || []).map(function(hh) {
-          return '<div translate="no" style="color:#fbbf24;margin-top:4px;">• ' + _esc(hh) + '</div>';
+          return '<div translate="no" class="mem-warn" style="margin-top:4px;">• ' + _esc(hh) + '</div>';
         }).join('');
-        out.innerHTML = '<span style="color:var(--text-muted);">' + _esc(_mt('memory.console.no_hits', 'No hits.')) + '</span>' + hints;
+        out.innerHTML = '<span class="mem-muted">' + _esc(_mt('memory.console.no_hits', 'No hits.')) + '</span>' + hints;
       } else {
         out.innerHTML = lines.join('') +
-          '<div style="margin-top:6px;font-size:0.68rem;color:var(--text-muted);">' + _esc(_mt('memory.console.channels_hint', 'Channels: fts5 · dense · belief_ppr · session_boost (enable Explain recall in Settings → Memory)')) + '</div>' +
-          '<button type="button" class="btn btn-sm" id="v2-probe-path-btn" style="margin-top:8px;font-size:0.72rem;">' + _esc(_mt('memory.console.show_path', 'Show path on graph →')) + '</button>' +
-          '<button type="button" class="btn btn-sm" id="v2-eval-golden-btn" style="margin-top:8px;margin-left:6px;font-size:0.72rem;">' + _esc(_mt('memory.console.run_golden_eval', 'Run golden eval')) + '</button>';
+          '<div class="mem-muted" style="margin-top:6px;font-size:0.68rem;">' + _esc(_mt('memory.console.channels_hint', 'Channels: fts5 · dense · belief_ppr · session_boost (enable Explain recall in Settings → Memory)')) + '</div>' +
+          '<button type="button" class="btn btn-sm btn-secondary" id="v2-probe-path-btn" style="margin-top:8px;">' + _esc(_mt('memory.console.show_path', 'Show path on graph →')) + '</button>' +
+          '<button type="button" class="btn btn-sm btn-outline" id="v2-eval-golden-btn" style="margin-top:8px;margin-inline-start:6px;">' + _esc(_mt('memory.console.run_golden_eval', 'Run golden eval')) + '</button>';
         document.getElementById('v2-probe-path-btn')?.addEventListener('click', function() { _v2gApplyPathFromQuery(); });
         document.getElementById('v2-eval-golden-btn')?.addEventListener('click', runGoldenEval);
         _wireHitForgets(out);
@@ -1056,7 +1066,7 @@
 
       // "Probe from this belief" — seeds the probe box with the object text so
       // the operator can see what else this belief recalls alongside.
-      const probeBtn = '<button type="button" id="v2-belief-probe" style="margin-top:6px;font-size:0.7rem;padding:2px 8px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);cursor:pointer;">' + _esc(_mt('memory.console.probe_from_belief', 'Probe from this belief →')) + '</button>';
+      const probeBtn = '<button type="button" id="v2-belief-probe" class="btn btn-xs btn-outline" style="margin-top:6px;">' + _esc(_mt('memory.console.probe_from_belief', 'Probe from this belief →')) + '</button>';
 
       body.innerHTML =
         '<div translate="no"><b>' + _esc(b.subject) + '</b> ' + _esc((b.predicate||'').replace(/_/g,' ')) +
@@ -1144,9 +1154,9 @@
         const label = QUEUE_STATUS[st];
         const stHtml = label ? _esc(_mt(label[0], label[1])) : '<span translate="no">' + _esc(st) + '</span>';
         const retry = st === 'failed'
-          ? ' <button type="button" data-retry="' + _attr(t.id) + '" class="v2-queue-retry" style="font-size:0.65rem;padding:1px 6px;cursor:pointer;">' + _esc(_mt('memory.console.retry', 'retry')) + '</button>'
+          ? ' <button type="button" data-retry="' + _attr(t.id) + '" class="btn btn-xs btn-outline v2-queue-retry">' + _esc(_mt('memory.console.retry', 'retry')) + '</button>'
           : '';
-        return '<div style="padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);">' +
+        return '<div class="mem-row" style="padding:3px 0;">' +
           '<span translate="no">' + _esc(t.task_type) + '</span> · ' + stHtml + ' · ' +
           _esc(window.kazmaCount('memory.console.attempts', t.attempts || 0)) + retry + '</div>';
       }).join('');
@@ -1190,12 +1200,12 @@
       const merges = data.merges || [];
       if (!merges.length) { el.textContent = _mt('memory.console.no_pending_merges', 'No pending merges.'); return; }
       el.innerHTML = merges.map(function(m) {
-        return '<div style="padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04);display:flex;gap:6px;align-items:center;flex-wrap:wrap;">' +
+        return '<div class="mem-row" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">' +
           '<span translate="no">' + _esc(m.source_entity_id) + ' → ' + _esc(m.target_entity_id) +
-          ' <span style="color:var(--text-muted);">(' + _esc(m.merge_tier) + ' · ' +
+          ' <span class="mem-muted">(' + _esc(m.merge_tier) + ' · ' +
           (m.confidence != null ? Number(m.confidence).toFixed(2) : '') + ')</span></span>' +
-          '<button type="button" data-mid="' + _attr(m.id) + '" data-act="approve" class="v2-merge-act btn btn-sm" style="font-size:0.65rem;padding:1px 6px;" aria-label="' + _attr(_mt('memory.console.approve', 'Approve')) + '">' + KazmaIcons.span('check') + '</button>' +
-          '<button type="button" data-mid="' + _attr(m.id) + '" data-act="reject" class="v2-merge-act btn btn-sm" style="font-size:0.65rem;padding:1px 6px;" aria-label="' + _attr(_mt('memory.console.reject', 'Reject')) + '">' + KazmaIcons.span('x') + '</button>' +
+          '<button type="button" data-mid="' + _attr(m.id) + '" data-act="approve" class="v2-merge-act btn btn-xs btn-success" aria-label="' + _attr(_mt('memory.console.approve', 'Approve')) + '">' + KazmaIcons.span('check') + '</button>' +
+          '<button type="button" data-mid="' + _attr(m.id) + '" data-act="reject" class="v2-merge-act btn btn-xs btn-outline" aria-label="' + _attr(_mt('memory.console.reject', 'Reject')) + '">' + KazmaIcons.span('x') + '</button>' +
           '</div>';
       }).join('');
       el.querySelectorAll('.v2-merge-act').forEach(function(btn) {
@@ -1225,10 +1235,11 @@
     const text = failed
       ? _mt('memory.console.memory_search_failed', 'Memory search failed: this is not an empty result.')
       : _mt('memory.console.probe_degraded', 'Meaning search was unavailable: keyword matches only.');
-    return '<div style="margin-bottom:6px;color:#fbbf24;font-size:0.72rem;">' + _esc(text) + '</div>';
+    // A failed search is a failure (danger); keyword-only is a warning.
+    return '<div class="notice tone-' + (failed ? 'danger' : 'warning') + '" style="display:block;margin-bottom:6px;font-size:0.72rem;">' + _esc(text) + '</div>';
   }
   function _knowledgeFailedBanner() {
-    return '<div style="margin-bottom:6px;color:#fbbf24;font-size:0.72rem;">' +
+    return '<div class="notice tone-danger" style="display:block;margin-bottom:6px;font-size:0.72rem;">' +
       _esc(_mt('memory.console.knowledge_search_failed', 'Knowledge search failed: this is not an empty result.')) + '</div>';
   }
 
@@ -1264,16 +1275,17 @@
       }
       const lines = (data.hits || []).map(function(h) {
         const store = h.store === 'knowledge' ? 'KB' : 'MEM';
-        const color = h.store === 'knowledge' ? '#fbbf24' : '#2ed573';
+        // Which store a hit came from is a category, not a status.
+        const color = h.store === 'knowledge' ? 'var(--cat-2)' : 'var(--cat-6)';
         const kind = (h.kind || '').toUpperCase();
         const prov = h.provenance || {};
         const extra = h.store === 'knowledge'
           ? (prov.document_title || prov.source_url || prov.library_id || '')
           : ((h.sources && h.sources.join(',')) || h.source || '');
-        return '<div style="margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,0.04);">' +
-          '<span translate="no" style="color:' + color + ';font-size:0.65rem;font-weight:700;">' + store + '/' + _esc(kind) + '</span> ' +
+        return '<div class="mem-row" style="margin-bottom:6px;padding-bottom:6px;">' +
+          '<span translate="no" class="mem-hit-kind" style="--mem-c:' + color + ';">' + store + '/' + _esc(kind) + '</span> ' +
           '<span translate="no">' + _esc((h.content || '').slice(0, 220)) + '</span>' +
-          (extra ? ' <span translate="no" style="color:var(--text-muted);font-size:0.68rem;">[' + _esc(String(extra).slice(0, 80)) + ']</span>' : '') +
+          (extra ? ' <span translate="no" class="mem-muted" style="font-size:0.68rem;">[' + _esc(String(extra).slice(0, 80)) + ']</span>' : '') +
           (h.store === 'knowledge' ? '' : _hitForget(h.kind === 'weekly_summary' ? 'summary' : h.kind, h.id)) +
           '</div>';
       });
@@ -1285,13 +1297,13 @@
       if (data.knowledge_error) banners.push(_knowledgeFailedBanner());
       if (lines.length) {
         out.innerHTML = banners.join('') + lines.join('') +
-          '<button type="button" class="btn btn-sm" id="v2-fed-path-btn" style="margin-top:8px;font-size:0.72rem;">' + _esc(_mt('memory.console.show_path', 'Show path on graph →')) + '</button>';
+          '<button type="button" class="btn btn-sm btn-secondary" id="v2-fed-path-btn" style="margin-top:8px;">' + _esc(_mt('memory.console.show_path', 'Show path on graph →')) + '</button>';
         document.getElementById('v2-fed-path-btn')?.addEventListener('click', function() { _v2gApplyPathFromQuery(); });
         _wireHitForgets(out);
       } else if (banners.length) {
         out.innerHTML = banners.join('');
       } else {
-        out.innerHTML = '<span style="color:var(--text-muted);">' + _esc(_mt('memory.console.no_hits_either', 'No hits in either store.')) + '</span>';
+        out.innerHTML = '<span class="mem-muted">' + _esc(_mt('memory.console.no_hits_either', 'No hits in either store.')) + '</span>';
       }
     } catch (e) {
       out.textContent = _mt('memory.console.fed_error', 'Federated search error: {error}', { error: e });
@@ -1327,7 +1339,7 @@
         (data.skipped ? ' · ' + _esc(_mt('memory.console.eval_skipped', 'skipped {n}', { n: data.skipped })) : '') + '</div>'
       ];
       (data.cases || []).forEach(function(c) {
-        const color = c.status === 'pass' ? '#2ed573' : (c.status === 'skipped' ? '#94a3b8' : '#f87171');
+        const color = c.status === 'pass' ? 'var(--success)' : (c.status === 'skipped' ? 'var(--text-muted)' : 'var(--danger)');
         lines.push('<div style="font-size:0.72rem;margin-bottom:2px;"><span style="color:' + color + ';font-weight:700;">' +
           _esc(_mt('memory.console.case_' + String(c.status || 'unknown').toLowerCase(), String(c.status || '?').toUpperCase())) + '</span> ' +
           '<span translate="no">' + _esc(c.id || '') + (c.query ? ' — ' + _esc(c.query) : '') + '</span></div>');
@@ -1365,11 +1377,11 @@
       const dags = data.dags || [];
       if (!dags.length) { el.textContent = _mt('memory.console.no_active_skills', 'No active skills yet.'); return; }
       el.innerHTML = dags.map(function(d) {
-        return '<div translate="no" style="padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);">' +
+        return '<div translate="no" class="mem-row" style="padding:3px 0;">' +
           '<b style="color:var(--text-primary);">' + _esc(d.name || d.id) + '</b> · C=' +
           (d.confidence != null ? Number(d.confidence).toFixed(2) : '?') +
           ' · n=' + (d.total_trials || 0) +
-          '<div style="color:var(--text-muted);">' + _esc((d.description || '').slice(0, 80)) + '</div></div>';
+          '<div class="mem-muted">' + _esc((d.description || '').slice(0, 80)) + '</div></div>';
       }).join('');
     } catch (e) { el.textContent = _mt('memory.console.skills_load_failed', 'Skills load failed'); }
   }
@@ -1468,13 +1480,13 @@
         // The id is isolated left to right: on an Arabic page its leading
         // digits joined the date's and the line read "29625 ... 2026/09/c31ba".
         const chat = ep.session_id ? ' · ' + _esc(_mt('memory.console.chat', 'chat')) + ' <bdi dir="ltr" translate="no">' + _esc(String(ep.session_id).slice(0, 12)) + '</bdi>' : '';
-        return '<div style="display:flex;gap:8px;align-items:flex-start;justify-content:space-between;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04);">' +
+        return '<div class="mem-row" style="display:flex;gap:8px;align-items:flex-start;justify-content:space-between;">' +
           // The memory is its own line, laid out in its own language: inline in
           // the row it took the page's direction, so on an Arabic page an
           // English memory sat on the right (2026-10-02).
           '<span style="min-width:0;overflow-wrap:anywhere;"><span translate="no" style="display:block;color:var(--text-primary);">' + _esc(ep.preview || ep.id) + '</span>' +
-          '<span style="display:block;color:var(--text-muted);font-size:0.65rem;"><bdi>' + _esc(when) + '</bdi>' + chat + '</span></span>' +
-          '<button type="button" class="btn btn-sm v2-memory-forget" data-id="' + _attr(ep.id) + '" style="font-size:0.65rem;padding:1px 6px;flex-shrink:0;">' + _esc(_mt('memory.console.forget', 'Forget')) + '</button></div>';
+          '<span class="mem-muted" style="display:block;font-size:0.65rem;"><bdi>' + _esc(when) + '</bdi>' + chat + '</span></span>' +
+          '<button type="button" class="btn btn-sm v2-memory-forget btn-outline" data-id="' + _attr(ep.id) + '" style="flex-shrink:0;">' + _esc(_mt('memory.console.forget', 'Forget')) + '</button></div>';
       }).join('');
       el.querySelectorAll('.v2-memory-forget').forEach(function(btn) {
         btn.addEventListener('click', function() { _forgetEpisode(btn.getAttribute('data-id')); });
@@ -1549,15 +1561,15 @@
           ((s.chat_count || 0) > 1 ? window.kazmaCount('memory.console.summary_chats', s.chat_count) : '');
         const pending = s.status === 'rebuild';
         const title = pending ? _mt('memory.console.summary_rebuilding', 'Being rewritten without a forgotten conversation') : (s.title || s.id);
-        return '<div style="display:flex;gap:8px;align-items:flex-start;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);">' +
+        return '<div class="mem-row" style="display:flex;gap:8px;align-items:flex-start;justify-content:space-between;padding:6px 0;">' +
           '<span style="min-width:0;overflow-wrap:anywhere;">' +
           // The title is its own line, in its own language (as the memories
           // list above): inline in the row it took the page's direction.
           '<span' + (pending ? '' : ' translate="no"') + ' style="display:block;color:var(--text-primary);font-weight:600;">' + _esc(title) + '</span>' +
-          '<span style="display:block;color:var(--text-muted);font-size:0.65rem;">' + _esc(_mt('memory.console.week_of', 'Week of {date}', { date: monday })) + ' · ' + _esc(size) + '</span>' +
+          '<span class="mem-muted" style="display:block;font-size:0.65rem;">' + _esc(_mt('memory.console.week_of', 'Week of {date}', { date: monday })) + ' · ' + _esc(size) + '</span>' +
           (pending ? '' : '<span translate="no" style="display:block;margin-top:2px;white-space:pre-wrap;">' + _esc(s.summary_text || '') + '</span>') +
           '</span>' +
-          '<button type="button" class="btn btn-sm v2-summary-forget" data-id="' + _attr(s.id) + '" style="font-size:0.65rem;padding:1px 6px;flex-shrink:0;">' + _esc(_mt('memory.console.forget', 'Forget')) + '</button></div>';
+          '<button type="button" class="btn btn-sm v2-summary-forget btn-outline" data-id="' + _attr(s.id) + '" style="flex-shrink:0;">' + _esc(_mt('memory.console.forget', 'Forget')) + '</button></div>';
       }).join('');
       el.querySelectorAll('.v2-summary-forget').forEach(function(btn) {
         btn.addEventListener('click', function() { _forgetSummary(btn.getAttribute('data-id')); });
@@ -1592,23 +1604,23 @@
       const beliefs = data.beliefs || [];
       const emptyCta = document.getElementById('v2-belief-empty-cta');
       if (!beliefs.length) {
-        list.innerHTML = '<div style="padding:12px;color:var(--text-muted);font-size:0.78rem;">' + _esc(_mt('memory.console.no_active_beliefs', 'No active beliefs yet.')) + '</div>';
+        list.innerHTML = '<div class="mem-muted" style="padding:12px;font-size:0.78rem;">' + _esc(_mt('memory.console.no_active_beliefs', 'No active beliefs yet.')) + '</div>';
         if (emptyCta) emptyCta.style.display = 'block';
         return;
       }
       if (emptyCta) emptyCta.style.display = 'none';
-      const ptypeColor = { functional:'#2ed573', set:'#60a5fa', state:'#fbbf24' };
       list.innerHTML = beliefs.map((b, idx) => {
         const conf = Math.round((b.confidence||0) * 100);
-        const pc = ptypeColor[b.predicate_type] || '#94a3b8';
+        // The graph's predicate palette, so a badge here matches its edges.
+        const pc = _v2gPredVar(b.predicate_type) || 'var(--text-muted)';
         const ptype = _mtData('memory.console.ptype_', b.predicate_type || '?');
         const objRaw = String(b.object || '');
         const objFull = _esc(objRaw);
         const objShown = objRaw.length > 160 ? objFull.slice(0, 160) + '…' : objFull;
-        return '<div class="v2-belief-row" data-id="' + _attr(b.id) + '" data-subject="' + _attr(b.subject) + '" data-object="' + _attr(b.object) + '" data-predicate="' + _attr(b.predicate) + '" style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);display:flex;align-items:flex-start;gap:8px;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(99,102,241,0.08)\'" onmouseout="this.style.background=\'transparent\'">' +
-               '<span' + ptype.attr + ' style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:' + pc + '22;color:' + pc + ';text-transform:uppercase;font-weight:600;flex-shrink:0;margin-top:2px;">' + _esc(ptype.text) + '</span>' +
+        return '<div class="v2-belief-row" data-id="' + _attr(b.id) + '" data-subject="' + _attr(b.subject) + '" data-object="' + _attr(b.object) + '" data-predicate="' + _attr(b.predicate) + '">' +
+               '<span' + ptype.attr + ' class="mem-ptype" style="--mem-c:' + pc + ';">' + _esc(ptype.text) + '</span>' +
                '<div translate="no" style="flex:1;color:var(--text-primary);min-width:0;word-break:break-word;line-height:1.4;"><b>' + _esc(b.subject) + '</b> ' + _esc(b.predicate.replace(/_/g,' ')) + ' <b title="' + objFull + '">' + objShown + '</b></div>' +
-               '<span style="font-size:0.68rem;color:var(--text-muted);font-family:var(--font-mono);flex-shrink:0;margin-top:2px;">i' + b.structural_importance + ' · ' + conf + '%</span>' +
+               '<span class="mem-muted" style="font-size:0.68rem;font-family:var(--font-mono);flex-shrink:0;margin-top:2px;">i' + b.structural_importance + ' · ' + conf + '%</span>' +
                '</div>';
       }).join('');
       // Make each belief row clickable — drawer + highlight graph
@@ -1619,9 +1631,8 @@
           var bid = row.getAttribute('data-id');
           if (bid) openBeliefDrawer(bid);
           _v2gSelectByBelief(subj, obj);
-          list.querySelectorAll('.v2-belief-row').forEach(function(r) { r.style.background = 'transparent'; r.style.borderLeft = ''; });
-          row.style.background = 'rgba(99,102,241,0.12)';
-          row.style.borderLeft = '3px solid #3b82f6';
+          list.querySelectorAll('.v2-belief-row').forEach(function(r) { r.classList.remove('is-selected'); });
+          row.classList.add('is-selected');
         });
       });
     } catch (e) { /* silent */ }
@@ -1822,43 +1833,115 @@
     selectedEdgeIdx: -1,
   };
 
-  // Palette follows site tokens (cyan accent + blue secondary).
-  // The "user" node is intentionally warm amber so it stands out.
-  function _v2gCss(name, fallback) {
+  // Palette: every colour is a token, read for the theme on screen. Entity
+  // types are the category tokens (--cat-1..6), the hub ("You") the warning
+  // colour, states the status tokens. HTML (filters, legend, inspector) uses
+  // the tokens as var() so it follows a theme change by itself; the canvas
+  // and the SVG export need resolved colours, cached per theme and dropped
+  // on kazma:themechange (or a data-theme/style change on <html>).
+  var _V2G_USER_TOKEN = '--warning';
+  var _V2G_MAJOR_TOKEN = '--cat-2';
+  var _V2G_TYPE_TOKENS = {
+    person: '--cat-1',
+    tool: '--cat-5',
+    concept: '--cat-6',
+    location: '--cat-3',
+    project: '--cat-4',
+    // entity, organization, event and any other type: the accent.
+  };
+  var _V2G_PRED_TOKENS = {
+    functional: '--accent',
+    set: '--cat-5',
+    state: '--cat-6',
+  };
+  // F: tier palette. The operator organizes nodes into a tiered tree
+  // (0=main/hub, 1=major, 2=sub, 3=leaf). Grouped nodes take their tier
+  // colour; ungrouped nodes (tier -1/undefined) fall back to the entity-type
+  // colour. The hub keeps its own colour regardless.
+  var _V2G_TIER_TOKENS = {
+    0: _V2G_USER_TOKEN,   // main — the hub's colour
+    1: '--accent',        // major
+    2: '--accent',        // sub
+    3: '--text-muted',    // leaf
+  };
+  // A token's value is the text it was declared with: the accent shades are
+  // color-mix() expressions since 2026-11-09 (kazma.css derives them from
+  // --accent), and _v2gHexAlpha only adds alpha to #rrggbb. So any value
+  // that is not a #rrggbb is painted on a 1x1 canvas and read back as one
+  // (opaque tokens only: a translucent one would lose its alpha).
+  var _v2gProbe = null;
+  function _v2gToHex(v) {
+    if (!v) return '';
+    if (/^#[0-9a-f]{6}$/i.test(v)) return v;
+    try {
+      if (window.CSS && CSS.supports && !CSS.supports('color', v)) return '';
+      if (!_v2gProbe) {
+        var cv = document.createElement('canvas');
+        cv.width = cv.height = 1;
+        _v2gProbe = cv.getContext('2d', { willReadFrequently: true });
+      }
+      _v2gProbe.clearRect(0, 0, 1, 1);
+      _v2gProbe.fillStyle = v;
+      _v2gProbe.fillRect(0, 0, 1, 1);
+      var d = _v2gProbe.getImageData(0, 0, 1, 1).data;
+      return '#' + [d[0], d[1], d[2]].map(function (c) { return c.toString(16).padStart(2, '0'); }).join('');
+    } catch (e) { return ''; }
+  }
+  // A token's colour for the theme on screen (#rrggbb), else the fallback
+  // token's, else ''.
+  function _v2gCss(name, fallbackName) {
     try {
       var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-      return v || fallback;
-    } catch (e) { return fallback; }
+      var hex = _v2gToHex(v);
+      if (hex) return hex;
+    } catch (e) { /* fall through */ }
+    return fallbackName ? _v2gCss(fallbackName) : '';
+  }
+  var _v2gThemeCache = null;
+  function _v2gThemeColor(token) {
+    var t = _v2gTheme();
+    if (!(token in t.byToken)) t.byToken[token] = _v2gCss(token, '--accent');
+    return t.byToken[token];
   }
   function _v2gTheme() {
-    var accent = _v2gCss('--accent', '#22d3ee');
-    var accentLight = _v2gCss('--accent-light', '#67e8f9');
-    var secondary = _v2gCss('--secondary', '#3b82f6');
-    var secondaryLight = _v2gCss('--secondary-light', '#93c5fd');
-    var user = _v2gCss('--warning', '#f59e0b');
-    return {
-      accent: accent,
-      accentLight: accentLight,
-      secondary: secondary,
-      secondaryLight: secondaryLight,
-      user: user,
-      // Soft type variation — all stay in site blue/cyan family
-      type: {
-        person: secondary,
-        tool: accent,
-        concept: accentLight,
-        location: secondaryLight,
-        project: '#38bdf8',
-        entity: '#7dd3fc',
-      },
-      pred: {
-        functional: accent,
-        set: secondaryLight,
-        state: '#38bdf8',
-      },
-    };
+    if (_v2gThemeCache) return _v2gThemeCache;
+    var t = { byToken: {} };
+    _v2gThemeCache = t;
+    var c = function (name, fb) { return (t.byToken[name] = _v2gCss(name, fb || '--text-muted')); };
+    t.accent = c('--accent');
+    t.accentLight = c('--accent-light', '--accent');
+    t.secondary = c('--secondary', '--accent');
+    t.secondaryLight = c('--secondary-light', '--secondary');
+    t.user = c(_V2G_USER_TOKEN);
+    t.warning = c('--warning');
+    t.danger = c('--danger');
+    t.muted = c('--text-muted');
+    t.ink = c('--text-primary');
+    t.ink2 = c('--text-secondary');
+    t.card = c('--surface-card');
+    t.well = c('--surface-sunken', '--surface-card');
+    t.major = c(_V2G_MAJOR_TOKEN, '--accent');
+    t.type = {};
+    Object.keys(_V2G_TYPE_TOKENS).forEach(function (k) { t.type[k] = c(_V2G_TYPE_TOKENS[k], '--accent'); });
+    t.pred = {};
+    Object.keys(_V2G_PRED_TOKENS).forEach(function (k) { t.pred[k] = c(_V2G_PRED_TOKENS[k], '--accent'); });
+    return t;
   }
-  // Legacy maps rebuilt from theme (filters / legend)
+  // Drop the resolved colours and paint again (theme or accent changed).
+  function _v2gThemeChanged() {
+    _v2gThemeCache = null;
+    _v2gRefreshPalette();
+    if (typeof _v2gRepaint === 'function' && _v2gPts && _v2gPts.length) _v2gRepaint();
+  }
+  // A token as a CSS value, for HTML: follows a theme change with no repaint.
+  function _v2gTokenVar(token) { return 'var(' + token + ')'; }
+  // The same token as text ink: the accent's text-strength shade, which
+  // reads 4.5:1 on the card and on a tint (the accent itself is a fill).
+  function _v2gInkVar(token) { return _v2gTokenVar(token === '--accent' ? '--accent-light' : token); }
+  function _v2gTypeVar(type) { return _v2gTokenVar(_V2G_TYPE_TOKENS[type] || '--accent'); }
+  // Predicate colour as text (badges, inspector rows, filter dots).
+  function _v2gPredVar(type) { return _V2G_PRED_TOKENS[type] ? _v2gInkVar(_V2G_PRED_TOKENS[type]) : ''; }
+  // Legacy maps rebuilt from theme (canvas paint reads them)
   function _v2gTypeColors() {
     var t = _v2gTheme();
     return Object.assign({ user: t.user }, t.type);
@@ -1909,31 +1992,29 @@
     }
     return raw || String(p.id || '');
   }
-  // F: tier color palette. The operator organizes nodes into a tiered tree
-  // (0=main/hub, 1=major, 2=sub, 3=leaf). Grouped nodes take their tier
-  // color; ungrouped nodes (tier -1/undefined) fall back to the entity-type
-  // color. The hub keeps its amber user color regardless.
-  var _V2G_TIER_COLORS = {
-    0: '#f59e0b',  // main  — amber/orange (the hub; matches existing hub style)
-    1: '#3b82f6',  // major — royal blue
-    2: '#3b82f6',  // sub   — blue
-    3: '#94a3b8',  // leaf  — slate
-  };
   function _v2gTierColor(tier) {
-    return _V2G_TIER_COLORS[tier];
+    return _V2G_TIER_TOKENS[tier] ? _v2gThemeColor(_V2G_TIER_TOKENS[tier]) : undefined;
   }
 
-  function _v2gNodeColor(p) {
-    var t = _v2gTheme();
-    if (_v2gIsUser(p)) return t.user;
-    // Major nodes get a distinct violet color — stands out from tier palette
-    // and hub amber, so the operator's marked projects/hubs are instantly visible.
-    if (p && p.isMajor) return '#a855f7';
-    // Tier color wins for grouped nodes (tier 0-3). -1/undefined → type color.
-    if (p && p.tier !== undefined && p.tier >= 0 && _V2G_TIER_COLORS[p.tier]) {
-      return _V2G_TIER_COLORS[p.tier];
+  // The token a node is drawn in: the hub its own; a major node the
+  // category colour kept for it, so the operator's marked nodes stand out
+  // from the tier palette and the hub; a grouped node its tier's (0-3);
+  // anything else its entity type's.
+  function _v2gNodeToken(p) {
+    if (_v2gIsUser(p)) return _V2G_USER_TOKEN;
+    if (p && p.isMajor) return _V2G_MAJOR_TOKEN;
+    if (p && p.tier !== undefined && p.tier >= 0 && _V2G_TIER_TOKENS[p.tier]) {
+      return _V2G_TIER_TOKENS[p.tier];
     }
-    return (t.type[p.type] || t.accent);
+    return (p && _V2G_TYPE_TOKENS[p.type]) || '--accent';
+  }
+  // For the canvas and the SVG export: the resolved colour.
+  function _v2gNodeColor(p) {
+    return _v2gThemeColor(_v2gNodeToken(p));
+  }
+  // For HTML text (tooltip, inspector title): the token as ink.
+  function _v2gNodeVar(p) {
+    return _v2gInkVar(_v2gNodeToken(p));
   }
   function _v2gHexAlpha(hex, a) {
     // #rgb / #rrggbb → rgba()
@@ -2311,7 +2392,7 @@
     var amb = ctx.createRadialGradient(W * 0.5, H * 0.42, 8, W * 0.5, H * 0.5, Math.max(W, H) * 0.55);
     amb.addColorStop(0, _v2gHexAlpha(theme.accent, 0.07));
     amb.addColorStop(0.45, _v2gHexAlpha(theme.secondary, 0.03));
-    amb.addColorStop(1, 'rgba(0,0,0,0)');
+    amb.addColorStop(1, _v2gHexAlpha(theme.accent, 0));
     ctx.fillStyle = amb;
     ctx.fillRect(0, 0, W, H);
 
@@ -2336,9 +2417,9 @@
         ((A.id === _v2gOps.sourceId && B.id === _v2gOps.targetId) ||
          (A.id === _v2gOps.targetId && B.id === _v2gOps.sourceId)));
       if (edgeSelected || beliefHot || pathHot) {
-        ctx.strokeStyle = edgeSelected ? '#fbbf24' : theme.accentLight;
+        ctx.strokeStyle = edgeSelected ? theme.warning : theme.accentLight;
         ctx.lineWidth = edgeSelected ? 3.6 : (pathHot ? 3.0 : 3.4);
-        ctx.shadowColor = _v2gHexAlpha(edgeSelected ? '#fbbf24' : theme.accent, 0.55); ctx.shadowBlur = 10;
+        ctx.shadowColor = _v2gHexAlpha(edgeSelected ? theme.warning : theme.accent, 0.55); ctx.shadowBlur = 10;
       } else if (opsEdge) {
         ctx.strokeStyle = theme.user; ctx.lineWidth = 2.6;
         ctx.shadowColor = _v2gHexAlpha(theme.user, 0.45); ctx.shadowBlur = 8;
@@ -2346,7 +2427,7 @@
         ctx.strokeStyle = theme.accent; ctx.lineWidth = 2.3;
         ctx.shadowColor = _v2gHexAlpha(theme.accent, 0.4); ctx.shadowBlur = 8;
       } else if (ed.superseded) {
-        ctx.strokeStyle = 'rgba(148,163,184,0.28)'; ctx.lineWidth = 1;
+        ctx.strokeStyle = _v2gHexAlpha(theme.muted, 0.45); ctx.lineWidth = 1;
         ctx.shadowBlur = 0;
       } else {
         var grad = ctx.createLinearGradient(ax, ay, bx, by);
@@ -2373,21 +2454,21 @@
       ctx.lineTo(bx - ah * Math.cos(ang - 0.4), by - ah * Math.sin(ang - 0.4));
       ctx.lineTo(bx - ah * Math.cos(ang + 0.4), by - ah * Math.sin(ang + 0.4));
       ctx.closePath();
-      ctx.fillStyle = hot || beliefHot ? theme.accentLight : (ed.superseded ? 'rgba(148,163,184,0.4)' : _v2gHexAlpha(pcolor, 0.85));
+      ctx.fillStyle = hot || beliefHot ? theme.accentLight : (ed.superseded ? _v2gHexAlpha(theme.muted, 0.6) : _v2gHexAlpha(pcolor, 0.85));
       ctx.fill();
       // Label
       if (_v2gView.scale > 0.7 && ed.label) {
         var mx = (ax + bx) / 2, my = (ay + by) / 2;
         var tw = ctx.measureText(ed.label).width;
-        ctx.fillStyle = 'rgba(10,15,20,0.82)';
+        ctx.fillStyle = _v2gHexAlpha(theme.card, 0.9);
         ctx.beginPath();
         // rounded pill
         var px = mx - tw / 2 - 5, py = my - 9, pw = tw + 10, ph = 15, pr = 4;
         ctx.moveTo(px + pr, py); ctx.arcTo(px + pw, py, px + pw, py + ph, pr);
         ctx.arcTo(px + pw, py + ph, px, py + ph, pr); ctx.arcTo(px, py + ph, px, py, pr);
         ctx.arcTo(px, py, px + pw, py, pr); ctx.closePath(); ctx.fill();
-        ctx.strokeStyle = _v2gHexAlpha(theme.accent, 0.2); ctx.lineWidth = 1; ctx.stroke();
-        ctx.fillStyle = hot || beliefHot ? theme.accentLight : 'rgba(200,220,235,0.95)';
+        ctx.strokeStyle = _v2gHexAlpha(theme.accent, 0.3); ctx.lineWidth = 1; ctx.stroke();
+        ctx.fillStyle = hot || beliefHot ? theme.accentLight : theme.ink2;
         ctx.textAlign = 'center'; ctx.fillText(ed.label, mx, my + 3);
       }
     }
@@ -2420,7 +2501,7 @@
       if (p.isHighStakes) {
         var pulse = 0.5 + 0.5 * Math.sin(tNow / 400);
         ctx.beginPath(); ctx.arc(x, y, r + 5 + pulse * 2, 0, 2 * Math.PI);
-        ctx.strokeStyle = 'rgba(239,68,68,' + (0.4 + pulse * 0.3) + ')'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.strokeStyle = _v2gHexAlpha(theme.danger, 0.4 + pulse * 0.3); ctx.lineWidth = 2; ctx.stroke();
       }
       // User: gentle amber breath
       if (isUser) {
@@ -2474,7 +2555,7 @@
           while (ctx.measureText(chipLab).width > chipW - 6 && chipLab.length > 3) {
             chipLab = chipLab.slice(0, -2) + '…';
           }
-          ctx.fillStyle = '#e6edf3';
+          ctx.fillStyle = theme.ink;
           ctx.textAlign = 'center';
           ctx.fillText(chipLab, x, y + 3);
         }
@@ -2482,9 +2563,8 @@
       }
       // Body — radial highlight for depth
       var body = ctx.createRadialGradient(x - r * 0.3, y - r * 0.35, 0, x, y, r);
-      body.addColorStop(0, _v2gHexAlpha('#ffffff', isUser ? 0.45 : 0.28));
-      body.addColorStop(0.35, color);
-      body.addColorStop(1, _v2gHexAlpha(color, 0.85));
+      body.addColorStop(0, color);
+      body.addColorStop(1, _v2gHexAlpha(color, 0.82));
       ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI);
       ctx.fillStyle = body;
       // F2: isolated (link-less under filter) + virtual nodes render faded.
@@ -2499,10 +2579,10 @@
         // Isolation badge: amber dashed ring so a stranded node is visible,
         // not mistaken for a healthy connected node.
         ctx.setLineDash([2, 3]);
-        ctx.strokeStyle = 'rgba(245,158,11,0.7)';
+        ctx.strokeStyle = _v2gHexAlpha(theme.warning, 0.75);
       } else {
         ctx.setLineDash([]);
-        ctx.strokeStyle = isUser ? _v2gHexAlpha('#fff7ed', 0.55) : 'rgba(255,255,255,0.28)';
+        ctx.strokeStyle = _v2gHexAlpha(theme.card, isUser ? 0.85 : 0.6);
       }
       ctx.lineWidth = isUser ? 1.6 : 1;
       ctx.stroke();
@@ -2510,7 +2590,7 @@
       // User center mark
       if (isUser && r > 8) {
         ctx.beginPath(); ctx.arc(x, y, Math.max(2.2, r * 0.22), 0, 2 * Math.PI);
-        ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.fill();
+        ctx.fillStyle = _v2gHexAlpha(theme.card, 0.9); ctx.fill();
       }
       if (showLabels) {
         var lab = p.label;
@@ -2526,9 +2606,9 @@
         ctx.font = (isUser ? '600 ' : '') + _v2gFont(isUser ? 12 : 11);
         // subtle label plate for readability
         var lw = ctx.measureText(lab).width;
-        ctx.fillStyle = 'rgba(10,15,20,0.55)';
+        ctx.fillStyle = _v2gHexAlpha(theme.card, 0.82);
         ctx.fillRect(x - lw / 2 - 4, y + r + 3, lw + 8, 14);
-        ctx.fillStyle = isUser ? theme.user : '#e6edf3';
+        ctx.fillStyle = isUser ? theme.user : theme.ink;
         ctx.textAlign = 'center';
         ctx.fillText(lab, x, y + r + 13);
       }
@@ -2649,30 +2729,30 @@
     if (srcEl) {
       srcEl.textContent = _mt('memory.console.ops_src', 'src: {id}', { id: _v2gOps.sourceId ? _v2gShortId(_v2gOps.sourceId) : '—' });
       srcEl.title = _v2gOps.sourceId || _mt('memory.mc.source_entity', 'Source entity');
-      srcEl.style.borderColor = _v2gOps.sourceId ? 'var(--accent,#22d3ee)' : 'var(--border-subtle)';
+      srcEl.classList.toggle('is-set', !!_v2gOps.sourceId);
     }
     if (tgtEl) {
       tgtEl.textContent = _mt('memory.console.ops_tgt', 'tgt: {id}', { id: _v2gOps.targetId ? _v2gShortId(_v2gOps.targetId) : '—' });
       tgtEl.title = _v2gOps.targetId || _mt('memory.mc.target_entity', 'Target entity');
-      tgtEl.style.borderColor = _v2gOps.targetId ? 'var(--secondary,#3b82f6)' : 'var(--border-subtle)';
+      tgtEl.classList.toggle('is-set', !!_v2gOps.targetId);
     }
     if (hint) {
       if (_v2gOps.mode === 'link') {
         hint.textContent = _v2gOps.sourceId
           ? _mt('memory.console.hint_link_target', 'Link mode: click the target node…')
           : _mt('memory.console.hint_link_source', 'Link mode: click the source node…');
-        hint.style.color = 'var(--accent,#22d3ee)';
+        hint.style.color = 'var(--accent-light)';
       } else if (_v2gOps.mode === 'merge') {
         hint.textContent = _v2gOps.sourceId
           ? _mt('memory.console.hint_merge_target', 'Merge mode: click the target (survivor)…')
           : _mt('memory.console.hint_merge_source', 'Merge mode: click the source (will be retired)…');
-        hint.style.color = 'var(--warning,#f59e0b)';
+        hint.style.color = 'var(--warning)';
       } else if (_v2gOps.mode === 'repoint') {
         hint.textContent = _mt('memory.console.hint_move', 'Move mode: click the new endpoint node… (Clear to cancel)');
-        hint.style.color = 'var(--accent,#22d3ee)';
+        hint.style.color = 'var(--accent-light)';
       } else if (_v2gOps.mode === 'group') {
         hint.textContent = _mt('memory.console.hint_group', 'Group mode: click the PARENT node… (Clear to cancel)');
-        hint.style.color = 'var(--accent,#22d3ee)';
+        hint.style.color = 'var(--accent-light)';
       } else if (_v2gOps.sourceId && _v2gOps.targetId) {
         hint.textContent = _mt('memory.console.hint_ready', 'Ready — press Link or Merge, or click an edge to edit/unlink.');
         hint.style.color = 'var(--text-secondary)';
@@ -2682,11 +2762,15 @@
       }
     }
     if (linkBtn) {
-      linkBtn.classList.toggle('btn-primary', _v2gOps.mode === 'link' || !!(!_v2gOps.mode && _v2gOps.sourceId && _v2gOps.targetId));
+      var linkOn = _v2gOps.mode === 'link' || !!(!_v2gOps.mode && _v2gOps.sourceId && _v2gOps.targetId);
+      // Soft until armed, filled when it will act (never no variant at all).
+      linkBtn.classList.toggle('btn-primary', linkOn);
+      linkBtn.classList.toggle('btn-secondary', !linkOn);
       linkBtn.textContent = _v2gOps.mode === 'link' ? _mt('memory.console.linking', 'Linking…') : _mt('memory.mc.link', 'Link');
     }
     if (mergeBtn) {
       mergeBtn.classList.toggle('btn-primary', _v2gOps.mode === 'merge');
+      mergeBtn.classList.toggle('btn-secondary', _v2gOps.mode !== 'merge');
       mergeBtn.textContent = _v2gOps.mode === 'merge' ? _mt('memory.console.merging', 'Merging…') : _mt('memory.mc.merge', 'Merge');
     }
   }
@@ -3506,9 +3590,9 @@
     _v2gSelectedId = null;
     _v2gHighlightSubj = A.id;
     _v2gHighlightObj = B.id;
-    var pcolor = _V2G_PRED_COLORS[ed.type] || _v2gTheme().accent;
+    var pcolor = _v2gPredVar(ed.type) || 'var(--accent-light)';
     var pred = ed.fullLabel || ed.label || '';
-    var html = '<div style="font-weight:700;font-size:0.8rem;color:#fbbf24;word-break:break-word;margin-bottom:6px;">' + _esc(_mt('memory.console.edge_belief', 'Edge · belief')) + '</div>';
+    var html = '<div style="font-weight:700;font-size:0.8rem;color:var(--warning);word-break:break-word;margin-bottom:6px;">' + _esc(_mt('memory.console.edge_belief', 'Edge · belief')) + '</div>';
     html += '<div translate="no" style="font-size:0.74rem;line-height:1.45;margin-bottom:8px;color:var(--text-primary);">';
     html += '<b>' + _v2gEsc(_v2gDisplayName(A)) + '</b> ';
     html += '<span style="color:' + pcolor + ';">' + _v2gEsc(String(pred).replace(/_/g, ' ')) + '</span> ';
@@ -3667,7 +3751,7 @@
         var tip = document.getElementById('v2g-tooltip');
         if (idx >= 0 && tip) {
           var p = _v2gPts[idx];
-          var tc = _v2gNodeColor(p);
+          var tc = _v2gNodeVar(p);
           var tLabel = _v2gTitle(_v2gDisplayName(p));
           var modeHint = '';
           if (_v2gOps.mode === 'link') modeHint = '<br><span style="color:var(--accent);">' + _v2gEsc(_mt('memory.console.tip_link_pick', 'link pick')) + '</span>';
@@ -3681,19 +3765,19 @@
             (p.id && _v2gDisplayName(p) !== p.id ? ' · id: ' + _v2gEsc(String(p.id).slice(0, 24)) : '') +
             '</span>' + modeHint;
           tip.style.display = 'block';
-          tip.style.borderColor = _v2gHexAlpha(tc, 0.35);
+          tip.style.borderColor = '';
           var rect = canvas.getBoundingClientRect();
           tip.style.left = Math.min(c.sx + 12, rect.width - 200) + 'px';
           tip.style.top = (c.sy + 12) + 'px';
         } else if (eHover >= 0 && tip) {
           var edh = _v2gEdges[eHover];
           var Ah = _v2gPts[edh.a], Bh = _v2gPts[edh.b];
-          tip.innerHTML = '<b style="color:#fbbf24;">' + _v2gEsc((edh.fullLabel || edh.label || _mt('memory.console.tip_edge', 'edge')).replace(/_/g, ' ')) + '</b><br>' +
+          tip.innerHTML = '<b style="color:var(--warning);">' + _v2gEsc((edh.fullLabel || edh.label || _mt('memory.console.tip_edge', 'edge')).replace(/_/g, ' ')) + '</b><br>' +
             '<span style="color:var(--text-muted);">' +
             _v2gEsc(Ah ? _v2gDisplayName(Ah) : '?') + ' → ' + _v2gEsc(Bh ? _v2gDisplayName(Bh) : '?') +
             '</span><br><span style="color:var(--text-muted);font-size:0.68rem;">' + _v2gEsc(_mt('memory.console.tip_edge_click', 'click to edit / unlink')) + '</span>';
           tip.style.display = 'block';
-          tip.style.borderColor = 'rgba(251,191,36,0.4)';
+          tip.style.borderColor = 'var(--warning-border)';
           var rect2 = canvas.getBoundingClientRect();
           tip.style.left = Math.min(c.sx + 12, rect2.width - 200) + 'px';
           tip.style.top = (c.sy + 12) + 'px';
@@ -3767,7 +3851,7 @@
     if (segs.length > 1) {
       return segs.map(function(seg) {
         var html = _v2gEsc(seg.trim());
-        return '<div style="padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);line-height:1.4;">' + html + '</div>';
+        return '<div class="mem-contents-line">' + html + '</div>';
       }).join('');
     }
     return '<div style="line-height:1.45;">' + _v2gEsc(t) + '</div>';
@@ -3790,17 +3874,17 @@
     _v2gRefreshPalette();
     _v2gOps.selectedEdgeIdx = -1;
     var phone = _v2gIsPhone();
-    var color = _v2gNodeColor(p);
+    var color = _v2gNodeVar(p);
     var fullName = _v2gDisplayName(p);
     var title = _v2gTitle(fullName);
-    var html = '<div translate="no" style="color:' + color + ';font-weight:700;font-size:0.82rem;word-break:break-word;margin-bottom:4px;padding-right:28px;">' + _v2gEsc(title) + '</div>';
+    var html = '<div translate="no" style="color:' + color + ';font-weight:700;font-size:0.82rem;word-break:break-word;margin-bottom:4px;padding-inline-end:28px;">' + _v2gEsc(title) + '</div>';
     html += '<div style="color:var(--text-muted);font-size:0.68rem;margin-bottom:6px;">';
     var pType = _mtData('memory.console.etype_', p.type);
     html += _v2gIsUser(p)
       ? _v2gEsc(_mt('memory.console.insp_you_hub', 'you · memory hub'))
       : _mtHtml('memory.console.insp_type', 'type: {type}', { type: '<span' + pType.attr + '>' + _v2gEsc(pType.text) + '</span>' });
     if (p.id) html += ' · ' + _v2gEsc(_mt('memory.console.insp_id', 'id:')) + ' <code style="font-size:0.65rem;">' + _v2gEsc(String(p.id)) + '</code>';
-    if (p.isHighStakes) html += ' · <span style="color:#ef4444;display:inline-flex;align-items:center;gap:3px;">' + KazmaIcons.span('alert') + ' ' + _v2gEsc(_mt('memory.console.high_stakes', 'high-stakes')) + '</span>';
+    if (p.isHighStakes) html += ' · <span style="color:var(--danger);display:inline-flex;align-items:center;gap:3px;">' + KazmaIcons.span('alert') + ' ' + _v2gEsc(_mt('memory.console.high_stakes', 'high-stakes')) + '</span>';
     if (p.isVirtual) html += _v2gEsc(_mt('memory.console.fact_node', ' · fact node'));
     html += '</div>';
     // Collect connections once for cut-hub + list UI
@@ -3835,8 +3919,7 @@
       }
       if (!_v2gIsUser(p) && !p.isVirtual) {
         var isMaj = !!p.isMajor;
-        extra += '<button type="button" class="btn btn-sm v2g-node-act" data-act="major" style="font-size:0.65rem;padding:2px 8px;' +
-          (isMaj ? 'border-color:#a855f7;color:#c084fc;' : '') +
+        extra += '<button type="button" class="btn btn-sm btn-outline v2g-node-act' + (isMaj ? ' mem-major-on' : '') + '" data-act="major" style="font-size:0.65rem;padding:2px 8px;' +
           '" title="' + _v2gEsc(_mt('memory.console.act_major_title', 'Mark as major')) + '">' +
           (isMaj ? KazmaIcons.span('star') + ' ' : '') + _v2gEsc(_mt('memory.console.act_major', 'Major')) + '</button>';
       }
@@ -3867,22 +3950,22 @@
       parentNames.forEach(function(n) {
         if (uniqParents.indexOf(n) < 0) uniqParents.push(n);
       });
-      html += '<div style="margin-bottom:8px;padding:8px 10px;border-radius:8px;border:1px solid rgba(245,158,11,0.45);background:rgba(245,158,11,0.12);font-size:0.7rem;line-height:1.4;color:#fcd34d;">';
-      html += _mt('memory.console.hub_shortcut', '<strong style="color:#fbbf24;">Hub shortcut</strong> — direct link to hub while also linked to {parents}.', {
+      html += '<div class="notice tone-warning" style="margin-bottom:8px;font-size:0.7rem;line-height:1.4;">';
+      html += _mt('memory.console.hub_shortcut', '<strong>Hub shortcut</strong> — direct link to hub while also linked to {parents}.', {
         parents: '<b translate="no">' + _v2gEsc(uniqParents.slice(0, 4).map(function(n) { return _v2gShortLabel(n, 30); }).join(', ')) + (uniqParents.length > 4 ? '…' : '') + '</b>',
       });
-      html += '<div style="margin-top:4px;color:var(--text-muted);font-size:0.65rem;">' + _mt('memory.console.hub_shortcut_hint', 'Preferred: this → parent → hub (you). Use <b>Cut hub</b> to drop the shortcut edge.') + '</div>';
-      html += '<button type="button" class="btn btn-sm btn-danger v2g-node-act" data-act="cut-hub" style="margin-top:6px;font-size:0.68rem;padding:3px 10px;">' +
+      html += '<div style="margin-top:4px;color:var(--text-secondary);font-size:0.65rem;">' + _mt('memory.console.hub_shortcut_hint', 'Preferred: this → parent → hub (you). Use <b>Cut hub</b> to drop the shortcut edge.') + '</div>';
+      html += '<button type="button" class="btn btn-sm btn-danger-solid v2g-node-act" data-act="cut-hub" style="margin-top:6px;font-size:0.68rem;padding:3px 10px;">' +
         _v2gEsc(hubEdges.length > 1 ? _mt('memory.console.cut_hub_links', 'Cut hub links') : _mt('memory.console.cut_hub_link', 'Cut hub link')) + '</button>';
       html += '</div>';
     } else if (hubEdges.length && !_v2gIsUser(p) && nonHubEdges.length === 0) {
-      html += '<div style="margin-bottom:8px;padding:6px 10px;border-radius:8px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.03);font-size:0.68rem;color:var(--text-muted);">' + _mt('memory.console.hub_only', 'Linked only to hub. Use <b style="color:#f87171;">Cut</b> on the connection row to detach.') + '</div>';
+      html += '<div class="notice tone-neutral" style="margin-bottom:8px;font-size:0.68rem;">' + _mt('memory.console.hub_only', 'Linked only to hub. Use <b>Cut</b> on the connection row to detach.') + '</div>';
     }
 
     // Contents — the full text of this belief/entity, shown exactly once.
     if (fullName !== title) {
       html += '<div style="font-size:0.68rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">' + _v2gEsc(_mt('memory.console.contents', 'Contents')) + '</div>';
-      html += '<div class="v2g-inspect-contents" translate="no" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:6px;padding:6px 8px;font-size:0.72rem;color:var(--text-secondary);word-break:break-word;margin-bottom:8px;">' + _v2gContents(fullName) + '</div>';
+      html += '<div class="v2g-inspect-contents mem-well" translate="no" style="padding:6px 8px;font-size:0.72rem;color:var(--text-secondary);word-break:break-word;margin-bottom:8px;">' + _v2gContents(fullName) + '</div>';
     }
     // Connections — one Cut per neighbor (easy topology cleanup)
     if (nodeEdges.length) {
@@ -3892,16 +3975,15 @@
       for (var r = 0; r < Math.min(edgeLimit, nodeEdges.length); r++) {
         var row = nodeEdges[r];
         var ed = row.ed;
-        var pcolor = _V2G_PRED_COLORS[ed.type] || _v2gTheme().accent;
+        var pcolor = _v2gPredVar(ed.type) || 'var(--accent-light)';
         var predLabel = _v2gEsc((ed.fullLabel || ed.label || '').replace(/_/g, ' '));
         var neighLabel = _v2gEsc(_v2gShortLabel(_v2gDisplayName(row.other), 30));
         var dir = row.outbound ? '→' : '←';
         var hubBadge = row.toHub
-          ? ' <span style="font-size:0.58rem;padding:1px 5px;border-radius:3px;background:rgba(245,158,11,0.2);color:#fbbf24;">' + _v2gEsc(_mt('memory.console.hub_badge', 'hub')) + '</span>'
+          ? ' <span class="badge badge-warning" style="font-size:0.58rem;padding:1px 5px;">' + _v2gEsc(_mt('memory.console.hub_badge', 'hub')) + '</span>'
           : '';
-        var rowBg = row.toHub && hubShortcut ? 'rgba(245,158,11,0.1)' : 'transparent';
-        var rowBorder = row.toHub && hubShortcut ? 'rgba(245,158,11,0.35)' : 'transparent';
-        html += '<div class="v2g-belief-row" data-edge-idx="' + row.idx + '" style="color:var(--text-secondary);line-height:1.35;font-size:0.72rem;word-break:break-word;padding:5px 6px;border-radius:6px;cursor:pointer;border:1px solid ' + rowBorder + ';background:' + rowBg + ';" onmouseover="this.style.background=\'rgba(251,191,36,0.1)\'" onmouseout="this.style.background=\'' + rowBg + '\'">';
+        var rowCls = row.toHub && hubShortcut ? ' is-hub-shortcut' : '';
+        html += '<div class="v2g-belief-row' + rowCls + '" data-edge-idx="' + row.idx + '">';
         html += '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px;">';
         html += '<div style="min-width:0;flex:1;">';
         html += '<span style="color:var(--text-muted);">' + dir + '</span> <b translate="no">' + neighLabel + '</b>' + hubBadge;
@@ -4048,7 +4130,7 @@
     } catch (inspectErr) {
       console.error('[v2g] inspect failed', inspectErr);
       try {
-        el.innerHTML = '<div style="color:#f87171;font-size:0.75rem;">' +
+        el.innerHTML = '<div style="color:var(--danger);font-size:0.75rem;">' +
           _v2gEsc(_mt('memory.console.inspect_error', 'Inspect error: {error}', { error: String(inspectErr && inspectErr.message ? inspectErr.message : inspectErr) })) +
           '</div>';
       } catch (e2) { /* ignore */ }
@@ -4239,17 +4321,14 @@
   function _v2gUpdateLegend(entCounts) {
     var leg = document.getElementById('v2g-legend');
     if (!leg) return;
-    _v2gRefreshPalette();
-    var theme = _v2gTheme();
     var hasUser = (_v2gRawNodes || []).some(function(n) {
       return String(n.id || '').toLowerCase() === 'user';
     });
     var parts = [];
     if (hasUser) {
       parts.push(
-        '<span title="' + _attr(_mt('memory.mc.legend_you', 'You')) + '"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:' +
-        theme.user + ';margin-right:4px;box-shadow:0 0 6px ' + _v2gHexAlpha(theme.user, 0.5) +
-        ';"></span>' + _esc(_mt('memory.mc.legend_you', 'You')) + '</span>'
+        '<span title="' + _attr(_mt('memory.mc.legend_you', 'You')) + '"><span class="mem-legend-dot" style="--mem-c:' +
+        _v2gTokenVar(_V2G_USER_TOKEN) + ';"></span>' + _esc(_mt('memory.mc.legend_you', 'You')) + '</span>'
       );
     }
     var order = ['person', 'tool', 'concept', 'location', 'project', 'entity'];
@@ -4259,17 +4338,15 @@
     });
     if (!keys.length) keys = ['concept'];
     keys.forEach(function(k) {
-      // person count includes user — still show type chip in accent family
-      var c = _V2G_TYPE_COLORS[k] || theme.accent;
+      // person count includes user — still show type chip in its own colour
       var n = entCounts[k] || 0;
       var kl = _mtData('memory.console.etype_', k);
       parts.push(
-        '<span' + kl.attr + '><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:' +
-        c + ';margin-right:4px;box-shadow:0 0 5px ' + _v2gHexAlpha(c, 0.35) +
-        ';"></span>' + _esc(kl.text) + (n ? ' <span style="opacity:0.7">(' + n + ')</span>' : '') + '</span>'
+        '<span' + kl.attr + '><span class="mem-legend-dot" style="--mem-c:' + _v2gTypeVar(k) + ';"></span>' +
+        _esc(kl.text) + (n ? ' <span>(' + n + ')</span>' : '') + '</span>'
       );
     });
-    parts.push('<span style="opacity:0.7;margin-left:2px;">' + _esc(_mt('memory.console.site_accent', '· site accent')) + '</span>');
+    parts.push('<span style="margin-inline-start:2px;">' + _esc(_mt('memory.console.site_accent', '· site accent')) + '</span>');
     leg.innerHTML = parts.join('');
   }
 
@@ -4393,11 +4470,8 @@
     box.innerHTML = ordered.map(function (p) {
       var active = (p === cur) ? 'chip-sel' : '';
       var esc = _esc(String(p));
-      return '<button type="button" class="v2g-chip ' + active + '" data-pred="' + esc + '" '
-        + 'style="font-size:0.62rem;font-family:var(--font-mono);padding:2px 8px;border-radius:999px;'
-        + 'border:1px solid ' + (active ? 'var(--accent)' : 'var(--border-subtle)') + ';'
-        + 'background:' + (active ? 'rgba(34,211,238,0.14)' : 'rgba(255,255,255,0.03)') + ';'
-        + 'color:' + (active ? 'var(--text-primary)' : 'var(--text-secondary)') + ';cursor:pointer;">'
+      // .v2g-chip / .chip-sel are styled in memory_console.html (tokens).
+      return '<button type="button" class="v2g-chip ' + active + '" data-pred="' + esc + '">'
         + esc + '</button>';
     }).join('');
     box.querySelectorAll('[data-pred]').forEach(function (btn) {
@@ -4433,7 +4507,7 @@
       if (name.length < 4) continue;
       if (typed !== name && typedTokens.indexOf(name) >= 0) {
         hintEl.innerHTML = _mtHtml('memory.console.similar_predicate', 'Similar to {name}? Click to reuse.', {
-          name: '<b translate="no" style="color:var(--accent);cursor:pointer;" data-adopt="' + _attr(name) + '">' + _esc(name) + '</b>',
+          name: '<b translate="no" style="color:var(--accent-light);cursor:pointer;" data-adopt="' + _attr(name) + '">' + _esc(name) + '</b>',
         });
         var adopt = hintEl.querySelector('[data-adopt]');
         if (adopt) adopt.addEventListener('click', function () {
@@ -4481,16 +4555,17 @@
       var active = !!_v2gFilters[group][key];
       var lbl = _mtData(group === 'entity' ? 'memory.console.etype_' : 'memory.console.ptype_', value);
       var label = _esc(lbl.text);
-      var cnt = (count != null && count > 0) ? ' <span style="opacity:0.7;font-family:var(--font-mono);">' + count + '</span>' : '';
-      return '<label' + lbl.attr + ' title="' + _attr(lbl.text) + (count != null ? ': ' + count : '') + '" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:0.65rem;padding:2px 7px;border-radius:999px;border:1px solid ' + (active ? color : 'var(--border-subtle)') + ';background:' + (active ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.02)') + ';' + (active ? 'color:var(--text-primary);' : 'color:var(--text-muted);') + '">' +
-             '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + (active ? color : 'transparent') + ';border:1px solid ' + color + ';flex-shrink:0;"></span>' +
+      var cnt = (count != null && count > 0) ? ' <span style="font-family:var(--font-mono);">' + count + '</span>' : '';
+      // The pill is styled in memory_console.html; *color* is a token (var()).
+      return '<label' + lbl.attr + (active ? ' class="is-on"' : '') + ' title="' + _attr(lbl.text) + (count != null ? ': ' + count : '') + '" style="--mem-c:' + color + ';">' +
+             '<span class="mem-filter-dot"></span>' +
              '<input type="checkbox" id="' + _attr(id) + '" ' + (active ? 'checked' : '') + ' style="display:none;">' + label + cnt + '</label>';
     }
     if (entBox) entBox.innerHTML = entTypes.map(function(t) {
-      return makeToggle(t, 'entity', t, _V2G_TYPE_COLORS[t] || '#94a3b8', entCounts[t] || 0);
+      return makeToggle(t, 'entity', t, _v2gTypeVar(t), entCounts[t] || 0);
     }).join('');
     if (predBox) predBox.innerHTML = predTypes.map(function(t) {
-      return makeToggle(t, 'predicate', t, _V2G_PRED_COLORS[t] || '#94a3b8', predCounts[t] || 0);
+      return makeToggle(t, 'predicate', t, _v2gPredVar(t) || 'var(--text-muted)', predCounts[t] || 0);
     }).join('');
     // Wire change handlers — multi-select (toggle each independently)
     document.querySelectorAll('[id^="v2g-ft-entity-"]').forEach(function(cb) {
@@ -4518,9 +4593,9 @@
         return { group: 'predicate', key: k, label: _esc(_mt('memory.console.filter_pred', 'pred:{type}', { type: _mtData('memory.console.ptype_', k).text })) };
       }));
       var html = all.map(function(c, idx) {
-        return '<span data-fg="' + _attr(c.group) + '" data-fk="' + _attr(c.key) + '" style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:rgba(59,130,246,0.15);color:#93c5fd;cursor:pointer;display:inline-flex;align-items:center;gap:3px;">' + c.label + ' ' + KazmaIcons.span('x') + '</span>';
+        return '<span data-fg="' + _attr(c.group) + '" data-fk="' + _attr(c.key) + '" class="badge badge-accent mem-filter-chip" style="font-size:0.62rem;padding:2px 6px;display:inline-flex;align-items:center;gap:3px;">' + c.label + ' ' + KazmaIcons.span('x') + '</span>';
       }).join('');
-      if (all.length) html += '<span id="v2g-reset-filters" style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:rgba(239,68,68,0.12);color:#f87171;cursor:pointer;margin-left:4px;">' + _esc(_mt('memory.console.reset_all', 'Reset all')) + '</span>';
+      if (all.length) html += '<span id="v2g-reset-filters" class="badge badge-danger mem-filter-chip" style="font-size:0.62rem;padding:2px 6px;margin-inline-start:4px;">' + _esc(_mt('memory.console.reset_all', 'Reset all')) + '</span>';
       chips.innerHTML = html;
       chips.querySelectorAll('span[data-fg]').forEach(function(span) {
         span.addEventListener('click', function() {
@@ -4627,9 +4702,18 @@
     var canvas = document.getElementById('v2g-canvas');
     if (!canvas) return;
     try {
+      // The canvas is transparent; the export gets the theme's well behind
+      // it, so its labels (this theme's ink) stay readable on any viewer.
+      var out = document.createElement('canvas');
+      out.width = canvas.width; out.height = canvas.height;
+      var octx = out.getContext('2d');
+      var theme = _v2gTheme();
+      octx.fillStyle = theme.well || theme.card;
+      octx.fillRect(0, 0, out.width, out.height);
+      octx.drawImage(canvas, 0, 0);
       var a = document.createElement('a');
       a.download = 'kazma-v2-topology.png';
-      a.href = canvas.toDataURL('image/png');
+      a.href = out.toDataURL('image/png');
       a.click();
       if (window.showToast) window.showToast(_mt('memory.console.png_downloaded', 'PNG downloaded'), 'success');
     } catch (e) {
@@ -4641,15 +4725,18 @@
     var W = 800, H = 500;
     var size = _v2gCanvasSize();
     if (size) { W = size.w; H = size.h; }
+    // The theme on screen: its well behind, its accent on edges, its ink on
+    // labels (the export used to be always dark).
+    var theme = _v2gTheme();
     var parts = ['<?xml version="1.0" encoding="UTF-8"?>',
       '<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">',
-      '<rect width="100%" height="100%" fill="#0a0f14"/>'];
+      '<rect width="100%" height="100%" fill="' + (theme.well || theme.card) + '"/>'];
     for (var e = 0; e < _v2gEdges.length; e++) {
       var ed = _v2gEdges[e], A = _v2gPts[ed.a], B = _v2gPts[ed.b];
       if (!A || !B) continue;
       parts.push('<line x1="' + _v2gSX(A.x).toFixed(1) + '" y1="' + _v2gSY(A.y).toFixed(1) +
         '" x2="' + _v2gSX(B.x).toFixed(1) + '" y2="' + _v2gSY(B.y).toFixed(1) +
-        '" stroke="#3b82f6" stroke-opacity="0.45" stroke-width="1.5"/>');
+        '" stroke="' + theme.accent + '" stroke-opacity="0.45" stroke-width="1.5"/>');
     }
     for (var i = 0; i < _v2gPts.length; i++) {
       var p = _v2gPts[i];
@@ -4657,7 +4744,7 @@
       parts.push('<circle cx="' + _v2gSX(p.x).toFixed(1) + '" cy="' + _v2gSY(p.y).toFixed(1) +
         '" r="' + p.r + '" fill="' + col + '" fill-opacity="0.9"/>');
       parts.push('<text x="' + _v2gSX(p.x).toFixed(1) + '" y="' + (_v2gSY(p.y) + p.r + 12).toFixed(1) +
-        '" fill="#e6edf3" font-size="11" text-anchor="middle" font-family="sans-serif">' +
+        '" fill="' + theme.ink + '" font-size="11" text-anchor="middle" font-family="sans-serif">' +
         _v2gEsc(p.label || p.id).replace(/&/g, '&amp;') + '</text>');
     }
     parts.push('</svg>');
@@ -4916,10 +5003,28 @@
     _v2gWireControls();
     _v2gLoad();
     _memEvery(30000, function() { if (!document.hidden) _v2gLoad(); });
+    // A theme or accent change repaints the canvas in the new tokens. The
+    // shell announces it (kazma:themechange on document); a change of
+    // <html data-theme> or its inline accent seeds is watched too, so a
+    // switch the event does not cover still repaints. One repaint a frame.
+    var _v2gThemeQueued = false;
+    function _v2gOnTheme() {
+      if (_v2gThemeQueued) return;
+      _v2gThemeQueued = true;
+      requestAnimationFrame(function() { _v2gThemeQueued = false; _v2gThemeChanged(); });
+    }
+    document.addEventListener('kazma:themechange', _v2gOnTheme);
+    var _v2gThemeObserver = null;
+    if (window.MutationObserver) {
+      _v2gThemeObserver = new MutationObserver(_v2gOnTheme);
+      _v2gThemeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'style'] });
+    }
     var _prevCleanup = window.__kazmaMemConsoleCleanup;
     window.__kazmaMemConsoleCleanup = function () {
       if (_v2gAnim) { try { cancelAnimationFrame(_v2gAnim); } catch (e2) { /* ignore */ } _v2gAnim = null; }
       if (_v2gPlayTimer) { clearInterval(_v2gPlayTimer); _v2gPlayTimer = null; }
+      document.removeEventListener('kazma:themechange', _v2gOnTheme);
+      if (_v2gThemeObserver) { _v2gThemeObserver.disconnect(); _v2gThemeObserver = null; }
       if (typeof _prevCleanup === 'function') _prevCleanup();
     };
   } catch (e) { /* V2 graph optional */ }

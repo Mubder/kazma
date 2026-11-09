@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% set active_page = "documents" %}
 {% block title %}Kazma — {{ t('nav.documents') }}{% endblock %}
-{% block page_title %}<svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5" style="vertical-align:middle;margin-right:6px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>{{ t('nav.documents') }}{% endblock %}
+{% block page_title %}<svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5" style="vertical-align:middle;margin-inline-end:6px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>{{ t('nav.documents') }}{% endblock %}
 
 {% block head %}
 <style>
@@ -9,37 +9,38 @@
   .docs-wrap { max-width: 1100px; margin: 0 auto; padding: 0 1rem; box-sizing: border-box; }
   .docs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
   @media (max-width: 768px) { .docs-grid { grid-template-columns: 1fr; } }
-  .drop-zone { border: 2px dashed var(--border-subtle); border-radius: var(--radius-sm); padding: 1.5rem; text-align: center; color: var(--text-muted); cursor: pointer; transition: border-color .15s, background .15s; }
+  .drop-zone { border: 2px dashed var(--card-hairline); border-radius: var(--card-radius); padding: 1.5rem; text-align: center; color: var(--text-muted); cursor: pointer; transition: border-color .15s, background .15s; }
   .drop-zone.dragover { border-color: var(--accent); background: var(--bg-hover); color: var(--text-primary); }
-  .doc-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .55rem .7rem; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); margin-bottom: .4rem; cursor: pointer; }
-  .doc-row:hover { background: var(--bg-hover); }
-  .doc-row.selected { border-color: var(--accent); }
+  .doc-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .55rem .7rem; border: 1px solid var(--card-hairline); border-radius: var(--radius-sm); margin-bottom: .4rem; cursor: pointer; }
+  .doc-row:hover { background: var(--tint); }
+  .doc-row.selected { border-color: var(--accent); background: var(--accent-subtle); }
   .doc-row-actions { display: flex; align-items: center; gap: .35rem; flex-shrink: 0; }
   .doc-row .btn-danger { opacity: .85; }
   .doc-row:hover .btn-danger { opacity: 1; }
   .doc-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .doc-meta { font-size: .72rem; color: var(--text-muted); font-family: var(--font-mono); }
-  .state-badge { font-size: .68rem; padding: 2px 8px; border-radius: 10px; font-weight: 600; white-space: nowrap; }
-  .state-ready { background: rgba(34,197,94,.15); color: #22c55e; }
-  .state-active { background: rgba(59,130,246,.15); color: #3b82f6; }
-  .state-fail { background: rgba(239,68,68,.15); color: #ef4444; }
-  .state-idle { background: var(--bg-elevated); color: var(--text-muted); }
-  .doc-preview { white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono); font-size: .78rem; background: var(--bg-deep); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: .6rem; max-height: 340px; overflow: auto; }
-  .cap-pill { display: inline-flex; align-items: center; gap: 4px; font-size: .68rem; padding: 2px 8px; border-radius: 10px; margin: 2px; border: 1px solid var(--border-subtle); }
-  .cap-ready { color: #22c55e; } .cap-degraded { color: #f59e0b; } .cap-unavailable { color: var(--text-muted); }
-  .evt-row { font-size: .72rem; font-family: var(--font-mono); padding: 2px 0; border-bottom: 1px dashed var(--border-subtle); }
-  .evt-err { color: #ef4444; }
+  /* State and capability pills are the shared .badge; documents.js picks the tone. */
+  .state-badge { white-space: nowrap; }
+  .doc-preview { white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono); font-size: .78rem; background: var(--surface-sunken); border: 1px solid var(--card-hairline); border-radius: var(--radius-sm); padding: .6rem; max-height: 340px; overflow: auto; }
+  .cap-pill { display: inline-flex; align-items: center; gap: 4px; margin: 2px; }
+  .evt-row { font-size: .72rem; font-family: var(--font-mono); padding: 2px 0; border-bottom: 1px dashed var(--card-hairline); }
+  .evt-err { color: var(--danger); }
+  .doc-job { border: 1px solid var(--card-hairline); border-radius: var(--radius-sm); padding: .4rem .5rem; margin: .35rem 0; }
   .docs-actions { display: flex; gap: .4rem; flex-wrap: wrap; }
   .doc-actions-card { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
-  .mini-input { font-size: .78rem; padding: 4px 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--text-primary); }
+  .mini-input { font-size: .78rem; height: 32px; padding: 0 8px; border: 1px solid var(--input-border); border-radius: var(--input-radius); background: var(--input-bg); color: var(--text-primary); }
+  .mini-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-subtle); }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="docs-wrap" x-data="documentsPage()" role="main" aria-label="{{ t('nav.documents') }}">
 
-  <div class="card" style="padding:1rem 1.25rem;margin-bottom:1rem;">
-    <strong>{{ t('nav.documents') }}</strong> {{ t('documents.intro') }}
+  <div class="page-banner" style="margin-bottom:1rem;">
+    <div>
+      <h2 class="page-banner-title" style="margin:0;">{{ t('nav.documents') }}</h2>
+      <p class="page-banner-crumb" style="margin:4px 0 0;">{{ t('documents.intro') }}</p>
+    </div>
   </div>
 
   <div class="docs-grid">
@@ -67,18 +68,21 @@
       <div class="card" style="padding:1rem;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.6rem;">
           <strong>{{ t('documents.library') }}</strong>
-          <button class="btn btn-sm" @click="loadDocuments()">{{ t('common.refresh') }}</button>
+          <button class="btn btn-secondary btn-sm" @click="loadDocuments()">{{ t('common.refresh') }}</button>
         </div>
         {# "None" only once the server said so: before the first answer the
            list is not empty, it is not loaded (tests/test_empty_states_after_load.py). #}
         <div x-show="!documentsLoaded && documentsLoading" x-cloak role="status" style="color:var(--text-muted);font-size:.8rem;">{{ t('common.loading') }}</div>
         {# A failed read says it failed, with the server's reason, over what an
            earlier read gave (audit 2026-10-26 AUD-058). #}
-        <div x-show="documentsError" x-cloak role="alert" class="doc-load-error" style="color:var(--danger, #c0392b);font-size:.8rem;margin-bottom:.4rem;">
+        <div x-show="documentsError" x-cloak role="alert" class="doc-load-error notice tone-danger" style="flex-direction:column;align-items:flex-start;font-size:.8rem;margin-bottom:.4rem;">
           <div>{{ t('documents.js.failed_to_load_documents') }}</div>
           <div translate="no" x-text="documentsError" style="color:var(--text-muted);"></div>
         </div>
-        <div x-show="documentsLoaded && !documentsError && documents.length === 0" x-cloak style="color:var(--text-muted);font-size:.8rem;">{{ t('documents.no_documents') }}</div>
+        <div x-show="documentsLoaded && !documentsError && documents.length === 0" x-cloak class="empty-state" style="font-size:.85rem;">
+          <span class="icon-tile" aria-hidden="true"><span class="ki" x-html="KazmaIcons.get('file-text')"></span></span>
+          <span>{{ t('documents.no_documents') }}</span>
+        </div>
         <template x-for="d in documents" :key="d.document_id">
           <div class="doc-row" :class="{ selected: selected && selected.document_id === d.document_id }" @click="openDocument(d.document_id)">
             <div style="min-width:0;flex:1;">
@@ -86,7 +90,7 @@
               <div class="doc-meta" translate="no" x-text="d.document_id.slice(0,8)"></div>
             </div>
             <div class="doc-row-actions">
-              <span class="state-badge" :class="stateClass(d.state)" x-text="tOr('documents.state_' + (d.state || 'unknown'), (d.state || 'unknown'))"></span>
+              <span class="badge state-badge" :class="stateClass(d.state)" x-text="tOr('documents.state_' + (d.state || 'unknown'), (d.state || 'unknown'))"></span>
               <button type="button" class="btn btn-sm btn-danger"
                       title="{{ t('documents.delete_title') }}"
                       :disabled="acting"
@@ -109,12 +113,12 @@
       <div class="card" style="padding:1rem;" x-show="selected" x-cloak>
         <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.5rem;">
           <strong dir="auto" translate="no" x-text="selected ? selected.title : ''"></strong>
-          <span class="state-badge" :class="stateClass(currentState)" x-text="currentState ? tOr('documents.state_' + currentState, currentState) : ''"></span>
+          <span class="badge state-badge" :class="stateClass(currentState)" x-text="currentState ? tOr('documents.state_' + currentState, currentState) : ''"></span>
         </div>
         <div class="doc-meta" translate="no" x-text="selected ? selected.document_id : ''" style="margin-bottom:.6rem;"></div>
 
         <div class="docs-actions" style="margin-bottom:.6rem;">
-          <button class="btn btn-sm" @click="refreshDetail()">{{ t('common.refresh') }}</button>
+          <button class="btn btn-secondary btn-sm" @click="refreshDetail()">{{ t('common.refresh') }}</button>
           {# A library by name, or a new one: this used to be a bare
              "library_id" text box that had to hold an existing slug. #}
           <select class="mini-input" style="max-width:220px;" x-model="libraryId"
@@ -125,7 +129,7 @@
             </template>
             <option value="__new__">{{ t('documents.library_new') }}</option>
           </select>
-          <button class="btn btn-sm" @click="addToLibrary()"
+          <button class="btn btn-secondary btn-sm" @click="addToLibrary()"
                   :disabled="currentState !== 'ready' || !libraryId || acting">{{ t('documents.add_to_library') }}</button>
           <button type="button" class="btn btn-sm btn-danger"
                   title="{{ t('documents.delete_title') }}"
@@ -141,9 +145,9 @@
           <span style="color:var(--text-muted);">{{ t('documents.in_libraries') }}</span>
           <span x-show="inLibraries && inLibraries.length === 0" x-cloak>{{ t('documents.in_no_library') }}</span>
           <template x-for="lib in (inLibraries || [])" :key="lib.id">
-            <span class="badge" style="display:inline-flex;align-items:center;gap:.3rem;">
+            <span class="badge badge-neutral" style="display:inline-flex;align-items:center;gap:.3rem;">
               <span translate="no" x-text="lib.name"></span>
-              <button type="button" class="btn btn-sm" style="padding:0 .35rem;line-height:1.2;"
+              <button type="button" class="btn btn-secondary btn-sm" style="padding:0 .35rem;line-height:1.2;"
                       :aria-label="_tr('documents.library_remove_from', 'Remove from “{library}”', { library: lib.name })"
                       :title="_tr('documents.library_remove_from', 'Remove from “{library}”', { library: lib.name })"
                       :disabled="acting" @click="removeFromLibrary(lib)">&times;</button>
@@ -163,7 +167,7 @@
                 <option value="docx">docx</option>
                 <option value="markdown">markdown</option>
               </select>
-              <button class="btn btn-sm" @click="convertDoc()"
+              <button class="btn btn-secondary btn-sm" @click="convertDoc()"
                       :disabled="acting || !rendererReady()"
                       :title="rendererReady() ? '' : t('documents.no_renderer')">{{ t('documents.convert') }}</button>
             </div>
@@ -171,15 +175,15 @@
           <div>
             <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:.25rem;">{{ t('documents.pdf_tools') }}</div>
             <div class="docs-actions" style="align-items:center;">
-              <button class="btn btn-sm" @click="pdfInfo()"
+              <button class="btn btn-secondary btn-sm" @click="pdfInfo()"
                       :disabled="acting || !mutatorReady()"
                       :title="mutatorReady() ? '' : t('documents.no_pdf_engine')">{{ t('documents.pdf_info') }}</button>
               <input class="mini-input" type="number" min="1" style="max-width:60px;" x-model.number="splitStart" placeholder="{{ t('documents.from') }}">
               <input class="mini-input" type="number" min="0" style="max-width:60px;" x-model.number="splitEnd" placeholder="{{ t('documents.to') }}">
-              <button class="btn btn-sm" @click="splitDoc()"
+              <button class="btn btn-secondary btn-sm" @click="splitDoc()"
                       :disabled="acting || !mutatorReady()"
                       :title="mutatorReady() ? '' : t('documents.no_pdf_engine')">{{ t('documents.split') }}</button>
-              <button class="btn btn-sm" @click="redactDoc()"
+              <button class="btn btn-secondary btn-sm" @click="redactDoc()"
                       :disabled="acting || !mutatorReady()"
                       :title="mutatorReady() ? '' : t('documents.no_pdf_engine')">{{ t('documents.redact') }}</button>
             </div>
@@ -195,7 +199,7 @@
                 <span translate="no" x-text="a.operation"></span> ·
                 <span translate="no" x-text="(a.output && a.output.extension) || ''"></span>
               </span>
-              <a class="btn btn-sm" :href="artifactUrl(a.artifact_id)" download>{{ t('documents.download') }}</a>
+              <a class="btn btn-secondary btn-sm" :href="artifactUrl(a.artifact_id)" download>{{ t('documents.download') }}</a>
             </div>
           </template>
         </details>
@@ -224,19 +228,19 @@
         <details open>
           <summary style="cursor:pointer;font-size:.8rem;">{{ t('documents.jobs') }}</summary>
           <template x-for="j in jobs" :key="j.job_id">
-            <div style="border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:.4rem .5rem;margin:.35rem 0;">
+            <div class="doc-job">
               <div style="display:flex;align-items:center;justify-content:space-between;gap:.4rem;">
                 <span class="doc-meta" translate="no" x-text="j.job_id.slice(0,8)"></span>
-                <span class="state-badge" :class="stateClass(j.state)" x-text="tOr('documents.state_' + j.state, j.state)"></span>
+                <span class="badge state-badge" :class="stateClass(j.state)" x-text="tOr('documents.state_' + j.state, j.state)"></span>
               </div>
               <div class="doc-meta" x-show="j.error_code" x-cloak>
                 <span class="evt-err" translate="no" x-text="j.error_code"></span>: <span dir="auto" translate="no" x-text="j.error_message"></span>
               </div>
               <div class="docs-actions" style="margin-top:.3rem;">
-                <button class="btn btn-sm" @click="showEvents(j.job_id)">{{ t('documents.events') }}</button>
-                <button class="btn btn-sm" @click="cancelJob(j.job_id)"
+                <button class="btn btn-secondary btn-sm" @click="showEvents(j.job_id)">{{ t('documents.events') }}</button>
+                <button class="btn btn-secondary btn-sm" @click="cancelJob(j.job_id)"
                         x-show="!['ready','cancelled','dead_letter','rejected'].includes(j.state)" x-cloak>{{ t('common.cancel') }}</button>
-                <button class="btn btn-sm" @click="retryJob(j.job_id)"
+                <button class="btn btn-secondary btn-sm" @click="retryJob(j.job_id)"
                         x-show="['dead_letter','rejected'].includes(j.state)" x-cloak>{{ t('common.retry') }}</button>
               </div>
               <template x-if="eventsFor === j.job_id">
@@ -258,7 +262,7 @@
       <div class="card" style="padding:1rem;margin-top:1rem;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem;">
           <strong>{{ t('documents.capabilities') }}</strong>
-          <button class="btn btn-sm" @click="loadHealth()">{{ t('common.refresh') }}</button>
+          <button class="btn btn-secondary btn-sm" @click="loadHealth()">{{ t('common.refresh') }}</button>
         </div>
         <div x-show="health" x-cloak>
           <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:.3rem;">
@@ -266,13 +270,13 @@
           </div>
           {# Where untrusted documents run, the broker the guard runs, and the one step that fixes what is not right. #}
           <div style="margin-bottom:.4rem;" data-testid="document-isolation" x-show="isolation()" x-cloak>
-            <span class="cap-pill" :class="isolation() && isolation().ready ? 'cap-ready' : 'cap-unavailable'">
+            <span class="badge cap-pill" :class="isolation() && isolation().ready ? 'badge-success' : 'badge-neutral'">
               {{ t('documents.isolation') }} <span x-text="isolationLabel()"></span>
             </span>
-            <span class="cap-pill" x-show="brokerLabel()" x-cloak>
+            <span class="badge badge-neutral cap-pill" x-show="brokerLabel()" x-cloak>
               {{ t('documents.broker') }} <span x-text="brokerLabel()"></span>
             </span>
-            <span class="cap-pill cap-degraded" x-show="isolation() && isolation().image_fallback" x-cloak>
+            <span class="badge badge-warning cap-pill" x-show="isolation() && isolation().image_fallback" x-cloak>
               {{ t('documents.isolation_image_older') }}
             </span>
             <div class="doc-meta" role="status" x-show="isolationAction()" x-cloak style="margin-top:.3rem;">
@@ -283,20 +287,20 @@
             </div>
           </div>
           <template x-for="p in (health ? health.parsers : [])" :key="p.parser_id">
-            <span class="cap-pill" :class="capClass(p.readiness)"><span translate="no" x-text="p.parser_id"></span>: <span x-text="tOr('documents.cap_' + p.readiness, p.readiness)"></span></span>
+            <span class="badge cap-pill" :class="capClass(p.readiness)"><span translate="no" x-text="p.parser_id"></span>: <span x-text="tOr('documents.cap_' + p.readiness, p.readiness)"></span></span>
           </template>
           <div style="margin-top:.3rem;">
             <template x-for="r in (health ? health.renderers : [])" :key="r.renderer_id">
-              <span class="cap-pill" :class="capClass(r.readiness)"><span translate="no" x-text="r.renderer_id"></span>: <span x-text="tOr('documents.cap_' + r.readiness, r.readiness)"></span></span>
+              <span class="badge cap-pill" :class="capClass(r.readiness)"><span translate="no" x-text="r.renderer_id"></span>: <span x-text="tOr('documents.cap_' + r.readiness, r.readiness)"></span></span>
             </template>
           </div>
           <div style="margin-top:.3rem;">
             <template x-for="m in (health ? health.mutators : [])" :key="m.renderer_id">
-              <span class="cap-pill" :class="capClass(m.readiness)"><span translate="no" x-text="m.renderer_id"></span>: <span x-text="tOr('documents.cap_' + m.readiness, m.readiness)"></span></span>
+              <span class="badge cap-pill" :class="capClass(m.readiness)"><span translate="no" x-text="m.renderer_id"></span>: <span x-text="tOr('documents.cap_' + m.readiness, m.readiness)"></span></span>
             </template>
           </div>
           <div style="margin-top:.3rem;" x-show="health && health.ocr" x-cloak>
-            <span class="cap-pill" :class="capClass(health && health.ocr ? health.ocr.readiness : 'unavailable')">
+            <span class="badge cap-pill" :class="capClass(health && health.ocr ? health.ocr.readiness : 'unavailable')">
               {{ t('documents.ocr') }} <span x-text="tOr('documents.cap_' + (health && health.ocr ? health.ocr.readiness : 'unavailable'), (health && health.ocr ? health.ocr.readiness : 'unavailable'))"></span>
             </span>
           </div>
@@ -307,16 +311,16 @@
       <div class="card" style="padding:1rem;margin-top:1rem;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem;">
           <strong>{{ t('documents.operations') }}</strong>
-          <button class="btn btn-sm" @click="loadOps()">{{ t('common.refresh') }}</button>
+          <button class="btn btn-secondary btn-sm" @click="loadOps()">{{ t('common.refresh') }}</button>
         </div>
 
         <div x-show="capacity" x-cloak>
           <div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.4rem;">
-            <span class="cap-pill" :class="capStatusClass(capacity ? capacity.status : '')">
+            <span class="badge cap-pill" :class="capStatusClass(capacity ? capacity.status : '')">
               {{ t('documents.status') }} <span x-text="capacity ? tOr('documents.cap_' + capacity.status, capacity.status) : '—'"></span>
             </span>
             <template x-for="reason in (capacity ? capacity.degraded_reasons : [])" :key="reason">
-              <span class="cap-pill cap-degraded" translate="no" x-text="reason"></span>
+              <span class="badge badge-warning cap-pill" translate="no" x-text="reason"></span>
             </template>
           </div>
 
@@ -341,23 +345,24 @@
             / <span x-text="ops && ops.tenant_quota ? fmtBytes(ops.tenant_quota.quota_bytes) : '—'"></span>
           </div>
 
-          <p class="cap-pill cap-degraded" role="status"
+          <p class="notice tone-warning" role="status" style="margin:.4rem 0 0;"
              x-show="readiness && readiness.policy && readiness.policy.restart_required" x-cloak>
+            <span class="ki" aria-hidden="true" x-html="KazmaIcons.get('alert')"></span>
             {{ t('documents.policy_restart_required') }}
           </p>
           {# Multi-replica readiness #}
           <div style="margin-top:.3rem;" x-show="readiness" x-cloak>
-            <span class="cap-pill" :class="capStatusClass(readiness ? readiness.status : '')">
+            <span class="badge cap-pill" :class="capStatusClass(readiness ? readiness.status : '')">
               {{ t('documents.storage_status') }} <span x-text="readiness ? tOr('documents.cap_' + readiness.status, readiness.status) : '—'"></span>
             </span>
-            <span class="cap-pill" x-text="t('documents.jobs_backend').replace('{backend}', (readiness && readiness.jobs_backend) ? readiness.jobs_backend : '—')"></span>
-            <span class="cap-pill" x-text="(readiness && readiness.jobs_multi_replica && readiness.metadata_multi_replica) ? t('documents.multi_replica') : t('documents.single_node')"></span>
+            <span class="badge badge-neutral cap-pill" x-text="t('documents.jobs_backend').replace('{backend}', (readiness && readiness.jobs_backend) ? readiness.jobs_backend : '—')"></span>
+            <span class="badge badge-neutral cap-pill" x-text="(readiness && readiness.jobs_multi_replica && readiness.metadata_multi_replica) ? t('documents.multi_replica') : t('documents.single_node')"></span>
           </div>
         </div>
 
         {# Garbage collection — dry-run then confirm #}
         <div style="margin-top:.6rem;display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;">
-          <button class="btn btn-sm" @click="runGc()" :disabled="maintenanceRunning">
+          <button class="btn btn-secondary btn-sm" @click="runGc()" :disabled="maintenanceRunning">
             <span x-show="!maintenanceRunning" x-cloak>{{ t('documents.run_gc') }}</span>
             <span x-show="maintenanceRunning" x-cloak>{{ t('documents.working') }}</span>
           </button>

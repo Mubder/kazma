@@ -116,11 +116,13 @@ def _get_trace_data() -> list[dict[str, Any]]:
     traces = []
     for entry in reversed(store.recent(50)):  # newest first
         t = time.strftime("%H:%M:%S", time.localtime(entry.timestamp))
+        # A status is a status badge (dashboard.js prependTraceRow keeps the
+        # same map): an error was the sky-blue "premium" tier badge.
         badge_class = {
-            "success": "badge-stdio",
-            "error": "badge-premium",
-            "warning": "badge-standard",
-        }.get(entry.status, "badge-basic")
+            "success": "badge-success",
+            "error": "badge-danger",
+            "warning": "badge-warning",
+        }.get(entry.status, "badge-neutral")
 
         traces.append(
             {

@@ -64,7 +64,7 @@
     return tx('replay.load_error', 'Could not load the steps (HTTP {status}).', { status: status });
   }
   function emptyState(html) {
-    return '<div style="padding:2rem;text-align:center;color:var(--text-muted);">' + html + '</div>';
+    return '<div class="empty-state" style="margin-top:1rem;">' + html + '</div>';
   }
 
   // ── Public API ──
@@ -143,7 +143,7 @@
                 // The store cannot be read: say so, and keep polling.
                 var listEl = $('replay-timeline-list');
                 if (listEl) {
-                  listEl.innerHTML = '<div class="replay-load-error" role="alert" style="padding:1rem;color:var(--error);">' +
+                  listEl.innerHTML = '<div class="replay-load-error notice tone-danger" role="alert">' +
                     esc(refusalText(body, r.status)) + '</div>';
                 }
               } else if (r.status === 404 || r.status === 503) {
@@ -208,7 +208,7 @@
             // An error is an error: a 403 or a broken store read as "no
             // snapshots yet" (TT-10).
             $('replay-snapshot-count').textContent = '';
-            listEl.innerHTML = '<div class="replay-load-error" role="alert" style="padding:1rem;color:var(--error);">' +
+            listEl.innerHTML = '<div class="replay-load-error notice tone-danger" role="alert">' +
               esc(refusalText(res.body, res.status)) + '</div>';
             return;
           }
@@ -249,7 +249,7 @@
                     '<div>' +
                       '<span style="font-weight:600;color:var(--text-primary);">' + esc(tx('replay.step_n', 'Step {step}', { step: s.step })) + '</span>' +
                       '<span translate="no" style="margin-inline-start:8px;font-size:0.85rem;color:var(--text-muted);">' + esc(s.model_used || '—') + '</span>' +
-                      (s.truncated ? '<span class="badge" style="margin-inline-start:8px;">' + esc(tx('replay.step_truncated', 'Too large to restore')) + '</span>' : '') +
+                      (s.truncated ? '<span class="badge badge-warning" style="margin-inline-start:8px;">' + esc(tx('replay.step_truncated', 'Too large to restore')) + '</span>' : '') +
                     '</div>' +
                     '<div style="display:flex;gap:12px;font-size:0.85rem;color:var(--text-muted);">' +
                       '<span>' + esc(tx('replay.messages_n', 'Messages: {n}', { n: s.message_count })) + '</span>' +
@@ -271,7 +271,7 @@
           }
         })
         .catch(function (err) {
-          listEl.innerHTML = '<div class="replay-load-error" role="alert" style="padding:1rem;color:var(--error);">' + esc(tx('replay.load_failed', 'Failed to load: {error}', { error: err.message })) + '</div>';
+          listEl.innerHTML = '<div class="replay-load-error notice tone-danger" role="alert">' + esc(tx('replay.load_failed', 'Failed to load: {error}', { error: err.message })) + '</div>';
         });
     },
 
@@ -297,8 +297,12 @@
             var content = m.content || '';
             if (typeof content !== 'string') content = JSON.stringify(content, null, 2);
             var cls = role === 'user' ? 'replay-msg-user' : (role === 'assistant' ? 'replay-msg-assistant' : 'replay-msg-tool');
+            // The roles as chat draws them: the user's words on the accent
+            // tint, the assistant's on a neutral wash, a tool's in a hairline.
             return '<div class="' + cls + '" style="padding:8px 12px;border-radius:6px;margin-bottom:4px;font-size:0.85rem;' +
-              'background:' + (role === 'user' ? 'rgba(99,102,241,0.08)' : role === 'assistant' ? 'rgba(34,197,94,0.08)' : 'rgba(161,161,170,0.08)') + ';">' +
+              (role === 'user' ? 'background:var(--accent-subtle);'
+                : role === 'assistant' ? 'background:var(--tint-strong);'
+                : 'border:1px solid var(--card-hairline);') + '">' +
               '<strong>' + esc(tx('replay.role_' + role, role)) + ':</strong> <span translate="no">' + esc(content.slice(0, 500)) + (content.length > 500 ? '…' : '') + '</span>' +
               '</div>';
           }).join('');
@@ -387,7 +391,7 @@
         .then(function (res) {
           var data = res.body || {};
           if (!res.ok || data.error) {
-            $('replay-diff-result').innerHTML = '<div role="alert" style="color:var(--error);">' + esc(refusalText(data, res.status)) + '</div>';
+            $('replay-diff-result').innerHTML = '<div role="alert" style="color:var(--danger);">' + esc(refusalText(data, res.status)) + '</div>';
             return;
           }
           var d = data.diff;

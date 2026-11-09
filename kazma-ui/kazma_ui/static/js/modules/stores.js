@@ -149,10 +149,10 @@ export function registerStores() {
                 var escapedMsg = String(message).replace(/[&<>"']/g, function (c) { return entityMap[c]; });
                 this.show({
                     title,
-                    body: `<p style="color: var(--text-secondary); line-height: 1.6;">${escapedMsg}</p>`,
+                    body: `<p class="confirm-message">${escapedMsg}</p>`,
                     size: 'sm',
                     actions: [
-                        { label: uiText('common.cancel', 'Cancel'), variant: 'btn-secondary' },
+                        { label: uiText('common.cancel', 'Cancel'), variant: 'btn-outline' },
                         { label: uiText('common.confirm', 'Confirm'), variant: 'btn-primary', handler: onConfirm },
                     ],
                 });
@@ -200,13 +200,17 @@ export function registerStores() {
                         actions: [
                             {
                                 label: cancelText,
-                                variant: 'btn-secondary',
+                                variant: 'btn-outline',
                                 close: true,
                                 handler: function () { settle(answer(false)); },
                             },
                             {
                                 label: confirmText,
-                                variant: danger ? 'btn-danger' : 'btn-primary',
+                                // A destructive confirm is the filled danger
+                                // (.btn-danger-solid); .btn-danger stays on
+                                // it so callers and tests that find the
+                                // dialog's danger button still do.
+                                variant: danger ? 'btn-danger btn-danger-solid' : 'btn-primary',
                                 close: true,
                                 handler: function () { settle(answer(true)); },
                             },
@@ -252,7 +256,7 @@ export function registerStores() {
                         inputValue: opts.defaultValue || '',
                         onClose: function () { settle(null); },
                         actions: [
-                            { label: cancelText, variant: 'btn-secondary', close: true, handler: function () { settle(null); } },
+                            { label: cancelText, variant: 'btn-outline', close: true, handler: function () { settle(null); } },
                             { label: confirmText, variant: 'btn-primary', close: true, handler: function () { settle(self.inputValue); } },
                         ],
                     });
@@ -528,13 +532,14 @@ export function registerStores() {
                 }
             },
 
-            // Each alert's colour and symbol by severity: never colour alone.
+            // Each alert's colour, tone (the .tone-* class its icon tile
+            // takes) and symbol by severity: never colour alone.
             tone(item) {
                 const severity = String((item && item.severity) || '').toUpperCase();
-                if (severity === 'SUCCESS') return { color: 'var(--success)', mark: '✓' };
-                if (severity === 'ERROR' || severity === 'CRITICAL') return { color: 'var(--danger)', mark: '✕' };
-                if (severity === 'INFO') return { color: 'var(--accent, #3b82f6)', mark: 'ⓘ' };
-                return { color: 'var(--warning)', mark: '⚠' };
+                if (severity === 'SUCCESS') return { name: 'success', color: 'var(--success)', mark: '✓' };
+                if (severity === 'ERROR' || severity === 'CRITICAL') return { name: 'danger', color: 'var(--danger)', mark: '✕' };
+                if (severity === 'INFO') return { name: 'info', color: 'var(--info)', mark: 'ⓘ' };
+                return { name: 'warning', color: 'var(--warning)', mark: '⚠' };
             },
 
             // Read: opened, or "Mark all as read" (the server's `read`, or this

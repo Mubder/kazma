@@ -6,21 +6,123 @@
 {% block content %}
 <div class="workspace-container" x-data="workspaceApp()" style="max-width:1400px;margin:0 auto;">
 
+  <!-- ── Page styles ──
+       Layout only: every colour is a token (kazma.css), and the surfaces are
+       the shared classes -- .page-banner, .card (the colour of the wall),
+       .modal, .badge-*, .notice, .tabs, .segmented, .stat-tile, .empty-state
+       and the sunken well for file lists and code. No card paints itself. -->
+  <style>
+    @keyframes ws-pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+    .ws-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+    .ws-banner-text { min-width: 0; }
+    .ws-banner-text > * { margin: 0; }
+    .ws-banner-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; margin-inline-start: auto; }
+    .ws-env-label { font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); }
+    .ws-env-select { max-width: 240px; min-width: 160px; flex: 1; }
+    .ws-modal-title { display: flex; align-items: center; gap: 8px; margin: 0; }
+    .ws-mono { font-family: var(--font-mono); }
+    .ws-small { font-size: 0.78rem; }
+    .ws-break { word-break: break-all; }
+    .ws-suggest-anchor { position: relative; }
+    .ws-suggest { position: absolute; top: 100%; inset-inline: 0; margin-top: 4px; max-height: 180px; overflow-y: auto; z-index: 100; padding: 4px;
+                  background: var(--surface-overlay); border: 1px solid var(--overlay-border); border-radius: var(--overlay-radius); box-shadow: var(--overlay-shadow); }
+    .ws-suggest .dropdown-item { font-family: var(--font-mono); font-size: 0.78rem; }
+    .ws-picker-search { padding: 16px 24px 0; flex-shrink: 0; }
+    .ws-picker-list { min-height: 200px; padding-top: 12px; }
+    .ws-pick-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 8px; border-bottom: 1px solid var(--card-hairline);
+                   cursor: pointer; border-radius: 6px; transition: background var(--transition-fast); }
+    .ws-pick-row:hover { background: var(--bg-hover); }
+    .ws-pick-name { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 0.85rem; font-weight: 500; color: var(--text-primary); }
+    .ws-pick-name > span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ws-cloning { justify-content: center; color: var(--accent-light); font-size: 0.85rem; }
+    .ws-card { display: flex; flex-direction: column; min-width: 0; }
+    .ws-card .card-title { display: flex; align-items: center; gap: 8px; margin: 0; }
+    /* A padded card's title row: no inset of its own beside the card's padding. */
+    .ws-card > .card-header { padding-inline: 0; padding-top: 0; }
+    .ws-card-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+    .ws-span-all { grid-column: 1 / -1; }
+    .ws-section-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); font-weight: 600; }
+    .ws-git-group + .ws-git-group { margin-top: 14px; }
+    .ws-git-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+    .ws-well { background: var(--surface-sunken); border-radius: 8px; padding: 4px 10px; max-height: 96px; overflow-y: auto; }
+    .ws-well-line { font-family: var(--font-mono); font-size: 0.75rem; padding: 4px 0; display: flex; align-items: center; gap: 8px; color: var(--text-secondary); }
+    .ws-well-line + .ws-well-line { border-top: 1px solid var(--card-hairline); }
+    .ws-well-empty { padding: 8px; text-align: center; color: var(--text-muted); font-size: 0.78rem; }
+    /* Staged / modified / untracked letters: the status ink on the well (a
+       tint on the well fell to 4.2:1 in light). */
+    .ws-mark { font-family: var(--font-mono); font-weight: 700; font-size: 0.72rem; min-width: 16px; text-align: center; }
+    .ws-mark-success { color: var(--success); }
+    .ws-mark-warning { color: var(--warning); }
+    .ws-mark-info { color: var(--info); }
+    .ws-code { font-family: var(--font-mono); font-size: 0.78rem; background: var(--surface-sunken); color: var(--text-secondary); padding: 2px 8px; border-radius: 6px; }
+    .ws-code-accent { color: var(--accent-light); }
+    .ws-path { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: ltr; }
+    .ws-badge-dot { display: inline-flex; align-items: center; gap: 6px; }
+    .ws-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+    .ws-dot-pulse { animation: ws-pulse 2s infinite; }
+    .ws-notice { display: flex; align-items: flex-start; gap: 10px; text-align: start; word-break: break-word; margin-bottom: 12px; }
+    .ws-notice-title { font-weight: 600; margin-bottom: 2px; }
+    .ws-empty-title { margin: 0; font-size: 0.95rem; font-weight: 600; color: var(--text-primary); }
+    .ws-empty-text { margin: 0 auto; max-width: 380px; font-size: 0.85rem; line-height: 1.5; }
+    .ws-empty-actions { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; }
+    .ws-empty-state .ws-notice { max-width: 460px; margin: 0 auto; }
+    .ws-repo-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+    .ws-repo-link { font-family: var(--font-mono); font-size: 0.95rem; font-weight: 600; color: var(--accent-light); text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+    .ws-repo-link:hover { text-decoration: underline; }
+    .ws-repo-desc { margin: 4px 0 0; font-size: 0.82rem; color: var(--text-secondary); line-height: 1.4; }
+    .ws-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .ws-subhead { margin: 0 0 8px; display: flex; align-items: center; gap: 6px; }
+    .ws-run { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    .ws-run-name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-weight: 600; font-size: 0.85rem; color: var(--text-primary); }
+    .ws-run-meta { font-size: 0.75rem; color: var(--text-muted); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+    .ws-run-end { display: flex; align-items: center; gap: 8px; }
+    .ws-list { max-height: 340px; overflow-y: auto; }
+    .ws-row { display: flex; align-items: center; gap: 8px; padding: 8px 6px; border-bottom: 1px solid var(--card-hairline); font-size: 0.82rem; color: var(--text-primary); }
+    .ws-row-link { cursor: pointer; transition: background var(--transition-fast); }
+    .ws-row-link:hover { background: var(--bg-hover); }
+    .ws-row-muted { color: var(--text-secondary); }
+    .ws-row-main { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; }
+    .ws-row-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-primary); }
+    .ws-row-num { font-family: var(--font-mono); font-weight: 600; font-size: 0.75rem; flex-shrink: 0; color: var(--accent-light); }
+    .ws-row-num-muted { color: var(--text-tertiary); }
+    .ws-row-tag { flex: 0 1 auto; font-weight: 600; }
+    .ws-term-ready { color: var(--text-muted); }
+    .ws-row-meta { font-size: 0.72rem; color: var(--text-muted); flex-shrink: 0; }
+    .ws-row-end { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+    .ws-link-muted { font-size: 0.75rem; color: var(--text-muted); text-decoration: none; }
+    .ws-link-muted:hover { color: var(--accent-light); text-decoration: underline; }
+    .ws-list-empty { padding: 14px; text-align: center; color: var(--text-muted); font-size: 0.82rem; }
+    .ws-icon-slot { width: 20px; flex-shrink: 0; display: inline-flex; align-items: center; color: var(--text-muted); }
+    .ws-path-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; font-size: 0.8rem; color: var(--text-secondary); }
+    .ws-path-row > span { font-weight: 600; }
+    .ws-files { max-height: 260px; overflow-y: auto; }
+    .ws-file-name { flex: 1; min-width: 0; }
+    .ws-file-size { font-size: 0.75rem; color: var(--text-muted); font-family: var(--font-mono); }
+    .ws-skeletons { padding: 12px 0; }
+    .ws-skeletons .skeleton { height: 28px; margin-bottom: 6px; }
+    .ws-roots-hint { margin: 0 0 12px; }
+    .ws-root-row { flex-wrap: wrap; }
+    .ws-root-path { flex: 1; min-width: 10rem; font-family: var(--font-mono); font-size: 0.78rem; overflow-wrap: anywhere; }
+    .ws-root-label { color: var(--text-secondary); }
+    .ws-roots-form { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; align-items: center; }
+    .ws-roots-form .ws-root-input { flex: 2; min-width: 12rem; }
+    .ws-roots-form .ws-root-name { flex: 1; min-width: 8rem; }
+    .ws-roots-form .form-select { width: auto; }
+    .ws-terminal-input { display: flex; gap: 8px; margin-top: 12px; }
+    .ws-terminal-input .form-input { flex: 1; font-family: var(--font-mono); }
+  </style>
+
   <!-- ── Workspace Selector Bar ── -->
-  <div class="card" style="margin-bottom:16px;padding:12px 16px;background:linear-gradient(135deg, var(--bg-surface) 0%, var(--bg-elevated) 100%);border:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">
-    <div style="display:flex;align-items:center;gap:12px;">
-      <div style="font-size:1.5rem;"><span class="ki" data-icon="construction" aria-hidden="true"></span></div>
-      <div>
-        <h2 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);letter-spacing:-0.02em;">{{ t('workspace.engine_title') }}</h2>
-        <p style="margin:0;font-size:0.75rem;color:var(--text-muted);">{{ t('workspace.engine_desc') }}</p>
-      </div>
+  <div class="page-banner ws-banner">
+    <div class="ws-banner-text">
+      <h2 class="page-banner-title">{{ t('workspace.engine_title') }}</h2>
+      <p class="page-banner-crumb">{{ t('workspace.engine_desc') }}</p>
     </div>
-    
-    <div style="display:flex;align-items:center;gap:12px;margin-left:auto;flex-wrap:wrap;justify-content:flex-end;">
-      <span style="font-size:0.8rem;font-weight:600;color:var(--text-secondary);">{{ t('workspace.active_env') }}</span>
+
+    <div class="ws-banner-actions">
+      <span class="ws-env-label">{{ t('workspace.active_env') }}</span>
       <select aria-label="{{ t('workspace.active_env') }}"
-        class="form-input"
-        style="max-width:240px;min-width:160px;flex:1;padding:6px 12px;border-radius:var(--radius-sm);font-weight:500;"
+        class="form-select ws-env-select"
         :value="activeWorkspaceId"
         @change="switchWorkspace($event.target.value)"
       >
@@ -28,7 +130,7 @@
           <option :value="ws.id" x-text="ws.name" translate="no" :selected="ws.id === activeWorkspaceId"></option>
         </template>
       </select>
-      
+
       <button class="btn btn-sm btn-secondary ws-action-btn" @click="showCreateModal = true">
         <span><span x-html="KazmaIcons.plus()"></span></span> {{ t('workspace.create') }}
       </button>
@@ -43,37 +145,27 @@
     </div>
   </div>
 
-  <!-- ── Custom Styles ── -->
-  <style>
-    @keyframes pulse {
-      0% { opacity: 0.4; }
-      50% { opacity: 1; }
-      100% { opacity: 0.4; }
-    }
-    [x-cloak] { display: none !important; }
-  </style>
-
   <!-- ── Create Workspace Modal ── -->
-  <div x-show="showCreateModal" class="ws-modal-overlay" style="background:rgba(0,0,0,0.6);" x-transition x-cloak @click.self="showCreateModal = false">
-    <div class="card" style="max-width:520px;width:100%;padding:0;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);display:flex;flex-direction:column;">
-      <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:16px 24px 12px;">
-        <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);"><span x-html="KazmaIcons.plus()"></span> {{ t('workspace.create_modal_title') }}</h3>
-        <button class="btn-icon" @click="showCreateModal = false" style="font-size:1rem;"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
+  <div x-show="showCreateModal" class="modal-overlay" x-transition x-cloak @click.self="showCreateModal = false">
+    <div class="modal modal-md" role="dialog" aria-modal="true" aria-labelledby="ws-create-title">
+      <div class="modal-header">
+        <h2 id="ws-create-title" class="ws-modal-title"><span x-html="KazmaIcons.plus()"></span> {{ t('workspace.create_modal_title') }}</h2>
+        <button type="button" class="modal-close" @click="showCreateModal = false" aria-label="{{ t('common.close') }}"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
       </div>
-      
-      <div style="display:flex;flex-direction:column;gap:16px;padding:16px 24px;">
-        <div>
-          <label style="display:block;font-size:0.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">{{ t('workspace.field_name') }}</label>
-          <input type="text" class="form-input" placeholder="{{ t('workspace.field_name_ph') }}" x-model="newWorkspaceName" style="width:100%;">
+
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label" for="ws-new-name">{{ t('workspace.field_name') }}</label>
+          <input id="ws-new-name" type="text" class="form-input" placeholder="{{ t('workspace.field_name_ph') }}" x-model="newWorkspaceName">
         </div>
-        <div>
-          <label style="display:block;font-size:0.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">{{ t('workspace.field_path') }}</label>
-          <input type="text" class="form-input" placeholder="{{ t('workspace.field_path_ph') }}" x-model="newWorkspacePath" style="width:100%;font-family:var(--font-mono);font-size:0.8rem;">
-          <p style="margin:4px 0 0 0;font-size:0.7rem;color:var(--text-muted);">{{ t('workspace.folder_autocreate') }}</p>
+        <div class="form-group">
+          <label class="form-label" for="ws-new-path">{{ t('workspace.field_path') }}</label>
+          <input id="ws-new-path" type="text" class="form-input ws-mono" placeholder="{{ t('workspace.field_path_ph') }}" x-model="newWorkspacePath">
+          <p class="form-hint">{{ t('workspace.folder_autocreate') }}</p>
         </div>
       </div>
 
-      <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;padding:12px 24px 16px;border-top:1px solid var(--border-subtle);">
+      <div class="modal-footer">
         <button class="btn btn-secondary" @click="showCreateModal = false">{{ t('workspace.cancel') }}</button>
         <button class="btn btn-primary" @click="createWorkspace()" :disabled="!newWorkspaceName.trim() || !newWorkspacePath.trim()">{{ t('workspace.create_switch') }}</button>
       </div>
@@ -81,31 +173,31 @@
   </div>
 
   <!-- ── Select Folder Modal ── -->
-  <div x-show="showFolderModal" class="ws-modal-overlay" style="background:rgba(0,0,0,0.6);" x-transition x-cloak>
-    <div class="card" style="max-width:480px;width:100%;padding:24px;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;border-bottom:1px solid var(--border-subtle);padding-bottom:12px;">
-        <h3 style="margin:0;font-size:1.1rem;font-weight:700;"><span class="ki" data-icon="folder-open" aria-hidden="true"></span> {{ t('workspace.folder_modal_title') }}</h3>
-        <button class="btn-icon" @click="showFolderModal = false" style="font-size:1rem;"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
+  <div x-show="showFolderModal" class="modal-overlay" x-transition x-cloak>
+    <div class="modal modal-md" role="dialog" aria-modal="true" aria-labelledby="ws-folder-title">
+      <div class="modal-header">
+        <h2 id="ws-folder-title" class="ws-modal-title"><span class="ki" data-icon="folder-open" aria-hidden="true"></span> {{ t('workspace.folder_modal_title') }}</h2>
+        <button type="button" class="modal-close" @click="showFolderModal = false" aria-label="{{ t('common.close') }}"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
       </div>
 
-      <div style="display:flex;flex-direction:column;gap:16px;margin-bottom:24px;">
-        <div style="position:relative;">
-          <label style="display:block;font-size:0.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">{{ t('workspace.field_folder_path') }}</label>
-          <input type="text" class="form-input" placeholder="{{ t('workspace.field_folder_path_ph') }}" x-model="selectedFolderPath" @input.debounce.300ms="fetchSuggestions()" @blur="setTimeout(() => suggestList = [], 200)" style="width:100%;font-family:var(--font-mono);font-size:0.8rem;">
+      <div class="modal-body">
+        <div class="form-group ws-suggest-anchor">
+          <label class="form-label" for="ws-folder-path">{{ t('workspace.field_folder_path') }}</label>
+          <input id="ws-folder-path" type="text" class="form-input ws-mono" placeholder="{{ t('workspace.field_folder_path_ph') }}" x-model="selectedFolderPath" @input.debounce.300ms="fetchSuggestions()" @blur="setTimeout(() => suggestList = [], 200)">
           <!-- Autocomplete dropdown -->
-          <div x-show="suggestList.length > 0" x-cloak style="position:absolute;top:100%;left:0;right:0;max-height:180px;overflow-y:auto;background:var(--bg-surface);border:1px solid var(--border-strong);border-radius:0 0 var(--radius-sm) var(--radius-sm);z-index:100;box-shadow:var(--shadow-md);">
+          <div x-show="suggestList.length > 0" x-cloak class="ws-suggest" role="listbox">
             <template x-for="s in suggestList" :key="s.path">
-              <div @click="pickSuggestion(s.path)" @mousedown.prevent style="padding:6px 12px;font-size:0.78rem;font-family:var(--font-mono);cursor:pointer;border-bottom:1px solid var(--tint);display:flex;align-items:center;gap:6px;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
-                <span style="color:var(--text-muted);"><span class="ki" data-icon="folder" aria-hidden="true"></span></span>
-                <span style="color:var(--text-primary);" translate="no" x-text="s.name"></span>
+              <div class="dropdown-item" role="option" @click="pickSuggestion(s.path)" @mousedown.prevent>
+                <span class="ws-icon-slot" x-html="KazmaIcons.span('folder')"></span>
+                <span translate="no" x-text="s.name"></span>
               </div>
             </template>
           </div>
-          <p style="margin:4px 0 0 0;font-size:0.75rem;color:var(--text-muted);">{{ t('workspace.autocomplete_hint') }}</p>
+          <p class="form-hint">{{ t('workspace.autocomplete_hint') }}</p>
         </div>
       </div>
-      
-      <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;">
+
+      <div class="modal-footer">
         <button type="button" class="btn btn-secondary" @click="showFolderModal = false">{{ t('workspace.cancel') }}</button>
         <button type="button" class="btn btn-primary" @click="selectFolder()" :disabled="!selectedFolderPath.trim()">{{ t('workspace.open_folder') }}</button>
       </div>
@@ -113,99 +205,99 @@
   </div>
 
   <!-- ── GitHub Repo Picker Modal ── -->
-  <div x-show="showRepoPicker" class="ws-modal-overlay" style="background:rgba(0,0,0,0.6);" x-transition x-cloak @click.self="showRepoPicker = false">
-    <div class="card" style="max-width:520px;width:100%;max-height:80vh;display:flex;flex-direction:column;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;border-bottom:1px solid var(--border-subtle);padding:16px 24px 12px;">
-        <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);"><span class="ki" data-icon="github" aria-hidden="true"></span> {{ t('workspace.repo_picker_title') }}</h3>
-        <button class="btn-icon" @click="showRepoPicker = false" style="font-size:1rem;"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
+  <div x-show="showRepoPicker" class="modal-overlay" x-transition x-cloak @click.self="showRepoPicker = false">
+    <div class="modal modal-md" role="dialog" aria-modal="true" aria-labelledby="ws-repo-title">
+      <div class="modal-header">
+        <h2 id="ws-repo-title" class="ws-modal-title"><span class="ki" data-icon="github" aria-hidden="true"></span> {{ t('workspace.repo_picker_title') }}</h2>
+        <button type="button" class="modal-close" @click="showRepoPicker = false" aria-label="{{ t('common.close') }}"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
       </div>
-      <div style="padding:0 24px 12px;">
-        <input type="text" class="form-input" placeholder="{{ t('workspace.repo_search_ph') }}" x-model="ghRepoSearch" style="width:100%;font-size:0.85rem;">
+      <div class="ws-picker-search">
+        <input type="text" class="form-input" placeholder="{{ t('workspace.repo_search_ph') }}" aria-label="{{ t('workspace.repo_search_ph') }}" x-model="ghRepoSearch" style="width:100%;">
       </div>
-      <div style="flex:1;overflow-y:auto;padding:0 24px 16px;min-height:200px;">
+      <div class="modal-body ws-picker-list">
         <template x-for="r in ghRepoFiltered" :key="r.full_name">
-          <div @click="pickRepo(r)" style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-bottom:1px solid var(--tint);cursor:pointer;border-radius:var(--radius-xs);transition:background 0.15s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
-            <div style="display:flex;align-items:center;gap:8px;min-width:0;">
-              <span style="font-size:0.9rem;"><span class="ki" data-icon="package" aria-hidden="true"></span></span>
-              <span style="font-size:0.82rem;font-weight:500;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" x-text="r.full_name"></span>
+          <div class="ws-pick-row" @click="pickRepo(r)">
+            <div class="ws-pick-name">
+              <span class="ws-icon-slot" x-html="KazmaIcons.span('package')"></span>
+              <span x-text="r.full_name"></span>
             </div>
-            <span x-show="r.private" style="font-size:0.58rem;color:#f59e0b;background:rgba(245,158,11,0.1);padding:1px 6px;border-radius:3px;flex-shrink:0;" x-cloak x-text="t('workspace.private_badge')"></span>
+            <span x-show="r.private" class="badge badge-warning" x-cloak x-text="t('workspace.private_badge')"></span>
           </div>
         </template>
-        <div x-show="ghRepoFiltered.length === 0 && (ghRepoListLoaded || ghCloning)" style="padding:24px;text-align:center;color:var(--text-muted);font-size:0.8rem;" x-cloak>
+        <div x-show="ghRepoFiltered.length === 0 && (ghRepoListLoaded || ghCloning)" class="ws-list-empty" x-cloak>
           <span x-show="!ghCloning" x-text="t('workspace.no_repos')" x-cloak></span>
           <span x-show="ghCloning" x-text="t('workspace.cloning_wait')" x-cloak></span>
         </div>
       </div>
-      <div x-show="ghCloning" style="padding:12px 24px;border-top:1px solid var(--border-subtle);text-align:center;font-size:0.8rem;color:var(--accent);" x-cloak>
+      <div x-show="ghCloning" class="modal-footer ws-cloning" x-cloak>
         <span x-html="KazmaIcons.clock()"></span> <span x-text="t('workspace.cloning')"></span>
       </div>
     </div>
   </div>
 
   <!-- ── GitHub Token Config Modal ── -->
-  <div x-show="showPatModal" class="ws-modal-overlay" style="background:rgba(0,0,0,0.6);" x-transition x-cloak>
-    <div class="card" style="max-width:480px;width:100%;padding:24px;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;border-bottom:1px solid var(--border-subtle);padding-bottom:12px;">
-        <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);"><span class="ki" data-icon="key" aria-hidden="true"></span> {{ t('workspace.pat_modal_title') }}</h3>
-        <button class="btn-icon" @click="showPatModal = false" style="font-size:1rem;"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
+  <div x-show="showPatModal" class="modal-overlay" x-transition x-cloak>
+    <div class="modal modal-md" role="dialog" aria-modal="true" aria-labelledby="ws-pat-title">
+      <div class="modal-header">
+        <h2 id="ws-pat-title" class="ws-modal-title"><span class="ki" data-icon="key" aria-hidden="true"></span> {{ t('workspace.pat_modal_title') }}</h2>
+        <button type="button" class="modal-close" @click="showPatModal = false" aria-label="{{ t('common.close') }}"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
       </div>
 
-      <div style="display:flex;flex-direction:column;gap:16px;margin-bottom:24px;">
-        <div>
-          <label style="display:block;font-size:0.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">{{ t('workspace.pat_label') }}</label>
-          <input type="password" class="form-input" placeholder="{{ t('workspace.pat_ph') }}" x-model="githubPat" style="width:100%;font-family:var(--font-mono);font-size:0.8rem;letter-spacing:0.1em;">
-          <p style="margin:6px 0 0 0;font-size:0.75rem;color:var(--text-muted);line-height:1.4;">
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label" for="ws-pat">{{ t('workspace.pat_label') }}</label>
+          <input id="ws-pat" type="password" class="form-input ws-mono" placeholder="{{ t('workspace.pat_ph') }}" x-model="githubPat" style="letter-spacing:0.1em;">
+          <p class="form-hint">
             {{ t('workspace.pat_desc') }}
           </p>
         </div>
       </div>
 
-        <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;">
-          <button type="button" class="btn btn-secondary" @click="showPatModal = false">{{ t('workspace.cancel') }}</button>
-          <button type="button" class="btn btn-primary" @click="saveGitHubToken()" :disabled="!githubPat.trim()">{{ t('workspace.pat_save') }}</button>
-        </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" @click="showPatModal = false">{{ t('workspace.cancel') }}</button>
+        <button type="button" class="btn btn-primary" @click="saveGitHubToken()" :disabled="!githubPat.trim()">{{ t('workspace.pat_save') }}</button>
+      </div>
     </div>
   </div>
 
   <!-- ── GitHub App Config Modal ── -->
-  <div x-show="showAppModal" class="ws-modal-overlay" style="background:rgba(0,0,0,0.6);" x-transition x-cloak>
-    <div class="card" style="max-width:520px;width:100%;padding:24px;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;border-bottom:1px solid var(--border-subtle);padding-bottom:12px;">
-        <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);"><span class="ki" data-icon="github" aria-hidden="true"></span> {{ t('workspace.ws.configure_github_app') }}</h3>
-        <button class="btn-icon" @click="showAppModal = false" style="font-size:1rem;"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
+  <div x-show="showAppModal" class="modal-overlay" x-transition x-cloak>
+    <div class="modal modal-md" role="dialog" aria-modal="true" aria-labelledby="ws-app-title">
+      <div class="modal-header">
+        <h2 id="ws-app-title" class="ws-modal-title"><span class="ki" data-icon="github" aria-hidden="true"></span> {{ t('workspace.ws.configure_github_app') }}</h2>
+        <button type="button" class="modal-close" @click="showAppModal = false" aria-label="{{ t('common.close') }}"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
       </div>
 
-      <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:20px;">
-        <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-          <div>
-            <label style="display:block;font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">{{ t('workspace.ws.app_id') }}</label>
-            <input type="text" class="form-input" placeholder="e.g. 1234567" x-model="githubAppId" style="width:100%;font-size:0.8rem;">
+      <div class="modal-body">
+        <div class="two-col-grid">
+          <div class="form-group">
+            <label class="form-label" for="ws-app-id">{{ t('workspace.ws.app_id') }}</label>
+            <input id="ws-app-id" type="text" class="form-input" placeholder="e.g. 1234567" x-model="githubAppId">
           </div>
-          <div>
-            <label style="display:block;font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">{{ t('workspace.ws.installation_id') }}</label>
-            <input type="text" class="form-input" placeholder="e.g. 891011" x-model="githubAppInstallationId" style="width:100%;font-size:0.8rem;">
+          <div class="form-group">
+            <label class="form-label" for="ws-app-inst">{{ t('workspace.ws.installation_id') }}</label>
+            <input id="ws-app-inst" type="text" class="form-input" placeholder="e.g. 891011" x-model="githubAppInstallationId">
           </div>
         </div>
 
-        <div>
-          <label style="display:block;font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">{{ t('workspace.ws.app_slug') }}</label>
-          <input type="text" class="form-input" translate="no" placeholder="e.g. kazma-agent" x-model="githubAppSlug" style="width:100%;font-size:0.8rem;">
-          <p style="margin:4px 0 0 0;font-size:0.7rem;color:var(--text-muted);">{{ t('workspace.ws.app_slug_hint') | safe }}</p>
+        <div class="form-group">
+          <label class="form-label" for="ws-app-slug">{{ t('workspace.ws.app_slug') }}</label>
+          <input id="ws-app-slug" type="text" class="form-input" translate="no" placeholder="e.g. kazma-agent" x-model="githubAppSlug">
+          <p class="form-hint">{{ t('workspace.ws.app_slug_hint') | safe }}</p>
         </div>
 
-        <div>
-          <label style="display:block;font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">{{ t('workspace.ws.private_key') }}</label>
-          <textarea class="form-input" translate="no" placeholder="-----BEGIN RSA PRIVATE KEY-----..." x-model="githubAppPrivateKey" rows="4" style="width:100%;font-family:var(--font-mono);font-size:0.7rem;"></textarea>
+        <div class="form-group">
+          <label class="form-label" for="ws-app-key">{{ t('workspace.ws.private_key') }}</label>
+          <textarea id="ws-app-key" class="form-textarea ws-mono" translate="no" placeholder="-----BEGIN RSA PRIVATE KEY-----..." x-model="githubAppPrivateKey" rows="4" style="font-size:0.75rem;"></textarea>
         </div>
 
-        <div>
-          <label style="display:block;font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">{{ t('workspace.ws.private_key_path') }}</label>
-          <input type="text" class="form-input" translate="no" placeholder="e.g. C:\keys\kazma-app.private-key.pem" x-model="githubAppPrivateKeyPath" style="width:100%;font-size:0.8rem;font-family:var(--font-mono);">
+        <div class="form-group">
+          <label class="form-label" for="ws-app-key-path">{{ t('workspace.ws.private_key_path') }}</label>
+          <input id="ws-app-key-path" type="text" class="form-input ws-mono" translate="no" placeholder="e.g. C:\keys\kazma-app.private-key.pem" x-model="githubAppPrivateKeyPath">
         </div>
       </div>
 
-      <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;">
+      <div class="modal-footer">
         <button type="button" class="btn btn-secondary" @click="showAppModal = false">{{ t('common.cancel') }}</button>
         <button type="button" class="btn btn-primary" @click="saveGitHubApp()" :disabled="!githubAppId.trim() || !githubAppInstallationId.trim()">{{ t('workspace.ws.save_github_app') }}</button>
       </div>
@@ -232,7 +324,7 @@
       <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
       {{ t('workspace.qa_terminal') }}
     </button>
-    <button class="btn btn-sm btn-secondary" @click="refreshAll()" style="margin-left:auto;">
+    <button class="btn btn-sm btn-secondary" @click="refreshAll()" style="margin-inline-start:auto;">
       <span x-html="KazmaIcons.refresh()"></span> {{ t('workspace.qa_refresh') }}
     </button>
   </div>
@@ -240,267 +332,264 @@
   <!-- ── Main Grid ── -->
   <div class="workspace-grid">
     <!-- Git Status -->
-    <div class="card" style="padding:0;overflow:hidden;border:1px solid var(--border-subtle);">
-      <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:10px 16px;">
-        <div style="display:flex;align-items:center;gap:8px;">
-          <span style="font-size:1.1rem;"><span class="ki" data-icon="git-branch" aria-hidden="true"></span></span>
-          <h3 style="margin:0;font-size:1rem;font-weight:600;">{{ t('workspace.git_status') }}</h3>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;">
-          <span :style="{ color: gitDirty ? 'var(--warning)' : 'var(--success)', fontSize:'0.75rem', fontWeight:'500' }"
+    <div class="card ws-card">
+      <div class="card-header">
+        <h3 class="card-title"><span class="ki" data-icon="git-branch" aria-hidden="true"></span> {{ t('workspace.git_status') }}</h3>
+        <div class="ws-card-actions">
+          <span class="badge" :class="gitDirty ? 'badge-warning' : 'badge-success'"
                 x-text="gitDirty ? ('● ' + t('workspace.dirty')) : ('● ' + t('workspace.clean'))"></span>
-          <span style="color:var(--border-strong);font-size:0.8rem;" x-show="gitIsGit" x-cloak>|</span>
-          <code style="font-family:var(--font-mono);font-size:0.8rem;background:var(--bg-elevated);padding:2px 6px;border-radius:var(--radius-xs);color:var(--accent);" x-show="gitIsGit" x-text="gitBranch" x-cloak></code>
+          <code class="ws-code ws-code-accent" x-show="gitIsGit" x-text="gitBranch" x-cloak></code>
         </div>
       </div>
 
-      <div class="ic-col" style="padding:12px;gap:10px;background:var(--bg-surface);" x-show="gitIsGit" x-cloak>
+      <div x-show="gitIsGit" x-cloak>
         <!-- Staged Files -->
-        <div>
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-            <span style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);font-weight:600;">{{ t('workspace.staged') }}</span>
-            <span class="badge" :style="{ background: gitStaged.length ? 'var(--success-subtle)' : 'var(--tint-strong)', color: gitStaged.length ? 'var(--success)' : 'var(--text-muted)', fontSize:'0.65rem', padding:'1px 5px', borderRadius:'10px' }" x-text="gitStaged.length"></span>
+        <div class="ws-git-group">
+          <div class="ws-git-head">
+            <span class="ws-section-label">{{ t('workspace.staged') }}</span>
+            <span class="badge" :class="gitStaged.length ? 'badge-success' : 'badge-neutral'" x-text="gitStaged.length"></span>
           </div>
-          <div style="background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);max-height:65px;overflow-y:auto;padding:4px 8px;">
+          <div class="ws-well">
             <template x-for="line in gitStaged" :key="line">
-              <div style="font-family:var(--font-mono);font-size:0.72rem;padding:3px 0;display:flex;align-items:center;gap:6px;color:var(--text-secondary);border-bottom:1px solid var(--tint);transition:background 0.15s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
-                <span style="color:var(--success);font-weight:bold;font-size:0.65rem;background:var(--success-subtle);padding:1px 3px;border-radius:3px;min-width:16px;text-align:center;">S</span>
-                <span translate="no" x-text="line.slice(3)" style="word-break:break-all;"></span>
+              <div class="ws-well-line">
+                <span class="ws-mark ws-mark-success">S</span>
+                <span translate="no" x-text="line.slice(3)" class="ws-break"></span>
               </div>
             </template>
-            <div x-show="gitStaged.length === 0" style="padding:8px;text-align:center;color:var(--text-muted);font-size:0.7rem;" x-cloak>
+            <div x-show="gitStaged.length === 0" class="ws-well-empty" x-cloak>
               {{ t('workspace.no_staged') }}
             </div>
           </div>
         </div>
 
         <!-- Modified Files -->
-        <div>
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-            <span style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);font-weight:600;">{{ t('workspace.modified') }}</span>
-            <span class="badge" :style="{ background: gitModified.length ? 'var(--warning-subtle)' : 'var(--tint-strong)', color: gitModified.length ? 'var(--warning)' : 'var(--text-muted)', fontSize:'0.65rem', padding:'1px 5px', borderRadius:'10px' }" x-text="gitModified.length"></span>
+        <div class="ws-git-group">
+          <div class="ws-git-head">
+            <span class="ws-section-label">{{ t('workspace.modified') }}</span>
+            <span class="badge" :class="gitModified.length ? 'badge-warning' : 'badge-neutral'" x-text="gitModified.length"></span>
           </div>
-          <div style="background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);max-height:65px;overflow-y:auto;padding:4px 8px;">
+          <div class="ws-well">
             <template x-for="line in gitModified" :key="line">
-              <div style="font-family:var(--font-mono);font-size:0.72rem;padding:3px 0;display:flex;align-items:center;gap:6px;color:var(--text-secondary);border-bottom:1px solid var(--tint);transition:background 0.15s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
-                <span style="color:var(--warning);font-weight:bold;font-size:0.65rem;background:var(--warning-subtle);padding:1px 3px;border-radius:3px;min-width:16px;text-align:center;">M</span>
-                <span translate="no" x-text="line.slice(3)" style="word-break:break-all;"></span>
+              <div class="ws-well-line">
+                <span class="ws-mark ws-mark-warning">M</span>
+                <span translate="no" x-text="line.slice(3)" class="ws-break"></span>
               </div>
             </template>
-            <div x-show="gitModified.length === 0" style="padding:8px;text-align:center;color:var(--text-muted);font-size:0.7rem;" x-cloak>
+            <div x-show="gitModified.length === 0" class="ws-well-empty" x-cloak>
               {{ t('workspace.no_modified') }}
             </div>
           </div>
         </div>
 
         <!-- Untracked Files -->
-        <div>
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-            <span style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);font-weight:600;">{{ t('workspace.untracked') }}</span>
-            <span class="badge" :style="{ background: gitUntracked.length ? 'var(--secondary-subtle)' : 'var(--tint-strong)', color: gitUntracked.length ? 'var(--secondary-light)' : 'var(--text-muted)', fontSize:'0.65rem', padding:'1px 5px', borderRadius:'10px' }" x-text="gitUntracked.length"></span>
+        <div class="ws-git-group">
+          <div class="ws-git-head">
+            <span class="ws-section-label">{{ t('workspace.untracked') }}</span>
+            <span class="badge" :class="gitUntracked.length ? 'badge-info' : 'badge-neutral'" x-text="gitUntracked.length"></span>
           </div>
-          <div style="background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);max-height:65px;overflow-y:auto;padding:4px 8px;">
+          <div class="ws-well">
             <template x-for="line in gitUntracked" :key="line">
-              <div style="font-family:var(--font-mono);font-size:0.72rem;padding:3px 0;display:flex;align-items:center;gap:6px;color:var(--text-secondary);border-bottom:1px solid var(--tint);transition:background 0.15s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
-                <span style="color:var(--secondary-light);font-weight:bold;font-size:0.65rem;background:var(--secondary-subtle);padding:1px 3px;border-radius:3px;min-width:16px;text-align:center;">U</span>
-                <span translate="no" x-text="line.slice(3)" style="word-break:break-all;"></span>
+              <div class="ws-well-line">
+                <span class="ws-mark ws-mark-info">U</span>
+                <span translate="no" x-text="line.slice(3)" class="ws-break"></span>
               </div>
             </template>
-            <div x-show="gitUntracked.length === 0" style="padding:8px;text-align:center;color:var(--text-muted);font-size:0.7rem;" x-cloak>
+            <div x-show="gitUntracked.length === 0" class="ws-well-empty" x-cloak>
               {{ t('workspace.no_untracked') }}
             </div>
           </div>
         </div>
       </div>
 
-      <div x-show="!gitIsGit && !loading" style="padding:24px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);" x-cloak>
-        <div style="margin-bottom:8px;color:var(--text-muted);"><span x-html="KazmaIcons.alert({class:'icon-lg'})"></span></div>
-        <p style="font-size:0.85rem;margin:0;">{{ t('workspace.not_repo') }}</p>
+      <div x-show="!gitIsGit && !loading" class="empty-state" x-cloak>
+        <span class="icon-tile tone-neutral"><span x-html="KazmaIcons.alert({class:'icon-lg'})"></span></span>
+        <p class="ws-empty-text">{{ t('workspace.not_repo') }}</p>
       </div>
     </div>
 
     <!-- GitHub Integration -->
-    <div class="card" style="padding:0;overflow:hidden;background:linear-gradient(135deg, var(--bg-surface) 0%, rgba(110, 84, 251, 0.03) 100%);border:1px solid var(--border-subtle);position:relative;">
-      <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:10px 16px;">
-        <div style="display:flex;align-items:center;gap:8px;">
-          <svg class="github-icon" width="18" height="18" viewBox="0 0 16 16" fill="currentColor" style="color:var(--text-primary);display:block;">
+    <div class="card ws-card">
+      <div class="card-header">
+        <h3 class="card-title">
+          <svg class="github-icon" width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" style="display:block;flex-shrink:0;">
             <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
           </svg>
-          <h3 style="margin:0;font-size:1rem;font-weight:600;letter-spacing:-0.01em;">{{ t('workspace.gh_title') }}</h3>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;">
+          {{ t('workspace.gh_title') }}
+        </h3>
+        <div class="ws-card-actions">
           <!-- Status indicator badge: authenticated = OAuth or valid PAT/env token -->
           <template x-if="ghIsGitHub && ghAuthenticated">
-            <span class="badge" style="background:rgba(16, 185, 129, 0.1);color:#10b981;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:12px;border:1px solid rgba(16, 185, 129, 0.2);display:inline-flex;align-items:center;gap:4px;">
-              <span style="display:inline-block;width:6px;height:6px;background:#10b981;border-radius:50%;box-shadow:0 0 8px #10b981;animation:pulse 2s infinite;"></span>
+            <span class="badge badge-success ws-badge-dot">
+              <span class="ws-dot ws-dot-pulse"></span>
               {{ t('workspace.gh_connected') }}
             </span>
           </template>
           <template x-if="ghIsGitHub && !ghAuthenticated">
-            <span class="badge" style="background:rgba(245, 158, 11, 0.1);color:#f59e0b;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:12px;border:1px solid rgba(245, 158, 11, 0.2);display:inline-flex;align-items:center;gap:4px;">
-              <span style="display:inline-block;width:6px;height:6px;background:#f59e0b;border-radius:50%;"></span>
+            <span class="badge badge-warning ws-badge-dot">
+              <span class="ws-dot"></span>
               {{ t('workspace.gh_token_missing') }}
             </span>
           </template>
           <template x-if="ghRateLimited">
-            <span class="badge" style="background:rgba(239, 68, 68, 0.1);color:#ef4444;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:12px;border:1px solid rgba(239, 68, 68, 0.2);display:inline-flex;align-items:center;gap:4px;">
+            <span class="badge badge-danger">
               {{ t('workspace.gh_rate_limited') }}
             </span>
           </template>
           <!-- Connect options when not authenticated -->
           <div x-show="!ghAuthenticated" class="ic-row" x-cloak>
-            <button class="btn btn-xs btn-primary" @click="showAppModal = true" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 8px;">
+            <button class="btn btn-xs btn-primary" @click="showAppModal = true">
               <span class="ki" data-icon="github" aria-hidden="true"></span> {{ t('workspace.configure_app') }}
             </button>
-            <button class="btn btn-xs btn-secondary" @click="showPatModal = true" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 8px;">
+            <button class="btn btn-xs btn-secondary" @click="showPatModal = true">
               <span class="ki" data-icon="key" aria-hidden="true"></span> PAT
             </button>
-            <button class="btn btn-xs btn-secondary" @click="connectGitHub()" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 8px;">
+            <button class="btn btn-xs btn-secondary" @click="connectGitHub()">
               OAuth
             </button>
           </div>
-          <button x-show="ghAuthenticated" class="btn btn-xs btn-secondary ic-row-xs" @click="disconnectGitHub()" style="font-size:0.75rem;padding:4px 8px;" x-cloak>
+          <button x-show="ghAuthenticated" class="btn btn-xs btn-secondary ic-row-xs" @click="disconnectGitHub()" x-cloak>
             {{ t('workspace.gh_disconnect') }}
           </button>
         </div>
       </div>
 
       <!-- Not authenticated (only after status has been checked) -->
-      <div x-show="ghIsGitHub && ghOAuthChecked && !ghAuthenticated" style="padding:24px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);" x-cloak>
-        <div style="font-size:1.5rem;margin-bottom:8px;"><span class="ki" data-icon="lock" aria-hidden="true"></span></div>
-        <h4 style="margin:0 0 4px 0;font-size:0.9rem;font-weight:600;color:var(--text-primary);">{{ t('workspace.ws.auth_github') }}</h4>
-        <p style="font-size:0.75rem;max-width:380px;margin:0 auto 16px auto;line-height:1.5;">{{ t('workspace.ws.connect_prefix') }} <span style="color:var(--accent);font-family:var(--font-mono);" translate="no" x-text="ghOwner + '/' + ghRepo"></span> {{ t('workspace.ws.connect_suffix') }}</p>
-        
+      <div x-show="ghIsGitHub && ghOAuthChecked && !ghAuthenticated" class="empty-state ws-empty-state" x-cloak>
+        <span class="icon-tile tone-neutral"><span class="ki" data-icon="lock" aria-hidden="true"></span></span>
+        <h4 class="ws-empty-title">{{ t('workspace.ws.auth_github') }}</h4>
+        <p class="ws-empty-text">{{ t('workspace.ws.connect_prefix') }} <span class="ws-mono ws-code-accent" translate="no" x-text="ghOwner + '/' + ghRepo"></span> {{ t('workspace.ws.connect_suffix') }}</p>
+
         <!-- Surface API / App errors prominently on the unauthenticated card -->
-        <div x-show="ghError" x-cloak class="ic-row-start" style="margin:0 auto 16px auto;max-width:460px;padding:10px 14px;border-radius:var(--radius-sm);background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3);color:#f87171;font-size:0.8rem;line-height:1.4;text-align:start;word-break:break-word;">
-          <span style="color:#ef4444;font-size:1rem;flex-shrink:0;"><span class="ki" data-icon="x-circle" aria-hidden="true"></span></span>
-          <div style="flex:1;">
-            <div style="font-weight:600;margin-bottom:2px;color:#ef4444;">{{ t('workspace.ws.gh_error') }}</div>
-            <div x-text="ghError" translate="no" style="font-family:var(--font-mono);font-size:0.75rem;opacity:0.95;"></div>
+        <div x-show="ghError" x-cloak class="notice tone-danger ws-notice" role="alert">
+          <span class="ki" data-icon="x-circle" aria-hidden="true"></span>
+          <div>
+            <div class="ws-notice-title">{{ t('workspace.ws.gh_error') }}</div>
+            <div x-text="ghError" translate="no" class="ws-mono ws-small"></div>
           </div>
         </div>
-        <div style="display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;">
-          <button class="btn btn-sm btn-primary" @click="showAppModal = true" style="font-size:0.8rem;display:inline-flex;align-items:center;gap:6px;">
+        <div class="ws-empty-actions">
+          <button class="btn btn-sm btn-primary" @click="showAppModal = true">
             <span class="ki" data-icon="github" aria-hidden="true"></span> {{ t('workspace.ws.configure_app_bot') }}
           </button>
-          <button class="btn btn-sm btn-secondary" @click="showPatModal = true" style="font-size:0.8rem;display:inline-flex;align-items:center;gap:6px;">
+          <button class="btn btn-sm btn-secondary" @click="showPatModal = true">
             <span class="ki" data-icon="key" aria-hidden="true"></span> {{ t('workspace.ws.enter_pat') }}
           </button>
-          <button class="btn btn-sm btn-secondary" @click="connectGitHub()" style="font-size:0.8rem;">
+          <button class="btn btn-sm btn-secondary" @click="connectGitHub()">
             {{ t('workspace.ws.connect_oauth') }}
           </button>
         </div>
-        <p style="font-size:0.65rem;color:var(--text-tertiary);margin-top:12px;">{{ t('workspace.gh_oauth_note') }}</p>
+        <p class="form-hint">{{ t('workspace.gh_oauth_note') }}</p>
       </div>
 
       <!-- Main GitHub Card Body — OAuth *or* valid PAT/env token -->
-      <div style="padding:12px;background:var(--bg-surface);" x-show="ghIsGitHub && ghAuthenticated" x-cloak>
+      <div x-show="ghIsGitHub && ghAuthenticated" x-cloak>
         <!-- Surface API errors (rate limit / 403 / private repo) above the zeroed stats -->
-        <div translate="no" x-show="ghError" x-cloak style="margin-bottom:10px;padding:8px 10px;border-radius:var(--radius-sm);background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);color:#fca5a5;font-size:0.75rem;line-height:1.4;" x-text="ghError"></div>
+        <div x-show="ghError" x-cloak class="notice tone-danger ws-notice" role="alert">
+          <span class="ki" data-icon="x-circle" aria-hidden="true"></span>
+          <span translate="no" class="ws-small" x-text="ghError"></span>
+        </div>
         <!-- Tab navigation -->
-        <div style="display:flex;gap:2px;border-bottom:1px solid var(--border-subtle);margin-bottom:10px;overflow-x:auto;">
+        <div class="tabs" role="tablist">
           <template x-for="tab in [['overview',t('workspace.gh_tab_overview')],['pulls',t('workspace.gh_tab_prs')],['issues',t('workspace.gh_tab_issues')],['commits',t('workspace.gh_tab_commits')],['workflows',t('workspace.gh_tab_actions')],['releases',t('workspace.gh_tab_releases')]]" :key="tab[0]">
-            <button @click="ghActiveTab = tab[0]; ghLoadTab(tab[0])" :style="{ background: ghActiveTab === tab[0] ? 'var(--bg-elevated)' : 'transparent', color: ghActiveTab === tab[0] ? 'var(--accent)' : 'var(--text-muted)', borderBottom: ghActiveTab === tab[0] ? '2px solid var(--accent)' : '2px solid transparent' }" style="border:none;padding:6px 10px;font-size:0.72rem;font-weight:600;cursor:pointer;white-space:nowrap;border-radius:var(--radius-xs) var(--radius-xs) 0 0;" x-text="tab[1]"></button>
+            <button type="button" class="tab" role="tab" :class="{ 'active': ghActiveTab === tab[0] }" :aria-selected="ghActiveTab === tab[0] ? 'true' : 'false'" @click="ghActiveTab = tab[0]; ghLoadTab(tab[0])" x-text="tab[1]"></button>
           </template>
         </div>
 
         <!-- OVERVIEW TAB -->
         <div x-show="ghActiveTab === 'overview'" x-cloak>
         <!-- Repository Info Banner -->
-        <div style="display:flex;align-items:start;justify-content:space-between;gap:12px;margin-bottom:10px;">
+        <div class="ws-repo-head">
           <div>
-            <a :href="ghHtmlUrl" target="_blank" style="font-family:var(--font-mono);font-size:0.95rem;font-weight:700;color:var(--accent);text-decoration:none;display:inline-flex;align-items:center;gap:6px;transition:opacity 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">
+            <a :href="ghHtmlUrl" target="_blank" class="ws-repo-link">
               <span translate="no" x-text="ghOwner + '/' + ghRepo"></span>
-              <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+              <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" aria-hidden="true">
                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/>
               </svg>
             </a>
-            <p style="margin:2px 0 0 0;font-size:0.75rem;color:var(--text-secondary);line-height:1.4;" :translate="ghDescription ? 'no' : null" x-text="ghDescription || t('workspace.no_description')"></p>
+            <p class="ws-repo-desc" :translate="ghDescription ? 'no' : null" x-text="ghDescription || t('workspace.no_description')"></p>
           </div>
-          <span class="badge" :style="{ background: ghPrivate ? 'rgba(239,68,68,0.1)' : 'rgba(16,185,129,0.1)', color: ghPrivate ? '#ef4444' : '#10b981', borderColor: ghPrivate ? 'rgba(239,68,68,0.2)' : 'rgba(16,185,129,0.2)' }" style="font-size:0.65rem;font-weight:600;padding:2px 6px;border-radius:4px;border:1px solid;text-transform:uppercase;" x-text="ghPrivate ? t('workspace.gh_private') : t('workspace.gh_public')"></span>
+          <span class="badge" :class="ghPrivate ? 'badge-warning' : 'badge-success'" x-text="ghPrivate ? t('workspace.gh_private') : t('workspace.gh_public')"></span>
         </div>
 
         <!-- Telemetry Stats Grid -->
-        <div class="swarm-metrics-grid" style="display:grid;grid-template-columns:repeat(4, 1fr);gap:8px;margin-bottom:10px;">
+        <div class="ws-stats">
           <!-- Stars -->
-          <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:6px;text-align:center;transition:transform 0.2s, box-shadow 0.2s;cursor:pointer;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='var(--shadow-sm)'" onmouseout="this.style.transform='none';this.style.boxShadow='none'">
-            <div style="margin-bottom:2px;color:var(--text-muted);"><span class="icon-sm" x-html="KazmaIcons.star({class:'icon-sm'})"></span></div>
-            <div style="font-family:var(--font-mono);font-size:1rem;font-weight:700;color:var(--text-primary);" x-text="ghStars">0</div>
-            <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:1px;">{{ t('workspace.gh_stars') }}</div>
+          <div class="stat-tile tone-warning">
+            <span class="stat-tile-icon"><span x-html="KazmaIcons.star({class:'icon-md'})"></span></span>
+            <span class="stat-tile-label">{{ t('workspace.gh_stars') }}</span>
+            <span class="stat-tile-value" x-text="ghStars">0</span>
           </div>
           <!-- Forks -->
-          <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:6px;text-align:center;transition:transform 0.2s, box-shadow 0.2s;cursor:pointer;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='var(--shadow-sm)'" onmouseout="this.style.transform='none';this.style.boxShadow='none'">
-            <div style="margin-bottom:2px;color:var(--text-muted);"><span x-html="KazmaIcons['git-fork']({class:'icon-sm'})"></span></div>
-            <div style="font-family:var(--font-mono);font-size:1rem;font-weight:700;color:var(--text-primary);" x-text="ghForks">0</div>
-            <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:1px;">{{ t('workspace.gh_forks') }}</div>
+          <div class="stat-tile tone-info">
+            <span class="stat-tile-icon"><span x-html="KazmaIcons['git-fork']({class:'icon-md'})"></span></span>
+            <span class="stat-tile-label">{{ t('workspace.gh_forks') }}</span>
+            <span class="stat-tile-value" x-text="ghForks">0</span>
           </div>
           <!-- Open Issues -->
-          <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:6px;text-align:center;transition:transform 0.2s, box-shadow 0.2s;cursor:pointer;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='var(--shadow-sm)'" onmouseout="this.style.transform='none';this.style.boxShadow='none'">
-            <div style="margin-bottom:2px;color:var(--text-muted);"><span x-html="KazmaIcons.bug({class:'icon-sm'})"></span></div>
-            <div style="font-family:var(--font-mono);font-size:1rem;font-weight:700;color:var(--text-primary);" x-text="ghOpenIssues">0</div>
-            <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:1px;">{{ t('workspace.gh_issues') }}</div>
+          <div class="stat-tile tone-accent">
+            <span class="stat-tile-icon"><span x-html="KazmaIcons.bug({class:'icon-md'})"></span></span>
+            <span class="stat-tile-label">{{ t('workspace.gh_issues') }}</span>
+            <span class="stat-tile-value" x-text="ghOpenIssues">0</span>
           </div>
           <!-- Pull Requests -->
-          <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:6px;text-align:center;transition:transform 0.2s, box-shadow 0.2s;cursor:pointer;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='var(--shadow-sm)'" onmouseout="this.style.transform='none';this.style.boxShadow='none'">
-            <div style="margin-bottom:2px;color:var(--text-muted);"><span x-html="KazmaIcons['git-pull-request']({class:'icon-sm'})"></span></div>
-            <div style="font-family:var(--font-mono);font-size:1rem;font-weight:700;color:var(--text-primary);" x-text="ghOpenPrs">0</div>
-            <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:1px;">{{ t('workspace.gh_prs') }}</div>
+          <div class="stat-tile tone-success">
+            <span class="stat-tile-icon"><span x-html="KazmaIcons['git-pull-request']({class:'icon-md'})"></span></span>
+            <span class="stat-tile-label">{{ t('workspace.gh_prs') }}</span>
+            <span class="stat-tile-value" x-text="ghOpenPrs">0</span>
           </div>
         </div>
 
         <!-- GitHub Action / CI/CD Live Workflows -->
-        <div style="border-top:1px solid var(--border-subtle);padding-top:10px;">
-          <h4 style="margin:0 0 6px 0;font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);font-weight:600;display:flex;align-items:center;gap:6px;">
-            <span><span class="ki" data-icon="bot" aria-hidden="true"></span></span> {{ t('workspace.gh_actions_title') }}
+        <div>
+          <h4 class="ws-subhead ws-section-label">
+            <span class="ki" data-icon="bot" aria-hidden="true"></span> {{ t('workspace.gh_actions_title') }}
           </h4>
-          
+
           <template x-if="ghLatestWorkflow">
-            <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:8px;display:flex;align-items:center;justify-content:space-between;gap:12px;">
-              <div style="display:flex;flex-direction:column;gap:2px;">
-                <div style="display:flex;align-items:center;gap:8px;">
-                  <span style="font-weight:600;font-size:0.8rem;color:var(--text-primary);" translate="no" x-text="ghLatestWorkflow.name"></span>
-                  <code style="font-family:var(--font-mono);font-size:0.65rem;background:var(--bg-deep);padding:1px 4px;border-radius:var(--radius-xs);color:var(--accent);" x-text="ghLatestWorkflow.branch"></code>
+            <div class="card-nested ws-run">
+              <div>
+                <div class="ws-run-name">
+                  <span translate="no" x-text="ghLatestWorkflow.name"></span>
+                  <code class="ws-code ws-code-accent" x-text="ghLatestWorkflow.branch"></code>
                 </div>
-                <div style="font-size:0.7rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;">
+                <div class="ws-run-meta">
                   <span x-text="t('workspace.triggered_by') + ' ' + ghLatestWorkflow.event"></span>
                   <span>•</span>
                   <span x-text="t('workspace.id_prefix') + ' ' + ghLatestWorkflow.id"></span>
                 </div>
               </div>
-              
-              <div style="display:flex;align-items:center;gap:8px;">
+
+              <div class="ws-run-end">
                 <!-- Run status badge -->
-                <div style="display:flex;align-items:center;gap:6px;">
-                  <!-- Success -->
-                  <template x-if="ghLatestWorkflow.conclusion === 'success'">
-                    <span style="background:rgba(16,185,129,0.1);color:#10b981;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:4px;border:1px solid rgba(16,185,129,0.2);display:inline-flex;align-items:center;gap:4px;">
-                      <span style="color:#10b981;font-size:0.8rem;"><span class="ki" data-icon="check" aria-hidden="true"></span></span> <span x-text="t('workspace.gh_passed')"></span>
-                    </span>
-                  </template>
-                  <!-- Failure -->
-                  <template x-if="ghLatestWorkflow.conclusion === 'failure' || ghLatestWorkflow.conclusion === 'cancelled'">
-                    <span style="background:rgba(239,68,68,0.1);color:#ef4444;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:4px;border:1px solid rgba(239,68,68,0.2);display:inline-flex;align-items:center;gap:4px;">
-                      <span style="color:#ef4444;font-size:0.8rem;"><span class="ki" data-icon="x" aria-hidden="true"></span></span> <span x-text="t('workspace.gh_failed')"></span>
-                    </span>
-                  </template>
-                  <!-- In progress -->
-                  <template x-if="ghLatestWorkflow.status === 'in_progress' || ghLatestWorkflow.status === 'queued' || !ghLatestWorkflow.conclusion">
-                    <span style="background:rgba(59,130,246,0.1);color:#3b82f6;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:4px;border:1px solid rgba(59,130,246,0.2);display:inline-flex;align-items:center;gap:4px;">
-                      <span style="display:inline-block;width:5px;height:6px;background:#3b82f6;border-radius:50%;box-shadow:0 0 6px #3b82f6;animation:pulse 1.5s infinite;"></span> <span x-text="t('workspace.gh_running')"></span>
-                    </span>
-                  </template>
-                </div>
-                
+                <!-- Success -->
+                <template x-if="ghLatestWorkflow.conclusion === 'success'">
+                  <span class="badge badge-success ws-badge-dot">
+                    <span x-html="KazmaIcons.span('check')"></span> <span x-text="t('workspace.gh_passed')"></span>
+                  </span>
+                </template>
+                <!-- Failure -->
+                <template x-if="ghLatestWorkflow.conclusion === 'failure' || ghLatestWorkflow.conclusion === 'cancelled'">
+                  <span class="badge badge-danger ws-badge-dot">
+                    <span x-html="KazmaIcons.span('x')"></span> <span x-text="t('workspace.gh_failed')"></span>
+                  </span>
+                </template>
+                <!-- In progress -->
+                <template x-if="ghLatestWorkflow.status === 'in_progress' || ghLatestWorkflow.status === 'queued' || !ghLatestWorkflow.conclusion">
+                  <span class="badge badge-accent ws-badge-dot">
+                    <span class="ws-dot ws-dot-pulse"></span> <span x-text="t('workspace.gh_running')"></span>
+                  </span>
+                </template>
+
                 <!-- Action link -->
-                <a :href="ghLatestWorkflow.html_url" target="_blank" class="btn btn-xs btn-primary" style="display:inline-flex;align-items:center;gap:4px;font-size:0.7rem;padding:2px 6px;text-decoration:none;">
+                <a :href="ghLatestWorkflow.html_url" target="_blank" class="btn btn-xs btn-primary">
                   <span x-text="t('workspace.gh_view_run')"></span>
                 </a>
               </div>
             </div>
           </template>
-          
+
           <template x-if="!ghLatestWorkflow">
-            <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:10px;text-align:center;color:var(--text-muted);font-size:0.75rem;">
+            <div class="ws-list-empty">
               <span x-text="t('workspace.gh_no_workflows')"></span>
             </div>
           </template>
@@ -508,92 +597,92 @@
         </div><!-- /OVERVIEW TAB -->
 
         <!-- PULL REQUESTS TAB -->
-        <div x-show="ghActiveTab === 'pulls'" style="max-height:340px;overflow-y:auto;" x-cloak>
+        <div x-show="ghActiveTab === 'pulls'" class="ws-list" x-cloak>
           <template x-for="pr in ghPrs" :key="pr.number">
-            <div @click="ghOpenPr(pr.number)" style="padding:7px 8px;border-bottom:1px solid var(--tint);cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;transition:background 0.15s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
-              <div style="display:flex;align-items:center;gap:6px;min-width:0;">
-                <span style="color:var(--accent);font-weight:700;font-size:0.72rem;font-family:var(--font-mono);flex-shrink:0;" x-text="'#' + pr.number"></span>
-                <span style="font-size:0.78rem;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" translate="no" x-text="pr.title"></span>
+            <div @click="ghOpenPr(pr.number)" class="ws-row ws-row-link">
+              <div class="ws-row-main">
+                <span class="ws-row-num" x-text="'#' + pr.number"></span>
+                <span class="ws-row-title" translate="no" x-text="pr.title"></span>
               </div>
-              <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
-                <template x-if="pr.draft"><span style="font-size:0.6rem;color:var(--text-muted);background:var(--bg-elevated);padding:1px 5px;border-radius:3px;">{{ t('workspace.pr_draft') }}</span></template>
-                <span translate="no" style="font-size:0.65rem;color:var(--text-muted);" x-text="pr.author"></span>
+              <div class="ws-row-end">
+                <template x-if="pr.draft"><span class="badge badge-neutral">{{ t('workspace.pr_draft') }}</span></template>
+                <span translate="no" class="ws-row-meta" x-text="pr.author"></span>
               </div>
             </div>
           </template>
-          <div x-show="ghTabLoaded.pulls && ghPrs.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_open_prs')" x-cloak></div>
+          <div x-show="ghTabLoaded.pulls && ghPrs.length === 0" class="ws-list-empty" x-text="t('workspace.no_open_prs')" x-cloak></div>
         </div>
 
         <!-- ISSUES TAB -->
-        <div x-show="ghActiveTab === 'issues'" style="max-height:340px;overflow-y:auto;" x-cloak>
+        <div x-show="ghActiveTab === 'issues'" class="ws-list" x-cloak>
           <template x-for="iss in ghIssues" :key="iss.number">
-            <div style="padding:7px 8px;border-bottom:1px solid var(--tint);display:flex;align-items:center;justify-content:space-between;gap:8px;">
-              <div style="display:flex;align-items:center;gap:6px;min-width:0;">
-                <span style="color:var(--text-tertiary);font-weight:700;font-size:0.72rem;font-family:var(--font-mono);flex-shrink:0;" x-text="'#' + iss.number"></span>
-                <span translate="no" style="font-size:0.78rem;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" x-text="iss.title"></span>
+            <div class="ws-row">
+              <div class="ws-row-main">
+                <span class="ws-row-num ws-row-num-muted" x-text="'#' + iss.number"></span>
+                <span translate="no" class="ws-row-title" x-text="iss.title"></span>
               </div>
-              <div style="display:flex;gap:3px;flex-shrink:0;">
+              <div class="ws-row-end">
                 <template x-for="lab in iss.labels.slice(0,2)" :key="lab">
-                  <span style="font-size:0.58rem;color:var(--text-muted);background:var(--bg-elevated);padding:1px 5px;border-radius:3px;" x-text="lab"></span>
+                  <span class="badge badge-neutral" x-text="lab"></span>
                 </template>
               </div>
             </div>
           </template>
-          <div x-show="ghTabLoaded.issues && ghIssues.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_open_issues')" x-cloak></div>
+          <div x-show="ghTabLoaded.issues && ghIssues.length === 0" class="ws-list-empty" x-text="t('workspace.no_open_issues')" x-cloak></div>
         </div>
 
         <!-- COMMITS TAB -->
-        <div x-show="ghActiveTab === 'commits'" style="max-height:340px;overflow-y:auto;" x-cloak>
+        <div x-show="ghActiveTab === 'commits'" class="ws-list" x-cloak>
           <template x-for="c in ghCommits" :key="c.sha">
-            <div style="padding:7px 8px;border-bottom:1px solid var(--tint);display:flex;align-items:center;gap:8px;">
-              <code style="font-family:var(--font-mono);font-size:0.65rem;background:var(--bg-deep);padding:1px 5px;border-radius:var(--radius-xs);color:var(--accent);flex-shrink:0;" x-text="c.sha"></code>
-              <span translate="no" style="font-size:0.75rem;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;" x-text="c.message"></span>
-              <span translate="no" style="font-size:0.62rem;color:var(--text-muted);flex-shrink:0;margin-left:auto;" x-text="c.author"></span>
+            <div class="ws-row">
+              <code class="ws-code ws-code-accent" x-text="c.sha"></code>
+              <span translate="no" class="ws-row-title" x-text="c.message"></span>
+              <span translate="no" class="ws-row-meta" x-text="c.author"></span>
             </div>
           </template>
-          <div x-show="ghTabLoaded.commits && ghCommits.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_recent_commits')" x-cloak></div>
+          <div x-show="ghTabLoaded.commits && ghCommits.length === 0" class="ws-list-empty" x-text="t('workspace.no_recent_commits')" x-cloak></div>
         </div>
 
         <!-- WORKFLOWS TAB -->
-        <div x-show="ghActiveTab === 'workflows'" style="max-height:340px;overflow-y:auto;" x-cloak>
+        <div x-show="ghActiveTab === 'workflows'" class="ws-list" x-cloak>
           <template x-for="wf in ghWorkflows" :key="wf.id">
-            <div style="padding:7px 8px;border-bottom:1px solid var(--tint);display:flex;align-items:center;justify-content:space-between;gap:8px;">
-              <div style="display:flex;align-items:center;gap:6px;min-width:0;">
-                <span style="font-size:0.75rem;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" translate="no" x-text="wf.name || 'workflow'"></span>
-                <code style="font-family:var(--font-mono);font-size:0.6rem;color:var(--accent);" x-text="wf.branch"></code>
+            <div class="ws-row">
+              <div class="ws-row-main">
+                <span class="ws-row-title" translate="no" x-text="wf.name || 'workflow'"></span>
+                <code class="ws-code ws-code-accent" x-text="wf.branch"></code>
               </div>
-              <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
-                <span style="font-size:0.7rem;font-weight:600;" :style="{ color: wf.conclusion === 'success' ? '#10b981' : (wf.conclusion === 'failure' ? '#ef4444' : '#3b82f6') }" x-text="wf.conclusion || wf.status || '—'"></span>
-                <a :href="wf.html_url" target="_blank" style="font-size:0.65rem;color:var(--text-muted);text-decoration:none;">{{ t('workspace.ws.view') }}</a>
+              <div class="ws-row-end">
+                <span class="badge" :class="wf.conclusion === 'success' ? 'badge-success' : (wf.conclusion === 'failure' ? 'badge-danger' : 'badge-accent')" x-text="wf.conclusion || wf.status || '—'"></span>
+                <a :href="wf.html_url" target="_blank" class="ws-link-muted">{{ t('workspace.ws.view') }}</a>
               </div>
             </div>
           </template>
-          <div x-show="ghTabLoaded.workflows && ghWorkflows.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_workflow_runs')" x-cloak></div>
+          <div x-show="ghTabLoaded.workflows && ghWorkflows.length === 0" class="ws-list-empty" x-text="t('workspace.no_workflow_runs')" x-cloak></div>
         </div>
 
         <!-- RELEASES TAB -->
-        <div x-show="ghActiveTab === 'releases'" style="max-height:340px;overflow-y:auto;" x-cloak>
+        <div x-show="ghActiveTab === 'releases'" class="ws-list" x-cloak>
           <template x-for="rel in ghReleases" :key="rel.id">
-            <div style="padding:7px 8px;border-bottom:1px solid var(--tint);display:flex;align-items:center;justify-content:space-between;gap:8px;">
-              <div style="display:flex;align-items:center;gap:6px;min-width:0;">
-                <span style="font-size:0.75rem;font-weight:600;color:var(--text-primary);" translate="no" x-text="rel.tag"></span>
-                <template x-if="rel.prerelease"><span style="font-size:0.58rem;color:#f59e0b;background:rgba(245,158,11,0.1);padding:1px 5px;border-radius:3px;">{{ t('workspace.ws.pre') }}</span></template>
-                <template x-if="rel.draft"><span style="font-size:0.58rem;color:var(--text-muted);background:var(--bg-elevated);padding:1px 5px;border-radius:3px;">{{ t('workspace.ws.draft') }}</span></template>
+            <div class="ws-row">
+              <div class="ws-row-main">
+                <span class="ws-row-title ws-row-tag" translate="no" x-text="rel.tag"></span>
+                <template x-if="rel.prerelease"><span class="badge badge-warning">{{ t('workspace.ws.pre') }}</span></template>
+                <template x-if="rel.draft"><span class="badge badge-neutral">{{ t('workspace.ws.draft') }}</span></template>
               </div>
-              <a :href="rel.html_url" target="_blank" style="font-size:0.65rem;color:var(--text-muted);text-decoration:none;">{{ t('workspace.ws.view') }}</a>
+              <a :href="rel.html_url" target="_blank" class="ws-link-muted">{{ t('workspace.ws.view') }}</a>
             </div>
           </template>
-          <div x-show="ghTabLoaded.releases && ghReleases.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_releases')" x-cloak></div>
+          <div x-show="ghTabLoaded.releases && ghReleases.length === 0" class="ws-list-empty" x-text="t('workspace.no_releases')" x-cloak></div>
         </div>
 
       </div><!-- /Main GitHub Card Body -->
 
       <!-- No GitHub repository configuration detected -->
-      <div x-show="!ghIsGitHub && !loading" style="padding:24px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);" x-cloak>
-        <div style="margin-bottom:8px;color:var(--text-muted);"><span x-html="KazmaIcons.cloud({class:'icon-lg'})"></span></div>
-        <h4 style="margin:0 0 4px 0;font-size:0.9rem;font-weight:600;color:var(--text-primary);">{{ t('workspace.gh_offline') }}</h4>
-        <p translate="no" style="font-size:0.75rem;max-width:320px;margin:0 auto 10px auto;line-height:1.4;" x-text="ghError || t('workspace.gh_offline_body')"></p>
-        <div style="display:flex;align-items:center;justify-content:center;gap:8px;">
+      <div x-show="!ghIsGitHub && !loading" class="empty-state ws-empty-state" x-cloak>
+        <span class="icon-tile tone-neutral"><span x-html="KazmaIcons.cloud({class:'icon-lg'})"></span></span>
+        <h4 class="ws-empty-title">{{ t('workspace.gh_offline') }}</h4>
+        <p translate="no" class="ws-empty-text" x-text="ghError || t('workspace.gh_offline_body')"></p>
+        <div class="ws-empty-actions">
           <button class="btn btn-xs btn-primary" @click="showAppModal = true">
             <span class="ki" data-icon="github" aria-hidden="true"></span> {{ t('workspace.configure_app') }}
           </button>
@@ -605,50 +694,48 @@
     </div>
 
     <!-- File Browser -->
-    <div class="card" style="padding:0;overflow:hidden;border:1px solid var(--border-subtle);">
-      <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:10px 16px;">
-        <div style="display:flex;align-items:center;gap:8px;">
-          <span style="font-size:1.1rem;"><span class="ki" data-icon="folder" aria-hidden="true"></span></span>
-          <h3 style="margin:0;font-size:1rem;font-weight:600;color:var(--text-primary);">{{ t('workspace.files_title') }}</h3>
-        </div>
-        <div style="display:flex;align-items:center;gap:12px;">
-          <code style="font-family:var(--font-mono);font-size:0.75rem;background:var(--bg-elevated);padding:3px 8px;border-radius:var(--radius-sm);color:var(--text-secondary);border:1px solid var(--border-subtle);" x-text="absoluteRoot || t('workspace.loading_path')"></code>
-          <button class="btn btn-xs btn-secondary" @click="triggerSelectFolder()" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 8px;">
+    <div class="card ws-card">
+      <div class="card-header">
+        <h3 class="card-title"><span class="ki" data-icon="folder" aria-hidden="true"></span> {{ t('workspace.files_title') }}</h3>
+        <div class="ws-card-actions">
+          <code class="ws-code ws-path" :title="absoluteRoot" x-text="absoluteRoot || t('workspace.loading_path')"></code>
+          <button class="btn btn-xs btn-secondary" @click="triggerSelectFolder()">
             <span><span class="ki" data-icon="folder-open" aria-hidden="true"></span></span> {{ t('workspace.select_folder') }}
           </button>
         </div>
       </div>
-      
-      <div style="background:var(--bg-elevated);padding:6px 16px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;gap:6px;font-size:0.75rem;color:var(--text-secondary);">
-        <span style="font-weight:600;">{{ t('workspace.location') }}</span>
-        <code style="font-family:var(--font-mono);color:var(--accent);" x-text="currentPath"></code>
+
+      <div class="ws-path-row">
+        <span>{{ t('workspace.location') }}</span>
+        <code class="ws-code ws-code-accent" x-text="currentPath"></code>
       </div>
-      <div class="file-list" style="max-height:180px;overflow-y:auto;">
-        <div x-show="currentPath && currentPath !== '/'" @click="goUp()"
-             style="display:flex;align-items:center;gap:8px;padding:6px 16px;border-bottom:1px solid var(--border-subtle);cursor:pointer;color:var(--text-secondary);font-size:0.8rem;" x-cloak>
-          <span style="width:20px;"><span x-html="KazmaIcons['arrow-up']()"></span></span>
-          <span style="flex:1;">..</span>
-          <span style="font-size:0.75rem;color:var(--text-muted);">{{ t('workspace.up_one_level') }}</span>
+      <div class="file-list ws-files">
+        <div x-show="currentPath && currentPath !== '/'" @click="goUp()" class="ws-row ws-row-link ws-row-muted" x-cloak>
+          <span class="ws-icon-slot"><span x-html="KazmaIcons['arrow-up']()"></span></span>
+          <span class="ws-file-name">..</span>
+          <span class="ws-row-meta">{{ t('workspace.up_one_level') }}</span>
         </div>
-        <div x-show="filesFailed && !loading" role="alert" style="padding:12px 16px;text-align:center;color:var(--danger);font-size:0.8rem;" x-cloak>{{ t('common.request_failed') }}</div>
+        <div x-show="filesFailed && !loading" role="alert" class="notice tone-danger ws-notice" x-cloak>
+          <span class="ki" data-icon="x-circle" aria-hidden="true"></span>
+          <span>{{ t('common.request_failed') }}</span>
+        </div>
         <template x-for="item in files" :key="item.path">
-          <div class="file-row"
+          <div class="file-row ws-row ws-row-link"
                :class="{ 'is-directory': item.is_dir }"
-               @click="navigate(item)"
-               style="display:flex;align-items:center;gap:8px;padding:6px 16px;border-bottom:1px solid var(--border-subtle);cursor:pointer;transition:background 0.15s;font-size:0.8rem;">
-            <span x-html="rowIcon(item)" style="width:20px;"></span>
-            <span x-text="item.name" translate="no" style="flex:1;" :style="{ fontWeight: item.is_dir ? '500' : '400' }"></span>
-            <span x-text="item.size || ''" style="font-size:0.75rem;color:var(--text-muted);font-family:var(--font-mono);"></span>
+               @click="navigate(item)">
+            <span class="ws-icon-slot" x-html="rowIcon(item)"></span>
+            <span x-text="item.name" translate="no" class="ws-file-name"></span>
+            <span x-text="item.size || ''" class="ws-file-size"></span>
           </div>
         </template>
-        <div x-show="filesLoaded && !filesFailed && files.length === 0 && !loading" style="padding:20px;text-align:center;color:var(--text-muted);" x-cloak>
-          <div style="font-size:1.5rem;margin-bottom:4px;"><span class="ki" data-icon="inbox" aria-hidden="true"></span></div>
-          <p style="margin:0;font-size:0.8rem;">{{ t('workspace.no_files') }}</p>
+        <div x-show="filesLoaded && !filesFailed && files.length === 0 && !loading" class="empty-state" x-cloak>
+          <span class="icon-tile tone-neutral"><span class="ki" data-icon="inbox" aria-hidden="true"></span></span>
+          <p class="ws-empty-text">{{ t('workspace.no_files') }}</p>
         </div>
-        <div x-show="loading" style="padding:15px;text-align:center;color:var(--text-muted);" x-cloak>
-          <div class="skeleton" style="height:28px;margin-bottom:6px;"></div>
-          <div class="skeleton" style="height:28px;margin-bottom:6px;"></div>
-          <div class="skeleton" style="height:28px;"></div>
+        <div x-show="loading" class="ws-skeletons" x-cloak>
+          <div class="skeleton"></div>
+          <div class="skeleton"></div>
+          <div class="skeleton"></div>
         </div>
       </div>
     </div>
@@ -656,81 +743,87 @@
     <!-- Folders outside the workspace: durable path grants. The agent can
          use a folder listed here without asking; the API existed and the
          docs pointed at a Settings control that did not (2026-09-28). -->
-    <div class="card" style="padding:0;overflow:hidden;border:1px solid var(--border-subtle);">
-      <div class="card-header" style="padding:10px 16px;border-bottom:1px solid var(--border-subtle);">
-        <h3 style="margin:0;font-size:1rem;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:6px;"><span class="ki" data-icon="folder-open" aria-hidden="true"></span> {{ t('workspace.extra_roots_title') }}</h3>
+    <div class="card ws-card">
+      <div class="card-header">
+        <h3 class="card-title"><span class="ki" data-icon="folder-open" aria-hidden="true"></span> {{ t('workspace.extra_roots_title') }}</h3>
       </div>
-      <div style="padding:10px 16px;font-size:0.8rem;">
-        <p style="margin:0 0 8px 0;color:var(--text-muted);">{{ t('workspace.extra_roots_hint') }}</p>
-        <template x-for="r in extraRoots" :key="r.path">
-          <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border-subtle);flex-wrap:wrap;">
-            <code translate="no" style="flex:1;min-width:10rem;font-family:var(--font-mono);font-size:0.75rem;overflow-wrap:anywhere;" x-text="r.path"></code>
-            <span class="badge" :class="r.mode === 'write' ? 'badge-warning' : 'badge-info'"
-                  x-text="r.mode === 'write' ? t('workspace.extra_roots_mode_write') : t('workspace.extra_roots_mode_read')"></span>
-            <span translate="no" x-show="r.label" x-cloak style="color:var(--text-secondary);" x-text="r.label"></span>
-            <button class="btn btn-xs btn-secondary" :disabled="extraRootsSaving" @click="removeExtraRoot(r)">{{ t('workspace.extra_roots_remove') }}</button>
-          </div>
-        </template>
-        <p x-show="extraRootsLoaded && extraRoots.length === 0" x-cloak style="margin:4px 0;color:var(--text-muted);">{{ t('workspace.extra_roots_none') }}</p>
-        <p translate="no" x-show="extraRootsError" x-cloak style="margin:4px 0;color:var(--danger);" x-text="extraRootsError"></p>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center;">
-          <input class="form-input" type="text" translate="no" style="flex:2;min-width:12rem;font-family:var(--font-mono);font-size:0.75rem;"
-                 x-model="newExtraRoot.path" placeholder="{{ t('workspace.extra_roots_path_ph') }}" aria-label="{{ t('workspace.extra_roots_path') }}">
-          <select class="form-select" style="width:auto;" x-model="newExtraRoot.mode" aria-label="{{ t('workspace.extra_roots_access') }}">
-            <option value="read">{{ t('workspace.extra_roots_mode_read') }}</option>
-            <option value="write">{{ t('workspace.extra_roots_mode_write') }}</option>
-          </select>
-          <input class="form-input" type="text" style="flex:1;min-width:8rem;" x-model="newExtraRoot.label"
-                 placeholder="{{ t('workspace.extra_roots_label_ph') }}" aria-label="{{ t('workspace.extra_roots_label') }}">
-          <button class="btn btn-sm btn-primary" :disabled="extraRootsSaving || !newExtraRoot.path.trim()" @click="addExtraRoot()">{{ t('workspace.extra_roots_add') }}</button>
+      <p class="card-sub ws-roots-hint">{{ t('workspace.extra_roots_hint') }}</p>
+      <template x-for="r in extraRoots" :key="r.path">
+        <div class="ws-row ws-root-row">
+          <code translate="no" class="ws-root-path" x-text="r.path"></code>
+          <span class="badge" :class="r.mode === 'write' ? 'badge-warning' : 'badge-info'"
+                x-text="r.mode === 'write' ? t('workspace.extra_roots_mode_write') : t('workspace.extra_roots_mode_read')"></span>
+          <span translate="no" x-show="r.label" x-cloak class="ws-root-label" x-text="r.label"></span>
+          <button class="btn btn-xs btn-secondary" :disabled="extraRootsSaving" @click="removeExtraRoot(r)">{{ t('workspace.extra_roots_remove') }}</button>
         </div>
+      </template>
+      <div x-show="extraRootsLoaded && extraRoots.length === 0" x-cloak class="empty-state">
+        <span class="icon-tile tone-neutral"><span class="ki" data-icon="folder-open" aria-hidden="true"></span></span>
+        <p class="ws-empty-text">{{ t('workspace.extra_roots_none') }}</p>
+      </div>
+      <div x-show="extraRootsError" x-cloak class="notice tone-danger ws-notice" role="alert">
+        <span class="ki" data-icon="x-circle" aria-hidden="true"></span>
+        <span translate="no" x-text="extraRootsError"></span>
+      </div>
+      <div class="ws-roots-form">
+        <input class="form-input ws-mono ws-root-input" type="text" translate="no"
+               x-model="newExtraRoot.path" placeholder="{{ t('workspace.extra_roots_path_ph') }}" aria-label="{{ t('workspace.extra_roots_path') }}">
+        <select class="form-select" x-model="newExtraRoot.mode" aria-label="{{ t('workspace.extra_roots_access') }}">
+          <option value="read">{{ t('workspace.extra_roots_mode_read') }}</option>
+          <option value="write">{{ t('workspace.extra_roots_mode_write') }}</option>
+        </select>
+        <input class="form-input ws-root-name" type="text" x-model="newExtraRoot.label"
+               placeholder="{{ t('workspace.extra_roots_label_ph') }}" aria-label="{{ t('workspace.extra_roots_label') }}">
+        <button class="btn btn-sm btn-primary" :disabled="extraRootsSaving || !newExtraRoot.path.trim()" @click="addExtraRoot()">{{ t('workspace.extra_roots_add') }}</button>
       </div>
     </div>
 
     <!-- Recent Activity (replaces Recent Files) -->
-    <div class="card" style="padding:0;overflow:hidden;border:1px solid var(--border-subtle);">
-      <div class="card-header" style="padding:10px 16px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;">
-        <h3 style="margin:0;font-size:1rem;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:6px;"><span x-html="KazmaIcons.zap({class:'icon-md'})"></span> {{ t('workspace.activity_title') }}</h3>
+    <div class="card ws-card">
+      <div class="card-header">
+        <h3 class="card-title"><span x-html="KazmaIcons.zap({class:'icon-md'})"></span> {{ t('workspace.activity_title') }}</h3>
         <!-- Filter chips -->
-        <div class="ic-row" style="gap:4px;" x-show="ghOAuthConnected" x-cloak>
+        <div class="segmented" role="group" aria-label="{{ t('workspace.activity_title') }}" x-show="ghOAuthConnected" x-cloak>
           <template x-for="chip in [['all',t('workspace.filter_all')],['commit',t('workspace.filter_commits')],['pr',t('workspace.filter_prs')],['issue',t('workspace.filter_issues')],['ci',t('workspace.filter_ci')]]" :key="chip[0]">
-            <button @click="ghActivityFilter = chip[0]" :style="{ background: ghActivityFilter === chip[0] ? 'var(--accent)' : 'var(--bg-elevated)', color: ghActivityFilter === chip[0] ? '#fff' : 'var(--text-muted)', border: ghActivityFilter === chip[0] ? '1px solid var(--accent)' : '1px solid var(--border-subtle)' }" style="font-size:0.62rem;font-weight:600;padding:2px 7px;border-radius:10px;cursor:pointer;" x-text="chip[1]"></button>
+            <button type="button" :class="{ 'active': ghActivityFilter === chip[0] }" :aria-pressed="ghActivityFilter === chip[0] ? 'true' : 'false'" @click="ghActivityFilter = chip[0]" x-text="chip[1]"></button>
           </template>
         </div>
       </div>
-      <div class="file-list" style="max-height:240px;overflow-y:auto;">
+      <div class="file-list ws-list">
         <template x-for="a in ghActivityFiltered" :key="a.type + a.descriptor + a.timestamp">
-          <div @click="a.html_url && window.open(a.html_url, '_blank')"
-               style="display:flex;align-items:center;gap:8px;padding:6px 16px;border-bottom:1px solid var(--tint);font-size:0.78rem;cursor:pointer;transition:background 0.15s;"
-               onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
-            <span style="width:18px;font-size:0.85rem;" x-html="activityIcon(a.type)"></span>
-            <span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text-primary);" x-text="a.descriptor"></span>
-            <span style="font-size:0.65rem;color:var(--text-muted);flex-shrink:0;" x-text="a.actor"></span>
-            <span style="font-size:0.6rem;color:var(--text-tertiary);flex-shrink:0;" x-text="ghRelativeTime(a.timestamp)"></span>
+          <div @click="a.html_url && window.open(a.html_url, '_blank')" class="ws-row ws-row-link">
+            <span class="ws-icon-slot" x-html="activityIcon(a.type)"></span>
+            <span class="ws-row-title" x-text="a.descriptor"></span>
+            <span class="ws-row-meta" x-text="a.actor"></span>
+            <span class="ws-row-meta" x-text="ghRelativeTime(a.timestamp)"></span>
           </div>
         </template>
-        <div x-show="ghActivityFailed" role="alert" style="padding:14px 20px;text-align:center;color:var(--text-muted);font-size:0.8rem;" x-text="t('workspace.activity_load_failed')" x-cloak></div>
-        <div x-show="ghActivity.length === 0 && !loading && ghOAuthChecked && !ghActivityFailed && (!ghOAuthConnected || ghActivityLoaded)" style="padding:30px 20px;text-align:center;color:var(--text-muted);" x-cloak>
-          <p style="margin:0;font-size:0.8rem;" x-text="ghOAuthConnected ? t('workspace.no_activity') : t('workspace.connect_for_activity')"></p>
+        <div x-show="ghActivityFailed" role="alert" class="notice tone-danger ws-notice" x-cloak>
+          <span class="ki" data-icon="x-circle" aria-hidden="true"></span>
+          <span x-text="t('workspace.activity_load_failed')"></span>
+        </div>
+        <div x-show="ghActivity.length === 0 && !loading && ghOAuthChecked && !ghActivityFailed && (!ghOAuthConnected || ghActivityLoaded)" class="empty-state" x-cloak>
+          <span class="icon-tile tone-neutral"><span x-html="KazmaIcons.zap({class:'icon-lg'})"></span></span>
+          <p class="ws-empty-text" x-text="ghOAuthConnected ? t('workspace.no_activity') : t('workspace.connect_for_activity')"></p>
         </div>
       </div>
     </div>
 
     <!-- Terminal Output -->
-    <div class="card" x-show="showTerminal" style="padding:0;overflow:hidden;grid-column:1/-1;" x-cloak>
+    <div class="card ws-card ws-span-all" x-show="showTerminal" x-cloak>
       <div class="card-header">
-        <h3><span class="ki" data-icon="laptop" aria-hidden="true"></span> <span x-text="t('workspace.terminal_title')"></span></h3>
-        <button class="btn-icon" @click="showTerminal = false"><span class="ki" data-icon="x" aria-hidden="true"></span> <span x-text="t('workspace.terminal_close')"></span></button>
+        <h3 class="card-title"><span class="ki" data-icon="laptop" aria-hidden="true"></span> <span x-text="t('workspace.terminal_title')"></span></h3>
+        <button type="button" class="btn btn-sm btn-outline" @click="showTerminal = false"><span class="ki" data-icon="x" aria-hidden="true"></span> <span x-text="t('workspace.terminal_close')"></span></button>
       </div>
-      <div class="terminal-output" x-ref="terminal" style="background:var(--bg-deep);color:var(--text-primary);font-family:var(--font-mono);font-size:0.8rem;padding:16px;max-height:300px;overflow-y:auto;">
-        <div x-show="termOutput.length === 0" style="color:var(--text-muted);" x-text="t('workspace.terminal_ready')" x-cloak></div>
+      <div class="terminal-output" x-ref="terminal">
+        <div x-show="termOutput.length === 0" class="ws-term-ready" x-text="t('workspace.terminal_ready')" x-cloak></div>
         <template x-for="line in termOutput" :key="line">
-          <div x-text="line" style="white-space:pre-wrap;word-break:break-all;"></div>
+          <div x-text="line" class="ws-break" style="white-space:pre-wrap;"></div>
         </template>
       </div>
-      <div style="display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--border-subtle);background:var(--bg-panel);">
-        <input type="text" class="form-input" :placeholder="t('workspace.terminal_command_ph')" x-model="termCommand"
-               @keydown.enter="runTermCommand()" style="flex:1;font-family:var(--font-mono);">
+      <div class="ws-terminal-input">
+        <input type="text" class="form-input" :placeholder="t('workspace.terminal_command_ph')" :aria-label="t('workspace.terminal_command_ph')" x-model="termCommand"
+               @keydown.enter="runTermCommand()">
         <button class="btn btn-sm btn-primary" @click="runTermCommand()" x-text="t('workspace.terminal_run')"></button>
       </div>
     </div>
@@ -1408,7 +1501,7 @@ function workspaceApp() {
         }
         actions.push({ label: t('common.close'), variant: 'btn-secondary' });
 
-        showModal({ title: t('workspace.pr_modal_title', { number: number }), body: '<pre translate="no" dir="auto" style="white-space:pre-wrap;font-family:var(--font-mono);font-size:0.78rem;line-height:1.6;color:var(--text-secondary);">' + (pr.body ? esc(pr.body.slice(0, 1200)) : esc(t('workspace.pr_no_description'))) + '</pre><p style="margin-top:12px;font-size:0.72rem;color:var(--text-muted);">' + lines.join('<br>') + '</p>', size: 'lg', actions });
+        showModal({ title: t('workspace.pr_modal_title', { number: number }), body: '<pre translate="no" dir="auto" style="white-space:pre-wrap;font-family:var(--font-mono);font-size:0.78rem;line-height:1.6;color:var(--text-secondary);background:var(--surface-sunken);padding:12px;border-radius:8px;">' + (pr.body ? esc(pr.body.slice(0, 1200)) : esc(t('workspace.pr_no_description'))) + '</pre><p style="margin-top:12px;font-size:0.72rem;color:var(--text-muted);">' + lines.join('<br>') + '</p>', size: 'lg', actions });
       } catch (e) { /* non-fatal */ }
     },
 

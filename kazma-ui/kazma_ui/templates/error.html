@@ -6,7 +6,9 @@
 
 {% block content %}
 <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 50vh; text-align: center;">
-    <div style="font-size: 4rem; margin-bottom: 1rem; color: var(--text-tertiary);">
+    {#- The icon on a tinted tile, in the error's tone: a missing page is
+        information, a server error a danger, anything else a warning. -#}
+    <div class="icon-tile {{ 'tone-info' if code == 404 else ('tone-danger' if code == 500 else 'tone-warning') }}" style="width:52px;height:52px;border-radius:var(--card-radius);margin-bottom:1rem;">
         {% if code == 404 %}
         <span class="ki" data-icon="search" aria-hidden="true"></span>
         {% elif code == 500 %}
@@ -30,7 +32,7 @@
         <button class="btn btn-secondary" onclick="history.back()">{{ t('common.go_back') }}</button>
     </div>
     {% if detail and code == 500 %}
-    <pre style="margin-top: 2rem; padding: 1rem; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius); font-size: 0.75rem; max-width: 600px; overflow-x: auto; text-align: left; color: var(--text-muted);">{{ detail }}</pre>
+    <pre translate="no" dir="ltr" style="margin-top: 2rem; padding: 1rem; background: var(--surface-sunken); border-radius: var(--radius); font-size: 0.75rem; max-width: 600px; overflow-x: auto; text-align: start; color: var(--text-secondary);">{{ detail }}</pre>
     {% endif %}
 </div>
 {% endblock %}

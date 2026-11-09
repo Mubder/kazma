@@ -168,7 +168,13 @@ def test_documents_show_when_the_answer_has_them(harness: Harness, how: str) -> 
                 ".docs-wrap .doc-row .doc-title", "els => els.map((e) => e.innerText.trim())")
             assert titles == ["Quarterly report", "تقرير الربع"]
             assert not _visible(pg, EMPTY)
-            assert not _visible(pg, LOADING)
+            # The loading line hides in Alpine's next flush, 1-4 ms after the
+            # rows render (measured before and after the 2026-11-09 refresh):
+            # an instant check raced it. Bounded: a line that stays still fails.
+            pg.wait_for_function(
+                "(t) => ![...document.querySelectorAll('.docs-wrap div')]"
+                ".some((el) => el.textContent.trim() === t && el.offsetParent !== null)",
+                arg=LOADING, timeout=2000)
         finally:
             context.close()
             browser.close()

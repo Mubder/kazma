@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% set active_page = "research" %}
 {% block title %}Kazma — {{ t('research.title') }}{% endblock %}
-{% block page_title %}<svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5" style="vertical-align:middle;margin-right:6px;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>{{ t('research.title') }}{% endblock %}
+{% block page_title %}<svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5" style="vertical-align:middle;margin-inline-end:6px;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>{{ t('research.title') }}{% endblock %}
 
 {% block content %}
 <div id="research-root" data-session="{{ request.query_params.get('session', '') | e }}" data-job="{{ request.query_params.get('job', '') | e }}" class="research-container" style="max-width:900px;margin:0 auto;padding:0 1rem;box-sizing:border-box;">
@@ -37,18 +37,18 @@
         </label>
         <button class="btn btn-primary" id="research-start-btn" onclick="KazmaResearch.startDeep()">{{ t('research.start_btn') }}</button>
       </div>
-      <div id="research-live" style="display:none;margin-top:1rem;padding-top:0.75rem;border-top:1px solid var(--border);">
+      <div id="research-live" style="display:none;margin-top:1rem;padding-top:0.75rem;border-top:1px solid var(--card-hairline);">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
           <div style="font-size:0.9rem;">
             <span id="research-live-status" style="font-weight:600;color:var(--accent);"></span>
-            <span id="research-live-stage" style="color:var(--text-muted);margin-left:8px;"></span>
+            <span id="research-live-stage" style="color:var(--text-muted);margin-inline-start:8px;"></span>
           </div>
           <span id="research-live-sources" style="font-size:0.8rem;color:var(--text-muted);"></span>
         </div>
         <div id="research-live-message" translate="no" style="font-size:0.85rem;color:var(--text-primary);margin-bottom:6px;"></div>
         <div id="research-live-connection" role="alert" aria-live="polite" style="display:none;color:var(--warning);margin-bottom:6px;"></div>
-        <div id="research-live-error" translate="no" style="display:none;font-size:0.82rem;color:var(--danger,#e53935);margin-bottom:6px;"></div>
-        <div id="research-live-log" translate="no" style="max-height:140px;overflow-y:auto;font-size:0.78rem;font-family:ui-monospace,monospace;color:var(--text-muted);background:var(--surface-2);padding:8px 10px;border-radius:6px;line-height:1.45;"></div>
+        <div id="research-live-error" translate="no" style="display:none;font-size:0.82rem;color:var(--danger);margin-bottom:6px;"></div>
+        <div id="research-live-log" translate="no" style="max-height:140px;overflow-y:auto;font-size:0.78rem;font-family:ui-monospace,monospace;color:var(--text-muted);background:var(--surface-sunken);padding:8px 10px;border-radius:var(--radius-sm);line-height:1.45;"></div>
         <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
           <button type="button" class="btn btn-secondary btn-sm" id="research-cancel-btn" style="display:none;" onclick="KazmaResearch.cancelDeep()">{{ t('research.cancel') }}</button>
         </div>

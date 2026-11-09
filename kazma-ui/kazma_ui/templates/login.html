@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="{{ lang()|default('en') }}" dir="{{ dir()|default('ltr') }}" data-theme="{{ theme()|default('light') }}">
+<html lang="{{ lang()|default('en') }}" dir="{{ dir()|default('ltr') }}" data-theme="{{ theme()|default('light') }}"{% set _accent = accent_style() if accent_style is defined else '' %}{% if _accent %} style="{{ _accent }}"{% endif %}>
 <head>
   <meta charset="utf-8">
   {# Same canvas contract as base.html — single color-scheme, theme-color,
@@ -8,13 +8,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="{{ theme()|default('light') }}">
   <meta name="supported-color-schemes" content="{{ theme()|default('light') }}">
-  <meta name="theme-color" content="{{ '#0e1626' if theme() == 'dark' else '#f0f4fa' }}">
+  <meta name="theme-color" content="{{ '#0e1626' if theme() == 'dark' else '#ffffff' }}">
   {# Critical inline theme CSS — see base.html. Paints the canvas the
      correct color from the first HTML bytes, before kazma.css (which
      login relied on for both fonts via @import and the html background)
      downloads + parses. #}
   <style>
-    html { background-color: {{ '#0e1626' if theme() == 'dark' else '#f0f4fa' }}; color-scheme: {{ 'only dark' if theme() == 'dark' else 'only light' }}; }
+    html { background-color: {{ '#0e1626' if theme() == 'dark' else '#ffffff' }}; color-scheme: {{ 'only dark' if theme() == 'dark' else 'only light' }}; }
   </style>
   <title>{{ t('login.page_title') }}</title>
   <link rel="icon" href="/static/img/favicon.png">
@@ -42,56 +42,31 @@
                env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
       font-family: var(--font-sans, system-ui, sans-serif);
     }
-    .login-card {
-      width: min(440px, 92vw);
-      background: var(--bg-panel);
-      border: 1px solid var(--border-subtle);
-      border-radius: 12px;
-      padding: 28px 24px;
-      box-shadow: 0 12px 40px rgba(0,0,0,.35);
-    }
-    .login-card h1 { margin: 0 0 6px; font-size: 1.25rem; color: var(--text-primary); }
+    /* The card is the shared .card (the wall's own colour, the soft
+       shadow); the fields, buttons and tabs are the shared classes. Only
+       the sign-in layout is this page's. */
+    .login-card { width: min(440px, 92vw); box-sizing: border-box; }
+    .login-card h1 { margin: 0 0 6px; font-size: 1.25rem; font-weight: 600; color: var(--text-primary); }
     .login-card p { margin: 0 0 14px; font-size: 0.85rem; color: var(--text-muted); line-height: 1.45; }
     .login-card label {
-      display: block; font-size: 0.78rem; font-weight: 600;
-      color: var(--text-secondary); margin-bottom: 6px;
+      display: block; font-size: 0.85rem; font-weight: 600;
+      color: var(--text-primary); margin-bottom: 6px;
     }
-    .login-card input[type="password"],
-    .login-card input[type="text"] {
-      width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px;
-      border: 1px solid var(--border-subtle); background: var(--bg-deep);
-      color: var(--text-primary); font-size: 0.9rem; margin-bottom: 14px;
-    }
-    .login-card input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
-    .login-card button, .login-card .btn-oidc {
-      width: 100%; padding: 10px 14px; border: none; border-radius: 8px;
-      background: var(--accent); color: #fff; font-weight: 600;
-      font-size: 0.9rem; cursor: pointer; margin-bottom: 8px; text-align: center;
-      text-decoration: none; display: inline-block; box-sizing: border-box;
-    }
-    .login-card .btn-oidc {
-      background: transparent; border: 1px solid var(--border-subtle);
-      color: var(--text-primary);
-    }
-    .login-card button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .login-card .form-input { width: 100%; box-sizing: border-box; margin-bottom: 14px; }
+    .login-submit { width: 100%; margin-bottom: 8px; box-sizing: border-box; }
+    /* A message, tinted in its own tone: an error is the danger tone, a
+       session that ended is the warning tone. Readable in both themes. */
     .login-error {
-      display: none; margin-bottom: 12px; padding: 8px 10px; border-radius: 6px;
-      background: rgba(220, 80, 80, 0.15); color: #f0a0a0; font-size: 0.82rem;
+      display: none; margin-bottom: 12px; padding: 10px 12px; border-radius: 8px;
+      background: var(--danger-subtle); color: var(--danger); font-size: 0.85rem;
     }
     .login-error.show { display: block; }
-    .login-error.info { background: rgba(234, 179, 8, 0.15); color: #facc15; }
+    .login-error.info { background: var(--warning-subtle); color: var(--warning); }
     .login-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
     .login-brand img { height: 32px; width: 32px; border-radius: 6px; object-fit: contain; }
-    .login-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
-    .login-tabs button {
-      flex: 1; background: transparent; border: 1px solid var(--border-subtle);
-      color: var(--text-muted); padding: 8px; border-radius: 8px; cursor: pointer;
-      font-size: 0.8rem; font-weight: 600; margin: 0;
-    }
-    .login-tabs button.active {
-      border-color: var(--accent); color: var(--text-primary);
-      background: var(--accent-subtle);
-    }
+    /* The sign-in modes are the shared segmented control. */
+    .login-tabs { display: flex; width: 100%; box-sizing: border-box; margin-bottom: 16px; }
+    .login-tabs > button { flex: 1 1 0; }
     .mode-panel { display: none; }
     .mode-panel.active { display: block; }
     .login-divider {
@@ -101,7 +76,7 @@
   </style>
 </head>
 <body class="login-page">
-  <div class="login-card">
+  <div class="card login-card">
     <div class="login-brand">
       <img src="/static/img/kazma-icon.png" alt="Kazma">
       <div><h1>{{ t('login.sign_in') }}</h1></div>
@@ -109,7 +84,7 @@
     <p id="blurb">{{ t('login.blurb') }}</p>
     <div id="err" class="login-error" role="alert"></div>
 
-    <div class="login-tabs" id="tabs">
+    <div class="segmented login-tabs" id="tabs">
       <button type="button" class="active" data-mode="user">{{ t('login.tab_user') }}</button>
       <button type="button" data-mode="secret">{{ t('login.tab_secret') }}</button>
     </div>
@@ -117,24 +92,24 @@
     <div id="mode-user" class="mode-panel active">
       <form id="userForm" autocomplete="on">
         <label for="username">{{ t('login.username') }}</label>
-        <input id="username" name="username" type="text" autocomplete="username" placeholder="alice" translate="no">
+        <input id="username" class="form-input" name="username" type="text" autocomplete="username" placeholder="alice" translate="no">
         <label for="password">{{ t('login.password') }}</label>
-        <input id="password" name="password" type="password" autocomplete="current-password" placeholder="••••••••">
-        <button type="submit" id="btnUser">{{ t('login.sign_in') }}</button>
+        <input id="password" class="form-input" name="password" type="password" autocomplete="current-password" placeholder="••••••••">
+        <button type="submit" class="btn btn-primary login-submit" id="btnUser">{{ t('login.sign_in') }}</button>
       </form>
     </div>
 
     <div id="mode-secret" class="mode-panel">
       <form id="secretForm" autocomplete="off">
         <label for="secret">{{ t('login.server_secret') }}</label>
-        <input id="secret" name="secret" type="password" placeholder="{{ t('login.secret_placeholder') }}" autocomplete="current-password">
-        <button type="submit" id="btnSecret">{{ t('login.with_secret') }}</button>
+        <input id="secret" class="form-input" name="secret" type="password" placeholder="{{ t('login.secret_placeholder') }}" autocomplete="current-password">
+        <button type="submit" class="btn btn-primary login-submit" id="btnSecret">{{ t('login.with_secret') }}</button>
       </form>
     </div>
 
     <div id="oidcWrap" style="display:none">
       <div class="login-divider">{{ t('login.or') }}</div>
-      <a class="btn-oidc" id="oidcBtn" href="/api/auth/oidc/start">{{ t('login.sso') }}</a>
+      <a class="btn btn-outline login-submit btn-oidc" id="oidcBtn" href="/api/auth/oidc/start">{{ t('login.sso') }}</a>
     </div>
   </div>
   <script src="/static/js/safe_next.js?v={{ js_version() }}"></script>

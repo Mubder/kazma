@@ -28,41 +28,29 @@ html[data-theme="light"] { color-scheme: only light; }
 
 /* ── 1. Shell — sidebar ──────────────────────────────────────────── */
 
-/* Brand mark — transparent K, no tile. object-fit:contain keeps the
-   portrait artwork from being cropped in the square slot. */
+/* Brand mark — transparent K, no tile, 32px (the reference's logo row).
+   object-fit:contain keeps the portrait artwork from being cropped in the
+   square slot. */
 .sidebar .logo-img {
-  width: 38px;
-  height: 38px;
-  border-radius: 11px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
   flex-shrink: 0;
   object-fit: contain;
-  transition: transform var(--transition-fast);
-}
-.sidebar .logo-img:hover {
-  transform: scale(1.05);
 }
 
 /* Sidebar footer avatar — transparent mark on a round surface */
 .sidebar .user-avatar-img {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   object-fit: contain;
   flex-shrink: 0;
 }
 
-/* Active nav item — gradient rail indicator (azure → sky) */
-.nav-link.active {
-  background: var(--accent-subtle);
-  color: var(--accent-light);
-  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.22);
-}
-.nav-link.active::before {
-  background: linear-gradient(180deg, var(--accent), var(--secondary));
-}
-.nav-link:hover {
-  color: var(--text-primary);
-}
+/* The menu items (hover, the active pill) are styled once, in kazma.css §4:
+   the gradient rail and tinted active item that lived here are retired
+   (2026-11-09 refresh). */
 
 /* The `.nav-more` disclosure rules lived here. The nav no longer hides
    anything behind a <details>, so they matched nothing — and CSS has no
@@ -87,14 +75,10 @@ html[data-theme="light"] { color-scheme: only light; }
 }
 .setup-wall-card {
   width: min(28rem, 100%);
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
   padding: var(--sp-6);
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
-  box-shadow: var(--shadow);
 }
 .setup-wall-card h2 { margin: 0; font-size: 1.25rem; }
 .setup-wall-card p { margin: 0; color: var(--text-muted); font-size: 0.9rem; }
@@ -111,7 +95,7 @@ html[data-theme="light"] { color-scheme: only light; }
   border-block-end: 3px solid var(--border); color: var(--text-muted);
   font-size: 0.85rem; font-weight: 600;
 }
-.setup-steps li.is-current { border-color: var(--accent); color: var(--text); }
+.setup-steps li.is-current { border-color: var(--accent); color: var(--text-primary); }
 .setup-steps li.is-done { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
 .setup-card { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-6); }
 .setup-card[x-cloak] { display: none !important; }
@@ -124,14 +108,14 @@ html[data-theme="light"] { color-scheme: only light; }
 .setup-muted { color: var(--text-muted); font-size: 0.9rem; }
 .setup-label { font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); }
 .setup-error { color: var(--error); font-size: 0.9rem; }
-.setup-ok { color: var(--success, #16a34a); font-weight: 600; }
+.setup-ok { color: var(--success); font-weight: 600; }
 .setup-row { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
 .setup-actions { display: flex; gap: var(--sp-2); justify-content: flex-end; flex-wrap: wrap; margin-top: var(--sp-2); }
 .setup-choice { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: var(--sp-3); }
 .setup-option {
   display: flex; flex-direction: column; gap: var(--sp-1); text-align: start;
   padding: var(--sp-4); border: 1px solid var(--border); border-radius: var(--radius);
-  background: var(--bg-elevated); color: var(--text); cursor: pointer; font: inherit;
+  background: var(--surface-card); color: var(--text-primary); cursor: pointer; font: inherit;
 }
 .setup-option span { color: var(--text-muted); font-size: 0.85rem; }
 .setup-option.is-selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
@@ -144,13 +128,13 @@ html[data-theme="light"] { color-scheme: only light; }
 .setup-extras { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
 .setup-extras a {
   display: flex; flex-direction: column; gap: 2px; padding: var(--sp-3);
-  border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); text-decoration: none;
+  border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); text-decoration: none;
 }
 .setup-extras a:hover { border-color: var(--accent); }
 .setup-extras span { color: var(--text-muted); font-size: 0.85rem; }
 .setup-try { margin: 0; padding-inline-start: 1.2rem; display: grid; gap: var(--sp-1); }
 .setup-command { font-family: var(--font-mono, monospace); font-size: 0.85rem; padding: var(--sp-2) var(--sp-3);
-  background: var(--bg-elevated); border-radius: var(--radius); align-self: flex-start; }
+  background: var(--surface-sunken); border-radius: var(--radius); align-self: flex-start; }
 
 /* Hands tape — HITL patch review stack (v5 only; do not copy into kazma.css). */
 .hitl-diff {
@@ -185,9 +169,6 @@ html[data-theme="light"] { color-scheme: only light; }
 .ide-review {
   margin: 0 0 10px 0;
   padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-panel);
 }
 .ide-review-head {
   display: flex;
@@ -205,32 +186,8 @@ html[data-theme="light"] { color-scheme: only light; }
 }
 .ide-review-hunk { margin: 8px 0; }
 
-/* Model selector — softer pill */
-.sidebar-model-dropdown {
-  border-radius: 10px;
-}
-.sidebar-model-dropdown:hover,
-.sidebar-model-dropdown:focus {
-  border-color: rgba(var(--accent-rgb), 0.45);
-}
-
-/* ── 2. Shell — header ───────────────────────────────────────────── */
-.page-header {
-  background: color-mix(in srgb, var(--bg-panel) 82%, transparent);
-}
-.header-btn {
-  border-radius: 10px;
-  min-height: 34px;
-}
-.header-btn:hover {
-  background: var(--accent-subtle);
-  border-color: rgba(var(--accent-rgb), 0.40);
-  color: var(--accent-light);
-}
-.notification-dot {
-  background: var(--secondary);
-  box-shadow: 0 0 6px var(--secondary-glow);
-}
+/* ── 2. Shell — header: kazma.css §5 (transparent over the wall, round
+   icon buttons, the search field); nothing is restyled here. ───────── */
 
 /* ── 3. Shell — mobile navigation (single-owner pattern) ───────────
    The bottom tab bar is the ONLY menu entry on phones: its "More" tab
@@ -259,7 +216,7 @@ html[data-theme="light"] { color-scheme: only light; }
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
-  .chat-sessions-btn:active { color: var(--accent); background: var(--bg-elevated); }
+  .chat-sessions-btn:active { color: var(--accent); background: var(--bg-active); }
 
   /* In-drawer close button (v4 hides .sidebar-toggle on mobile — bring
      it back only while the drawer is open) */
@@ -268,21 +225,17 @@ html[data-theme="light"] { color-scheme: only light; }
   /* Drawer presentation — slightly wider, deeper shadow */
   .sidebar {
     width: min(300px, 85vw);
-    box-shadow: 0 0 48px rgba(0, 0, 0, 0.55);
   }
 
   /* Bottom tab bar — opaque token surface (P2c: was color-mix 92%
      transparent; over the iOS canvas that let the dark UA canvas bleed
      through under the safe-area inset) + glowing active tab. */
   .bottom-nav {
-    background: var(--bg-panel);
-    border-top-color: var(--border-subtle);
+    background: var(--surface-chrome);
+    border-top-color: var(--card-hairline);
   }
   .bottom-nav a { transition: color var(--transition-fast); }
-  .bottom-nav a.active { color: var(--accent); }
-  .bottom-nav a.active svg {
-    filter: drop-shadow(0 0 6px rgba(var(--accent-rgb), 0.5));
-  }
+  .bottom-nav a.active { color: var(--accent-light); }
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -293,34 +246,21 @@ html[data-theme="light"] { color-scheme: only light; }
    ═══════════════════════════════════════════════════════════════════ */
 
 /* Metric cards — preview "stat" pattern */
+/* A card: no lift and no ring on hover (the reference). */
 .metric-card {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   text-align: start;
   padding: 18px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  transition: border-color var(--transition-fast),
-              box-shadow var(--transition-fast),
-              transform var(--transition-fast);
-}
-.metric-card:hover {
-  transform: translateY(-2px);
-  border-color: rgba(var(--accent-rgb), 0.32);
-  box-shadow: var(--shadow), 0 0 0 1px rgba(var(--accent-rgb), 0.10);
-}
-@media (hover: none) and (pointer: coarse) {
-  .metric-card:hover { transform: none; }
 }
 /* Icon tile (v4 flattened these to bare icons — v5 restores the tile) */
 .metric-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--tile-radius);
   background: var(--accent-subtle);
-  color: var(--accent);
+  color: var(--accent-light);
   border: none;
   box-shadow: none;
   padding: 0;
@@ -336,8 +276,8 @@ html[data-theme="light"] { color-scheme: only light; }
   opacity: 1;
 }
 .metric-value {
-  font-weight: 800;
-  letter-spacing: -0.02em;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
 }
 .metric-label {
@@ -345,46 +285,35 @@ html[data-theme="light"] { color-scheme: only light; }
   font-weight: 600;
 }
 
-/* Chart cards — real surface treatment */
-.chart-card {
-  background: var(--bg-panel);
-  border-color: var(--border-subtle);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
-}
 .chart-title {
   color: var(--text-tertiary);
   font-weight: 700;
   letter-spacing: 0.08em;
 }
 
-/* Range selector — segmented pill */
+/* Range selector — the shared segmented control (kazma.css §7): a sunken
+   well; the chosen range a wall-coloured pill with a small shadow. */
 .range-selector {
-  border-radius: var(--radius-pill);
-  padding: 3px;
-  background: var(--bg-surface);
-  border-color: var(--border-subtle);
+  border-radius: var(--radius);
+  padding: 4px;
+  gap: 4px;
+  background: var(--surface-sunken);
+  border-color: transparent;
 }
 .range-btn {
-  border-radius: var(--radius-pill);
+  border-radius: var(--btn-radius);
   padding: 5px 14px;
 }
 .range-btn.active {
-  background: var(--gradient-accent);
-  color: var(--text-inverse);
-  box-shadow: 0 2px 8px -2px rgba(var(--accent-rgb), 0.5);
-}
-[data-theme="light"] .range-btn.active { color: #ffffff; }
-
-/* Progress bars — brand gradient fill */
-.progress-fill {
-  background: var(--gradient-accent);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
 }
 
-/* HITL pending approvals — accent ring when action is needed */
+/* HITL pending approvals — a warning edge when action is needed */
 .hitl-panel.has-pending {
-  border-color: rgba(var(--accent-rgb), 0.40);
-  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.10), var(--shadow);
+  border-color: var(--warning-border);
+  box-shadow: 0 0 0 3px var(--warning-subtle), var(--card-shadow);
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -400,18 +329,18 @@ html[data-theme="light"] { color-scheme: only light; }
 }
 .session-item.active {
   background: var(--accent-subtle);
-  border-color: rgba(var(--accent-rgb), 0.20);
+  border-color: color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
-/* Composer — deeper radius + real glow on focus */
+/* Composer — the shared field's focus: the accent border and its ring */
 .input-wrapper {
   border-radius: var(--radius-xl);
-  background: var(--bg-surface);
+  background: var(--input-bg);
+  border-color: var(--input-border);
 }
 .input-wrapper:focus-within {
-  border-color: rgba(var(--accent-rgb), 0.55);
-  box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.35),
-              0 8px 30px -8px rgba(var(--accent-rgb), 0.35);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-subtle);
 }
 
 /* Send button — theme-correct ink on the gradient */
@@ -419,13 +348,10 @@ html[data-theme="light"] { color-scheme: only light; }
   color: var(--text-inverse);
   border-radius: 12px;
 }
-[data-theme="light"] .send-btn { color: #ffffff; }
 
 /* Bubbles — gradient user bubble ink adapts to theme */
 .message-user .message-text { color: var(--text-inverse); }
-[data-theme="light"] .message-user .message-text { color: #ffffff; }
 .message-avatar-user, .message-avatar.u { color: var(--text-inverse); }
-[data-theme="light"] .message-avatar-user, [data-theme="light"] .message-avatar.u { color: #ffffff; }
 
 /* Welcome screen — logo tile. Dark theme keeps the app-icon dark tile
    (matches the sidebar badge). Light theme swaps to an elevated surface
@@ -438,7 +364,7 @@ html[data-theme="light"] { color-scheme: only light; }
 /* Hint chips — kill the last indigo remnant, accent hover */
 .hint-chip:hover {
   background: var(--accent-subtle);
-  border-color: rgba(var(--accent-rgb), 0.45);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   color: var(--accent-light);
 }
 
@@ -446,14 +372,9 @@ html[data-theme="light"] { color-scheme: only light; }
    Phase 5 — SWARM / SETTINGS + PURPLE PURGE
    v4 hardcoded indigo/violet literals (94,106,210 · 139,92,246 ·
    a78bfa · 5e6ad2) remapped to the Abyss blue family. v5 loads last,
-   so these win without editing the v4 file.
+   so these win without editing the v4 file. The badges, the info toast
+   and the switch are styled once, in kazma.css (2026-11-09 refresh).
    ═══════════════════════════════════════════════════════════════════ */
-
-/* "Premium" badge — was violet, now sky */
-.badge-premium {
-  background: var(--secondary-subtle);
-  color: var(--secondary);
-}
 
 /* v4 gave active sessions a 3px accent bar — v5 uses a uniform pill ring */
 .session-item.active {
@@ -461,46 +382,26 @@ html[data-theme="light"] { color-scheme: only light; }
 }
 [dir="rtl"] .session-item.active {
   border-left-width: 3px;   /* RTL bar lives on the right in v4 markup */
-  border-left-color: rgba(var(--accent-rgb), 0.20);
+  border-left-color: color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 /* Search highlight <mark> in session titles — was indigo */
 .session-info .session-title mark {
-  background: rgba(var(--accent-rgb), 0.25);
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 /* Message reactions — was indigo */
 .reaction-btn.active {
   background: var(--accent-subtle);
-  border-color: rgba(var(--accent-rgb), 0.30);
-}
-
-/* Info toast — was indigo */
-.toast-info {
-  background: var(--accent-subtle);
-  color: var(--accent-light);
-  border-color: rgba(var(--accent-rgb), 0.30);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 /* Global search result kind chip — was indigo */
 .search-result-kind {
-  color: var(--accent);
+  color: var(--accent-light);
   background: var(--accent-subtle);
 }
 
-/* Settings toggles — gradient "on" state (preview pattern) */
-.toggle input:checked + .toggle-slider {
-  background: var(--gradient-accent);
-  border-color: transparent;
-}
-
-/* Settings group cards — surfaced */
-.settings-group {
-  background: var(--bg-panel);
-  border-color: var(--border-subtle);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
-}
 
 /* ═══════════════════════════════════════════════════════════════════
    Chat as the product — immersive shell + composer dock + message craft
@@ -604,16 +505,16 @@ html[data-theme="light"] { color-scheme: only light; }
 .composer-voice-btn.is-recording #mic-icon { display: none; }
 .composer-voice-btn.is-recording .composer-mic-recording { display: block; }
 .composer-voice-btn.is-recording {
-  background: rgba(239, 68, 68, 0.2);
-  border-color: #ef4444;
+  background: var(--danger-subtle);
+  border-color: var(--danger);
 }
 .composer-voice-btn.is-live-disabled {
   opacity: 0.5;
   pointer-events: none;
 }
 .composer-voice-btn.is-live {
-  background: rgba(34, 197, 94, 0.2);
-  color: #22c55e;
+  background: var(--success-subtle);
+  color: var(--success);
 }
 .composer-chrome { margin-top: 0; }
 /* Touch tap targets for the always-visible capacity controls (a11y). */
@@ -697,7 +598,7 @@ html[data-theme="light"] { color-scheme: only light; }
   color: var(--text-muted);
 }
 .sessions-kbd-hint kbd {
-  background: var(--bg-elevated);
+  background: var(--surface-sunken);
   border: 1px solid var(--border);
   padding: 1px 5px;
   border-radius: 3px;
@@ -708,8 +609,7 @@ html[data-theme="light"] { color-scheme: only light; }
 .build-badge {
   margin-top: 6px;
   font-size: 0.65rem;
-  color: var(--text-muted);
-  opacity: 0.75;
+  color: var(--text-muted);  /* no extra opacity: at 0.75 it read 3.24:1 */
   user-select: all;
   cursor: default;
 }
@@ -747,20 +647,20 @@ html[data-theme="light"] { color-scheme: only light; }
   padding: 3px 12px;
   cursor: pointer;
 }
-.chat-memory-choice[aria-pressed="true"] { color: var(--warning, #f59e0b); border-color: var(--warning, #f59e0b); }
+.chat-memory-choice[aria-pressed="true"] { color: var(--warning); border-color: var(--warning); }
 
 /* ── Open problems (Dashboard card, resilience plan G2) ── */
 .problems-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .problems-item {
   border: 1px solid var(--border-subtle);
-  border-inline-start: 3px solid var(--warning, #f59e0b);
+  border-inline-start: 3px solid var(--warning);
   border-radius: var(--radius-card, 10px);
   padding: 10px 14px;
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
-.problems-critical { border-inline-start-color: var(--danger, #ef4444); }
+.problems-critical { border-inline-start-color: var(--danger); }
 .problems-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
 .problems-source { font-size: 0.75rem; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.04em; }
 .problems-title { color: var(--text-primary); overflow-wrap: anywhere; flex: 1 1 14rem; min-width: 0; }
@@ -772,21 +672,21 @@ html[data-theme="light"] { color-scheme: only light; }
 /* ── Running work (Dashboard Runs card, run supervision) ── */
 .runs-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
 .runs-note { margin: 0; font-size: 0.82rem; color: var(--text-muted); }
-.runs-error { color: var(--danger, #ef4444); }
-.runs-warning { margin: 0; font-size: 0.82rem; color: var(--warning, #f59e0b); }
+.runs-error { color: var(--danger); }
+.runs-warning { margin: 0; font-size: 0.82rem; color: var(--warning); }
 .runs-incidents { display: flex; flex-direction: column; gap: 10px; }
 .runs-incident {
   border: 1px solid var(--border-subtle);
-  border-inline-start: 3px solid var(--warning, #f59e0b);
+  border-inline-start: 3px solid var(--warning);
   border-radius: var(--radius-card, 10px);
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--tint);
 }
-.runs-incident-failed, .runs-incident-dead { border-inline-start-color: var(--danger, #ef4444); }
-.runs-incident-focus { box-shadow: 0 0 0 2px var(--accent, #22d3ee); }
+.runs-incident-failed, .runs-incident-dead { border-inline-start-color: var(--danger); }
+.runs-incident-focus { box-shadow: 0 0 0 2px var(--accent); }
 .runs-incident-head { font-size: 0.78rem; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.04em; }
 .runs-incident-title { font-weight: 600; color: var(--text-primary); overflow-wrap: anywhere; }
 .runs-incident-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 0.78rem; color: var(--text-muted); }
@@ -799,7 +699,7 @@ html[data-theme="light"] { color-scheme: only light; }
 .runs-row-kind { color: var(--text-tertiary); font-size: 0.75rem; text-transform: uppercase; }
 .runs-row-title { color: var(--text-primary); flex: 1 1 14rem; min-width: 0; overflow-wrap: anywhere; }
 .runs-row-when, .runs-row-note { color: var(--text-muted); font-size: 0.78rem; }
-.runs-row-attention .runs-row-state, .runs-state-stalled, .runs-state-failed { color: var(--danger, #ef4444); }
+.runs-row-attention .runs-row-state, .runs-state-stalled, .runs-state-failed { color: var(--danger); }
 .runs-fold summary { cursor: pointer; font-size: 0.85rem; color: var(--text-secondary); }
 .runs-runbook-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .runs-runbook { display: flex; align-items: flex-start; gap: 8px; font-size: 0.85rem; }

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="{{ lang()|default('en') }}" dir="{{ dir()|default('ltr') }}" data-theme="{{ theme()|default('light') }}" x-data="kazmaApp()" :style="'font-size: ' + effectiveFontSize() + 'px'">
+<html lang="{{ lang()|default('en') }}" dir="{{ dir()|default('ltr') }}" data-theme="{{ theme()|default('light') }}"{% set _accent = accent_style() if accent_style is defined else '' %}{% if _accent %} style="{{ _accent }}"{% endif %} x-data="kazmaApp()" :style="{ fontSize: effectiveFontSize() + 'px' }">
 <head>
     <meta charset="UTF-8">
     {# viewport-fit=cover is required for env(safe-area-inset-*) on iOS.
@@ -10,7 +10,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="color-scheme" content="{{ theme()|default('light') }}">
     <meta name="supported-color-schemes" content="{{ theme()|default('light') }}">
-    <meta name="theme-color" content="{{ '#0e1626' if theme() == 'dark' else '#f0f4fa' }}">
+    <meta name="theme-color" content="{{ '#0e1626' if theme() == 'dark' else '#ffffff' }}">
     {# The build that rendered this page: modules/build_watch.js compares it
        with /health/live and offers a Refresh after a deploy. A template
        environment without the global (a router built bare, as in a test)
@@ -26,7 +26,7 @@
        iOS then commits the canvas from the phone's dark system preference.
        color-scheme is set too for UA widgets. Keep in sync with login.html. #}
     <style>
-      html { background-color: {{ '#0e1626' if theme() == 'dark' else '#f0f4fa' }}; color-scheme: {{ 'only dark' if theme() == 'dark' else 'only light' }}; }
+      html { background-color: {{ '#0e1626' if theme() == 'dark' else '#ffffff' }}; color-scheme: {{ 'only dark' if theme() == 'dark' else 'only light' }}; }
     </style>
     <title>{% block title %}Kazma{% endblock %}</title>
     <link rel="icon" type="image/png" href="/static/img/favicon.png">
@@ -67,41 +67,43 @@
             {# Global System Alerts Banner — x-cloak + x-show gate it; the
                flex layout lives in the .system-alerts-banner class so the
                inline style never forces display (which caused the flash). #}
-            <div x-data="systemAlertsBanner()" x-cloak x-show="activeAlert" class="system-alerts-banner" :style="bannerTone()" style="padding: 12px 24px; margin: 16px 24px 0 24px; border-radius: 6px; gap: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); transition: all 0.3s ease;">
-                <div style="display: flex; align-items: center; gap: 12px; color: var(--text-primary);">
-                    <!-- Warning SVG Icon -->
-                    <svg :style="{ color: bannerColor() }" style="flex-shrink: 0;" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+            {# A notice (kazma.css §7): tinted in the alert's tone (bannerTone:
+               danger for an error, else warning), the icon in the tone, the
+               text in ink; the actions are shared buttons. #}
+            <div x-data="systemAlertsBanner()" x-cloak x-show="activeAlert" class="notice system-alerts-banner" :class="bannerTone()">
+                <div class="system-alerts-banner-text">
+                    <svg class="notice-icon" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
                     </svg>
                     <div>
-                        <strong translate="no" x-text="activeAlert ? activeAlert.title : ''" style="font-weight: 600; display: block; margin-bottom: 2px;"></strong>
-                        <span translate="no" x-text="activeAlert ? activeAlert.reason : ''" style="font-size: 0.85rem; color: var(--text-secondary);"></span>
+                        <strong translate="no" class="system-alerts-banner-title" x-text="activeAlert ? activeAlert.title : ''"></strong>
+                        <span translate="no" class="system-alerts-banner-reason" x-text="activeAlert ? activeAlert.reason : ''"></span>
                     </div>
                 </div>
-                <div style="display: flex; align-items: center; gap: 12px;">
+                <div class="system-alerts-banner-actions">
                     <!-- Action Button -->
                     <template x-if="activeAlert && activeAlert.callback_id === 'sentence-transformers'">
-        <button type="button" class="btn-icon" @click="installMl()" :disabled="installing" style="background: var(--warning); border-color: var(--warning); color: #000; font-weight: 600; padding: 6px 12px; font-size: 0.8rem; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
-            <span x-show="installing" class="spinner-inline animate-spin" style="width:12px; height:12px; border:2px solid #000; border-top-color:transparent; border-radius:50%;"></span>
+        <button type="button" class="btn btn-sm btn-primary" @click="installMl()" :disabled="installing">
+            <span x-show="installing" class="spinner-inline animate-spin"></span>
             <span x-text="installing ? t('common.installing') : (activeAlert && activeAlert.button_text ? activeAlert.button_text : t('common.resolve'))"></span>
         </button>
                     </template>
                     <!-- Link to the page that fixes it (e.g. Settings -> Providers) -->
                     <template x-if="alertLink()">
-        <a :href="alertLink()" x-text="activeAlert.button_text || t('common.open')" style="background: var(--warning); border: 1px solid var(--warning); color: #000; font-weight: 600; padding: 6px 12px; font-size: 0.8rem; border-radius: 4px; text-decoration: none;"></a>
+        <a class="btn btn-sm btn-primary" :href="alertLink()" x-text="activeAlert.button_text || t('common.open')"></a>
                     </template>
                     <!-- Clear the backlog behind the shown alert -->
-                    <button type="button" x-show="waitingAlerts.length > 1" @click="dismissAll()" style="background: none; border: 1px solid var(--border-color, rgba(255,255,255,0.15)); color: var(--text-secondary); cursor: pointer; padding: 4px 10px; font-size: 0.8rem; border-radius: 4px;">{{ t('common.dismiss_all') }}</button>
+                    <button type="button" class="btn btn-sm btn-outline" x-show="waitingAlerts.length > 1" @click="dismissAll()">{{ t('common.dismiss_all') }}</button>
                     <!-- Close button -->
-                    <button type="button" @click="dismissAlert()" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 4px;" title="{{ t('common.dismiss') }}">
-                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                    <button type="button" class="btn-icon btn-sm" @click="dismissAlert()" title="{{ t('common.dismiss') }}" aria-label="{{ t('common.dismiss') }}">
+                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" aria-hidden="true">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
                         </svg>
                     </button>
                 </div>
             </div>
 
-            <div x-cloak x-show="$store.notifications.error" role="alert" style="margin:12px 24px;color:var(--danger);">{{ t('research.monitor.alerts_unavailable') }}</div>
+            <div x-cloak x-show="$store.notifications.error" role="alert" class="notice notice-danger system-alerts-error">{{ t('research.monitor.alerts_unavailable') }}</div>
             {# Page Body #}
             <div class="page-body">
                 {% block content %}{% endblock %}

@@ -131,7 +131,11 @@ def test_composer_survives_reload_and_mobile_bilingual_layout():
                         page.keyboard.press("Space")
                         assert not check.is_checked()
                         assert check.evaluate("e => getComputedStyle(e).backgroundColor") != checked["background"]
-                        colors.append(page.locator("#xd-source-text").evaluate("e => getComputedStyle(e).backgroundColor"))
+                        # Fields are transparent in both themes since the
+                        # 2026-11-09 refresh (the wall shows through): the
+                        # field follows the theme through its ink and hairline.
+                        colors.append(page.locator("#xd-source-text").evaluate(
+                            "e => {const s = getComputedStyle(e); return s.color + ' | ' + s.borderTopColor;}"))
                         assert page.locator("#xd-import").evaluate("e => getComputedStyle(e, '::file-selector-button').borderTopColor") == checked["border"]
                         assert page.evaluate("() => document.documentElement.scrollWidth <= innerWidth + 1")
                     assert colors[0] != colors[1]

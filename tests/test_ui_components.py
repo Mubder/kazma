@@ -409,7 +409,11 @@ class TestCSSDesignSystem:
         assert any(c in css for c in ("#3b82f6", "#3B82F6", "#2563eb", "#2563EB")), "No accent color found"
 
     def test_has_dark_background(self, css):
-        assert any(c in css for c in ("#02040a", "#0a0f1a", "var(--bg-primary)")), "Dark background color not found"
+        # The dark wall is the surface scale's (2026-11-09); the older spellings
+        # are kept so an earlier stylesheet still passes.
+        assert any(c in css for c in ("--surface-wall: #0e1626", "#02040a", "#0a0f1a", "var(--bg-primary)")), (
+            "Dark background color not found"
+        )
 
     def test_has_css_variables(self, css):
         assert ":root" in css

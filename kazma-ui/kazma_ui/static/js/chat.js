@@ -1411,7 +1411,7 @@
     menu.style.cssText =
       'display:none;position:absolute;bottom:100%;left:0;right:0;max-height:220px;' +
       'overflow:auto;background:var(--bg-elevated);border:1px solid var(--border);' +
-      'border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.25);z-index:50;margin-bottom:6px;';
+      'border-radius:8px;box-shadow:var(--overlay-shadow);z-index:50;margin-bottom:6px;';
     var wrapper = document.querySelector('.input-wrapper') || (inputEl && inputEl.parentElement);
     if (wrapper) {
       if (getComputedStyle(wrapper).position === 'static') wrapper.style.position = 'relative';
@@ -1471,7 +1471,7 @@
         sendMessage();
       });
       btn.addEventListener('mouseenter', function() {
-        btn.style.background = 'var(--bg-surface)';
+        btn.style.background = 'var(--bg-hover)';
       });
       btn.addEventListener('mouseleave', function() {
         btn.style.background = 'transparent';
@@ -6007,8 +6007,8 @@
       if (_propItems.length) {
         proposalHtml =
           '<div class="hitl-proposal" style="margin:8px 0;padding:8px 10px;border-radius:8px;' +
-          'background:color-mix(in srgb, var(--accent, #6c8cff) 7%, transparent);' +
-          'border:1px solid color-mix(in srgb, var(--accent, #6c8cff) 20%, transparent);">' +
+          'background:color-mix(in srgb, var(--accent) 7%, transparent);' +
+          'border:1px solid color-mix(in srgb, var(--accent) 20%, transparent);">' +
           '<p style="margin:0 0 6px 0;font-size:0.8rem;"><strong>' + escapeHtml(ti('hitl_publish', 'Content to publish')) + '</strong>' +
           (_propPid ? ' — ' + escapeHtml(tiFmt('hitl_stored_proposal', 'stored proposal {pid}', { pid: '\u0001' }))
             .replace('\u0001', '<code>' + escapeHtml(_propPid) + '</code>') : '') +
