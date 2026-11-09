@@ -120,8 +120,13 @@ def test_an_asyncio_loopback_connection_is_allowed(loop_kind):
         await server.wait_closed()
         return data
 
-    factory = asyncio.SelectorEventLoop if loop_kind == "selector" else None
-    assert asyncio.run(run(), loop_factory=factory) == b"ok"
+    # A loop made by hand: asyncio.run(loop_factory=) is Python 3.12+, and
+    # Kazma supports 3.11 (CI's Python; it raised TypeError there, 2026-11-09).
+    loop = asyncio.SelectorEventLoop() if loop_kind == "selector" else asyncio.new_event_loop()
+    try:
+        assert loop.run_until_complete(run()) == b"ok"
+    finally:
+        loop.close()
 
 
 # ── planted tests: run only in the child pytests below ───────────────────
@@ -163,8 +168,12 @@ def test_planted_asyncio_connection_in_a_thread_and_a_loop(loop_kind):
         except OSError:
             pass
 
-    factory = asyncio.SelectorEventLoop if loop_kind == "selector" else None
-    asyncio.run(run(), loop_factory=factory)
+    # A loop made by hand: asyncio.run(loop_factory=) is Python 3.12+.
+    loop = asyncio.SelectorEventLoop() if loop_kind == "selector" else asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(run())
+    finally:
+        loop.close()
 
 
 def _plant_stand_in_model_package(tmp_path: Path, monkeypatch) -> None:

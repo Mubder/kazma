@@ -223,7 +223,8 @@ def test_a_checkpoint_changed_across_a_restart_is_seen(run, tmp_path):
         return before[thread], after[thread]
 
     if sys.platform == "win32":
-        before, after = asyncio.run(read_tamper_read(), loop_factory=asyncio.SelectorEventLoop)
+        with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop) as runner:  # 3.11 has no run(loop_factory=)
+            before, after = runner.run(read_tamper_read())
     else:
         before, after = asyncio.run(read_tamper_read())
     assert before == recorded and after != recorded

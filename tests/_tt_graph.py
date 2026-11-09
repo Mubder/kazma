@@ -36,7 +36,9 @@ def run(coro: Any) -> Any:
     import sys
 
     if sys.platform == "win32":
-        return asyncio.run(coro, loop_factory=asyncio.SelectorEventLoop)
+        # asyncio.Runner, not asyncio.run(loop_factory=): that is Python 3.12+.
+        with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop) as runner:
+            return runner.run(coro)
     return asyncio.run(coro)
 
 
