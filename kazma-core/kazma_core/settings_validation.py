@@ -478,6 +478,9 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
         NOTICES_TO_CHATS_KEY: (_strict_bool, "notifications"),
         EMAIL_TO_KEY: (_email_address, "notifications"),
         "guard.telegram.chat_id": (_telegram_chat, "guard"),
+        # The group the "Telegram (group)" route sends Kazma's alerts to
+        # (ops_alerts.ALERTS_GROUP_KEY).
+        "notifications.ops.telegram_group_chat": (_telegram_chat, "notifications"),
         RUNBOOKS_KEY: (validate_runbooks, None),
         "agent.language": (_agent_language, "agent"),
         "agent.max_iterations": (_max_iterations, "agent"),

@@ -1266,9 +1266,9 @@ class TelegramAdapter(BaseAdapter):
         text = (
             f"👋 Kazma here. This group's chat id:\n"
             f"`{chat_id}`\n\n"
-            "Use it in Settings → Providers & Connectors → Platform "
-            "Connectors → Delivery & Routing (ops alerts / swarm output), "
-            "or anywhere a target chat id is asked for.\n"
+            "For alerts: Settings → Alerts (the alerts group, the guard's "
+            "chat). For swarm results: Settings → Providers & Connectors → "
+            "Delivery & Routing. Or anywhere a target chat id is asked for.\n"
             "Note: for me to see ALL group messages (not just commands and "
             "replies), disable privacy mode via @BotFather → /setprivacy."
         )

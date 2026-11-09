@@ -193,9 +193,59 @@ def test_a_save_writes_each_field_through_its_rule(client):
     assert client.get("/api/settings/alerts").json()["notices_to_chats"] is False
 
 
+def test_the_alerts_group_is_saved_and_makes_the_group_route_ready(client):
+    client.store.set("connectors.telegram.token", SECRET, category="connectors")
+    assert client.get("/api/settings/alerts").json()["routes"]["ready"]["telegram-group"] is False
+    res = client.put("/api/settings/alerts", json={"group_chat": "-1009876543210"})
+    assert res.status_code == 200 and res.json()["saved"] == ["group_chat"]
+    assert client.store.get(ops_alerts.ALERTS_GROUP_KEY) == "-1009876543210"
+    routes = client.get("/api/settings/alerts").json()["routes"]
+    assert routes["group_chat"] == "-1009876543210" and routes["ready"]["telegram-group"] is True
+
+
+def test_the_group_route_sends_to_the_alerts_group_and_leaves_swarm_results(client, monkeypatch):
+    """With an alerts group set, the "Telegram (group)" route goes there with
+    Kazma's own bot; the swarm's output group (and its bot) is not used. The
+    route as it was is the control: it went to the swarm's output chat."""
+    import urllib.request
+
+    store = client.store
+    store.set("connectors.telegram.token", "main-bot", category="connectors")
+    store.set("guard.telegram.chat_id", "111", category="guard")
+    store.set("swarm.output_target", {"enabled": True, "chat_id": "222", "bot_token": "swarm-bot",
+                                      "platform": "telegram"}, category="swarm")
+    sent: list[tuple[str, str]] = []
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, timeout=None):
+        from urllib.parse import parse_qs
+
+        sent.append((req.full_url.split("/bot", 1)[1].split("/", 1)[0], parse_qs(req.data.decode())["chat_id"][0]))
+        return _Resp()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr("kazma_core.config_store.get_config_store", lambda: store)
+    # Control: no alerts group, the route goes to the swarm's output group.
+    assert ops_alerts._telegram_direct("x", group_route=True)
+    assert sent[-1] == ("swarm-bot", "222")
+    store.set(ops_alerts.ALERTS_GROUP_KEY, "-1009876543210", category="notifications")
+    assert ops_alerts._telegram_direct("x", group_route=True)
+    assert sent[-1] == ("main-bot", "-1009876543210")
+    # The plain direct send (no group route) still goes to the guard's chat.
+    assert ops_alerts._telegram_direct("x")
+    assert sent[-1] == ("main-bot", "111")
+
+
 @pytest.mark.parametrize(("field", "bad"), [
     ("guard_chat", "my chat"),
     ("guard_chat", "12ab"),
+    ("group_chat", "the alerts group"),
     ("routes", ["telegram", "pager"]),
     ("lifecycle_events", ["restarted"]),
     ("notices_to_chats", "sometimes"),

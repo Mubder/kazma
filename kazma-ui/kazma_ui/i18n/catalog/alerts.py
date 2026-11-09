@@ -32,6 +32,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "settings.alerts.route_telegram": {"en": "Your chat with Kazma", "ar": "محادثتك مع كاظمه"},
     "settings.alerts.route_group": {"en": "The group Kazma posts to", "ar": "المجموعة التي ينشر فيها كاظمه"},
+    "settings.alerts.route_alerts_group": {"en": "Your alerts group (below)", "ar": "مجموعة تنبيهاتك (أدناه)"},
+    "settings.alerts.group_chat": {"en": "Alerts group (Telegram)", "ar": "مجموعة التنبيهات (Telegram)"},
+    "settings.alerts.group_chat_hint": {
+        "en": "Where the Telegram (group) route sends Kazma's alerts: the group's chat id, which Kazma posts when you add its bot to the group (it starts with -100). Empty: the swarm's output group. Put the same id in the guard's chat below and in Kazma Watch to get every alert in one place.",
+        "ar": "حيث يرسل مسار Telegram (مجموعة) تنبيهات كاظمه: معرّف محادثة المجموعة، وينشره كاظمه حين تضيف بوته إلى المجموعة (يبدأ بـ ‎-100‎). فارغًا: مجموعة مخرجات السرب. ضع المعرّف نفسه في محادثة الحارس أدناه وفي المراقب لتصلك كل التنبيهات في مكان واحد.",
+    },
     "settings.alerts.route_discord": {"en": "The Discord channel Kazma posts to", "ar": "قناة Discord التي ينشر فيها كاظمه"},
     "settings.alerts.route_slack": {"en": "The Slack channel Kazma posts to", "ar": "قناة Slack التي ينشر فيها كاظمه"},
     "settings.alerts.test_alert_failed": {

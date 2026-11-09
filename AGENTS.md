@@ -6784,6 +6784,10 @@ System's read-only outside-watch card (`/api/settings/outside-watch` is gone:
 field writes nothing. Sections and the keys they write, each with its reader:
 - Where Kazma's alerts go (`notifications.ops.channels`, now validated
   against `ALERT_ROUTES`) and Send a test alert (unchanged route); the
+  alerts group (`ops_alerts.ALERTS_GROUP_KEY`, 2026-11-09): when set, the
+  "Telegram (group)" route sends there with Kazma's own bot instead of the
+  swarm's output group, so one Telegram group can hold Kazma's, the guard's
+  and Kazma Watch's alerts while swarm results stay put; the
   server status messages (`notifications.lifecycle.events`). Adapters &
   Routes keeps the swarm's routes; no page script saves the alert keys any
   more, so two tabs cannot write over each other.
