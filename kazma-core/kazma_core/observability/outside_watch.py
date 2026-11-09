@@ -86,6 +86,9 @@ _CAUSE_WORDS = {
 EMAIL_TO_KEY = "notifications.watch.email_to"
 _EMAIL_RE = re.compile(r"^[^\s@<>\"(),;:]{1,64}@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
                        r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$")
+#: Cloudflare Email Service's error codes (E_SENDER_NOT_VERIFIED, ...), the
+#: only refusal reason Kazma Watch's test page passes on.
+_EMAIL_REASON = re.compile(r"E_[A-Z_]{1,40}")
 
 _cache_lock = threading.Lock()
 _cache: dict[str, Any] = {"at": 0.0, "key": None, "value": None}
@@ -448,8 +451,10 @@ def push_watch_settings(store: Any = None) -> dict[str, Any]:
 
 def watch_test_page() -> dict[str, Any]:
     """Have Kazma Watch send one test card through its own channels.
-    ``{"ok", "channels": {"telegram": "sent|failed|off", "email": ...}}`` or
-    ``{"ok": False, "error"}`` (``too_soon`` within 20 s of the last)."""
+    ``{"ok", "channels": {"telegram": "sent|failed|off", "email": ...},
+    "reasons": {"email": "E_..."}}`` -- why Cloudflare's Email Service refused
+    the email, its own code -- or ``{"ok": False, "error"}`` (``too_soon``
+    within 20 s of the last)."""
     pairing = _read_pairing()
     if pairing is None:
         return {"ok": False, "error": "not_paired"}
@@ -457,10 +462,15 @@ def watch_test_page() -> dict[str, Any]:
     if status == 200 and isinstance(data.get("channels"), dict):
         channels = {k: v for k, v in data["channels"].items()
                     if k in ("telegram", "email") and v in ("sent", "failed", "off")}
+        raw_reasons = data.get("reasons") if isinstance(data.get("reasons"), dict) else {}
+        reasons = {k: v for k, v in raw_reasons.items()
+                   if k == "email" and channels.get(k) == "failed"
+                   and isinstance(v, str) and _EMAIL_REASON.fullmatch(v)}
         ok = any(v == "sent" for v in channels.values())
         logger.info("[outside_watch] Kazma Watch test page: %s",
-                    ", ".join(f"{k} {v}" for k, v in sorted(channels.items())) or "no channel")
-        return {"ok": ok, "channels": channels}
+                    ", ".join(f"{k} {v}{' (' + reasons[k] + ')' if k in reasons else ''}"
+                              for k, v in sorted(channels.items())) or "no channel")
+        return {"ok": ok, "channels": channels, "reasons": reasons}
     error = str(data.get("error") or ("unreachable" if status == 0 else "refused"))
     return {"ok": False, "error": error, "status": status}
 

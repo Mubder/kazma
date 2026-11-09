@@ -194,6 +194,27 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.alerts.channel_sent": {"en": "took it", "ar": "استلمها"},
     "settings.alerts.channel_failed": {"en": "refused it", "ar": "رفضها"},
     "settings.alerts.channel_off": {"en": "not set up", "ar": "غير مُعدّ"},
+    "settings.alerts.channel_failed_because": {"en": "refused it: {reason}", "ar": "رفضها: {reason}"},
+    "settings.alerts.email_reason_sender": {
+        "en": "alerts.kazma.ai is not verified for sending in Cloudflare yet",
+        "ar": "لم يُوثَّق alerts.kazma.ai للإرسال في Cloudflare بعد",
+    },
+    "settings.alerts.email_reason_recipient": {
+        "en": "Cloudflare does not allow sending to that address",
+        "ar": "لا يسمح Cloudflare بالإرسال إلى هذا العنوان",
+    },
+    "settings.alerts.email_reason_suppressed": {
+        "en": "that address bounced before, so Cloudflare blocks it",
+        "ar": "ارتدّت رسالة إلى هذا العنوان من قبل، فيحجبه Cloudflare",
+    },
+    "settings.alerts.email_reason_limit": {
+        "en": "Cloudflare's sending limit is reached",
+        "ar": "بلغ الإرسال حدّ Cloudflare",
+    },
+    "settings.alerts.email_reason_other": {
+        "en": "Cloudflare refused it ({code})",
+        "ar": "رفضها Cloudflare ({code})",
+    },
     "settings.alerts.watch_err_bad_token": {
         "en": "Kazma Watch refused the pairing token. Paste its PAIRING_TOKEN again.",
         "ar": "رفض المراقب رمز الربط. الصق رمز PAIRING_TOKEN الخاص به مجددًا.",

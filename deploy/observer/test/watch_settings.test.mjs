@@ -150,10 +150,11 @@ test("an email page goes to the recipient Kazma told", async () => {
   assert.equal((await signed(e, "/v1/settings", { email_to: "owner@example.com" })).status, 200);
   net.live = 530;
   for (let i = 0; i < 4; i += 1) {
-    await runMinute(e, T0 + i * 60, { fetcher: net.fetcher, makeMessage: async (from, to, raw) => ({ from, to, raw }) });
+    await runMinute(e, T0 + i * 60, { fetcher: net.fetcher });
   }
   assert.equal(sent.length, 1);
   assert.equal(sent[0].to, "owner@example.com");
+  assert.deepEqual(sent[0].from, { email: "watch@kazma.example", name: "Kazma Watch" });
 });
 
 // -- POST /v1/test-page ------------------------------------------------------------
@@ -164,11 +165,11 @@ test("a test page goes through every channel and says which took it", async () =
   const net = new Net();
   await pair(e);
   assert.equal((await signed(e, "/v1/settings", { timezone: "Asia/Kuwait", email_to: "owner@example.com" })).status, 200);
-  const deps = { fetcher: net.fetcher, makeMessage: async (from, to, raw) => ({ from, to, raw }) };
+  const deps = { fetcher: net.fetcher };
   const res = await signed(e, "/v1/test-page", {}, { ts: T0 + 1, now: T0 + 1, deps });
   assert.equal(res.status, 200);
   const data = await res.json();
-  assert.deepEqual(data, { ok: true, channels: { telegram: "sent", email: "sent" } });
+  assert.deepEqual(data, { ok: true, channels: { telegram: "sent", email: "sent" }, reasons: {} });
   assert.equal(net.messages.length, 1);
   assert.equal(net.messages[0], testCard(T0 + 1, "Asia/Kuwait"));
   assert.match(net.messages[0], /^🔵 \[Watch\] Test page\n.*11:00 Asia\/Kuwait/);
@@ -181,7 +182,31 @@ test("a test page no channel took says so, and a channel not set up is off", asy
   net.telegramUp = false;
   await pair(e);
   const res = await signed(e, "/v1/test-page", {}, { deps: { fetcher: net.fetcher } });
-  assert.deepEqual(await res.json(), { ok: false, channels: { telegram: "failed", email: "off" } });
+  assert.deepEqual(await res.json(), { ok: false, channels: { telegram: "failed", email: "off" }, reasons: {} });
+});
+
+test("a refused email says why, with Email Service's own code", async () => {
+  const refuse = (code) => async () => { throw Object.assign(new Error("refused"), { code }); };
+  const run = async (send, zoneTs) => {
+    const e = env({ TELEGRAM_BOT_TOKEN: "", EMAIL_FROM: "watch@kazma.example", EMAIL: { send } });
+    await pair(e);
+    assert.equal((await signed(e, "/v1/settings", { email_to: "owner@example.com" }, { ts: zoneTs })).status, 200);
+    return (await signed(e, "/v1/test-page", {}, { ts: zoneTs + 1, now: zoneTs + 1 })).json();
+  };
+  assert.deepEqual(await run(refuse("E_SENDER_NOT_VERIFIED"), T0),
+    { ok: false, channels: { telegram: "off", email: "failed" }, reasons: { email: "E_SENDER_NOT_VERIFIED" } });
+  // Anything that is not one of Email Service's codes is not repeated to Kazma.
+  assert.deepEqual((await run(refuse("<script>"), T0)).reasons, { email: "E_SEND_FAILED" });
+  assert.deepEqual((await run(async () => { throw new TypeError("boom"); }, T0)).reasons, { email: "E_SEND_FAILED" });
+});
+
+test("no recipient means email is off, not an email to nobody", async () => {
+  const sent = [];
+  const e = env({ TELEGRAM_BOT_TOKEN: "", EMAIL_FROM: "watch@kazma.example", EMAIL: { send: async (m) => { sent.push(m); } } });
+  await pair(e);
+  const res = await signed(e, "/v1/test-page", {});
+  assert.deepEqual(await res.json(), { ok: false, channels: { telegram: "off", email: "off" }, reasons: {} });
+  assert.equal(sent.length, 0);
 });
 
 test("test pages need the signature and come at most every 20 seconds", async () => {

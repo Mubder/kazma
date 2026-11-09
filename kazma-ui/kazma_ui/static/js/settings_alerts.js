@@ -366,9 +366,30 @@
                 failed: _k('settings.alerts.channel_failed', 'refused it'),
                 off: _k('settings.alerts.channel_off', 'not set up'),
             })[v] || String(v || '');
+            const reason = ((res.reasons || {}).email) || '';
+            const email = ch.email === 'failed' && reason
+                ? _k('settings.alerts.channel_failed_because', 'refused it: {reason}', { reason: this._emailReason(reason) })
+                : state(ch.email);
             return _k('settings.alerts.watch_test_result', 'Kazma Watch sent a test page. Telegram: {telegram}. Email: {email}.', {
-                telegram: state(ch.telegram), email: state(ch.email),
+                telegram: state(ch.telegram), email,
             });
+        },
+
+        // Cloudflare Email Service's refusal codes, worded for the owner.
+        _emailReason(code) {
+            const key = ({
+                E_SENDER_NOT_VERIFIED: 'sender',
+                E_SENDER_DOMAIN_NOT_AVAILABLE: 'sender',
+                E_RECIPIENT_NOT_ALLOWED: 'recipient',
+                E_RECIPIENT_SUPPRESSED: 'suppressed',
+                E_RATE_LIMIT_EXCEEDED: 'limit',
+                E_DAILY_LIMIT_EXCEEDED: 'limit',
+            })[code];
+            if (key === 'sender') return _k('settings.alerts.email_reason_sender', 'alerts.kazma.ai is not verified for sending in Cloudflare yet');
+            if (key === 'recipient') return _k('settings.alerts.email_reason_recipient', 'Cloudflare does not allow sending to that address');
+            if (key === 'suppressed') return _k('settings.alerts.email_reason_suppressed', 'that address bounced before, so Cloudflare blocks it');
+            if (key === 'limit') return _k('settings.alerts.email_reason_limit', "Cloudflare's sending limit is reached");
+            return _k('settings.alerts.email_reason_other', 'Cloudflare refused it ({code})', { code });
         },
 
         async saveWatchSettings() {

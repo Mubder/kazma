@@ -186,11 +186,11 @@ export async function handle(request, env, now, deps = {}) {
   if (route === "POST /v1/cloudflare") {
     const paired = await new Store(env.DB).listInstalls();
     return handleCloudflare(request, env, now, {
-      installs: paired.length ? paired : [SITE], fetcher: d.fetcher, makeMessage: deps.makeMessage });
+      installs: paired.length ? paired : [SITE], fetcher: d.fetcher });
   }
   if (route === "POST /v1/settings") return handleWatchSettings(request, env, now);
   if (route === "POST /v1/test-page") {
-    return handleTestPage(request, env, now, { fetcher: d.fetcher, makeMessage: deps.makeMessage });
+    return handleTestPage(request, env, now, { fetcher: d.fetcher });
   }
   if (route === "POST /v1/leave") return handleLeave(request, env, now);
   if (route === "GET /") return handleStatusPage(request, env, now, d);
@@ -262,7 +262,7 @@ export async function runMinute(env, now, deps = {}) {
     const sent = [];
     for (const p of pages) {
       const ok = await page(env, p.text, now, {
-        fetcher, makeMessage: deps.makeMessage, emailTo: told ? told.email_to : null,
+        fetcher, emailTo: told ? told.email_to : null,
       });
       sent.push({ kind: p.kind, ok, text: p.text });
       state = settle(state, p, ok, now);
@@ -273,7 +273,7 @@ export async function runMinute(env, now, deps = {}) {
     seen[install] = { ...diag, pages: sent };
   }
   const cloudflare = await processNotices(env, now, {
-    installs: watched, fetcher, makeMessage: deps.makeMessage });
+    installs: watched, fetcher });
   if (minute % 60 === 7) {
     await store.prune(now);
     await store.pruneNotices(now);

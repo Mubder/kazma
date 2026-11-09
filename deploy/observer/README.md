@@ -134,10 +134,20 @@ owner's credentials; Kazma never holds them.
    the Tunnel health notification too: a second, independent signal for the
    tunnel.
 
-8. **Email (optional).** With Email Routing on kazma.ai and the owner's
-   address verified, uncomment the `send_email` binding in `wrangler.jsonc`
-   and set `EMAIL_FROM` (an address on kazma.ai) and `EMAIL_TO` (the
-   verified address).
+8. **Email (optional; Cloudflare Email Service, Email Sending, on Workers
+   Paid).** Send from a subdomain of its own, so kazma.ai's own mail records
+   are never touched: in the dashboard, **Compute -> Email Service -> Email
+   Sending -> Onboard Domain**, choose `alerts.kazma.ai`. Cloudflare adds its
+   sending records to that subdomain only (a bounce MX and SPF on
+   `cf-bounce.alerts.kazma.ai`, a DKIM key, and a DMARC record for the
+   subdomain if it has none); wait until it shows as verified. Then in
+   `wrangler.jsonc` keep the `send_email` binding (`EMAIL`, allowed to send
+   only as `watch@alerts.kazma.ai`) and `EMAIL_FROM`, and deploy. The
+   recipient is the address in Kazma's Settings -> Alerts -> Kazma Watch
+   ("Email the pages to", then "Tell Kazma Watch"); `EMAIL_TO` is only a
+   fallback for an install that told none. Settings' "Send a test page" says
+   whether the email went, and if Cloudflare refused it, its reason
+   (`E_SENDER_NOT_VERIFIED`: the subdomain is not verified yet).
 
 9. **Deploy:**
 

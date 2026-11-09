@@ -179,6 +179,14 @@ When the owner onboards `alerts.kazma.ai` with Cloudflare Email Service
 channel turns on with `EMAIL_FROM watch@alerts.kazma.ai`. The recipient is
 set from Settings -> Alerts (item 4) rather than by redeploying.
 
+Built 2026-11-09: the channel uses Email Service's structured send (the
+Email Routing form it had reaches only verified addresses), a binding
+allowed to send only as `watch@alerts.kazma.ai`, no email when no
+recipient is set, and the test page passes Cloudflare's refusal code on to
+Settings -> Alerts, worded in both languages
+(`deploy/observer/test/watch_settings.test.mjs`, `tests/test_settings_alerts.py`,
+`tests/js/test_settings_alerts.js`).
+
 ## Stages
 
 Each stage lands whole, with its gates, tested, pushed and deployed (the
