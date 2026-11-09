@@ -2836,7 +2836,7 @@ requires-dist = [
     { name = "pygments", specifier = ">=2.21.0" },
     { name = "pyjwt", specifier = ">=2.15.0" },
     { name = "pymongo", marker = "extra == 'database'", specifier = ">=4.18.3" },
-    { name = "pymupdf", marker = "extra == 'document-platform'", specifier = ">=1.24.0" },
+    { name = "pymupdf", marker = "extra == 'document-platform'", specifier = ">=1.24.0,<2" },
     { name = "pymysql", marker = "extra == 'database'", specifier = ">=1.2.3" },
     { name = "pypdf", specifier = ">=6.21.4,<7" },
     { name = "pypdf", marker = "extra == 'document'", specifier = ">=6.21.4,<7" },
