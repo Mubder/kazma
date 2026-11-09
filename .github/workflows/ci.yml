@@ -55,7 +55,7 @@ jobs:
       - name: Install deps
         # The Tests job's set: tests/test_imports.py imports every module
         # with exactly these installed.
-        run: pip install -e ".[test]" pillow pymupdf sqlite-vec pypdfium2 numpy prometheus-client
+        run: pip install -e ".[test]" pillow "pymupdf>=1.24.0,<2" sqlite-vec pypdfium2 numpy prometheus-client
       - name: Import each product module in a fresh interpreter (GATE)
         # tests/test_imports.py imports every module in ONE process, where each
         # finds the earlier ones loaded, so an import cycle that only works when
@@ -133,7 +133,7 @@ jobs:
         # without it that test ERRORED rather than skipped. It is a tiny pure
         # wheel and installing it exercises the metrics path instead of
         # hiding it — the same reasoning as the extras above.
-        run: pip install -e ".[test]" pillow pymupdf sqlite-vec pypdfium2 numpy prometheus-client
+        run: pip install -e ".[test]" pillow "pymupdf>=1.24.0,<2" sqlite-vec pypdfium2 numpy prometheus-client
       - name: Install Arabic rendering system deps
         # The visual RTL tests (tests/test_docx_rtl_visual.py) render DOCX
         # through LibreOffice and measure where glyphs land on the page. They
@@ -205,7 +205,7 @@ jobs:
       - name: Install deps
         # pymupdf: the neural OCR test draws its Arabic page with it in the
         # test process (a skip fails this job, below).
-        run: pip install -e ".[test]" pymupdf
+        run: pip install -e ".[test]" "pymupdf>=1.24.0,<2"
       - name: Build the worker and broker images
         run: |
           docker version --format 'engine {{.Server.Version}} {{.Server.Os}}/{{.Server.Arch}}'

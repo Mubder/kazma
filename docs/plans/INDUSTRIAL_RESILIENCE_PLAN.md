@@ -131,7 +131,8 @@ interrupted turn continues by itself).
 | J soak: run supervision, 2,000 cycles | passed, 0 violations (667 runs, 31 restarts, 385 incidents, one card each) | 2026-11-06 |
 | J soak: swarm, 30 minutes | passed, 0 violations (about 9,900 tasks, 14 restarts, 59 bursts at the admission limit) | 2026-11-06 |
 | J soak: Time Travel, 30 minutes | passed, 0 violations (124 cycles, a restart each) | 2026-11-06 |
-| J soaks: documents 48-72 h, memory several days, Knowledge 72 h | not run: each needs days of machine time beside the live install; the owner's to schedule (item 13) | open |
+| J the weekly chaos drill, first run (the drill VM `KazmaVMs`, 2026-11-09, build 83ad415b, Express install, a stand-in local model so it is ready) | passed: on SQLite -- server killed, ready 28 s after; network cut 2 min, live throughout, ready at once; disk filled, the guard recorded the level in 20 s, server up; operator reload, no crash restart; Docker skipped (no container). Then on Postgres 16 set up by `kazma setup postgres` -- the service stopped: not ready in 3 s, no restart, the guard started the service itself, ready at once (back after 91 s); kill 47 s; reload clean. Found: the database step stopped a container an SQLite install never had (now skipped, `tests/test_chaos_week.py`); the updater's fresh-process step never ran (`tests/test_load_by_path_registers_module.py`) | 2026-11-09 |
+| J soaks: documents 48-72 h, memory several days, Knowledge 72 h | running on this PC since 2026-11-08/09 (documents 48 h, Knowledge and memory 72 h); results recorded when they end | open |
 | Release 0.20.0 | deployed | `624d96b84` |
 
 ---

@@ -6,6 +6,7 @@ import importlib.util
 import json
 import logging
 import subprocess
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -40,6 +41,7 @@ def _measure() -> dict:
     before = _stamp(root)
     spec = importlib.util.spec_from_file_location("_kazma_metrics_measurement", script)
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # a dataclass looks its module up by name
     spec.loader.exec_module(module)
     # Same counting implementation as the CLI/website; bounded git without
     # server credentials or filesystem monitors. No model-supplied command.

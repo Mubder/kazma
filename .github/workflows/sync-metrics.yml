@@ -62,7 +62,7 @@ jobs:
       - name: Install deps
         # The same set as CI's Tests job, so `pytest --collect-only` counts
         # the tests CI runs.
-        run: pip install -e ".[test]" pillow pymupdf sqlite-vec pypdfium2 numpy prometheus-client
+        run: pip install -e ".[test]" pillow "pymupdf>=1.24.0,<2" sqlite-vec pypdfium2 numpy prometheus-client
 
       - name: Generate the metrics
         env:
