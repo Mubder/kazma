@@ -394,7 +394,18 @@ def test_restore_rejects_nonregular_descriptor_before_reading(tmp_path, monkeypa
     target.write_text('{}', encoding='utf-8')
     job = stages._PipelineJob(None, tmp_path, directory, 'fixture')
     effect = dict(files=[], value=job.file_ref(target))
-    monkeypatch.setattr(stages.os, 'fstat', lambda fd: SimpleNamespace(st_mode=stat.S_IFIFO))
+    # Only the artifact reads as a FIFO: ``stages.os`` is the process's os
+    # module, and on Linux other code calls os.fstat meanwhile (a stand-in
+    # with no st_size failed it there, CI 2026-11-09).
+    real_fstat, artifact = os.fstat, os.stat(target)
+
+    def fstat(fd):
+        found = real_fstat(fd)
+        if (found.st_dev, found.st_ino) == (artifact.st_dev, artifact.st_ino):
+            return SimpleNamespace(st_mode=stat.S_IFIFO)
+        return found
+
+    monkeypatch.setattr(stages.os, 'fstat', fstat)
     monkeypatch.setattr(stages.os, 'fdopen', lambda *a, **k: pytest.fail('Nonregular artifact was read'))
     with pytest.raises(AcquisitionError) as error:
         job.restore(effect)

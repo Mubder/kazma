@@ -147,6 +147,12 @@ def test_every_libreoffice_call_goes_through_the_runner():
         assert names.search(old.stdout) and _direct_process_calls(old.stdout)
 
 
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="the hang is Windows-only: after a timeout CPython's subprocess.run calls communicate() "
+           "again there (waiting for the pipes); on POSIX it waits for the process alone "
+           "(Lib/subprocess.py run(); CI on Linux, 2026-11-09)",
+)
 def test_the_old_call_waits_for_the_child():
     # Negative control: what the probe used to do.
     started = time.monotonic()
