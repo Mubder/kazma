@@ -2508,7 +2508,7 @@
                                 <dd x-text="outsideUptime(watchObserver())"></dd>
                                 <dt>{{ t('settings.outside_watch_incidents') }}</dt>
                                 <dd>
-                                    <span x-show="!(watchObserver().incidents_7d || []).length">{{ t('settings.outside_watch_no_incidents') }}</span>
+                                    <span x-show="!(watchObserver().incidents_7d || []).length" x-cloak>{{ t('settings.outside_watch_no_incidents') }}</span>
                                     <ul x-show="(watchObserver().incidents_7d || []).length" x-cloak>
                                         <template x-for="(inc, i) in (watchObserver().incidents_7d || [])" :key="i">
                                             <li><span x-text="outsideCondition(inc.cause)"></span>: <span x-text="outsideIncidentWhen(inc)"></span></li>

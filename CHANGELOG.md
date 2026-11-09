@@ -30,6 +30,23 @@
 - **One card for every alert.** Kazma, its guard and Kazma Watch send the
   same card format, from one catalog of every alert (the first stage of the
   unified alerts plan).
+- **One page per problem.** A database outage was paged three times (Kazma,
+  its guard and Kazma Watch), a full disk and a long restart twice. Each
+  condition now has one owner; the guard's heartbeat tells Kazma Watch what
+  was already paged and whether it reached you, and Kazma Watch pages only
+  what Kazma cannot: the machine or the tunnel gone, the guard silent, or an
+  inside page that reached nobody. Replayed, the three outages send one page
+  and one recovery each.
+- **Settings -> Alerts.** One tab for every alert: where Kazma's alerts go,
+  server status messages, the guard's pager (its chat, its last page, and a
+  test page the running guard sends itself), Kazma Watch (pair from the
+  page, its uptime and incidents, a test page, the time zone its cards use
+  and an email recipient), whether notices go to the chat apps or only the
+  bell, and the last seven days of alerts from all three senders.
+- **Cloudflare's own alerts through Kazma Watch.** Tunnel health, a deleted
+  tunnel, expiring Access tokens and Worker errors arrive as the same card,
+  joined to Kazma Watch's own incident when they are about the same thing.
+  It needs a webhook destination added in the Cloudflare dashboard.
 
 ## 0.21.1 — Any provider, a setup guide, and setup on a fresh Windows (2026-11-08)
 
