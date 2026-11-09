@@ -2401,6 +2401,12 @@
                 <p class="form-hint" x-show="alerts.loaded && !alerts.routes.length" x-cloak>{{ t('settings.alerts.routes_none') }}</p>
                 <p class="form-hint" x-show="alerts.loaded && alerts.routeNames.some(r => !alerts.ready[r])" x-cloak>{{ t('settings.alerts.routes_setup') }}
                     <a href="/settings?tab=connectors" @click.prevent="onTabChange('connectors')">{{ t('settings.platform_connectors') }}</a></p>
+                <div class="form-group">
+                    <label class="form-label" for="alerts-group-chat">{{ t('settings.alerts.group_chat') }}</label>
+                    <input id="alerts-group-chat" type="text" class="form-input" dir="ltr" translate="no" inputmode="text" autocomplete="off"
+                           x-model.trim="alerts.groupChat" placeholder="-1001234567890">
+                    <div class="form-hint">{{ t('settings.alerts.group_chat_hint') }}</div>
+                </div>
                 <div class="alerts-actions">
                     <button class="btn btn-secondary" type="button" id="alerts-test-alert" @click="sendTestAlert()" :disabled="opsTestAlert.sending"
                             x-text="opsTestAlert.sending ? t('settings.hub.test_alert_sending') : t('settings.hub.test_alert')"></button>

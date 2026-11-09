@@ -136,6 +136,16 @@ function component(source, extra = {}) {
   app.alerts.watchEmail = "owner@example.com";
   ok("control: without it Save stays off", !app.alertsDirty);
 
+  // The alerts group is one of the page's fields: Save sends it.
+  ({ app, sent } = component(SOURCE));
+  await app.loadAlerts();
+  app.alerts.groupChat = "-1009876543210";
+  ok("a typed alerts group turns Save on", app.alertsDirty);
+  await app.saveAlerts();
+  const putGroup = sent.find((s) => s.url === "/api/settings/alerts");
+  ok("Save sends the alerts group", putGroup && JSON.stringify(putGroup.init.body) === JSON.stringify({ group_chat: "-1009876543210" }),
+    putGroup && putGroup.init.body);
+
   // A test page with no address told says what to do.
   ({ app } = component(SOURCE, { paired: true }));
   await app.loadAlerts();

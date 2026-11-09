@@ -31,7 +31,7 @@
             loaded: false, failed: false, saving: false,
             routes: [], routeNames: ['telegram', 'telegram-group', 'discord', 'slack'], ready: {},
             lifecycle: [], lifecycleNames: ['started', 'startup_failed', 'starting', 'shutting_down'],
-            noticesChoice: 'chats', guardChat: '', guard: null, watch: null, watchEmail: '',
+            noticesChoice: 'chats', groupChat: '', guardChat: '', guard: null, watch: null, watchEmail: '',
         },
         alertsSnapshot: '',
         _watchEmailSaved: '',
@@ -60,6 +60,7 @@
             a.routeNames = Array.isArray(data.routes.names) ? data.routes.names : a.routeNames;
             a.routes = Array.isArray(data.routes.chosen) ? data.routes.chosen.slice() : [];
             a.ready = data.routes.ready || {};
+            a.groupChat = String(data.routes.group_chat || '');
             a.lifecycleNames = (data.lifecycle && Array.isArray(data.lifecycle.names)) ? data.lifecycle.names : a.lifecycleNames;
             a.lifecycle = (data.lifecycle && Array.isArray(data.lifecycle.events)) ? data.lifecycle.events.slice() : [];
             a.noticesChoice = data.notices_to_chats === false ? 'bell' : 'chats';
@@ -75,6 +76,7 @@
                 a.routes = edits.routes.slice();
                 a.lifecycle = edits.lifecycle_events.slice();
                 a.noticesChoice = edits.notices_to_chats ? 'chats' : 'bell';
+                a.groupChat = edits.group_chat;
                 a.guardChat = edits.guard_chat;
             }
             if (typedEmail !== null) a.watchEmail = typedEmail;
@@ -87,6 +89,7 @@
                 routes: a.routeNames.filter(r => a.routes.includes(r)),
                 lifecycle_events: a.lifecycleNames.filter(ev => a.lifecycle.includes(ev)),
                 notices_to_chats: a.noticesChoice !== 'bell',
+                group_chat: String(a.groupChat || '').trim(),
                 guard_chat: String(a.guardChat || '').trim(),
             };
         },
@@ -118,6 +121,7 @@
             a.routes = (snap.routes || []).slice();
             a.lifecycle = (snap.lifecycle_events || []).slice();
             a.noticesChoice = snap.notices_to_chats === false ? 'bell' : 'chats';
+            a.groupChat = String(snap.group_chat || '');
             a.guardChat = String(snap.guard_chat || '');
             a.watchEmail = this._watchEmailSaved;
         },
@@ -171,7 +175,9 @@
             if (!this.alerts.ready[route]) return _k('settings.alerts.route_not_set_up', 'Not set up yet');
             return ({
                 telegram: _k('settings.alerts.route_telegram', 'Your chat with Kazma'),
-                'telegram-group': _k('settings.alerts.route_group', 'The group Kazma posts to'),
+                'telegram-group': this.alerts.groupChat
+                    ? _k('settings.alerts.route_alerts_group', 'Your alerts group (below)')
+                    : _k('settings.alerts.route_group', 'The group Kazma posts to'),
                 discord: _k('settings.alerts.route_discord', 'The Discord channel Kazma posts to'),
                 slack: _k('settings.alerts.route_slack', 'The Slack channel Kazma posts to'),
             })[route] || '';

@@ -364,6 +364,13 @@ def _ops_channels() -> list[str]:
     return []
 
 
+#: The Telegram group the "Telegram (group)" route sends Kazma's alerts to
+#: (Settings -> Alerts). Unset, that route uses the swarm's output group, as
+#: before; set, the swarm's results stay where they are and only the alerts
+#: move (2026-11-09: one group for Kazma's and Kazma Watch's alerts).
+ALERTS_GROUP_KEY = "notifications.ops.telegram_group_chat"
+
+
 def _telegram_direct(text: str, *, group_route: bool = False) -> bool:
     """Send straight to Telegram, bypassing the in-process bus.
 
@@ -387,10 +394,13 @@ def _telegram_direct(text: str, *, group_route: bool = False) -> bool:
             or str(cs.get("connectors.telegram.swarm_chat_id", "") or "").strip()
             or str(cs.get("swarm.group_chat_id", "") or "").strip()
         )
-        # 'telegram-group' route (2026-09-03): deliver to the configured
-        # group via the dedicated swarm bot token when present (the group
-        # route's own bot), else the main bot token.
-        if group_route:
+        # 'telegram-group' route (2026-09-03): deliver to the alerts group
+        # when one is set (Kazma's own bot), else to the swarm's output group
+        # via its own bot token when present, else the main bot token.
+        alerts_group = str(cs.get(ALERTS_GROUP_KEY, "") or "").strip() if group_route else ""
+        if alerts_group:
+            chat = alerts_group
+        elif group_route:
             ot = cs.get("swarm.output_target", None)
             if isinstance(ot, dict) and ot.get("enabled") and ot.get("chat_id"):
                 chat = str(ot["chat_id"])

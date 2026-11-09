@@ -68,10 +68,13 @@ def _route_states(config_store: Any) -> dict[str, bool]:
             logger.debug("[alerts] %s not read", key, exc_info=True)
             return False
 
+    from kazma_core.observability.ops_alerts import ALERTS_GROUP_KEY
+
     group = config_store.get("swarm.output_target") or {}
     return {
         "telegram": has("connectors.telegram.token"),
-        "telegram-group": isinstance(group, dict) and bool(group.get("enabled") and group.get("chat_id")),
+        "telegram-group": (has("connectors.telegram.token") and has(ALERTS_GROUP_KEY))
+        or (isinstance(group, dict) and bool(group.get("enabled") and group.get("chat_id"))),
         "discord": has("connectors.discord.token"),
         "slack": has("connectors.slack.token"),
     }
@@ -88,6 +91,8 @@ def _alerts_state(config_store: Any) -> dict[str, Any]:
         watch_settings_wanted,
     )
 
+    from kazma_core.observability.ops_alerts import ALERTS_GROUP_KEY
+
     ready = _route_states(config_store)
     fallback = str(config_store.get("swarm.group_chat_id") or "").strip()
     raw_events = config_store.get(EVENTS_KEY)
@@ -101,6 +106,7 @@ def _alerts_state(config_store: Any) -> dict[str, Any]:
                        if r in _ROUTES],
             "names": list(_ROUTES),
             "ready": ready,
+            "group_chat": str(config_store.get(ALERTS_GROUP_KEY) or ""),
         },
         "lifecycle": {"events": events, "names": list(EVENT_NAMES)},
         "notices_to_chats": notices_to_chats(config_store),
@@ -123,12 +129,14 @@ def _save_alerts(config_store: Any, body: dict[str, Any]) -> dict[str, Any]:
     """Validate every field the body names, then write them in one batch.
     Raises :class:`SettingRejected` naming the field."""
     from kazma_core.lifecycle_notifier import EVENTS_KEY
+    from kazma_core.observability.ops_alerts import ALERTS_GROUP_KEY
 
     items: list[tuple[str, Any, str]] = []
     fields = {
         "routes": "notifications.ops.channels",
         "lifecycle_events": EVENTS_KEY,
         "notices_to_chats": "notifications.ops.notices_to_chats",
+        "group_chat": ALERTS_GROUP_KEY,
         "guard_chat": "guard.telegram.chat_id",
     }
     saved: list[str] = []
@@ -149,6 +157,8 @@ def _save_alerts(config_store: Any, body: dict[str, Any]) -> dict[str, Any]:
             items.append(("notifications.lifecycle.events", value, category or "notifications"))
         elif field == "notices_to_chats":
             items.append(("notifications.ops.notices_to_chats", value, category or "notifications"))
+        elif field == "group_chat":
+            items.append((ALERTS_GROUP_KEY, value, category or "notifications"))
         else:
             items.append(("guard.telegram.chat_id", value, category or "guard"))
     if items:
@@ -182,8 +192,8 @@ def register_alert_routes(router: APIRouter, config_store: Any) -> None:
     @router.put("/api/settings/alerts", dependencies=[Depends(verify_same_origin)])
     async def api_put_alerts(request: Request) -> Any:
         """Save the fields the body names (``routes``, ``lifecycle_events``,
-        ``notices_to_chats``, ``guard_chat``); a value a field cannot hold is
-        refused with what it may hold, and nothing is written."""
+        ``notices_to_chats``, ``group_chat``, ``guard_chat``); a value a field
+        cannot hold is refused with what it may hold, and nothing is written."""
         try:
             body = await read_json(request)
         except InvalidJsonBody:
