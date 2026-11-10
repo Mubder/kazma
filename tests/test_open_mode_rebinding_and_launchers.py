@@ -125,6 +125,10 @@ def _client(peer: tuple[str, int] = LOOPBACK, forwarded: bool = False) -> TestCl
     def write() -> dict[str, str]:
         return {"ok": "written"}
 
+    @app.get("/api/chat/probe")
+    def chat() -> dict[str, str]:
+        return {"ok": "chat"}
+
     app.middleware("http")(create_csrf_middleware())
     app.middleware("http")(auth.create_auth_middleware())
     return TestClient(ForwardedHeadersMiddleware(app) if forwarded else app, client=peer)
@@ -160,11 +164,11 @@ def test_the_public_demo_through_its_proxy_keeps_working(monkeypatch: pytest.Mon
     monkeypatch.setenv("KAZMA_DEMO_MODE", "1")
     # fly.io / a Docker port: the peer is not loopback.
     assert _client(peer=("172.17.0.1", 5000)).get(
-        "/api/settings/probe", headers={"host": "kazma-demo.fly.dev"}).status_code == 200
+        "/api/chat/probe", headers={"host": "kazma-demo.fly.dev"}).status_code == 200
     # A declared same-host proxy (a tunnel): the peer is the proxy.
     monkeypatch.setenv("KAZMA_TRUSTED_PROXIES", "127.0.0.1")
     assert _client(forwarded=True).get(
-        "/api/settings/probe",
+        "/api/chat/probe",
         headers={"host": "demo.example.org", "x-forwarded-for": "203.0.113.9"}).status_code == 200
 
 

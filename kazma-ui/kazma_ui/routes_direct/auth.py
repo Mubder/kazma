@@ -358,11 +358,19 @@ def register_auth_routes(self: Any) -> None:
         """Return current principal (role/username) for UI chrome."""
         from kazma_core.security.boot_guard import env_flag
 
-        from kazma_ui.auth import get_kazma_secret, get_request_principal, is_authenticated
+        from kazma_ui.auth import (
+            DEMO_VISITOR_ROLE,
+            get_kazma_secret,
+            get_request_principal,
+            is_authenticated,
+        )
 
-        # Public demo mode: report as an authenticated demo visitor.
+        # Public demo mode: report as an authenticated demo visitor, with the
+        # role the auth gate gives one (not admin: security audit 2026-11-10).
         if env_flag("KAZMA_DEMO_MODE"):
-            return _JSONResponse({"authenticated": True, "source": "demo", "role": "admin"})
+            return _JSONResponse(
+                {"authenticated": True, "source": "demo", "role": DEMO_VISITOR_ROLE}
+            )
         secret = get_kazma_secret()
         if secret and not is_authenticated(request, secret):
             return _JSONResponse({"authenticated": False}, status_code=401)

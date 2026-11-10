@@ -1417,6 +1417,28 @@ def require_kazma_secret(
 
 # ── Middleware Factory ──────────────────────────────────────────────────
 
+#: The role every visitor of a ``KAZMA_DEMO_MODE`` instance has: enough to
+#: chat, approve its own tool calls and use the IDE, never an admin surface.
+DEMO_VISITOR_ROLE = "operator"
+
+
+async def _demo_visitor_may(request: Request, path: str, expected: str) -> bool:
+    """Whether a demo request may reach *path*.
+
+    API routes only: a page is a shell whose calls come back here. A route
+    the demo visitor's role may not reach needs the shared secret or an
+    admin session -- with no secret configured, nobody reaches it.
+    """
+    from kazma_core.security.platform_rbac import role_allows
+
+    if not path.startswith("/api/") or role_allows(DEMO_VISITOR_ROLE, path, request.method):
+        return True
+    if not expected or not await asyncio.to_thread(is_authenticated, request, expected):
+        return False
+    principal = await asyncio.to_thread(get_request_principal, request) or {}
+    return principal.get("source") == "secret" or principal.get("role") == "admin"
+
+
 
 def create_auth_middleware(
     secret: str | None = None,
@@ -1483,6 +1505,16 @@ def create_auth_middleware(
                             "KAZMA_PRODUCTION — refusing to disable auth."
                         )
                     },
+                )
+            # A demo visitor is an operator: chat, approvals, the IDE. What
+            # only an admin may do -- MCP servers (a command on the host),
+            # settings, API tokens -- needs a real admin credential (security
+            # audit 2026-11-10: demo mode left them open to every visitor).
+            if not await _demo_visitor_may(request, path, expected):
+                return Response(
+                    content='{"detail":"Not available in the demo"}',
+                    status_code=403,
+                    media_type="application/json",
                 )
             return await call_next(request)
 
