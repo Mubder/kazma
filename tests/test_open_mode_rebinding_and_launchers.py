@@ -183,7 +183,7 @@ def test_a_secret_install_is_untouched(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_without_the_check_the_rebound_page_reached_the_api(monkeypatch: pytest.MonkeyPatch) -> None:
     """Negative control: the middleware without the Host check."""
     monkeypatch.setenv("KAZMA_AUTH_DISABLED", "1")
-    monkeypatch.setattr(auth, "open_mode_host_refused", lambda request: False)
+    monkeypatch.setattr(auth, "_open_mode_host_refused", lambda request: False)
     client = _client()
     assert client.get("/api/settings/probe", headers=REBOUND).status_code == 200
     assert client.post("/api/settings/probe", headers=REBOUND).status_code == 200

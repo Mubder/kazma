@@ -42,6 +42,36 @@ def _public_dns(monkeypatch):
     monkeypatch.setattr("kazma_core.security.ssrf._resolve_host_ips", lambda _host: ["93.184.216.34"])
 
 
+def _fetched(
+    data: bytes,
+    content_type: str = "image/png",
+    content_length: str | None = None,
+    *,
+    truncated: bool = False,
+    status: int = 200,
+    raises: Exception | None = None,
+):
+    """Stand in for ``web_acquire.http.fetch_public``, the download's seam
+    since the security audit of 2026-11-10 (it validates and pins every hop
+    and bounds the body; its own tests hold that). *truncated* is what it
+    reports for a body past ``max_bytes``."""
+    import httpx
+    from kazma_core.web_acquire.http import HttpFetch
+
+    headers = {"content-type": content_type}
+    if content_length is not None:
+        headers["content-length"] = content_length
+
+    async def _fetch(url: str, **kwargs):
+        if raises is not None:
+            raise raises
+        response = httpx.Response(status, headers=headers, content=data,
+                                  request=httpx.Request("GET", url))
+        return HttpFetch(response, "", url, truncated)
+
+    return patch("kazma_core.web_acquire.http.fetch_public", _fetch)
+
+
 # ═══════════════════════════════════════════════════════════════════
 # Helpers
 # ═══════════════════════════════════════════════════════════════════
@@ -243,35 +273,9 @@ class TestUrlImage:
     @pytest.mark.asyncio
     async def test_url_download_and_analyze(self):
         png_bytes = _make_png_bytes(16, 16)
-
-        # Mock httpx streaming response
-        mock_response = AsyncMock()
-        mock_response.status_code = 200
-        mock_response.raise_for_status = MagicMock()
-        mock_response.headers = {"content-type": "image/png", "content-length": str(len(png_bytes))}
-        mock_response.aiter_bytes = MagicMock(
-            return_value=aiter_mock([png_bytes])
-        )
-
-        mock_stream_ctx = AsyncMock()
-        mock_stream_ctx.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_stream_ctx.__aexit__ = AsyncMock(return_value=False)
-
-        mock_client = AsyncMock()
-        mock_client.stream = MagicMock(return_value=mock_stream_ctx)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-
-        mock_httpx = MagicMock()
-        mock_httpx.AsyncClient.return_value = mock_client
-        mock_httpx.HTTPStatusError = type("HTTPStatusError", (Exception,), {})
-        mock_httpx.ConnectError = type("ConnectError", (Exception,), {})
-        mock_httpx.TimeoutException = type("TimeoutException", (Exception,), {})
-
         mock_provider = _mock_llm_provider("A 16x16 red square from the web.")
 
-        with stub_modules({"httpx": mock_httpx}), \
-             patch("kazma_core.http_pool.get_http_client", return_value=mock_client), \
+        with _fetched(png_bytes, "image/png", str(len(png_bytes))), \
              patch(
                 "kazma_core.tools.vision_analyze._get_llm_provider",
                 return_value=(mock_provider, "test-active-model", "active-model"),
@@ -283,30 +287,28 @@ class TestUrlImage:
     @pytest.mark.asyncio
     async def test_url_download_failure(self):
         """Graceful error when URL download fails."""
-        mock_httpx = MagicMock()
-        mock_client = AsyncMock()
-
         import httpx as real_httpx
 
-        # Simulate ConnectError on stream context entry
-        mock_stream_ctx = AsyncMock()
-        mock_stream_ctx.__aenter__ = AsyncMock(
-            side_effect=real_httpx.ConnectError("Connection refused")
-        )
-        mock_stream_ctx.__aexit__ = AsyncMock(return_value=False)
+        with _fetched(b"", raises=real_httpx.ConnectError("Connection refused")):
+            result = await analyze_image("https://broken.example.com/img.png")
 
-        mock_client.stream = MagicMock(return_value=mock_stream_ctx)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_httpx.AsyncClient.return_value = mock_client
+        assert result.startswith("Error:") and "Could not connect" in result
 
-        with stub_modules({"httpx": mock_httpx}), \
-             patch("kazma_core.http_pool.get_http_client", return_value=mock_client):
-            # Patch the real httpx classes used in the except blocks
-            with patch("kazma_core.tools.vision_analyze.httpx", mock_httpx, create=True):
-                result = await analyze_image("https://broken.example.com/img.png")
+    @pytest.mark.asyncio
+    async def test_a_refused_redirect_is_blocked(self):
+        """A redirect to an internal address (refused by the acquisition
+        layer, audit F-08) is the same "Blocked" answer as a private URL."""
+        from kazma_core.security.ssrf import SSRFError
 
-        assert result.startswith("Error:")
+        with _fetched(b"", raises=SSRFError("Blocked URL 'http://169.254.169.254/'")):
+            with pytest.raises(ValueError, match="Blocked"):
+                await _download_image("https://example.com/redirects-to-metadata.png")
+
+    @pytest.mark.asyncio
+    async def test_an_http_error_is_said(self):
+        with _fetched(b"nope", "text/plain", status=404):
+            with pytest.raises(ValueError, match="HTTP 404"):
+                await _download_image("https://example.com/missing.png")
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -460,100 +462,53 @@ class TestVisionNotAvailable:
 # ═══════════════════════════════════════════════════════════════════
 
 
-def _make_mock_stream_response(
-    data: bytes,
-    content_type: str = "image/png",
-    content_length: str | None = None,
-):
-    """Build a mock httpx streaming response."""
-    resp = AsyncMock()
-    resp.status_code = 200
-    resp.raise_for_status = MagicMock()
-    headers = {"content-type": content_type}
-    if content_length is not None:
-        headers["content-length"] = content_length
-    resp.headers = headers
-    resp.aiter_bytes = MagicMock(
-        return_value=aiter_mock([data])
-    )
-    return resp
-
-
-async def aiter_mock(chunks):
-    """Async iterator yielding byte chunks."""
-    for chunk in chunks:
-        yield chunk
-
-
 class TestStreamDownloadSizeCap:
-    """Tests for stream-based download size enforcement (gw-064)."""
+    """Tests for download size enforcement (gw-064), through the bounded
+    acquisition layer since 2026-11-10."""
 
     @pytest.mark.asyncio
     async def test_content_length_too_large_raises(self):
         """Rejects download when Content-Length exceeds MAX_DOWNLOAD_BYTES."""
         small_data = b"\x89PNG" + b"\x00" * 100
 
-        mock_resp = _make_mock_stream_response(
-            small_data,
-            content_length=str(MAX_DOWNLOAD_BYTES + 1),
-        )
-
-        mock_stream_ctx = AsyncMock()
-        mock_stream_ctx.__aenter__ = AsyncMock(return_value=mock_resp)
-        mock_stream_ctx.__aexit__ = AsyncMock(return_value=False)
-
-        mock_client = AsyncMock()
-        mock_client.stream = MagicMock(return_value=mock_stream_ctx)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-
-        with patch("kazma_core.http_pool.get_http_client", return_value=mock_client):
+        with _fetched(small_data, content_length=str(MAX_DOWNLOAD_BYTES + 1)):
             with pytest.raises(ValueError, match="too large"):
                 await _download_image("https://example.com/huge.png")
 
     @pytest.mark.asyncio
     async def test_stream_bytes_exceed_limit_raises(self):
-        """Rejects download when streamed bytes exceed MAX_DOWNLOAD_BYTES."""
-        # Create data that's small but we patch MAX_DOWNLOAD_BYTES to be tiny
-        data = b"x" * 200
-
-        mock_resp = _make_mock_stream_response(data)
-
-        mock_stream_ctx = AsyncMock()
-        mock_stream_ctx.__aenter__ = AsyncMock(return_value=mock_resp)
-        mock_stream_ctx.__aexit__ = AsyncMock(return_value=False)
-
-        mock_client = AsyncMock()
-        mock_client.stream = MagicMock(return_value=mock_stream_ctx)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-
-        with patch("kazma_core.http_pool.get_http_client", return_value=mock_client), \
-             patch("kazma_core.tools.vision_analyze.MAX_DOWNLOAD_BYTES", 100):
+        """Rejects download when the body ran past the cap (the bounded
+        reader stopped and reported it cut)."""
+        with _fetched(b"x" * 100, truncated=True):
             with pytest.raises(ValueError, match="exceeds"):
                 await _download_image("https://example.com/stealth.png")
+
+    @pytest.mark.asyncio
+    async def test_the_cap_reaches_the_reader(self):
+        """The bounded reader is asked for MAX_DOWNLOAD_BYTES, no more."""
+        from kazma_core.web_acquire.http import HttpFetch
+
+        import httpx
+
+        asked: dict = {}
+
+        async def _fetch(url: str, **kwargs):
+            asked.update(kwargs)
+            response = httpx.Response(200, headers={"content-type": "image/png"},
+                                      content=_make_png_bytes(4, 4),
+                                      request=httpx.Request("GET", url))
+            return HttpFetch(response, "", url, False)
+
+        with patch("kazma_core.web_acquire.http.fetch_public", _fetch):
+            await _download_image("https://example.com/small.png")
+        assert asked["max_bytes"] == MAX_DOWNLOAD_BYTES
 
     @pytest.mark.asyncio
     async def test_no_content_length_small_file_succeeds(self):
         """Succeeds when Content-Length is absent but file is small."""
         png_data = _make_png_bytes(4, 4)
 
-        mock_resp = _make_mock_stream_response(
-            png_data,
-            content_type="image/png",
-            content_length=None,  # no Content-Length header
-        )
-
-        mock_stream_ctx = AsyncMock()
-        mock_stream_ctx.__aenter__ = AsyncMock(return_value=mock_resp)
-        mock_stream_ctx.__aexit__ = AsyncMock(return_value=False)
-
-        mock_client = AsyncMock()
-        mock_client.stream = MagicMock(return_value=mock_stream_ctx)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-
-        with patch("kazma_core.http_pool.get_http_client", return_value=mock_client):
+        with _fetched(png_data, "image/png", None):
             image_bytes, mime = await _download_image("https://example.com/small.png")
 
         assert image_bytes == png_data
@@ -564,22 +519,7 @@ class TestStreamDownloadSizeCap:
         """Succeeds when Content-Length is present and within limit."""
         png_data = _make_png_bytes(8, 8)
 
-        mock_resp = _make_mock_stream_response(
-            png_data,
-            content_type="image/jpeg",
-            content_length=str(len(png_data)),
-        )
-
-        mock_stream_ctx = AsyncMock()
-        mock_stream_ctx.__aenter__ = AsyncMock(return_value=mock_resp)
-        mock_stream_ctx.__aexit__ = AsyncMock(return_value=False)
-
-        mock_client = AsyncMock()
-        mock_client.stream = MagicMock(return_value=mock_stream_ctx)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-
-        with patch("kazma_core.http_pool.get_http_client", return_value=mock_client):
+        with _fetched(png_data, "image/jpeg", str(len(png_data))):
             image_bytes, mime = await _download_image("https://example.com/photo.jpg")
 
         assert image_bytes == png_data

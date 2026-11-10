@@ -29,7 +29,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from kazma_core.security import oidc as oidc_mod
-from kazma_core.security.oidc import OidcConfig, oidc_role_from_claims, oidc_sign_in_allowed
+from kazma_core.security.oidc import OidcConfig, oidc_role_from_claims
+from kazma_core.security.oidc import _sign_in_allowed as oidc_sign_in_allowed
 
 ISSUER = "https://idp.example"
 
@@ -178,7 +179,7 @@ async def test_an_unverified_email_identity_is_refused(idp) -> None:
 
 async def test_control_without_the_allowlist_the_stranger_got_in(idp, monkeypatch) -> None:
     monkeypatch.setenv("KAZMA_OIDC_ALLOWED_DOMAINS", "team.example")
-    monkeypatch.setattr(oidc_mod, "oidc_sign_in_allowed", lambda claims, cfg: True)
+    monkeypatch.setattr(oidc_mod, "_sign_in_allowed", lambda claims, cfg: True)
     result = await _sign_in(idp, {"sub": "b", "email": "me@elsewhere.example"})
     assert result["role"] == "operator"
 

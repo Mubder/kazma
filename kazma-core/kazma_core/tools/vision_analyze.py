@@ -196,66 +196,48 @@ async def _download_image(url: str) -> tuple[bytes, str]:
     Raises:
         ValueError: if the download fails or the content type is unsupported.
     """
-    if not _is_safe_url(url):
+    # A DNS lookup: off the loop. Kept as the early, readable refusal; the
+    # fetch below validates and pins every hop again.
+    if not await asyncio.to_thread(_is_safe_url, url):
         raise ValueError(f"Blocked potentially unsafe URL: {url}")
-    from kazma_core.http_pool import get_http_client
-    from kazma_core.security.ssrf import SSRFError, resolve_redirects
+    from kazma_core.security.ssrf import SSRFError
+    from kazma_core.web_acquire.http import fetch_public
 
-    headers = {"User-Agent": "KazmaBot/1.0 (vision analyzer)"}
+    headers ={"User-Agent": "KazmaBot/1.0 (vision analyzer)"}
     try:
-        client = get_http_client()
-        # Resolve the redirect chain with every hop SSRF-checked, then fetch
-        # the final URL with redirects OFF (audit F-08). Following redirects
-        # inside the fetch bypassed the guard entirely: a public URL could
-        # 302 to 169.254.169.254 and the response bytes came back to the
-        # caller.
-        try:
-            fetch_url = await resolve_redirects(
-                client, url, timeout=REQUEST_TIMEOUT, headers=headers
-            )
-        except SSRFError:
-            raise
-        except Exception:
-            # HEAD unsupported / probe failed — fall back to the original URL
-            # with redirects still disabled, which is fail-closed.
-            fetch_url = url
-        async with client.stream(
-            "GET",
-            fetch_url,
-            follow_redirects=False,
+        # The acquisition layer's GET (security audit 2026-11-10): every hop
+        # of the redirect chain validated and the connection PINNED to the
+        # address that was validated, the peer checked before the body is
+        # read, the body bounded. The pooled client re-resolved the name for
+        # the real request after the DNS-time check, so a rebinding name
+        # made Kazma send one blind GET to an internal address before the
+        # peer check could refuse it.
+        got = await fetch_public(
+            url,
+            max_bytes=MAX_DOWNLOAD_BYTES,
             timeout=REQUEST_TIMEOUT,
             headers=headers,
-        ) as resp:
-            # Post-connect peer check (audit 2026-09-16 F-6). The guard above
-            # is DNS-time only; this one sees the IP we actually reached.
-            from kazma_core.security.ssrf import assert_peer_public
+        )
+        resp = got.response
+        if resp.status_code >= 400:
+            raise ValueError(f"Failed to download image: HTTP {resp.status_code}")
 
-            assert_peer_public(resp, url=fetch_url)
-            resp.raise_for_status()
-
-            # Check Content-Length header first (may be absent)
-            content_length = int(resp.headers.get("content-length", 0))
-            if content_length > MAX_DOWNLOAD_BYTES:
-                raise ValueError(
-                    f"Image too large ({content_length / 1_048_576:.1f} MB). "
-                    f"Max {MAX_DOWNLOAD_BYTES / 1_048_576:.0f} MB."
-                )
-
-            # Stream-based size check — protects against missing Content-Length
-            chunks: list[bytes] = []
-            total_bytes = 0
-            async for chunk in resp.aiter_bytes(chunk_size=65536):
-                total_bytes += len(chunk)
-                if total_bytes > MAX_DOWNLOAD_BYTES:
-                    raise ValueError(
-                        f"Image download exceeds {MAX_DOWNLOAD_BYTES / 1_048_576:.0f} MB limit "
-                        f"(downloaded {total_bytes / 1_048_576:.1f} MB so far)."
-                    )
-                chunks.append(chunk)
-            image_bytes = b"".join(chunks)
-            # Capture inside the stream context — reading resp.headers after
-            # close only works because httpx retains received headers.
-            content_type = resp.headers.get("content-type", "")
+        # A declared size past the cap, or a body the reader had to cut.
+        try:
+            content_length = int(resp.headers.get("content-length", 0) or 0)
+        except ValueError:
+            content_length = 0
+        if content_length > MAX_DOWNLOAD_BYTES:
+            raise ValueError(
+                f"Image too large ({content_length / 1_048_576:.1f} MB). "
+                f"Max {MAX_DOWNLOAD_BYTES / 1_048_576:.0f} MB."
+            )
+        if got.truncated:
+            raise ValueError(
+                f"Image download exceeds {MAX_DOWNLOAD_BYTES / 1_048_576:.0f} MB limit."
+            )
+        image_bytes = resp.content
+        content_type = resp.headers.get("content-type", "")
 
         # Validate the MIME instead of silently sending mismatched bytes as
         # PNG (an SVG labeled image/png got rejected by vision endpoints).
@@ -279,8 +261,11 @@ async def _download_image(url: str) -> tuple[bytes, str]:
         raise ValueError(
             f"Could not connect to {url}. Check the URL and your connection."
         ) from exc
-    except httpx.TimeoutException as exc:
+    except (httpx.TimeoutException, TimeoutError) as exc:
         raise ValueError(f"Request to {url} timed out.") from exc
+    except SSRFError as exc:
+        # A redirect or a resolved address the acquisition layer refused.
+        raise ValueError(f"Blocked potentially unsafe URL: {url}") from exc
 
 
 def _build_vision_messages(

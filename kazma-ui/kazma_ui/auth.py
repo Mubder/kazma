@@ -600,10 +600,7 @@ def _host_cannot_be_rebound(request: Request) -> bool:
     """
     if _host_is_local_name(request):
         return True
-    try:
-        host = (request.headers.get("host") or "").strip().lower()
-    except Exception:
-        return False
+    host = (request.headers.get("host") or "").strip().lower()
     if not host:
         return True  # no browser sends a request without one
     if host.startswith("["):
@@ -619,20 +616,18 @@ def _host_cannot_be_rebound(request: Request) -> bool:
         pass
     if "." not in hostname or hostname.endswith(_RESERVED_LOCAL_SUFFIXES):
         return True
-    try:
-        from urllib.parse import urlsplit
+    from urllib.parse import urlsplit
 
-        from kazma_ui.browser_origins import configured_browser_origins
+    from kazma_ui.browser_origins import configured_browser_origins
 
-        for origin in configured_browser_origins():
-            if (urlsplit(origin).hostname or "").lower() == hostname:
-                return True
-    except Exception:
-        logger.debug("[auth] declared browser origins unreadable", exc_info=True)
-    return False
+    # The environment's declared origins (no store read): already normalized.
+    return any(
+        (urlsplit(origin).hostname or "").lower() == hostname
+        for origin in configured_browser_origins()
+    )
 
 
-def open_mode_host_refused(request: Any) -> bool:
+def _open_mode_host_refused(request: Any) -> bool:
     """Refuse a DNS-rebinding request while sign-in is off.
 
     With sign-in off (``KAZMA_AUTH_DISABLED``, ``KAZMA_DEMO_MODE``, an empty
@@ -1116,7 +1111,7 @@ def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> boo
                 "[SECURITY] KAZMA_DEV_WS_BYPASS is set but KAZMA_PRODUCTION=1 "
                 "— refusing to bypass WebSocket auth"
             )
-        elif open_mode_host_refused(websocket):
+        elif _open_mode_host_refused(websocket):
             return False
         else:
             return True
@@ -1124,7 +1119,7 @@ def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> boo
     if not expected:
         # Sign-in off: still not for a page that rebound its own domain to
         # this machine (security audit 2026-11-10).
-        return not open_mode_host_refused(websocket)
+        return not _open_mode_host_refused(websocket)
 
     # Loopback peers: trusted for single-operator local use.
     # The browser authenticates via the same-origin kazma-session cookie; the
@@ -1505,7 +1500,7 @@ def create_auth_middleware(
         # no credential stands between a page and the API, so a page that
         # rebound its own domain to 127.0.0.1 is refused by its Host
         # (security audit 2026-11-10). Request headers only, no store read.
-        if (not expected or env_flag("KAZMA_DEMO_MODE")) and open_mode_host_refused(request):
+        if (not expected or env_flag("KAZMA_DEMO_MODE")) and _open_mode_host_refused(request):
             return _rebinding_refusal(request)
 
         # 0. Public demo mode: KAZMA_DEMO_MODE bypasses the secret gate so a

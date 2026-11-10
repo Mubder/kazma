@@ -43,7 +43,6 @@ __all__ = [
     "fetch_discovery",
     "oidc_configured",
     "oidc_role_from_claims",
-    "oidc_sign_in_allowed",
     "oidc_tenant_from_claims",
 ]
 
@@ -129,7 +128,7 @@ def _email_of(claims: dict[str, Any]) -> str:
     return email
 
 
-def oidc_sign_in_allowed(claims: dict[str, Any], cfg: OidcConfig) -> bool:
+def _sign_in_allowed(claims: dict[str, Any], cfg: OidcConfig) -> bool:
     """Whether the allowlists admit this account (always, with none set)."""
     if not cfg.restricted:
         return True
@@ -374,7 +373,7 @@ async def exchange_code(code: str, state: str, *, bound_state: str) -> dict[str,
         or not claims.get("sub") or not claims.get("preferred_username")
     )
     email = _email_of(claims) if email_counts else str(claims.get("email") or "").strip()
-    if not oidc_sign_in_allowed(claims, cfg):
+    if not _sign_in_allowed(claims, cfg):
         logger.warning("[oidc] refused a sign-in the allowlists do not name")
         raise PermissionError("This account may not sign in to Kazma")
 
