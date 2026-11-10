@@ -63,6 +63,17 @@ def resolve_voice_session(session_id: str) -> tuple[Any, str] | None:
     session = store.get(sid)  # tenant-scoped: a foreign session is None
     if session is None:
         return None
+    # The rule /ws/chat and the chat controls follow
+    # (thread_ownership.resolve_caller_thread): a thread another tenant's
+    # session is also bound to is nobody's to drive.
+    try:
+        exclusive = not session.thread_id or store.thread_is_exclusive(session.thread_id)
+    except Exception:
+        logger.warning("[voice] thread ownership check failed -- refusing", exc_info=True)
+        return None
+    if not exclusive:
+        logger.warning("[voice] refused a chat whose thread is not the caller's alone")
+        return None
     if not session.thread_id:
         # Web session_id == LangGraph thread_id (same rule as the SSE route).
         session.thread_id = sid

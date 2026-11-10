@@ -2965,7 +2965,9 @@ def test_every_websocket_endpoint_authenticates():
             if not decorated_ws:
                 continue
             body = ast.dump(node)
-            if not any(name in body for name in ("websocket_is_authenticated", "get_websocket_principal")):
+            # "websocket_principal" covers get_websocket_principal and
+            # auth.websocket_principal (authenticated, then the principal).
+            if not any(name in body for name in ("websocket_is_authenticated", "websocket_principal")):
                 offenders.append(f"{_rel(path)}:{node.lineno} {node.name}")
 
     assert not offenders, (

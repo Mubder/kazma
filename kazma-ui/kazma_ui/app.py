@@ -1413,16 +1413,9 @@ class KazmaAppBuilder:
 
         # ── Voice Streaming WebSocket ──
         try:
-            from kazma_ui.routes_voice_ws import handle_voice_websocket
+            from kazma_ui.routes_voice_ws import serve_voice_websocket
 
             async def _ws_voice(websocket: WebSocket) -> None:
-                from kazma_ui.auth import websocket_is_authenticated
-
-                # The session lookup is a store read (audit 2026-10-26 AUD-111).
-                if not await asyncio.to_thread(websocket_is_authenticated, websocket):
-                    await websocket.close(code=4003, reason="Unauthorized")
-                    return
-
                 def _voice_graph_getter() -> Any:
                     # Live voice rides the SAME checkpointed graph as SSE
                     # (one brain, one thread, real HITL). No fallback to the
@@ -1431,7 +1424,8 @@ class KazmaAppBuilder:
                     # here would reintroduce the split-brain mouth.
                     return self._graph_holder.get("graph")
 
-                await handle_voice_websocket(
+                # Who may open it, in which tenant: serve_voice_websocket.
+                await serve_voice_websocket(
                     websocket,
                     graph_getter=_voice_graph_getter,
                     agent_getter=lambda: self.agent,

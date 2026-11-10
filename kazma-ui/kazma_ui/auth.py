@@ -1220,6 +1220,36 @@ def get_websocket_principal(websocket: Any) -> dict[str, Any] | None:
     return None
 
 
+def websocket_principal(websocket: Any) -> dict[str, Any] | None:
+    """Who opened this socket, or ``None`` when it is not authenticated.
+
+    Authentication is :func:`websocket_is_authenticated`'s, unchanged; the
+    principal is the credential's (a session keeps its role and tenant). A
+    socket that authenticated by peer trust while carrying a credential that
+    no longer names anyone (an expired cookie on this machine) is the local
+    operator, as it always was. Blocking (a session read): run it in a thread.
+    """
+    if not websocket_is_authenticated(websocket):
+        return None
+    return get_websocket_principal(websocket) or {
+        "username": "operator", "role": "admin", "source": "local",
+    }
+
+
+def principal_allows(principal: dict[str, Any], path: str, method: str) -> bool:
+    """Whether *principal* may do what ``method path`` does over HTTP.
+
+    The shared secret and an admin pass; anyone else is judged by
+    ``platform_rbac.role_allows``, the rule the HTTP middleware applies. A
+    socket that does what an HTTP route does asks with that route.
+    """
+    if principal.get("source") == "secret" or principal.get("role") == "admin":
+        return True
+    from kazma_core.security.platform_rbac import role_allows
+
+    return role_allows(str(principal.get("role") or "viewer"), path, method)
+
+
 def get_request_principal(request: Request) -> dict[str, Any] | None:
     """Return authenticated principal {username, role, user_id, source} or None."""
     provided = extract_provided_credential(request)

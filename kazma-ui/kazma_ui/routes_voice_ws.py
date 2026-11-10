@@ -86,6 +86,43 @@ def _public_stt_hint(err: str) -> str:
     return "Transcription failed"
 
 
+async def serve_voice_websocket(
+    websocket: WebSocket,
+    graph_getter: Any | None = None,
+    agent_getter: Any | None = None,
+) -> None:
+    """``/ws/voice``: who may open it, in which tenant, then the voice loop.
+
+    A voice utterance is a chat turn. It took any signed-in socket and ran in
+    no tenant (security audit 2026-11-10); now it takes the role that may post
+    a turn over HTTP (``POST /api/chat/stream``), in the caller's tenant, and
+    the chat it names must be the caller's (``resolve_voice_session``). The
+    single operator -- the secret, an admin session, this machine -- is
+    admitted exactly as before.
+    """
+    from kazma_core.tenant_context import tenant_scope
+    from kazma_core.tenant_isolation import principal_tenant_id
+
+    from kazma_ui.auth import principal_allows, websocket_principal
+
+    # The session lookup is a store read (audit 2026-10-26 AUD-111).
+    try:
+        principal = await asyncio.to_thread(websocket_principal, websocket)
+    except Exception:
+        logger.warning("[ws-voice] Authentication failed closed", exc_info=True)
+        principal = None
+    if principal is None:
+        await websocket.close(code=4003, reason="Unauthorized")
+        return
+    if not principal_allows(principal, "/api/chat/stream", "POST"):
+        await websocket.close(code=4403, reason="Forbidden for your role")
+        return
+    with tenant_scope(principal_tenant_id(principal) or "default"):
+        await handle_voice_websocket(
+            websocket, graph_getter=graph_getter, agent_getter=agent_getter
+        )
+
+
 async def handle_voice_websocket(
     websocket: WebSocket,
     graph_getter: Any | None = None,

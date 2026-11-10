@@ -391,7 +391,7 @@ def register_misc_routes(self: Any) -> None:
         )
     @self.app.websocket("/ws/dashboard")
     async def ws_dashboard(websocket: WebSocket) -> None:
-        from kazma_ui.auth import websocket_is_authenticated
+        from kazma_ui.auth import principal_allows, websocket_principal
 
         # Accept FIRST, then close 4003 — closing before accept makes the
         # server send an HTTP handshake rejection, so the client saw a 1006
@@ -399,8 +399,21 @@ def register_misc_routes(self: Any) -> None:
         # (the /ws/chat endpoint already does it in this order).
         await websocket.accept()
         # The session lookup is a store read (audit 2026-10-26 AUD-111).
-        if not await asyncio.to_thread(websocket_is_authenticated, websocket):
+        try:
+            principal = await asyncio.to_thread(websocket_principal, websocket)
+        except Exception:
+            logger.warning("[WS] dashboard authentication failed closed", exc_info=True)
+            principal = None
+        if principal is None:
             await websocket.close(code=4003, reason="Unauthorized")
+            return
+        # The feed is every tool call and model call's trace: what its HTTP
+        # twin (GET /api/agents/tools) shows, and only to whom it shows it --
+        # a viewer was streamed every user's traces (security audit 2026-11-10).
+        if not principal_allows(principal, "/api/agents/tools", "GET"):
+            # 4403, not 4003: the page sends a 4003 to the sign-in page, and a
+            # signed-in viewer would loop there.
+            await websocket.close(code=4403, reason="Forbidden for your role")
             return
         from kazma_core.shutdown import is_shutting_down
         from kazma_core.tracing import get_trace_store
