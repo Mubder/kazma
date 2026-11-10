@@ -175,7 +175,10 @@ def register_auth_routes(self: Any) -> None:
         session_uid = None
         session_tenant = None
         authenticated = False
-        user_key = username.lower()[:200]
+        # The username's window is per address too: keyed by the name alone,
+        # ten wrong passwords from anywhere locked the real user out for five
+        # minutes, from their own address too (security audit 2026-11-10).
+        user_key = f"{username.lower()[:200]}@{client_ip}" if username else ""
         user_recent = _recent_failures(_login_failures_user, user_key, now) if user_key else []
         if user_key and len(user_recent) >= _LOGIN_MAX_FAILS:
             logger.warning("[auth] login rate limit hit for a username (from %s)", client_ip)

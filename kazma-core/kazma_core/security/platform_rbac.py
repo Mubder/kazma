@@ -356,12 +356,26 @@ def create_local_user(
     return PlatformUser(user_id=uid, username=username, role=role, enabled=True, meta=meta)
 
 
+#: Verified against when no stored hash is: an unknown or disabled user costs
+#: the same PBKDF2 as a known one. Its digest matches no password (a fixed
+#: value, not a hash of one); only the cost is the point.
+_DUMMY_PASSWORD_HASH = (
+    f"pbkdf2_sha256${_PBKDF2_ITERATIONS}$kazma-no-such-user${'0' * 64}"
+)
+
+
 def authenticate_local_user(username: str, password: str) -> PlatformUser | None:
-    """Validate local credentials; return PlatformUser or None."""
+    """Validate local credentials; return PlatformUser or None.
+
+    Every refusal costs one PBKDF2 verification: an unknown or a disabled
+    user returned at once while a known one cost 600,000 iterations, so the
+    answer's time said which usernames exist (security audit 2026-11-10).
+    """
     for u in _users_for_sign_in():
         if str(u.get("username", "")).lower() != username.lower():
             continue
         if not u.get("enabled", True):
+            _verify_password(password, _DUMMY_PASSWORD_HASH)
             return None
         stored = str(u.get("password_hash") or "")
         if _verify_password(password, stored):
@@ -399,6 +413,9 @@ def authenticate_local_user(username: str, password: str) -> PlatformUser | None
                 enabled=True,
                 meta=dict(u.get("meta") or {}),
             )
+        # The name matched and the password did not: one verification spent.
+        return None
+    _verify_password(password, _DUMMY_PASSWORD_HASH)
     return None
 
 

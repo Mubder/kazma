@@ -77,9 +77,18 @@ def test_a_distributed_attack_does_not_lock_the_owner_out(login) -> None:
 def test_failures_against_one_username_never_lock_another(login) -> None:
     for n in range(10):                      # ten addresses, one username
         assert login.attempt(f"10.1.0.{n}", username="alice", password="wrong") == 401
-    assert login.attempt("10.1.1.1", username="alice", password="right") == 429, "alice is limited"
+    # Security audit 2026-11-10: the username's window was keyed by the name
+    # alone, so anyone could lock alice out from everywhere. It is per address
+    # now: alice, from her own address, still signs in.
+    assert login.attempt("10.1.1.1", username="alice", password="right") == 200, "alice is not locked out"
     assert login.attempt("10.1.1.2", username="bob", password="wrong") == 401, "bob is not"
     assert login.attempt("10.1.1.3", secret=SECRET) == 200, "nor is the shared secret"
+
+
+def test_one_address_guessing_one_username_is_limited(login) -> None:
+    for _ in range(10):
+        assert login.attempt("10.4.0.1", username="alice", password="wrong") == 401
+    assert login.attempt("10.4.0.1", username="alice", password="right") == 429
 
 
 def test_a_successful_login_clears_the_username_lock(login) -> None:
