@@ -84,22 +84,24 @@ def test_workspace_store_crud(tmp_path: Path) -> None:
 
 
 def test_config_store_hot_reloading(tmp_path: Path) -> None:
-    """Validate that reload_from_root dynamically updates the yaml_path and invalidates config cache."""
+    """A workspace's own kazma.yaml is content, never configuration.
+
+    The store's fallback followed the active workspace until 2026-11-10
+    (security audit SEC-02); the full gate is
+    tests/test_workspace_yaml_is_not_config.py.
+    """
     db_file = tmp_path / "settings_config.db"
-    config_store = ConfigStore(db_path=str(db_file), yaml_path="kazma.yaml")
-    
-    # 1. Create mock workspace with its own kazma.yaml
+    install_yaml = tmp_path / "kazma.yaml"
+    install_yaml.write_text("agent:\n  name: Kazma\n", encoding="utf-8")
+    config_store = ConfigStore(db_path=str(db_file), yaml_path=str(install_yaml))
+
     ws_path = tmp_path / "project_alpha"
     ws_path.mkdir()
-    ws_yaml = ws_path / "kazma.yaml"
-    ws_yaml.write_text("workspace:\n  id: 'alpha-123'\n", encoding="utf-8")
-    
-    # 2. Hot-reload ConfigStore from project_alpha
-    config_store.reload_from_root(ws_path)
-    assert config_store._yaml_path == ws_yaml
-    
-    # Value from mock YAML should be returned
-    assert config_store.get("workspace.id") == "alpha-123"
+    (ws_path / "kazma.yaml").write_text("workspace:\n  id: 'alpha-123'\n", encoding="utf-8")
+
+    assert not hasattr(config_store, "reload_from_root")
+    assert config_store.get("workspace.id") is None
+    assert config_store.get("agent.name") == "Kazma"
 
 
 def test_workspaces_api_endpoints(tmp_path: Path) -> None:

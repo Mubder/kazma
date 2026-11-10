@@ -183,15 +183,22 @@ def thread_owner(thread_id: str, *, strict: bool = False) -> str:
     return ""
 
 
-def sender_may_take_over(sender_id: str, thread_id: str) -> tuple[bool, str]:
+def sender_may_take_over(
+    sender_id: str, thread_id: str, *, admin: bool = False,
+) -> tuple[bool, str]:
     """Whether *sender_id* may bind their mouth to *thread_id*.
 
     Audit H-3: ``/session <id>`` used to let ANY allowlisted sender take
     over ANY season — including another user's — which also defeated the
     HITL cross-thread owner check (after take-over, the victim's gate is
-    on the attacker's "own" thread). Now: the owner must match. Seasons
-    with no derivable owner (web-created, legacy, uuid fallback) remain
-    open, and shared-team deployments can opt in via
+    on the attacker's "own" thread). Now: the owner must match.
+
+    A season with no owner on record (every chat started on the Web) is the
+    operator's: only a gateway *admin* takes it over. It was open to any
+    sender until 2026-11-10, and with an empty allowlist that is anyone who
+    can message the bot: ``/sessions`` listed the operator's chats and
+    ``/switch 1`` handed one over, history included (security audit
+    SEC-04). Shared-team deployments can opt in via
     ``KAZMA_SESSION_OPEN_TAKEOVER=1``.
     """
     if not sender_id or not thread_id:
@@ -200,7 +207,7 @@ def sender_may_take_over(sender_id: str, thread_id: str) -> tuple[bool, str]:
         return True, ""
     owner = thread_owner(thread_id)
     if not owner:
-        return True, ""
+        return bool(admin), ""
     if owner == sender_id:
         return True, ""
     logger.warning(
@@ -410,8 +417,14 @@ def _entry_from_chat_session(sess: Any) -> SessionEntry:
     )
 
 
-def list_directory(*, include_archived: bool = False, limit: int = _MAX_LIST) -> list[SessionEntry]:
-    """Newest-first operator session list (SessionManager is the SoT)."""
+def list_directory(
+    *, include_archived: bool = False, limit: int = _MAX_LIST, only_for: str | None = None,
+) -> list[SessionEntry]:
+    """Newest-first operator session list (SessionManager is the SoT).
+
+    *only_for* names a chat-app sender who is not a gateway admin: the list
+    is then that sender's own seasons, never the operator's (SEC-04).
+    """
     try:
         from kazma_ui.session_manager import get_session_manager
 
@@ -421,6 +434,8 @@ def list_directory(*, include_archived: bool = False, limit: int = _MAX_LIST) ->
         logger.debug("[sessions] SessionManager unavailable", exc_info=True)
         return []
     entries = [_entry_from_chat_session(s) for s in rows]
+    if only_for is not None and not _open_takeover_enabled():
+        entries = [e for e in entries if only_for and thread_owner(e.thread_id) == only_for]
     if limit and limit > 0:
         return entries[:limit]
     return entries
@@ -431,8 +446,13 @@ def resolve_session(
     *,
     current_thread_id: str | None = None,
     include_archived: bool = False,
+    only_for: str | None = None,
 ) -> SessionEntry | None:
-    """Resolve a user pick (index, id, suffix, or unique title)."""
+    """Resolve a user pick (index, id, suffix, or unique title).
+
+    *only_for*: as :func:`list_directory`, so a number means the same season
+    in the list a non-admin sender was shown.
+    """
     raw = (query or "").strip()
     if not raw:
         return None
@@ -446,7 +466,7 @@ def resolve_session(
             return None
         return resolve_session(current_thread_id, include_archived=True)
 
-    entries = list_directory(include_archived=include_archived, limit=_MAX_LIST)
+    entries = list_directory(include_archived=include_archived, limit=_MAX_LIST, only_for=only_for)
 
     # Stable identity first: full id, exact short_id, then unique suffix.
     # List index is last — numbers reshuffle as seasons update.

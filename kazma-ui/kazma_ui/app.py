@@ -394,7 +394,6 @@ class KazmaAppBuilder:
             active_ws = ws_store.get_active_workspace()
             if active_ws:
                 self.config_store.set("workspace.selected_path", active_ws["root_path"], category="workspace")
-                self.config_store.reload_from_root(active_ws["root_path"])
                 logger.info("[App] Aligned ConfigStore with active workspace root: %s", active_ws["root_path"])
         except Exception as e:
             logger.warning("[App] Failed to align active workspace on boot: %s", e)

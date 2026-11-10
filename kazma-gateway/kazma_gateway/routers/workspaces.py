@@ -262,9 +262,6 @@ def create_workspaces_router() -> APIRouter:
             # Set workspace.selected_path in ConfigStore
             config_store.set("workspace.selected_path", root_path, category="workspace")
 
-            # Force ConfigStore to reload its configurations from the new directory root
-            config_store.reload_from_root(root_path)
-
             logger.info("[workspaces] Successfully switched active workspace to %r at %s", active_ws["name"], root_path)
 
         except HTTPException:

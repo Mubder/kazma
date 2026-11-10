@@ -139,10 +139,16 @@ async def shared_file(file_id: str) -> Response:
     denied = await require_thread_owned(shared.thread_id)
     if denied is not None:
         return denied
+    headers = dict(_SHARED_FILE_HEADERS)
+    if not shared.inline:
+        # A document is fetched when its owner asks for it and kept nowhere
+        # else: a shared computer's browser cache held it for a day. Images
+        # drawn in the chat keep the private cache (they repaint often).
+        headers["Cache-Control"] = "no-store"
     return FileResponse(
         path,
         media_type=shared.mime if shared.inline else "application/octet-stream",
         filename=shared.name,
         content_disposition_type="inline" if shared.inline else "attachment",
-        headers=dict(_SHARED_FILE_HEADERS),
+        headers=headers,
     )

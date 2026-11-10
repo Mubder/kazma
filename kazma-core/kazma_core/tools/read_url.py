@@ -1334,10 +1334,48 @@ def _safe_workspace_path(rel_or_name: str | None, url: str) -> Path | str:
         target = (default_dir / name).resolve()
 
     try:
-        target.relative_to(root)
+        relative = target.relative_to(root)
     except ValueError:
         return "Error: path must stay inside the active workspace."
+    refusal = _extract_path_refusal(target, relative)
+    if refusal:
+        return "Error: " + refusal
     return target
+
+
+#: What a saved extract may be: text a person or the research readers open.
+_EXTRACT_SUFFIXES = (".md", ".txt")
+
+
+def _extract_path_refusal(target: Path, relative: Path) -> str:
+    """Why a saved extract may not be written at *target*, or ``""``.
+
+    A save runs with no approval card and its text is whatever the fetched
+    server answered (a JSON answer is kept byte for byte), so it may only
+    create a note: never a file some program loads. Until 2026-11-10 any new
+    path in the workspace was accepted: ``.venv/Lib/site-packages/x.pth``
+    (Python runs its ``import`` lines at the next start) or
+    ``kazma.local.yaml`` (settings) could be planted by a fetched page that
+    steered the model (security audit SEC-01).
+    """
+    from kazma_core.store_registry import is_kazma_store
+    from kazma_core.workspace.project_files import GENERATED_DIRS
+
+    parts = relative.parts
+    if any(":" in part for part in parts):
+        return "a save path may not contain ':'."
+    skipped = {name.lower() for name in GENERATED_DIRS}
+    for part in parts[:-1]:
+        if part.startswith(".") or part.lower() in skipped:
+            return (f"extracts are not saved inside `{part}` (an environment, "
+                    "tool or settings folder). Use a notes folder such as `research/`.")
+    name = parts[-1] if parts else ""
+    if name.startswith(".") or target.suffix.lower() not in _EXTRACT_SUFFIXES:
+        return ("a saved extract is a `.md` or `.txt` file with a plain name. "
+                "Use file_write (which asks first) for any other file.")
+    if is_kazma_store(target):
+        return "that path is one of Kazma's own files."
+    return ""
 
 
 # Back-compat alias

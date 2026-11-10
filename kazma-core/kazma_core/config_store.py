@@ -1480,11 +1480,13 @@ class ConfigStore(_ChangeNotices):
         with self._lock:
             self._clear_cache()
 
-    def reload_from_root(self, root_path: str | Path) -> None:
-        """Update the yaml_path to the new workspace root and invalidate cache."""
-        self._yaml_path = Path(root_path) / "kazma.yaml"
-        self.invalidate_yaml_cache()
-        logger.info("[ConfigStore] Hot-reloaded configurations from new root: %s", root_path)
+    # The YAML fallback is the install's own file for the life of the store.
+    # It followed the ACTIVE WORKSPACE until 2026-11-10 (``reload_from_root``,
+    # called at boot and on every workspace switch or clone): a repository's
+    # own kazma.yaml then answered every key with no stored row -- chat-app
+    # allowlists (so gateway admin), the commitment layer's switches, the
+    # offsite backup's destination -- with no validation and no card
+    # (security audit SEC-02). A workspace is content, never configuration.
 
     # ── Public API ────────────────────────────────────────────────────
 

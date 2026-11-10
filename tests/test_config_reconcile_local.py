@@ -63,9 +63,8 @@ def _yaml(tmp_path: Path, name: str, values: dict) -> Path:
 
 
 def _move_fallback(store: ConfigStore, tmp_path: Path) -> None:
-    root = tmp_path / "workspace"
-    root.mkdir()
-    store.reload_from_root(root)
+    # The fallback no longer follows a workspace (security audit SEC-02); a
+    # close still drops everything the store had read.
     store.close()  # SQLite reopens lazily; PG reads the same durable rows.
 
 

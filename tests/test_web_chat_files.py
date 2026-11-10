@@ -243,6 +243,7 @@ def test_the_owner_sees_an_image_in_the_page(tmp_path, client):
     assert r.headers["content-disposition"].startswith("inline")
     assert r.headers["x-content-type-options"] == "nosniff"
     assert "sandbox" in r.headers["content-security-policy"]
+    assert r.headers["cache-control"].startswith("private")
 
 
 def test_anything_but_a_raster_image_is_a_download(tmp_path, client):
@@ -251,6 +252,8 @@ def test_anything_but_a_raster_image_is_a_download(tmp_path, client):
     assert r.status_code == 200
     assert r.headers["content-type"] == "application/octet-stream"
     assert r.headers["content-disposition"].startswith("attachment")
+    # A document is not left in a browser's cache (it was kept for a day).
+    assert r.headers["cache-control"] == "no-store"
 
 
 def test_another_chats_file_is_not_found(tmp_path, client):

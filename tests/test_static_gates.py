@@ -2005,7 +2005,7 @@ def test_loop_stall_gate_catches_the_old_ledger_write():
 _SYNC_STORE_METHODS = frozenset({
     "get", "set", "set_if_absent", "batch_set", "atomic_update", "delete",
     "get_category", "get_all", "transaction", "export_yaml", "import_yaml",
-    "reconcile_from_yaml", "reset_all", "reload_from_root",
+    "reconcile_from_yaml", "reset_all",
 })
 
 

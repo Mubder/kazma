@@ -73,6 +73,14 @@ _ADMIN_PREFIXES = (
     # future system prompt, for every user of the install -- an operator
     # could confirm what the admin had held back.
     "/api/commitment",
+    # The install's mail and calendar connections: the OAuth client, the
+    # accounts, sign-in and disconnect. One set for the whole install, used
+    # by every chat; only Settings (an admin page) calls these routes, and
+    # they carry no check of their own. An operator could reconnect or
+    # disconnect the install's mailbox until 2026-11-10. The X credential
+    # routes were already admin-only (above).
+    "/api/email",
+    "/api/calendar",
     # The setup guide saves a provider's key and switches the model Kazma
     # uses, as Settings does: its page and its writes are the admin's.
     "/setup",

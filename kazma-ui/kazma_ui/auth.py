@@ -903,7 +903,8 @@ def verify_api_token(provided: str) -> bool:
         for entry in raw:
             if not isinstance(entry, dict):
                 continue
-            if entry.get("token_hash") != token_hash:
+            # Constant time, like every other secret compare here.
+            if not hmac.compare_digest(str(entry.get("token_hash") or ""), token_hash):
                 continue
             expires_days = entry.get("expires_days")
             created = entry.get("created_at") or ""
@@ -1452,8 +1453,18 @@ def create_auth_middleware(
                     status_code=403,
                     media_type="application/json",
                 )
-            logger.debug("[RBAC] multi-user check skipped: %s", exc)
-        if _multi_user:
+            # The user list could not be read. A session's own role is still
+            # enforced below; nothing here treats the error as "single
+            # operator, everything allowed" for a signed-in non-admin.
+            logger.warning("[RBAC] multi-user check failed: %s", type(exc).__name__)
+        # A signed-in session carries a role whatever mode the install is in:
+        # an OIDC sign-in mints viewer/operator sessions with no local user
+        # and no KAZMA_MULTI_USER, and a removed last user leaves live
+        # sessions behind. Enforced only under multi-user until 2026-11-10,
+        # such a session reached every admin route -- MCP servers (a command
+        # on the host), settings, API tokens (security audit SEC-05).
+        _session_cred = bool(provided) and str(provided).startswith("session:")
+        if _multi_user or _session_cred:
             try:
                 from kazma_core.security.platform_rbac import role_allows
 

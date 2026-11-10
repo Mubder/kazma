@@ -211,14 +211,10 @@ def create_workspace_select_router() -> APIRouter:
                 record = store.create_workspace(name, str(resolved))
                 ws_id = record["id"]
 
-            # Activate it — this flips is_active, sets selected_path, and
-            # reloads config from the new root. All 3 cards follow this.
+            # Activate it — this flips is_active and sets selected_path.
+            # All 3 cards follow this.
             store.set_active_workspace(ws_id)
             config_store.set("workspace.selected_path", str(resolved), category="workspace")
-            try:
-                config_store.reload_from_root(str(resolved))
-            except Exception:
-                logger.debug("[workspace/select] reload_from_root failed", exc_info=True)
         except HTTPException:
             raise
         except Exception as exc:

@@ -1148,10 +1148,6 @@ def _register_clone(store: Any, repo_name: str, repo_dir: Path, url: str, full_n
     store.set_active_workspace(record["id"])
     cs = get_config_store()
     cs.set("workspace.selected_path", str(repo_dir), category="workspace")
-    try:
-        cs.reload_from_root(str(repo_dir))
-    except Exception:
-        logger.debug("[github/repos/clone] reload_from_root failed", exc_info=True)
     # Persist the repo identity so it doesn't have to be re-derived from
     # `git remote` on every call (Phase 2). full_name is "owner/repo".
     try:

@@ -526,7 +526,8 @@ JSON". Gate: `tests/test_x_reasoning_off.py`.
   undeclared changed value).
 - **First boot seeds merged YAML, retirement reads shipped defaults**
   (`reconcile_from_yaml`, 2026-10-06): local provider/model choices must
-  survive the active workspace's fallback reload. Seed missing keys through
+  survive a restart (the fallback followed the active workspace then; it no
+  longer does, §62). Seed missing keys through
   `load_merged_yaml` and `shipped_settings`, including local-only files;
   existing rows retain precedence. Check declared retirements against raw
   shipped defaults BEFORE seeding, so a fresh local choice equal to a retired
@@ -9982,6 +9983,66 @@ Gates: `tests/test_provider_keys.py`, and in a browser (by the sidebar)
 `tests/e2e/test_provider_settings_browser.py`. The browser test found that
 the setup wall stayed up over a network server in use: readiness now
 counts the active provider's address (`setup_api.compute_setup_status`).
+
+### 62. The security audit of 2026-11-10: the High findings
+
+Five findings, each fixed with a test that fails on the old code. The
+audit's remaining findings are not listed here until each is fixed (the
+repository is public).
+
+- **A saved web extract is a note, never a file a program loads** (SEC-01,
+  `tools/read_url._extract_path_refusal`). `read_url_to_file` (write tier, no
+  card) and `crawl_site`'s save name their file through
+  `_safe_workspace_path`, whose only rules were "inside the workspace" and
+  "not there yet"; a JSON answer is saved byte for byte under `# ` header
+  lines. A fetched page that steered the model could plant
+  `.venv/Lib/site-packages/x.pth` (Python runs its `import` lines at the next
+  start) or `kazma.local.yaml`. Now: a `.md` or `.txt` file with a plain
+  name, in no dot folder and no folder of `GENERATED_DIRS` (compared without
+  case), no `:` in the path, never one of Kazma's own files. Any other
+  destination is `file_write`'s, which asks. Gate:
+  `tests/test_extract_saves_are_notes.py` (the old rule as the control).
+- **A workspace's `kazma.yaml` is content, never configuration** (SEC-02).
+  The settings store's YAML fallback is the install's own file for the life
+  of the store. `ConfigStore.reload_from_root` (boot, every workspace switch
+  and clone) pointed it at the active workspace, so a cloned repository's
+  file answered every key with no stored row: chat-app allowlists (gateway
+  admin), the commitment layer's switches, the offsite backup's destination.
+  The method and its four callers are gone; nothing assigns `_yaml_path`
+  outside `__init__`. Gate: `tests/test_workspace_yaml_is_not_config.py`
+  (the repoint put back by hand as the control; a planted repoint).
+- **The markdown renderer stashes every tag it writes** (SEC-03,
+  `static/js/streaming.js` `inline`: `stash`, `oneToken`). Each generated
+  `<a>`, `<img>` and `<span>` is held behind a token, like code spans, until
+  the last pass has run, and restored newest first; a link or image address
+  is one token (no space, quote, angle bracket or backtick, escaped or not).
+  The auto-link pass ran over anchors already written: a second URL after a
+  space inside a link's address closed the outer `href` and the rest became
+  attributes (`onmouseover`). Never add a pass that reads emitted markup.
+  Gate: `tests/js/test_markdown_no_attribute_injection.js` (the old passes as
+  the control).
+- **A chat-app sender sees and takes over only their own seasons** (SEC-04,
+  `sessions/directory.py`: `list_directory(only_for=)`,
+  `resolve_session(only_for=)`, `sender_may_take_over(admin=)`;
+  `agent_handler/session_commands.py`). `/sessions` listed every chat and
+  `/switch` bound the sender to any chat with no owner on record, which is
+  every chat started on the Web; with an empty allowlist that is anyone who
+  can message the bot. A sender who is not a gateway admin
+  (`allowlists.is_gateway_admin`) now lists and resolves their own seasons,
+  and an unowned season is an admin's. `KAZMA_SESSION_OPEN_TAKEOVER=1` still
+  opens both. Gate: `tests/test_session_takeover_needs_admin.py`.
+- **A session's role is enforced in every mode** (SEC-05, `auth.py`
+  `create_auth_middleware`: `_multi_user or _session_cred`). `role_allows`
+  ran only under multi-user; an OIDC sign-in mints viewer/operator sessions
+  with no local user, and such a session reached the MCP, settings and token
+  routes. A request carrying a session credential is now always judged by
+  its role; an unreadable user list is a WARNING and never "single
+  operator". API tokens and the shared secret are unchanged. The install's
+  mail and calendar connections (`/api/email`, `/api/calendar`) are admin
+  prefixes. Gate: `tests/test_session_role_always_enforced.py`.
+- With them: the API token hash is compared with `hmac.compare_digest`, and
+  a file shared into a web chat that is not an inline image is served
+  `Cache-Control: no-store` (`routes_chat_upload.shared_file`).
 
 ## UI Conventions (Web)
 

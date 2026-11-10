@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- **Security: five fixes from an audit of the whole code base.**
+  - Saving a web page to a file (which needs no approval) could create any
+    new file in the workspace, including one Python or Kazma loads at its
+    next start. A saved page is now a `.md` or `.txt` note outside every
+    environment, tool and settings folder.
+  - Opening or cloning a repository made that repository's own `kazma.yaml`
+    supply any setting you had never saved, such as who may use your chat
+    bots. Settings now come only from your install.
+  - A crafted link in a reply could run script in the chat page when the
+    pointer passed over it. The renderer no longer lets one link's text
+    become another tag's attributes.
+  - On Telegram, Discord and Slack, `/sessions` listed every chat and
+    `/switch` could take over any chat started on the web. People who are
+    not gateway admins now see and switch among their own chats only.
+  - With OIDC sign-in and no local users, a viewer or operator could reach
+    admin pages and routes. A signed-in session is now always held to its
+    role, and the mail and calendar connections are admin-only.
+  - Also: documents shared into a web chat are no longer kept in the
+    browser's cache.
+
 - **Workflows hold only the access they use, and a release is published
   last.** Three of the six GitHub workflows declared no permissions and took
   the repository's default token, which could write. Each now declares its

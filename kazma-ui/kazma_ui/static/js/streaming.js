@@ -716,10 +716,25 @@ var KazmaStream = (function() {
         var codeToken = '\x00KZCODE';
         while (html.indexOf(codeToken) !== -1) codeToken += 'X';
         html = html.replace(/(?<!`)(`+)(?!`)([^\n]*?)(?<!`)\1(?!`)/g, function(_, ticks, body) {
-          var token = codeToken + codeSpans.length + '\x00';
-          codeSpans.push('<code class="inline-code" dir="ltr">' + body + '</code>');
-          return token;
+          return stash('<code class="inline-code" dir="ltr">' + body + '</code>');
         });
+        // Every tag this function writes is stashed like a code span until
+        // the last pass has run, so no later pattern reads inside a tag. The
+        // auto-link pass used to run over the anchors already written: a
+        // second URL after a space inside a link's address got an anchor of
+        // its own, whose quotes ended the outer href, and the rest of it
+        // became attributes of the outer tag -- an onmouseover handler from
+        // one line of a model's reply (security audit 2026-11-10, SEC-03).
+        // And an address is one token: no space, quote, angle bracket or
+        // backtick, escaped or not.
+        function stash(markup) {
+          var token = codeToken + codeSpans.length + '\x00';
+          codeSpans.push(markup);
+          return token;
+        }
+        function oneToken(url) {
+          return !/[\s"'<>`\x00]|&quot;|&#39;|&#x27;|&lt;|&gt;/i.test(url);
+        }
         // Images first (so ![a](u) isn't partially eaten by links).
         // Only this server's own images load. A reply is steerable by any
         // untrusted text the agent read (a web page, an email, a document),
@@ -729,8 +744,9 @@ var KazmaStream = (function() {
         // An image elsewhere is shown as a link the reader chooses to open.
         html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function(_, alt, url) {
           var decodedUrl = url.replace(/&amp;/g, '&');
+          if (!oneToken(decodedUrl)) return esc(alt || '');
           if (isSameOriginPath(decodedUrl)) {
-            return '<img src="' + esc(decodedUrl) + '" alt="' + esc(alt) + '" loading="lazy" class="md-img">';
+            return stash('<img src="' + esc(decodedUrl) + '" alt="' + esc(alt) + '" loading="lazy" class="md-img">');
           }
           if (/^https?:\/\//i.test(decodedUrl)) {
             // The link text carries the full URL in `title`; when there is no
@@ -738,8 +754,8 @@ var KazmaStream = (function() {
             // auto-URL linkifier below cannot re-match (it needs https:// or
             // www.), so the anchor is never wrapped a second time.
             var label = alt ? esc(alt) : esc(decodedUrl.replace(/^https?:\/\//i, '').replace(/^www\./i, ''));
-            return '<a href="' + esc(decodedUrl) + '" target="_blank" rel="noopener noreferrer" dir="ltr"' +
-              ' class="md-img-link" title="' + esc(decodedUrl) + '">' + label + '</a>';
+            return stash('<a href="' + esc(decodedUrl) + '" target="_blank" rel="noopener noreferrer" dir="ltr"' +
+              ' class="md-img-link" title="' + esc(decodedUrl) + '">' + label + '</a>');
           }
           return esc(alt || '');
         });
@@ -750,13 +766,14 @@ var KazmaStream = (function() {
         html = html.replace(/~~(.+?)~~/g, '<del>$1</del>');
         html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(_, text, url) {
           var decodedUrl = url.replace(/&amp;/g, '&');
-          if (/^(https?:|mailto:)/i.test(decodedUrl)) {
-            return '<a href="' + esc(decodedUrl) + '" target="_blank" rel="noopener noreferrer" dir="ltr">' + text + '</a>';
+          if (oneToken(decodedUrl) && /^(https?:|mailto:)/i.test(decodedUrl)) {
+            return stash('<a href="' + esc(decodedUrl) + '" target="_blank" rel="noopener noreferrer" dir="ltr">') +
+              text + stash('</a>');
           }
           if (isSameOriginPath(decodedUrl) && /^\/[A-Za-z0-9_./?#&=%-]+$/.test(decodedUrl)) {
-            return '<a href="' + esc(decodedUrl) + '">' + text + '</a>';
+            return stash('<a href="' + esc(decodedUrl) + '">') + text + stash('</a>');
           }
-          return '<span class="dead-link" title="Blocked URL">' + text + '</span>';
+          return stash('<span class="dead-link" title="Blocked URL">') + text + stash('</span>');
         });
         html = html.replace(
           /(^|[\s>(])((?:https?:\/\/|www\.)[^\s<]+[^\s<.,;:!?'")\]])/g,
@@ -765,10 +782,13 @@ var KazmaStream = (function() {
             if (/^www\./i.test(href)) href = 'https://' + href;
             var rawHref = href.replace(/&amp;/g, '&');
             if (!/^(https?:)/i.test(rawHref)) return pre + url;
-            return pre + '<a href="' + esc(rawHref) + '" target="_blank" rel="noopener noreferrer" dir="ltr">' + url + '</a>';
+            if (!oneToken(rawHref)) return pre + url;
+            return pre + stash('<a href="' + esc(rawHref) + '" target="_blank" rel="noopener noreferrer" dir="ltr">' + url + '</a>');
           }
         );
-        for (var ci = 0; ci < codeSpans.length; ci++) {
+        // Newest first: a stashed tag may hold an earlier token (a code span
+        // inside an image's label).
+        for (var ci = codeSpans.length - 1; ci >= 0; ci--) {
           html = html.split(codeToken + ci + '\x00').join(codeSpans[ci]);
         }
         return html;

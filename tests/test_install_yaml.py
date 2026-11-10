@@ -100,7 +100,7 @@ def test_callers_get_a_copy(install):
 #: Files that may name the bare path, and why.
 ALLOWED = {
     # The store parses once and caches (``_load_yaml``); entry points that know
-    # the root pass it or call ``reload_from_root``.
+    # the root pass it.
     "kazma-core/kazma_core/config_store.py",
 }
 
