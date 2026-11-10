@@ -37,7 +37,7 @@ servers:
   filesystem:
     name: "Filesystem"
     description: "Read, search and write files in the active workspace"
-    command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "${KAZMA_ACTIVE_WORKSPACE}"]
+    command: ["npx", "-y", "@modelcontextprotocol/server-filesystem@2026.8.31", "${KAZMA_ACTIVE_WORKSPACE}"]
     package: {registry: npm, name: "@modelcontextprotocol/server-filesystem"}
     source: "https://github.com/modelcontextprotocol/servers"
     transport: stdio
@@ -47,7 +47,7 @@ servers:
   git:
     name: "Git"
     description: "Status, diff, log, branches and commits in the active workspace's repository"
-    command: ["uvx", "mcp-server-git", "--repository", "${KAZMA_ACTIVE_WORKSPACE}"]
+    command: ["uvx", "mcp-server-git@2026.8.18", "--repository", "${KAZMA_ACTIVE_WORKSPACE}"]
     package: {registry: pypi, name: "mcp-server-git"}
     source: "https://github.com/modelcontextprotocol/servers"
     transport: stdio
@@ -57,7 +57,7 @@ servers:
   time:
     name: "Time"
     description: "Current time and time zone conversion"
-    command: ["uvx", "mcp-server-time"]
+    command: ["uvx", "mcp-server-time@2026.8.18"]
     package: {registry: pypi, name: "mcp-server-time"}
     source: "https://github.com/modelcontextprotocol/servers"
     transport: stdio
@@ -66,7 +66,7 @@ servers:
   memory:
     name: "Memory (knowledge graph)"
     description: "A knowledge graph the server keeps in its own file, apart from Kazma's memory"
-    command: ["npx", "-y", "@modelcontextprotocol/server-memory"]
+    command: ["npx", "-y", "@modelcontextprotocol/server-memory@2026.8.31"]
     package: {registry: npm, name: "@modelcontextprotocol/server-memory"}
     source: "https://github.com/modelcontextprotocol/servers"
     transport: stdio
@@ -75,7 +75,7 @@ servers:
   sequential_thinking:
     name: "Sequential Thinking"
     description: "Step-by-step problem solving through a sequence of thoughts"
-    command: ["npx", "-y", "@modelcontextprotocol/server-sequential-thinking"]
+    command: ["npx", "-y", "@modelcontextprotocol/server-sequential-thinking@2026.8.31"]
     package: {registry: npm, name: "@modelcontextprotocol/server-sequential-thinking"}
     source: "https://github.com/modelcontextprotocol/servers"
     transport: stdio
@@ -84,7 +84,7 @@ servers:
   playwright:
     name: "Playwright (browser automation)"
     description: "Navigate, click, fill forms and take screenshots in a browser"
-    command: ["npx", "-y", "@playwright/mcp@latest"]
+    command: ["npx", "-y", "@playwright/mcp@0.0.83"]
     package: {registry: npm, name: "@playwright/mcp"}
     source: "https://github.com/microsoft/playwright-mcp"
     transport: stdio
@@ -93,7 +93,7 @@ servers:
   firecrawl:
     name: "Firecrawl (web scraping)"
     description: "Scrape, crawl and map websites through Firecrawl"
-    command: ["npx", "-y", "firecrawl-mcp"]
+    command: ["npx", "-y", "firecrawl-mcp@3.27.0"]
     package: {registry: npm, name: "firecrawl-mcp"}
     source: "https://github.com/firecrawl/firecrawl-mcp-server"
     transport: stdio
@@ -103,7 +103,7 @@ servers:
   brave_search:
     name: "Brave Search"
     description: "Web, news, image and local search through the Brave Search API"
-    command: ["npx", "-y", "@brave/brave-search-mcp-server"]
+    command: ["npx", "-y", "@brave/brave-search-mcp-server@2.1.4"]
     package: {registry: npm, name: "@brave/brave-search-mcp-server"}
     source: "https://github.com/brave/brave-search-mcp-server"
     transport: stdio
@@ -113,7 +113,7 @@ servers:
   context7:
     name: "Context7 (library docs)"
     description: "Current documentation and code examples for libraries (an API key is optional: CONTEXT7_API_KEY)"
-    command: ["npx", "-y", "@upstash/context7-mcp"]
+    command: ["npx", "-y", "@upstash/context7-mcp@4.1.1"]
     package: {registry: npm, name: "@upstash/context7-mcp"}
     source: "https://github.com/upstash/context7"
     transport: stdio
@@ -122,7 +122,7 @@ servers:
   notion:
     name: "Notion"
     description: "Search, read and edit Notion pages and databases"
-    command: ["npx", "-y", "@notionhq/notion-mcp-server"]
+    command: ["npx", "-y", "@notionhq/notion-mcp-server@2.5.2"]
     package: {registry: npm, name: "@notionhq/notion-mcp-server"}
     source: "https://github.com/makenotion/notion-mcp-server"
     transport: stdio
@@ -132,7 +132,7 @@ servers:
   stripe:
     name: "Stripe"
     description: "Customers, products, payments and refunds in a Stripe account"
-    command: ["npx", "-y", "@stripe/mcp"]
+    command: ["npx", "-y", "@stripe/mcp@0.3.3"]
     package: {registry: npm, name: "@stripe/mcp"}
     source: "https://github.com/stripe/ai"
     transport: stdio
@@ -142,7 +142,7 @@ servers:
   heroku:
     name: "Heroku"
     description: "Apps, dynos, add-ons and logs on Heroku"
-    command: ["npx", "-y", "@heroku/mcp-server"]
+    command: ["npx", "-y", "@heroku/mcp-server@1.2.9"]
     package: {registry: npm, name: "@heroku/mcp-server"}
     source: "https://github.com/heroku/heroku-mcp-server"
     transport: stdio
@@ -152,7 +152,7 @@ servers:
   aws_documentation:
     name: "AWS Documentation"
     description: "Search and read the AWS documentation"
-    command: ["uvx", "awslabs.aws-documentation-mcp-server@latest"]
+    command: ["uvx", "awslabs.aws-documentation-mcp-server@1.2.2"]
     package: {registry: pypi, name: "awslabs.aws-documentation-mcp-server"}
     source: "https://github.com/awslabs/mcp"
     transport: stdio

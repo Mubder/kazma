@@ -317,6 +317,7 @@ def test_memory_backend_secrets_are_install_scoped():
 # ship without a probe that feeds it a password inside a URL.
 
 import ast
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -422,12 +423,17 @@ def _probe_config_export_command():
 
 
 def _probe_approval_card():
+    """The one approval-card redactor, and both cards that use it."""
+    from kazma_core.security.approval_args import redact_arguments
+    from kazma_core.swarm.approval_card import render_arguments
     from kazma_gateway.agent_handler.hitl import _build_approval_prompt
 
-    return _build_approval_prompt(
-        {"tool": "shell_exec", "args": {"command": f"git clone {TOKEN_URL}", "dsn": DSN}},
-        "thread-probe",
-    )
+    args = {"command": f"git clone {TOKEN_URL}", "dsn": DSN}
+    return [
+        redact_arguments("shell_exec", args),
+        _build_approval_prompt({"tool": "shell_exec", "args": args}, "thread-probe"),
+        render_arguments(json.dumps(args), tool="shell_exec").text,
+    ]
 
 
 def _probe_pg_argv():
@@ -460,7 +466,7 @@ PROBES = {
     "kazma-core/kazma_core/config_store.py::_redact_for_log": _probe_redact_for_log,
     "kazma-core/kazma_core/settings_restore.py::_mask_backup_secrets": _probe_settings_export,
     "kazma-gateway/kazma_gateway/slash_commands.py::_redact_secrets": _probe_config_export_command,
-    "kazma-gateway/kazma_gateway/agent_handler/hitl.py::_build_approval_prompt._redact": _probe_approval_card,
+    "kazma-core/kazma_core/security/approval_args.py::redact_arguments": _probe_approval_card,
     "kazma-core/kazma_core/migration/pg_bridge.py::_redact_cmd": _probe_pg_argv,
     # Masked since 2026-09-26: their saves restore an unchanged masked URL and
     # refuse a changed one (tests/test_url_password_round_trip.py).

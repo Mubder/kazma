@@ -149,6 +149,7 @@ try:
         "port": port,
         # The app applies forwarded headers itself (see _note_proxies).
         "proxy_headers": False,
+        "server_header": False,
         "ws_ping_interval": 20.0,
         "ws_ping_timeout": 20.0,
         # Part of the one stop budget the guard hands down (FA-261): streams

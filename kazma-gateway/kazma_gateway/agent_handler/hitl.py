@@ -602,29 +602,14 @@ def _build_approval_prompt(
     request_id = _gate_request_id(thread_id, payload)
     tool = payload.get("tool", "unknown")
     args = payload.get("args", {})
-    # Redact known-sensitive keys before stringifying into the chat-visible
-    # approval card — args can carry credentials (http_request Authorization
-    # header, MCP env API keys, git token URLs) (audit finding).
-    _SENSITIVE = {
-        "authorization", "token", "api_key", "apikey", "password", "secret",
-        "header", "headers", "env", "cookie", "private_key",
-    }
+    # Credentials never reach the chat-visible card (http_request's
+    # Authorization header, MCP env keys, git token URLs, vault_store's
+    # value): the one approval-card redactor, shared with the swarm bus's card
+    # (audit 2026-11-10: this card's own exact-name list missed access_token,
+    # client_secret, bot_token...).
+    from kazma_core.security.approval_args import redact_arguments
 
-    def _redact(obj):
-        if isinstance(obj, dict):
-            return {
-                k: ("***" if k.lower() in _SENSITIVE else _redact(v))
-                for k, v in obj.items()
-            }
-        if isinstance(obj, list):
-            return [_redact(x) for x in obj]
-        # A key rule cannot see the token in `git clone https://u:TOKEN@…`
-        # or a DSN in a command: mask the URL password in every leaf.
-        from kazma_core.security.url_credentials import mask_url_credentials_deep
-
-        return mask_url_credentials_deep(obj)
-
-    args_str = _format_args_for_approval(tool, _redact(args))
+    args_str = _format_args_for_approval(tool, redact_arguments(tool, args))
     tools = payload.get("tools") or []
     _public, _labels, _clip = _public_card(tool, tools)
     # S1-3: proposal-backed posts — show the STORED drafts this approval
@@ -667,7 +652,7 @@ def _build_approval_prompt(
             if not isinstance(item, dict):
                 continue
             tname = str(item.get("name") or item.get("tool") or "tool")
-            targs = _redact(item.get("args") or item.get("arguments") or {})
+            targs = redact_arguments(tname, item.get("args") or item.get("arguments") or {})
             tstr = _format_args_for_approval(tname, targs, budget=_MULTI_BUDGET)
             lines.append(f"{i}. {tname}: {tstr}")
         lines.extend(proposal_lines)

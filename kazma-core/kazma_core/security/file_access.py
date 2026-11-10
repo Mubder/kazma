@@ -20,7 +20,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-__all__ = ["readable_by_others"]
+__all__ = ["readable_by_others", "restrict_to_owner"]
 
 #: SIDs that may read a secret file: SYSTEM, Administrators, the owner rights
 #: and the creator owner (the account itself is added at runtime).
@@ -40,6 +40,33 @@ def _current_user_sid() -> str:
         return ""
     sid = out.rsplit(",", 1)[-1].strip().strip('"')
     return sid if sid.startswith("S-") else ""
+
+
+def restrict_to_owner(path: Path) -> bool:
+    """Only this account may read *path*: no inherited entries, the account
+    alone (POSIX: mode 0600). True when the restriction is in place.
+
+    The one way Kazma restricts a secret file it writes: the observer's
+    pairing key, the Postgres superuser's password, the env file a first boot
+    writes its generated keys into. Blocking (``icacls`` on Windows).
+    """
+    if os.name != "nt":
+        try:
+            os.chmod(path, 0o600)
+            return True
+        except OSError:
+            return False
+    sid = _current_user_sid()
+    if not sid:
+        return False
+    try:
+        result = subprocess.run(  # noqa: S603 -- fixed program, no shell
+            ["icacls", str(path), "/inheritance:r", "/grant:r", f"*{sid}:(F)"],
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
 
 
 def _windows_sddl(path: Path) -> str | None:

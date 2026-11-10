@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from kazma_core.migration.bundle import KazmaBundle, parse_meta_env
+from kazma_core.migration.bundle import KazmaBundle, parse_meta_env, sweep_working_folders
 from kazma_core.migration.exporter import _DATA_DIR_DBS as _EXPORTED_DATA_DIR_DBS
 from kazma_core.migration.path_rewrite import build_path_map, rewrite_paths_in_sqlite
 from kazma_core.migration.vault_pairing import VaultKeyStatus, check_vault_key, sync_vault_key
@@ -325,10 +325,16 @@ def import_bundle(
     ts = int(time.time())
     staging = data_dir / f".migrate-staging-{ts}"
     report.staging_path = str(staging)
+    # Earlier staging folders lose their meta.env and are otherwise left: a
+    # failed import keeps its staging so the operator can take the files it
+    # could not restore, and nothing here knows whether they have.
+    sweep_working_folders(data_dir, ".migrate-staging-", max_age_s=float("inf"))
     if staging.exists():
         shutil.rmtree(staging, ignore_errors=True)
     _log(f"Extracting bundle to staging ({staging.name})…")
-    bundle.extract_all(staging)
+    # meta.env stays in the bundle: it was read from there above, and a
+    # staging folder kept on failure must not hold the vault key in clear.
+    bundle.extract_all(staging, exclude=("meta.env",))
 
     # ── 4. Path translation (invariant B) ──────────────────────────────
     _apply_path_rewrite(staging, bundle, report.target_workspace_root, report, _log)

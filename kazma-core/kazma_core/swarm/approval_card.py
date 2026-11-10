@@ -78,16 +78,25 @@ def web_link(approval_id: str) -> str:
     return path
 
 
-def render_arguments(tool_args: str | None) -> CardArguments:
-    """The card's argument block for *tool_args* (the call's JSON)."""
+def render_arguments(tool_args: str | None, *, tool: str = "") -> CardArguments:
+    """The card's argument block for *tool_args* (the call's JSON).
+
+    Secrets are hidden (``security.approval_args``, the chat card's redactor:
+    the card goes to every chat platform, audit 2026-11-10); every name stays,
+    and the digest is of the REAL arguments.
+    """
+    from kazma_core.security.approval_args import redact_arguments
+    from kazma_core.security.url_credentials import mask_urls_in_text
+
     raw = tool_args or ""
     digest = arguments_digest(raw)
     try:
         parsed = json.loads(raw) if raw else {}
     except ValueError:
-        parsed = {"arguments": raw}
+        parsed = {"arguments": mask_urls_in_text(raw)}
     if not isinstance(parsed, dict):
         parsed = {"arguments": parsed}
+    parsed = redact_arguments(tool, parsed)
     pairs = [(str(k), _value(v)) for k, v in parsed.items()]
     footer = f"arguments sha256: {digest}"
     if not pairs:

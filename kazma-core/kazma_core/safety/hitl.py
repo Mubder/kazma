@@ -426,12 +426,19 @@ CANONICAL_DANGER_TOOLS: tuple[str, ...] = (
 # name their action on the card (``safety.public_actions``).
 # A folder-access request widens what every file tool may read or write for
 # the session: on 2026-10-26 a YOLO window let one through with no card.
+# The vault's reads and writes (audit 2026-11-10): a retrieve puts a
+# credential into the model's context in clear, a store or delete changes one;
+# under a YOLO window or a grant, text the agent had just read could do either
+# with no card.
 ALWAYS_HITL_TOOLS: frozenset[str] = frozenset({
     "x_post",
     "x_delete_post",
     "x_schedule_post",
     "x_cancel_scheduled_post",
     "request_path_access",
+    "vault_retrieve",
+    "vault_store",
+    "vault_delete",
 })
 
 # Backward-compatible alias used throughout the codebase / tests.

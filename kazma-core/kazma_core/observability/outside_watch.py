@@ -38,7 +38,6 @@ import logging
 import os
 import re
 import secrets
-import subprocess
 import threading
 import time
 import urllib.parse
@@ -167,26 +166,11 @@ def _sign(key: str, ts: int, message: bytes) -> str:
 
 def _restrict_to_owner(path: Path) -> bool:
     """Only this account may read *path* (the guard runs as it). True when
-    the restriction is in place; the guard refuses a key it cannot restrict."""
-    if os.name != "nt":
-        try:
-            os.chmod(path, 0o600)
-            return True
-        except OSError:
-            return False
-    from kazma_core.security.file_access import _current_user_sid
+    the restriction is in place; the guard refuses a key it cannot restrict.
+    (``security.file_access.restrict_to_owner``, the shared one.)"""
+    from kazma_core.security.file_access import restrict_to_owner
 
-    sid = _current_user_sid()
-    if not sid:
-        return False
-    try:
-        result = subprocess.run(  # noqa: S603 -- fixed program, no shell
-            ["icacls", str(path), "/inheritance:r", "/grant:r", f"*{sid}:(F)"],
-            capture_output=True, text=True, timeout=30, check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return result.returncode == 0
+    return restrict_to_owner(path)
 
 
 def _write_pairing(data: dict[str, Any]) -> Path:

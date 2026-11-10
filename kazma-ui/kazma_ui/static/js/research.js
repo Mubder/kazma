@@ -689,9 +689,9 @@
           if (data.download_url) {
             window.open(data.download_url, '_blank', 'noopener');
           } else if (data.filename) {
+            // The route takes a name inside the documents folder, never an
+            // absolute path (2026-11-10 audit).
             window.open('/api/research/download?path=' + encodeURIComponent(data.filename), '_blank', 'noopener');
-          } else if (data.path) {
-            window.open('/api/research/download?path=' + encodeURIComponent(data.path), '_blank', 'noopener');
           }
         })
         .catch(function () { toast(i18n('research.ui.export_request_failed', 'Export request failed'), 'error'); });

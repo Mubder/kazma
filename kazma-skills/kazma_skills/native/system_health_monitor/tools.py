@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import re
 import logging
 from pathlib import Path
 import psutil
@@ -113,25 +112,18 @@ async def list_active_processes() -> str:
 
 
 def _sanitize_log_text(text: str) -> str:
-    """Masks secret API keys, passwords, and authorization tokens."""
-    # Mask OpenAI style sk-... keys
-    text = re.sub(r"sk-[a-zA-Z0-9]{32,}", "[REDACTED_OPENAI_KEY]", text)
-    # Mask Google/Gemini style API keys
-    text = re.sub(r"AIzaSy[a-zA-Z0-9_-]{33}", "[REDACTED_GEMINI_KEY]", text)
-    # Mask general authorization headers / tokens
-    text = re.sub(r"(?i)bearer\s+[a-zA-Z0-9_\-\.\~]+", "Bearer [REDACTED_BEARER_TOKEN]", text)
-    # Mask inline secrets, keys, and passwords (e.g., db_password="xxx", api_key="xxx")
-    text = re.sub(
-        r"(?i)(api[-_]?key|secret|password|token|jwt|auth)\s*[=:]\s*['\"][^'\"]+['\"]",
-        r'\1: "[REDACTED_SECRET]"',
-        text,
-    )
-    text = re.sub(
-        r"(?i)(api[-_]?key|secret|password|token|jwt|auth)\s*[=:]\s*[a-zA-Z0-9_\-]+",
-        r"\1=[REDACTED_SECRET]",
-        text,
-    )
-    return text
+    """*text* with every secret the product's redactor knows hidden.
+
+    The one redactor (``kazma_core.errors.redact_secrets``) and the URL
+    masker (``security.url_credentials``). This tool kept its own, weaker
+    copy (audit 2026-11-10): it missed a DSN's password, ``xox``/``ghp_``/
+    ``sk-proj-`` tokens, Telegram ``bot<id>:<token>`` URLs and JSON-format
+    lines (``"password": "x"``).
+    """
+    from kazma_core.errors import redact_secrets
+    from kazma_core.security.url_credentials import mask_urls_in_text
+
+    return redact_secrets(mask_urls_in_text(text))
 
 
 def _tail_lines(path: Path, count: int) -> list[str]:

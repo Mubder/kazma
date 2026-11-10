@@ -43,8 +43,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  sync:
-    name: Regenerate & open site PR
+  # Two jobs so the website token never meets anything installed from PyPI:
+  # `generate` installs the test dependencies without a lock and holds no
+  # secret; `sync` holds WEBSITE_TOKEN, installs nothing and runs a
+  # standard-library script on a fresh runner.
+  generate:
+    name: Regenerate the metrics
     if: github.repository == 'Mubder/kazma'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -76,6 +80,25 @@ jobs:
           path: ${{ runner.temp }}/site-metrics
           retention-days: 14
 
+  sync:
+    name: Open site PR
+    needs: generate
+    if: github.repository == 'Mubder/kazma'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # The script is read from the repository; nothing is installed.
+      - name: Checkout framework repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Fetch the generated metrics
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: site-metrics
+          path: ${{ runner.temp }}/site-metrics
+
       - name: Open or refresh the website pull request
         env:
           GH_TOKEN: ${{ secrets.WEBSITE_TOKEN }}
@@ -90,4 +113,6 @@ jobs:
           fi
           # git push/fetch authenticate through gh with the same token.
           gh auth setup-git
-          python scripts/sync_site_metrics.py --source "$RUNNER_TEMP/site-metrics"
+          # Isolated mode: no PYTHONPATH, no working-directory imports; the
+          # script imports the standard library only.
+          python3 -I scripts/sync_site_metrics.py --source "$RUNNER_TEMP/site-metrics"

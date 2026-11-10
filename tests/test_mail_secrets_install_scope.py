@@ -113,12 +113,16 @@ def test_the_backup_token_refresh_cannot_leave_a_stray_copy(vault):
 
 
 def test_the_agents_secret_tool_cannot_either(vault):
+    """The agent's tool wrote mail secrets under the request's tenant; since
+    2026-11-10 it cannot write them at all (they are Kazma's own:
+    ``tests/test_vault_tools_kazma_secrets.py``)."""
+    from kazma_core.agent.tool_refusal import RefusedBeforeEffect
     from kazma_skills.native.secret_vault.tools import vault_store
 
-    with tenant_scope("default"):
-        reply = asyncio.run(vault_store("email.gmail.client_secret", "from-chat", "email"))
-    assert "stored securely" in reply
-    assert _every_reader_sees(vault, "email.gmail.client_secret") == {"from-chat"}
+    _legacy_row(vault, None, "email.gmail.client_secret", "settings", "2026-09-25T00:00:00+00:00")
+    with tenant_scope("default"), pytest.raises(RefusedBeforeEffect):
+        asyncio.run(vault_store("email.gmail.client_secret", "from-chat", "email"))
+    assert _every_reader_sees(vault, "email.gmail.client_secret") == {"settings"}
 
 
 def test_mail_code_and_the_backup_code_read_the_same_copy(vault):

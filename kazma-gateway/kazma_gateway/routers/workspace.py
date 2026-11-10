@@ -175,6 +175,12 @@ def create_workspace_select_router() -> APIRouter:
         raw = body.path.strip()
         if not raw:
             raise HTTPException(status_code=422, detail="Path must not be empty.")
+        # Before resolve(): resolving a network path connects to its host.
+        from kazma_core.workspace.remote_paths import remote_path_reason
+
+        remote = remote_path_reason(raw)
+        if remote:
+            raise HTTPException(status_code=400, detail=remote)
 
         p = Path(raw)
         if not p.is_absolute():
@@ -243,6 +249,17 @@ def create_workspace_select_router() -> APIRouter:
         raw = (path or "").strip()
         if not raw:
             return JSONResponse({"suggestions": []})
+        # Before resolve()/is_dir()/iterdir(): each would connect to the host
+        # a network path names, and this GET is reachable by a cross-site
+        # navigation (2026-11-10 audit).
+        from kazma_core.workspace.remote_paths import remote_path_reason
+
+        remote = remote_path_reason(raw)
+        if remote:
+            return JSONResponse(
+                {"suggestions": [], "error": "remote_path", "detail": remote},
+                status_code=400,
+            )
 
         # Split into the existing parent dir + the partial segment being typed.
         p = Path(raw)

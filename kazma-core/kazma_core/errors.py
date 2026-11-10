@@ -67,8 +67,13 @@ _PATH_FRAGMENTS = r"""
       | /(?:home|Users|root|etc|var|opt)/[^\s'"]*   # POSIX absolute paths
 """
 _SECRET_FRAGMENTS = r"""
-        (?:password|secret|token|api[_-]?key)\s*[=:]\s*\S+
-      | \b(?:sk|xox[baprs]|ghp|gho|ghu|ghs|AIza)[-_][A-Za-z0-9_-]{8,}
+        "[^"\s]*(?:password|passwd|secret|token(?!s)|api[_-]?key|private[_-]?key|authorization)[^"\s]*"
+          \s*:\s*"[^"]*"                                # a JSON member ("password": "x")
+      | (?:password|passwd|secret|token|api[_-]?key)\s*[=:]\s*\S+
+      | \b(?:bearer|basic)\s+(?:(?=[A-Za-z0-9._~+/=-]*\d)[A-Za-z0-9._~+/=-]{16,}|[A-Za-z0-9._~+/=-]{24,})  # an Authorization header's credential: 16+ with a digit, or 24+ ("basic configuration" is prose)
+      | \b(?:sk|xox[baprs]|ghp|gho|ghu|ghs|github_pat)[-_][A-Za-z0-9_-]{8,}
+      | \bAIza[A-Za-z0-9_-]{30,}                        # a Google API key
+      | \b(?:bot)?\d{6,}:[A-Za-z0-9_-]{30,}             # a Telegram bot token (in its API URL too)
       | [a-z][a-z0-9+.-]*://[^/\s:@'"]+:[^@\s/'"]+@  # URL userinfo (a DSN's password)
 """
 #: Fragments that must never reach a client even in verbose mode.

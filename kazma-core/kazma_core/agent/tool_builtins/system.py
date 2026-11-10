@@ -477,25 +477,51 @@ def register_system_tools(registry: Any) -> None:
                 )
             args = [resolved, *args[1:]]
 
+            from kazma_core.safety.shell_arguments import (
+                attached_values,
+                matches_blocked,
+                short_option_values,
+                split_subcommand,
+            )
+
+            # git's and uv's subcommand comes after their global options,
+            # some of which take a value: ``git -C . config ...`` and
+            # ``uv --color never run ...`` (2026-11-10 audit). An unknown
+            # global option is refused, since the word after it could be
+            # its value or the subcommand.
+            try:
+                _sub_index, _sub = split_subcommand(binary, args[1:])
+            except ValueError as exc:
+                raise RefusedBeforeEffect(f"{exc}")
+            _sub_args = args[2 + _sub_index:]
+
             # Reject absolute paths outside workspace (audit H4).
             # Flag-prefixed args carry paths too (``--file=../../x``,
             # ``-oC:\out``) — check the value after ``=`` and short-flag
-            # payloads, not just bare operands (audit L-14).
+            # payloads, not just bare operands (audit L-14). Every binary's
+            # attached short values are checked, not only the binaries with a
+            # known option table: ``sort -oC:\x.bat`` and ``date -f<file>``
+            # skipped the check (2026-11-10 audit).
             for a in args[1:]:
                 if not a:
                     continue
                 candidates_a = [a]
-                from kazma_core.safety.shell_arguments import short_option_values
-
                 try:
                     attached = short_option_values(binary, a)
                 except ValueError as exc:
                     raise RefusedBeforeEffect(f"{exc}")
                 for flag, value in attached:
-                    blocked = {"tar": {"-I", "-T"}, "git": {"-c"}, "grep": {"-f"}, "jq": {"-f"}}
+                    blocked = {
+                        "tar": {"-I", "-T"}, "grep": {"-f"}, "jq": {"-f"},
+                        "sort": {"-o"},
+                    }
                     if flag in blocked.get(binary, set()):
                         raise RefusedBeforeEffect(f"'{flag}' is not allowed for {binary}; use a native tool.")
+                    if binary == "sort" and flag in ("-t", "-k"):
+                        continue  # a field separator or key, never a path
                     candidates_a.append(value)
+                # One character is a delimiter (``cut -d/``), not a path.
+                candidates_a.extend(v for v in attached_values(a) if len(v) > 1)
                 if a.startswith("-") and "=" in a:
                     candidates_a.append(a.split("=", 1)[1])
                 for check in candidates_a:
@@ -504,6 +530,15 @@ def register_system_tools(registry: Any) -> None:
                     from kazma_core.workspace.path_policy import (
                         control_plane_store_targeted,
                     )
+                    from kazma_core.workspace.remote_paths import (
+                        remote_path_reason,
+                    )
+
+                    # Before the store check and realpath, which would
+                    # connect to the host a network path names.
+                    _remote = remote_path_reason(check)
+                    if _remote:
+                        raise RefusedBeforeEffect(f"{_remote} (argument '{a}')")
 
                     targeted = control_plane_store_targeted(check, cwd=cwd_s)
                     if targeted:
@@ -555,12 +590,24 @@ def register_system_tools(registry: Any) -> None:
             _EXEC_CAPABLE_ARGS: dict[str, tuple[str, ...]] = {
                 "find": (
                     "-exec", "-execdir", "-ok", "-okdir",
-                    "-delete", "-fprintf", "-fprint", "-fls",
+                    "-delete", "-fprintf", "-fprint", "-fprint0", "-fls",
                 ),
                 "git": (
                     "--upload-pack", "--receive-pack", "--exec-path",
                     "-c", "--config-env", "--upload-archive",
+                    # git grep opens matching files in a program it names.
+                    "--open-files-in-pager",
+                    # git difftool runs the command it names.
+                    "--extcmd",
                 ),
+                # sort compresses temporary files through a program it names,
+                # and writes where -o/--output says; --files0-from takes the
+                # files to read from a list no path check sees.
+                "sort": (
+                    "--compress-program", "-o", "--output", "--files0-from",
+                ),
+                "wc": ("--files0-from",),
+                "du": ("--files0-from",),
                 "tar": (
                     "--use-compress-program", "--to-command", "-I",
                     "--checkpoint-action", "--rmt-command", "--rsh-command",
@@ -573,7 +620,8 @@ def register_system_tools(registry: Any) -> None:
             }
             for _a in args[1:]:
                 _flag = _a.split("=", 1)[0]
-                if _flag in _EXEC_CAPABLE_ARGS.get(binary, ()):
+                # A long option may be abbreviated (``--open-files=``).
+                if matches_blocked(_flag, _EXEC_CAPABLE_ARGS.get(binary, ())):
                     raise RefusedBeforeEffect(
                         f"'{_flag}' is not allowed for {binary} — it runs "
                         f"another program (or writes/deletes outside the vetted "
@@ -588,8 +636,8 @@ def register_system_tools(registry: Any) -> None:
             # 2026-10-26 AUD-085): `uv run python -c ...` and `uv tool run`
             # start an interpreter, and `git config alias.x "!cmd"` then
             # `git x` runs a shell command -- each after one approved card,
-            # the class F-03 closed for `find -exec`.
-            _sub = next((a for a in args[1:] if not a.startswith("-")), "")
+            # the class F-03 closed for `find -exec`. `_sub` is the real
+            # subcommand, after the global options (split_subcommand above).
             if binary == "uv" and (
                 _sub in ("run", "tool")
                 or any(a.split("=", 1)[0] == "--with" for a in args[1:])
@@ -600,16 +648,30 @@ def register_system_tools(registry: Any) -> None:
                 )
             if binary == "git" and _sub == "config" and not any(
                 a in ("--get", "--get-all", "--get-regexp", "--list", "-l", "--show-origin")
-                for a in args[1:]
+                for a in _sub_args
             ):
                 raise RefusedBeforeEffect(
                     "git config may only be read here (--get/--list): a written "
                     "alias or core.* value runs a program on the next git call."
                 )
+            if binary == "git" and (
+                # -O may sit in a cluster (``-iO<cmd>``); a pattern attached
+                # to -e that holds an O is refused too (use ``-e PATTERN``).
+                (_sub == "grep" and any(
+                    a.startswith("-") and not a.startswith("--") and "O" in a[1:]
+                    for a in _sub_args
+                ))
+                or (_sub == "bisect" and "run" in _sub_args)
+            ):
+                raise RefusedBeforeEffect(
+                    f"git {_sub} with these arguments runs another program "
+                    "(grep -O, bisect run) and would bypass the binary "
+                    "allowlist. Use a native git_* tool."
+                )
 
             # git subcommand denylist (destructive / credential / rewrite)
             if binary == "git" and len(args) > 1:
-                sub = args[1].lstrip("-")
+                sub = _sub
                 blocked_git = {
                     "push", "credential", "credential-manager",
                     "credential-store", "credential-cache",
@@ -619,6 +681,9 @@ def register_system_tools(registry: Any) -> None:
                     # (ext::, gitProxy). Cloning belongs to the audited
                     # /api/github/repos/clone route (audit F-03).
                     "clone", "fetch", "archive", "daemon", "http-backend",
+                    # They start the merge or diff tool the configuration
+                    # (or -x/--extcmd) names, whatever the arguments.
+                    "mergetool", "difftool",
                 }
                 joined = " ".join(args[1:]).lower()
                 if (

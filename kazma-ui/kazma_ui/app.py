@@ -81,6 +81,54 @@ def json_for_script(obj: object) -> str:
     )
 
 
+def _ensure_generated_secrets() -> None:
+    """Make ``KAZMA_SECRET`` and ``KAZMA_VAULT_KEY`` when they are not set, and
+    keep them in the install's env file (``env_files.persist_generated_secret``:
+    restricted to this account before the key is written).
+
+    They were written to ``Path(".env")`` -- the folder the server was launched
+    from -- with the folder's default permissions (audit 2026-11-10). A vault
+    key that cannot be kept is an ERROR: every secret stored with it is
+    unreadable after a restart. Production never invents a vault key.
+    """
+    import secrets
+
+    from kazma_core.env_files import persist_generated_secret
+
+    if not os.environ.get("KAZMA_SECRET", "").strip():
+        generated = secrets.token_hex(32)
+        os.environ["KAZMA_SECRET"] = generated
+        try:
+            where = persist_generated_secret("KAZMA_SECRET", generated)
+            logger.info("[Auth] Auto-generated KAZMA_SECRET and kept it in %s", where)
+        except Exception as exc:  # noqa: BLE001 -- boot goes on; sessions end at a restart
+            logger.warning("[Auth] Could not keep the auto-generated KAZMA_SECRET: %s", exc)
+
+    if os.environ.get("KAZMA_VAULT_KEY", "").strip():
+        return
+    if env_flag("KAZMA_PRODUCTION"):
+        # Production must not invent vault keys silently (audit M5 / 3.4)
+        logger.error(
+            "[Vault] KAZMA_PRODUCTION=1 requires KAZMA_VAULT_KEY — "
+            "set a Fernet key before starting (see .env.example)"
+        )
+        raise RuntimeError(
+            "KAZMA_PRODUCTION=1 requires KAZMA_VAULT_KEY to be set. "
+            "Generate one: python -c \"import secrets; print(secrets.token_hex(32))\""
+        )
+    vault_key = secrets.token_hex(32)
+    os.environ["KAZMA_VAULT_KEY"] = vault_key
+    try:
+        where = persist_generated_secret("KAZMA_VAULT_KEY", vault_key)
+        logger.info("[Vault] Auto-generated KAZMA_VAULT_KEY and kept it in %s", where)
+    except Exception as exc:  # noqa: BLE001 -- boot goes on, said loudly
+        logger.error(
+            "[Vault] The auto-generated KAZMA_VAULT_KEY could not be kept (%s): every secret "
+            "stored from now on will be unreadable after a restart. Set KAZMA_VAULT_KEY in "
+            "the install's .env before storing secrets.", exc,
+        )
+
+
 class KazmaAppBuilder:
     """Builder class for constructing and configuring the Kazma FastAPI application."""
 
@@ -293,89 +341,10 @@ class KazmaAppBuilder:
         wait_for_settings_store(get_config_store,
                                 on_wait=lambda waited: read_only_after(waited, since=boot_wall))
 
-        # Ensure KAZMA_SECRET is configured
+        # Ensure KAZMA_SECRET and KAZMA_VAULT_KEY are configured
         import sys
         if "pytest" not in sys.modules:
-            _secret = os.environ.get("KAZMA_SECRET", "").strip()
-            if not _secret:
-                import secrets
-                generated = secrets.token_hex(32)
-                os.environ["KAZMA_SECRET"] = generated
-
-                # Persist to .env if possible
-                env_path = Path(".env")
-                if env_path.exists():
-                    try:
-                        content = env_path.read_text(encoding="utf-8")
-                        lines = content.splitlines()
-                        updated = False
-                        for i, line in enumerate(lines):
-                            stripped = line.strip()
-                            if stripped.startswith("# KAZMA_SECRET=") or stripped.startswith("KAZMA_SECRET="):
-                                lines[i] = f"KAZMA_SECRET={generated}"
-                                updated = True
-                                break
-                        if updated:
-                            env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-                            logger.info("[Auth] Auto-generated and updated KAZMA_SECRET in .env file")
-                        else:
-                            with open(env_path, "a", encoding="utf-8") as f:
-                                f.write(f"\nKAZMA_SECRET={generated}\n")
-                            logger.info("[Auth] Auto-generated and appended KAZMA_SECRET to .env file")
-                    except Exception as e:
-                        logger.warning("[Auth] Failed to write auto-generated KAZMA_SECRET to .env: %s", e)
-                else:
-                    try:
-                        env_path.write_text(f"KAZMA_SECRET={generated}\n", encoding="utf-8")
-                        logger.info("[Auth] Created .env and persisted auto-generated KAZMA_SECRET")
-                    except Exception as e:
-                        logger.warning("[Auth] Failed to create .env for auto-generated KAZMA_SECRET: %s", e)
-
-            # Ensure KAZMA_VAULT_KEY is configured (for the encrypted secret vault)
-            _vault_key = os.environ.get("KAZMA_VAULT_KEY", "").strip()
-            _prod = env_flag("KAZMA_PRODUCTION")
-            if not _vault_key and _prod:
-                # Production must not invent vault keys silently (audit M5 / 3.4)
-                logger.error(
-                    "[Vault] KAZMA_PRODUCTION=1 requires KAZMA_VAULT_KEY — "
-                    "set a Fernet key before starting (see .env.example)"
-                )
-                raise RuntimeError(
-                    "KAZMA_PRODUCTION=1 requires KAZMA_VAULT_KEY to be set. "
-                    "Generate one: python -c \"import secrets; print(secrets.token_hex(32))\""
-                )
-            if not _vault_key:
-                import secrets as _sec2
-                _vault_generated = _sec2.token_hex(32)
-                os.environ["KAZMA_VAULT_KEY"] = _vault_generated
-
-                env_path = Path(".env")
-                if env_path.exists():
-                    try:
-                        content = env_path.read_text(encoding="utf-8")
-                        lines = content.splitlines()
-                        updated = False
-                        for i, line in enumerate(lines):
-                            stripped = line.strip()
-                            if stripped.startswith("# KAZMA_VAULT_KEY=") or stripped.startswith("KAZMA_VAULT_KEY="):
-                                lines[i] = f"KAZMA_VAULT_KEY={_vault_generated}"
-                                updated = True
-                                break
-                        if updated:
-                            env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-                            logger.info("[Vault] Auto-generated and updated KAZMA_VAULT_KEY in .env file")
-                        else:
-                            with open(env_path, "a", encoding="utf-8") as f:
-                                f.write(f"\nKAZMA_VAULT_KEY={_vault_generated}\n")
-                            logger.info("[Vault] Auto-generated and appended KAZMA_VAULT_KEY to .env file")
-                    except Exception as e:
-                        logger.warning("[Vault] Failed to write KAZMA_VAULT_KEY to .env: %s", e)
-                else:
-                    try:
-                        env_path.write_text(f"KAZMA_VAULT_KEY={_vault_generated}\n", encoding="utf-8")
-                        logger.info("[Vault] Created .env and persisted auto-generated KAZMA_VAULT_KEY")
-                    except Exception as e:
-                        logger.warning("[Vault] Failed to create .env for KAZMA_VAULT_KEY: %s", e)
+            _ensure_generated_secrets()
 
         self.config = load_config(self.config_path)
         # Process-wide singleton — never construct ConfigStore() elsewhere.
@@ -3008,7 +2977,8 @@ def main() -> None:
     # the TCP peer from the undeclared-proxy check.
     uvicorn.run(app, host=host, port=args.port, log_level="info",
                 ws_ping_interval=20.0, ws_ping_timeout=20.0,
-                loop=uvicorn_loop_factory(), proxy_headers=False)
+                loop=uvicorn_loop_factory(), proxy_headers=False,
+                server_header=False)
 
 
 if __name__ == "__main__":

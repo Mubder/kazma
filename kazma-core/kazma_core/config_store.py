@@ -187,6 +187,11 @@ def is_sensitive_config_key(key: str) -> bool:
         or last.endswith("_encryption_key")
         or last.endswith("_signing_key")
         or last.endswith("_webhook")  # webhook URLs carry bearer paths
+        # Audit 2026-11-10: names the Settings masker (config_mask) hid but
+        # nothing sent to the vault -- notifications.push.vapid_private_key
+        # (the Web Push signing key) sat in plaintext in settings.db.
+        or last.endswith(("_private_key", "_access_key", "_access_key_id", "_passphrase"))
+        or last in ("passphrase", "authorization", "bearer", "pat")
     ):
         return True
     # Layer 2: any segment that IS a secret-kind word (anywhere in the key).

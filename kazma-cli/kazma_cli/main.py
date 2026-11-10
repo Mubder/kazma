@@ -362,7 +362,7 @@ def _run_serve(port: int) -> None:
         uvicorn.run(app, host=host, port=port, log_level="info",
                     ws_ping_interval=20.0, ws_ping_timeout=20.0,
                     timeout_graceful_shutdown=uvicorn_graceful_s(), loop=uvicorn_loop_factory(),
-                    proxy_headers=False)
+                    proxy_headers=False, server_header=False)
     except OSError as exc:
         # Windows: port often "busy" via WSL/Docker portproxy (svchost), not another Kazma.
         err = str(exc).lower()

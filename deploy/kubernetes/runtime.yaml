@@ -63,6 +63,7 @@ spec:
             - kazma_ui.app:create_app
             - --factory
             - --no-proxy-headers
+            - --no-server-header
             - --host
             - 0.0.0.0
             - --port
@@ -79,7 +80,7 @@ spec:
               value: postgres
             - name: KAZMA_PRODUCTION
               value: "1"
-            - name: KAZMA_ALLOW_HOST_SHELL
+            - name: KAZMA_HOST_SHELL
               value: "0"
             - name: KAZMA_AUTO_MIGRATE
               value: "0"

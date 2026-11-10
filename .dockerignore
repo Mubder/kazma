@@ -20,6 +20,32 @@ build/
 .pytest_cache/
 .mypy_cache/
 .poolside/
+.pytest-tmp/
+.pytest_tmp*/
 
 # Deployment secrets: never copied into an image.
 secrets/
+
+# Kazma's own secret and state files (store_registry.SECRET_FILE_NAMES, the
+# install's .kazma folder: restic.pass, postgres_superuser.pass, observer.key,
+# document_broker.token, logs), at any depth: `.env` and `*.db` above match the
+# root only, and the image does `COPY . .`.
+.kazma/
+**/.kazma/
+**/.env
+**/.env.*
+!.env.example
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/*.db-journal
+**/*.pass
+**/*.key
+**/*.token
+**/meta.env
+
+# Local tooling and generated reports.
+.claude/
+**/.claude/
+reports/
+**/reports/
