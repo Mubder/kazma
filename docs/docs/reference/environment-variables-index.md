@@ -11,7 +11,7 @@ description: Every KAZMA_* variable the code reads, where, and its default. Gene
 > `python scripts/generate_env_reference.py` after adding or removing a variable;
 > `tests/test_env_reference.py` fails while this page is stale.
 
-**287** variables are read by the product code; **287** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
+**290** variables are read by the product code; **290** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
 the undocumented count is on a ratchet that may only go down.
 
 | Variable | Default in code | Read in | Described |
@@ -187,6 +187,9 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_NO_TRUNCATE` | (none) | `kazma_core.agent.graph_helpers` | yes |
 | `KAZMA_OBSERVER_PAIRING_TOKEN` | (none) | `kazma_cli.observer` | yes |
 | `KAZMA_OCR_MODEL_DIR` | (none) | `kazma_core.documents.ocr.neural_models` | yes |
+| `KAZMA_OIDC_ALLOWED_DOMAINS` | (none) | `kazma_core.security.oidc` | yes |
+| `KAZMA_OIDC_ALLOWED_EMAILS` | (none) | `kazma_core.security.oidc` | yes |
+| `KAZMA_OIDC_ALLOWED_GROUPS` | (none) | `kazma_core.security.oidc` | yes |
 | `KAZMA_OIDC_CLIENT_ID` | (none) | `kazma_core.security.oidc` | yes |
 | `KAZMA_OIDC_CLIENT_SECRET` | (none) | `kazma_core.security.oidc` | yes |
 | `KAZMA_OIDC_DEFAULT_ROLE` | (none) | `kazma_core.security.oidc` | yes |

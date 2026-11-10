@@ -263,7 +263,17 @@ def register_auth_routes(self: Any) -> None:
                 {"error": "session_create_failed", "detail": "Could not mint a login session."},
                 status_code=503,
             )
-    @self.app.get("/api/auth/oidc/start")
+    from fastapi import Depends
+
+    from kazma_ui.rate_limit import rate_limit
+
+    # Reached before sign-in, by anyone: each call fetches the IdP's discovery
+    # document and writes a pending sign-in, of which 32 are kept -- a loop
+    # evicted real ones (security audit 2026-11-10). Per client address.
+    @self.app.get(
+        "/api/auth/oidc/start",
+        dependencies=[Depends(rate_limit("oidc_start", 10, per_address=True))],
+    )
     async def _oidc_start(request: Request) -> Response:
         """Redirect browser to configured OIDC IdP (Phase 4.4)."""
         from fastapi.responses import RedirectResponse

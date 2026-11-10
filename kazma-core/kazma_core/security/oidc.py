@@ -43,6 +43,7 @@ __all__ = [
     "fetch_discovery",
     "oidc_configured",
     "oidc_role_from_claims",
+    "oidc_sign_in_allowed",
     "oidc_tenant_from_claims",
 ]
 
@@ -68,6 +69,78 @@ class OidcConfig:
         # Opt-in: the claim naming the user's Kazma tenant. Unset = every OIDC
         # user shares the default tenant, as before.
         self.tenant_claim = (os.environ.get("KAZMA_OIDC_TENANT_CLAIM") or "").strip()
+        # Who of the issuer's accounts may sign in (security audit
+        # 2026-11-10). None set: every account the issuer authenticates.
+        self.allowed_emails = _env_set("KAZMA_OIDC_ALLOWED_EMAILS")
+        self.allowed_domains = {d.lstrip("@") for d in _env_set("KAZMA_OIDC_ALLOWED_DOMAINS")}
+        self.allowed_groups = _env_set("KAZMA_OIDC_ALLOWED_GROUPS")
+        if self.issuer and not self.restricted:
+            _warn_open_issuer_once(self.issuer)
+
+    @property
+    def restricted(self) -> bool:
+        return bool(self.allowed_emails or self.allowed_domains or self.allowed_groups)
+
+
+def _env_set(name: str) -> set[str]:
+    return {
+        part.strip().lower()
+        for part in (os.environ.get(name) or "").split(",")
+        if part.strip()
+    }
+
+
+_open_issuer_warned: list[bool] = [False]
+
+
+def _warn_open_issuer_once(issuer: str) -> None:
+    if _open_issuer_warned[0]:
+        return
+    _open_issuer_warned[0] = True
+    logger.warning(
+        "[oidc] Every account %s authenticates may sign in to Kazma. Name who may "
+        "with KAZMA_OIDC_ALLOWED_EMAILS, KAZMA_OIDC_ALLOWED_DOMAINS or "
+        "KAZMA_OIDC_ALLOWED_GROUPS.",
+        issuer,
+    )
+
+
+def _claim_values(claims: dict[str, Any], *names: str) -> list[str]:
+    """Every value of the named claims, a list claim read element by element."""
+    values: list[str] = []
+    for name in names:
+        raw = claims.get(name)
+        items = raw if isinstance(raw, list) else [raw]
+        values += [str(v).strip() for v in items if v not in (None, "") and str(v).strip()]
+    return values
+
+
+def _email_of(claims: dict[str, Any]) -> str:
+    """The claims' email, refused when the IdP says it is not verified.
+
+    An address the IdP has not verified is whatever the account typed: at an
+    issuer that lets anyone register, the owner's address (security audit
+    2026-11-10). An IdP that does not send ``email_verified`` is taken at its
+    word, as before.
+    """
+    email = str(claims.get("email") or "").strip()
+    if email and claims.get("email_verified") in (False, "false", "False"):
+        raise PermissionError("OIDC email is not verified by the identity provider")
+    return email
+
+
+def oidc_sign_in_allowed(claims: dict[str, Any], cfg: OidcConfig) -> bool:
+    """Whether the allowlists admit this account (always, with none set)."""
+    if not cfg.restricted:
+        return True
+    if cfg.allowed_emails or cfg.allowed_domains:
+        email = _email_of(claims).lower()
+        if email and email in cfg.allowed_emails:
+            return True
+        if email and "@" in email and email.rsplit("@", 1)[1] in cfg.allowed_domains:
+            return True
+    groups = {g.lower() for g in _claim_values(claims, "groups", "roles", cfg.role_claim)}
+    return bool(groups & cfg.allowed_groups)
 
 
 def oidc_tenant_from_claims(claims: dict[str, Any], cfg: OidcConfig) -> str | None:
@@ -171,6 +244,9 @@ async def build_authorize_url() -> dict[str, str]:
         raise RuntimeError("OIDC discovery missing authorization_endpoint")
 
     state = secrets.token_urlsafe(24)
+    # Binds the id_token to this sign-in: a token minted for another one (a
+    # replayed or injected id_token) carries another nonce.
+    nonce = secrets.token_urlsafe(24)
     verifier, challenge = make_pkce()
     from kazma_core.config_store import get_config_store
 
@@ -179,7 +255,9 @@ async def build_authorize_url() -> dict[str, str]:
         pending = _live_pending(curr, now)
         while len(pending) >= _PENDING_MAX:
             pending.pop(min(pending, key=lambda k: float(pending[k].get("exp") or 0)))
-        pending[_state_id(state)] = {"verifier": verifier, "exp": now + _PENDING_TTL_S}
+        pending[_state_id(state)] = {
+            "verifier": verifier, "nonce": nonce, "exp": now + _PENDING_TTL_S,
+        }
         return pending
 
     # Off the loop: a settings write is a database round trip.
@@ -191,6 +269,7 @@ async def build_authorize_url() -> dict[str, str]:
         "redirect_uri": cfg.redirect_uri,
         "scope": cfg.scopes,
         "state": state,
+        "nonce": nonce,
         "code_challenge": challenge,
         "code_challenge_method": "S256",
     }
@@ -243,6 +322,7 @@ async def exchange_code(code: str, state: str, *, bound_state: str) -> dict[str,
     except (TypeError, ValueError):
         raise PermissionError("OIDC state expired") from None
     verifier = str(taken.get("verifier") or "")
+    nonce = str(taken.get("nonce") or "")
 
     disc = await fetch_discovery(cfg.issuer)
     token_ep = disc.get("token_endpoint")
@@ -272,6 +352,11 @@ async def exchange_code(code: str, state: str, *, bound_state: str) -> dict[str,
     id_token = tokens.get("id_token")
     if id_token:
         claims = await _verify_id_token(str(id_token), disc, cfg)
+        # A sign-in started before the nonce existed has none recorded.
+        if nonce and not hmac.compare_digest(
+            str(claims.get("nonce") or "").encode("utf-8"), nonce.encode("utf-8")
+        ):
+            raise PermissionError("OIDC id_token nonce does not match this sign-in")
     elif tokens.get("access_token") and disc.get("userinfo_endpoint"):
         claims = await _userinfo_claims(
             str(tokens["access_token"]),
@@ -282,6 +367,16 @@ async def exchange_code(code: str, state: str, *, bound_state: str) -> dict[str,
 
     if not (claims.get("sub") or claims.get("email")):
         raise PermissionError("OIDC claims missing subject")
+    # An unverified email is refused wherever it would count: as the name or
+    # id below, or matched against an allowlist.
+    email_counts = bool(
+        cfg.allowed_emails or cfg.allowed_domains
+        or not claims.get("sub") or not claims.get("preferred_username")
+    )
+    email = _email_of(claims) if email_counts else str(claims.get("email") or "").strip()
+    if not oidc_sign_in_allowed(claims, cfg):
+        logger.warning("[oidc] refused a sign-in the allowlists do not name")
+        raise PermissionError("This account may not sign in to Kazma")
 
     role = oidc_role_from_claims(claims, cfg)
     return {
@@ -289,32 +384,42 @@ async def exchange_code(code: str, state: str, *, bound_state: str) -> dict[str,
         "role": role,
         "username": str(
             claims.get("preferred_username")
-            or claims.get("email")
+            or email
             or claims.get("sub")
             or "oidc-user"
         ),
-        "user_id": str(claims.get("sub") or claims.get("email") or "oidc"),
+        "user_id": str(claims.get("sub") or email or "oidc"),
         "tenant_id": oidc_tenant_from_claims(claims, cfg),
         "tokens": {"token_type": tokens.get("token_type"), "expires_in": tokens.get("expires_in")},
     }
 
 
+#: Common IdP role names, as Kazma's roles.
+_ROLE_NAMES: dict[str, str] = {
+    "admin": "admin", "owner": "admin", "superadmin": "admin", "administrator": "admin",
+    "operator": "operator", "user": "operator", "member": "operator", "write": "operator",
+    "viewer": "viewer", "read": "viewer", "readonly": "viewer", "guest": "viewer",
+}
+_RANK = {"viewer": 1, "operator": 2, "admin": 3}
+
+
 def oidc_role_from_claims(claims: dict[str, Any], cfg: OidcConfig | None = None) -> str:
+    """The highest Kazma role any value of the role claim maps to.
+
+    A list-valued claim is read element by element (only its first element
+    was read: ``["employees", "kazma-admin"]`` gave the default role and
+    ``["admin", ...]`` admin whatever came after; security audit 2026-11-10).
+    No value that maps: the default role.
+    """
     cfg = cfg or OidcConfig()
     raw = claims.get(cfg.role_claim) or claims.get("roles") or claims.get("groups")
-    if isinstance(raw, list) and raw:
-        raw = raw[0]
-    role = str(raw or cfg.default_role).lower()
-    if role in ("admin", "operator", "viewer"):
-        return role
-    # Map common IdP names
-    if role in ("owner", "superadmin", "administrator"):
-        return "admin"
-    if role in ("user", "member", "write"):
-        return "operator"
-    if role in ("read", "readonly", "guest"):
-        return "viewer"
-    return cfg.default_role if cfg.default_role in ("admin", "operator", "viewer") else "operator"
+    items = raw if isinstance(raw, list) else [raw]
+    mapped = [_ROLE_NAMES[str(v).strip().lower()] for v in items
+              if v is not None and str(v).strip().lower() in _ROLE_NAMES]
+    if mapped:
+        return max(mapped, key=_RANK.__getitem__)
+    default = str(cfg.default_role or "").lower()
+    return default if default in _RANK else "operator"
 
 
 _ASYM_ALGS = ("RS256", "RS384", "RS512", "ES256", "ES384", "ES512", "PS256", "PS384", "PS512")
