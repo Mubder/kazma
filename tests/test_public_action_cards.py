@@ -32,6 +32,9 @@ LONG_POST = "Kazma metrics — " + "x" * 260 + " END"
 NOT_PUBLIC = {
     "request_path_access": "widens what the file tools may read or write for "
     "the session; nothing leaves the machine",
+    "vault_retrieve": "puts a stored secret into the model's context; nothing is published",
+    "vault_store": "writes a secret into the local vault; nothing is published",
+    "vault_delete": "removes a secret from the local vault; nothing is published",
 }
 
 

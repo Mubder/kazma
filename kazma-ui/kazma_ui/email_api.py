@@ -100,9 +100,9 @@ class ProtocolDisconnectBody(BaseModel):
 
 
 def _is_production() -> bool:
-    return (os.environ.get("KAZMA_PRODUCTION") or "").strip().lower() in (
-        "1", "true", "on", "yes",
-    )
+    from kazma_core.security.boot_guard import env_flag
+
+    return env_flag("KAZMA_PRODUCTION")
 
 
 def _vault_refused(exc: Exception) -> JSONResponse | None:

@@ -150,11 +150,17 @@ def create_saas_router() -> APIRouter:
         except PlatformUsersUnavailable:
             logger.warning("[saas] delete user: platform users unreadable", exc_info=True)
             return JSONResponse({"error": "users_unavailable"}, status_code=503)
+        gone = [u for u in users if str(u.get("username", "")).lower() == username.lower()]
         new_users = [u for u in users if str(u.get("username", "")).lower() != username.lower()]
-        if len(new_users) == len(users):
+        if not gone:
             return JSONResponse({"error": "User not found"}, status_code=404)
         _save_users_to_store(new_users)
-        return JSONResponse({"status": "ok", "deleted": username})
+        # A deleted user's sessions end with them, the asking admin's too
+        # when they delete themselves (security audit 2026-11-10).
+        ended = _end_sessions(gone[0], keep=None)
+        if ended is None:
+            return _sessions_not_ended()
+        return JSONResponse({"status": "ok", "deleted": username, "sessions_ended": ended})
 
     @router.patch("/users/{username}")
     async def patch_platform_user(username: str, request: Request) -> JSONResponse:
@@ -166,9 +172,36 @@ def create_saas_router() -> APIRouter:
         except InvalidJsonBody:
             return invalid_json_response()
         # The user store round trip and the password hash stay off the loop.
-        return await asyncio.to_thread(_patch_user, username, body)
+        from kazma_core.security.web_sessions import SESSION_COOKIE
 
-    def _patch_user(username: str, body: dict[str, Any]) -> JSONResponse:
+        return await asyncio.to_thread(
+            _patch_user, username, body, request.cookies.get(SESSION_COOKIE)
+        )
+
+    def _end_sessions(user: dict[str, Any], *, keep: str | None) -> int | None:
+        """End *user*'s sessions but *keep*; ``None`` when that failed."""
+        from kazma_core.security import web_sessions
+
+        try:
+            return web_sessions.revoke_user_sessions(
+                user_id=str(user.get("user_id") or ""),
+                username=str(user.get("username") or ""),
+                keep=keep,
+            )
+        except Exception:
+            logger.warning("[saas] could not end the sessions of %s", user.get("username"),
+                           exc_info=True)
+            return None
+
+    def _sessions_not_ended() -> JSONResponse:
+        # The change is saved; the sessions it should have ended are not.
+        return JSONResponse(
+            {"error": "sessions_not_ended",
+             "detail": "Saved, but the user's sessions could not be ended. Try again."},
+            status_code=503,
+        )
+
+    def _patch_user(username: str, body: dict[str, Any], keep: str | None = None) -> JSONResponse:
         from kazma_core.security.platform_rbac import (
             PlatformUsersUnavailable,
             _hash_password,
@@ -189,19 +222,35 @@ def create_saas_router() -> APIRouter:
                 break
         if not found:
             return JSONResponse({"error": "User not found"}, status_code=404)
+        # A session carries the role it was minted with, so a role change, a
+        # disable or a password reset must end the sessions that predate it
+        # (security audit 2026-11-10: they kept working). Only a password
+        # reset keeps the asking admin's own session; a changed role or a
+        # disabled account would otherwise live on in it.
+        role_changed = disabled = password_reset = False
         if "role" in body:
             role = str(body["role"]).lower()
             if role not in ("viewer", "operator", "admin"):
                 return JSONResponse({"error": "invalid role"}, status_code=400)
+            role_changed = role != str(found.get("role") or "operator").lower()
             found["role"] = role
         if "enabled" in body:
+            disabled = not bool(body["enabled"]) and found.get("enabled", True) is not False
             found["enabled"] = bool(body["enabled"])
         if body.get("password"):
             pw = str(body["password"])
             if len(pw) < 8:
                 return JSONResponse({"error": "password min 8 chars"}, status_code=400)
             found["password_hash"] = _hash_password(pw)
+            password_reset = True
         _save_users_to_store(users)
+        ended = 0
+        if role_changed or disabled or password_reset:
+            keep_mine = keep if (password_reset and not role_changed and not disabled) else None
+            result = _end_sessions(found, keep=keep_mine)
+            if result is None:
+                return _sessions_not_ended()
+            ended = result
         return JSONResponse({
             "status": "ok",
             "user": {
@@ -210,6 +259,7 @@ def create_saas_router() -> APIRouter:
                 "role": found.get("role"),
                 "enabled": found.get("enabled", True),
             },
+            "sessions_ended": ended,
         })
 
     @router.get("/tenants")

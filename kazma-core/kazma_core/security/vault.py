@@ -45,6 +45,7 @@ __all__ = [
     "consolidate_install_scoped_secrets",
     "get_vault",
     "is_install_scoped_secret",
+    "is_kazma_owned_secret",
     "reset_posture_cache",
     "reset_vault",
     "retrieve_scoped",
@@ -113,6 +114,10 @@ INSTALL_SCOPED_SECRETS: tuple[tuple[str, str], ...] = (
     # Offsite backup credentials (S3 access key; the NAS passwords are stored
     # global by the route already): the backup sync reads them with no tenant.
     ("cfg:backups.offsite.", "newest"),
+    # The Web Push signing key (vault-routed since 2026-11-10): made in the
+    # request of the first browser that subscribes, read by whatever finishes
+    # a turn, often with no tenant bound.
+    ("cfg:notifications.push.", "newest"),
 )
 
 
@@ -127,6 +132,26 @@ def _install_scope_rule(name: str) -> str | None:
 def is_install_scoped_secret(name: str) -> bool:
     """True if *name* (a vault name) belongs to the install: :data:`INSTALL_SCOPED_SECRETS`."""
     return _install_scope_rule(name) is not None
+
+
+#: The prefix of every vault row the settings store writes for a secret
+#: setting (``cfg:<key path>``): provider keys, bot tokens, the memory
+#: mirror's address, X credentials. Settings owns them.
+CONFIG_SECRET_PREFIX = "cfg:"
+
+
+def is_kazma_owned_secret(name: str) -> bool:
+    """True if *name* is one of Kazma's own vault rows, never the agent's.
+
+    A settings secret (``cfg:``) or an install-scoped one
+    (:data:`INSTALL_SCOPED_SECRETS`: mail and calendar sign-ins among them).
+    The agent's vault tools refuse these names both ways and leave them out of
+    their list: a retrieve put a provider key or a bot token into the model's
+    context, and a store overwrote a setting Settings guards
+    (``safety.protected_config``) -- the memory mirror's address, say.
+    """
+    clean = str(name or "").strip()
+    return clean.startswith(CONFIG_SECRET_PREFIX) or is_install_scoped_secret(clean)
 
 # ── Constants ──────────────────────────────────────────────────────────────
 

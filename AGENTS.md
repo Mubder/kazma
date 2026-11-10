@@ -526,7 +526,8 @@ JSON". Gate: `tests/test_x_reasoning_off.py`.
   undeclared changed value).
 - **First boot seeds merged YAML, retirement reads shipped defaults**
   (`reconcile_from_yaml`, 2026-10-06): local provider/model choices must
-  survive the active workspace's fallback reload. Seed missing keys through
+  survive a restart (the fallback followed the active workspace then; it no
+  longer does, §62). Seed missing keys through
   `load_merged_yaml` and `shipped_settings`, including local-only files;
   existing rows retain precedence. Check declared retirements against raw
   shipped defaults BEFORE seeding, so a fresh local choice equal to a retired
@@ -9464,8 +9465,9 @@ has a gate that fails on the old code.
   2026-11-03, when the live install folder was found granting read to a
   group another program had added (`CodexSandboxUsers`), inherited by `.env`
   and `vault.db` too; removing that grant is the owner's. The offsite copy
-  leaves `.env` out, zip and rclone alike (`universal.OFFSITE_LEAVES_OUT`,
-  FA-215, the owner's decision). Gates: `tests/test_secret_file_access_check.py`,
+  leaves every secret-named file out at any depth, zip and rclone alike
+  (FA-215, the owner's decision; by the registry's name rule since
+  2026-11-10, §62). Gates: `tests/test_secret_file_access_check.py`,
   `tests/test_offsite_copy_leaves_env_out.py`.
 - **What Kazma's words say is what the code does** (FA-119/120/121/122/123/
   229). The cron zone hint names its order (`cron.timezone`, `KAZMA_TZ`,
@@ -9982,6 +9984,160 @@ Gates: `tests/test_provider_keys.py`, and in a browser (by the sidebar)
 `tests/e2e/test_provider_settings_browser.py`. The browser test found that
 the setup wall stayed up over a network server in use: readiness now
 counts the active provider's address (`setup_api.compute_setup_status`).
+
+### 62. The security audit of 2026-11-10: the High findings
+
+Five findings, each fixed with a test that fails on the old code. The
+audit's remaining findings are not listed here until each is fixed (the
+repository is public).
+
+- **A saved web extract is a note, never a file a program loads** (SEC-01,
+  `tools/read_url._extract_path_refusal`). `read_url_to_file` (write tier, no
+  card) and `crawl_site`'s save name their file through
+  `_safe_workspace_path`, whose only rules were "inside the workspace" and
+  "not there yet"; a JSON answer is saved byte for byte under `# ` header
+  lines. A fetched page that steered the model could plant
+  `.venv/Lib/site-packages/x.pth` (Python runs its `import` lines at the next
+  start) or `kazma.local.yaml`. Now: a `.md` or `.txt` file with a plain
+  name, in no dot folder and no folder of `GENERATED_DIRS` (compared without
+  case), no `:` in the path, never one of Kazma's own files. Any other
+  destination is `file_write`'s, which asks. Gate:
+  `tests/test_extract_saves_are_notes.py` (the old rule as the control).
+- **A workspace's `kazma.yaml` is content, never configuration** (SEC-02).
+  The settings store's YAML fallback is the install's own file for the life
+  of the store. `ConfigStore.reload_from_root` (boot, every workspace switch
+  and clone) pointed it at the active workspace, so a cloned repository's
+  file answered every key with no stored row: chat-app allowlists (gateway
+  admin), the commitment layer's switches, the offsite backup's destination.
+  The method and its four callers are gone; nothing assigns `_yaml_path`
+  outside `__init__`. Gate: `tests/test_workspace_yaml_is_not_config.py`
+  (the repoint put back by hand as the control; a planted repoint).
+- **The markdown renderer stashes every tag it writes** (SEC-03,
+  `static/js/streaming.js` `inline`: `stash`, `oneToken`). Each generated
+  `<a>`, `<img>` and `<span>` is held behind a token, like code spans, until
+  the last pass has run, and restored newest first; a link or image address
+  is one token (no space, quote, angle bracket or backtick, escaped or not).
+  The auto-link pass ran over anchors already written: a second URL after a
+  space inside a link's address closed the outer `href` and the rest became
+  attributes (`onmouseover`). Never add a pass that reads emitted markup.
+  Gate: `tests/js/test_markdown_no_attribute_injection.js` (the old passes as
+  the control).
+- **A chat-app sender sees and takes over only their own seasons** (SEC-04,
+  `sessions/directory.py`: `list_directory(only_for=)`,
+  `resolve_session(only_for=)`, `sender_may_take_over(admin=)`;
+  `agent_handler/session_commands.py`). `/sessions` listed every chat and
+  `/switch` bound the sender to any chat with no owner on record, which is
+  every chat started on the Web; with an empty allowlist that is anyone who
+  can message the bot. A sender who is not a gateway admin
+  (`allowlists.is_gateway_admin`) now lists and resolves their own seasons,
+  and an unowned season is an admin's. `KAZMA_SESSION_OPEN_TAKEOVER=1` still
+  opens both. Gate: `tests/test_session_takeover_needs_admin.py`.
+- **A session's role is enforced in every mode** (SEC-05, `auth.py`
+  `create_auth_middleware`: `_multi_user or _session_cred`). `role_allows`
+  ran only under multi-user; an OIDC sign-in mints viewer/operator sessions
+  with no local user, and such a session reached the MCP, settings and token
+  routes. A request carrying a session credential is now always judged by
+  its role; an unreadable user list is a WARNING and never "single
+  operator". API tokens and the shared secret are unchanged. The install's
+  mail and calendar connections (`/api/email`, `/api/calendar`) are admin
+  prefixes. Gate: `tests/test_session_role_always_enforced.py`.
+- With them: the API token hash is compared with `hmac.compare_digest`, and
+  a file shared into a web chat that is not an inline image is served
+  `Cache-Control: no-store` (`routes_chat_upload.shared_file`).
+
+**The second batch (same audit, 2026-11-10)**, each with a test that fails on
+the old code:
+
+- **Agent tools.**
+  - `shell_exec` finds git's and uv's real subcommand after their global
+    options (`safety/shell_arguments.split_subcommand`; an unknown global
+    option is refused): `git -C . config ...` and `uv --directory . run ...`
+    passed the old first-word rule. More flags that start a program are
+    refused (`git grep -O`, `git difftool --extcmd`, `git bisect run`,
+    `sort --compress-program`/`-o`), abbreviated long options included
+    (`matches_blocked`), and a value attached to a short option reaches the
+    path policy for every binary (`attached_values`). Gate:
+    `tests/test_shell_exec_subcommand_and_attached_values.py`.
+  - The git read tools start no program the repository chose (`_git_read`:
+    no external diff, textconv, pager, hooks, signature program or filter
+    driver). Only `core.fsmonitor` was off. Gate:
+    `tests/test_git_read_tools_start_no_repo_program.py` (a real repository).
+  - Every branch and remote a git tool passes is a plain ref name
+    (`_checked_ref`, `_checked_revision`), a remote must be one the
+    repository has, and `--` precedes positionals. Gate:
+    `tests/test_git_tool_refs_validated.py`.
+  - A network or device path is refused on its text, before anything
+    resolves it (`workspace/remote_paths.remote_path_reason`, called by
+    `resolve_tool_path`, `check_path_access`, the shell argument check and
+    the workspace routes): resolving `\\host\share` connects to that host.
+    `/api/research/download` takes a name, never an absolute path. Gate:
+    `tests/test_remote_paths_refused_before_touching.py`.
+- **Secrets.**
+  - `vault_retrieve`, `vault_store` and `vault_delete` are in
+    `ALWAYS_HITL_TOOLS`, and the vault tools refuse Kazma's own rows
+    (`vault.is_kazma_owned_secret`: `cfg:` names and install-scoped ones) and
+    leave them out of `vault_list`. Gate: `tests/test_vault_tools_kazma_secrets.py`.
+  - The universal backup keeps registry entries out by pattern
+    (`store_registry.kept_out_of_backups`; `.migrate-*` is not backed up),
+    and the offsite copy drops every secret-named file at any depth. The
+    importer never extracts `meta.env`; the exporter removes it whatever
+    happens. A leftover staging folder loses its `meta.env` and is otherwise
+    kept. Gates: `tests/test_offsite_copy_leaves_env_out.py`,
+    `tests/test_migration_leaves_no_vault_key.py`.
+  - One redactor for every approval card (`security/approval_args.py`): the
+    chat card, the swarm bus card and the Swarm page hide a secret-named
+    argument, a tool's declared secret argument and URL passwords; every
+    name stays and the digest is of the real arguments. Gate:
+    `tests/test_approval_cards_hide_credentials.py`.
+  - Every key the Settings masker masks is vault-routed
+    (`is_sensitive_config_key`; the Web Push key was plaintext, and its
+    vault row is install-scoped). Gate:
+    `tests/test_masked_settings_go_to_the_vault.py`.
+  - `read_system_logs` uses the shared `redact_secrets` (which gained JSON
+    members, Authorization credentials and Telegram bot tokens). Gate:
+    `tests/test_system_logs_redact_secrets.py`.
+  - A first boot keeps its generated keys in the install's env file,
+    restricted to the owner before the key is written
+    (`env_files.persist_generated_secret`,
+    `security/file_access.restrict_to_owner`). Gate:
+    `tests/test_generated_keys_kept_in_the_install.py`.
+- **Sign-in and sessions.**
+  - The four security switches (`boot_guard.SECURITY_SWITCHES`) are read only
+    through `boot_guard.env_flag` (1/true/yes/on). The app factory refuses a
+    sign-in-off switch on a bind no launcher checked
+    (`factory_exposure_refusal`). While sign-in is off, a loopback request
+    whose Host could be a rebound public name is refused
+    (`auth._open_mode_host_refused`). Gates:
+    `tests/test_security_switch_spelling.py`,
+    `tests/test_open_mode_rebinding_and_launchers.py`.
+  - A demo visitor is an operator: admin routes need an admin credential.
+    Gate: `tests/test_demo_mode_admin_routes.py`.
+  - Deleting, disabling, re-roling or resetting a platform user ends their
+    sessions. Gate: `tests/test_user_changes_end_sessions.py`.
+  - `/ws/voice` and `/ws/dashboard` ask their HTTP twins' role
+    (`auth.websocket_principal`, `auth.principal_allows`). Gate:
+    `tests/test_websocket_roles.py`.
+  - OIDC: optional allowlists (`KAZMA_OIDC_ALLOWED_EMAILS`, `_DOMAINS`,
+    `_GROUPS`), an unverified email refused, every role value read, a nonce,
+    a rate-limited start route. Gate: `tests/test_oidc_who_may_sign_in.py`.
+  - Telegram checks the sender before it downloads or transcribes. Gate:
+    `tests/test_telegram_sender_checked_before_download.py`.
+  - Every local sign-in costs one PBKDF2, and the username throttle is per
+    address. Gate: `tests/test_login_timing_same_for_every_name.py`.
+  - `analyze_image` fetches through `web_acquire.http.fetch_public` (pinned).
+    Gate: `tests/test_vision_fetch_is_pinned.py`.
+- **Infrastructure.**
+  - The root `.dockerignore` excludes every secret file name and `.kazma/`
+    at any depth. Gate: `tests/test_dockerignore_secrets.py`.
+  - Headers: `style-src`, `font-src`, `frame-src`, `worker-src`,
+    `manifest-src`, HSTS over HTTPS only, `Cross-Origin-Resource-Policy`,
+    `Permissions-Policy`, no `Server` header. No `default-src`,
+    `script-src`, `connect-src` or opener policy (the optional LiveKit voice
+    path and the GitHub sign-in popup need them open).
+  - MCP presets name an exact version, held to the recorded registry answer
+    (`tests/test_mcp_catalog.py`). The release workflow checksums the built
+    files before any other tool runs and checks them again before signing;
+    the metrics workflow's token job installs nothing.
 
 ## UI Conventions (Web)
 

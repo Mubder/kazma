@@ -5,11 +5,14 @@ These tools are auto-registered by ``NativeSkillLoader`` when the
 singleton (``kazma_core.security.vault``).
 
 Security model:
-  - ``vault_store`` — unrestricted (anyone can store a secret).
-  - ``vault_list`` — unrestricted (names + categories only, no values).
-  - ``vault_retrieve`` — HITL-gated (user must approve before a secret is
-    released).  See ``safety/hitl.py`` ``DEFAULT_DANGER_TOOLS``.
-  - ``vault_delete`` — HITL-gated (user must approve deletion).
+  - ``vault_store``, ``vault_retrieve``, ``vault_delete`` ask every time
+    (``safety.hitl.ALWAYS_HITL_TOOLS``): no YOLO window, grant or task
+    approval skips their card.
+  - ``vault_list`` — read tier (names + categories only, no values).
+  - Kazma's own rows (``security.vault.is_kazma_owned_secret``: settings
+    secrets ``cfg:...``, mail and calendar sign-ins) are not the agent's:
+    every tool refuses those names before it touches the vault, and the list
+    leaves them out. They belong to Settings.
 
 The vault is disabled if ``KAZMA_VAULT_KEY`` is not set; all tools return
 a graceful error string in that case.
@@ -25,6 +28,16 @@ import json
 # (tests, a reset vault) never reaches these tools.
 from kazma_core.security import vault as _vault
 from kazma_core.agent.tool_refusal import RefusedBeforeEffect
+
+
+def _refuse_kazma_owned(name: str) -> None:
+    """Refuse a name that is one of Kazma's own vault rows, before any effect."""
+    if _vault.is_kazma_owned_secret(name):
+        raise RefusedBeforeEffect(
+            f"Error: '{str(name).strip()}' is one of Kazma's own secrets (a setting, "
+            "or a mail or calendar sign-in). It belongs to Settings; the vault "
+            "tools cannot read, change or delete it."
+        )
 
 
 async def vault_store(
@@ -44,6 +57,7 @@ async def vault_store(
     Returns:
         Success confirmation or error message.
     """
+    _refuse_kazma_owned(name)
     vault = _vault.get_vault()
     if vault is None:
         raise RefusedBeforeEffect("Error: Secret vault is disabled. Set KAZMA_VAULT_KEY to enable.")
@@ -76,6 +90,7 @@ async def vault_retrieve(name: str) -> str:
     Returns:
         The decrypted secret value, or an error/not-found message.
     """
+    _refuse_kazma_owned(name)
     vault = _vault.get_vault()
     if vault is None:
         raise RefusedBeforeEffect("Error: Secret vault is disabled. Set KAZMA_VAULT_KEY to enable.")
@@ -109,9 +124,11 @@ async def vault_list() -> str:
     vault = _vault.get_vault()
     if vault is None:
         return "Error: Secret vault is disabled. Set KAZMA_VAULT_KEY to enable."
-    items = await asyncio.to_thread(vault.list_secrets)
+    rows = await asyncio.to_thread(vault.list_secrets)
+    # Kazma's own rows are Settings', never the agent's: not listed.
+    items = [row for row in rows if not _vault.is_kazma_owned_secret(row.get("name", ""))]
     if not items:
-        return "The vault is empty."
+        return "The vault holds none of your secrets."
     return json.dumps(items, ensure_ascii=False, indent=2)
 
 
@@ -126,6 +143,7 @@ async def vault_delete(name: str) -> str:
     Returns:
         Success or error message.
     """
+    _refuse_kazma_owned(name)
     vault = _vault.get_vault()
     if vault is None:
         raise RefusedBeforeEffect("Error: Secret vault is disabled. Set KAZMA_VAULT_KEY to enable.")

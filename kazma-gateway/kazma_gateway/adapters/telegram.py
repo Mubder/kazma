@@ -232,6 +232,20 @@ class TelegramAdapter(BaseAdapter):
             return uid in self._allowed_users
         return True
 
+    def _sender_refusal(self, message: dict[str, Any]) -> str:
+        """The drop reason for *message*'s sender, or ``""`` when allowed.
+
+        The allowlist rule the parsed message is held to, read from the raw
+        message so it runs before any download or transcription.
+        """
+        if not self._allowed_users and not self._allow_all:
+            return "no_allowlist"
+        if self._allowed_users:
+            sender = (message.get("from") or {}).get("id", 0)
+            if sender not in self._allowed_users:
+                return "user_not_allowed"
+        return ""
+
     async def start(
         self,
         queue: asyncio.Queue[IncomingMessage],
@@ -620,6 +634,17 @@ class TelegramAdapter(BaseAdapter):
                 await self._announce_if_added_to_group(update)
             except Exception:
                 logger.debug("[telegram] group-add announce skipped", exc_info=True)
+
+            # Who sent it, BEFORE anything is read: _read_message downloads a
+            # file or photo and transcribes a voice note (a paid speech-to-text
+            # call), and it ran for every sender, allowed or not (security
+            # audit 2026-11-10). The sender is the message's own `from`, the
+            # id the check after the read uses too.
+            if message is not None:
+                refusal = self._sender_refusal(message)
+                if refusal:
+                    self._note_drop(refusal, message)
+                    return
 
             # Voice notes (download + transcribe), files and photos, then text.
             msg = await self._read_message(update, message)

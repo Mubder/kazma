@@ -776,21 +776,31 @@ def create_research_router() -> APIRouter:
     def download_export(path: str) -> Any:
         """Download an exported research file.
 
-        Accepts both absolute paths and bare filenames (looked up in
-        kazma-data/documents/). Security: only serves files from that dir.
+        Takes a name relative to kazma-data/documents/ (the export's
+        ``download_url`` names the file). Security: only serves files from
+        that dir.
+
+        An absolute path is refused before any filesystem call: the page
+        never sends one, and ``realpath`` of ``\\\\host\\share\\x`` connects
+        to that host -- this GET is reachable by a cross-site navigation
+        (2026-11-10 audit).
         """
         from kazma_core.paths import data_dir as _dd
+        from kazma_core.workspace.remote_paths import remote_path_reason
+
+        if (
+            remote_path_reason(path)
+            or os.path.isabs(path)
+            or os.path.splitdrive(path)[0]
+            or path.startswith(("/", "\\"))
+        ):
+            return JSONResponse({"error": "invalid file path"}, status_code=400)
 
         safe_root = os.path.realpath(str(_dd() / "documents"))
         # Resolve under the safe root and enforce segment-aware containment
         # (relative_to semantics via relpath), not a byte-prefix startswith()
         # check: the latter let sibling dirs like "documents_secret" pass.
-        # Absolute caller paths are still honored ONLY if they resolve inside
-        # safe_root.
-        if os.path.isabs(path):
-            real_path = os.path.realpath(path)
-        else:
-            real_path = os.path.realpath(os.path.join(safe_root, path))
+        real_path = os.path.realpath(os.path.join(safe_root, path))
         try:
             rel = os.path.relpath(real_path, safe_root)
             if rel.startswith("..") or os.path.isabs(rel):

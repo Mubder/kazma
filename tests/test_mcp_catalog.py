@@ -49,6 +49,23 @@ def run_target(command: list[str]) -> tuple[str, str] | None:
     return registry, re.split(r"@|==", spec, maxsplit=1)[0]
 
 
+def pinned_version(command: list[str]) -> str | None:
+    """The exact version ``npx -y <pkg>@V`` / ``uvx <pkg>@V`` pins; None when unpinned.
+
+    A registry tag (``latest``) or a range is no pin: the command would run
+    whatever the registry serves that day, with this user's rights.
+    """
+    specs = [str(a) for a in command[1:] if not str(a).startswith("-")]
+    if not specs:
+        return None
+    spec = specs[0]
+    rest = spec[1:] if spec.startswith("@") else spec
+    _, sep, version = rest.partition("@")
+    if not sep and "==" in rest:
+        version = rest.split("==", 1)[1]
+    return version if re.fullmatch(r"\d+(?:[.\-]\d+)*", version or "") else None
+
+
 def _repo_slug(url: str) -> str:
     match = re.search(r"github\.com[/:]([^/]+)/([^/#?]+)", str(url))
     if not match:
@@ -73,6 +90,11 @@ def catalog_problems(presets: list[dict], record: dict) -> list[str]:
             continue
         if entry.get("deprecated"):
             problems.append(f"{p['id']}: {target[0]}:{target[1]} is deprecated")
+        pin = pinned_version(p.get("command") or [])
+        if pin is None:
+            problems.append(f"{p['id']}: the command does not pin an exact version")
+        elif pin != entry.get("latest"):
+            problems.append(f"{p['id']}: pins {pin} but the record holds {entry.get('latest')}")
         if not _repo_slug(p.get("source", "")) or _repo_slug(p["source"]) != _repo_slug(entry.get("repository", "")):
             problems.append(f"{p['id']}: source {p.get('source')!r} is not the repository the registry names")
     return problems
@@ -111,6 +133,27 @@ def test_the_old_presets_fail_the_gate():
     assert any("pypi_mcp" in p and "not on record" in p for p in problems)
     assert any(p.startswith("time:") and "not on record" in p for p in problems)
     assert any("postgres" in p and "deprecated" in p for p in problems)
+
+
+def test_every_preset_pins_the_version_on_record_and_unpinned_ones_fail():
+    """Negative control: ``@latest``, a bare name and a stale pin are each refused."""
+    npm = "npm:@playwright/mcp"
+    record = {"packages": {npm: {"exists": True, "deprecated": False, "latest": "0.0.83",
+                                  "repository": "git+https://github.com/microsoft/playwright-mcp.git"}}}
+
+    def problems(spec: str) -> list[str]:
+        preset = {"id": "pw", "command": ["npx", "-y", spec],
+                  "package": {"registry": "npm", "name": "@playwright/mcp"},
+                  "source": "https://github.com/microsoft/playwright-mcp"}
+        return catalog_problems([preset], record)
+
+    assert problems("@playwright/mcp@0.0.83") == []
+    assert any("does not pin" in p for p in problems("@playwright/mcp@latest"))
+    assert any("does not pin" in p for p in problems("@playwright/mcp"))
+    assert any("pins 0.0.82" in p for p in problems("@playwright/mcp@0.0.82"))
+    assert pinned_version(["uvx", "mcp-server-git@2026.8.18", "--repository", "x"]) == "2026.8.18"
+    assert pinned_version(["uvx", "awslabs.x==1.2.2"]) == "1.2.2"
+    assert pinned_version(["uvx", "awslabs.x@latest"]) is None
 
 
 def test_the_record_holds_only_packages_the_presets_run():

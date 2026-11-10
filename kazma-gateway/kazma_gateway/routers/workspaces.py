@@ -172,6 +172,13 @@ def create_workspaces_router() -> APIRouter:
             raise HTTPException(status_code=422, detail="Workspace name must not be empty.")
         if not raw_path:
             raise HTTPException(status_code=422, detail="Workspace path must not be empty.")
+        # Before resolve()/makedirs(): each would connect to the host a
+        # network path names (workspace/remote_paths).
+        from kazma_core.workspace.remote_paths import remote_path_reason
+
+        remote = remote_path_reason(raw_path)
+        if remote:
+            raise HTTPException(status_code=400, detail=remote)
 
         p = Path(raw_path)
         # Strict cross-platform root validation
@@ -261,9 +268,6 @@ def create_workspaces_router() -> APIRouter:
 
             # Set workspace.selected_path in ConfigStore
             config_store.set("workspace.selected_path", root_path, category="workspace")
-
-            # Force ConfigStore to reload its configurations from the new directory root
-            config_store.reload_from_root(root_path)
 
             logger.info("[workspaces] Successfully switched active workspace to %r at %s", active_ws["name"], root_path)
 

@@ -18,7 +18,7 @@ tools:
     arabic_name: "استرجاع سر"
     description: >-
       Retrieve a stored secret from the vault by name. The value is decrypted
-      and returned. This action requires human approval (HITL) before the
+      and returned. This action asks for human approval every time before the
       secret is released. Use when the user asks for a key/secret, or when
       a tool needs a credential to proceed.
     category: "security"
@@ -29,7 +29,8 @@ tools:
     description: >-
       List all stored secret names and their categories. Secret values are
       NOT shown — only names. Use this to discover what credentials are
-      available before retrieving one.
+      available before retrieving one. Kazma's own secrets (settings, mail
+      and calendar sign-ins) are not listed: they belong to Settings.
     category: "security"
     prompt_chain:
       - "اعرض قائمة الأسرار المخزنة (الأسماء فقط)"

@@ -250,7 +250,9 @@ Consequences worth knowing:
 These can never be skipped — not by YOLO, not by a grant, not by
 `hitl.enabled: false` (X's automation rules require a human per outbound post):
 
-`x_cancel_scheduled_post`, `x_delete_post`, `x_post`, `x_schedule_post`
+`request_path_access`, `vault_delete`, `vault_retrieve`, `vault_store`, `x_cancel_scheduled_post`, `x_delete_post`, `x_post`, `x_schedule_post`
+
+The vault tools also refuse Kazma's own secrets (settings secrets named `cfg:...`, mail and calendar sign-ins) and leave them out of `vault_list`: those belong to Settings.
 
 In Telegram, Discord and Slack an approval card has ✅ Approve, ❌ Deny and 🔓 Approve for task (every approval of this task until your next message). An X card names its action instead ("Post now", "Schedule post", "Delete post", "Cancel scheduled post") and offers no task approval. A card nobody answers expires after `safety.hitl.approval_timeout_seconds` (default 300 s): the tool is not run, and the chat is told.
 

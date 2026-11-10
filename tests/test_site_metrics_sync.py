@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -310,6 +311,54 @@ def test_the_sync_workflow_keeps_its_rules():
     ) == []
 
 
+def secret_isolation_problems(sync_text: str) -> list[str]:
+    """The website token must never share a job with an unlocked PyPI install."""
+    wf = yaml.safe_load(sync_text)
+    problems = []
+    for name, job in (wf.get("jobs") or {}).items():
+        body = json.dumps(job)
+        has_secret = "secrets.WEBSITE_TOKEN" in body
+        installs = any(
+            "pip install" in str(s.get("run", "")) or "uv pip" in str(s.get("run", ""))
+            for s in job.get("steps") or []
+        )
+        if has_secret and installs:
+            problems.append(f"job {name!r} holds WEBSITE_TOKEN and installs packages")
+    holders = [n for n, j in (wf.get("jobs") or {}).items() if "secrets.WEBSITE_TOKEN" in json.dumps(j)]
+    if len(holders) != 1:
+        problems.append(f"WEBSITE_TOKEN is used in {holders}: exactly one job")
+    elif "generate" not in (wf["jobs"][holders[0]].get("needs") or []) and wf["jobs"][holders[0]].get("needs") != "generate":
+        problems.append("the sync job does not depend on the generate job")
+    sync_runs = "\n".join(str(s.get("run", "")) for s in (wf["jobs"].get(holders[0]) or {}).get("steps") or []) if holders else ""
+    if "python3 -I scripts/sync_site_metrics.py" not in sync_runs:
+        problems.append("the sync script is not run in isolated mode")
+    for job in (wf.get("jobs") or {}).values():
+        for step in job.get("steps") or []:
+            uses = str(step.get("uses") or "")
+            if uses and not re.search(r"@[0-9a-f]{40}\b", uses):
+                problems.append(f"{uses} is not pinned by commit SHA")
+    return problems
+
+
+def test_the_token_never_meets_an_unlocked_install():
+    assert secret_isolation_problems(WORKFLOW.read_text(encoding="utf-8")) == []
+
+
+def test_negative_control_the_single_job_fails_the_isolation_rule():
+    old = """
+jobs:
+  sync:
+    steps:
+      - run: pip install -e ".[test]"
+      - env:
+          GH_TOKEN: ${{ secrets.WEBSITE_TOKEN }}
+        run: python scripts/sync_site_metrics.py
+"""
+    problems = secret_isolation_problems(old)
+    assert any("installs packages" in p for p in problems), problems
+    assert any("isolated mode" in p for p in problems), problems
+
+
 @pytest.mark.parametrize(
     ("change", "problem"),
     [
@@ -317,7 +366,7 @@ def test_the_sync_workflow_keeps_its_rules():
         (("  contents: read", "  contents: write"), "may write"),
         (("numpy prometheus-client", "numpy"), "installs something else"),
         (('"$RUNNER_TEMP/site-metrics" --require-collected', '"$RUNNER_TEMP/site-metrics"'), "--require-collected"),
-        (("python scripts/sync_site_metrics.py", "gh pr view \"$B\" ; python scripts/sync_site_metrics.py"), "gh pr view"),
+        (("python3 -I scripts/sync_site_metrics.py", "gh pr view \"$B\" ; python3 -I scripts/sync_site_metrics.py"), "gh pr view"),
     ],
 )
 def test_the_rules_see_each_break(change, problem):

@@ -29,7 +29,8 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["CHAT_TOKEN_VARIABLES", "env_credential", "env_file_ladder", "load_env_files"]
+__all__ = ["CHAT_TOKEN_VARIABLES", "env_credential", "env_file_ladder",
+           "load_env_files", "persist_generated_secret"]
 
 #: The chat apps' token variables: read only through :func:`env_credential`
 #: (``tests/test_env_placeholders.py``).
@@ -118,6 +119,61 @@ def env_file_ladder(*, include_cwd: bool = True) -> list[Path]:
         ladder.append(Path(explicit).expanduser())
 
     return ladder
+
+
+def _install_env_file() -> Path:
+    """The env file a first boot keeps the keys it generates in.
+
+    The most specific file of the server's ladder that is Kazma's own
+    (``store_registry.is_kazma_secret_file``: the file ``KAZMA_ENV_FILE``
+    names, a ``.env`` directly in the install, the project root or Kazma's
+    home): an existing one first, else the most specific to create. Started
+    in the install folder, that is the ``.env`` beside it, as before. A
+    server started anywhere else wrote ``Path(".env")`` -- the vault key in
+    whatever folder it was launched from (audit 2026-11-10); now it writes
+    ``<kazma home>/.env``, which the ladder reads at every boot.
+    """
+    from kazma_core.paths import user_home
+    from kazma_core.store_registry import is_kazma_secret_file
+
+    own = [path for path in reversed(env_file_ladder()) if is_kazma_secret_file(path)]
+    for path in own:
+        if path.is_file():
+            return path
+    return own[0] if own else Path(user_home()) / ".env"
+
+
+def persist_generated_secret(name: str, value: str) -> Path:
+    """Keep ``name=value`` in :func:`_install_env_file`; returns the file.
+
+    The file is made empty and restricted to this account
+    (``security.file_access.restrict_to_owner``) BEFORE the value is written;
+    an existing file is restricted first too. A restriction that fails is a
+    WARNING and the value is still written: a vault key that is not kept
+    leaves every stored secret unreadable after a restart. An existing
+    ``name=`` line (or its commented example) is replaced, else one is
+    appended. Raises ``OSError`` when the file cannot be written.
+    """
+    from kazma_core.security.file_access import restrict_to_owner
+
+    path = _install_env_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        os.close(fd)
+    if not restrict_to_owner(path):
+        logger.warning("[env] could not restrict %s to this account; %s is kept there anyway",
+                       path, name)
+    lines = path.read_text(encoding="utf-8").splitlines()
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith((f"{name}=", f"# {name}=")):
+            lines[i] = f"{name}={value}"
+            break
+    else:
+        lines.append(f"{name}={value}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
 
 
 def load_env_files(*, override: bool = True, include_cwd: bool = True) -> list[str]:

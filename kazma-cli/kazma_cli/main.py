@@ -261,6 +261,24 @@ def _run_serve(port: int) -> None:
 
     from kazma_core.runtime_writer import RuntimeWriterBusy
 
+    # Same shared posture check serve.py runs: a secret does not protect an
+    # endpoint whose gate has been switched off. Imported rather than
+    # re-implemented — the bind/secret logic below is already a copy of
+    # serve.py's, and a check that lives in each caller goes missing from one.
+    # Before create_app(), which refuses a sign-in switch whose bind no
+    # launcher has checked (security audit 2026-11-10).
+    import os as _os_posture
+
+    from kazma_core.security.boot_guard import check_exposure_posture, note_launcher_checked
+
+    _posture_host = (_os_posture.environ.get("KAZMA_HOST") or "127.0.0.1").strip() or "127.0.0.1"
+    _posture_ok, _posture_msg = check_exposure_posture(_posture_host)
+    if _posture_msg:
+        print(_posture_msg)
+    if not _posture_ok:
+        sys.exit(1)
+    note_launcher_checked(_posture_host)
+
     try:
         app = create_app()
     except RuntimeWriterBusy as exc:
@@ -305,17 +323,7 @@ def _run_serve(port: int) -> None:
             "(override: KAZMA_ALLOW_YOLO=1).\n"
         )
 
-    # Same shared posture check serve.py runs: a secret does not protect an
-    # endpoint whose gate has been switched off. Imported rather than
-    # re-implemented — the bind/secret logic above is already a copy of
-    # serve.py's, and a check that lives in each caller goes missing from one.
-    from kazma_core.security.boot_guard import check_exposure_posture
-
-    _posture_ok, _posture_msg = check_exposure_posture(host)
-    if _posture_msg:
-        print(_posture_msg)
-    if not _posture_ok:
-        sys.exit(1)
+    # The exposure check ran before create_app() above.
 
     # Print the browseable URL — 0.0.0.0 is a bind address, not browsable.
     browse_url = f"http://127.0.0.1:{port}"
@@ -354,7 +362,7 @@ def _run_serve(port: int) -> None:
         uvicorn.run(app, host=host, port=port, log_level="info",
                     ws_ping_interval=20.0, ws_ping_timeout=20.0,
                     timeout_graceful_shutdown=uvicorn_graceful_s(), loop=uvicorn_loop_factory(),
-                    proxy_headers=False)
+                    proxy_headers=False, server_header=False)
     except OSError as exc:
         # Windows: port often "busy" via WSL/Docker portproxy (svchost), not another Kazma.
         err = str(exc).lower()

@@ -57,17 +57,158 @@ _LOG_MAX_COMMITS = 100
 _DIFF_MAX_CHARS = 60_000
 
 
+#: Configuration a read must not take from the repository: each names a
+#: program git would start. The repository is whatever the agent was pointed
+#: at, and these tools run with no approval card (2026-11-10 audit; the
+#: fsmonitor half since AUD-089). ``log.showSignature`` makes log/show run
+#: ``gpg.program``; ``core.hooksPath`` keeps the index-writing hooks out (a
+#: status may refresh the index, which runs post-index-change).
+_READ_CONFIG = (
+    "core.fsmonitor=false",
+    "core.pager=cat",
+    "log.showSignature=false",
+)
+#: Diff options that keep external diff drivers (``diff.external``,
+#: ``diff.<driver>.command``) and textconv drivers from running.
+_NO_DIFF_PROGRAMS = ("--no-ext-diff", "--no-textconv")
+_DIFF_SUBCOMMANDS = frozenset({"diff", "show", "log"})
+#: Environment a parent may set that names a program for git to run.
+_PROGRAM_ENV = ("GIT_EXTERNAL_DIFF", "GIT_PAGER", "PAGER", "GIT_EDITOR", "GIT_SEQUENCE_EDITOR")
+
+_NO_HOOKS_DIR: str | None = None
+
+
+def _no_hooks_dir() -> str:
+    """An empty directory for ``core.hooksPath``: no hook is found in it."""
+    global _NO_HOOKS_DIR
+    if _NO_HOOKS_DIR is None or not os.path.isdir(_NO_HOOKS_DIR):
+        import tempfile
+
+        _NO_HOOKS_DIR = tempfile.mkdtemp(prefix="kazma-git-no-hooks-")
+    return _NO_HOOKS_DIR
+
+
+def _filter_driver_overrides(listing: str) -> list[str]:
+    """``-c`` overrides that empty every filter driver the configuration
+    defines (``git config --get-regexp`` output).
+
+    A clean filter runs on ``git status`` and ``git diff`` for a modified
+    file the attributes assign it to, and only a driver defined in the
+    configuration can run. Git treats an empty command as no filter.
+    """
+    names: list[str] = []
+    for line in listing.splitlines():
+        key = line.split(" ", 1)[0].strip()
+        if not key.startswith("filter."):
+            continue
+        name = key[len("filter."):].rsplit(".", 1)[0]
+        if name and name not in names:
+            names.append(name)
+    overrides: list[str] = []
+    for name in names:
+        for kind in ("clean=", "smudge=", "process=", "required=false"):
+            overrides += ["-c", f"filter.{name}.{kind}"]
+    return overrides
+
+
+def _git_read_argv(args: list[str], filter_listing: str = "") -> list[str]:
+    """The argv of a read-only git command (see ``_git_read``)."""
+    argv = ["git", "--no-optional-locks"]
+    for setting in (*_READ_CONFIG, f"core.hooksPath={_no_hooks_dir()}"):
+        argv += ["-c", setting]
+    argv += _filter_driver_overrides(filter_listing)
+    if args and args[0] in _DIFF_SUBCOMMANDS:
+        return [*argv, args[0], *_NO_DIFF_PROGRAMS, *args[1:]]
+    return [*argv, *args]
+
+
 async def _git_read(args: list[str], *, timeout: int = 15) -> tuple[int, str, str]:
-    """A read-only git command in the active workspace, with the repository's
-    own fsmonitor hook off (it is code the repository chose) and the tool
-    child environment (``run_off_loop``)."""
+    """A read-only git command in the active workspace that starts no program
+    the repository chose.
+
+    The repository's fsmonitor, pager, hooks, signature program, external
+    diff and textconv drivers and filter drivers are all switched off
+    (``_git_read_argv``), and the child gets the tool child environment
+    without the variables that name a program (``_PROGRAM_ENV``). Until
+    2026-11-10 only fsmonitor was: ``git_diff`` on a repository whose
+    ``.git/config`` set ``diff.external`` ran that program with no approval
+    card.
+    """
+    from kazma_core.security.child_env import tool_child_env
+
     cwd = await asyncio.to_thread(_get_workspace)
+    env = tool_child_env()
+    for name in _PROGRAM_ENV:
+        env.pop(name, None)
+    # Reading the configuration starts nothing; the driver names it lists
+    # are emptied for the command itself.
+    listing = await run_off_loop(
+        ["git", "config", "--get-regexp", r"^filter\..*\.(clean|smudge|process)$"],
+        cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout,
+        encoding="utf-8", errors="replace",
+    )
     res = await run_off_loop(
-        ["git", "-c", "core.fsmonitor=false", *args],
-        cwd=cwd, capture_output=True, text=True, timeout=timeout,
+        _git_read_argv(args, listing.stdout or ""),
+        cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout,
         encoding="utf-8", errors="replace",
     )
     return res.returncode, res.stdout or "", res.stderr or ""
+
+
+#: A branch or remote name a tool passes to git: never an option ("-..."),
+#: never a range, never a lock file name (2026-11-10 audit: ``branch=
+#: "--receive-pack=<cmd>"`` ran a local program through git_push).
+_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/@-]*$")
+#: A revision git_diff shows: a ref, optionally with ``~n`` / ``^n``.
+_REV_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/@~^-]*$")
+
+
+def _checked_ref(
+    value: str | None, what: str = "branch", *, optional: bool = False,
+) -> str | None:
+    """*value* as a ref name git cannot read as an option, or refuse.
+
+    ``optional``: an empty value is None (the tool works the name out).
+    """
+    text = (value or "").strip()
+    if optional and not text:
+        return None
+    if (
+        not _REF_RE.match(text)
+        or ".." in text
+        or text.endswith(".lock")
+        or text.endswith("/")
+        or "//" in text
+    ):
+        raise RefusedBeforeEffect(
+            f"Error: {what} {value!r} is not a plain {what} name "
+            "(letters, digits, '.', '_', '/', '@', '-'; not starting with '-')."
+        )
+    return text
+
+
+def _refuse_unknown_remote(remote: str, remote_url: str) -> None:
+    """Refuse a remote the repository does not have (no ``remote.<x>.url``):
+    git would take any other word, a URL among them, as where to push or
+    pull (2026-11-10 audit)."""
+    if not remote_url:
+        raise RefusedBeforeEffect(
+            f"Error: {remote!r} is not a remote of this repository "
+            "(`git remote` lists them); a URL is not accepted."
+        )
+
+
+def _checked_revision(value: str) -> str:
+    """A commit or range for git_diff: each side a ref, ``~n``/``^n`` allowed."""
+    text = (value or "").strip()
+    sides = re.split(r"\.{2,3}", text)
+    if len(sides) > 2 or not all(
+        _REV_RE.match(side) and not side.endswith(".lock") for side in sides if side
+    ) or not any(sides):
+        raise RefusedBeforeEffect(
+            "Error: target must be a commit or a range, not an option"
+        )
+    return text
 
 
 async def git_log(count: int = 10, path: str = "", oneline: bool = True) -> str:
@@ -99,9 +240,11 @@ async def git_diff(target: str = "", path: str = "", stat: bool = False) -> str:
     range like ``main..HEAD``), read-only. ``stat`` lists the files only."""
     args = ["diff"]
     ref = (target or "").strip()
-    if ref.startswith("-"):
-        return "Error: target must be a commit or a range, not an option"
     if ref:
+        try:
+            ref = _checked_revision(target)
+        except RefusedBeforeEffect as refused:
+            return str(refused)
         args = ["show", "--format=%h %s", ref] if ".." not in ref else ["diff", ref]
     if stat:
         args.append("--stat")
@@ -137,7 +280,9 @@ async def git_commit(message: str, files: list[str] | None = None) -> str:
         commit_env = await asyncio.to_thread(get_commit_env)  # settings and a token lookup (audit 2026-10-26 AUD-111)
 
         # Stage files
-        add_args = ["git", "add", "."] if not files else ["git", "add"] + files
+        # "--": a file named like an option ("--pathspec-from-file=...") is
+        # a path here, never an option.
+        add_args = ["git", "add", "."] if not files else ["git", "add", "--", *files]
         await run_off_loop(add_args, cwd=cwd, check=True, env=commit_env)
 
         # Commit
@@ -167,6 +312,10 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
     cwd = await asyncio.to_thread(_get_workspace)
     if action not in ("push", "pull"):
         return "Invalid action. Use 'push' or 'pull'."
+    # Both reach git's argv: a branch "--receive-pack=<cmd>" ran a program,
+    # and a URL as the remote pushed the repository there (2026-11-10 audit).
+    branch = _checked_ref(branch, "branch", optional=True)
+    remote = _checked_ref(remote, "remote")
 
     cmd = ["git"]
     token = ""
@@ -224,6 +373,7 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
         remote_url = remote_res.stdout.strip()
     except Exception:
         remote_url = ""
+    _refuse_unknown_remote(remote, remote_url)
 
     # ── Auth: Authorization: Basic via http.extraheader ──
     # The App installation token (ghs_*) authenticates git HTTPS as
@@ -247,9 +397,10 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
         if not has_upstream and target_branch:
             # --set-upstream needs the named remote, not a URL; use remote name
             # (extraheader still authenticates the underlying request).
-            cmd.extend(["--set-upstream", remote, target_branch])
+            # "--": what follows is a remote and a refspec, never an option.
+            cmd.extend(["--set-upstream", "--", remote, target_branch])
         elif target_branch:
-            cmd.extend([push_target, target_branch])
+            cmd.extend(["--", push_target, target_branch])
 
     from kazma_core.security.child_env import tool_child_env
 
@@ -382,9 +533,9 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
             if action == "push":
                 push_target = remote_url if remote_url else remote
                 if not has_upstream and target_branch:
-                    new_cmd.extend(["--set-upstream", remote, target_branch])
+                    new_cmd.extend(["--set-upstream", "--", remote, target_branch])
                 elif target_branch:
-                    new_cmd.extend([push_target, target_branch])
+                    new_cmd.extend(["--", push_target, target_branch])
             # Rebuild cmd in place so _run() uses the fresh-token command, and
             # _remote_has_commit() uses the refreshed environment too.
             cmd[:] = new_cmd
@@ -477,7 +628,7 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
             logger.info("[git_push_pull] Push rejected (remote ahead) — auto-rebasing and retrying push")
 
             pull_cmd = ["git", "-c", "credential.helper="]
-            pull_cmd.extend(["pull", "--rebase", remote, target_branch or "main"])
+            pull_cmd.extend(["pull", "--rebase", "--", remote, target_branch or "main"])
 
             await run_off_loop(pull_cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=30)
 
@@ -567,8 +718,11 @@ async def git_push_pull(action: str = "pull", branch: str | None = None, remote:
 
 async def git_checkout(branch: str, create: bool = False) -> str:
     """Switch branches or create a new branch locally."""
+    # A branch git could read as an option (``--orphan=x``, ``-f``) is
+    # refused; "--" ends the arguments, so the name is never taken for a path.
+    branch = _checked_ref(branch, "branch")
     cwd = await asyncio.to_thread(_get_workspace)
-    cmd = ["git", "checkout", "-b", branch] if create else ["git", "checkout", branch]
+    cmd = ["git", "checkout", "-b", branch, "--"] if create else ["git", "checkout", branch, "--"]
     try:
         res = await run_off_loop(cmd, cwd=cwd, capture_output=True, text=True, timeout=10)
         return res.stdout.strip() or res.stderr.strip()
@@ -578,9 +732,10 @@ async def git_checkout(branch: str, create: bool = False) -> str:
 
 async def git_merge(source_branch: str) -> str:
     """Merge a branch into the currently active local branch."""
+    source_branch = _checked_ref(source_branch, "branch")
     cwd = await asyncio.to_thread(_get_workspace)
     try:
-        res = await run_off_loop(["git", "merge", source_branch], cwd=cwd, capture_output=True, text=True, timeout=15)
+        res = await run_off_loop(["git", "merge", "--", source_branch], cwd=cwd, capture_output=True, text=True, timeout=15)
         return res.stdout.strip() or res.stderr.strip()
     except Exception as e:
         return f"Error merging branch {source_branch}: {e}"

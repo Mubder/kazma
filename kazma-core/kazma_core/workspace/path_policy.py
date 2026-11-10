@@ -31,6 +31,7 @@ from kazma_core.workspace.path_grants import (
     mode_rank,
     path_under_root,
 )
+from kazma_core.workspace.remote_paths import remote_path_reason
 
 __all__ = [
     "PathAccessResult",
@@ -352,6 +353,18 @@ def check_path_access(
     """Return whether *path* may be accessed at *mode*."""
     need: AccessMode = "write" if str(mode).lower() in ("write", "rw") else "read"
     workspace = resolve_active_root()
+    # A network or device path is refused on its text: resolving it would
+    # already connect to the host it names (workspace/remote_paths).
+    remote = remote_path_reason(path)
+    if remote is not None:
+        return PathAccessResult(
+            allowed=False,
+            reason=remote,
+            mode=need,
+            via="denied",
+            resolved=str(path),
+            workspace=str(workspace),
+        )
     try:
         # A relative path means the workspace, the same as in every tool.
         resolved = resolve_tool_path(path, root=workspace)

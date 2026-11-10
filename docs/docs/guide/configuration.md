@@ -660,7 +660,7 @@ and the [operator recovery and evaluation workflow](https://github.com/Mubder/ka
 local progress/result monitor. Monitoring and completion alerts default on;
 the no-progress warning defaults to 180 seconds and the fresh low-credit
 threshold to 100. Settings are persisted in the existing settings database.
-External delivery follows **Adapters & Routes**; the local bell retains
+External delivery follows **Settings → Alerts**; the local bell retains
 observations independently of external delivery. See
 [Progress and result alerts](web-research#progress-and-result-alerts) for
 outcomes, retention, delivery receipts and local-first scope.

@@ -452,9 +452,14 @@ DATA_DIR_ENTRIES: dict[str, DataDirEntry] = {
     "update-state.json": DataDirEntry(
         "the state of an update in progress", "machine",
         reason="it describes this machine's checkout, part way through an update"),
+    # Not backed up (audit 2026-11-10): a staging folder an import or export
+    # left behind held the bundle's meta.env -- the vault key in clear --
+    # beside a vault.db, and the universal backup copied both into the plain
+    # offsite copy. The universal backup matched only exact names here, so the
+    # pattern kept nothing out (``kept_out_of_backups`` reads patterns).
     ".migrate-*": DataDirEntry(
         "the migration's own working folders", "machine",
-        reason="this machine's staging and pre-import backups"),
+        reason="this machine's staging and pre-import backups", backed_up=False),
     "*.tmp": DataDirEntry(
         "a file being written", "machine", reason="a half-written file is never read"),
     "agent_evolution.json": DataDirEntry(
@@ -1099,6 +1104,16 @@ def _data_dir_entry(name: str) -> DataDirEntry | None:
         if any(ch in pattern for ch in "*?[") and fnmatch.fnmatchcase(name, pattern):
             return entry
     return None
+
+
+def kept_out_of_backups(name: str) -> bool:
+    """Does the universal backup leave this entry of the data dir out?
+
+    By name or by pattern (``.migrate-*``), the one answer for the asset copy
+    and the database walk: an entry declared ``backed_up=False``.
+    """
+    entry = _data_dir_entry(name)
+    return entry is not None and not entry.backed_up
 
 
 def carried_in_bundle(name: str, *, lean: bool = False) -> bool:

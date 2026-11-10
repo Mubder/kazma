@@ -143,11 +143,16 @@ def describe(approval_id: str) -> dict[str, Any] | None:
     else:  # the request ended without its outcome on record (a crash)
         status = "ended"
     args = gate.args_json if gate is not None else None
+    tool = str((row or {}).get("tool") or (gate.tool if gate else ""))
+    # The page shows the call as the chat cards do, secrets hidden
+    # (security.approval_args); the digest is of the real arguments.
+    from kazma_core.security.approval_args import redacted_arguments_json
+
     return {
         "id": approval_id,
-        "tool": str((row or {}).get("tool") or (gate.tool if gate else "")),
+        "tool": tool,
         "status": status,
-        "arguments": args,
+        "arguments": redacted_arguments_json(tool, args),
         "arguments_digest": arguments_digest(args) if args is not None else "",
         "opened_at": float((row or {}).get("opened_at") or (gate.created_at if gate else 0) or 0),
         "deadline_at": float((row or {}).get("deadline_at") or 0) or None,

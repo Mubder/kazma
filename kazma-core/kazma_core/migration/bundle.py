@@ -308,8 +308,14 @@ class KazmaBundle:
 
     # ── Extraction ─────────────────────────────────────────────────────
 
-    def extract_all(self, dest: Path) -> Path:
-        """Extract the whole bundle into ``dest``. Returns the dest path."""
+    def extract_all(self, dest: Path, *, exclude: tuple[str, ...] = ()) -> Path:
+        """Extract the bundle into ``dest``, every entry but those *exclude*
+        names (archive names). Returns the dest path.
+
+        The importer leaves ``meta.env`` (the vault key in clear) in the
+        bundle: it reads it from there, and a staging folder an import left
+        behind was copied into the plain offsite backup (audit 2026-11-10).
+        """
         dest = Path(dest).resolve()
         dest.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(self.path, "r") as zf:
@@ -323,7 +329,8 @@ class KazmaBundle:
                     target.relative_to(dest)
                 except ValueError:
                     raise ValueError(f"unsafe bundle entry escapes staging: {name}")
-            zf.extractall(dest)
+            skipped = set(exclude)
+            zf.extractall(dest, members=[m for m in zf.namelist() if m not in skipped])
         return dest
 
     def read_text(self, arcname: str) -> str:
@@ -334,6 +341,50 @@ class KazmaBundle:
     def has_file(self, arcname: str) -> bool:
         with zipfile.ZipFile(self.path, "r") as zf:
             return arcname in zf.namelist()
+
+
+# ── Leftover working folders ──────────────────────────────────────────────
+
+#: A leftover staging or export folder older than this is removed at the next
+#: import or export.
+STALE_WORKING_FOLDER_S = 24 * 3600
+
+
+def _folder_epoch(folder: Path, prefix: str) -> float:
+    """When *folder* (``<prefix><epoch>``) was made: its name, else its mtime."""
+    try:
+        return float(folder.name[len(prefix):])
+    except ValueError:
+        return folder.stat().st_mtime
+
+
+def sweep_working_folders(data_dir: Path, prefix: str, *,
+                          max_age_s: float = STALE_WORKING_FOLDER_S,
+                          now: float | None = None) -> list[str]:
+    """Clean the folders *prefix* names that an earlier import or export left.
+
+    Every one loses its ``meta.env`` (the vault key in clear; a build before
+    2026-11-10 left it there, and the universal backup copied it offsite).
+    One older than *max_age_s* is removed whole, with a WARNING naming it.
+    Returns the names removed.
+    """
+    import shutil
+
+    removed: list[str] = []
+    now = time.time() if now is None else now
+    for folder in sorted(Path(data_dir).glob(f"{prefix}*")):
+        if not folder.is_dir():
+            continue
+        try:
+            (folder / "meta.env").unlink(missing_ok=True)
+            if now - _folder_epoch(folder, prefix) > max_age_s:
+                shutil.rmtree(folder)
+                removed.append(folder.name)
+                logger.warning("[migrate] removed a working folder left by an earlier run: %s",
+                               folder)
+        except OSError as exc:
+            logger.warning("[migrate] could not clean the leftover folder %s: %s", folder, exc)
+    return removed
 
 
 # ── meta.env helpers (the vault-key + non-secret env that travels) ─────────

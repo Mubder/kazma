@@ -339,7 +339,10 @@ Optional package: Playwright via `pip install -e ".[web]"` then `playwright inst
 | `KAZMA_OIDC_TENANT_CLAIM` | unset | No | The `id_token` claim naming the user's Kazma tenant; bound to the session at login. Unset = every OIDC user shares the default tenant. |
 | `KAZMA_OIDC_REDIRECT_URI` | `{KAZMA_PUBLIC_URL}/api/auth/oidc/callback` | If no public URL | Callback address registered with the IdP. Login refuses to start when neither this nor `KAZMA_PUBLIC_URL` is set. |
 | `KAZMA_OIDC_SCOPES` | `openid profile email` | No | Scopes requested at login. |
-| `KAZMA_OIDC_ROLE_CLAIM` | `role` | No | `id_token` claim naming the user's role (`roles`, then `groups`, are tried next). `admin` / `operator` / `viewer` are used as-is; `owner`, `member`, `readonly` and similar are mapped. |
+| `KAZMA_OIDC_ROLE_CLAIM` | `role` | No | `id_token` claim naming the user's role (`roles`, then `groups`, are tried next). `admin` / `operator` / `viewer` are used as-is; `owner`, `member`, `readonly` and similar are mapped. A list claim is read whole and the highest role it maps to wins. |
+| `KAZMA_OIDC_ALLOWED_EMAILS` | unset | Recommended with SSO | Comma-separated email addresses that may sign in. With any of the three allowlists set, an account none of them names is refused. With none set, every account the issuer authenticates may sign in (a warning says so at startup). An address the IdP marks `email_verified: false` never matches. |
+| `KAZMA_OIDC_ALLOWED_DOMAINS` | unset | Recommended with SSO | Comma-separated email domains (`example.com`) whose verified addresses may sign in. |
+| `KAZMA_OIDC_ALLOWED_GROUPS` | unset | Recommended with SSO | Comma-separated group or role names; an account carrying any of them in `groups`, `roles` or the role claim may sign in. |
 | `KAZMA_OIDC_DEFAULT_ROLE` | `operator` | Keep `operator` or `viewer` | Role for a user whose token names no recognized role. Setting `admin` makes every such user an administrator. |
 | `KAZMA_MULTI_USER` | unset | Multi-user | `1` applies the multi-user posture before any platform user exists: per-tenant filtering, opaque sessions always, and an RBAC check that cannot run denies the request instead of allowing it. |
 | `KAZMA_SESSION_TTL_SECONDS` | `1209600` (14 days) | No | Lifetime of a browser session; at least 300. |

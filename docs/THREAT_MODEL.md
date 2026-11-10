@@ -76,8 +76,9 @@ job and you still ran the command.
 
 **`KAZMA_ALLOW_YOLO=1`** turns the gate off per-thread for canonical danger
 tools. It cannot bypass `ALWAYS_HITL_TOOLS` (`x_post`, `x_delete_post`,
-`x_schedule_post`, `x_cancel_scheduled_post`, and `request_path_access`, which
-widens what the file tools may read or write) or git write commands, which
+`x_schedule_post`, `x_cancel_scheduled_post`, `request_path_access`, which
+widens what the file tools may read or write, and the vault's `vault_retrieve`,
+`vault_store` and `vault_delete`) or git write commands, which
 still show their card under YOLO. But for everything else, YOLO means the
 boundary above is not in place.
 

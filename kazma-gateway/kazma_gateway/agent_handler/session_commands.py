@@ -84,10 +84,23 @@ async def try_session_command(
         await _reply("⚠️ Session directory unavailable.")
         return True
 
+    # A sender who is not a gateway admin sees and switches among their own
+    # seasons only; the operator's chats (every chat started on the Web has
+    # no owner on record) are an admin's (security audit SEC-04). The admin
+    # rule reads settings, so it runs in a thread.
+    admin = False
+    try:
+        from kazma_gateway.allowlists import is_gateway_admin
+
+        admin = bool(await asyncio.to_thread(is_gateway_admin, sender, msg.platform))
+    except Exception:
+        logger.warning("[session-cmd] admin check failed; treating sender as not admin", exc_info=True)
+    only_for = None if admin else sender
+
     if verb in {"list", "list_all"}:
         # The sessions directory reads the whole chat list (audit 2026-10-26 AUD-111).
         entries = await asyncio.to_thread(
-            list_directory, include_archived=(verb == "list_all"), limit=40
+            list_directory, include_archived=(verb == "list_all"), limit=40, only_for=only_for
         )
         await _reply(format_session_list(entries, current_thread_id=thread_id))
         return True
@@ -140,11 +153,13 @@ async def try_session_command(
 
     # switch
     hit = await asyncio.to_thread(
-        resolve_session, rest, current_thread_id=thread_id, include_archived=False
+        resolve_session, rest, current_thread_id=thread_id, include_archived=False,
+        only_for=only_for,
     )
     if hit is None:
         hit = await asyncio.to_thread(
-            resolve_session, rest, current_thread_id=thread_id, include_archived=True
+            resolve_session, rest, current_thread_id=thread_id, include_archived=True,
+            only_for=only_for,
         )
     if hit is None:
         await _reply(
@@ -158,10 +173,13 @@ async def try_session_command(
     # gates (the in-thread approve path checks no sender identity).
     from kazma_core.sessions.directory import sender_may_take_over
 
-    allowed, owner = await asyncio.to_thread(sender_may_take_over, sender, hit.thread_id)
+    allowed, owner = await asyncio.to_thread(
+        sender_may_take_over, sender, hit.thread_id, admin=admin
+    )
     if not allowed:
+        whose = f"another user (`{owner[:6]}…`)" if owner else "the operator"
         await _reply(
-            f"🔒 That season belongs to another user (`{owner[:6]}…`).\n"
+            f"🔒 That season belongs to {whose}.\n"
             f"Take-over is limited to your own seasons."
         )
         logger.warning(

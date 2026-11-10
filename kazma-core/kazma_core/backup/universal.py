@@ -18,7 +18,7 @@ import shutil
 import sqlite3
 import threading
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from kazma_core.atomic_files import atomic_write_text
 
@@ -458,12 +458,48 @@ def _copy_root_artifacts(dest: Path) -> dict[str, Any]:
     return result
 
 
-#: Files of a backup the offsite copies never carry (2026-11, FA-215, the
-#: owner's decision): the install's ``.env`` holds the vault key, and the
-#: offsite zip and the rclone copy are plain. The local backup keeps it (it
-#: is the vault's recovery key), and so does the restic snapshot, which is
-#: encrypted; the vault key is escrowed apart from both.
-OFFSITE_LEAVES_OUT = (".env",)
+def _offsite_leaves_out(rel_path: str) -> bool:
+    """Is this file of a backup left out of the offsite copies?
+
+    Files of a backup the offsite copies never carry (2026-11, FA-215, the
+    owner's decision): the install's ``.env`` holds the vault key, and the
+    offsite zip and the rclone copy are plain. The local backup keeps it (it
+    is the vault's recovery key), and so does the restic snapshot, which is
+    encrypted; the vault key is escrowed apart from both.
+
+    By the registry's own secret-file NAME rule
+    (``store_registry.is_secret_file_name``), at any depth (audit 2026-11-10):
+    only the root ``.env`` was left out, so a ``meta.env`` in a migration's
+    leftover folder, or an ``.env`` in a copied asset folder, went offsite.
+    """
+    from kazma_core.store_registry import is_secret_file_name
+
+    return is_secret_file_name(PurePosixPath(rel_path).name)
+
+
+def _offsite_files(dest: Path) -> list[Path]:
+    """Every file of the backup the offsite copies carry."""
+    return [f for f in dest.rglob("*")
+            if f.is_file() and not _offsite_leaves_out(f.relative_to(dest).as_posix())]
+
+
+def _rclone_glob_escape(text: str) -> str:
+    """*text* as an rclone filter glob matching only itself."""
+    return "".join(f"\\{ch}" if ch in "\\*?[]{}" else ch for ch in text)
+
+
+def _offsite_rclone_excludes(dest: Path) -> list[str]:
+    """``--exclude`` arguments for every file the offsite copies leave out.
+
+    Each file by its own anchored path, found with the zip's rule, so the two
+    offsite paths leave out exactly the same files.
+    """
+    args: list[str] = []
+    for f in sorted(dest.rglob("*")):
+        rel = f.relative_to(dest).as_posix()
+        if f.is_file() and _offsite_leaves_out(rel):
+            args += ["--exclude", "/" + _rclone_glob_escape(rel)]
+    return args
 
 
 def _zip_backup_dir(dest: Path) -> Path:
@@ -472,12 +508,12 @@ def _zip_backup_dir(dest: Path) -> Path:
     One file instead of a folder tree: the cloud copy becomes atomic (a
     partial upload can't masquerade as a complete backup), uploads are a
     handful of API calls instead of hundreds, and SQLite DBs compress 5-10x.
-    The archive is the offsite copy: :data:`OFFSITE_LEAVES_OUT` is left out.
+    The archive is the offsite copy: what :func:`_offsite_leaves_out` names
+    is left out.
     """
     import zipfile
 
-    files = [f for f in dest.rglob("*")
-             if f.is_file() and f.relative_to(dest).as_posix() not in OFFSITE_LEAVES_OUT]
+    files = _offsite_files(dest)
     if not files:
         raise RuntimeError("backup directory is empty — nothing to archive")
     zip_path = dest.parent / f"{dest.name}.zip"
@@ -542,7 +578,7 @@ def _offsite_sync(dest: Path) -> dict[str, Any]:
             proc = await asyncio.to_thread(
                 subprocess.run,
                 ["rclone", "copy", "--transfers", "4",
-                 *(arg for name in OFFSITE_LEAVES_OUT for arg in ("--exclude", f"/{name}")),
+                 *_offsite_rclone_excludes(dest),
                  "--", str(dest), remote],
                 capture_output=True,
                 text=True, encoding="utf-8", errors="replace",
@@ -689,7 +725,13 @@ def selectable_databases(data_root: Path) -> list[Path]:
     "missing" — a completeness check is only meaningful against the set the
     backup actually intends to take.
     """
-    from kazma_core.store_registry import NOT_BACKED_UP
+    from kazma_core.store_registry import NOT_BACKED_UP, kept_out_of_backups
+
+    def _in_kept_out_folder(f: Path) -> bool:
+        # A database inside a data-dir folder the registry keeps out of
+        # backups: a migration's staging folder holds the bundle's vault.db.
+        parts = f.relative_to(data_root).parts
+        return len(parts) > 1 and kept_out_of_backups(parts[0])
 
     return [
         f
@@ -698,6 +740,7 @@ def selectable_databases(data_root: Path) -> list[Path]:
         # A store the registry keeps out of backups, and says why: the Time
         # Travel steps (snapshots.db, TT-05).
         and not (f.parent == data_root and f.name in NOT_BACKED_UP)
+        and not _in_kept_out_folder(f)
     ]
 
 
@@ -825,7 +868,7 @@ def _rebuilt_dirs() -> set[Path]:
 
 def _copy_assets(src: Path, dest: Path) -> list[dict[str, Any]]:
     """Copy all non-DB files and directories (recursive) excluding backups."""
-    from kazma_core.store_registry import DATA_DIR_ENTRIES
+    from kazma_core.store_registry import kept_out_of_backups
 
     copied: list[dict[str, Any]] = []
     rebuilt = _rebuilt_dirs()
@@ -837,10 +880,12 @@ def _copy_assets(src: Path, dest: Path) -> list[dict[str, Any]]:
         for suffix in ("", "-wal", "-shm", "-journal")
     )
     # What the registry keeps out (the server's held writer lock: copying it
-    # failed with "Permission denied" at every backup, 2026-10-15).
-    kept_out = {name for name, entry in DATA_DIR_ENTRIES.items() if not entry.backed_up}
+    # failed with "Permission denied" at every backup, 2026-10-15), by name
+    # or by pattern: an exact-name set never matched ``.migrate-*``, and a
+    # migration's leftover staging folder (the vault key in its meta.env)
+    # went into the plain offsite copy (audit 2026-11-10).
     for item in sorted(src.iterdir()):
-        if _should_exclude(item.name, is_dir=item.is_dir()) or item.name in kept_out:
+        if _should_exclude(item.name, is_dir=item.is_dir()) or kept_out_of_backups(item.name):
             continue
         if item.is_dir() and item.resolve() in rebuilt:
             copied.append({"path": item.name, "type": "rebuilt", "files": 0})

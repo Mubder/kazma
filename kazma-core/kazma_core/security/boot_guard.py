@@ -47,11 +47,14 @@ import os
 
 __all__ = [
     "LOOPBACK_HOSTS",
+    "SECURITY_SWITCHES",
     "WEAK_SECRET_CHARS",
     "env_flag",
     "exposure",
     "is_loopback",
     "check_exposure_posture",
+    "note_launcher_checked",
+    "factory_exposure_refusal",
 ]
 
 #: Hosts that are not reachable from another machine.
@@ -63,13 +66,29 @@ LOOPBACK_HOSTS: frozenset[str] = frozenset({"127.0.0.1", "::1", "localhost"})
 WEAK_SECRET_CHARS = 20
 
 
-def env_flag(name: str) -> bool:
-    """True when *name* is set to a truthy value.
+#: The switches that decide how open Kazma is. Product code reads them only
+#: through :func:`env_flag` (gate: ``tests/test_security_switch_spelling.py``):
+#: each place kept its own list of spellings, and they disagreed -- the
+#: middleware honoured ``KAZMA_DEV_WS_BYPASS=on`` that this guard read as off,
+#: and ``KAZMA_PRODUCTION=on`` meant production to the vault and not to the
+#: auth gate (security audit 2026-11-10).
+SECURITY_SWITCHES: frozenset[str] = frozenset({
+    "KAZMA_PRODUCTION",
+    "KAZMA_AUTH_DISABLED",
+    "KAZMA_DEMO_MODE",
+    "KAZMA_DEV_WS_BYPASS",
+})
 
-    Matches the spelling ``kazma_ui.auth`` accepts, so the boot guard and the
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def env_flag(name: str) -> bool:
+    """True when *name* is set to a truthy value: ``1``, ``true``, ``yes``, ``on``.
+
+    The one reader of :data:`SECURITY_SWITCHES`, so the boot guard and the
     middleware cannot disagree about whether a switch is on.
     """
-    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes")
+    return os.environ.get(name, "").strip().lower() in _TRUTHY
 
 
 def is_loopback(host: str) -> bool:
@@ -148,3 +167,86 @@ def check_exposure_posture(host: str) -> tuple[bool, str]:
         )
 
     return True, ""
+
+
+# ── Launchers that skip the check ───────────────────────────────────────
+#
+# ``serve.py``, ``kazma serve`` and ``kazma-web`` run the check above before
+# they start the server. A launcher that builds the app through the factory
+# itself (the Docker image: ``uvicorn kazma_ui.app:create_app --factory
+# --host 0.0.0.0``) ran none, so ``KAZMA_AUTH_DISABLED=1`` there served every
+# /api route to the network (security audit 2026-11-10). ``create_app()``
+# therefore asks :func:`factory_exposure_refusal`, which is a no-op unless a
+# switch the check refuses is on.
+
+#: The host a launcher in this process checked and found allowed.
+_launcher_checked: list[str | None] = [None]
+
+#: The switches the check above refuses on an exposed bind.
+_REFUSED_WHEN_EXPOSED = ("KAZMA_AUTH_DISABLED", "KAZMA_DEV_WS_BYPASS")
+
+
+def note_launcher_checked(host: str) -> None:
+    """A launcher ran :func:`check_exposure_posture` for *host* and it passed."""
+    _launcher_checked[0] = str(host or "").strip() or None
+
+
+def _uvicorn_cli_host(argv: list[str]) -> str | None:
+    """The host uvicorn's command line binds, when uvicorn is the program.
+
+    ``None`` when uvicorn is not the program or the bind cannot be told
+    (a file descriptor handed over). Without ``--host`` uvicorn binds its
+    ``UVICORN_HOST`` or ``127.0.0.1``.
+    """
+    if not argv:
+        return None
+    prog = str(argv[0]).replace("\\", "/").lower()
+    # `python -m uvicorn` (the Docker images) or the `uvicorn` console script.
+    if not (
+        prog.endswith("/uvicorn/__main__.py")
+        or prog.rsplit("/", 1)[-1] in ("uvicorn", "uvicorn.exe", "uvicorn-script.py")
+    ):
+        return None
+    if "--fd" in argv or any(a.startswith("--fd=") for a in argv):
+        return None
+    for i, arg in enumerate(argv):
+        if arg == "--host" and i + 1 < len(argv):
+            return argv[i + 1]
+        if arg.startswith("--host="):
+            return arg.split("=", 1)[1]
+    return os.environ.get("UVICORN_HOST") or "127.0.0.1"
+
+
+def factory_exposure_refusal(argv: list[str] | None = None) -> str:
+    """Why the app factory must not build this app; ``""`` when it may.
+
+    ``""`` unless ``KAZMA_AUTH_DISABLED`` or ``KAZMA_DEV_WS_BYPASS`` is on and
+    no launcher in this process checked the bind. Then the bind is read from
+    uvicorn's command line, else ``KAZMA_HOST``; a bind that cannot be read
+    is refused (it cannot be known to be loopback), and a known one gets the
+    launchers' own check.
+    """
+    import sys
+
+    if not any(env_flag(name) for name in _REFUSED_WHEN_EXPOSED):
+        return ""
+    if _launcher_checked[0] is not None:
+        return ""
+    host = _uvicorn_cli_host(list(sys.argv if argv is None else argv))
+    if host is None:
+        host = (os.environ.get("KAZMA_HOST") or "").strip() or None
+    if host is None:
+        switch = next(n for n in _REFUSED_WHEN_EXPOSED if env_flag(n))
+        return (
+            f"\n  [SECURITY] {switch} is on and this launcher's bind address "
+            "is unknown — refusing to build the app.\n"
+            "  A switch that turns sign-in off is allowed on this machine only, "
+            "and nothing here says\n"
+            "  the server listens on this machine only.\n\n"
+            "  Fix one of:\n"
+            f"    unset {switch}\n"
+            "    KAZMA_HOST=127.0.0.1               (say the bind is loopback)\n"
+            "    start Kazma with serve.py, `kazma serve` or `kazma-web`\n"
+        )
+    ok, message = check_exposure_posture(host)
+    return "" if ok else message

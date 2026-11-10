@@ -187,6 +187,11 @@ def is_sensitive_config_key(key: str) -> bool:
         or last.endswith("_encryption_key")
         or last.endswith("_signing_key")
         or last.endswith("_webhook")  # webhook URLs carry bearer paths
+        # Audit 2026-11-10: names the Settings masker (config_mask) hid but
+        # nothing sent to the vault -- notifications.push.vapid_private_key
+        # (the Web Push signing key) sat in plaintext in settings.db.
+        or last.endswith(("_private_key", "_access_key", "_access_key_id", "_passphrase"))
+        or last in ("passphrase", "authorization", "bearer", "pat")
     ):
         return True
     # Layer 2: any segment that IS a secret-kind word (anywhere in the key).
@@ -359,7 +364,9 @@ def get_kazma_secret() -> str:
     if env_secret:
         return env_secret
 
-    if os.environ.get("KAZMA_AUTH_DISABLED", "").lower() in ("true", "1", "yes"):
+    from kazma_core.security.boot_guard import env_flag
+
+    if env_flag("KAZMA_AUTH_DISABLED"):
         return ""
 
     import sys
@@ -1480,11 +1487,13 @@ class ConfigStore(_ChangeNotices):
         with self._lock:
             self._clear_cache()
 
-    def reload_from_root(self, root_path: str | Path) -> None:
-        """Update the yaml_path to the new workspace root and invalidate cache."""
-        self._yaml_path = Path(root_path) / "kazma.yaml"
-        self.invalidate_yaml_cache()
-        logger.info("[ConfigStore] Hot-reloaded configurations from new root: %s", root_path)
+    # The YAML fallback is the install's own file for the life of the store.
+    # It followed the ACTIVE WORKSPACE until 2026-11-10 (``reload_from_root``,
+    # called at boot and on every workspace switch or clone): a repository's
+    # own kazma.yaml then answered every key with no stored row -- chat-app
+    # allowlists (so gateway admin), the commitment layer's switches, the
+    # offsite backup's destination -- with no validation and no card
+    # (security audit SEC-02). A workspace is content, never configuration.
 
     # ── Public API ────────────────────────────────────────────────────
 

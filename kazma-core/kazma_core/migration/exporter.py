@@ -52,6 +52,7 @@ from kazma_core.migration.bundle import (
     Manifest,
     render_meta_env,
     sha256_file,
+    sweep_working_folders,
     vault_key_fingerprint,
 )
 from kazma_core.migration.path_rewrite import PathMap
@@ -183,11 +184,10 @@ def export_bundle(
     # success-path rmtree at the end doesn't run if export raises mid-way, and
     # each run mints a unique timestamp so orphans would otherwise accumulate)
     # (audit finding).
-    for _old in data_dir.glob(".migrate-export-*"):
-        try:
-            shutil.rmtree(_old, ignore_errors=True)
-        except Exception:
-            pass
+    # Every one of them: an export runs once at a time. The vault key in a
+    # leftover's meta.env went into the plain offsite backup (audit
+    # 2026-11-10); ``sweep_working_folders`` takes it out first and says so.
+    sweep_working_folders(data_dir, ".migrate-export-", max_age_s=-1.0)
     staging = data_dir / f".migrate-export-{int(time.time())}"
     if staging.exists():
         shutil.rmtree(staging, ignore_errors=True)
@@ -298,7 +298,23 @@ def export_bundle(
         "KAZMA_PUBLIC_URL": (os.environ.get("KAZMA_PUBLIC_URL") or "").strip(),
         "KAZMA_DB_BACKEND_SOURCE": source_backend,
     }
+    # From here to the end the staging folder holds the vault key in clear:
+    # it is removed whatever happens (audit 2026-11-10: a failed export left
+    # it, and the universal backup copied it offsite).
     (staging / "meta.env").write_text(render_meta_env(meta), encoding="utf-8")
+    try:
+        _finish_bundle(staging, out_path, manifest, meta, _log)
+    finally:
+        (staging / "meta.env").unlink(missing_ok=True)
+
+    shutil.rmtree(staging, ignore_errors=True)
+    _log(f"Bundle written: {out_path} ({out_path.stat().st_size // 1024} KB)")
+    return out_path
+
+
+def _finish_bundle(staging: Path, out_path: Path, manifest: Manifest,
+                   meta: dict[str, str], _log: Callable[[str], object]) -> None:
+    """Steps 8-10 of :func:`export_bundle`: path map, manifest, the zip."""
     manifest.vault_key_fingerprint = vault_key_fingerprint(meta["KAZMA_VAULT_KEY"])
 
     # 8. pathmap.json — source root/data dir for import-time translation.
@@ -327,10 +343,6 @@ def export_bundle(
     # wasteful; instead, include manifest's own hash via a second pass only
     # if strict integrity demands it. For v1 the importer verifies every
     # *data* file's hash; manifest self-hash is a known small gap.
-
-    shutil.rmtree(staging, ignore_errors=True)
-    _log(f"Bundle written: {out_path} ({out_path.stat().st_size // 1024} KB)")
-    return out_path
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────

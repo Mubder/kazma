@@ -72,6 +72,10 @@ services:
       - ./deploy/searxng:/etc/searxng:rw
     environment:
       SEARXNG_BASE_URL: "${SEARXNG_BASE_URL:-http://127.0.0.1:8088/}"
+      # Overrides server.secret_key of deploy/searxng/settings.yml. Optional on
+      # purpose (a required variable would stop every existing one-command
+      # start); set it to a long random value if you expose this instance.
+      SEARXNG_SECRET: "${SEARXNG_SECRET:-change-me-in-production-use-long-random}"
     restart: unless-stopped
     # JSON API is required by kazma_core.tools.web_search — enabled in
     # deploy/searxng/settings.yml (search.formats includes json).

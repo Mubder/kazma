@@ -131,8 +131,10 @@ def test_every_new_secret_is_vaulted_by_its_name():
     assert secret("providers.list.gw.aws_secret_access_key")
     assert secret("providers.list.gw.aws_session_token")
     assert secret("providers.list.gw.api_keys.k2.api_key")
-    # Control: a field named "headers" would not have been.
-    assert not secret("providers.list.gw.headers.Authorization")
+    # Control: a field named "headers" would not have been. (An
+    # ``Authorization`` member is vaulted by its own name since 2026-11-10:
+    # tests/test_masked_settings_go_to_the_vault.py; any other header is not.)
+    assert not secret("providers.list.gw.headers.X-Org-Key")
 
 
 def test_the_api_masks_every_new_secret_and_a_masked_save_keeps_it():

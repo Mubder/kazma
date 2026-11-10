@@ -1559,9 +1559,9 @@ class AsyncMCPManager:
 
     @staticmethod
     def _trusted_allowed_in_prod() -> bool:
-        if (os.environ.get("KAZMA_PRODUCTION") or "").strip().lower() not in (
-            "1", "true", "yes", "on",
-        ):
+        from kazma_core.security.boot_guard import env_flag
+
+        if not env_flag("KAZMA_PRODUCTION"):
             return True
         return (os.environ.get("KAZMA_MCP_TRUSTED_IN_PROD") or "").strip().lower() in (
             "1", "true", "yes", "on",

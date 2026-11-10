@@ -100,8 +100,17 @@ jobs:
           set -euo pipefail
           uv build --out-dir dist
           ls -la dist
+          # Checksums of the built files, taken before any other tool runs
+          # (the SBOM generator below is fetched at run time, unpinned). They
+          # live outside dist/ so they are not uploaded; every later step that
+          # signs or publishes checks them again, so a tool that rewrote a
+          # built file cannot have it signed unnoticed.
+          sha256sum dist/kazma-*.whl dist/kazma-*.tar.gz > build-artifacts.sha256
+          cat build-artifacts.sha256
 
       - name: Generate CycloneDX SBOM
+        env:
+          BASE: ${{ steps.ver.outputs.base }}
         run: |
           set -euo pipefail
           # From the lockfile, not the build environment: the lock is the exact
@@ -116,17 +125,29 @@ jobs:
           uv export --locked --no-dev --no-emit-project --format requirements-txt \
             -o requirements.lock.txt
           uvx --from cyclonedx-bom cyclonedx-py requirements requirements.lock.txt \
-            --of JSON -o "dist/kazma-${{ steps.ver.outputs.base }}.cdx.json" \
+            --of JSON -o "dist/kazma-${BASE}.cdx.json" \
             --sv 1.6 --output-reproducible
           python -c "import json,sys; d=json.load(open(sys.argv[1],encoding='utf-8')); print('SBOM components:', len(d.get('components') or []))" \
-            "dist/kazma-${{ steps.ver.outputs.base }}.cdx.json"
+            "dist/kazma-${BASE}.cdx.json"
+          # The tool above ran after the build: the wheel and the sdist must
+          # still be what `uv build` made. The SBOM's own checksum joins the
+          # list only now that it exists.
+          sha256sum -c build-artifacts.sha256
+          sha256sum "dist/kazma-${BASE}.cdx.json" >> build-artifacts.sha256
 
       - name: Checksums
         run: |
           set -euo pipefail
+          sha256sum -c build-artifacts.sha256
           cd dist
           sha256sum kazma-*.whl kazma-*.tar.gz kazma-*.cdx.json > SHA256SUMS
           cat SHA256SUMS
+
+      - name: Verify the built files before attesting
+        run: |
+          set -euo pipefail
+          sha256sum -c build-artifacts.sha256
+          (cd dist && sha256sum -c SHA256SUMS)
 
       # Answers "was this really built from Mubder/kazma at this commit?".
       # Verify with: gh attestation verify <file> --repo Mubder/kazma
@@ -152,8 +173,12 @@ jobs:
           TAG: ${{ steps.ver.outputs.tag }}
           FULL: ${{ steps.ver.outputs.full }}
           NOTES_IN: ${{ inputs.notes }}
+          BASE: ${{ steps.ver.outputs.base }}
         run: |
           set -euo pipefail
+          # Nothing between the build and here may have changed a file.
+          sha256sum -c build-artifacts.sha256
+          (cd dist && sha256sum -c SHA256SUMS)
           if [[ -n "${NOTES_IN}" ]]; then
             NOTES="${NOTES_IN}"
           else
@@ -168,11 +193,11 @@ jobs:
           carries SLSA build provenance. See [docs/SUPPLY_CHAIN.md](https://github.com/Mubder/kazma/blob/main/docs/SUPPLY_CHAIN.md).
 
           \`\`\`bash
-          gh attestation verify kazma-${{ steps.ver.outputs.base }}-py3-none-any.whl --repo Mubder/kazma
+          gh attestation verify kazma-${BASE}-py3-none-any.whl --repo Mubder/kazma
           sha256sum -c SHA256SUMS
           \`\`\`
 
-          \`kazma-${{ steps.ver.outputs.base }}.cdx.json\` is a CycloneDX 1.6 SBOM of the locked dependency set."
+          \`kazma-${BASE}.cdx.json\` is a CycloneDX 1.6 SBOM of the locked dependency set."
           fi
           # A draft first, every file attached, published last. A published
           # release's files are never replaced: with GitHub's immutable

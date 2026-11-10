@@ -176,7 +176,7 @@ answered or logged with the reason it was not
 reconnects Discord asks for. Tables in an answer read on a phone on Telegram,
 Discord and Slack. A restart sends one status card — how long Kazma was down
 and whether each chat app connected — instead of three messages (**Settings →
-Adapters & Routes → Server status messages**; [Deployment](./deployment)). Every
+Alerts → Server status messages**; [Deployment](./deployment)). Every
 page reads in Arabic, the login page included.
 
 **New in 2026-09-26/27 — memory you can see and steer.** A turn that used

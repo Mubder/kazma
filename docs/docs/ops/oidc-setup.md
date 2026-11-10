@@ -29,7 +29,33 @@ KAZMA_OIDC_SCOPES=openid profile email
 KAZMA_OIDC_ROLE_CLAIM=role          # or groups / custom claim
 KAZMA_OIDC_DEFAULT_ROLE=operator    # viewer | operator | admin
 KAZMA_OIDC_TENANT_CLAIM=org         # optional: claim naming the user's Kazma tenant
+# who may sign in (set at least one; see below)
+KAZMA_OIDC_ALLOWED_EMAILS=owner@example.com
+KAZMA_OIDC_ALLOWED_DOMAINS=example.com
+KAZMA_OIDC_ALLOWED_GROUPS=kazma-users
 ```
+
+## Who may sign in
+
+Without an allowlist, **every account the issuer authenticates** may sign in
+and gets `KAZMA_OIDC_DEFAULT_ROLE`; Kazma logs a warning at startup saying so.
+That is right only for an issuer whose accounts are all yours. For a public
+issuer (Google, a shared Auth0 tenant) name who may:
+
+- `KAZMA_OIDC_ALLOWED_EMAILS`: exact addresses, comma-separated.
+- `KAZMA_OIDC_ALLOWED_DOMAINS`: email domains, comma-separated.
+- `KAZMA_OIDC_ALLOWED_GROUPS`: group or role names found in the token's
+  `groups`, `roles` or `KAZMA_OIDC_ROLE_CLAIM`.
+
+With any of them set, an account none of them names is refused. An email the
+IdP marks `email_verified: false` never matches an allowlist, and is refused
+when it would be the user's name or id (no `sub`, or no
+`preferred_username`). An IdP that sends no `email_verified` is taken at its
+word.
+
+Every sign-in also sends a `nonce`, and the `id_token` must carry it back.
+`/api/auth/oidc/start` is rate-limited per client address (bucket
+`oidc_start`, 10 a minute; `api.rate_limit.oidc_start_per_minute` changes it).
 
 `KAZMA_OIDC_TENANT_CLAIM` is off by default, and then every OIDC user shares the
 `default` tenant. When set, the named claim (a slug of letters, digits, `.`, `_`,
@@ -81,7 +107,10 @@ malformed value is ignored and logged. Local users get the same binding from
 | admin, owner, administrator | admin |
 | operator, user, member, write | operator |
 | viewer, read, guest | viewer |
-| (missing) | `KAZMA_OIDC_DEFAULT_ROLE` |
+| (missing, or no value maps) | `KAZMA_OIDC_DEFAULT_ROLE` |
+
+A list claim (`groups: ["staff", "admin"]`) is read whole: the highest role any
+of its values maps to wins.
 
 ## Test
 

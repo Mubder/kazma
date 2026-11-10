@@ -85,13 +85,16 @@ def _bootstrap_bind_and_secret() -> str:
     # "is this labelled production?". Neither asks "are you exposed?", so an
     # auth kill switch plus a non-loopback bind used to start cleanly with a
     # perfectly good secret and serve every /api endpoint to the network.
-    from kazma_core.security.boot_guard import check_exposure_posture
+    from kazma_core.security.boot_guard import check_exposure_posture, note_launcher_checked
 
     _ok, _msg = check_exposure_posture(host)
     if _msg:
         print(_msg, file=sys.stdout if _ok else sys.stderr)
     if not _ok:
         sys.exit(1)
+    # create_app() (built by uvicorn's factory call below) asks whether a
+    # launcher checked the bind; this one did.
+    note_launcher_checked(host)
 
     return host
 
@@ -146,6 +149,7 @@ try:
         "port": port,
         # The app applies forwarded headers itself (see _note_proxies).
         "proxy_headers": False,
+        "server_header": False,
         "ws_ping_interval": 20.0,
         "ws_ping_timeout": 20.0,
         # Part of the one stop budget the guard hands down (FA-261): streams

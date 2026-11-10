@@ -104,6 +104,9 @@ _ALWAYS_HITL_FALLBACK: frozenset[str] = frozenset({
     "x_schedule_post",
     "x_cancel_scheduled_post",
     "request_path_access",
+    "vault_retrieve",
+    "vault_store",
+    "vault_delete",
 })
 
 
@@ -471,7 +474,7 @@ class SafetyMiddleware:
         from kazma_core.swarm import shared_approvals
         from kazma_core.swarm.approval_card import render_arguments, web_link
 
-        card = render_arguments(tool_args)
+        card = render_arguments(tool_args, tool=tool_name)
         if not card.complete:
             logger.warning(
                 "[Safety] %s refused: its arguments cannot be shown on a chat card (%s)",

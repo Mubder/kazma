@@ -44,7 +44,9 @@ _lock = threading.Lock()
 def _enabled() -> bool:
     if os.environ.get("KAZMA_RATE_LIMIT_ENABLED", "").lower() in ("0", "false", "no"):
         return False
-    if os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes"):
+    from kazma_core.security.boot_guard import env_flag
+
+    if env_flag("KAZMA_DEMO_MODE"):
         return False
     try:
         from kazma_ui.auth import get_kazma_secret
@@ -131,8 +133,23 @@ def _allow(key: tuple[str, str], limit: int) -> tuple[bool, float]:
         return True, 0.0
 
 
-def rate_limit(bucket: str, default_per_minute: int) -> Any:
-    """FastAPI dependency factory — 429 with Retry-After when exhausted."""
+def _address(request: Request) -> str:
+    """The proxy-aware client address alone, for a route with no caller
+    identity to key by: a varied cookie would otherwise buy a fresh bucket."""
+    try:
+        from kazma_ui.auth import client_address
+
+        return "ip:" + (client_address(request) or "unknown")
+    except Exception:
+        return "ip:" + (request.client.host if request.client else "unknown")
+
+
+def rate_limit(bucket: str, default_per_minute: int, *, per_address: bool = False) -> Any:
+    """FastAPI dependency factory — 429 with Retry-After when exhausted.
+
+    ``per_address`` keys the window by the client address only: for a route
+    reached before sign-in, where a cookie is whatever the caller sends.
+    """
 
     async def _check(request: Request) -> None:
         # The secret's lookup is a settings read when none is cached (open
@@ -146,7 +163,8 @@ def rate_limit(bucket: str, default_per_minute: int) -> Any:
         # A settings read: off the loop (AUD-007; the docstring of _principal
         # says why a store lookup here must not block).
         limit = await asyncio.to_thread(_per_minute, bucket, default_per_minute)
-        allowed, retry_after = _allow((bucket, _principal(request)), limit)
+        caller = _address(request) if per_address else _principal(request)
+        allowed, retry_after = _allow((bucket, caller), limit)
         if not allowed:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,

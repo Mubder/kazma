@@ -2005,7 +2005,7 @@ def test_loop_stall_gate_catches_the_old_ledger_write():
 _SYNC_STORE_METHODS = frozenset({
     "get", "set", "set_if_absent", "batch_set", "atomic_update", "delete",
     "get_category", "get_all", "transaction", "export_yaml", "import_yaml",
-    "reconcile_from_yaml", "reset_all", "reload_from_root",
+    "reconcile_from_yaml", "reset_all",
 })
 
 
@@ -2965,7 +2965,9 @@ def test_every_websocket_endpoint_authenticates():
             if not decorated_ws:
                 continue
             body = ast.dump(node)
-            if not any(name in body for name in ("websocket_is_authenticated", "get_websocket_principal")):
+            # "websocket_principal" covers get_websocket_principal and
+            # auth.websocket_principal (authenticated, then the principal).
+            if not any(name in body for name in ("websocket_is_authenticated", "websocket_principal")):
                 offenders.append(f"{_rel(path)}:{node.lineno} {node.name}")
 
     assert not offenders, (

@@ -55,8 +55,9 @@ def register_auth_routes(self: Any) -> None:
             }
         # Public demo mode: report as open/authenticated so the client skips
         # the login redirect. Matches the middleware bypass in auth.py.
-        import os as _os
-        if _os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes"):
+        from kazma_core.security.boot_guard import env_flag
+
+        if env_flag("KAZMA_DEMO_MODE"):
             return {
                 "auth_enabled": False,
                 "authenticated": True,
@@ -174,7 +175,10 @@ def register_auth_routes(self: Any) -> None:
         session_uid = None
         session_tenant = None
         authenticated = False
-        user_key = username.lower()[:200]
+        # The username's window is per address too: keyed by the name alone,
+        # ten wrong passwords from anywhere locked the real user out for five
+        # minutes, from their own address too (security audit 2026-11-10).
+        user_key = f"{username.lower()[:200]}@{client_ip}" if username else ""
         user_recent = _recent_failures(_login_failures_user, user_key, now) if user_key else []
         if user_key and len(user_recent) >= _LOGIN_MAX_FAILS:
             logger.warning("[auth] login rate limit hit for a username (from %s)", client_ip)
@@ -262,7 +266,17 @@ def register_auth_routes(self: Any) -> None:
                 {"error": "session_create_failed", "detail": "Could not mint a login session."},
                 status_code=503,
             )
-    @self.app.get("/api/auth/oidc/start")
+    from fastapi import Depends
+
+    from kazma_ui.rate_limit import rate_limit
+
+    # Reached before sign-in, by anyone: each call fetches the IdP's discovery
+    # document and writes a pending sign-in, of which 32 are kept -- a loop
+    # evicted real ones (security audit 2026-11-10). Per client address.
+    @self.app.get(
+        "/api/auth/oidc/start",
+        dependencies=[Depends(rate_limit("oidc_start", 10, per_address=True))],
+    )
     async def _oidc_start(request: Request) -> Response:
         """Redirect browser to configured OIDC IdP (Phase 4.4)."""
         from fastapi.responses import RedirectResponse
@@ -355,13 +369,21 @@ def register_auth_routes(self: Any) -> None:
     @self.app.get("/api/auth/me")
     def _auth_me(request: Request) -> Response:
         """Return current principal (role/username) for UI chrome."""
-        import os as _os
+        from kazma_core.security.boot_guard import env_flag
 
-        from kazma_ui.auth import get_kazma_secret, get_request_principal, is_authenticated
+        from kazma_ui.auth import (
+            DEMO_VISITOR_ROLE,
+            get_kazma_secret,
+            get_request_principal,
+            is_authenticated,
+        )
 
-        # Public demo mode: report as an authenticated demo visitor.
-        if _os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes"):
-            return _JSONResponse({"authenticated": True, "source": "demo", "role": "admin"})
+        # Public demo mode: report as an authenticated demo visitor, with the
+        # role the auth gate gives one (not admin: security audit 2026-11-10).
+        if env_flag("KAZMA_DEMO_MODE"):
+            return _JSONResponse(
+                {"authenticated": True, "source": "demo", "role": DEMO_VISITOR_ROLE}
+            )
         secret = get_kazma_secret()
         if secret and not is_authenticated(request, secret):
             return _JSONResponse({"authenticated": False}, status_code=401)

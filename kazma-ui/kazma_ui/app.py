@@ -29,6 +29,7 @@ from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from kazma_core.security.boot_guard import env_flag
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,54 @@ def json_for_script(obj: object) -> str:
         .replace(" ", "\\u2028")
         .replace(" ", "\\u2029")
     )
+
+
+def _ensure_generated_secrets() -> None:
+    """Make ``KAZMA_SECRET`` and ``KAZMA_VAULT_KEY`` when they are not set, and
+    keep them in the install's env file (``env_files.persist_generated_secret``:
+    restricted to this account before the key is written).
+
+    They were written to ``Path(".env")`` -- the folder the server was launched
+    from -- with the folder's default permissions (audit 2026-11-10). A vault
+    key that cannot be kept is an ERROR: every secret stored with it is
+    unreadable after a restart. Production never invents a vault key.
+    """
+    import secrets
+
+    from kazma_core.env_files import persist_generated_secret
+
+    if not os.environ.get("KAZMA_SECRET", "").strip():
+        generated = secrets.token_hex(32)
+        os.environ["KAZMA_SECRET"] = generated
+        try:
+            where = persist_generated_secret("KAZMA_SECRET", generated)
+            logger.info("[Auth] Auto-generated KAZMA_SECRET and kept it in %s", where)
+        except Exception as exc:  # noqa: BLE001 -- boot goes on; sessions end at a restart
+            logger.warning("[Auth] Could not keep the auto-generated KAZMA_SECRET: %s", exc)
+
+    if os.environ.get("KAZMA_VAULT_KEY", "").strip():
+        return
+    if env_flag("KAZMA_PRODUCTION"):
+        # Production must not invent vault keys silently (audit M5 / 3.4)
+        logger.error(
+            "[Vault] KAZMA_PRODUCTION=1 requires KAZMA_VAULT_KEY — "
+            "set a Fernet key before starting (see .env.example)"
+        )
+        raise RuntimeError(
+            "KAZMA_PRODUCTION=1 requires KAZMA_VAULT_KEY to be set. "
+            "Generate one: python -c \"import secrets; print(secrets.token_hex(32))\""
+        )
+    vault_key = secrets.token_hex(32)
+    os.environ["KAZMA_VAULT_KEY"] = vault_key
+    try:
+        where = persist_generated_secret("KAZMA_VAULT_KEY", vault_key)
+        logger.info("[Vault] Auto-generated KAZMA_VAULT_KEY and kept it in %s", where)
+    except Exception as exc:  # noqa: BLE001 -- boot goes on, said loudly
+        logger.error(
+            "[Vault] The auto-generated KAZMA_VAULT_KEY could not be kept (%s): every secret "
+            "stored from now on will be unreadable after a restart. Set KAZMA_VAULT_KEY in "
+            "the install's .env before storing secrets.", exc,
+        )
 
 
 class KazmaAppBuilder:
@@ -292,91 +341,10 @@ class KazmaAppBuilder:
         wait_for_settings_store(get_config_store,
                                 on_wait=lambda waited: read_only_after(waited, since=boot_wall))
 
-        # Ensure KAZMA_SECRET is configured
+        # Ensure KAZMA_SECRET and KAZMA_VAULT_KEY are configured
         import sys
         if "pytest" not in sys.modules:
-            _secret = os.environ.get("KAZMA_SECRET", "").strip()
-            if not _secret:
-                import secrets
-                generated = secrets.token_hex(32)
-                os.environ["KAZMA_SECRET"] = generated
-
-                # Persist to .env if possible
-                env_path = Path(".env")
-                if env_path.exists():
-                    try:
-                        content = env_path.read_text(encoding="utf-8")
-                        lines = content.splitlines()
-                        updated = False
-                        for i, line in enumerate(lines):
-                            stripped = line.strip()
-                            if stripped.startswith("# KAZMA_SECRET=") or stripped.startswith("KAZMA_SECRET="):
-                                lines[i] = f"KAZMA_SECRET={generated}"
-                                updated = True
-                                break
-                        if updated:
-                            env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-                            logger.info("[Auth] Auto-generated and updated KAZMA_SECRET in .env file")
-                        else:
-                            with open(env_path, "a", encoding="utf-8") as f:
-                                f.write(f"\nKAZMA_SECRET={generated}\n")
-                            logger.info("[Auth] Auto-generated and appended KAZMA_SECRET to .env file")
-                    except Exception as e:
-                        logger.warning("[Auth] Failed to write auto-generated KAZMA_SECRET to .env: %s", e)
-                else:
-                    try:
-                        env_path.write_text(f"KAZMA_SECRET={generated}\n", encoding="utf-8")
-                        logger.info("[Auth] Created .env and persisted auto-generated KAZMA_SECRET")
-                    except Exception as e:
-                        logger.warning("[Auth] Failed to create .env for auto-generated KAZMA_SECRET: %s", e)
-
-            # Ensure KAZMA_VAULT_KEY is configured (for the encrypted secret vault)
-            _vault_key = os.environ.get("KAZMA_VAULT_KEY", "").strip()
-            _prod = (os.environ.get("KAZMA_PRODUCTION") or "").strip().lower() in (
-                "1", "true", "on", "yes",
-            )
-            if not _vault_key and _prod:
-                # Production must not invent vault keys silently (audit M5 / 3.4)
-                logger.error(
-                    "[Vault] KAZMA_PRODUCTION=1 requires KAZMA_VAULT_KEY — "
-                    "set a Fernet key before starting (see .env.example)"
-                )
-                raise RuntimeError(
-                    "KAZMA_PRODUCTION=1 requires KAZMA_VAULT_KEY to be set. "
-                    "Generate one: python -c \"import secrets; print(secrets.token_hex(32))\""
-                )
-            if not _vault_key:
-                import secrets as _sec2
-                _vault_generated = _sec2.token_hex(32)
-                os.environ["KAZMA_VAULT_KEY"] = _vault_generated
-
-                env_path = Path(".env")
-                if env_path.exists():
-                    try:
-                        content = env_path.read_text(encoding="utf-8")
-                        lines = content.splitlines()
-                        updated = False
-                        for i, line in enumerate(lines):
-                            stripped = line.strip()
-                            if stripped.startswith("# KAZMA_VAULT_KEY=") or stripped.startswith("KAZMA_VAULT_KEY="):
-                                lines[i] = f"KAZMA_VAULT_KEY={_vault_generated}"
-                                updated = True
-                                break
-                        if updated:
-                            env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-                            logger.info("[Vault] Auto-generated and updated KAZMA_VAULT_KEY in .env file")
-                        else:
-                            with open(env_path, "a", encoding="utf-8") as f:
-                                f.write(f"\nKAZMA_VAULT_KEY={_vault_generated}\n")
-                            logger.info("[Vault] Auto-generated and appended KAZMA_VAULT_KEY to .env file")
-                    except Exception as e:
-                        logger.warning("[Vault] Failed to write KAZMA_VAULT_KEY to .env: %s", e)
-                else:
-                    try:
-                        env_path.write_text(f"KAZMA_VAULT_KEY={_vault_generated}\n", encoding="utf-8")
-                        logger.info("[Vault] Created .env and persisted auto-generated KAZMA_VAULT_KEY")
-                    except Exception as e:
-                        logger.warning("[Vault] Failed to create .env for KAZMA_VAULT_KEY: %s", e)
+            _ensure_generated_secrets()
 
         self.config = load_config(self.config_path)
         # Process-wide singleton — never construct ConfigStore() elsewhere.
@@ -394,7 +362,6 @@ class KazmaAppBuilder:
             active_ws = ws_store.get_active_workspace()
             if active_ws:
                 self.config_store.set("workspace.selected_path", active_ws["root_path"], category="workspace")
-                self.config_store.reload_from_root(active_ws["root_path"])
                 logger.info("[App] Aligned ConfigStore with active workspace root: %s", active_ws["root_path"])
         except Exception as e:
             logger.warning("[App] Failed to align active workspace on boot: %s", e)
@@ -465,7 +432,7 @@ class KazmaAppBuilder:
         # KAZMA_EMBEDDER_PREWARM=0 defers the load to the first recall: the
         # test suite sets it, because every app a test built loaded the
         # multi-gigabyte local model here (2026-10-15).
-        _demo_mode = os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes")
+        _demo_mode = env_flag("KAZMA_DEMO_MODE")
         _prewarm_off = os.environ.get("KAZMA_EMBEDDER_PREWARM", "").strip().lower() in (
             "0", "false", "no", "off",
         )
@@ -549,9 +516,7 @@ class KazmaAppBuilder:
         # `Response` return types — a known FastAPI/Pydantic-v2 interaction),
         # and (2) the API surface should not be internet-exposed. Dev/loopback
         # builds keep them. Docs/redoc are never mounted in prod.
-        _prod = (os.environ.get("KAZMA_PRODUCTION") or "").strip().lower() in (
-            "1", "true", "on", "yes",
-        )
+        _prod = env_flag("KAZMA_PRODUCTION")
         self.app = FastAPI(
             title="Kazma",
             version=self.config.version,
@@ -880,7 +845,7 @@ class KazmaAppBuilder:
         # those was left unchanged (audit finding MED #6).
 
         # Startup warning: DEV_WS_BYPASS is a security backdoor
-        if os.environ.get("KAZMA_DEV_WS_BYPASS", "").strip().lower() in ("1", "true", "yes", "on"):
+        if env_flag("KAZMA_DEV_WS_BYPASS"):
             logger.warning(
                 "[SECURITY] KAZMA_DEV_WS_BYPASS is set — all WebSocket auth is "
                 "DISABLED. This is a security risk. Remove it from .env for "
@@ -1417,16 +1382,9 @@ class KazmaAppBuilder:
 
         # ── Voice Streaming WebSocket ──
         try:
-            from kazma_ui.routes_voice_ws import handle_voice_websocket
+            from kazma_ui.routes_voice_ws import serve_voice_websocket
 
             async def _ws_voice(websocket: WebSocket) -> None:
-                from kazma_ui.auth import websocket_is_authenticated
-
-                # The session lookup is a store read (audit 2026-10-26 AUD-111).
-                if not await asyncio.to_thread(websocket_is_authenticated, websocket):
-                    await websocket.close(code=4003, reason="Unauthorized")
-                    return
-
                 def _voice_graph_getter() -> Any:
                     # Live voice rides the SAME checkpointed graph as SSE
                     # (one brain, one thread, real HITL). No fallback to the
@@ -1435,7 +1393,8 @@ class KazmaAppBuilder:
                     # here would reintroduce the split-brain mouth.
                     return self._graph_holder.get("graph")
 
-                await handle_voice_websocket(
+                # Who may open it, in which tenant: serve_voice_websocket.
+                await serve_voice_websocket(
                     websocket,
                     graph_getter=_voice_graph_getter,
                     agent_getter=lambda: self.agent,
@@ -2924,7 +2883,20 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
     With the database away a minute into the boot and a copy of the settings
     on this machine, the read-only server instead (resilience plan A4)."""
+    from kazma_core.security.boot_guard import factory_exposure_refusal
+
     from kazma_ui.read_only_mode import ReadOnlyStart, create_read_only_app
+
+    # A launcher that builds the app itself (`uvicorn ... --factory`, the
+    # Docker image) skipped the exposure check serve.py and the CLI run: a
+    # sign-in switch on a network bind served every /api route (security
+    # audit 2026-11-10). A no-op unless such a switch is on.
+    refusal = factory_exposure_refusal()
+    if refusal:
+        import sys
+
+        print(refusal, file=sys.stderr)
+        raise SystemExit(1)
 
     builder = KazmaAppBuilder(config_path)
     try:
@@ -2979,6 +2951,18 @@ def main() -> None:
             "Set KAZMA_HOST=127.0.0.1 or pin KAZMA_SECRET."
         )
 
+    # The same exposure check serve.py and `kazma serve` run: a secret does
+    # not protect an endpoint whose gate has been switched off. kazma-web ran
+    # none until 2026-11-10 (security audit).
+    from kazma_core.security.boot_guard import check_exposure_posture, note_launcher_checked
+
+    _posture_ok, _posture_msg = check_exposure_posture(host)
+    if _posture_msg:
+        print(_posture_msg)
+    if not _posture_ok:
+        raise SystemExit(1)
+    note_launcher_checked(host)
+
     app = create_app()
     from kazma_core.eventloop import uvicorn_loop_factory
     # Turn Delivery V2 (KD-7, plan TURN_DELIVERY_V2_CURSOR_RESUME_PLAN.md):
@@ -2993,7 +2977,8 @@ def main() -> None:
     # the TCP peer from the undeclared-proxy check.
     uvicorn.run(app, host=host, port=args.port, log_level="info",
                 ws_ping_interval=20.0, ws_ping_timeout=20.0,
-                loop=uvicorn_loop_factory(), proxy_headers=False)
+                loop=uvicorn_loop_factory(), proxy_headers=False,
+                server_header=False)
 
 
 if __name__ == "__main__":
