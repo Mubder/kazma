@@ -214,9 +214,9 @@ def docker_available() -> bool:
 
 
 def _production_or_multi_user() -> bool:
-    if (os.environ.get("KAZMA_PRODUCTION") or "").strip().lower() in (
-        "1", "true", "on", "yes",
-    ):
+    from kazma_core.security.boot_guard import env_flag
+
+    if env_flag("KAZMA_PRODUCTION"):
         return True
     try:
         from kazma_core.security.platform_rbac import multi_user_enabled

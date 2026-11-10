@@ -506,8 +506,9 @@ async def extract_beliefs_for_turn(
     raw_beliefs: list[dict[str, Any]] | None = None
     if use_llm:
         # Skip LLM in demo mode (matches consolidator convention)
-        import os
-        if os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes"):
+        from kazma_core.security.boot_guard import env_flag
+
+        if env_flag("KAZMA_DEMO_MODE"):
             # demo mode still allows heuristic extraction below
             pass
         else:

@@ -345,11 +345,9 @@ def get_document_rollout() -> DocumentRollout:
 
 
 def _production() -> bool:
-    import os
+    from kazma_core.security.boot_guard import env_flag
 
-    return (os.environ.get("KAZMA_PRODUCTION") or "").strip().lower() in (
-        "1", "true", "on", "yes",
-    )
+    return env_flag("KAZMA_PRODUCTION")
 
 
 def get_document_storage_root() -> Path:

@@ -29,6 +29,7 @@ from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from kazma_core.security.boot_guard import env_flag
 
 logger = logging.getLogger(__name__)
 
@@ -332,9 +333,7 @@ class KazmaAppBuilder:
 
             # Ensure KAZMA_VAULT_KEY is configured (for the encrypted secret vault)
             _vault_key = os.environ.get("KAZMA_VAULT_KEY", "").strip()
-            _prod = (os.environ.get("KAZMA_PRODUCTION") or "").strip().lower() in (
-                "1", "true", "on", "yes",
-            )
+            _prod = env_flag("KAZMA_PRODUCTION")
             if not _vault_key and _prod:
                 # Production must not invent vault keys silently (audit M5 / 3.4)
                 logger.error(
@@ -464,7 +463,7 @@ class KazmaAppBuilder:
         # KAZMA_EMBEDDER_PREWARM=0 defers the load to the first recall: the
         # test suite sets it, because every app a test built loaded the
         # multi-gigabyte local model here (2026-10-15).
-        _demo_mode = os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes")
+        _demo_mode = env_flag("KAZMA_DEMO_MODE")
         _prewarm_off = os.environ.get("KAZMA_EMBEDDER_PREWARM", "").strip().lower() in (
             "0", "false", "no", "off",
         )
@@ -548,9 +547,7 @@ class KazmaAppBuilder:
         # `Response` return types — a known FastAPI/Pydantic-v2 interaction),
         # and (2) the API surface should not be internet-exposed. Dev/loopback
         # builds keep them. Docs/redoc are never mounted in prod.
-        _prod = (os.environ.get("KAZMA_PRODUCTION") or "").strip().lower() in (
-            "1", "true", "on", "yes",
-        )
+        _prod = env_flag("KAZMA_PRODUCTION")
         self.app = FastAPI(
             title="Kazma",
             version=self.config.version,
@@ -879,7 +876,7 @@ class KazmaAppBuilder:
         # those was left unchanged (audit finding MED #6).
 
         # Startup warning: DEV_WS_BYPASS is a security backdoor
-        if os.environ.get("KAZMA_DEV_WS_BYPASS", "").strip().lower() in ("1", "true", "yes", "on"):
+        if env_flag("KAZMA_DEV_WS_BYPASS"):
             logger.warning(
                 "[SECURITY] KAZMA_DEV_WS_BYPASS is set — all WebSocket auth is "
                 "DISABLED. This is a security risk. Remove it from .env for "
@@ -2923,7 +2920,20 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
     With the database away a minute into the boot and a copy of the settings
     on this machine, the read-only server instead (resilience plan A4)."""
+    from kazma_core.security.boot_guard import factory_exposure_refusal
+
     from kazma_ui.read_only_mode import ReadOnlyStart, create_read_only_app
+
+    # A launcher that builds the app itself (`uvicorn ... --factory`, the
+    # Docker image) skipped the exposure check serve.py and the CLI run: a
+    # sign-in switch on a network bind served every /api route (security
+    # audit 2026-11-10). A no-op unless such a switch is on.
+    refusal = factory_exposure_refusal()
+    if refusal:
+        import sys
+
+        print(refusal, file=sys.stderr)
+        raise SystemExit(1)
 
     builder = KazmaAppBuilder(config_path)
     try:
@@ -2977,6 +2987,18 @@ def main() -> None:
             "Refusing non-loopback bind without KAZMA_SECRET. "
             "Set KAZMA_HOST=127.0.0.1 or pin KAZMA_SECRET."
         )
+
+    # The same exposure check serve.py and `kazma serve` run: a secret does
+    # not protect an endpoint whose gate has been switched off. kazma-web ran
+    # none until 2026-11-10 (security audit).
+    from kazma_core.security.boot_guard import check_exposure_posture, note_launcher_checked
+
+    _posture_ok, _posture_msg = check_exposure_posture(host)
+    if _posture_msg:
+        print(_posture_msg)
+    if not _posture_ok:
+        raise SystemExit(1)
+    note_launcher_checked(host)
 
     app = create_app()
     from kazma_core.eventloop import uvicorn_loop_factory

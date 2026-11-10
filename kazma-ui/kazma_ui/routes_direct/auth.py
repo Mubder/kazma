@@ -55,8 +55,9 @@ def register_auth_routes(self: Any) -> None:
             }
         # Public demo mode: report as open/authenticated so the client skips
         # the login redirect. Matches the middleware bypass in auth.py.
-        import os as _os
-        if _os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes"):
+        from kazma_core.security.boot_guard import env_flag
+
+        if env_flag("KAZMA_DEMO_MODE"):
             return {
                 "auth_enabled": False,
                 "authenticated": True,
@@ -355,12 +356,12 @@ def register_auth_routes(self: Any) -> None:
     @self.app.get("/api/auth/me")
     def _auth_me(request: Request) -> Response:
         """Return current principal (role/username) for UI chrome."""
-        import os as _os
+        from kazma_core.security.boot_guard import env_flag
 
         from kazma_ui.auth import get_kazma_secret, get_request_principal, is_authenticated
 
         # Public demo mode: report as an authenticated demo visitor.
-        if _os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes"):
+        if env_flag("KAZMA_DEMO_MODE"):
             return _JSONResponse({"authenticated": True, "source": "demo", "role": "admin"})
         secret = get_kazma_secret()
         if secret and not is_authenticated(request, secret):

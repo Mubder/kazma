@@ -49,7 +49,9 @@ def yolo_allowed() -> bool:
     raw = os.environ.get("KAZMA_ALLOW_YOLO")
     if raw is not None and str(raw).strip() != "":
         return _truthy(str(raw))
-    if _truthy(os.environ.get("KAZMA_PRODUCTION")):
+    from kazma_core.security.boot_guard import env_flag
+
+    if env_flag("KAZMA_PRODUCTION"):
         return False
     return True
 

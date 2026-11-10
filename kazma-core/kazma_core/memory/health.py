@@ -153,7 +153,9 @@ def build_memory_health() -> dict[str, Any]:
     global _health_embed_cache_ts
     cfg = _read_memory_cfg()
     components: list[dict[str, Any]] = []
-    demo = os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes")
+    from kazma_core.security.boot_guard import env_flag
+
+    demo = env_flag("KAZMA_DEMO_MODE")
     recall_state = recall_degraded()
     recall_fail_count = int(recall_state.get("fail_count") or 0)
     recall_degraded_now = recall_fail_count > 0

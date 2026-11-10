@@ -44,7 +44,9 @@ _lock = threading.Lock()
 def _enabled() -> bool:
     if os.environ.get("KAZMA_RATE_LIMIT_ENABLED", "").lower() in ("0", "false", "no"):
         return False
-    if os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes"):
+    from kazma_core.security.boot_guard import env_flag
+
+    if env_flag("KAZMA_DEMO_MODE"):
         return False
     try:
         from kazma_ui.auth import get_kazma_secret

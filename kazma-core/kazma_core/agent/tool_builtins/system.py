@@ -385,10 +385,9 @@ def register_system_tools(registry: Any) -> None:
                 "tar", "gzip", "gunzip", "zip", "unzip",
             }
         # Dev-only extras when not in production
-        import os as _os_bin
-        if (_os_bin.environ.get("KAZMA_PRODUCTION") or "").lower() not in (
-            "1", "true", "on", "yes",
-        ):
+        from kazma_core.security.boot_guard import env_flag as _env_flag
+
+        if not _env_flag("KAZMA_PRODUCTION"):
             _SAFE_BINARIES = set(_SAFE_BINARIES) | {"ps", "pgrep", "kazma"}
         import os
 

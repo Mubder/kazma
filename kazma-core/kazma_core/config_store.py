@@ -359,7 +359,9 @@ def get_kazma_secret() -> str:
     if env_secret:
         return env_secret
 
-    if os.environ.get("KAZMA_AUTH_DISABLED", "").lower() in ("true", "1", "yes"):
+    from kazma_core.security.boot_guard import env_flag
+
+    if env_flag("KAZMA_AUTH_DISABLED"):
         return ""
 
     import sys

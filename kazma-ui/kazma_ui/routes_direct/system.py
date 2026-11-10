@@ -92,7 +92,9 @@ def register_system_routes(self: Any) -> None:
 
         # Demo mode: report DEMO instead of DEGRADED so the UI hides the
         # install button and shows a clean "demo mode" message.
-        _demo_mode = _os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes")
+        from kazma_core.security.boot_guard import env_flag
+
+        _demo_mode = env_flag("KAZMA_DEMO_MODE")
 
         store = get_config_store()
         if _demo_mode:
@@ -238,10 +240,11 @@ def register_system_routes(self: Any) -> None:
         Supply-chain safe: only extras/packages in the installer allowlists.
         """
         req = req or {}
-        import os as _os
         # In demo mode, ML deps can't be installed (container has no build
         # tools and not enough RAM). Return a clean message.
-        if _os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes"):
+        from kazma_core.security.boot_guard import env_flag
+
+        if env_flag("KAZMA_DEMO_MODE"):
             return {"status": "unavailable", "message": "ML dependencies are not available in demo mode."}
 
         from kazma_core.system import (

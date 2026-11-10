@@ -15,9 +15,9 @@ def validate_root(path: Path) -> Path:
         configured = configured_workspace_roots()
     except policy_read_failures() as exc:
         raise PermissionError("Workspace root policy is unavailable; access refused.") from exc
-    production = os.environ.get("KAZMA_PRODUCTION", "").strip().lower() in (
-        "1", "true", "on", "yes",
-    )
+    from kazma_core.security.boot_guard import env_flag
+
+    production = env_flag("KAZMA_PRODUCTION")
     if production and not allowed and not configured:
         raise PermissionError(
             "KAZMA_WORKSPACE_ROOT or Settings security.workspace_roots is required in production. "

@@ -583,6 +583,101 @@ def _host_is_local_name(request: Request) -> bool:
     return hostname in local_names or hostname in extras or host in extras
 
 
+#: Names no public DNS answers (RFC 6761): a rebinding page cannot be served
+#: under one, so a request naming one is not a rebinding.
+_RESERVED_LOCAL_SUFFIXES = (".localhost", ".test")
+
+
+def _host_cannot_be_rebound(request: Request) -> bool:
+    """The request's ``Host`` is not a name a DNS-rebinding page could carry.
+
+    A rebinding page is served from the attacker's own public domain, which
+    then resolves to 127.0.0.1; its requests carry that domain as ``Host``.
+    So a Host that is a local name (:func:`_host_is_local_name`, which takes
+    ``KAZMA_AUTOLOGIN_HOSTS``), an IP literal, a single-label name, a reserved
+    name (``*.localhost``, ``*.test``) or the host of a declared browser
+    origin (``KAZMA_PUBLIC_URL`` / ``KAZMA_CORS_ORIGINS``) is not one.
+    """
+    if _host_is_local_name(request):
+        return True
+    try:
+        host = (request.headers.get("host") or "").strip().lower()
+    except Exception:
+        return False
+    if not host:
+        return True  # no browser sends a request without one
+    if host.startswith("["):
+        return True  # an IPv6 literal
+    hostname = host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+    hostname = hostname.rstrip(".")
+    import ipaddress
+
+    try:
+        ipaddress.ip_address(hostname)
+        return True
+    except ValueError:
+        pass
+    if "." not in hostname or hostname.endswith(_RESERVED_LOCAL_SUFFIXES):
+        return True
+    try:
+        from urllib.parse import urlsplit
+
+        from kazma_ui.browser_origins import configured_browser_origins
+
+        for origin in configured_browser_origins():
+            if (urlsplit(origin).hostname or "").lower() == hostname:
+                return True
+    except Exception:
+        logger.debug("[auth] declared browser origins unreadable", exc_info=True)
+    return False
+
+
+def open_mode_host_refused(request: Any) -> bool:
+    """Refuse a DNS-rebinding request while sign-in is off.
+
+    With sign-in off (``KAZMA_AUTH_DISABLED``, ``KAZMA_DEMO_MODE``, an empty
+    secret, ``KAZMA_DEV_WS_BYPASS`` for sockets) nothing checked the
+    ``Host``: a page on an attacker's domain that resolves to 127.0.0.1 is a
+    loopback peer, its ``Origin`` matches its ``Host``, and the CSRF check
+    trusts the origin the request names -- so it reached the whole API of a
+    loopback install (security audit 2026-11-10). Only a loopback peer that
+    is not a declared proxy is judged: a request through a proxy (the public
+    demo) carries the proxy's public name by design.
+    """
+    peer = _peer_host(request)
+    if not peer:
+        return False
+    import ipaddress
+
+    try:
+        ip = ipaddress.ip_address(peer.split("%")[0])
+    except ValueError:
+        return peer == "localhost" and not _host_cannot_be_rebound(request)
+    if ip.version == 6 and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    if not ip.is_loopback or _is_trusted_proxy(peer):
+        return False
+    return not _host_cannot_be_rebound(request)
+
+
+def _rebinding_refusal(request: Request) -> JSONResponse:
+    logger.warning(
+        "[SECURITY] Refused a request to Host %r on a loopback peer while sign-in "
+        "is off (DNS rebinding). Add the name to KAZMA_AUTOLOGIN_HOSTS if it is yours.",
+        (request.headers.get("host") or "")[:100],
+    )
+    return JSONResponse(
+        status_code=421,
+        content={
+            "detail": (
+                "Sign-in is off, and this request names a host that is not this "
+                "machine. Open Kazma at http://127.0.0.1 or localhost, or add the "
+                "name to KAZMA_AUTOLOGIN_HOSTS."
+            )
+        },
+    )
+
+
 def _should_auto_issue_cookie(request: Request, expected: str) -> bool:
     """Whether to Set-Cookie the secret without an explicit login.
 
@@ -1015,17 +1110,21 @@ def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> boo
     expected = expected_secret or get_kazma_secret()
 
     # Dev bypass for local testing — never enable in production
-    if os.environ.get("KAZMA_DEV_WS_BYPASS", "").strip().lower() in ("1", "true", "yes", "on"):
-        if os.environ.get("KAZMA_PRODUCTION", "").strip().lower() in ("1", "true", "yes"):
+    if env_flag("KAZMA_DEV_WS_BYPASS"):
+        if env_flag("KAZMA_PRODUCTION"):
             logger.error(
                 "[SECURITY] KAZMA_DEV_WS_BYPASS is set but KAZMA_PRODUCTION=1 "
                 "— refusing to bypass WebSocket auth"
             )
+        elif open_mode_host_refused(websocket):
+            return False
         else:
             return True
 
     if not expected:
-        return True
+        # Sign-in off: still not for a page that rebound its own domain to
+        # this machine (security audit 2026-11-10).
+        return not open_mode_host_refused(websocket)
 
     # Loopback peers: trusted for single-operator local use.
     # The browser authenticates via the same-origin kazma-session cookie; the
@@ -1350,11 +1449,18 @@ def create_auth_middleware(
             return await call_next(request)
         expected = static_secret if static_secret is not None else await aget_kazma_secret()
 
+        # 00. Sign-in off (an empty secret, KAZMA_AUTH_DISABLED, demo mode):
+        # no credential stands between a page and the API, so a page that
+        # rebound its own domain to 127.0.0.1 is refused by its Host
+        # (security audit 2026-11-10). Request headers only, no store read.
+        if (not expected or env_flag("KAZMA_DEMO_MODE")) and open_mode_host_refused(request):
+            return _rebinding_refusal(request)
+
         # 0. Public demo mode: KAZMA_DEMO_MODE bypasses the secret gate so a
         #    public demo instance is open to all visitors
         #    without login. Only enable this on a throwaway demo instance —
         #    never on a production deployment with real secrets/data.
-        if os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes"):
+        if env_flag("KAZMA_DEMO_MODE"):
             global _demo_mode_warned
             if not _demo_mode_warned:
                 _demo_mode_warned = True
@@ -1363,7 +1469,7 @@ def create_auth_middleware(
                     "disabled and every /api endpoint is open. Enable this only "
                     "on throwaway demo instances."
                 )
-            if os.environ.get("KAZMA_PRODUCTION", "").lower() in ("1", "true", "yes"):
+            if env_flag("KAZMA_PRODUCTION"):
                 # Refuse to silently open a production instance.
                 logger.error(
                     "[Auth] KAZMA_DEMO_MODE and KAZMA_PRODUCTION are both set — "
@@ -1384,10 +1490,7 @@ def create_auth_middleware(
         # (get_kazma_secret returns "" → the gate opens). It is documented
         # as production-blocked like DEMO_MODE; enforce that here so the
         # docstring and the behaviour agree (audit L-3).
-        if (
-            os.environ.get("KAZMA_AUTH_DISABLED", "").lower() in ("1", "true", "yes")
-            and os.environ.get("KAZMA_PRODUCTION", "").lower() in ("1", "true", "yes")
-        ):
+        if env_flag("KAZMA_AUTH_DISABLED") and env_flag("KAZMA_PRODUCTION"):
             logger.error(
                 "[Auth] KAZMA_AUTH_DISABLED and KAZMA_PRODUCTION are both set — "
                 "refusing to disable auth; returning 503."
@@ -1732,9 +1835,7 @@ def assert_proxy_configuration() -> None:
     production instance that is neither loopback-bound nor proxy-aware is
     almost certainly the F-01 topology.
     """
-    production = (os.environ.get("KAZMA_PRODUCTION") or "").strip().lower() in (
-        "1", "true", "on", "yes",
-    )
+    production = env_flag("KAZMA_PRODUCTION")
     if not production or behind_proxy():
         return
     bind = (os.environ.get("KAZMA_HOST") or "127.0.0.1").strip().lower()
