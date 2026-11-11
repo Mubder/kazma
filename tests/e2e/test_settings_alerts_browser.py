@@ -332,3 +332,108 @@ def test_a_separate_alerts_bot_from_the_alerts_tab(setup, monkeypatch) -> None:
     finally:
         telegram.shutdown()
     assert errors == [], errors
+
+
+# -- the cards leave no holes at any width (2026-11-11) ----------------------------------
+# The sections were a grid: each row as tall as its tallest card, so the page
+# was empty under the server status messages and under the guard's pager,
+# down to the bottom of Kazma Watch, and the holes moved as the window
+# changed width. They now flow down columns, each card straight under the
+# one before it.
+
+#: The grid as it was (the negative control).
+_OLD_GRID = (".alerts-grid { display: grid !important; column-width: auto !important;"
+             " grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)) !important;"
+             " gap: 24px !important; align-items: start !important; }"
+             " .alerts-grid > * { margin: 0 !important; }")
+
+
+#: Each card's position; the space between a card and the one above it in
+#: its column, beyond the column gap (a hole); and the number of columns.
+_HOLES_JS = """() => {
+        const grid = document.querySelector('#alerts-tab .alerts-grid');
+        const gap = parseFloat(getComputedStyle(grid).columnGap) || 24;
+        const cards = [...grid.children].filter(c => c.offsetParent !== null).map(c => {
+            const r = c.getBoundingClientRect();
+            return { id: c.id, left: Math.round(r.left), right: r.right, top: r.top, bottom: r.bottom };
+        });
+        const columns = {};
+        for (const c of cards) (columns[c.left] = columns[c.left] || []).push(c);
+        const holes = [];
+        for (const list of Object.values(columns)) {
+            list.sort((a, b) => a.top - b.top);
+            for (let i = 1; i < list.length; i++) {
+                const space = list[i].top - list[i - 1].bottom;
+                if (Math.abs(space - gap) > 2) holes.push(list[i - 1].id + ' -> ' + list[i].id + ': ' + Math.round(space) + 'px');
+            }
+        }
+        return { holes, columns: Object.keys(columns).length,
+                 first: cards.length ? cards[0].left : 0, gridLeft: grid.getBoundingClientRect().left,
+                 spanned: Math.max(...cards.map(c => c.right)) - Math.min(...cards.map(c => c.left)),
+                 gridWidth: grid.getBoundingClientRect().width,
+                 gridRight: grid.getBoundingClientRect().right, order: cards.map(c => c.id) };
+    }"""
+
+
+def _holes(page) -> dict:
+    return page.evaluate(_HOLES_JS)
+
+
+def _settled(page, *, holes: bool) -> dict:
+    """The layout once it has settled after a change: polled to a deadline
+    until it shows holes (``holes=True``) or none, the columns filling the
+    section; then read, so a layout that never settles fails the caller's
+    assertion with what it was."""
+    from playwright.sync_api import TimeoutError as PlaywrightTimeout
+
+    want = ("g.holes.length > 0" if holes
+            else "g.holes.length === 0 && g.gridWidth - g.spanned < 4")
+    try:
+        page.wait_for_function(f"() => {{ const g = ({_HOLES_JS})(); return {want}; }}", timeout=10000)
+    except PlaywrightTimeout:
+        pass
+    return _holes(page)
+
+
+def test_the_alerts_cards_leave_no_holes_at_any_width(setup) -> None:
+    from playwright.sync_api import sync_playwright
+
+    h: Harness = setup.h
+    errors: list[str] = []
+    host = h.base.split("//", 1)[1].split(":", 1)[0]
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            pg = browser.new_context(viewport={"width": 1366, "height": 900}, locale="en-US").new_page()
+            pg.on("pageerror", lambda exc: errors.append(str(exc)))
+            _open_alerts(pg, h.base, "Alerts")
+            seen_columns = set()
+            for width in (700, 1000, 1366, 1700, 2200):
+                pg.set_viewport_size({"width": width, "height": 900})
+                got = _settled(pg, holes=False)
+                assert got["holes"] == [], (width, got)
+                assert got["order"][0] == "alerts-routes", got["order"]
+                # The columns fill the section: no empty columns on one side.
+                assert got["gridWidth"] - got["spanned"] < 4, (width, got)
+                seen_columns.add(got["columns"])
+            assert len(seen_columns) >= 2, f"the column count never changed with the width: {seen_columns}"
+            _shot(pg, "en-alerts-columns")
+
+            # Negative control: the grid as it was leaves holes.
+            pg.set_viewport_size({"width": 1366, "height": 900})
+            pg.add_style_tag(content=_OLD_GRID)
+            assert _settled(pg, holes=True)["holes"], "the old grid should leave a hole under a short card"
+
+            # Arabic: the first column is on the right.
+            ctx = browser.new_context(viewport={"width": 1366, "height": 900})
+            ctx.add_cookies([{"name": "kazma-lang", "value": "ar", "domain": host, "path": "/"}])
+            ar = ctx.new_page()
+            ar.on("pageerror", lambda exc: errors.append(str(exc)))
+            _open_alerts(ar, h.base, "التنبيهات")
+            got = _settled(ar, holes=False)
+            assert got["holes"] == [], got
+            assert got["columns"] >= 2 and got["first"] > (got["gridLeft"] + got["gridRight"]) / 2, got
+            _shot(ar, "ar-alerts-columns")
+        finally:
+            browser.close()
+    assert errors == [], errors

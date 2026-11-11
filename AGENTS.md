@@ -7080,7 +7080,12 @@ answering a request), `deploy/observer/test/watch_settings.test.mjs`
 cards with an untold install's UTC as the control, test-page channels and
 rate, leave), `tests/e2e/test_settings_alerts_browser.py` (by the sidebar,
 English and Arabic: the guard's test page, pair, test, unpair; cards the
-wall's colour in light and dark).
+wall's colour in light and dark). The tab's cards flow down at most three
+columns of 320px or more (`.alerts-grid`: CSS columns, each card whole),
+never a grid: a grid row is as tall as its tallest card, and the page was
+empty under the short cards (2026-11-11). Gate:
+`test_the_alerts_cards_leave_no_holes_at_any_width` (700 to 2,200px, EN/AR;
+the old grid as the negative control).
 
 **Where Stages 2, 3 and 4 meet** (merged 2026-11-09). Each delivery has ONE
 receipt, told the outcome once: Kazma's `ops_alerts._Receipt` writes the
