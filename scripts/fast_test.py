@@ -567,6 +567,20 @@ def chunk_timeout_for(n_files: int, explicit: float | None) -> float:
     return max(_MIN_CHUNK_TIMEOUT, _SECONDS_PER_FILE * n_files)
 
 
+def file_timeout_for(explicit_file: float | None, explicit_chunk: float | None) -> float:
+    """The budget of ONE file run alone while a chunk is recovered.
+
+    The backstop a one-file chunk gets: a hung TEST is pytest-timeout's to
+    catch, so this only has to outlast a long file. A fixed 180 s did not:
+    on a slow CI runner (2026-11-11) a chunk went to per-file recovery and
+    tests/test_guard_integration.py -- 25 tests against real guard
+    processes, several minutes when healthy -- was killed at its tenth test
+    and reported POISON. An explicit ``--file-timeout`` wins."""
+    if explicit_file is not None:
+        return float(explicit_file)
+    return chunk_timeout_for(1, explicit_chunk)
+
+
 def needs_recovery(r: dict) -> bool:
     """A chunk result whose tally cannot be trusted: it crashed, ran out of
     time, or produced no parseable summary."""
@@ -592,8 +606,9 @@ def main() -> int:
     ap.add_argument("--chunk-timeout", type=float, default=None,
                     help="seconds per chunk (default: %.0f s per file, at least %.0f s)"
                          % (_SECONDS_PER_FILE, _MIN_CHUNK_TIMEOUT))
-    ap.add_argument("--file-timeout", type=float, default=180.0,
-                    help="per-file timeout during poison-file retry")
+    ap.add_argument("--file-timeout", type=float, default=None,
+                    help="seconds for one file run alone during poison-file retry "
+                         "(default: a one-file chunk's budget)")
     ap.add_argument("--foreground", action="store_true",
                     help="run pytest at normal priority (default: below a normal program, "
                          "so a run never starves a Kazma server on the same machine)")
@@ -649,6 +664,7 @@ def main() -> int:
     # tests/test_reply_sink.py was reported as `exit=-11` with nothing to act
     # on. A tail of it is printed with the POISON list now.
     poison_diag: dict[str, str] = {}
+    file_budget = file_timeout_for(args.file_timeout, args.chunk_timeout)
     # A work queue: a timed-out chunk is re-run as smaller pieces in parallel,
     # and a piece that still needs recovery comes back here (it splits again,
     # or goes to the crash isolation below). Each split shrinks the pieces,
@@ -759,7 +775,7 @@ def main() -> int:
             code, log = run_pytest(
                 [str(f.relative_to(REPO)), "-m", "not slow", "--timeout=120",
                  "--continue-on-collection-errors"],
-                args.file_timeout,
+                file_budget,
             )
             failed_here = [m.group(2) for m in _FAILED_RE.finditer(log)]
             all_failed.extend(failed_here)
@@ -775,7 +791,9 @@ def main() -> int:
                 _, diag = run_pytest(
                     [str(f.relative_to(REPO)), "-m", "not slow", "--timeout=20",
                      "--continue-on-collection-errors", "-v"],
-                    120.0,
+                    # The file's own budget: with 120 s the "last test line"
+                    # named whatever ran at 120 s, a hang or not.
+                    file_budget,
                 )
                 last = next(
                     (ln.strip() for ln in reversed(diag.splitlines())
@@ -793,7 +811,7 @@ def main() -> int:
                 code2, log2 = run_pytest(
                     [str(f.relative_to(REPO)), "-m", "not slow", "--timeout=120",
                      "--continue-on-collection-errors"],
-                    args.file_timeout,
+                    file_budget,
                 )
                 failed2 = [m.group(2) for m in _FAILED_RE.finditer(log2)]
                 all_failed.extend(failed2)
@@ -811,7 +829,7 @@ def main() -> int:
                     _, diag = run_pytest(
                         [str(f.relative_to(REPO)), "-m", "not slow", "--timeout=20",
                          "--continue-on-collection-errors", "-v"],
-                        120.0,
+                        file_budget,
                     )
                     last = next(
                         (ln.strip() for ln in reversed(diag.splitlines())
