@@ -480,7 +480,12 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
     from kazma_core.memory.embedder import API_KEY_ENV_KEY
     from kazma_core.model_details import OVERRIDES_KEY as MODEL_DETAILS_KEY
     from kazma_core.model_prices import OWNER_PRICES_KEY
-    from kazma_core.observability.ops_alerts import NOTICES_TO_CHATS_KEY
+    from kazma_core.observability.ops_alerts import (
+        ALERTS_BOT_CHAT_KEY,
+        ALERTS_BOT_KEY,
+        ALERTS_BOT_TOKEN_KEY,
+        NOTICES_TO_CHATS_KEY,
+    )
     from kazma_core.observability.outside_watch import EMAIL_TO_KEY
     from kazma_core.runs.runbooks import RUNBOOKS_KEY, validate_runbooks
     from kazma_core.swarm.task_store import TASK_RETENTION_KEY
@@ -510,9 +515,9 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
         "notifications.ops.telegram_group_chat": (_telegram_chat, "notifications"),
         # The separate alerts bot (ops_alerts.ALERTS_BOT_*): which bot sends,
         # its token (a secret: the vault) and its chat.
-        "notifications.ops.telegram_bot": (_alerts_bot_choice, "notifications"),
-        "notifications.ops.telegram_bot_token": (_telegram_bot_token, "notifications"),
-        "notifications.ops.telegram_bot_chat": (_telegram_chat, "notifications"),
+        ALERTS_BOT_KEY: (_alerts_bot_choice, "notifications"),
+        ALERTS_BOT_TOKEN_KEY: (_telegram_bot_token, "notifications"),
+        ALERTS_BOT_CHAT_KEY: (_telegram_chat, "notifications"),
         RUNBOOKS_KEY: (validate_runbooks, None),
         "agent.language": (_agent_language, "agent"),
         "agent.max_iterations": (_max_iterations, "agent"),

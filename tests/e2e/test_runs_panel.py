@@ -108,3 +108,62 @@ def test_the_runs_card_shows_an_incident_and_acts_on_it(language: str) -> None:
                     browser.close()
         finally:
             reset_incident_store(None)
+
+
+# -- leaving the Dashboard while it loads (CI, 2026-11-11) -------------------
+# The card checked that it was on the page before asking /api/runs, never
+# after: an answer that came back once a sidebar link had been pressed was
+# drawn into elements no longer there, and the next page got "Cannot read
+# properties of null (reading 'replaceChildren')" (a chat test failed on it in
+# CI, by chance). Here the answer is held until the page has left.
+
+_RUNS_JS = "kazma-ui/kazma_ui/static/js/runs_panel.js"
+
+
+def _leave_while_loading(base: str, script: str | None) -> list[str]:
+    """The page errors from: Memory, then the Dashboard by the sidebar with
+    /api/runs held, then Chat by the sidebar, then the held answer released.
+    ``script``: serve this runs_panel.js instead of the real one."""
+    from playwright.sync_api import sync_playwright
+
+    errors: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            page = browser.new_context().new_page()
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            if script is not None:
+                page.route("**/static/js/runs_panel.js*", lambda route: route.fulfill(
+                    status=200, content_type="text/javascript", body=script))
+            held: list = []
+            page.route("**/api/runs", lambda route: held.append(route))
+            page.goto(base + "/memory", wait_until="domcontentloaded")
+            page.wait_for_function("() => !!window.Alpine")
+            with page.expect_request("**/api/runs", timeout=20000):
+                page.click('nav a[href="/dashboard"], aside a[href="/dashboard"]', timeout=15000)
+            page.wait_for_function("() => location.pathname === '/dashboard'", timeout=20000)
+            page.click('nav a[href="/chat"], aside a[href="/chat"]', timeout=15000)
+            page.wait_for_function("() => location.pathname === '/chat' && !document.getElementById('runs-panel')",
+                                   timeout=20000)
+            assert held, "the Dashboard never asked for its running work"
+            with page.expect_response("**/api/runs", timeout=20000):
+                held[0].continue_()
+            page.wait_for_load_state("networkidle", timeout=20000)
+        finally:
+            browser.close()
+    return errors
+
+
+def test_leaving_the_dashboard_while_it_loads_leaves_no_error() -> None:
+    from pathlib import Path
+
+    current = (Path(__file__).resolve().parents[2] / _RUNS_JS).read_text(encoding="utf-8")
+    # The card as it was: no look at the page once the answer is back.
+    old = current.replace("    if (!document.getElementById('runs-panel')) return;\n    show('runs-loading', false);",
+                          "    show('runs-loading', false);", 1)
+    old = old.replace("    if (!incidents || !list) return;  // not on this page (any more)\n", "", 1)
+    assert old != current, "the negative control no longer removes the checks"
+    with unified_turn_server() as h:
+        assert _leave_while_loading(h.base, None) == []
+        assert any("replaceChildren" in e for e in _leave_while_loading(h.base, old)), \
+            "the old card should have drawn into the page that replaced it"

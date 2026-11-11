@@ -2473,7 +2473,7 @@
                     <dd x-text="guardRunningText()"></dd>
                 </dl>
                 <p class="form-hint" id="alerts-guard-by-bot" x-show="alerts.guard && alerts.guard.via_alerts_bot" x-cloak>{{ t('settings.alerts.guard_chat_by_bot') }}</p>
-                <div class="form-group" x-show="!(alerts.guard && alerts.guard.via_alerts_bot)">
+                <div class="form-group" x-show="!(alerts.guard && alerts.guard.via_alerts_bot)" x-cloak>
                     <label class="form-label" for="alerts-guard-chat">{{ t('settings.alerts.guard_chat') }}</label>
                     <input id="alerts-guard-chat" type="text" class="form-input" dir="ltr" translate="no" inputmode="text" autocomplete="off"
                            x-model.trim="alerts.guardChat" placeholder="123456789">

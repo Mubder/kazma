@@ -81,7 +81,13 @@ def test_the_table_names_the_keys_the_owning_modules_define() -> None:
     from kazma_core.memory.embedder import API_KEY_ENV_KEY
     from kazma_core.model_details import OVERRIDES_KEY as MODEL_DETAILS_KEY
     from kazma_core.model_prices import OWNER_PRICES_KEY
-    from kazma_core.observability.ops_alerts import ALERTS_GROUP_KEY, NOTICES_TO_CHATS_KEY
+    from kazma_core.observability.ops_alerts import (
+        ALERTS_BOT_CHAT_KEY,
+        ALERTS_BOT_KEY,
+        ALERTS_BOT_TOKEN_KEY,
+        ALERTS_GROUP_KEY,
+        NOTICES_TO_CHATS_KEY,
+    )
     from kazma_core.observability.outside_watch import EMAIL_TO_KEY
     from kazma_core.runs.runbooks import RUNBOOKS_KEY
     from kazma_core.swarm.task_store import TASK_RETENTION_KEY
@@ -110,6 +116,9 @@ def test_the_table_names_the_keys_the_owning_modules_define() -> None:
                              MODEL_DETAILS_KEY, NOTICES_TO_CHATS_KEY, EMAIL_TO_KEY,
                              # The alerts group, 2026-11-09: a chat id Telegram cannot send to.
                              ALERTS_GROUP_KEY,
+                             # The separate alerts bot, 2026-11-11: a choice no sender
+                             # reads, a token that is no bot's, a chat it cannot send to.
+                             ALERTS_BOT_KEY, ALERTS_BOT_TOKEN_KEY, ALERTS_BOT_CHAT_KEY,
                              "notifications.ops.channels", "guard.telegram.chat_id",
                              "agent.language", "agent.max_iterations"}
 
