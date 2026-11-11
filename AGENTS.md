@@ -7368,6 +7368,18 @@ the gate to pass. Full list with evidence: `docs/KNOWN_GAPS.md`.
   episode list -- and the beliefs list failed outright for a tenant-bound
   caller (its tenant predicate had no value bound). A new route needs a
   request in the gate's table or fails. See §16's multi-tenant note.
+- **A tool's structured argument names its keys** (2026-11-12). A tool's
+  schema is generated from its signature (`kazma_core.agent.tool_schema`),
+  and `list[dict]` told the model no key: it guessed, and the engines
+  dropped what they did not read (live, every slide title of a deck, sent as
+  `title` to an engine reading `heading`). A list of records is a TypedDict
+  (keys, types, `Annotated` descriptions; the document records are
+  `kazma_core.documents.payloads`), and a mapping whose keys are data (a
+  form's fields) is described in a `name: description` docstring line.
+  Gates: `tests/test_tool_parameters_name_their_keys.py` (every registered
+  tool; the old signatures as the negative control),
+  `tests/test_document_tool_records.py` (every key of every record reaches
+  the rendered document; the engine that read only `heading` as control).
 - **Every product module is reached** (`tests/test_orphan_modules.py`); a
   module only its own tests import fails, unless allowlisted with a reason.
 - **Every PowerShell script Kazma ships can start**

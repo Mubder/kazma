@@ -574,13 +574,14 @@ def _generate_pptx(output: Path, payload: dict[str, Any]) -> None:
     Arabic DOCX/PDF/HTML/XLSX in design.
     """
     from kazma_core.documents.engines.pptx import PptxEngine
+    from kazma_core.documents.payloads import slide_heading
     from kazma_core.documents.profile import DocProfile
 
     slides = payload.get("slides") if isinstance(payload.get("slides"), list) else []
     sample_parts = [str(payload.get("title", "")), str(payload.get("subtitle", ""))]
     for s in slides:
         if isinstance(s, dict):
-            sample_parts.append(str(s.get("heading", "")))
+            sample_parts.append(slide_heading(s))
             sample_parts.append(str(s.get("body", "")))
             bullets = s.get("bullets")
             if isinstance(bullets, list):

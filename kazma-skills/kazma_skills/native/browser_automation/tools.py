@@ -379,6 +379,9 @@ async def browser_fill_form(
 ) -> str:
     """Fill form inputs from a {css_selector: value} mapping.
 
+    fields: a mapping of each input's CSS selector to the text typed into it
+    submit_selector: a button to click after filling (optional)
+
     If *submit_selector* is set, clicks it after filling and returns the
     resulting page text.
     """

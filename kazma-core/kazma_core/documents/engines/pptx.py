@@ -30,6 +30,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from kazma_core.documents.payloads import slide_heading
 from kazma_core.documents.profile import DocProfile
 
 logger = logging.getLogger(__name__)
@@ -120,8 +121,11 @@ class PptxEngine:
                 MSO_SHAPE.RECTANGLE, 0, Inches(0.25), slide_w, Inches(0.95),
             )
             self._fill(bar, colors["heading"])
+            # A slide's title is its "heading"; "title" is read too: the tool
+            # named no key until 2026-11-12, and the model sent "title" for
+            # every slide of a deck, all dropped (documents/payloads.py).
             self._shape_text(
-                bar, str(value.get("heading", "")),
+                bar, slide_heading(value),
                 color_hex="FFFFFF", bold=True, size=26, align=None, band=True,
             )
 

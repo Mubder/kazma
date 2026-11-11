@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from pathlib import Path
+from typing import Annotated, TypedDict
 
 from kazma_core.tools.text_newlines import in_newline_style, newline_of, read_exact
 from kazma_core.workspace.binding import resolve_tool_path
@@ -24,6 +25,7 @@ from kazma_core.agent.tool_refusal import KnownEffectError, RefusedBeforeEffect,
 
 __all__ = [
     "PatchError",
+    "PatchItem",
     "MAX_PATCH_SET",
     "apply_search_replace",
     "apply_unified_diff",
@@ -32,6 +34,17 @@ __all__ = [
 ]
 
 MAX_PATCH_SET = 20
+
+
+class PatchItem(TypedDict, total=False):
+    """One edit of a patch set: an exact replacement (old_string -> new_string)
+    or a unified diff (patch)."""
+
+    path: Annotated[str, "the file; may be omitted when the call's own path names it"]
+    old_string: Annotated[str, "the exact text to replace"]
+    new_string: Annotated[str, "the text that replaces it"]
+    replace_all: Annotated[bool, "replace every occurrence of old_string (default: exactly one)"]
+    patch: Annotated[str, "a unified diff, in place of old_string/new_string"]
 
 
 class PatchError(ValueError):

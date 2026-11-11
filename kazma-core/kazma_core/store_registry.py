@@ -632,7 +632,7 @@ TOOL_WRITES: dict[str, Write] = {
     "digest_research_file": Write(("none",), note=_OUTPUT_ONLY),
     "summarize_research_file": Write(("none",), note=_OUTPUT_ONLY),
     "synthesize_from_digests": Write(("none",), note=_OUTPUT_ONLY),
-    "export_session": _WORKSPACE_FILE,
+    "export_session": Write(("none",), note=_OUTPUT_ONLY),
     # ── files, code, git ───────────────────────────────────────────────
     "file_write": _WORKSPACE_FILE,
     "file_append": _WORKSPACE_FILE,

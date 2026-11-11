@@ -5,8 +5,6 @@ sidebar_label: Tools Catalog
 description: Complete catalog of built-in agent tools and native skill tools
 ---
 
-> This page is published at [kazma.ai/docs/tools-catalog/](https://kazma.ai/docs/tools-catalog/) ([Arabic](https://kazma.ai/ar/docs/tools-catalog/)).
-
 > Exhaustive tool list extracted from `LocalToolRegistry` and native skill manifests. Regenerate with `python scripts/generate_tools_catalog.py`. Danger classification aligns with `CANONICAL_DANGER_TOOLS` — see [Security & Safety](../guide/security-and-safety).
 
 ## How tools run
@@ -57,9 +55,9 @@ description: Complete catalog of built-in agent tools and native skill tools
 | `shell_exec` | system | **danger** | Execute a shell command (allowlisted binaries only) and return stdout+stderr. Prefer native tools first: file_list/file_read/file_search/file_write, git_status/git_*, python_exec/code_exec, install_agent_skill. Do NOT use shell for: cd (not allowed — cwd is already the workspace), cat/ls (use file_… |
 | `spawn_agent` | delegation | safe/read | Spawn a sub-agent to handle a focused task independently. The sub-agent has its own context and tools. Use this for research, code generation, file operations, or any task that benefits from dedicated focus. Returns a summary when done. |
 | `spawn_agents` | delegation | safe/read | Spawn multiple sub-agents in parallel for independent tasks. Use this when you have 2-3 unrelated tasks that can run concurrently. Returns a list of results, one per task. |
-| `dispatch_swarm` | swarm | safe/read | Dispatch a research or analysis task to the Swarm engine. The task appears in the Swarm panel (/swarm) with full worker progress, results, cost, and traceability. Returns a task ID immediately — use check_swarm_task to retrieve the result when ready. Use this instead of spawn_agent when you want th… |
+| `dispatch_swarm` | swarm | safe/read | Dispatch a research or analysis task to the Swarm engine. worker='auto' (the default) lets the swarm pick the registered worker best suited to the task, or start one from a template; name a worker only when the user asks for it. The task appears in the Swarm panel (/swarm) with full worker progress… |
 | `check_swarm_task` | swarm | safe/read | Wait for a dispatched Swarm task and return its result. Waits up to wait_seconds (default 60, at most 90) for the task to finish and returns the full result as soon as it does; if it is still running then, says so -- call again with the same id to keep waiting (a research task takes one to three mi… |
-| `python_exec` | code | **danger** | Execute Python code in a sandboxed subprocess. Returns stdout + stderr. Max 30s timeout, 512MB memory, isolated mode (no site-packages). Use for calculations, data processing, prototyping. |
+| `python_exec` | code | **danger** | Execute Python code in a sandboxed subprocess. Returns the exit code, stdout and stderr. timeout: default 30 s, at most 120 s. Memory: 512 MB. Output past 4,000 characters is cut and marked [truncated]. The install's own Python packages are importable (no user site-packages); no network in the cont… |
 | `repository_metrics` | diagnostics | safe/read | Get fresh verified metrics for the installed Kazma source repository. Use FIRST for Kazma metrics posts, LOC/files/package/test-function counts; never substitute cached METRICS.md. Reuses the official generator without writes, shell interpreters or live pytest execution. Returns the verified runtim… |
 | `context_info` | diagnostics | safe/read | Show context window usage (token count, percentage, summarization threshold) plus the active workspace root, model, and provider. Use details=true for a per-role token breakdown. |
 | `computer_use` | browser | **danger** | Use the computer (screenshot → click/type/key loop) to accomplish a goal in the browser. Prefer browser_navigate/click when you already know CSS selectors. HITL danger-tier. Optional url= to open first. max_steps default 8 (hard cap 15). Kill-switch: KAZMA_COMPUTER_USE=0. |
@@ -93,7 +91,7 @@ description: Complete catalog of built-in agent tools and native skill tools
 | `crawl_site` | search | safe/read | Bounded multi-page crawl (same-domain by default). Args: start_url, profile=research_brief\|research_deep\|kb_site\|single_page (named cap preset), max_pages (default from profile; hard max 50; use 12–20 for deep docs), max_depth, same_domain_only=True, delay_ms, save=True. Saves pages under workspace… |
 | `generate_image` | media | safe/read | Generate an image from a text prompt. provider can be 'auto' (first available), 'pollinations' (free, no key), 'dall-e' (OpenAI), 'stability' (SDXL), or 'flux' (FAL). Returns the saved file path. |
 | `analyze_image` | media | safe/read | Analyze an image using LLM vision. Provide a local path or URL and an optional question. |
-| `export_session` | utility | safe/read | Export the current conversation session to a file (JSON or Markdown format). |
+| `export_session` | utility | safe/read | Return this conversation as JSON or Markdown text (the reply carries it; no file is written). |
 | `search_agent_skills` | skills | safe/read | Search the open Agent Skills marketplace (GitHub topic:agent-skills) for installable skills matching a query. Returns repos with stars, descriptions, and the install_agent_skill command for each. |
 | `list_agent_skills` | skills | safe/read | List installed Agent Skills (SKILL.md / agentskills.io format). Shows name, description, location and integrity for each skill: verified, unsigned (loads with a warning) or refused at activation. |
 | `activate_skill` | skills | safe/read | Load full instructions for an installed Agent Skill into context. Call this when a task matches a skill's description before proceeding. Pass the skill name from list_agent_skills / the available_skills catalog. |
@@ -132,6 +130,7 @@ These modules implement or support tools (some registered at startup, some via s
 - `research_eval.py`
 - `research_evidence.py`
 - `research_files.py`
+- `research_final_paper.py`
 - `research_pipeline.py`
 - `research_planner.py`
 - `research_readiness.py`
@@ -139,6 +138,7 @@ These modules implement or support tools (some registered at startup, some via s
 - `research_synthesize.py`
 - `send_message.py`
 - `text_newlines.py`
+- `turn_writes.py`
 - `vision_analyze.py`
 - `web_research.py`
 - `web_search.py`
@@ -150,7 +150,7 @@ These modules implement or support tools (some registered at startup, some via s
 | `web_search_duckduckgo` | advanced-web-crawler | web | safe/read | Search the public web via core web_search (SearXNG / DuckDuckGo / Bing). Markdown titles, URLs, snippets. May rate-limit without SearXNG. |
 | `crawl_page` | advanced-web-crawler | web | safe/read | Fetch ONE public URL and extract readable text (alias of read_url). Not multi-page crawl. Playwright fallback for bot walls / thin JS shells when installed. |
 | `parse_document` | advanced-web-crawler | filesystem | safe/read | Parse runtime-ready local document formats through the isolated document service. Supports page/sheet/slide/block selectors and deterministic continuation; legacy DOC/XLS/PPT require a healthy headless LibreOffice converter. |
-| `arabic_translate` | arabic-bilingual-nlp | nlp | safe/read | Translate context-preserving between Arabic and English. |
+| `arabic_translate` | arabic-bilingual-nlp | nlp | safe/read | Translate between Arabic and English, keeping meaning and context, with the configured model (a remote service only when the operator sets KAZMA_TRANSLATION_REMOTE=mymemory). The translation comes back fenced as data. |
 | `hijri_convert` | arabic-bilingual-nlp | nlp | safe/read | Convert dates between Gregorian calendar (YYYY-MM-DD) and Hijri calendar. |
 | `insert_diacritics` | arabic-bilingual-nlp | nlp | safe/read | Apply correct vowel diacritics (tashkeel/harakat) to Arabic text based on semantic grammar. |
 | `browser_navigate` | browser-automation | browser | **danger** | Open a URL in a headless browser and return the page title plus the visible body text (truncated). Use for JS-rendered pages a plain HTTP fetch cannot read. |
@@ -163,10 +163,10 @@ These modules implement or support tools (some registered at startup, some via s
 | `create_event` | calendar | calendar | **danger** | Create a calendar event with a title, start/end (ISO 8601), optional location and description. account= picks another connected account's calendar (a name or address from email_accounts; empty = the main calendar). |
 | `update_event` | calendar | calendar | **danger** | Update an existing event by id. Only provided fields are changed. Use the account the event was listed from. account= picks another connected account's calendar (a name or address from email_accounts; empty = the main calendar). |
 | `delete_event` | calendar | calendar | **danger** | Delete a calendar event by id. Use the account the event was listed from. account= picks another connected account's calendar (a name or address from email_accounts; empty = the main calendar). |
-| `find_free_slots` | calendar | calendar | safe/read | Find free time slots of a given duration within a date range, excluding existing busy events. account= picks another connected account's calendar (a name or address from email_accounts; empty = the main calendar). |
+| `find_free_slots` | calendar | calendar | safe/read | Find free time slots of a given duration on one day: its working day, 09:00 to 17:00 in the operator's time zone, around every event that overlaps it (all-day and multi-day events included). account= picks another connected account's calendar (a name or address from email_accounts; empty = the main… |
 | `dispatch_notification` | chat-platform-dispatcher | communication | **danger** | Send a notification message to a specific recipient or channel on Telegram, Discord, or Slack. |
 | `send_approval_request` | chat-platform-dispatcher | communication | safe/read | Ask the operator on Telegram, Discord or Slack to review something. A plain question: no approval buttons, approves nothing; the operator answers in the chat. A tool that needs approval asks with its own card: never use this in its place. |
-| `send_message` | chat-platform-dispatcher | communication | **danger** | Send a text message to the current conversation thread. Use this to reply to the user. The platform and delivery channel are handled automatically. |
+| `send_message` | chat-platform-dispatcher | communication | **danger** | Send a text message to a chat on Telegram, Discord or Slack, named by target_id (for example 'telegram:12345') and backend. Your answer already reaches this conversation: use this only to message another chat the user asked you to. |
 | `lint_code` | code-analyzer-linter | code | safe/read | Execute static checks on Python files using ruff linter to detect errors and unused imports. |
 | `format_code` | code-analyzer-linter | code | safe/read | Format source code files using ruff format to maintain styling guidelines. |
 | `run_unit_tests` | code-analyzer-linter | code | **danger** | Execute tests in the test path using pytest and return a structured summary of successes or traceback errors. |
@@ -218,8 +218,8 @@ These modules implement or support tools (some registered at startup, some via s
 | `github_comment_issue` | git-github-manager | git | **danger** | Post a comment on a GitHub Issue or Pull Request. |
 | `github_list_issues` | git-github-manager | git | safe/read | Retrieve and view list of issues currently open on the remote repository. |
 | `vault_store` | secret-vault | security | **danger** | Store an API key, token, password, or other secret in the encrypted vault. The secret is encrypted with AES-256-GCM and can be retrieved later by name. Use this when the user shares a credential that should be securely stored. |
-| `vault_retrieve` | secret-vault | security | **danger** | Retrieve a stored secret from the vault by name. The value is decrypted and returned. This action requires human approval (HITL) before the secret is released. Use when the user asks for a key/secret, or when a tool needs a credential to proceed. |
-| `vault_list` | secret-vault | security | safe/read | List all stored secret names and their categories. Secret values are NOT shown — only names. Use this to discover what credentials are available before retrieving one. |
+| `vault_retrieve` | secret-vault | security | **danger** | Retrieve a stored secret from the vault by name. The value is decrypted and returned. This action asks for human approval every time before the secret is released. Use when the user asks for a key/secret, or when a tool needs a credential to proceed. |
+| `vault_list` | secret-vault | security | safe/read | List all stored secret names and their categories. Secret values are NOT shown — only names. Use this to discover what credentials are available before retrieving one. Kazma's own secrets (settings, mail and calendar sign-ins) are not listed: they belong to Settings. |
 | `vault_delete` | secret-vault | security | **danger** | Permanently delete a stored secret from the vault by name. This action requires human approval (HITL). Use when the user asks to remove a credential. |
 | `get_system_stats` | system-health-monitor | diagnostics | safe/read | Fetches CPU, RAM, and Disk space utilization metrics of the host system. |
 | `list_active_processes` | system-health-monitor | diagnostics | safe/read | Lists active subprocesses spawned under the parent Kazma process. |

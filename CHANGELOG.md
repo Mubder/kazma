@@ -30,6 +30,18 @@ on that has none.
   "Turns that succeed" target read "unknown" every week (it read the turn
   line in another form than Kazma writes); it now counts real turns. Any
   alert cut at its limit now ends at a line or a word and says "(cut)".
+- **A deck's slide titles are kept.** The PowerPoint tool never told the model
+  which keys a slide takes: the model sent each slide's title as "title", the
+  engine read only "heading", and every slide after the first showed an empty
+  title band. The deck, PDF, Word, Excel and Markdown tools, the patch set and
+  the calendar update now tell the model each key they take, its type and
+  what it is, and the deck engine also reads "title". `generate_pdf` no
+  longer offers images it never drew.
+- **Office's Protected View.** On a PC where IBM Plex Sans Arabic is installed
+  for one Windows user only, PowerPoint's Protected View draws Arabic set in
+  it as wrong glyphs and Word shows Arial, until Enable Editing; a file made
+  with no font from Kazma does the same. Install the font for all users.
+  The rendering guide says so.
 - **A deck written by hand in code goes to Kazma's PowerPoint generator.**
   When the agent tried to build a PowerPoint file with python-pptx in its
   Python tool, nothing stopped it, and the file came out in Arial and Segoe
