@@ -118,6 +118,10 @@ INSTALL_SCOPED_SECRETS: tuple[tuple[str, str], ...] = (
     # request of the first browser that subscribes, read by whatever finishes
     # a turn, often with no tenant bound.
     ("cfg:notifications.push.", "newest"),
+    # The separate alerts bot (Settings -> Alerts, 2026-11-11): saved in an
+    # admin's request, read by every alert -- background jobs, the guard's
+    # settings lookup -- with no tenant bound.
+    ("cfg:notifications.ops.telegram_bot_token", "newest"),
 )
 
 

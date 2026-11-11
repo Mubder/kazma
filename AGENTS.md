@@ -7006,6 +7006,26 @@ field writes nothing. Sections and the keys they write, each with its reader:
   server status messages (`notifications.lifecycle.events`). Adapters &
   Routes keeps the swarm's routes; no page script saves the alert keys any
   more, so two tabs cannot write over each other.
+- **The bot that sends them** (2026-11-11; the owner's alerts landed among
+  his chats with Kazma, every sender using the chat bot):
+  `ops_alerts.ALERTS_BOT_KEY` chooses `chat_bot` (Kazma's own, the default)
+  or `alerts_bot`, a separate bot -- `ALERTS_BOT_TOKEN_KEY` (in the vault,
+  install-scoped: `vault.INSTALL_SCOPED_SECRETS`) and `ALERTS_BOT_CHAT_KEY`.
+  `ops_alerts.alerts_bot` is the one answer; with it the Telegram route goes
+  to its chat (`ops_alerts.telegram_route`; Kazma's chat bot leaves the
+  route, `bus_send_targets(skip_telegram=)`, a required keyword so every
+  sender decides), the group route to the alerts group
+  (`ops_alerts.group_route`), the start card the same way, and the guard
+  pages with it (`ops_alerts.pager_credentials`, run by the guard's settings
+  lookup, read again at a page `_NOTIFY_REFRESH_S` later). An alerts bot
+  that does not take an alert hands it to Kazma's chat bot (outcome
+  `alerts-bot` failed). A save choosing it asks Telegram
+  (`ops_alerts.check_alerts_bot`: a token it does not know is 400
+  `bot_refused` and nothing is written; a chat the bot cannot see is saved
+  and said). The token is never answered back. Gates:
+  `tests/test_alerts_bot.py` (the delivery as it was as the negative
+  control), `tests/e2e/test_settings_alerts_browser.py` (EN/AR, by the
+  sidebar, a stand-in Telegram).
 - The guard's pager: `guard.telegram.chat_id` (a number or a public @name;
   read by the guard's lookup and `ops_alerts`' direct fallback; a SETTING in
   `settings_restore`). The guard records every page's outcome in its state

@@ -32,8 +32,14 @@
             routes: [], routeNames: ['telegram', 'telegram-group', 'discord', 'slack'], ready: {},
             lifecycle: [], lifecycleNames: ['started', 'startup_failed', 'starting', 'shutting_down'],
             noticesChoice: 'chats', groupChat: '', guardChat: '', guard: null, watch: null, watchEmail: '',
+            // Which Telegram bot sends them: Kazma's chat bot, or a separate
+            // alerts bot (its token is never read back: only whether one is
+            // saved; a token typed here is sent once, on Save).
+            botChoice: 'chat_bot', botToken: '', botTokenSaved: false, botChat: '',
         },
         alertsSnapshot: '',
+        // What Telegram said of the alerts bot at the last Save.
+        botCheck: { note: '', tone: '' },
         _watchEmailSaved: '',
         // "Send a test alert": one alert through the saved routes; the
         // result names the routes that took it.
@@ -66,6 +72,11 @@
             a.noticesChoice = data.notices_to_chats === false ? 'bell' : 'chats';
             a.guard = data.guard || null;
             a.guardChat = String((data.guard && data.guard.chat) || '');
+            const bot = data.bot || {};
+            a.botChoice = bot.choice === 'alerts_bot' ? 'alerts_bot' : 'chat_bot';
+            a.botTokenSaved = !!bot.token_saved;
+            a.botToken = '';
+            a.botChat = String(bot.chat || '');
             a.watch = data.watch || null;
             a.watchEmail = String((data.watch && data.watch.email_to) || '');
             this._watchEmailSaved = a.watchEmail;
@@ -78,6 +89,9 @@
                 a.noticesChoice = edits.notices_to_chats ? 'chats' : 'bell';
                 a.groupChat = edits.group_chat;
                 a.guardChat = edits.guard_chat;
+                a.botChoice = edits.bot;
+                a.botToken = edits.bot_token;
+                a.botChat = edits.bot_chat;
             }
             if (typedEmail !== null) a.watchEmail = typedEmail;
             this.loadRecentAlerts();
@@ -91,6 +105,10 @@
                 notices_to_chats: a.noticesChoice !== 'bell',
                 group_chat: String(a.groupChat || '').trim(),
                 guard_chat: String(a.guardChat || '').trim(),
+                bot: a.botChoice === 'alerts_bot' ? 'alerts_bot' : 'chat_bot',
+                bot_chat: String(a.botChat || '').trim(),
+                // Empty keeps the saved token; anything typed is a change.
+                bot_token: String(a.botToken || '').trim(),
             };
         },
 
@@ -123,6 +141,9 @@
             a.noticesChoice = snap.notices_to_chats === false ? 'bell' : 'chats';
             a.groupChat = String(snap.group_chat || '');
             a.guardChat = String(snap.guard_chat || '');
+            a.botChoice = snap.bot === 'alerts_bot' ? 'alerts_bot' : 'chat_bot';
+            a.botChat = String(snap.bot_chat || '');
+            a.botToken = '';
             a.watchEmail = this._watchEmailSaved;
         },
 
@@ -144,11 +165,18 @@
             let saved = true;
             if (Object.keys(body).length) {
                 try {
-                    await window.kazmaSave('/api/settings/alerts', { method: 'PUT', body });
+                    const res = await window.kazmaSave('/api/settings/alerts', { method: 'PUT', body });
                     this.alertsSnapshot = JSON.stringify(curr);
+                    this.botCheck = this._botCheckNote(res && res.bot);
                 } catch (e) {
                     saved = false;
-                    showToast(_k('settings.alerts.save_failed', 'Not saved: {error}', { error: e.message }), 'error');
+                    if (e.body && e.body.code === 'bot_refused') {
+                        const note = _k('settings.alerts.bot_refused', 'Not saved: Telegram does not know that bot token. Copy it again from BotFather.');
+                        this.botCheck = { note, tone: 'tone-danger' };
+                        showToast(note, 'error');
+                    } else {
+                        showToast(_k('settings.alerts.save_failed', 'Not saved: {error}', { error: e.message }), 'error');
+                    }
                 }
             }
             // The email is kept and told to Kazma Watch by its own route; its
@@ -161,11 +189,26 @@
             this.alerts.saving = false;
         },
 
+        // What Telegram said of the alerts bot when it was saved (the save's
+        // ``bot``: its name, whether it sees the chat); nothing when the save
+        // did not touch it.
+        _botCheckNote(check) {
+            if (!check) return { note: '', tone: '' };
+            if (!check.ok) {
+                return { note: _k('settings.alerts.bot_saved_unchecked', 'Saved. Telegram could not be asked about the bot just now: send a test alert to check it.'), tone: 'tone-warning' };
+            }
+            if (check.chat_ok === false) {
+                return { note: _k('settings.alerts.bot_saved_chat_unseen', 'Saved, but {bot} cannot see that chat yet: send it /start from your account, or add it to the group, then send a test alert.', { bot: check.bot }), tone: 'tone-warning' };
+            }
+            return { note: _k('settings.alerts.bot_saved_ok', 'Alerts now come from {bot}.', { bot: check.bot }), tone: 'tone-success' };
+        },
+
         // ── 1. Where Kazma's alerts go ──
         alertRouteName(route) {
             return ({
                 telegram: 'Telegram',
                 'telegram-group': _k('settings.hub.route_tg_group', 'Telegram (group)'),
+                'alerts-bot': _k('settings.alerts.route_name_alerts_bot', 'the alerts bot'),
                 discord: 'Discord',
                 slack: 'Slack',
             })[route] || route;
@@ -173,8 +216,11 @@
 
         alertRouteLine(route) {
             if (!this.alerts.ready[route]) return _k('settings.alerts.route_not_set_up', 'Not set up yet');
+            const own = this.alerts.botChoice === 'alerts_bot';
             return ({
-                telegram: _k('settings.alerts.route_telegram', 'Your chat with Kazma'),
+                telegram: own
+                    ? _k('settings.alerts.route_alerts_bot', "The alerts bot's chat")
+                    : _k('settings.alerts.route_telegram', 'Your chat with Kazma'),
                 'telegram-group': this.alerts.groupChat
                     ? _k('settings.alerts.route_alerts_group', 'Your alerts group (below)')
                     : _k('settings.alerts.route_group', 'The group Kazma posts to'),
@@ -208,8 +254,10 @@
             const res = this.opsTestAlert.result;
             if (!res) return '';
             const sent = (res.sent || []).map(r => this.alertRouteName(r)).join(', ');
-            const failed = (res.failed || []).map(r => this.alertRouteName(r)).join(', ');
+            const botFailed = (res.failed || []).includes('alerts-bot');
+            const failed = (res.failed || []).filter(r => r !== 'alerts-bot').map(r => this.alertRouteName(r)).join(', ');
             const parts = [];
+            if (botFailed) parts.push(_k('settings.alerts.test_alert_bot_failed', "The alerts bot did not take it, so Kazma's chat bot sent it. Check the bot's token, and that the bot can see its chat."));
             if (sent) parts.push(_k('settings.hub.test_alert_sent', 'Delivered to {routes}.', { routes: sent }));
             if (failed) parts.push(_k('settings.alerts.test_alert_failed', 'Not delivered to {routes}: its Test button (Providers & Connectors) says why.', { routes: failed }));
             if (res.error) {
@@ -221,6 +269,14 @@
         },
 
         // ── 3. The guard's pager ──
+        guardBotText() {
+            const g = this.alerts.guard || {};
+            if (g.via_alerts_bot) return _k('settings.alerts.guard_via_alerts_bot', 'The alerts bot, to the alerts chat above');
+            return g.bot
+                ? _k('settings.alerts.guard_bot_ready', "Kazma's Telegram bot")
+                : _k('settings.alerts.guard_bot_missing', 'No Telegram bot yet (Providers & Connectors -> Platform connectors)');
+        },
+
         guardRunningText() {
             const g = this.alerts.guard || {};
             if (g.guard === 'running') return _k('settings.alerts.guard_is_running', 'Running');

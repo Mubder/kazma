@@ -698,12 +698,14 @@ load_env_files()
 from kazma_core.config_store import get_config_store
 from kazma_core.diagnostic_scope import read_only_diagnostic
 with read_only_diagnostic("guard.notifier"):
-    cs = get_config_store()
-    token = str(cs.get("connectors.telegram.token", "") or "").strip()
-    chat = (str(cs.get("guard.telegram.chat_id", "") or "")
-            or str(cs.get("swarm.group_chat_id", "") or "")).strip()
+    from kazma_core.observability.ops_alerts import pager_credentials
+    token, chat = pager_credentials(get_config_store())
 print("KAZMA_GUARD_NOTIFY " + json.dumps({"token": token, "chat": chat}))
 """
+#: Credentials read from Kazma's settings are read again at a page this much
+#: later: the owner may have chosen another bot or chat (Settings -> Alerts,
+#: the alerts bot, 2026-11-11), and the guard kept the first ones for life.
+_NOTIFY_REFRESH_S = 600.0
 _NOTIFY_LOOKUP_MARK = "KAZMA_GUARD_NOTIFY "
 _NOTIFY_LOOKUP_TIMEOUT_S = 90.0
 #: A lookup that found nothing is tried again when a page is due, at most
@@ -733,7 +735,11 @@ class Notifier:
     1. ``KAZMA_GUARD_TELEGRAM_TOKEN`` / ``KAZMA_GUARD_TELEGRAM_CHAT``
     2. ``SWARM_BOT_TOKEN`` / ``SWARM_CHAT_ID``
     3. Kazma's own config store, which resolves the token out of the
-       encrypted vault (``connectors.telegram.token``)
+       encrypted vault: the alerts bot and its chat when Settings -> Alerts
+       chose one, else Kazma's chat bot (``connectors.telegram.token``) to
+       ``guard.telegram.chat_id`` (``ops_alerts.pager_credentials``). Read
+       again at a page ``_NOTIFY_REFRESH_S`` later, so a change of bot or
+       chat reaches the guard without a restart.
 
     Step 3 is the only place the guard reaches into the application, and it
     does so in a CHILD process, so the guard itself never imports the app.
@@ -790,9 +796,20 @@ class Notifier:
         itself restarted. A lookup that found nothing is tried again when a
         page is due, at most every ``_NOTIFY_RELOOKUP_S``.
         """
-        if self.token and self.chat:
-            return
         now = time.monotonic()
+        if self.token and self.chat:
+            # Read from the settings: read again once they may have changed
+            # (another bot or chat chosen). A lookup that finds nothing keeps
+            # the ones that worked. Environment credentials are never re-read.
+            if self._source != "vault" or (self._looked_up_at is not None
+                                           and now - self._looked_up_at < _NOTIFY_REFRESH_S):
+                return
+            self._looked_up_at = now
+            v_token, v_chat = self._from_config_store()
+            if v_token and v_chat and (v_token, v_chat) != (self.token, self.chat):
+                self.token, self.chat = v_token, v_chat
+                self._log("info", "notify.credentials_changed", chat=v_chat)
+            return
         if self._looked_up_at is not None and now - self._looked_up_at < _NOTIFY_RELOOKUP_S:
             return
         self._looked_up_at = now

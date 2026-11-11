@@ -146,7 +146,7 @@ def test_chosen_channels_that_refuse_are_a_failed_delivery(
     """Not the "routing choice" log line: the chosen channel was tried."""
     sender.answer = False
     monkeypatch.setattr(ops_alerts, "_ops_channels", lambda: ["discord"])
-    monkeypatch.setattr(ops_alerts, "bus_send_targets", lambda adapter, channels: [adapter])
+    monkeypatch.setattr(ops_alerts, "bus_send_targets", lambda adapter, channels, **_: [adapter])
     direct: list[str] = []
     monkeypatch.setattr(ops_alerts, "_telegram_direct", lambda text, **_: direct.append(text) or True)
     assert asyncio.run(ops_alerts._deliver("hello")) is False

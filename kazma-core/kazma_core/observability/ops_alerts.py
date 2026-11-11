@@ -336,14 +336,17 @@ def _format(severity: str, title: str, detail: str, suppressed: int,
     return format_operator_card("Ops", severity, title, body)
 
 
-def bus_send_targets(adapter: Any, channels: list[str]) -> list[Any]:
+def bus_send_targets(adapter: Any, channels: list[str], *, skip_telegram: bool) -> list[Any]:
     """Bus adapters that should receive a routed notification.
 
     Empty ``channels`` means every configured adapter (legacy fan-out).
     ``telegram-group`` is not a bus adapter and is ignored here — the
     caller sends that route via ``_telegram_direct(group_route=True)``.
     Selecting only ``telegram-group`` must not silently fan out to
-    Discord/Slack (empty-after-strip is not "all").
+    Discord/Slack (empty-after-strip is not "all"). ``skip_telegram``
+    (required: every sender decides it): the alerts bot already took the
+    Telegram route (``telegram_route``), so Kazma's chat bot does not send
+    it again.
     """
     from kazma_core.swarm.bus import FanOutBusAdapter, NullBusAdapter
 
@@ -353,6 +356,8 @@ def bus_send_targets(adapter: Any, channels: list[str]) -> list[Any]:
         targets = list(adapter.adapters)
     else:
         targets = [adapter]
+    if skip_telegram:
+        targets = [a for a in targets if str(getattr(a, "name", "") or "").lower() != "telegram"]
     selected = [str(c).strip().lower() for c in (channels or []) if str(c).strip()]
     if not selected:
         return targets
@@ -391,6 +396,166 @@ def _ops_channels() -> list[str]:
 #: before; set, the swarm's results stay where they are and only the alerts
 #: move (2026-11-09: one group for Kazma's and Kazma Watch's alerts).
 ALERTS_GROUP_KEY = "notifications.ops.telegram_group_chat"
+
+#: Which Telegram bot sends Kazma's alerts (Settings -> Alerts, 2026-11-11):
+#: ``chat_bot``, Kazma's own -- the bot people talk to, the default and what
+#: every alert used before -- or ``alerts_bot``, a separate bot kept for
+#: alerts (Kazma Watch's, say: then every alert arrives in one chat). The
+#: owner's alerts had landed among his chats with Kazma, with no way to move
+#: them. With the alerts bot, the Telegram route goes to its chat, the group
+#: route to the alerts group, and the guard pages with it
+#: (``pager_credentials``); if it does not take an alert, Kazma's chat bot
+#: sends it, so a revoked token never silences the pager.
+ALERTS_BOT_KEY = "notifications.ops.telegram_bot"
+ALERTS_BOT_TOKEN_KEY = "notifications.ops.telegram_bot_token"
+ALERTS_BOT_CHAT_KEY = "notifications.ops.telegram_bot_chat"
+ALERTS_BOT_CHOICES = ("chat_bot", "alerts_bot")
+#: The route name an alerts bot that did not take an alert is reported under.
+ALERTS_BOT_ROUTE = "alerts-bot"
+#: Telegram's Bot API (a test points it at a stand-in).
+TELEGRAM_API = "https://api.telegram.org"
+
+
+@dataclass(frozen=True)
+class AlertsBot:
+    """The separate alerts bot: its token (a secret) and the chat it sends to."""
+
+    token: str
+    chat: str
+
+
+def alerts_bot(store: Any = None) -> AlertsBot | None:
+    """The alerts bot when one is chosen and set; None means Kazma's chat bot
+    sends (blocking: settings reads; never on the loop). Never raises: a
+    choice that cannot be read is Kazma's chat bot, which still pages."""
+    from kazma_core.db.pg_helpers import store_errors
+
+    try:
+        if store is None:
+            from kazma_core.config_store import get_config_store
+
+            store = get_config_store()
+        if str(store.get(ALERTS_BOT_KEY, "") or "").strip() != "alerts_bot":
+            return None
+        token = str(store.get(ALERTS_BOT_TOKEN_KEY, "") or "").strip()
+        chat = str(store.get(ALERTS_BOT_CHAT_KEY, "") or "").strip()
+    except store_errors():  # a routing read must never mute an alert
+        logger.warning("[ops_alerts] the alerts bot could not be read; Kazma's chat bot sends", exc_info=True)
+        return None
+    if not token or not chat or token.startswith("vault://"):
+        return None
+    return AlertsBot(token, chat)
+
+
+def pager_credentials(store: Any = None) -> tuple[str, str]:
+    """``(token, chat)`` the guard pages with (its settings lookup runs this
+    in a child, ``kazma_guard._NOTIFY_LOOKUP``): the alerts bot and its chat
+    when one is chosen, else Kazma's chat bot to ``guard.telegram.chat_id``
+    (else ``swarm.group_chat_id``). Blocking; ``("", "")`` when unset."""
+    bot = alerts_bot(store)
+    if bot is not None:
+        return bot.token, bot.chat
+    if store is None:
+        from kazma_core.config_store import get_config_store
+
+        store = get_config_store()
+    token = str(store.get("connectors.telegram.token", "") or "").strip()
+    chat = (str(store.get("guard.telegram.chat_id", "") or "")
+            or str(store.get("swarm.group_chat_id", "") or "")).strip()
+    return token, chat
+
+
+def _send_telegram(token: str, chat: str, text: str) -> bool:
+    """One message through the Bot API (stdlib urllib: nothing else need be
+    initialised). True when Telegram took it. Never raises; never logs the
+    token."""
+    import urllib.parse
+    import urllib.request
+
+    body = urllib.parse.urlencode({
+        "chat_id": chat,
+        "text": text[:4000],
+        "disable_web_page_preview": "true",
+    }).encode()
+    req = urllib.request.Request(f"{TELEGRAM_API}/bot{token}/sendMessage", data=body, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=10):
+            pass
+        return True
+    except (OSError, ValueError) as exc:  # urllib's HTTPError and URLError are OSErrors
+        logger.warning("[ops_alerts] Telegram did not take the alert: %s", type(exc).__name__)
+        return False
+
+
+def _alerts_bot_send(text: str, *, group_route: bool = False) -> bool | None:
+    """Send with the alerts bot: the Telegram route to its chat, the group
+    route to the alerts group. None when it does not take this route (none
+    chosen; a group route with no alerts group); else whether Telegram took
+    it, a refusal said once here so the caller can send with Kazma's chat bot."""
+    bot = alerts_bot()
+    if bot is None:
+        return None
+    chat = bot.chat
+    if group_route:
+        from kazma_core.db.pg_helpers import store_errors
+
+        try:
+            from kazma_core.config_store import get_config_store
+
+            chat = str(get_config_store().get(ALERTS_GROUP_KEY, "") or "").strip()
+        except store_errors():  # a routing read must never mute an alert
+            logger.warning("[ops_alerts] the alerts group could not be read", exc_info=True)
+            return None
+        if not chat:
+            return None
+    if _send_telegram(bot.token, chat, text):
+        return True
+    logger.warning("[ops_alerts] the alerts bot did not take the alert (%s route); "
+                   "Kazma's chat bot sends it", "group" if group_route else "Telegram")
+    return False
+
+
+def check_alerts_bot(token: str, chat: str) -> dict[str, Any]:
+    """Ask Telegram whether *token* is a bot and whether it can reach *chat*
+    (Settings -> Alerts' save; blocking, about two requests).
+
+    ``{"ok": bool, "bot": "@name", "chat_ok": bool | None, "code": ...}``:
+    ``bot_refused`` (not a bot token: nothing would ever be sent),
+    ``unreachable`` (Telegram could not be asked). ``chat_ok`` False means the
+    bot cannot see the chat yet -- add it to the group, or send it /start.
+    Never logs the token.
+    """
+    import json
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    def ask(method: str, **params: str) -> dict[str, Any]:
+        url = f"{TELEGRAM_API}/bot{token}/{method}"
+        if params:
+            url += "?" + urllib.parse.urlencode(params)
+        with urllib.request.urlopen(urllib.request.Request(url), timeout=10) as resp:
+            return json.loads(resp.read(65536).decode("utf-8", "replace"))
+
+    try:
+        me = ask("getMe")
+    except urllib.error.HTTPError as exc:
+        if exc.code in (401, 404):
+            return {"ok": False, "code": "bot_refused"}
+        return {"ok": False, "code": "unreachable"}
+    except (OSError, ValueError):
+        return {"ok": False, "code": "unreachable"}
+    username = str((me.get("result") or {}).get("username") or "") if isinstance(me, dict) else ""
+    if not (isinstance(me, dict) and me.get("ok") and username):
+        return {"ok": False, "code": "bot_refused"}
+    try:
+        seen = ask("getChat", chat_id=chat)
+        chat_ok: bool | None = bool(isinstance(seen, dict) and seen.get("ok"))
+    except urllib.error.HTTPError:
+        chat_ok = False  # 400 "chat not found": not a member, or never started
+    except (OSError, ValueError):
+        chat_ok = None
+    return {"ok": True, "bot": "@" + username, "chat_ok": chat_ok}
 
 
 def _telegram_direct(text: str, *, group_route: bool = False) -> bool:
@@ -436,25 +601,34 @@ def _telegram_direct(text: str, *, group_route: bool = False) -> bool:
                 "guard.telegram.chat_id). The alert exists only in this log."
             )
             return False
-
-        import urllib.parse
-        import urllib.request
-
-        body = urllib.parse.urlencode({
-            "chat_id": chat,
-            "text": text[:4000],
-            "disable_web_page_preview": "true",
-        }).encode()
-        req = urllib.request.Request(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            data=body, method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=10):
-            pass
-        return True
+        return _send_telegram(token, chat, text)
     except Exception as exc:  # noqa: BLE001
         logger.warning("[ops_alerts] Telegram delivery failed: %s", exc)
         return False
+
+
+async def telegram_route(text: str, channels: list[str], outcome: dict[str, list[str]]) -> bool:
+    """Send the Telegram route with the alerts bot, when one is chosen and the
+    route is on (``channels`` empty is every route). True when it took the
+    alert -- Kazma's chat bot then leaves the route alone; False when none is
+    chosen or it did not take it, and Kazma's chat bot sends it as before.
+    Records the outcome under ``telegram`` / ``alerts-bot``."""
+    if channels and "telegram" not in channels:
+        return False
+    took = await asyncio.to_thread(_alerts_bot_send, text)
+    if took is True:
+        outcome.setdefault("sent", []).append("telegram")
+    elif took is False:
+        outcome.setdefault("failed", []).append(ALERTS_BOT_ROUTE)
+    return took is True
+
+
+async def group_route(text: str) -> bool:
+    """The "Telegram (group)" route: the alerts bot to the alerts group when
+    one is chosen, else -- or when it does not take it -- Kazma's chat bot."""
+    if await asyncio.to_thread(_alerts_bot_send, text, group_route=True) is True:
+        return True
+    return await asyncio.to_thread(_telegram_direct, text, group_route=True)
 
 
 async def _deliver(text: str, outcome: dict[str, list[str]] | None = None) -> bool:
@@ -483,16 +657,19 @@ async def _deliver(text: str, outcome: dict[str, list[str]] | None = None) -> bo
     # while the database is away -- on the loop it froze the server 15 s to
     # deliver the alert about that very outage (2026-10-22).
     channels = await asyncio.to_thread(_ops_channels)
+    # The alerts bot, when one is chosen, takes the Telegram route itself.
+    sent_bot = await telegram_route(text, channels, outcome)
     # The group route is Telegram-direct only (it is not a bus adapter):
     # always fire it alongside whatever the bus delivers.
     sent_group = False
     if "telegram-group" in channels:
         try:
-            sent_group = await asyncio.to_thread(lambda t=text: _telegram_direct(t, group_route=True)
-            )
+            sent_group = await group_route(text)
         except Exception:  # noqa: BLE001
             logger.warning("[ops_alerts] telegram-group delivery failed", exc_info=True)
         (sent if sent_group else failed).append("telegram-group")
+    # Delivered already, by the alerts bot or to the group.
+    sent_direct = sent_bot or sent_group
     bus_refused = False
     try:
         from kazma_core.swarm.bus import (
@@ -503,10 +680,10 @@ async def _deliver(text: str, outcome: dict[str, list[str]] | None = None) -> bo
 
         adapter = get_message_bus().adapter
         if not isinstance(adapter, NullBusAdapter):
-            targets = bus_send_targets(adapter, channels)
+            targets = bus_send_targets(adapter, channels, skip_telegram=sent_bot)
             if channels and not targets:
-                if sent_group:
-                    return True  # group route already delivered
+                if sent_direct:
+                    return True  # the alerts bot or the group route delivered it
                 logger.info(
                     "[ops_alerts] channels %s match no configured "
                     "adapter — alert not bus-delivered (operator "
@@ -538,7 +715,7 @@ async def _deliver(text: str, outcome: dict[str, list[str]] | None = None) -> bo
             # An adapter reports whether its platform took the message; a
             # bus that took it nowhere is not a delivery (it counted as one
             # until 2026-10-02, so a failed send never reached the fallback).
-            if sent_group or any(r is True for r in results):
+            if sent_direct or any(r is True for r in results):
                 return True
             bus_refused = True
             logger.warning(
@@ -551,6 +728,8 @@ async def _deliver(text: str, outcome: dict[str, list[str]] | None = None) -> bo
 
     # No platform bus in this process (worker/CLI/script), or the bus took it
     # nowhere -- go direct. Direct is Telegram-only: honor the routing choice.
+    if sent_bot:
+        return True  # the Telegram route is delivered; the chat bot need not send it
     if channels and "telegram" not in channels:
         if sent_group:
             return True
@@ -611,6 +790,8 @@ def _has_any_sink() -> bool:
         from kazma_core.config_store import get_config_store
 
         cs = get_config_store()
+        if alerts_bot(cs) is not None:
+            return True
         token = str(cs.get("connectors.telegram.token", "") or "").strip()
         chat = (
             str(cs.get("guard.telegram.chat_id", "") or "").strip()

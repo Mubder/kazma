@@ -38,11 +38,63 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Where the Telegram (group) route sends Kazma's alerts: the group's chat id, which Kazma posts when you add its bot to the group (it starts with -100). Empty: the swarm's output group. Put the same id in the guard's chat below and in Kazma Watch to get every alert in one place.",
         "ar": "حيث يرسل مسار Telegram (مجموعة) تنبيهات كاظمه: معرّف محادثة المجموعة، وينشره كاظمه حين تضيف بوته إلى المجموعة (يبدأ بـ ‎-100‎). فارغًا: مجموعة مخرجات السرب. ضع المعرّف نفسه في محادثة الحارس أدناه وفي المراقب لتصلك كل التنبيهات في مكان واحد.",
     },
+    # Which Telegram bot sends the alerts (ops_alerts.ALERTS_BOT_KEY).
+    "settings.alerts.bot_label": {"en": "Telegram bot that sends them", "ar": "بوت Telegram الذي يرسلها"},
+    "settings.alerts.bot_chat_bot": {
+        "en": "Kazma's chat bot (the one you talk to)",
+        "ar": "بوت كاظمه للمحادثة (الذي تتحدث معه)",
+    },
+    "settings.alerts.bot_alerts_bot": {"en": "A separate bot for alerts", "ar": "بوت منفصل للتنبيهات"},
+    "settings.alerts.bot_hint": {
+        "en": "A separate bot keeps alerts out of your chats with Kazma. It can be Kazma Watch's bot: then every alert, from Kazma, its guard and Kazma Watch, arrives in one chat. The guard pages with it too.",
+        "ar": "البوت المنفصل يُبعد التنبيهات عن محادثاتك مع كاظمه. ويمكن أن يكون بوت المراقب: فتصلك كل التنبيهات، من كاظمه وحارسه والمراقب، في محادثة واحدة. ويرسل الحارس عبره أيضًا.",
+    },
+    "settings.alerts.bot_token": {"en": "Alerts bot token", "ar": "رمز بوت التنبيهات"},
+    "settings.alerts.bot_token_hint": {
+        "en": "From BotFather. Kept in Kazma's vault and never shown again; leave it empty to keep the saved one.",
+        "ar": "من BotFather. يُحفظ في خزنة كاظمه ولا يُعرض مرة أخرى؛ اتركه فارغًا لتبقي المحفوظ.",
+    },
+    "settings.alerts.bot_token_saved": {
+        "en": "Saved; type a new one to replace it",
+        "ar": "محفوظ؛ اكتب رمزًا جديدًا لتستبدله",
+    },
+    "settings.alerts.bot_chat": {"en": "Chat for alerts", "ar": "محادثة التنبيهات"},
+    "settings.alerts.bot_chat_hint": {
+        "en": "A number (your own chat's, or -100... for a group) or a public @channel. Send the bot /start from your account first, or add it to the group.",
+        "ar": "رقم (رقم محادثتك، أو ‎-100...‎ لمجموعة) أو ‎@قناة‎ عامة. أرسل إلى البوت ‎/start‎ من حسابك أولًا، أو أضفه إلى المجموعة.",
+    },
+    "settings.alerts.route_alerts_bot": {"en": "The alerts bot's chat", "ar": "محادثة بوت التنبيهات"},
+    "settings.alerts.route_name_alerts_bot": {"en": "the alerts bot", "ar": "بوت التنبيهات"},
+    "settings.alerts.bot_saved_ok": {"en": "Alerts now come from {bot}.", "ar": "تصل التنبيهات الآن من {bot}."},
+    "settings.alerts.bot_saved_chat_unseen": {
+        "en": "Saved, but {bot} cannot see that chat yet: send it /start from your account, or add it to the group, then send a test alert.",
+        "ar": "حُفظ، لكن {bot} لا يرى تلك المحادثة بعد: أرسل إليه ‎/start‎ من حسابك، أو أضفه إلى المجموعة، ثم أرسل تنبيهًا تجريبيًا.",
+    },
+    "settings.alerts.bot_saved_unchecked": {
+        "en": "Saved. Telegram could not be asked about the bot just now: send a test alert to check it.",
+        "ar": "حُفظ. تعذّر سؤال Telegram عن البوت الآن: أرسل تنبيهًا تجريبيًا لتتحقق منه.",
+    },
+    "settings.alerts.bot_refused": {
+        "en": "Not saved: Telegram does not know that bot token. Copy it again from BotFather.",
+        "ar": "لم يُحفظ: لا يعرف Telegram رمز البوت هذا. انسخه مرة أخرى من BotFather.",
+    },
+    "settings.alerts.guard_via_alerts_bot": {
+        "en": "The alerts bot, to the alerts chat above",
+        "ar": "بوت التنبيهات، إلى محادثة التنبيهات أعلاه",
+    },
+    "settings.alerts.guard_chat_by_bot": {
+        "en": "With a separate alerts bot, the guard pages from it, to the alerts chat above.",
+        "ar": "مع بوت تنبيهات منفصل، يرسل الحارس عبره إلى محادثة التنبيهات أعلاه.",
+    },
     "settings.alerts.route_discord": {"en": "The Discord channel Kazma posts to", "ar": "قناة Discord التي ينشر فيها كاظمه"},
     "settings.alerts.route_slack": {"en": "The Slack channel Kazma posts to", "ar": "قناة Slack التي ينشر فيها كاظمه"},
     "settings.alerts.test_alert_failed": {
         "en": "Not delivered to {routes}: its Test button (Providers & Connectors) says why.",
         "ar": "لم يصل إلى {routes}: زر «اختبار» الخاص به (المزوّدون والموصلات) يوضح السبب.",
+    },
+    "settings.alerts.test_alert_bot_failed": {
+        "en": "The alerts bot did not take it, so Kazma's chat bot sent it. Check the bot's token, and that the bot can see its chat.",
+        "ar": "لم يستقبله بوت التنبيهات، فأرسله بوت كاظمه للمحادثة. تحقق من رمز البوت، ومن أن البوت يرى محادثته.",
     },
     "settings.alerts.test_alert_nowhere": {
         "en": "No alert route sends anywhere. Set up a chat app in Providers & Connectors, then save a route here.",
@@ -51,8 +103,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     # 3. The guard's pager
     "settings.alerts.guard_title": {"en": "The guard's pager", "ar": "منبّه الحارس"},
     "settings.alerts.guard_sub": {
-        "en": "Pages you through Kazma's Telegram bot when Kazma itself is down.",
-        "ar": "يُرسل إليك عبر بوت كاظمه في Telegram حين يتوقف كاظمه نفسه.",
+        "en": "Pages you on Telegram when Kazma itself is down.",
+        "ar": "يُرسل إليك عبر Telegram حين يتوقف كاظمه نفسه.",
     },
     "settings.alerts.guard_bot": {"en": "Bot", "ar": "البوت"},
     "settings.alerts.guard_bot_ready": {"en": "Kazma's Telegram bot", "ar": "بوت كاظمه في Telegram"},

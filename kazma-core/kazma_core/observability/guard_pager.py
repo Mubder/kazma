@@ -15,10 +15,12 @@ shows that pager and tests it:
   (``PagerTest``).
 * :func:`pager_test_result` -- that answer, for the page to poll.
 
-The bot is Kazma's (``connectors.telegram.token``); the chat is
-``guard.telegram.chat_id`` (Settings -> Alerts), else ``swarm.group_chat_id``.
-``KAZMA_GUARD_TELEGRAM_TOKEN`` / ``KAZMA_GUARD_TELEGRAM_CHAT`` in the guard's
-environment win over both: the state file says when they do (``source``).
+The bot and chat are ``ops_alerts.pager_credentials``'s: the alerts bot and
+its chat when Settings -> Alerts chose one, else Kazma's chat bot
+(``connectors.telegram.token``) to ``guard.telegram.chat_id``, else
+``swarm.group_chat_id``. ``KAZMA_GUARD_TELEGRAM_TOKEN`` /
+``KAZMA_GUARD_TELEGRAM_CHAT`` in the guard's environment win over both: the
+state file says when they do (``source``).
 
 Blocking (files): call these off the loop.
 """

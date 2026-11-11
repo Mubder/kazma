@@ -234,3 +234,101 @@ def test_the_alerts_tab_in_a_browser(setup) -> None:
         finally:
             browser.close()
     assert errors == [], errors
+
+
+# -- a separate alerts bot (2026-11-11) ---------------------------------------------------
+# The owner's alerts arrived in his chat with Kazma's own bot, with no setting
+# to send them from another. The tab now chooses the bot: Kazma's chat bot or
+# a separate one (its token and chat), asked of Telegram (a stand-in here) when
+# saved; the guard's card says the alerts bot pages for it.
+
+
+def test_a_separate_alerts_bot_from_the_alerts_tab(setup, monkeypatch) -> None:
+    from playwright.sync_api import sync_playwright
+
+    from kazma_core.observability import ops_alerts
+    from tests.test_alerts_bot import BOT_TOKEN, MAIN_TOKEN, _Telegram
+
+    handler = type("T", (_Telegram,), {"known": {BOT_TOKEN}, "chats": {"-100555"}, "sent": []})
+    telegram = HTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=telegram.serve_forever, daemon=True).start()
+    monkeypatch.setattr(ops_alerts, "TELEGRAM_API", f"http://127.0.0.1:{telegram.server_address[1]}")
+    h: Harness = setup.h
+    errors: list[str] = []
+    host = h.base.split("//", 1)[1].split(":", 1)[0]
+
+    def bot_state(page) -> dict:
+        return page.evaluate("fetch('/api/settings/alerts').then(r => r.json()).then(d => d.bot)")
+
+    def note(page, text: str) -> None:
+        page.wait_for_function(
+            f"(document.querySelector('#alerts-bot-check') || {{}}).innerText.includes({json.dumps(text)})",
+            timeout=30000)
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            try:
+                pg = browser.new_context(viewport={"width": 1366, "height": 900}, locale="en-US").new_page()
+                pg.on("pageerror", lambda exc: errors.append(str(exc)))
+                _open_alerts(pg, h.base, "Alerts")
+                assert not pg.locator("#alerts-bot-fields").is_visible()
+                assert pg.locator("[data-route=telegram] .alerts-row-line").inner_text() != "The alerts bot's chat"
+                pg.locator("#alerts-bot-choice").select_option("alerts_bot")
+                pg.locator("#alerts-bot-fields").wait_for(state="visible", timeout=10000)
+
+                # A token Telegram does not know: refused, nothing kept.
+                pg.locator("#alerts-bot-token").fill(MAIN_TOKEN)
+                pg.locator("#alerts-bot-chat").fill("-100555")
+                pg.locator("#alerts-save").click()
+                note(pg, "Telegram does not know that bot token")
+                assert bot_state(pg)["choice"] == "chat_bot"
+
+                # The alerts bot's own token: saved, named, never shown again.
+                pg.locator("#alerts-bot-token").fill(BOT_TOKEN)
+                pg.locator("#alerts-save").click()
+                note(pg, "Alerts now come from @kazma_alerts_bot")
+                state = bot_state(pg)
+                assert state == {"choice": "alerts_bot", "token_saved": True, "chat": "-100555", "active": True}
+                assert BOT_TOKEN not in pg.content()
+                pg.wait_for_function("document.querySelector('#alerts-bot-token').value === ''", timeout=15000)
+                assert pg.locator("#alerts-bot-token").get_attribute("placeholder").startswith("Saved")
+                assert pg.locator("[data-route=telegram] .alerts-row-line").inner_text() == "The alerts bot's chat"
+                assert pg.locator("#alerts-guard-by-bot").is_visible()
+                assert not pg.locator("#alerts-guard-chat").is_visible()
+                _shot(pg, "en-alerts-bot")
+
+                # A test alert goes from the alerts bot to its chat.
+                pg.locator("#alerts-test-alert").click()
+                pg.wait_for_function("(document.querySelector('#alerts-test-alert') || {}).disabled === false "
+                                     "&& document.body.innerText.includes('Delivered to Telegram')", timeout=30000)
+                assert (BOT_TOKEN, "-100555") in handler.sent
+
+                # Arabic, by the sidebar: a chat the bot cannot see is saved and said.
+                ctx = browser.new_context(viewport={"width": 1366, "height": 900})
+                ctx.add_cookies([{"name": "kazma-lang", "value": "ar", "domain": host, "path": "/"}])
+                ar = ctx.new_page()
+                ar.on("pageerror", lambda exc: errors.append(str(exc)))
+                _open_alerts(ar, h.base, "التنبيهات")
+                assert ar.locator("label[for='alerts-bot-choice']").inner_text() == "بوت Telegram الذي يرسلها"
+                assert ar.locator("#alerts-bot-fields").is_visible()
+                ar.locator("#alerts-bot-chat").fill("-100999")
+                ar.locator("#alerts-save").click()
+                note(ar, "لا يرى تلك المحادثة بعد")
+                assert bot_state(ar)["chat"] == "-100999"
+                _shot(ar, "ar-alerts-bot")
+
+                # Back to Kazma's chat bot: the guard's chat field returns.
+                pg.reload()
+                pg.locator("#alerts-routes").wait_for(state="visible", timeout=20000)
+                pg.locator("#alerts-bot-choice").select_option("chat_bot")
+                pg.locator("#alerts-save").click()
+                pg.wait_for_function(
+                    "fetch('/api/settings/alerts').then(r => r.json()).then(d => d.bot.choice === 'chat_bot')",
+                    timeout=15000)
+                pg.locator("#alerts-guard-chat").wait_for(state="visible", timeout=15000)
+            finally:
+                browser.close()
+    finally:
+        telegram.shutdown()
+    assert errors == [], errors
