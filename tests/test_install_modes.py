@@ -199,6 +199,24 @@ def test_docker_readiness_on_windows():
 # ── an install, end to end, on a fake machine ─────────────────────────
 
 
+class _BoxFont:
+    """Kazma's document font on the fake Windows: not installed until setup does it."""
+
+    def __init__(self):
+        self.installed = False
+
+    def state(self):
+        from kazma_core.system_deps import DepState
+
+        if self.installed:
+            return DepState("fonts", True, "IBM Plex Sans Arabic, installed for all users")
+        return DepState("fonts", False, "IBM Plex Sans Arabic is not installed for all users", ["ibm plex"])
+
+    def install(self):
+        self.installed = True
+        return True, "installed for all users: IBMPlexSansArabic-Regular.ttf, IBMPlexSansArabic-Bold.ttf"
+
+
 class Box:
     """A Windows machine with nothing on it; ``run`` installs as the real
     programs would."""
@@ -223,6 +241,7 @@ class Box:
             (self.root / rel).write_text("", encoding="utf-8")
         (self.root / "deploy" / "document-worker").mkdir(parents=True)
         self.home = tmp_path
+        self.house_font = _BoxFont()
 
     def which(self, name):
         found = {"tesseract": self.langs is not None, "clamscan": self.clam, "freshclam": self.clam,
@@ -232,7 +251,8 @@ class Box:
     def finders(self):
         return {"soffice": lambda: "C:/LO/soffice.com" if self.soffice else None,
                 "docker": lambda: "C:/Docker/docker.exe" if self.docker else None,
-                "vcruntime": lambda: self.vcruntime}
+                "vcruntime": lambda: self.vcruntime,
+                "house_font": self.house_font}
 
     def run(self, argv, **kw):
         argv = [str(a) for a in argv]

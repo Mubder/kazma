@@ -369,11 +369,19 @@ def _ask(ask, question: str) -> str:
         return ""
 
 
-def run_system_step(step, *, which, run=subprocess.run, log=None) -> tuple[bool, str]:
-    """One step of a system install: a program, or the two this module
-    carries out itself (Tesseract's model download, the macOS signature job)."""
+def run_system_step(step, *, which, run=subprocess.run, log=None, house_font=None) -> tuple[bool, str]:
+    """One step of a system install: a program, or the three this module
+    carries out itself (Tesseract's model download, the macOS signature job,
+    Kazma's document font). *house_font* installs the font
+    (``house_font_install.HouseFont``; tests pass a fake)."""
     from kazma_core.system_deps import fetch_tessdata, freshclam_agent_plist, tessdata_folder
 
+    if step.action == "fonts:house":
+        if house_font is None:
+            from kazma_core.house_font_install import HouseFont
+
+            house_font = HouseFont.for_this_machine()
+        return house_font.install()
     if step.action.startswith("tessdata:"):
         folder = tessdata_folder(which)
         try:
@@ -457,7 +465,7 @@ def _setup_system(options, *, run=subprocess.run, which=None, ask=input, platfor
         return 1
 
     def do(step) -> tuple[bool, str]:
-        return run_system_step(step, which=which, run=run)
+        return run_system_step(step, which=which, run=run, house_font=(finders or {}).get("house_font"))
 
     def installed_anyway(step) -> bool:
         if not installs_package(step):

@@ -85,7 +85,7 @@ prints the same list):
 | Neural OCR for Arabic (its models) | yes | yes | OCR reads with Tesseract only (weaker Arabic, no Arabic-Indic digits) |
 | Office documents (LibreOffice) | yes | yes | Office files cannot be read or converted |
 | Malware scan (ClamAV, refreshed daily) | yes | yes | documents are not scanned for malware |
-| Arabic fonts | yes | yes | Arabic text in documents may be drawn as boxes (Linux) |
+| Arabic fonts | yes | yes | Office's Protected View shows Kazma's Word and PowerPoint files in another face; on Linux Arabic may be drawn as boxes |
 | Node.js | yes | yes | MCP servers that need npx cannot start (health reads degraded) |
 | Browser tools (Playwright and Chromium) |  | yes | no browser tools; pages are read without running their JavaScript |
 | Docling (the hardest PDFs) |  | yes | a PDF the main readers cannot read gets no second local try |
@@ -183,7 +183,7 @@ The system programs come from the OS's package manager:
 | OCR | `UB-Mannheim.TesseractOCR`, plus the Arabic and English models (a pinned release, checked by SHA-256) | `tesseract`, `tesseract-lang` | `tesseract-ocr`, `tesseract-ocr-ara`, `tesseract-ocr-eng` | `tesseract`, `tesseract-langpack-ara` |
 | Office conversion | `TheDocumentFoundation.LibreOffice` | `--cask libreoffice` | `libreoffice-writer` | `libreoffice-writer` |
 | Malware scan | `Cisco.ClamAV`, plus a daily `freshclam` task | `clamav`, plus a daily `freshclam` launchd job | `clamav`, `clamav-freshclam` | `clamav`, `clamav-update` |
-| Arabic fonts | bundled with Kazma | bundled with Kazma | `fonts-noto-core` | `google-noto-sans-arabic-fonts` |
+| Arabic fonts | IBM Plex Sans Arabic from Kazma's bundle, installed for all users (a per-user copy of it is retired) | IBM Plex Sans Arabic from Kazma's bundle, in `~/Library/Fonts` | `fonts-noto-core`, plus IBM Plex Sans Arabic in `~/.local/share/fonts/kazma` | `google-noto-sans-arabic-fonts`, plus IBM Plex Sans Arabic in `~/.local/share/fonts/kazma` |
 | Node.js | `OpenJS.NodeJS.LTS` | `node` | `nodejs`, `npm` | `nodejs`, `npm` |
 | Docker (Full) | `Docker.DockerDesktop` (and WSL 2 first) | Docker Desktop (cask) | `docker.io` | `moby-engine` |
 

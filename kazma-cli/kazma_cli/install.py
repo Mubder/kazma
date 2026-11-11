@@ -615,7 +615,8 @@ def _run_planned(item: PlannedStep, machine: Machine, env_path: Path, log) -> tu
             return False, "Docker is not installed"
         step = type(step)(step.title, (docker, *step.argv[1:]), admin=step.admin)
     if step.action or step.dep:
-        return run_system_step(step, which=machine.which, run=machine.run, log=log)
+        return run_system_step(step, which=machine.which, run=machine.run, log=log,
+                               house_font=machine.finders.get("house_font"))
     return _run_step(step, [], run=machine.run, cwd=item.cwd, log=log)
 
 

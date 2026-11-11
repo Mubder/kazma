@@ -54,8 +54,9 @@ LABELS = {
     "docker": "Docker (the document container, the sandbox, SearXNG)",
 }
 
-#: Each dependency's packages per package manager. ``None``: nothing to
-#: install there (the fonts are bundled with Kazma on Windows and macOS).
+#: Each dependency's packages per package manager. ``None``: no package to
+#: install there. Kazma's own document font is a step of its own on every OS
+#: (``house_font_install``, :func:`_house_font_steps`).
 PACKAGES: dict[str, dict[str, tuple[str, ...] | None]] = {
     "winget": {
         "vcruntime": ("Microsoft.VCRedist.2015+.x64",),
@@ -232,15 +233,24 @@ def _check_malware(os_name: str, run: Runner, which: Callable[[str], str | None]
     return DepState("malware", True, "ClamAV" + ("" if scheduled else " (daily refresh: cannot tell here)"))
 
 
-def _check_fonts(os_name: str, run: Runner, which: Callable[[str], str | None]) -> DepState:
+def _check_fonts(os_name: str, run: Runner, which: Callable[[str], str | None], house: Any) -> DepState:
+    """Kazma's document font on this machine (``house_font_install``), and on
+    Linux the Noto Arabic faces LibreOffice falls back to. The old check said
+    "bundled with Kazma" on Windows and macOS whatever was installed: the
+    owner's per-user IBM Plex, which Office's Protected View draws as wrong
+    glyphs, passed it (2026-11-12)."""
+    own = house.state()
     if os_name in ("windows", "macos"):
-        return DepState("fonts", True, "bundled with Kazma (IBM Plex Sans Arabic)")
+        return own
     if not which("fc-list"):
-        return DepState("fonts", False, "fontconfig (fc-list) is not installed", ["fonts"])
+        return DepState("fonts", False, "fontconfig (fc-list) is not installed", ["fonts", *own.missing])
     _, text = _out(run, ["fc-list", ":lang=ar", "family"])
-    if re.search(r"Noto (Naskh|Sans|Kufi) Arabic", text):
-        return DepState("fonts", True, "Noto Arabic fonts")
-    return DepState("fonts", False, "no Noto Arabic font", ["fonts"])
+    noto = bool(re.search(r"Noto (Naskh|Sans|Kufi) Arabic", text))
+    if noto and own.ok:
+        return DepState("fonts", True, f"Noto Arabic fonts; {own.detail}")
+    missing = ([] if noto else ["fonts"]) + list(own.missing)
+    detail = "; ".join(part for part in ("" if noto else "no Noto Arabic font", "" if own.ok else own.detail) if part)
+    return DepState("fonts", False, detail, missing)
 
 
 #: The oldest Node.js major the MCP servers Kazma ships are run with.
@@ -284,21 +294,28 @@ def check_all(platform: Platform, *, run: Runner = subprocess.run,
               which: Callable[[str], str | None] = shutil.which,
               soffice: Callable[[], str | None] | None = None,
               docker: Callable[[], str | None] | None = None,
-              vcruntime: Callable[[], tuple[int, int] | None] | None = None) -> list[DepState]:
+              vcruntime: Callable[[], tuple[int, int] | None] | None = None,
+              house_font: Any = None) -> list[DepState]:
     """Every dependency as found on this machine. *soffice*, *docker* and
-    *vcruntime* find those (Kazma's own finders by default). The Visual C++
-    runtime is listed on Windows only, first: what loads it comes after."""
+    *vcruntime* find those (Kazma's own finders by default); *house_font*
+    checks and installs Kazma's document font (``house_font_install.HouseFont``).
+    The Visual C++ runtime is listed on Windows only, first: what loads it
+    comes after."""
     if soffice is None:
         from kazma_core.documents.binaries import find_soffice as soffice
     if docker is None:
         from kazma_core.docker_cli import find_docker_cli as docker
+    if house_font is None:
+        from kazma_core.house_font_install import HouseFont
+
+        house_font = HouseFont(platform.os if platform.os in ("windows", "macos") else "linux")
     first = [_check_vcruntime(vcruntime or _vcruntime_version)] if platform.os == "windows" else []
     return [
         *first,
         _check_ocr(run, which),
         _check_office(soffice),
         _check_malware(platform.os, run, which),
-        _check_fonts(platform.os, run, which),
+        _check_fonts(platform.os, run, which, house_font),
         _check_node(run, which),
         _check_docker(run, docker),
     ]
@@ -337,13 +354,28 @@ def _freshclam_commands(platform: Platform) -> list[Step]:
                  ok_codes=(0, 1))]
 
 
+def _house_font_steps(platform: Platform, state: DepState) -> list[Step]:
+    """Kazma's document font, from the bundle (``house_font_install``): for all
+    users on Windows (administrator rights), the user's font folder elsewhere."""
+    from kazma_core.house_font_install import NOT_INSTALLED, PER_USER_COPY
+
+    if NOT_INSTALLED not in state.missing and PER_USER_COPY not in state.missing:
+        return []
+    windows = platform.os == "windows"
+    title = ("install IBM Plex Sans Arabic for all users" + (
+        ", retiring the per-user copy" if PER_USER_COPY in state.missing else "")) if windows \
+        else "install IBM Plex Sans Arabic"
+    return [Step(title, action="fonts:house", admin=windows, dep="fonts")]
+
+
 def install_plan(platform: Platform, states: list[DepState]) -> list[Step]:
     """The steps that put in what *states* found missing, nothing more."""
     if platform.manager is None:
         return []
     table = PACKAGES[platform.manager]
     steps: list[Step] = []
-    if platform.manager == "apt" and any(s.ok is False and table.get(s.name) for s in states):
+    if platform.manager == "apt" and any(
+            s.ok is False and table.get(s.name) and (s.name != "fonts" or "fonts" in s.missing) for s in states):
         steps.append(Step("refresh the package lists", ("sudo", "apt-get", "update")))
     for state in states:
         if state.ok is not False:
@@ -355,6 +387,11 @@ def install_plan(platform: Platform, states: list[DepState]) -> list[Step]:
         if state.name == "ocr" and platform.manager == "winget" and state.missing != ["tesseract"]:
             steps.extend(Step(f"download Tesseract's {lang} model", action=f"tessdata:{lang}", dep="ocr")
                          for lang in state.missing if lang in TESSDATA)
+            continue
+        if state.name == "fonts":
+            if packages and "fonts" in state.missing:
+                steps.append(Step(f"install {LABELS['fonts']}", _install(platform, packages), dep="fonts"))
+            steps.extend(_house_font_steps(platform, state))
             continue
         if packages is None:
             continue
