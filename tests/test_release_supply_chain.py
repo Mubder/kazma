@@ -13,6 +13,7 @@ dispatch on GitHub.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -84,10 +85,41 @@ def test_release_attests_build_provenance(steps: list[dict[str, Any]]) -> None:
     ), "provenance attestation step missing — `gh attestation verify` would fail"
 
 
+def _commands(run: str) -> list[str]:
+    """A step's shell commands, comments dropped and continuations joined."""
+    joined = re.sub(r"\\\n\s*", " ", run)
+    return [
+        line.strip() for line in joined.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+
+
+def _locked_version(package: str) -> str:
+    lock = (_ROOT / "uv.lock").read_text(encoding="utf-8")
+    match = re.search(rf'(?m)^name = "{re.escape(package)}"\nversion = "([^"]+)"', lock)
+    assert match, f"{package} is not in uv.lock"
+    return match.group(1)
+
+
+def _sign_step(steps: list[dict[str, Any]]) -> dict[str, Any]:
+    signing = [s for s in steps if any(" sigstore sign " in f" {c} " for c in _commands(str(s.get("run") or "")))]
+    assert len(signing) == 1, "one step signs the release — without it releases ship unsigned"
+    return signing[0]
+
+
 def test_release_signs_artifacts_with_sigstore(steps: list[dict[str, Any]]) -> None:
-    assert any(
-        u.startswith("sigstore/gh-action-sigstore-python@") for u in _uses(steps)
-    ), "signing step missing — releases would ship unsigned"
+    """sigstore-python itself, at the version `kazma update` verifies with.
+
+    Not sigstore/gh-action-sigstore-python: that action brings in
+    actions/upload-artifact and softprops/action-gh-release by tag, which this
+    repository refuses (every action pinned to a full commit SHA), and GitHub
+    stopped the 0.21.2 release at "Set up job" (2026-11-11)."""
+    assert not any(u.startswith("sigstore/gh-action-sigstore-python@") for u in _uses(steps))
+    version = _locked_version("sigstore")
+    sign = [c for c in _commands(str(_sign_step(steps)["run"])) if " sigstore sign " in f" {c} "]
+    assert sign and all(f"--from sigstore=={version} " in c for c in sign), (
+        f"sign with sigstore {version} (uv.lock's), the version the updater verifies with: {sign}"
+    )
 
 
 def test_signing_covers_every_published_artifact(steps: list[dict[str, Any]]) -> None:
@@ -96,14 +128,40 @@ def test_signing_covers_every_published_artifact(steps: list[dict[str, Any]]) ->
     SHA256SUMS especially: an unsigned checksum file can simply be replaced
     alongside the artifacts it describes, which makes it worth nothing.
     """
-    sign = next(
-        s
-        for s in steps
-        if str(s.get("uses") or "").startswith("sigstore/gh-action-sigstore-python@")
-    )
-    inputs = str((sign.get("with") or {}).get("inputs") or "")
-    for expected in (".whl", ".tar.gz", ".cdx.json", "SHA256SUMS"):
-        assert expected in inputs, f"{expected} is published but never signed"
+    sign = " ".join(c for c in _commands(str(_sign_step(steps)["run"])) if " sigstore sign " in f" {c} ")
+    for expected in ("dist/kazma-*.whl", "dist/kazma-*.tar.gz", "dist/kazma-*.cdx.json", "dist/SHA256SUMS"):
+        assert expected in sign, f"{expected} is published but never signed"
+
+
+def test_negative_control_the_old_signing_step_fails() -> None:
+    old = [
+        {"name": "Sign", "uses": "sigstore/gh-action-sigstore-python@f514d46b907ebcd5bedc05145c03b69c1edd8b46",
+         "with": {"inputs": "./dist/kazma-*.whl\n./dist/SHA256SUMS"}},
+        {"name": "Publish", "run": 'gh release create "$TAG" --draft dist/*'},
+    ]
+    with pytest.raises(AssertionError):
+        test_release_signs_artifacts_with_sigstore(old)
+    unpinned_sign = [{"name": "Sign", "run": "uvx --from sigstore sigstore sign dist/kazma-*.whl"}]
+    with pytest.raises(AssertionError):
+        test_release_signs_artifacts_with_sigstore(unpinned_sign)
+    with pytest.raises(AssertionError):
+        test_the_bundles_pass_the_updaters_rule_before_anything_is_published(unpinned_sign + old[1:])
+
+
+def test_the_bundles_pass_the_updaters_rule_before_anything_is_published(
+    steps: list[dict[str, Any]],
+) -> None:
+    """A release whose bundles `kazma update` would refuse is never published:
+    from 0.21.2 on every wheel install would be left unable to update."""
+    runs = [str(s.get("run") or "") for s in steps]
+    sign = steps.index(_sign_step(steps))
+    publish = next(i for i, r in enumerate(runs) if "gh release create" in r)
+    checks = [
+        c for r in runs[sign + 1:publish] for c in _commands(r)
+        if "scripts/verify_release_signatures.py dist" in c
+    ]
+    version = _locked_version("sigstore")
+    assert checks and all(f"--with sigstore=={version} " in c for c in checks), checks
 
 
 def _publish_problems(run: str) -> list[str]:
@@ -196,10 +254,12 @@ def _order_problems(steps: list[dict[str, Any]]) -> list[str]:
     build = first(lambda r, u: "uv build" in r)
     sbom = first(lambda r, u: "cyclonedx-py" in r)
     attest = first(lambda r, u: u.startswith("actions/attest-build-provenance@"))
-    sign = first(lambda r, u: u.startswith("sigstore/gh-action-sigstore-python@"))
+    sign = first(lambda r, u: "sigstore sign" in r or u.startswith("sigstore/gh-action-sigstore-python@"))
     publish = first(lambda r, u: "gh release create" in r)
     if None in (build, sbom, attest, sign, publish):
         return ["a supply-chain step is missing"]
+    if "verify_release_signatures.py" not in "\n".join(runs[sign + 1 : publish]):
+        problems.append("the signatures are not checked before the release is created")
     if "sha256sum dist/" not in runs[build]:
         problems.append("the built files are not checksummed in the build step")
     if "sha256sum -c" not in runs[sbom]:
@@ -237,4 +297,4 @@ def test_negative_control_the_old_order_fails() -> None:
         {"name": "Publish", "run": 'gh release create "$TAG" --draft dist/*'},
     ]
     problems = _order_problems(old)
-    assert len(problems) == 5, problems
+    assert len(problems) == 6, problems
