@@ -5,7 +5,7 @@
  "agent.language": "en",
  "agent.name": "kazma",
  "agent.rtl": false,
- "agent.version": "0.21.1",
+ "agent.version": "0.21.2",
  "backups.extra_paths": "research",
  "backups.offsite.enabled": true,
  "backups.offsite.keep": 7,

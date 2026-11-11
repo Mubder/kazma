@@ -6,6 +6,17 @@ description: Dated changes and links to the Kazma upgrade guides.
 
 > This page is published at [kazma.ai/docs/release-notes/](https://kazma.ai/docs/release-notes/) ([Arabic](https://kazma.ai/ar/docs/release-notes/)).
 
+## What's new (2026-11-11): 0.21.2
+
+| Area | Change |
+|---|---|
+| **Alerts in one place** | Settings → Alerts holds where Kazma's alerts go, the server status messages, the guard's pager with a test page, Kazma Watch (paired from the page, its email, the time zone of its cards) and the last seven days of alerts from all three senders. Every alert is one card, and one problem is paged once, not by each sender that saw it. |
+| **Alerts from their own bot** | Settings → Alerts → **Telegram bot that sends them** chooses Kazma's chat bot or a separate bot with its own chat (Kazma Watch's, say), for every alert and the guard's pages. The weekly resilience report arrives whole, one item a line, and counts the turns that succeeded. |
+| **Security** | Fixes from an audit of the whole code base: a chat bot with no allowed users is private; a link Kazma found in what it read asks before it is opened; a git command's approval card names what the repository runs; the approval record keeps no passwords or tokens; a sign-in works only in the browser that started it; what Kazma downloads, and the setup's uv, are pinned and checked. |
+| **A signed release** | Published by the release workflow, so the wheel carries a Sigstore signature; `kazma update` checks it and refuses a release from 0.21.2 on without one ([Supply chain](../../SUPPLY_CHAIN.md)). |
+| **Office files in the Kazma font** | Word, PowerPoint and Excel files name the Kazma font in every font setting, and decks carry the font inside the file, as Word files already did. |
+| **A new look** | Cards the colour of the page, one set of buttons and controls, your accent colour on every page. |
+
 ## What's new (2026-11-08): 0.21.1
 
 | Area | Change |

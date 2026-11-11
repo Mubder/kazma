@@ -1,6 +1,16 @@
 # CHANGELOG
 
-## Unreleased
+## 0.21.2 — Alerts in one place, a new look, and a signed release (2026-11-11)
+
+Every alert, from Kazma, its guard and Kazma Watch, is now one card, paged
+once per problem and set up in one place, Settings → Alerts, where it can
+also come from a Telegram bot of its own. The web app has a new look. An
+audit of the whole code base was fixed in three batches: a chat bot with no
+allowed users is private, a sign-in works only in the browser that started
+it, and what Kazma downloads is pinned. It is the first release the release
+workflow has published since v0.11.0, so its wheel carries a Sigstore
+signature, and this version's `kazma update` refuses any release from 0.21.2
+on that has none.
 
 - **Kazma's alerts can come from a separate Telegram bot.** Every alert --
   problems and recoveries, the daily digest, the weekly report, the start

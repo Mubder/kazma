@@ -183,14 +183,14 @@ Feed it to whatever your organisation already uses. For a quick look:
 # Component count and licences
 python - <<'PY'
 import json
-d = json.load(open("kazma-0.21.1.cdx.json", encoding="utf-8"))
+d = json.load(open("kazma-0.21.2.cdx.json", encoding="utf-8"))
 comps = d.get("components") or []
 print(f"{len(comps)} components, CycloneDX {d['specVersion']}")
 PY
 
 # Known vulnerabilities, via any CycloneDX-aware scanner
-grype sbom:kazma-0.21.1.cdx.json
-trivy sbom kazma-0.21.1.cdx.json
+grype sbom:kazma-0.21.2.cdx.json
+trivy sbom kazma-0.21.2.cdx.json
 ```
 
 ---

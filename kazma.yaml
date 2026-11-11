@@ -1,6 +1,6 @@
 agent:
   name: kazma
-  version: 0.21.1
+  version: 0.21.2
   language: en
   rtl: false
   # PreToolUse / PostToolUse — programmable, NOT a permission system.
