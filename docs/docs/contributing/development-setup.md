@@ -127,7 +127,12 @@ npm run build    # production build
 The site's build packages are kept by `npm audit fix` (never `--force`) and
 `docs/package-lock.json`. `package.json` holds Mermaid on 11.x (`overrides`):
 the audit fix otherwise took Mermaid 12, a major version Docusaurus 3 was not
-tested with. What the audit still reports needs a major version of a package
-Docusaurus 3.10.2 (the newest) holds back -- `tinypool` and
-`serialize-javascript` in the build, the dev server's `uuid`, the `katex`
-Mermaid 11 brings -- or has no fixed release yet (`deepmerge`).
+tested with. It also holds `tinypool` on 2.x and `serialize-javascript` on
+7.x (2026-11-11): Docusaurus 3.10.2 (the newest) holds both a major version
+back, and their critical and high advisories are fixed only there. The site
+builds with both (`npm run build`), which needs Node 20, as Docusaurus does.
+Do not run `npm audit fix` without checking `npm ls @docusaurus/preset-classic`
+after it: on 2026-11-11 it moved the preset back to 3.7.0, a second, older
+Docusaurus beside 3.10.2. What the audit still reports is moderate or low and
+needs a major version Docusaurus holds back -- the dev server's `uuid`, the
+`katex` Mermaid 11 brings -- or has no fixed release yet (`deepmerge`).

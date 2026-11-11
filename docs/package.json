@@ -23,7 +23,9 @@
     "react-dom": "^18.2.0"
   },
   "overrides": {
-    "mermaid": "^11.17.2"
+    "mermaid": "^11.17.2",
+    "tinypool": "^2.2.0",
+    "serialize-javascript": "^7.1.4"
   },
   "devDependencies": {
     "@docusaurus/module-type-aliases": "^3.4.0",
@@ -34,6 +36,6 @@
     "development": ["last 3 chrome version", "last 3 firefox version", "last 5 safari version"]
   },
   "engines": {
-    "node": ">=18.0"
+    "node": ">=20.0"
   }
 }

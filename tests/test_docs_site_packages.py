@@ -13,6 +13,14 @@ Each floor below is the first release that fixes the advisories npm audit
 reported for that package on 2026-11-11; the lock must not fall back below
 one. What is left needs a major version Docusaurus 3.10.2 holds back
 (``docs/docs/contributing/development-setup.md``).
+
+Two of those were taken through ``overrides`` (2026-11-11, Dependabot's
+critical and high alerts): ``tinypool`` 2 (prototype pollution leading to code
+execution; Docusaurus loads it with ``import()`` only for its SSG worker pool,
+off in this site's config, and 2.2.0 still hands a worker ``workerData[1]`` and
+its ``__tinypool_state__.workerId``) and ``serialize-javascript`` 7 (code
+execution, cross-site scripting, a denial of service; webpack's copy and CSS
+plugins). The site builds with both. Their floors are below.
 """
 
 from __future__ import annotations
@@ -50,6 +58,9 @@ FLOORS: dict[str, str | dict[str, str]] = {
     "source-map-js": "1.2.2",
     "svgo": {"3": "3.3.5"},
     "undici": "7.30.1",
+    # Through overrides (2026-11-11): Docusaurus 3.10.2 holds both a major back.
+    "tinypool": "2.1.2",
+    "serialize-javascript": "7.1.3",
 }
 
 
@@ -81,6 +92,14 @@ def test_mermaid_stays_on_11():
     assert {v.split(".")[0] for v in _versions(lock, "mermaid")} == {"11"}
 
 
+def test_the_overrides_hold_the_majors_docusaurus_holds_back():
+    package = json.loads((ROOT / "docs" / "package.json").read_text(encoding="utf-8"))
+    assert package["overrides"]["tinypool"].startswith("^2.")
+    assert package["overrides"]["serialize-javascript"].startswith("^7.")
+    # Both need Node 20, as Docusaurus 3.10.2 does.
+    assert package["engines"]["node"] == ">=20.0"
+
+
 def test_negative_control_the_old_lock_is_refused():
     """Versions the lock held before the fix (2026-11-11)."""
     old = {"packages": {
@@ -88,6 +107,9 @@ def test_negative_control_the_old_lock_is_refused():
         "node_modules/undici": {"version": "7.28.0"},
         "node_modules/postcss-selector-parser": {"version": "7.1.4"},
         "node_modules/foo/node_modules/postcss-selector-parser": {"version": "6.1.6"},
+        "node_modules/tinypool": {"version": "1.1.1"},
+        "node_modules/serialize-javascript": {"version": "6.0.2"},
     }}
     assert below_floor(old) == ["dompurify@3.4.12 < 3.4.17", "postcss-selector-parser@7.1.4 < 7.1.6",
-                                "undici@7.28.0 < 7.30.1"]
+                                "undici@7.28.0 < 7.30.1", "tinypool@1.1.1 < 2.1.2",
+                                "serialize-javascript@6.0.2 < 7.1.3"]
