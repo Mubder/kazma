@@ -365,7 +365,12 @@ def _house_font_steps(platform: Platform, state: DepState) -> list[Step]:
     title = ("install IBM Plex Sans Arabic for all users" + (
         ", retiring the per-user copy" if PER_USER_COPY in state.missing else "")) if windows \
         else "install IBM Plex Sans Arabic"
-    return [Step(title, action="fonts:house", admin=windows, dep="fonts")]
+    shown = ("copy Kazma's bundled IBM Plex Sans Arabic (regular, bold) into the Windows Fonts folder "
+             "and list it for all users" + (
+                 "; unregister and delete the per-user copy" if PER_USER_COPY in state.missing else "")) \
+        if windows else ("copy Kazma's bundled IBM Plex Sans Arabic into " + (
+            "~/Library/Fonts" if platform.os == "macos" else "~/.local/share/fonts/kazma, then fc-cache"))
+    return [Step(title, action="fonts:house", admin=windows, dep="fonts", shown=shown)]
 
 
 def install_plan(platform: Platform, states: list[DepState]) -> list[Step]:
