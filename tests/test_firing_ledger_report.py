@@ -77,7 +77,9 @@ def test_every_mechanism_is_named_in_the_message(week):
     for sig in fl.FIRING_SIGNATURES:
         assert sig.mechanism in message, sig.mechanism
     assert len(report.entries) == len(fl.FIRING_SIGNATURES)
-    assert f"of {len(fl.FIRING_SIGNATURES)} mechanisms" in title
+    # Re-pointed 2026-11-11: the count is the body's first line; the title
+    # stays short (it was the digest's whole alert line).
+    assert body.startswith(f"Last 24h: {len(report.fired)} of {len(fl.FIRING_SIGNATURES)} mechanisms fired")
 
 
 def test_what_needs_a_look_comes_first(week):
@@ -93,10 +95,15 @@ def test_what_needs_a_look_comes_first(week):
     report = fl.build_report(hours=24)
     title, body = fl.render(report)
     assert "need a look" in title
-    assert body.startswith("Needs a look: ")
-    look = body.split(". ", 1)[0]
-    assert "guard restart (3: unhealthy (probe error: timed out) 2, process exited (code 1) 1)" in look
-    assert "health-gated restart (2)" in look
+    # Re-pointed 2026-11-11 (sections, one line an item): the first section
+    # after the count is what needs a look, each restart reason on its line.
+    sections = body.split("\n\n")
+    look = sections[1]
+    assert look.startswith("Needs a look:\n")
+    assert ("  guard restart: 3\n"
+            "    unhealthy (probe error: timed out): 2\n"
+            "    process exited (code 1): 1") in look
+    assert "  health-gated restart: 2" in look
     assert "event loop stall" in look
     # A week with nothing wrong -- every scheduled job on schedule -- says so
     # by saying nothing is wrong.
@@ -113,7 +120,7 @@ def test_what_needs_a_look_comes_first(week):
            + [_app_line("[acquisition] canary passed in 4.2 s")] * 7)
     quiet_title, quiet_body = fl.render(fl.build_report(hours=168))
     assert "need a look" not in quiet_title
-    assert not quiet_body.startswith("Needs a look")
+    assert "Needs a look:" not in quiet_body
 
 
 def test_alerts_are_counted_as_sent_not_as_logged(week):
@@ -144,9 +151,104 @@ def test_a_scheduled_job_below_its_schedule_needs_a_look(week):
     assert "daily digest" in look
     assert "universal backup" not in look  # 27 of 28: a restart costs a run
     _, body = fl.render(report)
-    assert "daily digest (2 of 7 scheduled)" in body
+    assert "  daily digest: 2 of 7 scheduled" in body
     # Nothing at all is below schedule too.
     assert "graph memory backup" in look
+
+
+# ── the message as Telegram shows it (2026-11-11) ─────────────────────
+# The report of 2026-11-11 arrived as one paragraph under a 111-character
+# title, and stopped at "Stops over budget 0": the body was every section
+# joined by spaces, and the alert layer cut it at 600 characters. The digest
+# then printed the whole title as the alert's name, ": 1" at its end.
+
+#: The live week's restart reasons, as the guard wrote them.
+_LIVE_REASONS = (["never became healthy"] * 33
+                 + ["unhealthy (database: timed out (3s); code_execution: No available isolated "
+                    "execution backend; not ready for 628s)"])
+
+
+def _live_week(app, guard):
+    app_lines = ([_app_line("[universal-backup] complete: 26 DBs")] * 28
+                 + [_app_line("[digest] daily digest dispatched (400 chars)")] * 7
+                 + [_app_line(f"[ops_alert] key.{i} | an alert") for i in range(9)]
+                 + [_app_line("[ops_alert] backup.pg_dump | The Postgres dump failed.")] * 2
+                 + [_app_line("restic local snapshot ok: ab12")] * 112)
+    guard_lines = [_guard_line("guard.restarting", reason=r) for r in _LIVE_REASONS]
+    _write(app, guard, app_lines, guard_lines)
+
+
+def _sent(monkeypatch, report):
+    """What ``_send`` hands the alert layer, and the card it would build."""
+    from kazma_core.observability import ops_alerts
+
+    calls = []
+    monkeypatch.setattr(ops_alerts, "alert", lambda key, title, detail="", **kw: calls.append(
+        (title, detail, kw)) or True)
+    fl._send(report)
+    (title, detail, kw), = calls
+    card = ops_alerts._format(kw["severity"], title, detail, 0, 0,
+                              kw.get("max_detail", ops_alerts.MAX_DETAIL_CHARS))
+    return title, detail, kw, card
+
+
+def test_the_whole_report_reaches_the_card_in_lines(week, monkeypatch):
+    app, guard, _ = week
+    _live_week(app, guard)
+    report = fl.build_report(hours=168)
+    title, detail, kw, card = _sent(monkeypatch, report)
+    assert kw["severity"] == "warn"
+    # Every section is in the card, each on lines of its own.
+    for heading in ("Needs a look:", "Alerts sent:", "Routine:", "Silent (", "Not watched ("):
+        assert f"\n\n{heading}" in card, heading
+    assert "(cut)" not in card
+    assert "  guard restart: 34\n    never became healthy: 33\n" in card
+    assert len(card) <= 4096
+    # The alert layer's default cut is what lost the rest (negative control).
+    from kazma_core.observability import ops_alerts
+
+    cut = ops_alerts._format("warn", title, detail, 0, 0)
+    assert "Routine:" not in cut and cut.endswith(ops_alerts.CUT_MARK)
+
+
+def test_the_title_is_short_and_says_what_is_wrong(week):
+    app, guard, _ = week
+    _live_week(app, guard)
+    title, _ = fl.render(fl.build_report(hours=168))
+    assert title.startswith("Weekly resilience report — ")
+    assert len(title) <= 80 and "log lines" not in title and "mechanisms" not in title
+    # One is "needs", more are "need".
+    _write(app, guard, [_app_line("[universal-backup] complete: 26 DBs")] * 28,
+           [_guard_line("guard.restarting", reason="process exited (code 1)")])
+    report = fl.build_report(hours=168)
+    assert len(report.needs_a_look) >= 1
+    one = fl._title(fl.LedgerReport(entries=[e for e in report.entries if e.mechanism == "guard restart"]))
+    assert one == "Weekly resilience report — 1 needs a look"
+
+
+def test_a_long_report_leaves_out_its_last_sections_whole_and_says_which(week):
+    app, guard, _ = week
+    _live_week(app, guard)
+    report = fl.build_report(hours=168)
+    _, body = fl.render(report, budget=900)
+    assert "Needs a look:" in body
+    assert "\n\nNot watched (" not in body, "the section itself is left out"
+    last = body.rsplit("\n\n", 1)[1]
+    assert last.startswith("Left out for length: ") and "Not watched (no log line to count)" in last
+
+
+def test_targets_that_cannot_be_measured_do_not_lose_the_report(week, monkeypatch):
+    app, guard, _ = week
+    _live_week(app, guard)
+
+    def broken(now=None):
+        raise RuntimeError("the observer could not be asked")
+
+    monkeypatch.setattr(fl, "_week_targets", broken)
+    report = fl.build_report(hours=168)
+    assert report.targets == [] and "targets not measured (RuntimeError)" in report.error
+    _, body = fl.render(report)
+    assert "Needs a look:" in body and "Scan error: targets not measured" in body
 
 
 # ── what blocked the loop ──────────────────────────────────────────────
@@ -213,4 +315,5 @@ def test_the_report_names_the_blockers_of_the_week(week):
     report = fl.build_report(hours=168)
     assert report.stall_blockers == {"kazma_ui.settings.get_appearance (from kazma_ui.app._render)": 2}
     _, body = fl.render(report)
-    assert "The event loop was blocked in: kazma_ui.settings.get_appearance" in body
+    assert ("The event loop was blocked in:\n"
+            "  kazma_ui.settings.get_appearance (from kazma_ui.app._render): 2") in body

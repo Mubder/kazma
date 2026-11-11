@@ -29,10 +29,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from kazma_core.observability.turn_line import read_turn_line
+
 __all__ = ["Target", "measure_targets", "render_targets"]
 
 WEEK_S = 7 * 86400.0
-_TURN = re.compile(r"\[turn\] Turn finished: platform=\S* key=(\S+) failed=(True|False)")
 _BACKUP = "[universal-backup] complete:"
 _OVER_BUDGET = "[shutdown] the stop ran over"
 _ALERT = re.compile(r"\[ops_alert\] \S+ \|(?!.*\(throttled\))")
@@ -72,8 +73,10 @@ def _week(app: list[tuple[float, str]], guard: list[tuple[float, dict]], start: 
     msgs = [m for t, m in app if start <= t < end]
     turns: dict[str, bool] = {}
     for m in msgs:
-        for key, failed in _TURN.findall(m):
-            turns[key] = failed == "True"
+        turn = read_turn_line(m)
+        if turn is not None:
+            _platform, key, failed = turn
+            turns[key] = failed
     events = [(t, e) for t, e in guard if start <= t < end]
     restarts = [t for t, e in events if e.get("event") == "guard.restarting"]
     outages: list[float] = []
@@ -103,7 +106,12 @@ def _targets(now: dict[str, Any], before: dict[str, Any]) -> list[Target]:
         return "unknown" if v is None else f"{v:.1f}%"
 
     def mins(v: float | None) -> str:
-        return "unknown" if v is None else ("none" if v == 0 else f"{v / 60:.1f} min")
+        # Hours past two: "643.4 min" was the report of 2026-11-11.
+        if v is None:
+            return "unknown"
+        if v == 0:
+            return "none"
+        return f"{v / 3600:.1f} h" if v >= 2 * 3600 else f"{v / 60:.1f} min"
 
     rows = [
         ("Uptime", "99.5% or better", now["uptime"], lambda v: v >= 99.5, pct, before["uptime"]),
@@ -140,16 +148,31 @@ def measure_targets(app_lines: Iterable[str], guard_lines: Iterable[str], *, now
                     _week(app, guard, now - 2 * WEEK_S, now - WEEK_S, uptime_before))
 
 
-def render_targets(targets: list[Target]) -> str:
-    """The report's "Targets" sentence."""
-    parts = []
-    for t in targets:
-        state = "met" if t.met else ("missed" if t.met is False else "unknown")
-        text = f"{t.name} {t.shown} (goal {t.goal}): {state}"
-        if t.before:
-            text += f", week before {t.before}"
-        parts.append(text)
+#: A target's mark: met, missed, nothing to measure.
+_MARKS = {True: "✅", False: "❌", None: "❔"}
+
+
+def render_targets(targets: list[Target]) -> list[str]:
+    """The report's "Targets" section: a heading, then one line a target::
+
+        Targets (2 missed):
+          ❌ Uptime: 98.9% (goal 99.5% or better)
+          ✅ Backups fresh: 7 of 7 days (goal every day; week before 1 of 7 days)
+
+    It was one sentence of seven targets joined by semicolons, cut off at
+    the alert's 600 characters (2026-11-11). Empty when nothing was measured.
+    """
+    if not targets:
+        return []
     missed = sum(1 for t in targets if t.met is False)
-    head = f"Targets ({missed} missed)" if missed else "Targets (all met)" if all(t.met for t in targets) \
-        else "Targets"
-    return head + ": " + "; ".join(parts) + "."
+    if missed:
+        head = f"Targets ({missed} missed):"
+    elif all(t.met for t in targets):
+        head = "Targets (all met):"
+    else:
+        head = "Targets:"
+    lines = [head]
+    for t in targets:
+        aside = f"goal {t.goal}" + (f"; week before {t.before}" if t.before else "")
+        lines.append(f"  {_MARKS[t.met]} {t.name}: {t.shown} ({aside})")
+    return lines

@@ -46,7 +46,7 @@ import logging
 import re
 import time
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -228,9 +228,9 @@ class LedgerReport:
     stall_blockers: dict[str, int] = field(default_factory=dict)
     #: Manifest mechanisms that leave no trace the ledger can count.
     blind: list[str] = field(default_factory=list)
-    #: The week against its targets (resilience plan G3): the "Targets"
-    #: sentence, or "" when they could not be measured.
-    targets: str = ""
+    #: The week against its targets (resilience plan G3), each a
+    #: ``weekly_targets.Target``; empty when they could not be measured.
+    targets: list[Any] = field(default_factory=list)
 
     @property
     def fired(self) -> list[LedgerEntry]:
@@ -256,9 +256,13 @@ class LedgerReport:
             "suppressed_alerts": self.suppressed_alerts,
             "stall_blockers": dict(self.stall_blockers),
             "blind": list(self.blind),
-            "targets": self.targets,
+            "targets": [asdict(t) for t in self.targets],
             "error": self.error,
         }
+
+    @property
+    def targets_missed(self) -> int:
+        return sum(1 for t in self.targets if t.met is False)
 
     def summary(self) -> str:
         return (f"{len(self.fired)} of {len(self.entries)} mechanisms fired in "
@@ -522,10 +526,10 @@ _TARGET_APP_MARKS = ("[turn] Turn finished", "[universal-backup] complete:",
 _TARGET_GUARD_MARKS = ("guard.restarting", "guard.supervising")
 
 
-def _targets_sentence(now: float | None = None) -> str:
+def _week_targets(now: float | None = None) -> list[Any]:
     """The week against its targets, from the logs of the last two weeks and
-    the observer's uptime (plan G3). "" when it cannot be measured."""
-    from kazma_core.observability.weekly_targets import measure_targets, render_targets
+    the observer's uptime (plan G3)."""
+    from kazma_core.observability.weekly_targets import measure_targets
 
     now = time.time() if now is None else now
     cutoff = now - 2 * 7 * 86400
@@ -548,13 +552,21 @@ def _targets_sentence(now: float | None = None) -> str:
     observer = outside_status().get("observer") or {}
     value = observer.get("up_7d_pct") if observer.get("ok") else None
     uptime = float(value) if isinstance(value, (int, float)) else None
-    return render_targets(measure_targets(app, guard, now=now, uptime_now=uptime))
+    return measure_targets(app, guard, now=now, uptime_now=uptime)
 
 
 def build_report(hours: float = 168.0) -> LedgerReport:
     """Scan, and cross-check against the manifest's own claims."""
     report = scan_log(hours)
-    report.targets = _targets_sentence()
+    try:
+        report.targets = _week_targets()
+    except (OSError, ValueError, TypeError, KeyError, RuntimeError) as exc:
+        # The targets were measured outside any guard: a failure there (the
+        # observer's status, an unreadable log, a malformed line) lost the
+        # whole weekly report. The week's counts still go out.
+        logger.warning("[firing-ledger] the weekly targets could not be measured", exc_info=True)
+        report.error = (report.error + "; " if report.error else "") + \
+            f"targets not measured ({type(exc).__name__})"
     try:
         from kazma_core.observability.resilience_manifest import MECHANISMS
 
@@ -644,7 +656,8 @@ async def ledger_scheduler() -> None:
 
 
 def _named(entry: LedgerEntry) -> str:
-    """``name (count)``, with the tally or the schedule when there is one."""
+    """``name (count)``, with the tally or the schedule when there is one
+    (the command line's one-line form)."""
     if entry.tally and set(entry.tally) != {"(unnamed)"}:
         parts = [f"{k} {n}" for k, n in list(entry.tally.items())[:4]]
         more = len(entry.tally) - 4
@@ -656,44 +669,128 @@ def _named(entry: LedgerEntry) -> str:
     return f"{entry.mechanism} ({entry.count})"
 
 
-def render(report: LedgerReport) -> tuple[str, str]:
-    """``(title, body)`` of the weekly message. Every mechanism is in it."""
+#: The longest body the weekly message sends: under Telegram's 4,096 with the
+#: card's first line around it (``ops_alerts.alert``'s ``max_detail`` ceiling).
+BODY_BUDGET = 3500
+#: How many names of a tally are listed under its mechanism.
+_TALLY_SHOWN = 6
+
+
+def _alert_name(key: str) -> str:
+    """An alert key as the catalog titles it ("Kazma could not start"), else the key."""
+    from kazma_core.observability.alert_catalog import entry_for
+
+    entry = entry_for(key)
+    return entry.title if entry is not None else key
+
+
+def _entry_lines(entry: LedgerEntry, *, name=None) -> list[str]:
+    """``  mechanism: count`` (or ``N of M scheduled``), and its tally under it.
+
+    The tally names each reason or key with its count, one a line: a guard
+    restart's reasons hold parentheses and semicolons of their own, and in
+    one sentence they ran into each other ("unhealthy (database: timed out
+    (3s); code_execution: ...) 1)").
+    """
+    named = entry.tally and set(entry.tally) != {"(unnamed)"}
+    if entry.expected and not named:
+        lines = [f"  {entry.mechanism}: {entry.count} of {entry.expected} scheduled"]
+    else:
+        lines = [f"  {entry.mechanism}: {entry.count}"]
+    if named:
+        items = list(entry.tally.items())
+        lines += [f"    {(name or str)(k)}: {n}" for k, n in items[:_TALLY_SHOWN]]
+        if len(items) > _TALLY_SHOWN:
+            lines.append(f"    and {len(items) - _TALLY_SHOWN} more")
+    return lines
+
+
+def _title(report: LedgerReport) -> str:
+    """Short, for a phone's notification and the daily digest's alert line.
+
+    It carried the whole summary (111 characters on 2026-11-11), which the
+    digest then printed as the alert's name with ": 1" after it.
+    """
+    from kazma_core.english_count import count_noun
+
+    look, missed = len(report.needs_a_look), report.targets_missed
+    parts = []
+    if look:
+        parts.append(f"{look} {'needs' if look == 1 else 'need'} a look")
+    if missed:
+        parts.append(f"{count_noun(missed, 'target')} missed")
+    return "Weekly resilience report — " + (", ".join(parts) if parts else "nothing needs a look")
+
+
+def _sections(report: LedgerReport) -> list[list[str]]:
+    """The body's sections, most important first; each a heading and its lines."""
+    from kazma_core.observability.weekly_targets import render_targets
+
     look = report.needs_a_look
     by_kind = {k: [e for e in report.fired if e.kind == k and e not in look]
                for k in (ALERTING, RECOVERY, ROUTINE, SYMPTOM)}
-    title = f"Weekly resilience report — {report.summary()}"
+    window = "Last 7 days" if round(report.window_hours) == 168 else f"Last {report.window_hours:.0f}h"
+    sections = [[f"{window}: {len(report.fired)} of {len(report.entries)} mechanisms fired "
+                 f"({report.scanned_lines:,} log lines read)."]]
     if look:
-        title += f"; {len(look)} need a look"
-    lines: list[str] = []
-    if look:
-        lines.append("Needs a look: " + "; ".join(_named(e) for e in look) + ".")
+        sections.append(["Needs a look:"] + [line for e in look for line in _entry_lines(e)])
     if report.targets:
-        lines.append(report.targets)
+        sections.append(render_targets(report.targets))
     if report.stall_blockers:
-        blockers = [f"{k} ×{n}" for k, n in list(report.stall_blockers.items())[:8]]
+        blocked = ["The event loop was blocked in:"]
+        blocked += [f"  {k}: {n}" for k, n in list(report.stall_blockers.items())[:8]]
         if len(report.stall_blockers) > 8:
-            blockers.append(f"+{len(report.stall_blockers) - 8} more in .kazma/stall-*.txt")
-        lines.append("The event loop was blocked in: " + "; ".join(blockers) + ".")
+            blocked.append(f"  and {len(report.stall_blockers) - 8} more (.kazma/stall-*.txt)")
+        sections.append(blocked)
     sent = next((e for e in report.entries if e.kind == ALERTING), None)
     if sent is not None and (sent.count or report.suppressed_alerts):
-        text = f"Alerts sent: {_named(sent)}" if sent.count else "Alerts sent: none"
-        if report.suppressed_alerts:
-            text += f"; {report.suppressed_alerts} repeats held back by their cooldown"
-        lines.append(text + ".")
+        held = (f" ({report.suppressed_alerts} repeats held back by their cooldown)"
+                if report.suppressed_alerts else "")
+        alerts = [f"Alerts sent: {sent.count}{held}"]
+        # The tally's lines, one level up: the heading is the count's line.
+        alerts += [line[2:] for line in _entry_lines(sent, name=_alert_name)[1:]]
+        sections.append(alerts)
     if by_kind[ROUTINE]:
-        lines.append("Routine: " + ", ".join(_named(e) for e in by_kind[ROUTINE]) + ".")
+        sections.append(["Routine:"] + [line for e in by_kind[ROUTINE] for line in _entry_lines(e)])
     if by_kind[RECOVERY]:
-        lines.append("Recoveries that ran: " + ", ".join(_named(e) for e in by_kind[RECOVERY]) + ".")
+        sections.append(["Recoveries that ran:"] + [line for e in by_kind[RECOVERY] for line in _entry_lines(e)])
     silent = [e.mechanism for e in report.silent if e not in look]
     if silent:
-        lines.append("Silent: " + ", ".join(silent) + ".")
+        sections.append(["Silent (not needed this week, not necessarily broken): " + ", ".join(silent) + "."])
     if report.blind:
-        lines.append("Not watched (no log line to count): " + ", ".join(report.blind) + ".")
-    lines.append("Silent is not necessarily broken -- a recovery whose fault never "
-                 "occurred is simply unexercised. It is worth knowing which.")
+        sections.append(["Not watched (no log line to count): " + ", ".join(report.blind) + "."])
     if report.error:
-        lines.append(f"Scan error: {report.error}")
-    return title, " ".join(lines)
+        sections.append([f"Scan error: {report.error}"])
+    return sections
+
+
+def render(report: LedgerReport, budget: int = BODY_BUDGET) -> tuple[str, str]:
+    """``(title, body)`` of the weekly message. Every mechanism is in it.
+
+    The body is laid out in sections, a blank line between them, each a
+    heading and one line an item -- the daily digest's layout. It was one
+    paragraph, and the alert layer cut it at 600 characters: the report of
+    2026-11-11 ended at "Stops over budget 0", with the alerts, the routine
+    jobs and the silent mechanisms gone. Past *budget* the last sections are
+    left out whole, and named.
+    """
+    sections = _sections(report)
+    kept: list[list[str]] = []
+    left_out: list[str] = []
+    used = 0
+    for i, section in enumerate(sections):
+        text = "\n".join(section)
+        size = len(text) + (2 if kept else 0)
+        if not left_out and (i < 2 or used + size <= budget - 120):
+            kept.append(section)
+            used += size
+        else:
+            left_out.append(section[0].split(":", 1)[0])
+    body = "\n\n".join("\n".join(s) for s in kept)
+    if left_out:
+        body += ("\n\nLeft out for length: " + ", ".join(left_out)
+                 + ". The whole report: python -m kazma_core.observability.firing_ledger --quiet")
+    return _title(report), body
 
 
 def _send(report: LedgerReport) -> None:
@@ -701,12 +798,14 @@ def _send(report: LedgerReport) -> None:
         from kazma_core.observability.ops_alerts import alert
 
         title, body = render(report)
+        problem = bool(report.needs_a_look or report.targets_missed)
         alert(
             "resilience.firing_ledger",
             title,
             body,
-            severity="warn" if report.needs_a_look else "info",
+            severity="warn" if problem else "info",
             cooldown_s=6 * 24 * 3600,
+            max_detail=BODY_BUDGET,
         )
     except Exception:  # noqa: BLE001
         logger.debug("[firing-ledger] could not send report", exc_info=True)

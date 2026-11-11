@@ -299,11 +299,33 @@ def _should_send(key: str, cooldown_s: float) -> tuple[bool, int]:
         return False, rec.since_sent
 
 
+#: What ends a detail cut at its limit.
+CUT_MARK = " … (cut)"
+
+
+def _cut_detail(detail: str, limit: int) -> str:
+    """*detail* within *limit* characters, cut at a line or a word and marked.
+
+    A detail was cut mid-word with nothing to say so: the weekly report of
+    2026-11-11 ended at "Stops over budget 0", which read as the end of it.
+    """
+    if len(detail) <= limit:
+        return detail
+    room = max(0, limit - len(CUT_MARK))
+    head = detail[:room]
+    for sep in ("\n", " "):
+        at = head.rfind(sep)
+        if at >= room // 2:
+            head = head[:at]
+            break
+    return head.rstrip() + CUT_MARK
+
+
 def _format(severity: str, title: str, detail: str, suppressed: int,
             cooldown_s: float, max_detail: int = MAX_DETAIL_CHARS) -> str:
     from kazma_core.observability.alert_card import format_operator_card
 
-    body = (detail or "")[:max(0, min(int(max_detail), 3500))]
+    body = _cut_detail(detail or "", max(0, min(int(max_detail), 3500)))
     if suppressed:
         mins = int(cooldown_s // 60) or 1
         note = (

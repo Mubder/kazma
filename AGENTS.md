@@ -5889,6 +5889,26 @@ repeat held back, counted apart); restart reasons and alert keys are tallied
 by the thread in `_run_once`); manifest mechanisms with no signature are
 "not watched", never a mechanism. Tests: `tests/test_firing_ledger_report.py`.
 
+**The report is laid out in lines and sent whole (2026-11-11).** Telegram
+showed the week to 2026-11-11 as one paragraph under a 111-character title,
+cut at "Stops over budget 0": `firing_ledger.render` joined its sections with
+spaces, `ops_alerts.alert` cut every detail at 600 characters, and the daily
+digest printed the title as the alert's name. Now: a short title
+(`firing_ledger._title`: what needs a look, the targets missed), sections
+with a blank line between them and one item a line (a tally's reasons under
+their mechanism; the targets marked ✅ ❌ ❔, `weekly_targets.render_targets`),
+sent with `max_detail=firing_ledger.BODY_BUDGET`; past it the last sections
+are left out whole and named. A missed target makes the report a warning; a
+failure measuring the targets is the report's scan error, never the loss of
+the report. Every detail `ops_alerts` cuts ends at a line or word with
+`ops_alerts.CUT_MARK`, and the digest cuts an alert's label at
+`daily_digest._LABEL_MAX`. **The finished-turn line has one reader**,
+`turn_line.read_turn_line`: the targets matched `failed=True|False` while
+`close_turn` writes `yes`/`no`, so "Turns that succeed" was unknown every
+week (its fixture wrote the form no code writes). Gate:
+`tests/test_weekly_report_reads_turns.py` (the real `close_turn` line; the old
+pattern as the negative control; no second parser).
+
 **D. One restic run per repository** (`restic_repo._run`, 2026-09-30). The
 universal backup's snapshot and the maintenance task's `forget --prune` /
 `check` are separate queue tasks and overlapped; `forget` and `check` lock a
