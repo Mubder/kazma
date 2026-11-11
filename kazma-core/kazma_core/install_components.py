@@ -108,9 +108,11 @@ COMPONENTS: tuple[Component, ...] = (
         express=True, system=("malware",), admin=True),
     Component(
         "fonts", "Arabic fonts",
-        "Arabic is drawn in documents (Kazma brings its own on Windows and macOS)",
-        "Arabic text in documents may be drawn as boxes (Linux)",
-        express=True, system=("fonts",)),
+        "IBM Plex Sans Arabic, Kazma's document font, is installed (Windows: for all users), "
+        "so Office's Protected View shows Kazma's files in it",
+        "Office's Protected View shows Kazma's Word and PowerPoint files in another face; "
+        "on Linux Arabic may be drawn as boxes",
+        express=True, system=("fonts",), admin=True),
     Component(
         "node", "Node.js",
         "MCP servers started with npx run, the shipped filesystem server among them",

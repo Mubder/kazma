@@ -3695,7 +3695,13 @@ PowerPoint draws Arabic in it as wrong glyphs and Word shows Arial until Enable
 Editing. A python-pptx deck with no embedded font garbles the same way; one
 naming Arial or a face installed nowhere draws correctly. It is the install,
 not the file: do not change the engines for it (the guide's "Office's
-Protected View"). **A document built by hand in code goes to
+Protected View"). Setup installs the bundled faces for all users and retires
+a per-user copy (`kazma_core.house_font_install`; the fonts part of
+`kazma setup system`/`install`; `tests/test_house_font_install.py`, the old
+"bundled with Kazma" check as the negative control). The one document font
+stays IBM Plex (the owner's decision, 2026-11-12): Calibri, Segoe UI and Dubai
+display in Protected View, but Microsoft's terms let Kazma ship none of them
+for its PDFs and HTML. **A document built by hand in code goes to
 its generator** (`agent/raw_document_guard.py`, asked by the tool worker
 before a `python_exec`/`code_exec`/`shell_exec` call runs): reportlab or
 fpdf -> `generate_pdf`, python-docx -> `generate_docx`, a new openpyxl or

@@ -29,12 +29,30 @@ PLATFORMS = {
 }
 
 
+class _HouseFont:
+    """Kazma's document font on a fake machine (``house_font_install.HouseFont``)."""
+
+    def __init__(self, installed=True):
+        self.installed, self.installs = installed, 0
+
+    def state(self):
+        if self.installed:
+            return sd.DepState("fonts", True, "IBM Plex Sans Arabic, installed for all users")
+        return sd.DepState("fonts", False, "IBM Plex Sans Arabic is not installed", ["ibm plex"])
+
+    def install(self):
+        self.installs += 1
+        self.installed = True
+        return True, "installed for all users"
+
+
 class _Machine:
     """A machine with some programs; ``run`` answers as they would."""
 
     def __init__(self, *, tesseract_langs=("ara", "eng", "osd"), clam=True, fonts=True, docker=True,
                  freshclam_scheduled=True, soffice=True, node="v22.11.0", vcruntime=(14, 44)):
         self.vcruntime = vcruntime
+        self.house = _HouseFont()
         self.programs = {"tesseract", "fc-list"} if tesseract_langs is not None else {"fc-list"}
         if clam:
             self.programs |= {"clamscan", "freshclam"}
@@ -48,7 +66,8 @@ class _Machine:
     def finders(self):
         return {"soffice": lambda: "/usr/bin/soffice" if self.soffice else None,
                 "docker": lambda: "/usr/bin/docker" if self.docker else None,
-                "vcruntime": lambda: self.vcruntime}
+                "vcruntime": lambda: self.vcruntime,
+                "house_font": self.house}
 
     def which(self, name):
         return f"/usr/bin/{name}" if name in self.programs else None
@@ -87,6 +106,7 @@ def test_each_manager_installs_the_table(machine, manager, tmp_path, monkeypatch
     monkeypatch.setenv("PROGRAMFILES", str(tmp_path))  # this machine's own programs are not the fake's
     machine.langs, machine.programs = None, set()
     machine.soffice = machine.docker = machine.fonts = False
+    machine.house.installed = False
     machine.vcruntime = None
     platform = PLATFORMS[manager]
     states = sd.check_all(platform, run=machine.run, which=machine.which, **machine.finders())
@@ -105,7 +125,11 @@ def test_each_manager_installs_the_table(machine, manager, tmp_path, monkeypatch
     if manager == "apt":
         assert argvs[0] == "sudo apt-get update"
     if manager == "winget":
-        assert [s.action for s in steps if s.action] == ["tessdata:ara", "tessdata:eng"]
+        assert [s.action for s in steps if s.action] == ["tessdata:ara", "tessdata:eng", "fonts:house"]
+        assert [s.admin for s in steps if s.action == "fonts:house"] == [True], "for all users: an elevated terminal"
+    else:
+        assert [s.action for s in steps if s.action == "fonts:house"] == ["fonts:house"], \
+            "Kazma's document font is installed on every OS"
     refresh = [s for s in steps if s.title.startswith("refresh the malware signatures")]
     assert len(refresh) == 1, "the signatures get a daily refresh of their own"
 

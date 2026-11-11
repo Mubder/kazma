@@ -37,11 +37,16 @@ on that has none.
   the calendar update now tell the model each key they take, its type and
   what it is, and the deck engine also reads "title". `generate_pdf` no
   longer offers images it never drew.
-- **Office's Protected View.** On a PC where IBM Plex Sans Arabic is installed
-  for one Windows user only, PowerPoint's Protected View draws Arabic set in
-  it as wrong glyphs and Word shows Arial, until Enable Editing; a file made
-  with no font from Kazma does the same. Install the font for all users.
-  The rendering guide says so.
+- **Kazma's installer installs its document font.** On a PC where IBM Plex
+  Sans Arabic was installed for one Windows user only, PowerPoint's Protected
+  View drew Arabic set in it as wrong glyphs and Word showed Arial, until
+  Enable Editing; a file made with no font from Kazma did the same. Setup
+  (`kazma setup system`, `kazma setup install`) now installs IBM Plex Sans
+  Arabic for all users on Windows, retiring a per-user copy of it, and in the
+  user's font folder on macOS and Linux. Its check used to say "bundled with
+  Kazma" whatever was installed. IBM Plex stays the one font of every
+  document: the Microsoft fonts that show in Protected View cannot be shipped
+  with Kazma for its PDFs and HTML.
 - **A deck written by hand in code goes to Kazma's PowerPoint generator.**
   When the agent tried to build a PowerPoint file with python-pptx in its
   Python tool, nothing stopped it, and the file came out in Arial and Segoe

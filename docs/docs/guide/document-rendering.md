@@ -152,8 +152,18 @@ These are the non-obvious facts each engine encodes once:
   and no embedded font, garbles when its Arabic names the face and draws
   correctly when it names Arial or a face installed nowhere; removing a
   Kazma deck's embedded fonts changes nothing. No file can change this:
-  install the font for all users (Windows: right-click the font file,
-  **Install for all users**; administrator rights), or choose Enable Editing.
+  the font has to be installed for all users. Kazma's installer does that on
+  the machine Kazma runs on (`kazma setup system`, `kazma setup install`;
+  administrator rights on Windows), and retires a per-user copy of the same
+  faces. Fonts installed for all users -- Arial, Calibri, Segoe UI, Dubai --
+  display correctly in Protected View (measured the same day). People you
+  send a file to who do not have IBM Plex see another face in Protected
+  View, and IBM Plex after Enable Editing.
+  One font for every format is kept on purpose: Calibri, Segoe UI and Dubai
+  are Microsoft's fonts, which Kazma may not ship, so its PDFs and HTML could
+  not use them on every install; IBM Plex is under the SIL Open Font License.
+  In LibreOffice an embedded font is used in a Word file and ignored in a
+  deck, whatever the font (measured in Kazma's worker image).
 - **Per block, not per document** — a bilingual document keeps each language's
   blocks aligned to their own reading start in every engine: `w:bidi` per
   paragraph (DOCX), per-block styles (PDF), a `dir` wrapper (HTML).
