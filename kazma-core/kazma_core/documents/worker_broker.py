@@ -932,8 +932,7 @@ class _Broker:
         def cancelled() -> bool:
             # The client sends nothing after its input: readable means it
             # closed the connection (or broke protocol). Either ends the job.
-            readable, _, _ = select.select([sock], [], [], 0)
-            return bool(readable)
+            return _readable_now(sock)
 
         def emit(data: bytes) -> None:
             sock.settimeout(30.0)
@@ -962,6 +961,22 @@ class _Broker:
             _send_frame(sock, FRAME_STATUS, status)
         except OSError:
             logger.info("[broker] client left before job %s status", run_id)
+
+
+def _readable_now(sock: socket.socket) -> bool:
+    """Has *sock* something to read (or been closed by its peer), without
+    waiting? ``poll`` where the system has it: ``select.select`` refuses a
+    descriptor numbered 1024 or more on Linux (``ValueError: filedescriptor
+    out of range``), so a broker -- or a process hosting one -- with that many
+    files open never saw a client leave, and the job ran on to its deadline
+    (Linux CI, 2026-11-10: the test process held thousands). Windows has no
+    ``poll`` and no such limit on ``select``."""
+    if hasattr(select, "poll"):
+        poller = select.poll()
+        poller.register(sock, select.POLLIN)
+        return bool(poller.poll(0))  # POLLHUP and POLLERR are always reported
+    readable, _, _ = select.select([sock], [], [], 0)
+    return bool(readable)
 
 
 def _close_quietly(stream: Any) -> None:
@@ -1008,9 +1023,19 @@ def _log_connection_error(request: object, client_address: object) -> None:
     logger.exception("[broker] connection from %s failed", client_address)
 
 
+#: SO_REUSEADDR on the broker's TCP port, POSIX only. There it lets a broker
+#: started again take back a port whose last connections are in TIME_WAIT --
+#: the guard's status probes leave some on every broker port -- while a port
+#: another socket LISTENS on is still refused. Without it, a broker restarted
+#: within a minute of its predecessor could not listen on Linux, and the guard
+#: restarted it until it gave up (CI, 2026-11-10). On Windows the option would
+#: let another process take a bound port, so it stays off there.
+_REUSE_ADDRESS = os.name != "nt"
+
+
 class _TcpServer(socketserver.ThreadingTCPServer):
     daemon_threads = True
-    allow_reuse_address = False
+    allow_reuse_address = _REUSE_ADDRESS
 
     def handle_error(self, request: Any, client_address: Any) -> None:
         _log_connection_error(request, client_address)
@@ -1156,6 +1181,8 @@ def _tcp_listen_refused(listen: str) -> OSError | None:
     try:
         family = socket.AF_INET6 if ":" in host.strip("[]") else socket.AF_INET
         with socket.socket(family, socket.SOCK_STREAM) as probe:
+            if _REUSE_ADDRESS:  # the bind the server makes (_TcpServer)
+                probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             probe.bind((host.strip("[]"), int(port)))
     except OSError as exc:
         return exc

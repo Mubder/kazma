@@ -32,6 +32,7 @@ import httpx
 
 from kazma_core.background import spawn_background
 from kazma_gateway.adapters.discord_receive import DiscordReceiveLog
+from kazma_gateway.sender_rule import SenderGate
 from kazma_gateway.gateway import (
     Attachment,
     BaseAdapter,
@@ -107,7 +108,7 @@ _SEND_MAX_RETRIES = 3
 _SEND_BASE_DELAY = 1.0
 
 
-class DiscordAdapter(BaseAdapter):
+class DiscordAdapter(SenderGate, BaseAdapter):
     """Discord bot adapter using Gateway WebSocket + REST API.
 
     Receives messages via Discord Gateway WebSocket (long-lived connection).
@@ -116,9 +117,10 @@ class DiscordAdapter(BaseAdapter):
     Args:
         token:           Discord bot token.
         allowed_guilds:  Optional whitelist of guild IDs (empty = allow all).
-        allowed_users:   Optional whitelist of Discord user IDs (empty = allow
-                         all). Stored as strings to match how Discord snowflake
-                         IDs are parsed. Mirrors Telegram's allowed_users gate.
+        allowed_users:   Optional whitelist of Discord user IDs (empty = only
+                         the owner's own ids Kazma knows, or everyone with
+                         ``allow_all``: ``sender_rule``). Stored as strings to
+                         match how Discord snowflake IDs are parsed.
 
     context_metadata keys (carried in every IncomingMessage):
         channel_id:  str
@@ -185,19 +187,9 @@ class DiscordAdapter(BaseAdapter):
         """The live receive record for the connector Test (plain data)."""
         return {
             **self._receive.snapshot(),
-            "allowed_users": len(self._allowed_users),
-            "allow_all": self._allow_all,
+            **self.admission(),
             "allowed_guilds": sorted(self._allowed_guilds),
         }
-
-    def actor_allowed(self, user_id: object) -> bool:
-        """Fail-closed allowlist: empty + ``allow_all=False`` rejects everyone."""
-        if not self._allowed_users and not self._allow_all:
-            return False
-        if self._allowed_users:
-            uid = str(user_id or "")
-            return bool(uid) and uid in self._allowed_users
-        return True
 
     async def listen(
         self,
@@ -213,14 +205,7 @@ class DiscordAdapter(BaseAdapter):
             queue:          The unified message bus.
             shutdown_event: Signals when to stop.
         """
-        if not self._allowed_users and not self._allow_all:
-            logger.error(
-                "[discord] No allowed_users configured and allow_all is false. "
-                "Bot will REJECT ALL messages. Set connectors.discord.allowed_users "
-                "or allow_all=true."
-            )
-        elif not self._allowed_users and self._allow_all:
-            logger.warning("[discord] allow_all is true — accepting messages from ALL users.")
+        # Who it answers is said once, where it is built (chat_adapters).
         self._queue = queue  # for interaction → synthetic slash enqueue
         self._http = httpx.AsyncClient(
             base_url=_DISCORD_API,
@@ -523,15 +508,20 @@ class DiscordAdapter(BaseAdapter):
             if gid and gid not in self._allowed_guilds:
                 self._note_drop("server_not_allowed", data)
                 return None
-        # User-level allowlist (fail-closed when empty + !allow_all)
-        if not self._allowed_users and not self._allow_all:
-            self._note_drop("no_allowlist", data)
+        # The one sender rule (sender_rule): a stranger writing in a direct
+        # message is told once a day that this bot is private.
+        refusal = self.sender_refusal(meta.get("user_id"))
+        if refusal:
+            self._note_drop(refusal, data)
+            self.tell_refused_sender(
+                refusal,
+                user_id=meta.get("user_id"),
+                direct=not meta.get("guild_id"),
+                target_id=f"discord:{meta.get('channel_id')}",
+                context_metadata={"channel_id": meta.get("channel_id")},
+                user_text=parsed.text,
+            )
             return None
-        if self._allowed_users:
-            uid = meta.get("user_id")
-            if not uid or uid not in self._allowed_users:
-                self._note_drop("user_not_allowed", data)
-                return None
         return parsed
 
     #: Drops that point at a setting to fix (a WARNING, throttled -- the
@@ -693,8 +683,9 @@ class DiscordAdapter(BaseAdapter):
         # made installs admin-grade and stopped there, leaving the privilege
         # model upside down: pressing Approve on a shell_exec / vault_retrieve
         # card was less privileged than installing a package. No-op in the
-        # shipped posture (allowed_users ⇒ admin); it bites only in allow_all,
-        # where any guild member could otherwise answer the operator.
+        # shipped posture (allowed_users, or the owner's own id, ⇒ admin); it
+        # bites only with the open switch, where any guild member could
+        # otherwise answer the operator.
         if action.kind in ("hitl", "swarm", "run"):
             from kazma_gateway.allowlists import is_gateway_admin
 
@@ -782,7 +773,7 @@ class DiscordAdapter(BaseAdapter):
                     private_reply_id = await prepare_callback(self, data, user_id, channel_id)
                     if private_reply_id is None:
                         return  # A private response must never fall back to the public channel.
-                # Top-of-handler actor_allowed already covered empty + nonempty.
+                # The top of the handler asked the sender rule (actor_allowed).
                 msg = IncomingMessage(
                     platform="discord",
                     sender_id=(

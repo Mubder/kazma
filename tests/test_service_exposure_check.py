@@ -90,6 +90,7 @@ def test_boot_says_it_once(monkeypatch, caplog):
 
     sent = []
     monkeypatch.setattr(se, "_docker_rows", lambda: EXPOSED_ROWS)
+    monkeypatch.setattr(se, "_inspect_container", lambda name: None)  # SearXNG's key: not this test's
     monkeypatch.setattr(se, "_role_answer", lambda: {"rolname": "postgres", "rolsuper": True})
     monkeypatch.setattr("kazma_core.observability.ops_alerts.alert", lambda *a, **k: sent.append(a[0]))
     with caplog.at_level(logging.WARNING, logger="kazma_core.security.service_exposure"):

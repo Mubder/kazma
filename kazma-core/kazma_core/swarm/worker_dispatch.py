@@ -243,6 +243,7 @@ async def dispatch_worker(
                 """Run the worker dispatch, honoring per-task workspace + commitment scope."""
                 from kazma_core.ide.workspace_scope import workspace_scope
                 from kazma_core.safety.commitment.scope import swarm_scope
+                from kazma_core.safety.outside_text_fetch import outside_text_scope
                 from kazma_core.tenant_context import tenant_scope
 
                 tid = None
@@ -257,7 +258,10 @@ async def dispatch_worker(
                 with tenant_scope(tid or "default"):
                     # Both managers no-op when their token is None, so always wrap.
                     async with workspace_scope(_ws_id), swarm_scope(_scope_token):
-                        with track_dispatch_effects(effects), handoff_offer(_offer):
+                        # The task's text is the user's message for its
+                        # fetches after outside text (safety.outside_text_fetch).
+                        with track_dispatch_effects(effects), handoff_offer(_offer), \
+                                outside_text_scope(prompt):
                             return await worker.dispatch(prompt, context=context)
 
             try:

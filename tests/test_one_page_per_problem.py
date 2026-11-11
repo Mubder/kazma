@@ -530,7 +530,7 @@ class _Machine:
             body = json.dumps(data, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ts = int(BASE + self.t)
         self.minutes.append({"now": ts, "live": live, "ready": ready, "heartbeat": {
-            "body": body.decode("utf-8"), "ts": ts, "signature": guard.sign_heartbeat(KEY.encode(), ts, body)}})
+            "body": body.decode("utf-8"), "ts": ts, "signature": guard.sign_request(KEY.encode(), ts, "POST", "/v1/heartbeat", body)}})
 
     def watch(self, node: str, tmp_path: Path) -> dict:
         path = tmp_path / "scenario.json"

@@ -67,7 +67,9 @@ class _Watch(BaseHTTPRequestHandler):
         key = self.keys.get(install)
         if not key:
             return None, "unknown_install"
-        want = "v1=" + hmac.new(key.encode(), ts.encode() + b"." + raw, hashlib.sha256).hexdigest()
+        # The Worker's v2 check (verify.js verifyRequest): method, path, body.
+        message = f"v2\n{ts}\n{self.command}\n{self.path}\n".encode() + raw
+        want = "v2=" + hmac.new(key.encode(), message, hashlib.sha256).hexdigest()
         if not hmac.compare_digest(want, self.headers.get("X-Kazma-Signature", "")):
             return None, "bad_signature"
         return install, ""
@@ -99,8 +101,8 @@ class _Watch(BaseHTTPRequestHandler):
         install = self.headers.get("X-Kazma-Install", "")
         ts = self.headers.get("X-Kazma-Timestamp", "")
         key = self.keys.get(install)
-        want = "v1=" + hmac.new(key.encode(), f"{ts}.GET /v1/summary".encode(), hashlib.sha256).hexdigest() \
-            if key else ""
+        message = f"v2\n{ts}\nGET\n{self.path}\n".encode()
+        want = "v2=" + hmac.new(key.encode(), message, hashlib.sha256).hexdigest() if key else ""
         if not key or not hmac.compare_digest(want, self.headers.get("X-Kazma-Signature", "")):
             return self._reply(401, {"error": "bad_signature"})
         now = time.time()

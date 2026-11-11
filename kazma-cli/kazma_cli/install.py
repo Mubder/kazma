@@ -331,9 +331,16 @@ def _check_parts(parts, machine: Machine, platform) -> tuple[dict[str, PartState
         elif part.id == "document_container":
             ok, detail = _container_state(machine, root)
         elif part.id == "private_search":
+            from kazma_core.security.searxng_secret import PLACEHOLDER, SECRET_VAR
+
             url = _env_value(env_path, "KAZMA_SEARXNG_URL")
+            secret = _env_value(env_path, SECRET_VAR)
             if not url:
                 ok, detail = False, "KAZMA_SEARXNG_URL is not set"
+            elif not secret or secret == PLACEHOLDER:
+                # Started without one, SearXNG runs on the placeholder key
+                # docker-compose.yml falls back to (2026-11-11).
+                ok, detail = False, f"{SECRET_VAR} is not set: SearXNG runs on the placeholder key"
             else:
                 answered = machine.answers(url.rstrip("/") + "/healthz")
                 ok, detail = (True, f"SearXNG answers at {url}") if answered else (
@@ -473,9 +480,17 @@ def build_plan(parts, found: dict[str, PartState], states, machine: Machine, pla
             "documents use the container profile", action="container_profile",
             shown="setting security.execution.document_worker_isolation = container")))
     if "private_search" in todo_ids and root is not None:
+        env_path = machine.env_path or _env_path()
+        # A generated key before SearXNG starts: compose falls back to the
+        # placeholder settings.yml ships (2026-11-11). Compose reads it from
+        # the same .env (--env-file); a key already there is kept.
+        plan.append(PlannedStep("private_search", Step(
+            "keep a generated SearXNG secret key", action="searxng_secret",
+            shown=f"SEARXNG_SECRET=<generated> in {env_path.name}, unless one is set")))
         plan.append(PlannedStep("private_search", Step(
             "start SearXNG (docker compose, search profile)",
-            (docker, "compose", "-f", str(root / "docker-compose.yml"), "--profile", "search", "up", "-d", "searxng")),
+            (docker, "compose", "-f", str(root / "docker-compose.yml"), "--env-file", str(env_path),
+             "--profile", "search", "up", "-d", "searxng")),
             attempts=_SYSTEM_ATTEMPTS, cwd=str(root)))
         plan.append(PlannedStep("private_search", Step(f"point Kazma's web search at {SEARXNG_URL}",
                                                        action="searxng_env",
@@ -582,6 +597,15 @@ def _run_planned(item: PlannedStep, machine: Machine, env_path: Path, log) -> tu
         except OSError as exc:
             return False, str(exc)
         os.environ["KAZMA_SEARXNG_URL"] = SEARXNG_URL
+        return True, ""
+    if step.action == "searxng_secret":
+        from kazma_core.security.searxng_secret import ensure_searxng_secret
+
+        try:
+            wrote = ensure_searxng_secret(env_path)
+        except OSError as exc:
+            return False, str(exc)
+        log("SEARXNG_SECRET generated and kept" if wrote else "SEARXNG_SECRET already set: kept")
         return True, ""
     if step.argv and step.argv[0] == "docker":
         from kazma_core.docker_cli import find_docker_cli

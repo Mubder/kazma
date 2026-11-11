@@ -349,6 +349,17 @@ class KazmaBundle:
 #: import or export.
 STALE_WORKING_FOLDER_S = 24 * 3600
 
+#: A failed import's staging folder is kept this long (2026-11-11): it holds
+#: the files the import could not restore, which the operator may still need
+#: to take, and it is removed at the next import after that. It used to be
+#: kept forever (``max_age_s=inf``).
+STALE_STAGING_S = 30 * 86400
+
+#: The file a running import or export keeps in its working folder: the
+#: process that uses it. A sweep never removes a folder whose marker names a
+#: process still running (or one it cannot rule out), whatever its age.
+IN_USE_MARKER = ".kazma-in-use"
+
 
 def _folder_epoch(folder: Path, prefix: str) -> float:
     """When *folder* (``<prefix><epoch>``) was made: its name, else its mtime."""
@@ -358,6 +369,64 @@ def _folder_epoch(folder: Path, prefix: str) -> float:
         return folder.stat().st_mtime
 
 
+def _this_process() -> dict[str, object]:
+    """Who uses a working folder: host, pid and start time (guards pid reuse)."""
+    import psutil
+
+    return {
+        "host": socket.gethostname(),
+        "pid": os.getpid(),
+        "started": f"{psutil.Process(os.getpid()).create_time():.3f}",
+    }
+
+
+def mark_working_folder(folder: Path) -> None:
+    """Say *folder* is in use by this process until :func:`release_working_folder`."""
+    from kazma_core.atomic_files import atomic_write_text
+
+    Path(folder).mkdir(parents=True, exist_ok=True)
+    atomic_write_text(Path(folder) / IN_USE_MARKER, json.dumps(_this_process()))
+
+
+def release_working_folder(folder: Path) -> None:
+    """Take this process's mark off *folder* (a folder already removed is fine)."""
+    try:
+        (Path(folder) / IN_USE_MARKER).unlink(missing_ok=True)
+    except OSError as exc:
+        logger.warning("[migrate] could not take the in-use mark off %s: %s", folder, exc)
+
+
+def _working_folder_in_use(folder: Path) -> bool:
+    """Whether a run may still use *folder*: its marker names a live process.
+
+    No marker: not in use. A marker naming a process of this host that is
+    gone (or a reused pid, told by its start time): not in use. A marker that
+    cannot be read, of another host, or a process that cannot be asked: in
+    use -- a folder is never removed under a run that might hold it.
+    """
+    marker = Path(folder) / IN_USE_MARKER
+    if not marker.exists():
+        return False
+    try:
+        owner = json.loads(marker.read_text(encoding="utf-8"))
+        host, pid, started = owner["host"], int(owner["pid"]), str(owner["started"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return True
+    if host != socket.gethostname():
+        return True
+    import psutil
+
+    try:
+        process = psutil.Process(pid)
+        if f"{process.create_time():.3f}" != started:
+            return False  # the pid was reused: the run that marked it is gone
+        return process.is_running() and process.status() != psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        return False
+    except psutil.Error:
+        return True
+
+
 def sweep_working_folders(data_dir: Path, prefix: str, *,
                           max_age_s: float = STALE_WORKING_FOLDER_S,
                           now: float | None = None) -> list[str]:
@@ -365,7 +434,8 @@ def sweep_working_folders(data_dir: Path, prefix: str, *,
 
     Every one loses its ``meta.env`` (the vault key in clear; a build before
     2026-11-10 left it there, and the universal backup copied it offsite).
-    One older than *max_age_s* is removed whole, with a WARNING naming it.
+    One older than *max_age_s* is removed whole, with a WARNING naming it,
+    unless a run still uses it (:func:`_working_folder_in_use`).
     Returns the names removed.
     """
     import shutil
@@ -377,11 +447,15 @@ def sweep_working_folders(data_dir: Path, prefix: str, *,
             continue
         try:
             (folder / "meta.env").unlink(missing_ok=True)
-            if now - _folder_epoch(folder, prefix) > max_age_s:
-                shutil.rmtree(folder)
-                removed.append(folder.name)
-                logger.warning("[migrate] removed a working folder left by an earlier run: %s",
-                               folder)
+            if now - _folder_epoch(folder, prefix) <= max_age_s:
+                continue
+            if _working_folder_in_use(folder):
+                logger.info("[migrate] left %s: a run still uses it", folder)
+                continue
+            shutil.rmtree(folder)
+            removed.append(folder.name)
+            logger.warning("[migrate] removed a working folder left by an earlier run: %s",
+                           folder)
         except OSError as exc:
             logger.warning("[migrate] could not clean the leftover folder %s: %s", folder, exc)
     return removed

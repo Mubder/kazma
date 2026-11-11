@@ -96,7 +96,7 @@ Import never touches live data mid-flight:
 3. **Backup** live DBs to `kazma-data/.migrate-backup-<ts>/`
 4. **Swap** staging → live (WAL-safe, one file at a time)
 
-A failure before the swap leaves live data untouched. The staging dir is preserved on failure for inspection. To roll back: copy the `.db` files from the backup dir back over the live ones.
+A failure before the swap leaves live data untouched. The staging dir is preserved on failure for inspection, without the vault key, and the next import removes it once it is older than 30 days (never while an import is still using it). Take what you need from it before then. To roll back: copy the `.db` files from the backup dir back over the live ones.
 
 ---
 

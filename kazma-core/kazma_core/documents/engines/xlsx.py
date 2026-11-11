@@ -65,6 +65,7 @@ class XlsxEngine:
 
         workbook = Workbook()
         workbook.remove(workbook.active)
+        self._house_workbook(workbook)
 
         # File core properties (title/author/subject).
         try:
@@ -141,6 +142,31 @@ class XlsxEngine:
         if not workbook.sheetnames:
             workbook.create_sheet("Sheet")
         workbook.save(str(output))
+
+    @staticmethod
+    def _house_workbook(workbook: Any) -> None:
+        """The workbook's own fonts in the house face (``engines/office_fonts.py``).
+
+        Kazma's cells name it, but a cell a person adds takes the Normal
+        style's font -- the stylesheet's first, Calibri with the theme's
+        minor scheme -- and the theme named Calibri, with Arial for Arabic.
+        Both are the house face now: the first font names it with no theme
+        scheme, and the theme's font scheme is the house theme.
+        """
+        from copy import copy
+
+        from openpyxl.styles import Font
+        from openpyxl.styles.colors import Color
+        from openpyxl.utils.indexed_list import IndexedList
+        from openpyxl.writer.theme import theme_xml
+
+        from .office_fonts import house_faces, house_theme
+
+        latin, _ = house_faces()
+        default = Font(name=latin, sz=11, family=2, b=False, i=False, color=Color(theme=1))
+        workbook._fonts = IndexedList([default])
+        workbook._named_styles["Normal"].font = copy(default)
+        workbook.loaded_theme = house_theme(theme_xml.encode("utf-8"))
 
     @staticmethod
     def _add_chart(sheet: Any, spec: dict[str, Any], *, last_data_row: int) -> None:

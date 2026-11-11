@@ -302,6 +302,14 @@ other engines are rate-limited.
 | Env | `KAZMA_SEARXNG_URL=http://127.0.0.1:8088` |
 | ConfigStore | key `search.searxng_url` (same purpose) |
 | Settings | `deploy/searxng/settings.yml` enables **JSON** format (required) |
+| Secret key | `SEARXNG_SECRET` in `.env`: `kazma setup install` (the private search part) generates one before it starts SearXNG and keeps one that is there |
+
+`kazma setup install --with private_search` sets SearXNG up end to end: a
+generated secret key, the container, and `KAZMA_SEARXNG_URL`. Started by hand
+without `SEARXNG_SECRET`, SearXNG runs on the placeholder key the shipped
+files carry; Kazma says so once at start (a WARNING in its log) and in the
+security report (`check_searxng_secret`), and running the same setup command
+fixes it: it writes the key and starts the container again with it.
 
 Kazma multi-base discovery also probes `localhost:8088`, `host.docker.internal:8088`, and `searxng:8080`. Live bases are cached briefly; dead hosts cool down ~60s.
 

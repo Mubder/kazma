@@ -32,7 +32,9 @@ __all__ = [
     "filter_injection",
     "format_untrusted_block",
     "fence_untrusted",
+    "holds_fence",
     "observation_text",
+    "outside_fences",
     "sanitize_fence_source",
 ]
 
@@ -349,3 +351,24 @@ def observation_text(text: str) -> str:
     if not text or "<kazma:data" not in text:
         return text or ""
     return _FENCED_BLOCK_RE.sub(lambda m: m.group(1), text)
+
+
+def holds_fence(text: str | None) -> bool:
+    """Whether *text* carries outside text: a data fence, which only the fence
+    helpers write (a fetched page, a mail, a document, an MCP resource)."""
+    return bool(text) and _FENCE_OPEN_RE.search(str(text)) is not None
+
+
+def outside_fences(text: str | None) -> str:
+    """*text* without its data fences: what its author wrote, not what it
+    quotes from outside (a message with an attached document's text)."""
+    body = str(text or "")
+    if "<kazma:data" not in body:
+        return body
+    body = _FENCED_BLOCK_RE.sub(" ", body)
+    # A fence cut off (a bounded output) is dropped from its opening on.
+    match = _FENCE_OPEN_RE.search(body)
+    return body[: match.start()] if match else body
+
+
+_FENCE_OPEN_RE: re.Pattern[str] = re.compile(r"<kazma:data source=\"[^\"]*\" untrusted=\"true\">")

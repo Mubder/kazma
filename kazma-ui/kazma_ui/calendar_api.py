@@ -17,10 +17,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse
 
 from kazma_ui.email_api import _request_base, _safe_error, _verify_same_origin
 
@@ -40,23 +39,22 @@ async def calendar_status() -> JSONResponse:
         return _safe_error(exc)
 
 
-@router.get("/oauth/google/start")
-async def google_calendar_oauth_start(request: Request) -> Any:
+@protected_router.post("/oauth/google/start", dependencies=[Depends(_verify_same_origin)])
+async def google_calendar_oauth_start(request: Request) -> JSONResponse:
+    """Start a Google Calendar sign-in from Kazma's own page: the consent URL
+    (opened in the same tab) and the binding cookie (``kazma_ui.oauth_sign_in``).
+    It comes back through the Gmail callback."""
     from kazma_skills.native.calendar.oauth_google import start_google_calendar_oauth
+    from kazma_skills.native.email_manager.oauth_gmail import gmail_redirect_uri
 
-    result = await asyncio.to_thread(start_google_calendar_oauth, _request_base(request))
-    if not result.get("ok"):
-        return JSONResponse(result, status_code=400)
-    return RedirectResponse(result["authorize_url"], status_code=302)
+    from kazma_ui.oauth_sign_in import answer_start
 
-
-@router.get("/oauth/google/start.json")
-async def google_calendar_oauth_start_json(request: Request) -> JSONResponse:
-    from kazma_skills.native.calendar.oauth_google import start_google_calendar_oauth
-
-    result = await asyncio.to_thread(start_google_calendar_oauth, _request_base(request))
-    code = 200 if result.get("ok") else 400
-    return JSONResponse(result, status_code=code)
+    base = _request_base(request)
+    return await answer_start(
+        request,
+        callback_url=gmail_redirect_uri(base),
+        start=lambda: start_google_calendar_oauth(base),
+    )
 
 
 @protected_router.post(
@@ -72,15 +70,21 @@ async def google_calendar_disconnect() -> JSONResponse:
         return _safe_error(exc)
 
 
-@router.get("/oauth/microsoft/start.json")
-async def outlook_calendar_oauth_start_json(request: Request) -> JSONResponse:
-    """A Microsoft sign-in for Outlook Calendar only: mail is left as it is."""
-    from kazma_skills.native.email_manager.oauth_ms_browser import start_ms_browser_oauth
+@protected_router.post("/oauth/microsoft/start", dependencies=[Depends(_verify_same_origin)])
+async def outlook_calendar_oauth_start(request: Request) -> JSONResponse:
+    """A Microsoft sign-in for Outlook Calendar only: mail is left as it is.
+    The sign-in URL (opened in the same tab) and the binding cookie; it comes
+    back through the Microsoft callback (``purpose=calendar``)."""
+    from kazma_skills.native.email_manager.oauth_ms_browser import ms_redirect_uri, start_ms_browser_oauth
 
-    result = await asyncio.to_thread(
-        start_ms_browser_oauth, _request_base(request), purpose="calendar"
+    from kazma_ui.oauth_sign_in import answer_start
+
+    base = _request_base(request)
+    return await answer_start(
+        request,
+        callback_url=ms_redirect_uri(base),
+        start=lambda: start_ms_browser_oauth(base, purpose="calendar"),
     )
-    return JSONResponse(result, status_code=200 if result.get("ok") else 400)
 
 
 @protected_router.post(

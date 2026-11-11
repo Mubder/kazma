@@ -29,7 +29,14 @@ import httpx
 
 from kazma_core.http_tls import shared_ssl_context
 from kazma_gateway.adapters.discord_receive import DROP_REASONS
-from kazma_gateway.connector_test import Checks, command_registration, judge_message, listening, when
+from kazma_gateway.connector_test import (
+    Checks,
+    allowlist_check,
+    command_registration,
+    judge_message,
+    listening,
+    when,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +161,8 @@ async def diagnose(
     channel_id: str = "",
     guild_ids: list[str] | None = None,
     allowed_users: list[str] | None = None,
+    owner_ids: list[str] | None = None,
+    open_to_everyone: bool | None = None,
     live: dict[str, Any] | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> dict[str, Any]:
@@ -265,15 +274,12 @@ async def diagnose(
             for user_id in allowed[:_DM_USERS]:
                 add("direct_message", *await _judge_direct_messages(client, user_id, me, live, allowed))
 
-    if allowed:
-        add("allowed", True, f"{len(allowed)} allowed user(s): {', '.join(allowed)}.")
-    elif live is not None and live.get("allow_all"):
-        add("allowed", None, "Allowed User IDs is empty: anyone who can message the bot is answered.")
-    else:
-        add("allowed", False, (
-            "Allowed User IDs is empty, so every message is refused. Put your Discord user id there "
-            "(Discord → Settings → Advanced → Developer Mode, then right-click your name → Copy User ID)."
-        ))
+    add("allowed", *allowlist_check(
+        allowed, owner_ids=list(owner_ids or ()), open_to_everyone=open_to_everyone, live=live,
+        platform="Discord",
+        find_id=("send the bot a direct message: a refused sender is told their id; or Discord → "
+                 "Settings → Advanced → Developer Mode, then right-click your name → Copy User ID"),
+    ))
 
     add("listening", *listening(live, "Discord", not_running=(
         "Kazma's Discord connection is not running: turn Discord on above and Save, "

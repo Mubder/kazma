@@ -123,3 +123,11 @@ npm install
 npm run start    # local dev server
 npm run build    # production build
 ```
+
+The site's build packages are kept by `npm audit fix` (never `--force`) and
+`docs/package-lock.json`. `package.json` holds Mermaid on 11.x (`overrides`):
+the audit fix otherwise took Mermaid 12, a major version Docusaurus 3 was not
+tested with. What the audit still reports needs a major version of a package
+Docusaurus 3.10.2 (the newest) holds back -- `tinypool` and
+`serialize-javascript` in the build, the dev server's `uuid`, the `katex`
+Mermaid 11 brings -- or has no fixed release yet (`deepmerge`).

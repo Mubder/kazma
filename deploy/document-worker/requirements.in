@@ -1,5 +1,7 @@
 # Python engines of the containerized document worker (and nothing else).
-# Direct pins match uv.lock; requirements.txt locks the rest by hash.
+# Direct pins match uv.lock; requirements.txt locks the rest by hash, never
+# below a security floor pyproject.toml declares for the same package
+# (tests/test_document_worker_locks.py holds both).
 # Regenerate it after a change:
 #   uv pip compile deploy/document-worker/requirements.in --python-version 3.11 \
 #     --python-platform x86_64-manylinux_2_28 --generate-hashes \
@@ -9,26 +11,30 @@
 # not part of the container profile), psutil (Windows-only tree cleanup).
 arabic-reshaper==3.0.1
 defusedxml==0.7.1
-lxml==6.1.1
-markdown==3.10.2
+lxml==6.1.3
+markdown==3.11.2
 # The neural OCR engine (documents.ocr.engine): ONNX Runtime, OpenCV's image
 # operations, polygon offsetting. Its models are baked in by the ocr-models
 # build stage (deploy/document-worker/Dockerfile).
 numpy==2.4.6
-onnxruntime==1.31.0
+onnxruntime==1.31.1
 opencv-python-headless==5.0.0.93
 openpyxl==3.1.5
 pyclipper==1.4.0
 pdfplumber==0.11.10
-pillow==12.3.0
-prometheus-client==0.25.0
-pygments==2.20.0
+# 13 (a new major) for the image-parsing advisories fixed in 13.0.0; Kazma's
+# own environment runs it since the FA-258 floors (pyproject.toml).
+pillow==13.0.0
+prometheus-client==0.26.0
+pygments==2.21.0
 pymupdf==1.28.2
-pypdf==6.19.0
-pypdfium2==5.12.1
-python-bidi==0.6.10
+pypdf==6.21.4
+pypdfium2==5.14.0
+python-bidi==0.6.12
 python-docx==1.2.0
 python-pptx==1.0.2
 pyyaml==6.0.3
-reportlab==5.0.0
+reportlab==5.1.0
 weasyprint==70.0
+# Security floors of packages the engines bring in (pyproject.toml's).
+brotli>=1.2.1

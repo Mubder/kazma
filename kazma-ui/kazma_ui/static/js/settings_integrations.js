@@ -402,9 +402,13 @@
                         url.searchParams.delete('account');
                         history.replaceState(null, '', url.pathname + url.search + url.hash);
                     } else if (oauth === 'error') {
-                        showToast(_k('settings.int.oauth_failed', 'OAuth failed: ') + (url.searchParams.get('msg') || 'unknown'), 'error');
+                        // A refused callback names a code (oauth_attempts):
+                        // worded here, in the page's language.
+                        const why = window.kazmaSignInFailed(url.searchParams.get('reason'), url.searchParams.get('msg') || 'unknown');
+                        showToast(_k('settings.int.oauth_failed', 'OAuth failed: ') + why, 'error');
                         url.searchParams.delete('email_oauth');
                         url.searchParams.delete('msg');
+                        url.searchParams.delete('reason');
                         history.replaceState(null, '', url.pathname + url.search + url.hash);
                     }
                     if (calOauth === 'ok') {
@@ -419,9 +423,11 @@
                         url.searchParams.delete('msg');
                         history.replaceState(null, '', url.pathname + url.search + url.hash);
                     } else if (calOauth === 'error') {
-                        showToast(_k('settings.int.calendar_oauth_failed', 'Calendar OAuth failed: ') + (url.searchParams.get('msg') || 'unknown'), 'error');
+                        const why = window.kazmaSignInFailed(url.searchParams.get('reason'), url.searchParams.get('msg') || 'unknown');
+                        showToast(_k('settings.int.calendar_oauth_failed', 'Calendar OAuth failed: ') + why, 'error');
                         url.searchParams.delete('calendar_oauth');
                         url.searchParams.delete('msg');
+                        url.searchParams.delete('reason');
                         history.replaceState(null, '', url.pathname + url.search + url.hash);
                     }
                 } catch (e) { /* ignore */ }
@@ -494,22 +500,27 @@
             return clean;
         },
 
-        async _startAccountSignIn(kind, alias) {
-            const base = kind === 'microsoft'
-                ? '/api/email/oauth/microsoft/start.json'
-                : '/api/email/oauth/gmail/start.json';
+        /* Start an OAuth sign-in in THIS tab (auth-guard.js kazmaStartSignIn:
+           a POST, then the provider's page; the callback sends the browser
+           back to Settings). *say* words a start that did not go. */
+        async _signIn(url, body, say, fallback) {
             this.emailSaving = true;
             try {
-                const resp = await fetch(base + '?account=' + encodeURIComponent(alias), { credentials: 'same-origin' });
-                const data = await resp.json().catch(() => ({}));
-                if (!resp.ok || !data.ok || !data.authorize_url) {
-                    throw new Error(data.error || ('HTTP ' + resp.status));
-                }
-                window.location.href = data.authorize_url;
+                const data = await window.kazmaStartSignIn(url, body);
+                if (data.ok) return;  // on the way to the provider
+                showToast(say(window.kazmaSignInProblem(data, fallback || ('HTTP ' + data.status))), 'error');
             } catch (e) {
-                showToast(_k('settings.int.email_account_failed', 'Could not add the account: {error}', { error: e.message }), 'error');
-                this.emailSaving = false;
+                showToast(say(e.message), 'error');
             }
+            this.emailSaving = false;
+        },
+
+        async _startAccountSignIn(kind, alias) {
+            const url = kind === 'microsoft'
+                ? '/api/email/oauth/microsoft/start'
+                : '/api/email/oauth/gmail/start';
+            await this._signIn(url, { account: alias },
+                (error) => _k('settings.int.email_account_failed', 'Could not add the account: {error}', { error }));
         },
 
         async addGoogleAccount() {
@@ -765,36 +776,18 @@
                 );
                 return;
             }
-            this.emailSaving = true;
-            try {
-                const resp = await fetch('/api/email/oauth/gmail/start.json', { credentials: 'same-origin' });
-                const data = await resp.json().catch(() => ({}));
-                if (!resp.ok || !data.ok || !data.authorize_url) {
-                    throw new Error(data.error || _k('settings.int.could_not_start_google_oauth', 'Could not start Google OAuth (is Client ID/secret saved?)'));
-                }
-                window.location.href = data.authorize_url;
-            } catch (e) {
-                showToast(_k('settings.int.gmail_oauth_failed', 'Gmail OAuth failed: ') + e.message, 'error');
-                this.emailSaving = false;
-            }
+            await this._signIn('/api/email/oauth/gmail/start', {},
+                (error) => _k('settings.int.gmail_oauth_failed', 'Gmail OAuth failed: ') + error,
+                _k('settings.int.could_not_start_google_oauth', 'Could not start Google OAuth (is Client ID/secret saved?)'));
         },
 
         async connectMicrosoftOAuth() {
             if ((this.emailMs.client_id || '').trim()) {
                 await this.saveMsClient();
             }
-            this.emailSaving = true;
-            try {
-                const resp = await fetch('/api/email/oauth/microsoft/start.json', { credentials: 'same-origin' });
-                const data = await resp.json().catch(() => ({}));
-                if (!resp.ok || !data.ok || !data.authorize_url) {
-                    throw new Error(data.error || _k('settings.int.could_not_start_microsoft_oauth', 'Could not start Microsoft OAuth'));
-                }
-                window.location.href = data.authorize_url;
-            } catch (e) {
-                showToast(_k('settings.int.microsoft_oauth_failed', 'Microsoft OAuth failed: ') + e.message, 'error');
-                this.emailSaving = false;
-            }
+            await this._signIn('/api/email/oauth/microsoft/start', {},
+                (error) => _k('settings.int.microsoft_oauth_failed', 'Microsoft OAuth failed: ') + error,
+                _k('settings.int.could_not_start_microsoft_oauth', 'Could not start Microsoft OAuth'));
         },
 
         async saveGmail() {
@@ -836,18 +829,9 @@
                 );
                 return;
             }
-            this.emailSaving = true;
-            try {
-                const resp = await fetch('/api/calendar/oauth/google/start.json', { credentials: 'same-origin' });
-                const data = await resp.json().catch(() => ({}));
-                if (!resp.ok || !data.ok || !data.authorize_url) {
-                    throw new Error(data.error || _k('settings.int.could_not_start_google_calendar', 'Could not start Google Calendar OAuth'));
-                }
-                window.location.href = data.authorize_url;
-            } catch (e) {
-                showToast(_k('settings.int.calendar_oauth_failed', 'Calendar OAuth failed: ') + e.message, 'error');
-                this.emailSaving = false;
-            }
+            await this._signIn('/api/calendar/oauth/google/start', {},
+                (error) => _k('settings.int.calendar_oauth_failed', 'Calendar OAuth failed: ') + error,
+                _k('settings.int.could_not_start_google_calendar', 'Could not start Google Calendar OAuth'));
         },
 
         async disconnectGoogleCalendar() {
@@ -866,18 +850,9 @@
             if ((this.emailMs.client_id || '').trim()) {
                 await this.saveMsClient();
             }
-            this.emailSaving = true;
-            try {
-                const resp = await fetch('/api/calendar/oauth/microsoft/start.json', { credentials: 'same-origin' });
-                const data = await resp.json().catch(() => ({}));
-                if (!resp.ok || !data.ok || !data.authorize_url) {
-                    throw new Error(data.error || _k('settings.int.could_not_start_microsoft_oauth', 'Could not start Microsoft OAuth'));
-                }
-                window.location.href = data.authorize_url;
-            } catch (e) {
-                showToast(_k('settings.int.calendar_oauth_failed', 'Calendar OAuth failed: ') + e.message, 'error');
-                this.emailSaving = false;
-            }
+            await this._signIn('/api/calendar/oauth/microsoft/start', {},
+                (error) => _k('settings.int.calendar_oauth_failed', 'Calendar OAuth failed: ') + error,
+                _k('settings.int.could_not_start_microsoft_oauth', 'Could not start Microsoft OAuth'));
         },
 
         /* The same calendar-only sign-in with a code, for when Microsoft

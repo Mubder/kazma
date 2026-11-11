@@ -165,7 +165,7 @@ mcp:
       transport: stdio
       workspace_bound: true
       trust: approval_required
-      command: [npx, -y, '@modelcontextprotocol/server-filesystem', '${KAZMA_ACTIVE_WORKSPACE}']
+      command: [npx, -y, '@modelcontextprotocol/server-filesystem@2026.8.31', '${KAZMA_ACTIVE_WORKSPACE}']
   ide_server:
     enabled: true
     root: .
@@ -201,6 +201,7 @@ Multi-line string. The default is Arabic-aware: "You are Kazma (كاظمه), an 
 | `memory.consolidation.skip_llm_in_demo` | bool | `true` | No LLM under `KAZMA_DEMO_MODE`. |
 | `memory.embedding.provider` | str | `local` | `local` or remote OpenAI-compatible embed API. |
 | `memory.embedding.model` | str | `BAAI/bge-m3` | Embedding model id (multilingual, 1024-dim). |
+| `memory.embedding.revision` | str | unset | Hugging Face revision of a local model you configured. Unset, `BAAI/bge-m3` loads at Kazma's pinned commit and any other model follows its main branch. |
 | `memory.embedding.dim` | int | `1024` | Must match the embedder. |
 | `memory.embedding.base_url` | str | unset | `/embeddings` endpoint for remote providers. |
 | `memory.embedding.api_key_env` | str | `KAZMA_EMBED_API_KEY` | Env var holding the remote API key. |

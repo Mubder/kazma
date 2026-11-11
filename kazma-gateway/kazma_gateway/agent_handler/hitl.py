@@ -570,22 +570,35 @@ def _public_card(tool: Any, tools: Any) -> tuple[tuple[str, str] | None, dict[st
 ASKS_EVERY_TIME = "This tool asks you every time: YOLO and grants cannot skip it."
 
 
+def _card_note_lines(payload: dict[str, Any]) -> list[str]:
+    """The card's notes, worded: why a fetch asks, what a repository makes
+    git run -- in the language of the message the card answers
+    (``safety.card_notes``)."""
+    from kazma_core.safety.card_notes import note_lines
+
+    lang = str(payload.get("card_lang") or "")
+    return [f"⚠️ {line}" for line in note_lines(payload.get("card_notes"), lang)]
+
+
 def _single_tool_card_text(
     tool: Any, args_str: str, proposal_lines: list[str], request_id: str,
     public: tuple[str, str] | None, *, always: bool = False,
+    notes: list[str] | None = None,
 ) -> str:
     """A one-tool card's text: a public action first names itself and shows
-    exactly what it publishes, then the call."""
+    exactly what it publishes, then the call. *notes* are the card's notes
+    (``safety.card_notes``), worded."""
     drafts = "\n".join(proposal_lines) + "\n" if proposal_lines else ""
+    noted = "".join(f"{line}\n\n" for line in (notes or []))
     reply = f"Reply: hitl approve {request_id}\n   or: hitl deny {request_id}"
     if public:
         return (
-            f"📢 {public[0]}\n\n{drafts}Tool: {tool}\nArgs: {args_str}\n\n"
+            f"📢 {public[0]}\n\n{drafts}Tool: {tool}\nArgs: {args_str}\n\n{noted}"
             "This is a public action and asks you every time. Read the text "
             f"above before you answer.\n\n{reply}"
         )
     note = f"{ASKS_EVERY_TIME}\n\n" if always else ""
-    return f"⚠️ Approval required\nTool: {tool}\nArgs: {args_str}\n\n{drafts}{note}{reply}"
+    return f"⚠️ Approval required\nTool: {tool}\nArgs: {args_str}\n\n{drafts}{noted}{note}{reply}"
 
 
 def _build_approval_prompt(
@@ -612,6 +625,7 @@ def _build_approval_prompt(
     args_str = _format_args_for_approval(tool, redact_arguments(tool, args))
     tools = payload.get("tools") or []
     _public, _labels, _clip = _public_card(tool, tools)
+    _note_lines = _card_note_lines(payload)
     # S1-3: proposal-backed posts — show the STORED drafts this approval
     # publishes, resolved server-side from the durable artifact store. The
     # user approves the stored text, not the model's memory.
@@ -655,6 +669,7 @@ def _build_approval_prompt(
             targs = redact_arguments(tname, item.get("args") or item.get("arguments") or {})
             tstr = _format_args_for_approval(tname, targs, budget=_MULTI_BUDGET)
             lines.append(f"{i}. {tname}: {tstr}")
+        lines.extend(_note_lines)
         lines.extend(proposal_lines)
         if not _labels["task"] and not _public:
             lines.extend(["", ASKS_EVERY_TIME])
@@ -720,6 +735,7 @@ def _build_approval_prompt(
         return {"text": text, "markup": markup, "platform": plat}
     text = _single_tool_card_text(
         tool, args_str, proposal_lines, request_id, _public, always=not _labels["task"],
+        notes=_note_lines,
     )
     markup = None
     plat = (platform or "telegram").lower()

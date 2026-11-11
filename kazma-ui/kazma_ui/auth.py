@@ -568,19 +568,36 @@ def _host_is_local_name(request: Request) -> bool:
     # NOT "0.0.0.0": browsers route it to loopback, so on a direct bind with
     # peer trust a request to http://0.0.0.0:<port> would inherit the
     # loopback auto-login (AUD-021). It is a bind address, never a client host.
-    local_names = {"localhost", "127.0.0.1", "::1", "[::1]"}
-    machine = socket.gethostname().lower() if hasattr(socket, "gethostname") else ""
-    if machine:
-        local_names.add(machine)
-        # Windows often addresses itself as <hostname>.local / <hostname>.lan
-        for suffix in (".local", ".lan"):
-            local_names.add(machine + suffix)
+    local_names = {"localhost", "127.0.0.1", "::1", "[::1]"} | _machine_names()
     extras = {
         h.strip().lower().split(":")[0]
         for h in os.environ.get(_AUTOLOGIN_EXTRA_HOSTS_ENV_VAR, "").split(",")
         if h.strip()
     }
-    return hostname in local_names or hostname in extras or host in extras
+    return hostname.rstrip(".") in local_names or hostname in extras or host in extras
+
+
+def _machine_names() -> set[str]:
+    """This machine's own host name, with and without its domain.
+
+    ``socket.gethostname()`` (no DNS lookup: the loop is not held), compared
+    in lower case. A name the OS reports with its domain (``box.corp.example``)
+    also counts as its first label (``box``); a short name also counts with
+    ``.local`` / ``.lan``, which Windows and mDNS answer for it.
+    """
+    try:
+        machine = socket.gethostname().strip().lower().rstrip(".")
+    except (AttributeError, OSError):
+        return set()
+    if not machine:
+        return set()
+    names = {machine}
+    short = machine.split(".", 1)[0]
+    if short:
+        names.add(short)
+        for suffix in (".local", ".lan"):
+            names.add(short + suffix)
+    return names
 
 
 #: Names no public DNS answers (RFC 6761): a rebinding page cannot be served
@@ -593,10 +610,17 @@ def _host_cannot_be_rebound(request: Request) -> bool:
 
     A rebinding page is served from the attacker's own public domain, which
     then resolves to 127.0.0.1; its requests carry that domain as ``Host``.
-    So a Host that is a local name (:func:`_host_is_local_name`, which takes
-    ``KAZMA_AUTOLOGIN_HOSTS``), an IP literal, a single-label name, a reserved
-    name (``*.localhost``, ``*.test``) or the host of a declared browser
-    origin (``KAZMA_PUBLIC_URL`` / ``KAZMA_CORS_ORIGINS``) is not one.
+    So a Host that is a local name (:func:`_host_is_local_name`: ``localhost``,
+    this machine's own name with and without its domain, what
+    ``KAZMA_AUTOLOGIN_HOSTS`` names), an IP literal, a reserved name
+    (``*.localhost``, ``*.test``) or the host of a declared browser origin
+    (``KAZMA_PUBLIC_URL`` / ``KAZMA_CORS_ORIGINS``) is not one.
+
+    A single-label name is not taken on its own: until 2026-11-11 any name
+    without a dot passed, and a name like ``attacker`` reaches a browser
+    through the network's DNS search suffix or a name another machine on the
+    LAN answers (LLMNR, NetBIOS) -- a page served under it, rebound to
+    127.0.0.1, reached the whole API of an install with sign-in off.
     """
     if _host_is_local_name(request):
         return True
@@ -614,7 +638,9 @@ def _host_cannot_be_rebound(request: Request) -> bool:
         return True
     except ValueError:
         pass
-    if "." not in hostname or hostname.endswith(_RESERVED_LOCAL_SUFFIXES):
+    if "." not in hostname:
+        return False  # not a local name (checked above): see the docstring
+    if hostname.endswith(_RESERVED_LOCAL_SUFFIXES):
         return True
     from urllib.parse import urlsplit
 
@@ -813,9 +839,10 @@ ALWAYS_OPEN_PATHS: frozenset[str] = frozenset({
 ALWAYS_OPEN_PREFIXES: tuple[str, ...] = (
     # Callbacks are browser redirects with ?code= only (no secret header).
     "/api/github/oauth/callback",
-    # /api/github/oauth/start is intentionally *not* open: starting OAuth
-    # requires an authenticated session/cookie (audit residual — unauth start
-    # could write oauth_state into ConfigStore).
+    # The starts (/api/github/oauth/start, /api/email/oauth/*/start,
+    # /api/calendar/oauth/*/start) are intentionally *not* open: each is a
+    # POST from a signed-in page that records a sign-in attempt
+    # (kazma_core.security.oauth_attempts).
     # Email OAuth: Google/Microsoft redirect with ?code= only (no secret header)
     "/api/email/oauth/gmail/callback",
     "/api/email/oauth/microsoft/callback",

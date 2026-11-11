@@ -188,7 +188,7 @@ def _utc_now_iso() -> str:
 # Pattern task types whose ``task.timeout`` is applied PER STEP by the
 # pattern executors (patterns.py ``wait_timeout`` wraps each individual
 # dispatch), NOT as a whole-task deadline. dispatch() exempts these from
-# the whole-task ``wait_for`` and reap_stale_tasks() must scale its
+# the whole-task deadline and reap_stale_tasks() must scale its
 # watchdog deadline by the pattern's step count accordingly.
 _PER_STEP_PATTERN_TYPES = (
     TaskType.PIPELINE,
@@ -211,7 +211,7 @@ def task_budget(task: Any) -> tuple[float, int] | None:
     path's Temporal limits sit after that (``durable.activity_timeouts``).
     Pattern tasks (PIPELINE/FAN_OUT/CONSULT/CONDITIONAL) get ``task.timeout``
     PER STEP, not as a whole-task deadline -- dispatch() exempts them from
-    the whole-task wait_for and patterns.py applies wait_timeout(task.timeout)
+    the whole-task deadline and patterns.py applies wait_timeout(task.timeout)
     around EACH step -- so the budget scales with the step count: pipeline
     steps run sequentially (len(workers)); fan-out/consult waves are bounded
     above by sequential steps; conditional is router + one branch (at least
@@ -1018,10 +1018,12 @@ class SwarmEngine:
                 and float(task.timeout) > 0
                 and task.type not in _PER_STEP_PATTERN_TYPES
             ):
-                return await asyncio.wait_for(
-                    self._dispatch_inner(task, started, task_span),
-                    timeout=float(task.timeout),
-                )
+                # In the run's own task: on Python 3.11 ``asyncio.wait_for``
+                # ran the work in a task of its own, and a second stop of the
+                # run (a shutdown after a cancel) left it running after the
+                # run had ended (tests/test_work_deadlines_stay_in_the_task.py).
+                async with asyncio.timeout(float(task.timeout)):
+                    return await self._dispatch_inner(task, started, task_span)
             return await self._dispatch_inner(task, started, task_span)
         except asyncio.TimeoutError:
             logger.warning("[SwarmEngine] Task '%s' timed out after %.1fs", task.id, float(task.timeout or 0))

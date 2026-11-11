@@ -54,8 +54,8 @@ from typing import Any
 
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))  # the shared report helpers sit beside this file
+from soak_report import peak_rss_bytes, utc_stamp  # noqa: E402
 from soak_report import percentile as _percentile  # noqa: E402
-from soak_report import utc_stamp  # noqa: E402
 from soak_report import write_report as _write_report  # noqa: E402
 
 _ROOT = _HERE.parent
@@ -238,12 +238,8 @@ def _child(plan: dict[str, Any]) -> dict[str, Any]:
         out["recall_ms"].append(round((time.perf_counter() - t0) * 1000, 2))
         out.setdefault("found", {})[q["token"]] = any(q["token"] in e.content.casefold() for e in found.episodes)
     step("done")
-    try:
-        import resource  # POSIX
-
-        out["peak_rss_mb"] = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1)
-    except ImportError:
-        out["peak_rss_mb"] = None
+    peak = peak_rss_bytes()  # this child's own peak, not its parent's
+    out["peak_rss_mb"] = round(peak / 2**20, 1) if peak else None
     return out
 
 

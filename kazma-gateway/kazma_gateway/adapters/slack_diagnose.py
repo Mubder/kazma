@@ -30,7 +30,15 @@ from kazma_core.english_count import count_noun
 from kazma_gateway.adapters.slack_parse import is_new_message
 from kazma_core.http_tls import shared_ssl_context
 from kazma_gateway.adapters.slack_receive import SLACK_REASONS
-from kazma_gateway.connector_test import Checks, command_registration, judge_message, listening, show, when
+from kazma_gateway.connector_test import (
+    Checks,
+    allowlist_check,
+    command_registration,
+    judge_message,
+    listening,
+    show,
+    when,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +180,8 @@ async def diagnose(
     app_token: str = "",
     channel_id: str = "",
     allowed_users: list[str] | None = None,
+    owner_ids: list[str] | None = None,
+    open_to_everyone: bool | None = None,
     live: dict[str, Any] | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> dict[str, Any]:
@@ -297,15 +307,12 @@ async def diagnose(
                         place=f"The latest direct message user {user_id} wrote to the bot",
                     ), link)
 
-    if allowed:
-        add("allowed", True, f"{len(allowed)} allowed user(s): {', '.join(allowed)}.")
-    elif live is not None and live.get("allow_all"):
-        add("allowed", None, "Allowed User IDs is empty: anyone who can message the bot is answered.")
-    else:
-        add("allowed", False, (
-            "Allowed User IDs is empty, so every message is refused. Put your Slack member ID "
-            "there (your profile → ⋮ → Copy member ID)."
-        ))
+    add("allowed", *allowlist_check(
+        allowed, owner_ids=list(owner_ids or ()), open_to_everyone=open_to_everyone, live=live,
+        platform="Slack",
+        find_id=("send the bot a direct message: a refused sender is told their id; or your "
+                 "profile → ⋮ → Copy member ID"),
+    ))
 
     ok, said = listening(live, "Slack", not_running=(
         "Kazma's Slack connection is not running: turn Slack on above and Save, or check the tokens."

@@ -49,7 +49,7 @@ Use this before exposing Kazma beyond loopback. Aligns with
 - [ ] Shell allowlist + env scrub active
 - [ ] Workspace root confinement in production
 - [ ] Cron concurrency / stop / stale RUNNING handled
-- [ ] Multi-operator: platform allowlists set + `KAZMA_GATEWAY_STRICT_ALLOWLIST=1` (2026-08-19; adapters otherwise run allow-all for backward compat)
+- [ ] Chat apps: each platform's Allowed User IDs set, and `KAZMA_GATEWAY_OPEN_TO_EVERYONE` not set (an empty allowlist is private since 2026-11-11: only the owner's own account Kazma knows; the switch lets anyone in)
 - [ ] `KAZMA_HITL_CANONICAL_FLOOR` is not set to `0` (the floor is on by default since 2026-09-16: the danger list cannot narrow below canonical)
 - [ ] Offsite/cloud-sync backups verify TLS (WebDAV default ON since 2026-08-19; `backups.offsite.webdav.tls_verify=false` only for self-signed labs)
 - [ ] Offsite restic: **write probe** succeeds (`rclone:` and `s3:` — a read-only remote is a failed backup)

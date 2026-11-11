@@ -392,6 +392,8 @@ def test_the_route_runs_the_diagnosis_with_the_saved_settings(monkeypatch) -> No
     for key, value in {"token": "tok", "swarm_channel_id": "c1", "guild_id": "g1, g2",
                        "allowed_users": "u1"}.items():
         store.set(f"connectors.discord.{key}", value, category="connectors")
+    for name in ("KAZMA_GATEWAY_ADMINS", "KAZMA_GATEWAY_OPEN_TO_EVERYONE"):
+        monkeypatch.delenv(name, raising=False)
     got: dict[str, Any] = {}
 
     async def fake(token: str, **kw: Any) -> dict[str, Any]:
@@ -406,7 +408,8 @@ def test_the_route_runs_the_diagnosis_with_the_saved_settings(monkeypatch) -> No
     body = TestClient(app).post("/api/connectors/discord/test").json()
     assert body["checks"] == [{"key": "token", "ok": True, "detail": "d"}], "the response model keeps the checks"
     assert got == {"token": "tok", "channel_id": "c1", "guild_ids": ["g1", "g2"],
-                   "allowed_users": ["u1"], "live": {"live": "discord"}}
+                   "allowed_users": ["u1"], "owner_ids": [], "open_to_everyone": False,
+                   "live": {"live": "discord"}}
 
 
 def test_the_guild_id_reaches_the_running_adapter() -> None:

@@ -774,13 +774,18 @@
     }
   }
 
+  // The LiveKit browser client ships with Kazma, pinned (scripts/vendor_livekit.py,
+  // static/vendor/livekit/vendored.json). It was loaded from a CDN, unpinned,
+  // which also kept the pages from sending a script-src policy (2026-11-11).
+  var LIVEKIT_CLIENT_SRC = '/static/vendor/livekit/livekit-client.umd.js?v=2.23.0';
+
   function _loadLiveKit() {
     return new Promise(function(resolve, reject) {
       if (window.LivekitClient) { resolve(window.LivekitClient); return; }
       var s = document.createElement('script');
-      s.src = 'https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.js';
+      s.src = LIVEKIT_CLIENT_SRC;
       s.onload = function() { resolve(window.LivekitClient || window.livekit); };
-      s.onerror = function() { reject(new Error('livekit-client CDN failed')); };
+      s.onerror = function() { reject(new Error('livekit-client failed to load')); };
       document.head.appendChild(s);
     });
   }

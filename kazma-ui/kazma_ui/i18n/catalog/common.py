@@ -9,6 +9,40 @@ from __future__ import annotations
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
     "common.send": {"en": "Send", "ar": "إرسال"},
+    # OAuth sign-ins (GitHub, Google, Microsoft): auth-guard.js kazmaSignInProblem
+    # and kazmaSignInFailed word what the start and the callback answer.
+    "oauth.sign_in_from": {
+        "en": "Open Kazma at {origin} to sign in: the provider sends you back there.",
+        "ar": "افتح Kazma على {origin} لتسجيل الدخول: المزوّد يعيدك إلى هناك.",
+    },
+    "oauth.failed.other_browser": {
+        "en": "The sign-in was started in another browser. Start it again here.",
+        "ar": "بدأ تسجيل الدخول في متصفح آخر. ابدأه من جديد هنا.",
+    },
+    "oauth.failed.unknown": {
+        "en": "This sign-in was already used or never started. Start it again.",
+        "ar": "تسجيل الدخول هذا استُخدم من قبل أو لم يبدأ. ابدأه من جديد.",
+    },
+    "oauth.failed.expired": {
+        "en": "The sign-in took longer than ten minutes. Start it again.",
+        "ar": "استغرق تسجيل الدخول أكثر من عشر دقائق. ابدأه من جديد.",
+    },
+    "oauth.failed.other_provider": {
+        "en": "The sign-in came back to the wrong place. Start it again.",
+        "ar": "عاد تسجيل الدخول إلى المكان الخطأ. ابدأه من جديد.",
+    },
+    "oauth.failed.denied": {
+        "en": "The sign-in was cancelled at the provider.",
+        "ar": "أُلغي تسجيل الدخول لدى المزوّد.",
+    },
+    "oauth.failed.no_code": {
+        "en": "The provider sent no sign-in code back. Start it again.",
+        "ar": "لم يُرسل المزوّد رمز تسجيل الدخول. ابدأه من جديد.",
+    },
+    "oauth.failed.exchange_failed": {
+        "en": "The provider refused to finish the sign-in. Start it again.",
+        "ar": "رفض المزوّد إكمال تسجيل الدخول. ابدأه من جديد.",
+    },
     "chat.slash.page_action": {"en": "Manage on its page", "ar": "الإدارة من صفحة الميزة"},
     "chat.slash.admin_options": {"en": "Some options require an administrator", "ar": "بعض الخيارات تتطلب صلاحية مسؤول"},
     "skill.desc.x-publisher": {"en": "Manage X accounts, reviewed drafts, publishing and scheduled posts.", "ar": "إدارة حسابات X والمسودات المعتمدة والنشر والمنشورات المجدولة."},

@@ -437,7 +437,11 @@ Auto-detects install type:
   GitHub release of `Mubder/kazma`, downloads its wheel from the release,
   and installs it (with the extras you already have) only when its SHA-256
   matches the release's `SHA256SUMS` and, where GitHub reports one, GitHub's
-  own digest of the file. Kazma is not on PyPI; `kazma update` never
+  own digest of the file, and its Sigstore signature (`<wheel>.sigstore.json`)
+  shows Kazma's release workflow made it. A release from 0.21.2 on without
+  that signature is not installed; v0.21.1 and older are checked by their
+  SHA-256 only, and the command says so (a bundle one of them carries is still
+  verified). Kazma is not on PyPI; `kazma update` never
   installs `kazma` from there. See
   [SUPPLY_CHAIN.md](https://github.com/Mubder/kazma/blob/main/docs/SUPPLY_CHAIN.md).
 - **git / monorepo** → preflight (main-only) → named stash → hard-reset

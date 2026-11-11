@@ -724,9 +724,22 @@ class LocalToolRegistry:
 
                 from kazma_core.swarm.safety import get_safety
 
+                from kazma_core.safety.git_repo_programs import git_card_note
+                from kazma_core.safety.outside_text_fetch import registry_card_host
+
                 safety = get_safety()
+                # A fetch after outside text whose host the task and its
+                # search results never named asks too, like any card: YOLO
+                # and grants skip it (safety.outside_text_fetch).
+                _fetch_host = registry_card_host(tool_name, arguments)
                 # Pre-filter: non-danger tools skip the bus entirely.
-                if safety.enabled and safety.is_danger_tool(tool_name):
+                if safety.enabled and (_fetch_host or safety.is_danger_tool(tool_name)):
+                    _notes: list[dict[str, Any]] = []
+                    if _fetch_host:
+                        _notes.append({"code": "outside_fetch", "host": _fetch_host})
+                    _git_note = await git_card_note(tool_name, arguments)
+                    if _git_note:
+                        _notes.append(_git_note)
                     # Nothing about the request comes from the call's own
                     # arguments: the approval id is minted by check() (Swarm
                     # audit SW-S02: an argument named task_id approved every
@@ -736,6 +749,8 @@ class LocalToolRegistry:
                         tool_name=tool_name,
                         tool_args=_json.dumps(arguments, default=str),
                         worker_name="swarm or IDE",
+                        force_danger=bool(_fetch_host),
+                        card_notes=_notes,
                     )
                     if not approved:
                         return {
@@ -768,6 +783,10 @@ class LocalToolRegistry:
                 # Preserve the uncertainty through output hooks. A returned
                 # failure does not prove that a mutator made no changes.
                 payload["effect_uncertain"] = True
+            # What a swarm task has read: its next fetch is judged by it.
+            from kazma_core.safety.outside_text_fetch import record_registry_result
+
+            record_registry_result(tool_name, payload)
             return payload
 
         for attempt in range(1, max_attempts + 1):

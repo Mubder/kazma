@@ -10,7 +10,13 @@
 #     --emit-index-url -o deploy/document-worker/ocr-models.txt
 numpy==2.4.6
 onnx==1.23.2
-onnxruntime==1.31.0
-# Above the setuptools advisories the CPU index's own copy (78.1.0) carries.
-setuptools==83.0.0
+onnxruntime==1.31.1
+# At or above pyproject.toml's security floor (84.1.0 fixes the latest
+# setuptools advisory; the CPU index's own copy, 78.1.0, carries older ones).
+setuptools==84.2.1
+# torch brings filelock in: 4.2.1 fixes its advisories (a new major over
+# the 3.x torch resolved to; Kazma's own environment runs 4.x with torch).
+filelock>=4.2.1
+# The CPU index resolves packaging to 24.1; Kazma requires 26.3 (pyproject.toml).
+packaging>=26.3
 torch==2.14.1+cpu

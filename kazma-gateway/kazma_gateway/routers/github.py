@@ -12,7 +12,6 @@ import hashlib
 import logging
 import os
 import re
-import secrets
 import subprocess
 import time
 from pathlib import Path
@@ -427,9 +426,11 @@ async def _fetch_status(
 
 # ── OAuth flow (read-only integration) ────────────────────────────────
 #
-# The user clicks "Connect GitHub" → /oauth/start redirects to GitHub →
-# the user authorizes → GitHub calls back /oauth/callback → Kazma
-# exchanges the code for a token and stores it in ConfigStore only.
+# The user clicks "Connect GitHub" → the page POSTs /oauth/start and goes to
+# the GitHub URL it answers, in the same tab → the user authorizes → GitHub
+# sends the browser to /oauth/callback → Kazma takes the attempt, exchanges
+# the code for a token, stores it in ConfigStore only, and sends the browser
+# back to the page it started from.
 
 
 def _oauth_redirect_uri(request: Request) -> str:
@@ -486,131 +487,150 @@ def oauth_status() -> JSONResponse:
     })
 
 
-@router.get("/oauth/start", response_model=None)
-async def oauth_start(request: Request) -> RedirectResponse | JSONResponse:
-    """Redirect the user to GitHub's authorization page."""
+class _OAuthStartRequest(BaseModel):
+    #: The Kazma page to come back to (a path on this server; anything else
+    #: is the Workspace page, ``oauth_attempts.safe_return_path``).
+    return_to: str = ""
+
+
+#: Where the sign-in comes back to when the start named nowhere usable.
+_DEFAULT_RETURN = "/workspace"
+
+
+@router.post("/oauth/start", response_model=None)
+async def oauth_start(request: Request, body: _OAuthStartRequest | None = None) -> JSONResponse:
+    """Start a GitHub sign-in from Kazma's own page (2026-11-11).
+
+    It was a GET that wrote ONE install-wide state (``connectors.github.
+    oauth_state``) compared with ``!=``: a second start replaced the first, a
+    link on any page could start one, and the state was good in any browser.
+    Now each start is an attempt of its own (``oauth_attempts``: ten minutes,
+    bounded, bound to this browser by a cookie, taken once at the callback),
+    and the answer is the GitHub URL, which the page opens in the SAME tab --
+    the callback sends the browser back to *return_to* (no popup, no
+    ``window.opener``).
+    """
+    from kazma_core.security.oauth_attempts import begin, safe_return_path
+
     from kazma_gateway.routers.github_client import build_authorize_url, oauth_configured
 
     if not oauth_configured():
-        # Browser tab expects HTML, not raw JSON (window.open from Workspace).
-        accept = (request.headers.get("accept") or "").lower()
-        if "text/html" in accept or "Kazma-Soft-Nav" not in request.headers:
-            return _oauth_setup_page(request)
         return JSONResponse(
             {
+                "ok": False,
+                "code": "not_configured",
+                "setup_url": "/api/github/oauth/setup",
                 "error": "GitHub OAuth App is not configured",
                 "hint": "Set GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET in .env, "
                 "or paste a Personal Access Token on the Workspace page.",
             },
             status_code=503,
         )
-    state = secrets.token_urlsafe(16)
     try:
         redirect_uri = _oauth_redirect_uri(request)
     except ValueError as exc:
         logger.warning("[github/oauth] redirect URI refused: %s", exc)
         return JSONResponse(
             {
+                "ok": False,
+                "code": "public_url_required",
                 "error": validation_error(exc),
                 "hint": "Set KAZMA_PUBLIC_URL=https://your.public.host before OAuth.",
             },
             status_code=503,
         )
-    # Stash the state + redirect_uri in ConfigStore so the callback can
-    # validate the state and replay the exact redirect_uri used here.
-    try:
-        from kazma_core.config_store import get_config_store
+    return_to = safe_return_path(body.return_to if body else "", default=_DEFAULT_RETURN)
 
-        await asyncio.to_thread(get_config_store().batch_set, [
-            ("connectors.github.oauth_state", state, "connectors"),
-            ("connectors.github.oauth_redirect_uri", redirect_uri, "connectors"),
-        ])
-    except Exception:
-        logger.exception("[github/oauth] failed to store OAuth state")
-    authorize_url = build_authorize_url(state=state, redirect_uri=redirect_uri)
-    logger.info("[github/oauth] redirecting to GitHub authorization (redirect_uri=%s)", redirect_uri)
-    return RedirectResponse(url=authorize_url, status_code=302)
+    def _start() -> dict[str, Any]:
+        # A settings write (the attempt): in the thread answer_start runs it in.
+        state = begin("github", redirect_uri=redirect_uri, return_to=return_to)
+        return {
+            "ok": True,
+            "authorize_url": build_authorize_url(state=state, redirect_uri=redirect_uri),
+            "state": state,
+        }
+
+    from kazma_ui.oauth_sign_in import answer_start
+
+    logger.info("[github/oauth] starting a GitHub sign-in (redirect_uri=%s)", redirect_uri)
+    return await answer_start(request, callback_url=redirect_uri, start=_start)
+
+
+def _back_to(return_to: str, outcome: str, reason: str = "") -> str:
+    """The page the sign-in started from, with its outcome for the page to
+    say (``workspace.gh_oauth_*``): a code, never GitHub's own text."""
+    from urllib.parse import quote
+
+    from kazma_core.security.oauth_attempts import safe_return_path
+
+    path = safe_return_path(return_to, default=_DEFAULT_RETURN)
+    sep = "&" if "?" in path else "?"
+    tail = f"&github_oauth_reason={quote(reason)}" if reason else ""
+    return f"{path}{sep}github_oauth={outcome}{tail}"
 
 
 @router.get("/oauth/callback", response_model=None)
-async def oauth_callback(request: Request) -> RedirectResponse | JSONResponse:
-    """Handle the GitHub redirect-back: exchange the code for a token."""
+async def oauth_callback(request: Request) -> RedirectResponse:
+    """GitHub sends the browser back here: take the attempt, exchange the
+    code, and send the browser back to the page that started the sign-in."""
+    from kazma_core.security.oauth_attempts import AttemptRefused
+
     from kazma_gateway.routers.github_client import (
         exchange_code_for_token,
         store_oauth_token,
         GitHubError,
     )
+    from kazma_ui.oauth_sign_in import forget_binding, take_attempt
 
     code = request.query_params.get("code", "")
     state = request.query_params.get("state", "")
     error = request.query_params.get("error", "")
 
+    def _answer(outcome: str, reason: str = "", attempt: dict[str, Any] | None = None) -> RedirectResponse:
+        response = RedirectResponse(
+            _back_to(str((attempt or {}).get("return_to") or ""), outcome, reason), status_code=302
+        )
+        return forget_binding(response, request, state, attempt)  # type: ignore[return-value]
+
+    # The attempt goes first, whatever GitHub answered: a state is good once.
+    try:
+        attempt = await take_attempt(request, state, providers=("github",))
+    except AttemptRefused as exc:
+        # Never the state itself: the log is readable by the agent's log tool
+        # (AUD-024). The reason says enough (another browser, used, expired).
+        logger.warning("[github/oauth] callback refused: %s", exc.reason)
+        return _answer("error", exc.reason)
+
     # GitHub surfaces user-denial / errors as query params on the callback.
     if error:
         logger.warning("[github/oauth] authorization denied by GitHub")
-        return _oauth_result_page(False, "Authorization denied by GitHub. Please try connecting again.")
-
-    # Validate the state to prevent CSRF.
-    try:
-        from kazma_core.config_store import get_config_store
-
-        def _pending() -> tuple[str, str]:
-            store = get_config_store()
-            return (
-                store.get("connectors.github.oauth_state", ""),
-                store.get("connectors.github.oauth_redirect_uri", ""),
-            )
-
-        expected_state, redirect_uri = await asyncio.to_thread(_pending)
-    except Exception:
-        expected_state, redirect_uri = "", ""
-
-    if not state or state != expected_state:
-        # Never log the state values themselves — the pending `expected_state`
-        # is a live anti-CSRF secret, and the log is readable by the agent's
-        # log tool (AUD-024). Short fingerprints keep the diagnostic ("present
-        # but different" vs "one was empty") without exposing either token.
-        import hashlib
-
-        def _fp(v: str) -> str:
-            return hashlib.sha256(v.encode()).hexdigest()[:8] if v else "none"
-
-        logger.warning(
-            "[github/oauth] state mismatch — possible CSRF (got=%s expected=%s)",
-            _fp(state), _fp(expected_state),
-        )
-        return _oauth_result_page(False, "Security check failed (invalid state). Please try connecting again.")
-
+        return _answer("error", "denied", attempt)
     if not code:
-        return _oauth_result_page(False, "No authorization code returned by GitHub.")
+        return _answer("error", "no_code", attempt)
 
-    if not redirect_uri:
-        redirect_uri = _oauth_redirect_uri(request)
-
+    redirect_uri = str(attempt.get("redirect_uri") or "") or _oauth_redirect_uri(request)
     try:
         token_data = await exchange_code_for_token(code=code, redirect_uri=redirect_uri)
     except GitHubError as exc:
         from kazma_core.errors import redact_secrets
 
-        detail = redact_secrets(exc.message)[:200]
-        logger.error("[github/oauth] token exchange failed: %s", detail)
-        return _oauth_result_page(False, f"Token exchange failed: {detail}")
+        # GitHub's own words go to the log only: the page says a code (FA-130).
+        logger.error("[github/oauth] token exchange failed: %s", redact_secrets(exc.message)[:200])
+        return _answer("error", "exchange_failed", attempt)
     except Exception as exc:
         logger.error("[github/oauth] unexpected error during token exchange (%s)", type(exc).__name__)
-        return _oauth_result_page(False, "Token exchange failed unexpectedly. Please try connecting again.")
+        return _answer("error", "exchange_failed", attempt)
 
     await asyncio.to_thread(store_oauth_token, token_data)
-    # Clear the one-time state so it can't be replayed.
-    try:
-        from kazma_core.config_store import get_config_store
-
-        await asyncio.to_thread(
-            get_config_store().set, "connectors.github.oauth_state", "", category="connectors",
-        )
-    except Exception:
-        logger.warning("[github/oauth] one-time state not cleared", exc_info=True)
     logger.info("[github/oauth] successfully connected (scope=%s)", token_data.get("scope", ""))
-    return _oauth_result_page(True, "GitHub connected successfully.")
+    return _answer("ok", "", attempt)
+
+
+@router.get("/oauth/setup", response_model=None)
+def oauth_setup(request: Request) -> Any:
+    """How to create the GitHub OAuth App, for an install that has none: the
+    Workspace page opens it when the owner asks for the guide."""
+    return _oauth_setup_page(request)
 
 
 @router.post("/oauth/revoke")
@@ -709,54 +729,6 @@ def _oauth_setup_page(request: Request) -> HTMLResponseType:
   <a class="btn" href="/workspace">Back to Workspace</a>
   <a class="btn btn2" href="https://github.com/settings/developers" target="_blank" rel="noopener">Open GitHub OAuth Apps</a>
 </div></body></html>"""
-    return HTMLResponse(html)
-
-
-def _oauth_result_page(success: bool, message: str) -> HTMLResponseType:
-    """Render a minimal close-the-tab page after the OAuth callback.
-
-    ``message`` is text, escaped here: a token-exchange failure quotes
-    GitHub's own answer, which is not Kazma's to put into HTML (FA-130).
-    """
-    import html as _html
-
-    from fastapi.responses import HTMLResponse
-
-    message = _html.escape(message, quote=True)
-    color = "#10b981" if success else "#ef4444"
-    icon = "✅" if success else "❌"
-    html = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>GitHub Connection</title>
-<style>
-  body {{ font-family: system-ui, sans-serif; background: #0f1117; color: #e5e7eb;
-         display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }}
-  .card {{ text-align: center; padding: 40px; border-radius: 12px;
-           background: #1a1d27; border: 1px solid #2a2f3e; max-width: 420px; }}
-  .icon {{ font-size: 3rem; margin-bottom: 16px; }}
-  .msg {{ color: {color}; font-size: 1.1rem; margin-bottom: 8px; }}
-  .hint {{ color: #6b7280; font-size: 0.85rem; }}
-</style></head>
-<body><div class="card">
-  <div class="icon">{icon}</div>
-  <div class="msg">{message}</div>
-  <div class="hint">You can close this tab and return to Kazma.</div>
-</div>
-<script>
-  // Try to signal the opener (the Kazma tab) so it refreshes immediately.
-  // Only to Kazma's own origin (AUD-106): with '*' any page that opened
-  // this tab -- another site's window -- received the outcome.
-  if (window.opener) {{ try {{ window.opener.postMessage({{ type: 'github-oauth-done', success: {str(success).lower()} }}, window.location.origin); }} catch(e) {{}} }}
-  // Reliable fallback: redirect THIS tab back to the workspace page after
-  // a short delay. On success the user lands on Kazma (which re-checks
-  // OAuth status on load); we can't always window.close() a non-script
-  // opened tab, so redirecting is more robust than a stuck success page.
-  setTimeout(function() {{
-    try {{ window.close(); }} catch(e) {{}}
-    // If the tab didn't close (common for non-script-opened tabs), redirect.
-    window.location.href = '/workspace';
-  }}, 2000);
-</script>
-</body></html>"""
     return HTMLResponse(html)
 
 

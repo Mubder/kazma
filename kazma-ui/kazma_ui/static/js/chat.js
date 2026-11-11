@@ -4247,6 +4247,30 @@
     return s;
   }
 
+  /** One note the gate put on a card (``card_notes``, kazma_core
+   *  safety/card_notes.py): why a fetch asks, what a repository makes git
+   *  run. The sentence in the reader's language; the host and the
+   *  repository's settings are content, shown as they are. */
+  function _hitlCardNoteHtml(note) {
+    if (!note || typeof note !== 'object') return '';
+    var mark = '\u0001';
+    var value = '';
+    var text = '';
+    if (note.code === 'outside_fetch') {
+      value = String(note.host || '');
+      text = tiFmt('hitl_note_outside_fetch',
+        'This address came from text Kazma read, not from you or a search result: {host}', { host: mark });
+    } else if (note.code === 'git_programs') {
+      value = (Array.isArray(note.items) ? note.items : []).map(String).join('; ');
+      text = tiFmt('hitl_note_git_programs',
+        'This repository sets programs git runs for this command: {items}', { items: mark });
+    } else {
+      return '';
+    }
+    return '<p class="hitl-jail-note" dir="auto">' + escapeHtml(text).replace(mark,
+      '<bdi dir="ltr" translate="no">' + escapeHtml(value) + '</bdi>') + '</p>';
+  }
+
   /** The server's approval summary ("Agent wants to run: tool(args)") in
    *  the reader's language: the prefix translated, the call shown as it is
    *  (translate="no" -- a tool name and its arguments are content) and
@@ -6068,6 +6092,7 @@
         (data.jail_note
           ? '<p class="hitl-jail-note" dir="auto">' + escapeHtml(String(data.jail_note)) + '</p>'
           : '') +
+        (Array.isArray(data.card_notes) ? data.card_notes.map(_hitlCardNoteHtml).join('') : '') +
         '<p class="hitl-message" dir="auto">' + _hitlMessageHtml(truncateStr(data.message || '', 400)) + '</p>' +
         '<p class="hitl-scope-hint" style="font-size:0.72rem;color:var(--text-muted);margin-top:6px;">' +
           (publicAction

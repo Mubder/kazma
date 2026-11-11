@@ -138,14 +138,36 @@ class _Harness:
 
 
 def test_the_signature_matches_the_shared_vector():
-    sig = guard.sign_heartbeat(VECTOR["key"].encode(), VECTOR["timestamp"],
-                               VECTOR["body"].encode())
-    assert sig == VECTOR["signature"]
-    # Control: another timestamp, or another body, is another signature.
-    assert guard.sign_heartbeat(VECTOR["key"].encode(), VECTOR["timestamp"] + 1,
-                                VECTOR["body"].encode()) != VECTOR["signature"]
-    assert guard.sign_heartbeat(VECTOR["key"].encode(), VECTOR["timestamp"],
-                                b'{"v":2}') != VECTOR["signature"]
+    """v2 (the route in what is signed): the guard's message and each route's
+    signature are the Worker's and Kazma's, byte for byte."""
+    key, ts, v2 = VECTOR["key"].encode(), VECTOR["timestamp"], VECTOR["v2"]
+    assert guard.signed_message(ts, "POST", "/v1/heartbeat", VECTOR["body"].encode()) \
+        == v2["message"].encode()
+    for route in v2["routes"]:
+        assert guard.sign_request(key, ts, route["method"], route["path"],
+                                  route["body"].encode()) == route["signature"], route
+    sig = guard.sign_request(key, ts, "POST", "/v1/heartbeat", VECTOR["body"].encode())
+    # Control: another timestamp, body or route is another signature.
+    assert guard.sign_request(key, ts + 1, "POST", "/v1/heartbeat", VECTOR["body"].encode()) != sig
+    assert guard.sign_request(key, ts, "POST", "/v1/heartbeat", b'{"v":2}') != sig
+    assert guard.sign_request(key, ts, "POST", "/v1/leave", VECTOR["body"].encode()) != sig
+    # Negative control: the v1 form the guard used to send covers the body
+    # alone, so the same bytes are valid on any route (the vector's v1 value).
+    v1 = "v1=" + hmac.new(key, f"{ts}.".encode() + VECTOR["body"].encode(), hashlib.sha256).hexdigest()
+    assert v1 == VECTOR["signature"] and not sig.startswith("v1=")
+
+
+def test_the_heartbeat_signs_the_path_it_is_sent_to(monkeypatch, tmp_path):
+    """An observer under another path signs that path: the Worker reads the
+    request line's own path."""
+    h = _Harness(monkeypatch, tmp_path)
+    monkeypatch.setenv("KAZMA_GUARD_OUTSIDE_WATCH_URL", "http://127.0.0.1:8787/watch/v1/heartbeat")
+    h.tick()
+    req = h.opener.requests[0]
+    headers = {k.lower(): v for k, v in req.header_items()}
+    ts = int(headers["x-kazma-timestamp"])
+    assert headers["x-kazma-signature"] == guard.sign_request(
+        KEY.encode(), ts, "POST", "/watch/v1/heartbeat", req.data)
 
 
 # -- off until paired ----------------------------------------------------------------
@@ -205,7 +227,8 @@ def test_a_paired_guard_sends_a_signed_heartbeat_a_minute(monkeypatch, tmp_path)
     req = h.opener.requests[0]
     headers = {k.lower(): v for k, v in req.header_items()}
     ts = int(headers["x-kazma-timestamp"])
-    assert headers["x-kazma-signature"] == guard.sign_heartbeat(KEY.encode(), ts, req.data)
+    assert headers["x-kazma-signature"] == guard.sign_request(KEY.encode(), ts, "POST",
+                                                               "/v1/heartbeat", req.data)
     body = json.loads(req.data)
     assert body["v"] == 1 and body["install"] == headers["x-kazma-install"]
     assert [json.loads(r.data)["seq"] for r in h.opener.requests] == [1, 2, 3, 4]

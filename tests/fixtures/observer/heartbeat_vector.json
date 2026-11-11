@@ -4,6 +4,15 @@
   "timestamp": 1700000000,
   "body": "{\"v\":1}",
   "signature": "v1=caefa36c8191c535b8c6fe24654547ee1edc72edfdba1ac3843db34994dc060e",
+  "v2": {
+    "_comment": "The route-bound form every signer sends since 2026-11-11: 'v2=' + hex HMAC-SHA256 under key of 'v2\\n<timestamp>\\n<METHOD>\\n<path>\\n' + body (the guard's signed_message, Kazma's outside_watch._sign, the Worker's v2Message). Same key, timestamp and body as above; each route signs to its own value, so a signature for one is refused on another. 'signature' above is the v1 form, accepted by the Worker only while ACCEPT_V1 is true.",
+    "message": "v2\n1700000000\nPOST\n/v1/heartbeat\n{\"v\":1}",
+    "routes": [
+      {"method": "POST", "path": "/v1/heartbeat", "body": "{\"v\":1}", "signature": "v2=317f5bb686af6d3057d9edb776fb34406cd15013a97a6f53a0b71e99af49e3dc"},
+      {"method": "POST", "path": "/v1/leave", "body": "{\"v\":1}", "signature": "v2=ad5c51c01d1a0db329801139064dc64e03b6bc27f65ce11fd9fc1e8c7c5729bd"},
+      {"method": "GET", "path": "/v1/summary", "body": "", "signature": "v2=9513431f38eba6c57b8d02e6deed91b1fb4816abc8b08686f2fd79f270e8f3bc"}
+    ]
+  },
   "pages": {
     "in": [
       {"key": "database.away", "paged_at": 1800000120, "delivered": true, "title": "CANARY Kazma's database is not answering"},

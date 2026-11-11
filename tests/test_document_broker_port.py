@@ -10,8 +10,12 @@ address the guard has now from its state file.
 from __future__ import annotations
 
 import json
+import os
 import socket
+import threading
+import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -28,6 +32,65 @@ def test_a_port_it_cannot_take_is_exit_7_before_the_image_is_attested(tmp_path, 
         port = held.getsockname()[1]
         code = worker_broker.main(["--image", "x", "--token-file", str(token), "--listen", f"tcp:127.0.0.1:{port}"])
     assert code == worker_broker.EXIT_PORT_UNAVAILABLE == 7
+
+
+class _AnswersAndCloses:
+    """A broker that answers each connection and closes it first, as the real
+    one answers the guard's status probe."""
+
+    limits = SimpleNamespace(concurrency=1)
+
+    def handle(self, sock: socket.socket) -> None:
+        sock.sendall(b"S")
+
+
+def broker_port_in_time_wait() -> int:
+    """A broker's port the way a killed broker leaves it: the broker answered a
+    probe and closed that connection first, so the connection holds the port
+    in TIME_WAIT for a minute after the broker is gone."""
+    server = worker_broker._make_server("tcp:127.0.0.1:0", _AnswersAndCloses(), allow_non_loopback=False)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
+    thread.start()
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as client:
+            client.settimeout(5)
+            assert client.recv(1) == b"S"
+            assert client.recv(1) == b""  # the broker closed first
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+    time.sleep(0.05)  # the last ACK, on loopback
+    return port
+
+
+def test_a_broker_started_again_listens_where_the_killed_one_did():
+    """Linux CI, 2026-11-10: a killed broker's restart could not listen on its
+    port ("Address already in use") until the guard gave up: the guard's
+    status probes leave connections in TIME_WAIT on every broker port."""
+    listen = f"tcp:127.0.0.1:{broker_port_in_time_wait()}"
+    assert worker_broker._tcp_listen_refused(listen) is None
+    server = worker_broker._make_server(listen, _AnswersAndCloses(), allow_non_loopback=False)
+    try:
+        # A port another socket LISTENS on is still refused.
+        assert isinstance(worker_broker._tcp_listen_refused(listen), OSError)
+    finally:
+        server.server_close()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows lets a plain bind take a port in TIME_WAIT")
+def test_control_the_old_bind_is_refused_where_the_killed_broker_was(monkeypatch):
+    """Negative control: the broker's bind before the fix (no SO_REUSEADDR)."""
+    monkeypatch.setattr(worker_broker, "_REUSE_ADDRESS", False)
+    monkeypatch.setattr(worker_broker._TcpServer, "allow_reuse_address", False)
+    listen = f"tcp:127.0.0.1:{broker_port_in_time_wait()}"
+    assert isinstance(worker_broker._tcp_listen_refused(listen), OSError)
+
+
+def test_windows_never_reuses_a_bound_address():
+    """SO_REUSEADDR on Windows would let another process take the port."""
+    assert worker_broker._TcpServer.allow_reuse_address is (os.name != "nt")
 
 
 def _handed(monkeypatch, tmp_path, *, state_url, source="guard"):

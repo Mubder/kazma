@@ -126,6 +126,122 @@ function Test-UvWorks {
     return $LASTEXITCODE -eq 0
 }
 
+# ── Helper: install uv, verified ─────────────────────────────────────────────
+# One uv release, with the SHA-256 of each Windows archive written here
+# (2026-11, supply chain). Setup used to pipe https://astral.sh/uv/install.ps1
+# into Invoke-Expression, in an administrator window: it ran whatever that
+# address served that day. Now it downloads this release's archive from
+# GitHub, checks it against the hash below before anything is extracted or
+# run, and stops on a mismatch. The hashes are uv's own .sha256 files of the
+# release, which GitHub's asset digests matched. setup.sh does the same;
+# tests/test_setup_downloads_verified.py holds both to it.
+$UvVersion = "0.13.6"
+$UvArchiveSha256 = @{
+    "x86_64-pc-windows-msvc"  = "a2a8820d5eea32f08ef467ef3b7f66883a9b076d5737a2fc2fbb5f458d1bb50f"
+    "aarch64-pc-windows-msvc" = "c2426c0c8e28b53d8c440e47a18d96ad4db51e159866c0e81435b196d7f0081c"
+    "i686-pc-windows-msvc"    = "32ceb64db231cbedfd499f7654c72e4c0b564f2846f9e76c0a4a7b2d03d7e67c"
+}
+
+function Get-UvTarget {
+    # A 32-bit PowerShell on a 64-bit Windows names the machine here.
+    $arch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+    switch ("$arch".ToUpper()) {
+        "AMD64" { return "x86_64-pc-windows-msvc" }
+        "ARM64" { return "aarch64-pc-windows-msvc" }
+        "X86"   { return "i686-pc-windows-msvc" }
+    }
+    return ""
+}
+
+function Add-UvToUserPath([string]$Dir) {
+    # As uv's own installer does: later terminals (and `kazma update`) find it.
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    $parts = @("$userPath" -split ";" | Where-Object { $_ })
+    if ($parts -notcontains $Dir) {
+        [Environment]::SetEnvironmentVariable("Path", (@($Dir) + $parts) -join ";", "User")
+    }
+}
+
+# The download, the hash and the unzip are .NET calls: Windows PowerShell 5.1
+# started from a PowerShell 7 terminal inherits 7's module path and cannot
+# load Get-FileHash ("not recognized"), and its Invoke-WebRequest progress bar
+# makes a download many times slower.
+function Save-UvArchive([string]$Url, [string]$Path) {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    $client = New-Object System.Net.WebClient
+    try { $client.DownloadFile($Url, $Path) } finally { $client.Dispose() }
+}
+
+function Get-Sha256Hex([string]$Path) {
+    $stream = [IO.File]::OpenRead($Path)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        return -join ($sha.ComputeHash($stream) | ForEach-Object { $_.ToString("x2") })
+    } finally {
+        $sha.Dispose()
+        $stream.Dispose()
+    }
+}
+
+function Expand-UvArchive([string]$Archive, [string]$Destination) {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [IO.Compression.ZipFile]::ExtractToDirectory($Archive, $Destination)
+}
+
+function Install-PinnedUv {
+    $target = Get-UvTarget
+    if (-not $target -or -not $UvArchiveSha256.ContainsKey($target)) {
+        Log-Fail "uv $UvVersion has no Windows build for this processor ($env:PROCESSOR_ARCHITECTURE)"
+        return $false
+    }
+    $name = "uv-$target.zip"
+    $url = "https://github.com/astral-sh/uv/releases/download/$UvVersion/$name"
+    $work = Join-Path ([IO.Path]::GetTempPath()) ("kazma-uv-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $work -Force | Out-Null
+    try {
+        $archive = Join-Path $work $name
+        try {
+            Save-UvArchive $url $archive
+        } catch {
+            Log-Fail "Could not download $url"
+            Log-Info "  $_"
+            return $false
+        }
+        $expected = $UvArchiveSha256[$target]
+        $actual = Get-Sha256Hex $archive
+        if ($actual -ne $expected) {
+            Log-Fail "The uv download does not match its recorded SHA-256: nothing was installed"
+            Log-Info "  $name"
+            Log-Info "  expected $expected"
+            Log-Info "  got      $actual"
+            return $false
+        }
+        $dir = Join-Path $env:USERPROFILE ".local\bin"
+        try {
+            $unpacked = Join-Path $work "unpacked"
+            Expand-UvArchive $archive $unpacked
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            foreach ($exe in @("uv.exe", "uvx.exe", "uvw.exe")) {
+                $found = Get-ChildItem -LiteralPath $unpacked -Recurse -Filter $exe | Select-Object -First 1
+                if ($found) { Copy-Item -LiteralPath $found.FullName -Destination (Join-Path $dir $exe) -Force }
+            }
+        } catch {
+            Log-Fail "Could not unpack uv into $dir"
+            Log-Info "  $_"
+            return $false
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $dir "uv.exe"))) {
+            Log-Fail "The uv archive held no uv.exe"
+            return $false
+        }
+        try { Add-UvToUserPath $dir } catch { Log-Warn "uv is in $dir; add it to PATH for later terminals ($_)" }
+        $env:Path = "$dir;$env:Path"
+        return $true
+    } finally {
+        Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 # ── Banner ───────────────────────────────────────────────────────────────────
 
 # Which Kazma this installs, read before anything is installed: the version
@@ -230,49 +346,25 @@ if (Test-UvWorks) {
     Log-Ok "uv detected: $uvVersion"
     $UvInstalled = $true
 } else {
-    Log-Warn "uv not found — installing it..."
+    Log-Warn "uv not found — installing uv $UvVersion (checked against its recorded SHA-256)..."
 
-    # Priority 1: pip (when there is a Python)
-    if ($PythonCmd) {
-        Invoke-Native { & $PythonCmd -m pip install --user uv } | ForEach-Object { Write-Verbose $_ }
-    }
-    if (Test-UvWorks) {
-        $uvVersion = Invoke-Native -StdoutOnly { uv --version }
-        Log-Ok "uv installed via pip: $uvVersion"
-        $UvInstalled = $true
-    }
-
-    # Priority 2: official PowerShell installer
-    if (-not $UvInstalled) {
-        # Only say pip failed when there was a Python to run it: a fresh
-        # Windows has none, and the clean VM's install (2026-11-08) read
-        # "pip failed" there. 6>&1: uv's installer writes with Write-Host,
-        # and its "restart your shell" advice is for a person, not for this
-        # script, which reads the new PATH itself just below.
-        if ($PythonCmd) { Log-Info "pip failed, trying uv's official installer..." }
-        else { Log-Info "Installing uv with its official installer..." }
-        try {
-            Invoke-Native { Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression 6>&1 } | ForEach-Object { Write-Verbose $_ }
-            # Refresh PATH for the current session
-            $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "User") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "Machine")
-            if (Test-UvWorks) {
-                $uvVersion = Invoke-Native -StdoutOnly { uv --version }
-                Log-Ok "uv installed via installer: $uvVersion"
-                $UvInstalled = $true
-            }
-        } catch {
-            Log-Warn "Official installer failed: $_"
+    # Install-PinnedUv: the release archive, verified before it is unpacked.
+    if (Install-PinnedUv) {
+        if (Test-UvWorks) {
+            $uvVersion = Invoke-Native -StdoutOnly { uv --version }
+            Log-Ok "uv installed: $uvVersion"
+            $UvInstalled = $true
+        } else {
+            Log-Fail "uv $UvVersion was installed but does not run"
         }
     }
 
     if (-not $UvInstalled) {
         Log-Fail "Could not install a working uv"
-        Log-Info "Fix manually:"
-        Log-Info "  pip install uv"
-        Log-Info "  # or: irm https://astral.sh/uv/install.ps1 | iex"
-        Log-Info ""
-        Log-Info "Or skip uv entirely:"
-        Log-Info "  $PythonCmd -m pip install -e `".[rag,dev,tui]`""
+        Log-Info "Fix manually: download uv-$(Get-UvTarget).zip from"
+        Log-Info "  https://github.com/astral-sh/uv/releases/tag/$UvVersion"
+        Log-Info "check it against the .sha256 file beside it, put uv.exe on PATH,"
+        Log-Info "then run setup.cmd again."
         exit 1
     }
 }

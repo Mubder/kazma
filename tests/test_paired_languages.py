@@ -242,6 +242,15 @@ def _outbox_notices(text: str) -> bool:
                for notice in (_earlier_reply_notice, _late_reply_notice))
 
 
+def _private_notice(text: str) -> bool:
+    """A sender a private chat app refuses is told so, and their id, in
+    their language (kazma_gateway.sender_rule, 2026-11-11)."""
+    from kazma_gateway.sender_rule import private_notice
+
+    notice = private_notice("telegram", "12345", text)
+    return detect_user_language(notice) == detect_user_language(text) and "12345" in notice
+
+
 def _read_only_notice(text: str) -> bool:
     """While the database is away each chat is told once, in its language (plan A4)."""
     from kazma_ui.read_only_mode import _notice
@@ -371,6 +380,8 @@ PAIRS: list[Pair] = [
          "Here is the summary you asked for.", "هذا الملخص الذي طلبته.", _outbox_notices, True),
     Pair("read_only_notice", ("kazma-ui/kazma_ui/read_only_mode.py",),
          "hello, are you there?", "مرحبا، أنت موجود؟", _read_only_notice, True),
+    Pair("private_notice", ("kazma-gateway/kazma_gateway/sender_rule.py",),
+         "hello, who are you?", "مرحبا، من أنت؟", _private_notice, True),
 ]
 
 
@@ -474,6 +485,9 @@ DECLARED: dict[str, str] = {
         "chooser); tests/test_turn_resume.py delivers it",
     M + "agent/command_catalog.py": "each command's description in both languages (description / "
                                     "description_ar); tests/test_slash_help_and_menu.py",
+    M + "safety/card_notes.py": "the approval cards' notes worded in both languages (NOTE_TEXT); "
+                                "the card's own language picks one, nothing is decided by "
+                                "Arabic text; tests/test_outside_text_fetch.py",
     M + "agent/state.py": "an attribute's documentation string names an Arabic pivot phrase",
     M + "agent/task_ledger.py": "reads Kazma's OWN Arabic next-step phrasing out of its replies "
                                 "(\"الآن\", \"سأقوم ب\"), beside the English forms",

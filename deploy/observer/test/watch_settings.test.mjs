@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { d1 } from "./d1_standin.mjs";
 import { handle, runMinute } from "../src/index.js";
 import { clock, pageText } from "../src/incidents.js";
-import { sign } from "../src/verify.js";
+import { sign, signV2 } from "../src/verify.js";
 import { testCard, TEST_GAP_S, validZone } from "../src/watch_settings.js";
 
 const INSTALL = "a1b2c3d4e5f6a7b8";
@@ -61,20 +61,41 @@ async function pair(e) {
   assert.equal(res.status, 200);
 }
 
-/** A request signed the way Kazma's outside_watch._signed_post signs it. */
-async function signed(e, path, fields = {}, { key = KEY, ts = T0, now = T0, deps = {} } = {}) {
+/** A request signed the way Kazma's outside_watch._signed_post signs it (v2:
+ * the route and the body); ``signedFor`` names another route to sign for. */
+async function signed(e, path, fields = {}, { key = KEY, ts = T0, now = T0, deps = {}, signedFor = path, v1 = false } = {}) {
   const raw = JSON.stringify({ v: 1, install: INSTALL, ...fields });
+  const signature = v1 ? await sign(key, ts, raw) : await signV2(key, ts, "POST", signedFor, raw);
   return post(e, path, raw, {
-    "X-Kazma-Install": INSTALL, "X-Kazma-Timestamp": String(ts), "X-Kazma-Signature": await sign(key, ts, raw),
+    "X-Kazma-Install": INSTALL, "X-Kazma-Timestamp": String(ts), "X-Kazma-Signature": signature,
   }, now, deps);
 }
 
 async function summary(e, now) {
   const req = new Request("https://status.kazma.example/v1/summary", {
     headers: { "X-Kazma-Install": INSTALL, "X-Kazma-Timestamp": String(now),
-      "X-Kazma-Signature": await sign(KEY, now, "GET /v1/summary") } });
+      "X-Kazma-Signature": await signV2(KEY, now, "GET", "/v1/summary", "") } });
   return (await handle(req, e, now)).json();
 }
+
+// -- one route's signature is not another's (v2) --------------------------------
+
+test("a settings request's signature does not unpair: v2 binds the route", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  const e = env();
+  await pair(e);
+  // Signed for /v1/settings, sent to /v1/leave and /v1/test-page: refused.
+  for (const path of ["/v1/leave", "/v1/test-page"]) {
+    const res = await signed(e, path, { timezone: "Asia/Kuwait" }, { signedFor: "/v1/settings" });
+    assert.equal(res.status, 401, path);
+    assert.equal((await res.json()).error, "bad_signature");
+  }
+  assert.equal((await signed(e, "/v1/settings", { timezone: "Asia/Kuwait" })).status, 200, "still paired");
+  // Negative control: the v1 form of the same request unpairs (the hole).
+  const old = await signed(e, "/v1/leave", { timezone: "Asia/Kuwait" }, { ts: T0 + 1, now: T0 + 1, v1: true });
+  assert.equal(old.status, 200);
+  assert.equal((await signed(e, "/v1/settings", {}, { ts: T0 + 2, now: T0 + 2 })).status, 401, "unpaired");
+});
 
 // -- POST /v1/settings ------------------------------------------------------------
 

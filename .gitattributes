@@ -25,6 +25,12 @@
 *.cmd text eol=crlf
 *.bat text eol=crlf
 
+# Vendored as their publisher ships them, byte for byte, on every checkout:
+# their SHA-256 is recorded beside them (vendored.json) and checked by
+# tests/test_vendor_livekit.py.
+kazma-ui/kazma_ui/static/vendor/livekit/livekit-client.umd.js -text
+kazma-ui/kazma_ui/static/vendor/livekit/LICENSE -text
+
 # Binary — never convert. No churn: these were never being converted.
 *.png binary
 *.jpg binary
@@ -35,3 +41,8 @@
 *.db binary
 *.woff binary
 *.woff2 binary
+
+# Signed bytes: a Sigstore signature is over the exact file, so a checkout
+# that turned LF into CRLF would make the recorded signature fail
+# (tests/test_update_checks_release_signature.py).
+tests/fixtures/release_signature/** -text

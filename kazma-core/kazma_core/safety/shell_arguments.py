@@ -13,6 +13,27 @@ Three questions, each answered here so the policy asks them one way:
 """
 from __future__ import annotations
 
+import os
+import shlex
+
+
+def split_command_line(command: str) -> list[str]:
+    """``shell_exec``'s words of *command*, as it runs them (no shell).
+
+    ``shlex.split`` defaults to posix=True, which treats "\\" as an escape:
+    on Windows ``git -C C:\\repo status`` became ``-C C:repo``. So Windows
+    splits non-posix and strips ONE matched pair of surrounding quotes per
+    word. Raises ``ValueError`` on an unbalanced quote. The approval card's
+    disclosures read the same words (``safety.git_repo_programs``).
+    """
+    if os.name == "nt":
+        return [
+            a[1:-1] if len(a) >= 2 and a[0] == a[-1] and a[0] in ("'", '"') else a
+            for a in shlex.split(command, posix=False)
+        ]
+    return shlex.split(command)
+
+
 # git is not here: its short options before the subcommand are read by
 # split_subcommand, and after it they belong to the subcommand
 # (``git log -3`` was refused as an "unsupported git short option").

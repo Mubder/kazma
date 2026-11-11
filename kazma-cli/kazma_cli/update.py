@@ -5,8 +5,9 @@ git install, then checks for updates accordingly:
 
 * **pip install** (a release wheel): reads the latest GitHub release of the
   canonical repo and installs its wheel once it matches the release's
-  published SHA-256 -- never the name ``kazma`` from PyPI, where no Kazma
-  package is published and the name is anyone's to register.
+  published SHA-256 and its Sigstore signature names Kazma's release workflow
+  (kazma_cli.release_signature) -- never the name ``kazma`` from PyPI, where
+  no Kazma package is published and the name is anyone's to register.
 * **git / editable install** (preferred monorepo path): ``git fetch``, then
   hard-reset **main** to ``origin/main`` (after named stash of local edits),
   reinstall extras in a fresh process, and postflight-verify HEAD + CLI.
@@ -40,6 +41,7 @@ from rich.console import Console
 from rich.table import Table
 
 from kazma_cli.banner import _get_version
+from kazma_cli.release_signature import MAX_BUNDLE_BYTES, SignatureRefused, check_bundle, must_be_signed
 
 logger = logging.getLogger(__name__)
 
@@ -318,6 +320,9 @@ class ReleaseInfo:
     wheel_sha256: str = ""
     page: str = ""
     problem: str = ""
+    #: The wheel's Sigstore bundle (``<wheel>.sigstore.json``), when the
+    #: release carries one. Required from ``release_signature.SIGNED_FROM`` on.
+    bundle_url: str = ""
 
 
 def _is_sha256(value: str) -> bool:
@@ -405,10 +410,18 @@ def _read_release(api_url: str) -> ReleaseInfo | None:
             github = digest[len("sha256:"):] if digest.startswith("sha256:") else ""
             if not _is_sha256(github):
                 github = ""
+            # The wheel's Sigstore bundle (kazma_cli.release_signature): a
+            # release from SIGNED_FROM on without one is not installed.
+            bundle = next((a for a in assets if a.get("name") == f"{name}.sigstore.json"), None)
+            bundle_url = str((bundle or {}).get("browser_download_url") or "")
             if not listed:
                 problem = "SHA256SUMS does not list the wheel"
             elif github and github != listed:
                 problem = "SHA256SUMS and GitHub disagree about the wheel's SHA-256"
+            elif bundle_url and not bundle_url.startswith(_RELEASE_DOWNLOAD_PREFIX):
+                problem = f"the wheel's signature is not served from {_RELEASE_DOWNLOAD_PREFIX}"
+            elif not bundle_url and must_be_signed(version):
+                problem = "the release carries no Sigstore signature for its wheel"
             else:
                 problem = ""
             return ReleaseInfo(
@@ -418,6 +431,7 @@ def _read_release(api_url: str) -> ReleaseInfo | None:
                 wheel_sha256=listed if not problem else "",
                 page=page,
                 problem=problem,
+                bundle_url=bundle_url if not problem else "",
             )
     except Exception as exc:
         logger.warning("Failed to fetch the latest Kazma release: %s", exc)
@@ -523,7 +537,10 @@ def do_pip_update(
     *,
     reinstall: bool = False,
 ) -> bool:
-    """Install *release*'s wheel once its SHA-256 matches the release's.
+    """Install *release*'s wheel once its SHA-256 matches the release's and its
+    Sigstore bundle proves Kazma's release workflow made it (required from
+    ``release_signature.SIGNED_FROM`` on; an older release is checked by its
+    SHA-256 alone, and says so).
 
     Never installs ``kazma`` by name (see :func:`get_latest_release`). The
     wheel is downloaded from the canonical repo's release, hashed as it
@@ -544,6 +561,10 @@ def do_pip_update(
         and release.wheel_name == Path(release.wheel_name).name
     ):
         problem = "the release gives no wheel with a published SHA-256"
+    if not problem and release.bundle_url and not release.bundle_url.startswith(_RELEASE_DOWNLOAD_PREFIX):
+        problem = f"the wheel's signature is not served from {_RELEASE_DOWNLOAD_PREFIX}"
+    if not problem and not release.bundle_url and must_be_signed(release.version):
+        problem = "the release carries no Sigstore signature for its wheel"
     if problem:
         console.print(f"[red]Not installing v{release.version} automatically: {problem}.[/red]")
         console.print(f"Verify and install it by hand: {page}")
@@ -558,6 +579,7 @@ def do_pip_update(
             wheel = Path(tmp) / release.wheel_name
             sha = hashlib.sha256()
             size = 0
+            bundle = b""
             with httpx.Client(timeout=_INSTALL_TIMEOUT, follow_redirects=True) as client:
                 with client.stream("GET", release.wheel_url) as resp:
                     resp.raise_for_status()
@@ -569,6 +591,15 @@ def do_pip_update(
                                 return False
                             sha.update(chunk)
                             fh.write(chunk)
+                if release.bundle_url:
+                    with client.stream("GET", release.bundle_url) as resp:
+                        resp.raise_for_status()
+                        for chunk in resp.iter_bytes():
+                            bundle += chunk
+                            if len(bundle) > MAX_BUNDLE_BYTES:
+                                console.print("[red]The signature download is larger than any Sigstore "
+                                              "bundle; not installing.[/red]")
+                                return False
             if sha.hexdigest() != release.wheel_sha256:
                 console.print(
                     "[red]The downloaded wheel does not match the release's "
@@ -576,11 +607,27 @@ def do_pip_update(
                 )
                 console.print(f"Release: {page}")
                 return False
+            # The signature (kazma_cli.release_signature): the wheel was made
+            # by Kazma's release workflow, not only listed in the release.
+            if release.bundle_url:
+                try:
+                    signer = check_bundle(sha.digest(), bundle)
+                except SignatureRefused as exc:
+                    console.print(f"[red]The wheel's Sigstore signature does not hold ({exc}); "
+                                  "not installing.[/red]")
+                    console.print(f"Release: {page}")
+                    return False
+                console.print(f"[cyan]Signature verified: made by {signer}[/cyan]")
+                checked = "SHA-256 and Sigstore signature verified"
+            else:
+                console.print(f"[yellow]v{release.version} is older than Kazma's signed releases: it is "
+                              "checked by its SHA-256 only.[/yellow]")
+                checked = "SHA-256 verified"
             spec = str(wheel)
             if extras:
                 spec += f"[{','.join(extras)}]"
                 console.print(f"[cyan]Preserving optional extras:[/cyan] {', '.join(extras)}")
-            console.print(f"[cyan]Installing {release.wheel_name} (SHA-256 verified)...[/cyan]")
+            console.print(f"[cyan]Installing {release.wheel_name} ({checked})...[/cyan]")
             # Extras (rag: torch) can take far longer than Kazma itself.
             timeout = _INSTALL_TIMEOUT_HEAVY if extras else _INSTALL_TIMEOUT
             if reinstall:

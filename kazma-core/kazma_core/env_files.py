@@ -143,8 +143,8 @@ def _install_env_file() -> Path:
     return own[0] if own else Path(user_home()) / ".env"
 
 
-def persist_generated_secret(name: str, value: str) -> Path:
-    """Keep ``name=value`` in :func:`_install_env_file`; returns the file.
+def persist_generated_secret(name: str, value: str, *, path: Path | None = None) -> Path:
+    """Keep ``name=value`` in :func:`_install_env_file` (or *path*); returns the file.
 
     The file is made empty and restricted to this account
     (``security.file_access.restrict_to_owner``) BEFORE the value is written;
@@ -152,11 +152,13 @@ def persist_generated_secret(name: str, value: str) -> Path:
     WARNING and the value is still written: a vault key that is not kept
     leaves every stored secret unreadable after a restart. An existing
     ``name=`` line (or its commented example) is replaced, else one is
-    appended. Raises ``OSError`` when the file cannot be written.
+    appended. Raises ``OSError`` when the file cannot be written. *path* is
+    for setup, which keeps a key in the ``.env`` docker compose reads
+    (``security.searxng_secret``).
     """
     from kazma_core.security.file_access import restrict_to_owner
 
-    path = _install_env_file()
+    path = Path(path) if path is not None else _install_env_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)

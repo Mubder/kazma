@@ -203,7 +203,9 @@ def test_calendar_api_mounted() -> None:
 
     paths = [getattr(r, "path", "") for r in calendar_api.router.routes]
     assert any("/status" in p for p in paths)
-    assert any("oauth/google/start.json" in p for p in paths)
+    # The sign-in starts with a POST from the page (2026-11-11).
+    posts = [getattr(r, "path", "") for r in calendar_api.protected_router.routes]
+    assert "/api/calendar/oauth/google/start" in posts
 
 
 def test_ms_device_client_id_reads_vault() -> None:
@@ -214,21 +216,14 @@ def test_ms_device_client_id_reads_vault() -> None:
     assert "email.microsoft.client_id" in src
 
 
-def test_peek_state_does_not_consume() -> None:
-    from kazma_skills.native.email_manager.oauth_common import (
-        new_state,
-        peek_state,
-        pop_state,
-    )
+def test_the_gmail_callback_takes_a_calendar_attempt_too() -> None:
+    """The Google Calendar sign-in comes back through the Gmail callback: one
+    take names both providers, and the attempt says which it was."""
+    from kazma_core.security.oauth_attempts import begin, take
 
-    s = new_state("google_calendar", redirect_uri="http://localhost/cb")
-    meta = peek_state(s)
-    assert meta is not None and meta["provider"] == "google_calendar"
-    meta2 = peek_state(s)
-    assert meta2 is not None
-    popped = pop_state(s)
-    assert popped is not None
-    assert peek_state(s) is None
+    s = begin("google_calendar", redirect_uri="http://localhost/cb")
+    meta = take(s, bound_state=s, providers=("gmail", "google_calendar"))
+    assert meta["provider"] == "google_calendar"
 
 
 @pytest.mark.asyncio
@@ -236,14 +231,14 @@ async def test_gmail_finish_persists_calendar_when_scope_granted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from kazma_skills.native.email_manager import oauth_gmail as og
-    from kazma_skills.native.email_manager.oauth_common import new_state
 
     monkeypatch.setenv("EMAIL_GMAIL_CLIENT_ID", "cid")
     monkeypatch.setenv("EMAIL_GMAIL_CLIENT_SECRET", "sec")
-    state = new_state(
-        "gmail",
-        redirect_uri="http://127.0.0.1:9090/api/email/oauth/gmail/callback",
-    )
+    # The attempt the callback took (oauth_attempts.take).
+    state = {
+        "provider": "gmail",
+        "redirect_uri": "http://127.0.0.1:9090/api/email/oauth/gmail/callback",
+    }
     stored: dict[str, str] = {}
 
     def fake_store(name: str, value: str, category: str = "email") -> bool:

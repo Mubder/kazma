@@ -128,3 +128,76 @@ def test_status_says_the_service():
     lines = guard._dbsvc_status_lines({"database_service": {"state": "down", "service": "postgresql-x64-16"}})
     assert lines == ["database    : down (postgresql-x64-16)"]
     assert "database_service" in guard.GUARD_FEATURES
+
+
+# -- a guard without admin rights (2026-11-11) --------------------------------
+#
+# The user-level task (--install from a shell without admin rights) runs the
+# guard without them, and a Windows service lets administrators alone start
+# it (some machines refuse the query too). Refused, sc says "OpenService
+# FAILED 5: Access is denied." and exits 5. The boot task an admin shell
+# registers runs the guard with admin rights: Windows gives an S4U task of an
+# admin account its full token whatever its run level (measured on the drill
+# VM 2026-11-11: Limited and Highest both High integrity).
+
+_DENIED = (5, "[SC] OpenService FAILED 5:\n\nAccess is denied.\n\n", "")
+
+
+class _Refusing(_Harness):
+    def __init__(self, monkeypatch, *, refuse: tuple[str, ...]) -> None:
+        super().__init__(monkeypatch)
+        self.refuse = refuse
+        self.events: list[str] = []
+        log = self.g.log
+
+        def _log(level, event, **fields):
+            self.events.append(event)
+            return log(level, event, **fields)
+
+        self.g.log = _log
+        self.g.dbsvc.log = _log
+
+    def _run(self, argv, timeout):
+        if argv[:1] == ["sc"] and argv[1] in self.refuse:
+            self.calls.append(list(argv))
+            return _DENIED
+        return super()._run(argv, timeout)
+
+
+def test_a_refused_query_is_not_an_outage_while_the_port_answers(monkeypatch):
+    """Live risk of the change: the guard asks sc every 30 s, and without the
+    query right every answer is "Access is denied". The port decides."""
+    h = _Refusing(monkeypatch, refuse=("query",))
+    h.run(900)
+    assert "dbsvc.down" not in h.events and h.pages == []
+    assert guard._read_state()["database_service"]["state"] == "running"
+    assert h.events.count("dbsvc.access_denied") == 1      # said once, not every 30 s
+
+
+def test_the_old_reading_called_a_refused_query_an_outage(monkeypatch):
+    """The negative control: the rule before the change (a state sc would not
+    give counted as stopped) turns the refusal into a down database."""
+    h = _Refusing(monkeypatch, refuse=("query",))
+    monkeypatch.setattr(guard.DatabaseServiceWatch, "_running",
+                        lambda self, os_name, service: False)
+    h.run(400)
+    assert "dbsvc.down" in h.events and h.pages
+
+
+def test_a_refused_query_still_sees_a_real_outage_by_its_port(monkeypatch):
+    h = _Refusing(monkeypatch, refuse=("query",))
+    h.run(300)
+    h.answers = False
+    h.run(400)
+    assert "dbsvc.down" in h.events
+    assert h.starts() == 1                       # unknown state: it still asks the OS
+
+
+def test_a_refused_start_says_how_to_allow_it(monkeypatch):
+    h = _Refusing(monkeypatch, refuse=("start",))
+    h.run(300)
+    h.running = h.answers = False
+    h.run(400)
+    assert "dbsvc.access_denied" in h.events
+    assert len(h.pages) == 1 and "not allowed to start it" in h.pages[0]
+    assert "install_service.py --install" in h.pages[0] and "start it yourself" in h.pages[0]

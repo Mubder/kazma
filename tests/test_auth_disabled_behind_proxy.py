@@ -74,7 +74,9 @@ def _client() -> TestClient:
         return {"ok": "yes"}
 
     app.middleware("http")(auth.create_auth_middleware())
-    return TestClient(ForwardedHeadersMiddleware(app), client=TUNNEL)
+    # Host 127.0.0.1: with sign-in off a loopback peer's Host must name this
+    # machine (TestClient's default "testserver" is a single-label name).
+    return TestClient(ForwardedHeadersMiddleware(app), client=TUNNEL, base_url="http://127.0.0.1:9090")
 
 
 def test_a_proxied_request_is_refused_while_sign_in_is_off(monkeypatch: pytest.MonkeyPatch) -> None:

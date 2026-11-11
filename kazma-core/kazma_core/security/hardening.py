@@ -225,6 +225,7 @@ class SecurityHardeningRunner:
         "check_permission_escalation",
         "check_service_exposure",
         "check_secret_file_access",
+        "check_searxng_secret",
     ]
 
     def __init__(self, project_root: str | Path | None = None) -> None:
@@ -705,6 +706,34 @@ class SecurityHardeningRunner:
             severity="critical",
             message="No service of Kazma's is published beyond this machine" + note,
             recommendation="Keep container ports on 127.0.0.1",
+        )
+
+    async def check_searxng_secret(self) -> HardeningCheck:
+        """Kazma's SearXNG does not run on the placeholder secret key that
+        settings.yml and docker-compose.yml ship (2026-11-11: setup generates
+        one, ``security.searxng_secret``)."""
+        return await asyncio.to_thread(self._searxng_secret)
+
+    def _searxng_secret(self) -> HardeningCheck:
+        from kazma_core.security.service_exposure import searxng_secret_problems
+
+        problems, unchecked = searxng_secret_problems()
+        note = f" (not checked: {'; '.join(unchecked)})" if unchecked else ""
+        if problems:
+            return HardeningCheck(
+                name="check_searxng_secret",
+                passed=False,
+                severity="medium",
+                message="; ".join(problems) + note,
+                recommendation=("Run `kazma setup install --with private_search`: it keeps a generated "
+                                "SEARXNG_SECRET in .env and starts SearXNG again with it."),
+            )
+        return HardeningCheck(
+            name="check_searxng_secret",
+            passed=True,
+            severity="medium",
+            message="No SearXNG of Kazma's runs on the placeholder secret key" + note,
+            recommendation="Keep SEARXNG_SECRET in .env (setup writes one)",
         )
 
     async def check_secret_file_access(self) -> HardeningCheck:

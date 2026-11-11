@@ -30,7 +30,7 @@ description: Kazma Deployment — code-audited reference (unified docs, v0.9+)
 
 The live file is `Dockerfile` at the repo root — do not copy-paste a snapshot here (it drifted before: missing git, Arabic fonts, LibreOffice, Tesseract, ClamAV, and `document-platform`). What it actually does:
 
-- Base: `python:3.11-slim`.
+- Base: `python:3.11-slim`, pinned by digest (`@sha256:...`), as every Kazma Dockerfile is: a tag is whatever the registry serves that day. Dependabot proposes a new digest as a pull request.
 - System deps: git, libpq, Noto Arabic fonts, LibreOffice, Tesseract (`eng`+`ara`), ClamAV, build-essential, curl.
 - Python: `pip install -e ".[rag,postgres,document-platform]"`.
 - Runs as non-root **`kazma`**. Listens on **container port 8000**.
@@ -212,6 +212,19 @@ at stable paths under `/state`. UID/GID 10001 match the Docker image. Its
 ceiling to finish before storage moves. It mounts no Docker socket or
 Kubernetes credentials. Provide an isolated code execution service separately.
 
+The container's root filesystem is read-only (`readOnlyRootFilesystem`). Every
+place Kazma writes is a mount: the `/state` volume (data, Kazma's home, skills,
+vectors, `KAZMA_ENV_FILE` for a key the server generates, and `HF_HOME` so the
+meaning-search model is not downloaded again at each start), and `emptyDir`
+volumes for `/tmp` (scratch files, LibreOffice profiles, a shell tool's private
+home), the user's home `/home/kazma` (caches under `~/.cache` and `~/.config`)
+and ClamAV's signature, log and run folders. An init container copies the
+signatures the image was built with into the signature folder, which
+freshclam then keeps current. Anything you add that writes elsewhere needs a
+mount of its own; `tests/test_kubernetes_runtime_contract.py` resolves Kazma's
+own write locations under the manifest's environment and fails on one outside
+every mount.
+
 Before applying, choose a supported replicated block CSI driver whose
 detach/reattach fencing you can verify. Replace the storage class placeholder
 and the image placeholder with a built, scanned release digest. Create
@@ -224,8 +237,8 @@ platform credentials through the normal protected configuration workflow.
 Fresh HA installs register the default workspace inside the persistent data
 directory, rather than the container's application directory. Existing active
 workspace registrations are preserved: verify that every writable workspace
-is on storage included in the paired backup. A workspace under `/app` loses
-its files when a pod is replaced, even when database and PVC recovery succeed.
+is on storage included in the paired backup. A workspace under `/app` cannot
+be written at all (the root filesystem is read-only); move it under `/state`.
 
 ```bash
 kubectl kustomize deploy/kubernetes

@@ -324,6 +324,9 @@ async def supervisor_node(
             "consecutive_refusals": 0,
             "refused_signatures": [],
             "tool_argument_rechecks": 0,
+            # What the last turn read from outside is not this turn's
+            # (safety.outside_text_fetch); an approval resume keeps it.
+            "outside_text": {},
         }
         if cost_breaker and hasattr(cost_breaker, "record_user_interaction"):
             cost_breaker.record_user_interaction()

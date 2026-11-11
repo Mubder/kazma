@@ -53,6 +53,119 @@ uv_works() {
     uv --version &>/dev/null
 }
 
+# ── Helper: install uv, verified ────────────────────────────────────────────
+# One uv release, with the SHA-256 of each archive written here (2026-11,
+# supply chain). Setup used to pipe https://astral.sh/uv/install.sh into sh:
+# it ran whatever that address served that day. Now it downloads this
+# release's archive from GitHub, checks it against the hash below before
+# anything is unpacked or run, and stops on a mismatch. The hashes are uv's
+# own .sha256 files of the release, which GitHub's asset digests matched.
+# setup.ps1 does the same; tests/test_setup_downloads_verified.py holds both.
+UV_RELEASE="0.13.6"
+
+uv_archive_sha256() {
+    case "$1" in
+        x86_64-unknown-linux-gnu)   echo "f29c3e94ffabd7e6f3ba521dba169a9b7ec12100bf3257087f0f24f6123f3645" ;;
+        aarch64-unknown-linux-gnu)  echo "229e194255c7958d86d56e8790d969a6f74736592133f0dfd0076f754c642c1d" ;;
+        x86_64-unknown-linux-musl)  echo "5d61f26b6c7213779eda90edc6971ea6b0b796bfb8d49a574c8ad69b59838548" ;;
+        aarch64-unknown-linux-musl) echo "819692e404d23e5aae6bc44c0e260f1f5492fd1910ab4693b2c650f926dbe800" ;;
+        x86_64-apple-darwin)        echo "63ba17fdda55ad1a230d4b37fc6017ffa10c23688c83818bd3bfdf914c652a02" ;;
+        aarch64-apple-darwin)       echo "60fbd5c8a1ed681845eea28d9d622fcde03c51e91a43465b64a1e17db1ed3472" ;;
+        *) echo "" ;;
+    esac
+}
+
+uv_target() {
+    local arch ldd_out
+    case "$(uname -m)" in
+        x86_64|amd64) arch="x86_64" ;;
+        aarch64|arm64) arch="aarch64" ;;
+        *) echo ""; return 0 ;;
+    esac
+    case "$(uname -s)" in
+        Darwin) echo "$arch-apple-darwin" ;;
+        Linux)
+            ldd_out=$(ldd --version 2>&1 || true)
+            if [[ "$ldd_out" == *musl* || -f /etc/alpine-release ]]; then
+                echo "$arch-unknown-linux-musl"
+            else
+                echo "$arch-unknown-linux-gnu"
+            fi ;;
+        *) echo "" ;;
+    esac
+}
+
+sha256_of() {
+    if command -v sha256sum &>/dev/null; then
+        sha256sum "$1" | cut -d' ' -f1
+    elif command -v shasum &>/dev/null; then
+        shasum -a 256 "$1" | cut -d' ' -f1
+    fi
+}
+
+download_to() {
+    if command -v curl &>/dev/null; then
+        curl --proto '=https' --tlsv1.2 -fsSL "$1" -o "$2"
+    elif command -v wget &>/dev/null; then
+        wget -q --https-only -O "$2" "$1"
+    else
+        log_fail "Neither curl nor wget is here to download uv"
+        return 1
+    fi
+}
+
+install_pinned_uv() {
+    local target expected url work archive actual found
+    target=$(uv_target)
+    expected=$(uv_archive_sha256 "$target")
+    if [[ -z "$target" || -z "$expected" ]]; then
+        log_fail "uv $UV_RELEASE has no build for this machine ($(uname -s) $(uname -m))"
+        return 1
+    fi
+    url="https://github.com/astral-sh/uv/releases/download/$UV_RELEASE/uv-$target.tar.gz"
+    work=$(mktemp -d)
+    archive="$work/uv-$target.tar.gz"
+    if ! download_to "$url" "$archive"; then
+        log_fail "Could not download $url"
+        rm -rf "$work"
+        return 1
+    fi
+    actual=$(sha256_of "$archive")
+    if [[ -z "$actual" ]]; then
+        log_fail "No sha256sum or shasum here to check the uv download: nothing was installed"
+        rm -rf "$work"
+        return 1
+    fi
+    if [[ "$actual" != "$expected" ]]; then
+        log_fail "The uv download does not match its recorded SHA-256: nothing was installed"
+        log_info "  uv-$target.tar.gz"
+        log_info "  expected $expected"
+        log_info "  got      $actual"
+        rm -rf "$work"
+        return 1
+    fi
+    mkdir -p "$work/unpacked" "$HOME/.local/bin"
+    tar -xzf "$archive" -C "$work/unpacked"
+    for exe in uv uvx; do
+        found=$(find "$work/unpacked" -type f -name "$exe" | head -n 1)
+        if [[ -n "$found" ]]; then
+            cp "$found" "$HOME/.local/bin/$exe"
+            chmod 755 "$HOME/.local/bin/$exe"
+        fi
+    done
+    rm -rf "$work"
+    if [[ ! -x "$HOME/.local/bin/uv" ]]; then
+        log_fail "The uv archive held no uv"
+        return 1
+    fi
+    case ":$PATH:" in
+        *":$HOME/.local/bin:"*) ;;
+        *) log_info "uv is in ~/.local/bin: add it to PATH for later terminals (export PATH=\"\$HOME/.local/bin:\$PATH\")" ;;
+    esac
+    export PATH="$HOME/.local/bin:$PATH"
+    hash -r
+}
+
 # ── 0. Permission Guard ─────────────────────────────────────────────────────
 if [[ ! -x "$0" ]]; then
     log_warn "This script is not executable."
@@ -127,67 +240,25 @@ fi
 
 # Install uv if needed
 if [[ "$UV_INSTALLED" == "false" ]]; then
-    log_warn "uv not found — installing via pip..."
+    log_warn "uv not found — installing uv $UV_RELEASE (checked against its recorded SHA-256)..."
 
-    # Priority 1: pip (works everywhere — WSL, Docker, bare metal), when there is a Python
-    if [[ -n "$PYTHON_CMD" ]] && "$PYTHON_CMD" -m pip install --user uv 2>&1 | tail -1; then
-        export PATH="$HOME/.local/bin:$PATH"
-        hash -r
-        if command -v uv &>/dev/null && uv_works; then
+    # install_pinned_uv: the release archive, verified before it is unpacked.
+    if install_pinned_uv; then
+        if uv_works; then
             UV_VERSION=$(uv --version 2>/dev/null || echo "installed")
-            log_ok "uv installed via pip: $UV_VERSION"
+            log_ok "uv installed: $UV_VERSION"
             UV_INSTALLED=true
         else
-            log_warn "pip install succeeded but uv not on PATH"
-            log_info "Trying: export PATH=\$HOME/.local/bin:\$PATH"
-            # One more check with explicit path
-            if [[ -x "$HOME/.local/bin/uv" ]]; then
-                export PATH="$HOME/.local/bin:$PATH"
-                UV_VERSION=$("$HOME/.local/bin/uv" --version 2>/dev/null || echo "installed")
-                log_ok "uv found at ~/.local/bin/uv: $UV_VERSION"
-                UV_INSTALLED=true
-            fi
-        fi
-    fi
-
-    # Priority 2: official curl installer (works in Docker/bare metal)
-    if [[ "$UV_INSTALLED" == "false" ]] && command -v curl &>/dev/null; then
-        log_info "pip failed, trying official installer..."
-        if curl -LsSf https://astral.sh/uv/install.sh | sh 2>&1 | tail -1; then
-            export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
-            hash -r
-            if command -v uv &>/dev/null && uv_works; then
-                UV_VERSION=$(uv --version 2>/dev/null || echo "installed")
-                log_ok "uv installed via curl: $UV_VERSION"
-                UV_INSTALLED=true
-            fi
-        fi
-    fi
-
-    # Priority 3: snap (last resort — known systemd issues in WSL2)
-    if [[ "$UV_INSTALLED" == "false" ]] && command -v snap &>/dev/null; then
-        log_warn "Trying snap as last resort (may fail in WSL2)..."
-        if sudo snap install astral-uv --classic 2>&1 | tail -1; then
-            hash -r
-            if uv_works; then
-                UV_VERSION=$(uv --version 2>/dev/null || echo "installed")
-                log_ok "uv installed via snap: $UV_VERSION"
-                UV_INSTALLED=true
-            else
-                log_fail "snap uv installed but broken (systemd scope error)"
-                sudo snap remove astral-uv 2>/dev/null || true
-            fi
+            log_fail "uv $UV_RELEASE was installed but does not run"
         fi
     fi
 
     if [[ "$UV_INSTALLED" == "false" ]]; then
         log_fail "Could not install a working uv"
-        log_info "Fix manually:"
-        log_info "  pip install uv"
-        log_info "  # or: curl -LsSf https://astral.sh/uv/install.sh | sh"
-        log_info ""
-        log_info "Or skip uv entirely:"
-        log_info "  $PYTHON_CMD -m pip install -e '.[rag,dev,tui]'"
+        log_info "Fix manually: download uv-$(uv_target).tar.gz from"
+        log_info "  https://github.com/astral-sh/uv/releases/tag/$UV_RELEASE"
+        log_info "check it against the .sha256 file beside it, put uv on PATH,"
+        log_info "then run ./setup.sh again."
         exit 1
     fi
 fi

@@ -342,8 +342,16 @@ def test_every_refreshing_backend_takes_an_account() -> None:
 # ── signing an extra account in ─────────────────────────────────────────
 
 
+def _taken(started: dict, provider: str) -> dict:
+    """The attempt a start recorded, as its callback takes it (with the
+    browser's binding cookie, oauth_attempts.take)."""
+    from kazma_core.security.oauth_attempts import take
+
+    return take(started["state"], bound_state=started["state"], providers=(provider,))
+
+
 def test_a_google_sign_in_for_an_extra_account_keeps_its_own_tokens(vault, monkeypatch) -> None:
-    from kazma_skills.native.email_manager import oauth_common, oauth_gmail
+    from kazma_skills.native.email_manager import oauth_gmail
 
     _main_gmail(vault)
     before = _main_keys(vault)
@@ -352,7 +360,8 @@ def test_a_google_sign_in_for_an_extra_account_keeps_its_own_tokens(vault, monke
 
     started = oauth_gmail.start_gmail_oauth("https://kazma.test", account="Work")
     assert started["ok"] and "select_account" in started["authorize_url"]
-    state = next(k for k, v in oauth_common._oauth_states.items() if v.get("account") == "work")
+    state = _taken(started, "gmail")
+    assert state["account"] == "work"
 
     monkeypatch.setattr(oauth_gmail.httpx, "AsyncClient", _fake_client(
         {"access_token": "w-a", "refresh_token": "w-r", "scope": GMAIL_SCOPES, "email": "work@gmail.com"}))
@@ -368,7 +377,8 @@ def test_a_google_sign_in_for_an_extra_account_keeps_its_own_tokens(vault, monke
 
     # The main account's own address as an extra account: refused, nothing kept.
     started = oauth_gmail.start_gmail_oauth("https://kazma.test", account="dup")
-    state = next(k for k, v in oauth_common._oauth_states.items() if v.get("account") == "dup")
+    state = _taken(started, "gmail")
+    assert state["account"] == "dup"
     monkeypatch.setattr(oauth_gmail.httpx, "AsyncClient", _fake_client(
         {"access_token": "d-a", "refresh_token": "d-r", "scope": GMAIL_SCOPES, "email": "main@gmail.com"}))
 
@@ -394,7 +404,7 @@ def test_a_bad_name_is_refused_before_the_sign_in(vault, monkeypatch) -> None:
 def test_a_microsoft_sign_in_for_an_extra_account_keeps_its_own_tokens(vault, monkeypatch) -> None:
     import base64
 
-    from kazma_skills.native.email_manager import oauth_common, oauth_ms_browser
+    from kazma_skills.native.email_manager import oauth_ms_browser
 
     _main_microsoft(vault)
     before = _main_keys(vault)
@@ -402,7 +412,8 @@ def test_a_microsoft_sign_in_for_an_extra_account_keeps_its_own_tokens(vault, mo
     monkeypatch.setattr(oauth_ms_browser, "_client_secret", lambda: "")
     started = oauth_ms_browser.start_ms_browser_oauth("https://kazma.test", account="team")
     assert started["ok"] and "prompt=select_account" in started["authorize_url"]
-    state = next(k for k, v in oauth_common._oauth_states.items() if v.get("account") == "team")
+    state = _taken(started, "microsoft")
+    assert state["account"] == "team"
 
     def seg(obj):
         return base64.urlsafe_b64encode(json.dumps(obj).encode()).decode().rstrip("=")
@@ -509,10 +520,13 @@ def test_the_sign_in_routes_take_the_account(vault, monkeypatch) -> None:
 
     monkeypatch.setattr(oauth_gmail, "_client_id", lambda: "cid.apps.googleusercontent.com")
     monkeypatch.setattr(oauth_gmail, "_client_secret", lambda: "GOCSPX-secret")
+    # The page's origin is the callback's (http://testserver here).
+    monkeypatch.setenv("KAZMA_PUBLIC_URL", "http://testserver")
     c = _client()
-    ok = c.get("/api/email/oauth/gmail/start.json", params={"account": "work"})
+    ok = c.post("/api/email/oauth/gmail/start", json={"account": "work"})
     assert ok.status_code == 200 and ok.json()["authorize_url"]
-    bad = c.get("/api/email/oauth/gmail/start.json", params={"account": "sandbox"})
+    assert "state" not in ok.json(), "the state travels in the cookie and the URL only"
+    bad = c.post("/api/email/oauth/gmail/start", json={"account": "sandbox"})
     assert bad.status_code == 400
 
 
@@ -551,5 +565,6 @@ def test_the_settings_card_offers_every_way_in() -> None:
                  "addPasswordAccount()", "reconnectEmailAccount(a)", "removeEmailAccount(a)"):
         assert call in card, call
     js = (REPO / "kazma-ui/kazma_ui/static/js/settings_integrations.js").read_text(encoding="utf-8")
-    assert "'?account=' + encodeURIComponent(alias)" in js
+    # The account's name rides the sign-in's POST body (2026-11-11).
+    assert "this._signIn(url, { account: alias }" in js
     assert "'/api/email/accounts/' + encodeURIComponent(a.alias) + '/remove'" in js

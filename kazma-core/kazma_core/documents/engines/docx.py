@@ -168,8 +168,60 @@ class DocxEngine:
         self._house_bullets(document)
         self._complex_script_emphasis(document)
         self._give_direction_marks_a_face(document)
+        self._house_package(document)
         document.save(str(output))
         self._embed_house_fonts(Path(output))
+
+    @staticmethod
+    def _house_package(document: Any) -> None:
+        """The theme, the defaults and every style in the house face.
+
+        Kazma's runs and Normal style name IBM Plex Sans Arabic, but text a
+        person types in a heading, a list or a new style resolved through
+        ``w:docDefaults`` and the heading styles to the template's theme:
+        Calibri / Calibri Light, and Times New Roman for Arabic (its
+        ``script="Arab"`` entry). ``engines/office_fonts.py`` rewrites the
+        theme, ``w:docDefaults`` and every style's ``w:rFonts`` (in
+        ``styles.xml`` and Word 2010's ``stylesWithEffects.xml``), and the
+        font table lists only the faces the document names.
+        """
+        from docx.opc.constants import CONTENT_TYPE as CT
+        from docx.opc.part import XmlPart
+        from docx.oxml.parser import parse_xml
+        from lxml import etree
+
+        from .office_fonts import (
+            house_faces,
+            house_font_table,
+            house_theme,
+            house_word_styles,
+            word_faces_named,
+        )
+
+        def rewrite(part: Any, change: Any) -> None:
+            if isinstance(part, XmlPart):
+                change(part.element)
+                return
+            root = parse_xml(part.blob)  # the template's own part; entities off
+            change(root)
+            part._blob = etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
+
+        parts = list(document.part.package.iter_parts())
+        font_table = None
+        for part in parts:
+            if part.content_type == CT.OFC_THEME:
+                if isinstance(part, XmlPart):
+                    part._element = parse_xml(house_theme(part.blob))
+                else:
+                    part._blob = house_theme(part.blob)
+            elif part.content_type in (CT.WML_STYLES, "application/vnd.ms-word.stylesWithEffects+xml"):
+                rewrite(part, house_word_styles)
+            elif part.content_type == CT.WML_FONT_TABLE:
+                font_table = part
+        if font_table is not None:
+            roots = [p.element for p in parts if isinstance(p, XmlPart)]
+            used = word_faces_named(roots) | set(house_faces())
+            rewrite(font_table, lambda root: house_font_table(root, used))
 
     def _embed_house_fonts(self, output: Path) -> None:
         """Put the house face inside the file (``engines/docx_fonts.py``).

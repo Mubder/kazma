@@ -291,8 +291,6 @@ def register_system_tools(registry: Any) -> None:
         category="system",
     )
     async def shell_exec(command: str, timeout: int = 30) -> str:
-        import shlex
-
         from kazma_core.safety.shell_preflight import shell_refusal
 
         # Every refusal before the process starts is RefusedBeforeEffect:
@@ -326,23 +324,12 @@ def register_system_tools(registry: Any) -> None:
         # attached to the token, which would break the allowlist check below
         # (it reads Path(args[0]).name). So: split non-posix on Windows, then
         # strip ONE matched pair of surrounding quotes per token. Both halves
-        # are required; either alone is wrong.
-        #
-        # NOTE: use a distinct alias — this function does a local `import os`
-        # further down, which makes a bare `os` here an UnboundLocalError.
-        import os as _os_plat
+        # are required; either alone is wrong. One splitter, which the
+        # approval card's git disclosure reads too.
+        from kazma_core.safety.shell_arguments import split_command_line
 
         try:
-            if _os_plat.name == "nt":
-                args = shlex.split(command, posix=False)
-                args = [
-                    a[1:-1]
-                    if len(a) >= 2 and a[0] == a[-1] and a[0] in ("'", '"')
-                    else a
-                    for a in args
-                ]
-            else:
-                args = shlex.split(command)
+            args = split_command_line(command)
         except ValueError as exc:
             raise RefusedBeforeEffect(f"Invalid command syntax: {exc}")
 
@@ -722,6 +709,17 @@ def register_system_tools(registry: Any) -> None:
             # (to_thread), keeping the bounded-output + timeout semantics.
             import subprocess
             from kazma_core.security.process_budget import OutputLimitExceeded, run_bounded_async
+
+            if binary == "git":
+                # A repository's fsmonitor hook runs on almost every git
+                # command; the git read tools turn it off, and so does this
+                # (2026-11-11). Placed after the policy above, which refuses
+                # a ``-c`` the call itself names. What else the repository
+                # configures runs as approved, named on the card
+                # (safety/git_repo_programs).
+                from kazma_core.safety.git_repo_programs import shell_git_argv
+
+                args = shell_git_argv(args)
 
             try:
                 result = await run_bounded_async(

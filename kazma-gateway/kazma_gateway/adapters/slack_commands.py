@@ -68,11 +68,18 @@ async def handle(adapter: Any, ws: Any, envelope: dict[str, Any]) -> None:
         reason = "no_channel"
     elif adapter._allowed_channels and cid not in adapter._allowed_channels:
         reason = "channel_not_allowed"
-    elif not uid or not adapter.actor_allowed(uid):
-        reason = "user_not_allowed" if adapter._allowed_users or adapter._allow_all else "no_allowlist"
+    else:
+        reason = adapter.sender_refusal(uid) or None
     if reason:
         adapter._receive.drop(reason, message_id=iid, author_id=uid, channel_id=cid)
-        await ack("Kazma refused this command: check the configured allowlists.")
+        # An ephemeral answer, only to the person who ran it: a refused sender
+        # is told the bot is private and their id (sender_rule).
+        from kazma_gateway.sender_rule import REFUSALS, private_notice
+
+        await ack(
+            private_notice("slack", uid, str(payload.get("text") or "")) if reason in REFUSALS and uid
+            else "Kazma refused this command: check the configured allowlists."
+        )
         return
     name = str(payload.get("command") or "").lstrip("/")
     text = native_command_text(name, str(payload.get("text") or ""))

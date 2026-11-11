@@ -1167,13 +1167,26 @@
             // Reuse the Gmail OAuth flow (now includes the drive.file scope).
             // After the callback we land back on Settings; loadOffsiteConfig
             // completes the provider selection.
-            try { localStorage.setItem('kazma_offsite_connect_pending', 'google_drive'); } catch (e) {}
-            window.location.href = '/api/email/oauth/gmail/start';
+            return this._startOffsiteSignIn('google_drive', '/api/email/oauth/gmail/start');
         },
 
         connectOneDrive() {
-            try { localStorage.setItem('kazma_offsite_connect_pending', 'onedrive'); } catch (e) {}
-            window.location.href = '/api/email/oauth/microsoft/start';
+            return this._startOffsiteSignIn('onedrive', '/api/email/oauth/microsoft/start');
+        },
+
+        /* The sign-in starts with a POST (auth-guard.js kazmaStartSignIn,
+           same tab); it was a link to a GET start until 2026-11-11. */
+        async _startOffsiteSignIn(provider, url) {
+            try { localStorage.setItem('kazma_offsite_connect_pending', provider); } catch (e) {}
+            try {
+                const data = await window.kazmaStartSignIn(url, {});
+                if (data.ok) return;
+                try { localStorage.removeItem('kazma_offsite_connect_pending'); } catch (e) {}
+                showToast(window.kazmaSignInProblem(data, 'HTTP ' + data.status), 'error');
+            } catch (e) {
+                try { localStorage.removeItem('kazma_offsite_connect_pending'); } catch (err) {}
+                showToast(e.message, 'error');
+            }
         },
 
         async loadOffsiteConfig() {

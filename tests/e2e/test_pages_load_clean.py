@@ -210,6 +210,68 @@ def test_negative_control_the_tour_sees_a_policy_refusal() -> None:
     assert any("CSP refused" in e and "img-src" in e for e in errors), errors
 
 
+def test_negative_control_the_policy_refuses_a_script_from_another_host() -> None:
+    """The page policy as Kazma sends it (2026-11-11, ``_policy_for``): the
+    LiveKit client's old CDN address is refused, as is an outside socket,
+    while this page's inline script runs. Under the policy before that day
+    (no ``script-src``) the same page loads the outside script."""
+    from playwright.sync_api import sync_playwright
+
+    from kazma_ui.security_headers import _policy_for
+
+    scope = {"type": "http", "method": "GET", "path": "/probe", "raw_path": b"/probe",
+             "query_string": b"", "headers": [(b"host", b"kazma.test")], "scheme": "http",
+             "server": ("kazma.test", 80), "client": ("203.0.113.9", 5000), "root_path": ""}
+    policies = {
+        "now": _policy_for(scope).decode(),
+        "before": ("style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
+                   "object-src 'none'; frame-ancestors 'none'"),
+    }
+    body = (
+        "<html><body><script>window.inlineRan = true;</script>"
+        "<script src=\"https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.js\"></script>"
+        "<script>try { new WebSocket('wss://outside.example/x'); } catch (e) {}</script>"
+        "</body></html>"
+    )
+    def refuse_and_note(asked: list[str]):
+        # One parameter: Playwright passes (route, request) to a two-argument handler.
+        def handler(route) -> None:
+            asked.append(route.request.url)
+            route.abort()
+        return handler
+
+    def serve(policy: str):
+        def handler(route) -> None:
+            route.fulfill(status=200, content_type="text/html", body=body,
+                          headers={"content-security-policy": policy})
+        return handler
+
+    seen: dict[str, dict] = {}
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            for name, policy in policies.items():
+                pg = browser.new_page()
+                errors: list[str] = []
+                asked: list[str] = []
+                pg.on("console", lambda msg, sink=errors: sink.append(f"CSP refused: {msg.text[:200]}")
+                      if "Content Security Policy" in msg.text else None)
+                pg.route("https://cdn.jsdelivr.net/**", refuse_and_note(asked))
+                pg.route("http://kazma.test/probe", serve(policy))
+                pg.goto("http://kazma.test/probe", wait_until="domcontentloaded")
+                pg.wait_for_timeout(500)
+                seen[name] = {"errors": errors, "asked": asked, "inline": pg.evaluate("() => !!window.inlineRan")}
+                pg.close()
+        finally:
+            browser.close()
+    now, before = seen["now"], seen["before"]
+    assert now["inline"] and before["inline"], seen
+    assert any("script-src" in e for e in now["errors"]), now
+    assert any("connect-src" in e for e in now["errors"]), now
+    assert now["asked"] == [], "the outside script was never even requested"
+    assert before["asked"], "control: the old policy let the page ask for it"
+
+
 #: What Cloudflare serves for every request while the server restarts.
 BAD_GATEWAY = "<!DOCTYPE html><html><head><title>502</title></head><body>Bad gateway</body></html>"
 

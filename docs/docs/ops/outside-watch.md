@@ -50,6 +50,10 @@ Only states and numbers: no chat, no files, no paths, no names, no error
 text. The guard builds the message from a fixed list of fields and signs it
 with a key only this install holds; the observer refuses a message that is
 not signed with it, is more than five minutes old, or was already received.
+The signature covers the address it was sent to as well as the message, so
+a signed request is refused at any other of the observer's addresses (see
+`deploy/observer/README.md`, "Signatures"). When Kazma and the observer are
+both updated, deploy the observer first, then Kazma.
 
 ## Setting it up
 

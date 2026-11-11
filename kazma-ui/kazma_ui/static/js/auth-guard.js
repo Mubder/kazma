@@ -158,3 +158,85 @@
         }
     };
 })();
+
+/**
+ * window.kazmaStartSignIn(url, body) -> Promise<object> — start an OAuth
+ * sign-in (GitHub, Google, Microsoft) in THIS tab.
+ *
+ * The start routes are POSTs from Kazma's own page (security audit
+ * 2026-11-10: they were GETs that wrote state). Each answers
+ * {ok, authorize_url} and sets the cookie that binds the sign-in to this
+ * browser (kazma_ui.oauth_sign_in); the provider then sends the browser back
+ * through the callback to the page it started from. No popup and no
+ * window.opener: the pages send Cross-Origin-Opener-Policy: same-origin.
+ *
+ * Posts *body* as JSON with X-Requested-With (the mail and calendar routes
+ * require it) and, on success, goes to the provider's page -- only an
+ * http(s) address is followed. Otherwise resolves with the answer
+ * ({ok: false, code, error, origin, status}) for kazmaSignInProblem to word.
+ * A network failure rejects. Gate: tests/js/test_kazma_start_sign_in.js.
+ */
+(function () {
+    "use strict";
+    if (typeof window.kazmaStartSignIn === "function") return;
+
+    function _words(key, english, vars) {
+        return typeof window.kazmaT === "function" ? window.kazmaT(key, english, vars) : english;
+    }
+
+    window.kazmaStartSignIn = async function (url, body) {
+        var res = await window.fetch(url, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest" },
+            body: JSON.stringify(body || {}),
+        });
+        var data = null;
+        try { data = await res.json(); } catch (e) { data = null; }
+        data = data && typeof data === "object" ? data : {};
+        if (res.ok && data.ok && typeof data.authorize_url === "string") {
+            var target = null;
+            try { target = new URL(data.authorize_url, window.location.href); } catch (e) { target = null; }
+            if (target && (target.protocol === "https:" || target.protocol === "http:")) {
+                window.location.assign(target.href);
+                return { ok: true, navigating: true };
+            }
+            return { ok: false, code: "bad_authorize_url", status: res.status };
+        }
+        data.ok = false;
+        data.status = res.status;
+        return data;
+    };
+
+    /* The words for a start that did not go: the page is on another origin
+       than the callback (the binding cookie would never come back), else the
+       server's own reason, else *fallback*. */
+    window.kazmaSignInProblem = function (data, fallback) {
+        if (data && data.code === "sign_in_from_callback_origin" && data.origin) {
+            return _words("oauth.sign_in_from",
+                "Open Kazma at {origin} to sign in: the provider sends you back there.",
+                { origin: String(data.origin) });
+        }
+        return (data && (data.error || data.detail)) || fallback || "";
+    };
+
+    /* The words for a sign-in the callback refused or that failed, by its
+       code (oauth_attempts.REFUSAL_REASONS, and GitHub's denied / no_code /
+       exchange_failed). An unknown code: *fallback*. */
+    var _REASONS = {
+        other_browser: "The sign-in was started in another browser. Start it again here.",
+        unknown: "This sign-in was already used or never started. Start it again.",
+        expired: "The sign-in took longer than ten minutes. Start it again.",
+        other_provider: "The sign-in came back to the wrong place. Start it again.",
+        denied: "The sign-in was cancelled at the provider.",
+        no_code: "The provider sent no sign-in code back. Start it again.",
+        exchange_failed: "The provider refused to finish the sign-in. Start it again.",
+    };
+    window.kazmaSignInFailed = function (reason, fallback) {
+        var code = String(reason || "");
+        if (Object.prototype.hasOwnProperty.call(_REASONS, code)) {
+            return _words("oauth.failed." + code, _REASONS[code]);
+        }
+        return fallback || "";
+    };
+})();

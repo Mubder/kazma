@@ -34,3 +34,21 @@ updates:
     labels:
       - "dependencies"
       - "ci"
+
+  # Container base images (2026-11, supply chain): every Dockerfile pins its
+  # FROM by digest (tests/test_setup_downloads_verified.py), so a new image
+  # reaches Kazma only as a reviewed pull request, never by a tag moving.
+  # Dependabot reads every Dockerfile* in each folder (Dockerfile.demo too).
+  - package-ecosystem: "docker"
+    directories:
+      - "/"
+      - "/deploy/document-worker"
+      - "/deploy/document-broker"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(docker)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "docker"

@@ -59,10 +59,6 @@ NOT_CALLED_BY_A_PAGE: dict[str, str] = {
     "/api/email/oauth/microsoft/callback": "Microsoft's OAuth redirect lands here",
     "/api/github/oauth/callback": "GitHub's OAuth redirect lands here",
     "/api/auth/oidc/callback": "the OIDC identity provider's sign-in redirect lands here",
-    "/api/calendar/oauth/google/start": (
-        "the sign-in as a link (302 to Google, listed in api-routes.md); the "
-        "calendar card uses /oauth/google/start.json"
-    ),
     "/api/chat/files/{file_id}": (
         "linked from chat replies: send_file and generate_image write this URL "
         "into the Markdown they hand the model (AGENTS §16 B2)"

@@ -2209,8 +2209,14 @@ def _broker_name() -> str:
 
 
 def _port_is_free(port: int) -> bool:
+    """Could the broker listen on *port* now? Asked the way the broker binds
+    (worker_broker._TcpServer): with SO_REUSEADDR on POSIX, where a port whose
+    last connections are in TIME_WAIT is free to a restarted broker; never on
+    Windows, where the option would let a bind take a port in use."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         try:
+            if os.name != "nt":
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind(("127.0.0.1", port))
         except OSError:
             return False
@@ -3543,6 +3549,8 @@ class DatabaseServiceWatch:
         self._down_since: float | None = None
         self._started_this_outage = False
         self._paged = False
+        self._refusal_said = False
+        self.start_refused = False
         self.state = "none"
         self.service = ""
 
@@ -3553,10 +3561,27 @@ class DatabaseServiceWatch:
         _tick_safely(self._tick, lambda exc: self.log(
             "error", "dbsvc.internal_error", error=f"{type(exc).__name__}: {exc}"[:300]))
 
+    def _refused(self, got, what: str, service: str) -> bool:
+        """Whether Windows refused the guard *what* on the service (``sc``'s
+        "OpenService FAILED 5: Access is denied"). A guard without admin
+        rights -- the user-level task ``install_service.py --install``
+        registers from a shell without them -- may not start the Postgres
+        service, and on some machines may not query it. Said once."""
+        text = " ".join(str(part) for part in got[1:]) if got else ""
+        refused = bool(got) and (got[0] == 5 or "FAILED 5" in text)
+        if refused and not self._refusal_said:
+            self._refusal_said = True
+            self.log("error", "dbsvc.access_denied", service=service, action=what,
+                     fix="run scripts/service/install_service.py --install from an "
+                         "admin PowerShell: the task it registers there may start the service")
+        return refused
+
     def _running(self, os_name: str, service: str) -> bool | None:
         if os_name == "windows":
             got = self._run(["sc", "query", service], 15)
-            return None if got is None else (got[0] == 0 and "RUNNING" in got[1])
+            if got is None or self._refused(got, "query", service):
+                return None                  # unknown: the port decides
+            return got[0] == 0 and "RUNNING" in got[1]
         if os_name == "macos":
             got = self._run(["launchctl", "print", f"system/{service}"], 15)
             return None if got is None else (got[0] == 0 and "state = running" in got[1])
@@ -3571,6 +3596,9 @@ class DatabaseServiceWatch:
         else:
             return False                  # the OS's own restart rule does it
         got = self._run(argv, 30)
+        if got is not None and os_name == "windows" and self._refused(got, "start", service):
+            self.start_refused = True
+            return False
         return got is not None and got[0] == 0
 
     def _tick(self) -> None:
@@ -3588,7 +3616,9 @@ class DatabaseServiceWatch:
         self.service = service
         running = self._running(os_name, service)
         answers = self._answers(int(rec.get("port") or 5432))
-        up = bool(running) and answers
+        # A state the OS would not give (None: sc refused or could not run)
+        # is unknown, and the port decides: a refused query is not an outage.
+        up = answers and running is not False
         if up:
             if self._down_since is not None:
                 self.log("info", "dbsvc.back", service=service,
@@ -3611,7 +3641,10 @@ class DatabaseServiceWatch:
             started = self._start(os_name, service)
             self.log("warn" if started else "error", "dbsvc.start_tried", service=service, accepted=started)
         if down_for >= DBSVC_PAGE_AFTER_S and not self._paged:
-            what = ("the guard asked the OS to start it" if self._started_this_outage
+            what = ("the guard is not allowed to start it: start it yourself, and "
+                    "run scripts/service/install_service.py --install from an admin "
+                    "PowerShell once, so the guard may next time" if self.start_refused
+                    else "the guard asked the OS to start it" if self._started_this_outage
                     else "the OS's own restart rule is the one that starts it")
             # False while Kazma's own page has this outage (one page per
             # problem): asked again next check, and no recovery for it.
@@ -3879,8 +3912,9 @@ def _disk_status_lines(state: dict) -> list[str]:
 #
 # The heartbeat is an allowlist, built by heartbeat_body: states, counts and
 # check NAMES -- no chat, no content, no path, no name, no error text. It is
-# signed with HMAC-SHA256 under the pairing key (sign_heartbeat), over
-# "<timestamp>.<body>", so the observer can refuse a forged or replayed one.
+# signed with HMAC-SHA256 under the pairing key (sign_request, "v2="), over
+# "v2\n<timestamp>\n<METHOD>\n<path>\n<body>", so the observer can refuse a
+# forged or replayed one, and one signed for another of its routes.
 # The key must be readable by the guard's account alone (restricted like the
 # broker token); a key file anyone else may read is never used. One send at
 # a time, on a daemon thread, bounded by OUTSIDE_WATCH_TIMEOUT_S: an observer
@@ -3908,10 +3942,26 @@ _NAME_RE = re.compile(r"^[a-z_]{1,40}$")
 _STATE_WORD_RE = re.compile(r"^[a-z_]{1,24}$")
 
 
-def sign_heartbeat(key: bytes, ts: int, body: bytes) -> str:
-    """``v1=<hex>``: HMAC-SHA256 under *key* of ``b"<ts>." + body``."""
-    mac = hmac.new(key, str(int(ts)).encode("ascii") + b"." + body, hashlib.sha256)
-    return "v1=" + mac.hexdigest()
+def signed_message(ts: int, method: str, path: str, body: bytes) -> bytes:
+    """What a ``v2`` signature covers: ``b"v2\\n<ts>\\n<METHOD>\\n<path>\\n" + body``.
+
+    The route (method and path, as the request line names them) is in it, so a
+    signature made for one of the observer's routes is refused on another (the
+    v1 form, ``"<ts>." + body``, did not bind the route). A newline can be in
+    neither a method nor a path, so no two requests share a message; the
+    ``v2`` tag keeps a v2 message from ever being a v1 one. The observer's
+    copy is ``deploy/observer/src/verify.js`` (``v2Message``), and Kazma's
+    ``kazma_core.observability.outside_watch``; the shared vector,
+    ``tests/fixtures/observer/heartbeat_vector.json``, holds all three to it.
+    """
+    head = f"v2\n{int(ts)}\n{method.upper()}\n{path}\n".encode("ascii")
+    return head + body
+
+
+def sign_request(key: bytes, ts: int, method: str, path: str, body: bytes) -> str:
+    """``v2=<hex>``: HMAC-SHA256 under *key* of :func:`signed_message`."""
+    mac = hmac.new(key, signed_message(ts, method, path, body), hashlib.sha256)
+    return "v2=" + mac.hexdigest()
 
 
 def _word(value: object) -> str | None:
@@ -4316,11 +4366,12 @@ class OutsideWatch:
             snapshot["power"] = _power_state()
             body = heartbeat_body(snapshot)
             ts = int(time.time())
+            path = urllib.parse.urlsplit(url).path or "/"
             req = _request(url, data=body, method="POST", headers={
                 "Content-Type": "application/json",
                 "X-Kazma-Install": str(snapshot.get("install") or ""),
                 "X-Kazma-Timestamp": str(ts),
-                "X-Kazma-Signature": sign_heartbeat(key, ts, body),
+                "X-Kazma-Signature": sign_request(key, ts, "POST", path, body),
             })
             with self.opener(req, timeout=OUTSIDE_WATCH_TIMEOUT_S) as resp:
                 status = int(getattr(resp, "status", 0) or 0)

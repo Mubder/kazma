@@ -58,7 +58,10 @@ chmod +x setup.sh
 
 The script installs `uv` when it is missing (and through it a Python, when
 this machine has none), Kazma's base packages, then asks **how to install
-Kazma** and hands over to `kazma setup install`:
+Kazma** and hands over to `kazma setup install` (the uv it installs is one
+release, downloaded from uv's GitHub release and checked against the SHA-256
+the script records before it is unpacked; a download that does not match stops
+setup and installs nothing):
 
 | Install | What it is |
 |---|---|

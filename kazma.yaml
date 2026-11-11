@@ -39,7 +39,7 @@ mcp:
     command:
     - npx
     - -y
-    - '@modelcontextprotocol/server-filesystem'
+    - '@modelcontextprotocol/server-filesystem@2026.8.31'
     - ${KAZMA_ACTIVE_WORKSPACE}
     enabled: true
     tool_count: 0

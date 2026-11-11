@@ -67,6 +67,31 @@ class RetiredDefault:
 
 RETIRED_DEFAULTS: tuple[RetiredDefault, ...] = (
     RetiredDefault(
+        key="mcp.servers",
+        old=([
+            {
+                "auth": {},
+                "command": [
+                    "npx", "-y", "@modelcontextprotocol/server-filesystem",
+                    "${KAZMA_ACTIVE_WORKSPACE}",
+                ],
+                "enabled": True,
+                "name": "filesystem",
+                "tool_count": 0,
+                "tools": [],
+                "transport": "stdio",
+                "trust": "approval_required",
+                "workspace_bound": True,
+            },
+        ],),
+        since="2026-11-11",
+        why=(
+            "the shipped filesystem server ran npx with no version, so every start ran "
+            "whatever npm served that day; it is pinned to the catalog's version. A list "
+            "the owner changed is pinned where it is read (mcp_servers_store._canonical_server)"
+        ),
+    ),
+    RetiredDefault(
         key="appearance.accent_color",
         removed=True,
         old=("#5e6ad2",),

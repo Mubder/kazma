@@ -1482,8 +1482,8 @@ def create_graph_handler(
         if is_slash_command(msg.text):
             # Admin gate (audit H-8): a command that changes what every user
             # and platform gets -- the model, memory, MCP servers, the
-            # personality -- must not be reachable by anyone in the default
-            # allow_all posture.
+            # personality -- must not be reachable by anyone a chat app lets
+            # in (with KAZMA_GATEWAY_OPEN_TO_EVERYONE, everyone).
             # The admin allowlist is a settings read (audit 2026-10-26 AUD-111).
             if changes_global_config(msg.text) and not await asyncio.to_thread(
                 _sender_is_gateway_admin, msg

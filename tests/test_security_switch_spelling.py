@@ -138,7 +138,9 @@ def _probe_client() -> TestClient:
         return {"ok": "yes"}
 
     app.middleware("http")(auth.create_auth_middleware())
-    return TestClient(app, client=("127.0.0.1", 40000))
+    # Opened as http://127.0.0.1: with sign-in off a loopback peer's Host
+    # must name this machine (TestClient's default "testserver" does not).
+    return TestClient(app, client=("127.0.0.1", 40000), base_url="http://127.0.0.1:9090")
 
 
 def test_production_on_refuses_auth_disabled(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -57,7 +57,11 @@ Only for a deliberate product milestone:
    - `kazma-gateway/pyproject.toml`
    - `kazma-tui` falls through to `kazma_core.version` (no hardcode needed)
 2. Commit: `chore(version): base 0.10.0 → 0.10.1`
-3. Optionally run **Actions → Release** to create tag `v0.10.1` + GitHub Release
+3. Run **Actions → Release** (from `main`) to create tag `v0.10.1` + GitHub
+   Release. Publish every release this way, never by uploading files by hand:
+   the workflow signs the files with Sigstore, and from 0.21.2 on
+   `kazma update` refuses a release whose wheel has no signature
+   (docs/SUPPLY_CHAIN.md).
 
 Do **not** put `+gSHA` into committed version files. Display code adds it.
 

@@ -429,15 +429,13 @@ async def execute_pipeline(
         step_effects = DispatchEffects()
         try:
             with track_effects(step_effects):
-                worker_result = await asyncio.wait_for(
-                    dispatch_worker_by_name(
+                async with asyncio.timeout(wait_timeout(task.timeout)):
+                    worker_result = await dispatch_worker_by_name(
                         worker_name,
                         task.prompt,
                         dispatch_context,
                         fallback_chain=task.fallback_chain or None,
-                    ),
-                    timeout=wait_timeout(task.timeout),
-                )
+                    )
         except TimeoutError:
             logger.warning(
                 "[SwarmPatterns] pipeline worker '%s' timed out after %.2fs",
@@ -562,15 +560,13 @@ async def resume_pipeline(
         step_effects = DispatchEffects()
         try:
             with track_effects(step_effects):
-                worker_result = await asyncio.wait_for(
-                    dispatch_worker_by_name(
+                async with asyncio.timeout(wait_timeout(task.timeout)):
+                    worker_result = await dispatch_worker_by_name(
                         worker_name,
                         task.prompt,
                         dispatch_context,
                         fallback_chain=task.fallback_chain or None,
-                    ),
-                    timeout=wait_timeout(task.timeout),
-                )
+                    )
         except TimeoutError:
             logger.warning(
                 "[SwarmPatterns] resumed pipeline worker '%s' timed out after %.2fs",
@@ -689,15 +685,13 @@ async def execute_conditional(
     step_effects = DispatchEffects()
     try:
         with track_effects(step_effects):
-            router_result = await asyncio.wait_for(
-                dispatch_worker_by_name(
+            async with asyncio.timeout(wait_timeout(task.timeout)):
+                router_result = await dispatch_worker_by_name(
                     router_name,
                     task.prompt,
                     pattern_dispatch_context(task, extra={"worker_name": router_name}),
                     fallback_chain=task.fallback_chain or None,
-                ),
-                timeout=wait_timeout(task.timeout),
-            )
+                )
     except TimeoutError:
         logger.warning(
             "[SwarmPatterns] conditional router '%s' timed out after %.2fs",
@@ -750,14 +744,12 @@ async def execute_conditional(
     step_effects = DispatchEffects()
     try:
         with track_effects(step_effects):
-            target_result = await asyncio.wait_for(
-                dispatch_worker_by_name(
+            async with asyncio.timeout(wait_timeout(task.timeout)):
+                target_result = await dispatch_worker_by_name(
                     target_worker,
                     task.prompt,
                     pattern_dispatch_context(task, extra={"worker_name": target_worker}),
-                ),
-                timeout=wait_timeout(task.timeout),
-            )
+                )
     except TimeoutError:
         logger.warning(
             "[SwarmPatterns] conditional target '%s' timed out after %.2fs",
@@ -826,15 +818,13 @@ async def execute_fan_out(
         try:
             async with concurrency:
                 with track_effects(step_effects):
-                    worker_result = await asyncio.wait_for(
-                        dispatch_worker_by_name(
+                    async with asyncio.timeout(wait_timeout(task.timeout)):
+                        worker_result = await dispatch_worker_by_name(
                             worker_name,
                             task.prompt,
                             dispatch_context,
                             fallback_chain=task.fallback_chain or None,
-                        ),
-                        timeout=wait_timeout(task.timeout),
-                    )
+                        )
         except TimeoutError:
             logger.warning(
                 "[SwarmPatterns] fan-out worker '%s' timed out after %.2fs",

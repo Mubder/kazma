@@ -628,11 +628,10 @@ class InProcessWorker(SwarmWorker):
 
                                     _t = await _aio.to_thread(_resolve_tool_timeout, tc.name)  # audit 2026-10-26 AUD-111
                                     if _t and _t > 0:
-                                        result = await _aio.wait_for(
-                                            execute_effect(tool_registry, effect_state,
-                                                           {"id": tc.id, "name": tc.name}, tc.arguments),
-                                            timeout=_t,
-                                        )
+                                        async with _aio.timeout(_t):
+                                            result = await execute_effect(tool_registry, effect_state,
+                                                                          {"id": tc.id, "name": tc.name},
+                                                                          tc.arguments)
                                     else:
                                         result = await execute_effect(tool_registry, effect_state,
                                                                       {"id": tc.id, "name": tc.name}, tc.arguments)

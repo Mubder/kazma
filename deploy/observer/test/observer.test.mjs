@@ -16,7 +16,7 @@ import { duration, OPEN_AFTER_S, pageText } from "../src/incidents.js";
 import { forgetCerts } from "../src/access.js";
 import { formatOperatorCard } from "../src/card.js";
 import { CATALOG } from "../src/catalog.js";
-import { sign } from "../src/verify.js";
+import { ACCEPT_V1, sign, signingHeaders, signV2, v2Message, verifyRequest } from "../src/verify.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const VECTOR = JSON.parse(readFileSync(
@@ -111,9 +111,10 @@ async function pair(e, install = INSTALL, key = KEY) {
   assert.equal(res.status, 200);
 }
 
-async function beat(e, now, body = heartbeatBody(), { key = KEY, ts = now, install = INSTALL } = {}) {
+async function beat(e, now, body = heartbeatBody(), { key = KEY, ts = now, install = INSTALL, v1 = false } = {}) {
   const raw = typeof body === "string" ? body : JSON.stringify(body);
-  const signature = await sign(key, ts, raw);
+  // The guard's v2 form (sign_request); the v1 form only where a test asks.
+  const signature = v1 ? await sign(key, ts, raw) : await signV2(key, ts, "POST", "/v1/heartbeat", raw);
   return post(e, "/v1/heartbeat", raw, {
     "X-Kazma-Install": install, "X-Kazma-Timestamp": String(ts), "X-Kazma-Signature": signature,
   }, now);
@@ -125,6 +126,77 @@ test("the shared vector verifies, and a changed body or timestamp does not", asy
   assert.equal(await sign(VECTOR.key, VECTOR.timestamp, VECTOR.body), VECTOR.signature);
   assert.notEqual(await sign(VECTOR.key, VECTOR.timestamp + 1, VECTOR.body), VECTOR.signature);
   assert.notEqual(await sign(VECTOR.key, VECTOR.timestamp, '{"v":2}'), VECTOR.signature);
+});
+
+test("the v2 vector: the message and each route's signature, byte for byte", async () => {
+  const v2 = VECTOR.v2;
+  assert.equal(new TextDecoder().decode(v2Message(VECTOR.timestamp, "POST", "/v1/heartbeat", VECTOR.body)),
+    v2.message);
+  const seen = new Set();
+  for (const r of v2.routes) {
+    const got = await signV2(VECTOR.key, VECTOR.timestamp, r.method, r.path, r.body);
+    assert.equal(got, r.signature, `${r.method} ${r.path}`);
+    seen.add(got);
+  }
+  assert.equal(seen.size, v2.routes.length, "each route signs to its own value");
+  // The method is case-insensitive as the request line is upper-cased.
+  assert.equal(await signV2(VECTOR.key, VECTOR.timestamp, "post", "/v1/heartbeat", VECTOR.body),
+    v2.routes[0].signature);
+});
+
+test("a v2 heartbeat is accepted; the same signature on another route is refused", async () => {
+  const e = env();
+  await pair(e);
+  assert.equal((await beat(e, T0)).status, 200);
+  // Signed for /v1/heartbeat, sent to /v1/leave with the same body: refused,
+  // and the install is still paired.
+  const raw = JSON.stringify({ v: 1, install: INSTALL });
+  const signature = await signV2(KEY, T0 + 5, "POST", "/v1/heartbeat", raw);
+  const left = await post(e, "/v1/leave", raw, {
+    "X-Kazma-Install": INSTALL, "X-Kazma-Timestamp": String(T0 + 5), "X-Kazma-Signature": signature,
+  }, T0 + 5);
+  assert.equal(left.status, 401);
+  assert.equal((await left.json()).error, "bad_signature");
+  assert.equal((await beat(e, T0 + 60)).status, 200, "still paired");
+});
+
+test("negative control: the v1 form binds no route, so the same replay unpairs", async (t) => {
+  const warn = t.mock.method(console, "warn", () => {});
+  const e = env();
+  await pair(e);
+  const raw = JSON.stringify({ v: 1, install: INSTALL });
+  const signature = await sign(KEY, T0 + 5, raw);   // what a heartbeat's v1 signature covered
+  const left = await post(e, "/v1/leave", raw, {
+    "X-Kazma-Install": INSTALL, "X-Kazma-Timestamp": String(T0 + 5), "X-Kazma-Signature": signature,
+  }, T0 + 5);
+  assert.equal(left.status, 200, "the old verifier takes it: the hole v2 closes");
+  assert.equal((await beat(e, T0 + 60)).status, 401, "unpaired by a replayed signature");
+  assert.ok(warn.mock.calls.some((c) => /accepted a v1 signature on POST \/v1\/leave/.test(c.arguments[0])));
+});
+
+test("v1 is still accepted during the transition, and logged as such", async (t) => {
+  assert.equal(ACCEPT_V1, true, "drop v1 by setting ACCEPT_V1 false once no install sends it");
+  const warn = t.mock.method(console, "warn", () => {});
+  const e = env();
+  await pair(e);
+  assert.equal((await beat(e, T0, heartbeatBody(), { v1: true })).status, 200);
+  const logged = warn.mock.calls.map((c) => c.arguments[0]);
+  assert.ok(logged.some((m) => m.includes("accepted a v1 signature on POST /v1/heartbeat")), logged);
+  assert.ok(!logged.some((m) => m.includes(KEY)), "the key is never logged");
+  warn.mock.resetCalls();
+  assert.equal((await beat(e, T0 + 60)).status, 200);
+  assert.equal(warn.mock.callCount(), 0, "a v2 signature logs nothing");
+});
+
+test("with v1 dropped, a v1 signature is refused before any key is read", async () => {
+  const raw = JSON.stringify({ v: 1, install: INSTALL });
+  const req = new Request("https://status.kazma.example/v1/heartbeat", {
+    method: "POST", body: raw, headers: {
+      "X-Kazma-Install": INSTALL, "X-Kazma-Timestamp": String(T0),
+      "X-Kazma-Signature": await sign(KEY, T0, raw) } });
+  assert.deepEqual(signingHeaders(req, T0, { acceptV1: false }), { error: "v1_retired" });
+  const h = signingHeaders(req, T0);
+  assert.equal(await verifyRequest(KEY, h, req, raw, { acceptV1: false }), false);
 });
 
 // -- the heartbeat endpoint -------------------------------------------------------
@@ -452,7 +524,7 @@ test("the summary answers only the install's own signed request", async () => {
   const ts = T0 + 300;
   const get = async (key) => handle(new Request("https://status.kazma.example/v1/summary", {
     headers: { "X-Kazma-Install": INSTALL, "X-Kazma-Timestamp": String(ts),
-      "X-Kazma-Signature": await sign(key, ts, "GET /v1/summary") } }), e, ts);
+      "X-Kazma-Signature": await signV2(key, ts, "GET", "/v1/summary", "") } }), e, ts);
   const res = await get(KEY);
   assert.equal(res.status, 200);
   const data = await res.json();
