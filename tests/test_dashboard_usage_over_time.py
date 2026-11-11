@@ -85,7 +85,10 @@ def test_the_route_gives_each_range_its_buckets(ledger, monkeypatch, range_, bar
     from kazma_ui.dashboard import usage_over_time
 
     monkeypatch.setattr(auth, "get_kazma_secret", lambda: "")
-    _call(ledger, datetime.now(UTC) - timedelta(seconds=30), 1234, 0.05)
+    # The call is made now. The bars are aligned to the clock, so a call 30 s
+    # ago fell in the bar before whenever the test ran in a bar's first 30 s:
+    # CI 2026-11-11, 22:55:21, the newest bar read 0.
+    _call(ledger, datetime.now(UTC), 1234, 0.05)
     body = json.loads(usage_over_time(_request("/api/dashboard/usage"), range=range_).body)
     assert body["available"] is True and body["range"] == range_
     assert body["bucket_seconds"] == width and len(body["buckets"]) == bars

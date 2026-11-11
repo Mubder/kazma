@@ -118,6 +118,8 @@ def test_a_per_user_copy_beside_an_all_users_install_is_retired(windows):
     plan = sd.install_plan(Platform("windows", "winget"), [state])
     assert [(s.action, s.admin) for s in plan] == [("fonts:house", True)]
     assert "retiring the per-user copy" in plan[0].title
+    # The plan prints what the step does, not the action's code name.
+    assert "Windows Fonts folder" in plan[0].printable() and "per-user copy" in plan[0].printable()
     assert font.install()[0] and font.state().ok is True
 
 
