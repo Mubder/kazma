@@ -488,6 +488,8 @@ The card waits until every chat app has connected or failed (up to 45 s; they us
 
 To check the routes without waiting for a restart, press **Send a test alert** in Settings → Alerts: one message goes along the saved routes the way a real alert does, and the page names each route that took it.
 
+On Telegram the card comes from Kazma's chat bot, or from a separate alerts bot when Settings → Alerts → **Telegram bot that sends them** chooses one (see [Configuration → where Kazma's alerts go](configuration#notifications-ops)).
+
 ### Messages
 
 | Message | On by default | When | What it tells you |

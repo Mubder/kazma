@@ -9,6 +9,15 @@ description: Operator guide for recent Kazma features — Hands 0.11, CodeMirror
 
 > This page is published at [kazma.ai/docs/recent-features/](https://kazma.ai/docs/recent-features/) ([Arabic](https://kazma.ai/ar/docs/recent-features/)).
 
+**New in 2026-11-11 — alerts from their own bot, and a weekly report you
+can read.** Settings → Alerts → **Telegram bot that sends them** chooses
+Kazma's chat bot or a separate bot with its own chat; problems, recoveries,
+the daily digest, the weekly report, the start card and the guard's pages
+all follow it, and it can be Kazma Watch's bot, so every alert arrives in
+one chat (see [Configuration](configuration.md#notifications-ops)). The
+weekly resilience report now arrives whole, in sections with one item a
+line, and counts the turns that succeeded.
+
 **New in 2026-11-03 — old cloud backup copies are deleted.** Settings →
 Backup → **Keep cloud copies** (default 7, 0 keeps every copy): after each
 upload that succeeds, Kazma deletes its older copies from the provider's

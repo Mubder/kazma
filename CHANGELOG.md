@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **Kazma's alerts can come from a separate Telegram bot.** Every alert --
+  problems and recoveries, the daily digest, the weekly report, the start
+  card and the guard's pages -- came from Kazma's chat bot, so they landed
+  among your chats with Kazma. Settings → Alerts → **Telegram bot that sends
+  them** now chooses Kazma's chat bot (as before) or a separate bot with its
+  own chat. It can be Kazma Watch's bot, so every alert arrives in one chat.
+  Saving asks Telegram first: a token it does not know is refused, and a chat
+  the bot cannot see yet is saved with what to do. If the alerts bot ever
+  refuses a message, Kazma's chat bot sends it, so an alert is never lost.
+  The token is kept in the vault and never shown again.
+- **The weekly resilience report is readable on a phone, and whole.** It
+  arrived as one paragraph under a 111-character title and stopped at the
+  alert's 600th character, with the rest of the report gone. It is now in
+  sections, one item a line, with each target marked ✅ ❌ ❔, sent whole, and
+  its title says only what needs a look and which targets were missed. Its
+  "Turns that succeed" target read "unknown" every week (it read the turn
+  line in another form than Kazma writes); it now counts real turns. Any
+  alert cut at its limit now ends at a line or a word and says "(cut)".
 - **A deck written by hand in code goes to Kazma's PowerPoint generator.**
   When the agent tried to build a PowerPoint file with python-pptx in its
   Python tool, nothing stopped it, and the file came out in Arial and Segoe

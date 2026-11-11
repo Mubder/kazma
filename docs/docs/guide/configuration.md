@@ -299,6 +299,22 @@ notifications:
 
 Notifications route through the SwarmMessageBus (no parallel path). Set `connectors.<platform>.swarm_chat_id` to the chat ID where messages should land. Without it, the bus is `NullBusAdapter` and messages are dropped silently.
 
+### `notifications.ops` — where Kazma's alerts go {#notifications-ops}
+
+Problems and recoveries, the daily digest, the weekly report and the server status messages all go where these settings say. Settings → **Alerts** writes them; **Send a test alert** there sends one message the way a real alert travels and names each route that took it.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `notifications.ops.channels` | list | every chat app set up | The routes: `telegram`, `telegram-group`, `discord`, `slack`. None chosen sends to every chat app that is set up. |
+| `notifications.ops.telegram_bot` | string | `chat_bot` | Which Telegram bot sends the alerts: `chat_bot`, Kazma's own (the bot you talk to), or `alerts_bot`, a separate bot. |
+| `notifications.ops.telegram_bot_token` | secret | — | The separate bot's token, from BotFather. Kept in the vault; never shown again. |
+| `notifications.ops.telegram_bot_chat` | string | — | The chat the separate bot sends to: a number (your own chat's, or `-100...` for a group) or a public `@channel`. |
+| `notifications.ops.telegram_group_chat` | string | — | The group the "Telegram (group)" route sends to. Empty: the swarm's output group. |
+| `notifications.ops.notices_to_chats` | bool | `true` | `false` keeps information and success notices off the chat apps: they reach the bell and the daily digest only. |
+| `guard.telegram.chat_id` | string | — | The chat the guard pages when Kazma itself is down, when Kazma's chat bot sends the alerts. |
+
+With a separate alerts bot, the Telegram route goes to its chat and Kazma's chat bot no longer sends it; the group route sends to the alerts group with it; and the guard pages with it, to its chat. It can be Kazma Watch's bot, so every alert arrives in one chat. Send the bot `/start` from your own account first, or add it to the group. Saving asks Telegram whether the token is a bot and whether it can see the chat: a token Telegram does not know is refused and nothing is saved; a chat the bot cannot see yet is saved, and the page says what to do. If the alerts bot refuses a message (a revoked token, say), Kazma's chat bot sends it instead, and **Send a test alert** says so. The guard reads its settings again at a page ten minutes later, so a change of bot reaches it without a restart.
+
 ### `ui`
 
 | Key | Type | Default | Description |
