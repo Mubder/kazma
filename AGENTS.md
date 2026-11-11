@@ -3688,7 +3688,14 @@ slot of every XML part resolved through theme references; each run, end mark
 and bullet of the slides and notes; the embedded faces equal to the bundle;
 PDF and HTML faces; LibreOffice draws the deck and workbook in the house face
 only; the engines with these steps taken out, and a planted Segoe UI and
-mixed run, as negative controls). **A document built by hand in code goes to
+mixed run, as negative controls). **Office's Protected View loads no embedded
+font, and garbles a face installed for one Windows user** (measured 2026-11-12,
+the owner's machine: IBM Plex Sans Arabic in the user's own font folder):
+PowerPoint draws Arabic in it as wrong glyphs and Word shows Arial until Enable
+Editing. A python-pptx deck with no embedded font garbles the same way; one
+naming Arial or a face installed nowhere draws correctly. It is the install,
+not the file: do not change the engines for it (the guide's "Office's
+Protected View"). **A document built by hand in code goes to
 its generator** (`agent/raw_document_guard.py`, asked by the tool worker
 before a `python_exec`/`code_exec`/`shell_exec` call runs): reportlab or
 fpdf -> `generate_pdf`, python-docx -> `generate_docx`, a new openpyxl or
