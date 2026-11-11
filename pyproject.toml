@@ -6,19 +6,19 @@ readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11,<3.15"
 dependencies = [
-    "fastapi>=0.162.0",
+    "fastapi>=0.162.2",
     "uvicorn[standard]>=0.54.0",
-    "langgraph>=1.2.18",
-    "langgraph-checkpoint-sqlite>=3.1.2",
+    "langgraph>=1.2.20",
+    "langgraph-checkpoint-sqlite>=3.1.3",
     # Imported unconditionally at module level (FastAPI request models;
     # kazma_gateway checkpoint RunnableConfig). Transitively present via
     # fastapi / langgraph today, but declared so a transitive change cannot
     # break the import (AUD-011). Optional deps imported behind a guard
     # (numpy, jsonschema, huggingface_hub, aiohttp) stay undeclared by design.
-    "pydantic>=2.14.1",
-    "langchain-core>=1.7.0",
+    "pydantic>=2.14.3",
+    "langchain-core>=1.7.6",
     "aiosqlite>=0.20.0",
-    "langfuse>=5.0.4",
+    "langfuse>=5.2.0",
     "pyyaml>=6.0",
     # Reads requirements and versions for the boot check that the installed
     # packages meet this build's minimums (kazma_core.install_requirements).
@@ -34,23 +34,23 @@ dependencies = [
     "sigstore>=4.5.1,<5",
     "PyJWT>=2.15.0",
     "jinja2>=3.1.0",
-    "python-multipart>=0.0.9",
+    "python-multipart>=0.0.33",
     "textual>=8.2.8",
     "psutil>=5.9.0",
-    "websockets>=17.3",
+    "websockets>=17.4",
     "duckduckgo-search>=6.0",
     "trafilatura>=2.3.1",
-    "markdown>=3.11.2",
+    "markdown>=3.11.3",
     "pygments>=2.21.0",
     # zoneinfo database — bare Windows/containers have no system tzdata;
     # cron.timezone (and anything using ZoneInfo) needs it to resolve names.
-    "tzdata>=2026.5",
+    "tzdata>=2026.6",
     "networkx>=3.1",
-    "click>=8.5.0",
+    "click>=8.5.1",
     "rich>=13.0.0",
-    "google-cloud-aiplatform>=2.6.0",
+    "google-cloud-aiplatform>=2.7.0",
     "python-dotenv>=1.2.4",
-    "arabic-reshaper>=3.0.0",
+    "arabic-reshaper>=3.1.0",
     "python-bidi>=0.6.12",
     "reportlab>=5.1.0",
     "python-docx>=1.1.0",
@@ -65,12 +65,12 @@ dependencies = [
     # release that fixes an advisory (GET /api/security/hardening lists what
     # an install still has).
     "urllib3>=2.8.0",
-    "anyio>=4.14.2",
+    "anyio>=4.16.0",
     "pyasn1>=0.6.5",
     # 2026-11-07: GHSA-6q48-6c7w-9gw2 (emSign roots with compromised intermediates).
     "certifi>=2026.10.18",
     # 2026-10-07 OSV refresh: keep existing installs above these fixes too.
-    "langgraph-sdk>=0.4.10",
+    "langgraph-sdk>=0.4.14",
     "multidict>=7.2.1",
     "werkzeug>=3.1.9",
 ]
@@ -81,8 +81,8 @@ dev = [
     # pytest's addopts name --timeout: without pytest-timeout pytest refused to
     # start on every fresh install (tests/test_setup_extras_run_the_suite.py).
     "kazma[test]",
-    "ruff>=0.17.3",
-    "mypy>=2.4.0",
+    "ruff>=0.17.4",
+    "mypy>=2.4.1",
     "locust>=2.47.0",
     # Runs .pre-commit-config.yaml: the import gates (every module imports,
     # no dangling kazma_* refs) and the static gates (no blocking DB call on
@@ -90,16 +90,16 @@ dev = [
     # web tool output fenced). ~8s total. Activate once per clone with
     # `pre-commit install`; until you do, the hooks never fire.
     "pre-commit>=4.7.0",
-    "virtualenv>=21.15.0",  # security floor (see the base list): pre-commit brings it
+    "virtualenv>=21.15.6",  # security floor (see the base list): pre-commit brings it
     # Security floors (see the base list) for what locust and pre-commit bring
     # in: OSV advisories fixed in these releases (tests/test_dependency_floors.py).
     "brotli>=1.2.1",
     "msgpack>=1.2.3",
-    "filelock>=4.2.1",
+    "filelock>=4.2.9",
 ]
 test = [
-    "sqlglot==30.25.0",
-    "pytest>=8.0.0",
+    "sqlglot==30.30.0",
+    "pytest>=9.2.0",
     "pytest-asyncio>=1.4.1",
     "pytest-cov>=5.0.0",
     "pytest-mock>=3.17.0",
@@ -126,12 +126,12 @@ rag = [
     "sentence-transformers>=6.2.0",
     "sqlite-vec>=0.1.6",  # L4 local vector layer (UnifiedMemoryAdapter)
     # Security floors for what these bring in (see the base list).
-    "torch>=2.13.0",
-    "transformers>=5.21.0",
+    "torch>=2.15.0",
+    "transformers>=5.22.2",
     "oauthlib>=4.0.1",
     "aiohttp>=3.14.5",
     "setuptools>=84.2.1",
-    "filelock>=4.2.1",
+    "filelock>=4.2.9",
 ]
 observability = [
     "prometheus-client>=0.26.0",
@@ -150,7 +150,7 @@ document = [
     "reportlab>=5.1.0",
     "python-docx>=1.1.0",
     "openpyxl>=3.1.0",
-    "arabic-reshaper>=3.0.0",
+    "arabic-reshaper>=3.1.0",
     "python-bidi>=0.6.12",
     "pypdf>=6.21.4,<7",  # 7 untested: `kazma update` does not read uv.lock (2026-11-07)
     "pdfplumber>=0.11.0",
@@ -187,16 +187,16 @@ document-platform = [
     # not read uv.lock, so an unbounded floor installed it.
     "pymupdf>=1.24.0,<2",
     # Optional PDFium peer in the multi-engine PDF bake-off (safe if unused).
-    "pypdfium2>=5.14.0",
+    "pypdfium2>=5.15.0",
 ]
 # Optional Docling local extract (hard PDFs; salvage after PyMuPDF)
 docling = [
-    "docling>=2.143.0",
+    "docling>=2.149.0",
     # Security floors for what docling brings in (see the base list).
-    "torch>=2.13.0",
-    "transformers>=5.21.0",
+    "torch>=2.15.0",
+    "transformers>=5.22.2",
     "setuptools>=84.2.1",
-    "filelock>=4.2.1",
+    "filelock>=4.2.9",
 ]
 # Codebase index (tree-sitter languages; regex fallback always works)
 index = [
@@ -206,11 +206,11 @@ index = [
 ]
 # E2B Firecracker sandboxes (untrusted python_exec)
 sandbox = [
-    "e2b-code-interpreter>=2.11.5",
+    "e2b-code-interpreter>=2.11.9",
 ]
 # Temporal durable swarm steps (crash-resume long work)
 durable = [
-    "temporalio>=1.34.0",
+    "temporalio>=1.35.0",
 ]
 # The memory graph in Neo4j (memory.backends.graph.provider = neo4j). Without
 # the driver the graph stays in SQLite and boot says so once.
@@ -219,11 +219,11 @@ neo4j = [
 ]
 # Database drivers beyond SQLite (database_client skill)
 database = [
-    "sqlglot==30.25.0",
+    "sqlglot==30.30.0",
     "psycopg[binary]>=3.3.6",
     "pymysql>=1.2.3",
     "pymongo>=4.18.3",
-    "dnspython>=2.9.0",  # security floor (see the base list): pymongo brings it
+    "dnspython>=2.9.2",  # security floor (see the base list): pymongo brings it
 ]
 # Convenience meta-extra — installs everything at once.
 # Usage: pip install -e ".[all]"  or  uv sync --all-extras
