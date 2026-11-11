@@ -65,6 +65,22 @@ def _python_type_to_json_schema(tp: Any) -> dict[str, Any]:
     if tp in _PY_TO_JSON:
         return {"type": _PY_TO_JSON[tp]}
 
+    # Annotated[T, "what it is"]: T's schema with that description.
+    if _typing.get_origin(tp) is _typing.Annotated:
+        base, *meta = _typing.get_args(tp)
+        fragment = _python_type_to_json_schema(base)
+        text = next((m for m in meta if isinstance(m, str) and m.strip()), None)
+        if text:
+            fragment["description"] = text.strip()
+        return fragment
+
+    # A typed record names its keys. A list of plain dicts named none: the
+    # model guessed, and a key it guessed wrong was dropped without a word
+    # (2026-11-12, every slide title of a deck, sent as "title" to an engine
+    # reading "heading"; tests/test_tool_parameters_name_their_keys.py).
+    if _typing.is_typeddict(tp):
+        return _typeddict_schema(tp)
+
     # Generic types (list[T], dict[K, V])
     origin = getattr(tp, "__origin__", None)
 
@@ -92,6 +108,24 @@ def _python_type_to_json_schema(tp: Any) -> dict[str, Any]:
 
     # Fallback
     return {"type": "string"}
+
+
+def _typeddict_schema(tp: Any) -> dict[str, Any]:
+    """A TypedDict as a closed object: its keys, their types and descriptions
+    (``Annotated[T, "..."]``), the required ones listed."""
+    hints = get_type_hints(tp, include_extras=True)
+    required = getattr(tp, "__required_keys__", frozenset(hints))
+    node: dict[str, Any] = {
+        "type": "object",
+        "properties": {key: _python_type_to_json_schema(sub) for key, sub in hints.items()},
+    }
+    keys = [key for key in hints if key in required]
+    if keys:
+        node["required"] = keys
+    doc = inspect.getdoc(tp)
+    if doc and doc != inspect.getdoc(dict):
+        node["description"] = " ".join(doc.split())
+    return node
 
 
 def _stamp_closed_objects(node: Any) -> None:

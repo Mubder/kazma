@@ -175,8 +175,20 @@ def register_external_tools(registry: Any) -> None:
         logger.debug("analyze_image not available")
     try:
         from kazma_core.tools.export_session import export_session
-        registry.register_function("export_session", export_session,
-            description="Export the current conversation session to a file (JSON or Markdown format).",
+
+        async def export_current_session(format: str = "json") -> str:
+            """Export this conversation.
+
+            format: "json" (every message) or "markdown" (readable, without system messages)
+            """
+            # The conversation is the turn's own (set by the tool worker),
+            # never messages the model passes: offered, `messages` let a
+            # model export a conversation it wrote (2026-11-12).
+            return await export_session(format=format)
+
+        registry.register_function("export_session", export_current_session,
+            description=("Return this conversation as JSON or Markdown text (the reply "
+                         "carries it; no file is written)."),
             category="utility")
     except ImportError:
         logger.debug("export_session not available")

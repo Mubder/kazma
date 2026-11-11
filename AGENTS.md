@@ -3688,7 +3688,14 @@ slot of every XML part resolved through theme references; each run, end mark
 and bullet of the slides and notes; the embedded faces equal to the bundle;
 PDF and HTML faces; LibreOffice draws the deck and workbook in the house face
 only; the engines with these steps taken out, and a planted Segoe UI and
-mixed run, as negative controls). **A document built by hand in code goes to
+mixed run, as negative controls). **Office's Protected View loads no embedded
+font, and garbles a face installed for one Windows user** (measured 2026-11-12,
+the owner's machine: IBM Plex Sans Arabic in the user's own font folder):
+PowerPoint draws Arabic in it as wrong glyphs and Word shows Arial until Enable
+Editing. A python-pptx deck with no embedded font garbles the same way; one
+naming Arial or a face installed nowhere draws correctly. It is the install,
+not the file: do not change the engines for it (the guide's "Office's
+Protected View"). **A document built by hand in code goes to
 its generator** (`agent/raw_document_guard.py`, asked by the tool worker
 before a `python_exec`/`code_exec`/`shell_exec` call runs): reportlab or
 fpdf -> `generate_pdf`, python-docx -> `generate_docx`, a new openpyxl or
@@ -7361,6 +7368,18 @@ the gate to pass. Full list with evidence: `docs/KNOWN_GAPS.md`.
   episode list -- and the beliefs list failed outright for a tenant-bound
   caller (its tenant predicate had no value bound). A new route needs a
   request in the gate's table or fails. See §16's multi-tenant note.
+- **A tool's structured argument names its keys** (2026-11-12). A tool's
+  schema is generated from its signature (`kazma_core.agent.tool_schema`),
+  and `list[dict]` told the model no key: it guessed, and the engines
+  dropped what they did not read (live, every slide title of a deck, sent as
+  `title` to an engine reading `heading`). A list of records is a TypedDict
+  (keys, types, `Annotated` descriptions; the document records are
+  `kazma_core.documents.payloads`), and a mapping whose keys are data (a
+  form's fields) is described in a `name: description` docstring line.
+  Gates: `tests/test_tool_parameters_name_their_keys.py` (every registered
+  tool; the old signatures as the negative control),
+  `tests/test_document_tool_records.py` (every key of every record reaches
+  the rendered document; the engine that read only `heading` as control).
 - **Every product module is reached** (`tests/test_orphan_modules.py`); a
   module only its own tests import fails, unless allowlisted with a reason.
 - **Every PowerShell script Kazma ships can start**

@@ -10,6 +10,7 @@ from typing import Any
 
 from kazma_core.agent.tool_registry import _workspace_scope_error
 from kazma_core.documents.errors import DocumentParseError
+from kazma_core.documents.payloads import Slide
 from kazma_core.documents.service import DocumentService, ocr_continuation_note, tool_ocr_budget
 from kazma_core.workspace.binding import resolve_tool_path
 
@@ -284,7 +285,10 @@ async def convert_document(
 async def pdf_fill_form(
     file_path: str, fields: dict[str, str], output_name: str = ""
 ) -> str:
-    """Fill validated AcroForm fields through the isolated mutation worker."""
+    """Fill validated AcroForm fields through the isolated mutation worker.
+
+    fields: a mapping of each form field's name in the PDF to the value it takes
+    """
 
     source, error = await asyncio.to_thread(_resolve_input, file_path, "PDF form reads")
     if error:
@@ -321,8 +325,12 @@ async def pdf_redact(
     return _artifact_output(result, "Secure PDF redaction")
 
 
-async def generate_pptx(title: str, slides: list[dict[str, Any]]) -> str:
-    """Generate a verified PPTX through the isolated renderer worker."""
+async def generate_pptx(title: str, slides: list[Slide]) -> str:
+    """Generate a verified PPTX through the isolated renderer worker.
+
+    title: the deck's title, on its title slide
+    slides: the slides after the title slide, in order; each names its title as heading
+    """
 
     result = await DocumentService().generate(
         "pptx",

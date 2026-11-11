@@ -443,6 +443,36 @@ def test_the_chunk_timeout_scales_with_the_chunk() -> None:
     assert runner.chunk_timeout_for(four_chunk, None) > 900.0
 
 
+@pytest.mark.parametrize('old_limit', [False, True], ids=['fixed', 'old-180s-control'])
+def test_a_long_file_recovered_alone_is_not_called_a_hang(monkeypatch, capsys, old_limit) -> None:
+    """CI 2026-11-11: a slow runner sent a chunk to per-file recovery, and a
+    fixed 180 s per file killed tests/test_guard_integration.py (25 tests
+    against real guard processes, minutes when healthy) at its tenth test --
+    reported POISON, the build red. A file run alone gets a one-file chunk's
+    budget; the hang diagnosis gets the same, or it names whatever test was
+    running when a shorter clock ran out."""
+    runner = _runner()
+    assert runner.file_timeout_for(None, None) == runner._MIN_CHUNK_TIMEOUT
+    assert runner.file_timeout_for(None, 1500.0) == 1500.0  # CI's chunk budget
+    assert runner.file_timeout_for(240.0, 1500.0) == 240.0  # an explicit value wins
+    _drive_main(runner, monkeypatch, lambda n: -11)
+    if old_limit:
+        monkeypatch.setattr(runner.sys, 'argv', ['fast_test.py', '--chunks', '2',
+                                                 '--file-timeout', '180'])
+    budgets: list[float] = []
+
+    def per_file(args, timeout):
+        budgets.append(timeout)
+        # a healthy file that needs 300 s
+        return (0, '1 passed in 300.0s') if timeout >= 300 else (124, 'timed out')
+
+    monkeypatch.setattr(runner, 'run_pytest', per_file)
+    assert runner.main() == (1 if old_limit else 0)
+    assert ('POISON' in capsys.readouterr().out) is old_limit
+    if not old_limit:
+        assert budgets and min(budgets) == runner._MIN_CHUNK_TIMEOUT
+
+
 def _drive_main(runner, monkeypatch, code_for) -> list[int]:
     """Run ``main`` over 8 fake files in 2 chunks; ``code_for(n_files)`` is the
     exit code a chunk of that size gets. Returns the sizes it was run at."""

@@ -8,6 +8,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from kazma_core.documents.payloads import Section, Sheet, Table
 from kazma_core.documents.service import DocumentService
 
 from kazma_core.paths import data_dir as _data_dir
@@ -257,9 +258,8 @@ def _note_generated(kind: str, payload: dict[str, Any], result: Any) -> None:
 
 async def generate_pdf(
     title: str,
-    sections: list[dict[str, str]] | None = None,
-    tables: list[dict[str, Any]] | None = None,
-    images: list[dict[str, str]] | None = None,
+    sections: list[Section] | None = None,
+    tables: list[Table] | None = None,
     lang: str | None = None,
     rtl: bool | None = None,
     markdown_path: str | None = None,
@@ -314,7 +314,6 @@ async def generate_pdf(
         "title": title,
         "sections": _sections(sections),
         "tables": tables or [],
-        "images": [{} for _ in images or []],
         "page_numbers": True,
     }
     if lang:
@@ -347,8 +346,8 @@ async def generate_pdf(
 
 async def generate_docx(
     title: str,
-    sections: list[dict[str, str]] | None = None,
-    tables: list[dict[str, Any]] | None = None,
+    sections: list[Section] | None = None,
+    tables: list[Table] | None = None,
     lang: str | None = None,
     rtl: bool | None = None,
     markdown_path: str | None = None,
@@ -408,7 +407,7 @@ async def generate_docx(
 
 
 async def generate_xlsx(
-    sheets: list[dict[str, Any]], filename: str = "workbook"
+    sheets: list[Sheet], filename: str = "workbook"
 ) -> str:
     """Generate a verified XLSX through the isolated renderer worker."""
 
@@ -423,7 +422,7 @@ async def generate_xlsx(
 
 
 async def generate_markdown_doc(
-    title: str, sections: list[dict[str, str]]
+    title: str, sections: list[Section]
 ) -> str:
     """Generate a verified UTF-8 Markdown artifact."""
 

@@ -158,16 +158,30 @@ jobs:
         with:
           subject-path: "dist/kazma-*.whl,dist/kazma-*.tar.gz,dist/kazma-*.cdx.json"
 
-      # Keyless signature bundles (*.sigstore.json) next to each artifact.
-      # Verify with: python -m sigstore verify identity ...
+      # Keyless signature bundles (<file>.sigstore.json) beside each file,
+      # made by sigstore-python itself. The action that wrapped it
+      # (sigstore/gh-action-sigstore-python) brings in actions/upload-artifact
+      # and softprops/action-gh-release by tag, which this repository refuses
+      # (every action pinned to a full commit SHA): the 0.21.2 release could
+      # not start its job (2026-11-11). The version is uv.lock's, the one
+      # `kazma update` verifies with (tests/test_release_supply_chain.py).
       - name: Sign artifacts with Sigstore
-        uses: sigstore/gh-action-sigstore-python@f514d46b907ebcd5bedc05145c03b69c1edd8b46 # v3.0.0
-        with:
-          inputs: |
-            ./dist/kazma-*.whl
-            ./dist/kazma-*.tar.gz
-            ./dist/kazma-*.cdx.json
-            ./dist/SHA256SUMS
+        run: |
+          set -euo pipefail
+          sha256sum -c build-artifacts.sha256
+          (cd dist && sha256sum -c SHA256SUMS)
+          uvx --from sigstore==4.5.1 sigstore sign \
+            dist/kazma-*.whl dist/kazma-*.tar.gz dist/kazma-*.cdx.json dist/SHA256SUMS
+          ls -la dist
+
+      # Every bundle passes the rule the updater applies (issuer, this
+      # repository, this workflow from main or a v* tag) before anything is
+      # published: a release it would refuse is never published.
+      - name: Verify the signatures as kazma update does
+        run: |
+          set -euo pipefail
+          uv run --no-project --with sigstore==4.5.1 python scripts/verify_release_signatures.py dist
+          sha256sum -c build-artifacts.sha256
 
       - name: Publish the GitHub Release
         env:

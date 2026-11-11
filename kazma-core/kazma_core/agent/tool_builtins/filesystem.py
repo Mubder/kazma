@@ -17,6 +17,7 @@ from pathlib import Path, PurePath
 from typing import Any
 
 from kazma_core.agent.tool_scope import resolve_in_scope
+from kazma_core.tools.file_apply_patch import PatchItem
 from kazma_core.workspace.binding import resolve_tool_path
 from kazma_core.workspace.project_files import GENERATED_DIRS
 from kazma_core.agent.tool_refusal import RefusedBeforeEffect, effect_unknown
@@ -407,7 +408,7 @@ def register_filesystem_tools(registry: Any) -> None:
         category="filesystem",
     )
     async def file_apply_patch_set(
-        patches: list[dict] | None = None,
+        patches: list[PatchItem] | None = None,
         verify: bool = True,
         path: str = "",
     ) -> str:

@@ -13,9 +13,21 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import Annotated, TypedDict
+
 from kazma_core.agent.tool_refusal import RefusedBeforeEffect
 
 logger = logging.getLogger(__name__)
+
+
+class _EventFields(TypedDict, total=False):
+    """The event fields to change; the others keep their values."""
+
+    summary: Annotated[str, "the event's title"]
+    start: Annotated[str, "the new start, ISO 8601 with its offset"]
+    end: Annotated[str, "the new end, ISO 8601 with its offset"]
+    location: Annotated[str, "the place"]
+    description: Annotated[str, "the event's notes"]
 
 
 def _default_window(time_min: str = "", time_max: str = "") -> tuple[str, str]:
@@ -110,11 +122,14 @@ async def create_event(
 
 async def update_event(
     event_id: str,
-    fields: dict,
+    fields: _EventFields,
     provider: str = "auto",
     account: str = "",
 ) -> str:
-    """Update an event by id. ``fields`` keys: summary, start, end, location, description."""
+    """Update an event by id.
+
+    fields: only the fields to change (summary, start, end, location, description)
+    """
     if not event_id or not event_id.strip():
         raise RefusedBeforeEffect("Error: event_id is required.")
     from kazma_skills.native.calendar.router import (

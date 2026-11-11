@@ -140,6 +140,20 @@ These are the non-obvious facts each engine encodes once:
   (Embedded OpenType font parts, `engines/pptx_fonts.py`); Excel cannot
   embed fonts. Code keeps its monospace face and formulas Cambria Math.
   `tests/test_office_files_name_the_house_face.py` reads every slot.
+- **Office's Protected View** — a file from the internet or a chat app opens
+  in Protected View, which loads no embedded font: the house face appears
+  after **Enable Editing**. Before that, a device without IBM Plex draws the
+  text in a fallback face. On a Windows device where IBM Plex Sans Arabic is
+  installed for one user only (in that user's own font folder, the default
+  when a font is installed without administrator rights), PowerPoint's
+  Protected View draws Arabic text set in it as wrong glyphs of other
+  scripts, and Word shows Arial. Measured 2026-11-12 on Microsoft 365
+  (16.0.20708): a three-line deck made with python-pptx, nothing from Kazma
+  and no embedded font, garbles when its Arabic names the face and draws
+  correctly when it names Arial or a face installed nowhere; removing a
+  Kazma deck's embedded fonts changes nothing. No file can change this:
+  install the font for all users (Windows: right-click the font file,
+  **Install for all users**; administrator rights), or choose Enable Editing.
 - **Per block, not per document** — a bilingual document keeps each language's
   blocks aligned to their own reading start in every engine: `w:bidi` per
   paragraph (DOCX), per-block styles (PDF), a `dir` wrapper (HTML).
