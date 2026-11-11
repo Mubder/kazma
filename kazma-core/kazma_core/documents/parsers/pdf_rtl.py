@@ -104,6 +104,7 @@ def page_glyph_lines(page: Any) -> list[list[Glyph]]:
     """Glyphs of the page grouped into visual lines, each sorted left to right."""
     glyphs: list[Glyph] = []
     marks: list[Glyph] = []
+    drawn: list[Glyph] = []  # every mark drawn on the page, whatever the text map names it
     for span in page.get_texttrace() or ():
         if int(span.get("wmode", 0) or 0) != 0:
             continue  # vertical writing is out of scope here
@@ -142,14 +143,18 @@ def page_glyph_lines(page: Any) -> list[list[Glyph]]:
                 # producer named wrong: LibreOffice names IBM Plex Sans
                 # Arabic's shadda "8" or "3" (live 2026-10-18, "يح3دد").
                 # Arabic letters of no width stay: a ligature's parts.
+                drawn.append(glyph)
                 continue
             if zero_advance and category[0] not in "LNZ":
+                drawn.append(glyph)
                 if category[0] == "M":
                     marks.append(glyph)
                 # A zero-advance glyph that is no mark is a mark mapped wrong
-                # by the producer ("/" for a tanween): dropped, never text.
+                # by the producer ("/" or "#" for a tanween): dropped, never text.
                 continue
             glyphs.append(glyph)
+    for glyph in glyphs:
+        _drop_undrawn_marks(glyph, drawn)
     lines: list[_Line] = []
     for glyph in sorted(glyphs, key=lambda g: (g.y, g.x0)):
         target = next((ln for ln in lines if abs(ln.y - glyph.y) <= 0.35 * max(ln.size, glyph.size)), None)
@@ -163,6 +168,35 @@ def page_glyph_lines(page: Any) -> list[list[Glyph]]:
     for line in sorted(lines, key=lambda ln: ln.y):
         out.append(sorted(line.glyphs, key=lambda g: g.x0))
     return out
+
+
+def _drawn_over(glyph: Glyph, mark: Glyph) -> bool:
+    """Is *mark* drawn on *glyph* (the geometry :func:`_attach_mark` uses)?"""
+    return (abs(glyph.y - mark.y) <= 0.8 * max(glyph.size, mark.size)
+            and glyph.x0 - 0.5 <= mark.x0 <= glyph.x1 + 0.5)
+
+
+def _drop_undrawn_marks(glyph: Glyph, drawn: Sequence[Glyph]) -> None:
+    """A letter glyph's text keeps the marks it names only where a mark is
+    drawn on that glyph.
+
+    A text map holds one text per glyph. LibreOffice 24.2 (Ubuntu 24.04's)
+    draws the tanween of "ريالاً" as a glyph of its own, named "#", and moves
+    the tanween's code point into the text of the lam-alef ligature glyph
+    ("لاً"), so every lam-alef of the document read with a tanween: Kazma's
+    own footer "الاصطناعي" read back "الاًصطناعي" (Linux CI, 2026-11-10;
+    LibreOffice 26.2 names the mark "/" and the ligature "لا"). Where the
+    mark is drawn the text keeps it -- the misnamed mark glyph itself is
+    dropped. The price: a font that draws a mark inside a letter glyph, with
+    no mark glyph, loses that mark in the reading (search folds marks away);
+    a mark the page does not show is never read.
+    """
+    text = glyph.text
+    base = text.rstrip("".join(c for c in text if unicodedata.category(c) == "Mn"))
+    if len(base) == len(text) or not any(unicodedata.category(c)[0] == "L" for c in base):
+        return
+    if not any(_drawn_over(glyph, mark) for mark in drawn):
+        glyph.text = base
 
 
 def _attach_mark(mark: Glyph, lines: list[_Line]) -> None:

@@ -183,7 +183,7 @@ def _plant_stand_in_model_package(tmp_path: Path, monkeypatch) -> None:
     pkg.mkdir()
     (pkg / "__init__.py").write_text(
         "class SentenceTransformer:\n"
-        "    def __init__(self, name):\n"
+        "    def __init__(self, name, revision=None):\n"
         "        self.name = name\n"
         "    def encode(self, text, convert_to_numpy=False):\n"
         "        return [0.5, 0.5]\n",

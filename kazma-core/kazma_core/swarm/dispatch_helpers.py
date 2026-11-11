@@ -24,10 +24,10 @@ def normalize_worker_type(worker_type: str) -> str:
 
 
 def wait_timeout(timeout: float | None) -> float | None:
-    """Normalize ``SwarmTask.timeout`` for ``asyncio.wait_for``.
+    """Normalize ``SwarmTask.timeout`` for a step's ``asyncio.timeout``.
 
     The engine treats ``timeout <= 0`` as "no timeout"; patterns previously
-    passed the raw value to ``wait_for``, where ``0`` meant an INSTANT
+    passed the raw value to the deadline, where ``0`` meant an INSTANT
     ``TimeoutError`` for every fan-out/pipeline/consultation worker.
     """
     try:
@@ -41,7 +41,7 @@ def wait_timeout(timeout: float | None) -> float | None:
 # ``execute()`` raises ``ValueError`` for ``timeout <= 0`` and treats
 # ``None`` as its own default (300s) — so neither can carry the documented
 # "timeout <= 0 means no timeout" semantics through the guard. One year:
-# effectively unbounded, still finite for ``asyncio.wait_for`` scheduling
+# effectively unbounded, still finite for ``asyncio.timeout`` scheduling
 # and log formatting.
 NO_DEADLINE_SENTINEL: float = 86_400.0 * 365.0
 

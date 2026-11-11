@@ -358,9 +358,13 @@ def _format_hitl_message(tool: str, args: Any) -> str:
     """Build the single-line ``Agent wants to run: <tool>(...)`` summary.
 
     Kept compact (≈240 chars of args) so the approval card never shows the
-    full body of e.g. a ``file_write`` ``content`` blob.
+    full body of e.g. a ``file_write`` ``content`` blob. Built from the
+    arguments as an approval card shows them (``security.approval_args``):
+    the message is on every card and in the approval record.
     """
-    summary = _summarize_args_for_hitl(args)
+    from kazma_core.security.approval_args import redact_arguments
+
+    summary = _summarize_args_for_hitl(redact_arguments(tool, args))
     if summary:
         base = f"Agent wants to run: {tool}({summary})"
     else:

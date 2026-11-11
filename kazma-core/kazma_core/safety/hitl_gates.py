@@ -31,6 +31,17 @@ the SelectorEventLoop).
 Kill-switch: ``KAZMA_GATE_REGISTRY=0`` (env, checked live) reverts readers
 to legacy derivation. Execution decisions require durable recording and
 remain paused while the registry is disabled.
+
+**The record keeps no credential** (2026-11-11). :func:`register_gate` is the
+one writer of a row's call: it stores the arguments as an approval card shows
+them (``security.approval_args``), the payload with every call's arguments
+masked, the message through the same redactor, and ``args_digest`` -- the
+hash of the REAL arguments, which the swarm bus card and the Swarm page show
+and which twin matching compares (two calls that differ only in a hidden
+secret are two calls). Rows an older build wrote are redacted once when the
+schema is opened (:func:`_redact_stored_rows`), their digest taken from the
+arguments they held. Execution reads the checkpoint, never this row (§30 A).
+Gate: ``tests/test_gate_records_keep_no_credentials.py``.
 """
 
 from __future__ import annotations
@@ -149,7 +160,10 @@ class GateRow:
     tenant_id: str = ""
     session_id: str = ""
     turn_id: str = ""
+    #: A writer passes the REAL arguments; :func:`register_gate` stores them
+    #: as a card shows them and keeps their hash in ``args_digest``.
     args_json: str = "{}"
+    args_digest: str = ""
     message: str = ""
     payload_json: str = "{}"
     state: str = "pending"
@@ -244,6 +258,7 @@ CREATE TABLE IF NOT EXISTS hitl_gates (
   kind         TEXT NOT NULL DEFAULT 'security',
   tool         TEXT NOT NULL,
   args_json    TEXT NOT NULL DEFAULT '{}',
+  args_digest  TEXT NOT NULL DEFAULT '',
   message      TEXT NOT NULL DEFAULT '',
   payload_json TEXT NOT NULL DEFAULT '{}',
   state        TEXT NOT NULL DEFAULT 'pending',
@@ -272,10 +287,91 @@ def ensure_gate_schema() -> None:
         conn = _connect()
         try:
             conn.executescript(_SCHEMA)
+            from kazma_core.db.sqlite_columns import add_missing_columns
+
+            add_missing_columns(conn, "hitl_gates", [("args_digest", "TEXT NOT NULL DEFAULT ''")])
             conn.commit()
+            _redact_stored_rows(conn)
             _schema_ready = True
         finally:
             conn.close()
+
+
+#: A row's arguments and payload are bounded AFTER they are masked: cut first,
+#: a JSON text no longer parses and its secret-named members are not found.
+_ARGS_MAX = 20_000
+_PAYLOAD_MAX = 40_000
+_MESSAGE_MAX = 2_000
+#: Rows redacted per transaction when an older build's rows are converted.
+_REDACT_BATCH = 500
+
+
+def _masked_message(text: str) -> str:
+    """A row's free text (a card's message, a resume's error), credentials
+    masked -- it can quote the call."""
+    from kazma_core.security.approval_args import redact_text
+
+    return redact_text(text)[:_MESSAGE_MAX]
+
+
+def _record_view(tool: str, args_json: str, payload_json: str, message: str) -> tuple[str, str, str, str]:
+    """``(args_json, args_digest, payload_json, message)`` as a row keeps them:
+    the arguments as an approval card shows them, the digest of the REAL
+    arguments, the payload and message with every credential masked."""
+    from kazma_core.security.approval_args import (
+        arguments_digest,
+        redacted_arguments_json,
+        redacted_gate_payload,
+    )
+
+    raw = args_json if args_json is not None else ""
+    shown = redacted_arguments_json(tool, raw) or ""
+    return (
+        shown[:_ARGS_MAX],
+        arguments_digest(raw),
+        redacted_gate_payload(payload_json)[:_PAYLOAD_MAX],
+        _masked_message(message),
+    )
+
+
+def _redact_stored_rows(conn: sqlite3.Connection) -> int:
+    """Redact the rows an older build stored raw; how many were converted.
+
+    A row with no ``args_digest`` was written before the record kept no
+    credential: its digest is taken from the arguments it holds (the real
+    ones), then they are masked. Idempotent: a converted row has a digest and
+    is never read here again; the update names the values it read, so a
+    concurrent write (``fail_gate``'s message) is never overwritten.
+    """
+    converted = 0
+    while True:
+        rows = conn.execute(
+            "SELECT gate_id, tool, args_json, payload_json, message FROM hitl_gates "
+            "WHERE args_digest = '' LIMIT ?",
+            (_REDACT_BATCH,),
+        ).fetchall()
+        if not rows:
+            break
+        progressed = 0
+        with conn:
+            for r in rows:
+                args_json, digest, payload_json, message = _record_view(
+                    r["tool"], r["args_json"], r["payload_json"], r["message"],
+                )
+                cur = conn.execute(
+                    "UPDATE hitl_gates SET args_json = ?, args_digest = ?, payload_json = ?, "
+                    "message = ? WHERE gate_id = ? AND args_digest = '' AND args_json = ? "
+                    "AND payload_json = ? AND message = ?",
+                    (args_json, digest, payload_json, message, r["gate_id"],
+                     r["args_json"], r["payload_json"], r["message"]),
+                )
+                progressed += cur.rowcount or 0
+        converted += progressed
+        if not progressed:
+            break  # every row changed under us; the next open converts them
+    if converted:
+        logger.info("[HitlGates] redacted the arguments of %d stored gate row(s)", converted)
+    return converted
 
 
 # ── event hook (renders into the EXISTING turn story — never a new stream) ─
@@ -358,6 +454,7 @@ def _row_to_gate(r: sqlite3.Row) -> GateRow:
         kind=r["kind"],
         tool=r["tool"],
         args_json=r["args_json"],
+        args_digest=r["args_digest"],
         message=r["message"],
         payload_json=r["payload_json"],
         state=r["state"],
@@ -393,6 +490,14 @@ def register_gate(gate: GateRow, *, ttl_seconds: float | None = None) -> GateRow
     if gate.expires_at is None:
         ttl = _DEFAULT_TTL_SECONDS if ttl_seconds is None else ttl_seconds
         gate.expires_at = now + ttl if ttl and ttl > 0 else None
+    # The row keeps the call as a card shows it, and the hash of the real
+    # arguments -- before any lookup, so twins are matched by that hash. A row
+    # this function already converted keeps its digest (masking twice changes
+    # nothing; hashing the masked text would).
+    shown, digest, gate.payload_json, gate.message = _record_view(
+        gate.tool, gate.args_json, gate.payload_json, gate.message,
+    )
+    gate.args_json, gate.args_digest = shown, (gate.args_digest or digest)
     created = False
     with _write_lock:
         conn = _connect()
@@ -437,14 +542,14 @@ def register_gate(gate: GateRow, *, ttl_seconds: float | None = None) -> GateRow
             conn.execute(
                 """INSERT INTO hitl_gates
                    (gate_id, alias_id, thread_id, tenant_id, session_id, turn_id,
-                    mechanism, kind, tool, args_json, message, payload_json,
+                    mechanism, kind, tool, args_json, args_digest, message, payload_json,
                     state, decision, actor, supersedes,
                     created_at, claimed_at, settled_at, expires_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     gate.gate_id, gate.alias_id, gate.thread_id, gate.tenant_id,
                     gate.session_id, gate.turn_id, gate.mechanism, gate.kind,
-                    gate.tool, gate.args_json, gate.message, gate.payload_json,
+                    gate.tool, gate.args_json, gate.args_digest, gate.message, gate.payload_json,
                     gate.state, gate.decision, gate.actor, gate.supersedes,
                     gate.created_at, gate.claimed_at, gate.settled_at,
                     gate.expires_at,
@@ -465,13 +570,31 @@ def register_gate(gate: GateRow, *, ttl_seconds: float | None = None) -> GateRow
     return gate
 
 
-def _same_pause_args(a: str | None, b: str | None) -> bool:
-    """True when two rows carry the same non-empty tool args (twin pause)."""
-    left = (a or "").strip()
-    right = (b or "").strip()
-    if not left or not right or left in ("{}", "null") or right in ("{}", "null"):
+def _no_arguments(args_json: str | None) -> bool:
+    text = (args_json or "").strip()
+    return not text or text in ("{}", "null")
+
+
+def _row_digest(row: GateRow) -> str:
+    """The hash of a row's REAL arguments. A row an older build wrote and the
+    schema pass has not converted yet holds them raw: hash what it holds."""
+    if row.args_digest:
+        return row.args_digest
+    from kazma_core.security.approval_args import arguments_digest
+
+    return arguments_digest(row.args_json)
+
+
+def _same_pause_args(a: GateRow, b: GateRow) -> bool:
+    """True when two rows carry the same non-empty tool args (twin pause).
+
+    Compared by the digest of the real arguments, never by the stored text:
+    that text is masked, and two calls that differ only in a hidden secret
+    are two calls.
+    """
+    if _no_arguments(a.args_json) or _no_arguments(b.args_json):
         return False
-    return left == right
+    return _row_digest(a) == _row_digest(b)
 
 
 def _lookup_live_gate(conn: sqlite3.Connection, gate: GateRow) -> GateRow | None:
@@ -491,12 +614,13 @@ def _lookup_live_gate(conn: sqlite3.Connection, gate: GateRow) -> GateRow | None
                 return existing
     if not (gate.thread_id and gate.tool):
         return None
-    if gate.mechanism == "swarm_bus":
-        # Each bus request is minted fresh (``SafetyMiddleware._ask_the_bus``),
-        # never a second registration of one pause: two identical calls asking
-        # at once are two requests. Matched as twins, the second request's id
-        # became the first row's alias, and its outcome was recorded on the
-        # first request's row (2026-10-14).
+    if gate.mechanism != "graph":
+        # Only a graph pause is registered twice (hash id, then LangGraph's).
+        # Each bus request is minted fresh (``SafetyMiddleware._ask_the_bus``,
+        # the registry bridge), never a second registration of one pause: two
+        # identical calls asking at once are two requests. Matched as twins,
+        # the second request's id became the first row's alias, and its
+        # outcome was recorded on the first request's row (2026-10-14).
         return None
     cur = conn.execute(
         "SELECT * FROM hitl_gates WHERE thread_id = ? AND tool = ? "
@@ -511,7 +635,7 @@ def _lookup_live_gate(conn: sqlite3.Connection, gate: GateRow) -> GateRow | None
             return existing
         if existing.alias_id and existing.alias_id in (gate.gate_id, gate.alias_id):
             return existing
-        if _same_pause_args(existing.args_json, gate.args_json):
+        if _same_pause_args(existing, gate):
             if not existing.alias_id and gate.gate_id != existing.gate_id:
                 conn.execute(
                     "UPDATE hitl_gates SET alias_id = ? WHERE gate_id = ?",
@@ -594,7 +718,7 @@ def _supersede_pending_twins(claimed: GateRow) -> None:
     """Drop the hash-id ghost of a pause we just claimed under the native id."""
     if not claimed.thread_id or not claimed.tool:
         return
-    if claimed.mechanism == "swarm_bus":
+    if claimed.mechanism != "graph":
         return  # each bus request is its own, never a ghost (_lookup_live_gate)
     conn = _connect()
     try:
@@ -611,7 +735,7 @@ def _supersede_pending_twins(claimed: GateRow) -> None:
             (claimed.alias_id and other.gate_id == claimed.alias_id)
             or (other.alias_id and other.alias_id in (claimed.gate_id, claimed.alias_id))
         )
-        same_args = _same_pause_args(other.args_json, claimed.args_json)
+        same_args = _same_pause_args(other, claimed)
         if same_id or same_args:
             supersede_gate(other.gate_id, claimed.gate_id)
 
@@ -673,7 +797,8 @@ def fail_gate(gate_id: str, error: str = "") -> GateRow:
         for from_state in ("resuming", "claimed"):
             if _cas(
                 conn, gate_id, from_state, "error",
-                {"settled_at": now, "message": error[:2000] if error else ""},
+                # A resume's error can quote the call: masked like the row.
+                {"settled_at": now, "message": _masked_message(error) if error else ""},
             ):
                 row = _get(conn, gate_id)
                 break

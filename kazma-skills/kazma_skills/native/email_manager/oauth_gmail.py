@@ -13,11 +13,10 @@ import httpx
 from kazma_skills.native.email_manager.credentials import VaultWriteFailed, vault_store
 from kazma_skills.native.email_manager.oauth_common import (
     authorize_redirect,
-    new_state,
-    pop_state,
     public_base_url,
 )
 from kazma_core.http_tls import shared_ssl_context
+from kazma_core.security.oauth_attempts import begin
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +182,10 @@ def start_gmail_oauth(request_base: str | None = None, *, account: str = "") -> 
     if shape:
         return {"ok": False, "code": "malformed_client", "error": shape}
     redirect = gmail_redirect_uri(request_base)
-    state = new_state("gmail", redirect_uri=redirect, account=alias)
+    # One attempt per sign-in, bound to this browser by the start route's
+    # cookie and taken once at the callback (oauth_attempts). A settings
+    # write: this function runs in a thread.
+    state = begin("gmail", redirect_uri=redirect, account=alias)
     # Persist client for callback process
     os.environ["EMAIL_GMAIL_CLIENT_ID"] = cid
     os.environ["EMAIL_GMAIL_CLIENT_SECRET"] = secret
@@ -211,6 +213,8 @@ def start_gmail_oauth(request_base: str | None = None, *, account: str = "") -> 
         "redirect_uri": redirect,
         "scopes": GMAIL_SCOPES,
         "message": "Redirect user to authorize_url",
+        # For the start route's binding cookie; never sent back in its JSON.
+        "state": state,
     }
 
 
@@ -266,19 +270,20 @@ async def _probe_drive_api(client: httpx.AsyncClient, access: str) -> tuple[bool
         return False, str(exc)
 
 
-async def finish_gmail_oauth(code: str, state: str) -> dict[str, Any]:
-    """Finish the Gmail sign-in; a vault that cannot keep it is a failed
-    sign-in, said as one (FA-104), never "connected"."""
+async def finish_gmail_oauth(code: str, attempt: dict[str, Any]) -> dict[str, Any]:
+    """Finish the Gmail sign-in of *attempt* (the callback took it with the
+    browser's binding cookie, ``oauth_attempts.take``); a vault that cannot
+    keep it is a failed sign-in, said as one (FA-104), never "connected"."""
     try:
-        return await _finish_gmail_oauth(code, state)
+        return await _finish_gmail_oauth(code, attempt)
     except VaultWriteFailed as exc:
         return {"ok": False, "code": "vault_unavailable", "error": str(exc)}
 
 
-async def _finish_gmail_oauth(code: str, state: str) -> dict[str, Any]:
+async def _finish_gmail_oauth(code: str, attempt: dict[str, Any]) -> dict[str, Any]:
     """Exchange code for tokens; store only if Gmail API scopes work."""
-    meta = pop_state(state)
-    if not meta or meta.get("provider") != "gmail":
+    meta = attempt if isinstance(attempt, dict) else {}
+    if meta.get("provider") != "gmail":
         return {"ok": False, "error": "Invalid or expired OAuth state. Try Connect Gmail again."}
     cid = _client_id()
     secret = _client_secret()

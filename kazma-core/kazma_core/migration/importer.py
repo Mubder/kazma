@@ -35,7 +35,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from kazma_core.migration.bundle import KazmaBundle, parse_meta_env, sweep_working_folders
+from kazma_core.migration.bundle import (
+    IN_USE_MARKER,
+    STALE_STAGING_S,
+    KazmaBundle,
+    mark_working_folder,
+    parse_meta_env,
+    release_working_folder,
+    sweep_working_folders,
+)
 from kazma_core.migration.exporter import _DATA_DIR_DBS as _EXPORTED_DATA_DIR_DBS
 from kazma_core.migration.path_rewrite import build_path_map, rewrite_paths_in_sqlite
 from kazma_core.migration.vault_pairing import VaultKeyStatus, check_vault_key, sync_vault_key
@@ -240,6 +248,29 @@ def import_bundle(
     Returns:
         An :class:`ImportReport`. Check ``report.ok``.
     """
+    # The staging folder this run marks as its own, taken off whatever way
+    # the run ends: a mark left on would keep a failed import's folder from
+    # ever expiring while the process that ran it lives on.
+    held: list[Path] = []
+    try:
+        return _import_bundle(bundle_path, target_workspace_root=target_workspace_root,
+                              reset_vault_key=reset_vault_key, dry_run=dry_run, force=force,
+                              progress=progress, held=held)
+    finally:
+        for folder in held:
+            release_working_folder(folder)
+
+
+def _import_bundle(
+    bundle_path: str | Path,
+    *,
+    target_workspace_root: str | None,
+    reset_vault_key: bool,
+    dry_run: bool,
+    force: bool,
+    progress: Callable[[str], None] | None,
+    held: list[Path],
+) -> ImportReport:
     report = ImportReport(
         dry_run=dry_run,
         bundle_path=str(bundle_path),
@@ -325,16 +356,20 @@ def import_bundle(
     ts = int(time.time())
     staging = data_dir / f".migrate-staging-{ts}"
     report.staging_path = str(staging)
-    # Earlier staging folders lose their meta.env and are otherwise left: a
-    # failed import keeps its staging so the operator can take the files it
-    # could not restore, and nothing here knows whether they have.
-    sweep_working_folders(data_dir, ".migrate-staging-", max_age_s=float("inf"))
+    # Earlier staging folders lose their meta.env. A failed import keeps its
+    # staging so the operator can take the files it could not restore; one
+    # older than STALE_STAGING_S (30 days) is removed, never one a running
+    # import marks as its own (2026-11-11: they were kept forever).
+    sweep_working_folders(data_dir, ".migrate-staging-", max_age_s=STALE_STAGING_S)
     if staging.exists():
         shutil.rmtree(staging, ignore_errors=True)
+    mark_working_folder(staging)
+    held.append(staging)
     _log(f"Extracting bundle to staging ({staging.name})…")
     # meta.env stays in the bundle: it was read from there above, and a
     # staging folder kept on failure must not hold the vault key in clear.
-    bundle.extract_all(staging, exclude=("meta.env",))
+    # A bundle cannot plant the in-use mark either.
+    bundle.extract_all(staging, exclude=("meta.env", IN_USE_MARKER))
 
     # ── 4. Path translation (invariant B) ──────────────────────────────
     _apply_path_rewrite(staging, bundle, report.target_workspace_root, report, _log)

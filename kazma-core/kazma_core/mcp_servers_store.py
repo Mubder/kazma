@@ -301,9 +301,45 @@ _RUNTIME_FIELDS = frozenset({
 })
 
 
+#: The MCP packages kazma.yaml ships a server for, with the exact version each
+#: runs (2026-11, supply chain). kazma.yaml ran
+#: ``npx -y @modelcontextprotocol/server-filesystem`` with no version: every
+#: start ran whatever npm served that day, with the owner's rights over the
+#: workspace. kazma.yaml and the preset catalog (``certified_servers.yaml``)
+#: name the same version; ``tests/test_mcp_shipped_servers_pinned.py`` holds
+#: the three equal and the catalog to the registry record.
+SHIPPED_PACKAGE_VERSIONS: dict[str, str] = {
+    "@modelcontextprotocol/server-filesystem": "2026.8.31",
+}
+
+
+def _pinned_command(command: list[Any]) -> list[Any]:
+    """*command* with a bare (versionless) shipped package pinned.
+
+    The first boot copies kazma.yaml's servers into the settings store, and
+    the stored copy wins over kazma.yaml by name, so a version added to
+    kazma.yaml never reached an install that had booted before it. A stored
+    command still naming a shipped package with no version runs the version
+    kazma.yaml ships now. A version the owner wrote (``@1.2.3``, ``@latest``)
+    is theirs and is left as written.
+    """
+    if not command:
+        return command
+    runner = Path(str(command[0])).name.lower().removesuffix(".cmd").removesuffix(".exe")
+    if runner != "npx":
+        return command
+    out = list(command)
+    for i, arg in enumerate(out[1:], start=1):
+        version = SHIPPED_PACKAGE_VERSIONS.get(str(arg))
+        if version:
+            out[i] = f"{arg}@{version}"
+    return out
+
+
 def _canonical_server(server: dict[str, Any]) -> dict[str, Any]:
     """*server* as it is stored and shown: its configuration only (the
-    runtime fields above dropped), a workspace-bound one marked so, with an
+    runtime fields above dropped), a shipped package with no version pinned
+    (:func:`_pinned_command`), a workspace-bound one marked so, with an
     old sandbox path in its folder argument put back to the placeholder.
 
     The connect pins a workspace-bound server's folder to the active
@@ -322,6 +358,8 @@ def _canonical_server(server: dict[str, Any]) -> dict[str, Any]:
     )
 
     out = {k: v for k, v in server.items() if k not in _RUNTIME_FIELDS}
+    if isinstance(out.get("command"), list):
+        out["command"] = _pinned_command(out["command"])
     if not is_workspace_bound_server(out):
         return out
     out["workspace_bound"] = True

@@ -153,7 +153,14 @@ from typing import Any
 
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))  # the shared report helpers sit beside this file
-from soak_report import RUNNING, finished, latency_summary, process_tree_sample, utc_stamp  # noqa: E402
+from soak_report import (  # noqa: E402
+    RUNNING,
+    finished,
+    latency_summary,
+    peak_rss_bytes,
+    process_tree_sample,
+    utc_stamp,
+)
 from soak_report import write_report as _write_report  # noqa: E402
 
 _ROOT = _HERE.parent
@@ -531,18 +538,9 @@ def _ms(start: float) -> float:
 
 
 def _peak_rss_mib() -> float | None:
-    try:
-        import psutil
-
-        info = psutil.Process().memory_info()
-        if hasattr(info, "peak_wset"):
-            return round(info.peak_wset / 2**20, 1)
-        import resource  # POSIX
-
-        peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        return round(peak / (2**20 if sys.platform == "darwin" else 1024), 1)
-    except (ImportError, OSError):
-        return None
+    """This process's own peak resident memory (:func:`soak_report.peak_rss_bytes`)."""
+    peak = peak_rss_bytes()
+    return round(peak / 2**20, 1) if peak else None
 
 
 def _guard_network(refused: list[str]) -> None:

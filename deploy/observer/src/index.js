@@ -24,7 +24,7 @@ import { settle, step } from "./incidents.js";
 import { openInside } from "./receipts.js";
 import { ninetyDays, statusPage, uptimePct } from "./page.js";
 import { Store } from "./store.js";
-import { INSTALL_RE, sameText, signingHeaders, verify } from "./verify.js";
+import { INSTALL_RE, sameText, signingHeaders, verifyRequest } from "./verify.js";
 import { handleLeave, handleTestPage, handleWatchSettings } from "./watch_settings.js";
 
 const DAY = 86400;
@@ -58,7 +58,7 @@ async function handleHeartbeat(request, env, now) {
   const store = new Store(env.DB);
   const key = await store.installKey(h.install);
   if (!key) return json({ error: "unknown_install" }, 401);
-  if (!(await verify(key, h.ts, raw, h.signature))) return json({ error: "bad_signature" }, 401);
+  if (!(await verifyRequest(key, h, request, raw))) return json({ error: "bad_signature" }, 401);
   let body;
   try {
     body = JSON.parse(new TextDecoder().decode(raw));
@@ -128,7 +128,9 @@ async function handleSummary(request, env, now) {
   const store = new Store(env.DB);
   const key = await store.installKey(h.install);
   if (!key) return json({ error: "unknown_install" }, 401);
-  if (!(await verify(key, h.ts, "GET /v1/summary", h.signature))) return json({ error: "bad_signature" }, 401);
+  if (!(await verifyRequest(key, h, request, "", { v1Body: "GET /v1/summary" }))) {
+    return json({ error: "bad_signature" }, 401);
+  }
   const v = await view(store, h.install, now);
   const week = v.incidents.filter((i) => (i.ended_at || now) >= now - 7 * DAY);
   return json({

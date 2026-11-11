@@ -130,7 +130,7 @@ from typing import Any
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 
-from soak_report import finished, latency_summary, process_tree_sample, utc_stamp  # noqa: E402
+from soak_report import finished, latency_summary, peak_rss_bytes, process_tree_sample, utc_stamp  # noqa: E402
 from soak_report import write_report as _write_report  # noqa: E402
 
 _ROOT = _HERE.parent
@@ -447,16 +447,12 @@ def _pages(db: Path) -> dict[str, int]:
 
 
 def _rss() -> tuple[float, float]:
-    """``(resident, peak resident)`` of this process, in MiB."""
+    """``(resident, peak resident)`` of this process, in MiB (its OWN peak:
+    :func:`soak_report.peak_rss_bytes`)."""
     import psutil
 
     info = psutil.Process().memory_info()
-    peak = getattr(info, "peak_wset", 0)
-    if not peak:
-        import resource  # POSIX
-
-        maxrss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        peak = maxrss if sys.platform == "darwin" else maxrss * 1024
+    peak = peak_rss_bytes() or 0
     return round(info.rss / _MiB, 1), round(max(peak, info.rss) / _MiB, 1)
 
 

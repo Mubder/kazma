@@ -23,7 +23,9 @@ __all__ = ["COMMON_REASONS", "ReceiveLog", "iso"]
 
 #: Reasons every adapter shares, in words the Test and the log show.
 COMMON_REASONS: dict[str, str] = {
-    "no_allowlist": "was refused: Allowed User IDs is empty",
+    # A private chat app (sender_rule): its author is not the owner's own
+    # account Kazma knows.
+    "no_allowlist": "was refused: Allowed User IDs is empty and its author is not the owner's account Kazma knows",
     "user_not_allowed": "was refused: its author is not in Allowed User IDs",
     "queue_full": "was dropped: Kazma's message queue was full",
     "processing_failed": "failed while being prepared (a voice note or file that could not be read?)",

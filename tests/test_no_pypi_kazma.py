@@ -371,6 +371,8 @@ class FakeGitHub:
 
     def stream(self, method: str, url: str, **_kw: Any) -> _Resp:
         self.seen.append(url)
+        if url == _DOWNLOAD + _WHEEL + ".sigstore.json":
+            return _Resp(200, content=b'{"stand-in": "bundle"}')
         return _Resp(200, content=self.wheel) if url == self.url else _Resp(404)
 
     # httpx.Client(...) -> this object, as a context manager
@@ -393,6 +395,10 @@ def github(monkeypatch):
     # Never this machine's server: the installers refuse while one answers on
     # the port, and a live install may (as on the owner's machine).
     monkeypatch.setattr(update, "_is_server_running", lambda port=9090: False)
+    # The stand-in wheel has no real signature: the Sigstore check itself is
+    # held by tests/test_update_checks_release_signature.py on recorded bundles.
+    monkeypatch.setattr(update, "check_bundle", lambda sha256, bundle, verifier=None: (
+        "https://github.com/Mubder/kazma/.github/workflows/release.yml@refs/heads/main"))
 
     def install(fake: FakeGitHub) -> FakeGitHub:
         monkeypatch.setattr(httpx, "Client", fake)

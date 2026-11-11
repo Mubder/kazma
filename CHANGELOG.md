@@ -1,7 +1,111 @@
 # CHANGELOG
 
-## Unreleased
+## 0.21.2 — Alerts in one place, a new look, and a signed release (2026-11-11)
 
+Every alert, from Kazma, its guard and Kazma Watch, is now one card, paged
+once per problem and set up in one place, Settings → Alerts, where it can
+also come from a Telegram bot of its own. The web app has a new look. An
+audit of the whole code base was fixed in three batches: a chat bot with no
+allowed users is private, a sign-in works only in the browser that started
+it, and what Kazma downloads is pinned. It is the first release the release
+workflow has published since v0.11.0, so its wheel carries a Sigstore
+signature, and this version's `kazma update` refuses any release from 0.21.2
+on that has none.
+
+- **Kazma's alerts can come from a separate Telegram bot.** Every alert --
+  problems and recoveries, the daily digest, the weekly report, the start
+  card and the guard's pages -- came from Kazma's chat bot, so they landed
+  among your chats with Kazma. Settings → Alerts → **Telegram bot that sends
+  them** now chooses Kazma's chat bot (as before) or a separate bot with its
+  own chat. It can be Kazma Watch's bot, so every alert arrives in one chat.
+  Saving asks Telegram first: a token it does not know is refused, and a chat
+  the bot cannot see yet is saved with what to do. If the alerts bot ever
+  refuses a message, Kazma's chat bot sends it, so an alert is never lost.
+  The token is kept in the vault and never shown again.
+- **The weekly resilience report is readable on a phone, and whole.** It
+  arrived as one paragraph under a 111-character title and stopped at the
+  alert's 600th character, with the rest of the report gone. It is now in
+  sections, one item a line, with each target marked ✅ ❌ ❔, sent whole, and
+  its title says only what needs a look and which targets were missed. Its
+  "Turns that succeed" target read "unknown" every week (it read the turn
+  line in another form than Kazma writes); it now counts real turns. Any
+  alert cut at its limit now ends at a line or a word and says "(cut)".
+- **A deck written by hand in code goes to Kazma's PowerPoint generator.**
+  When the agent tried to build a PowerPoint file with python-pptx in its
+  Python tool, nothing stopped it, and the file came out in Arial and Segoe
+  UI. Like a PDF, Word or Excel file built that way, it is now refused before
+  it runs and the agent is pointed to the generator for that format, which
+  uses Kazma's font throughout.
+- **Security: a chat bot with no allowed users is private.** A Telegram,
+  Discord or Slack bot whose Allowed User IDs list is empty used to answer
+  anyone who could reach it. It now answers only your own account Kazma
+  already knows (on Telegram, a private chat Kazma pages you in; anywhere, a
+  `platform:id` entry of `KAZMA_GATEWAY_ADMINS`) and refuses everyone else.
+  Someone refused in a direct message is told once a day, in their language,
+  that the bot is private and what their id is. Each boot warns about every
+  bot with an empty list, and its Test shows it as a problem with the fix.
+  `KAZMA_GATEWAY_OPEN_TO_EVERYONE=1` brings the old behaviour back (warned at
+  every boot); `KAZMA_GATEWAY_STRICT_ALLOWLIST` is now the default and only
+  wins over that switch. If you message Kazma on Discord or Slack with an
+  empty list, add your user id in Settings → Adapters & Routes first.
+- **Security: a link found in what Kazma read asks before Kazma opens it.**
+  Once Kazma has read a web page, a mail, a document or another outside text
+  in a turn, opening a web address asks you first when the address came from
+  that text: neither your message nor a search result in the same turn named
+  its site. The card says why. Reading what you asked for, and what a search
+  found, still asks nothing.
+- **Security: an approved git command names what the repository runs.** The
+  approval card for a git command Kazma runs in a shell lists the hooks and
+  the programs the repository's own settings make git start (filters, diff
+  drivers, an ssh command, a pager). Every such command runs with the
+  repository's file monitor turned off; LFS and your hooks keep working.
+- **Security: the approval record keeps no passwords or tokens.** The record
+  of every approval question (`hitl_gates.db`) kept each call's arguments as
+  they were, a token or a password in a URL included, for the 90 days a
+  decided question is kept and in every backup. It now keeps them as the
+  approval card shows them, with a fingerprint of the real call; records an
+  older version wrote are masked when Kazma starts.
+- **Generated Office files stay in the Kazma font.** A PowerPoint deck named
+  IBM Plex Sans Arabic for English only, so its Arabic, and any text added
+  later, showed in Arial or Calibri. Every font setting of every Word,
+  PowerPoint and Excel file Kazma makes now names the Kazma font: the text,
+  the paragraph and list defaults, bullets, styles, speaker notes and the
+  theme behind them, so new text, new slides and new cells keep it too.
+  Decks also carry the font inside the file, as Word files already did, and
+  a line mixing Arabic and English lays out correctly in PowerPoint.
+- **The document worker image's packages are current.** Its locks held
+  Pillow 12, pypdf 6.19, brotli 1.2.0 and, in the OCR model build stage,
+  filelock 3 and setuptools 83, each with published advisories Kazma's own
+  environment had already moved past. They now hold Pillow 13.0.0, pypdf
+  6.21.4, brotli 1.2.1, filelock 4.2.10 and setuptools 84.2.1, with the
+  engines' other pins matching `uv.lock`; OSV reports no advisory for any
+  locked version. A build gate keeps the locks from falling behind again.
+  Rebuild the image to use them (`scripts/document_worker_image.py build`).
+- **Kubernetes: a read-only root filesystem.** The manifest now sets
+  `readOnlyRootFilesystem` and gives every place Kazma writes a mount: the
+  state volume (which now also keeps the meaning-search model and the env
+  file for a generated key) and scratch volumes for the temp folder, the home
+  folder and ClamAV. Not yet run on a cluster.
+- **Setup generates SearXNG's secret key.** The private search part of
+  `kazma setup install` now keeps a generated `SEARXNG_SECRET` in `.env`
+  before it starts SearXNG, and never replaces one you set. Started without
+  one, SearXNG still runs on the shipped placeholder; Kazma now says so once
+  at start and in the security report, and running
+  `kazma setup install --with private_search` fixes it.
+- **Kazma Watch signatures name the request they were made for.** The
+  guard's heartbeat and Kazma's signed requests to Kazma Watch now sign the
+  method and address along with the message (`v2`), and Kazma Watch refuses a
+  signature made for another of its addresses. It still takes the older form
+  for now, and logs each one, until every install sends the new one. Deploy
+  the Kazma Watch Worker before updating Kazma.
+- **A failed import's staging folder expires after 30 days.** It was kept
+  forever, one more for each failed import. The next import now removes one
+  older than 30 days, never one an import is still using.
+- **The guard no longer calls a running database down when Windows refuses
+  to say.** A guard without admin rights (the task installed from a shell
+  without them) may be refused the Postgres service's status; it read that
+  as "stopped" and paged an outage. The port now decides, and a refused
+  start says how to fix it.
 - **Security: five fixes from an audit of the whole code base.**
   - Saving a web page to a file (which needs no approval) could create any
     new file in the workspace, including one Python or Kazma loads at its
@@ -40,6 +144,54 @@
     people who are not allowed.
   - Built-in MCP servers are pinned to exact versions, and the Docker image
     no longer picks up secret files from the build folder.
+- **Supply chain: what Kazma downloads is pinned.**
+  - The meaning-search model (`BAAI/bge-m3`) is loaded and downloaded at one
+    fixed commit instead of whatever its repository's main branch holds. It
+    is the commit every install already has, so nothing downloads again. A
+    model you choose yourself can be pinned with `memory.embedding.revision`.
+  - The filesystem MCP server Kazma ships ran `npx` with no version, so each
+    start ran whatever npm served that day. It is pinned to the version the
+    preset catalog records, and installs that booted before follow: a stored
+    copy naming the package with no version runs that version too.
+  - Setup no longer runs uv's installer script straight from the web (on
+    Windows, in an administrator window). It downloads one uv release from
+    GitHub and checks it against the SHA-256 written in the script before
+    unpacking it; a download that does not match stops setup.
+  - The Docker images start from a base image pinned by digest, and
+    Dependabot proposes new ones as pull requests.
+  - `kazma update` on a release-wheel install now also checks the wheel's
+    Sigstore signature: it must come from Kazma's own release workflow on
+    GitHub. Releases after v0.21.1 must carry that signature or are not
+    installed; v0.21.1 and older (published without one) are checked by
+    their checksum and the update says so. Releases are now published
+    through the release workflow, which signs them. Adds the `sigstore`
+    package.
+  - The tools the release builds run are pinned to exact versions: the SBOM
+    generator, the PyPI reservation check (`twine`) and the CodeMirror
+    minifier (`terser`). A build gate refuses a loose `uvx`/`npx` package.
+  - The documentation site's build packages: `npm audit fix` moved 23
+    vulnerable packages to fixed releases without a major version (Mermaid
+    is held on 11). What remains needs a major version of packages
+    Docusaurus 3.10.2 pins.
+- **Security: the audit's third batch.**
+  - With sign-in turned off, a request from this machine that names a host
+    without a dot (`intranet`, `wpad`) is refused unless it is `localhost`,
+    this machine's own name or a name listed in `KAZMA_AUTOLOGIN_HOSTS`.
+    Any such name was accepted before.
+  - Connecting GitHub, Gmail, Google Calendar, Microsoft mail or Outlook
+    Calendar is now one sign-in that belongs to the browser that started it,
+    lasts ten minutes and is used once. GitHub kept one sign-in for the
+    whole install that any browser could finish, a link could start a
+    sign-in, and a second start broke the first. The GitHub sign-in now runs
+    in the same tab and brings you back to the Workspace.
+  - No sign-in opens a popup any more, so every page now tells the browser
+    to keep it apart from windows of other sites
+    (`Cross-Origin-Opener-Policy`).
+  - Live voice's LiveKit client ships with Kazma (pinned, its checksum
+    recorded) instead of being loaded from a CDN, and the pages now refuse
+    scripts from any other site and connect only to Kazma and the LiveKit
+    server you configured. After you change the LiveKit address in
+    Settings, reload the pages you have open.
 
 - **Workflows hold only the access they use, and a release is published
   last.** Three of the six GitHub workflows declared no permissions and took

@@ -21,6 +21,8 @@ from types import SimpleNamespace
 
 import pytest
 from kazma_core.observability import daily_digest, ops_alerts
+from kazma_core.observability.turn_line import _LINE as _TURN_PATTERN
+from kazma_core.observability.turn_line import read_turn_line
 
 from tests._emitted_lines import emitted_app_lines, guard_events, product_roots
 
@@ -304,8 +306,8 @@ def test_close_turn_writes_one_line_per_finished_turn(caplog, monkeypatch, tmp_p
     _close(graph, thread)  # a late settle closes the same turn again
     lines = _finished_lines(caplog)
     assert len(lines) == 1, lines
-    turn = daily_digest._TURN_LINE.search(lines[0])
-    assert turn and turn.group(1) == "telegram" and turn.group(3) == "no"
+    turn = read_turn_line(lines[0])
+    assert turn and turn[0] == "telegram" and turn[2] is False
     assert "book the table" not in lines[0] and thread not in lines[0]
 
 
@@ -322,8 +324,8 @@ def test_a_paused_or_stopped_turn_is_not_finished_and_a_failed_one_says_so(
     _close(_Graph({"messages": list(_TURN), "_gateway": web, "turn_failed": True}), thread)
     lines = _finished_lines(caplog)
     assert len(lines) == 1
-    turn = daily_digest._TURN_LINE.search(lines[0])
-    assert turn and turn.group(1) == "web" and turn.group(3) == "yes"
+    turn = read_turn_line(lines[0])
+    assert turn and turn[0] == "web" and turn[2] is True
 
 
 # -- the lines it reads are lines the code writes --------------------------
@@ -335,7 +337,7 @@ def _unread(lines, app_lines=None, literals=(), turn_line=None) -> list[str]:
     the needle of each line its pattern takes (the quick scan drops a line
     without it) and the turn line."""
     app_lines = daily_digest._APP_LINES if app_lines is None else app_lines
-    turn_line = daily_digest._TURN_LINE if turn_line is None else turn_line
+    turn_line = _TURN_PATTERN if turn_line is None else turn_line
     missing = [m for m in literals if not any(m in line for line in lines)]
     for needle, pattern, _label in app_lines:
         taken = [line for line in lines if pattern.match(line)]
@@ -369,7 +371,7 @@ def test_the_marker_gate_catches_a_line_no_code_writes():
     assert _unread(lines, stale) == [r"\[SSE\] Detached turn completed"]
     wrong_needle = (("Backfilled turn", re.compile(r"\[SSE\] Backfilled unanswered turn"), "y"),)
     assert len(_unread(lines, wrong_needle)) == 1
-    assert _unread(["[turn] Turn done: 1"], ()) == [daily_digest._TURN_LINE.pattern]
+    assert _unread(["[turn] Turn done: 1"], ()) == [_TURN_PATTERN.pattern]
 
 
 #: What the health check logged on live while Docker was stopped
@@ -797,3 +799,24 @@ class TestSchedulerHealth:
         )
         out = self._check()()
         assert out["cron"] == "error"
+
+
+# -- an alert's line stays one short line (2026-11-11) ----------------------
+
+#: The weekly report's title as the digest of 2026-11-11 printed it.
+_LIVE_WEEKLY_TITLE = ("Weekly resilience report — 17 of 34 mechanisms fired in the last 168h "
+                      "(104260 log lines scanned); 3 need a look")
+
+
+def test_a_long_alert_title_is_cut_at_a_word_in_the_digest():
+    from collections import Counter
+
+    label = daily_digest._alert_label("resilience.firing_ledger", Counter({_LIVE_WEEKLY_TITLE: 1}))
+    assert len(label) <= daily_digest._LABEL_MAX + 1 and label.endswith("…")
+    assert label.startswith("Weekly resilience report — 17 of 34 mechanisms")
+    assert not label[:-1].endswith(" ")
+    short = "Weekly resilience report — 2 need a look, 2 targets missed"
+    assert daily_digest._alert_label("resilience.firing_ledger", Counter({short: 1})) == short
+    lines = daily_digest._alert_lines({"resilience.firing_ledger": {
+        "sent": 1, "held": 0, "titles": Counter({_LIVE_WEEKLY_TITLE: 1})}})
+    assert lines == [f"  {label}: 1"]

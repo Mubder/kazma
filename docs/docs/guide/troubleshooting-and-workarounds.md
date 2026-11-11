@@ -446,7 +446,7 @@ _tracing._trace_store = TraceStore()
 1. Confirm the handler is registered: `gateway_manager.on_message(create_graph_handler(agent))`.
 2. Check adapter logs for `getMe` validation — `adapters/telegram.py` calls `getMe` on startup and sets `_running = False` on a bad token.
 3. `deleteWebhook` is called automatically in `TelegramAdapter.listen()` — verify it ran.
-4. If `allowed_users` is non-empty, only those Telegram user IDs are processed (`TelegramAdapter.set_allowed_users([...])`).
+4. If `allowed_users` is non-empty, only those Telegram user IDs are processed (`TelegramAdapter.set_allowed_users([...])`). If it is empty, the bot is private: only the owner's own account Kazma knows is answered, and a stranger writing to the bot privately is told so, with their id, once a day ([Who a chat app answers](./gateways-and-platforms.md#who-it-answers)).
 5. Inspect `gateway.stats` for `handler_registered` and `queue_depth`.
 
 ### 10.2 Telegram 401 / 403 / 409 / 400 errors

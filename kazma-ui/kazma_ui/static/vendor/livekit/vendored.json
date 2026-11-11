@@ -1,0 +1,12 @@
+{
+  "package": "livekit-client",
+  "version": "2.23.0",
+  "license": "Apache-2.0",
+  "source": "https://registry.npmjs.org/livekit-client/-/livekit-client-2.23.0.tgz",
+  "integrity": "sha512-j9Kg86nJjBjNFUD+ukp2jwMCGa0k+YD5gU//RzAM+ZY3pbG631QCte7fQjwqWMmtBzhDJL9nKYuOLMv/9IbAxg==",
+  "sha256": {
+    "livekit-client.umd.js": "fb646f2260d84f91238d0a2dc10726c456631d6a26c7cafc43cfee5959b4d31d",
+    "LICENSE": "09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b"
+  },
+  "rebuild": "python scripts/vendor_livekit.py"
+}

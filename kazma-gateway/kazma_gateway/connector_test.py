@@ -15,7 +15,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-__all__ = ["Checks", "command_registration", "judge_message", "listening", "show", "when"]
+__all__ = ["Checks", "allowlist_check", "command_registration", "judge_message", "listening", "show", "when"]
 
 
 class Checks:
@@ -101,6 +101,41 @@ def judge_message(
     return False, (
         f"{lead} never reached Kazma's connection, though the connection was up "
         f"(its last event: {show(when(live.get('last_event_at')))}). {never_hint}"
+    )
+
+
+def allowlist_check(
+    allowed: list[str],
+    *,
+    owner_ids: list[str] | tuple[str, ...] = (),
+    open_to_everyone: bool | None = None,
+    live: dict[str, Any] | None = None,
+    platform: str,
+    find_id: str,
+) -> tuple[bool | None, str]:
+    """Who the chat app answers (``sender_rule``), and the fix when its
+    allowlist is empty: private is a problem to fix too -- the owner's own
+    account Kazma knows passes, or no one does. *open_to_everyone* None reads
+    the running adapter's (``live``)."""
+    if allowed:
+        return True, f"{len(allowed)} allowed user(s): {', '.join(allowed)}."
+    if open_to_everyone is None:
+        open_to_everyone = bool(live and live.get("allow_all"))
+    fix = f"Put your {platform} user id in Allowed User IDs and Save ({find_id})."
+    if open_to_everyone:
+        return False, (
+            "Allowed User IDs is empty and KAZMA_GATEWAY_OPEN_TO_EVERYONE is on: anyone who can "
+            f"message the bot is answered. {fix} Then turn the switch off."
+        )
+    if owner_ids:
+        return False, (
+            "Allowed User IDs is empty, so Kazma is private: it answers only the owner's own "
+            f"{platform} account it already knows ({', '.join(owner_ids)}) and refuses everyone "
+            f"else. {fix}"
+        )
+    return False, (
+        f"Allowed User IDs is empty, so every message is refused: Kazma knows no {platform} "
+        f"account of its owner's. {fix}"
     )
 
 

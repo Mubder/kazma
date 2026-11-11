@@ -74,6 +74,14 @@ Legacy deep-links: `?tab=embedder` → Memory (scroll to embedder); `?tab=connec
 > actionable warning instead of stalling the process on a live ~2GB
 > `bge-m3` download. Force-allow with `KAZMA_EMBED_ALLOW_DOWNLOAD=1`.
 
+> **The model is pinned (2026-11):** Kazma loads, downloads and checks
+> `BAAI/bge-m3` at one commit (`5617a9f61b028005a4858fdac845db406aefb181`),
+> never at the repository's `main` branch, so a change pushed to the model's
+> repository does not reach an install. It is the commit every install's cache
+> already holds, so nothing downloads again. A model you configure yourself
+> follows its repository's main branch unless you give a revision
+> (`memory.embedding.revision`, or `KAZMA_EMBED_REVISION`).
+
 ---
 
 ## Recall & post-turn

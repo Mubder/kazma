@@ -84,6 +84,19 @@ def test_an_ordinary_alert_is_still_cut_at_its_default():
     assert "x" * 2000 in ops_alerts._format("info", "t", long, 0, 0, 3500)
 
 
+def test_a_cut_detail_ends_at_a_line_or_word_and_says_it_was_cut():
+    """The weekly report of 2026-11-11 stopped mid-list at the 600th
+    character, with nothing to say more had been there."""
+    detail = "Targets (2 missed):\n" + "\n".join(f"  target {i}: met (goal one or better)" for i in range(40))
+    card = ops_alerts._format("warn", "t", detail, 0, 0)
+    body = card.split("\n", 1)[1]
+    assert body.endswith(ops_alerts.CUT_MARK) and len(body) <= ops_alerts.MAX_DETAIL_CHARS
+    kept = body[:-len(ops_alerts.CUT_MARK)]
+    assert detail.startswith(kept) and detail[len(kept)] == "\n", "cut at a line"
+    # A detail that fits is untouched.
+    assert ops_alerts._format("warn", "t", "short", 0, 0).endswith("\nshort")
+
+
 # ── A decided failure no longer needs attention ─────────────────────────────
 # Same live test: after the owner retried the first failure and dismissed the
 # second, ``/runs`` still said "2 need attention".

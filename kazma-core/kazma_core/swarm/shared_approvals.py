@@ -145,15 +145,20 @@ def describe(approval_id: str) -> dict[str, Any] | None:
     args = gate.args_json if gate is not None else None
     tool = str((row or {}).get("tool") or (gate.tool if gate else ""))
     # The page shows the call as the chat cards do, secrets hidden
-    # (security.approval_args); the digest is of the real arguments.
+    # (security.approval_args). The record already keeps it that way, and the
+    # digest of the REAL arguments beside it (``args_digest``): the masked
+    # text's hash would not match the card's.
     from kazma_core.security.approval_args import redacted_arguments_json
 
+    digest = ""
+    if gate is not None:
+        digest = gate.args_digest or arguments_digest(args)
     return {
         "id": approval_id,
         "tool": tool,
         "status": status,
         "arguments": redacted_arguments_json(tool, args),
-        "arguments_digest": arguments_digest(args) if args is not None else "",
+        "arguments_digest": digest,
         "opened_at": float((row or {}).get("opened_at") or (gate.created_at if gate else 0) or 0),
         "deadline_at": float((row or {}).get("deadline_at") or 0) or None,
         "decided_by": str((row or {}).get("actor") or (gate.actor if gate else "") or ""),

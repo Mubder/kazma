@@ -4191,8 +4191,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Allowed User IDs",
     },
     "settings.hub.tg_allowed_ph": {
-        "ar": "123456789 — مفصولة بفواصل؛ الفراغ يسمح للجميع (الوضع غير الصارم)",
-        "en": "123456789 — comma-separated; empty allows all (non-strict mode)",
+        "ar": "123456789 — مفصولة بفواصل؛ الفراغ يجعل البوت خاصًا: لا يرد إلا على حسابك الذي يعرفه Kazma",
+        "en": "123456789 — comma-separated; empty keeps the bot private: only your own account Kazma knows",
     },
     "settings.hub.tg_group": {
         "ar": "Telegram — مجموعة",
@@ -5933,8 +5933,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Live duplex voice (LiveKit)",
     },
     "settings.livekit_hint": {
-        "ar": "اختياري. مطلوب فقط للوضع المباشر الذي يمكن مقاطعته في أي وقت — التسجيل والقراءة بصوت عالٍ يعملان بدونه.",
-        "en": "Optional. Only needed for the live, interrupt-anytime mode — recording and read-aloud work without it.",
+        "ar": "اختياري. مطلوب فقط للوضع المباشر الذي يمكن مقاطعته في أي وقت — التسجيل والقراءة بصوت عالٍ يعملان بدونه. يُستخدم رابط جديد في الصفحات التي تُفتح بعد حفظه: أعد تحميل الصفحات المفتوحة.",
+        "en": "Optional. Only needed for the live, interrupt-anytime mode — recording and read-aloud work without it. A new address is used by pages opened after you save it: reload the pages you have open.",
     },
     "settings.livekit_url": {
         "ar": "رابط LiveKit",

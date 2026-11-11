@@ -1,6 +1,6 @@
 agent:
   name: kazma
-  version: 0.21.1
+  version: 0.21.2
   language: en
   rtl: false
   # PreToolUse / PostToolUse — programmable, NOT a permission system.
@@ -38,7 +38,7 @@ mcp:
     command:
     - npx
     - -y
-    - '@modelcontextprotocol/server-filesystem'
+    - '@modelcontextprotocol/server-filesystem@2026.8.31'
     - ${KAZMA_ACTIVE_WORKSPACE}
     workspace_bound: true
   - name: sequential-thinking

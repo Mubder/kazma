@@ -34,7 +34,11 @@ def _fortnight():
         turns = 200
         failed = 1 if week == "before" else 6  # this week: 97 % -- missed
         for i in range(turns):
-            app.append(_app(start + 100 + i, f"[turn] Turn finished: platform=web key={week}{i} failed={i < failed}"))
+            # The writer's own words (kazma_ui.turn_runtime): failed=yes|no.
+            # This fixture wrote failed=True|False, the form the reader
+            # expected and no code writes (2026-11-11).
+            outcome = "yes" if i < failed else "no"
+            app.append(_app(start + 100 + i, f"[turn] Turn finished: platform=web key={week}{i} failed={outcome}"))
         for i in range(3 if week == "this" else 12):
             app.append(_app(start + 5000 + i, f"[ops_alert] key.{i} | an alert"))
         app.append(_app(start + 6000, "[ops_alert] key.0 | an alert (throttled)"))
@@ -65,11 +69,25 @@ def test_each_target_is_measured_with_the_week_before():
     assert got["Alerts per week"].before == "12", "a throttled repeat is no alert"
 
 
-def test_the_sentence_names_what_was_missed():
+def test_the_section_names_what_was_missed_one_target_a_line():
+    """Re-pointed 2026-11-11: one line a target, marked; it was one sentence
+    of seven targets joined by semicolons, cut at the alert's 600 characters."""
     app, guard = _fortnight()
-    text = render_targets(measure_targets(app, guard, now=NOW, uptime_now=99.91))
-    assert text.startswith("Targets (3 missed):")
-    assert "Turns that succeed 97.0% (goal 99% or better): missed, week before 99.5%" in text
+    lines = render_targets(measure_targets(app, guard, now=NOW, uptime_now=99.91))
+    assert lines[0] == "Targets (3 missed):"
+    assert "  ❌ Turns that succeed: 97.0% (goal 99% or better; week before 99.5%)" in lines
+    assert "  ✅ Backups fresh: 7 of 7 days (goal every day; week before 7 of 7 days)" in lines
+    assert len(lines) == 8 and render_targets([]) == []
+
+
+def test_a_long_recovery_is_said_in_hours():
+    """The report of 2026-11-11 said "643.4 min" for an eleven-hour outage."""
+    t = NOW - WEEK_S + 86400
+    guard = [_guard(t, "guard.restarting"), _guard(t + 38604, "guard.supervising")]
+    got = _by_name(measure_targets([], guard, now=NOW))
+    assert got["Time to recover (median)"].shown == "10.7 h"
+    short = [_guard(t, "guard.restarting"), _guard(t + 204, "guard.supervising")]
+    assert _by_name(measure_targets([], short, now=NOW))["Time to recover (median)"].shown == "3.4 min"
 
 
 def test_nothing_to_measure_is_unknown_never_met():
@@ -82,8 +100,11 @@ def test_nothing_to_measure_is_unknown_never_met():
 def test_the_weekly_report_carries_the_targets():
     from kazma_core.observability.firing_ledger import LedgerReport, render
 
-    report = LedgerReport(targets="Targets (1 missed): Stops over budget 1 (goal 0): missed.")
-    _title, body = render(report)
-    assert body.startswith("Targets (1 missed):")
+    app, guard = _fortnight()
+    report = LedgerReport(targets=measure_targets(app, guard, now=NOW, uptime_now=99.91))
+    title, body = render(report)
+    assert "\n\nTargets (3 missed):\n  ✅ Uptime: 99.9%" in body
+    # A missed target is in the title, and makes the report a warning.
+    assert title == "Weekly resilience report — 3 targets missed"
     # Negative control: a report without the section says nothing of targets.
     assert "Targets" not in render(LedgerReport())[1]

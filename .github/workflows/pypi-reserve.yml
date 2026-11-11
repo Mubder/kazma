@@ -58,7 +58,9 @@ jobs:
           WANTED: ${{ inputs.names }}
         run: python scripts/pypi_reserve.py --out dist ${WANTED:+--names "$WANTED"}
       - name: Check the metadata
-        run: uvx twine check --strict dist/*/*
+        # An exact version: uvx would otherwise run whatever PyPI serves that
+        # day (tests/test_actions_pinned_by_sha.py).
+        run: uvx --from twine==7.0.0 twine check --strict dist/*/*
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: pypi-reserve

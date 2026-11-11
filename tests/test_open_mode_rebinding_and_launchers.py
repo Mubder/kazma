@@ -144,12 +144,68 @@ def test_a_rebound_domain_is_refused(monkeypatch: pytest.MonkeyPatch, mode: str)
 
 
 @pytest.mark.parametrize("host", [
-    "127.0.0.1:9090", "localhost:9090", "[::1]:9090", "testserver", "kazma.localhost:9090",
-    "dev.test", "192.168.1.5:9090",
+    "127.0.0.1:9090", "localhost:9090", "LOCALHOST", "localhost.:9090", "[::1]:9090",
+    "kazma.localhost:9090", "dev.test", "192.168.1.5:9090",
 ])
 def test_this_machine_keeps_working(monkeypatch: pytest.MonkeyPatch, host: str) -> None:
     monkeypatch.setenv("KAZMA_AUTH_DISABLED", "1")
     assert _client().get("/api/settings/probe", headers={"host": host}).status_code == 200
+
+
+# ── single-label names (2026-11-11) ─────────────────────────────────────
+
+#: A name with no dot: the network's DNS search suffix, or a machine on the
+#: LAN answering LLMNR / NetBIOS, can hand a browser such a name, and a page
+#: served under it rebinds to 127.0.0.1 like any other.
+SINGLE_LABEL = ["attacker:9090", "testserver", "wpad", "intranet:9090"]
+
+
+@pytest.mark.parametrize("host", SINGLE_LABEL)
+def test_a_single_label_name_is_refused(monkeypatch: pytest.MonkeyPatch, host: str) -> None:
+    monkeypatch.setenv("KAZMA_AUTH_DISABLED", "1")
+    monkeypatch.setattr(auth.socket, "gethostname", lambda: "kazma-box")
+    headers = {"host": host, "origin": f"http://{host}"}
+    client = _client()
+    assert client.get("/api/settings/probe", headers=headers).status_code == 421
+    assert client.post("/api/settings/probe", headers=headers).status_code == 421
+
+
+def test_this_machines_own_name_with_and_without_its_domain(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("KAZMA_AUTH_DISABLED", "1")
+    monkeypatch.setattr(auth.socket, "gethostname", lambda: "Kazma-Box.Corp.Example")
+    client = _client()
+    for host in ("kazma-box", "KAZMA-BOX:9090", "kazma-box.corp.example", "Kazma-Box.Corp.Example.",
+                 "kazma-box.local", "kazma-box.lan:9090"):
+        assert client.get("/api/settings/probe", headers={"host": host}).status_code == 200, host
+    assert client.get("/api/settings/probe", headers={"host": "other-box"}).status_code == 421
+    monkeypatch.setattr(auth.socket, "gethostname", lambda: "kazma-box")
+    assert client.get("/api/settings/probe", headers={"host": "kazma-box:9090"}).status_code == 200
+
+
+def test_a_single_label_name_the_owner_declares_works(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("KAZMA_AUTH_DISABLED", "1")
+    monkeypatch.setattr(auth.socket, "gethostname", lambda: "kazma-box")
+    monkeypatch.setenv("KAZMA_AUTOLOGIN_HOSTS", "nas, kazma.lan")
+    client = _client()
+    assert client.get("/api/settings/probe", headers={"host": "nas:9090"}).status_code == 200
+    assert client.get("/api/settings/probe", headers={"host": "attacker:9090"}).status_code == 421
+
+
+def _old_cannot_be_rebound(request) -> bool:
+    """The rule as it was until 2026-11-11: any name without a dot passed."""
+    host = (request.headers.get("host") or "").strip().lower()
+    hostname = (host.rsplit(":", 1)[0] if host.count(":") == 1 else host).rstrip(".")
+    return "." not in hostname or auth._host_is_local_name(request)
+
+
+def test_negative_control_the_old_rule_let_a_single_label_name_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("KAZMA_AUTH_DISABLED", "1")
+    monkeypatch.setattr(auth.socket, "gethostname", lambda: "kazma-box")
+    monkeypatch.setattr(auth, "_host_cannot_be_rebound", _old_cannot_be_rebound)
+    headers = {"host": "attacker:9090", "origin": "http://attacker:9090"}
+    client = _client()
+    assert client.get("/api/settings/probe", headers=headers).status_code == 200
+    assert client.post("/api/settings/probe", headers=headers).status_code == 200
 
 
 def test_a_declared_name_works(monkeypatch: pytest.MonkeyPatch) -> None:

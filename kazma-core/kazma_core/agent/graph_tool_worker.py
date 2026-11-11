@@ -9,6 +9,7 @@ import time
 from typing import Any
 
 from kazma_core.agent.effect_journal import EffectUncertain, execute_effect
+from kazma_core.agent.raw_document_guard import raw_document_refusal
 from kazma_core.agent.graph_helpers import (
     _format_hitl_message,
     _resolve_tool_timeout,
@@ -986,23 +987,45 @@ async def tool_worker_node(
         # child graphs. A disabled config must behave exactly like None:
         # no ContextVar, ALWAYS_HITL_TOOLS-only danger split.
         _hitl_active = bool(hitl_config) and bool(hitl_config.get("enabled", True))
+        # A fetch after outside text asks when the user's message and this
+        # turn's search results named neither its host
+        # (safety.outside_text_fetch). Keyed by call id: the card names it.
+        from kazma_core.safety.outside_text_fetch import OutsideText, fetch_needs_card
+
+        _seen = OutsideText.from_state(state.get("outside_text"))
+        _user_text = _last_user_text(state)
+        _outside_hosts: dict[str, str] = {}
         if _hitl_active:
+            from kazma_core.safety.hitl import standing_approval
+
+            def _split() -> list[tuple[bool, str | None, str, str | None]]:
+                out = []
+                for tc in pending:
+                    card, unasked_by = approval_need(tc["name"], hitl_config)
+                    host = "" if card else fetch_needs_card(
+                        tc["name"], tc.get("arguments") or {}, _seen, _user_text)
+                    host_by = standing_approval(get_current_thread_id(), tc["name"]) if host else None
+                    out.append((card, unasked_by, host, host_by))
+                return out
+
             # The approval floor and the tool grants are settings reads (audit 2026-10-26 AUD-111).
-            _needs_card = await asyncio.to_thread(
-                lambda: [approval_need(tc["name"], hitl_config) for tc in pending]
-            )
-            for tc, (_card, _unasked_by) in zip(pending, _needs_card):
+            _needs_card = await asyncio.to_thread(_split)
+            for tc, (_card, _unasked_by, _host, _host_by) in zip(pending, _needs_card):
                 if _card or _tc_is_git_write(tc):
                     danger_tools.append(tc)
+                elif _host and not _host_by:
+                    danger_tools.append(tc)
+                    _outside_hosts[str(tc.get("id") or "")] = _host
                 else:
                     safe_tools.append(tc)
                     # A call a standing approval let skip its card says so
                     # here; the registry's bus check is skipped for it. An
                     # MCP call is said by the MCP gate, which checks again.
-                    if _unasked_by and not str(tc["name"]).startswith("mcp__"):
+                    _by = _unasked_by or _host_by
+                    if _by and not str(tc["name"]).startswith("mcp__"):
                         note_ran_without_asking(
                             tc["name"], get_current_thread_id() or str(state.get("thread_id") or ""),
-                            _unasked_by,
+                            _by,
                         )
         else:
             from kazma_core.safety.hitl import ALWAYS_HITL_TOOLS
@@ -1044,42 +1067,20 @@ async def tool_worker_node(
                     refused=True,
                 )
 
-            # Document-generation guard: the model is trying to build a
-            # PDF/DOCX/XLSX via raw Python (reportlab/fpdf/openpyxl) instead
-            # of the purpose-built generate_* tools. This burns dozens of
-            # iterations on code that produces inferior output — intercept
-            # and redirect BEFORE execution (audit 2026-08-14: 100-iteration
-            # rabbit hole on a 24-post Arabic calendar).
-            _tool_name_low = str(tc["name"]).lower()
-            if _tool_name_low in ("python_exec", "code_exec", "shell_exec"):
-                _code = str(_args.get("code") or _args.get("command") or "")
-                _code_low = _code.lower()
-                if any(
-                    marker in _code_low
-                    for marker in (
-                        "reportlab", "fpdf", "from fpdf", "simpledoctemplate",
-                        "canvas(", "platypus", "openpyxl.workbook",
-                        "docx.document", "from docx",
-                    )
-                ) and "generate_pdf" not in _code_low and "generate_docx" not in _code_low:
-                    _doc_hint = (
-                        "SYSTEM OVERRIDE: You are trying to build a document via raw "
-                        "Python. STOP — use the dedicated document generator tools instead:\n"
-                        "1. Write content to a .md file: file_write(path='output.md', content=...)\n"
-                        "2. Generate: generate_pdf(title='...', markdown_path='output.md')\n"
-                        "The generate_pdf tool handles Arabic shaping, RTL layout, styling, "
-                        "and page numbering automatically — your manual code cannot. "
-                        "Do NOT retry with Python."
-                    )
-                    _dur = (time.monotonic() - start) * 1000
-                    return ToolResult(
-                        tool_call_id=tc["id"],
-                        name=tc["name"],
-                        content=_doc_hint,
-                        is_error=True,
-                        duration_ms=_dur,
-                        refused=True,
-                    )
+            # Document-generation guard: a PDF, Word file, workbook or deck
+            # built by hand in code goes to Kazma's generator for that format
+            # instead, BEFORE it runs (kazma_core.agent.raw_document_guard).
+            _doc_hint = raw_document_refusal(str(tc["name"]), _args)
+            if _doc_hint:
+                _dur = (time.monotonic() - start) * 1000
+                return ToolResult(
+                    tool_call_id=tc["id"],
+                    name=tc["name"],
+                    content=_doc_hint,
+                    is_error=True,
+                    duration_ms=_dur,
+                    refused=True,
+                )
             # Per-tool wall-clock timeout (audit B: fault isolation). A hung
             # tool (deadlocked MCP server, wedged subprocess) previously
             # blocked the whole turn until the outer KAZMA_TURN_TIMEOUT
@@ -1501,6 +1502,20 @@ async def tool_worker_node(
                 _jail = "\n".join(_notes)
             except Exception:
                 _jail = ""
+            # Notes every surface words in the card's language
+            # (safety.card_notes): why a fetch asks, and what a repository
+            # makes a shell_exec git command run.
+            from kazma_core.safety.card_notes import card_language
+            from kazma_core.safety.git_repo_programs import git_card_note
+
+            _card_notes: list[dict[str, Any]] = []
+            for _tc in danger_tools:
+                _host = _outside_hosts.get(str(_tc.get("id") or ""))
+                if _host:
+                    _card_notes.append({"code": "outside_fetch", "host": _host, "tool": _tc["name"]})
+                _git_note = await git_card_note(str(_tc.get("name") or ""), _tc.get("arguments") or {})
+                if _git_note:
+                    _card_notes.append(_git_note)
             approval_input = {
                 "type": "hitl_approval",
                 "kind": "security",  # self-describing (§4.3): every payload carries kind
@@ -1509,6 +1524,8 @@ async def tool_worker_node(
                 "tools": tools_payload,
                 "message": message,
                 "jail_note": _jail,
+                "card_notes": _card_notes,
+                "card_lang": card_language(_user_text),
                 "yolo_allowed": _yolo_allowed() and not _batch_always,
                 # An always-ask tool (X writes) takes a one-time approval
                 # only: the card offers no "allow for this chat" either, and
@@ -1598,6 +1615,12 @@ async def tool_worker_node(
                 else:
                     logger.info("[ToolWorker] HITL denied: %s", tc["name"])
                     results.append(_denied_result(tc, approval))
+
+        # What this step read, before any breaker rewrites the results: the
+        # next step's fetches are judged by it (safety.outside_text_fetch).
+        for _tr in results:
+            _seen.record(str(_tr.get("name") or ""), _tr.get("content"),
+                         is_error=bool(_tr.get("is_error")))
 
         # S1-3 audit trail: mark the drafts consumed by SUCCESSFUL posts
         # (SQLite read-modify-write under BEGIN IMMEDIATE — off the loop).
@@ -1804,6 +1827,7 @@ async def tool_worker_node(
             "refused_signatures": breaker_state.refused_signatures,
             "tool_signatures": sigs,
             "recovery_probes": _probes,
+            "outside_text": _seen.as_state(),
             # If the breaker just tripped or max consecutive failures hit, force RESPOND
             "next_node": NodeName.RESPOND if (breaker_tripped_now or consecutive_failures >= 3 or _terminal_now) else NodeName.SUPERVISOR,
         }

@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Any
 
 from kazma_core.english_count import count_noun
+from kazma_core.observability.turn_line import TURN_MARKER, read_turn_line
 
 logger = logging.getLogger(__name__)
 
@@ -94,13 +95,13 @@ _APP_LINES: tuple[tuple[str, re.Pattern[str], str], ...] = (
 )
 
 # One line per finished turn, from every transport
-# (kazma_ui.turn_runtime._note_finished_turn). Turns were counted from "SSE
-# turn complete", which only the web stream writes.
-_TURN_MARKER = "[turn] Turn finished:"
+# (kazma_ui.turn_runtime._note_finished_turn), read through
+# ``turn_line.read_turn_line`` (the weekly targets read it too). Turns were
+# counted from "SSE turn complete", which only the web stream writes.
+_TURN_MARKER = TURN_MARKER
 # The memory changes the operator made (kazma_ui.memory_actions, Memory audit
 # M35): one line each, with the route and the status. The forgets are counted.
 _MEMORY_ACTION = "[memory] operator action="
-_TURN_LINE = re.compile(r"\[turn\] Turn finished: platform=(\S+) key=(\S+) failed=(\S+)")
 # One line per scheduled fire and per delivery outcome (kazma_core.cron.scheduler,
 # Scheduled audit SCH-E02/E11): a reminder not delivered, missed or failed was a
 # CRITICAL log line and nothing else.
@@ -406,9 +407,10 @@ def _scan_app_log(
         if any(n in msg for n in _UNASKED_NEEDLES):
             unasked.append((ts, msg))
             continue
-        turn = _TURN_LINE.search(msg)
+        turn = read_turn_line(msg)
         if turn:
-            turns[turn.group(2)] = (turn.group(1), turn.group(3) == "yes")
+            platform, key, failed = turn
+            turns[key] = (platform, failed)
             continue
         cron = _CRON_LINE.search(msg)
         if cron:
@@ -471,8 +473,20 @@ def _alert_label(key: str, titles: Counter) -> str:
     """What an alert said, in its own words: its title when every occurrence
     had the same one, else its key. The digest listed keys alone, and
     ``acquisition.completed`` (a crawl) beside ``acquisition.done`` (a
-    research run) read as one thing counted twice."""
-    return next(iter(titles)) if len(titles) == 1 else key
+    research run) read as one thing counted twice.
+
+    At most ``_LABEL_MAX`` characters, cut at a word: the weekly report's
+    111-character title was the whole line, its count after a colon at the
+    end of it (2026-11-11)."""
+    label = next(iter(titles)) if len(titles) == 1 else key
+    if len(label) <= _LABEL_MAX:
+        return label
+    cut = label[:_LABEL_MAX].rsplit(" ", 1)[0].rstrip(" ,;:—-")
+    return cut + "…"
+
+
+#: The longest alert label the digest prints.
+_LABEL_MAX = 80
 
 
 def _alert_lines(tallies: dict[str, dict]) -> list[str]:

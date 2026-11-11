@@ -280,6 +280,18 @@ def _load_connector_config(config_store: ConfigStore, name: str) -> dict[str, An
     return config
 
 
+def _who_it_answers(config_store: ConfigStore, platform: str) -> dict[str, Any]:
+    """The owner's own ids Kazma knows and the open switch: who a chat app
+    with an empty allowlist answers (``sender_rule``), for its Test."""
+    from kazma_gateway.allowlists import known_owner_ids
+    from kazma_gateway.sender_rule import open_to_everyone
+
+    return {
+        "owner_ids": [owner.user_id for owner in known_owner_ids(config_store, platform)],
+        "open_to_everyone": open_to_everyone(),
+    }
+
+
 def _discord_test_settings(config_store: ConfigStore) -> dict[str, Any]:
     """What the Discord Test checks against (store reads: run off the loop):
     the delivery channel, the Guild ID and the allowed users, as saved."""
@@ -289,6 +301,7 @@ def _discord_test_settings(config_store: ConfigStore) -> dict[str, Any]:
         "channel_id": str(config_store.get("connectors.discord.swarm_channel_id", "") or "").strip(),
         "guild_ids": split_ids(config_store.get("connectors.discord.guild_id", "")),
         "allowed_users": split_ids(config_store.get("connectors.discord.allowed_users", "")),
+        **_who_it_answers(config_store, "discord"),
     }
 
 
@@ -302,6 +315,7 @@ def _telegram_test_settings(config_store: ConfigStore) -> dict[str, Any]:
         "chat_id": str(config_store.get("connectors.telegram.swarm_chat_id", "") or "").strip(),
         "group": group if isinstance(group, dict) else None,
         "allowed_users": split_ids(config_store.get("connectors.telegram.allowed_users", "")),
+        **_who_it_answers(config_store, "telegram"),
     }
 
 
@@ -318,6 +332,7 @@ def _slack_test_settings(config_store: ConfigStore) -> dict[str, Any]:
         "app_token": app_token,
         "channel_id": str(config_store.get("connectors.slack.swarm_channel_id", "") or "").strip(),
         "allowed_users": split_ids(config_store.get("connectors.slack.allowed_users", "")),
+        **_who_it_answers(config_store, "slack"),
     }
 
 

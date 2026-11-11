@@ -131,6 +131,8 @@ KEY_RULES: tuple[KeyRule, ...] = (
     KeyRule("path_grant.", RUNTIME, "folders granted to one chat"),
     KeyRule("path_grant_index.", RUNTIME, "the index of a chat's folder grants"),
     KeyRule("hitl.last_stale_notice.", RUNTIME, "when a chat was last told its card expired"),
+    KeyRule("gateway.private_notices", RUNTIME, "the refused chat-app senders told today that the bot "
+            "is private (kazma_gateway.sender_rule: at most once a day each)"),
     KeyRule("swarm.approval.", RUNTIME, "a swarm task's shared approval"),
     KeyRule("swarm.breaker.", RUNTIME, "circuit-breaker state and probe leases"),
     KeyRule("registry.active_chat_model", RUNTIME, "a mirror of the model in use"),
@@ -175,6 +177,8 @@ KEY_RULES: tuple[KeyRule, ...] = (
     KeyRule("backup.restore_drill.", RUNTIME, "when the restore drill last ran"),
     KeyRule("auth.oidc.", RUNTIME, "single sign-ons in progress (auth.oidc.pending), and the "
             "one-at-a-time keys an older build kept (state, state_exp, pkce_verifier)"),
+    KeyRule("auth.oauth.", RUNTIME, "GitHub, Google and Microsoft sign-ins in progress "
+            "(auth.oauth.pending, kazma_core.security.oauth_attempts)"),
     KeyRule("self_improvement.pending_evolution", RUNTIME, "Soul changes waiting for review"),
     # ── Credentials: not in a backup, never restored ──────────────────────
     KeyRule("security.", CREDENTIAL, "the sign-in secret and the disclosure key"),

@@ -187,14 +187,25 @@ def kb(monkeypatch: pytest.MonkeyPatch, tmp_path):
 
 
 def _wait_for_job(client: TestClient, job_id: str) -> dict[str, Any]:
-    deadline = time.monotonic() + 5
-    job: dict[str, Any] = {}
+    """The crawl job once it has finished, polled to a deadline.
+
+    30 s, not 5: the crawl runs in a thread of its own, and on a loaded CI
+    runner (a 42-minute run on 2026-11-11) five seconds went by with no job
+    to show. The failure names the last answer -- its status and body --
+    which the old message (``never finished: {}``) threw away, so a 404, a
+    busy journal and a slow thread could not be told apart.
+    """
+    deadline = time.monotonic() + 30
+    last: tuple[int, Any] = (0, None)
     while time.monotonic() < deadline:
-        job = client.get(f"/api/kb/jobs/{job_id}").json().get("job") or {}
+        resp = client.get(f"/api/kb/jobs/{job_id}")
+        body = resp.json()
+        job = (body.get("job") if isinstance(body, dict) else None) or {}
         if job.get("finished_at"):
             return job
+        last = (resp.status_code, body)
         time.sleep(0.02)
-    raise AssertionError(f"job {job_id} never finished: {job}")
+    raise AssertionError(f"job {job_id} never finished; last answer: HTTP {last[0]} {last[1]}")
 
 
 def test_library_lifecycle(kb):

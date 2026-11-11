@@ -116,8 +116,14 @@ def main() -> int:
             raw = json.dumps(body).encode("utf-8")
             sock.sendall(b"S" + struct.pack(">I", len(raw)) + raw)
 
-    server = socketserver.ThreadingTCPServer((host, int(port)), Handler)
-    server.daemon_threads = True
+    class Server(socketserver.ThreadingTCPServer):
+        daemon_threads = True
+        # As the real broker binds (worker_broker._TcpServer): on POSIX a
+        # broker started again takes back a port the guard's probes left in
+        # TIME_WAIT.
+        allow_reuse_address = os.name != "nt"
+
+    server = Server((host, int(port)), Handler)
     note("listening", port=int(port))
 
     def stop(*_args: object) -> None:

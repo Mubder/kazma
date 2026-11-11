@@ -1,5 +1,5 @@
 // Replays a scenario built by tests/test_one_page_per_problem.py: the guard's
-// real heartbeats (built by heartbeat_body, signed by sign_heartbeat), one a
+// real heartbeats (built by heartbeat_body, signed by sign_request), one a
 // minute, through the Worker's own handlers on the D1 stand-in, with the
 // pull probe's answers the scenario gives. Prints what Kazma Watch paged.
 //

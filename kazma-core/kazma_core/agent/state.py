@@ -345,6 +345,18 @@ class SupervisorState(TypedDict, total=False):
     Fresh turns reset it; graph iterations and approval resumes retain it.
     """
 
+    outside_text: dict[str, Any]
+    """What this turn has read from outside: ``{"read": bool, "hosts": [...]}``.
+
+    ``read`` once a tool's result carried a data fence (a page, a mail, a
+    document); ``hosts`` are the hosts of this turn's search results. After
+    outside text, a call that fetches a URL whose host neither the user's
+    message nor a search result named asks for approval
+    (``safety.outside_text_fetch``). The tool worker updates it; fresh turns
+    reset it (the supervisor at iteration 0); approval resumes retain it.
+    Must be declared: LangGraph drops undeclared keys.
+    """
+
     _research_depth_nudged: bool
     """One-shot guard so the research-depth "more sources" nudge fires once per
     turn, not every tool-worker iteration. Must be declared (undeclared keys
@@ -480,6 +492,7 @@ def initial_supervisor_state(
         force_synthesis=False,
         plan_only_continues=0,
         tool_argument_rechecks=0,
+        outside_text={},
         _research_depth_nudged=False,
         _research_pipeline_nudged=False,
         turn_failed=False,

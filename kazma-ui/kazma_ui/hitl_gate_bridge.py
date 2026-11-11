@@ -199,9 +199,12 @@ async def gate_pending_from_payload(
             mechanism=mechanism,
             kind=str(payload.get("kind") or "security"),
             tool=tool,
-            args_json=json.dumps(args, default=str)[:20000],
-            message=str(payload.get("message") or "")[:2000],
-            payload_json=json.dumps(payload, default=str)[:40000],
+            # Whole and real: register_gate keeps them as a card shows them
+            # and their digest, and bounds what it keeps (a JSON text cut
+            # before it is masked no longer parses, and its secrets stay).
+            args_json=json.dumps(args, default=str),
+            message=str(payload.get("message") or ""),
+            payload_json=json.dumps(payload, default=str),
         )
         # A new pause means prior claimed/resuming gates on this thread
         # finished their tool. Settle them so live_gates (and the view
@@ -253,8 +256,8 @@ async def gate_claimed(
                 thread_id=thread_id,
                 tool=tool or str(src.get("tool") or ""),
                 kind=str(src.get("kind") or "security"),
-                message=str(src.get("message") or "")[:2000],
-                payload_json=json.dumps(src, default=str)[:40000],
+                message=str(src.get("message") or ""),
+                payload_json=json.dumps(src, default=str),
             )
             row = await register_gate_async(create)
             record_hitl_gate_reconciled("created_missing")

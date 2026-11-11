@@ -1,6 +1,6 @@
 [project]
 name = "kazma"
-version = "0.21.1"
+version = "0.21.2"
 description = "Kazma — Autonomous AI agent framework with LangGraph, ChromaDB RAG, and Arabic RTL dashboard"
 readme = "README.md"
 license = { text = "MIT" }
@@ -28,6 +28,10 @@ dependencies = [
     # speaks the protocol Microsoft serves now: 7.2.8 is refused (FA-248).
     "edge-tts>=7.3.1",
     "cryptography>=50.0.0",
+    # `kazma update` installs a release wheel only with a Sigstore signature
+    # from Kazma's release workflow (kazma_cli/release_signature.py). Below 5:
+    # the check uses its Verifier, policy and Bundle API as 4.x has them.
+    "sigstore>=4.5.1,<5",
     "PyJWT>=2.15.0",
     "jinja2>=3.1.0",
     "python-multipart>=0.0.9",

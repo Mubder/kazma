@@ -29,7 +29,7 @@ ADMIN_ROUTES = [
     ("post", "/api/settings/account/tokens"),
     ("get", "/api/providers"),
     ("get", "/api/email/status"),
-    ("get", "/api/email/oauth/gmail/start"),
+    ("post", "/api/email/oauth/gmail/start"),
     ("get", "/api/calendar/status"),
 ]
 
@@ -102,7 +102,7 @@ def test_control_the_old_rule_let_the_viewer_in(single_operator, monkeypatch):
 
 def test_mail_and_calendar_connections_are_the_admins():
     for path in ("/api/email/status", "/api/email/accounts", "/api/email/oauth/gmail/start",
-                 "/api/calendar/status", "/api/calendar/oauth/google/start.json"):
+                 "/api/calendar/status", "/api/calendar/oauth/google/start"):
         for method in ("GET", "POST", "DELETE"):
             assert role_allows("operator", path, method) is False, (method, path)
             assert role_allows("admin", path, method) is True

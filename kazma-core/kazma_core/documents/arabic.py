@@ -63,6 +63,7 @@ __all__ = [
     "fold_for_search",
     "strip_bidi_controls",
     "isolate_ltr_runs",
+    "script_runs",
     "shape_spans",
     "shape_text",
     "shaping_available",
@@ -230,6 +231,48 @@ _LTR_RUN_EDGE = frozenset({"L", "EN"})
 
 #: Sentence punctuation that belongs to the left-to-right run it follows.
 _LTR_TRAILING_PUNCT = frozenset(".!?,;:")
+
+
+def script_runs(text: str, *, rtl: bool) -> list[tuple[str, bool]]:
+    """Split *text* into runs of one script: ``[(text, is_rtl), ...]``.
+
+    PowerPoint lays a run out by its language (``a:rPr/@lang``): a single
+    run holding both Arabic and English drew its spaces on the wrong side of
+    the Arabic words as ``en-US`` and moved the full stop of an English
+    sentence as ``ar-SA`` (measured in PowerPoint, 2026-11-11). PowerPoint's
+    own runs follow the keyboard, one language each, and split so they lay
+    out right. A letter takes its script (bidi class R/AL or L); a neutral
+    -- space, digit, punctuation, mark -- the script of the letters on both
+    sides when they agree, else the paragraph's (*rtl*): the bidi
+    algorithm's own rule for neutrals (N1, N2).
+    """
+    if not text:
+        return []
+    sides: list[bool | None] = [
+        True if _is_strong_rtl(c) else False if _is_strong_ltr(c) else None for c in text
+    ]
+    n = len(text)
+    i = 0
+    while i < n:
+        if sides[i] is not None:
+            i += 1
+            continue
+        j = i
+        while j < n and sides[j] is None:
+            j += 1
+        before = sides[i - 1] if i > 0 else None
+        after = sides[j] if j < n else None
+        side = before if before is not None and before == after else rtl
+        for k in range(i, j):
+            sides[k] = side
+        i = j
+    runs: list[tuple[str, bool]] = []
+    start = 0
+    for k in range(1, n + 1):
+        if k == n or sides[k] != sides[start]:
+            runs.append((text[start:k], bool(sides[start])))
+            start = k
+    return runs
 
 
 def isolate_ltr_runs(text: str) -> str:

@@ -18,10 +18,19 @@ pytestmark = [pytest.mark.e2e, pytest.mark.slow]
 
 
 @pytest.mark.parametrize("language", ["en", "ar"])
-def test_the_problems_card_shows_a_problem_and_acknowledges_it(language: str) -> None:
+def test_the_problems_card_shows_a_problem_and_acknowledges_it(language: str, monkeypatch) -> None:
+    from kazma_core import install_requirements
     from kazma_core.observability.alerts import AlertDispatcher
     from kazma_ui.i18n import TRANSLATIONS
     from playwright.sync_api import sync_playwright
+
+    # The card must hold this test's problem alone, whatever Python runs the
+    # test: the boot check reads the host's installed packages, and GitHub's
+    # Ubuntu runner ships setuptools 79.0.1, below the floor of the rag and
+    # docling extras -- so on CI the Dashboard also listed "unmet install
+    # requirements", Acknowledge left that row, and the card never emptied
+    # (2026-11-10). The check itself is held by tests/test_install_requirements.py.
+    monkeypatch.setattr(install_requirements, "unmet_requirements", lambda project_root=None: [])
 
     with unified_turn_server() as h:
         AlertDispatcher.post_banner(subsystem="llm-failover:e2e", title="Model failover: e2e-model failed",

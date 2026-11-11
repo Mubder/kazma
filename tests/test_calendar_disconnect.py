@@ -274,13 +274,14 @@ def test_the_microsoft_callback_answers_the_card_that_asked(
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    from kazma_skills.native.email_manager import oauth_common, oauth_ms_browser
+    from kazma_core.security.oauth_attempts import begin, binding_cookie_name
+    from kazma_skills.native.email_manager import oauth_ms_browser
     from kazma_ui import email_api
 
-    state = oauth_common.new_state("microsoft", redirect_uri="x", purpose=purpose)
+    state = begin("microsoft", redirect_uri="x", purpose=purpose)
 
-    async def finish(code: str, st: str) -> dict:
-        assert oauth_common.pop_state(st)["purpose"] == purpose
+    async def finish(code: str, attempt: dict) -> dict:
+        assert attempt["purpose"] == purpose
         return {"ok": True, "email": "me@msn.com"}
 
     monkeypatch.setattr(oauth_ms_browser, "finish_ms_browser_oauth", finish)
@@ -289,6 +290,8 @@ def test_the_microsoft_callback_answers_the_card_that_asked(
     r = TestClient(app).get(
         "/api/email/oauth/microsoft/callback",
         params={"code": "c", "state": state},
+        # The binding cookie the start route set in this browser.
+        headers={"cookie": f"{binding_cookie_name(state)}={state}"},
         follow_redirects=False,
     )
     assert r.status_code == 302
@@ -299,7 +302,7 @@ def test_the_calendar_sign_in_keeps_only_calendar_tokens(monkeypatch: pytest.Mon
     """finish_ms_browser_oauth dispatches on the state's purpose."""
     import asyncio
 
-    from kazma_skills.native.email_manager import oauth_common, oauth_ms, oauth_ms_browser
+    from kazma_skills.native.email_manager import oauth_ms, oauth_ms_browser
 
     kept: list[str] = []
     monkeypatch.setattr(oauth_ms_browser, "_client_id", lambda: "cid")
@@ -331,8 +334,9 @@ def test_the_calendar_sign_in_keeps_only_calendar_tokens(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(oauth_ms_browser.httpx, "AsyncClient", _Client)
     for purpose in ("calendar", "mail"):
-        state = oauth_common.new_state("microsoft", redirect_uri="x", purpose=purpose)
-        result = asyncio.run(oauth_ms_browser.finish_ms_browser_oauth("code", state))
+        # The attempt the callback took (oauth_attempts.take).
+        attempt = {"provider": "microsoft", "redirect_uri": "x", "purpose": purpose}
+        result = asyncio.run(oauth_ms_browser.finish_ms_browser_oauth("code", attempt))
         assert result["ok"] and result["purpose"] == purpose
     assert kept == ["calendar", "mail"]
 
@@ -345,11 +349,14 @@ def test_the_outlook_calendar_routes_are_guarded_like_the_google_ones() -> None:
         "/api/calendar/oauth/google/disconnect",
         "/api/calendar/oauth/microsoft/disconnect",
         "/api/calendar/oauth/microsoft/device/start",
+        # The sign-in starts are POSTs from the page too (2026-11-11).
+        "/api/calendar/oauth/google/start",
+        "/api/calendar/oauth/microsoft/start",
     ):
         deps = [d.call for d in posts[path].dependant.dependencies]
         assert calendar_api._verify_same_origin in deps, path
     gets = {r.path for r in calendar_api.router.routes}
-    assert "/api/calendar/oauth/microsoft/start.json" in gets
+    assert not any(p.startswith("/api/calendar/oauth/") and "start" in p for p in gets), gets
 
 
 def test_the_code_sign_in_can_bring_a_disconnected_calendar_back(

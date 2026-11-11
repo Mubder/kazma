@@ -2401,6 +2401,34 @@
                 <p class="form-hint" x-show="alerts.loaded && !alerts.routes.length" x-cloak>{{ t('settings.alerts.routes_none') }}</p>
                 <p class="form-hint" x-show="alerts.loaded && alerts.routeNames.some(r => !alerts.ready[r])" x-cloak>{{ t('settings.alerts.routes_setup') }}
                     <a href="/settings?tab=connectors" @click.prevent="onTabChange('connectors')">{{ t('settings.platform_connectors') }}</a></p>
+                <!-- Which Telegram bot sends them (ops_alerts.ALERTS_BOT_KEY):
+                     Kazma's chat bot, or a separate alerts bot with its own chat. -->
+                <div class="form-group mt-3" id="alerts-bot">
+                    <label class="form-label" for="alerts-bot-choice">{{ t('settings.alerts.bot_label') }}</label>
+                    <select id="alerts-bot-choice" class="form-select" x-model="alerts.botChoice">
+                        <option value="chat_bot">{{ t('settings.alerts.bot_chat_bot') }}</option>
+                        <option value="alerts_bot">{{ t('settings.alerts.bot_alerts_bot') }}</option>
+                    </select>
+                    <div class="form-hint">{{ t('settings.alerts.bot_hint') }}</div>
+                </div>
+                <div x-show="alerts.botChoice === 'alerts_bot'" x-cloak id="alerts-bot-fields">
+                    <div class="form-group">
+                        <label class="form-label" for="alerts-bot-token">{{ t('settings.alerts.bot_token') }}</label>
+                        <input id="alerts-bot-token" type="password" class="form-input" dir="ltr" translate="no" autocomplete="off"
+                               x-model.trim="alerts.botToken"
+                               :placeholder="alerts.botTokenSaved ? t('settings.alerts.bot_token_saved') : '123456789:AA…'">
+                        <div class="form-hint">{{ t('settings.alerts.bot_token_hint') }}</div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="alerts-bot-chat">{{ t('settings.alerts.bot_chat') }}</label>
+                        <input id="alerts-bot-chat" type="text" class="form-input" dir="ltr" translate="no" inputmode="text" autocomplete="off"
+                               x-model.trim="alerts.botChat" placeholder="123456789">
+                        <div class="form-hint">{{ t('settings.alerts.bot_chat_hint') }}</div>
+                    </div>
+                </div>
+                <div class="notice mb-3" id="alerts-bot-check" x-show="botCheck.note" x-cloak role="status" :class="botCheck.tone">
+                    <span x-text="botCheck.note"></span>
+                </div>
                 <div class="form-group">
                     <label class="form-label" for="alerts-group-chat">{{ t('settings.alerts.group_chat') }}</label>
                     <input id="alerts-group-chat" type="text" class="form-input" dir="ltr" translate="no" inputmode="text" autocomplete="off"
@@ -2440,11 +2468,12 @@
                 <p class="card-sub">{{ t('settings.alerts.guard_sub') }}</p>
                 <dl class="outside-watch-grid" x-show="alerts.loaded" x-cloak>
                     <dt>{{ t('settings.alerts.guard_bot') }}</dt>
-                    <dd x-text="alerts.guard && alerts.guard.bot ? t('settings.alerts.guard_bot_ready') : t('settings.alerts.guard_bot_missing')"></dd>
+                    <dd x-text="guardBotText()"></dd>
                     <dt>{{ t('settings.alerts.guard_running') }}</dt>
                     <dd x-text="guardRunningText()"></dd>
                 </dl>
-                <div class="form-group">
+                <p class="form-hint" id="alerts-guard-by-bot" x-show="alerts.guard && alerts.guard.via_alerts_bot" x-cloak>{{ t('settings.alerts.guard_chat_by_bot') }}</p>
+                <div class="form-group" x-show="!(alerts.guard && alerts.guard.via_alerts_bot)" x-cloak>
                     <label class="form-label" for="alerts-guard-chat">{{ t('settings.alerts.guard_chat') }}</label>
                     <input id="alerts-guard-chat" type="text" class="form-input" dir="ltr" translate="no" inputmode="text" autocomplete="off"
                            x-model.trim="alerts.guardChat" placeholder="123456789">

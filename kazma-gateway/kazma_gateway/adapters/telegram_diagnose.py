@@ -35,7 +35,14 @@ import httpx
 
 from kazma_core.http_tls import shared_ssl_context
 from kazma_gateway.adapters.telegram_receive import TELEGRAM_REASONS
-from kazma_gateway.connector_test import Checks, command_registration, judge_message, listening, when
+from kazma_gateway.connector_test import (
+    Checks,
+    allowlist_check,
+    command_registration,
+    judge_message,
+    listening,
+    when,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +146,8 @@ async def diagnose(
     chat_id: str = "",
     group: dict[str, Any] | None = None,
     allowed_users: list[str] | None = None,
+    owner_ids: list[str] | None = None,
+    open_to_everyone: bool | None = None,
     live: dict[str, Any] | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> dict[str, Any]:
@@ -236,15 +245,11 @@ async def diagnose(
             reasons=TELEGRAM_REASONS,
         ))
 
-    if allowed:
-        add("allowed", True, f"{len(allowed)} allowed user(s): {', '.join(allowed)}.")
-    elif live is not None and live.get("allow_all"):
-        add("allowed", None, "Allowed User IDs is empty: anyone who can message the bot is answered.")
-    else:
-        add("allowed", False, (
-            "Allowed User IDs is empty, so every message is refused. Put your Telegram user id "
-            "there (send /start to @userinfobot to see it)."
-        ))
+    add("allowed", *allowlist_check(
+        allowed, owner_ids=list(owner_ids or ()), open_to_everyone=open_to_everyone, live=live,
+        platform="Telegram",
+        find_id="message the bot: a refused sender is told their id, or send /start to @userinfobot",
+    ))
 
     add("listening", *listening(live, "Telegram", not_running=(
         "Kazma's Telegram connection is not running: turn Telegram on above and Save, "

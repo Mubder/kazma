@@ -16,10 +16,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from typing import Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
@@ -42,6 +41,11 @@ class DevicePollBody(BaseModel):
 
 class _DeviceStartBody(BaseModel):
     # An extra account's name: the sign-in keeps its tokens under it.
+    account: str = Field(default="", max_length=64)
+
+
+class _SignInStartBody(BaseModel):
+    # An extra account's name (``email_manager.accounts``); empty = the main one.
     account: str = Field(default="", max_length=64)
 
 
@@ -342,26 +346,30 @@ def gmail_set_oauth_client(body: GmailOAuthClientBody) -> JSONResponse:
         return _safe_error(exc)
 
 
-@router.get("/oauth/gmail/start")
-async def gmail_oauth_start(request: Request, account: str = "") -> Any:
-    """Redirect browser to Google consent screen (*account*: an extra
-    account's name; empty = the main Gmail account)."""
-    from kazma_skills.native.email_manager.oauth_gmail import start_gmail_oauth
+@protected_router.post("/oauth/gmail/start", dependencies=[Depends(_verify_same_origin)])
+async def gmail_oauth_start(request: Request, body: _SignInStartBody | None = None) -> JSONResponse:
+    """Start a Google sign-in from Kazma's own page (security audit
+    2026-11-10: it was a GET that wrote state). The answer is the consent
+    URL, which the page opens in the same tab, and the cookie that binds the
+    sign-in to this browser (``kazma_ui.oauth_sign_in``). ``account`` names
+    an extra account; empty = the main Gmail account."""
+    from kazma_skills.native.email_manager.oauth_gmail import gmail_redirect_uri, start_gmail_oauth
 
-    result = await asyncio.to_thread(start_gmail_oauth, _request_base(request), account=account)
-    if not result.get("ok"):
-        # JSON for API clients; Settings uses fetch then window.location
-        return JSONResponse(result, status_code=400)
-    return RedirectResponse(result["authorize_url"], status_code=302)
+    from kazma_ui.oauth_sign_in import answer_start
+
+    base = _request_base(request)
+    account = body.account if body else ""
+    return await answer_start(
+        request,
+        callback_url=gmail_redirect_uri(base),
+        start=lambda: start_gmail_oauth(base, account=account),
+    )
 
 
-@router.get("/oauth/gmail/start.json")
-async def gmail_oauth_start_json(request: Request, account: str = "") -> JSONResponse:
-    from kazma_skills.native.email_manager.oauth_gmail import start_gmail_oauth
-
-    result = await asyncio.to_thread(start_gmail_oauth, _request_base(request), account=account)
-    code = 200 if result.get("ok") else 400
-    return JSONResponse(result, status_code=code)
+def _refused_sign_in(settings_url: str, flag: str, reason: str) -> str:
+    """Where a refused callback sends the browser: the card's flag and the
+    refusal's code, which the page words (``settings.int.oauth_refused_*``)."""
+    return f"{settings_url}&{flag}=error&reason={quote(reason)}"
 
 
 @router.get("/oauth/gmail/callback")
@@ -371,7 +379,16 @@ async def gmail_oauth_callback(
     state: str | None = None,
     error: str | None = None,
 ) -> RedirectResponse:
-    """Google redirects here; store tokens and send user back to Settings."""
+    """Google redirects here; store tokens and send user back to Settings.
+
+    The attempt is taken once, with this browser's binding cookie
+    (``oauth_attempts.take``): a state used before, started in another
+    browser, past its ten minutes or of another provider finishes nothing.
+    """
+    from kazma_core.security.oauth_attempts import AttemptRefused
+
+    from kazma_ui.oauth_sign_in import forget_binding, take_attempt
+
     base = _request_base(request)
     settings_url = f"{base}/settings?tab=email"
     if error:
@@ -384,40 +401,47 @@ async def gmail_oauth_callback(
             f"{settings_url}&email_oauth=error&msg={quote('missing_code')}",
             status_code=302,
         )
-    from kazma_skills.native.email_manager.oauth_common import peek_state
-
-    peeked = peek_state(state or "")
-    if peeked and peeked.get("provider") == "google_calendar":
+    try:
+        attempt = await take_attempt(request, state, providers=("gmail", "google_calendar"))
+    except AttemptRefused as exc:
+        logger.warning("[email.oauth] Google callback refused: %s", exc.reason)
+        return forget_binding(
+            RedirectResponse(_refused_sign_in(settings_url, "email_oauth", exc.reason), status_code=302),
+            request, state,
+        )
+    if attempt.get("provider") == "google_calendar":
         from kazma_skills.native.calendar.oauth_google import finish_google_calendar_oauth
 
-        result = await finish_google_calendar_oauth(code, state)
+        result = await finish_google_calendar_oauth(code, attempt)
         if not result.get("ok"):
-            return RedirectResponse(
+            answer = RedirectResponse(
                 f"{settings_url}&calendar_oauth=error&msg={quote(str(result.get('error') or 'failed'))}",
                 status_code=302,
             )
-        email = quote(str(result.get("email") or ""))
-        return RedirectResponse(
-            f"{settings_url}&calendar_oauth=ok&provider=google&email={email}",
-            status_code=302,
-        )
+        else:
+            email = quote(str(result.get("email") or ""))
+            answer = RedirectResponse(
+                f"{settings_url}&calendar_oauth=ok&provider=google&email={email}",
+                status_code=302,
+            )
+        return forget_binding(answer, request, state, attempt)
 
     from kazma_skills.native.email_manager.oauth_gmail import finish_gmail_oauth
 
-    result = await finish_gmail_oauth(code, state)
+    result = await finish_gmail_oauth(code, attempt)
     if not result.get("ok"):
-        return RedirectResponse(
+        return forget_binding(RedirectResponse(
             f"{settings_url}&email_oauth=error&msg={quote(str(result.get('error') or 'failed'))}",
             status_code=302,
-        )
+        ), request, state, attempt)
     email = quote(str(result.get("email") or ""))
     cal = "1" if result.get("calendar_ok") else "0"
     # An extra account names itself, so the page can say which one it was.
     acct = f"&account={quote(str(result['account']))}" if result.get("account") else ""
-    return RedirectResponse(
+    return forget_binding(RedirectResponse(
         f"{settings_url}&email_oauth=ok&provider=gmail&email={email}&calendar={cal}{acct}",
         status_code=302,
-    )
+    ), request, state, attempt)
 
 
 # ── Microsoft OAuth browser + device ───────────────────────────────────
@@ -454,23 +478,22 @@ def ms_set_client(body: MsClientBody) -> JSONResponse:
         return _safe_error(exc)
 
 
-@router.get("/oauth/microsoft/start")
-async def ms_oauth_start(request: Request, account: str = "") -> Any:
-    from kazma_skills.native.email_manager.oauth_ms_browser import start_ms_browser_oauth
+@protected_router.post("/oauth/microsoft/start", dependencies=[Depends(_verify_same_origin)])
+async def ms_oauth_start(request: Request, body: _SignInStartBody | None = None) -> JSONResponse:
+    """Start a Microsoft sign-in for mail from Kazma's own page: the answer
+    is the sign-in URL (opened in the same tab) and the binding cookie
+    (``kazma_ui.oauth_sign_in``)."""
+    from kazma_skills.native.email_manager.oauth_ms_browser import ms_redirect_uri, start_ms_browser_oauth
 
-    result = await asyncio.to_thread(start_ms_browser_oauth, _request_base(request), account=account)
-    if not result.get("ok"):
-        return JSONResponse(result, status_code=400)
-    return RedirectResponse(result["authorize_url"], status_code=302)
+    from kazma_ui.oauth_sign_in import answer_start
 
-
-@router.get("/oauth/microsoft/start.json")
-async def ms_oauth_start_json(request: Request, account: str = "") -> JSONResponse:
-    from kazma_skills.native.email_manager.oauth_ms_browser import start_ms_browser_oauth
-
-    result = await asyncio.to_thread(start_ms_browser_oauth, _request_base(request), account=account)
-    code = 200 if result.get("ok") else 400
-    return JSONResponse(result, status_code=code)
+    base = _request_base(request)
+    account = body.account if body else ""
+    return await answer_start(
+        request,
+        callback_url=ms_redirect_uri(base),
+        start=lambda: start_ms_browser_oauth(base, account=account),
+    )
 
 
 @router.get("/oauth/microsoft/callback")
@@ -494,26 +517,35 @@ async def ms_oauth_callback(
             f"{settings_url}&email_oauth=error&msg={quote('missing_code')}",
             status_code=302,
         )
-    from kazma_skills.native.email_manager.oauth_common import peek_state
+    from kazma_core.security.oauth_attempts import AttemptRefused
     from kazma_skills.native.email_manager.oauth_ms_browser import finish_ms_browser_oauth
 
+    from kazma_ui.oauth_sign_in import forget_binding, take_attempt
+
+    try:
+        attempt = await take_attempt(request, state, providers=("microsoft",))
+    except AttemptRefused as exc:
+        logger.warning("[email.oauth] Microsoft callback refused: %s", exc.reason)
+        return forget_binding(
+            RedirectResponse(_refused_sign_in(settings_url, "email_oauth", exc.reason), status_code=302),
+            request, state,
+        )
     # The calendar card's sign-in comes back here too (one redirect URI in
     # Azure); its answer goes to the calendar's toast, not the mail card's.
-    peeked = peek_state(state or "")
-    flag = "calendar_oauth" if peeked and peeked.get("purpose") == "calendar" else "email_oauth"
-    result = await finish_ms_browser_oauth(code, state)
+    flag = "calendar_oauth" if attempt.get("purpose") == "calendar" else "email_oauth"
+    result = await finish_ms_browser_oauth(code, attempt)
     if not result.get("ok"):
-        return RedirectResponse(
+        return forget_binding(RedirectResponse(
             f"{settings_url}&{flag}=error&msg={quote(str(result.get('error') or 'failed'))}",
             status_code=302,
-        )
+        ), request, state, attempt)
     provider = "outlook" if flag == "calendar_oauth" else "microsoft"
     email = quote(str(result.get("email") or ""))
     acct = f"&account={quote(str(result['account']))}" if result.get("account") else ""
-    return RedirectResponse(
+    return forget_binding(RedirectResponse(
         f"{settings_url}&{flag}=ok&provider={provider}&email={email}{acct}",
         status_code=302,
-    )
+    ), request, state, attempt)
 
 
 @protected_router.post("/oauth/microsoft/device/start", dependencies=[Depends(_verify_same_origin)])

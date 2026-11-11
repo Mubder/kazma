@@ -17,13 +17,32 @@ from starlette.responses import PlainTextResponse, Response, StreamingResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from kazma_ui.security_headers import CSP, SecurityHeadersMiddleware, pin_static_types
+from kazma_ui import security_headers
+from kazma_ui.security_headers import (
+    CSP,
+    SecurityHeadersMiddleware,
+    _livekit_connect_sources,
+    pin_static_types,
+    _policy_for,
+)
+
+
+def _directive(csp: str, name: str) -> str:
+    for part in csp.split(";"):
+        if part.strip().startswith(name + " "):
+            return part.strip()
+    return ""
 
 
 def _check(headers) -> None:
     csp = headers.get("content-security-policy", "")
     assert "img-src 'self' data: blob:" in csp, csp
     assert "frame-ancestors 'none'" in csp and "object-src 'none'" in csp, csp
+    # Scripts: this server's, inline and Alpine's expressions; no other host
+    # (2026-11-11: the LiveKit client was loaded from a CDN).
+    assert _directive(csp, "script-src") == "script-src 'self' 'unsafe-inline' 'unsafe-eval'", csp
+    # Connections: this server first; another host only when it is LiveKit's.
+    assert _directive(csp, "connect-src").startswith("connect-src 'self'"), csp
     assert headers.get("x-frame-options") == "DENY"
     assert headers.get("x-content-type-options") == "nosniff"
     assert headers.get("referrer-policy") == "same-origin"
@@ -32,8 +51,9 @@ def _check(headers) -> None:
         "frame-src 'none'", "worker-src 'self' blob:", "manifest-src 'self'",
     ):
         assert directive in csp, (directive, csp)
-    # The GitHub sign-in popup answers its opener: no opener policy.
-    assert headers.get("cross-origin-opener-policy") is None
+    # No window shares an opener with another site's (2026-11-11): every
+    # sign-in runs in the same tab (tests/test_no_popup_sign_in.py).
+    assert headers.get("cross-origin-opener-policy") == "same-origin"
     assert headers.get("cross-origin-resource-policy") == "same-origin"
     assert headers.get("permissions-policy") == "camera=(), geolocation=(), microphone=(self)"
 
@@ -111,11 +131,99 @@ def test_scripts_keep_their_type_whatever_the_registry_says() -> None:
 
 
 def test_the_policy_names_only_this_origin() -> None:
-    """Every directive the policy carries is 'self' (plus data:/blob: the page
-    makes); no host is allowed anywhere. Scripts and connections are left
-    unrestricted on purpose (the optional LiveKit voice path)."""
+    """Every directive the fixed policy carries is 'self' (plus data:/blob:
+    the page makes, and the inline scripts and Alpine expressions the pages
+    run); no host is allowed anywhere. ``connect-src`` is per response."""
     assert "http://" not in CSP and "https://" not in CSP and "*" not in CSP
-    assert "default-src" not in CSP and "connect-src" not in CSP and "script-src" not in CSP
+    assert "default-src" not in CSP and "connect-src" not in CSP
+    assert "script-src 'self' 'unsafe-inline' 'unsafe-eval'" in CSP
+
+
+# ── connect-src and the LiveKit server (2026-11-11) ─────────────────────
+
+
+def _http_scope(host: bytes = b"127.0.0.1:9090", scheme: str = "http") -> dict:
+    return {
+        "type": "http", "method": "GET", "path": "/chat", "raw_path": b"/chat", "query_string": b"",
+        "headers": [(b"host", host)], "scheme": scheme, "server": ("127.0.0.1", 9090),
+        "client": ("203.0.113.9", 5000), "root_path": "", "http_version": "1.1",
+    }
+
+
+@pytest.mark.parametrize("url, sources", [
+    ("wss://lk.example.com", ("wss://lk.example.com", "https://lk.example.com")),
+    ("https://lk.example.com:7443/rtc", ("wss://lk.example.com:7443", "https://lk.example.com:7443")),
+    ("ws://localhost:7880", ("ws://localhost:7880", "http://localhost:7880")),
+    ("wss://proj.livekit.cloud", ("wss://proj.livekit.cloud", "https://proj.livekit.cloud",
+                                  "wss://*.livekit.cloud", "https://*.livekit.cloud")),
+    # Nothing that could end the directive or name another, and no other scheme.
+    ("wss://a;script-src *", ()), ("wss://a.com b.com", ()), ("wss://u:p@lk.example.com", ()),
+    ("javascript:alert(1)", ()), ("lk.example.com", ()), ("", ()),
+])
+def test_the_livekit_address_becomes_its_origins_only(url: str, sources: tuple) -> None:
+    assert _livekit_connect_sources(url) == sources
+
+
+def test_connect_src_is_this_server_and_the_configured_livekit_server() -> None:
+    plain = _policy_for(_http_scope()).decode()
+    assert _directive(plain, "connect-src") == "connect-src 'self' ws://127.0.0.1:9090"
+    behind_tls = _policy_for(_http_scope(b"kazma.example", "https"),
+                            _livekit_connect_sources("wss://lk.example.com")).decode()
+    assert _directive(behind_tls, "connect-src") == (
+        "connect-src 'self' wss://kazma.example wss://lk.example.com https://lk.example.com")
+    # A Host that could end the directive never reaches the policy.
+    for host in (b"evil.example;script-src *", b"evil.example, *"):
+        hostile = _policy_for(_http_scope(host)).decode()
+        assert "evil" not in hostile and hostile.count("script-src") == 1, hostile
+
+
+def test_the_livekit_server_is_read_off_the_loop_and_kept(monkeypatch) -> None:
+    """The settings read runs in a thread, and once per TTL."""
+    import threading
+
+    from kazma_core.voice import livekit
+
+    reads: list[int] = []
+    loop_thread: list[int] = []
+
+    def config():
+        reads.append(threading.get_ident())
+        return livekit.LiveKitConfig(enabled=True, url="wss://lk.example.com", api_key="k", api_secret="s")
+
+    monkeypatch.setattr(livekit, "get_livekit_config", config)
+    security_headers._LIVEKIT.forget()
+
+    async def page(request):
+        loop_thread.append(threading.get_ident())
+        return PlainTextResponse("ok")
+
+    app = Starlette(routes=[Route("/p", page)])
+    app.add_middleware(SecurityHeadersMiddleware)
+    try:
+        client = TestClient(app)
+        first = client.get("/p").headers["content-security-policy"]
+        second = client.get("/p").headers["content-security-policy"]
+        assert "wss://lk.example.com https://lk.example.com" in first and first == second
+        assert len(reads) == 1, "kept between responses"
+        assert reads[0] not in loop_thread, "read off the loop"
+        # Duplex off: no host but this server's.
+        monkeypatch.setattr(livekit, "get_livekit_config", lambda: livekit.LiveKitConfig(
+            enabled=False, url="wss://lk.example.com", api_key="", api_secret=""))
+        security_headers._LIVEKIT.forget()
+        off = client.get("/p").headers["content-security-policy"]
+        assert "lk.example.com" not in off
+    finally:
+        security_headers._LIVEKIT.forget()
+
+
+def test_negative_control_the_old_policy_had_no_script_or_connect_rule() -> None:
+    """The policy before 2026-11-11 let a page load a script from any host."""
+    old = (
+        "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; "
+        "font-src 'self' data:; frame-src 'none'; worker-src 'self' blob:; manifest-src 'self'; "
+        "object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+    )
+    assert _directive(old, "script-src") == "" and _directive(old, "connect-src") == ""
 
 
 def _scope(scheme: str, peer: str = "203.0.113.9", forwarded_proto: str | None = None) -> dict:

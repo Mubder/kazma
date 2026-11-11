@@ -48,6 +48,7 @@ from kazma_gateway.gateway import (
 )
 from kazma_gateway.adapters.telegram_receive import TELEGRAM_REASONS, message_of, update_kind, where_of
 from kazma_gateway.receive_log import ReceiveLog
+from kazma_gateway.sender_rule import SenderGate
 from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
@@ -81,7 +82,7 @@ _EMOJI_MAP: dict[str, list[dict[str, str]]] = {
 }
 
 
-class TelegramAdapter(BaseAdapter):
+class TelegramAdapter(SenderGate, BaseAdapter):
     """Telegram Bot API adapter using manual getUpdates polling.
 
     Headless: direct HTTP polling — no webhooks, no aiogram Dispatcher,
@@ -98,10 +99,11 @@ class TelegramAdapter(BaseAdapter):
 
     Args:
         token:          Telegram Bot API token.
-        allowed_users:  Whitelist of user IDs. Fail-closed: empty with
-                        ``allow_all=False`` (the default) rejects everyone —
-                        configure the list in Settings or pass
-                        ``allow_all=True`` to accept from all users.
+        allowed_users:  Whitelist of user IDs. Empty with ``allow_all=False``
+                        (the default) answers only the owner's own ids Kazma
+                        knows (``set_owner_ids``, ``sender_rule``) --
+                        configure the list in Settings; ``allow_all=True``
+                        (the open switch) accepts from all users.
         parse_mode:     Default parse_mode for outbound messages.
         poll_timeout:   Long-poll timeout in seconds for getUpdates (default 5).
         voice_enabled:  Whether to transcribe voice messages (default False).
@@ -189,11 +191,7 @@ class TelegramAdapter(BaseAdapter):
 
     def diagnostics(self) -> dict[str, Any]:
         """The live receive record for the connector Test (plain data)."""
-        return {
-            **self._receive.snapshot(),
-            "allowed_users": len(self._allowed_users),
-            "allow_all": self._allow_all,
-        }
+        return {**self._receive.snapshot(), **self.admission()}
 
     #: Drops that point at a setting to fix (a WARNING, throttled).
     _DROP_WARNINGS = frozenset({"no_allowlist", "queue_full", "voice_failed"})
@@ -220,31 +218,28 @@ class TelegramAdapter(BaseAdapter):
         """
         self._allowed_users = set(user_ids)
 
-    def actor_allowed(self, user_id: object) -> bool:
-        """Fail-closed allowlist: empty + ``allow_all=False`` rejects everyone."""
-        if not self._allowed_users and not self._allow_all:
-            return False
-        if self._allowed_users:
-            try:
-                uid = int(user_id)  # type: ignore[arg-type]
-            except (TypeError, ValueError):
-                return False
-            return uid in self._allowed_users
-        return True
-
     def _sender_refusal(self, message: dict[str, Any]) -> str:
         """The drop reason for *message*'s sender, or ``""`` when allowed.
 
-        The allowlist rule the parsed message is held to, read from the raw
-        message so it runs before any download or transcription.
+        The one sender rule (``sender_rule``), read from the raw message so it
+        runs before any download or transcription.
         """
-        if not self._allowed_users and not self._allow_all:
-            return "no_allowlist"
-        if self._allowed_users:
-            sender = (message.get("from") or {}).get("id", 0)
-            if sender not in self._allowed_users:
-                return "user_not_allowed"
-        return ""
+        return self.sender_refusal((message.get("from") or {}).get("id", 0))
+
+    def _refuse(self, reason: str, message: dict[str, Any], text: str | None = None) -> None:
+        """Record why *message* was left and, for a stranger in a private
+        chat, tell them once a day that this bot is private."""
+        self._note_drop(reason, message)
+        chat = message.get("chat") or {}
+        said = text if text is not None else (message.get("text") or message.get("caption"))
+        self.tell_refused_sender(
+            reason,
+            user_id=(message.get("from") or {}).get("id"),
+            direct=chat.get("type") == "private",
+            target_id=f"telegram:{chat.get('id')}",
+            context_metadata={"chat_id": chat.get("id"), "parse_mode": ""},
+            user_text=said,
+        )
 
     async def start(
         self,
@@ -252,17 +247,8 @@ class TelegramAdapter(BaseAdapter):
         shutdown_event: asyncio.Event,
     ) -> None:
         """Start the adapter and store queue reference for webhook ingress."""
+        # Who it answers is said once, where it is built (chat_adapters).
         self._queue = queue
-        if not self._allowed_users and not self._allow_all:
-            logger.error(
-                "[telegram] No allowed_users configured and allow_all is false. "
-                "The bot will REJECT ALL messages. Set connectors.telegram.allowed_users "
-                "in Settings, or set allow_all=true to accept from everyone."
-            )
-        elif not self._allowed_users and self._allow_all:
-            logger.warning(
-                "[telegram] allow_all is true — accepting messages from ALL users."
-            )
         await super().start(queue, shutdown_event)
 
     async def listen(
@@ -643,7 +629,7 @@ class TelegramAdapter(BaseAdapter):
             if message is not None:
                 refusal = self._sender_refusal(message)
                 if refusal:
-                    self._note_drop(refusal, message)
+                    self._refuse(refusal, message)
                     return
 
             # Voice notes (download + transcribe), files and photos, then text.
@@ -651,7 +637,6 @@ class TelegramAdapter(BaseAdapter):
             if msg is None:
                 return
 
-            # User whitelist (fail-closed: empty list + allow_all=false = reject all)
             from kazma_core.agent.command_catalog import normalize_telegram_command
 
             normalized = normalize_telegram_command(msg.text or "", getattr(self, "_bot_username", ""))
@@ -660,16 +645,11 @@ class TelegramAdapter(BaseAdapter):
                 return
             msg.text = normalized
             msg.context_metadata["bot_username"] = getattr(self, "_bot_username", "")
-            if not self._allowed_users and not self._allow_all:
-                self._note_drop("no_allowlist", message)
+            # The parsed message is held to the same rule (sender_rule).
+            refusal = self.sender_refusal(msg.context_metadata.get("user_id", 0))
+            if refusal:
+                self._refuse(refusal, message or {}, msg.text)
                 return
-            if self._allowed_users:
-                user_id = msg.context_metadata.get("user_id", 0)
-                if user_id not in self._allowed_users:
-                    # INFO, not DEBUG: "why did Kazma not answer me" must be
-                    # in the log (2026-09-29).
-                    self._note_drop("user_not_allowed", message)
-                    return
 
             msg_key = f"{msg.context_metadata.get('chat_id')}:{msg.context_metadata.get('message_id')}"
             if self._already_seen_message(msg):
@@ -1403,8 +1383,7 @@ class TelegramAdapter(BaseAdapter):
         message = callback_query.get("message", {})
         from_user = callback_query.get("from", {})
 
-        # Fail-closed: empty allowlist + allow_all=False rejects callbacks
-        # the same way messages are rejected (audit H-3).
+        # The one sender rule, as for messages (audit H-3, sender_rule).
         if not self.actor_allowed(from_user.get("id", 0)):
             logger.warning(
                 "[telegram] Callback rejected (allowlist fail-closed) user=%s",
@@ -1428,11 +1407,12 @@ class TelegramAdapter(BaseAdapter):
         # tool is the single most powerful button in the product — it is the
         # one that converts "the agent wants to" into "the agent did".
         #
-        # In the shipped posture (allowed_users configured, no
-        # KAZMA_GATEWAY_ADMINS) is_gateway_admin returns True for exactly the
-        # users who could already approve, so this changes nothing. It bites
-        # only in allow_all, where it is supposed to: every member of a group
-        # chat could otherwise answer the operator's approvals.
+        # In the shipped posture (allowed_users configured, or private with the
+        # owner's own id, no KAZMA_GATEWAY_ADMINS) is_gateway_admin returns
+        # True for exactly the users who could already approve, so this
+        # changes nothing. It bites only with the open switch, where it is
+        # supposed to: every member of a group chat could otherwise answer
+        # the operator's approvals.
         if action.kind in ("hitl", "swarm", "run"):
             from kazma_gateway.allowlists import is_gateway_admin
 
@@ -1512,7 +1492,7 @@ class TelegramAdapter(BaseAdapter):
         if action.kind == "sys_install":
             # Admin gate (audit H-8): package installation is admin-grade.
             # The old check was nested inside ``if self._allowed_users:``,
-            # so in the default allow_all posture (empty allowlist) ANYONE
+            # so in the then-default open posture (empty allowlist) ANYONE
             # pressing the button triggered a package install.
             from kazma_gateway.allowlists import is_gateway_admin
 

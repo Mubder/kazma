@@ -7,4 +7,4 @@ try:
 
     __version__ = _get_version()
 except Exception:  # pragma: no cover - bare install without core
-    __version__ = "0.21.1"
+    __version__ = "0.21.2"

@@ -42,11 +42,29 @@ folder (`pip install -e ".[web]"`, or Settings → Packages) and upgrade with
 On an install made from a release wheel, `kazma update` reads the newest
 release from the GitHub API, downloads its wheel from that release, and
 installs it only when the file's SHA-256 matches the release's `SHA256SUMS`
-and, where GitHub reports one, GitHub's own digest of the asset; otherwise it
-stops and names the release page. It does not check the Sigstore signature
-itself: run `gh attestation verify` (below) when you want that proof. The
-Settings update check reads the same release. Until 2026-09-30 both asked
-PyPI, and `kazma update` then had pip upgrade `kazma` by name.
+and, where GitHub reports one, GitHub's own digest of the asset, and (since
+2026-11) the wheel's Sigstore bundle verifies: chained to Sigstore, recorded
+in its transparency log, over the wheel's SHA-256, and naming
+`.github/workflows/release.yml` of `Mubder/kazma` run from `main` or a `v*`
+tag (`kazma_cli/release_signature.py`). The checksums live in the same release
+as the wheel, so whoever could change its files could change them too; the
+signature cannot be made without running the release workflow here. A release
+from 0.21.2 on without a bundle is not installed. v0.21.1 and older are
+checked by their SHA-256 alone, and the command says so; a bundle one of them
+does carry is still verified, never ignored. Otherwise it stops and names the
+release page. Sigstore's root of trust comes from its TUF repository, read at
+each check; without the network the copy on the machine is used, and the
+check is never skipped. The Settings update check reads the same release.
+Until 2026-09-30 both asked PyPI, and `kazma update` then had pip upgrade
+`kazma` by name.
+
+**The next release must be published through `.github/workflows/release.yml`**
+(Actions → Release → Run workflow, from `main`). That workflow is what signs
+the files and attaches the `.sigstore.json` bundles; a release built and
+uploaded by hand has none, and from 0.21.2 on `kazma update` refuses it on
+every wheel install. The workflow signed v0.11.0; v0.12.0 to v0.21.1 were
+published by hand without bundles, which is why the requirement starts after
+them (`release_signature.SIGNED_FROM`).
 
 ### How the names are held {#pypi-names}
 
@@ -93,7 +111,7 @@ first eight went up in four rounds.
 This is the check that matters most, and it is one command:
 
 ```bash
-gh attestation verify kazma-0.21.1-py3-none-any.whl --repo Mubder/kazma
+gh attestation verify kazma-0.11.0-py3-none-any.whl --repo Mubder/kazma
 ```
 
 A pass means GitHub's transparency log agrees the file was produced by the
@@ -115,8 +133,8 @@ pip install sigstore
 
 python -m sigstore verify github \
   --repository Mubder/kazma \
-  --bundle kazma-0.21.1-py3-none-any.whl.sigstore.json \
-  kazma-0.21.1-py3-none-any.whl
+  --bundle kazma-0.11.0-py3-none-any.whl.sigstore.json \
+  kazma-0.11.0-py3-none-any.whl
 ```
 
 The explicit form, if you want to pin the exact identity rather than let the
@@ -124,14 +142,16 @@ The explicit form, if you want to pin the exact identity rather than let the
 
 ```bash
 python -m sigstore verify identity \
-  --cert-identity "https://github.com/Mubder/kazma/.github/workflows/release.yml@refs/tags/v0.21.1" \
+  --cert-identity "https://github.com/Mubder/kazma/.github/workflows/release.yml@refs/heads/main" \
   --cert-oidc-issuer "https://token.actions.githubusercontent.com" \
-  --bundle kazma-0.21.1-py3-none-any.whl.sigstore.json \
-  kazma-0.21.1-py3-none-any.whl
+  --bundle kazma-0.11.0-py3-none-any.whl.sigstore.json \
+  kazma-0.11.0-py3-none-any.whl
 ```
 
-The `@refs/...` suffix is the git ref the release was built from. Check the
-run if you are unsure which one applies.
+The `@refs/...` suffix is the git ref the workflow ran from. The release
+workflow is started by hand from `main`, so its bundles say `@refs/heads/main`
+(v0.11.0's do); a run from a tag would say `@refs/tags/v...`. Check the run
+if you are unsure which one applies.
 
 ---
 
@@ -152,7 +172,10 @@ verifying its Sigstore bundle first makes the checksums meaningful.
 `kazma-<version>.cdx.json` is CycloneDX 1.6, generated from `uv.lock` rather
 than from the build machine's environment. That distinction matters: it
 describes the exact pinned set that `uv sync` installs for you, not whatever
-the CI runner happened to resolve on the day.
+the CI runner happened to resolve on the day. The generator itself is one
+release too (`cyclonedx-bom==8.0.1`), as is every tool a workflow or build
+script runs through `uvx` or `npx`: with no version they run whatever the
+registry serves that day.
 
 Feed it to whatever your organisation already uses. For a quick look:
 
@@ -160,30 +183,38 @@ Feed it to whatever your organisation already uses. For a quick look:
 # Component count and licences
 python - <<'PY'
 import json
-d = json.load(open("kazma-0.21.1.cdx.json", encoding="utf-8"))
+d = json.load(open("kazma-0.21.2.cdx.json", encoding="utf-8"))
 comps = d.get("components") or []
 print(f"{len(comps)} components, CycloneDX {d['specVersion']}")
 PY
 
 # Known vulnerabilities, via any CycloneDX-aware scanner
-grype sbom:kazma-0.21.1.cdx.json
-trivy sbom kazma-0.21.1.cdx.json
+grype sbom:kazma-0.21.2.cdx.json
+trivy sbom kazma-0.21.2.cdx.json
 ```
 
 ---
 
 ## Rebuilding what is vendored
 
-Two third-party assets are committed rather than fetched, because the UI must
+Three third-party assets are committed rather than fetched, because the UI must
 render on a box with no route to the internet:
 
 - **CodeMirror 5** (MIT) — `kazma-ui/kazma_ui/static/vendor/codemirror/`.
   Rebuild with `python scripts/vendor_codemirror.py`; the pinned version lives
   in that script and in the `VERSION` file beside the bundle.
+- **LiveKit browser client** (`livekit-client` 2.23.0, Apache-2.0) —
+  `kazma-ui/kazma_ui/static/vendor/livekit/`, for Live duplex voice. Rebuild
+  with `python scripts/vendor_livekit.py`, which checks the tarball against
+  the integrity npm published; the version, source, integrity and SHA-256 of
+  each file are in `vendored.json` beside it. It was loaded from a CDN,
+  unpinned, until 2026-11-11.
 - **IBM Plex Sans Arabic** (OFL) — `kazma-ui/kazma_ui/static/fonts/`.
 
 `tests/test_editor_assets_offline.py` fails the build if any template starts
-loading remote script or stylesheets again.
+loading remote script or stylesheets again, `tests/test_vendor_livekit.py` if
+any page script does, and the pages' Content-Security-Policy refuses a script
+from another host in the browser.
 
 ---
 

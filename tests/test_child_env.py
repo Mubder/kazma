@@ -225,6 +225,9 @@ _SPAWN_DIRS = (
     "kazma-core/kazma_core/mcp",
     "kazma-core/kazma_core/mcp_client.py",
     "kazma-core/kazma_core/security/process_budget.py",
+    # The approval card's git disclosure reads a repository's configuration
+    # (2026-11-11): git in the user's workspace, like the tools above.
+    "kazma-core/kazma_core/safety/git_repo_programs.py",
 )
 _SPAWNERS = {
     "subprocess.run", "subprocess.Popen", "subprocess.check_output",

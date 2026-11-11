@@ -268,6 +268,8 @@ async def request_approval_via_registry(
 
     tid = thread_id or f"mcp:{_WATCHER_ID}"
     gate_id = make_gate_id(tid, tool_name, tool_args, seq=int(time.time() * 1000) % 1_000_000)
+    from kazma_core.security.approval_args import redacted_arguments_json
+
     try:
         await asyncio.to_thread(
             register_gate,
@@ -277,7 +279,11 @@ async def request_approval_via_registry(
                 tool=tool_name,
                 mechanism=origin,
                 tenant_id=tenant,
-                message=(tool_args or "")[:500],
+                # The record keeps the call as a card shows it and the hash
+                # of the real call (register_gate); the dashboard's text is
+                # the masked view, never the raw arguments.
+                args_json=tool_args or "",
+                message=(redacted_arguments_json(tool_name, tool_args or "") or "")[:500],
             ),
             ttl_seconds=timeout,
         )

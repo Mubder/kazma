@@ -8,13 +8,15 @@ import pytest
 
 
 def test_oauth_state_roundtrip() -> None:
-    from kazma_skills.native.email_manager.oauth_common import new_state, pop_state
+    """A sign-in's attempt is taken once (the store's rules are
+    tests/test_oauth_attempts.py)."""
+    from kazma_core.security.oauth_attempts import AttemptRefused, begin, take
 
-    s = new_state("gmail", redirect_uri="http://localhost/cb")
-    meta = pop_state(s)
-    assert meta is not None
-    assert meta["provider"] == "gmail"
-    assert pop_state(s) is None
+    s = begin("gmail", redirect_uri="http://localhost/cb")
+    meta = take(s, bound_state=s, providers=("gmail",))
+    assert meta["provider"] == "gmail" and meta["redirect_uri"] == "http://localhost/cb"
+    with pytest.raises(AttemptRefused):
+        take(s, bound_state=s, providers=("gmail",))
 
 
 def test_gmail_start_requires_client(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -54,12 +56,12 @@ def test_ms_browser_start_ok(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.asyncio
 async def test_gmail_finish_oauth(monkeypatch: pytest.MonkeyPatch) -> None:
-    from kazma_skills.native.email_manager.oauth_common import new_state
     from kazma_skills.native.email_manager import oauth_gmail as og
 
     monkeypatch.setenv("EMAIL_GMAIL_CLIENT_ID", "cid")
     monkeypatch.setenv("EMAIL_GMAIL_CLIENT_SECRET", "sec")
-    state = new_state("gmail", redirect_uri="http://127.0.0.1:9090/api/email/oauth/gmail/callback")
+    # The attempt the callback took (oauth_attempts.take); finish gets it whole.
+    state = {"provider": "gmail", "redirect_uri": "http://127.0.0.1:9090/api/email/oauth/gmail/callback"}
     stored: dict[str, str] = {}
 
     def fake_store(name: str, value: str, category: str = "email") -> bool:
@@ -119,12 +121,12 @@ async def test_gmail_finish_oauth(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.asyncio
 async def test_gmail_finish_rejects_insufficient_scopes(monkeypatch: pytest.MonkeyPatch) -> None:
-    from kazma_skills.native.email_manager.oauth_common import new_state
     from kazma_skills.native.email_manager import oauth_gmail as og
 
     monkeypatch.setenv("EMAIL_GMAIL_CLIENT_ID", "cid")
     monkeypatch.setenv("EMAIL_GMAIL_CLIENT_SECRET", "sec")
-    state = new_state("gmail", redirect_uri="http://127.0.0.1:9090/api/email/oauth/gmail/callback")
+    # The attempt the callback took (oauth_attempts.take); finish gets it whole.
+    state = {"provider": "gmail", "redirect_uri": "http://127.0.0.1:9090/api/email/oauth/gmail/callback"}
     monkeypatch.setattr(og, "vault_store", lambda *a, **k: True)
 
     class FakeResp:
@@ -182,12 +184,12 @@ async def test_gmail_finish_records_drive_block_without_failing(
 ) -> None:
     """Drive blocked (API off / scope stripped) must NOT fail Gmail connect,
     but must be recorded so the backup card can warn instead of lying '✓'."""
-    from kazma_skills.native.email_manager.oauth_common import new_state
     from kazma_skills.native.email_manager import oauth_gmail as og
 
     monkeypatch.setenv("EMAIL_GMAIL_CLIENT_ID", "cid")
     monkeypatch.setenv("EMAIL_GMAIL_CLIENT_SECRET", "sec")
-    state = new_state("gmail", redirect_uri="http://127.0.0.1:9090/api/email/oauth/gmail/callback")
+    # The attempt the callback took (oauth_attempts.take); finish gets it whole.
+    state = {"provider": "gmail", "redirect_uri": "http://127.0.0.1:9090/api/email/oauth/gmail/callback"}
     stored: dict[str, str] = {}
 
     def fake_store(name: str, value: str, category: str = "email") -> bool:

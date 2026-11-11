@@ -39,6 +39,7 @@ _TOKEN_ENV = (
     "SLACK_BOT_TOKEN",
     "SLACK_APP_TOKEN",
     "KAZMA_GATEWAY_STRICT_ALLOWLIST",
+    "KAZMA_GATEWAY_OPEN_TO_EVERYONE",
 )
 
 
@@ -281,8 +282,9 @@ def test_the_one_builder_gate_sees_a_second_copy() -> None:
 
 def test_boot_and_refresh_build_the_same_adapters(store, monkeypatch) -> None:
     """The real builder: a switched-off platform stays off, Telegram keeps its
-    webhook secret, and an adapter with no allowlist takes everyone (or no
-    one, strict) -- at boot and on Refresh alike."""
+    webhook secret, and an adapter with no allowlist is private (or takes
+    everyone with the open switch, 2026-11-11: sender_rule) -- at boot and on
+    Refresh alike."""
     store.batch_set([
         ("connectors.telegram.token", "123:demo-telegram-token", "connectors"),
         ("connectors.telegram.webhook_secret", "demo-webhook-secret", "connectors"),
@@ -297,12 +299,12 @@ def test_boot_and_refresh_build_the_same_adapters(store, monkeypatch) -> None:
     boot = {a.name: a for a in gateway.adapters}
     assert set(boot) == {"telegram", "slack"}, "the Settings switch must keep Discord off"
     assert boot["telegram"]._webhook_secret == "demo-webhook-secret"
-    assert all(a._allow_all for a in boot.values())
+    assert not any(a._allow_all for a in boot.values()), "private by default"
 
     async def refresh_twice() -> dict[str, BaseAdapter]:
         await adapters.apply(force=True)
         refreshed = {a.name: a for a in gateway.adapters}
-        monkeypatch.setenv("KAZMA_GATEWAY_STRICT_ALLOWLIST", "1")
+        monkeypatch.setenv("KAZMA_GATEWAY_OPEN_TO_EVERYONE", "1")
         await adapters.apply(force=True)
         return refreshed
 
@@ -310,8 +312,8 @@ def test_boot_and_refresh_build_the_same_adapters(store, monkeypatch) -> None:
     assert set(refreshed) == {"telegram", "slack"}
     assert all(refreshed[name] is not boot[name] for name in refreshed)
     assert refreshed["telegram"]._webhook_secret == "demo-webhook-secret"
-    assert all(a._allow_all for a in refreshed.values())
-    assert not any(a._allow_all for a in gateway.adapters), "strict allowlists refuse everyone"
+    assert not any(a._allow_all for a in refreshed.values())
+    assert all(a._allow_all for a in gateway.adapters), "the open switch lets everyone in"
 
 
 # ── Saved settings reach the running gateway ────────────────────────────

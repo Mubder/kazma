@@ -70,6 +70,32 @@ DEFAULT_MODEL = "BAAI/bge-m3"
 DEFAULT_DIM = 1024
 DEFAULT_PROVIDER = "local"
 
+#: The commit of ``DEFAULT_MODEL`` every load, download and cache check names
+#: (2026-11, supply chain). Without a revision the Hugging Face libraries
+#: follow the repository's ``main``, so whoever can push there changes the
+#: weights every install loads next. This is the ``refs/main`` every install's
+#: cache has held since the model shipped: pinning it downloads nothing again.
+#: The weights at this commit are ``pytorch_model.bin``; the repository has no
+#: ``model.safetensors`` there (its safetensors copy is a separate pull-request
+#: commit), so the library's own choice of file is left as it is.
+DEFAULT_MODEL_REVISION = "5617a9f61b028005a4858fdac845db406aefb181"
+
+#: The models Kazma ships, with their pinned commits. A model the owner
+#: configured that is not here loads unpinned, unless they give a revision
+#: (``KAZMA_EMBED_REVISION`` / ``memory.embedding.revision``).
+_PINNED_REVISIONS: dict[str, str] = {DEFAULT_MODEL: DEFAULT_MODEL_REVISION}
+
+
+def _model_revision(model_name: str, configured: str | None = None) -> str | None:
+    """The revision of *model_name* to load: the one the owner configured,
+    else Kazma's pin of a model it ships, else None (the library's default
+    branch). Every ``SentenceTransformer`` and ``snapshot_download`` call
+    passes it (gate: ``tests/test_embedding_model_pinned.py``)."""
+    given = str(configured or "").strip()
+    if given:
+        return given
+    return _PINNED_REVISIONS.get(str(model_name or "").strip())
+
 # Hosted embed-only fleet presets (MEMORY_REMAINING #78). Opt-in via
 # KAZMA_EMBED_FLEET=1 or provider=openai|voyage — never surprise-switch a
 # laptop's 1024-d sqlite-vec store.
@@ -265,8 +291,11 @@ class LocalSentenceTransformerEmbedder:
         dim: int = DEFAULT_DIM,
         *,
         allow_download: bool = True,
+        revision: str | None = None,
     ) -> None:
         self._model_name = model_name
+        #: Kazma's pin of a model it ships unless *revision* names another.
+        self._revision = _model_revision(model_name, revision)
         self._dim = dim
         self._model: Any = None
         self._model_lock = threading.Lock()
@@ -288,7 +317,7 @@ class LocalSentenceTransformerEmbedder:
         with self._model_lock:
             if self._model is not None:
                 return self._model
-            if not self._allow_download and not _model_in_hf_cache(self._model_name):
+            if not self._allow_download and not _model_in_hf_cache(self._model_name, self._revision):
                 period = self.breaker.failure("model not in the local cache, downloads disabled")
                 logger.warning(
                     "[Embedder:local] %s is not in the local HF cache and "
@@ -301,8 +330,9 @@ class LocalSentenceTransformerEmbedder:
             try:
                 from sentence_transformers import SentenceTransformer
 
-                self._model = SentenceTransformer(self._model_name)
-                logger.info("[Embedder:local] Loaded %s", self._model_name)
+                self._model = SentenceTransformer(self._model_name, revision=self._revision)
+                logger.info("[Embedder:local] Loaded %s (revision %s)", self._model_name,
+                            self._revision or "unpinned")
             except ImportError:
                 period = self.breaker.failure("sentence-transformers not installed")
                 logger.warning("[Embedder:local] sentence-transformers not installed; next try in %.0f s",
@@ -510,7 +540,7 @@ def _store_embedding_overrides() -> dict[str, Any]:
         store = getattr(_cs_mod, "_config_store", None)
         if store is None:
             return overrides
-        for key in ("provider", "model", "dim", "base_url", "api_key_env"):
+        for key in ("provider", "model", "revision", "dim", "base_url", "api_key_env"):
             try:
                 val = store.get(f"embedding.{key}")
             except Exception:
@@ -550,6 +580,11 @@ def _read_embedding_config() -> dict[str, Any]:
         or os.environ.get("KAZMA_VECTOR_MODEL", "")
         or cfg.get("model", DEFAULT_MODEL)
     )
+    # A revision the owner gave for the model (a commit, tag or branch); none
+    # means Kazma's pin of a model it ships (``_model_revision``).
+    revision = str(
+        os.environ.get("KAZMA_EMBED_REVISION", "") or cfg.get("revision", "") or ""
+    ).strip()
     dim = cfg.get("dim", DEFAULT_DIM)
     try:
         dim = int(os.environ.get("KAZMA_EMBED_DIM", "") or dim)
@@ -577,6 +612,7 @@ def _read_embedding_config() -> dict[str, Any]:
         {
             "provider": provider,
             "model": model,
+            "revision": revision,
             "dim": dim,
             "base_url": base_url,
             "api_key": api_key,
@@ -681,8 +717,9 @@ def embedder_readiness() -> dict[str, Any]:
 
 
 def local_model_downloaded(model_name: str = DEFAULT_MODEL) -> bool:
-    """Whether the local embedding model is on disk (no network)."""
-    return _model_in_hf_cache(model_name)
+    """Whether the local embedding model is on disk at the revision the
+    server loads (no network)."""
+    return _model_in_hf_cache(model_name, _model_revision(model_name))
 
 
 def download_local_model(model_name: str = DEFAULT_MODEL) -> None:
@@ -691,15 +728,17 @@ def download_local_model(model_name: str = DEFAULT_MODEL) -> None:
     `kazma setup install` runs this for the meaning-search part, so the
     model arrives during the install. Left to the server's first start, the
     clean Windows VM (2026-11-07) waited 5.5 minutes for 4.3 GB before Kazma
-    answered at all, with nothing on screen saying why.
+    answered at all, with nothing on screen saying why. It downloads the
+    pinned commit the server loads (``_model_revision``).
     """
     from sentence_transformers import SentenceTransformer
 
-    SentenceTransformer(model_name)
+    SentenceTransformer(model_name, revision=_model_revision(model_name))
 
 
-def _model_in_hf_cache(model_name: str) -> bool:
-    """Whether *model_name* resolves from the local HF cache (no network).
+def _model_in_hf_cache(model_name: str, revision: str | None) -> bool:
+    """Whether *model_name* at *revision* resolves from the local HF cache
+    (no network).
 
     ``snapshot_download(local_files_only=True)`` raises when the model is
     not cached and never touches the network — the guard that lets
@@ -708,7 +747,7 @@ def _model_in_hf_cache(model_name: str) -> bool:
     try:
         from huggingface_hub import snapshot_download
 
-        snapshot_download(repo_id=model_name, local_files_only=True)
+        snapshot_download(repo_id=model_name, revision=revision, local_files_only=True)
         return True
     except Exception:
         return False
@@ -809,9 +848,11 @@ def _create_embedder() -> Embedder | None:
     if fell_back_from_remote or provider in remote_providers:
         local_model = DEFAULT_MODEL
         local_dim = DEFAULT_DIM
+        local_revision = None  # a configured revision was the remote model's
     else:
         local_model = cfg.get("model") or DEFAULT_MODEL
         local_dim = int(cfg.get("dim") or DEFAULT_DIM)
+        local_revision = cfg.get("revision") or None
 
     # Fallback embedders (unknown provider / broken remote config) may NOT
     # surprise-download the ~2GB model — only a deliberate local config
@@ -824,6 +865,7 @@ def _create_embedder() -> Embedder | None:
 
     _embedder = LocalSentenceTransformerEmbedder(
         model_name=local_model, dim=local_dim, allow_download=allow_download,
+        revision=local_revision,
     )
     logger.info("[Embedder] Using local: %s (dim=%d)", local_model, local_dim)
     return _embedder

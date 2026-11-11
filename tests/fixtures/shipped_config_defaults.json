@@ -5,7 +5,7 @@
  "agent.language": "en",
  "agent.name": "kazma",
  "agent.rtl": false,
- "agent.version": "0.21.1",
+ "agent.version": "0.21.2",
  "backups.extra_paths": "research",
  "backups.offsite.enabled": true,
  "backups.offsite.keep": 7,
@@ -44,7 +44,7 @@
    "command": [
     "npx",
     "-y",
-    "@modelcontextprotocol/server-filesystem",
+    "@modelcontextprotocol/server-filesystem@2026.8.31",
     "${KAZMA_ACTIVE_WORKSPACE}"
    ],
    "enabled": true,

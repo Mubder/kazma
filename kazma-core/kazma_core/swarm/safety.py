@@ -218,6 +218,7 @@ class SafetyMiddleware:
         worker_name: str = "",
         *,
         force_danger: bool = False,
+        card_notes: list[dict[str, Any]] | None = None,
     ) -> bool:
         """Check if a tool call should be allowed.
 
@@ -232,7 +233,10 @@ class SafetyMiddleware:
                 if it is not in the static ``_EXTENDED_DANGER`` list.
                 Required for MCP tools whose names (e.g. ``write_file``,
                 ``run_command``) differ from local builtins (``file_write``,
-                ``shell_exec``) but were classified as danger/unknown.
+                ``shell_exec``) but were classified as danger/unknown, and
+                for a fetch after outside text (``safety.outside_text_fetch``).
+            card_notes: Notes the card states (``safety.card_notes``): why a
+                fetch asks, what a repository makes git run.
 
         Fail-closed: when no real bus adapter is wired (``NullBusAdapter``),
         danger tools are rejected unless ``allow_headless_danger`` is set
@@ -324,7 +328,8 @@ class SafetyMiddleware:
             await _notify_cron_denial(tool_name, "blocked (no approval bus)")
             return False
 
-        approved = await self._ask_the_bus(bus, tool_name, tool_args, tid, task_id, worker_name, timeout)
+        approved = await self._ask_the_bus(bus, tool_name, tool_args, tid, task_id, worker_name, timeout,
+                                           card_notes=card_notes)
 
         if approved:
             self._approved_count += 1
@@ -450,6 +455,8 @@ class SafetyMiddleware:
         task_id: str,
         worker_name: str,
         timeout: float,
+        *,
+        card_notes: list[dict[str, Any]] | None = None,
     ) -> bool:
         """Ask the operator on every configured platform; True only for an
         Approve given to THIS request (Swarm audit stage 1).
@@ -496,13 +503,17 @@ class SafetyMiddleware:
                 gate_id = make_gate_id(
                     thread, tool_name, tool_args, seq=int(time.time() * 1000) % 1_000_000,
                 ) + "-" + uuid.uuid4().hex[:8]
+                from kazma_core.security.approval_args import redacted_arguments_json
+
                 await _aio.to_thread(
                     register_gate,
-                    # The whole call is kept on the decision record; the card
-                    # shows a bounded view of it and its hash (SW-S03).
+                    # The decision record keeps the call as the card shows it
+                    # and the hash of the real call (SW-S03). The message is
+                    # built from the masked view: a text redactor cannot know
+                    # a tool's own secret arguments (vault_store's value).
                     GateRow(gate_id=gate_id, thread_id=thread, tool=tool_name,
                             mechanism="swarm_bus", args_json=tool_args or "",
-                            message=(tool_args or "")[:500]),
+                            message=(redacted_arguments_json(tool_name, tool_args or "") or "")[:500]),
                     ttl_seconds=timeout,
                 )
         except Exception:
@@ -515,11 +526,21 @@ class SafetyMiddleware:
             deadline=time.time() + timeout, platforms=platforms,
         )
         row: dict[str, Any] = {"status": "cancelled"}
+        # The card's notes, in the task's language (safety.card_notes).
+        from kazma_core.safety.card_notes import card_language, note_lines
+        from kazma_core.safety.outside_text_fetch import bound_tracker
+
+        _tracker = bound_tracker()
+        _lines = note_lines(card_notes or [], card_language(_tracker.task_text if _tracker else ""))
+        # Bounded: the card stays inside Discord's 2,000 characters.
+        _noted = "".join(f"{line}\n" for line in _lines)
+        if len(_noted) > 500:
+            _noted = _noted[:499] + "…\n"
         try:
             await bus.request_approval(
                 worker_name=worker_name,
                 task_description=f"Tool: {tool_name}",
-                proposed_output=f"{card.text}\nrequest: {approval_id}",
+                proposed_output=f"{card.text}\n{_noted}request: {approval_id}",
                 task_id=approval_id,
                 timeout=timeout,
                 # The whole call and the same decision on the Web dashboard.

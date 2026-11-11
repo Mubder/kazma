@@ -1897,7 +1897,8 @@ class KazmaAppBuilder:
 
             # ── A service of Kazma's reachable beyond this machine ───
             # A database published on every interface, or signed in to as
-            # a superuser (FA-218). Said once at boot, in the background.
+            # a superuser (FA-218), and a SearXNG on the placeholder
+            # secret key (2026-11-11). Said once at boot, in the background.
             from kazma_core.security.service_exposure import report_exposure
 
             spawn_background(_aio.to_thread(report_exposure), name="service-exposure")

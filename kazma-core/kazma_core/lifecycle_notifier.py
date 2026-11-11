@@ -448,7 +448,11 @@ async def _deliver(text: str, level: str) -> list[str]:
         from kazma_core.swarm.bus import BusMessage, get_message_bus
 
         channels = await asyncio.to_thread(ops_alerts._ops_channels)
-        targets = ops_alerts.bus_send_targets(get_message_bus().adapter, channels)
+        # The alerts bot, when one is chosen, takes the Telegram route
+        # (Settings -> Alerts): the same rule as every ops alert.
+        bot: dict[str, list[str]] = {}
+        sent_bot = await ops_alerts.telegram_route(text, channels, bot)
+        targets = ops_alerts.bus_send_targets(get_message_bus().adapter, channels, skip_telegram=sent_bot)
         msg = BusMessage(
             worker_name="Kazma",
             worker_role="system",
@@ -459,9 +463,9 @@ async def _deliver(text: str, level: str) -> list[str]:
         sends: list[Any] = [a.send(msg) for a in targets]
         if "telegram-group" in channels:
             names.append("telegram-group")
-            sends.append(asyncio.to_thread(ops_alerts._telegram_direct, text, group_route=True))
+            sends.append(ops_alerts.group_route(text))
         if not sends:
-            return []
+            return list(bot.get("sent", []))
         # Bounded on the cancel too (audit 2026-10-26 AUD-071, §26E):
         # asyncio.wait_for waits without a bound for sends whose cancel an
         # httpx read absorbed, and this runs in boot and shutdown.
@@ -475,7 +479,7 @@ async def _deliver(text: str, level: str) -> list[str]:
     except Exception as exc:  # noqa: BLE001 — never break boot/shutdown
         logger.warning("[LifecycleNotifier] could not send %r: %s", _title(text), exc)
         return []
-    delivered = []
+    delivered = list(bot.get("sent", []))
     for name, result in zip(names, results, strict=True):
         if isinstance(result, BaseException):
             logger.warning("[LifecycleNotifier] %s did not take the message: %s", name, result)

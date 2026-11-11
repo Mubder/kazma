@@ -4,7 +4,9 @@
 {% block page_title %}{{ t('workspace.page_title') }}{% endblock %}
 
 {% block content %}
-<div class="workspace-container" x-data="workspaceApp()" style="max-width:1400px;margin:0 auto;">
+<div class="workspace-container" x-data="workspaceApp()" style="max-width:1400px;margin:0 auto;"
+     data-github-oauth="{{ request.query_params.get('github_oauth', '') | e }}"
+     data-github-oauth-reason="{{ request.query_params.get('github_oauth_reason', '') | e }}">
 
   <!-- ── Page styles ──
        Layout only: every colour is a token (kazma.css), and the surfaces are
@@ -930,8 +932,6 @@ function workspaceApp() {
 
     // What init() starts and destroy() ends (audit 2026-10-26 AUD-030).
     _timers: [],
-    _ghPoll: null,
-    _offMessage: null,
     _destroyed: false,
 
     async init() {
@@ -941,6 +941,7 @@ function workspaceApp() {
       // finish. Without this the card flashes "Connect to GitHub" on a
       // hard refresh while refreshAll() blocks on GitHub API calls.
       this.loadOAuthStatus();
+      this.sayGitHubSignIn();
       await this.loadWorkspaces();
       await this.refreshAll();
       await this.loadBookmarks();
@@ -954,23 +955,9 @@ function workspaceApp() {
       // tabs too -- a `git status` per visit every 10 s, and uncached
       // GitHub calls every minute (audit 2026-10-26 AUD-030).
       this._timers = [];
-      // Listen for the OAuth callback tab signaling completion.
-      // AUD-106: only Kazma's own callback tab (same origin) is heard; any
-      // window (another site that framed or opened this page) could post
-      // 'github-oauth-done' and drive the page's GitHub refresh and toast.
-      const onMessage = (e) => {
-        if (e.origin !== window.location.origin) return;
-        if (e.data && e.data.type === 'github-oauth-done') {
-          this.loadOAuthStatus().then(() => {
-            if (this.ghOAuthConnected) {
-              KazmaStream.toast(e.data.success ? t('workspace.toast_gh_connected') : t('workspace.toast_gh_conn_failed'), e.data.success ? 'success' : 'error', 2500);
-              if (e.data.success) this.loadGitHubStatus();
-            }
-          });
-        }
-      };
-      window.addEventListener('message', onMessage);
-      this._offMessage = () => window.removeEventListener('message', onMessage);
+      // The GitHub sign-in runs in this tab and comes back here (2026-11-11):
+      // there is no callback tab to listen to (sayGitHubSignIn reads how it
+      // ended). The page sends Cross-Origin-Opener-Policy: same-origin.
 
       // Poll Git & GitHub status every 10 seconds to keep UI live and fresh.
       // GitHub tab lists refresh on their own lighter cadence below. A
@@ -999,8 +986,32 @@ function workspaceApp() {
       this._destroyed = true;
       (this._timers || []).forEach((id) => clearInterval(id));
       this._timers = [];
-      if (this._ghPoll) { clearInterval(this._ghPoll); this._ghPoll = null; }
-      if (this._offMessage) { this._offMessage(); this._offMessage = null; }
+    },
+
+    /* How the GitHub sign-in this page started ended: the callback sent the
+       browser back with github_oauth=ok|error and a reason code. Read from
+       the page (the template's data-*, from the request), never from
+       location: soft navigation runs this before it changes the address. */
+    sayGitHubSignIn() {
+      const root = this.$root || this.$el;
+      const data = (root && root.dataset) || {};
+      const outcome = data.githubOauth || '';
+      if (!outcome) return;
+      if (outcome === 'ok') {
+        KazmaStream.toast(t('workspace.toast_gh_connected'), 'success', 2500);
+        this.loadOAuthStatus().then(() => this.loadGitHubStatus());
+      } else {
+        const why = window.kazmaSignInFailed(data.githubOauthReason, '');
+        KazmaStream.toast(why ? t('workspace.toast_gh_conn_failed') + ' ' + why : t('workspace.toast_gh_conn_failed'), 'error', 6000);
+      }
+      try {
+        const url = new URL(window.location.href);
+        if (url.pathname === '/workspace' && url.searchParams.has('github_oauth')) {
+          url.searchParams.delete('github_oauth');
+          url.searchParams.delete('github_oauth_reason');
+          history.replaceState(history.state, '', url.pathname + url.search + url.hash);
+        }
+      } catch (e) { /* the toast is what matters */ }
     },
 
     async loadExtraRoots() {
@@ -1380,32 +1391,30 @@ function workspaceApp() {
             })
           : confirm(t('workspace.oauth_missing_native'));
         if (useSetup) {
-          window.open('/api/github/oauth/start', '_blank');
+          window.location.assign('/api/github/oauth/setup');
         } else if (this.showPatModal !== undefined) {
           this.showPatModal = true;
         }
         return;
       }
-      // Open the GitHub OAuth flow in a new tab.
-      window.open('/api/github/oauth/start', '_blank');
-      // Poll for connection — the callback tab may not be able to
-      // postMessage back (popup blockers / opener restrictions), so we
-      // poll /oauth/status until connected or ~2 min elapse.
-      if (this._ghPoll) clearInterval(this._ghPoll);
-      let attempts = 0;
-      this._ghPoll = setInterval(async () => {
-        attempts++;
-        await this.loadOAuthStatus();
-        if (this.ghOAuthConnected) {
-          clearInterval(this._ghPoll);
-          this._ghPoll = null;
-          KazmaStream.toast(t('workspace.toast_gh_connected'), 'success', 2500);
-          await this.loadGitHubStatus();
-        } else if (attempts > 24) { // ~2 min at 5s
-          clearInterval(this._ghPoll);
-          this._ghPoll = null;
+      // The sign-in runs in THIS tab (2026-11-11): the start is a POST that
+      // answers GitHub's URL and binds the sign-in to this browser, and the
+      // callback sends the browser back here (sayGitHubSignIn). It opened a
+      // popup that answered its opener with postMessage, which the page's
+      // Cross-Origin-Opener-Policy now cuts.
+      try {
+        const data = await window.kazmaStartSignIn('/api/github/oauth/start', {
+          return_to: window.location.pathname,
+        });
+        if (data.ok) return;  // on the way to GitHub
+        if (data.code === 'not_configured') {
+          window.location.assign('/api/github/oauth/setup');
+          return;
         }
-      }, 5000);
+        KazmaStream.toast(window.kazmaSignInProblem(data, t('workspace.toast_gh_conn_failed')), 'error', 6000);
+      } catch (e) {
+        KazmaStream.toast(t('workspace.toast_conn_error', {msg: e.message}), 'error', 4000);
+      }
     },
 
     async disconnectGitHub() {

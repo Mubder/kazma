@@ -211,8 +211,8 @@ mcp:
       command:
         - npx
         - '-y'
-        - '@modelcontextprotocol/server-filesystem'
-        - kazma-data/workspace
+        - '@modelcontextprotocol/server-filesystem@2026.8.31'  # an exact version: npx runs whatever npm serves otherwise
+        - '${KAZMA_ACTIVE_WORKSPACE}'
     - name: secured-api
       transport: sse
       url: https://mcp.example.com/sse
@@ -228,6 +228,8 @@ mcp:
     root: .
     max_file_size: 1048576
 ```
+
+Name an exact version for an `npx`/`uvx` server (`package@1.2.3`): without one, every start runs whatever the registry serves that day, with your rights. The filesystem server Kazma ships is pinned (`@modelcontextprotocol/server-filesystem@2026.8.31`, the version the preset catalog records), and an install that booted before the pin runs it pinned too: a stored copy that names the package with no version is read with today's version, and a version you wrote yourself is left as you wrote it.
 
 ### 5.4 Adding MCP servers via the Web UI
 

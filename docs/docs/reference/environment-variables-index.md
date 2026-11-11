@@ -11,7 +11,7 @@ description: Every KAZMA_* variable the code reads, where, and its default. Gene
 > `python scripts/generate_env_reference.py` after adding or removing a variable;
 > `tests/test_env_reference.py` fails while this page is stale.
 
-**290** variables are read by the product code; **290** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
+**292** variables are read by the product code; **292** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
 the undocumented count is on a ratchet that may only go down.
 
 | Variable | Default in code | Read in | Described |
@@ -90,6 +90,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_EMBED_FLEET` | `""` | `kazma_core.memory.embedder` | yes |
 | `KAZMA_EMBED_MODEL` | `""` | `kazma_core.memory.embedder`, `kazma_core.memory.health` | yes |
 | `KAZMA_EMBED_PROVIDER` | `""` | `kazma_core.memory.embedder`, `kazma_core.memory.health` | yes |
+| `KAZMA_EMBED_REVISION` | `""` | `kazma_core.memory.embedder` | yes |
 | `KAZMA_ENV_FILE` | (none) | `kazma_core.env_files`, `kazma_core.store_registry` | yes |
 | `KAZMA_EXPORTS_DIR` | (none) | `kazma_core.paths` | yes |
 | `KAZMA_FETCH_BACKEND` | (none) | `kazma_core.tools.read_url` | yes |
@@ -100,7 +101,8 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_FIRECRAWL_URL` | (none) | `kazma_core.stores.knowledge_ingest`, `kazma_core.tools.read_url`, `kazma_core.web_acquire.credits` | yes |
 | `KAZMA_FTS5_PATH` | (none) | `kazma_core.memory.backfill_v2`, `kazma_core.paths` | yes |
 | `KAZMA_GATEWAY_ADMINS` | (none) | `kazma_gateway.allowlists` | yes |
-| `KAZMA_GATEWAY_STRICT_ALLOWLIST` | (none) | `kazma_gateway.chat_adapters` | yes |
+| `KAZMA_GATEWAY_OPEN_TO_EVERYONE` | (none) | `kazma_core.security.boot_guard`, `kazma_gateway.sender_rule` | yes |
+| `KAZMA_GATEWAY_STRICT_ALLOWLIST` | (none) | `kazma_core.security.boot_guard`, `kazma_gateway.sender_rule` | yes |
 | `KAZMA_GATE_REGISTRY` | (none) | `kazma_core.safety.hitl_gates` | yes |
 | `KAZMA_GITHUB_APP_ID` | (none) | `kazma_core.git_identity` | yes |
 | `KAZMA_GITHUB_APP_INSTALLATION_ID` | (none) | `kazma_core.git_identity` | yes |
@@ -220,7 +222,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_PROJECT_ROOT` | (none) | `kazma_core.mcp.server`, `kazma_core.paths` | yes |
 | `KAZMA_PROMPT_CACHE` | (none) | `kazma_core.prompt_cache` | yes |
 | `KAZMA_PROVIDER` | `""` | `kazma_core.model_registry`, `kazma_core.web_acquire.research_pipeline_job`, `kazma_ui.app` | yes |
-| `KAZMA_PUBLIC_URL` | `""` | `kazma_core.ide.env_context`, `kazma_core.migration.exporter`, `kazma_core.security.hardening` +6 | yes |
+| `KAZMA_PUBLIC_URL` | `""` | `kazma_core.ide.env_context`, `kazma_core.migration.exporter`, `kazma_core.safety.outside_text_fetch` +7 | yes |
 | `KAZMA_RATE_LIMIT_ENABLED` | `""` | `kazma_ui.rate_limit` | yes |
 | `KAZMA_READ_ONLY_START` | (none) | `kazma_ui.read_only_mode` | yes |
 | `KAZMA_READ_URL_MAX_CHARS` | (none) | `kazma_core.tools.read_url` | yes |

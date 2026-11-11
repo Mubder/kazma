@@ -108,10 +108,25 @@ The Test writes nothing, except that on Discord and Slack it opens the direct-me
 A chat app's settings take effect when they are saved, wherever they are saved: the Platform Adapters card, a settings restore, the terminal app, or the agent. Within a second Kazma:
 
 - rebuilds that platform's adapter when its token, app-level token (Slack), webhook secret (Telegram) or on/off switch changed, and leaves the other platforms connected;
-- applies a changed allowlist to the running adapter in place;
+- applies a changed allowlist, or a changed owner's chat (below), to the running adapter in place;
 - rebuilds a platform's swarm sender when its bot token, switch or destination channel changed. An unchanged sender is kept, with the approvals it is waiting for.
 
 A platform switched off in Settings stays off at boot and on every rebuild. **Refresh Gateway** (and `kazma gateway refresh`) rebuilds every adapter through the same code as boot, for when you want everything to reconnect. Until 2026-10-01 a saved token reached no running adapter until a Refresh. That Refresh used its own copy of the boot code, which started a platform switched off, dropped Telegram's webhook secret, and left adapters with no allowlist taking no messages. The code is `kazma_gateway/chat_adapters.py`, and the settings store tells it about every write.
+
+### 2.6 Who a chat app answers {#who-it-answers}
+
+Each platform's **Allowed User IDs** (Settings → Adapters & Routes) decides who may talk to Kazma through its bot. With the list set, only the users on it. With the list empty, the bot is **private** (since 2026-11-11): it answers only its owner's own account that Kazma already knows, and refuses everyone else. Kazma knows the owner's account from:
+
+- on Telegram, a private chat Kazma already uses to reach you: the guard's alert chat (`guard.telegram.chat_id`, Settings → Alerts) or the delivery chat (`connectors.telegram.swarm_chat_id`). A group or channel id is never taken as a person;
+- on any platform, a `platform:id` entry of `KAZMA_GATEWAY_ADMINS` (for example `discord:123456789012345678` or `slack:U0123ABCD`).
+
+Discord and Slack keep no owner's user id anywhere else, so with an empty list and no admin entry they answer no one until you add yourself. The owner's account Kazma knows is also an admin there (approvals, `/config`), as a listed user is.
+
+A refused sender writing to the bot in a direct message is told, at most once a day, that the bot is private, what their user id is, and where the owner adds it, in the language they wrote in. In a group, a server channel or a Slack channel the refusal is silent. A native `/kazma` command answers the same words privately (only the person who ran it sees them). Every refusal is recorded and logged with its reason, as in [2.4](#connector-test).
+
+At each boot an adapter with an empty list logs one WARNING saying whom it answers and how to fix it, and its **Test** shows the empty list as a problem with the fix. To find your id, message the bot: the private notice names it.
+
+`KAZMA_GATEWAY_OPEN_TO_EVERYONE=1` brings back the posture before 2026-11-11: a bot with an empty list answers anyone who can reach it. It is warned at every boot while it is on. `KAZMA_GATEWAY_STRICT_ALLOWLIST`, the old way to ask for what is now the default, changes nothing on its own and wins over the open switch when both are set. The rule is `kazma_gateway/sender_rule.py`; every adapter asks it.
 
 ---
 

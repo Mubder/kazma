@@ -472,6 +472,21 @@ def test_every_e2e_file_runs_in_a_ci_job():
     ) == ["test_only_explained.py"]
 
 
+def _literal_line_breaks(text: str) -> list[int]:
+    """Lines holding a backslash-n followed by a space: a line break written as
+    text. The gate above reads names, so it passed on 2026-11-11 while the
+    shell handed pytest a file called ``n`` and the e2e job ran nothing."""
+    return [n for n, line in enumerate(text.splitlines(), 1) if re.search(r"\\n\s", line)]
+
+
+def test_no_workflow_line_holds_a_line_break_written_as_text():
+    for path in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")):
+        assert _literal_line_breaks(path.read_text(encoding="utf-8")) == [], path.name
+    # Negative control: the line of 2026-11-11.
+    assert _literal_line_breaks(
+        "            tests/e2e/test_a.py \\n            tests/e2e/test_b.py\n") == [1]
+
+
 def test_postgres_and_e2e_have_ci_coverage():
     ci = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "KAZMA_DB_BACKEND: postgres" in ci, (

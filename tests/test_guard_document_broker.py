@@ -576,6 +576,22 @@ def test_a_broker_left_by_a_killed_guard_is_reaped(tmp_path):
 # ── a port the broker cannot listen on (live 2026-10-31) ──────────────────
 
 
+def test_a_port_left_in_time_wait_is_free_to_the_broker():
+    """The guard asks the way the broker binds: a restarted broker takes back
+    a port its predecessor's connections left in TIME_WAIT (on Linux a plain
+    bind is refused there, tests/test_document_broker_port.py), and a port
+    another socket listens on is still taken."""
+    import socket
+
+    from tests.test_document_broker_port import broker_port_in_time_wait
+
+    assert guard._port_is_free(broker_port_in_time_wait())
+    with socket.socket() as held:
+        held.bind(("127.0.0.1", 0))
+        held.listen()
+        assert not guard._port_is_free(held.getsockname()[1])
+
+
 def _reserve(monkeypatch, ports: set[int]) -> None:
     """Windows' reserved block: these ports cannot be bound."""
     monkeypatch.setattr(guard, "_port_is_free", lambda port: port not in ports)

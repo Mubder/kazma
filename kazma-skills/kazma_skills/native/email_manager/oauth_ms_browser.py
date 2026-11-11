@@ -10,11 +10,10 @@ import httpx
 
 from kazma_skills.native.email_manager.oauth_common import (
     authorize_redirect,
-    new_state,
-    pop_state,
     public_base_url,
 )
 from kazma_core.http_tls import shared_ssl_context
+from kazma_core.security.oauth_attempts import begin
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +77,9 @@ def start_ms_browser_oauth(
         }
     tenant = _tenant()
     redirect = ms_redirect_uri(request_base)
-    state = new_state("microsoft", redirect_uri=redirect, tenant=tenant, purpose=purpose, account=alias)
+    # One attempt per sign-in, bound to this browser and taken once at the
+    # callback (oauth_attempts). A settings write: this runs in a thread.
+    state = begin("microsoft", redirect_uri=redirect, tenant=tenant, purpose=purpose, account=alias)
     # confidential clients need secret; public clients can omit
     params = {
         "client_id": cid,
@@ -100,12 +101,16 @@ def start_ms_browser_oauth(
         "authorize_url": url,
         "redirect_uri": redirect,
         "message": "Redirect user to authorize_url",
+        # For the start route's binding cookie; never sent back in its JSON.
+        "state": state,
     }
 
 
-async def finish_ms_browser_oauth(code: str, state: str) -> dict[str, Any]:
-    meta = pop_state(state)
-    if not meta or meta.get("provider") != "microsoft":
+async def finish_ms_browser_oauth(code: str, attempt: dict[str, Any]) -> dict[str, Any]:
+    """Finish the Microsoft sign-in of *attempt* (the callback took it with
+    the browser's binding cookie, ``oauth_attempts.take``)."""
+    meta = attempt if isinstance(attempt, dict) else {}
+    if meta.get("provider") != "microsoft":
         return {"ok": False, "error": "Invalid or expired OAuth state. Try Connect Microsoft again."}
     cid = _client_id()
     secret = _client_secret()

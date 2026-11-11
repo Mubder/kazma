@@ -65,9 +65,32 @@ the inside pages still open, when, delivered or not). No chat, no content,
 no path, no name, no error text: the guard builds the body through an allowlist
 (`heartbeat_body` in `scripts/service/kazma_guard.py`) and the Worker cuts
 what it receives to the same list again (`sanitize` in `src/diagnose.js`).
-It is signed `v1=<HMAC-SHA256>` of `"<timestamp>.<body>"` with the install's
-pairing key; a heartbeat older than five minutes, or not newer than the last
-one taken, is refused.
+It is signed with the install's pairing key; a heartbeat older than five
+minutes, or not newer than the last one taken, is refused.
+
+## Signatures
+
+Every request the guard and Kazma sign (the heartbeat, the summary, and
+Settings → Alerts' settings, test page and leave) carries
+`X-Kazma-Signature: v2=<hex>`, HMAC-SHA256 under the pairing key of
+
+```text
+v2\n<timestamp>\n<METHOD>\n<path>\n<body>
+```
+
+with `\n` a newline, `<path>` the request line's path (`/v1/heartbeat`) and
+`<body>` the raw body (empty for a GET). The route is in what is signed, so a
+signature made for one route is refused on another. The older `v1=<hex>`,
+over `"<timestamp>." + body`, bound no route. `src/verify.js` still accepts
+v1 while `ACCEPT_V1` is `true` and logs each one it accepts ("accepted a v1
+signature on POST /v1/heartbeat from install ..."; read with
+`npx wrangler tail`). Once no install sends v1, set `ACCEPT_V1 = false` and
+deploy: a v1 request is then refused (`v1_retired`). Do it soon: while v1 is
+accepted, the routes are only as bound as v1 makes them.
+
+**Deploy the Worker before the Kazma build that sends v2.** A guard or Kazma
+that signs v2 is refused by a Worker that knows only v1: its heartbeats stop
+counting, and Kazma Watch pages the guard as gone.
 
 ## Setting it up (the owner, once)
 
@@ -221,8 +244,9 @@ npm test
 The Worker's handlers run in Node against a D1 stand-in over Node's own
 SQLite (`node:sqlite`, Node 22.5 or newer), so `schema.sql` and every
 statement run as written; the network is a fake. Kazma's test suite runs
-them too (`tests/test_outside_watch.py`), and the guard's signer is held to
-the same signature vector (`tests/fixtures/observer/heartbeat_vector.json`).
+them too (`tests/test_outside_watch.py`), and the guard's and Kazma's
+signers are held to the same signature vector
+(`tests/fixtures/observer/heartbeat_vector.json`, its `v2` routes).
 
 ## Storage and privacy
 

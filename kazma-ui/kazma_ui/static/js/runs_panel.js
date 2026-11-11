@@ -164,10 +164,11 @@
     }
 
     var incidents = document.getElementById('runs-incidents');
+    var list = document.getElementById('runs-list');
+    if (!incidents || !list) return;  // not on this page (any more)
     incidents.replaceChildren.apply(incidents, live.map(incidentCard));
 
     var shown = active.concat(attention.filter(function (r) { return active.indexOf(r) < 0; }));
-    var list = document.getElementById('runs-list');
     list.replaceChildren.apply(list, shown.map(runRow));
 
     var errors = Object.keys(data.errors || {});
@@ -205,6 +206,12 @@
       return;
     }
     var data = await window.kazmaGetJson('/api/runs');
+    // The page may have gone while the answer was on its way (a sidebar link
+    // pressed meanwhile): its elements are no longer there to fill. Checked
+    // only before the request, render() threw on the next page
+    // ("Cannot read properties of null (reading 'replaceChildren')", CI
+    // 2026-11-11).
+    if (!document.getElementById('runs-panel')) return;
     show('runs-loading', false);
     if (!data || !data.ok) {
       var errorBox = document.getElementById('runs-error');
@@ -219,7 +226,7 @@
     var box = document.getElementById('runs-runbook-list');
     if (!box) return;
     var data = await window.kazmaGetJson('/api/runs/runbooks');
-    if (!data || !data.ok) return;
+    if (!data || !data.ok || !box.isConnected) return;
     box.replaceChildren.apply(box, data.runbooks.map(function (book) {
       var label = el('label', 'runs-runbook');
       var input = el('input');

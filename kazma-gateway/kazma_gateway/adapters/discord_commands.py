@@ -79,21 +79,22 @@ async def handle(adapter: Any, data: dict[str, Any]) -> None:
     if adapter._native_replies.get(iid):
         adapter._receive.drop_event("duplicate", raw)
         return
-    reason = None
-    if not uid or not adapter.actor_allowed(uid):
-        reason = "user_not_allowed" if adapter._allowed_users or adapter._allow_all else "no_allowlist"
-    elif guild and adapter._allowed_guilds and guild not in adapter._allowed_guilds:
+    reason = adapter.sender_refusal(uid) or None
+    if reason is None and guild and adapter._allowed_guilds and guild not in adapter._allowed_guilds:
         reason = "server_not_allowed"
-    elif not cid:
+    elif reason is None and not cid:
         reason = "no_channel"
     if reason:
         adapter._receive.drop_event(reason, raw)
-        await ack(
-            {
-                "type": 4,
-                "data": {"content": "Kazma refused this command: check the configured allowlists.", "flags": 64},
-            }
+        # Only the person who ran it sees this answer (flags 64): a refused
+        # sender is told the bot is private and their id (sender_rule).
+        from kazma_gateway.sender_rule import REFUSALS, private_notice
+
+        said = (
+            private_notice("discord", uid, None) if reason in REFUSALS and uid
+            else "Kazma refused this command: check the configured allowlists."
         )
+        await ack({"type": 4, "data": {"content": said, "flags": 64}})
         return
     command = data.get("data") or {}
     options = command.get("options") or []

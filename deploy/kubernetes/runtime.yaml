@@ -1,5 +1,15 @@
 # Preparation template: substitute the image digest and fenced CSI class,
 # create kazma-runtime-secrets, then perform the deployment guide's drills.
+#
+# The root filesystem is read-only (2026-11-11). Every place Kazma writes is a
+# mount: /state (the volume: data, home, skills, vectors, the env file a
+# generated key is kept in, the Hugging Face model cache), and emptyDirs for
+# the temp folder (/tmp: scratch, LibreOffice profiles, a shell tool's home),
+# the user's home (/home/kazma: caches under ~/.cache and ~/.config) and
+# ClamAV's signatures, log and run folders (freshclam refreshes them; the
+# signatures the image was built with are copied in first).
+# tests/test_kubernetes_runtime_contract.py resolves Kazma's own write
+# locations under this environment and fails on one outside every mount.
 apiVersion: v1
 kind: Service
 metadata:
@@ -52,6 +62,21 @@ spec:
         fsGroupChangePolicy: OnRootMismatch
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        # The ClamAV signatures the image was built with, into the writable
+        # folder freshclam refreshes (an emptyDir hides the image's copy).
+        - name: clamav-signatures
+          image: ghcr.io/mubder/kazma:REPLACE_WITH_RELEASE
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "cp -a /var/lib/clamav/. /seed/"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: clamav-db
+              mountPath: /seed
       containers:
         - name: kazma
           image: ghcr.io/mubder/kazma:REPLACE_WITH_RELEASE
@@ -92,6 +117,20 @@ spec:
               value: /state/skills
             - name: KAZMA_VECTOR_PATH
               value: /state/vector_memory
+            # A key the server generates (none, while the secrets below are
+            # set) is kept on the volume, not in the read-only /app.
+            - name: KAZMA_ENV_FILE
+              value: /state/home/.env
+            # The meaning-search model (about 4 GB) is kept on the volume:
+            # in the home's emptyDir it would download again at every start.
+            - name: HF_HOME
+              value: /state/cache/huggingface
+            - name: HOME
+              value: /home/kazma
+            - name: TMPDIR
+              value: /tmp
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
             - name: KAZMA_DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -114,6 +153,7 @@ spec:
                   key: trusted-proxies
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: [ALL]
           resources:
@@ -145,6 +185,32 @@ spec:
           volumeMounts:
             - name: state
               mountPath: /state
+            - name: tmp
+              mountPath: /tmp
+            - name: home
+              mountPath: /home/kazma
+            - name: clamav-db
+              mountPath: /var/lib/clamav
+            - name: clamav-log
+              mountPath: /var/log/clamav
+            - name: clamav-run
+              mountPath: /run/clamav
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 8Gi
+        - name: home
+          emptyDir:
+            sizeLimit: 2Gi
+        - name: clamav-db
+          emptyDir:
+            sizeLimit: 2Gi
+        - name: clamav-log
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: clamav-run
+          emptyDir:
+            sizeLimit: 16Mi
   volumeClaimTemplates:
     - metadata:
         name: state

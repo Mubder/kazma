@@ -385,7 +385,7 @@ class TestBusAdapterNames:
         fan = bus_mod.FanOutBusAdapter(
             [_Named("telegram"), _Named("discord"), _Named("slack")]
         )
-        names = [a.name for a in bus_send_targets(fan, ["telegram"])]
+        names = [a.name for a in bus_send_targets(fan, ["telegram"], skip_telegram=False)]
         assert names == ["telegram"]
 
     def test_bus_send_targets_group_only_does_not_mean_all(self) -> None:
@@ -401,8 +401,8 @@ class TestBusAdapterNames:
         fan = bus_mod.FanOutBusAdapter(
             [_Named("telegram"), _Named("discord")]
         )
-        assert bus_send_targets(fan, ["telegram-group"]) == []
-        all_names = {a.name for a in bus_send_targets(fan, [])}
+        assert bus_send_targets(fan, ["telegram-group"], skip_telegram=False) == []
+        all_names = {a.name for a in bus_send_targets(fan, [], skip_telegram=False)}
         assert all_names == {"telegram", "discord"}
 
 

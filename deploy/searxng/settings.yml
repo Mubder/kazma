@@ -18,7 +18,9 @@ search:
     - json
 
 server:
-  # Override via env SEARXNG_SECRET if you expose this instance publicly
+  # SEARXNG_SECRET overrides it: `kazma setup install` keeps a generated one
+  # in .env, which docker-compose.yml passes in. This placeholder is used only
+  # when SearXNG is started without one.
   secret_key: "change-me-in-production-use-long-random"
   limiter: false
   image_proxy: false

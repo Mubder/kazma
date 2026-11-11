@@ -432,7 +432,7 @@ test("negative control: the Workspace had no destroy()", async () => {
   const old = revert(WORKSPACE, "    destroy() {\n      this._destroyed = true;", "    _unusedDestroy() {\n      this._destroyed = true;");
   const env = await workspaceVisits(old);
   assert.equal(env.count().intervals, 6, "three pollers a visit");
-  assert.equal(env.count().listeners, 2, "a message listener a visit");
+  // The GitHub sign-in's message listener is gone with its popup (2026-11-11).
 });
 
 // ── The rule itself ─────────────────────────────────────────────────────

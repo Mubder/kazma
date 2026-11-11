@@ -135,6 +135,42 @@ def test_a_mark_joins_its_letter_and_a_misread_mark_is_dropped():
     assert logical_line(line) == "ريالاً"
 
 
+#: LibreOffice 24.2 (Ubuntu 24.04, Linux CI 2026-11-10): the tanween drawn as
+#: a glyph named "#", its code point moved into the lam-alef ligature's text,
+#: and the text map's one text for that glyph read on every lam-alef.
+_TANWEEN = chr(0x064B)
+
+
+def _lam_alef(x0: float, gid: int = 53) -> list:
+    return [_char("ل", gid, x0, x0 + 5.0), _char("ا", -1, x0, x0), _char(_TANWEEN, -1, x0, x0)]
+
+
+def test_a_ligature_reads_a_mark_only_where_one_is_drawn():
+    from kazma_core.documents.parsers.pdf_rtl import page_glyph_lines
+
+    # "ريالاً": the "#" tanween is drawn on the ligature -- it keeps its mark.
+    riyal = _Page([_char("#", 52, 30.5, 30.5, 97.0), *_lam_alef(30.0),
+                   _char("ا", 41, 35.1, 38.0), _char("ي", 17, 38.0, 41.0), _char("ر", 54, 41.0, 44.0)])
+    (line,) = page_glyph_lines(riyal)
+    assert logical_line(line) == "ريالا" + _TANWEEN
+    # "الاصطناعي": the same glyph, no mark drawn on it -- no tanween read.
+    footer = _Page([_char("ي", 118, 0.0, 5.0), _char("ع", 74, 5.0, 9.0), _char("ا", 41, 9.0, 11.0),
+                    _char("ن", 43, 11.0, 13.5), _char("ط", 120, 13.5, 19.0), _char("ص", 121, 19.0, 25.9),
+                    *_lam_alef(25.9), _char("ا", 8, 31.0, 33.0)])
+    (line,) = page_glyph_lines(footer)
+    assert logical_line(line) == "الاصطناعي"
+
+
+def test_control_the_text_map_alone_reads_a_tanween_the_page_does_not_show(monkeypatch):
+    """Negative control: every ligature read as its text map names it."""
+    from kazma_core.documents.parsers import pdf_rtl
+
+    monkeypatch.setattr(pdf_rtl, "_drop_undrawn_marks", lambda glyph, drawn: None)
+    footer = _Page([_char("ص", 121, 19.0, 25.9), *_lam_alef(25.9), _char("ا", 8, 31.0, 33.0)])
+    (line,) = pdf_rtl.page_glyph_lines(footer)
+    assert logical_line(line) == "الا" + _TANWEEN + "ص"
+
+
 def test_a_decimal_with_an_arabic_separator():
     line = _visual("٣", "٫", "٧", "٥", " ", "لى", "إ")  # "لى" is one ligature glyph
     assert logical_line(line) == "إلى ٣٫٧٥"

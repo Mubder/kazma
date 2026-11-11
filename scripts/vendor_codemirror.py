@@ -42,6 +42,9 @@ import tempfile
 from pathlib import Path
 
 CM_VERSION = "5.65.16"
+#: The minifier, an exact version: ``terser@5`` ran whatever npm served that
+#: day over the bundle Kazma ships (tests/test_actions_pinned_by_sha.py).
+TERSER_VERSION = "5.51.2"
 
 REPO = Path(__file__).resolve().parent.parent
 OUT_DIR = REPO / "kazma-ui" / "kazma_ui" / "static" / "vendor" / "codemirror"
@@ -180,7 +183,7 @@ def _minify_js(text: str, workdir: Path) -> str:
         print("  npx not found — shipping unminified")
         return text
     proc = subprocess.run(
-        [npx, "--yes", "--prefer-offline", "terser@5", str(src), "-c", "-m", "-o", str(out)],
+        [npx, "--yes", "--prefer-offline", f"terser@{TERSER_VERSION}", str(src), "-c", "-m", "-o", str(out)],
         capture_output=True,
         text=True,
         check=False,

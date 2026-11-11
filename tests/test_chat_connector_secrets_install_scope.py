@@ -131,7 +131,7 @@ def _builder_reads() -> set[str]:
         for table in (chat_adapters.ADAPTER_FIELDS, chat_adapters.BUS_FIELDS, chat_adapters.ALLOWLIST_FIELDS)
         for platform, names in table.items()
         for name in names
-    }
+    } | set(chat_adapters._OWNER_KEYS)  # the owner's chat (sender_rule), watched too
     # What the builder reads is what its tables declare: a field read but not
     # declared would never wake the gateway when it changes.
     assert read == declared, sorted(read ^ declared)

@@ -8,6 +8,11 @@ read by the sender it configures:
 
 * ``notifications.ops.channels`` -- where Kazma's alerts go (``ops_alerts``);
   ``POST /api/settings/notifications/test-alert`` sends one along them.
+* ``notifications.ops.telegram_bot`` / ``_token`` / ``_chat`` -- which
+  Telegram bot sends them: Kazma's chat bot, or a separate alerts bot with
+  its own chat (``ops_alerts.alerts_bot``; the guard pages with it too). A
+  save that chooses it asks Telegram first (``check_alerts_bot``); the token
+  is never answered back.
 * ``notifications.lifecycle.events`` -- the server status messages
   (``lifecycle_notifier``).
 * ``notifications.ops.notices_to_chats`` -- whether info and success cards go
@@ -68,15 +73,36 @@ def _route_states(config_store: Any) -> dict[str, bool]:
             logger.debug("[alerts] %s not read", key, exc_info=True)
             return False
 
-    from kazma_core.observability.ops_alerts import ALERTS_GROUP_KEY
+    from kazma_core.observability.ops_alerts import ALERTS_GROUP_KEY, alerts_bot
 
     group = config_store.get("swarm.output_target") or {}
+    own_bot = alerts_bot(config_store) is not None
     return {
-        "telegram": has("connectors.telegram.token"),
-        "telegram-group": (has("connectors.telegram.token") and has(ALERTS_GROUP_KEY))
+        "telegram": own_bot or has("connectors.telegram.token"),
+        "telegram-group": ((own_bot or has("connectors.telegram.token")) and has(ALERTS_GROUP_KEY))
         or (isinstance(group, dict) and bool(group.get("enabled") and group.get("chat_id"))),
         "discord": has("connectors.discord.token"),
         "slack": has("connectors.slack.token"),
+    }
+
+
+def _bot_state(config_store: Any) -> dict[str, Any]:
+    """Which bot sends the alerts, and whether a separate one is set up.
+    Never the token: only whether one is saved."""
+    from kazma_core.observability.ops_alerts import (
+        ALERTS_BOT_CHAT_KEY,
+        ALERTS_BOT_KEY,
+        ALERTS_BOT_TOKEN_KEY,
+        alerts_bot,
+    )
+
+    choice = str(config_store.get(ALERTS_BOT_KEY) or "").strip() or "chat_bot"
+    return {
+        "choice": choice,
+        "token_saved": bool(str(config_store.get(ALERTS_BOT_TOKEN_KEY) or "").strip()),
+        "chat": str(config_store.get(ALERTS_BOT_CHAT_KEY) or ""),
+        # Chosen and complete: what the alerts and the guard use now.
+        "active": alerts_bot(config_store) is not None,
     }
 
 
@@ -94,6 +120,7 @@ def _alerts_state(config_store: Any) -> dict[str, Any]:
     from kazma_core.observability.ops_alerts import ALERTS_GROUP_KEY
 
     ready = _route_states(config_store)
+    bot = _bot_state(config_store)
     fallback = str(config_store.get("swarm.group_chat_id") or "").strip()
     raw_events = config_store.get(EVENTS_KEY)
     events = (list(parse_lifecycle_events(raw_events)[0]) if raw_events is not None
@@ -108,6 +135,7 @@ def _alerts_state(config_store: Any) -> dict[str, Any]:
             "ready": ready,
             "group_chat": str(config_store.get(ALERTS_GROUP_KEY) or ""),
         },
+        "bot": bot,
         "lifecycle": {"events": events, "names": list(EVENT_NAMES)},
         "notices_to_chats": notices_to_chats(config_store),
         "guard": {
@@ -115,6 +143,9 @@ def _alerts_state(config_store: Any) -> dict[str, Any]:
             # kazma.yaml ships 0 for "no group chat".
             "fallback_chat": "" if fallback in ("", "0") else fallback,
             "bot": ready["telegram"],
+            # The guard pages with the alerts bot, to its chat, when one is
+            # chosen (ops_alerts.pager_credentials).
+            "via_alerts_bot": bot["active"],
             **pager_status(),
         },
         "watch": {
@@ -161,9 +192,63 @@ def _save_alerts(config_store: Any, body: dict[str, Any]) -> dict[str, Any]:
             items.append((ALERTS_GROUP_KEY, value, category or "notifications"))
         else:
             items.append(("guard.telegram.chat_id", value, category or "guard"))
+    bot_items, bot_saved, checked = _bot_fields(config_store, body)
+    items += bot_items
+    saved += bot_saved
     if items:
         config_store.batch_set(items)
-    return {"ok": True, "saved": saved}
+    result: dict[str, Any] = {"ok": True, "saved": saved}
+    if checked is not None:
+        result["bot"] = checked
+    return result
+
+
+class _BotRefusedError(Exception):
+    """Telegram does not know the alerts bot's token: nothing is saved."""
+
+
+def _bot_fields(config_store: Any, body: dict[str, Any]) -> tuple[list[tuple[str, Any, str]], list[str], dict | None]:
+    """The alerts bot's fields (``bot``, ``bot_token``, ``bot_chat``):
+    ``(items to write, fields saved, what Telegram said)``. An empty token
+    keeps the saved one. Choosing the alerts bot needs a token and a chat
+    (typed or saved); a token Telegram does not know is refused
+    (:class:`_BotRefusedError`), and nothing of the save is written. A chat the bot
+    cannot see yet is saved and said (``chat_ok``: add it to the group, or
+    send it /start)."""
+    from kazma_core.observability.ops_alerts import (
+        ALERTS_BOT_CHAT_KEY,
+        ALERTS_BOT_KEY,
+        ALERTS_BOT_TOKEN_KEY,
+        check_alerts_bot,
+    )
+
+    keys = {"bot": ALERTS_BOT_KEY, "bot_token": ALERTS_BOT_TOKEN_KEY, "bot_chat": ALERTS_BOT_CHAT_KEY}
+    values: dict[str, Any] = {}
+    for field, key in keys.items():
+        if field not in body:
+            continue
+        try:
+            value, _category = validate_setting(key, body[field])
+        except SettingRejected as exc:
+            raise SettingRejected(f"{field}: {exc}") from None
+        if field == "bot_token" and not value:
+            continue  # empty keeps the saved token
+        values[field] = value
+    if not values:
+        return [], [], None
+    choice = values.get("bot") or str(config_store.get(ALERTS_BOT_KEY) or "").strip() or "chat_bot"
+    token = values.get("bot_token") or str(config_store.get(ALERTS_BOT_TOKEN_KEY) or "").strip()
+    chat = values.get("bot_chat", str(config_store.get(ALERTS_BOT_CHAT_KEY) or "").strip())
+    checked = None
+    if choice == "alerts_bot":
+        if not token or not chat:
+            raise SettingRejected("bot: a separate alerts bot needs its token and its chat.")
+        # Asked whenever it is chosen, so the answer under Save is current.
+        checked = check_alerts_bot(token, chat)
+        if checked.get("code") == "bot_refused":
+            raise _BotRefusedError()
+    items = [(keys[f], v, "notifications") for f, v in values.items()]
+    return items, list(values), checked
 
 
 def _save_watch_settings(config_store: Any, body: dict[str, Any]) -> dict[str, Any]:
@@ -192,8 +277,10 @@ def register_alert_routes(router: APIRouter, config_store: Any) -> None:
     @router.put("/api/settings/alerts", dependencies=[Depends(verify_same_origin)])
     async def api_put_alerts(request: Request) -> Any:
         """Save the fields the body names (``routes``, ``lifecycle_events``,
-        ``notices_to_chats``, ``group_chat``, ``guard_chat``); a value a field
-        cannot hold is refused with what it may hold, and nothing is written."""
+        ``notices_to_chats``, ``group_chat``, ``guard_chat``, ``bot``,
+        ``bot_token``, ``bot_chat``); a value a field cannot hold is refused
+        with what it may hold, and nothing is written. ``bot_refused``:
+        Telegram does not know the alerts bot's token."""
         try:
             body = await read_json(request)
         except InvalidJsonBody:
@@ -204,6 +291,8 @@ def register_alert_routes(router: APIRouter, config_store: Any) -> None:
             return await asyncio.to_thread(_save_alerts, config_store, body)
         except SettingRejected as exc:
             return _refused("rejected", error=str(exc))
+        except _BotRefusedError:
+            return _refused("bot_refused")
 
     @router.post("/api/settings/alerts/guard-test", dependencies=[Depends(verify_same_origin)])
     def api_guard_test() -> Any:

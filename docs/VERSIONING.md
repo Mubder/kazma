@@ -8,8 +8,8 @@ Kazma uses a **fixed public base** plus a **live git commit id**.
 
 | Piece | Example | Meaning |
 |-------|---------|---------|
-| Public base (files) | `0.21.1` | Root `pyproject.toml` / `kazma.yaml` / package versions |
-| Display version | `0.21.1+g4d37b2c` | What CLI, banner, FastAPI, and UI show |
+| Public base (files) | `0.21.2` | Root `pyproject.toml` / `kazma.yaml` / package versions |
+| Display version | `0.21.2+g4d37b2c` | What CLI, banner, FastAPI, and UI show |
 | `+g……` | PEP 440 **local** segment | Short git SHA (`g` = git) |
 
 Why not bump `0.10.0` → `0.10.1` on every merge? That turned into
@@ -20,16 +20,16 @@ build identity; the base is a human milestone.
 
 | Location | Role |
 |----------|------|
-| Root `pyproject.toml` → `project.version` | **Public base only** (`0.21.1`) |
+| Root `pyproject.toml` → `project.version` | **Public base only** (`0.21.2`) |
 | `kazma.yaml` → `agent.version` | Same public base |
 | `kazma_core.version.get_version()` | **Runtime display**: `base+gSHA` |
-| Git tag `v0.21.1` | Optional milestone marker (no `+`) |
+| Git tag `v0.21.2` | Optional milestone marker (no `+`) |
 
 ```python
 from kazma_core.version import get_version, get_base_version
 
-get_base_version()  # "0.21.1"
-get_version()       # "0.21.1+g4d37b2c"  (when git / CI SHA available)
+get_base_version()  # "0.21.2"
+get_version()       # "0.21.2+g4d37b2c"  (when git / CI SHA available)
 ```
 
 ### SHA resolution order
@@ -57,7 +57,11 @@ Only for a deliberate product milestone:
    - `kazma-gateway/pyproject.toml`
    - `kazma-tui` falls through to `kazma_core.version` (no hardcode needed)
 2. Commit: `chore(version): base 0.10.0 → 0.10.1`
-3. Optionally run **Actions → Release** to create tag `v0.10.1` + GitHub Release
+3. Run **Actions → Release** (from `main`) to create tag `v0.10.1` + GitHub
+   Release. Publish every release this way, never by uploading files by hand:
+   the workflow signs the files with Sigstore, and from 0.21.2 on
+   `kazma update` refuses a release whose wheel has no signature
+   (docs/SUPPLY_CHAIN.md).
 
 Do **not** put `+gSHA` into committed version files. Display code adds it.
 

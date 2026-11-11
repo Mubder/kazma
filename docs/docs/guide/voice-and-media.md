@@ -82,6 +82,15 @@ cancellation — **not** a server media plane and not a second brain; the
 LangGraph `/ws/voice` loop still owns the conversation. Telegram / Discord /
 Slack are still voice notes.
 
+The LiveKit browser client ships with Kazma (`livekit-client` 2.23.0, Apache-2.0,
+in `kazma-ui/kazma_ui/static/vendor/livekit/`, its version, source and SHA-256 in
+`vendored.json`; rebuilt with `scripts/vendor_livekit.py`): nothing is loaded
+from a CDN. The pages' Content-Security-Policy lets them connect to this server
+and to the LiveKit server you configured (its `wss`/`https` origin, and
+`*.livekit.cloud` for LiveKit Cloud) and nowhere else. A page uses the policy
+it was opened with, so after you save a new LiveKit address in Settings,
+reload the pages you have open.
+
 OpenAI Realtime and Gemini Live are **not used at all**: they cannot stay
 codec-only without owning the tool loop, which would bypass HITL. Voice always
 runs on the REST STT/TTS providers below, and there is no setting that changes

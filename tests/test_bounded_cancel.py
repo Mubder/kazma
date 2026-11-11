@@ -518,7 +518,7 @@ async def test_ops_alert_bus_send_ends_within_its_bound_when_a_send_absorbs_its_
 
     monkeypatch.setattr(bus_mod, "get_message_bus", lambda: _Bus())
     monkeypatch.setattr(ops_alerts, "_ops_channels", lambda: [])
-    monkeypatch.setattr(ops_alerts, "bus_send_targets", lambda adapter, channels: [adapter])
+    monkeypatch.setattr(ops_alerts, "bus_send_targets", lambda adapter, channels, **_: [adapter])
     monkeypatch.setattr(ops_alerts, "_telegram_direct", lambda *a, **k: False)
     real = bc.wait_for_bounded
 

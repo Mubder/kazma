@@ -327,6 +327,8 @@ DECLARED = {
     "safety/commitment/authorize.py:_effective_mode": "YOLO relaxes the semantic "
     "checks (remind, cancel), never an approval card",
     "agent/capacity_commands.py:_flags": "shows the chat's YOLO state",
+    "agent/graph_tool_worker.py:_split": "reads the approvals in a thread for "
+    "tool_worker_node, which says it",
 }
 
 

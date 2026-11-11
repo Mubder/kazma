@@ -397,6 +397,31 @@ the operator turned off still refuses them. Gate:
 `tests/test_folder_access_always_asks.py` (the old list and the config without
 `yolo` as negative controls).
 
+**A fetch after outside text asks, narrowly** (2026-11-11, the owner's
+decision; `safety/outside_text_fetch.py`, the one decision). `read_url`,
+`crawl_site` and `web_search` are read tier, so text a turn read could send
+data out in a URL. Once a turn has read outside text -- a tool result inside a
+data fence (`prompt_fence.holds_fence`: only the fence helpers write one), or
+a user message quoting a fenced document -- a call that fetches a URL
+(`FETCH_URL_FIELDS`, an MCP tool's `url`-like argument) asks ONLY when its
+host was named neither in the user's latest message (outside its fences; a
+swarm task's prompt) nor in a search result of the same turn
+(`SEARCH_TOOLS`, read with `serp.extract_urls_from_search`), and is not
+`KAZMA_PUBLIC_URL`'s host. An ordinary one-time card; YOLO and standing
+grants skip it (`hitl.standing_approval`, said by `note_ran_without_asking`);
+its note says why (`card_notes` code `outside_fetch`, `safety/card_notes.py`
+`NOTE_TEXT` = catalog `chat.hitl_note_outside_fetch`, EN/AR). Both chokes
+ask it: the chat graph's split (`graph_tool_worker`, state in the declared
+`SupervisorState.outside_text`, updated after each step, kept across an
+approval pause, reset by `initial_supervisor_state` and by the supervisor at
+iteration 0) and `LocalToolRegistry.execute` (a swarm dispatch binds
+`outside_text_scope` around the worker with its prompt; the registry asks
+`SafetyMiddleware.check` with `force_danger` and `card_notes`). A new
+fetching tool is declared in
+`FETCH_URL_FIELDS` or `NOT_FETCHES`. Gate: `tests/test_outside_text_fetch.py`
+(a real graph and scripted model; the graph without the check as the
+control).
+
 **A draft is published only after the user has seen it, on a card that says
 it publishes** (2026-10-16, the same incident: "check the metrics" saved a
 draft and asked to post it 2 s later, in that turn, and the card was approved
@@ -645,6 +670,18 @@ compatibility. **All public API methods and constructors are unchanged.**
   bus adapters that stays below WARNING is declared with its reason in
   `tests/test_swarm_boundaries_and_signals.py::_QUIET_HANDLERS`. Each worker
   result is counted once in the worker metrics (`_finalize_task`).
+- **A deadline on work keeps the work in its caller's task** (2026-11-11):
+  the run (`_run_admitted`), a dispatch (`TimeoutGuard.execute`), a pattern
+  step, a consult, a worker's tool call and a scheduled fire's turn are
+  bounded by `asyncio.timeout`, never `asyncio.wait_for`. On Python 3.11 (CI's
+  and the live install's) `wait_for` ran the work in a task of its own, and a
+  second cancel of the caller (a shutdown after a stop) left it running after
+  the run had ended: Linux CI's Swarm soak saw a worker with a dispatch in
+  flight after the engine stopped, and the Scheduled soak's clock could not
+  see a fire's turn. 3.12's `wait_for` already ran it in the caller's task.
+  Every other `wait_for` in `swarm/` and `cron/` is declared with why it bounds
+  no work: `tests/test_work_deadlines_stay_in_the_task.py` (a copy of 3.11's
+  `wait_for` as the negative control, on every Python).
 - **A worker's text reaches a model fenced** (SW-S10): `check_swarm_task`,
   pipeline and handoff hand-ons, the synthesis prompt, the Refiner. Same gate
   file (`_RESULT_TEXT_ONLY` declares the stored-result builders).
@@ -757,6 +794,20 @@ workspace. Three new modules; understanding their interaction is essential.
   configuration only: `_canonical_server` drops the runtime fields
   (`_RUNTIME_FIELDS`: status, connected, tool counts...), which `upsert`
   wrote into kazma.yaml for every server.
+- **Every MCP server Kazma ships runs an exact version** (2026-11, supply
+  chain). kazma.yaml ran `@modelcontextprotocol/server-filesystem` through
+  `npx -y` with no version: each start ran whatever npm served. kazma.yaml,
+  the catalog and `mcp_servers_store.SHIPPED_PACKAGE_VERSIONS` name one
+  version (held equal, the catalog held to the registry record). The first
+  boot copied kazma.yaml's list into the settings store, which wins by name,
+  so installs follow two ways: a store still holding that copy takes today's
+  at boot (`config_defaults` retires `mcp.servers`), and any stored command
+  naming a shipped package bare is pinned by `_canonical_server`
+  (`_pinned_command`), which every read and write passes; a version the
+  owner wrote stays. Gate: `tests/test_mcp_shipped_servers_pinned.py` (every
+  npx/uvx command in a shipped config pinned; the old kazma.yaml line, the
+  canonicalizer without the pins and the boot without the declaration as
+  negative controls).
 - **The running server never writes kazma.yaml's MCP servers**
   (2026-10-02): it is a tracked file, and every page's MCP change left the
   live checkout modified, so a `git pull` touching kazma.yaml refused to
@@ -1031,7 +1082,11 @@ and the "reclaimed" it reported was not the disk's (found by the TT-G3 soak,
 The long soak (TT-G3) is `scripts/time_travel_soak.py`: a restart per cycle
 on private stores, 2,000-iteration turns, every restore/fork/forget path,
 injected faults and kills, these budgets checked after every cycle
-(`tests/test_time_travel_soak_harness.py`, with planted violations).
+(`tests/test_time_travel_soak_harness.py`, with planted violations). A soak
+reads a process's peak memory through `soak_report.peak_rss_bytes` (its own
+peak: `VmHWM` on Linux), never `ru_maxrss`, which on Linux keeps the parent's
+size from before the child's exec -- a cycle child of a 1 GiB pytest process
+read 1 GiB on Linux CI (2026-11-10; gate in `tests/test_soak_report.py`).
 
 **D. Restore and fork are one service (`kazma_ui/thread_rewind.py`, TT-02,
 TT-04, TT-G1).** Every surface calls `rewind_thread` / `fork_thread`: the
@@ -2358,8 +2413,10 @@ delivered or not. While running, a row past its lease, or ours with no
 task, goes back the same way. A failed agent turn (an exception, `error`,
 `turn_failed`) is a failed fire: counted and alerted (`cron.job_failure`;
 `cron.job_failed` when its budget of 3 runs out), never delivered as the
-reminder. Shutdown stops cron first and drains fires within a bound;
-`/health/activity` counts them (`active_fires`), and
+reminder. A task's turn runs in its fire's own task, under
+`asyncio.timeout` (§9: on Python 3.11 `wait_for` gave it a task of its own,
+which a second cancel left running). Shutdown stops cron first and drains
+fires within a bound; `/health/activity` counts them (`active_fires`), and
 `kazma_guard.py --reload --when-idle` waits for them. Retention purges by
 `finished_at`, and recovery reads every running row. Gates:
 `tests/test_cron_fire_record.py`, `tests/test_cron_crash_matrix.py` (a real
@@ -2670,7 +2727,13 @@ verifies, path-rewrites the *staged* copies, backs up the live DBs to
 `.migrate-backup-<ts>/`, then swaps staging → live one file at a time via
 `rename`. Any exception before the swap leaves live data untouched; the
 staging dir is preserved on failure. `verify` runs as a dry-run inside every
-import and is available standalone.
+import and is available standalone. **A kept staging dir expires**
+(2026-11-11): the next import removes one older than `STALE_STAGING_S` (30
+days), never one a running import marks as its own (`IN_USE_MARKER`, written
+by `mark_working_folder`, taken off by `import_bundle` however the run ends;
+`_working_folder_in_use` keeps a folder whose mark it cannot read or rule
+out). It was swept with `max_age_s=inf`, kept forever. Gate:
+`tests/test_failed_import_staging_expires.py` (the old age as the control).
 
 **Scope — SQLite + Postgres (v2).** The bundle always carries the SQLite
 files (vault, memory, cron and the other stores `store_registry` carries —
@@ -3011,6 +3074,15 @@ stage (hash-locked `deploy/document-worker/ocr-models.txt`, CPU PyTorch) runs
 and `parser_container_request` points the parse at that copy -- the host's
 model directory is never sent. The capability report names both OCR engines
 (`ocr.engines`); an older image's report without them reads neural as absent.
+**The image's locks keep up with Kazma's own** (2026-11-11): the engines'
+direct pins (`deploy/document-worker/requirements.in`) are versions `uv.lock`
+holds, and no package either hash lock holds is below a floor pyproject.toml
+declares or a recorded advisory's fix; the engines hold no httpx, Docling or
+torch. The locks had kept Pillow 12.3.0, pypdf 6.19.0, brotli 1.2.0 and, in
+the build stage, filelock 3.32.3 and setuptools 83.0.0 -- 72 advisories --
+after Kazma's own environment had moved past each. Gate:
+`tests/test_document_worker_locks.py` (the old locks as the control). A new
+lock needs the image rebuilt.
 `security.execution.container_required` refuses the `process` profile
 (`worker_isolation_required`; unreadable policy refuses too) -- checked where
 Kazma starts a worker, never inside one. Gates:
@@ -3578,6 +3650,53 @@ in another face. A file that cannot take them is still written (WARNING).
 Gate: `tests/test_docx_embeds_house_fonts.py` (Word 16's own encoding as a
 fixture; the engine without the step as the negative control).
 
+**Every font slot of every Office file names the house face** (2026-11-11,
+`engines/office_fonts.py`). Live 2026-11-10 the owner: a deck "has the font
+set to the Kazma font but displays it as Arial". A DrawingML run has three
+slots and Arabic is drawn from `a:cs`; python-pptx's `font.name` writes
+`a:latin` alone, so Arabic fell to the template theme (Calibri, an empty `cs`,
+`script="Arab"` = Times New Roman / Arial), and so did everything that
+inherits in every Office format: the caret at a line's end, a new text box or
+cell, Word's heading styles (Times New Roman for Arabic, measured in Word),
+the notes page, the master's bullets (Arial). Now: each PPTX run, paragraph
+default (`a:defRPr`) and end mark (`a:endParaRPr`) names IBM Plex Sans Arabic
+in `a:latin`, `a:ea` and `a:cs` (`house_text_properties`, the one helper); the
+themes (`house_theme`: latin/ea/cs and `script="Arab"`, other scripts
+dropped), the master's `p:txStyles`, `p:defaultTextStyle`, the layouts and the
+notes master (made even with no notes) too (`PptxEngine._house_package`);
+bullets are `a:buChar` "•" in the house face, hanging on the paragraph's
+reading side, never typed into the text. A PPTX paragraph takes its own
+direction (`block_is_rtl`, the footer the deck's) and its text one run per
+script with its `lang` (`arabic.script_runs`: in PowerPoint a mixed run drew
+its spaces on the wrong side of the Arabic words as `en-US`, or moved the
+full stop as `ar-SA`). The deck embeds the face (`engines/pptx_fonts.py`:
+`p:embeddedFontLst`, `ppt/fonts/fontN.fntdata` as uncompressed Embedded
+OpenType 0x00020001, which PowerPoint loads -- checked with a renamed copy of
+the face no machine has). DOCX: the theme, `w:docDefaults` and every style's
+`w:rFonts` (`styles.xml`, `stylesWithEffects.xml`) name it with no theme
+reference, and the font table lists only the faces the document names
+(`DocxEngine._house_package`). XLSX: the stylesheet's first font -- the
+Normal style a new cell takes -- names it with no theme scheme, and the theme
+is the house theme (`XlsxEngine._house_workbook`); Excel cannot embed fonts.
+Code keeps its monospace face and formulas Cambria Math (DOCX/HTML), and DOCX
+direction marks their face (above). Word's PDF names ArialMT for one
+invisible glyph: the tab after a list bullet (no font maps U+0009; a plain
+Word document does the same). Gate:
+`tests/test_office_files_name_the_house_face.py` (English, Arabic and
+bilingual files in every format through `renderer_worker._generate_*`; every
+slot of every XML part resolved through theme references; each run, end mark
+and bullet of the slides and notes; the embedded faces equal to the bundle;
+PDF and HTML faces; LibreOffice draws the deck and workbook in the house face
+only; the engines with these steps taken out, and a planted Segoe UI and
+mixed run, as negative controls). **A document built by hand in code goes to
+its generator** (`agent/raw_document_guard.py`, asked by the tool worker
+before a `python_exec`/`code_exec`/`shell_exec` call runs): reportlab or
+fpdf -> `generate_pdf`, python-docx -> `generate_docx`, a new openpyxl or
+xlsxwriter workbook -> `generate_xlsx`, python-pptx -> `generate_pptx`. The
+owner's Arial deck of 2026-11-10 was python-pptx run that way: the guard
+knew no PowerPoint library and named `generate_pdf` for everything. Gate:
+`tests/test_raw_document_guard.py` (the old marker list as control).
+
 **A ReportLab PDF draws every letter, and bold is bold** (2026-10-31,
 `documents/glyph_fallback.py`). The house face has no Latin Extended-A or
 Additional (ā ḥ ṣ ẓ ḍ ṭ ʿ ʾ: every scholarly transliteration of Arabic), and
@@ -3657,7 +3776,12 @@ the duplicate for a rendering defect and tried to "fix" it). `pdf_rtl`: a
 direction mark with a visible advance is the space it was drawn with; a digit
 or Latin letter of no width is a misnamed mark (Plex's shadda as "8"/"3"); a
 Latin letter under `_KASHIDA_EM` (0.15 em) is a misnamed kashida ("G"); Arabic
-letters of no width stay (a ligature's parts). `arabic.visual_order` drops
+letters of no width stay (a ligature's parts). A letter glyph's text keeps the
+marks it names only where a mark glyph is drawn on it (`_drop_undrawn_marks`):
+LibreOffice 24.2 (Ubuntu 24.04, Linux CI 2026-11-10) names "ريالاً"'s tanween
+glyph "#" and puts the tanween into the lam-alef ligature's text, so every
+lam-alef read "لاً" (the footer's "الاصطناعي" with a tanween).
+`arabic.visual_order` drops
 isolates (python-bidi asserts on them; the whole page's reading failed). The
 PDF parser finds the tables first and reads a single-column page's text
 around them (`pdf_layout._segments_around_tables`): each table once, where it
@@ -4076,7 +4200,12 @@ stopped. Gates: `tests/test_postgres_move_switch.py` (the old setup fails
 all 16), and on real Postgres `tests/test_resilience_postgres.py`.
 `kazma doctor` checks the service from the record; the guard watches it
 (`DatabaseServiceWatch`: starts a stopped service once per outage, pages once
-at five minutes, once on recovery). Gates: `tests/test_setup_postgres.py`
+at five minutes, once on recovery). A state `sc` refuses ("Access is
+denied": a guard without admin rights, the user-level task) is unknown and
+the port decides -- read as stopped it paged a running database down; a
+refused start is said once with the fix (2026-11-11). An S4U boot task of an
+admin account runs with its full token whatever its run level (measured on
+the drill VM), so `--install`'s boot task keeps `Highest`. Gates: `tests/test_setup_postgres.py`
 (every package manager faked; a password on psql's command line as the
 negative control), `tests/test_guard_database_service.py`.
 
@@ -4246,6 +4375,26 @@ languages, the docs, setup.ps1's own messages) names `setup.cmd`, and
 `powershell -File setup.ps1` refused there, and a setup.cmd that does not
 change folder, as the negative controls).
 
+**Setup runs nothing it has not checked** (2026-11, supply chain). setup.ps1
+piped `https://astral.sh/uv/install.ps1` into `Invoke-Expression` (in the
+administrator window it opens) and setup.sh piped `install.sh` into `sh`:
+each ran whatever that address served. Both install ONE uv release
+(`$UvVersion` / `UV_RELEASE`, equal) from uv's GitHub release, with the
+SHA-256 of each platform's archive written in the script (uv's own `.sha256`
+files, which GitHub's asset digests matched), checked before anything is
+unpacked; a mismatch stops setup with both hashes. setup.ps1's download,
+hash and unzip are .NET calls (`Save-UvArchive`, `Get-Sha256Hex`,
+`Expand-UvArchive`): 5.1 started from a PowerShell 7 terminal cannot load
+`Get-FileHash`. uv goes to `~/.local/bin` (Windows: also the user PATH, as
+uv's installer did). The pip and snap fallbacks are gone. A new uv release
+means new hashes in both scripts. Every Dockerfile starts `FROM` a digest
+(`@sha256:`), and Dependabot's `docker` ecosystem watches each folder with
+one. Gate: `tests/test_setup_downloads_verified.py` (no shipped script pipes
+a download into a shell, every `FROM` pinned, one uv release with a hash per
+platform; the real install functions cut out of each script and run on a
+local archive: a match installed, a mismatch refused before unpacking; the
+old installer lines and a bare tag as negative controls).
+
 **What the install shows** (the owner, after the clean VM's first run,
 2026-11-07: some 60 lines before one question, no version, and the mode
 question answered by an Enter left in the console). The setup scripts open
@@ -4272,6 +4421,19 @@ The end's wait for Kazma counts the time each try takes (`_finish`: a
 refused connection takes about 2 s on Windows, and 240 s became 325 s).
 Gates: `tests/test_install_modes.py` (the model there as the control; the
 old count of 48 tries).
+
+**The shipped embedding model is pinned to one commit** (2026-11, supply
+chain): `embedder.DEFAULT_MODEL_REVISION` (`refs/main` of every install's
+cache, so nothing downloads again), passed by every load, download and cache
+check through `embedder._model_revision`; without it the Hugging Face libraries
+follow the repository's `main`. A model the owner configured that Kazma does
+not ship loads unpinned unless they give one (`KAZMA_EMBED_REVISION`,
+`memory.embedding.revision`); a remote config that falls back to the local
+model takes the pin, never the remote model's revision. Never change the
+pinned commit without re-embedding (the vectors are that commit's). Gate:
+`tests/test_embedding_model_pinned.py` (every `SentenceTransformer(` /
+`snapshot_download(` call in product code and scripts names `revision=`; the
+old unpinned lines as the negative control).
 
 ### 21d. The setup guide (`/setup`, `kazma-ui/kazma_ui/setup_api.py`)
 
@@ -5531,6 +5693,22 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
 - `_EXEC_CAPABLE_ARGS` rejects per-binary flags that execute another
   program (`find -exec`, `git --upload-pack`/`-c`, `tar
   --use-compress-program`, …). Add an entry when you add a binary.
+- **`shell_exec` git: the card is the gate, and it names what the repository
+  runs** (2026-11-11, the owner's decision). Every git command it runs gets
+  `-c core.fsmonitor=false` before its subcommand
+  (`git_repo_programs.shell_git_argv`, added after the policy that refuses a
+  `-c` the call names). The approval card (chat graph `card_notes`, chat
+  apps, swarm bus) names the hooks present (not `.sample`) and every program
+  the repository's own `local`/`worktree` configuration sets -- filter, diff
+  and merge drivers, `core.sshCommand`, `core.pager`, a shell alias that is
+  the command (`_repository_programs`, read with `git config --show-scope` and
+  `git rev-parse`, which run none of them, with `tool_child_env`, off the
+  loop). Nothing else is switched off: LFS and the owner's hooks keep
+  working. One splitter for the command's words
+  (`shell_arguments.split_command_line`). Gate:
+  `tests/test_shell_git_programs.py` (real repositories, a global
+  configuration of the test's own; the argv without the override as the
+  control).
 
 **D. Secret masking recurses.**
 - `settings.mask_deep()` walks dicts, lists, and JSON-encoded strings.
@@ -5710,6 +5888,26 @@ repeat held back, counted apart); restart reasons and alert keys are tallied
 (the first Kazma frame above the storage layer, and its caller -- old dumps
 by the thread in `_run_once`); manifest mechanisms with no signature are
 "not watched", never a mechanism. Tests: `tests/test_firing_ledger_report.py`.
+
+**The report is laid out in lines and sent whole (2026-11-11).** Telegram
+showed the week to 2026-11-11 as one paragraph under a 111-character title,
+cut at "Stops over budget 0": `firing_ledger.render` joined its sections with
+spaces, `ops_alerts.alert` cut every detail at 600 characters, and the daily
+digest printed the title as the alert's name. Now: a short title
+(`firing_ledger._title`: what needs a look, the targets missed), sections
+with a blank line between them and one item a line (a tally's reasons under
+their mechanism; the targets marked ✅ ❌ ❔, `weekly_targets.render_targets`),
+sent with `max_detail=firing_ledger.BODY_BUDGET`; past it the last sections
+are left out whole and named. A missed target makes the report a warning; a
+failure measuring the targets is the report's scan error, never the loss of
+the report. Every detail `ops_alerts` cuts ends at a line or word with
+`ops_alerts.CUT_MARK`, and the digest cuts an alert's label at
+`daily_digest._LABEL_MAX`. **The finished-turn line has one reader**,
+`turn_line.read_turn_line`: the targets matched `failed=True|False` while
+`close_turn` writes `yes`/`no`, so "Turns that succeed" was unknown every
+week (its fixture wrote the form no code writes). Gate:
+`tests/test_weekly_report_reads_turns.py` (the real `close_turn` line; the old
+pattern as the negative control; no second parser).
 
 **D. One restic run per repository** (`restic_repo._run`, 2026-09-30). The
 universal backup's snapshot and the maintenance task's `forget --prune` /
@@ -6050,6 +6248,22 @@ a second (negative control: the same turn without the wait is refused).
 `make_gate_id` hash) — one pause can never mint two cards. A terminal row
 under a HASH id does not eat a NEW ask for the same tool+args (fresh row,
 uniquified suffix); a native-id repeat returns the terminal row.
+
+**C2. A row keeps no credential** (2026-11-11). `register_gate` is the one
+writer of a row's call (`_record_view`): `args_json` as an approval card
+shows it (`security.approval_args`), `payload_json` with every call's
+arguments masked (`redacted_gate_payload`), `message` through `redact_text`,
+and `args_digest` = `arguments_digest` of the REAL arguments -- the swarm
+card's footer and the Swarm page's `describe` show it. A writer passes the
+whole real JSON (a text cut before masking no longer parses, and its secrets
+stay); the row is bounded after. Twins are matched by `args_digest`, never by
+the stored text (two calls differing only in a hidden secret are two calls),
+and only between graph rows (the one mechanism registered twice). Rows an
+older build wrote are masked once at schema open (`_redact_stored_rows`,
+digest from what they held). Execution never reads the row (A). Gate:
+`tests/test_gate_records_keep_no_credentials.py` (every `GateRow(` writer
+driven with a planted secret and the raw row read; the old storage and the
+text twin rule as controls).
 
 **D. Surfaces render; they never mint.** Gate transitions publish through
 `GateEvents` into the EXISTING turn journal (`hitl` parts of the same
@@ -6792,6 +7006,26 @@ field writes nothing. Sections and the keys they write, each with its reader:
   server status messages (`notifications.lifecycle.events`). Adapters &
   Routes keeps the swarm's routes; no page script saves the alert keys any
   more, so two tabs cannot write over each other.
+- **The bot that sends them** (2026-11-11; the owner's alerts landed among
+  his chats with Kazma, every sender using the chat bot):
+  `ops_alerts.ALERTS_BOT_KEY` chooses `chat_bot` (Kazma's own, the default)
+  or `alerts_bot`, a separate bot -- `ALERTS_BOT_TOKEN_KEY` (in the vault,
+  install-scoped: `vault.INSTALL_SCOPED_SECRETS`) and `ALERTS_BOT_CHAT_KEY`.
+  `ops_alerts.alerts_bot` is the one answer; with it the Telegram route goes
+  to its chat (`ops_alerts.telegram_route`; Kazma's chat bot leaves the
+  route, `bus_send_targets(skip_telegram=)`, a required keyword so every
+  sender decides), the group route to the alerts group
+  (`ops_alerts.group_route`), the start card the same way, and the guard
+  pages with it (`ops_alerts.pager_credentials`, run by the guard's settings
+  lookup, read again at a page `_NOTIFY_REFRESH_S` later). An alerts bot
+  that does not take an alert hands it to Kazma's chat bot (outcome
+  `alerts-bot` failed). A save choosing it asks Telegram
+  (`ops_alerts.check_alerts_bot`: a token it does not know is 400
+  `bot_refused` and nothing is written; a chat the bot cannot see is saved
+  and said). The token is never answered back. Gates:
+  `tests/test_alerts_bot.py` (the delivery as it was as the negative
+  control), `tests/e2e/test_settings_alerts_browser.py` (EN/AR, by the
+  sidebar, a stand-in Telegram).
 - The guard's pager: `guard.telegram.chat_id` (a number or a public @name;
   read by the guard's lookup and `ops_alerts`' direct fallback; a SETTING in
   `settings_restore`). The guard records every page's outcome in its state
@@ -6811,7 +7045,9 @@ field writes nothing. Sections and the keys they write, each with its reader:
   or answered; then `push_watch_settings`), its test page, what it is told
   (`notifications.watch.email_to` and the zone from `cron.timezone`), and
   unpair -- each a request signed by the install's own key
-  (`outside_watch._signed_post`): `POST /v1/settings`, `/v1/test-page`,
+  (`outside_watch._signed_post`, a `v2` signature over its own route: one
+  signed for another route is refused, §39 "Signatures bind the route"):
+  `POST /v1/settings`, `/v1/test-page`,
   `/v1/leave` (`deploy/observer/src/watch_settings.js`, D1
   `install_settings`; an older signed request is refused, a test page at
   most every 20 s). An install the observer no longer knows
@@ -6844,7 +7080,12 @@ answering a request), `deploy/observer/test/watch_settings.test.mjs`
 cards with an untold install's UTC as the control, test-page channels and
 rate, leave), `tests/e2e/test_settings_alerts_browser.py` (by the sidebar,
 English and Arabic: the guard's test page, pair, test, unpair; cards the
-wall's colour in light and dark).
+wall's colour in light and dark). The tab's cards flow down at most three
+columns of 320px or more (`.alerts-grid`: CSS columns, each card whole),
+never a grid: a grid row is as tall as its tallest card, and the page was
+empty under the short cards (2026-11-11). Gate:
+`test_the_alerts_cards_leave_no_holes_at_any_width` (700 to 2,200px, EN/AR;
+the old grid as the negative control).
 
 **Where Stages 2, 3 and 4 meet** (merged 2026-11-09). Each delivery has ONE
 receipt, told the outcome once: Kazma's `ops_alerts._Receipt` writes the
@@ -7015,11 +7256,11 @@ in the vault and does **not** automatically feed Calendar.
   `drive.file`): Gmail connect still succeeds if Calendar API is off.
   Settings → Email → **Connect Google Calendar** is the dedicated grant (same
   OAuth client, same `/api/email/oauth/gmail/callback` — dispatch on
-  `state.provider == google_calendar`).
+  the attempt's provider, `google_calendar`).
 - Microsoft mail OAuth requests `Calendars.ReadWrite` and copies tokens
   to `calendar.microsoft.*`. Device-flow client id reads vault via `cred()`,
   not env-only. The calendar card's **Connect Outlook Calendar** is its own
-  sign-in (`/api/calendar/oauth/microsoft/start.json`, state
+  sign-in (POST `/api/calendar/oauth/microsoft/start`, the attempt's
   `purpose=calendar`, the Microsoft callback): it keeps calendar tokens only
   (`store_microsoft_calendar_tokens`) -- the mail sign-in would reconnect a
   mailbox the owner disconnected.
@@ -7810,6 +8051,16 @@ code) and Kazma ran with nobody supervising it.
   `tests/test_document_broker_port.py`, the port tests in
   `tests/test_guard_document_broker.py` (the old search as the negative
   control, and the real guard with a fake broker refusing its first port).
+  **A restarted broker takes back its own port** (Linux CI, 2026-11-10): the
+  guard's status probes leave the broker's port in TIME_WAIT, and on Linux a
+  plain bind is refused there for a minute, so a killed broker could not
+  listen again until the guard gave up. On POSIX the broker's listener, its
+  test bind and the guard's `_port_is_free` set SO_REUSEADDR (a port another
+  socket LISTENS on is still refused); never on Windows, where it would let
+  a bind take a port in use. The broker sees a client leave with `poll`
+  (`worker_broker._readable_now`): `select.select` refuses a descriptor
+  numbered 1024 or more on Linux. Gates: `tests/test_document_broker_port.py`,
+  `tests/test_broker_sees_a_client_leave.py`.
   The token
   `.kazma/document_broker.token` is made once, restricted to the guard's
   account (`icacls /inheritance:r` + its SID) before the secret is written,
@@ -7902,9 +8153,10 @@ code) and Kazma ran with nobody supervising it.
   account like the broker token: a key it cannot restrict is never used,
   `key_unprotected`), it POSTs every minute to
   `KAZMA_GUARD_OUTSIDE_WATCH_URL` (https, or http to this machine only),
-  signed `v1=<HMAC-SHA256>` of `"<timestamp>.<body>"` (`sign_heartbeat`; the
-  shared vector `tests/fixtures/observer/heartbeat_vector.json`, read by the
-  observer's verifier too). The body is an allowlist (`heartbeat_body`):
+  signed `v2=<HMAC-SHA256>` of the request's route and body (`sign_request`
+  over `signed_message`; the shared vector
+  `tests/fixtures/observer/heartbeat_vector.json`, read by the observer's
+  verifier too; "Signatures bind the route" below). The body is an allowlist (`heartbeat_body`):
   states, numbers, the readiness checks' NAMES (`ProbeResult.checks`, never
   the detail's text), the commit, the database, Docker, cloudflared, disk,
   power and the page receipts (`receipts_allowlist`: an inside catalog key
@@ -7944,6 +8196,23 @@ code) and Kazma ran with nobody supervising it.
   Gates: `tests/test_outside_watch.py` (the guard reads what pairing writes;
   a refused pairing or an unrestrictable file leaves no key; it runs the
   Worker's own `node --test` suite, a D1 stand-in over `node:sqlite`).
+  **Signatures bind the route** (2026-11-11). Every signed request -- the
+  guard's heartbeat, Kazma's summary, settings, test page and leave -- sends
+  `X-Kazma-Signature: v2=<hex>`, HMAC-SHA256 under the pairing key of
+  `"v2\n<timestamp>\n<METHOD>\n<path>\n" + body` (a newline is in neither a
+  method nor a path; `<path>` is the request line's, the body empty for a
+  GET). Three copies, held byte for byte to the vector's `v2` routes: the
+  guard's `signed_message` (stdlib), Kazma's `outside_watch._sign`, the
+  Worker's (`deploy/observer/src/verify.js`: its v2 message and request
+  check). The v1 form (`"<timestamp>." + body`) bound no route: the Worker
+  accepts it only while its `ACCEPT_V1` constant is true, logs each one, and
+  refuses it once that is false -- flip it when no install sends v1. Deploy
+  the Worker before a Kazma that sends v2. Gates: the node suite
+  (`deploy/observer/test/observer.test.mjs`,
+  `deploy/observer/test/watch_settings.test.mjs`: a v2 signature for one
+  route refused on another; v1 accepted and logged; the v1 verifier as the
+  negative control), `tests/test_observer_heartbeat.py`,
+  `tests/test_outside_watch.py`.
 - **Settings' "Restart server" asks the guard.** A server the guard started
   writes the guard's reload request (`supervisor_watch.request_guard_reload`;
   the guard hands the path over in `KAZMA_GUARD_RELOAD_FILE`, an older guard
@@ -8141,6 +8410,28 @@ Test on every adapter; Telegram and Slack had the same blind spots.
   `tests/test_chat_files_reach_the_agent.py` (the parse-first order and the
   old subtype rule as negative controls; no Slack module reads `subtype`
   itself).
+- **A chat app with an empty allowlist is private** (2026-11-11, the owner's
+  decision; `kazma_gateway/sender_rule.py`). Every adapter is a
+  `sender_rule.SenderGate` and every accept path -- messages, the polling
+  path, buttons, native commands -- asks its `sender_refusal`; nothing else
+  reads `_allowed_users` or `_allow_all`. A set allowlist decides alone;
+  empty, only the owner's own accounts Kazma already knows pass
+  (`allowlists.known_owner_ids`: a positive Telegram chat id in
+  `allowlists.OWNER_ID_KEYS`, a `platform:id` entry of
+  `KAZMA_GATEWAY_ADMINS`), and they are admin too (`is_gateway_admin`); the
+  rest are `no_allowlist`. A refused sender in a DIRECT conversation is told
+  once a day per sender per platform, in their language, that the bot is
+  private and their id (`SenderGate.tell_refused_sender`; the record is the
+  runtime settings key `sender_rule.NOTICE_KEY`, so a restart does not tell
+  them again); never in a group or channel. `KAZMA_GATEWAY_OPEN_TO_EVERYONE`
+  (`boot_guard.env_flag`) lets everyone in again, warned at every boot;
+  `KAZMA_GATEWAY_STRICT_ALLOWLIST` set too wins. Each build logs one WARNING
+  per adapter with an empty allowlist naming the fix, and the Test's
+  `allowed` check shows it as a problem (`connector_test.allowlist_check`).
+  The owner's settings are watched (`chat_adapters._watched_key`) and
+  re-applied in place. Gate: `tests/test_chat_apps_private_by_default.py`
+  (the real accept paths; a planted second rule and the old builder's
+  open default as negative controls).
 - Gates: `tests/test_discord_receive_and_test.py`,
   `tests/test_telegram_slack_receive_and_test.py` (nothing a connection reads
   unaccounted for, with negative controls; each drop reason at its level;
@@ -8303,11 +8594,13 @@ problem was its database. Each layer now holds on its own:
   `kazma_ui/security_headers.py` sends a CSP (`img-src`/`media-src 'self'
   data: blob:`, `object-src`/`frame-ancestors 'none'`), nosniff and
   referrer on every response — outermost but for the forwarded-headers
-  layer; `pin_static_types` keeps `.js` executable under nosniff. Not
-  scripts/styles (Alpine needs inline). A route may set its own policy (chat
-  file downloads). Gates: `tests/js/test_markdown_images.js`,
-  `tests/test_security_headers.py`, the page tour's CSP-refusal control
-  (AUD-018).
+  layer; `pin_static_types` keeps `.js` executable under nosniff. Scripts
+  are this server's, inline and Alpine's (`'unsafe-inline'`,
+  `'unsafe-eval'`: Alpine needs both) and `connect-src` is this server and
+  the configured LiveKit server, since 2026-11-11 (§62). A route may set
+  its own policy (chat file downloads). Gates:
+  `tests/js/test_markdown_images.js`, `tests/test_security_headers.py`, the
+  page tour's CSP-refusal controls (AUD-018).
 - **No LLM call is answered from a cache of another request.** The semantic
   response cache is gone (module + tests deleted, `llm_provider.chat` no
   longer serializes `messages`): it keyed on the whole conversation, the
@@ -8433,6 +8726,28 @@ and the sibling suites):**
   release's wheel, from the file, only when it matches `SHA256SUMS` and
   GitHub's asset digest (URL pinned to the repo's releases, streamed, size
   capped, extras kept); a release it cannot verify is refused with its page.
+  **And its Sigstore signature** (2026-11, `kazma_cli/release_signature.py`):
+  the checksums sit in the same release as the wheel, so the wheel's
+  `<wheel>.sigstore.json` must verify with sigstore-python (a base dependency,
+  imported only by `check_bundle`) -- chain, transparency log, signature over
+  the wheel's SHA-256 -- and name issuer `token.actions.githubusercontent.com`,
+  source repository `Mubder/kazma` and `release.yml` run from `refs/heads/main`
+  (the workflow is dispatched there; every bundle says so) or a `v*` tag.
+  Required from `release_signature.SIGNED_FROM` (0.21.2, the first release
+  after v0.21.1) on: without a bundle the release is refused before anything
+  is downloaded. v0.21.1 and older install on their checksums and say so, and
+  a bundle one of them carries is still verified, never ignored. Not v0.11.0
+  (the first release the workflow signed): v0.12.0 to v0.21.1 were published
+  by hand with no bundles, and that cutoff left every wheel install unable to
+  update. **The next release goes through `.github/workflows/release.yml`**,
+  which signs it; a hand-published one is refused. The root of trust is
+  Sigstore's TUF repository, else the copy on the machine
+  (`_production_verifier`); never skipped. Gate:
+  `tests/test_update_checks_release_signature.py` (recorded real bundles and
+  root of trust, no network: Kazma v0.11.0's passes, a changed file, another
+  repository's valid bundle and another workflow's identity are refused, an
+  older release's bundle is verified; the updater without the check and the
+  v0.11.0 cutoff, which refuses v0.21.1, as negative controls).
   On a wheel install `--reinstall` fetches its own release (`_get_release`,
   tag `v<version>`) and `--force` with nothing newer reinstalls
   (`do_pip_update(reinstall=True)`: `--force-reinstall --no-deps`, then the
@@ -9061,7 +9376,8 @@ test that fails on the old code.
     - Soul confirm is admin-only with real statuses (AUD-104).
     - Every saved model profile keeps or refuses masked secrets
       (`ModelRegistry.save_model_profile`, AUD-105).
-    - The OAuth message is origin-checked (AUD-106).
+    - The OAuth message is origin-checked (AUD-106). Superseded 2026-11-11:
+      the GitHub sign-in runs in the same tab and posts no message (§62).
 - **A result that says whether it worked is read where it is returned**
   (2026-10-27, the audit's recurring pattern 2,
   `tests/test_failure_results_are_used.py`). A backup, migration, send or
@@ -9492,6 +9808,16 @@ has a gate that fails on the old code.
   which the updater checks against that release's SHA256SUMS, and GitHub's
   immutable releases refuse. Gates: `tests/test_workflow_permissions.py`,
   `tests/test_release_supply_chain.py` (the old publish step as the control).
+- **A tool a workflow or build script runs names one release** (2026-11,
+  supply chain). `uvx`/`npx` with no version run whatever PyPI or npm serves
+  that day: the release workflow's SBOM tool (`cyclonedx-bom==8.0.1`), the
+  PyPI reservation workflow's `twine==7.0.0` and the CodeMirror minifier
+  (`vendor_codemirror.TERSER_VERSION`, terser 5.51.2) are exact. Raise a
+  version by hand, after trying it. Gate: `tests/test_actions_pinned_by_sha.py`
+  (every `uvx`/`npx` package in `.github/workflows/` and `scripts/` --
+  `--from`, `--with`, `--package` or the command itself, Python argv lists
+  with their module constants resolved -- is `name==1.2.3` or
+  `name@1.2.3`; the three old forms as negative controls).
 - **AGENTS.md names what exists** (FA-151/152/154). §2 states the `_gateway`
   exception; the stale names, counts and paths of §1-§45 are corrected.
   Every backticked code name here -- a dotted path, a name after its file
@@ -10027,8 +10353,8 @@ repository is public).
   `resolve_session(only_for=)`, `sender_may_take_over(admin=)`;
   `agent_handler/session_commands.py`). `/sessions` listed every chat and
   `/switch` bound the sender to any chat with no owner on record, which is
-  every chat started on the Web; with an empty allowlist that is anyone who
-  can message the bot. A sender who is not a gateway admin
+  every chat started on the Web; with an empty allowlist that was anyone who
+  could message the bot (private since 2026-11-11, §42). A sender who is not a gateway admin
   (`allowlists.is_gateway_admin`) now lists and resolves their own seasons,
   and an unowned season is an admin's. `KAZMA_SESSION_OPEN_TAKEOVER=1` still
   opens both. Gate: `tests/test_session_takeover_needs_admin.py`.
@@ -10102,14 +10428,21 @@ the old code:
     `security/file_access.restrict_to_owner`). Gate:
     `tests/test_generated_keys_kept_in_the_install.py`.
 - **Sign-in and sessions.**
-  - The four security switches (`boot_guard.SECURITY_SWITCHES`) are read only
+  - The security switches (`boot_guard.SECURITY_SWITCHES`, the chat apps'
+    two since 2026-11-11, §42) are read only
     through `boot_guard.env_flag` (1/true/yes/on). The app factory refuses a
     sign-in-off switch on a bind no launcher checked
     (`factory_exposure_refusal`). While sign-in is off, a loopback request
     whose Host could be a rebound public name is refused
-    (`auth._open_mode_host_refused`). Gates:
+    (`auth._open_mode_host_refused`). A name without a dot passes only when
+    it is `localhost`, this machine's own name (`socket.gethostname()`, with
+    and without its domain, `auth._machine_names`) or one
+    `KAZMA_AUTOLOGIN_HOSTS` names: any single-label name passed until
+    2026-11-11, and a DNS search suffix or a LAN name answer (LLMNR,
+    NetBIOS) can hand a browser one. Gates:
     `tests/test_security_switch_spelling.py`,
-    `tests/test_open_mode_rebinding_and_launchers.py`.
+    `tests/test_open_mode_rebinding_and_launchers.py` (the old single-label
+    rule as the negative control).
   - A demo visitor is an operator: admin routes need an admin credential.
     Gate: `tests/test_demo_mode_admin_routes.py`.
   - Deleting, disabling, re-roling or resetting a platform user ends their
@@ -10126,18 +10459,103 @@ the old code:
     address. Gate: `tests/test_login_timing_same_for_every_name.py`.
   - `analyze_image` fetches through `web_acquire.http.fetch_public` (pinned).
     Gate: `tests/test_vision_fetch_is_pinned.py`.
+  - **An OAuth sign-in is one attempt, started by POST**
+    (`kazma_core/security/oauth_attempts.py`, `kazma_ui/oauth_sign_in.py`;
+    GitHub, Gmail, Google Calendar, Microsoft mail, Outlook Calendar).
+    GitHub kept ONE install-wide state compared with `!=` (a second start
+    replaced the first, and any browser could finish it), the mail and
+    calendar sign-ins an unbounded dict in memory, and every start was a GET
+    that wrote it. A start is a POST from Kazma's page (the CSRF rule; the
+    mail and calendar routes also `_verify_same_origin`) that answers the
+    provider's URL and sets a cookie named for the attempt
+    (`oauth_attempts.binding_cookie_name`: HttpOnly, SameSite=Lax, the
+    callback's path, ten minutes). The attempt is kept as its state's hash
+    in the settings store (`oauth_attempts.PENDING_KEY`, RUNTIME, at most
+    `oauth_attempts.MAX_PENDING`); the callback takes it once
+    (`oauth_attempts.take`: the cookie compared with `hmac.compare_digest`
+    before anything is read, then one `atomic_update`) and refuses a state
+    used twice, from another browser, past ten minutes or of another
+    provider, with a code the pages word (`window.kazmaSignInFailed`). A
+    start from another origin than the callback is refused with the origin
+    to open (409), before anything is kept. The page follows the answer with
+    `window.kazmaStartSignIn` (http(s) only); the GitHub callback sends the
+    browser back to the page it started from
+    (`oauth_attempts.safe_return_path`). Gates:
+    `tests/test_oauth_attempts.py` (the real app, stand-in providers; the
+    old single state as the negative control),
+    `tests/js/test_kazma_start_sign_in.js`.
 - **Infrastructure.**
   - The root `.dockerignore` excludes every secret file name and `.kazma/`
     at any depth. Gate: `tests/test_dockerignore_secrets.py`.
   - Headers: `style-src`, `font-src`, `frame-src`, `worker-src`,
     `manifest-src`, HSTS over HTTPS only, `Cross-Origin-Resource-Policy`,
-    `Permissions-Policy`, no `Server` header. No `default-src`,
-    `script-src`, `connect-src` or opener policy (the optional LiveKit voice
-    path and the GitHub sign-in popup need them open).
+    `Permissions-Policy`, no `Server` header. No `default-src`: every kind
+    a page uses is named.
+  - **No script from another host; connections to this server and the
+    configured LiveKit server only** (2026-11-11,
+    `kazma_ui/security_headers.py`). The LiveKit browser client was loaded
+    from cdn.jsdelivr.net, unpinned, when Live voice started, and kept the
+    pages from sending `script-src`. It ships with Kazma now
+    (`static/vendor/livekit`: `livekit-client` 2.23.0, Apache-2.0, its
+    version, npm integrity and SHA-256 in `vendored.json`, rebuilt by
+    `scripts/vendor_livekit.py`; the two files are `-text` so a Windows
+    checkout keeps their bytes). The policy: `script-src 'self'
+    'unsafe-inline' 'unsafe-eval'` (the pages' inline scripts and handlers,
+    and Alpine's expressions, compiled with `new Function`), and
+    `connect-src 'self'`, this server's own `ws`/`wss` origin, and the
+    LiveKit server (`LIVEKIT_URL` or `voice.livekit.url`, while duplex is
+    on; `_livekit_connect_sources`: its `wss` and `https` origin, a plain
+    origin only, and `*.livekit.cloud` for LiveKit Cloud). The LiveKit
+    address is read off the loop and kept `_LiveKitSources.TTL_S` seconds
+    (`_livekit_sources`: the first response waits for one read in a thread,
+    later ones refresh in the background). A page keeps the policy it was
+    opened with: a LiveKit address saved in Settings reaches pages opened
+    after the save (Settings says so). Gates: `tests/test_security_headers.py`
+    (the directives, a hostile address or Host, the read off the loop and
+    kept; the old policy as the control), `tests/test_vendor_livekit.py`
+    (the files as recorded, served as a script, no page loading a script,
+    stylesheet or module from another host; the old `voice.js` line
+    planted), `tests/e2e/test_pages_load_clean.py` (every page and Settings
+    tab under the policy; a CDN script and an outside socket refused, the
+    old policy as the control), `tests/e2e/test_livekit_client_and_policy.py`
+    (the vendored client defines `LivekitClient.Room`; the configured LiveKit
+    host reachable, an outside one and an unconfigured one refused, live
+    voice's own socket never).
+  - **No sign-in runs in a popup; every page sends
+    `Cross-Origin-Opener-Policy: same-origin`** (2026-11-11). The GitHub
+    sign-in opened a window whose callback page answered
+    `window.opener.postMessage`, so the opener policy had to stay off. Every
+    sign-in now runs in the same tab (`window.kazmaStartSignIn`, the callback
+    sends the browser back), and the header is on. The one window a page
+    still opens for a sign-in is an MCP server's authorization page
+    (`mcp.js`, `noopener`, its callback a loopback listener of its own,
+    declared). Gates: `tests/test_no_popup_sign_in.py` (no `window.open` of
+    a sign-in, no opener read, no window `message` listener in any product
+    script, template or server page; planted shapes and the old Workspace
+    line as negative controls), `tests/test_security_headers.py`,
+    `tests/e2e/test_github_sign_in_same_tab.py` (reached by the sidebar,
+    English and Arabic: GitHub and Gmail sign-ins with stand-in providers,
+    no window opened).
   - MCP presets name an exact version, held to the recorded registry answer
     (`tests/test_mcp_catalog.py`). The release workflow checksums the built
     files before any other tool runs and checks them again before signing;
     the metrics workflow's token job installs nothing.
+  - **SearXNG's secret key is generated by setup** (2026-11-11, the owner's
+    decision; `security/searxng_secret.py`). `kazma setup install`'s private
+    search part keeps a generated `SEARXNG_SECRET` in its `.env` before it
+    starts SearXNG (`ensure_searxng_secret`, through
+    `env_files.persist_generated_secret(path=)`: restricted before the value
+    is written; an owner's value, in the file or the shell, is never
+    replaced; the placeholder is not a value) and runs compose with
+    `--env-file` on that file. The part is not in place while the key is
+    missing, so a re-run fixes an older install. `docker-compose.yml` keeps
+    the placeholder as its fallback, so a start without setup still works;
+    Kazma's SearXNG container on it (`uses_placeholder`: its
+    `SEARXNG_SECRET`, else the `secret_key` of the settings file it mounts)
+    is a boot WARNING (`service_exposure.searxng_secret_problems`, no ops
+    alert) and the security report's `check_searxng_secret`. Gate:
+    `tests/test_searxng_secret_generated.py` (the old setup as the negative
+    control).
 
 ## UI Conventions (Web)
 
@@ -10684,6 +11102,19 @@ sent. Gate: `tests/test_answer_quality_monitor.py`.
   advisory ownership alone cannot fence a partitioned host's effects.
   Drills: `tests/test_runtime_ownership.py` (marked real Postgres tests),
   deployment contract: `tests/test_kubernetes_runtime_contract.py`.
+  **The Kubernetes root filesystem is read-only** (2026-11-11,
+  `deploy/kubernetes/runtime.yaml`): every container's security context
+  makes its root read-only, and every place Kazma writes is a mount -- the
+  `/state` volume (with `KAZMA_ENV_FILE` and `HF_HOME` on it) or an emptyDir
+  (`/tmp`, `/home/kazma`, ClamAV's three folders; an init container seeds
+  the signatures). The contract test resolves the write locations with
+  Kazma's own code in a child under the manifest's environment (every
+  zero-argument function of `kazma_core.paths`, the temp folder, the home
+  and its caches, the Hugging Face cache, `env_files._install_env_file`, a
+  shell tool's home, the skills home, the OCR models) and fails on one
+  outside every mount; a planted write, the manifest without its emptyDirs
+  and without `KAZMA_ENV_FILE` are the negative controls. A new write
+  location outside them needs a mount. Unverified on a cluster.
 
 - **A test run never touches an install's data** (2026-09-27). The root
   `conftest.py` pins `KAZMA_DATA_DIR` and `KAZMA_USER_HOME` to fresh temp
@@ -10796,3 +11227,4 @@ sent. Gate: `tests/test_answer_quality_monitor.py`.
 - `docs/plans/done/DOCS_CONSOLIDATION_PLAN.md` — Docs consolidation plan (completed)
 - `CHANGELOG.md` — Sprint history
 - Live docs only under `docs/docs/` (Docusaurus). Do not resurrect retired `docs-v2` / loose handover trees. A page added, moved or deleted there (or directly in `docs/`) changes `docs/website-pages.json` and `docs/sidebars.js` in the same commit (`tests/test_website_pages.py`, `tests/test_docs_sidebar.py`). Every `#anchor` a docs link names is a heading of its page -- a `{#id}` or the id Docusaurus derives -- because Docusaurus only warns and CI does not build the docs (`tests/test_docs_anchors.py`; five pointed at removed sections on 2026-10-01). kazma.ai honours `{#id}`, and its build fails on a missing anchor and on an Arabic page linking to an English page that has an Arabic one (docs/docs/ops/website-sync.md). Every file a published page names in a code span is a tracked file, or declared with its reason -- runtime, example, another repository, a removal the page states (`tests/test_docs_file_refs.py`; 39 pointed at nothing on 2026-10-01, one of them a security protection whose code had been deleted).
+- The docs site's build packages (`docs/package-lock.json`) are fixed with `npm audit fix`, never `--force`, and checked with `npm run build`; `docs/package.json` holds Mermaid on 11.x (`overrides`: the audit fix took Mermaid 12, a major Docusaurus 3 was not tested with). Each package the 2026-11 fix moved past its advisories has its first fixed release as a floor (`tests/test_docs_site_packages.py`, the old lock's versions as the negative control); what is left needs a major version Docusaurus 3.10.2 holds back (`docs/docs/contributing/development-setup.md`).

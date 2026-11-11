@@ -233,20 +233,32 @@ running server.
 | POST | `/api/email/gmail/connect` | Session | Gmail app-password → IMAP |
 | POST | `/api/email/gmail/disconnect` | Session | Clear Gmail creds |
 | POST | `/api/email/oauth/gmail/client` | Session | Save Google OAuth client id/secret |
-| GET | `/api/email/oauth/gmail/start` · `start.json` | Session | Browser OAuth redirect / JSON; `?account=<name>` signs in another account under that name |
-| GET | `/api/email/oauth/gmail/callback` | Open (OAuth) | Token exchange; redirects to Settings |
+| POST | `/api/email/oauth/gmail/start` | Session (same origin) | Start a Google sign-in: answers `{ok, authorize_url}` for the page to open in the same tab, and sets the cookie that binds the sign-in to this browser (one attempt, ten minutes, taken once at the callback). Body `{"account": "<name>"}` signs in another account under that name. 409 `sign_in_from_callback_origin` (with `origin`) when the page is on another origin than the callback |
+| GET | `/api/email/oauth/gmail/callback` | Open (OAuth) | Takes the attempt with the browser's binding cookie (another browser, a used, expired or other provider's state: `reason=` on the redirect), exchanges the code; redirects to Settings |
 | POST | `/api/email/oauth/microsoft/client` | Session | Save Azure app id/secret |
-| GET | `/api/email/oauth/microsoft/start` · `start.json` | Session | Browser OAuth; `?account=<name>` for another account |
-| GET | `/api/email/oauth/microsoft/callback` | Open (OAuth) | Token exchange |
+| POST | `/api/email/oauth/microsoft/start` | Session (same origin) | Start a Microsoft sign-in for mail, as the Google one; body `{"account": "<name>"}` for another account |
+| GET | `/api/email/oauth/microsoft/callback` | Open (OAuth) | Takes the attempt with the browser's binding cookie, then the token exchange |
 | POST | `/api/email/oauth/microsoft/device/start` · `…/poll` | Session | Device-code fallback; body `{"account": "<name>"}` for another account |
 | POST | `/api/email/oauth/microsoft/disconnect` | Session | Clear Microsoft mail: tokens, the sign-in's address and scopes (Outlook Calendar keeps its own switch) |
 | GET | `/api/calendar/status` | Session | Each calendar's state and address, and the active provider |
-| GET | `/api/calendar/oauth/google/start` · `start.json` | Session | Google Calendar sign-in (callback: the Gmail one) |
-| GET | `/api/calendar/oauth/microsoft/start.json` | Session | Outlook Calendar sign-in for the calendar only (callback: the Microsoft one, `purpose=calendar`); mail is left as it is |
+| POST | `/api/calendar/oauth/google/start` | Session (same origin) | Start a Google Calendar sign-in, as the Gmail one (callback: the Gmail one) |
+| POST | `/api/calendar/oauth/microsoft/start` | Session (same origin) | Start an Outlook Calendar sign-in for the calendar only (callback: the Microsoft one, `purpose=calendar`); mail is left as it is |
 | POST | `/api/calendar/oauth/microsoft/device/start` | Session | The same by device code (poll with `/api/email/oauth/microsoft/device/poll`) |
 | POST | `/api/calendar/oauth/google/disconnect` · `…/microsoft/disconnect` | Session | Turn that calendar off until it is connected from the card again; mail stays connected |
 
 Agent mail ops use tools (`email_list`, …), not these HTTP routes. Guide: [Email integration](../guide/email-integration).
+
+Every sign-in above, and GitHub's below, is one attempt: it lives ten minutes, belongs to the browser that started it (a cookie only that browser holds), and is used once. A callback that cannot finish one sends the browser back with `reason=` `other_browser`, `unknown` (used before, or never started), `expired` or `other_provider`, which the page says in its language.
+
+## GitHub sign-in
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/github/oauth/status` | Session | Whether the OAuth app is configured, connected, and whether any token is usable |
+| POST | `/api/github/oauth/start` | Session (same origin) | Start a GitHub sign-in: answers `{ok, authorize_url}` for the page to open in the same tab and sets the binding cookie. Body `{"return_to": "/workspace"}`: the page to come back to (a path on this server). 503 `not_configured` (with `setup_url`) without an OAuth app; 409 `sign_in_from_callback_origin` when the page is on another origin than the callback |
+| GET | `/api/github/oauth/callback` | Open (OAuth) | Takes the attempt, exchanges the code and sends the browser back to `return_to` with `github_oauth=ok`, or `github_oauth=error&github_oauth_reason=<code>` (the refusals above, `denied`, `no_code`, `exchange_failed`) |
+| GET | `/api/github/oauth/setup` | Session | How to create the GitHub OAuth app, for an install that has none |
+| POST | `/api/github/oauth/revoke` | Session | Disconnect: clears the OAuth token, the token and the GitHub App credentials |
 
 ## X publisher
 

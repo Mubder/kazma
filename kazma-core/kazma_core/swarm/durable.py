@@ -17,7 +17,7 @@ Temporal's time-skipping test server 2026-10-15). The rules:
   in the run's own context (its effect tracker, tenant, call authority), so
   an interrupted run records what it changed exactly as in process.
 * **One deadline owner: the engine.** The activity's body applies the
-  engine's deadline (``_run_admitted``'s ``wait_for`` for a dispatch, the
+  engine's deadline (``_run_admitted``'s ``asyncio.timeout`` for a dispatch, the
   pattern's per-step timeouts) and the watchdog stops it at
   ``task_budget`` + ``WATCHDOG_MARGIN_S``; Temporal's limits are taken from
   that same budget and sit after the engine's own end of the run

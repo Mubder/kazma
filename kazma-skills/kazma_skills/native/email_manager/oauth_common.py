@@ -1,16 +1,16 @@
-"""Shared OAuth helpers (state CSRF + public base URL)."""
+"""Shared OAuth helpers (public base URL, authorize URL, id_token address).
+
+A sign-in's state is ``kazma_core.security.oauth_attempts`` (one attempt per
+sign-in, bound to the browser that started it, taken once at the callback).
+It lived here in process memory until 2026-11-11: unbounded, bound to no
+browser, and lost at every reload.
+"""
 
 from __future__ import annotations
 
 import os
-import secrets
-import time
 from typing import Any
 from urllib.parse import urlencode
-
-# state -> {provider, created_at, extra}
-_oauth_states: dict[str, dict[str, Any]] = {}
-_STATE_TTL = 900
 
 
 def address_from_id_token(id_token: Any) -> str:
@@ -52,36 +52,6 @@ def public_base_url(request_base: str | None = None) -> str:
         return str(request_base).rstrip("/")
     port = (os.environ.get("KAZMA_PORT") or "9090").strip()
     return f"http://127.0.0.1:{port}"
-
-
-def new_state(provider: str, **extra: Any) -> str:
-    # prune expired
-    now = time.time()
-    dead = [k for k, v in _oauth_states.items() if now - v.get("created_at", 0) > _STATE_TTL]
-    for k in dead:
-        _oauth_states.pop(k, None)
-    state = secrets.token_urlsafe(24)
-    _oauth_states[state] = {"provider": provider, "created_at": now, **extra}
-    return state
-
-
-def peek_state(state: str) -> dict[str, Any] | None:
-    """Read OAuth state without consuming it (callback dispatch)."""
-    meta = _oauth_states.get((state or "").strip())
-    if not meta:
-        return None
-    if time.time() - meta.get("created_at", 0) > _STATE_TTL:
-        return None
-    return dict(meta)
-
-
-def pop_state(state: str) -> dict[str, Any] | None:
-    meta = _oauth_states.pop((state or "").strip(), None)
-    if not meta:
-        return None
-    if time.time() - meta.get("created_at", 0) > _STATE_TTL:
-        return None
-    return meta
 
 
 def authorize_redirect(url: str, params: dict[str, str]) -> str:

@@ -959,8 +959,12 @@ Anything else goes to the agent as a normal message.
 
 ## Permissions
 
-A chat app takes messages from the users its allowlist admits; an empty
-allowlist admits everyone in the chat. Within that:
+A chat app takes messages from the users its allowlist admits. An empty
+allowlist admits only the owner's own account Kazma already knows (a private
+Telegram chat Kazma pages you in, or a `platform:id` entry of
+`KAZMA_GATEWAY_ADMINS`), unless `KAZMA_GATEWAY_OPEN_TO_EVERYONE` is set: see
+[Who a chat app answers](../guide/gateways-and-platforms.md#who-it-answers).
+Within that:
 
 - A change that applies to every user and platform is admin-only: the
   default model (`/config model`, `/model default`), `/config memory`,
@@ -968,8 +972,10 @@ allowlist admits everyone in the chat. Within that:
   switching or cloning the active workspace (`/ide repo`), and the swarm's
   output routing (`/swarm config`). An admin is a user named in
   `KAZMA_GATEWAY_ADMINS` (user ids, or `platform:id` for one platform), which
-  decides alone when it is set; otherwise a user on the platform's allowlist.
-  With an empty allowlist and no `KAZMA_GATEWAY_ADMINS`, no one is.
+  decides alone when it is set; otherwise a user on the platform's allowlist,
+  or, with that allowlist empty, the owner's own account Kazma knows. With an
+  empty allowlist, no owner's account known and no `KAZMA_GATEWAY_ADMINS`, no
+  one is.
 - `/hitl` answers only a task you started, and `/session` takes over only
   your own seasons.
 - `/yolo` and `/unrestricted` are refused where policy forbids them

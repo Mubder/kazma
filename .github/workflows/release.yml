@@ -101,7 +101,7 @@ jobs:
           uv build --out-dir dist
           ls -la dist
           # Checksums of the built files, taken before any other tool runs
-          # (the SBOM generator below is fetched at run time, unpinned). They
+          # (the SBOM generator below is fetched at run time). They
           # live outside dist/ so they are not uploaded; every later step that
           # signs or publishes checks them again, so a tool that rewrote a
           # built file cannot have it signed unnoticed.
@@ -124,7 +124,9 @@ jobs:
           # dependency, and versions pyproject's minimums now refuse).
           uv export --locked --no-dev --no-emit-project --format requirements-txt \
             -o requirements.lock.txt
-          uvx --from cyclonedx-bom cyclonedx-py requirements requirements.lock.txt \
+          # An exact version: uvx would otherwise run whatever PyPI serves that
+          # day (tests/test_actions_pinned_by_sha.py).
+          uvx --from cyclonedx-bom==8.0.1 cyclonedx-py requirements requirements.lock.txt \
             --of JSON -o "dist/kazma-${BASE}.cdx.json" \
             --sv 1.6 --output-reproducible
           python -c "import json,sys; d=json.load(open(sys.argv[1],encoding='utf-8')); print('SBOM components:', len(d.get('components') or []))" \

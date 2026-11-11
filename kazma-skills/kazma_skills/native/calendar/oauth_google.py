@@ -18,12 +18,9 @@ from kazma_skills.native.calendar.credentials import (
     scopes_include_google_calendar,
     turn_calendar_on,
 )
-from kazma_skills.native.email_manager.oauth_common import (
-    authorize_redirect,
-    new_state,
-    pop_state,
-)
+from kazma_skills.native.email_manager.oauth_common import authorize_redirect
 from kazma_core.http_tls import shared_ssl_context
+from kazma_core.security.oauth_attempts import begin
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +120,9 @@ def start_google_calendar_oauth(request_base: str | None = None) -> dict[str, An
     if shape:
         return {"ok": False, "code": "malformed_client", "error": shape}
     redirect = _redirect_uri(request_base)
-    state = new_state("google_calendar", redirect_uri=redirect)
+    # One attempt per sign-in, bound to this browser and taken once at the
+    # callback (oauth_attempts). A settings write: this runs in a thread.
+    state = begin("google_calendar", redirect_uri=redirect)
     url = authorize_redirect(
         AUTH_URL,
         {
@@ -142,13 +141,17 @@ def start_google_calendar_oauth(request_base: str | None = None) -> dict[str, An
         "redirect_uri": redirect,
         "scopes": CALENDAR_SCOPES,
         "message": "Redirect user to authorize_url",
+        # For the start route's binding cookie; never sent back in its JSON.
+        "state": state,
     }
 
 
-async def finish_google_calendar_oauth(code: str, state: str) -> dict[str, Any]:
-    """Exchange code; store only if Calendar API probe succeeds."""
-    meta = pop_state(state)
-    if not meta or meta.get("provider") != "google_calendar":
+async def finish_google_calendar_oauth(code: str, attempt: dict[str, Any]) -> dict[str, Any]:
+    """Exchange code; store only if Calendar API probe succeeds. *attempt* is
+    the one the callback took with the browser's binding cookie
+    (``oauth_attempts.take``)."""
+    meta = attempt if isinstance(attempt, dict) else {}
+    if meta.get("provider") != "google_calendar":
         return {
             "ok": False,
             "error": "Invalid or expired OAuth state. Try Connect Calendar again.",

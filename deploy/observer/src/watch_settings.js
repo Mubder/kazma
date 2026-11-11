@@ -18,7 +18,7 @@ import { formatOperatorCard } from "./card.js";
 import { clock } from "./incidents.js";
 import { json, readBody } from "./http.js";
 import { Store } from "./store.js";
-import { signingHeaders, verify } from "./verify.js";
+import { signingHeaders, verifyRequest } from "./verify.js";
 
 export const TEST_GAP_S = 20;
 const ZONE_MAX = 64;
@@ -51,7 +51,7 @@ async function signedBody(request, env, now) {
   const store = new Store(env.DB);
   const key = await store.installKey(h.install);
   if (!key) return { response: json({ error: "unknown_install" }, 401) };
-  if (!(await verify(key, h.ts, raw, h.signature))) return { response: json({ error: "bad_signature" }, 401) };
+  if (!(await verifyRequest(key, h, request, raw))) return { response: json({ error: "bad_signature" }, 401) };
   let body;
   try {
     body = JSON.parse(new TextDecoder().decode(raw));

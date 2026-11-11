@@ -997,11 +997,13 @@ class CronScheduler:
             }
             from kazma_core.agent.turn import run_agent_turn
 
-            turn = await asyncio.wait_for(
-                run_agent_turn(graph=graph, thread_id=str(config["configurable"]["thread_id"]),
-                               state=state, config=config, persist=False),
-                timeout=settings.task_budget_seconds,
-            )
+            # The turn runs in this fire's own task: on Python 3.11
+            # ``asyncio.wait_for`` ran it in a task of its own, which a second
+            # cancel of the fire left running after the fire had ended
+            # (tests/test_work_deadlines_stay_in_the_task.py).
+            async with asyncio.timeout(settings.task_budget_seconds):
+                turn = await run_agent_turn(graph=graph, thread_id=str(config["configurable"]["thread_id"]),
+                                            state=state, config=config, persist=False)
         except TimeoutError:
             logger.warning("[CronScheduler] %s timed out", job.job_id)
             return FireResult(success=False, outcome="timed_out",

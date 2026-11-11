@@ -171,10 +171,8 @@ async def execute_consult(
         try:
             async with concurrency:
                 with track_effects(step_effects):
-                    worker_result = await asyncio.wait_for(
-                        dispatch_worker_by_name(worker_name, task.prompt, dispatch_context),
-                        timeout=wait_timeout(task.timeout),
-                    )
+                    async with asyncio.timeout(wait_timeout(task.timeout)):
+                        worker_result = await dispatch_worker_by_name(worker_name, task.prompt, dispatch_context)
         except TimeoutError:
             logger.warning(
                 "[Consultation] worker '%s' timed out after %.2fs",

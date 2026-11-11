@@ -86,7 +86,7 @@ mechanics, reading direction/theme/alignment from the profile:
 | `pdf.py` | Any document that needs shaping (`profile.shape_arabic`) routes **DOCX→LibreOffice→PDF**; everything else, and the fallback when LibreOffice is absent or fails, is reportlab with per-block alignment and RTL table columns reversed. |
 | `html.py` | `dir` attribute + CSS `unicode-bidi`; `dir` on each table from `profile.table_direction`; `text-align-last: start`, so each block ends its paragraphs on its own side; a `dir` wrapper on the blocks whose direction differs from the document's; `<bdi dir="ltr">` isolators for embedded Latin; the pinned font inlined for Arabic exports (`documents.render.embed_html_fonts`). |
 | `xlsx.py` | `sheet_view.rightToLeft` + complex-script `readingOrder`. |
-| `pptx.py` | `<a:pPr rtl="1">` **and** `algn="r"` (rtl alone does not right-align; the DrawingML attr is `algn`, not `al`). |
+| `pptx.py` | Per paragraph (`profile.block_is_rtl`): `<a:pPr rtl="1">` **and** `algn="r"` (rtl alone does not right-align; the DrawingML attr is `algn`, not `al`); the footer follows the deck. Text is one run per script, each with its `lang` (`arabic.script_runs`); bullets are the paragraph's own `a:buChar` "•", hanging on its reading side. |
 
 ## 3. Direction correctness — the hard-won details
 
@@ -123,6 +123,23 @@ These are the non-obvious facts each engine encodes once:
   Arabic, regular and bold, as Word embeds fonts (obfuscated font parts and
   `w:embedTrueTypeFonts`, `engines/docx_fonts.py`). Without it, a device with
   no IBM Plex drew the file in another face. It adds about 210 KB a file, compressed.
+- **Every font slot names the house face** — an Office file names a face in
+  far more places than its text: each run has three slots (Latin, East Asian
+  and complex script; Arabic is drawn from the complex-script one), and
+  paragraph defaults, the end-of-paragraph mark, list levels, bullets,
+  styles, the document defaults and the theme decide what text that is added
+  later, or that names nothing, is drawn in. The templates the engines build
+  on named Calibri or Cambria there, with Times New Roman or Arial for
+  Arabic; a deck "had the Kazma font but displayed it as Arial". Every slot
+  of every DOCX, PPTX and XLSX now names IBM Plex Sans Arabic
+  (`engines/office_fonts.py`): runs, defaults, end marks and bullets ("•"),
+  the themes (Latin, East Asian, complex script and the Arabic script
+  entry), the slide master's text styles, the notes master, Word's
+  `w:docDefaults` and every style, and Excel's Normal font, which a new
+  cell takes. A deck also carries the face, as PowerPoint embeds fonts
+  (Embedded OpenType font parts, `engines/pptx_fonts.py`); Excel cannot
+  embed fonts. Code keeps its monospace face and formulas Cambria Math.
+  `tests/test_office_files_name_the_house_face.py` reads every slot.
 - **Per block, not per document** — a bilingual document keeps each language's
   blocks aligned to their own reading start in every engine: `w:bidi` per
   paragraph (DOCX), per-block styles (PDF), a `dir` wrapper (HTML).
@@ -140,6 +157,9 @@ These are the non-obvious facts each engine encodes once:
   PDFs.
 - **PPTX** — paragraph RTL needs `rtl="1"` **and** an explicit `algn`
   alignment; `rtl` alone leaves text left-aligned (inherits the layout).
+  PowerPoint lays a run out by its language, so a line with both scripts is
+  written one run per script: as a single run it drew its spaces on the
+  wrong side of the Arabic words, or moved an English sentence's full stop.
 - **HTML** — bidi is native (`dir` + the browser algorithm); explicit `<bdi>` is
   only extra polish for URLs/standards.
 
@@ -203,7 +223,10 @@ active-content policy (`pdf_policy.py`) before it leaves the worker.
    If it needs a Python package or system binary, add it to the worker image
    too (`deploy/document-worker/requirements.in` /
    `deploy/document-worker/Dockerfile`): in the `container` profile the engines
-   that exist are the ones the image reports.
+   that exist are the ones the image reports. Pin the version `uv.lock` holds
+   and compile the hash lock with the command in the file's header;
+   `tests/test_document_worker_locks.py` refuses a pin `uv.lock` does not hold
+   and a locked version below a floor `pyproject.toml` declares.
 4. Add a test to `tests/test_unified_document_layer.py` asserting the engine
    consumes the profile (direction + a theme token), and extend
    `scripts/verify_documents.py`.

@@ -156,9 +156,21 @@ def _allowed_url(url: str) -> bool:
     return parsed.scheme == "http" and parsed.hostname in ("127.0.0.1", "localhost", "::1")
 
 
-def _sign(key: str, ts: int, message: bytes) -> str:
-    mac = hmac.new(key.encode("utf-8"), str(int(ts)).encode("ascii") + b"." + message, hashlib.sha256)
-    return "v1=" + mac.hexdigest()
+def _sign(key: str, ts: int, method: str, url: str, body: bytes) -> str:
+    """``v2=<hex>``: HMAC-SHA256 under *key* of
+    ``b"v2\\n<ts>\\n<METHOD>\\n<path>\\n" + body``, *path* the one *url* names.
+
+    The route is in what is signed, so the observer refuses a signature made
+    for another of its routes (the v1 form, ``"<ts>." + body``, bound none).
+    The guard's copy is
+    ``sign_request`` in ``scripts/service/kazma_guard.py``, the observer's
+    ``deploy/observer/src/verify.js``; ``tests/fixtures/observer/heartbeat_vector.json``
+    holds the three to one message.
+    """
+    path = urllib.parse.urlsplit(url).path or "/"
+    message = f"v2\n{int(ts)}\n{method.upper()}\n{path}\n".encode("ascii") + body
+    mac = hmac.new(key.encode("utf-8"), message, hashlib.sha256)
+    return "v2=" + mac.hexdigest()
 
 
 # -- the pairing file ------------------------------------------------------------
@@ -266,14 +278,15 @@ def _observer_summary(pairing: dict[str, str] | None = None, *, fresh: bool = Fa
         if not fresh and _cache["key"] == cache_key and time.monotonic() - _cache["at"] < _SUMMARY_TTL_S:
             return dict(_cache["value"])
     ts = int(time.time())
+    url = f"{pairing['url']}/v1/summary"
     headers = {
         "X-Kazma-Install": pairing["install"],
         "X-Kazma-Timestamp": str(ts),
-        "X-Kazma-Signature": _sign(pairing["key"], ts, b"GET /v1/summary"),
+        "X-Kazma-Signature": _sign(pairing["key"], ts, "GET", url, b""),
     }
     try:
         with httpx.Client(timeout=_TIMEOUT_S, follow_redirects=False, trust_env=False) as client:
-            res = client.get(f"{pairing['url']}/v1/summary", headers=headers)
+            res = client.get(url, headers=headers)
         data = res.json() if res.status_code == 200 else None
     except (httpx.HTTPError, ValueError) as exc:
         value: dict[str, Any] = {"ok": False, "error": "unreachable", "detail": type(exc).__name__}
@@ -373,20 +386,21 @@ def outside_digest_line(now: float | None = None) -> str | None:
 
 def _signed_post(pairing: dict[str, str], route: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     """POST *body* to the observer's *route*, signed by the install's key the
-    way the heartbeat is (``"<ts>." + body``). ``(status, answer)``; status 0
-    when the observer did not answer."""
+    way the heartbeat is (:func:`_sign`: the route and the body).
+    ``(status, answer)``; status 0 when the observer did not answer."""
     raw = json.dumps({"v": 1, "install": pairing["install"], **body},
                      sort_keys=True, separators=(",", ":")).encode("utf-8")
     ts = int(time.time())
+    url = f"{pairing['url']}{route}"
     headers = {
         "Content-Type": "application/json",
         "X-Kazma-Install": pairing["install"],
         "X-Kazma-Timestamp": str(ts),
-        "X-Kazma-Signature": _sign(pairing["key"], ts, raw),
+        "X-Kazma-Signature": _sign(pairing["key"], ts, "POST", url, raw),
     }
     try:
         with httpx.Client(timeout=_TIMEOUT_S, follow_redirects=False, trust_env=False) as client:
-            res = client.post(f"{pairing['url']}{route}", content=raw, headers=headers)
+            res = client.post(url, content=raw, headers=headers)
     except httpx.HTTPError as exc:
         return 0, {"error": "unreachable", "detail": type(exc).__name__}
     try:

@@ -73,9 +73,6 @@ NOT_REPOSITORY_FILES = {
     "manifest.yml": "a skill manifest's accepted name",
     "ar.json": "named to say there are no such files",
     "en.json": "named to say there are no such files",
-    # API paths that end in .json
-    "start.json": "an OAuth route (/api/.../start.json)",
-    "api/calendar/oauth/microsoft/start.json": "an OAuth route",
     # the website's repository (Mubder/KazmaAI)
     "src/data/metrics.json": "kazma.ai's file",
     "src/data/docs-sync.json": "kazma.ai's file",

@@ -71,12 +71,16 @@ WEAK_SECRET_CHARS = 20
 #: each place kept its own list of spellings, and they disagreed -- the
 #: middleware honoured ``KAZMA_DEV_WS_BYPASS=on`` that this guard read as off,
 #: and ``KAZMA_PRODUCTION=on`` meant production to the vault and not to the
-#: auth gate (security audit 2026-11-10).
+#: auth gate (security audit 2026-11-10). The chat apps' two
+#: (``kazma_gateway.sender_rule``, 2026-11-11) decide who may message Kazma
+#: through a bot whose allowlist is empty.
 SECURITY_SWITCHES: frozenset[str] = frozenset({
     "KAZMA_PRODUCTION",
     "KAZMA_AUTH_DISABLED",
     "KAZMA_DEMO_MODE",
     "KAZMA_DEV_WS_BYPASS",
+    "KAZMA_GATEWAY_OPEN_TO_EVERYONE",
+    "KAZMA_GATEWAY_STRICT_ALLOWLIST",
 })
 
 _TRUTHY = frozenset({"1", "true", "yes", "on"})

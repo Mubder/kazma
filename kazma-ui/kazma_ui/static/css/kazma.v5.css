@@ -721,13 +721,23 @@ html[data-theme="light"] { color-scheme: only light; }
 /* Settings -> Alerts (the unified alerts plan, Stage 3): the sections as
    cards side by side, a route row (icon tile, name and line, switch), the
    buttons under a section, and the Save row. Layout only: the colours are
-   the shared classes'. */
+   the shared classes'.
+   The cards flow down as many columns of 320px or more as fit, each card
+   whole, the next straight under it: a grid's row is as tall as its tallest
+   card, and the page was empty under the server status messages and the
+   guard's pager down to the bottom of Kazma Watch (2026-11-11). Order is the
+   page's, down a column then across (right to left in Arabic). Three columns
+   at most: five cards balanced into more left the columns past the third
+   empty, the cards on one side of a wide page. */
 .alerts-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
-  gap: var(--sp-5);
-  align-items: start;
+  columns: 3 320px;
+  column-gap: var(--sp-5);
 }
+.alerts-grid > * {
+  break-inside: avoid;
+  margin: 0 0 var(--sp-5);
+}
+.alerts-grid + .alerts-save { margin-top: 0; }
 .alerts-row {
   display: flex;
   align-items: center;

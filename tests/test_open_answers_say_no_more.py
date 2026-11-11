@@ -1,7 +1,9 @@
 """What Kazma answers before sign-in says no more than it must (2026-11).
 
 - FA-130: the GitHub OAuth result page put its message into HTML as text;
-  a token-exchange failure quotes GitHub's own answer there.
+  a token-exchange failure quotes GitHub's own answer there. Since
+  2026-11-11 there is no result page: the callback answers a redirect with a
+  code, and GitHub's words go to the log only.
 - FA-131: ``/health/ready`` and ``/health/deep`` answer without sign-in, and
   three of their checks returned the exception's text (a DSN host, a path),
   five more ``Type: text``. A failed check now shows the exception's type, a
@@ -30,22 +32,44 @@ HEALTH = ROOT / "kazma-ui" / "kazma_ui" / "health.py"
 _HOSTILE = '<img src=x onerror="alert(1)">'
 
 
-def test_the_oauth_result_page_shows_its_message_as_text():
-    from kazma_gateway.routers.github import _oauth_result_page
+def _carries_github_text(location: str) -> bool:
+    from urllib.parse import unquote
 
-    body = _oauth_result_page(False, f"Token exchange failed: {_HOSTILE}").body.decode()
-    assert "<img" not in body
-    assert "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;" in body
+    return "<img" in unquote(location) or "onerror" in unquote(location)
 
 
-def test_negative_control_unescaped_the_markup_reaches_the_page(monkeypatch):
-    import html
+def test_the_github_callback_says_a_code_never_githubs_text(monkeypatch):
+    """Since 2026-11-11 the callback sends the browser back to the page it
+    started from with a code (``github_oauth_reason``); the result page that
+    put GitHub's answer into HTML is gone, and GitHub's words go to the log."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from kazma_core.security.oauth_attempts import begin, binding_cookie_name
 
-    from kazma_gateway.routers.github import _oauth_result_page
+    from kazma_gateway.routers import github, github_client
 
-    monkeypatch.setattr(html, "escape", lambda s, quote=True: s)
-    body = _oauth_result_page(False, _HOSTILE).body.decode()
-    assert "<img src=x" in body
+    async def refuse(code, redirect_uri):
+        raise github_client.GitHubError(400, f"bad_verification_code {_HOSTILE}")
+
+    monkeypatch.setattr(github_client, "exchange_code_for_token", refuse)
+    app = FastAPI()
+    app.include_router(github.create_github_router())
+    state = begin("github", redirect_uri="http://testserver/api/github/oauth/callback",
+                  return_to="/workspace")
+    r = TestClient(app).get(
+        "/api/github/oauth/callback", params={"code": "c", "state": state},
+        headers={"cookie": f"{binding_cookie_name(state)}={state}"}, follow_redirects=False,
+    )
+    assert r.status_code == 302
+    location = r.headers["location"]
+    assert location == "/workspace?github_oauth=error&github_oauth_reason=exchange_failed"
+    assert not _carries_github_text(location)
+
+
+def test_negative_control_a_location_quoting_the_text_is_caught():
+    from urllib.parse import quote
+
+    assert _carries_github_text("/workspace?github_oauth=error&msg=" + quote(_HOSTILE))
 
 
 # ── FA-131 ───────────────────────────────────────────────────────────────────

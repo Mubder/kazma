@@ -259,6 +259,33 @@ def _telegram_chat(value: Any) -> Any:
                           "or a public @name.")
 
 
+def _alerts_bot_choice(value: Any) -> Any:
+    # Which bot sends Kazma's alerts (ops_alerts.ALERTS_BOT_KEY).
+    from kazma_core.observability.ops_alerts import ALERTS_BOT_CHOICES
+
+    text = str(value if value is not None else "").strip() or "chat_bot"
+    if text not in ALERTS_BOT_CHOICES:
+        raise SettingRejected("The bot that sends alerts is one of: " + ", ".join(ALERTS_BOT_CHOICES) + ".")
+    return text
+
+
+def _telegram_bot_token(value: Any) -> Any:
+    # A Telegram bot token, as BotFather gives it: digits, a colon, 35 more.
+    # A token that is not one is an alerts bot that never sends.
+    import re
+
+    from kazma_core.config_store import is_masked_secret_placeholder
+
+    text = str(value if value is not None else "").strip()
+    if not text:
+        return ""
+    if is_masked_secret_placeholder(text):
+        raise SettingRejected("Paste the bot's token itself, not the stars that hide a saved one.")
+    if not re.fullmatch(r"\d{5,15}:[A-Za-z0-9_-]{30,64}", text):
+        raise SettingRejected("A Telegram bot token looks like 123456789:AA... (BotFather gives it).")
+    return text
+
+
 def _email_address(value: Any) -> Any:
     # Kazma Watch's email recipient (Settings -> Alerts, sent to the observer).
     from kazma_core.observability.outside_watch import valid_email
@@ -453,7 +480,12 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
     from kazma_core.memory.embedder import API_KEY_ENV_KEY
     from kazma_core.model_details import OVERRIDES_KEY as MODEL_DETAILS_KEY
     from kazma_core.model_prices import OWNER_PRICES_KEY
-    from kazma_core.observability.ops_alerts import NOTICES_TO_CHATS_KEY
+    from kazma_core.observability.ops_alerts import (
+        ALERTS_BOT_CHAT_KEY,
+        ALERTS_BOT_KEY,
+        ALERTS_BOT_TOKEN_KEY,
+        NOTICES_TO_CHATS_KEY,
+    )
     from kazma_core.observability.outside_watch import EMAIL_TO_KEY
     from kazma_core.runs.runbooks import RUNBOOKS_KEY, validate_runbooks
     from kazma_core.swarm.task_store import TASK_RETENTION_KEY
@@ -481,6 +513,11 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
         # The group the "Telegram (group)" route sends Kazma's alerts to
         # (ops_alerts.ALERTS_GROUP_KEY).
         "notifications.ops.telegram_group_chat": (_telegram_chat, "notifications"),
+        # The separate alerts bot (ops_alerts.ALERTS_BOT_*): which bot sends,
+        # its token (a secret: the vault) and its chat.
+        ALERTS_BOT_KEY: (_alerts_bot_choice, "notifications"),
+        ALERTS_BOT_TOKEN_KEY: (_telegram_bot_token, "notifications"),
+        ALERTS_BOT_CHAT_KEY: (_telegram_chat, "notifications"),
         RUNBOOKS_KEY: (validate_runbooks, None),
         "agent.language": (_agent_language, "agent"),
         "agent.max_iterations": (_max_iterations, "agent"),

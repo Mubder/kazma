@@ -117,3 +117,40 @@ def process_tree_sample() -> dict[str, float | int]:
         except psutil.Error:
             continue
     return {"rss_mib": round(rss / 2**20, 1), "handles": handles, "processes": len(procs)}
+
+
+def peak_rss_bytes() -> int | None:
+    """This process's own peak resident memory, in bytes; None when unknown.
+
+    Windows: the peak working set. Linux: ``VmHWM`` of ``/proc/self/status``,
+    the high-water mark of this process's own address space. Never
+    ``getrusage(RUSAGE_SELF).ru_maxrss`` on Linux: the kernel keeps there the
+    largest resident size from BEFORE the process's exec, so a child started
+    by a 1 GiB pytest process reads 1 GiB before it has done anything (CI,
+    2026-11-10: the Time Travel soak's first cycle "grew 964 MiB" while the
+    child itself held about 100). Elsewhere ``ru_maxrss`` (bytes on macOS,
+    kilobytes on the BSDs).
+    """
+    if os.name == "nt":
+        try:
+            import psutil
+
+            return int(getattr(psutil.Process().memory_info(), "peak_wset", 0)) or None
+        except Exception:  # noqa: BLE001 -- a measurement must never end a soak
+            return None
+    if sys.platform.startswith("linux"):
+        try:
+            with open("/proc/self/status", encoding="ascii", errors="replace") as fh:
+                for line in fh:
+                    if line.startswith("VmHWM:"):
+                        return int(line.split()[1]) * 1024  # kB
+        except (OSError, ValueError, IndexError):
+            return None
+        return None
+    try:
+        import resource
+
+        maxrss = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+        return (maxrss if sys.platform == "darwin" else maxrss * 1024) or None
+    except (ImportError, OSError):
+        return None

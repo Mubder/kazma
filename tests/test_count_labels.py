@@ -178,8 +178,8 @@ _NOT_A_NOUN = frozenset({"is", "was", "as", "has", "does", "its", "this", "us"})
 #: position or a duration: what follows them is not a counted noun, in either
 #: language ("{name} uses tools", "{name} مُعطَّل").
 _NOT_A_COUNT = frozenset({
-    "amount", "boost", "d", "end", "error", "id", "library", "mb", "member", "model",
-    "name", "names", "number", "path", "protocol", "provider", "root", "s", "scanner",
+    "amount", "boost", "bot", "d", "end", "error", "id", "library", "mb", "member", "model",
+    "name", "names", "number", "origin", "path", "protocol", "provider", "root", "s", "scanner",
     "shown", "size", "source", "start", "target", "tool", "v", "x", "y",
 })
 

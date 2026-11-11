@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -139,3 +140,69 @@ def test_percentiles_and_the_latency_summary() -> None:
     summary = soak_report.latency_summary(values)
     assert summary["n"] == 100 and summary["max"] == 100.0 and summary["p99"] == 99.0
     assert soak_report.latency_summary([]) == {"p50": None, "p95": None, "p99": None, "max": None, "n": 0}
+
+
+# ── a process's own peak memory (CI, 2026-11-10) ─────────────────────────
+
+#: A parent that holds this much, then starts a child that measures itself.
+_PARENT_MIB = 256
+
+_PARENT = r"""
+import json, subprocess, sys
+held = bytearray({mib} * 2**20)
+for i in range(0, len(held), 4096):
+    held[i] = 1  # resident, not only reserved
+child = '''
+import json, os, sys
+sys.path.insert(0, os.environ["KAZMA_TEST_SOAK_SCRIPTS"])  # a path in source breaks on Windows' backslashes
+import soak_report
+try:
+    import resource
+    maxrss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+except ImportError:
+    maxrss = None
+print(json.dumps({{"peak": soak_report.peak_rss_bytes(), "ru_maxrss": maxrss}}))
+'''
+out = subprocess.run([sys.executable, "-c", child], capture_output=True, text=True, check=True).stdout
+print(out.strip().splitlines()[-1])
+"""
+
+
+def _child_started_by_a_big_parent() -> dict:
+    script = _PARENT.format(mib=_PARENT_MIB)
+    env = {**os.environ, "KAZMA_TEST_SOAK_SCRIPTS": str(Path(soak_report.__file__).resolve().parent)}
+    out = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True,
+                         timeout=120, env=env).stdout
+    return json.loads(out.strip().splitlines()[-1])
+
+
+def test_a_child_reports_its_own_peak_not_its_parents() -> None:
+    """A soak's cycle child is started by the harness (a pytest process of a
+    gigabyte in a CI chunk). Its peak is its own: the Time Travel soak's
+    first cycle read "RSS grew 964 MiB" on Linux CI from the parent's size."""
+    measured = _child_started_by_a_big_parent()
+    assert measured["peak"] and measured["peak"] < 128 * 2**20, measured
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="the inherited high-water mark is Linux's")
+def test_control_ru_maxrss_carries_the_parents_size_into_the_child() -> None:
+    """Negative control: what the soaks read before -- ``ru_maxrss`` (kB on
+    Linux) -- holds the parent's resident size from before the child's exec."""
+    measured = _child_started_by_a_big_parent()
+    assert measured["ru_maxrss"] * 1024 >= (_PARENT_MIB - 16) * 2**20, measured
+
+
+def _ru_maxrss_readers(folder: Path) -> list[str]:
+    return sorted(p.name for p in folder.glob("*.py")
+                  if p.name != "soak_report.py" and "ru_maxrss" in p.read_text(encoding="utf-8"))
+
+
+def test_no_soak_reads_ru_maxrss_but_the_shared_helper(tmp_path: Path) -> None:
+    """The class gate: every peak a soak reports comes from
+    :func:`soak_report.peak_rss_bytes`, never ``ru_maxrss`` read in place
+    (the Time Travel, Knowledge and Memory soaks each read it)."""
+    assert _ru_maxrss_readers(Path(soak_report.__file__).resolve().parent) == []
+    # Negative control: a planted reader is found.
+    (tmp_path / "planted_soak.py").write_text(
+        "import resource\npeak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss\n", encoding="utf-8")
+    assert _ru_maxrss_readers(tmp_path) == ["planted_soak.py"]

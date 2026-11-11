@@ -37,6 +37,19 @@ from kazma_core.observability import daily_digest, outside_watch
 
 ROOT = Path(__file__).resolve().parents[1]
 TOKEN = "t" * 40
+VECTOR = json.loads((ROOT / "tests" / "fixtures" / "observer" / "heartbeat_vector.json")
+                    .read_text(encoding="utf-8"))
+
+
+def _v2(key: str, ts: str | int, method: str, path: str, body: bytes) -> str:
+    """The Worker's v2 signature, written from verify.js's v2Message."""
+    message = f"v2\n{ts}\n{method}\n{path}\n".encode("ascii") + body
+    return "v2=" + hmac.new(key.encode(), message, hashlib.sha256).hexdigest()
+
+
+def _v1(key: str, ts: int, body: bytes) -> str:
+    """The old v1 form, which bound no route."""
+    return "v1=" + hmac.new(key.encode(), f"{ts}.".encode("ascii") + body, hashlib.sha256).hexdigest()
 
 
 class _Observer(BaseHTTPRequestHandler):
@@ -75,8 +88,8 @@ class _Observer(BaseHTTPRequestHandler):
         sig = self.headers.get("X-Kazma-Signature", "")
         self.seen.append({"path": self.path, "install": install})
         key = self.paired.get(install)
-        want = "v1=" + hmac.new(key.encode(), f"{ts}.GET /v1/summary".encode(),
-                                hashlib.sha256).hexdigest() if key else None
+        # The Worker's v2 check (verify.js verifyRequest): method, path, body.
+        want = _v2(key, ts, "GET", self.path, b"") if key else None
         if self.path != "/v1/summary" or not key or not hmac.compare_digest(want, sig):
             return self._reply(401, {"error": "bad_signature"})
         return self._reply(200, {"install": install, **self.summary})
@@ -199,6 +212,76 @@ def test_a_pairing_file_the_guard_would_refuse_reads_as_not_paired(content):
     path = outside_watch._pairing_path()
     path.write_text(content, encoding="utf-8")
     assert outside_watch._read_pairing() is None
+
+
+# -- the signature binds the route (v2) ---------------------------------------------
+
+
+def test_kazmas_signer_matches_the_shared_v2_vector():
+    """Kazma's ``_sign`` and the Worker's ``signV2`` (the node suite checks
+    the same vector) sign every route to the same bytes."""
+    v2 = VECTOR["v2"]
+    for route in v2["routes"]:
+        url = f"https://status.kazma.example{route['path']}"
+        got = outside_watch._sign(VECTOR["key"], VECTOR["timestamp"], route["method"], url,
+                                  route["body"].encode())
+        assert got == route["signature"], route
+    assert len({r["signature"] for r in v2["routes"]}) == len(v2["routes"])
+
+
+def _worker_accepts(key: str, ts: int, method: str, path: str, body: bytes, signature: str, *,
+                    v1_only: bool = False) -> bool:
+    """The Worker's check, as verify.js makes it; ``v1_only`` is the old one."""
+    if v1_only:
+        return hmac.compare_digest(_v1(key, ts, body), signature)
+    return hmac.compare_digest(_v2(key, ts, method, path, body), signature)
+
+
+def test_a_signature_for_one_route_is_refused_on_another():
+    key, ts, body = VECTOR["key"], VECTOR["timestamp"], b'{"v":1,"install":"a1b2c3d4e5f6a7b8"}'
+    settings = outside_watch._sign(key, ts, "POST", "https://o.example/v1/settings", body)
+    assert settings.startswith("v2=")
+    assert _worker_accepts(key, ts, "POST", "/v1/settings", body, settings)
+    assert not _worker_accepts(key, ts, "POST", "/v1/leave", body, settings)
+    assert not _worker_accepts(key, ts, "GET", "/v1/settings", body, settings)
+    # Negative control: the old v1-only check takes a settings request's
+    # signature on /v1/leave -- the route is not in what it signed.
+    old = _v1(key, ts, body)
+    assert _worker_accepts(key, ts, "POST", "/v1/settings", body, old, v1_only=True)
+    assert _worker_accepts(key, ts, "POST", "/v1/leave", body, old, v1_only=True)
+
+
+def test_every_signed_request_kazma_sends_is_v2(observer, restricted, monkeypatch):
+    """The settings, test-page and leave requests carry a v2 signature over
+    their own route (and the summary over its own, checked by the stand-in)."""
+    outside_watch.pair_with_observer(observer.url, TOKEN)
+    pairing = outside_watch._read_pairing()
+    sent: list[tuple[str, str, bytes, dict]] = []
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def post(self, url, content=b"", headers=None):
+            sent.append(("POST", url, content, dict(headers or {})))
+            import httpx
+
+            return httpx.Response(200, json={"ok": True})
+
+    monkeypatch.setattr(outside_watch.httpx, "Client", _Client)
+    for route in ("/v1/settings", "/v1/test-page", "/v1/leave"):
+        outside_watch._signed_post(pairing, route, {"x": 1})
+    assert [s[1].removeprefix(observer.url) for s in sent] == ["/v1/settings", "/v1/test-page", "/v1/leave"]
+    for method, url, raw, headers in sent:
+        path = url.removeprefix(observer.url)
+        ts = headers["X-Kazma-Timestamp"]
+        assert headers["X-Kazma-Signature"] == _v2(pairing["key"], ts, method, path, raw)
 
 
 # -- reading back ---------------------------------------------------------------------

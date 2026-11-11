@@ -1280,6 +1280,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "هذه الأداة <strong>تتطلب الموافقة دائمًا</strong> (حماية أمان) — لا يتخطاها YOLO ولا أذونات الجلسة.",
         "en": "This tool <strong>always requires approval</strong> (safety fail-safe) — YOLO and session grants cannot skip it.",
     },
+    # The card's notes: the same words as kazma_core/safety/card_notes.py
+    # NOTE_TEXT (tests/test_outside_text_fetch.py holds them equal).
+    "chat.hitl_note_outside_fetch": {
+        "ar": "هذا العنوان جاء من نص قرأه Kazma، لا منك ولا من نتيجة بحث: {host}",
+        "en": "This address came from text Kazma read, not from you or a search result: {host}",
+    },
+    "chat.hitl_note_git_programs": {
+        "ar": "هذا المستودع يحدد برامج يشغّلها git لهذا الأمر: {items}",
+        "en": "This repository sets programs git runs for this command: {items}",
+    },
     "chat.hitl_approve_once": {
         "ar": "موافقة لمرة واحدة",
         "en": "Approve once",

@@ -6,7 +6,7 @@ Provides six core components:
   transient-failure detection.
 * **CircuitBreaker** -- per-worker failure tracking with closed/open/half-open
   state machine and manual reset support.
-* **TimeoutGuard** -- per-task timeout enforcement via ``asyncio.wait_for`` with
+* **TimeoutGuard** -- per-task timeout enforcement via ``asyncio.timeout`` with
   configurable on-timeout behaviors (fail, retry, skip).
 * **OutputValidator** -- Pydantic / dict / JSON-schema validation on worker
   output before acceptance.
@@ -718,7 +718,7 @@ def _shared_breakers_enabled() -> bool:
 
 @dataclass
 class TimeoutGuard:
-    """Per-task timeout enforcement via ``asyncio.wait_for``.
+    """Per-task timeout enforcement via ``asyncio.timeout``.
 
     Wraps a worker coroutine with a timeout.  When the timeout fires the
     worker's coroutine is cleanly cancelled and a result dict is returned
@@ -778,7 +778,11 @@ class TimeoutGuard:
             )
 
         try:
-            return await asyncio.wait_for(fn(), timeout=effective_timeout)
+            # In the caller's own task, never a task of wait_for's (Python
+            # 3.11): a second cancel of the dispatch then reaches the worker
+            # (tests/test_work_deadlines_stay_in_the_task.py).
+            async with asyncio.timeout(effective_timeout):
+                return await fn()
         except TimeoutError:
             logger.warning(
                 "[TimeoutGuard] worker '%s' timed out after %.2fs (on_timeout=%s)",

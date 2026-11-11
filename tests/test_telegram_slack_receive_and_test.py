@@ -537,6 +537,9 @@ def test_the_routes_run_each_diagnosis_with_the_saved_settings(monkeypatch) -> N
     }.items():
         store.set(key, value, category="connectors")
     store.set("swarm.output_target", {"chat_id": -100, "enabled": True, "bot_token": ""}, category="swarm")
+    store.delete("guard.telegram.chat_id")
+    for name in ("KAZMA_GATEWAY_ADMINS", "KAZMA_GATEWAY_OPEN_TO_EVERYONE"):
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("SLACK_APP_TOKEN", "xapp-env")
     got: dict[str, dict[str, Any]] = {}
 
@@ -554,11 +557,15 @@ def test_the_routes_run_each_diagnosis_with_the_saved_settings(monkeypatch) -> N
     client = TestClient(app)
     assert client.post("/api/connectors/telegram/test").json()["checks"]
     assert client.post("/api/connectors/slack/test").json()["checks"]
+    # The delivery chat 7 is a private chat: the owner's own account Kazma
+    # knows (sender_rule), which the Test names when the allowlist is empty.
     assert got["telegram"] == {"token": "123:abc", "chat_id": "7", "allowed_users": ["7"],
                                "group": {"chat_id": -100, "enabled": True, "bot_token": ""},
+                               "owner_ids": ["7"], "open_to_everyone": False,
                                "live": {"live": "telegram"}}
     assert got["slack"] == {"token": "xoxb-t", "app_token": "xapp-env", "channel_id": "C1",
-                            "allowed_users": ["U1"], "live": {"live": "slack"}}
+                            "allowed_users": ["U1"], "owner_ids": [], "open_to_everyone": False,
+                            "live": {"live": "slack"}}
 
 
 def test_every_check_of_every_adapter_has_a_title_on_the_card() -> None:
