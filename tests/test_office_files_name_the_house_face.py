@@ -385,6 +385,40 @@ def _faces_on_the_page(tmp_path: Path, fmt: str) -> dict[str, set[str]]:
     return faces
 
 
+def _opens(tmp_path: Path, fmt: str) -> bool:
+    """Whether this LibreOffice opens *fmt* at all. CI installs Writer only,
+    which cannot open a deck or a workbook (Impress and Calc are packages of
+    their own), and there no PDF is written. Probed on a plain file made with
+    python-pptx or openpyxl, never on Kazma's output, so a file of Kazma's
+    that LibreOffice refuses still fails the test. Tried twice: a fresh
+    profile's first conversion can write nothing (seen in WSL, 2026-11-11)."""
+    from kazma_core.documents.binaries import run_soffice_cli
+
+    folder = tmp_path / "probe"
+    folder.mkdir()
+    plain = folder / f"plain.{fmt}"
+    if fmt == "pptx":
+        from pptx import Presentation
+
+        deck = Presentation()
+        deck.slides.add_slide(deck.slide_layouts[1]).shapes.title.text = "Plain"
+        deck.save(plain)
+    else:
+        from openpyxl import Workbook
+
+        book = Workbook()
+        book.active["A1"] = "Plain"
+        book.save(plain)
+    for _ in range(2):
+        run_soffice_cli(("--headless", "--nologo", "--norestore",
+                         f"-env:UserInstallation={(folder / 'profile').as_uri()}",
+                         "--convert-to", "pdf", "--outdir", str(folder), str(plain)),
+                        timeout=180, cwd=folder)
+        if (folder / "plain.pdf").exists():
+            return True
+    return False
+
+
 @pytest.mark.skipif(not _soffice(), reason="needs LibreOffice and PyMuPDF")
 @pytest.mark.parametrize("fmt", ["pptx", "xlsx"])
 def test_on_the_page_only_the_house_face_is_drawn(tmp_path, monkeypatch, fmt):
@@ -392,6 +426,8 @@ def test_on_the_page_only_the_house_face_is_drawn(tmp_path, monkeypatch, fmt):
     generated deck and workbook in the house face only; the old engines' were
     drawn partly in Arial or Calibri (Arabic, chart text)."""
 
+    if not _opens(tmp_path, fmt):
+        pytest.skip(f"this LibreOffice cannot open .{fmt} (Impress or Calc is not installed)")
     for name, faces in _faces_on_the_page(tmp_path / "new", fmt).items():
         assert faces and all(_house_postscript(face) for face in faces), (name, faces)
     _old_engines(monkeypatch)
