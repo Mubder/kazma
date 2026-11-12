@@ -36,6 +36,8 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
+from kazma_core.docker_cli import KAZMA_CONTEXT, KAZMA_DISTRO
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -53,8 +55,8 @@ __all__ = [
 
 Runner = Callable[..., subprocess.CompletedProcess]
 
-DISTRO = "kazma-engine"
-CONTEXT = "kazma-engine"
+DISTRO = KAZMA_DISTRO
+CONTEXT = KAZMA_CONTEXT
 TASK_NAME = "KazmaEngine"
 PORT = 2376
 #: What an action answers when Windows must restart before the next step
@@ -99,9 +101,12 @@ _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 def _engine_dir() -> Path:
-    """``%LOCALAPPDATA%\\Kazma\\engine``: the distro's disk, its scripts, downloads."""
-    base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
-    return Path(base) / "Kazma" / "engine"
+    """``%LOCALAPPDATA%\\Kazma\\engine``: the distro's disk, its scripts,
+    downloads. One definition, :func:`kazma_core.docker_cli.kazma_engine_dir`:
+    the guard's disk watch reads the same folder."""
+    from kazma_core.docker_cli import kazma_engine_dir
+
+    return kazma_engine_dir()
 
 
 def bin_dir() -> Path:

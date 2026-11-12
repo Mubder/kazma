@@ -636,9 +636,16 @@ def _isolation_report() -> dict[str, Any]:
     attestation = status.get("attestation") if isinstance(status.get("attestation"), dict) else {}
     capabilities = status.get("capabilities") if isinstance(status.get("capabilities"), dict) else {}
     image_code = capabilities.get("documents_code_sha256")
+    from kazma_core.docker_cli import engine_in_force
+
     return {
         "mode": CONTAINER,
         "ready": ready,
+        # Which Docker engine the broker's containers run on (``kazma``,
+        # ``desktop``, ``system``, ``other``): Kazma's own engine comes back
+        # with nobody signed in, Docker Desktop waits for a sign-in, so a
+        # broker waiting on each calls for a different step (``action``).
+        "engine": engine_in_force(),
         "filesystem_isolation": ready,
         "network_isolation": ready,
         "resource_limits": "container_cgroup" if ready else None,

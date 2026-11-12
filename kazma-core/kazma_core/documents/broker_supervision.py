@@ -313,6 +313,10 @@ _MESSAGES = {
                    "start it (schtasks /Run /TN KazmaAgent).",
     "wait": "The guard is starting the document broker; it attests its containers first.",
     "start_docker": "Docker does not answer: start Docker. The guard keeps trying.",
+    "start_kazma_engine": "Kazma's container engine does not answer: the guard runs its KazmaEngine "
+                          "task and keeps trying. If it stays down, repair it with the command below.",
+    "start_docker_desktop": "Docker Desktop does not answer: it starts only when someone signs in to "
+                            "this PC. Sign in, or start Docker Desktop; the guard keeps trying.",
     "check_broker_log": "The document broker keeps failing: its log is below.",
     "enable_guard_broker": "The guard does not run a document broker here (KAZMA_GUARD_DOCUMENT_BROKER=off).",
     "run_broker": "Nothing runs a document broker: run Kazma under the guard (it runs one), or run a "
@@ -372,6 +376,14 @@ def isolation_action(report: dict[str, Any]) -> dict[str, Any] | None:
     if state == "image_missing":
         return _action("build_image", _broker_command())
     if state == "docker_unavailable":
+        # Name the engine the broker waits for: Kazma's own comes back by
+        # itself (its boot task, the guard), Docker Desktop waits for a
+        # sign-in (docs/plans/CONTAINERS_WITHOUT_A_SIGN_IN_PLAN.md).
+        engine = report.get("engine")
+        if engine == "kazma":
+            return _action("start_kazma_engine", f"{_install_python()} -m kazma_cli setup engine")
+        if engine == "desktop":
+            return _action("start_docker_desktop")
         return _action("start_docker")
     if state in ("backoff",) or (broker.get("failures") or 0) > 0:
         return _action("check_broker_log", broker.get("log"))

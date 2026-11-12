@@ -306,6 +306,14 @@ def test_readiness_names_the_one_step_that_fixes_it(store, tmp_path, monkeypatch
             monkeypatch.delenv("KAZMA_DOCUMENT_BROKER_URL", raising=False)
         else:
             monkeypatch.setenv("KAZMA_DOCUMENT_BROKER_URL", "tcp://127.0.0.1:24567")
+            if case == "docker_down":
+                # An engine Kazma did not set up: the general step. Kazma's
+                # engine and Docker Desktop are named in their own steps
+                # (test_engine_named_where_kazma_waits); without this the
+                # answer followed this machine's own docker context.
+                from kazma_core import docker_cli
+
+                monkeypatch.setattr(docker_cli, "engine_in_force", lambda: "other")
             broker = {
                 "old_guard": {"state": "idle"},
                 "image_missing": {"state": "image_missing", "failures": 0},

@@ -736,6 +736,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Docker does not answer: start Docker. The guard keeps trying.",
         "ar": "Docker لا يستجيب: شغّل Docker. يواصل الحارس المحاولة.",
     },
+    "documents.isolation_action.start_kazma_engine": {
+        "en": "Kazma's container engine does not answer: the guard runs its KazmaEngine task and keeps trying. If it stays down, repair it with the command below.",
+        "ar": "محرّك الحاويات الخاص بـ Kazma لا يستجيب: يشغّل الحارس مهمته KazmaEngine ويواصل المحاولة. إن بقي متوقفًا فأصلحه بالأمر أدناه.",
+    },
+    "documents.isolation_action.start_docker_desktop": {
+        "en": "Docker Desktop does not answer: it starts only when someone signs in to this PC. Sign in, or start Docker Desktop; the guard keeps trying.",
+        "ar": "Docker Desktop لا يستجيب: لا يبدأ إلا حين يسجّل أحدٌ الدخول إلى هذا الجهاز. سجّل الدخول أو شغّل Docker Desktop؛ يواصل الحارس المحاولة.",
+    },
     "documents.isolation_action.check_broker_log": {
         "en": "The document broker keeps failing. Its log:",
         "ar": "يتكرّر فشل وسيط المستندات. سجلّه:",
