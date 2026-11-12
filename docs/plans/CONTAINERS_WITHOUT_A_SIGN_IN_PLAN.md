@@ -194,10 +194,19 @@ So a boot task with nobody signed in can start and keep Kazma's engine, and
 its containers stop within seconds. The guard starts the keep-alive before
 anything else uses the engine.
 
-Not measured yet (Stage 2's drill does it): someone signing in while the
-engine runs (their own distros and the engine side by side), `wsl
---shutdown` while Kazma runs, and a Windows update restart rather than a
-plain one.
+Second drill, the same day, with the engine as built for the owner's PC
+(mutual TLS, `KazmaEngine` task, S4U, Limited) and a probe container on
+`127.0.0.1:18080`, the VM restarted with nobody signed in:
+
+| Check | Result |
+|---|---|
+| A service as **SYSTEM** reads the port (a tunnel service runs that way) | 200 from 45 s after boot, every 45 s for six minutes |
+| A service as **LOCAL SERVICE** reads it | the same |
+| `wsl --shutdown` (WSL and Docker Desktop updates do it) | the task's keep-alive started again after 5 s; the container answered 19 s after the shutdown |
+| Someone signed in while the engine runs | on the owner's PC: the engine (session 0) and the owner's own distros (session 1) run side by side in one WSL VM, and the `kazma-engine` context answers from the signed-in session |
+
+Not measured: a Windows update restart rather than a plain one, sleep and
+resume, WSL updating itself.
 
 ## Stages
 
@@ -293,6 +302,40 @@ defined by a plain engine: HypertFit's `SMPLX_WORKER_URL` names it (port
 8790, where nothing listens today, so the SMPL-X worker is already off);
 when it runs again it belongs in a container on HypertFit's network, or the
 engine is given the Windows host's address.
+
+## Independent review (Fable, 2026-11-12) and what changed
+
+The owner asked for an independent opinion before going on. Fable's verdict:
+proceed with changes. It agreed that on Windows an engine in WSL started by
+a boot task is the only "Docker as a service" for Linux containers (Docker's
+own Windows service runs Windows containers only; Docker Desktop, Rancher
+Desktop and Podman machine start at a sign-in; a Hyper-V VM has no Windows
+mounts and no Home edition; automatic sign-in stores the password). Taken
+from it:
+
+1. **No accidental switch.** The first code pinned Kazma's engine whenever
+   its context existed; on the owner's PC (engine made, nothing moved) the
+   next reload would have looked for its containers on an empty engine. The
+   choice is now explicit: `containers.engine` (`kazma`, `desktop`), else the
+   engine setup recorded it installed, else nothing pinned.
+2. **Every Docker call follows the choice**, not only the server's: the first
+   `find_docker_cli` of any Kazma process applies it (the CLI, setup,
+   scripts); the guard takes it from the server's record.
+3. **Paths follow the choice**, never a cached `docker info` (an engine that
+   was down sent `G:\...` to it for a minute). Only fixed local drives are
+   mounted; a share, a mapped or a removable drive is refused with the
+   reason.
+4. **The guard repairs the engine itself**: it runs the task, restarts
+   Docker inside the distro, and holds its own keep-alive when the task is
+   missing or refused.
+5. **Express stays container-free** (the owner's decision after the review):
+   the engine is installed when a container part is chosen; Docker Desktop
+   only when the user picks it.
+6. Still to build, from the review: a preflight for another Docker inside a
+   WSL distro and for `.wslconfig` networking; Docker updates only through
+   `kazma update` (never at a random hour); a dated Ubuntu image; a watch on
+   the engine's disk; an uninstall that refuses while other projects' data
+   lives in it; the native sandboxes sooner.
 
 ## Decisions
 

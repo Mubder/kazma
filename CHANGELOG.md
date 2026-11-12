@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## Kazma's own container engine, step 1 (2026-11-12)
+
+- Kazma can run its containers on an engine of its own: Docker Engine in a
+  WSL distro (`kazma-engine`), started at boot by a scheduled task with
+  nobody signed in. Docker Desktop starts only at a sign-in. Measured on a
+  clean Windows VM:
+  - the engine starts with nobody signed in;
+  - a tunnel service running under another account reaches its containers;
+  - it is back 19 s after `wsl --shutdown`.
+- A new setting, `containers.engine`, chooses `kazma` or `desktop`. Kazma pins
+  the choice for every Docker call it makes, so Docker Desktop resetting the
+  CLI's default can't move it. With no choice, nothing changes: an install
+  is never switched to an engine it hasn't moved to.
+- The code sandbox mounts the workspace in a form Kazma's engine can read.
+- When Kazma's engine doesn't answer, the guard runs its boot task and
+  restarts Docker inside it, never launching Docker Desktop.
+- Plan and independent review: `docs/plans/CONTAINERS_WITHOUT_A_SIGN_IN_PLAN.md`.
+  Setup installing the engine when container features are chosen, and the
+  Settings choice, come next.
+
 ## Kazma keeps running while Docker waits for a sign-in (2026-11-12)
 
 - A Windows update restarted the PC at 06:30 and nobody signed in, so Docker

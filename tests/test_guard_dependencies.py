@@ -84,12 +84,18 @@ class _Docker:
         self.states: dict[str, str] = {}
         self.start_rc = 0
         self.calls: list[list[str]] = []
+        self.schtasks_result = (0, "SUCCESS: Attempted to run the scheduled task.", "")
+        self.wsl_result = (0, "", "")
 
     def __call__(self, cmd, timeout):
         cmd = [str(c) for c in cmd]
         self.calls.append(cmd)
         if cmd[0] == "whoami":
             return 0, "PC\\balfa\n", ""
+        if cmd[0] == "schtasks":
+            return self.schtasks_result
+        if cmd[0] == "wsl.exe":
+            return self.wsl_result
         args = cmd[1:]
         if args[:1] == ["version"]:
             return (0, "29.0.1\n", "") if self.engine else (1, "", "Cannot connect to the Docker daemon")
@@ -146,12 +152,15 @@ class _Harness:
         self.launches.append(cli)
         return self.launch_result
 
-    def write_record(self, names) -> None:
+    def write_record(self, names, engine: str | None = None) -> None:
         path = guard._deps_record_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"version": 1, "containers": [
+        data = {"version": 1, "containers": [
             {"name": n, "ports": [], "for": ["database"]} for n in names],
-            "updated": time.time()}), encoding="utf-8")
+            "updated": time.time()}
+        if engine is not None:
+            data["engine"] = engine
+        path.write_text(json.dumps(data), encoding="utf-8")
 
     def run(self, seconds: float, step: float = 1.0) -> None:
         end = self.clock.now + seconds
@@ -847,3 +856,124 @@ def test_the_guard_reads_what_the_server_writes(monkeypatch, tmp_path):
 def test_the_mode_names(value, monkeypatch):
     monkeypatch.setenv("KAZMA_GUARD_START_DEPENDENCIES", value)
     assert guard._deps_mode() == value
+
+
+# ── Kazma's own container engine (2026-11-12) ──────────────────────────
+#
+# docs/plans/CONTAINERS_WITHOUT_A_SIGN_IN_PLAN.md: Docker Engine in the
+# kazma-engine WSL distro, kept up from boot by the KazmaEngine task. The
+# guard takes the choice from the server's record, pins the same Docker
+# context, and brings that engine back itself -- never Docker Desktop.
+
+
+def _engine_contexts(monkeypatch) -> list[str]:
+    """The guard's pin, without this machine's docker contexts."""
+    pinned: list[str] = []
+
+    def apply(engine):
+        context = {"kazma": "kazma-engine", "desktop": "desktop-linux"}.get(engine)
+        pinned.append(context or "")
+        return context
+
+    monkeypatch.setattr(guard, "_apply_docker_engine", apply)
+    return pinned
+
+
+def test_no_choice_in_the_record_pins_nothing(monkeypatch):
+    pinned = _engine_contexts(monkeypatch)
+    h = _Harness(monkeypatch)
+    h.run(2)
+    assert h.deps.engine == "" and h.deps.context is None
+    assert pinned and set(pinned) == {""}
+    assert not h.deps.kazma_engine()
+
+
+def test_kazmas_engine_down_is_brought_back_by_its_task_never_docker_desktop(monkeypatch):
+    _engine_contexts(monkeypatch)
+    h = _Harness(monkeypatch, containers=None)
+    h.write_record(["kazma-searxng"], engine="kazma")
+    h.docker.engine = False
+    h.run(140)
+    assert h.deps.kazma_engine()
+    assert h.launches == [], "Docker Desktop is never launched for Kazma's engine"
+    assert [c[:4] for c in h.docker.calls if c[0] == "schtasks"] == [["schtasks", "/Run", "/TN", "KazmaEngine"]]
+    assert ["wsl.exe", "-d", "kazma-engine", "-u", "root", "--", "systemctl", "restart", "docker"] in h.docker.calls
+    assert h.deps.state == "engine_starting"
+    assert "KazmaEngine" in h.deps.restart_note()
+    h.docker.engine = True
+    h.run(20)
+    assert h.deps.state == "ok"
+    assert h.pages_titled("Docker is back"), h.pages
+    assert "KazmaEngine task" in h.pages_titled("Docker is back")[0]
+
+
+def test_control_the_same_outage_on_docker_desktop_launches_it(monkeypatch):
+    _engine_contexts(monkeypatch)
+    h = _Harness(monkeypatch, containers=None)
+    h.write_record(["kazma-searxng"], engine="desktop")
+    h.docker.engine = False
+    h.run(140)
+    assert len(h.launches) == 1
+    assert not [c for c in h.docker.calls if c[0] in {"schtasks", "wsl.exe"}]
+
+
+@pytest.mark.parametrize("answer,state", [
+    ((1, "", "ERROR: The system cannot find the file specified."), "engine_task_missing"),
+    ((1, "", "ERROR: Access is denied."), "engine_task_denied"),
+])
+def test_a_task_that_cannot_run_and_the_guard_holds_the_engine_up(monkeypatch, answer, state):
+    _engine_contexts(monkeypatch)
+    spawned: list[int] = []
+
+    class _Alive:
+        pid = 4242
+
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(guard, "_spawn_engine_keepalive", lambda: spawned.append(1) or _Alive())
+    h = _Harness(monkeypatch, containers=None)
+    h.write_record(["kazma-searxng"], engine="kazma")
+    h.docker.engine = False
+    h.docker.schtasks_result = answer
+    h.run(140)
+    assert h.deps.state == state
+    assert spawned == [1], "one keep-alive of the guard's own"
+    assert ["wsl.exe", "-d", "kazma-engine", "-u", "root", "--", "systemctl", "restart", "docker"] in h.docker.calls
+    assert h.launches == []
+
+
+def test_a_new_choice_restarts_the_document_broker(monkeypatch):
+    _engine_contexts(monkeypatch)
+    h = _Harness(monkeypatch, containers=None)
+    h.write_record(["kazma-searxng"], engine="desktop")
+    restarted: list[int] = []
+    monkeypatch.setattr(h.g.broker, "engine_changed", lambda: restarted.append(1))
+    h.run(2)
+    assert restarted == [], "the first choice the guard reads is no change"
+    h.write_record(["kazma-searxng"], engine="kazma")
+    h.run(65)
+    assert restarted == [1]
+    assert h.deps.context == "kazma-engine"
+
+
+def test_status_names_the_engine():
+    lines = guard._dependency_status_lines({"dependencies": {
+        "engine_up": True, "state": "ok", "engine": "kazma", "context": "kazma-engine"}})
+    assert any("Kazma's own" in line and "KazmaEngine" in line for line in lines)
+    lines = guard._dependency_status_lines({"dependencies": {
+        "engine_up": True, "state": "ok", "engine": "desktop", "context": "desktop-linux"}})
+    assert any("Docker Desktop" in line for line in lines)
+
+
+def test_the_server_records_the_choice_for_the_guard(monkeypatch, tmp_path):
+    path = tmp_path / "guard_dependencies.json"
+    monkeypatch.setenv(gd.RECORD_FILE_ENV, str(path))
+    monkeypatch.setattr(gd, "_endpoints", lambda: ([], set()))
+    monkeypatch.setattr(gd, "_containers", lambda: None)
+    from kazma_core import container_engine
+
+    monkeypatch.setattr(container_engine, "engine_setting", lambda: "kazma")
+    gd._publish_dependencies()
+    assert json.loads(path.read_text(encoding="utf-8"))["engine"] == "kazma", \
+        "written even while Docker does not answer: the guard must follow it"
