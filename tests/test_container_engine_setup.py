@@ -117,7 +117,7 @@ def test_each_missing_piece_is_named(machine, monkeypatch, tmp_path):
     machine.task = False
     found = ces.check(machine)
     assert found.ok is False
-    assert found.missing == ["distro", "task"]
+    assert found.missing == ["distro", "task", "docker"], "no distro, so no Docker answering in it"
     assert "the kazma-engine distro is not there" in found.detail
     assert "KazmaEngine task" in found.detail
 
@@ -147,7 +147,8 @@ def test_control_the_list_alone_takes_an_empty_wsl_for_none(machine, monkeypatch
 def test_without_wsl_nothing_else_is_asked_of_it(machine):
     machine.wsl = False
     found = ces.check(machine)
-    assert "wsl" in found.missing and "docker" not in found.missing
+    assert found.missing[:2] == ["wsl", "distro"] and found.missing[-1] == "docker", \
+        "every piece that needs WSL is missing too (the check said them ok)"
     assert not any(a[0].endswith("docker.exe") for a in machine.ran)
 
 
@@ -256,6 +257,46 @@ def test_a_download_longer_than_pinned_keeps_nothing(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.parametrize("fetch", ["engine", "tessdata"])
+def test_setup_downloads_trust_certifis_roots_not_the_machines_store_alone(fetch, monkeypatch, tmp_path):
+    """The clean VM (2026-11-12): Python's default context read only the roots
+    already in a fresh Windows' store, and every GitHub release download
+    failed "unable to get local issuer certificate". Both setup downloads
+    open with the shared context (certifi's roots) unless a test gives an
+    opener."""
+    import ssl
+    import urllib.request
+
+    from kazma_core import http_tls
+    from kazma_core import system_deps as sd
+
+    data = b"pinned"
+    seen = {}
+
+    def urlopen(url, timeout=None, context=None):
+        seen["context"] = context
+        return _Response(data)
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    if fetch == "engine":
+        ces._fetch(_download(data), tmp_path / "d")
+    else:
+        monkeypatch.setitem(sd.TESSDATA, "ara", ("https://example.invalid/ara", len(data),
+                                                 hashlib.sha256(data).hexdigest()))
+        sd.fetch_tessdata("ara", tmp_path / "t")
+    assert isinstance(seen["context"], ssl.SSLContext)
+    assert seen["context"] is http_tls.shared_ssl_context()
+
+
+def test_control_a_bare_urlopen_brings_no_context(monkeypatch):
+    import urllib.request
+
+    seen = {}
+    monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout=None, context=None: seen.update(c=context))
+    urllib.request.urlopen("https://example.invalid/x", timeout=1)  # the old default opener's call
+    assert seen["c"] is None, "Python's default context: the machine's store alone"
+
+
 def test_every_download_is_https_and_pinned():
     for item in ces.DOWNLOADS.values():
         assert item.url.startswith("https://")
@@ -294,13 +335,63 @@ def test_the_docker_step_pipes_the_script_and_needs_its_ready_line(machine):
     assert ok and "ENGINE_READY" in detail
     call = next(i for i, a in enumerate(machine.ran) if "bash" in a)
     assert machine.ran[call][-2:] == ["10.231.0.1/24", "10.231.128.0/17"], "a range no route of this machine uses"
-    assert "ENGINE_READY" in (machine.stdin[call] or "")
+    sent = machine.stdin[call]
+    assert isinstance(sent, bytes) and b"ENGINE_READY" in sent and b"\r" not in sent
+
+
+def test_a_script_reaches_a_real_program_without_carriage_returns():
+    """A real child reads what setup pipes it. In text mode Windows writes
+    each "\n" as "\r\n", and the engine's script failed in bash on its first
+    line (the clean VM, 2026-11-12)."""
+    import sys
+
+    probe = [sys.executable, "-c", "import sys; d = sys.stdin.buffer.read(); print(d.count(b'\\r'), len(d))"]
+    code, out = ces._out(subprocess.run, probe, stdin="set -euo pipefail\necho ready\n")
+    assert code == 0 and out.split() == ["0", "29"]
+
+
+@pytest.mark.skipif(__import__("os").name != "nt", reason="the translation is Windows'")
+def test_control_text_mode_adds_carriage_returns_on_windows():
+    import sys
+
+    probe = [sys.executable, "-c", "import sys; print(sys.stdin.buffer.read().count(b'\\r'))"]
+    done = subprocess.run(probe, input="a\nb\n", capture_output=True, text=True, check=False)
+    assert done.stdout.strip() == "2"
 
 
 def test_control_a_script_that_stops_short_is_a_failed_step(machine):
     machine.answers[("wsl.exe", "-d", ces.DISTRO, "-u", "root", "--", "bash")] = (0, "E: Unable to locate package")
     ok, detail = ces.run_action("engine:docker", run=machine)
     assert not ok and "failed" in detail
+
+
+def test_the_cli_folder_joins_the_users_path_once(machine, monkeypatch, tmp_path):
+    """The owner's own ``docker`` reaches the engine too; PATH is changed
+    through .NET (``setx`` cuts it at 1,024 characters), only when missing."""
+    monkeypatch.setenv("PATH", r"C:\Windows")
+    ces._on_user_path(machine, ces.bin_dir())
+    script = machine.ran[-1][-1]
+    assert machine.ran[-1][0] == "powershell" and "SetEnvironmentVariable('Path'" in script and "'User')" in script
+    assert "setx" not in script and str(ces.bin_dir()) in script
+    assert str(ces.bin_dir()) in __import__("os").environ["PATH"]
+    ces._on_user_path(machine, ces.bin_dir())
+    assert __import__("os").environ["PATH"].count(str(ces.bin_dir())) == 1
+
+
+def test_kazmas_own_cli_off_path_is_not_a_warning(monkeypatch, tmp_path, caplog):
+    import logging
+
+    from kazma_core import docker_cli
+
+    cli = tmp_path / "Kazma" / "engine" / "bin" / "docker.exe"
+    cli.parent.mkdir(parents=True)
+    cli.write_bytes(b"")
+    monkeypatch.setattr(docker_cli, "_candidates", lambda: [cli])
+    monkeypatch.setattr(docker_cli.shutil, "which", lambda name: None)
+    monkeypatch.delenv("KAZMA_DOCKER_BIN", raising=False)
+    with caplog.at_level(logging.WARNING, logger="kazma_core.docker_cli"):
+        assert docker_cli.find_docker_cli() == str(cli)
+    assert not [r for r in caplog.records if "not on PATH" in r.getMessage()]
 
 
 def test_the_boot_task_runs_with_nobody_signed_in_and_normal_rights(monkeypatch, tmp_path):

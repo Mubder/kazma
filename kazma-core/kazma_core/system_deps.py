@@ -24,7 +24,6 @@ import os
 import re
 import shutil
 import subprocess
-import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -461,9 +460,11 @@ def package_is_in(state: DepState) -> bool:
     return state.ok is not False or _PACKAGE_MISSING.get(state.name, state.name) not in state.missing
 
 
-def fetch_tessdata(lang: str, folder: Path, *, opener: Callable[..., Any] = urllib.request.urlopen) -> Path:
+def fetch_tessdata(lang: str, folder: Path, *, opener: Callable[..., Any] | None = None) -> Path:
     """Download Tesseract's *lang* model into *folder*, kept only when its
     size and SHA-256 are the pinned ones (:data:`TESSDATA`)."""
+    if opener is None:
+        from kazma_core.http_tls import open_download as opener
     url, size, digest = TESSDATA[lang]
     folder.mkdir(parents=True, exist_ok=True)
     target = folder / f"{lang}.traineddata"
