@@ -25,7 +25,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["open_download", "prewarm", "shared_ssl_context"]
+__all__ = ["prewarm", "shared_ssl_context"]
 
 _CONTEXT: Any = None
 _LOCK = threading.Lock()
@@ -50,25 +50,6 @@ def shared_ssl_context() -> Any:
                 logger.warning("[http_tls] shared TLS context unavailable", exc_info=True)
                 return True
     return _CONTEXT
-
-
-def open_download(url: str, *, timeout: float) -> Any:
-    """``urllib.request.urlopen`` for a download setup makes, verified
-    against certifi's roots (this module's context), never the machine's
-    store alone.
-
-    Python's default context on Windows reads only the roots already in the
-    machine's store, and a fresh Windows adds a root only when Windows itself
-    builds a chain that needs it: on the clean drill VM (2026-11-12) every
-    GitHub release download setup made failed "unable to get local issuer
-    certificate" while ``Invoke-WebRequest`` to the same host worked."""
-    import ssl
-    import urllib.request
-
-    context = shared_ssl_context()
-    if not isinstance(context, ssl.SSLContext):
-        context = ssl.create_default_context()
-    return urllib.request.urlopen(url, timeout=timeout, context=context)  # noqa: S310 -- https, verified
 
 
 def prewarm() -> None:

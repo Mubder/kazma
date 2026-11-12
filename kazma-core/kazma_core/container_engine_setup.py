@@ -29,6 +29,7 @@ import os
 import shutil
 import subprocess
 import time
+import urllib.request
 import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -141,21 +142,12 @@ def _asset(name: str) -> str:
 
 def _out(run: Runner, argv: list[str], *, timeout: float = 60, stdin: str | None = None,
          env: dict[str, str] | None = None) -> tuple[int, str]:
-    # Bytes both ways: in text mode Windows writes every "\n" of stdin as
-    # "\r\n", and bash then reads `set -o pipefail\r` (the clean VM,
-    # 2026-11-12: the engine's setup script failed on its first line).
     try:
-        done = run(argv, input=None if stdin is None else stdin.encode("utf-8"), capture_output=True,
+        done = run(argv, input=stdin, capture_output=True, text=True, encoding="utf-8", errors="replace",
                    timeout=timeout, check=False, env=env, creationflags=_NO_WINDOW)
     except (OSError, subprocess.SubprocessError) as exc:
         return 127, str(exc)
-    return done.returncode, (_text(done.stdout) + _text(done.stderr)).replace("\x00", "")
-
-
-def _text(data: bytes | str | None) -> str:
-    if isinstance(data, bytes):
-        return data.decode("utf-8", errors="replace")
-    return data or ""
+    return done.returncode, ((done.stdout or "") + (done.stderr or "")).replace("\x00", "")
 
 
 def _wsl_env() -> dict[str, str]:
@@ -214,7 +206,7 @@ def check(run: Runner = subprocess.run) -> EngineCheck:
     missing: list[str] = []
     distros = _distros(run)
     if distros is None:
-        missing += ["wsl", "distro"]  # no WSL, so no distro either
+        missing.append("wsl")
     elif DISTRO not in distros:
         missing.append("distro")
     if not find_docker_cli():
@@ -225,12 +217,13 @@ def check(run: Runner = subprocess.run) -> EngineCheck:
     if code != 0:
         missing.append("task")
     version = ""
-    code, text = (_docker(run, "version", "--format", "{{.Server.Version}}")
-                  if not {"distro", "cli", "context"} & set(missing) else (1, ""))
-    if code == 0 and text.strip():
-        version = text.strip().splitlines()[-1]
-    else:
-        missing.append("docker")  # no distro: nothing there to answer
+    if "distro" not in missing and "wsl" not in missing:
+        code, text = (_docker(run, "version", "--format", "{{.Server.Version}}")
+                      if "cli" not in missing and "context" not in missing else (1, ""))
+        if code == 0 and text.strip():
+            version = text.strip().splitlines()[-1]
+        else:
+            missing.append("docker")
     if not missing:
         return EngineCheck(True, f"Kazma's engine, Docker {version}", [], version)
     words = {"wsl": "WSL is not installed", "distro": "the kazma-engine distro is not there",
@@ -299,11 +292,9 @@ def install_steps(found: EngineCheck) -> list[Any]:
             for action, needed in wanted.items() if needed]
 
 
-def _fetch(item: Download, folder: Path, *, opener: Callable[..., Any] | None = None) -> Path:
+def _fetch(item: Download, folder: Path, *, opener: Callable[..., Any] = urllib.request.urlopen) -> Path:
     """Download *item* into *folder*, kept only when its SHA-256 (and size,
     when pinned) match."""
-    if opener is None:
-        from kazma_core.http_tls import open_download as opener
     folder.mkdir(parents=True, exist_ok=True)
     target = folder / item.name
     if target.is_file() and _sha256(target) == item.sha256:
@@ -410,23 +401,7 @@ def _action_cli(run: Runner, log: Callable[[str], None], opener: Any) -> tuple[b
     compose = _fetch(DOWNLOADS["compose"], downloads, opener=opener)
     _plugins_dir().mkdir(parents=True, exist_ok=True)
     shutil.copyfile(compose, _plugins_dir() / "docker-compose.exe")
-    _on_user_path(run, bin_dir())
     return True, f"docker.exe in {bin_dir()}, compose plugin in {_plugins_dir()}"
-
-
-def _on_user_path(run: Runner, folder: Path) -> None:
-    """*folder* on this account's PATH (new terminals; this process now), so
-    the owner's own ``docker`` reaches the engine too. Through the .NET call,
-    never ``setx`` (it cuts PATH at 1,024 characters)."""
-    entries = [e for e in (os.environ.get("PATH") or "").split(os.pathsep) if e]
-    if str(folder) not in entries:
-        os.environ["PATH"] = os.pathsep.join([*entries, str(folder)])
-    quoted = str(folder).replace("'", "''")
-    script = ("$p=[string][Environment]::GetEnvironmentVariable('Path','User'); "
-              f"$f='{quoted}'; "
-              "if (-not (($p -split ';') -contains $f)) { "
-              "[Environment]::SetEnvironmentVariable('Path', (($p.TrimEnd(';'), $f) -join ';').TrimStart(';'), 'User') }")
-    _out(run, ["powershell", "-NoProfile", "-NonInteractive", "-Command", script])
 
 
 def _action_context(run: Runner, log: Callable[[str], None], opener: Any) -> tuple[bool, str]:
@@ -538,7 +513,7 @@ _ACTIONS: dict[str, Callable[..., tuple[bool, str]]] = {
 
 
 def run_action(action: str, *, run: Runner = subprocess.run, log: Callable[[str], None] | None = None,
-               opener: Any = None) -> tuple[bool, str]:
+               opener: Any = urllib.request.urlopen) -> tuple[bool, str]:
     """Carry out one ``engine:*`` step. (ok, what happened)."""
     say = log or (lambda _m: None)
     fn = _ACTIONS.get(action)
