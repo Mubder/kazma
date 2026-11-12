@@ -1,7 +1,7 @@
 {
  "version": 1,
  "generated_by": "python -m kazma_core.observability.alert_catalog --write",
- "answered_by": {"dependency_down": ["database_away"], "kazma_restarting": ["database_away"]},
+ "answered_by": {"dependency_down": ["database_away", "docker_away"], "kazma_restarting": ["database_away", "docker_away"]},
  "same_cause": {"tunnel_down": ["machine_unreachable", "unreachable"]},
  "alerts": [
   {"key": "acquisition.allowance", "sender": "ops", "severity": "warn", "title": "Remote request allowance exhausted (not billed credits)", "title_ar": "نفدت حصة الطلبات الخارجية (ليست رصيداً مفوتراً)", "page": "/research", "closed_by": "", "condition": "", "owner": true},
@@ -71,7 +71,7 @@
   {"key": "dbsvc.down", "sender": "guard", "severity": "critical", "title": "Kazma's database service is down", "title_ar": "خدمة قاعدة بيانات كاظمه متوقفة", "page": "/settings?tab=system", "closed_by": "dbsvc.back", "condition": "database_away", "owner": true},
   {"key": "deps.container_recovered", "sender": "guard", "severity": "success", "title": "A container Kazma needs runs again", "title_ar": "عادت حاوية يحتاجها كاظمه تعمل", "page": "/dashboard", "closed_by": "", "condition": "", "owner": true},
   {"key": "deps.container_start_failed", "sender": "guard", "severity": "warn", "title": "A container Kazma needs will not start", "title_ar": "حاوية يحتاجها كاظمه لا تبدأ", "page": "/dashboard", "closed_by": "deps.container_recovered", "condition": "", "owner": true},
-  {"key": "deps.engine_down", "sender": "guard", "severity": "warn", "title": "Docker does not answer: Kazma cannot start", "title_ar": "Docker لا يستجيب: لا يستطيع كاظمه البدء", "page": "/dashboard", "closed_by": "deps.engine_up", "condition": "", "owner": true},
+  {"key": "deps.engine_down", "sender": "guard", "severity": "warn", "title": "Docker does not answer", "title_ar": "Docker لا يستجيب", "page": "/dashboard", "closed_by": "deps.engine_up", "condition": "docker_away", "owner": true},
   {"key": "deps.engine_up", "sender": "guard", "severity": "success", "title": "Docker is back", "title_ar": "عاد Docker", "page": "/dashboard", "closed_by": "", "condition": "", "owner": true},
   {"key": "disk.back", "sender": "guard", "severity": "success", "title": "Disk space is back", "title_ar": "عادت مساحة القرص", "page": "/dashboard", "closed_by": "", "condition": "", "owner": true},
   {"key": "disk.critical", "sender": "guard", "severity": "critical", "title": "The disk is almost full", "title_ar": "القرص ممتلئ تقريبًا", "page": "/dashboard", "closed_by": "disk.back", "condition": "disk_critical", "owner": true},

@@ -347,8 +347,8 @@ CATALOG: tuple[_Entry, ...] = (
            page="/documents", closed_by="broker.recovered"),
     _guard("broker.recovered", "success", "Kazma's document broker is running again",
            "عاد وسيط مستندات كاظمه يعمل", page="/documents"),
-    _guard("deps.engine_down", "warn", "Docker does not answer: Kazma cannot start",
-           "Docker لا يستجيب: لا يستطيع كاظمه البدء", closed_by="deps.engine_up"),
+    _guard("deps.engine_down", "warn", "Docker does not answer", "Docker لا يستجيب",
+           closed_by="deps.engine_up", condition="docker_away"),
     _guard("deps.engine_up", "success", "Docker is back", "عاد Docker"),
     _guard("deps.container_start_failed", "warn", "A container Kazma needs will not start",
            "حاوية يحتاجها كاظمه لا تبدأ", closed_by="deps.container_recovered"),
@@ -420,10 +420,12 @@ SHARED_OWNERS: dict[str, str] = {
 #: A Kazma Watch condition, and the inside conditions whose page answers for
 #: it: Kazma not ready, or down while it boots, because its database is away
 #: is the database's page (``database.away``, the guard's ``dbsvc.down`` or
-#: ``child.waiting_for_database``), not a second one.
+#: ``child.waiting_for_database``), not a second one; because the Docker
+#: engine does not answer, the guard's ``deps.engine_down`` (2026-11-12: both
+#: paged one problem, and Kazma Watch reminded of it every hour for five).
 ANSWERED_BY: dict[str, tuple[str, ...]] = {
-    "dependency_down": ("database_away",),
-    "kazma_restarting": ("database_away",),
+    "dependency_down": ("database_away", "docker_away"),
+    "kazma_restarting": ("database_away", "docker_away"),
 }
 
 #: Kazma Watch's conditions one cause shows as: the probe reads the tunnel's

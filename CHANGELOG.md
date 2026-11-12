@@ -1,5 +1,34 @@
 # CHANGELOG
 
+## Kazma keeps running while Docker waits for a sign-in (2026-11-12)
+
+- A Windows update restarted the PC at 06:30 and nobody signed in, so Docker
+  Desktop never started. Code execution needs Docker on that install, so
+  Kazma said "not ready", and the guard restarted it 18 times in six hours,
+  paging each time, although chat worked the whole while. Readiness now says
+  when what fails waits for something outside Kazma (`waits_for`: the Docker
+  engine not installed, not running or not answering). The guard keeps Kazma
+  running and never restarts it for that: a restart cannot start Docker.
+  Chat, memory, reminders and providers keep working; code execution,
+  documents, private search and the memory graph wait for Docker.
+  `kazma_guard.py --status` says "up, waiting for docker".
+- One page for the problem. The guard's Docker page now comes after five
+  minutes (three when nobody is signed in to start Docker Desktop for, since
+  only a sign-in brings it back), before Kazma Watch would page the same
+  problem, and Kazma Watch counts it as the answer to its own "a dependency
+  is away". Kazma Watch also stops its hourly reminders once a page from
+  inside answers for what it paged.
+- The same restart reason pages once an hour while it repeats, saying how many
+  restarts there were since; each restart is still in `guard.log`. A restart
+  page quotes the server's last words only when it ended by itself: these
+  pages had quoted a settings warning and a progress bar from the boot of a
+  server the guard had stopped.
+- The health check says a Docker outage once, and once when Docker is back.
+  It wrote 4,666 warnings in those five hours, one per probe.
+- The tools catalog writes square brackets in a description as text:
+  `download_image`'s `![caption](path)` drew a broken picture on the docs
+  page.
+
 ## 0.21.2 — Alerts in one place, a new look, and a signed release (2026-11-11)
 
 Every alert, from Kazma, its guard and Kazma Watch, is now one card, paged

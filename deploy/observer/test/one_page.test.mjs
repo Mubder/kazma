@@ -129,6 +129,37 @@ test("a database page answers for Kazma down while it boots (ANSWERED_BY)", () =
   assert.ok(CATALOG.answered_by.kazma_restarting.includes("database_away"));
 });
 
+test("the guard's Docker page answers for Kazma not ready or restarting (2026-11-12)", () => {
+  const docker = { key: "deps.engine_down", paged_at: T + 180, delivered: true };
+  for (const condition of ["dependency_down", "kazma_restarting"]) {
+    assert.deepEqual(run(15, () => ({ condition, detail: "code_execution, docker", pages: [docker] })).pages, [],
+      condition);
+    assert.ok(CATALOG.answered_by[condition].includes("docker_away"), condition);
+  }
+  // Control: the catalog of the morning, with no condition on the Docker
+  // page, answered for neither: Kazma Watch paged "Kazma has not paged it".
+  const before = { key: "deps.container_start_failed", paged_at: T + 180, delivered: true };
+  assert.equal(run(15, () => dependency([before])).pages.length, 1);
+});
+
+test("no hourly reminder once a page from inside answers for what Kazma Watch paged", () => {
+  // 2026-11-12: Kazma Watch paged at 7 min; the guard's Docker page came at
+  // 12; Kazma Watch reminded every hour for five hours anyway.
+  const late = { key: "deps.engine_down", paged_at: T + 720, delivered: true };
+  const diag = (now, i) => ({ condition: "dependency_down", detail: "code_execution, docker",
+    pages: i >= 12 ? [late] : [] });
+  const r = run(5 * 60, diag);
+  assert.deepEqual(r.pages.map((p) => p.kind), ["open"]);
+  // Control: with no inside page the hourly reminders are sent.
+  const alone = run(5 * 60, () => dependency([]));
+  assert.ok(alone.pages.filter((p) => p.kind === "remind").length >= 4,
+    alone.pages.map((p) => p.kind).join(","));
+  // ...and so they are when the inside page was not delivered.
+  const lost = { ...late, delivered: false };
+  const r2 = run(5 * 60, (now, i) => ({ ...diag(now, i), pages: i >= 12 ? [lost] : [] }));
+  assert.ok(r2.pages.filter((p) => p.kind === "remind").length >= 4);
+});
+
 test("a Cloudflare notice Kazma Watch paged holds its own incident of the same cause", () => {
   const notice = { key: "cloudflare.tunnel_down", condition: "tunnel_down", delivered: true };
   const held = run(8, () => ({ condition: "machine_unreachable", pages: null, notices: [notice] }));

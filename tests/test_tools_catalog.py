@@ -97,6 +97,28 @@ def test_every_swarm_worker_tool_is_in_the_catalog_with_a_tier():
     assert all(get_effect_profile(n).registered for n in names), names
 
 
+#: Markdown link or image syntax inside a table row: ``[text](target)``.
+_LINK_SYNTAX = re.compile(r"\[[^\]\n]*\]\([^)\n]*\)")
+
+
+def test_no_table_cell_holds_markdown_link_syntax():
+    """A description is text, never a link: ``download_image`` names
+    ``![caption](path)``, which drew a broken image on the docs site and
+    stopped kazma.ai's link check (2026-11-12). The generator writes square
+    brackets as entities."""
+    rows = [line for line in CATALOG.read_text(encoding="utf-8").splitlines()
+            if _ROW.match(line)]
+    assert rows
+    linked = [line for line in rows if _LINK_SYNTAX.search(line)]
+    assert not linked, "Run: python scripts/generate_tools_catalog.py\n  " + "\n  ".join(linked)
+    gen = _generator()
+    assert _LINK_SYNTAX.search("| `x` | " + gen._cell("Place ![caption](path) alone") + " |") is None
+    # Negative control: the escapes before 2026-11-12 left the image syntax in.
+    old = {k: v for k, v in gen._CELL_ESCAPES.items() if k not in "[]"}
+    escaped = "".join(old.get(ch, ch) for ch in "Place ![caption](path) alone")
+    assert _LINK_SYNTAX.search(escaped)
+
+
 def test_no_tool_is_listed_twice():
     """Native skill tools are registered in the same registry as built-ins;
     they belong in the native section only."""

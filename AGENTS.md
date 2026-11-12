@@ -7013,7 +7013,10 @@ each paged two or three times: by Kazma, its guard and Kazma Watch.
   within `INSIDE_GRACE_S` (5 min) or none came 5 min after it would have
   paged on its own, or when the heartbeats stop (its own condition; the page
   names the inside pages that were open). A heartbeat with no receipts at
-  all (an older guard) is read the old way.
+  all (an older guard) is read the old way. An incident it paged first gets
+  no hourly reminder while a delivered inside page answers for it
+  (`incidents.js`, 2026-11-12: five reminders over the guard's Docker page;
+  the guard's `deps.engine_down` answers `dependency_down` since then).
 - Gates: `tests/test_one_page_per_problem.py` (both hold copies on the
   fixture, a planted non-owner on each side, the receipts' life, the
   relations; three live-shaped scenarios -- a database outage, a critical
@@ -8081,6 +8084,43 @@ code) and Kazma ran with nobody supervising it.
   beside it as the negative control), `tests/test_guard_integration.py`
   (a real guard: no restart past the start budget and the outage runway, the
   same body without the flag restarted as the control).
+- **Waiting for a dependency outside Kazma is up too** (2026-11-12: a Windows
+  update restarted the PC, nobody signed in, Docker Desktop never started; the
+  live install requires code execution, readiness answered 503, and the guard
+  restarted a Kazma that served chat 18 times in six hours, paging each
+  time). A failing check that waits for something no restart of Kazma brings
+  back carries `waits_for` (the code-execution check: the Docker engine not
+  installed, not running or not answering); `/health/ready` lists
+  `waits_for` (`{check: dependency}`) when every failing required check
+  waits for the owner or for such a dependency and no `restart_required`
+  is said; it still answers 503. The guard reads it
+  (`ProbeResult.waits_for`, `_answered_waits`): at start the child is up
+  (`child.up_waiting_for`), while running it counts toward no restart,
+  said once (`health.waiting_for`), paged once after `WAIT_PAGE_S` (300 s)
+  unless the guard's Docker watch sees the engine down and pages it
+  (`_deps_speaks_for`: one page per problem), and `health.wait_over` (with
+  `health.ready_again` when the guard paged) when it is ready. The check says
+  a Docker outage once and its end once (`_say_docker_down`). The Docker
+  watch pages at `DEPS_PAGE_AFTER_S` (300 s; 180 s in `DEPS_STUCK_STATES`,
+  nobody signed in or the guard as SYSTEM), so its page comes before Kazma
+  Watch's own (seven minutes in), and `deps.engine_down`'s condition
+  `docker_away` answers Kazma Watch's `dependency_down` and
+  `kazma_restarting` (`ANSWERED_BY`). Windows' automatic sign-in after an
+  update was on that morning and signed nobody in (the update restarted
+  twice): only a sign-in starts Docker Desktop, and the page says so.
+  Gates: `tests/test_readiness_waits_for_docker.py` (the real readiness body
+  read by the guard's probe over HTTP; a database failure beside it as the
+  control), `tests/test_guard_integration.py` (a real guard; the body
+  without the flag restarted as the control),
+  `tests/test_guard_dependencies.py` (one page with the Docker watch, the
+  wait's own page and recovery, the earlier Docker page).
+- **A restart reason pages once an hour while it repeats**
+  (`notify_restart`, `RESTART_REPAGE_S`), saying how many restarts there
+  were since; a healthy start ends the series (`notify_recovered`). Every
+  restart is in `guard.log`. The 900 s page cooldown let a restart every 15-20
+  minutes page each time. A page quotes the server's last words only when it
+  ended by itself (`_ended_by_itself`: an exit, an exit while starting), never
+  the boot lines of a server the guard stopped.
 - **The server's last words are kept.** The guard sends the server's stderr to
   `.kazma/server.stderr.log` (beside `guard.log`, rotated at 2 MB) and quotes
   the lines the server wrote before it went in `guard.restarting`
