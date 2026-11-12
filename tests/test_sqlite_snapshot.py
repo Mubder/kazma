@@ -58,7 +58,9 @@ def test_the_native_memory_backup_finishes_while_the_source_is_written(tmp_path)
     finally:
         stop.set()
         th.join(5)
-    assert took < 1.0, took
+    # Below the 2 s the batched control waits for its writer; 1.0 s failed on
+    # a loaded CI runner at 1.42 s (2026-11-12) with the copy right.
+    assert took < 1.9, took
     assert sqlite3.connect(str(tmp_path / "copy.db")).execute("SELECT COUNT(*) FROM t").fetchone()[0] >= 2000
 
 
