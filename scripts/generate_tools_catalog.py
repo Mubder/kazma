@@ -162,6 +162,12 @@ def render(builtin: list[dict], modules: list[str], native: list[dict],
         "description: Complete catalog of built-in agent tools and native skill tools",
         "---",
         "",
+        # kazma.ai copies this page (docs/website-pages.json); the line under
+        # the title names where (tests/test_website_pages.py). A regeneration
+        # dropped it once (2026-11-12).
+        "> This page is published at [kazma.ai/docs/tools-catalog/](https://kazma.ai/docs/tools-catalog/) "
+        "([Arabic](https://kazma.ai/ar/docs/tools-catalog/)).",
+        "",
         "> Exhaustive tool list extracted from `LocalToolRegistry` and native skill manifests. "
         "Regenerate with `python scripts/generate_tools_catalog.py`. "
         "Danger classification aligns with `CANONICAL_DANGER_TOOLS` — see "

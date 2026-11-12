@@ -5,6 +5,8 @@ sidebar_label: Tools Catalog
 description: Complete catalog of built-in agent tools and native skill tools
 ---
 
+> This page is published at [kazma.ai/docs/tools-catalog/](https://kazma.ai/docs/tools-catalog/) ([Arabic](https://kazma.ai/ar/docs/tools-catalog/)).
+
 > Exhaustive tool list extracted from `LocalToolRegistry` and native skill manifests. Regenerate with `python scripts/generate_tools_catalog.py`. Danger classification aligns with `CANONICAL_DANGER_TOOLS` — see [Security & Safety](../guide/security-and-safety).
 
 ## How tools run
@@ -91,6 +93,7 @@ description: Complete catalog of built-in agent tools and native skill tools
 | `crawl_site` | search | safe/read | Bounded multi-page crawl (same-domain by default). Args: start_url, profile=research_brief\|research_deep\|kb_site\|single_page (named cap preset), max_pages (default from profile; hard max 50; use 12–20 for deep docs), max_depth, same_domain_only=True, delay_ms, save=True. Saves pages under workspace… |
 | `generate_image` | media | safe/read | Generate an image from a text prompt. provider can be 'auto' (first available), 'pollinations' (free, no key), 'dall-e' (OpenAI), 'stability' (SDXL), or 'flux' (FAL). Returns the saved file path. |
 | `analyze_image` | media | safe/read | Analyze an image using LLM vision. Provide a local path or URL and an optional question. |
+| `download_image` | media | safe/read | Save a picture from the web (PNG, JPEG, GIF or WebP, at most 20 MB) as a file in the workspace's downloads/images folder, to put in a document. Args: url, name (optional). Returns the path: name it as ![caption](path) in generate_pdf/generate_docx, or as a slide's image in generate_pptx. |
 | `export_session` | utility | safe/read | Return this conversation as JSON or Markdown text (the reply carries it; no file is written). |
 | `search_agent_skills` | skills | safe/read | Search the open Agent Skills marketplace (GitHub topic:agent-skills) for installable skills matching a query. Returns repos with stars, descriptions, and the install_agent_skill command for each. |
 | `list_agent_skills` | skills | safe/read | List installed Agent Skills (SKILL.md / agentskills.io format). Shows name, description, location and integrity for each skill: verified, unsigned (loads with a warning) or refused at activation. |
@@ -123,6 +126,7 @@ These modules implement or support tools (some registered at startup, some via s
 - `file_apply_patch.py`
 - `file_read.py`
 - `file_write.py`
+- `image_download.py`
 - `image_gen.py`
 - `personality_cmd.py`
 - `read_url.py`

@@ -4,10 +4,11 @@
 
 Every alert, from Kazma, its guard and Kazma Watch, is now one card, paged
 once per problem and set up in one place, Settings → Alerts, where it can
-also come from a Telegram bot of its own. The web app has a new look. An
-audit of the whole code base was fixed in three batches: a chat bot with no
-allowed users is private, a sign-in works only in the browser that started
-it, and what Kazma downloads is pinned. It is the first release the release
+also come from a Telegram bot of its own. The web app has a new look, and
+Kazma's Word, PDF and PowerPoint files can carry pictures. An audit of the
+whole code base was fixed in three batches: a chat bot with no allowed users
+is private, a sign-in works only in the browser that started it, and what
+Kazma downloads is pinned. It is the first release the release
 workflow has published since v0.11.0, so its wheel carries a Sigstore
 signature, and this version's `kazma update` refuses any release from 0.21.2
 on that has none.
@@ -35,8 +36,9 @@ on that has none.
   engine read only "heading", and every slide after the first showed an empty
   title band. The deck, PDF, Word, Excel and Markdown tools, the patch set and
   the calendar update now tell the model each key they take, its type and
-  what it is, and the deck engine also reads "title". `generate_pdf` no
-  longer offers images it never drew.
+  what it is, and the deck engine also reads "title". `generate_pdf`'s
+  `images` argument, which it never drew, is gone (pictures are placed from
+  the text now, below).
 - **Kazma's installer installs its document font.** On a PC where IBM Plex
   Sans Arabic was installed for one Windows user only, PowerPoint's Protected
   View drew Arabic set in it as wrong glyphs and Word showed Arial, until
@@ -47,6 +49,21 @@ on that has none.
   Kazma" whatever was installed. IBM Plex stays the one font of every
   document: the Microsoft fonts that show in Protected View cannot be shipped
   with Kazma for its PDFs and HTML.
+- **Pictures in Kazma's documents.** Word, PDF and PowerPoint files can now
+  carry pictures. In a report, `![caption](path)` on a line of its own places
+  the picture right there with its caption under it; on a slide, an `image`
+  goes beside the slide's text (the text on the left of an English slide and
+  on the right of an Arabic one) or across the slide when it has no text. A picture
+  can be a file in the workspace, an image Kazma generated or one sent in a
+  chat; a picture on the web is saved first with the new `download_image`
+  tool. Each picture is checked before anything is made (a file, not an
+  address; a real PNG, JPEG, GIF or WebP, whatever its name; at most 40, 20 MB
+  each), then decoded and saved again inside the document worker's sandbox:
+  turned upright, put in standard colour, made no larger than needed, and
+  stripped of everything but its pixels, so a phone photo's GPS position or a
+  file hidden behind a picture never reaches the document. A picture that
+  cannot be read fails the document and says which file, rather than leaving
+  it out.
 - **A deck written by hand in code goes to Kazma's PowerPoint generator.**
   When the agent tried to build a PowerPoint file with python-pptx in its
   Python tool, nothing stopped it, and the file came out in Arial and Segoe

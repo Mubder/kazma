@@ -97,11 +97,13 @@ class SpacerBlock(Block):
 
 @dataclass
 class ImageBlock(Block):
-    """An approved-asset image referenced by filename.
+    """An image, placed where its line stood, referenced by file name.
 
-    The engine resolves ``name`` against the validated assets directory and
-    embeds the bytes. Unapproved / missing images are skipped (never embedded)
-    — only files present in the sha256-validated ``assets/`` dir are reachable.
+    ``name`` is a file in the folder the renderer worker cleaned
+    (``documents.image_clean``: decoded, metadata dropped, saved again);
+    ``width_in`` fits it on the page (``renderer_worker._figure_width``). A
+    name not there -- the legacy ``images`` payload without approved assets --
+    is skipped; one that is there and cannot be embedded fails the document.
     """
 
     name: str = ""

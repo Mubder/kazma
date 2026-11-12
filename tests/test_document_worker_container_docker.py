@@ -278,6 +278,47 @@ async def test_mutation_and_render_workers_run_in_the_container(container_profil
         assert generated.data.export_path.stat().st_size > 0
 
 
+async def test_pictures_are_cleaned_and_placed_inside_the_container(container_profile, tmp_path: Path) -> None:
+    """A document's pictures cross into the container as approved assets and
+    are decoded, cleaned and placed there (``documents.image_clean``)."""
+    import io
+    import zipfile
+
+    from kazma_core.documents.image_inputs import DocumentImages
+    from PIL import Image
+
+    photo = tmp_path / "trip.jpg"
+    exif = Image.Exif()
+    exif[0x0112] = 6
+    exif[0x8825] = {1: "N", 2: (29.0, 22.0, 30.0)}
+    Image.new("RGB", (300, 200), (200, 30, 30)).save(photo, format="JPEG", exif=exif.tobytes())
+    eps = tmp_path / "fake.png"
+    eps.write_bytes(b"\x89PNG\r\n\x1a\n%!PS-Adobe-3.0 EPSF-3.0\nshowpage\n")
+    service = DocumentService(config=_config(tmp_path))
+
+    async def generate(target: str, source: Path) -> Any:
+        async with DocumentImages() as images:
+            name = await images.take(str(source))
+            return await service.generate(
+                target, {"title": "صور Pictures", "sections": [{"heading": "One",
+                                                               "body": f"قبل before\n![رحلة trip]({name})\nafter"}]},
+                tenant_id="t", workspace_id="w", actor_id="a", export_dir=tmp_path / "exports",
+                approved_assets=images.paths,
+            )
+
+    made = await generate("docx", photo)
+    assert made.ok, (made.code, made.message)
+    with zipfile.ZipFile(made.data.export_path) as zf:
+        picture = zf.read(next(n for n in zf.namelist() if n.startswith("word/media/")))
+    assert b"Exif" not in picture
+    with Image.open(io.BytesIO(picture)) as img:
+        assert img.height > img.width
+    pdf = await generate("pdf", photo)
+    assert pdf.ok, (pdf.code, pdf.message)
+    refused = await generate("docx", eps)
+    assert not refused.ok and refused.code == "invalid_image"
+
+
 # ── each limit holds (qualification broker) ─────────────────────────────
 
 

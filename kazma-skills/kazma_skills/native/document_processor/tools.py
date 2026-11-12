@@ -329,14 +329,22 @@ async def generate_pptx(title: str, slides: list[Slide]) -> str:
     """Generate a verified PPTX through the isolated renderer worker.
 
     title: the deck's title, on its title slide
-    slides: the slides after the title slide, in order; each names its title as heading
+    slides: the slides after the title slide, in order; each names its title as heading, and may name a picture as image
     """
+    import dataclasses
 
-    result = await DocumentService().generate(
-        "pptx",
-        {"title": title, "slides": slides or []},
-        output_name=title,
-        export_dir=DOC_DIR,
-        **_scope(),
-    )
+    from kazma_core.documents.image_inputs import DocumentImages
+
+    async with DocumentImages() as images:
+        staged = await images.in_slides(list(slides or []))
+        result = await DocumentService().generate(
+            "pptx",
+            {"title": title, "slides": staged},
+            output_name=title,
+            export_dir=DOC_DIR,
+            approved_assets=images.paths,
+            **_scope(),
+        )
+        if not result.ok:
+            result = dataclasses.replace(result, message=images.explain(result.message))
     return _artifact_output(result, "PowerPoint")

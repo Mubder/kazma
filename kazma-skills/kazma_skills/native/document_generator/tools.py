@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 
 from pathlib import Path
@@ -228,32 +229,62 @@ async def _markdown_source(markdown_path: str) -> Path:
     return p
 
 
-def _same_document(kind: str, payload: dict[str, Any]) -> str:
-    """The canonical text of a document request: the same title, sections and
-    tables are the same document (plan D4)."""
+def _same_document(kind: str, payload: dict[str, Any], images: tuple[str, ...] = ()) -> str:
+    """The canonical text of a document request: the same title, sections,
+    tables and images (by content) are the same document (plan D4)."""
     import json
 
     return json.dumps({"kind": kind, "title": payload.get("title"), "sections": payload.get("sections"),
-                       "tables": payload.get("tables")}, sort_keys=True, ensure_ascii=False, default=str)
+                       "tables": payload.get("tables"), "slides": payload.get("slides"),
+                       "images": list(images)}, sort_keys=True, ensure_ascii=False, default=str)
 
 
-def _generated_already(kind: str, payload: dict[str, Any]) -> None:
+def _generated_already(kind: str, payload: dict[str, Any], images: tuple[str, ...] = ()) -> None:
     """Refuse a document the running turn already generated, naming its file."""
     from kazma_core.tools.turn_writes import earlier_copy
 
-    earlier = earlier_copy("document", _same_document(kind, payload), "")
+    earlier = earlier_copy("document", _same_document(kind, payload, images), "")
     if earlier:
         raise RefusedBeforeEffect(
             f"Error: this {kind.upper()} was already generated in this turn, at {earlier}; it was not "
             "generated again. Send or use that file; to change it, call again with the changed content.")
 
 
-def _note_generated(kind: str, payload: dict[str, Any], result: Any) -> None:
+def _note_generated(kind: str, payload: dict[str, Any], result: Any, images: tuple[str, ...] = ()) -> None:
     from kazma_core.tools.turn_writes import note_written
 
     path = getattr(result.data, "export_path", None) if getattr(result, "ok", False) and result.data else None
     if path:
-        note_written("document", _same_document(kind, payload), str(path))
+        note_written("document", _same_document(kind, payload, images), str(path))
+
+
+def _markdown_sections(md: str) -> list[dict[str, str]]:
+    """A Markdown file's headings as sections (the export endpoints' split)."""
+    parsed: list[dict[str, str]] = []
+    cur_h = "Report"
+    cur_b: list[str] = []
+    fenced = False
+    for line in md.splitlines():
+        # A "#" inside a fenced code block is code, not a heading.
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+        if line.startswith("#") and not fenced:
+            if cur_b or parsed:
+                parsed.append({"heading": cur_h, "body": "\n".join(cur_b).strip()})
+            cur_h = line
+            cur_b = []
+        else:
+            cur_b.append(line)
+    if cur_b or not parsed:
+        parsed.append({"heading": cur_h, "body": "\n".join(cur_b).strip()})
+    return parsed
+
+
+def _sections_for_check(sections: list[dict[str, str]]) -> list[dict[str, str]]:
+    """The sections as the PDF's text shows them: each image line its caption."""
+    from kazma_core.documents.image_inputs import text_without_images
+
+    return [{**section, "body": text_without_images(section.get("body", ""))} for section in sections]
 
 
 async def generate_pdf(
@@ -284,10 +315,15 @@ async def generate_pdf(
       - ``-`` / ``*`` bullets and ``1.`` numbered lists
       - ``**bold**``, ``*italic*``, ``code``, links
       - blank-line paragraphs (justified); blockquotes with ``>``
+      - pictures: ``![caption](path)`` on a line of its own places a PNG,
+        JPEG, GIF or WebP file right there, its caption under it. The path is
+        a file in the workspace, a generated image or a chat attachment; a
+        web image is saved first with ``download_image``.
 
     Arabic is auto-detected (or set ``lang="ar"`` / ``rtl=True``). PDF path
     applies arabic-reshaper + python-bidi so letters join and order correctly.
     """
+    from kazma_core.documents.image_inputs import DocumentImages
 
     source_md = None
     if markdown_path:
@@ -295,51 +331,42 @@ async def generate_pdf(
         p = await _markdown_source(markdown_path)
         md = await asyncio.to_thread(p.read_text, encoding="utf-8", errors="replace")  # FA-139
         source_md = p
-        # Parse markdown headings into sections (same split as the export endpoints).
-        parsed: list[dict[str, str]] = []
-        cur_h = "Report"
-        cur_b: list[str] = []
-        for line in md.splitlines():
-            if line.startswith("#"):
-                if cur_b or parsed:
-                    parsed.append({"heading": cur_h, "body": "\n".join(cur_b).strip()})
-                cur_h = line
-                cur_b = []
-            else:
-                cur_b.append(line)
-        if cur_b or not parsed:
-            parsed.append({"heading": cur_h, "body": "\n".join(cur_b).strip()})
-        sections = parsed
-    payload: dict[str, Any] = {
-        "title": title,
-        "sections": _sections(sections),
-        "tables": tables or [],
-        "page_numbers": True,
-    }
-    if lang:
-        payload["lang"] = lang
-    if rtl is not None:
-        payload["rtl"] = bool(rtl)
-    _generated_already("pdf", payload)
-    result = await DocumentService().generate(
-        "pdf",
-        payload,
-        output_name=title,
-        export_dir=DOC_DIR,
-        **_scope(),
-    )
+        sections = _markdown_sections(md)
+    async with DocumentImages() as images:
+        # Images are relative to the Markdown file's folder when it names them so.
+        payload: dict[str, Any] = {
+            "title": title,
+            "sections": await images.in_sections(_sections(sections), base=source_md),
+            "tables": tables or [],
+            "page_numbers": True,
+        }
+        if lang:
+            payload["lang"] = lang
+        if rtl is not None:
+            payload["rtl"] = bool(rtl)
+        _generated_already("pdf", payload, images.digests)
+        result = await DocumentService().generate(
+            "pdf",
+            payload,
+            output_name=title,
+            export_dir=DOC_DIR,
+            approved_assets=images.paths,
+            **_scope(),
+        )
+        if not result.ok:
+            result = dataclasses.replace(result, message=images.explain(result.message))
     if result.ok:
         # Guardrail (2026-08-27 incident): verify the rendered PDF actually
         # CONTAINS the requested bodies/tables before reporting success —
         # a lazily-summarized call (or a renderer truncation) must surface
         # as an error the model can self-correct from, never a false ✅.
         _path = getattr(result.data, "export_path", None) if result.data else None
-        _err = _verify_pdf_content(_path, _sections(sections), tables)
+        _err = _verify_pdf_content(_path, _sections_for_check(payload["sections"]), tables)
         if _err:
             # The incomplete file is known and named; a new call writes a new
             # file: a correctable error, not an unknown effect.
             raise KnownEffectError(f"{_err} (incomplete file: {_path})")
-    _note_generated("pdf", payload, result)
+    _note_generated("pdf", payload, result, images.digests)
     answer = _output(result, "PDF")
     return answer + await _keep_with_research(result, title, "pdf", source_md)
 
@@ -359,49 +386,45 @@ async def generate_docx(
         file_write (chunked). Headings become DOCX sections automatically.
       - ``sections``: inline [{"heading": …, "body": …}] (small docs only)
 
-    Body markdown: headings, lists, **bold**, GFM tables, quotes.
+    Body markdown: headings, lists, **bold**, GFM tables, quotes, and
+    pictures: ``![caption](path)`` on a line of its own places a PNG, JPEG,
+    GIF or WebP file right there (a workspace file, a generated image or a
+    chat attachment; a web image is saved first with ``download_image``).
     Also accepts structured ``tables=[{heading, headers, rows}]`` like PDF.
     Word shapes Arabic; we set ``w:bidi``, justify (``w:jc=both``), heading
     fills, and styled tables.
     """
+
+    from kazma_core.documents.image_inputs import DocumentImages
 
     source_md = None
     if markdown_path:
         p = await _markdown_source(markdown_path)
         md = await asyncio.to_thread(p.read_text, encoding="utf-8", errors="replace")  # FA-139
         source_md = p
-        parsed: list[dict[str, str]] = []
-        cur_h = "Report"
-        cur_b: list[str] = []
-        for line in md.splitlines():
-            if line.startswith("#"):
-                if cur_b or parsed:
-                    parsed.append({"heading": cur_h, "body": "\n".join(cur_b).strip()})
-                cur_h = line
-                cur_b = []
-            else:
-                cur_b.append(line)
-        if cur_b or not parsed:
-            parsed.append({"heading": cur_h, "body": "\n".join(cur_b).strip()})
-        sections = parsed
-    payload: dict[str, Any] = {
-        "title": title,
-        "sections": _sections(sections),
-        "tables": tables or [],
-    }
-    if lang:
-        payload["lang"] = lang
-    if rtl is not None:
-        payload["rtl"] = bool(rtl)
-    _generated_already("docx", payload)
-    result = await DocumentService().generate(
-        "docx",
-        payload,
-        output_name=title,
-        export_dir=DOC_DIR,
-        **_scope(),
-    )
-    _note_generated("docx", payload, result)
+        sections = _markdown_sections(md)
+    async with DocumentImages() as images:
+        payload: dict[str, Any] = {
+            "title": title,
+            "sections": await images.in_sections(_sections(sections), base=source_md),
+            "tables": tables or [],
+        }
+        if lang:
+            payload["lang"] = lang
+        if rtl is not None:
+            payload["rtl"] = bool(rtl)
+        _generated_already("docx", payload, images.digests)
+        result = await DocumentService().generate(
+            "docx",
+            payload,
+            output_name=title,
+            export_dir=DOC_DIR,
+            approved_assets=images.paths,
+            **_scope(),
+        )
+        if not result.ok:
+            result = dataclasses.replace(result, message=images.explain(result.message))
+    _note_generated("docx", payload, result, images.digests)
     answer = _output(result, "DOCX")
     return answer + await _keep_with_research(result, title, "docx", source_md)
 

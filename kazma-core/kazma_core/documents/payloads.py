@@ -25,7 +25,8 @@ class Section(TypedDict, total=False):
     heading: Annotated[str, "the section's heading"]
     body: Annotated[str, (
         "the section's complete text, in Markdown (# headings, - lists, **bold**, "
-        "tables); never a summary of it"
+        "tables); never a summary of it. A picture goes on a line of its own as "
+        "![caption](path to a PNG, JPEG, GIF or WebP file) and is placed right there"
     )]
 
 
@@ -43,6 +44,12 @@ class Slide(TypedDict, total=False):
     heading: Annotated[str, "the slide's title, drawn in its title band"]
     bullets: Annotated[list[str], "the slide's points, one item per point"]
     body: Annotated[str, "the slide's text when it has no bullets; each line becomes a point"]
+    image: Annotated[str, (
+        "a picture for the slide: the path of a PNG, JPEG, GIF or WebP file (in the workspace, "
+        "a generated image or a chat attachment; a web image is saved first with download_image). "
+        "Drawn beside the text, or across the slide when it has no text"
+    )]
+    image_caption: Annotated[str, "a caption under the picture (optional)"]
     notes: Annotated[str, "speaker notes (not shown on the slide)"]
 
 

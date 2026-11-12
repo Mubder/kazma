@@ -48,7 +48,11 @@ class PptxEngine:
     # ------------------------------------------------------------------ #
     # public entry
     # ------------------------------------------------------------------ #
-    def render(self, payload: dict[str, Any], output: Path | str) -> None:
+    def render(self, payload: dict[str, Any], output: Path | str, *,
+               images_dir: Path | None = None, images: dict[str, Any] | None = None) -> None:
+        """Write the deck. A slide's ``image`` names an approved image, drawn
+        from *images_dir* (the worker's cleaned folder; *images*: approved
+        name -> ``image_clean.CleanImage``)."""
         from pptx import Presentation
         from pptx.enum.shapes import MSO_SHAPE
         from pptx.util import Inches
@@ -129,14 +133,27 @@ class PptxEngine:
                 color_hex="FFFFFF", bold=True, size=26, align=None, band=True,
             )
 
-            # Bullet body.
-            body = slide.shapes.add_shape(
-                MSO_SHAPE.RECTANGLE, Inches(0.6), Inches(1.55),
-                slide_w - Inches(1.2), slide_h - Inches(2.5),
-            )
-            body.fill.background()  # transparent
-            body.line.fill.background()
-            self._bullet_body(body, value, colors["body"])
+            # Bullet body, and the slide's picture beside it: the text on the
+            # side its reading starts, the picture on the other; a slide with
+            # a picture and no text gives the picture the whole body.
+            left, top = Inches(0.6), Inches(1.55)
+            width, height = slide_w - Inches(1.2), slide_h - Inches(2.5)
+            picture = self._slide_picture(value, images_dir, images or {})
+            has_text = bool(value.get("bullets") or str(value.get("body") or "").strip())
+            if picture is not None and has_text:
+                gap = Inches(0.3)
+                text_w = int(width * 0.55)
+                picture_w = width - text_w - gap
+                if self._slide_is_rtl(value):
+                    text_left, picture_left = left + picture_w + gap, left
+                else:
+                    text_left, picture_left = left, left + text_w + gap
+                self._text_body(slide, value, text_left, top, text_w, height, colors["body"])
+                self._place_picture(slide, picture, value, picture_left, top, picture_w, height, colors["muted"])
+            elif picture is not None:
+                self._place_picture(slide, picture, value, left, top, width, height, colors["muted"])
+            else:
+                self._text_body(slide, value, left, top, width, height, colors["body"])
 
             # Footer (brand + page number).
             footer = slide.shapes.add_textbox(
@@ -258,6 +275,58 @@ class PptxEngine:
                 setattr(tf, side, Inches(0.15))
         self._style_paragraph(tf.paragraphs[0], text=text, color_hex=color_hex, bold=bold,
                               size=size, align=align, rtl=rtl)
+
+    def _text_body(self, slide: Any, value: dict[str, Any], left: int, top: int,
+                   width: int, height: int, body_hex: str) -> None:
+        from pptx.enum.shapes import MSO_SHAPE
+
+        body = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, left, top, width, height)
+        body.fill.background()  # transparent
+        body.line.fill.background()
+        self._bullet_body(body, value, body_hex)
+
+    def _slide_is_rtl(self, value: dict[str, Any]) -> bool:
+        """Whether the slide's own text reads right to left (its side for the text)."""
+        bullets = value.get("bullets")
+        lines = [str(b) for b in bullets] if isinstance(bullets, list) else [str(value.get("body") or "")]
+        sample = "\n".join([slide_heading(value), *lines])
+        return self.profile.block_direction(sample) == "rtl"
+
+    @staticmethod
+    def _slide_picture(value: dict[str, Any], images_dir: Path | None,
+                       images: dict[str, Any]) -> tuple[Path, Any] | None:
+        """The cleaned file and size of the slide's ``image``, or None.
+
+        A name with no cleaned image (a payload from outside the document
+        tools, which approve none) is left out, said at WARNING.
+        """
+        name = str(value.get("image") or "").strip()
+        if not name:
+            return None
+        clean = images.get(name)
+        if clean is None or images_dir is None or not (Path(images_dir) / clean.name).is_file():
+            logger.warning("[pptx] a slide names an image that was not approved: %s", name[:80])
+            return None
+        return Path(images_dir) / clean.name, clean
+
+    #: Room for a picture's caption under it.
+    _CAPTION_EMU = 457200  # 0.5 in
+
+    def _place_picture(self, slide: Any, picture: tuple[Path, Any], value: dict[str, Any],
+                       left: int, top: int, width: int, height: int, muted_hex: str) -> None:
+        """The picture, as large as fits in the box keeping its shape, centred,
+        with its caption under it."""
+        path, clean = picture
+        caption = str(value.get("image_caption") or "").strip()
+        room = height - (self._CAPTION_EMU if caption else 0)
+        scale = min(width / max(1, clean.width), room / max(1, clean.height))
+        pic_w, pic_h = int(clean.width * scale), int(clean.height * scale)
+        pic_left = left + (width - pic_w) // 2
+        pic_top = top + (room - pic_h) // 2
+        slide.shapes.add_picture(str(path), pic_left, pic_top, width=pic_w, height=pic_h)
+        if caption:
+            box = slide.shapes.add_textbox(left, pic_top + pic_h, width, self._CAPTION_EMU)
+            self._shape_text(box, caption, color_hex=muted_hex, size=12, align="ctr")
 
     def _bullet_body(self, shape: Any, value: dict[str, Any], body_hex: str) -> None:
         """Fill a body shape with bullets (or body lines), each its own direction.

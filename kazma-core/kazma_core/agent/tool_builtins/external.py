@@ -174,6 +174,19 @@ def register_external_tools(registry: Any) -> None:
     except ImportError:
         logger.debug("analyze_image not available")
     try:
+        from kazma_core.tools.image_download import download_image
+
+        registry.register_function("download_image", download_image,
+            description=(
+                "Save a picture from the web (PNG, JPEG, GIF or WebP, at most 20 MB) as a file in the "
+                "workspace's downloads/images folder, to put in a document. Args: url, name (optional). "
+                "Returns the path: name it as ![caption](path) in generate_pdf/generate_docx, or as a "
+                "slide's image in generate_pptx."
+            ),
+            category="media")
+    except ImportError:
+        logger.debug("download_image not available")
+    try:
         from kazma_core.tools.export_session import export_session
 
         async def export_current_session(format: str = "json") -> str:

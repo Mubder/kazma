@@ -86,6 +86,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "تحليل صورة باستخدام رؤية النموذج.",
         "en": "Analyze an image using LLM vision.",
     },
+    "tool.desc.download_image": {
+        "ar": "حفظ صورة من الويب (PNG أو JPEG أو GIF أو WebP، حتى 20 ميغابايت) في مجلد downloads/images لوضعها في مستند.",
+        "en": "Save a picture from the web (PNG, JPEG, GIF or WebP, at most 20 MB) in the workspace's downloads/images folder, to put in a document.",
+    },
     "tool.desc.analyze_local_image": {
         "ar": "تحليل لقطة شاشة أو رسم بياني محلي.",
         "en": "Analyze a local screenshot or diagram.",

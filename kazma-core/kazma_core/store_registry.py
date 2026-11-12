@@ -606,6 +606,7 @@ TOOL_WRITES: dict[str, Write] = {
     "x_post": Write(("external:x", "x_posts.db", "x_publications.db"), ("x_status",)),
     "x_delete_post": Write(("external:x", "x_posts.db", "x_publications.db"), ("x_status",)),
     "x_download_media": Write(("workspace",), ("file_list",)),
+    "download_image": Write(("workspace",), ("file_list", "analyze_image")),
     "x_schedule_post": Write(("x_scheduled.db", "x_publications.db"), ("x_list_scheduled",)),
     "x_cancel_scheduled_post": Write(("x_scheduled.db", "x_publications.db"), ("x_list_scheduled",)),
     # ── documents ──────────────────────────────────────────────────────

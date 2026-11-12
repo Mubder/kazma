@@ -32,9 +32,9 @@ WRITERS = frozenset({
     "file_write", "file_append", "file_apply_patch", "file_apply_patch_set",
     "generate_pdf", "generate_docx", "generate_xlsx", "generate_markdown_doc",
     "document_convert", "document_redact", "convert_document", "send_file",
-    "x_download_media",
+    "x_download_media", "download_image", "generate_pptx",
 })
-_EXT = r"(?:md|markdown|pdf|docx?|xlsx?|csv|tsv|txt|json|html?|py|js|ts|tsx|css|ya?ml|png|jpe?g|svg|zip|pptx|mp4|xml)"
+_EXT = r"(?:md|markdown|pdf|docx?|xlsx?|csv|tsv|txt|json|html?|py|js|ts|tsx|css|ya?ml|png|jpe?g|gif|webp|svg|zip|pptx|mp4|xml)"
 _FILE = re.compile(rf"[\w؀-ۿ][\w؀-ۿ.\-]*\.{_EXT}\b", re.I)
 _PATHISH = re.compile(rf"[\w؀-ۿ.:\-/\\]*[\w؀-ۿ]\.{_EXT}\b", re.I)
 _AR = "\u0600-\u06FF"
