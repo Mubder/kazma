@@ -72,19 +72,31 @@ WSL 2 distro of Kazma's own, `kazma-engine`, started at boot by the guard.
   2026-11-12), imports Ubuntu's published WSL image pinned by SHA-256 against
   Ubuntu's `SHA256SUMS`, and installs Docker Engine from Docker's apt
   repository at a pinned series. One restart when the features were off.
-- **Started by the guard, which already starts at boot.** The guard holds a
-  keep-alive child (`wsl.exe -d kazma-engine -- sleep infinity`), supervised
-  like the document broker: restarted when it dies (a user's `wsl --shutdown`
-  stops every distro), paged once through the existing `docker_away`
-  condition. Docker Desktop is never launched for this engine.
-- **No socket and no certificates.** Kazma runs `wsl.exe -d kazma-engine --
-  docker ...` for every Docker call: only the Windows account that owns the
-  distro can use it, and nothing listens on a port. Measured on this PC:
-  8 MB through stdin and stdout byte for byte, about 100 ms a call (a
-  container start costs seconds).
-- **Windows paths in a mount are translated** to the distro's view
-  (`C:\Users\x` -> `/mnt/c/Users/x`) by one helper; compose runs inside the
-  distro, so the compose files' relative paths work unchanged.
+- **Started by a boot task of its own, `KazmaEngine`** (S4U, normal rights,
+  at startup and every 5 minutes), not by Kazma's guard: the engine serves
+  every project on the PC, and stays up when Kazma is paused or updated. The
+  task holds a keep-alive (`wsl.exe -d kazma-engine -- sleep infinity`) and
+  starts it again when it ends (a `wsl --shutdown`, an update), backing off
+  to a minute. The guard watches the engine and pages through the existing
+  `docker_away` condition; it never launches Docker Desktop for it.
+  Registering an S4U task needs administrator rights once (setup runs
+  elevated; on the owner's PC it was the owner's step).
+- **An ordinary Docker context.** The engine listens on `127.0.0.1:2376`
+  with mutual TLS: a CA kept in the distro, a client key readable by the
+  account only. `docker context create kazma-engine` points at it, so
+  `docker` and `docker compose` on Windows, Kazma's included, work as they
+  do with Docker Desktop. Measured: without the client key the connection is
+  refused. (`wsl.exe -d kazma-engine -- docker ...` also works, binary-safe,
+  about 100 ms a call: the fallback where a port is not wanted.)
+- **Windows paths in a mount.** The engine mounts the drives at `/c`, `/g`
+  (`[automount] root=/`), and `COMPOSE_CONVERT_WINDOWS_PATHS=1` makes compose
+  send `G:\x` as `/g/x`, so compose files with relative bind mounts work
+  unchanged. Kazma translates its own mounts (the code sandbox's workspace)
+  by the engine's daemon labels (`io.kazma.engine.drive-root=/`); a Linux
+  engine without them gets no Windows mount, with the reason said.
+- **Pinned by Kazma.** Kazma names its Docker context in a setting instead of
+  trusting the CLI's current one: Docker Desktop, when someone opens it, may
+  switch the current context back to itself.
 - **Ports published on 127.0.0.1 reach Windows 127.0.0.1** through WSL's
   localhost forwarding (measured: 200 from Windows for a container in the
   distro). Kazma's addresses do not change.
@@ -241,6 +253,46 @@ strict profile no longer needs a container at all. After it, containers are
 needed only for private search.
 
 **Later, on demand:** macOS always-on (variant E).
+
+## The owner's PC (started 2026-11-12, with the owner's approval)
+
+The owner asked "why not just use Docker as a service?" and approved backing
+up Docker Desktop and moving to it. On Windows no Windows service runs Linux
+containers by itself (Docker's own Windows service runs Windows containers
+only; Docker Desktop's service is a helper, its engine starts with the app
+at sign-in), so "Docker as a service" for Linux containers is this engine.
+
+Done:
+- **Backup** of Docker Desktop: every container's settings, consistent
+  `pg_dumpall` of the running databases, every image (one archive), every
+  volume, checksums. Kept in `C:\Users\balfa\docker-desktop-backup\2026-11-12`,
+  readable by the account only.
+- **The engine:** the `kazma-engine` distro in
+  `%LOCALAPPDATA%\Kazma\engine`, Docker Engine 29.9.3, networks in
+  `10.213.0.0/16`, the `kazma-engine` context; every image loaded with the
+  same image IDs.
+
+Left, in order:
+1. The owner registers `KazmaEngine` (one elevated command:
+   `%LOCALAPPDATA%\Kazma\engine\register-engine-task.ps1`).
+2. Kazma pins its context and translates its mounts (Stage 1), and the
+   guard stops launching Docker Desktop for this engine; the document worker
+   image is built on the engine.
+3. One cut-over, a few minutes per project: ShipX, HypertFit and Kazma's
+   SearXNG and Neo4j stopped on Docker Desktop (kept), their volumes copied
+   and compared, recreated on the engine from their saved settings, the
+   current context switched, every site checked through its tunnel address.
+4. Docker Desktop no longer starts at sign-in (the owner's choice; kept
+   installed for rollback).
+
+Catches, said to the owner: no Docker Desktop window for these containers;
+ports published on `0.0.0.0` (ShipX's 5600, the old `shipx-db` on 5533) are
+reachable from this PC only, no longer from the LAN (the tunnel uses
+`127.0.0.1`, so the sites are unaffected); `host.docker.internal` is not
+defined by a plain engine: HypertFit's `SMPLX_WORKER_URL` names it (port
+8790, where nothing listens today, so the SMPL-X worker is already off);
+when it runs again it belongs in a container on HypertFit's network, or the
+engine is given the Windows host's address.
 
 ## Decisions
 
