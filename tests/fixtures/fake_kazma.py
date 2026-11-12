@@ -22,6 +22,12 @@ each of the specific ways that broke the guard in production:
                           "old": the same body without ``needs_setup`` (a
                           build before 2026-11-07, the negative control)
     FAKE_SETUP_DONE_FILE  ...ready once this file exists (the owner added a key)
+    FAKE_WAITS_FOR        from the start, not ready + 503 because the Docker
+                          engine does not answer and code execution is
+                          required, as Kazma answers it (``waits_for``); "old":
+                          the same body without ``waits_for`` (a build before
+                          2026-11-12, the negative control)
+    FAKE_WAIT_OVER_FILE   ...ready once this file exists (Docker answers again)
     FAKE_DEGRADED_AFTER_S   report degraded + 200: a partial failure that is
                           explicitly still serving and must NOT be restarted
     FAKE_HANG_AFTER_S     stop answering entirely without exiting
@@ -77,10 +83,35 @@ NOTE_ENV = [name for name in os.environ.get("FAKE_NOTE_ENV", "").split(",") if n
 BROKER_REQUEST = os.environ.get("FAKE_BROKER_REQUEST", "").strip().lower()
 NEEDS_SETUP = os.environ.get("FAKE_NEEDS_SETUP", "").strip().lower()
 SETUP_DONE_FILE = os.environ.get("FAKE_SETUP_DONE_FILE", "")
+WAITS_FOR = os.environ.get("FAKE_WAITS_FOR", "").strip().lower()
+WAIT_OVER_FILE = os.environ.get("FAKE_WAIT_OVER_FILE", "")
+
+
+def _waits_for_body() -> dict | None:
+    """Kazma's readiness while the Docker engine does not answer and code
+    execution is required (2026-11-12: a Windows update restart, nobody
+    signed in to start Docker Desktop)."""
+    if not WAITS_FOR or (WAIT_OVER_FILE and os.path.exists(WAIT_OVER_FILE)):
+        return None
+    failed = {"status": "failed", "component": "code_execution",
+              "error": "No available isolated execution backend"}
+    if WAITS_FOR != "old":
+        failed["waits_for"] = "docker"
+    body: dict = {
+        "status": "not_ready",
+        "checks": {"database": {"status": "ok"}, "code_execution": failed},
+        "unavailable_capabilities": ["code_execution"],
+    }
+    if WAITS_FOR != "old":
+        body["waits_for"] = {"code_execution": "docker"}
+    return body
 
 
 def _needs_setup_body() -> dict | None:
     """Kazma's readiness with no provider key (the drill VM, 2026-11-06)."""
+    waiting = _waits_for_body()
+    if waiting is not None:
+        return waiting
     if not NEEDS_SETUP or (SETUP_DONE_FILE and os.path.exists(SETUP_DONE_FILE)):
         return None
     body: dict = {

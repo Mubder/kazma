@@ -298,16 +298,126 @@ def test_a_docker_that_does_not_come_up_is_started_again_later_and_paged_once(mo
     h.docker.engine = False
     h.run(130)
     assert len(h.launches) == 1
-    h.run(240)
+    h.run(160)  # 290 s down: Docker Desktop may still be starting
+    assert h.pages_titled("Docker does not answer") == []
+    h.run(80)
     assert h.deps.state == "not_coming_up"
     assert "deps.not_coming_up" in h.events()
     assert len(h.launches) == 1
-    assert h.pages_titled("Kazma cannot start") == []
+    assert len(h.pages_titled("Docker does not answer")) == 1
     h.run(300)
     assert len(h.launches) == 2
-    assert len(h.pages_titled("Kazma cannot start")) == 1
     h.run(1200)
-    assert len(h.pages_titled("Kazma cannot start")) == 1
+    assert len(h.pages_titled("Docker does not answer")) == 1
+
+
+def test_nobody_signed_in_is_paged_sooner_with_the_way_out(monkeypatch):
+    """2026-11-12: a Windows update restarted the PC and nobody signed in.
+    The guard paged at ten minutes, two after Kazma Watch had paged the same
+    problem. Nothing brings Docker back until someone signs in, so it pages
+    at three minutes, and says what brings it back: a sign-in."""
+    h = _Harness(monkeypatch)
+    h.images = {"svchost.exe", "wininit.exe"}
+    h.docker.engine = False
+    h.run(175)
+    assert h.deps.state == "no_session"
+    assert h.pages_titled("Docker does not answer") == []
+    h.run(10)
+    pages = h.pages_titled("Docker does not answer")
+    assert len(pages) == 1, h.pages
+    assert "nobody is signed in" in pages[0]
+    assert "Sign in to this PC to start it." in pages[0]
+    assert "Kazma cannot start" not in pages[0], "Kazma keeps running; it waits for Docker"
+    h.run(1200)
+    assert len(h.pages_titled("Docker does not answer")) == 1
+    # Control: a Docker Desktop being started is given the longer wait.
+    h2 = _Harness(monkeypatch)
+    h2.docker.engine = False
+    h2.run(185)
+    assert h2.deps.state == "docker_starting" and h2.pages_titled("Docker does not answer") == []
+
+
+# ── Kazma up and waiting for Docker (2026-11-12) ──────────────────────
+
+
+def test_a_wait_for_docker_the_docker_watch_sees_is_its_page_alone(monkeypatch):
+    h = _Harness(monkeypatch)
+    h.docker.engine = False
+    detail = "code_execution: No available isolated execution backend"
+    for _ in range(int(guard.WAIT_PAGE_S // 30) + 4):
+        h.run(30)
+        h.g._note_waiting(("docker",), detail)
+    assert h.pages_titled("Kazma is up, but not ready") == [], "one page per problem"
+    assert len(h.pages_titled("Docker does not answer")) == 1
+    assert h.events().count("health.waiting_for") == 1
+    assert "health.waiting_paged_by" in h.events()
+    h.docker.engine = True
+    h.run(20)
+    h.g._end_waiting()
+    assert h.pages_titled("Kazma is ready again") == [], "the Docker page's own recovery says it"
+    assert len(h.pages_titled("Docker is back")) == 1
+
+
+def test_a_wait_nothing_else_pages_is_paged_once_and_its_end_once(monkeypatch):
+    h = _Harness(monkeypatch, mode="off")
+    detail = "code_execution: No available isolated execution backend"
+    h.g._note_waiting(("docker",), detail)
+    h.clock.now += guard.WAIT_PAGE_S - 5
+    h.g._note_waiting(("docker",), detail)
+    assert h.pages_titled("Kazma is up, but not ready") == [], "a reboot's minute of waiting is no incident"
+    h.clock.now += 10
+    for _ in range(5):
+        h.g._note_waiting(("docker",), detail)
+        h.clock.now += 60
+    pages = h.pages_titled("Kazma is up, but not ready")
+    assert len(pages) == 1 and "a restart cannot bring docker back" in pages[0], pages
+    h.g._end_waiting()
+    assert len(h.pages_titled("Kazma is ready again")) == 1
+    assert "health.wait_over" in h.events()
+    # A wait that ended before its page ends quietly.
+    h.g._note_waiting(("docker",), detail)
+    h.clock.now += 60
+    h.g._end_waiting()
+    assert len(h.pages_titled("Kazma is ready again")) == 1
+
+
+# ── restart pages ─────────────────────────────────────────────────────
+
+
+def test_one_restart_page_an_hour_per_reason(monkeypatch):
+    """2026-11-12: eighteen "never became healthy" pages, 15-20 min apart,
+    each past the 15-minute page cooldown."""
+    h = _Harness(monkeypatch)
+    for _ in range(3):  # 0, 18 and 36 min
+        h.g.restarts += 1
+        h.g.notify_restart("never became healthy", 300)
+        h.clock.now += 1080
+    assert len(h.pages_titled("Kazma stopped: never became healthy")) == 1
+    assert h.events().count("notify.restart_collapsed") == 2
+    h.clock.now += 1600
+    h.g.restarts += 1
+    h.g.notify_restart("never became healthy", 300)  # 81 min after the first
+    pages = h.pages_titled("Kazma stopped: never became healthy")
+    assert len(pages) == 2 and "It restarted 2 more times for this since the last page." in pages[1]
+    # Another reason pages; a healthy start ends the series.
+    h.g.notify_restart("process exited (code 1)", 15)
+    assert len(h.pages_titled("Kazma stopped: process exited")) == 1
+    h.g.notify_recovered()
+    h.clock.now += 60
+    h.g.notify_restart("never became healthy", 15)
+    assert len(h.pages_titled("Kazma stopped: never became healthy")) == 3
+    # Control: the cooldown alone (900 s) let a restart every 20 min page.
+    assert guard.PAGE_COOLDOWN_S < 1200 < guard.RESTART_REPAGE_S
+
+
+def test_last_words_only_from_a_server_that_ended_by_itself(monkeypatch):
+    h = _Harness(monkeypatch)
+    assert h.g._ended_by_itself("process exited (code 3221225477)")
+    assert not h.g._ended_by_itself("unhealthy (unreachable: timed out)")
+    h.g._exited_while_starting = False
+    assert not h.g._ended_by_itself("never became healthy"), "the guard stopped it: boot lines only"
+    h.g._exited_while_starting = True
+    assert h.g._ended_by_itself("never became healthy")
 
 
 def test_off_and_held_do_nothing(monkeypatch):

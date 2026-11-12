@@ -62,7 +62,11 @@ def _one_line(text: object, limit: int = _DESCRIPTION_LIMIT) -> str:
 #: MDX, where "<" opens a JSX tag and "{" a JavaScript expression: one tool
 #: description with "proposal_id=<that item's id>" stopped the whole site
 #: from building (2026-09-25 to 2026-09-27; tests/test_docs_mdx_safe.py).
-_CELL_ESCAPES = {"|": "\\|", "<": "&lt;", ">": "&gt;", "{": "&#123;", "}": "&#125;"}
+#: A square bracket is markdown's link and image syntax: download_image's
+#: "![caption](path)" rendered as a broken image, and the site's link check
+#: refused the page (2026-11-12).
+_CELL_ESCAPES = {"|": "\\|", "<": "&lt;", ">": "&gt;", "{": "&#123;", "}": "&#125;",
+                 "[": "&#91;", "]": "&#93;"}
 
 
 def _cell(text: object) -> str:

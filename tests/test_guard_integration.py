@@ -286,6 +286,42 @@ def test_a_setup_wait_without_its_flag_was_restarted(tmp_path):
         g.wait_for("guard.restarting", timeout=30)
 
 
+def test_a_server_waiting_for_docker_is_up_and_never_restarted(tmp_path):
+    """2026-11-12: a Windows update restarted the PC at 06:30 and nobody
+    signed in, so Docker Desktop never started. Code execution is required on
+    the live install, readiness answered "not ready: code_execution", and the
+    guard restarted a Kazma that served chat 18 times in six hours, paging
+    each time. Readiness now says it waits for Docker (``waits_for``); the
+    guard keeps it up, says so once, and sees the wait end."""
+    port = _free_port()
+    over = tmp_path / "docker-back"
+    with GuardRun(tmp_path, port, FAKE_WAITS_FOR="docker", FAKE_WAIT_OVER_FILE=str(over),
+                  START_TIMEOUT="10", FAILURES="2", INTERVAL="2",
+                  KAZMA_GUARD_DEPENDENCY_OUTAGE_S="6") as g:
+        ev = g.wait_for("child.up_waiting_for", timeout=60)
+        assert ev.get("waits_for") == "docker", ev
+        assert "code_execution" in str(ev.get("detail")), ev
+        time.sleep(16)  # past the start budget (10 s) and the outage runway (6 s)
+        assert g.count("guard.restarting") == 0 and g.count("child.never_ready") == 0
+        assert g.count("child.spawned") == 1
+        assert g.count("health.waiting_for") == 1, "said once, not every probe"
+        over.write_text("", encoding="utf-8")  # Docker answers again
+        g.wait_for("health.wait_over", timeout=30)
+        assert g.count("guard.restarting") == 0
+
+
+def test_a_docker_wait_without_its_flag_was_restarted(tmp_path):
+    """Negative control: the morning's answer, from a build before
+    ``waits_for``: never ready, stopped and restarted -- and the page did not
+    quote the boot's stderr as the stopped server's last words."""
+    port = _free_port()
+    with GuardRun(tmp_path, port, FAKE_WAITS_FOR="old", START_TIMEOUT="8",
+                  FAILURES="2", INTERVAL="2") as g:
+        ev = g.wait_for("child.never_ready", timeout=60)
+        assert "code_execution" in str(ev.get("last")), ev
+        g.wait_for("guard.restarting", timeout=30)
+
+
 def test_a_long_dependency_outage_is_restarted_after_the_runway(tmp_path):
     """Past the runway the guard restarts anyway: the database may be back
     and Kazma's own connections what is stuck."""

@@ -181,6 +181,15 @@ FAILURES_TO_KILL = int(os.environ.get("KAZMA_GUARD_FAILURES", "3"))
 # paged; past it the guard restarts anyway, for the case where the database
 # is back and Kazma's own connections are what is stuck.
 DEPENDENCY_OUTAGE_S = float(os.environ.get("KAZMA_GUARD_DEPENDENCY_OUTAGE_S", "600"))
+# Kazma up and waiting for a dependency outside it (readiness ``waits_for``:
+# the Docker engine) is never restarted for it, and is paged this long into
+# the wait -- not at once: Docker Desktop takes a minute or two after every
+# sign-in, and a reboot is no incident.
+WAIT_PAGE_S = 300.0
+# The same restart reason pages once an hour while it repeats: on
+# 2026-11-12 eighteen "never became healthy" pages came 15-20 min apart,
+# each past the page cooldown. Every restart still lands in guard.log.
+RESTART_REPAGE_S = 3600.0
 # A booting server rewrites its boot-status file on every try while it waits
 # for its database (a try is the pool's attempts, ~30 s, plus a 10 s pause).
 # A record older than this says nothing about now.
@@ -1291,6 +1300,18 @@ def _needs_setup(data: object) -> tuple[str, ...]:
                          and set(n) <= _CHECK_NAME_CHARS}))[:8]
 
 
+def _waits_for(data: object) -> tuple[str, ...]:
+    """What Kazma waits for that no restart brings back (``waits_for`` in a
+    readiness body: ``{check: dependency}``, said only when every failing
+    required check waits for the owner or for such a dependency). The
+    dependencies' names only, as ``_check_names``: ``("docker",)``."""
+    waits = data.get("waits_for") if isinstance(data, dict) else None
+    if not isinstance(waits, dict):
+        return ()
+    return tuple(sorted({d for d in waits.values() if isinstance(d, str) and 0 < len(d) <= 40
+                         and set(d) <= _CHECK_NAME_CHARS}))[:8]
+
+
 def _health_failure_detail(raw: str, *, http_status: int = 0) -> str:
     """One formatter for HTTP 200 not_ready and HTTP 503 JSON bodies."""
     try:
@@ -1329,18 +1350,24 @@ class ProbeResult(tuple):
     # Not ready only because the owner has something to set up (a provider
     # key): Kazma is up, and no restart can fix it.
     needs_setup: tuple[str, ...]
+    # Not ready only because of what the owner sets up or a dependency
+    # outside Kazma (the Docker engine): Kazma is up and serves what does not
+    # need it, and no restart brings the dependency back.
+    waits_for: tuple[str, ...]
 
     def __new__(cls, healthy: bool, detail: str, answered: bool = True,
                 restart_required: bool = False,
                 database: dict | None = None,
                 checks: tuple[str, ...] = (),
-                needs_setup: tuple[str, ...] = ()) -> ProbeResult:
+                needs_setup: tuple[str, ...] = (),
+                waits_for: tuple[str, ...] = ()) -> ProbeResult:
         obj = super().__new__(cls, (healthy, detail))
         obj.answered = answered
         obj.restart_required = restart_required
         obj.database = database
         obj.checks = tuple(checks)
         obj.needs_setup = tuple(needs_setup)
+        obj.waits_for = tuple(waits_for)
         return obj
 
 
@@ -1404,6 +1431,22 @@ def _setup_in(raw: str) -> tuple[str, ...]:
         return ()
 
 
+def _waits_in(raw: str) -> tuple[str, ...]:
+    """``_waits_for`` of a readiness body given as text."""
+    try:
+        return _waits_for(json.loads(raw))
+    except ValueError:
+        return ()
+
+
+def _answered_waits(result: object) -> tuple[str, ...]:
+    """What a probe that Kazma answered says it waits for, outside Kazma; ()
+    for no answer, or an answer that only a restart clears."""
+    if not getattr(result, "answered", False) or getattr(result, "restart_required", False):
+        return ()
+    return tuple(getattr(result, "waits_for", ()) or ())
+
+
 def probe(url: str, timeout: float) -> ProbeResult:
     """Return (healthy, detail). Any non-200 or exception is unhealthy."""
     try:
@@ -1414,7 +1457,8 @@ def probe(url: str, timeout: float) -> ProbeResult:
                 restart, db = _readiness_fields(raw)
                 return ProbeResult(False, _health_failure_detail(raw, http_status=resp.status),
                                    restart_required=restart, database=db,
-                                   checks=_check_names(raw), needs_setup=_setup_in(raw))
+                                   checks=_check_names(raw), needs_setup=_setup_in(raw),
+                                   waits_for=_waits_in(raw))
         # HTTP 200 IS the contract. /health/ready returns 503 only when a
         # CRITICAL dependency (config store, database) is gone; a partial
         # failure is reported as "degraded" with 200 and the explicit
@@ -1438,7 +1482,7 @@ def probe(url: str, timeout: float) -> ProbeResult:
             return ProbeResult(False, "; ".join(failing[:6]) if failing else "not_ready",
                                restart_required=data.get("restart_required") is True,
                                database=db, checks=_check_names(data),
-                               needs_setup=_needs_setup(data))
+                               needs_setup=_needs_setup(data), waits_for=_waits_for(data))
         degraded = [
             k for k, v in (data.get("checks") or {}).items()
             if isinstance(v, dict)
@@ -1462,7 +1506,8 @@ def probe(url: str, timeout: float) -> ProbeResult:
         restart, db = _readiness_fields(raw)
         return ProbeResult(False, _health_failure_detail(raw, http_status=int(exc.code or 0)),
                            restart_required=restart, database=db,
-                           checks=_check_names(raw), needs_setup=_setup_in(raw))
+                           checks=_check_names(raw), needs_setup=_setup_in(raw),
+                           waits_for=_waits_in(raw))
     except urllib.error.URLError as exc:
         return ProbeResult(False, f"unreachable: {getattr(exc, 'reason', exc)}", answered=False)
     except Exception as exc:  # noqa: BLE001 -- a probe must never raise
@@ -2967,9 +3012,11 @@ class DocumentBroker:
 #     a container Kazma's record names, stopped after the engine came back
 #     (and not seen running since), is started: never created, stopped or
 #     removed, and never one Kazma does not use.
-#   * One page per outage, once it has lasted DEPS_PAGE_AFTER_S, and one when
-#     Docker answers again; the restart backoff then ends early, so Kazma comes
-#     back within seconds of its database.
+#   * One page per outage, once it has lasted DEPS_PAGE_AFTER_S (sooner when
+#     nobody can bring it back: DEPS_STUCK_STATES), and one when Docker
+#     answers again; the restart backoff then ends early. Since 2026-11-12
+#     Kazma itself is never restarted for Docker: readiness says it waits for
+#     it (``waits_for``), and it serves what does not need Docker meanwhile.
 
 DEPS_MODE_ENV = "KAZMA_GUARD_START_DEPENDENCIES"
 DEPS_MODES = ("auto", "off")
@@ -2984,8 +3031,16 @@ DEPS_ENGINE_GRACE_S = 120.0
 DEPS_LAUNCH_WAIT_S = 240.0
 #: Between launches that did not bring the engine up, by consecutive failure.
 DEPS_LAUNCH_BACKOFF_S = (300.0, 900.0, 1800.0)
-#: The outage paged once it has lasted this long.
-DEPS_PAGE_AFTER_S = 600.0
+#: The outage paged once it has lasted this long. Kazma Watch pages a
+#: dependency outage nobody inside paged about seven minutes after it saw it
+#: (deploy/observer: three failed minutes, then five for an inside page):
+#: at 600 s it paged first on 2026-11-12, and both paged one problem.
+DEPS_PAGE_AFTER_S = 300.0
+#: Sooner when nothing can bring the engine back until someone acts: nobody
+#: is signed in to start Docker Desktop for (a Windows update restart), or
+#: the guard runs as SYSTEM.
+DEPS_STUCK_PAGE_AFTER_S = 180.0
+DEPS_STUCK_STATES = frozenset({"no_session", "cannot_launch"})
 #: The engine back this long before a stopped container is started: Docker
 #: restarts `unless-stopped` containers itself, in the first seconds.
 DEPS_CONTAINER_SETTLE_S = 60.0
@@ -3350,13 +3405,19 @@ class Dependencies:
                      grace_s=int(DEPS_ENGINE_GRACE_S))
         down_for = now - (self._down_since or now)
         self._maybe_launch(now, down_for)
-        if down_for >= DEPS_PAGE_AFTER_S and not self._paged:
+        page_after = DEPS_STUCK_PAGE_AFTER_S if self.state in DEPS_STUCK_STATES else DEPS_PAGE_AFTER_S
+        if down_for >= page_after and not self._paged:
             self._paged = True
+            minutes = max(1, int(down_for // 60))
+            # Windows' "Use my sign-in info to automatically finish setting up
+            # after an update" was on during 2026-11-12's restart and signed
+            # nobody in: a sign-in is the one way out the guard can name.
+            fix = " Sign in to this PC to start it." if self.state == "no_session" else ""
             self.guard._page(
-                "warn", "Docker does not answer: Kazma cannot start",
-                f"The Docker engine has not answered for {int(down_for // 60)} min, and Kazma "
-                f"needs it ({', '.join(self.containers) or 'the document broker'}). "
-                f"{self.detail.rstrip('.')}. The guard keeps trying.",
+                "warn", "Docker does not answer",
+                f"The Docker engine has not answered for {minutes} min; what needs it waits "
+                f"({', '.join(self.containers) or 'the document broker'}). "
+                f"{self.detail.rstrip('.')}.{fix} The guard keeps trying.",
                 kind="deps.engine_down", fingerprint="deps:docker", force=True)
 
     def _maybe_launch(self, now: float, down_for: float) -> None:
@@ -4639,6 +4700,15 @@ class Guard:
         self._last_page_fp = ""
         self._last_page_at = 0.0
         self._awaiting_recovery = ""
+        # A restart reason's last page and the restarts since (notify_restart:
+        # one page an hour per reason while it repeats).
+        self._restart_paged: dict[str, tuple[float, int]] = {}
+        # The child exited by itself while it started (its stderr is then
+        # its last words; a child the guard stopped has none).
+        self._exited_while_starting = False
+        # Kazma is up and waits for a dependency outside it (``waits_for``):
+        # since when, for what, and who paged it (_note_waiting).
+        self._waiting: dict | None = None
         self.page_cooldown_s = PAGE_COOLDOWN_S
         # Wall-clock time the current child was spawned: a reload request
         # made before it is already satisfied by it.
@@ -4708,6 +4778,56 @@ class Guard:
                    f"{detail}. Open {home} and go to Settings -> Providers. "
                    "Not restarting: a restart cannot add what is missing.",
                    kind="health.needs_setup", fingerprint="needs-setup")
+
+    def _deps_speaks_for(self, waits: tuple[str, ...]) -> bool:
+        """The guard's own Docker watch pages this wait (one page per
+        problem): Kazma waits for Docker, and the watch sees the engine down."""
+        deps = getattr(self, "deps", None)
+        return bool("docker" in waits and deps is not None and deps.owns_engine_alerts()
+                    and deps.engine_up is False)
+
+    def _note_waiting(self, waits: tuple[str, ...], detail: str) -> None:
+        """Kazma is up and waits for a dependency outside it (``waits_for``:
+        the Docker engine). Never restarted for it: a restart cannot bring it
+        back (2026-11-12: after a Windows update restart nobody was signed in
+        to start Docker Desktop, and the guard restarted a Kazma that served
+        chat 18 times in six hours, paging each time). Said once; paged once
+        after ``WAIT_PAGE_S``, unless the guard's Docker watch pages it."""
+        now = time.monotonic()
+        w = getattr(self, "_waiting", None)
+        if w is None or w["waits"] != waits:
+            self.log("warn", "health.waiting_for", waits_for=",".join(waits), detail=detail,
+                     restart="never: a restart cannot bring it back")
+            w = {"waits": waits, "since": w["since"] if w else now,
+                 "paged": w["paged"] if w else ""}
+            self._waiting = w
+        if w["paged"] or now - w["since"] < WAIT_PAGE_S:
+            return
+        if self._deps_speaks_for(waits):
+            w["paged"] = "deps"
+            self.log("info", "health.waiting_paged_by", by="deps.engine_down")
+            return
+        what = ", ".join(waits)
+        sent = self._page(
+            "warn", "Kazma is up, but not ready",
+            f"{detail}. Kazma keeps serving what does not need {what}; what needs it waits. "
+            f"Not restarting: a restart cannot bring {what} back.",
+            kind="health.dependency_down", fingerprint="waiting-for")
+        w["paged"] = "guard" if sent else "not_sent"
+
+    def _end_waiting(self) -> None:
+        """Kazma is ready: a wait it was in is over (one recovery card, when
+        this guard paged the wait)."""
+        w = getattr(self, "_waiting", None)
+        if w is None:
+            return
+        self._waiting = None
+        self.log("info", "health.wait_over", waits_for=",".join(w["waits"]),
+                 waited_s=int(time.monotonic() - w["since"]))
+        if w["paged"] == "guard":
+            self._page("success", "Kazma is ready again",
+                       f"{', '.join(w['waits'])} answers again; no restart was needed.",
+                       kind="health.ready_again", fingerprint="waiting-over")
 
     def _page(
         self,
@@ -4796,9 +4916,26 @@ class Guard:
         return receipts.own() + PageReceipts.kazma(getattr(self, "spawned_at", 0.0))
 
     def notify_restart(self, reason: str, delay_s: float, *, tail: str = "") -> bool:
-        """Page a restart. Collapses identical ``reason`` inside the cooldown."""
+        """Page a restart: once an hour per ``reason`` while it repeats
+        (``RESTART_REPAGE_S``; every restart is in guard.log), saying how
+        many more there were since the last page. *tail* is the server's
+        last words: pass it only when the server ended by itself."""
+        now = time.monotonic()
+        paged = getattr(self, "_restart_paged", None)
+        if paged is None:
+            paged = self._restart_paged = {}
+        self._awaiting_recovery = reason
+        last_page = paged.get(reason)
+        if last_page is not None and now - last_page[0] < RESTART_REPAGE_S:
+            paged[reason] = (last_page[0], last_page[1] + 1)
+            self.log("info", "notify.restart_collapsed", reason=reason,
+                     since_page_s=int(now - last_page[0]), restarts_since=last_page[1] + 1)
+            return False
         title = f"Kazma stopped: {reason}"
         detail = f"Restarting in {int(delay_s)}s (attempt {self.restarts})."
+        if last_page is not None and last_page[1]:
+            detail += (f"\nIt restarted {last_page[1]} more time{'s' if last_page[1] != 1 else ''} "
+                       "for this since the last page.")
         deps = getattr(self, "deps", None)
         note = deps.restart_note() if deps is not None else ""
         if note:
@@ -4807,12 +4944,24 @@ class Guard:
             last = "\n".join(tail.splitlines()[-8:])[-600:]
             detail += f"\nIts last words (server.stderr.log):\n{last}"
         sent = self._page("warn", title, detail, kind="guard.restarting", fingerprint=reason)
-        self._awaiting_recovery = reason
+        paged[reason] = (now, 0)
         return sent
+
+    def _ended_by_itself(self, reason: str) -> bool:
+        """The server ended on its own (a crash, an exit while starting):
+        what it wrote on stderr is its last words. A server the guard
+        stopped (never ready, not answering) wrote only its boot's lines --
+        on 2026-11-12 every page quoted the same settings warning and a
+        weights progress bar as the reason."""
+        if reason.startswith("process exited"):
+            return True
+        return reason == "never became healthy" and bool(getattr(self, "_exited_while_starting", False))
 
     def notify_recovered(self) -> bool:
         """One recovery card after a kill/unhealthy restart, if we were waiting."""
         reason = self._awaiting_recovery
+        # A healthy start ends every series of restarts: the next one pages.
+        getattr(self, "_restart_paged", {}).clear()
         if not reason:
             return False
         self._awaiting_recovery = ""
@@ -4885,6 +5034,7 @@ class Guard:
         waiting_for: str | None = None
         wait_logged = False
         wait_paged = False
+        self._exited_while_starting = False
         while time.monotonic() < deadline and not self._stop:
             self._beat()
             self._broker_tick()
@@ -4903,6 +5053,7 @@ class Guard:
                 self._last_stop_graceful = stop_child(self.proc, self.log, grace_s=GRACEFUL_STOP_S)
                 return False
             if self.proc and self.proc.poll() is not None:
+                self._exited_while_starting = True
                 self.log("error", "child.exited_during_startup",
                          code=self.proc.returncode,
                          after_s=round(time.monotonic() - started, 1))
@@ -4912,7 +5063,8 @@ class Guard:
             ok, detail = boot_result
             needs = (tuple(getattr(boot_result, "needs_setup", ()) or ())
                      if getattr(boot_result, "answered", False) else ())
-            if ok or needs:
+            waits = _answered_waits(boot_result)
+            if ok or needs or waits:
                 # Is the thing answering actually the thing we launched?
                 # After a restart, an orphan holding the port answers this
                 # probe perfectly, and the guard would supervise a stranger
@@ -4926,15 +5078,24 @@ class Guard:
                     # Detection alone left the guard refusing forever.
                     reap_port_holder(self.health_url, self.log)
                     return False
-                if not ok:
+                if not ok and needs:
                     # Up, and waiting for its owner: started, not "never
                     # ready". _supervise holds it the same way.
                     self.log("info", "child.up_needs_setup", needs=",".join(needs),
                              detail=detail, after_s=round(time.monotonic() - started, 1))
                     self._say_needs_setup(needs, detail)
                     return True
+                if not ok:
+                    # Up, and waiting for a dependency outside it (the
+                    # Docker engine): started, not "never ready". A restart
+                    # cannot bring the dependency back; _supervise holds it.
+                    self.log("info", "child.up_waiting_for", waits_for=",".join(waits),
+                             detail=detail, after_s=round(time.monotonic() - started, 1))
+                    self._note_waiting(waits, detail)
+                    return True
                 self.log("info", "child.ready",
                          detail=detail, after_s=round(time.monotonic() - started, 1))
+                self._end_waiting()
                 if wait_paged:
                     self._page("success", "Kazma is up: its database answers again",
                                f"The boot waited {round(time.monotonic() - started)} s "
@@ -5431,7 +5592,7 @@ class Guard:
                 extra = {"stderr_tail": tail} if tail else {}
                 self.log("warn", "guard.restarting", reason=reason, in_s=delay,
                          restarts=self.restarts, **extra)
-                self.notify_restart(reason, delay, tail=tail)
+                self.notify_restart(reason, delay, tail=tail if self._ended_by_itself(reason) else "")
                 # A pause during the backoff holds at once (the gate before
                 # the next spawn), not after up to five minutes; Docker
                 # answering again starts Kazma at once.
@@ -5632,11 +5793,15 @@ class Guard:
             ok, detail = result
             needs = (tuple(getattr(result, "needs_setup", ()) or ())
                      if getattr(result, "answered", False) else ())
-            if not ok and needs:
-                # Up, waiting for its owner (a provider key): no restart can
+            waits = _answered_waits(result)
+            if not ok and (needs or waits):
+                # Up, waiting for its owner (a provider key) or for a
+                # dependency outside it (the Docker engine): no restart can
                 # fix it, so none counts toward one. Said once.
-                if not getattr(self, "_waiting_setup", False):
+                if needs and not getattr(self, "_waiting_setup", False):
                     self._say_needs_setup(needs, detail)
+                if waits:
+                    self._note_waiting(waits, detail)
                 consecutive = 0
                 unanswered = 0
                 outage_since = None
@@ -5648,6 +5813,7 @@ class Guard:
                 self._waiting_setup = False
                 self.log("info", "health.setup_done")
             if ok:
+                self._end_waiting()
                 if consecutive:
                     self.log("info", "health.recovered", after_failures=consecutive)
                 if outage_paged and not app_paged:
@@ -5801,6 +5967,8 @@ def _cmd_status() -> int:
         word = "healthy"
     elif result.answered and result.needs_setup:
         word = "up, needs setup in Settings -> Providers"
+    elif result.answered and result.waits_for:
+        word = f"up, waiting for {', '.join(result.waits_for)}"
     elif result.answered:
         word = "up, not ready"
     else:

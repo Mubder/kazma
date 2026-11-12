@@ -133,8 +133,24 @@ export function step(prev, diag, now, { timeZone = "" } = {}) {
   }
   open.detail = diag.detail || null;
   if (open.paged_at === null) openOrHold(open, diag, now, state.bad_since ?? open.started_at, pages);
-  else if (now - (open.last_page_at || open.paged_at) >= REMIND_EVERY_S) pages.push({ kind: "remind" });
+  else if (now - (open.last_page_at || open.paged_at) >= REMIND_EVERY_S && !answeredInside(diag, now, state, open)) {
+    pages.push({ kind: "remind" });
+  }
   return finish(state, now, pages, timeZone);
+}
+
+/**
+ * A page from inside (or a Cloudflare notice) now answers for the condition
+ * Kazma Watch paged first: that sender is telling the owner, so no reminder
+ * on top of it. On 2026-11-12 Kazma Watch paged a Docker outage two minutes
+ * before the guard did, then reminded of it every hour for five.
+ */
+function answeredInside(diag, now, state, open) {
+  const d = decide(diag.condition, {
+    pages: diag.pages, notices: diag.notices, now,
+    badSince: state.bad_since ?? open.started_at, openAfter: OPEN_AFTER_S,
+  });
+  return d.act === "hold";
 }
 
 /** An incident Kazma Watch has not paged: page it, or hold it (receipts.js). */

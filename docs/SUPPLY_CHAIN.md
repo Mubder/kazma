@@ -64,7 +64,8 @@ the files and attaches the `.sigstore.json` bundles; a release built and
 uploaded by hand has none, and from 0.21.2 on `kazma update` refuses it on
 every wheel install. The workflow signed v0.11.0; v0.12.0 to v0.21.1 were
 published by hand without bundles, which is why the requirement starts after
-them (`release_signature.SIGNED_FROM`).
+them (`release_signature.SIGNED_FROM`). v0.21.2 (2026-11-12) is the first
+release published by the workflow since, and its wheel passes the checks below.
 
 ### How the names are held {#pypi-names}
 
@@ -111,7 +112,7 @@ first eight went up in four rounds.
 This is the check that matters most, and it is one command:
 
 ```bash
-gh attestation verify kazma-0.11.0-py3-none-any.whl --repo Mubder/kazma
+gh attestation verify kazma-0.21.2-py3-none-any.whl --repo Mubder/kazma
 ```
 
 A pass means GitHub's transparency log agrees the file was produced by the
@@ -133,8 +134,8 @@ pip install sigstore
 
 python -m sigstore verify github \
   --repository Mubder/kazma \
-  --bundle kazma-0.11.0-py3-none-any.whl.sigstore.json \
-  kazma-0.11.0-py3-none-any.whl
+  --bundle kazma-0.21.2-py3-none-any.whl.sigstore.json \
+  kazma-0.21.2-py3-none-any.whl
 ```
 
 The explicit form, if you want to pin the exact identity rather than let the
@@ -144,14 +145,14 @@ The explicit form, if you want to pin the exact identity rather than let the
 python -m sigstore verify identity \
   --cert-identity "https://github.com/Mubder/kazma/.github/workflows/release.yml@refs/heads/main" \
   --cert-oidc-issuer "https://token.actions.githubusercontent.com" \
-  --bundle kazma-0.11.0-py3-none-any.whl.sigstore.json \
-  kazma-0.11.0-py3-none-any.whl
+  --bundle kazma-0.21.2-py3-none-any.whl.sigstore.json \
+  kazma-0.21.2-py3-none-any.whl
 ```
 
 The `@refs/...` suffix is the git ref the workflow ran from. The release
-workflow is started by hand from `main`, so its bundles say `@refs/heads/main`
-(v0.11.0's do); a run from a tag would say `@refs/tags/v...`. Check the run
-if you are unsure which one applies.
+workflow is started by hand from `main`, so its bundles say
+`@refs/heads/main` (v0.21.2's do, as v0.11.0's did); a run from a tag would
+say `@refs/tags/v...`. Check the run if you are unsure which one applies.
 
 ---
 
