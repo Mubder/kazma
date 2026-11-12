@@ -15,6 +15,8 @@ description: Dated changes and links to the Kazma upgrade guides.
 | **Security** | Fixes from an audit of the whole code base: a chat bot with no allowed users is private; a link Kazma found in what it read asks before it is opened; a git command's approval card names what the repository runs; the approval record keeps no passwords or tokens; a sign-in works only in the browser that started it; what Kazma downloads, and the setup's uv, are pinned and checked. |
 | **A signed release** | Published by the release workflow, so the wheel carries a Sigstore signature; `kazma update` checks it and refuses a release from 0.21.2 on without one ([Supply chain](../../SUPPLY_CHAIN.md)). |
 | **Office files in the Kazma font** | Word, PowerPoint and Excel files name the Kazma font in every font setting, and decks carry the font inside the file, as Word files already did. |
+| **Pictures in documents** | Word, PDF and PowerPoint files carry pictures: `![caption](path)` on a line of its own in a report, an `image` on a slide, a picture from the web saved first with `download_image`. Each picture is decoded and saved again in the document worker, so a photo's GPS position never reaches the file ([Pictures in a document](document-rendering.md#pictures-in-a-document)). |
+| **The Kazma font for every user** | Setup installs IBM Plex Sans Arabic for all users on Windows: installed for one user, it made PowerPoint's Protected View draw Arabic as wrong glyphs and Word show Arial. A deck's slide titles are kept: the deck tool now tells the model each key a slide takes. |
 | **A new look** | Cards the colour of the page, one set of buttons and controls, your accent colour on every page. |
 
 ## What's new (2026-11-08): 0.21.1
