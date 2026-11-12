@@ -176,6 +176,47 @@ def test_the_runtime_is_read_from_the_registry():
     assert isinstance(found, tuple) and found[0] == 14 and found[1] >= 0
 
 
+@pytest.mark.parametrize("manager", ["apt", "dnf"])
+def test_docker_on_linux_starts_at_boot_and_this_account_may_use_it(machine, manager, monkeypatch):
+    """Kazma's container engine on Linux is the system's Docker service: setup
+    starts it at boot and adds the account Kazma runs as to the docker group
+    (without it every container of Kazma's fails on the socket)."""
+    monkeypatch.setattr("getpass.getuser", lambda: "kazma-owner")
+    machine.docker = False
+    states = sd.check_all(PLATFORMS[manager], run=machine.run, which=machine.which, **machine.finders())
+    argvs = [" ".join(s.argv) for s in sd.install_plan(PLATFORMS[manager], states)]
+    install = next(i for i, a in enumerate(argvs) if any(p in a for p in sd.PACKAGES[manager]["docker"]))
+    assert argvs[install + 1:install + 3] == ["sudo systemctl enable --now docker",
+                                              "sudo usermod -aG docker kazma-owner"]
+
+
+def _socket_refused(machine):
+    def run(argv, **kw):
+        if argv[0].endswith("docker"):
+            machine.ran.append(list(argv))
+            return subprocess.CompletedProcess(argv, 1, "", "permission denied while trying to connect to the "
+                                                            "Docker daemon socket at unix:///var/run/docker.sock")
+        return machine.run(argv, **kw)
+    return run
+
+
+def test_a_docker_this_account_may_not_use_gets_the_group_only(machine, monkeypatch):
+    monkeypatch.setattr("getpass.getuser", lambda: "kazma-owner")
+    states = sd.check_all(PLATFORMS["apt"], run=_socket_refused(machine), which=machine.which, **machine.finders())
+    docker = next(s for s in states if s.name == "docker")
+    assert docker.ok is False and docker.missing == [sd.DOCKER_GROUP]
+    assert [" ".join(s.argv) for s in sd.install_plan(PLATFORMS["apt"], states)] == [
+        "sudo systemctl enable --now docker", "sudo usermod -aG docker kazma-owner"], \
+        "Docker is not installed again, and the package lists are not refreshed for it"
+
+
+def test_control_elsewhere_a_refused_socket_is_not_the_group(machine):
+    states = sd.check_all(PLATFORMS["winget"], run=_socket_refused(machine), which=machine.which,
+                          **machine.finders())
+    docker = next(s for s in states if s.name == "docker")
+    assert docker.ok is None and sd.install_plan(PLATFORMS["winget"], states) == []
+
+
 def test_no_package_manager_means_no_plan(machine):
     machine.soffice = False
     states = sd.check_all(Platform("linux", None), run=machine.run, which=machine.which, **machine.finders())

@@ -242,6 +242,34 @@ class Box:
         (self.root / "deploy" / "document-worker").mkdir(parents=True)
         self.home = tmp_path
         self.house_font = _BoxFont()
+        # Kazma's own container engine (Windows): what of it is missing, the
+        # steps setup ran, and what its preflight finds.
+        self.engine_missing = ["distro", "docker", "cli", "context", "task"]
+        self.engine_actions: list[str] = []
+        self.engine_problem = ""
+
+    def engine_check(self):
+        from kazma_core.container_engine_setup import EngineCheck
+
+        missing = (["wsl"] if not self.wsl else []) + list(self.engine_missing)
+        if not missing:
+            return EngineCheck(True, "Kazma's engine, Docker 29.9.3", [], "29.9.3")
+        return EngineCheck(False, "missing: " + ", ".join(missing), missing)
+
+    def engine_action(self, action):
+        from kazma_core.container_engine_setup import RESTART
+
+        self.engine_actions.append(action)
+        if action == "engine:wsl":
+            self.wsl = True
+            return True, RESTART
+        gives = {"engine:distro": "distro", "engine:docker": "docker", "engine:cli": "cli",
+                 "engine:context": "context", "engine:task": "task"}
+        if action in gives and gives[action] in self.engine_missing:
+            self.engine_missing.remove(gives[action])
+        if action == "engine:cli":
+            self.docker = True
+        return True, "done"
 
     def which(self, name):
         found = {"tesseract": self.langs is not None, "clamscan": self.clam, "freshclam": self.clam,
@@ -252,7 +280,10 @@ class Box:
         return {"soffice": lambda: "C:/LO/soffice.com" if self.soffice else None,
                 "docker": lambda: "C:/Docker/docker.exe" if self.docker else None,
                 "vcruntime": lambda: self.vcruntime,
-                "house_font": self.house_font}
+                "house_font": self.house_font,
+                "engine": self.engine_check,
+                "engine_action": self.engine_action,
+                "engine_preflight": lambda: self.engine_problem}
 
     def run(self, argv, **kw):
         argv = [str(a) for a in argv]
@@ -333,7 +364,7 @@ class Box:
 
 def _options(**kw) -> argparse.Namespace:
     base = dict(mode=None, with_=[], without=[], yes=False, check=False, dry_run=False, list=False,
-                packages_only=False, no_browser=False)
+                packages_only=False, no_browser=False, docker="kazma")
     base.update(kw)
     return argparse.Namespace(**base)
 
@@ -474,16 +505,59 @@ def test_full_where_docker_cannot_run_installs_the_rest_and_says_why(box, capsys
     assert ic.by_id("private_search").lacks in out
 
 
+def test_full_installs_kazmas_engine_not_docker_desktop(box, capsys):
+    """2026-11-12: Docker Desktop starts only at a sign-in, so after an
+    unattended restart every container waited. A container part now brings
+    Kazma's own engine (started at boot by its task), never Docker Desktop;
+    a second run finds it and does nothing more."""
+    from kazma_cli.install import install
+
+    assert install(_options(mode="full", yes=True), _machine(box)) == 0
+    assert "Docker.DockerDesktop" not in _installs(box)
+    assert box.engine_actions == ["engine:distro", "engine:docker", "engine:cli", "engine:context",
+                                  "engine:task", "engine:record"]
+    assert box.container and box.searxng, "the container parts ran on the engine"
+    results = json.loads((box.home / "setup_record.json").read_text(encoding="utf-8"))["install"]["results"]
+    assert results["docker"]["ok"] is True and "Kazma's engine" in results["docker"]["detail"]
+    box.engine_actions.clear()
+    assert install(_options(mode="full", yes=True), _machine(box)) == 0
+    assert box.engine_actions == [], "a second run changes nothing"
+
+
 def test_full_installs_wsl_first_and_asks_for_the_restart(box, capsys):
     from kazma_cli.install import install
 
     box.wsl = False
     assert install(_options(mode="full", yes=True), _machine(box)) in (0, 1)
     out = capsys.readouterr().out
+    assert box.engine_actions == ["engine:wsl"], "the engine's other steps wait for the restart"
+    assert "after Windows restarts" in out
+    assert "Restart Windows to finish WSL, then run setup again" in out
+    assert "Docker.DockerDesktop" not in _installs(box)
+
+
+def test_control_docker_desktop_only_when_chosen(box, capsys):
+    """Negative control, and the owner's choice: ``--docker desktop`` installs
+    Docker Desktop (after WSL, as before) and none of Kazma's engine."""
+    from kazma_cli.install import install
+
+    box.wsl = False
+    install(_options(mode="full", yes=True, docker="desktop"), _machine(box))
     wsl = next(i for i, a in enumerate(box.ran) if a[:2] == ["wsl", "--install"])
     docker = next(i for i, a in enumerate(box.ran) if a[:2] == ["winget", "install"] and "Docker.DockerDesktop" in a)
     assert wsl < docker
-    assert "Restart Windows to finish WSL, then run setup again" in out
+    assert box.engine_actions == []
+
+
+def test_what_stops_kazmas_engine_is_said_first_and_blocks_only_containers(box, capsys):
+    from kazma_cli.install import install
+
+    box.engine_problem = "Docker already runs in the WSL distro 'Ubuntu'"
+    assert install(_options(mode="full", yes=True), _machine(box)) == 1
+    out = capsys.readouterr().out
+    assert "Kazma's container engine cannot run here: Docker already runs" in out
+    assert box.engine_actions == [] and not box.container and not box.searxng
+    assert box.pg and box.service, "the rest is installed"
 
 
 def test_a_virtual_machine_is_told_what_docker_needs(box, capsys):

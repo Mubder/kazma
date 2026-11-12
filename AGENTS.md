@@ -10708,11 +10708,37 @@ SERVICE (a tunnel) reach its published ports, and it is back 19 s after a
   missing or refused (`engine_task_missing`, `engine_task_denied`).
 - **Express stays container-free** (the owner's decision after the review):
   setup installs Kazma's engine when a container part is chosen; Docker
-  Desktop only when the user picks it.
+  Desktop only when the user picks it (`kazma setup install --docker
+  desktop`).
+- **Setup installs it** (`kazma_core/container_engine_setup.py`, assets in
+  `container_engine_assets/`): `check` names what is missing (wsl, distro,
+  docker, cli, context, task), `install_steps` puts in only that, in order,
+  the record last (it waits for `docker version` and writes
+  `setup_record.json` `container_engine`, the setting's fallback). WSL first
+  (pinned MSI, the two features); a step that needs Windows restarted
+  answers `RESTART` and the container steps after it wait (Docker
+  Desktop's own path keeps its order). The distro is the dated Ubuntu 24.04
+  image, Docker Engine set up by `setup-engine.sh` piped over stdin (LF,
+  idempotent, docker packages held, TLS keys made once, listening on
+  127.0.0.1 only with client certificates); Docker's Windows CLI and the
+  compose plugin from Docker's own downloads. Every download is pinned by
+  URL, size and SHA-256 and kept only when it matches (`_fetch`). What would
+  stop it is said before anything is installed (`preflight`: WSL's
+  localhost forwarding off, Docker already in another distro), and stops
+  only the container parts. `kazma setup engine` installs, repairs, checks
+  or removes it; removing is refused while another project's containers
+  live in it or it cannot be asked (`--force`). On Linux Kazma's engine is
+  the system's Docker service: setup starts it at boot and adds the account
+  to the `docker` group (`system_deps._docker_access_steps`; a socket this
+  account may not use is `DOCKER_GROUP`, fixed with the group alone).
 - Gates: `tests/test_container_engine_choice.py` (the first rule, "the
   context exists", as the negative control), the engine cases in
   `tests/test_guard_dependencies.py` (the same outage on Docker Desktop as
-  the control).
+  the control), `tests/test_container_engine_setup.py` (a fake machine and
+  download: a mismatched download keeps nothing, a script without its ready
+  line fails its step), `tests/test_install_modes.py` (Full installs the
+  engine and never Docker Desktop; `--docker desktop` as the control),
+  `tests/test_setup_system.py` (the docker group; Windows as the control).
 
 ## UI Conventions (Web)
 

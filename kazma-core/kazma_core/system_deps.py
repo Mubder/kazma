@@ -280,11 +280,16 @@ def _check_node(run: Runner, which: Callable[[str], str | None]) -> DepState:
     return DepState("node", True, f"Node.js {text.strip()}")
 
 
-def _check_docker(run: Runner, find: Callable[[], str | None]) -> DepState:
+def _check_docker(run: Runner, find: Callable[[], str | None], os_name: str = "") -> DepState:
     exe = find()
     if not exe:
         return DepState("docker", False, "Docker is not installed", ["docker"])
     code, text = _out(run, [exe, "version", "--format", "{{.Server.Version}}"], timeout=20)
+    if code != 0 and os_name in _LINUX and "permission denied" in text.lower():
+        # The engine runs; this account may not use its socket (Kazma runs as
+        # this account, so every container of Kazma's would fail).
+        return DepState("docker", False, "Docker runs, but this account may not use it (not in the docker group)",
+                        [DOCKER_GROUP])
     if code != 0:
         return DepState("docker", None, "Docker is installed; its engine does not answer now")
     return DepState("docker", True, f"Docker engine {text.strip()[:40]}")
@@ -317,7 +322,7 @@ def check_all(platform: Platform, *, run: Runner = subprocess.run,
         _check_malware(platform.os, run, which),
         _check_fonts(platform.os, run, which, house_font),
         _check_node(run, which),
-        _check_docker(run, docker),
+        _check_docker(run, docker, platform.os),
     ]
 
 
@@ -335,6 +340,26 @@ def _install(platform: Platform, packages: tuple[str, ...]) -> tuple[str, ...]:
     if manager == "dnf":
         return ("sudo", "dnf", "install", "-y", *packages)
     raise ValueError(f"no package manager for {platform.os}")
+
+
+#: Platform.os on Linux (``postgres_service.detect_platform``).
+_LINUX = ("debian", "fedora", "linux")
+#: What ``missing`` names when Docker runs but this account may not use it.
+DOCKER_GROUP = "docker group"
+
+
+def _docker_access_steps(platform: Platform) -> list[Step]:
+    """Linux: Docker started at boot (Kazma's engine there is the system's
+    Docker service), and this account let use its socket. The group applies
+    from the account's next sign-in; Kazma's service, started at boot, has it."""
+    if platform.os not in _LINUX:
+        return []
+    import getpass
+
+    user = getpass.getuser()
+    return [Step("start Docker at boot", ("sudo", "systemctl", "enable", "--now", "docker"), dep="docker"),
+            Step(f"let {user} use Docker (the docker group; it applies from the next sign-in)",
+                 ("sudo", "usermod", "-aG", "docker", user), dep="docker")]
 
 
 def _freshclam_steps(platform: Platform) -> list[Step]:
@@ -380,7 +405,8 @@ def install_plan(platform: Platform, states: list[DepState]) -> list[Step]:
     table = PACKAGES[platform.manager]
     steps: list[Step] = []
     if platform.manager == "apt" and any(
-            s.ok is False and table.get(s.name) and (s.name != "fonts" or "fonts" in s.missing) for s in states):
+            s.ok is False and table.get(s.name) and (s.name != "fonts" or "fonts" in s.missing)
+            and s.missing != [DOCKER_GROUP] for s in states):
         steps.append(Step("refresh the package lists", ("sudo", "apt-get", "update")))
     for state in states:
         if state.ok is not False:
@@ -398,10 +424,15 @@ def install_plan(platform: Platform, states: list[DepState]) -> list[Step]:
                 steps.append(Step(f"install {LABELS['fonts']}", _install(platform, packages), dep="fonts"))
             steps.extend(_house_font_steps(platform, state))
             continue
+        if state.name == "docker" and state.missing == [DOCKER_GROUP]:
+            steps.extend(_docker_access_steps(platform))
+            continue
         if packages is None:
             continue
         steps.append(Step(f"install {LABELS[state.name]}", _install(platform, packages),
                           admin=platform.manager in ("winget",), dep=state.name))
+        if state.name == "docker":
+            steps.extend(_docker_access_steps(platform))
         if state.name == "ocr" and platform.manager == "winget":
             steps.extend(Step(f"download Tesseract's {lang} model", action=f"tessdata:{lang}", dep="ocr")
                          for lang in TESSDATA)

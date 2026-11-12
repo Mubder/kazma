@@ -304,12 +304,21 @@ def run(args: list[str]) -> int:
     system.add_argument("-y", "--yes", action="store_true", help="do not ask before acting")
     system.add_argument("--check", action="store_true", help="report only; change nothing")
     system.add_argument("--dry-run", action="store_true", help="print the plan; run nothing")
+    engine = sub.add_parser("engine", help="Kazma's own container engine: Docker that starts at boot (Windows)")
+    engine.add_argument("-y", "--yes", action="store_true", help="do not ask before acting")
+    engine.add_argument("--check", action="store_true", help="report only; change nothing")
+    engine.add_argument("--dry-run", action="store_true", help="print the plan; run nothing")
+    engine.add_argument("--remove", action="store_true",
+                        help="remove it (refused while another project's containers live in it)")
+    engine.add_argument("--force", action="store_true", help="with --remove: remove it even then, with their data")
     from kazma_cli.install import add_install_parser
 
     add_install_parser(sub)
     options = parser.parse_args(args)
     if options.what == "system":
         return _setup_system(options)
+    if options.what == "engine":
+        return _setup_engine(options)
     if options.what == "install":
         from kazma_cli.install import install
 
@@ -504,6 +513,90 @@ def _setup_system(options, *, run=subprocess.run, which=None, ask=input, platfor
     if not_done:
         _say("Not done: " + "; ".join(not_done) + ". Run kazma setup system again to finish.")
     return 0 if not left and not not_done else 1
+
+
+_ENGINE_PIECES = (("wsl", "WSL 2"), ("distro", "the kazma-engine WSL distro"),
+                  ("docker", "Docker Engine in it, answering"), ("cli", "Docker's command-line tools"),
+                  ("context", "the kazma-engine Docker context"),
+                  ("task", "the KazmaEngine task (starts it at boot, nobody signed in)"))
+
+
+def _say_engine(found) -> None:
+    for key, label in _ENGINE_PIECES:
+        _say(f"  {'NO' if key in found.missing else 'ok':4} {label}")
+
+
+def _setup_engine(options, *, run=subprocess.run, ask=input, platform=None, opener=None,
+                  admin=None) -> int:
+    """``kazma setup engine``: Kazma's own container engine (AGENTS.md section 63).
+
+    Windows: check it, show what is missing, ask, install or repair it (each
+    step idempotent), or remove it with ``--remove``. Elsewhere Kazma's engine
+    is the system's Docker service, which ``kazma setup system`` installs,
+    starts at boot and lets this account use."""
+    import urllib.request
+
+    from kazma_core import container_engine_setup as ces
+    from kazma_core import postgres_service as pgs
+
+    platform = platform or pgs.detect_platform()
+    if platform.os != "windows":
+        if options.remove:
+            _say("Kazma uses the system's Docker service here: there is no engine of Kazma's own to remove.")
+            return 0
+        _say("Kazma's container engine here is the system's Docker service: kazma setup system installs it, "
+             "starts it at boot and lets this account use it.")
+        return _setup_system(options, run=run, ask=ask, platform=platform)
+    found = ces.check(run)
+    _say("Kazma's container engine (Docker as a service, started at boot):")
+    _say_engine(found)
+    if options.remove:
+        if not options.yes and _ask(ask, "Remove Kazma's engine, with every container, image and volume in it? "
+                                         "[y/N] ").strip().lower() not in ("y", "yes"):
+            _say("Nothing was done.")
+            return 1
+        ok, detail = ces.remove(run, _say, force=options.force)
+        _say(detail if ok else f"Not removed: {detail}")
+        if ok:
+            _say("If Settings > System chose Kazma's engine, choose Docker Desktop there: until then Kazma "
+                 "uses the docker CLI's current context.")
+        return 0 if ok else 1
+    if options.check:
+        if not found.ok:
+            _say("Install or repair it with: kazma setup engine")
+        return 0 if found.ok else 1
+    problem = ces.preflight(run)
+    if problem:
+        _say(f"Kazma's engine cannot run here: {problem}")
+        return 2
+    steps = ces.install_steps(found)
+    _say("The plan:")
+    for i, step in enumerate(steps, 1):
+        _say(f"  {i:2}. {step.title}")
+    if options.dry_run:
+        return 0
+    if any(s.admin for s in steps) and not (pgs.is_admin() if admin is None else admin):
+        _say("Run this from an elevated terminal (Run as administrator): "
+             + "; ".join(s.title for s in steps if s.admin) + " needs it.")
+        return 2
+    if not options.yes and _ask(ask, "Set Kazma's engine up now? [y/N] ").strip().lower() not in ("y", "yes"):
+        _say("Nothing was done.")
+        return 1
+    for step in steps:
+        _say(f"-> {step.title}")
+        ok, detail = ces.run_action(step.action, run=run, log=lambda m: _say(f"   {m}"),
+                                    opener=opener or urllib.request.urlopen)
+        if ok and detail == ces.RESTART:
+            _say("Restart Windows to finish WSL, then run kazma setup engine again: it continues where it stopped.")
+            return 1
+        if not ok:
+            _say(f"   FAILED: {detail}")
+            _say("Run kazma setup engine again: it repairs what is missing and keeps what is there.")
+            return 1
+        if detail:
+            _say(f"   {detail}")
+    _say("Kazma's engine is set up: it starts at boot, with nobody signed in.")
+    return 0
 
 
 #: The pause ``--move-from-container`` asks Kazma's guard for while it copies.
