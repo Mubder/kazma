@@ -727,6 +727,20 @@
             } catch (e) { /* keep defaults */ }
         },
 
+        async loadContainerEngine() {
+            try {
+                const data = await this._fetch('/api/settings/containers');
+                if (data && data.installed) {
+                    this.containerEngine = {
+                        engine: typeof data.engine === 'string' ? data.engine : '',
+                        effective: data.effective || '',
+                        loaded: true,
+                        installed: { kazma: !!data.installed.kazma, desktop: !!data.installed.desktop },
+                    };
+                }
+            } catch (e) { /* the card stays disabled: nothing loaded */ }
+        },
+
         async loadChatReasoning() {
             try {
                 const data = await this._fetch('/api/settings/chat-reasoning');

@@ -531,6 +531,26 @@
             this.turnSpendingSaving = false;
         },
 
+        async saveContainerEngine() {
+            this.containerEngineSaving = true;
+            try {
+                await window.kazmaSave('/api/settings/single', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        key: 'containers.engine',
+                        value: this.containerEngine.engine || '',
+                        category: 'containers',
+                    }),
+                });
+                showToast(_k('settings.containers_saved', 'Container engine saved'), 'success');
+                await this.loadContainerEngine();
+            } catch (e) {
+                showToast(e.message || _k('settings.agentjs.save_failed_2', 'Save failed'), 'error');
+            }
+            this.containerEngineSaving = false;
+        },
+
         async saveChatReasoning() {
             this.chatReasoningSaving = true;
             try {

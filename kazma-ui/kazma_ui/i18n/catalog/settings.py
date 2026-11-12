@@ -2387,6 +2387,42 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "التفكير قبل إجابة المحادثة",
         "en": "Reasoning before a chat answer",
     },
+    "settings.containers_title": {
+        "ar": "محرك الحاويات",
+        "en": "Container engine",
+    },
+    "settings.containers_label": {
+        "ar": "ما الذي يشغّل حاويات Kazma",
+        "en": "What runs Kazma's containers",
+    },
+    "settings.containers_current": {
+        "ar": "ما يختاره Docker نفسه (دون اختيار)",
+        "en": "Whatever Docker itself uses (no choice)",
+    },
+    "settings.containers_kazma": {
+        "ar": "محرك Kazma — يبدأ مع Windows دون تسجيل دخول",
+        "en": "Kazma's engine — starts with Windows, no sign-in needed",
+    },
+    "settings.containers_desktop": {
+        "ar": "Docker Desktop — ينتظر تسجيل الدخول",
+        "en": "Docker Desktop — waits for a sign-in",
+    },
+    "settings.containers_hint": {
+        "ar": "تستخدمه المستندات وبيئة تشغيل الشيفرة والبحث الخاص وشبكة الذاكرة. محرك Kazma يعود بعد إعادة التشغيل حتى لو لم يسجّل أحد الدخول؛ أما Docker Desktop فيبدأ فقط بعد تسجيل الدخول.",
+        "en": "Documents, the code sandbox, private search and the memory graph use it. Kazma's engine comes back after a restart even when nobody signs in; Docker Desktop starts only after a sign-in.",
+    },
+    "settings.containers_no_kazma": {
+        "ar": "محرك Kazma غير مثبّت على هذا الجهاز. يثبّته الإعداد عند اختيار ميزات تعمل بالحاويات: kazma setup engine",
+        "en": "Kazma's engine is not set up on this machine. Setup installs it when you choose features that use containers: kazma setup engine",
+    },
+    "settings.save_containers": {
+        "ar": "حفظ محرك الحاويات",
+        "en": "Save container engine",
+    },
+    "settings.containers_saved": {
+        "ar": "تم حفظ محرك الحاويات",
+        "en": "Container engine saved",
+    },
     "settings.checkpoint_retention_days": {
         "ar": "الاحتفاظ بكامل السجل بعد آخر رسالة (أيام)",
         "en": "Keep the full history after a chat's last message for (days)",

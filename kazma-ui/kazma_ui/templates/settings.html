@@ -2820,6 +2820,22 @@
             <button class="btn btn-primary" @click="saveTurnSpending()" :disabled="turnSpendingSaving">{{ t('settings.save_turn_spending') }}</button>
         </div>
 
+        <!-- Which container engine Kazma uses (kazma_core.container_engine) -->
+        <div class="settings-group mb-6" id="container-engine-section" data-testid="container-engine">
+            <h3>{{ t('settings.containers_title') }}</h3>
+            <div class="form-group">
+                <label for="container-engine-choice">{{ t('settings.containers_label') }}</label>
+                <select id="container-engine-choice" class="form-select" x-model="containerEngine.engine" style="max-width:360px" :disabled="!containerEngine.loaded">
+                    <option value="">{{ t('settings.containers_current') }}</option>
+                    <option value="kazma" :disabled="!containerEngine.installed.kazma">{{ t('settings.containers_kazma') }}</option>
+                    <option value="desktop" :disabled="!containerEngine.installed.desktop">{{ t('settings.containers_desktop') }}</option>
+                </select>
+                <div class="form-hint">{{ t('settings.containers_hint') }}</div>
+                <div class="form-hint" x-show="containerEngine.loaded && !containerEngine.installed.kazma" x-cloak>{{ t('settings.containers_no_kazma') }}</div>
+            </div>
+            <button class="btn btn-primary" @click="saveContainerEngine()" :disabled="containerEngineSaving || !containerEngine.loaded">{{ t('settings.save_containers') }}</button>
+        </div>
+
         <!-- Reasoning before a chat answer (kazma_core.agent.chat_reasoning) -->
         <div class="settings-group mb-6" id="chat-reasoning-section">
             <h3>{{ t('settings.chat_reasoning_title') }}</h3>
