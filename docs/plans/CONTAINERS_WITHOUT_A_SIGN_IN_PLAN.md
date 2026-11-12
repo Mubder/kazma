@@ -281,17 +281,39 @@ Done:
   `10.213.0.0/16`, the `kazma-engine` context; every image loaded with the
   same image IDs.
 
-Left, in order:
-1. The owner registers `KazmaEngine` (one elevated command:
-   `%LOCALAPPDATA%\Kazma\engine\register-engine-task.ps1`).
-2. Kazma pins its context and translates its mounts (Stage 1), and the
-   guard stops launching Docker Desktop for this engine; the document worker
-   image is built on the engine.
-3. One cut-over, a few minutes per project: ShipX, HypertFit and Kazma's
-   SearXNG and Neo4j stopped on Docker Desktop (kept), their volumes copied
-   and compared, recreated on the engine from their saved settings, the
-   current context switched, every site checked through its tunnel address.
-4. Docker Desktop no longer starts at sign-in (the owner's choice; kept
+Then, the same day:
+1. The owner registered `KazmaEngine`; it alone holds the engine up.
+2. Stage 1 shipped (commit c396c3d2): the explicit choice, the pin, the
+   mount translation, the guard's repair.
+3. **Restore test**: both ShipX database dumps loaded into a throwaway
+   Postgres on the engine with no error (79 tables; the old database's
+   three schemas).
+4. **Moved, one container at a time** (stopped on Docker Desktop with restart
+   policy `no` and kept; volumes copied while stopped, a sha256 list of every
+   file equal on both sides; recreated from its saved settings; files added
+   inside a container carried too -- HypertFit's Redis had its config file
+   written there by compose, `shipx-web` a hand-copied script):
+   HypertFit (Redis, app), ShipX (Postgres, Redis, the old `shipx-db` --
+   something still queries it --, web, worker), Kazma's SearXNG and Neo4j.
+   ShipX's databases dumped before and after: the same data, byte for byte
+   (only `pg_dump`'s random `\restrict` key differs). `shipx.kazma.ai`
+   answers through the tunnel as before; Kazma is ready, its search and
+   memory graph answer from the engine.
+5. Left on Docker Desktop, stopped: the old `kazma-db-win` (Kazma's database
+   before its move to the Postgres service), two test databases and ShipX's
+   one-off `shipx-migrate`.
+
+Found on the way: HypertFit's app had restarted 44 times since the morning's
+boot (its own start-up checks fail; `frs.kazma.ai` answers 502) -- before
+and after the move alike. HypertFit's own problem, reported to the owner.
+
+Left:
+1. The owner chooses Kazma's engine in Settings -> System -> Container
+   engine (a request from this PC reaches live only through the tunnel's
+   sign-in), and restarts the guard so it runs the new guard code.
+2. The docker CLI's default context becomes `kazma-engine`, so the owner's
+   own `docker` and `docker compose` reach the engine.
+3. Docker Desktop no longer starts at sign-in (the owner's choice; kept
    installed for rollback).
 
 Catches, said to the owner: no Docker Desktop window for these containers;

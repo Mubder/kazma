@@ -235,6 +235,18 @@ def _isolated_guard_files(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_docker_config(tmp_path, monkeypatch):
+    """The docker CLI's own settings (contexts, current context) come from an
+    empty folder: which engine a developer's machine uses never decides a
+    test (2026-11-12, Kazma's own container engine: path translation and the
+    engine choice read ``~/.docker``). A test of those creates its contexts
+    there. The empty config's ``default`` context still reaches a local
+    Docker for the tests that run a real container."""
+    monkeypatch.setenv("DOCKER_CONFIG", str(tmp_path / "docker-config"))
+    monkeypatch.delenv("DOCKER_CONTEXT", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _isolated_hitl_gate_registry(tmp_path):
     """Give every test its own gate registry, and keep tests off the real one.
 

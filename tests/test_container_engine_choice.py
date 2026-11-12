@@ -192,6 +192,45 @@ def test_a_settings_write_reapplies_the_choice(contexts, monkeypatch):
     assert seen == [1, 1]
 
 
+# ── Settings ──────────────────────────────────────────────────────────
+
+
+def test_settings_accept_only_an_engine_this_machine_has(contexts):
+    from kazma_core.settings_validation import SettingRejected, validate_setting
+
+    assert validate_setting(docker_cli.ENGINE_KEY, "")[0] == ""
+    with pytest.raises(SettingRejected):
+        validate_setting(docker_cli.ENGINE_KEY, "podman")
+    with pytest.raises(SettingRejected, match="kazma setup engine"):
+        validate_setting(docker_cli.ENGINE_KEY, "kazma")
+    contexts("kazma-engine")
+    assert validate_setting(docker_cli.ENGINE_KEY, "Kazma")[0] == "kazma"
+    with pytest.raises(SettingRejected, match="Docker Desktop"):
+        validate_setting(docker_cli.ENGINE_KEY, "desktop")
+
+
+def test_the_settings_route_reports_the_choice_and_what_is_installed(contexts, tmp_path):
+    from unittest.mock import MagicMock
+
+    from fastapi import FastAPI
+    from fastapi.templating import Jinja2Templates
+    from fastapi.testclient import TestClient
+    from kazma_core.config_store import get_config_store
+    from kazma_ui.settings import create_settings_router
+
+    contexts("kazma-engine")
+    _setting("kazma")
+    try:
+        app = FastAPI()
+        app.include_router(create_settings_router(
+            MagicMock(), get_config_store(), Jinja2Templates(directory=str(tmp_path))))
+        body = TestClient(app).get("/api/settings/containers").json()
+        assert body["engine"] == "kazma" and body["effective"] == "kazma"
+        assert body["installed"] == {"kazma": True, "desktop": False}
+    finally:
+        _setting(None)
+
+
 # ── paths ─────────────────────────────────────────────────────────────
 
 
@@ -203,6 +242,21 @@ def test_windows_folders_as_kazmas_engine_mounts_them(contexts, monkeypatch):
     assert docker_cli.engine_host_path(r"\\server\share\x", windows=True) is None
     monkeypatch.setattr(docker_cli, "_drive_is_fixed", lambda drive: False)
     assert docker_cli.engine_host_path(r"Z:\mapped", windows=True) is None
+
+
+def test_the_clis_own_current_context_counts_when_nothing_is_pinned(contexts, monkeypatch, tmp_path):
+    """The owner switched the docker CLI to Kazma's engine (``docker context
+    use kazma-engine``) before choosing it in Settings: the sandbox's mount
+    must already be the engine's view."""
+    monkeypatch.setattr(docker_cli, "_drive_is_fixed", lambda drive: True)
+    config = tmp_path / "docker" / "config.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(json.dumps({"currentContext": "kazma-engine"}), encoding="utf-8")
+    assert docker_cli.engine_host_path(r"G:\x", windows=True) == "/g/x"
+    config.write_text(json.dumps({"currentContext": "desktop-linux"}), encoding="utf-8")
+    assert docker_cli.engine_host_path(r"G:\x", windows=True) == r"G:\x"
+    monkeypatch.setenv("DOCKER_CONTEXT", "kazma-engine")
+    assert docker_cli.engine_host_path(r"G:\x", windows=True) == "/g/x", "a pin wins"
 
 
 def test_docker_desktop_and_other_systems_keep_the_path(contexts, monkeypatch):

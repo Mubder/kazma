@@ -215,6 +215,8 @@ KEY_RULES: tuple[KeyRule, ...] = (
     KeyRule("connectors.", SETTING, "chat apps and integrations (their keys follow the key rule)"),
     KeyRule("context.", SETTING, "how much of a chat the model is given"),
     KeyRule("cron.timezone", SETTING, "the reminders' time zone"),
+    KeyRule("containers.engine", SETTING, "which container engine Kazma uses (its own, or "
+            "Docker Desktop); a machine without that engine refuses it"),
     KeyRule("guard.telegram.chat_id", SETTING, "the Telegram chat the guard pages when Kazma is "
             "down (Settings -> Alerts), and Kazma's direct alert fallback"),
     KeyRule("runs.runbooks", SETTING, "which automatic first steps the run supervisor may take "

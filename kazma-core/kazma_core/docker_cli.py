@@ -52,6 +52,7 @@ __all__ = [
     "KAZMA_CONTEXT",
     "apply_engine_choice",
     "engine_host_path",
+    "engine_installed",
     "find_docker_cli",
     "normalize_engine",
 ]
@@ -142,6 +143,26 @@ def _context_exists(name: str) -> bool:
         return json.loads(meta.read_text(encoding="utf-8")).get("Name") == name
     except (OSError, ValueError, AttributeError):
         return False
+
+
+def _context_in_force() -> str:
+    """The Docker context a docker call uses now: ``DOCKER_CONTEXT``, else the
+    CLI's current context (its ``config.json``), else ``default``."""
+    pinned = (os.environ.get("DOCKER_CONTEXT") or "").strip()
+    if pinned:
+        return pinned
+    try:
+        data = json.loads((_docker_config_dir() / "config.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "default"
+    return str((data or {}).get("currentContext") or "default") if isinstance(data, dict) else "default"
+
+
+def engine_installed(engine: str) -> bool:
+    """Whether this machine has *engine*'s Docker context (``kazma``,
+    ``desktop``)."""
+    context = {"kazma": KAZMA_CONTEXT, "desktop": DESKTOP_CONTEXT}.get(engine)
+    return bool(context) and _context_exists(context)
 
 
 def normalize_engine(value: object) -> str:
@@ -252,7 +273,7 @@ def engine_host_path(path: str, *, windows: bool | None = None) -> str | None:
     sent ``G:\\...`` to it for a minute). *windows* defaults to this OS."""
     if windows is None:
         windows = os.name == "nt"
-    if not windows or os.environ.get("DOCKER_CONTEXT") != KAZMA_CONTEXT:
+    if not windows or os.environ.get("DOCKER_HOST") or _context_in_force() != KAZMA_CONTEXT:
         return path
     win = PureWindowsPath(path)
     if len(win.drive) != 2 or not win.drive.endswith(":") or not _drive_is_fixed(win.drive):

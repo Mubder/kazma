@@ -376,6 +376,23 @@ def _chat_reasoning(value: Any) -> str:
     return level
 
 
+def _container_engine(value: Any) -> str:
+    """``containers.engine``: ``kazma`` (Kazma's own engine), ``desktop``
+    (Docker Desktop) or ``""`` (no choice: the docker CLI's current context).
+    A choice whose engine this machine does not have is refused, never
+    stored to be ignored (2026-11-12, ``kazma_core/container_engine.py``)."""
+    from kazma_core.docker_cli import ENGINE_CHOICES, engine_installed
+
+    text = str(value if value is not None else "").strip().lower()
+    if text not in ("", *ENGINE_CHOICES):
+        raise SettingRejected(f"containers.engine must be one of {['', *ENGINE_CHOICES]}")
+    if text and not engine_installed(text):
+        raise SettingRejected(
+            "Kazma's container engine is not set up on this machine (kazma setup engine)"
+            if text == "kazma" else "Docker Desktop is not set up on this machine")
+    return text
+
+
 def _max_iterations(value: Any) -> int:
     """``agent.max_iterations``: the range the runtime clamps to (FA-251:
     -7 and 999999 were stored, and the turn silently used 5 or 100)."""
@@ -474,6 +491,7 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
     from kazma_core.backup.universal import OFFSITE_KEEP_KEY
     from kazma_core.checkpoint_retention import RETENTION_KEY
     from kazma_core.cron.settings import FIRE_WITHOUT_HITL_KEY, SETTING_BOUNDS
+    from kazma_core.docker_cli import ENGINE_KEY
     from kazma_core.documents.config import OCR_ENGINE_KEY
     from kazma_core.lifecycle_notifier import EVENTS_KEY
     from kazma_core.memory.config import TENANT_MODE_KEY
@@ -504,6 +522,7 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
         TURN_TOKEN_BUDGET_KEY: (_turn_token_budget, "agent"),
         DAILY_COST_LIMIT_KEY: (_daily_cost_limit, "agent"),
         CHAT_REASONING_KEY: (_chat_reasoning, "agent"),
+        ENGINE_KEY: (_container_engine, "containers"),
         EVENTS_KEY: (_lifecycle_events, "notifications"),
         # Settings -> Alerts (the unified alerts plan, Stage 3).
         "notifications.ops.channels": (_alert_routes, "notifications"),

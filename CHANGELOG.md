@@ -16,9 +16,14 @@
 - The code sandbox mounts the workspace in a form Kazma's engine can read.
 - When Kazma's engine doesn't answer, the guard runs its boot task and
   restarts Docker inside it, never launching Docker Desktop.
+- Settings → System → **Container engine** offers the choice: Kazma's
+  engine (starts with Windows, no sign-in needed) or Docker Desktop (waits
+  for a sign-in). A choice whose engine isn't installed on the machine is
+  refused, with the reason.
+- Path translation follows the context actually in force: the pinned one,
+  else the docker CLI's own default.
 - Plan and independent review: `docs/plans/CONTAINERS_WITHOUT_A_SIGN_IN_PLAN.md`.
-  Setup installing the engine when container features are chosen, and the
-  Settings choice, come next.
+  Setup installing the engine when container features are chosen comes next.
 
 ## Kazma keeps running while Docker waits for a sign-in (2026-11-12)
 

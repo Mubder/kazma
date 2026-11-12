@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -548,6 +549,23 @@ class SettingsRouterBuilder:
                                type(exc).__name__)
                 return {"level": level, "levels": list(LEVELS), "provider": "", "applies": None}
             return {"level": level, "levels": list(LEVELS), "provider": provider, "applies": applies}
+
+        @router.get("/api/settings/containers")
+        def api_get_containers() -> dict[str, Any]:
+            """Which container engine Kazma uses (``containers.engine``,
+            ``kazma_core/container_engine.py``): the stored choice, the one in
+            force (a stored choice, else the engine setup installed), the Docker
+            context this server pinned, and which engines this machine has.
+            Saved through ``PUT /api/settings/single`` (validated)."""
+            from kazma_core.container_engine import engine_setting
+            from kazma_core.docker_cli import ENGINE_KEY, engine_installed, normalize_engine
+
+            return {
+                "engine": normalize_engine(config_store.get(ENGINE_KEY)),
+                "effective": engine_setting(),
+                "context": os.environ.get("DOCKER_CONTEXT") or None,
+                "installed": {name: engine_installed(name) for name in ("kazma", "desktop")},
+            }
 
         @router.get("/api/settings/cron-timezone")
         def api_get_cron_timezone() -> dict[str, str]:
