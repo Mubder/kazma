@@ -957,6 +957,24 @@ def test_a_new_choice_restarts_the_document_broker(monkeypatch):
     assert h.deps.context == "kazma-engine"
 
 
+def test_a_choice_that_arrives_after_no_choice_restarts_the_broker(monkeypatch):
+    """Live 2026-11-12: the restarted guard read the record before the server
+    wrote the owner's choice ("no choice"); when "kazma" arrived it was not
+    seen as a change, the broker kept its old context, and the choice was
+    logged again at every check."""
+    _engine_contexts(monkeypatch)
+    h = _Harness(monkeypatch, containers=None)
+    h.write_record(["kazma-searxng"])
+    restarted: list[int] = []
+    monkeypatch.setattr(h.g.broker, "engine_changed", lambda: restarted.append(1))
+    h.run(130)
+    assert h.events().count("deps.engine_choice") == 1, "said once, not at every check"
+    h.write_record(["kazma-searxng"], engine="kazma")
+    h.run(65)
+    assert restarted == [1]
+    assert h.deps.context == "kazma-engine"
+
+
 def test_status_names_the_engine():
     lines = guard._dependency_status_lines({"dependencies": {
         "engine_up": True, "state": "ok", "engine": "kazma", "context": "kazma-engine"}})

@@ -3321,10 +3321,14 @@ class Dependencies:
                 self._engine_said = "error"
                 self.log("warn", "deps.engine_choice_failed", error=str(exc)[:200])
             return
-        if (engine, context) == (self.engine, self.context) and self._engine_said:
+        applied_before = self._engine_said == "applied"
+        if applied_before and (engine, context) == (self.engine, self.context):
             return
-        changed = bool(self._engine_said) and (engine, context) != (self.engine, self.context)
-        self.engine, self.context, self._engine_said = engine, context, engine
+        # "No choice" is a choice too: a guard that started before the server
+        # wrote its record and then reads "kazma" must restart the broker
+        # (2026-11-12: it compared the empty choice as "not applied yet").
+        changed = applied_before
+        self.engine, self.context, self._engine_said = engine, context, "applied"
         self.log("info", "deps.engine_choice", engine=engine, context=context or "current")
         broker = getattr(self.guard, "broker", None)
         if changed and broker is not None:
