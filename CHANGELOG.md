@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## A reload no longer reports the offsite backup as broken (2026-11-12)
+
+- A deploy's reload stopped the server while its six-hourly check of the
+  offsite backup was running. Restic was in the same process group as the
+  server, so the stop signal reached it too and it quit. Kazma then reported
+  "The remote backup repository failed verification". The repository was
+  fine.
+- Restic now runs in its own process group, so a run Kazma started finishes
+  even when the server stops.
+- A restic run that still fails while Kazma is stopping is logged as
+  stopped, with no alert, and runs again at the next pass.
+- `scripts/deploy_live.py` read the old server's last seconds as errors of
+  the new build, and reverted a good commit. Its log check now starts at the
+  moment the new server starts.
+
 ## Kazma's own container engine, step 2: setup installs it (2026-11-12)
 
 - On Windows, choosing any part that runs containers (Full, or one picked in

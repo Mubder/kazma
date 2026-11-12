@@ -111,6 +111,9 @@ class ResticResult:
     stdout: str = ""
     error: str = ""
     skipped: str = ""
+    #: Kazma's own stop ended the run (not a fault of the repository): said,
+    #: never alerted; the next pass runs it again.
+    interrupted: bool = False
     detail: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
@@ -119,6 +122,8 @@ class ResticResult:
             d["repo"] = self.repo
         if self.error:
             d["error"] = self.error[:400]
+        if self.interrupted:
+            d["interrupted"] = True
         if self.skipped:
             d["skipped"] = self.skipped
         if self.detail:
@@ -599,7 +604,7 @@ def _run(args: list[str], repo: str, password: str, *,
             proc = subprocess.run(
                 ["restic", "--retry-lock", _RETRY_LOCK, *args], env=env, capture_output=True,
                 text=True, encoding="utf-8", errors="replace",
-                timeout=timeout, check=False, input=stdin,
+                timeout=timeout, check=False, input=stdin, **_own_process_group(),
             )
     except Exception as exc:  # noqa: BLE001
         res.error = f"{action} would not run: {exc}"
@@ -608,9 +613,31 @@ def _run(args: list[str], repo: str, password: str, *,
     res.stdout = proc.stdout or ""
     if proc.returncode != 0:
         res.error = _meaningful_error(proc.stderr, proc.stdout)
+        if _kazma_is_stopping():
+            res.interrupted = True
+            res.error = f"{action} stopped by Kazma's own stop (it runs again at the next pass): {res.error}"
         return res
     res.ok = True
     return res
+
+
+def _own_process_group() -> dict[str, Any]:
+    """Start restic outside the server's process group. The guard stops the
+    server with CTRL_BREAK / SIGTERM to that whole group, and restic, in it,
+    quit mid-run: on 2026-11-12 a reload stopped the remote check, which was
+    then reported as a repository that failed verification. Outside the group
+    a run Kazma started finishes even when the server stops."""
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def _kazma_is_stopping() -> bool:
+    try:
+        from kazma_core.shutdown import is_shutting_down
+    except ImportError:
+        return False
+    return is_shutting_down()
 
 
 def _meaningful_error(stderr: str | None, stdout: str | None) -> str:

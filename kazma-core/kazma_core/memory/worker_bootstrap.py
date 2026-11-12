@@ -1783,11 +1783,18 @@ async def _handle_restic_maintenance(payload: dict[str, Any]) -> bool:
             # keeps reporting success -- silent, and worse than any disk leak.
             await asyncio.to_thread(unlock_stale, repo, password)
             pruned = await asyncio.to_thread(forget_prune, repo, password)
+            if pruned.interrupted:
+                logger.info("[memory_worker] restic %s: %s", name, pruned.error[:200])
+                continue
             if not pruned.ok:
                 logger.warning("[memory_worker] restic forget %s: %s",
                                name, pruned.error[:200])
                 continue
             verified = await asyncio.to_thread(check, repo, password)
+            if verified.interrupted:
+                # Kazma's own stop, not the repository: no alert (2026-11-12).
+                logger.info("[memory_worker] restic %s: %s", name, verified.error[:200])
+                continue
             if not verified.ok:
                 logger.error("[memory_worker] restic check FAILED for %s: %s",
                              name, verified.error[:200])

@@ -199,6 +199,40 @@ def test_errors_in_the_log_since_the_boot_fail_the_deploy(tmp_path):
     assert deploy_live.log_errors(tmp_path, since) == ["CRITICAL y: after"]
 
 
+def _guard_events(live: Path, *events: tuple[str, str]) -> None:
+    log = live / ".kazma" / "guard.log"
+    log.parent.mkdir(exist_ok=True)
+    log.write_text("\n".join(json.dumps({"ts": ts, "level": "info", "event": e}) for ts, e in events),
+                   encoding="utf-8")
+
+
+def test_the_old_servers_stop_is_not_the_new_builds_error(tmp_path):
+    """2026-11-12: the guard's stop also stopped the old server's restic
+    check, which logged an ERROR 4 s before the new server was spawned; read
+    from the reload request, the deploy reverted a good commit."""
+    from datetime import datetime
+
+    log = tmp_path / ".kazma" / "kazma.log"
+    log.parent.mkdir()
+    log.write_text("\n".join(json.dumps(x) for x in [
+        {"timestamp": "2026-11-12T17:02:40+00:00", "level": "ERROR", "logger": "old", "message": "stopped mid-check"},
+        {"timestamp": "2026-11-12T17:03:30+00:00", "level": "ERROR", "logger": "new", "message": "a new error"},
+    ]), encoding="utf-8")
+    _guard_events(tmp_path, ("2026-11-12T16:00:00+00:00", "child.spawned"),
+                  ("2026-11-12T17:02:44+00:00", "child.stopped_gracefully"),
+                  ("2026-11-12T17:02:45+00:00", "child.spawned"))
+    requested = datetime.fromisoformat("2026-11-12T17:02:30+00:00").timestamp()
+    boot = deploy_live.new_boot(tmp_path, requested)
+    assert boot == datetime.fromisoformat("2026-11-12T17:02:45+00:00").timestamp()
+    assert deploy_live.log_errors(tmp_path, boot) == ["ERROR new: a new error"], "an error after the spawn still fails"
+    # The negative control: read from the request, the old server's line counts.
+    assert len(deploy_live.log_errors(tmp_path, requested)) == 2
+
+
+def test_without_a_guard_log_the_window_starts_at_the_request(tmp_path):
+    assert deploy_live.new_boot(tmp_path, 123.0) == 123.0
+
+
 def test_a_live_checkout_with_its_own_commit_is_undone_too(repos, stub, recorded, monkeypatch):
     # The live install keeps a local commit (its kazma.yaml): its pull is a
     # merge, and what was deployed is what origin/main gained.

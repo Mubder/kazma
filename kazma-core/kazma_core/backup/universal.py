@@ -1129,6 +1129,8 @@ def _snapshot_to_restic(dest: Path) -> dict[str, Any] | None:
                 # be told apart from one that is not running at all.
                 logger.info("[universal-backup] restic %s snapshot ok: %s",
                             name, res.detail.get("snapshot_id") or "(no id)")
+            elif res.interrupted:
+                logger.info("[universal-backup] restic %s: %s", name, res.error[:200])
             else:
                 logger.warning("[universal-backup] restic %s failed: %s",
                                name, res.error[:200])

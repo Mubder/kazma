@@ -311,7 +311,7 @@ def test_clean_restic_maintenance_leaves_the_line_the_ledger_counts(monkeypatch,
     import kazma_core.backup.restic_repo as repo_mod
     from kazma_core.memory import worker_bootstrap as wb
 
-    ok = SimpleNamespace(ok=True, error="")
+    ok = SimpleNamespace(ok=True, error="", interrupted=False)
     monkeypatch.setattr(repo_mod, "restic_available", lambda: True)
     monkeypatch.setattr(repo_mod, "ensure_password", lambda **_: ("pw", False))
     monkeypatch.setattr(repo_mod, "repo_paths", lambda: {"local": "L", "remote": ""})

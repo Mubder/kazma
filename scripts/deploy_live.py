@@ -173,6 +173,35 @@ def test_turn(server: Server) -> str:
     return ""
 
 
+def new_boot(live: Path, after_epoch: float) -> float:
+    """When the server the reload started was spawned: the guard's last
+    ``child.spawned`` event at or after *after_epoch*, else *after_epoch*.
+
+    The log check reads from there. Read from the reload request, it took the
+    old server's last seconds as the new build's: on 2026-11-12 the guard's
+    stop also stopped the old server's restic check, which logged "restic
+    check FAILED" 4 s before the new server existed, and the deploy reverted
+    a good commit."""
+    from datetime import datetime
+
+    try:
+        lines = (live / ".kazma" / "guard.log").read_text(encoding="utf-8", errors="replace").splitlines()[-5000:]
+    except OSError:
+        return after_epoch
+    found = after_epoch
+    for line in lines:
+        try:
+            rec = json.loads(line)
+            if rec.get("event") != "child.spawned":
+                continue
+            when = datetime.fromisoformat(str(rec.get("ts"))).timestamp()
+        except (ValueError, AttributeError):
+            continue
+        if when >= after_epoch:
+            found = when
+    return found
+
+
 def log_errors(live: Path, since_epoch: float) -> list[str]:
     """ERROR and CRITICAL lines of the server's log written since *since_epoch*."""
     found = []
@@ -246,7 +275,7 @@ def deploy(live: Path, *, dev: Path = DEV, revert: bool = True, skip_turn: bool 
         problem = check()
         if problem:
             return fail(live, dev, shipped, after, problem, revert)
-    errors = log_errors(live, boot_from)
+    errors = log_errors(live, new_boot(live, boot_from))
     if errors:
         say("   errors in the log since the boot:")
         for line in errors[:10]:

@@ -5975,6 +5975,20 @@ restic started elsewhere (the restore listing too). A missed snapshot alerts
 Tests: `tests/test_restic_one_run_per_repo.py` (negative control: a lock per
 call overlaps).
 
+**D2. Kazma's own stop is not a repository failure** (`restic_repo._run`,
+2026-11-12). The guard stops the server with CTRL_BREAK / SIGTERM to its
+whole process group, and restic, in it, quit mid-check: a deploy's reload
+logged "restic check FAILED for remote", paged that the remote repository
+failed verification, and `deploy_live.py` read the ERROR and reverted a good
+commit. restic starts in its own process group (`_own_process_group`: a run
+Kazma started finishes even when the server stops), and a run that still
+fails while Kazma is stopping is `interrupted` -- said at INFO by every
+caller, never alerted, run again at the next pass. `deploy_live.py`'s log
+check reads from the new server's spawn (the guard's `child.spawned`,
+`new_boot`), never from the reload request. Tests:
+`tests/test_restic_stop_is_not_a_failure.py`, `tests/test_deploy_live.py`
+(each with the old reading as the control).
+
 **E. The daily digest reads every source of its window**
 (`observability/daily_digest.py`, 2026-10-03). The live digest said "Turns
 completed: 0" over a day with four turns (three web, one Telegram that paused
