@@ -23,6 +23,18 @@
 - Linux: when setup installs Docker, it also starts it at boot and adds your
   account to the `docker` group. If Docker runs but your account can't use
   it, setup adds the group and nothing else.
+- Drilled on a clean Windows VM. WSL went in, Windows restarted, and the
+  rest took 321 s. After a reboot with nobody signed in, Docker answered
+  29 s after boot, and a container read a mounted Windows folder. The drill
+  found and fixed three bugs:
+  - WSL with no distro yet was taken for no WSL, which would have asked for
+    a restart on every run.
+  - Downloads failed certificate checks on a fresh Windows, which lacked
+    GitHub's root certificate. Setup now checks against the certificates
+    Kazma ships with, and the Tesseract model downloads do the same.
+  - The engine script reached bash with Windows line endings.
+- Docker's command-line tools join your PATH, so your own `docker` reaches
+  the engine too.
 
 ## Kazma's own container engine, step 1 (2026-11-12)
 

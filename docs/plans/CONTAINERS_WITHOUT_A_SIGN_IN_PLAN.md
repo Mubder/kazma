@@ -249,7 +249,10 @@ context, the boot task, the record; pinned downloads; a preflight before
 anything is installed); `--docker desktop` keeps Docker Desktop; `kazma setup
 engine` installs, repairs, checks or removes it (removal refused while
 another project's containers live in it). The guard's supervision and
-Settings' choice shipped in Stage 1's commits. Open: the automated boot drill
+Settings' choice shipped in Stage 1's commits. Drilled by hand on the clean
+VM the same day (`kazma setup engine`: WSL, a restart, the rest in 321 s;
+Docker answered 29 s after a reboot with nobody signed in; three bugs found
+and fixed, AGENTS.md section 63). Open: the automated boot drill
 (`scripts/engine_boot_drill.py`), and readiness and the disk watch naming the
 engine.
 
