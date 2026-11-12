@@ -228,6 +228,10 @@ class Box:
         self.models = self.chromium = self.service = self.kazma_up = self.pg = self.searxng = False
         self.embedding_model = False
         self.container = False
+        #: How many /healthz asks a just-started SearXNG leaves unanswered
+        #: (the boot drill: 2 s after `compose up` it did not answer yet);
+        #: None never answers.
+        self.searxng_silent_for: int | None = 0
         self.vcruntime: tuple[int, int] | None = None  # a fresh Windows has none (the clean VM, 2026-11-08)
         self.virtualization = _facts("Dell Inc. OptiPlex", True, True)
         self.wsl = True
@@ -358,7 +362,12 @@ class Box:
 
     def answers(self, url: str) -> bool:
         if url.endswith("/healthz"):
-            return self.searxng
+            if not self.searxng or self.searxng_silent_for is None:
+                return False
+            if self.searxng_silent_for > 0:
+                self.searxng_silent_for -= 1
+                return False
+            return True
         return self.kazma_up
 
 
@@ -522,6 +531,36 @@ def test_full_installs_kazmas_engine_not_docker_desktop(box, capsys):
     box.engine_actions.clear()
     assert install(_options(mode="full", yes=True), _machine(box)) == 0
     assert box.engine_actions == [], "a second run changes nothing"
+
+
+def test_a_just_started_searxng_is_waited_for_before_it_is_judged(box, capsys):
+    """The boot drill (2026-11-12): a Full install asked SearXNG 2 s after
+    `docker compose up`, called private search not installed and ended with
+    exit 1 ("run setup again"); SearXNG answered 49 s later. Setup now waits
+    for it, within SEARXNG_READY_WAIT_S."""
+    from kazma_cli.install import SEARXNG_READY_WAIT_S, install
+
+    box.searxng_silent_for = 6  # the drill's: not yet, for a while
+    machine = _machine(box)
+    assert install(_options(mode="full", yes=True), machine) == 0
+    out = capsys.readouterr().out
+    assert "wait for SearXNG to answer" in out and "Private web search" not in out.split("Done:")[-1]
+    assert machine.sleeps.count(3.0) == 6, "one short wait per unanswered ask"
+    results = json.loads((box.home / "setup_record.json").read_text(encoding="utf-8"))["install"]["results"]
+    assert results["private_search"]["ok"] is True
+    assert SEARXNG_READY_WAIT_S <= 180, "bounded: a broken SearXNG fails its step, it does not hold setup"
+
+
+def test_a_searxng_that_never_answers_fails_its_step_in_bounded_time(box, capsys):
+    """Negative control: the wait is not a way to call a dead SearXNG ready."""
+    from kazma_cli.install import SEARXNG_READY_WAIT_S, install
+
+    box.searxng_silent_for = None
+    machine = _machine(box)
+    assert install(_options(mode="full", yes=True), machine) == 1
+    out = capsys.readouterr().out
+    assert f"SearXNG did not answer at http://127.0.0.1:8088 within {int(SEARXNG_READY_WAIT_S)} s" in out
+    assert machine.sleeps.count(3.0) <= SEARXNG_READY_WAIT_S / 3.0 + 1
 
 
 def test_full_installs_wsl_first_and_asks_for_the_restart(box, capsys):

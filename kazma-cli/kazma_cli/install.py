@@ -63,6 +63,10 @@ SEARXNG_URL = "http://127.0.0.1:8088"
 DISK_NEEDED = {"express": 8 * 2**30, "full": 25 * 2**30, "custom": 8 * 2**30}
 #: How long the end waits for a freshly started Kazma to answer.
 ANSWER_WAIT_S = 240.0
+#: How long setup waits for the SearXNG it just started to answer before the
+#: part is judged: the boot drill (2026-11-12) checked it 2 s after `docker
+#: compose up` and called private search not installed; it answered 49 s later.
+SEARXNG_READY_WAIT_S = 120.0
 
 _MODE_TEXT = {
     "express": "everything that needs no Docker",
@@ -551,6 +555,9 @@ def build_plan(parts, found: dict[str, PartState], states, machine: Machine, pla
         plan.append(PlannedStep("private_search", Step(f"point Kazma's web search at {SEARXNG_URL}",
                                                        action="searxng_env",
                                                        shown=f"KAZMA_SEARXNG_URL={SEARXNG_URL} in .env")))
+        plan.append(PlannedStep("private_search", Step(
+            "wait for SearXNG to answer", action="searxng_ready",
+            shown=f"GET {SEARXNG_URL}/healthz, for up to {int(SEARXNG_READY_WAIT_S)} s")))
     if "service" in todo_ids and root is not None:
         plan.append(PlannedStep("service", Step(
             "install Kazma as a service (its guard starts at boot)",
@@ -641,6 +648,24 @@ def _postgres(log) -> tuple[bool, str]:
     return code == 0, "" if code == 0 else f"kazma setup postgres ended with {code} (see above)"
 
 
+def _wait_for_searxng(machine: Machine) -> tuple[bool, str]:
+    """The SearXNG just started answers before the part is judged, within
+    SEARXNG_READY_WAIT_S. The time each try takes counts, as in ``_finish``:
+    a refused connection on Windows takes about 2 s."""
+    url = SEARXNG_URL.rstrip("/") + "/healthz"
+    spent = 0.0
+    while True:
+        started = time.monotonic()
+        answered = machine.answers(url)
+        spent += time.monotonic() - started
+        if answered:
+            return True, f"answers after {int(spent)} s"
+        if spent >= SEARXNG_READY_WAIT_S:
+            return False, f"SearXNG did not answer at {SEARXNG_URL} within {int(SEARXNG_READY_WAIT_S)} s"
+        machine.sleep(3.0)
+        spent += 3.0
+
+
 def _run_planned(item: PlannedStep, machine: Machine, env_path: Path, log) -> tuple[bool, str]:
     step = item.step
     if step.action.startswith("engine:"):
@@ -661,6 +686,8 @@ def _run_planned(item: PlannedStep, machine: Machine, env_path: Path, log) -> tu
             return False, str(exc)
         os.environ["KAZMA_SEARXNG_URL"] = SEARXNG_URL
         return True, ""
+    if step.action == "searxng_ready":
+        return _wait_for_searxng(machine)
     if step.action == "searxng_secret":
         from kazma_core.security.searxng_secret import ensure_searxng_secret
 

@@ -456,12 +456,19 @@ $code = $LASTEXITCODE
 @{exit = $code; seconds = [int]((Get-Date) - $start).TotalSeconds} | ConvertTo-Json | Set-Content "$drill\install-$Round.done" -Encoding ascii
 """
 
+#: Run from the install folder (``strict_profile``): a Kazma command reads
+#: the launch folder's ``.env``, and from the account's home it loaded none,
+#: wrote the setting into a local store of its own and read it back True,
+#: while the server's Postgres never had it (the first drill, 2026-11-12).
+#: So it refuses unless the install's ``.env`` is the one loaded.
 STRICT_PROFILE = (
-    "from kazma_core.env_files import load_env_files; load_env_files(); "
+    "import sys; from pathlib import Path; "
+    "from kazma_core.env_files import load_env_files; loaded = load_env_files(); "
+    "assert any(Path(f).parent == Path.cwd() for f in loaded), f'not the install env: {loaded}'; "
     "from kazma_core.config_store import get_config_store; "
     "s = get_config_store(); "
     "s.set('security.execution.container_required', True, category='security'); "
-    "print('container_required =', s.get('security.execution.container_required'))"
+    "print('container_required =', s.get('security.execution.container_required'), 'from', loaded)"
 )
 
 
@@ -552,8 +559,12 @@ def _wait_for_file(vm: Vm, path: str, timeout: float) -> dict[str, Any]:
 
 
 def strict_profile(vm: Vm) -> str:
-    got = vm.ssh(f"& '{VM_ROOT}\\.venv\\Scripts\\python.exe' -c \"{STRICT_PROFILE}\"", timeout=300)
-    return (got.stdout + got.stderr).strip()[-300:]
+    got = vm.ssh(f"Set-Location '{VM_ROOT}'; & '{VM_ROOT}\\.venv\\Scripts\\python.exe' -c \"{STRICT_PROFILE}\"",
+                 timeout=300)
+    said = (got.stdout + got.stderr).strip()
+    if "container_required = True" not in said:
+        raise RuntimeError(f"the strict profile was not set in the server's store: {said[-400:]}")
+    return said.splitlines()[-1][-300:]
 
 
 def measure_boot(vm: Vm, engine: str) -> list[dict[str, Any]]:

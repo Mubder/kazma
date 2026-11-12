@@ -174,6 +174,28 @@ def test_the_report_says_whether_the_expected_verdict_held():
 # ── what the drill sends to the VM ────────────────────────────────────
 
 
+def test_the_strict_profile_is_set_only_through_the_install_s_env(tmp_path):
+    """The first drill wrote the profile from the VM account's home folder:
+    no ``.env`` loaded, the setting landed in a store of its own and read
+    back True, and the server's Postgres never had it -- readiness had no
+    code sandbox check at all. Run anywhere but an install folder, the write
+    refuses before it touches a store."""
+    import os
+    import subprocess
+
+    # Its own stores: no database address, a data folder and home of the test's.
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("KAZMA_ENV_FILE", "KAZMA_DATABASE_URL", "DATABASE_URL")}
+    env.update(KAZMA_DATA_DIR=str(tmp_path / "data"), KAZMA_USER_HOME=str(tmp_path / "home"))
+    got = subprocess.run([sys.executable, "-c", drill.STRICT_PROFILE], cwd=tmp_path, env=env,
+                         capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL)
+    assert got.returncode != 0 and "not the install env" in got.stderr, got.stderr[-400:]
+    (tmp_path / ".env").write_text("KAZMA_DRILL_PROBE=1\n", encoding="utf-8")
+    got = subprocess.run([sys.executable, "-c", drill.STRICT_PROFILE], cwd=tmp_path, env=env,
+                         capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL)
+    assert "container_required = True" in got.stdout, (got.stdout + got.stderr)[-400:]
+
+
 def test_the_files_the_vm_runs_are_complete():
     compile(drill.PROBE, "probe.py", "exec")
     for template in (drill.PREPARE, drill.RUN_INSTALL):
