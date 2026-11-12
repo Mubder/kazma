@@ -577,15 +577,22 @@ def test_full_installs_wsl_first_and_asks_for_the_restart(box, capsys):
 
 def test_control_docker_desktop_only_when_chosen(box, capsys):
     """Negative control, and the owner's choice: ``--docker desktop`` installs
-    Docker Desktop (after WSL, as before) and none of Kazma's engine."""
+    Docker Desktop and none of Kazma's engine. WSL comes from the engine's
+    own step (its pinned MSI): `wsl --install` is refused outside a
+    signed-in console (the boot drill's control, 2026-11-13), and an
+    unattended Desktop install never got Docker Desktop at all."""
     from kazma_cli.install import install
 
     box.wsl = False
     install(_options(mode="full", yes=True, docker="desktop"), _machine(box))
-    wsl = next(i for i, a in enumerate(box.ran) if a[:2] == ["wsl", "--install"])
-    docker = next(i for i, a in enumerate(box.ran) if a[:2] == ["winget", "install"] and "Docker.DockerDesktop" in a)
-    assert wsl < docker
-    assert box.engine_actions == []
+    out = capsys.readouterr().out
+    assert box.engine_actions == ["engine:wsl"], "WSL only; none of the engine's own steps"
+    assert "Docker.DockerDesktop" not in _installs(box), "after the restart"
+    assert "Restart Windows to finish WSL, then run setup again" in out
+    install(_options(mode="full", yes=True, docker="desktop"), _machine(box))
+    assert "Docker.DockerDesktop" in _installs(box)
+    assert box.engine_actions == ["engine:wsl"], "WSL was there: nothing of the engine ran"
+    assert not [a for a in box.ran if a[:2] == ["wsl", "--install"]], "never the refused command"
 
 
 def test_what_stops_kazmas_engine_is_said_first_and_blocks_only_containers(box, capsys):

@@ -268,6 +268,9 @@ class Vm:
     def ssh(self, script: str, timeout: float = 300.0) -> subprocess.CompletedProcess:
         """A PowerShell script on the VM, sent encoded (no quoting through
         sshd's shell)."""
+        # No progress records: PowerShell writes them to stderr as CLIXML
+        # ("Preparing modules for first use"), which buried the answers.
+        script = "$ProgressPreference = 'SilentlyContinue'\n" + script
         encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
         return subprocess.run(
             [_ssh_exe(), "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", self.host,
@@ -561,10 +564,11 @@ def _wait_for_file(vm: Vm, path: str, timeout: float) -> dict[str, Any]:
 def strict_profile(vm: Vm) -> str:
     got = vm.ssh(f"Set-Location '{VM_ROOT}'; & '{VM_ROOT}\\.venv\\Scripts\\python.exe' -c \"{STRICT_PROFILE}\"",
                  timeout=300)
-    said = (got.stdout + got.stderr).strip()
-    if "container_required = True" not in said:
-        raise RuntimeError(f"the strict profile was not set in the server's store: {said[-400:]}")
-    return said.splitlines()[-1][-300:]
+    said = [line for line in got.stdout.splitlines() if line.startswith("container_required = ")]
+    if not said or not said[-1].startswith("container_required = True"):
+        raise RuntimeError("the strict profile was not set in the server's store: "
+                           f"{(got.stdout + got.stderr).strip()[-400:]}")
+    return said[-1][:300]
 
 
 def measure_boot(vm: Vm, engine: str) -> list[dict[str, Any]]:

@@ -488,7 +488,7 @@ def build_plan(parts, found: dict[str, PartState], states, machine: Machine, pla
     engine, never Docker Desktop (docs/plans/CONTAINERS_WITHOUT_A_SIGN_IN_PLAN.md)."""
     from kazma_core.install_components import extras_for
     from kazma_core.postgres_service import Step
-    from kazma_core.system_deps import install_plan, wsl_install_step
+    from kazma_core.system_deps import install_plan
 
     todo = [p for p in parts if found[p.id].ok is False]
     todo_ids = {p.id for p in todo}
@@ -509,7 +509,15 @@ def build_plan(parts, found: dict[str, PartState], states, machine: Machine, pla
             plan.append(PlannedStep(owner_of["docker"], step,
                                     attempts=1 if step.action == "engine:wsl" else _SYSTEM_ATTEMPTS))
     elif "docker" in wanted_deps and readiness is not None and readiness.wsl_missing:
-        plan.append(PlannedStep("docker", wsl_install_step()))
+        # Docker Desktop needs WSL too, installed the way Kazma's engine
+        # installs it (the two Windows features, WSL's own MSI pinned by
+        # SHA-256, a restart). It was `wsl --install`, which Windows refuses
+        # outside a signed-in console ("The Windows Subsystem for Linux is not
+        # installed", the boot drill's control, 2026-11-13): an unattended
+        # `--docker desktop` install never got Docker Desktop at all.
+        plan.append(PlannedStep("docker", Step(
+            "install WSL 2 for Docker Desktop (pinned release; Windows restarts after it)",
+            action="engine:wsl", admin=True, dep="docker")))
     for step in install_plan(platform, chosen_states):
         part = owner_of.get(step.dep, "")  # the package lists' refresh is no part's
         plan.append(PlannedStep(part, step, attempts=_SYSTEM_ATTEMPTS))
@@ -894,8 +902,9 @@ def _execute(plan: list[PlannedStep], machine: Machine, platform, say, log) -> t
     failed: set[str] = set()
     not_done: list[str] = []
     restart_needed = False
-    # Kazma's engine waits for Windows to restart after WSL; Docker Desktop's
-    # installer does not, so its path keeps the order it had.
+    # The container steps wait for Windows to restart after WSL, on either
+    # path: Kazma's engine needs WSL running, and Docker Desktop is installed
+    # once WSL is (both get WSL from the same step, ``engine:wsl``).
     engine_waits = False
     needs_of = {c.id: set(c.needs) for c in COMPONENTS}
     from kazma_core.container_engine_setup import RESTART
@@ -922,7 +931,6 @@ def _execute(plan: list[PlannedStep], machine: Machine, platform, say, log) -> t
             not_done.append(item.step.title)
             failed.add(item.part)
             continue
-        restart_needed = restart_needed or item.step.argv[:2] == ("wsl", "--install")
         if platform.os == "windows":
             from kazma_core.path_refresh import refresh_path_from_os
 
