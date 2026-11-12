@@ -18,7 +18,8 @@ Then it checks, in order:
 3. no ERROR or CRITICAL line in the server's log since the new boot.
 
 When a check fails it undoes the deploy the only way the live install allows:
-it reverts the deployed commits on ``main`` here, pushes, pulls the revert
+it reverts the deployed commits on ``origin/main`` (in a worktree of its own,
+never on a checkout's HEAD), pushes, pulls the revert
 into the live install and reloads; then it pages the owner (the live guard's
 ``--page``) with what failed. ``--no-revert`` stops after the page instead.
 Every step is printed; nothing secret is.
@@ -286,6 +287,31 @@ def deploy(live: Path, *, dev: Path = DEV, revert: bool = True, skip_turn: bool 
     return 0
 
 
+def revert_on_origin(repo: Path, first: str, last: str) -> None:
+    """Revert ``first..last`` on top of ``origin/main`` and push that, built
+    in a worktree of its own: never on a checkout's HEAD.
+
+    On 2026-11-12 this script ran from the live install's copy, so ``dev`` was
+    the live checkout: the revert was made on its HEAD and ``HEAD:main``
+    pushed the live install's own commits (its local kazma.yaml since
+    2026-10-03) to the public repository, and main shipped that kazma.yaml.
+    A revert built on origin/main pushes the revert and nothing else, from
+    whichever checkout this runs in."""
+    import tempfile
+
+    git(repo, "fetch", "origin")
+    where = Path(tempfile.mkdtemp(prefix="kazma-revert-"))
+    git(repo, "worktree", "add", "--detach", str(where), "origin/main")
+    try:
+        git(where, "revert", "--no-edit", f"{first}..{last}")
+        git(where, "push", "origin", "HEAD:main")
+    finally:
+        try:
+            git(repo, "worktree", "remove", "--force", str(where))
+        except RuntimeError:
+            say(f"   the revert's worktree {where} was left behind; remove it with git worktree prune")
+
+
 def fail(live: Path, dev: Path, shipped: tuple[str, str], after: str, problem: str, revert: bool) -> int:
     say(f"FAILED: {problem}")
     if not revert:
@@ -294,9 +320,7 @@ def fail(live: Path, dev: Path, shipped: tuple[str, str], after: str, problem: s
     first, last = shipped
     say(f"-> reverting {first[:12]}..{last[:12]} on main")
     try:
-        git(dev, "fetch", "origin")
-        git(dev, "revert", "--no-edit", f"{first}..{last}")
-        git(dev, "push", "origin", "HEAD:main")
+        revert_on_origin(dev, first, last)
         git(live, "pull", "--no-rebase", "--no-edit")
         code, out = run_live(live, "scripts/service/kazma_guard.py", "--reload", "--when-idle", timeout=1200)
         reverted = code == 0

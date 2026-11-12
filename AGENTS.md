@@ -5985,9 +5985,15 @@ Kazma started finishes even when the server stops), and a run that still
 fails while Kazma is stopping is `interrupted` -- said at INFO by every
 caller, never alerted, run again at the next pass. `deploy_live.py`'s log
 check reads from the new server's spawn (the guard's `child.spawned`,
-`new_boot`), never from the reload request. Tests:
-`tests/test_restic_stop_is_not_a_failure.py`, `tests/test_deploy_live.py`
-(each with the old reading as the control).
+`new_boot`), never from the reload request. And its revert is built on
+`origin/main` in a worktree of its own (`revert_on_origin`), never on a
+checkout's HEAD: run from the live install's copy, its revert was made on
+the live HEAD and pushed the live install's own commits (its local
+`kazma.yaml` since 2026-10-03) to the public repository, and `main` shipped
+that file until it was restored. Run it from the dev checkout
+(`.venv/Scripts/python.exe scripts/deploy_live.py --live
+C:/Users/balfa/kazma`). Tests: `tests/test_restic_stop_is_not_a_failure.py`,
+`tests/test_deploy_live.py` (each with the old behaviour as the control).
 
 **E. The daily digest reads every source of its window**
 (`observability/daily_digest.py`, 2026-10-03). The live digest said "Turns

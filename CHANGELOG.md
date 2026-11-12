@@ -14,6 +14,12 @@
 - `scripts/deploy_live.py` read the old server's last seconds as errors of
   the new build, and reverted a good commit. Its log check now starts at the
   moment the new server starts.
+- That revert ran from the live install's own copy of the script, so it was
+  built on the live checkout and pushed the live install's local commits,
+  including its own `kazma.yaml`, to the repository. `main` briefly shipped
+  that file: Discord and Slack on by default, and an extra MCP server at no
+  fixed version. The shipped `kazma.yaml` is restored, and a revert is now
+  always built on `origin/main` in a separate worktree.
 
 ## Kazma's own container engine, step 2: setup installs it (2026-11-12)
 

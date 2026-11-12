@@ -160,7 +160,9 @@ def test_a_bad_deploy_is_undone_and_the_page_names_the_check(repos, stub, record
     # Reverted on main and pulled: the live tree is the one before the deploy.
     assert (live / "app.txt").read_text(encoding="utf-8") == "v1\n"
     assert _git(live, "rev-parse", "HEAD") != before          # a revert commit, never a reset
-    assert "Revert" in _git(dev, "log", "-1", "--format=%s")
+    # The revert is on origin/main (built in a worktree of its own), never on
+    # the checkout the script ran from.
+    assert "Revert" in _git(dev.parent / "origin.git", "log", "-1", "--format=%s", "main")
     (title, detail), = recorded["pages"]
     assert title == "A deploy failed and was undone" and "the test turn answered" in detail
 
@@ -197,6 +199,42 @@ def test_errors_in_the_log_since_the_boot_fail_the_deploy(tmp_path):
 
     since = datetime.fromisoformat("2026-11-06T10:01:00+00:00").timestamp()
     assert deploy_live.log_errors(tmp_path, since) == ["CRITICAL y: after"]
+
+
+def test_run_from_the_live_checkout_the_revert_pushes_none_of_its_commits(repos, stub, recorded, monkeypatch):
+    """2026-11-12: the script ran from the live install's copy, so its dev
+    checkout was the live one; the revert was made on the live HEAD and
+    pushed the live install's own commit (its kazma.yaml) to origin."""
+    dev, live = repos
+    handler, url = stub
+    (live / "local.yaml").write_text("the live install's own\n", encoding="utf-8")
+    _git(live, "add", "local.yaml")
+    _git(live, "commit", "-m", "local settings")
+    _push(dev, "v2 broken\n")
+    handler.answer = "no"
+    handler.commit = ""
+    monkeypatch.setattr(deploy_live, "wait_for_build", lambda srv, commit, timeout=900.0: "")
+    assert deploy_live.deploy(live, dev=live, server=deploy_live.Server(live, base=url)) == 1
+    origin = repos[0].parent / "origin.git"
+    pushed = _git(origin, "log", "--format=%s", "main")
+    assert "local settings" not in pushed, "the live install's own commit stayed out of origin"
+    assert pushed.splitlines()[0].startswith("Revert")
+    assert (live / "app.txt").read_text(encoding="utf-8") == "v1\n"
+    assert (live / "local.yaml").read_text(encoding="utf-8") == "the live install's own\n"
+    assert _git(live, "worktree", "list").count("\n") == 0, "the revert's worktree is gone"
+
+
+def test_control_reverting_on_the_checkouts_head_pushes_its_commits(repos):
+    dev, live = repos
+    (live / "local.yaml").write_text("mine\n", encoding="utf-8")
+    _git(live, "add", "local.yaml")
+    _git(live, "commit", "-m", "local settings")
+    first = _git(live, "rev-parse", "HEAD")
+    after = _push(dev, "v2\n")
+    _git(live, "pull", "--no-rebase", "--no-edit")
+    _git(live, "revert", "--no-edit", f"{first}..{after}")  # the old way: on the live HEAD
+    _git(live, "push", "origin", "HEAD:main")
+    assert "local settings" in _git(repos[0].parent / "origin.git", "log", "--format=%s", "main")
 
 
 def _guard_events(live: Path, *events: tuple[str, str]) -> None:

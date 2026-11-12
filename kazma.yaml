@@ -35,22 +35,17 @@ mcp:
   servers:
   - name: filesystem
     transport: stdio
+    workspace_bound: true
     command:
     - npx
     - -y
     - '@modelcontextprotocol/server-filesystem@2026.8.31'
     - ${KAZMA_ACTIVE_WORKSPACE}
-    workspace_bound: true
-  - name: sequential-thinking
-    transport: stdio
-    command:
-    - npx
-    - -y
-    - '@modelcontextprotocol/server-sequential-thinking'
-    url: ''
-    env: {}
     enabled: true
+    tool_count: 0
+    tools: []
     trust: approval_required
+    auth: {}
 system_prompt: 'You are Kazma (Arabic: كاظمه / كاظمة — never كازما), an autonomous
   multi-platform AI agent framework.
 
@@ -128,9 +123,9 @@ connectors:
   telegram:
     enabled: true
   discord:
-    enabled: true
+    enabled: false
   slack:
-    enabled: true
+    enabled: false
 gateway:
   # Messages one person may send per minute before Kazma answers "Slow
   # down" and leaves the rest unanswered: a flood guard, not the platforms'
