@@ -88,6 +88,7 @@ def test_the_table_names_the_keys_the_owning_modules_define() -> None:
         ALERTS_GROUP_KEY,
         NOTICES_TO_CHATS_KEY,
     )
+    from kazma_core.docker_cli import ENGINE_KEY
     from kazma_core.observability.outside_watch import EMAIL_TO_KEY
     from kazma_core.runs.runbooks import RUNBOOKS_KEY
     from kazma_core.swarm.task_store import TASK_RETENTION_KEY
@@ -119,6 +120,9 @@ def test_the_table_names_the_keys_the_owning_modules_define() -> None:
                              # The separate alerts bot, 2026-11-11: a choice no sender
                              # reads, a token that is no bot's, a chat it cannot send to.
                              ALERTS_BOT_KEY, ALERTS_BOT_TOKEN_KEY, ALERTS_BOT_CHAT_KEY,
+                             # The container engine, 2026-11-12: an engine this machine
+                             # does not have would send every docker call nowhere.
+                             ENGINE_KEY,
                              "notifications.ops.channels", "guard.telegram.chat_id",
                              "agent.language", "agent.max_iterations"}
 

@@ -155,11 +155,24 @@ def _wsl_env() -> dict[str, str]:
     return {**os.environ, "WSL_UTF8": "1"}
 
 
+def _wsl_installed(run: Runner) -> bool:
+    """WSL itself (its MSI or Store package), not Windows' stub ``wsl.exe``:
+    the stub answers ``--version`` with an error (measured on the clean VM,
+    2026-11-12). The distro list cannot tell them apart: a WSL with no
+    distro yet answers ``-l`` with an error too."""
+    code, _ = _out(run, ["wsl.exe", "--version"], env=_wsl_env())
+    return code == 0
+
+
 def _distros(run: Runner, *, running: bool = False) -> list[str] | None:
+    """The WSL distros (only those running, with *running*); None when WSL is
+    not installed."""
+    if not running and not _wsl_installed(run):
+        return None
     argv = ["wsl.exe", "-l", "-q"] + (["--running"] if running else [])
     code, text = _out(run, argv, env=_wsl_env())
     if code != 0:
-        return None if not running else []
+        return []
     return [line.strip() for line in text.splitlines() if line.strip()]
 
 

@@ -62,6 +62,8 @@ class Machine:
         if name == "wsl.exe":
             if not self.wsl:
                 return 1, "WSL is not installed"
+            if argv[1:3] == ["-l", "-q"] and not self.distros:
+                return 1, "Windows Subsystem for Linux has no installed distributions."
             if argv[1:3] == ["-l", "-q"]:
                 names = self.running if "--running" in argv else self.distros
                 return 0, "\n".join(names)
@@ -118,6 +120,28 @@ def test_each_missing_piece_is_named(machine, monkeypatch, tmp_path):
     assert found.missing == ["distro", "task"]
     assert "the kazma-engine distro is not there" in found.detail
     assert "KazmaEngine task" in found.detail
+
+
+def test_wsl_with_no_distro_yet_is_wsl_installed(machine):
+    """After WSL's install and the restart, WSL has no distro, and ``wsl -l``
+    answers that with an error. Read as "no WSL", setup would install WSL and
+    ask for a restart again, every run."""
+    machine.distros = []
+    found = ces.check(machine)
+    assert "wsl" not in found.missing and "distro" in found.missing
+    assert [s.action for s in ces.install_steps(found)][0] == "engine:distro"
+    assert ces.run_action("engine:wsl", run=machine) == (True, "WSL is here")
+
+
+def test_control_the_list_alone_takes_an_empty_wsl_for_none(machine, monkeypatch):
+    machine.distros = []
+
+    def list_only(run, *, running=False):
+        code, text = ces._out(run, ["wsl.exe", "-l", "-q"], env=ces._wsl_env())
+        return None if code != 0 else text.split()
+
+    monkeypatch.setattr(ces, "_distros", list_only)
+    assert "wsl" in ces.check(machine).missing
 
 
 def test_without_wsl_nothing_else_is_asked_of_it(machine):
