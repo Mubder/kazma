@@ -72,8 +72,12 @@ _reported_lock = threading.Lock()
 def _candidates() -> list[Path]:
     """Where Docker installs its CLI, per OS. Order is preference."""
     if os.name == "nt":
+        # Kazma's own engine installs Docker's CLI here (container_engine_setup);
+        # it is first: it works without Docker Desktop installed at all.
+        local = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+        kazma = [Path(local) / "Kazma" / "engine" / "bin" / "docker.exe"]
         roots = [os.environ.get(v) for v in ("ProgramFiles", "ProgramW6432")] + [r"C:\Program Files"]
-        out = [Path(r) / "Docker" / "Docker" / "resources" / "bin" / "docker.exe" for r in roots if r]
+        out = kazma + [Path(r) / "Docker" / "Docker" / "resources" / "bin" / "docker.exe" for r in roots if r]
         data = os.environ.get("ProgramData") or r"C:\ProgramData"
         out.append(Path(data) / "DockerDesktop" / "version-bin" / "docker.exe")
         return list(dict.fromkeys(out))

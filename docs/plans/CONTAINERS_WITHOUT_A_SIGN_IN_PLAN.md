@@ -242,6 +242,17 @@ behaviour changes on Docker Desktop.
   part ready within five minutes. Docker Desktop's launch rule as the
   negative control.
 
+Status (2026-11-12): setup's half is shipped. `kazma setup install` installs
+the engine on Windows whenever a container part is chosen
+(`container_engine_setup.py`: WSL, the distro, Docker Engine, the CLI, the
+context, the boot task, the record; pinned downloads; a preflight before
+anything is installed); `--docker desktop` keeps Docker Desktop; `kazma setup
+engine` installs, repairs, checks or removes it (removal refused while
+another project's containers live in it). The guard's supervision and
+Settings' choice shipped in Stage 1's commits. Open: the automated boot drill
+(`scripts/engine_boot_drill.py`), and readiness and the disk watch naming the
+engine.
+
 **Stage 3: move an existing install.** `kazma setup engine
 --move-from-desktop`, on the pattern of the Postgres move (section 21 G):
 - Kazma held while idle.
@@ -255,6 +266,10 @@ Drilled on the VM with Docker Desktop installed first.
 
 **Stage 4: Linux access.** Rootless Docker as a user service with linger,
 else the `docker` group with the reason; measured on a Linux machine.
+Status (2026-11-12): the `docker` group half is shipped (`kazma setup
+system` starts Docker at boot and adds the account; a socket the account may
+not use is found and fixed with the group alone). Rootless is not done, and
+nothing here was measured on a Linux machine yet.
 
 **Stage 5 (separate plan): isolation without containers.** An AppContainer
 sandbox on Windows and bubblewrap on Linux for code and documents, so a

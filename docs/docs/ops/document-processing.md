@@ -495,7 +495,14 @@ database container was gone and the guard restarted Kazma for eleven hours).
 The guard now starts what Kazma runs on (`KAZMA_GUARD_START_DEPENDENCIES`,
 `auto` by default):
 
-- **Docker Desktop**, when its engine has not answered for two minutes. On
+- **Kazma's own engine** (Windows, when Settings → System or setup chose it):
+  Docker Engine in the `kazma-engine` WSL distro, kept up from boot by the
+  `KazmaEngine` task with nobody signed in. When it has not answered for two
+  minutes the guard runs that task and restarts Docker inside the distro; it
+  never starts Docker Desktop for it. A missing or refused task is said in
+  `guard.log`, and the guard keeps the distro up itself until it is repaired
+  (`kazma setup engine`).
+- **Docker Desktop** (when it is the engine in use), when its engine has not answered for two minutes. On
   Windows the guard registers an on-demand task, `KazmaDockerDesktop`, that
   runs `Docker Desktop.exe` in the signed-in user's session with normal
   rights, and runs it; elsewhere it runs `docker desktop start`. It does not

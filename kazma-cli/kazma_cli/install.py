@@ -125,6 +125,19 @@ def add_install_parser(sub) -> None:
     install.add_argument("--packages-only", action="store_true",
                          help="install Kazma's Python packages for the mode only; show the rest as the plan")
     install.add_argument("--no-browser", action="store_true", help="do not open the browser at the end")
+    install.add_argument("--docker", choices=("kazma", "desktop"), default="kazma",
+                         help="Windows, when a container part is chosen: kazma (default: Kazma's own engine, "
+                              "starts with Windows, no sign-in needed) or desktop (Docker Desktop, waits for a "
+                              "sign-in)")
+
+
+def _docker_choice(options, platform) -> str:
+    """``kazma`` on Windows unless ``--docker desktop`` (Kazma's own engine:
+    docs/plans/CONTAINERS_WITHOUT_A_SIGN_IN_PLAN.md); elsewhere ``system``
+    (Linux: the distribution's Docker service; macOS: Docker Desktop)."""
+    if platform.os != "windows":
+        return "system"
+    return "desktop" if getattr(options, "docker", "kazma") == "desktop" else "kazma"
 
 
 # -- the log ------------------------------------------------------------------------------------
@@ -291,13 +304,47 @@ class PartState:
     detail: str
 
 
-def _check_parts(parts, machine: Machine, platform) -> tuple[dict[str, PartState], list]:
+#: Finders that stand in for Kazma's engine (tests), not for a system
+#: dependency's finder (``system_deps.check_all`` takes those).
+_NOT_SYSTEM_FINDERS = frozenset({"engine", "engine_action", "engine_preflight"})
+
+
+def _system_finders(machine: Machine) -> dict:
+    return {k: v for k, v in machine.finders.items() if k not in _NOT_SYSTEM_FINDERS}
+
+
+def _engine_preflight(machine: Machine) -> str:
+    """What would stop Kazma's engine here (``container_engine_setup.preflight``)."""
+    finder = machine.finders.get("engine_preflight")
+    if finder is not None:
+        return finder()
+    from kazma_core.container_engine_setup import preflight
+
+    return preflight(machine.run)
+
+
+def _engine_check(machine: Machine):
+    """Kazma's own container engine as found (``container_engine_setup.check``)."""
+    finder = machine.finders.get("engine")
+    if finder is not None:
+        return finder()
+    from kazma_core.container_engine_setup import check
+
+    return check(machine.run)
+
+
+def _check_parts(parts, machine: Machine, platform, docker: str = "system") -> tuple[dict[str, PartState], list]:
     """Each part as found, and the system dependencies as ``kazma setup
-    system`` sees them."""
-    from kazma_core.system_deps import check_all
+    system`` sees them. With *docker* ``kazma`` (Windows) the Docker part is
+    Kazma's own engine: a Docker Desktop on the machine is not it."""
+    from kazma_core.system_deps import DepState, check_all
 
     extras = _extras_present()
-    states = check_all(platform, run=machine.run, which=machine.which, **machine.finders)
+    states = check_all(platform, run=machine.run, which=machine.which, **_system_finders(machine))
+    if docker == "kazma" and any("docker" in p.system for p in parts):
+        engine = _engine_check(machine)
+        states = [DepState("docker", engine.ok, engine.detail, list(engine.missing)) if s.name == "docker" else s
+                  for s in states]
     system = {s.name: s for s in states}
     root = machine.root
     env_path = machine.env_path or _env_path()
@@ -431,8 +478,10 @@ def _extras_step(missing: list[str], machine: Machine):
 
 
 def build_plan(parts, found: dict[str, PartState], states, machine: Machine, platform,
-               readiness=None) -> list[PlannedStep]:
-    """The steps that put in what *found* says is missing, in table order."""
+               readiness=None, docker: str = "system") -> list[PlannedStep]:
+    """The steps that put in what *found* says is missing, in table order.
+    With *docker* ``kazma`` (Windows) a container part brings Kazma's own
+    engine, never Docker Desktop (docs/plans/CONTAINERS_WITHOUT_A_SIGN_IN_PLAN.md)."""
     from kazma_core.install_components import extras_for
     from kazma_core.postgres_service import Step
     from kazma_core.system_deps import install_plan, wsl_install_step
@@ -447,8 +496,15 @@ def build_plan(parts, found: dict[str, PartState], states, machine: Machine, pla
         plan.append(PlannedStep(owner, _extras_step(missing_extras, machine), attempts=_SYSTEM_ATTEMPTS))
     wanted_deps = {d for p in todo for d in p.system}
     owner_of = {d: next(p.id for p in todo if d in p.system) for d in wanted_deps}
-    chosen_states = [s for s in states if s.name in wanted_deps]
-    if "docker" in wanted_deps and readiness is not None and readiness.wsl_missing:
+    engine = docker == "kazma" and "docker" in wanted_deps
+    chosen_states = [s for s in states if s.name in wanted_deps and not (engine and s.name == "docker")]
+    if engine:
+        from kazma_core.container_engine_setup import install_steps
+
+        for step in install_steps(_engine_check(machine)):
+            plan.append(PlannedStep(owner_of["docker"], step,
+                                    attempts=1 if step.action == "engine:wsl" else _SYSTEM_ATTEMPTS))
+    elif "docker" in wanted_deps and readiness is not None and readiness.wsl_missing:
         plan.append(PlannedStep("docker", wsl_install_step()))
     for step in install_plan(platform, chosen_states):
         part = owner_of.get(step.dep, "")  # the package lists' refresh is no part's
@@ -587,6 +643,13 @@ def _postgres(log) -> tuple[bool, str]:
 
 def _run_planned(item: PlannedStep, machine: Machine, env_path: Path, log) -> tuple[bool, str]:
     step = item.step
+    if step.action.startswith("engine:"):
+        runner = machine.finders.get("engine_action")
+        if runner is not None:
+            return runner(step.action)
+        from kazma_core.container_engine_setup import run_action
+
+        return run_action(step.action, run=machine.run, log=log)
     if step.action == "postgres":
         return _postgres(log)
     if step.action == "container_profile":
@@ -750,6 +813,11 @@ def _preflight(parts, found: dict[str, PartState], machine: Machine, platform, m
             pre.problems.append(f"Docker cannot run here: {pre.readiness.problem}")
         elif pre.readiness.note:
             say(f"Note: {pre.readiness.note}")
+        if _docker_choice(options, platform) == "kazma" and "docker" not in pre.blocked:
+            problem = _engine_preflight(machine)
+            if problem:
+                pre.blocked["docker"] = problem
+                pre.problems.append(f"Kazma's container engine cannot run here: {problem}")
     for part in todo:
         blocked_need = next((need for need in part.needs if need in pre.blocked), None)
         if blocked_need and part.id not in pre.blocked:
@@ -799,15 +867,27 @@ def _execute(plan: list[PlannedStep], machine: Machine, platform, say, log) -> t
     failed: set[str] = set()
     not_done: list[str] = []
     restart_needed = False
+    # Kazma's engine waits for Windows to restart after WSL; Docker Desktop's
+    # installer does not, so its path keeps the order it had.
+    engine_waits = False
     needs_of = {c.id: set(c.needs) for c in COMPONENTS}
+    from kazma_core.container_engine_setup import RESTART
+
     for item in plan:
         if item.part in failed or needs_of.get(item.part, set()) & failed:
             say(f"-> {item.step.title}: not done (an earlier step it needs failed)")
             not_done.append(item.step.title)
             failed.add(item.part)
             continue
+        if engine_waits and (item.part == "docker" or "docker" in needs_of.get(item.part, set())):
+            say(f"-> {item.step.title}: after Windows restarts (WSL)")
+            not_done.append(item.step.title)
+            continue
         say(f"-> {item.step.title}", "brand")
         ok, detail = _attempt(item, machine, env_path, say, log)
+        if ok and detail == RESTART:
+            restart_needed = engine_waits = True
+            continue
         if not ok and item.step.dep:
             ok = _installed_anyway(item.step, platform, machine, say)
         if not ok:
@@ -867,7 +947,7 @@ def install(options, machine: Machine | None = None) -> int:
     detailed = options.check or options.dry_run
     show = say if detailed else log.write
     say(f"Checking {count_noun(len(parts), 'part')} of {mode.capitalize()}...")
-    found, states = _check_parts(parts, machine, platform)
+    found, states = _check_parts(parts, machine, platform, _docker_choice(options, platform))
     show(f"Install: {mode.capitalize()} ({len(parts)} of {count_noun(len(full_ids()), 'part')})")
     _show_parts(parts, found, show)
     left_out = [c for c in COMPONENTS if c.id not in {p.id for p in parts}]
@@ -877,7 +957,8 @@ def install(options, machine: Machine | None = None) -> int:
             show(f"  --   {comp.title}: {comp.lacks}")
     pre = _preflight(parts, found, machine, platform, mode, options, say)
     todo = [p for p in parts if found[p.id].ok is False and p.id not in pre.blocked]
-    plan = build_plan(todo, found, states, machine, platform, pre.readiness) if todo else []
+    plan = build_plan(todo, found, states, machine, platform, pre.readiness,
+                      _docker_choice(options, platform)) if todo else []
     admin_short = (platform.os == "windows" and any(item.step.admin for item in plan)
                    and not (machine.is_admin or pgs.is_admin)())
     if admin_short and not options.packages_only:
@@ -949,7 +1030,7 @@ def _conclude(mode: str, parts, pre: _Preflight, machine: Machine, platform, opt
     """Check every part again, record it, and say what Kazma lacks for now."""
     from kazma_core.system_deps import record_system
 
-    after, after_states = _check_parts(parts, machine, platform)
+    after, after_states = _check_parts(parts, machine, platform, _docker_choice(options, platform))
     for cid, reason in pre.blocked.items():
         after[cid] = PartState(False, reason)
     record_system(after_states, machine.record_path)
@@ -983,7 +1064,8 @@ def _installed_anyway(step, platform, machine: Machine, say) -> bool:
 
     if not installs_package(step):
         return False
-    found = {s.name: s for s in check_all(platform, run=machine.run, which=machine.which, **machine.finders)}
+    found = {s.name: s for s in check_all(platform, run=machine.run, which=machine.which,
+                                          **_system_finders(machine))}
     if step.dep in found and package_is_in(found[step.dep]):
         say("   installed, though the installer answered with an error")
         return True

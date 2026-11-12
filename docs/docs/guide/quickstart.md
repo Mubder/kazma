@@ -185,7 +185,15 @@ The system programs come from the OS's package manager:
 | Malware scan | `Cisco.ClamAV`, plus a daily `freshclam` task | `clamav`, plus a daily `freshclam` launchd job | `clamav`, `clamav-freshclam` | `clamav`, `clamav-update` |
 | Arabic fonts | IBM Plex Sans Arabic from Kazma's bundle, installed for all users (a per-user copy of it is retired) | IBM Plex Sans Arabic from Kazma's bundle, in `~/Library/Fonts` | `fonts-noto-core`, plus IBM Plex Sans Arabic in `~/.local/share/fonts/kazma` | `google-noto-sans-arabic-fonts`, plus IBM Plex Sans Arabic in `~/.local/share/fonts/kazma` |
 | Node.js | `OpenJS.NodeJS.LTS` | `node` | `nodejs`, `npm` | `nodejs`, `npm` |
-| Docker (Full) | `Docker.DockerDesktop` (and WSL 2 first) | Docker Desktop (cask) | `docker.io` | `moby-engine` |
+| Docker (Full, or any part that runs containers) | Kazma's own engine: Docker Engine in the `kazma-engine` WSL distro, started at boot by the `KazmaEngine` task with nobody signed in (WSL 2 first; every download pinned by SHA-256). `--docker desktop` installs `Docker.DockerDesktop` instead | Docker Desktop (cask) | `docker.io`, started at boot, this account in the `docker` group | `moby-engine`, started at boot, this account in the `docker` group |
+
+Docker Desktop starts only when someone signs in, so after an unattended
+restart (a Windows update, a power cut) its containers wait; Kazma's engine
+does not. Express installs no container part, so it installs no engine. On
+Windows `kazma setup engine` installs, repairs or checks it on its own
+(`--check`, `--dry-run`, `-y`; `--remove` takes it away, refused while
+another project's containers live in it), and Settings → System chooses which
+engine Kazma uses. On Linux, Kazma's engine is the system's Docker service.
 
 `kazma setup system` installs these programs alone (`--check`, `--dry-run`,
 `-y` as above), and `kazma doctor` shows the same checks and names the command

@@ -1,5 +1,29 @@
 # CHANGELOG
 
+## Kazma's own container engine, step 2: setup installs it (2026-11-12)
+
+- On Windows, choosing any part that runs containers (Full, or one picked in
+  Custom) now installs Kazma's own engine, not Docker Desktop: WSL 2, a
+  `kazma-engine` distro (Ubuntu 24.04), Docker Engine in it, Docker's Windows
+  command-line tools, the `kazma-engine` connection, and the `KazmaEngine`
+  task that starts it at boot with nobody signed in. Express installs no
+  container part, so no engine.
+- Every download is pinned by address, size and SHA-256, and a file that
+  doesn't match is not kept. Each step is safe to run twice: a second run
+  repairs what is missing and changes nothing else.
+- If WSL had to be turned on, Windows must restart first; the container steps
+  wait for that and the next run carries on.
+- What would stop the engine is said before anything is installed (WSL's
+  localhost forwarding switched off, or Docker already running in another WSL
+  distro), and it holds back only the container parts.
+- `kazma setup install --docker desktop` installs Docker Desktop instead.
+- New: `kazma setup engine` installs, repairs or checks the engine on its own
+  (`--check`, `--dry-run`, `-y`), and `--remove` takes it away. Removing is
+  refused while another project's containers live in it, unless `--force`.
+- Linux: when setup installs Docker, it also starts it at boot and adds your
+  account to the `docker` group. If Docker runs but your account can't use
+  it, setup adds the group and nothing else.
+
 ## Kazma's own container engine, step 1 (2026-11-12)
 
 - Kazma can run its containers on an engine of its own: Docker Engine in a
