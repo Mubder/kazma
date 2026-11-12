@@ -119,6 +119,8 @@ def find_docker_cli() -> str | None:
         return on_path
     for candidate in _candidates():
         if candidate.is_file():
+            if candidate.parent.parent.name == "engine" and candidate.parent.parent.parent.name == "Kazma":
+                return str(candidate)  # Kazma's own engine's CLI lives there by design
             _say_once(
                 f"found:{candidate}",
                 "[docker] the docker CLI is not on PATH; using %s. Docker Desktop "

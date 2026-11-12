@@ -10745,6 +10745,18 @@ SERVICE (a tunnel) reach its published ports, and it is back 19 s after a
   the system's Docker service: setup starts it at boot and adds the account
   to the `docker` group (`system_deps._docker_access_steps`; a socket this
   account may not use is `DOCKER_GROUP`, fixed with the group alone).
+- **Drilled on a clean Windows VM** (2026-11-12): WSL, a restart, then the
+  rest in 321 s; after a reboot with nobody signed in Docker answered 29 s
+  after boot, and a container read a mounted `C:` folder. The drill found
+  three bugs, each now held by a test: WSL is told by `wsl --version`
+  (`_wsl_installed`; Windows' stub fails it, and a WSL with no distro fails
+  `wsl -l` too, which read as "no WSL" and asked for a restart on every
+  run); a download setup makes opens with `http_tls.open_download` (certifi's
+  roots: a fresh Windows' store lacked GitHub's, and Python reads the store
+  alone; the Tesseract models too); and a program's stdin is bytes (`_out`:
+  text mode on Windows wrote `\r\n`, and bash refused the script's first
+  line). Docker's CLI folder joins the user's PATH (`_on_user_path`, never
+  `setx`), and Kazma's own CLI off PATH is no warning.
 - Gates: `tests/test_container_engine_choice.py` (the first rule, "the
   context exists", as the negative control), the engine cases in
   `tests/test_guard_dependencies.py` (the same outage on Docker Desktop as

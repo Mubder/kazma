@@ -534,7 +534,6 @@ def _setup_engine(options, *, run=subprocess.run, ask=input, platform=None, open
     step idempotent), or remove it with ``--remove``. Elsewhere Kazma's engine
     is the system's Docker service, which ``kazma setup system`` installs,
     starts at boot and lets this account use."""
-    import urllib.request
 
     from kazma_core import container_engine_setup as ces
     from kazma_core import postgres_service as pgs
@@ -585,7 +584,7 @@ def _setup_engine(options, *, run=subprocess.run, ask=input, platform=None, open
     for step in steps:
         _say(f"-> {step.title}")
         ok, detail = ces.run_action(step.action, run=run, log=lambda m: _say(f"   {m}"),
-                                    opener=opener or urllib.request.urlopen)
+                                    opener=opener)
         if ok and detail == ces.RESTART:
             _say("Restart Windows to finish WSL, then run kazma setup engine again: it continues where it stopped.")
             return 1
