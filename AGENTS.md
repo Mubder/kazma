@@ -10664,6 +10664,56 @@ the old code:
     `tests/test_searxng_secret_generated.py` (the old setup as the negative
     control).
 
+### 63. Kazma's own container engine (`kazma_core/container_engine.py`, `docker_cli.py`)
+
+2026-11-12: a Windows update restarted the PC and nobody signed in; Docker
+Desktop starts only at a sign-in, so every container stayed down for six
+hours. Plan, measurements and an independent review:
+`docs/plans/CONTAINERS_WITHOUT_A_SIGN_IN_PLAN.md`. On Windows the only
+"Docker as a service" for Linux containers is Docker Engine in a WSL distro
+started by a boot task: `kazma-engine`, kept up by the `KazmaEngine` task
+(S4U, normal rights; it holds `wsl.exe -d kazma-engine -- sleep infinity`,
+since WSL stops a distro about 15 s after the last `wsl.exe` leaves), reached
+as the Docker context `kazma-engine` (mutual TLS on 127.0.0.1:2376). Drilled
+on a clean VM: it starts with nobody signed in, services as SYSTEM and LOCAL
+SERVICE (a tunnel) reach its published ports, and it is back 19 s after a
+`wsl --shutdown`.
+
+- **The choice is explicit.** `containers.engine` is `kazma` (Kazma's
+  engine), `desktop` (Docker Desktop, the owner's choice), or unset: then the
+  engine setup recorded it installed (`setup_record.json`
+  `container_engine`), else nothing is pinned and the docker CLI's current
+  context serves, as before (`container_engine.engine_setting`). Never "the
+  engine exists, so use it": on the owner's PC, engine made and nothing moved,
+  that would have sent Kazma to an empty engine at the next reload.
+- **Pinned in `DOCKER_CONTEXT`** for the process and every docker call it
+  starts (`docker_cli.apply_engine_choice`); the operator's own
+  `DOCKER_CONTEXT` or `DOCKER_HOST` wins. The server applies it at boot
+  before the background loops and follows the setting
+  (`watch_engine_setting`); any other Kazma process applies it at its first
+  `find_docker_cli` (the CLI, setup, scripts). The guard's copy of
+  `docker_cli.py` (loaded by path) never reads settings: it takes the choice
+  from the server's record (`guard_dependencies`, field `engine`) and hands
+  the context to the document broker (`_BROKER_ENV_KEEP`), which restarts
+  when the choice changes.
+- **Mount paths follow the context** (`docker_cli.engine_host_path`): Kazma's
+  engine mounts fixed drive `G:` at `/g` (its distro's `[automount] root=/`);
+  a share, mapped, `subst` or removable drive is refused with the reason;
+  Docker Desktop takes the Windows path. Never decided from a cached
+  `docker info`.
+- **The guard brings Kazma's engine back, never Docker Desktop**
+  (`Dependencies._start_kazma_engine`): it runs the `KazmaEngine` task,
+  restarts Docker inside the distro (a running keep-alive does not mean a
+  running dockerd), and holds a keep-alive of its own when the task is
+  missing or refused (`engine_task_missing`, `engine_task_denied`).
+- **Express stays container-free** (the owner's decision after the review):
+  setup installs Kazma's engine when a container part is chosen; Docker
+  Desktop only when the user picks it.
+- Gates: `tests/test_container_engine_choice.py` (the first rule, "the
+  context exists", as the negative control), the engine cases in
+  `tests/test_guard_dependencies.py` (the same outage on Docker Desktop as
+  the control).
+
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser

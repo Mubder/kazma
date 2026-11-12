@@ -644,6 +644,7 @@ def _workspace_mounts(ws: Path) -> list[str]:
     """
     from pathlib import PurePosixPath
 
+    from kazma_core.docker_cli import engine_host_path
     from kazma_core.store_registry import kazma_paths_inside
     from kazma_core.workspace.path_policy import sandbox_workspace_target
 
@@ -653,12 +654,20 @@ def _workspace_mounts(ws: Path) -> list[str]:
     # inside a snippet still resolve. A Windows path is not a valid container
     # path at all, so it lands on /workspace there.
     target = sandbox_workspace_target(ws_path)
+    # The folder as the engine is told it: Docker Desktop takes a Windows
+    # path, Kazma's own engine wants /g/... (2026-11-12). A folder that
+    # engine cannot mount (a network share, a mapped or removable drive)
+    # gets no workspace, and the reason is logged by the caller.
+    src = engine_host_path(ws_path)
+    if src is None:
+        raise RuntimeError(f"Kazma's container engine cannot mount {ws_path} "
+                           "(only fixed local drives can be mounted)")
     folders, files = kazma_paths_inside(host)
 
     def _inside(path: Path) -> str:
         return str(PurePosixPath(target) / path.relative_to(host).as_posix())
 
-    args = ["--mount", _mount_spec("type=bind", f"src={ws_path}", f"dst={target}", "ro")]
+    args = ["--mount", _mount_spec("type=bind", f"src={src}", f"dst={target}", "ro")]
     for folder in folders:
         args += [
             "--mount",
@@ -676,7 +685,9 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int) -> str:
     Docker never mounts it. Windows service-created private temporary folders
     can be unreadable to Docker Desktop even when workspace mounts work.
     """
-    docker = _docker_cli()
+    # Off the loop: the first lookup of a process applies the engine choice
+    # (a settings read).
+    docker = await asyncio.to_thread(_docker_cli)
     if not docker:
         raise RuntimeError("docker CLI not found")
 
@@ -697,12 +708,12 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int) -> str:
         ws = await asyncio.to_thread(_fw._get_workspace)
         if ws and ws.exists():
             mount_args = await asyncio.to_thread(_workspace_mounts, ws)
-    except Exception:
-        # Fail closed: a workspace whose Kazma files cannot be hidden is not
-        # mounted at all, and the snippet runs without it.
+    except Exception as exc:
+        # Fail closed: a workspace whose Kazma files cannot be hidden, or
+        # that the engine cannot mount, is not mounted at all, and the
+        # snippet runs without it.
         logger.warning(
-            "[code_exec] Docker jail runs without the workspace: Kazma's own "
-            "files in it could not be hidden",
+            "[code_exec] Docker jail runs without the workspace: %s", exc,
             exc_info=True,
         )
 
@@ -833,7 +844,7 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
             try:
                 return await _e2b_run(code, timeout)
             except Exception as exc:
-                if await asyncio.to_thread(local_exec_forbidden) and not docker_available():
+                if await asyncio.to_thread(local_exec_forbidden) and not await asyncio.to_thread(docker_available):
                     logger.error("[code_exec] E2B required but failed: %s", exc)
                     return f"[Exit code: 1]\nE2B sandbox failed: {exc}"
                 logger.warning(

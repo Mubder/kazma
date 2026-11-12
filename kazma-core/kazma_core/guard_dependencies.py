@@ -13,7 +13,14 @@ What it writes, to the file the guard hands over in
 ``KAZMA_GUARD_DEPENDENCIES_FILE``::
 
     {"version": 1, "containers": [{"name": ..., "ports": [...], "for": [...]}],
-     "updated": <epoch>}
+     "engine": "kazma" | "desktop" | "", "updated": <epoch>}
+
+``engine`` is the container engine chosen (``containers.engine``, or the one
+setup installed; ``""``: none chosen, the docker CLI's current context;
+2026-11-12, :mod:`kazma_core.container_engine`): the guard pins the same
+Docker context for its own docker calls and the document broker's, and
+brings Kazma's engine back -- never Docker Desktop -- when it is Kazma's
+that does not answer.
 
 How a container gets on the list:
 
@@ -361,12 +368,16 @@ def _record_path() -> Path | None:
     return Path(raw) if raw else None
 
 
-def _read_record(path: Path) -> list[dict[str, Any]]:
+def _read_whole(path: Path) -> dict[str, Any]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return []
-    containers = data.get("containers") if isinstance(data, dict) else None
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _read_record(path: Path) -> list[dict[str, Any]]:
+    containers = _read_whole(path).get("containers")
     return [c for c in containers or () if isinstance(c, dict)]
 
 
@@ -393,7 +404,20 @@ def _publish_dependencies() -> bool:
     path = _record_path()
     if path is None:
         return False
+    from kazma_core.container_engine import engine_setting
+
     with _publish_lock:
+        engine = engine_setting()
+        whole = _read_whole(path)
+        if str(whole.get("engine") or "") != engine:
+            # The guard must follow a new choice whether or not Docker
+            # answers now: written first, with the last list kept.
+            whole = {"version": RECORD_VERSION, "containers": _read_record(path),
+                     "engine": engine, "updated": time.time()}
+            _write_atomic(path, whole)
+            logger.info("[guard] the guard uses %s", {
+                "kazma": "Kazma's container engine", "desktop": "Docker Desktop",
+            }.get(engine, "the docker CLI's current context"))
         inspected = _containers()
         if inspected is None:
             logger.info("[guard] Docker did not answer: the guard's list of Kazma's containers is kept")
@@ -409,7 +433,7 @@ def _publish_dependencies() -> bool:
         if containers == previous:
             return False
         _write_atomic(path, {"version": RECORD_VERSION, "containers": containers,
-                             "updated": time.time()})
+                             "engine": engine, "updated": time.time()})
         logger.info("[guard] Kazma depends on these containers: %s",
                     ", ".join(f"{c['name']} ({'/'.join(c['for'])})" for c in containers) or "none")
         return True

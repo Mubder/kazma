@@ -1709,6 +1709,24 @@ class KazmaAppBuilder:
             except Exception as exc:  # noqa: BLE001
                 logger.debug("[Swarm] deferred checkpoint arming failed: %s", exc)
 
+            # ── Which container engine Kazma uses ─────────────────────
+            # Kazma's own engine (the KazmaEngine task starts it at boot,
+            # with nobody signed in), or Docker Desktop when the owner chose
+            # it. Pinned before anything below calls Docker: the background
+            # loops, the Postgres tool check, the exposure check, the guard's
+            # container record (docs/plans/CONTAINERS_WITHOUT_A_SIGN_IN_PLAN.md).
+            import asyncio as _aio
+
+            from kazma_core.container_engine import watch_engine_setting
+            from kazma_core.safety.deployment_policy import policy_read_failures
+
+            try:
+                await _aio.to_thread(watch_engine_setting)
+            except policy_read_failures():
+                # The docker CLI's own current context then serves.
+                logger.warning("[docker] the container engine choice could not be applied",
+                               exc_info=True)
+
             # ── Start the process-wide background loops ────────────────
             # Same reason as the arming above: the constructor has no event
             # loop, so swarm maintenance / checkpoint retention / the

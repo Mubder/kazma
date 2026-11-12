@@ -2609,6 +2609,17 @@ class DocumentBroker:
         except Exception as exc:  # noqa: BLE001 -- see the class docstring
             self._internal(exc)
 
+    def engine_changed(self) -> None:
+        """The owner chose another container engine: a running broker starts
+        its job containers on the old one, so it is started again. Called
+        from Dependencies' tick, whose wrapper catches and logs a failure."""
+        if self.proc is not None and self.proc.poll() is None:
+            if os.environ.get("DOCKER_CONTEXT") != getattr(self, "docker_context", None):
+                self.log("info", "broker.engine_changed",
+                         context=os.environ.get("DOCKER_CONTEXT") or "current")
+                self.stop("engine changed")
+                self._start()
+
     def on_pause(self) -> None:
         """Maintenance: nothing of Kazma runs while the guard holds."""
         self.held = True
@@ -2762,6 +2773,9 @@ class DocumentBroker:
         if fallback:
             cmd.append("--fallback-to-newest-built")
         env = {k: v for k, v in os.environ.items() if k.upper() in _BROKER_ENV_KEEP}
+        # The engine the guard pinned (Dependencies.apply_engine): the broker
+        # starts its job containers there.
+        self.docker_context = env.get("DOCKER_CONTEXT")
         kwargs: dict = {"cwd": str(self.guard.cwd), "env": env, "stdin": subprocess.DEVNULL}
         if os.name == "nt":
             kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
@@ -3040,7 +3054,11 @@ DEPS_PAGE_AFTER_S = 300.0
 #: is signed in to start Docker Desktop for (a Windows update restart), or
 #: the guard runs as SYSTEM.
 DEPS_STUCK_PAGE_AFTER_S = 180.0
-DEPS_STUCK_STATES = frozenset({"no_session", "cannot_launch"})
+DEPS_STUCK_STATES = frozenset({"no_session", "cannot_launch", "engine_task_missing"})
+#: Kazma's own container engine (2026-11-12): the boot task that keeps the
+#: kazma-engine WSL distro running, with nobody signed in. The guard runs it
+#: when that engine does not answer, and never launches Docker Desktop for it.
+ENGINE_TASK_NAME = "KazmaEngine"
 #: The engine back this long before a stopped container is started: Docker
 #: restarts `unless-stopped` containers itself, in the first seconds.
 DEPS_CONTAINER_SETTLE_S = 60.0
@@ -3115,6 +3133,27 @@ def _docker_cli() -> str | None:
         return _docker_cli_module().find_docker_cli()
     except (OSError, ImportError, SyntaxError, AttributeError):
         return None
+
+
+#: Kazma's engine's Docker context (``docker_cli.KAZMA_CONTEXT``) and its WSL distro.
+_KAZMA_CONTEXT = "kazma-engine"
+_KAZMA_DISTRO = "kazma-engine"
+
+
+def _apply_docker_engine(engine: str) -> str | None:
+    """Pin *engine*'s Docker context in this process's DOCKER_CONTEXT, the
+    way the server does (``docker_cli.apply_engine_choice``). The context in
+    force, or None for the docker CLI's current one."""
+    return _docker_cli_module().apply_engine_choice(engine)
+
+
+def _spawn_engine_keepalive() -> subprocess.Popen:
+    """Hold Kazma's engine distro up: WSL stops a distro about 15 s after the
+    last wsl.exe attached to it leaves."""
+    return subprocess.Popen(
+        ["wsl.exe", "-d", _KAZMA_DISTRO, "-u", "root", "--", "sleep", "infinity"],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        creationflags=_NO_WINDOW)
 
 
 def _docker_desktop_exe(cli: str) -> Path | None:
@@ -3248,6 +3287,52 @@ class Dependencies:
         self._container_paged: set[str] = set()
         self._left_alone: set[str] = set()
         self.containers: list[str] = []
+        #: The engine the server's record names, and the Docker context the
+        #: guard pinned for it (None: the docker CLI's current context).
+        self.engine = ""
+        self.context: str | None = None
+        self._engine_said = ""
+        self._keepalive: subprocess.Popen | None = None
+
+    # -- which engine ----------------------------------------------------
+
+    def recorded_engine(self) -> str:
+        """The choice the server records: ``kazma``, ``desktop``, or ``""``
+        (no choice: the docker CLI's current context, as before -- an
+        install is never switched to an engine it has not moved to)."""
+        try:
+            data = json.loads(_deps_record_path().read_text(encoding="utf-8") or "{}")
+        except (OSError, ValueError):
+            data = {}
+        value = str((data.get("engine") if isinstance(data, dict) else "") or "").strip().lower()
+        return value if value in {"kazma", "desktop"} else ""
+
+    def apply_engine(self) -> None:
+        """Pin the chosen engine's Docker context for every docker call the
+        guard starts, the document broker's included. Nothing when off (the
+        docker CLI's current context then serves, as before)."""
+        if self.mode == "off":
+            return
+        engine = self.recorded_engine()
+        try:
+            context = _apply_docker_engine(engine)
+        except (OSError, ImportError, SyntaxError, AttributeError) as exc:
+            if self._engine_said != "error":
+                self._engine_said = "error"
+                self.log("warn", "deps.engine_choice_failed", error=str(exc)[:200])
+            return
+        if (engine, context) == (self.engine, self.context) and self._engine_said:
+            return
+        changed = bool(self._engine_said) and (engine, context) != (self.engine, self.context)
+        self.engine, self.context, self._engine_said = engine, context, engine
+        self.log("info", "deps.engine_choice", engine=engine, context=context or "current")
+        broker = getattr(self.guard, "broker", None)
+        if changed and broker is not None:
+            broker.engine_changed()
+
+    def kazma_engine(self) -> bool:
+        """Whether the engine the guard watches is Kazma's own."""
+        return self.context == _KAZMA_CONTEXT
 
     # -- what Kazma is handed ------------------------------------------
 
@@ -3305,6 +3390,16 @@ class Dependencies:
         """A line for the restart page while Docker is the problem."""
         if self.mode == "off" or self.engine_up is not False:
             return ""
+        if self.kazma_engine():
+            return {
+                "engine_starting": "Kazma's container engine does not answer; the guard ran its "
+                                   "KazmaEngine task.",
+                "engine_task_missing": "Kazma's container engine does not answer, and its "
+                                       "KazmaEngine task is not registered.",
+                "engine_task_denied": "Kazma's container engine does not answer; the guard may "
+                                      "not run its KazmaEngine task and holds it up itself.",
+            }.get(self.state, "Kazma's container engine does not answer; the guard will run its "
+                              "KazmaEngine task if it stays down.")
         notes = {
             "docker_starting": "The Docker engine does not answer; the guard started Docker Desktop.",
             "not_coming_up": "The Docker engine does not answer, and the Docker Desktop the guard "
@@ -3337,6 +3432,7 @@ class Dependencies:
         if now < self._next_check:
             return
         self._next_check = now + DEPS_CHECK_EVERY_S
+        self.apply_engine()
         self.containers = self.recorded_containers()
         broker = getattr(self.guard, "broker", None)
         if not self.containers and not (broker is not None and broker.wanted):
@@ -3387,7 +3483,9 @@ class Dependencies:
             if was_down:
                 self.log("info", "deps.engine_up", down_s=down_s, launched=self._launches)
                 if self._paged or self._launches:
-                    what = (f"The guard started Docker Desktop; the engine answers again after "
+                    starter = ("Kazma's container engine (its KazmaEngine task)"
+                               if self.kazma_engine() else "Docker Desktop")
+                    what = (f"The guard started {starter}; the engine answers again after "
                             f"{down_s // 60} min. " if self._launches else
                             f"The engine answers again after {down_s // 60} min. ")
                     self.guard._page("success", "Docker is back", what + "Kazma follows.",
@@ -3412,10 +3510,14 @@ class Dependencies:
             # Windows' "Use my sign-in info to automatically finish setting up
             # after an update" was on during 2026-11-12's restart and signed
             # nobody in: a sign-in is the one way out the guard can name.
-            fix = " Sign in to this PC to start it." if self.state == "no_session" else ""
+            fix = {
+                "no_session": " Sign in to this PC to start it.",
+                "engine_task_missing": " Register it again: kazma setup engine.",
+            }.get(self.state, "")
+            which = "Kazma's container engine" if self.kazma_engine() else "The Docker engine"
             self.guard._page(
                 "warn", "Docker does not answer",
-                f"The Docker engine has not answered for {minutes} min; what needs it waits "
+                f"{which} has not answered for {minutes} min; what needs it waits "
                 f"({', '.join(self.containers) or 'the document broker'}). "
                 f"{self.detail.rstrip('.')}.{fix} The guard keeps trying.",
                 kind="deps.engine_down", fingerprint="deps:docker", force=True)
@@ -3423,6 +3525,9 @@ class Dependencies:
     def _maybe_launch(self, now: float, down_for: float) -> None:
         if down_for < DEPS_ENGINE_GRACE_S:
             self.state, self.detail = "docker_down", "the Docker engine does not answer (waiting)"
+            return
+        if self.kazma_engine():
+            self._start_kazma_engine(now)
             return
         images = _running_images() if os.name == "nt" else set()
         if images & _INSTALLER_IMAGES:
@@ -3475,6 +3580,85 @@ class Dependencies:
         self._next_launch = now + wait
         self.log("error", "deps.launch_failed", detail=what, next_try_s=int(wait))
         self.state, self.detail = "launch_failed", f"Docker Desktop could not be started: {what}"
+
+    def _start_kazma_engine(self, now: float) -> None:
+        """Kazma's engine does not answer: bring it back. Never Docker Desktop.
+
+        1. Run its KazmaEngine task (it holds the distro up, with nobody
+           signed in; running it while it runs does nothing). A task that is
+           missing or refused (an administrator registered it, the guard has
+           no right to run it) is said, and the guard holds the distro up
+           itself with its own keep-alive.
+        2. Restart Docker inside the distro: a keep-alive that runs does not
+           mean dockerd does (a failed update, a full disk).
+        Then the launch wait, and the backoff, as for Docker Desktop."""
+        if self._launched_at is not None:
+            if now - self._launched_at < DEPS_LAUNCH_WAIT_S:
+                if self.state not in {"engine_task_missing", "engine_task_denied"}:
+                    self.state = "engine_starting"
+                    self.detail = "the guard ran the KazmaEngine task; waiting for Kazma's engine"
+                return
+            self._launched_at = None
+            self._launch_failures += 1
+            wait = DEPS_LAUNCH_BACKOFF_S[min(self._launch_failures, len(DEPS_LAUNCH_BACKOFF_S)) - 1]
+            self._next_launch = now + wait
+            self.log("warn", "deps.not_coming_up", waited_s=int(DEPS_LAUNCH_WAIT_S),
+                     next_try_s=int(wait), engine="kazma")
+            self.state = "not_coming_up"
+            self.detail = "the KazmaEngine task ran and Kazma's engine did not answer"
+            return
+        if now < self._next_launch:
+            return
+        if os.name != "nt":
+            self._say("docker_down", "Kazma's container engine does not answer")
+            return
+        self._launches += 1
+        got = _run_command(["schtasks", "/Run", "/TN", ENGINE_TASK_NAME], 30)
+        task_ran = got is not None and got[0] == 0
+        if not task_ran:
+            why = ((got[2] or got[1]).strip()[:300] if got else "schtasks could not run")
+            low = why.lower()
+            if "cannot find" in low or "does not exist" in low:
+                self._say("engine_task_missing", "the KazmaEngine task that starts Kazma's "
+                                                 "container engine is not registered")
+            elif "denied" in low:
+                self._say("engine_task_denied", "the guard may not run the KazmaEngine task "
+                                                f"({why}); it holds the engine up itself")
+            else:
+                self.log("error", "deps.engine_task_failed", detail=why)
+            self._hold_engine_up()
+        repaired = _run_command(
+            ["wsl.exe", "-d", _KAZMA_DISTRO, "-u", "root", "--", "systemctl", "restart", "docker"], 90)
+        self.log("warn", "deps.engine_repair", attempt=self._launches, task_ran=task_ran,
+                 docker_restart=repaired[0] if repaired else None)
+        self._launched_at = now
+        self._said = "" if task_ran else self._said
+        if self.state not in {"engine_task_missing", "engine_task_denied"}:
+            self.state = "engine_starting"
+            self.detail = "the guard ran the KazmaEngine task and restarted Docker in it; waiting"
+
+    def _hold_engine_up(self) -> None:
+        """The guard's own keep-alive for Kazma's engine (its task cannot run):
+        WSL stops a distro about 15 s after the last wsl.exe attached to it
+        leaves. One at a time; stopped with the guard."""
+        if self._keepalive is not None and self._keepalive.poll() is None:
+            return
+        try:
+            self._keepalive = _spawn_engine_keepalive()
+            self.log("warn", "deps.engine_keepalive", pid=self._keepalive.pid)
+        except OSError as exc:
+            self._keepalive = None
+            self.log("error", "deps.engine_keepalive_failed", error=str(exc)[:200])
+
+    def shutdown(self) -> None:
+        """The guard stops: its own keep-alive (if it held one) goes with it."""
+        proc, self._keepalive = self._keepalive, None
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=10)
+            except (OSError, subprocess.SubprocessError):
+                pass
 
     # -- containers --------------------------------------------------------
 
@@ -3551,6 +3735,8 @@ class Dependencies:
             "state": self.state,
             "detail": self.detail,
             "engine_up": self.engine_up,
+            "engine": self.engine,
+            "context": self.context,
             "containers": list(self.containers),
             "record_file": str(_deps_record_path()),
             "launches": self._launches,
@@ -3569,6 +3755,10 @@ def _dependency_status_lines(state: dict) -> list[str]:
     engine = {True: "answers", False: "DOES NOT ANSWER", None: "not checked"}.get(
         rec.get("engine_up"), "not checked")
     lines = [f"docker      : {engine} ({rec.get('state')})"]
+    if rec.get("context") == _KAZMA_CONTEXT:
+        lines.append(f"  engine    : Kazma's own ({_KAZMA_CONTEXT}, the {ENGINE_TASK_NAME} task)")
+    elif rec.get("engine") == "desktop":
+        lines.append("  engine    : Docker Desktop (the owner's choice)")
     if rec.get("containers"):
         lines.append(f"  kazma uses: {', '.join(str(c) for c in rec['containers'])}")
     if rec.get("detail"):
@@ -5403,6 +5593,8 @@ class Guard:
             return 2
         # Only a guard that will supervise touches the broker: a refused one
         # rewrote the broker's record (and could reap it) on its way out.
+        # The engine choice is pinned first: the broker starts on it.
+        self.deps.apply_engine()
         self.broker.on_guard_start()
         self.deps.on_guard_start()
         self.disk.on_guard_start()
@@ -5525,6 +5717,7 @@ class Guard:
                 if self.once:
                     self.log("info", "guard.once_exit", reason=reason)
                     self.broker.shutdown()
+                    self.deps.shutdown()
                     return 1
 
                 if reason == "maintenance":
@@ -5605,6 +5798,7 @@ class Guard:
             stop_child(self.proc, self.log, grace_s=GRACEFUL_STOP_S)
         # After Kazma, which may be in the middle of a job on it.
         self.broker.shutdown()
+        self.deps.shutdown()
         self.log("info", "guard.stopped")
         return 0
 
