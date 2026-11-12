@@ -578,7 +578,7 @@ class PdfEngine:
                     styles["cite"],
                 ))
         elif isinstance(block, ImageBlock):
-            self._add_image(block, story, Spacer)
+            self._add_image(block, story, Spacer, Paragraph, styles, th, col_width)
 
     def _is_repeat_heading(self, text: str) -> bool:
         from kazma_core.documents.heading_text import headings_equivalent
@@ -672,9 +672,19 @@ class PdfEngine:
             i = j
         return out
 
-    def _add_image(self, block: ImageBlock, story: list[Any], Spacer: Any) -> None:
-        """Embed an approved-asset image as a reportlab Image flowable (LTR path;
-        the DOCX-route handles images via LibreOffice for RTL)."""
+    #: The tallest an image is drawn (its caption fits under it on the page).
+    _MAX_IMAGE_HEIGHT_PT = 8.0 * 72.0
+
+    def _add_image(self, block: ImageBlock, story: list[Any], Spacer: Any, Paragraph: Any,
+                   styles: dict[str, Any], th: dict[str, Any], col_width: float) -> None:
+        """Place an image, centred, its caption under it on the same page.
+
+        The reportlab path (the DOCX route draws them through LibreOffice for
+        shaped Arabic). Only files in the folder the worker cleaned are
+        reachable; a name not there is the legacy ``images`` payload without
+        approved assets, skipped as before. One that is there and cannot be
+        drawn fails the document.
+        """
         from pathlib import Path
 
         if not getattr(self, "_assets_dir", None) or not block.name:
@@ -683,17 +693,30 @@ class PdfEngine:
         if not candidate.is_file():
             logger.debug("[pdf] image not in approved assets, skipped: %s", block.name)
             return
-        try:
-            from reportlab.lib.utils import ImageReader
-            from reportlab.platypus import Image
+        from reportlab.lib.enums import TA_CENTER
+        from reportlab.lib.styles import ParagraphStyle
+        from reportlab.lib.utils import ImageReader
+        from reportlab.platypus import Image, KeepTogether
 
-            iw, ih = ImageReader(str(candidate)).getSize()  # px
-            target_w = block.width_in * 72.0  # in → pt
-            img = Image(str(candidate), width=target_w, height=target_w * ih / iw)
-            story.append(img)
-            story.append(Spacer(1, 8))
-        except Exception:
-            logger.debug("[pdf] image embed failed: %s", block.name, exc_info=True)
+        iw, ih = ImageReader(str(candidate)).getSize()  # px
+        width = min(block.width_in * 72.0, float(col_width))  # in -> pt
+        height = width * ih / iw
+        if height > self._MAX_IMAGE_HEIGHT_PT:
+            width, height = width * self._MAX_IMAGE_HEIGHT_PT / height, self._MAX_IMAGE_HEIGHT_PT
+        img = Image(str(candidate), width=width, height=height)
+        img.hAlign = "CENTER"
+        figure: list[Any] = [Spacer(1, 4), img]
+        if block.caption:
+            caption_style = ParagraphStyle(
+                "KazmaCaption", parent=self._styles_for(block.caption, styles)["body"],
+                fontSize=9, leading=12, textColor=th["muted"], alignment=TA_CENTER,
+                spaceBefore=4, spaceAfter=0, firstLineIndent=0,
+            )
+            figure.append(Paragraph(
+                inline_markdown_to_reportlab(block.caption, shape_arabic=self.shape_ar), caption_style,
+            ))
+        story.append(KeepTogether(figure))
+        story.append(Spacer(1, 10))
 
     def _add_table(
         self, block: TableBlock, story: list[Any], Table: Any, TableStyle: Any,

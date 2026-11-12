@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from kazma_core.documents.content_model import ContentModel
+    from kazma_core.documents.image_clean import CleanImage
     from kazma_core.documents.profile import DocProfile
 
 from .errors import DocumentSecurityError
@@ -120,8 +121,73 @@ def _sections(value: object) -> list[dict[str, str]]:
     return result
 
 
+#: The widest and tallest a figure is drawn, in inches (an A4 or Letter page
+#: with its margins, room left for the caption).
+_FIGURE_MAX_WIDTH_IN = 6.5
+_FIGURE_MAX_HEIGHT_IN = 8.0
+#: A small image is drawn at its own size on a 96 dpi screen, never blown up.
+_FIGURE_DPI = 96.0
+
+
+def _figure_width(width_px: int, height_px: int) -> float:
+    """The width, in inches, a figure of that many pixels is drawn at."""
+    width = min(_FIGURE_MAX_WIDTH_IN, width_px / _FIGURE_DPI,
+                _FIGURE_MAX_HEIGHT_IN * width_px / max(1, height_px))
+    return round(max(0.1, width), 3)
+
+
+def _cleaned_images(request: dict[str, Any], output: Path) -> dict[str, CleanImage]:
+    """Every approved image of a generation, cleaned into ``images/`` beside
+    the output (``documents.image_clean``); approved name -> cleaned image.
+
+    ``assets/`` itself is never written: ``_verify_assets`` checks it again
+    after the render.
+    """
+    from .image_clean import ImageRejected, clean_images
+
+    names = [str(record["name"]) for record in request.get("approved_assets") or []]
+    if not names:
+        return {}
+    try:
+        return clean_images(output.parent / "assets", names, output.parent / "images")
+    except ImageRejected as exc:
+        raise WorkerError("invalid_image", f"{exc}; nothing was made") from exc
+
+
+def _add_body_with_figures(model: ContentModel, body: str, images: dict[str, CleanImage]) -> None:
+    """A section body as body text and figures, each image where its line was.
+
+    An image line names an approved image by the name the Kazma process gave
+    it (``documents.image_inputs``); a line naming anything else stays text.
+    """
+    from kazma_core.documents.content_model import BodyBlock, ImageBlock
+    from kazma_core.documents.image_refs import ImageRef, parts
+
+    if not images:
+        model.add(BodyBlock(text=body))
+        return
+    run: list[str] = []
+
+    def flush() -> None:
+        text = "\n".join(run)
+        run.clear()
+        if text.strip():
+            model.add(BodyBlock(text=text))
+
+    for part in parts(body):
+        if isinstance(part, ImageRef) and part.source in images:
+            flush()
+            clean = images[part.source]
+            model.add(ImageBlock(name=clean.name, caption=part.caption,
+                                 width_in=_figure_width(clean.width, clean.height)))
+        else:
+            run.append(part.line if isinstance(part, ImageRef) else part)
+    flush()
+
+
 def _build_model_and_profile(
     payload: dict[str, Any],
+    images: dict[str, CleanImage] | None = None,
 ) -> tuple[ContentModel, DocProfile]:
     """Build a format-agnostic ContentModel + DocProfile from a render payload.
 
@@ -135,7 +201,6 @@ def _build_model_and_profile(
     engines interpret each block type in their format-native way.
     """
     from kazma_core.documents.content_model import (
-        BodyBlock,
         CitationBlock,
         ContentModel,
         HeadingBlock,
@@ -158,9 +223,12 @@ def _build_model_and_profile(
         str(payload.get("header", "") or ""),
         str(payload.get("footer", "") or ""),
     ]
+    from kazma_core.documents.image_refs import without_images
+
     for item in sections:
         sample_parts.append(item.get("heading", ""))
-        sample_parts.append((item.get("body") or "")[:1500])
+        # An image line counts as its caption (its file name is no language).
+        sample_parts.append(without_images((item.get("body") or "")[:1500]))
     for table in payload.get("tables") or []:
         if not isinstance(table, dict):
             continue
@@ -242,7 +310,7 @@ def _build_model_and_profile(
                 model.add(HeadingBlock(text=heading, level=level, fill=fill_h))
                 last_heading = heading
         if body.strip():
-            model.add(BodyBlock(text=body))
+            _add_body_with_figures(model, body, images or {})
 
     # Structured tables (engine emits the optional heading bar).
     tables = payload.get("tables")
@@ -261,18 +329,23 @@ def _build_model_and_profile(
                 ))
 
     # Images (approved-asset references; engines embed only validated files).
-    images = payload.get("images")
-    if isinstance(images, list):
-        for img in images:
+    listed = payload.get("images")
+    if isinstance(listed, list):
+        for img in listed:
             if isinstance(img, dict) and img.get("name"):
                 try:
                     width = float(img.get("width_in", img.get("width", 5.0)) or 5.0)
                 except (TypeError, ValueError):
                     width = 5.0
+                name = str(img["name"])
+                clean = (images or {}).get(name)
+                if clean is not None:  # an approved image, cleaned under its own name
+                    name = clean.name
+                    width = min(width, _figure_width(clean.width, clean.height))
                 model.add(ImageBlock(
-                    name=str(img["name"]),
+                    name=name,
                     caption=str(img.get("caption", "")),
-                    width_in=max(1.0, min(7.0, width)),
+                    width_in=max(0.1, min(_FIGURE_MAX_WIDTH_IN, width)),
                 ))
 
     # Citations / references.
@@ -481,11 +554,12 @@ def _markdown_html(text: str) -> str:
 
 
 def _generate_html(output: Path, payload: dict[str, Any], *,
-                   assets_dir: Path | None = None) -> None:
+                   assets_dir: Path | None = None,
+                   images: dict[str, CleanImage] | None = None) -> None:
     """Generate HTML via the unified document layer (ContentModel + DocProfile)."""
     from kazma_core.documents.engines.html import HtmlEngine
 
-    model, profile = _build_model_and_profile(payload)
+    model, profile = _build_model_and_profile(payload, images)
     html = HtmlEngine(profile).render(model, assets_dir=assets_dir)
     output.write_text(html, encoding="utf-8")
 
@@ -516,7 +590,8 @@ def _font_paths(*, arabic: bool = False) -> tuple[Path | None, Path | None]:
 
 
 def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str],
-                  *, assets_dir: Path | None = None) -> None:
+                  *, assets_dir: Path | None = None,
+                  images: dict[str, CleanImage] | None = None) -> None:
     """Generate a PDF via the unified document layer.
 
     Builds a format-agnostic :class:`ContentModel` + :class:`DocProfile` (shared
@@ -527,16 +602,17 @@ def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str],
     """
     from kazma_core.documents.engines.pdf import PdfEngine
 
-    model, profile = _build_model_and_profile(payload)
+    model, profile = _build_model_and_profile(payload, images)
     PdfEngine(profile, warnings).render(model, output, assets_dir=assets_dir)
 
 
 def _generate_docx(output: Path, payload: dict[str, Any], *,
-                   assets_dir: Path | None = None) -> None:
+                   assets_dir: Path | None = None,
+                   images: dict[str, CleanImage] | None = None) -> None:
     """Generate a DOCX via the unified document layer (shared model + profile)."""
     from kazma_core.documents.engines.docx import DocxEngine
 
-    model, profile = _build_model_and_profile(payload)
+    model, profile = _build_model_and_profile(payload, images)
     DocxEngine(profile).render(model, output, assets_dir=assets_dir)
 
 
@@ -566,12 +642,15 @@ def _generate_xlsx(output: Path, payload: dict[str, Any]) -> None:
     XlsxEngine(profile).render(payload, output)
 
 
-def _generate_pptx(output: Path, payload: dict[str, Any]) -> None:
+def _generate_pptx(output: Path, payload: dict[str, Any], *,
+                   images_dir: Path | None = None,
+                   images: dict[str, CleanImage] | None = None) -> None:
     """Generate PPTX via the unified document layer.
 
     Slides keep their own slides/bullets payload but pull theme + direction
     (RTL paragraphs) from a :class:`DocProfile`, so an Arabic deck matches the
-    Arabic DOCX/PDF/HTML/XLSX in design.
+    Arabic DOCX/PDF/HTML/XLSX in design. A slide's ``image`` names an approved
+    image, drawn from the cleaned folder.
     """
     from kazma_core.documents.engines.pptx import PptxEngine
     from kazma_core.documents.payloads import slide_heading
@@ -583,6 +662,7 @@ def _generate_pptx(output: Path, payload: dict[str, Any]) -> None:
         if isinstance(s, dict):
             sample_parts.append(slide_heading(s))
             sample_parts.append(str(s.get("body", "")))
+            sample_parts.append(str(s.get("image_caption", "")))
             bullets = s.get("bullets")
             if isinstance(bullets, list):
                 sample_parts.extend(str(b) for b in bullets)
@@ -591,7 +671,7 @@ def _generate_pptx(output: Path, payload: dict[str, Any]) -> None:
         language=payload.get("lang") or payload.get("language"),
         rtl=payload.get("rtl"),
     )
-    PptxEngine(profile).render(payload, output)
+    PptxEngine(profile).render(payload, output, images_dir=images_dir, images=images)
 
 
 def _weasy_pdf(output: Path, source: str, assets: Path) -> None:
@@ -775,13 +855,9 @@ def _render(request: dict[str, Any], output: Path) -> tuple[str, str, list[str]]
     if template not in (None, "default", "report", "compact"):
         raise WorkerError("unsupported_template", "Requested document template is unavailable")
     renderer = str(request.get("renderer", ""))
-    # Approved render assets live next to the output under assets/ (validated by
-    # _verify_assets, sha256-matched). Engines embed images from here by name.
-    assets_dir: Path | None = None
-    if request.get("approved_assets"):
-        _candidate = output.parent / "assets"
-        if _candidate.is_dir():
-            assets_dir = _candidate
+    # Approved render assets live next to the output under assets/ (validated
+    # by _verify_assets, sha256-matched). A generation embeds them only once
+    # cleaned (_cleaned_images); a conversion's HTML names them there.
     source: Path | None = None
     if request.get("source_path") is not None:
         source = Path(str(request["source_path"])).resolve(strict=True)
@@ -789,18 +865,23 @@ def _render(request: dict[str, Any], output: Path) -> tuple[str, str, list[str]]
             raise WorkerError("document_changed", "Source changed before rendering")
     if operation.startswith("generate:"):
         target = operation.split(":", 1)[1]
+        # A generation's approved assets are its images: each decoded and
+        # saved again in images/ before any engine reads it, and the engines
+        # read only those (documents.image_clean).
+        images = _cleaned_images(request, output) if target in {"html", "pdf", "docx", "pptx"} else {}
+        figures = output.parent / "images" if images else None
         if target == "markdown":
             output.write_text(_markdown(payload), encoding="utf-8")
         elif target == "html":
-            _generate_html(output, payload, assets_dir=assets_dir)
+            _generate_html(output, payload, assets_dir=figures, images=images)
         elif target == "pdf":
-            _generate_pdf(output, payload, warnings, assets_dir=assets_dir)
+            _generate_pdf(output, payload, warnings, assets_dir=figures, images=images)
         elif target == "docx":
-            _generate_docx(output, payload, assets_dir=assets_dir)
+            _generate_docx(output, payload, assets_dir=figures, images=images)
         elif target == "xlsx":
             _generate_xlsx(output, payload)
         elif target == "pptx":
-            _generate_pptx(output, payload)
+            _generate_pptx(output, payload, images_dir=figures, images=images)
         else:
             raise WorkerError("unsupported_operation", "Unsupported generation format")
     elif operation == "convert:markdown:html":

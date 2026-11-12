@@ -296,7 +296,7 @@ rich-content capabilities:
 |---|---|---|
 | **Code/syntax highlighting** | `documents/rich_render.py`, `engines/html.py` | Fenced code blocks get syntax-colored output in both **HTML and PDF** render paths. |
 | **XLSX charts** | `engines/xlsx.py` | `BarChart` / `LineChart` (+ more types) with **multi-series** support and **axis titles** via `add_chart`. |
-| **Image embedding** | `engines/docx.py`, `mutation_worker.py` | **Approved assets** can be embedded inline in DOCX (`add_picture`), HTML, and PDF (`InlineImage`-style) renders. Markdown image references resolve to approved assets. |
+| **Pictures** | `documents/image_inputs.py`, `documents/image_clean.py`, the engines | A picture is placed where its line stands, centred, with its caption under it, in Word, PDF and HTML; a slide's picture goes beside its text. See [Pictures in a document](#pictures-in-a-document). |
 | **Real PDF TOC** | PDF engine | Structural table-of-contents generated from heading outline (not just an outline field). |
 | **Clickable HTML TOC** | HTML engine | The HTML table-of-contents is hyperlinked — entries jump to their sections. |
 
@@ -304,11 +304,82 @@ rich-content capabilities:
 > caller approved for this job, copied into the job with its checksum (the
 > worker refuses one that changed); a `data:` URI in the source is read as
 > embedded data. Nothing is fetched from a URL or another local path: an HTML
-> or Markdown source that names one is refused (`external_resource_denied`),
-> and an image block whose asset is missing is skipped, never embedded. This
-> keeps the generate/convert path consistent
+> or Markdown source that names one is refused (`external_resource_denied`).
+> This keeps the generate/convert path consistent
 > with the Document Intelligence security model
 > (see [Document security](../security/document-security)).
+
+### Pictures in a document
+
+**How to ask for one.** In `generate_pdf` and `generate_docx`, a Markdown
+image on a line of its own places a picture right there, its alt text the
+caption under it:
+
+```markdown
+Revenue grew in every quarter.
+
+![Quarterly revenue, 2026](charts/revenue.png)
+
+The outlook remains strong.
+```
+
+A path with spaces or parentheses goes in angle brackets:
+`![Caption](<my pictures/a (1).png>)`. In `generate_pptx`, a slide takes an
+`image` and an optional `image_caption`; the picture goes beside the slide's
+text (the text on the side its reading starts, so on the right for an Arabic
+slide), or across the slide when the slide has no text. The tools' schemas
+say this to the model.
+
+**Which files.** A PNG, JPEG, GIF or WebP file that the file tools may read
+(the workspace, granted folders), an image `generate_image` made, or a picture
+sent in a chat (Kazma's own `images` and `attachments` folders). A relative
+path in a Markdown file means that file's folder first. A picture on the web
+is saved first with `download_image(url)`, which answers with its path: a
+document call never fetches anything. At most 40 pictures, 20 MB each and
+160 MB together.
+
+**What is refused, and why.** Everything below refuses the call before
+anything is made, naming the picture:
+
+- an address instead of a file (the message names `download_image`);
+- a file the file tools may not read (a Kazma store or secret file among them);
+- a file whose first bytes are not a PNG, JPEG, GIF or WebP, whatever its name;
+- an image inside a sentence: it must be on a line of its own (it is never
+  dropped without a word);
+- more, or larger, pictures than the limits.
+
+An image line inside a fenced code block is code, left as written.
+
+**What happens to each picture.** The Kazma process never decodes a picture:
+it copies each one into a folder of the call's own as `image-01.png` and so on,
+and the worker sees only those names. In the worker's sandbox (or its
+container), `documents/image_clean.py`:
+
+- opens each picture with the PNG, JPEG, GIF and WebP decoders only. Pillow's
+  others are never tried, so an EPS file named `.png` never starts Ghostscript;
+- refuses one past 40 million pixels (a decompression bomb is a small file);
+- turns it upright by its EXIF orientation;
+- converts it to sRGB through its own colour profile;
+- reduces it to 2,400 pixels on its longest side;
+- rebuilds it from its pixels alone and saves it as PNG, or as JPEG when the
+  source was a JPEG with no transparency.
+
+Nothing else leaves: no EXIF (a phone photo's GPS position and camera serial),
+no text chunks, no comments, and nothing a polyglot file carried beside its
+pixels. A picture the worker cannot read fails the document with
+`invalid_image`, and the error names the user's file.
+
+**How it is placed.** Each picture is centred, as wide as the page allows
+(6.5 in), never more than 8 in tall, and never drawn larger than its own size
+on a 96 dpi screen, so a small logo is not blown up. The caption follows in
+its own language's direction. A legacy `images` payload naming no approved
+picture is still skipped; a picture that was approved and cleaned and cannot
+be embedded fails the document, never a document without it.
+
+Tests: `tests/test_document_images.py` (each hostile file beside what the raw
+file carries; placement in PDF, the Arabic PDF through LibreOffice, Word and
+PowerPoint; the tools), and in the worker image
+`test_pictures_are_cleaned_and_placed_inside_the_container`.
 
 Verification extends to these features — re-run `scripts/verify_documents.py`
 after touching the engines.

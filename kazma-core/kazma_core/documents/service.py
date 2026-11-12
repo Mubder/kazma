@@ -264,8 +264,14 @@ class DocumentService:
         document_id: Any = None,
         version_id: Any = None,
         job_id: Any = None,
+        approved_assets: tuple[str | Path, ...] = (),
     ) -> DocumentResult[Any]:
-        """Generate and atomically promote a verified document artifact."""
+        """Generate and atomically promote a verified document artifact.
+
+        *approved_assets* are the document's images, already checked and
+        staged by the caller (``documents.image_inputs``); the worker decodes
+        and cleans them before any engine reads them.
+        """
 
         try:
             scope = OperationScope(
@@ -276,8 +282,11 @@ class DocumentService:
                 version_id=version_id,
                 job_id=job_id,
             )
-        except (TypeError, ValueError) as exc:
+            assets = tuple(self._validate_path(item) for item in approved_assets)
+        except (OSError, TypeError, ValueError) as exc:
             return self._operation_error("invalid_document_scope", str(exc))
+        except DocumentParseError as exc:
+            return self._operation_error(exc.code, exc.safe_message)
         return await run_cancellable(
             self.operations.generate,
             target_format=target_format,
@@ -287,6 +296,7 @@ class DocumentService:
             export_dir=export_dir,
             template=template,
             template_version=template_version,
+            approved_assets=assets,
         )
 
     @policy_operation

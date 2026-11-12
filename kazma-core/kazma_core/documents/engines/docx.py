@@ -815,37 +815,38 @@ class DocxEngine:
             self._set_paragraph(p, "start")
 
     def _render_image(self, document: Any, block: ImageBlock) -> None:
-        """Embed an approved-asset image (validated by the worker's _verify_assets).
+        """Place an image, centred, with its caption under it on the same page.
 
-        Only files present in the sha256-checked assets dir are reachable; a
-        referenced-but-missing image is skipped (never embedded).
+        Only files in the folder the worker cleaned (``documents.image_clean``)
+        are reachable. A name that is not there is the legacy ``images``
+        payload without approved assets, skipped as before; an image that is
+        there and cannot be embedded fails the document (the block loop's
+        ``DocumentRenderError``), never a document without it.
         """
-        from docx.shared import Inches, Pt
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.shared import Inches, Pt, RGBColor
 
         path = self._resolve_asset(block.name)
         if path is None:
             logger.debug("[docx] image not in approved assets, skipped: %s", block.name)
             return
-        try:
-            document.add_picture(str(path), width=Inches(block.width_in))
-            if block.caption:
-                from docx.enum.text import WD_ALIGN_PARAGRAPH
-                from docx.oxml import OxmlElement
-                from docx.oxml.ns import qn
-
-                cap = document.add_paragraph(block.caption)
-                cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                for r in cap.runs:
-                    r.font.size = Pt(9)
-                if self.profile.rtl:
-                    p_pr = cap._p.get_or_add_pPr()
-                    if p_pr.find(qn("w:bidi")) is None:
-                        b = OxmlElement("w:bidi")
-                        b.set(qn("w:val"), "1")
-                        p_pr.append(b)
-            document.add_paragraph("")  # spacer
-        except Exception:
-            logger.debug("[docx] image embed failed: %s", block.name, exc_info=True)
+        document.add_picture(str(path), width=Inches(block.width_in))
+        picture = document.paragraphs[-1]
+        picture.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        picture.paragraph_format.space_before = Pt(6)
+        if not block.caption:
+            picture.paragraph_format.space_after = Pt(10)
+            return
+        self._keep_with_following(picture)
+        cap = document.add_paragraph()
+        run = cap.add_run(block.caption)
+        run.font.size = Pt(9)
+        run.font.color.rgb = RGBColor.from_string(str(self.theme["muted"]).lstrip("#"))
+        # The caption's own direction (an Arabic caption under an English
+        # document's figure reads right to left), then centred like the image.
+        self._set_paragraph(cap, "start")
+        cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        cap.paragraph_format.space_after = Pt(10)
 
     def _resolve_asset(self, name: str) -> Path | None:
         if not name or not getattr(self, "_assets_dir", None):

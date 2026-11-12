@@ -49,16 +49,27 @@ def _pptx_text(path: Path) -> str:
 
 
 def test_every_slide_key_reaches_the_deck(tmp_path):
+    from kazma_core.documents.image_clean import clean_images
+    from PIL import Image
+
+    # A slide's image is an approved name, cleaned by the worker first.
+    (tmp_path / "assets").mkdir()
+    Image.new("RGB", (64, 48), (10, 20, 30)).save(tmp_path / "assets" / "image-01.png")
+    images = clean_images(tmp_path / "assets", ["image-01.png"], tmp_path / "images")
     slides = [
-        {"heading": "zqheading", "bullets": ["zqbullet"], "notes": "zqnotes"},
+        {"heading": "zqheading", "bullets": ["zqbullet"], "notes": "zqnotes",
+         "image": "image-01.png", "image_caption": "zqcaption"},
         {"heading": "zqheadingtwo", "body": "zqbody"},
     ]
     assert set().union(*map(set, slides)) == _keys(Slide), "the payload covers every key of Slide"
     path = tmp_path / "deck.pptx"
-    rw._generate_pptx(path, {"title": "Deck", "slides": slides})
+    rw._generate_pptx(path, {"title": "Deck", "slides": slides},
+                      images_dir=tmp_path / "images", images=images)
     text = _pptx_text(path)
-    for marker in ("zqheading", "zqbullet", "zqnotes", "zqheadingtwo", "zqbody"):
+    for marker in ("zqheading", "zqbullet", "zqnotes", "zqheadingtwo", "zqbody", "zqcaption"):
         assert marker in text, f"{marker} never reached the deck"
+    with zipfile.ZipFile(path) as z:
+        assert any(n.startswith("ppt/media/") for n in z.namelist()), "the image reached the deck"
 
 
 def test_a_slide_sent_with_title_keeps_its_title(tmp_path):

@@ -56,6 +56,7 @@ __all__ = [
 #: Tool -> the arguments that hold the URL it fetches.
 FETCH_URL_FIELDS: dict[str, tuple[str, ...]] = {
     "read_url": ("url",),
+    "download_image": ("url",),
     "read_url_to_file": ("url",),
     "crawl_page": ("url",),
     "crawl_site": ("start_url",),

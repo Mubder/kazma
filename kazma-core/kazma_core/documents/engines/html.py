@@ -404,20 +404,23 @@ class HtmlEngine:
         if path is None:
             logger.debug("[html] image not in approved assets, skipped: %s", block.name)
             return ""
-        try:
-            data = Path(path).read_bytes()
-        except Exception:
-            logger.debug("[html] image read failed: %s", block.name, exc_info=True)
-            return ""
+        # An image that is there and cannot be read fails the document (the
+        # block loop's DocumentRenderError), never a page without it.
+        data = Path(path).read_bytes()
         ext = Path(path).suffix.lstrip(".").lower()
         mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
-                "gif": "image/gif", "svg": "image/svg+xml", "webp": "image/webp"}.get(ext, "image/png")
+                "gif": "image/gif", "webp": "image/webp"}.get(ext, "image/png")
         b64 = base64.b64encode(data).decode("ascii")
         from html import escape as esc
-        cap = f"\n      <figcaption>{esc(block.caption)}</figcaption>" if block.caption else ""
+        cap = ""
+        if block.caption:
+            # The caption's own direction, whatever the document's.
+            cap_dir = self.profile.block_direction(block.caption)
+            cap = f'\n      <figcaption dir="{cap_dir}">{esc(block.caption)}</figcaption>'
         return (
-            f'    <figure class="image"><img src="data:{mime};base64,{b64}" '
-            f'alt="{esc(block.caption or block.name)}" style="width:{block.width_in}in;max-width:100%">{cap}\n'
+            f'    <figure class="image" style="text-align:center"><img src="data:{mime};base64,{b64}" '
+            f'alt="{esc(block.caption or block.name)}" '
+            f'style="width:{block.width_in}in;max-width:100%;height:auto">{cap}\n'
             f"    </figure>"
         )
 
