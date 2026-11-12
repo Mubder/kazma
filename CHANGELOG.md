@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## Kazma Watch refuses the old signature form (2026-11-12)
+
+- Kazma Watch now accepts only `v2` signatures, which include the route a
+  request was signed for. The old `v1` form signed the body alone, so a
+  heartbeat's signature replayed to `/v1/leave` would have unpaired the
+  install.
+- Every signed route (heartbeat, summary, settings, test page, leave) now
+  answers a `v1` signature with `v1_retired`, before any key is read.
+- The guard and Kazma have signed `v2` since 2026-11-11. The live Worker's
+  log showed only `v2` requests before the switch.
+- A guard or Kazma too old to sign `v2` is refused, and Kazma Watch pages its
+  guard as gone. Update that install.
+
 ## A reload no longer reports the offsite backup as broken (2026-11-12)
 
 - A deploy's reload stopped the server while its six-hourly check of the

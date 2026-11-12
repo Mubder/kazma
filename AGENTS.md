@@ -8331,14 +8331,17 @@ code) and Kazma ran with nobody supervising it.
   GET). Three copies, held byte for byte to the vector's `v2` routes: the
   guard's `signed_message` (stdlib), Kazma's `outside_watch._sign`, the
   Worker's (`deploy/observer/src/verify.js`: its v2 message and request
-  check). The v1 form (`"<timestamp>." + body`) bound no route: the Worker
-  accepts it only while its `ACCEPT_V1` constant is true, logs each one, and
-  refuses it once that is false -- flip it when no install sends v1. Deploy
-  the Worker before a Kazma that sends v2. Gates: the node suite
+  check). The v1 form (`"<timestamp>." + body`) bound no route: one signed
+  heartbeat body replayed to `/v1/leave` unpaired the install. It is
+  **retired** (2026-11-12, `ACCEPT_V1 = false`, once the owner's guard and
+  Kazma both signed v2; `wrangler tail` showed no v1 request): every signed
+  route refuses it with `v1_retired` before any key is read. Never set it
+  true again; an install that cannot sign v2 updates. Gates: the node suite
   (`deploy/observer/test/observer.test.mjs`,
   `deploy/observer/test/watch_settings.test.mjs`: a v2 signature for one
-  route refused on another; v1 accepted and logged; the v1 verifier as the
-  negative control), `tests/test_observer_heartbeat.py`,
+  route refused on another; v1 refused on the heartbeat, the summary,
+  settings, test page and leave, the install still paired; the verifier
+  with v1 accepted as the negative control), `tests/test_observer_heartbeat.py`,
   `tests/test_outside_watch.py`.
 - **Settings' "Restart server" asks the guard.** A server the guard started
   writes the guard's reload request (`supervisor_watch.request_guard_reload`;

@@ -81,16 +81,11 @@ v2\n<timestamp>\n<METHOD>\n<path>\n<body>
 with `\n` a newline, `<path>` the request line's path (`/v1/heartbeat`) and
 `<body>` the raw body (empty for a GET). The route is in what is signed, so a
 signature made for one route is refused on another. The older `v1=<hex>`,
-over `"<timestamp>." + body`, bound no route. `src/verify.js` still accepts
-v1 while `ACCEPT_V1` is `true` and logs each one it accepts ("accepted a v1
-signature on POST /v1/heartbeat from install ..."; read with
-`npx wrangler tail`). Once no install sends v1, set `ACCEPT_V1 = false` and
-deploy: a v1 request is then refused (`v1_retired`). Do it soon: while v1 is
-accepted, the routes are only as bound as v1 makes them.
-
-**Deploy the Worker before the Kazma build that sends v2.** A guard or Kazma
-that signs v2 is refused by a Worker that knows only v1: its heartbeats stop
-counting, and Kazma Watch pages the guard as gone.
+over `"<timestamp>." + body`, bound no route, so a heartbeat's signature
+replayed to `/v1/leave` unpaired the install. v1 is retired since
+2026-11-12 (`ACCEPT_V1 = false` in `src/verify.js`): every signed route
+refuses it with `v1_retired`. A guard or Kazma too old to sign v2 is refused
+too, and Kazma Watch pages its guard as gone; update that install.
 
 ## Setting it up (the owner, once)
 
