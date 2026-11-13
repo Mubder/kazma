@@ -39,7 +39,8 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.postgres
+# real_docker: pg_dump/pg_restore through ``docker exec`` when KAZMA_DB_CONTAINER names one.
+pytestmark = [pytest.mark.postgres, pytest.mark.real_docker]
 
 _KILLED = 137
 _BODY = b"Coordinated restore source text.\n"

@@ -55,7 +55,7 @@ dependencies = [
     "reportlab>=5.1.0",
     "python-docx>=1.1.0",
     "openpyxl>=3.1.0",
-    "pypdf>=6.21.4,<7",  # 7 untested: `kazma update` does not read uv.lock (2026-11-07)
+    "pypdf>=7.1.0,<8",  # 7: the 7.0 security fixes; 7.1 tested 2026-11-13 (`kazma update` does not read uv.lock)
     "pdfplumber>=0.11.0",
     "python-pptx>=0.6.23",
     # Security floors (2026-10-02): packages Kazma runs on without importing
@@ -152,7 +152,7 @@ document = [
     "openpyxl>=3.1.0",
     "arabic-reshaper>=3.1.0",
     "python-bidi>=0.6.12",
-    "pypdf>=6.21.4,<7",  # 7 untested: `kazma update` does not read uv.lock (2026-11-07)
+    "pypdf>=7.1.0,<8",  # 7: the 7.0 security fixes; 7.1 tested 2026-11-13 (`kazma update` does not read uv.lock)
     "pdfplumber>=0.11.0",
     "python-pptx>=0.6.23",
 ]
@@ -283,6 +283,7 @@ markers = [
     "eval: Industry eval pack (golden trajectories, no live LLM)",
     "e2e: Browser smoke (Playwright; separate CI job)",
     "postgres: Verified against a real Postgres; the CI Postgres job runs these (scripts/postgres_suite.py)",
+    "real_docker: Runs real containers on the developer's own Docker engine (the docker CLI's own settings are not swapped for an empty folder)",
 ]
 
 [tool.coverage.run]

@@ -24,6 +24,16 @@ stop at any minute.
 * :func:`restore_to` lays a base backup and the WAL up to a time into a new
   data folder and says how to start it: the live database is never touched.
 
+Each Postgres major has its own archive folder, base backups and offsite
+names (2026-11-13, ``postgres_upgrade``). A new major numbers its WAL
+segments from the start again on the same timeline, so beside an older
+major's base backup the retention prune took every segment of the new one
+for older than that backup's start and removed it, and the offsite names
+collided. The record names the folders (``base_backup_dir``,
+``offsite_tag``); an install made before 18 keeps the folders it has. A
+restore to a time before an upgrade reads the server it replaced
+(``previous`` in the record): its archive, its base backups, its binaries.
+
 Every function blocks: off the loop. Nothing happens on an install whose
 setup record names no WAL archive (``kazma setup postgres`` was not run).
 """
@@ -66,18 +76,37 @@ _START = re.compile(r"START WAL LOCATION: [0-9A-F/]+ \(file ([0-9A-F]{24})\)")
 # -- setting it up ------------------------------------------------------------------------
 
 
-def default_archive_dir(platform: Any) -> Path:
-    """Where the server copies finished segments: a folder its service
-    account may write and Kazma's account may read and prune."""
+def default_archive_dir(platform: Any, major: int | None = None) -> Path:
+    """Where *major*'s server copies finished segments: a folder its service
+    account may write and Kazma's account may read and prune. One per major
+    (an install made before 18 keeps the folder its record names)."""
+    from kazma_core.postgres_service import PG_MAJOR
+
+    major = major or PG_MAJOR
     if platform.os == "windows":
-        return Path(os.environ.get("ProgramData") or r"C:\ProgramData") / "Kazma" / "pg_wal_archive"
+        return Path(os.environ.get("ProgramData") or r"C:\ProgramData") / "Kazma" / f"pg_wal_archive-{major}"
     if platform.os == "debian":
-        return Path("/var/lib/postgresql/16/wal_archive")
+        return Path(f"/var/lib/postgresql/{major}/wal_archive")
     if platform.os == "fedora":
-        return Path("/var/lib/pgsql/16/wal_archive")
+        return Path(f"/var/lib/pgsql/{major}/wal_archive")
     from kazma_core.paths import data_dir
 
-    return data_dir() / "backups" / "pg" / "wal"     # macOS: the server runs as this account
+    return data_dir() / "backups" / "pg" / f"wal-{major}"     # macOS: the server runs as this account
+
+
+def default_base_dir(major: int | None = None) -> Path:
+    """Where *major*'s base backups go (one folder per major)."""
+    from kazma_core.paths import data_dir
+    from kazma_core.postgres_service import PG_MAJOR
+
+    return data_dir() / "backups" / "pg" / f"base-{major or PG_MAJOR}"
+
+
+def offsite_tag(major: int | None = None) -> str:
+    """What *major*'s offsite names carry after ``pgwal-``/``pgbase-``."""
+    from kazma_core.postgres_service import PG_MAJOR
+
+    return f"pg{major or PG_MAJOR}-"
 
 
 def archive_command(platform: Any, archive_dir: Path) -> str:
@@ -153,7 +182,11 @@ def archive_problem(status: dict[str, Any], now: float | None = None) -> str | N
 # -- base backups and retention -------------------------------------------------------------------
 
 
-def _base_root() -> Path:
+def _base_root(record: dict[str, Any] | None = None) -> Path:
+    """The record's base-backup folder; with none named, the one every
+    install used before 18."""
+    if record and record.get("base_backup_dir"):
+        return Path(record["base_backup_dir"])
     from kazma_core.paths import data_dir
 
     return data_dir() / "backups" / "pg" / "base"
@@ -231,8 +264,10 @@ _PUSHED_KEY = "backups.pg.wal_offsite_pushed"
 
 
 def _push_offsite(archive_dir: Path, *, root: Path | None = None, provider: Any = None,
-                 pushed: set[str] | None = None) -> dict[str, Any]:
-    """Upload the segments and base backups not yet offsite. Returns what it did."""
+                 pushed: set[str] | None = None, tag: str = "") -> dict[str, Any]:
+    """Upload the segments and base backups not yet offsite. Returns what it
+    did. *tag* (the record's ``offsite_tag``) keeps one major's names apart
+    from another's."""
     import asyncio
 
     if provider is None:
@@ -247,10 +282,10 @@ def _push_offsite(archive_dir: Path, *, root: Path | None = None, provider: Any 
         pushed = set(get_config_store().get(_PUSHED_KEY, []) or [])
     todo: list[tuple[Path, str]] = []
     for path in sorted(archive_dir.iterdir()) if archive_dir.is_dir() else []:
-        if _SEGMENT.match(path.name) and f"pgwal-{path.name}" not in pushed:
-            todo.append((path, f"pgwal-{path.name}"))
+        if _SEGMENT.match(path.name) and f"pgwal-{tag}{path.name}" not in pushed:
+            todo.append((path, f"pgwal-{tag}{path.name}"))
     for base in _base_backups(root):
-        name = f"pgbase-{base.name}.tar.gz"
+        name = f"pgbase-{tag}{base.name}.tar.gz"
         if name not in pushed:
             todo.append((base / "base.tar.gz", name))
     sent, failed = [], []
@@ -260,8 +295,8 @@ def _push_offsite(archive_dir: Path, *, root: Path | None = None, provider: Any 
         if not result.get("ok"):
             break                         # keep the order: the next pass starts here
     pushed.update(sent)
-    live = {f"pgwal-{p.name}" for p in archive_dir.iterdir()} if archive_dir.is_dir() else set()
-    live |= {f"pgbase-{b.name}.tar.gz" for b in _base_backups(root)}
+    live = {f"pgwal-{tag}{p.name}" for p in archive_dir.iterdir()} if archive_dir.is_dir() else set()
+    live |= {f"pgbase-{tag}{b.name}.tar.gz" for b in _base_backups(root)}
     from kazma_core.config_store import get_config_store
 
     get_config_store().set(_PUSHED_KEY, sorted(pushed & live), category="backups")
@@ -305,12 +340,13 @@ def wal_sweep(now: float | None = None) -> str:
         alert("backup.wal_archive_stale", "The database's WAL archive is not current",
               f"{problem}. Point-in-time restore covers only up to the last archived segment.",
               severity="warn", cooldown_s=6 * 3600.0)
-    newest = _base_backups()
+    root = _base_root(record)
+    newest = _base_backups(root)
     if not newest or now - int(newest[0].name) >= BASE_EVERY_S:
         password = _superuser_password()
         if password:
             try:
-                base = _base_backup(record, password, now=now)
+                base = _base_backup(record, password, now=now, root=root)
                 logger.info("[backup] base backup taken: %s", base.name)
             except StoppedByKazma as exc:
                 logger.info("[backup] %s; the next sweep takes it", exc)
@@ -318,8 +354,8 @@ def wal_sweep(now: float | None = None) -> str:
                 logger.warning("[backup] base backup failed: %s", exc)
                 alert("backup.pg_base_backup", "The weekly database base backup failed", str(exc)[:500],
                       severity="warn", cooldown_s=6 * 3600.0)
-    removed = prune(archive_dir)
-    pushed = _push_offsite(archive_dir)
+    removed = prune(archive_dir, root)
+    pushed = _push_offsite(archive_dir, root=root, tag=str(record.get("offsite_tag") or ""))
     logger.info("[backup] WAL archive: %s; %d segment(s) pruned; offsite %s",
                 problem or "current", removed, json.dumps(pushed))
     return problem or "current"
@@ -348,15 +384,32 @@ def _base_before(target_time: str, bases: list[Path]) -> Path:
     return max(earlier, key=lambda b: int(b.name))
 
 
+def generation_for(target_time: str, record: dict[str, Any]) -> dict[str, Any]:
+    """The server whose archive covers *target_time*: the record's own, or,
+    for a time before it was set up, the one it replaced (``previous``,
+    ``postgres_upgrade``), whose archive and base backups were kept."""
+    from datetime import datetime
+
+    previous = record.get("previous") or {}
+    if not previous:
+        return record
+    try:
+        when = datetime.fromisoformat(target_time.strip()).astimezone().timestamp()
+    except ValueError as exc:
+        raise ValueError(f"{target_time!r} is not a time: write it like 2026-11-20 14:05") from exc
+    return previous if when < float(record.get("installed_at") or 0) else record
+
+
 def restore_to(target_time: str, new_data_dir: Path, archive_dir: Path, *, base: Path | None = None,
-               os_name: str = "windows") -> list[str]:
+               os_name: str = "windows", base_root: Path | None = None) -> list[str]:
     """Lay the newest base backup older than *target_time* into *new_data_dir*
     and set it to replay the archived WAL up to that time. Returns the steps
     left to the operator (start it on a spare port, check, switch). The live
-    data folder is never touched."""
+    data folder is never touched. *base_root*: the base backups of the server
+    whose archive *archive_dir* is (:func:`generation_for`)."""
     if new_data_dir.exists() and any(new_data_dir.iterdir()):
         raise ValueError(f"{new_data_dir} is not empty: a restore goes into a new folder")
-    base = base or _base_before(target_time, _base_backups())
+    base = base or _base_before(target_time, _base_backups(base_root))
     new_data_dir.mkdir(parents=True, exist_ok=True)
     with tarfile.open(base / "base.tar.gz", "r:gz") as tar:
         tar.extractall(new_data_dir, filter="data")

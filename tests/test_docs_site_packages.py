@@ -6,8 +6,17 @@ by ``npm audit`` (91 Dependabot alerts). ``npm audit fix`` -- never
 ``--force`` -- moved 23 of them past their advisories within the ranges their
 dependents allow. It also took Mermaid 12, a major version (and eight days
 old) that Docusaurus 3's ``theme-mermaid`` allows with ``>=11.6.0``;
-``docs/package.json`` holds Mermaid on 11.x (``overrides``), whose 11.16.1
+``docs/package.json`` held Mermaid on 11.x (``overrides``), whose 11.16.1
 already fixed Mermaid's own advisories.
+
+2026-11-13: Mermaid 12 (12.3.0, two months after 12.0) is taken through the
+same override. It brings KaTeX 0.18, which fixes the KaTeX advisory Mermaid
+11's 0.16 carried; every diagram in the docs parses with it
+(``tests/test_docs_mermaid_diagrams_parse.py``) and the site builds. ``uuid``
+11 is taken through ``overrides`` too: the dev server's ``sockjs`` asked for
+8.x (``require('uuid').v4``, which 11 still exports), and its advisory was
+every moderate one ``npm audit`` reported (each Docusaurus package depends on
+the dev server). What is left is low and has no fixed release (``deepmerge``).
 
 Each floor below is the first release that fixes the advisories npm audit
 reported for that package on 2026-11-11; the lock must not fall back below
@@ -49,6 +58,7 @@ FLOORS: dict[str, str | dict[str, str]] = {
     "js-yaml": {"4": "4.3.2"},
     "launch-editor": "2.14.2",
     "mermaid": "11.16.1",
+    "katex": "0.18.2",
     "nanoid": {"3": "3.3.18"},
     "postcss": "8.5.23",
     "postcss-selector-parser": {"6": "6.1.5", "7": "7.1.6"},
@@ -61,6 +71,8 @@ FLOORS: dict[str, str | dict[str, str]] = {
     # Through overrides (2026-11-11): Docusaurus 3.10.2 holds both a major back.
     "tinypool": "2.1.2",
     "serialize-javascript": "7.1.3",
+    # 2026-11-13: the dev server's sockjs asks for uuid 8.
+    "uuid": "11.1.1",
 }
 
 
@@ -85,17 +97,18 @@ def test_no_package_falls_below_its_fixed_release():
     assert not below_floor(lock), below_floor(lock)
 
 
-def test_mermaid_stays_on_11():
+def test_mermaid_is_12_and_one_copy():
     lock = json.loads(LOCK.read_text(encoding="utf-8"))
     package = json.loads((ROOT / "docs" / "package.json").read_text(encoding="utf-8"))
-    assert package["overrides"]["mermaid"].startswith("^11.")
-    assert {v.split(".")[0] for v in _versions(lock, "mermaid")} == {"11"}
+    assert package["overrides"]["mermaid"].startswith("^12.")
+    assert {v.split(".")[0] for v in _versions(lock, "mermaid")} == {"12"}
 
 
 def test_the_overrides_hold_the_majors_docusaurus_holds_back():
     package = json.loads((ROOT / "docs" / "package.json").read_text(encoding="utf-8"))
     assert package["overrides"]["tinypool"].startswith("^2.")
     assert package["overrides"]["serialize-javascript"].startswith("^7.")
+    assert package["overrides"]["uuid"].startswith("^11.")
     # Both need Node 20, as Docusaurus 3.10.2 does.
     assert package["engines"]["node"] == ">=20.0"
 

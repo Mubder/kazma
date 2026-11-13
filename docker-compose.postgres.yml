@@ -8,14 +8,32 @@ services:
   db:
     # Pinned by version and digest (tests/test_container_services.py);
     # Dependabot's docker-compose updates propose new ones.
-    image: postgres:16.16-alpine@sha256:0adbf25a9e96d38823bb813f3ac0ed41fadb665c88f1df7fe6dbfb060cbdc106
+    image: postgres:18.7-alpine@sha256:75dcac3dfb1cd01ca3536910bbc84128759362f8b118bf8c55b38a94f68f3b73
     container_name: kazma-db
     environment:
       POSTGRES_USER: kazma
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD to a strong password}
       POSTGRES_DB: kazma
+      # 1 only while scripts/pg_compose_upgrade.py moves a 16 database in.
+      KAZMA_PG_UPGRADING: ${KAZMA_PG_UPGRADING:-0}
+    # Postgres 18 keeps its data under /var/lib/postgresql/18 (the image's own
+    # layout), in a volume of its own: it cannot open Postgres 16's folder. The
+    # 16 volume stays as it was, mounted read-only only to see that a database
+    # there was moved (scripts/pg_compose_upgrade.py) before this one starts
+    # empty; a fresh install's is empty and passes.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        if [ -f /kazma/pg16/PG_VERSION ] && [ ! -f /var/lib/postgresql/18/docker/PG_VERSION ] && [ "$$KAZMA_PG_UPGRADING" != 1 ]; then
+          echo "Kazma's database is in the Postgres 16 volume and this Postgres 18 holds none."
+          echo "Move it: python scripts/pg_compose_upgrade.py -f <this compose file>. Nothing was started."
+          exit 78
+        fi
+        exec docker-entrypoint.sh postgres
     volumes:
-      - kazma_pgdata:/var/lib/postgresql/data
+      - kazma_pgdata18:/var/lib/postgresql
+      - kazma_pgdata:/kazma/pg16:ro
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     healthcheck:
@@ -55,6 +73,8 @@ services:
       start_period: 20s
 
 volumes:
+  # Postgres 16's data, kept after the move to 18 (the way back).
   kazma_pgdata:
+  kazma_pgdata18:
   kazma_data:
   kazma_vectors:

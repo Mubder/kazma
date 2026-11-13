@@ -1,9 +1,9 @@
-"""``kazma setup postgres`` -- Postgres 16 as an OS service (resilience plan A1).
+"""``kazma setup postgres`` -- Postgres as an OS service (resilience plan A1).
 
 One command for every OS: winget (Windows), Homebrew (macOS), apt
 (Debian/Ubuntu, WSL) or dnf (Fedora/RHEL). It prints the plan and asks
-before doing anything (``-y`` skips the question), then installs Postgres 16
-as a service that starts at boot and restarts on failure, listening on this
+before doing anything (``-y`` skips the question), then installs Postgres
+(``postgres_service.PG_MAJOR``) as a service that starts at boot and restarts on failure, listening on this
 machine only, creates Kazma's database and its ``kazma_app`` role (not a
 superuser), turns on WAL archiving, writes ``KAZMA_DATABASE_URL`` into the
 install's ``.env`` (never printed), signs in once as Kazma will, and records
@@ -20,7 +20,10 @@ starts Kazma on the new database, sees it signed in there, and stops the
 container (kept, not removed). Run again, it replaces an earlier copy only
 if Kazma never started on it (:mod:`kazma_core.backup.pg_move`); on a healthy
 service whose address ``.env`` already names, it is the move only and needs
-no admin rights.
+no admin rights. A second run repairs the major the record names (an install
+made before 18 runs 16): it never installs another one beside it.
+``--upgrade`` moves Kazma's database to the current major
+(:mod:`kazma_cli.postgres_upgrade`).
 
 The superuser's password is kept in ``<install>/.kazma/postgres_superuser.pass``
 (this account only); the role's only in ``.env``. Neither is printed, and a
@@ -292,7 +295,7 @@ def _print_check(platform, record: dict, state: dict | None) -> int:
 def run(args: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="kazma setup", description="Set up what Kazma runs on.")
     sub = parser.add_subparsers(dest="what", required=True)
-    pg = sub.add_parser("postgres", help="PostgreSQL 16 as an OS service")
+    pg = sub.add_parser("postgres", help="PostgreSQL as an OS service")
     pg.add_argument("-y", "--yes", action="store_true", help="do not ask before acting")
     pg.add_argument("--check", action="store_true", help="report only; change nothing")
     pg.add_argument("--dry-run", action="store_true", help="print the commands; run nothing")
@@ -300,6 +303,8 @@ def run(args: list[str]) -> int:
     pg.add_argument("--move-from-container", metavar="NAME",
                     help="copy the data of this Docker container (Kazma's database today) into the new server")
     pg.add_argument("--no-env", action="store_true", help="do not write KAZMA_DATABASE_URL into .env")
+    pg.add_argument("--upgrade", action="store_true",
+                    help="move Kazma's database to the current PostgreSQL major (the old server is kept, stopped)")
     system = sub.add_parser("system", help="OCR, LibreOffice, ClamAV, the Arabic fonts, Node.js and Docker")
     system.add_argument("-y", "--yes", action="store_true", help="do not ask before acting")
     system.add_argument("--check", action="store_true", help="report only; change nothing")
@@ -332,6 +337,10 @@ def run(args: list[str]) -> int:
         from kazma_cli.install import install
 
         return install(options)
+    if options.upgrade:
+        from kazma_cli.postgres_upgrade import upgrade_postgres
+
+        return upgrade_postgres(options)
     return _setup_postgres(options)
 
 
@@ -966,7 +975,6 @@ def _repoint_memory_backends(container: str, new_url: str, *, run=subprocess.run
     from urllib.parse import urlsplit
 
     import psycopg
-
     from kazma_core.security.vault import get_vault
 
     port = _container_port(container, run=run)
@@ -1014,18 +1022,76 @@ def _stop_container(name: str, *, run=subprocess.run) -> bool:
     return True
 
 
+def _server_to_set_up(platform, rec: dict, port: int, *, run=subprocess.run) -> tuple[int, str | None, dict | None]:
+    """The major and service a run sets up, and its state: the server the
+    record names when it is installed -- a second run repairs that one (an
+    install made before 18 runs 16), never installs another major beside it
+    (``--upgrade`` moves it) -- else the current major."""
+    from kazma_core import postgres_service as pgs
+
+    if rec.get("service") and rec.get("major"):
+        state = pgs.service_state(platform.os, rec["service"], port, run=run)
+        if state.get("installed"):
+            return int(rec["major"]), str(rec["service"]), state
+    service = pgs.service_name(platform.os)
+    return pgs.PG_MAJOR, service, (pgs.service_state(platform.os, service, port, run=run) if service else None)
+
+
+def _write_setup_record(platform, service: str, major: int, port: int, archive_dir: Path, rec: dict,
+                        *, keep: bool) -> None:
+    """The record of the server set up. A repair (*keep*) keeps what the
+    record says of its history: when it was set up, its base-backup folder
+    and offsite names, the server it replaced."""
+    import time
+
+    from kazma_core import postgres_service as pgs
+    from kazma_core.backup import wal_archive
+
+    if keep:
+        history = dict(installed_at=float(rec.get("installed_at") or time.time()),
+                       base_backup_dir=str(rec.get("base_backup_dir") or ""),
+                       offsite_tag=str(rec.get("offsite_tag") or ""), previous=dict(rec.get("previous") or {}))
+    else:
+        history = dict(installed_at=time.time(), base_backup_dir=str(wal_archive.default_base_dir(major)),
+                       offsite_tag=wal_archive.offsite_tag(major))
+    pgs.write_record(pgs.PostgresRecord(
+        os=platform.os, manager=platform.manager, service=service, port=port,
+        bin_dir=pgs.bin_dir_for(platform, major), major=major, wal_archive_dir=str(archive_dir), **history))
+
+
+def _without_install_steps(steps):
+    """A second run checks and repairs: it never reinstalls. The superuser's
+    password and the role are set again; the install steps are skipped."""
+    return [s for s in steps if not s.title.startswith(("Install", "Add the", "Create its data"))
+            and s.argv[:1] != ("",)]
+
+
+def _say_no_manager_or_older(platform, major: int) -> bool:
+    """True (said) when no package manager Kazma knows is here; an older
+    major is noted with the command that moves it."""
+    from kazma_core import postgres_service as pgs
+
+    if platform.manager is None:
+        _say(f"No package manager Kazma knows on this {platform.os} system (winget, Homebrew, apt, dnf).")
+        _say(f"Install PostgreSQL {pgs.PG_MAJOR} by hand: docs/docs/ops/postgres-and-saas.md, "
+             "\"Postgres as an OS service\".")
+        return True
+    if major < pgs.PG_MAJOR:
+        _say(f"This install runs PostgreSQL {major}; {pgs.PG_MAJOR} is current: kazma setup postgres --upgrade "
+             "moves Kazma's database to it.")
+    return False
+
+
 def _setup_postgres(options, *, run=subprocess.run, hold: _MoveHold | None = None) -> int:
     from kazma_core import postgres_service as pgs
 
     platform = pgs.detect_platform()
     record = pgs.read_record()
-    service = pgs.SERVICE.get(platform.os)
-    state = pgs.service_state(platform.os, service, options.port, run=run) if service else None
+    rec = record.get("postgres") or {}
+    major, service, state = _server_to_set_up(platform, rec, options.port, run=run)
     if options.check:
         return _print_check(platform, record, state)
-    if platform.manager is None:
-        _say(f"No package manager Kazma knows on this {platform.os} system (winget, Homebrew, apt, dnf).")
-        _say("Install PostgreSQL 16 by hand: docs/docs/ops/postgres-and-saas.md, \"Postgres as an OS service\".")
+    if _say_no_manager_or_older(platform, major):
         return 2
 
     installed = bool(state and state.get("installed"))
@@ -1035,22 +1101,23 @@ def _setup_postgres(options, *, run=subprocess.run, hold: _MoveHold | None = Non
     superuser_password = stored_superuser or secrets.token_urlsafe(24)
     existing_app = _existing_app_password(options.port)
     app_password = existing_app or secrets.token_urlsafe(24)
-    throwaway = secrets.token_urlsafe(18)
+    # A repair signs in with the superuser's own password (the throwaway is
+    # the installer's, and there is no installer on a second run).
+    throwaway = stored_superuser if installed and stored_superuser else secrets.token_urlsafe(18)
     hidden = [superuser_password, app_password, throwaway]
     container = options.move_from_container
 
     from kazma_core.backup import wal_archive
 
-    archive_dir = wal_archive.default_archive_dir(platform)
+    keep = installed and rec.get("service") == service
+    archive_dir = (Path(rec["wal_archive_dir"]) if keep and rec.get("wal_archive_dir")
+                   else wal_archive.default_archive_dir(platform, major))
     steps = pgs.setup_plan(platform, port=options.port, superuser_password=superuser_password,
                            throwaway_password=throwaway, app_password=app_password, role_sql=_role_sql(),
-                           wal_archive_command=wal_archive.archive_command(platform, archive_dir))
+                           wal_archive_command=wal_archive.archive_command(platform, archive_dir), major=major)
     steps = wal_archive.prepare_steps(platform, archive_dir) + steps
     if installed:
-        # A second run checks and repairs: it never reinstalls. The superuser's
-        # password and the role are set again; the install steps are skipped.
-        steps = [s for s in steps if not s.title.startswith(("Install", "Add the", "Create its data"))
-                 and s.argv[:1] != ("",)]
+        steps = _without_install_steps(steps)
         if not pass_file.exists() and platform.os == "windows":
             _say("Postgres is installed, but this install does not know its superuser's password")
             _say(f"({pass_file} is missing). Put it there, then run this again.")
@@ -1077,7 +1144,7 @@ def _setup_postgres(options, *, run=subprocess.run, hold: _MoveHold | None = Non
             _say(refusal)
             return 2
 
-    _print_postgres_plan(f"PostgreSQL {pgs.PG_MAJOR} as a {platform.os} service ({service}) on "
+    _print_postgres_plan(f"PostgreSQL {major} as a {platform.os} service ({service}) on "
                          f"127.0.0.1:{options.port}", options, steps, installed=installed, hold=hold)
     if options.dry_run:
         return 0
@@ -1132,9 +1199,7 @@ def _setup_postgres(options, *, run=subprocess.run, hold: _MoveHold | None = Non
         for key in by_hand:
             _say(f"   {key} names the container and is stored in plain text: set it to the new server in "
                  "Settings -> Memory.")
-    pgs.write_record(pgs.PostgresRecord(
-        os=platform.os, manager=platform.manager, service=service, port=options.port,
-        bin_dir=pgs.bin_dir_for(platform), wal_archive_dir=str(archive_dir), installed_at=__import__("time").time()))
+    _write_setup_record(platform, service, major, options.port, archive_dir, rec, keep=keep)
 
     if not container:
         _say("Done. Reload Kazma when it is idle to use the new database:")
@@ -1162,23 +1227,54 @@ def _print_postgres_plan(head: str, options, steps, *, installed: bool, hold: _M
              " (kept, not removed)")
 
 
-def _run_setup_steps(steps, platform, service, port: int, hidden: list[str], *, run=subprocess.run) -> bool:
-    """Each step in order; False (said) at the first that fails."""
+def _do_setup_step(step, platform, service, port: int, hidden: list[str], *, run=subprocess.run) -> tuple[bool, str]:
+    """One step: a program, or an action this command carries out itself
+    (on the step's own service and port, else the plan's)."""
     from kazma_core import postgres_service as pgs
 
+    at, svc = step.port or port, step.service or service
+    if step.action == "wait":
+        ok = pgs.wait_for_port(at)
+        return ok, "" if ok else f"nothing answered on port {at} within a minute"
+    if step.action == "restart":
+        ok = pgs.restart_service(platform.os, svc, at, run=run, major=step.major)
+        return ok, "" if ok else "it did not answer after the restart"
+    if step.action == "stop":
+        ok = pgs.stop_service(platform.os, svc, run=run, major=step.major)
+        return ok, "" if ok else f"{svc} did not stop"
+    if step.action == "start":
+        ok = pgs.start_service(platform.os, svc, at, run=run, major=step.major)
+        return ok, "" if ok else f"{svc} did not answer on port {at} within a minute"
+    if step.action == "set_port":
+        try:
+            pgs.set_port_on_disk(pgs.data_dir_for(platform, step.major), step.port)
+        except OSError as exc:
+            return False, f"{type(exc).__name__}: {exc}"
+        return True, ""
+    ok, detail = _run_step(step, hidden, run=run)
+    if not ok and _winget_source_missing(step, detail):
+        # A fresh Windows answers every install 0x8A15000F until its package
+        # list is registered (the clean VM, 2026-11-08): the same repair the
+        # system steps make (run_system_step), here for Postgres's install.
+        _say("   winget's package list is not set up on this machine: registering it, then trying again")
+        fixed, why = _register_winget_source(run, None)
+        if not fixed:
+            return False, f"{detail} -- registering winget's package list failed: {why}"
+        ok, detail = _run_step(step, hidden, run=run)
+    return ok, detail
+
+
+def _run_setup_steps(steps, platform, service, port: int, hidden: list[str], *, run=subprocess.run,
+                     on_failure: str = "Nothing past this step was done. Fix it and run kazma setup postgres "
+                                       "again.") -> bool:
+    """Each step in order; False (said) at the first that fails."""
     for step in steps:
         _say(f"-> {step.title or step.printable()}")
-        if step.action == "wait":
-            ok = pgs.wait_for_port(port)
-            detail = "" if ok else f"nothing answered on port {port} within a minute"
-        elif step.action == "restart":
-            ok = pgs.restart_service(platform.os, service, port, run=run)
-            detail = "" if ok else "it did not answer after the restart"
-        else:
-            ok, detail = _run_step(step, hidden, run=run)
+        ok, detail = _do_setup_step(step, platform, service, port, hidden, run=run)
         if not ok:
             _say(f"   FAILED: {detail}")
-            _say("Nothing past this step was done. Fix it and run kazma setup postgres again.")
+            if on_failure:
+                _say(on_failure)
             return False
     return True
 
@@ -1271,11 +1367,15 @@ def run_restore(args: list[str]) -> int:
         return 2
     _say(f"Restoring to {options.to} into {options.into} (the live database is not touched).")
     try:
-        steps = wal_archive.restore_to(options.to, Path(options.into), Path(rec["wal_archive_dir"]),
-                                       os_name=rec.get("os", ""))
-    except (ValueError, OSError) as exc:
+        gen = wal_archive.generation_for(options.to, rec)
+        steps = wal_archive.restore_to(options.to, Path(options.into), Path(gen["wal_archive_dir"]),
+                                       os_name=rec.get("os", ""), base_root=wal_archive._base_root(gen))
+    except (ValueError, OSError, KeyError) as exc:
         _say(f"Nothing was restored: {exc}")
         return 1
+    if gen is not rec:
+        _say(f"That time is before the move to PostgreSQL {rec.get('major')}: the restore is of the server it "
+             f"replaced (PostgreSQL {gen.get('major')}), and is started with its programs ({gen.get('bin_dir')}).")
     _say("Laid out. What is left:")
     for i, step in enumerate(steps, 1):
         _say(f"  {i}. {step}")

@@ -247,13 +247,20 @@ def _update_brings_nothing_along(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _isolated_docker_config(tmp_path, monkeypatch):
+def _isolated_docker_config(request, tmp_path, monkeypatch):
     """The docker CLI's own settings (contexts, current context) come from an
     empty folder: which engine a developer's machine uses never decides a
     test (2026-11-12, Kazma's own container engine: path translation and the
     engine choice read ``~/.docker``). A test of those creates its contexts
-    there. The empty config's ``default`` context still reaches a local
-    Docker for the tests that run a real container."""
+    there.
+
+    A test that runs real containers is marked ``real_docker`` and keeps the
+    developer's own settings: the empty config's ``default`` context is the
+    platform's own Docker address, which on a machine whose engine is Kazma's
+    (no Docker Desktop) answers nothing -- every container test failed there
+    on 2026-11-13, and the sandbox's real run skipped without a word."""
+    if request.node.get_closest_marker("real_docker") is not None:
+        return
     monkeypatch.setenv("DOCKER_CONFIG", str(tmp_path / "docker-config"))
     monkeypatch.delenv("DOCKER_CONTEXT", raising=False)
 

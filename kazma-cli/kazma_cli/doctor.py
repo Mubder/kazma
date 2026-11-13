@@ -363,6 +363,15 @@ def _database_service_rows() -> list[tuple[str, str]]:
         out.append(_line(WARN if problem else OK,
                          "the WAL archive " + (problem or "is current"),
                          f"repair: {fix}" if problem else ""))
+    from kazma_core import postgres_upgrade as pgu
+
+    major = int(rec.get("major") or 0)
+    if pgu.journal():
+        out.append(_line(BAD, f"an upgrade to PostgreSQL {pgu.journal().get('to')} did not finish",
+                         "kazma setup postgres --upgrade (it picks up or undoes it)"))
+    elif major and major < pgs.PG_MAJOR:
+        out.append(_line(OK, f"the database runs PostgreSQL {major}; {pgs.PG_MAJOR} is current",
+                         "kazma setup postgres --upgrade moves it (the old server is kept, stopped)"))
     return out
 
 

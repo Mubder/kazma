@@ -4,7 +4,7 @@
 # build (no CUDA download); every other package comes from PyPI at the version
 # pinned here, and ocr-models.txt holds every hash.
 # Regenerate ocr-models.txt after a change:
-#   uv pip compile deploy/document-worker/ocr-models.in --python-version 3.11 \
+#   uv pip compile deploy/document-worker/ocr-models.in --python-version 3.14 \
 #     --python-platform x86_64-manylinux_2_28 --generate-hashes \
 #     --index https://download.pytorch.org/whl/cpu --index-strategy unsafe-best-match \
 #     --emit-index-url -o deploy/document-worker/ocr-models.txt

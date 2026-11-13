@@ -37,7 +37,8 @@ import uuid
 import pytest
 from kazma_core.memory import state_backend as sb
 
-pytestmark = pytest.mark.postgres
+# real_docker: pg_dump/pg_restore through ``docker exec`` when KAZMA_DB_CONTAINER names one.
+pytestmark = [pytest.mark.postgres, pytest.mark.real_docker]
 
 TURNS = max(4, int(os.environ.get("KAZMA_TEST_MEMORY_RESTORE_DRILL_TURNS", "40")))
 

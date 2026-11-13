@@ -198,6 +198,7 @@ def _docker_with_image() -> tuple[str, str] | None:
     return (docker, DEFAULT_DOCKER_IMAGE) if probe.returncode == 0 else None
 
 
+@pytest.mark.real_docker
 async def test_a_real_container_reads_the_env_as_empty(install, monkeypatch):
     """The real Docker run: ``.env`` reads empty, a file in the data folder
     is not there, the user's own file reads whole. Skipped without docker and

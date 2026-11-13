@@ -3809,6 +3809,12 @@ DBSVC_CHECK_EVERY_S = 30.0
 DBSVC_START_AFTER_S = 60.0
 DBSVC_PAGE_AFTER_S = 300.0
 DBSVC_SETTLE_S = 120.0
+#: While ``kazma setup postgres --upgrade`` switches servers (its journal in
+#: the setup record says ``switching``), the watch leaves the service alone:
+#: the old one is stopped on purpose, and starting it would take the port
+#: from the new one. Bounded, so a run that died there is not waited for
+#: (``postgres_upgrade.SWITCH_HOLD_S``, held equal by a test).
+DBSVC_UPGRADE_HOLD_S = 15 * 60.0
 
 
 def _setup_record() -> dict:
@@ -3817,7 +3823,14 @@ def _setup_record() -> dict:
     except (OSError, ValueError):
         return {}
     rec = data.get("postgres") if isinstance(data, dict) else None
-    return rec if isinstance(rec, dict) else {}
+    if not isinstance(rec, dict):
+        return {}
+    upgrade = data.get("postgres_upgrade")
+    if isinstance(upgrade, dict) and upgrade.get("stage") == "switching":
+        since = upgrade.get("switching_since")
+        if isinstance(since, (int, float)) and 0 <= time.time() - since < DBSVC_UPGRADE_HOLD_S:
+            return {**rec, "upgrading": True}
+    return rec
 
 
 def _port_answers(port: int) -> bool:
@@ -3907,6 +3920,12 @@ class DatabaseServiceWatch:
                 self._write()
             return
         self.service = service
+        if rec.get("upgrading"):
+            # Servers switching on purpose: not an outage, and not the
+            # watch's to start (an outage, if any, is counted after).
+            self._down_since, self._started_this_outage = None, False
+            self._set("upgrading")
+            return
         running = self._running(os_name, service)
         answers = self._answers(int(rec.get("port") or 5432))
         # A state the OS would not give (None: sc refused or could not run)

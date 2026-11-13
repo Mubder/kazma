@@ -29,7 +29,8 @@ import pytest
 from kazma_core.backup import pg_move, wal_archive
 from kazma_core.db import availability
 
-pytestmark = pytest.mark.postgres
+# real_docker: pg_dump/pg_restore through ``docker exec`` when KAZMA_DB_CONTAINER names one.
+pytestmark = [pytest.mark.postgres, pytest.mark.real_docker]
 
 
 def _dsn() -> str:

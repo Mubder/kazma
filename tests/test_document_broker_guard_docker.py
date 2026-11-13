@@ -37,6 +37,7 @@ pytestmark = [
         reason="set KAZMA_TEST_DOCUMENT_WORKER_IMAGE (and have a docker CLI) to run the real broker",
     ),
     pytest.mark.timeout(1200),
+    pytest.mark.real_docker,
 ]
 
 

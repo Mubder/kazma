@@ -38,6 +38,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.real_docker
+
 ROOT = Path(__file__).resolve().parents[1]
 ZOMBIE = ROOT / "tests" / "fixtures" / "documents" / "lease_zombie.py"
 LEASE = 8

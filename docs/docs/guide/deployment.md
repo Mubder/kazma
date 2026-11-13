@@ -30,7 +30,7 @@ description: Kazma Deployment — code-audited reference (unified docs, v0.9+)
 
 The live file is `Dockerfile` at the repo root — do not copy-paste a snapshot here (it drifted before: missing git, Arabic fonts, LibreOffice, Tesseract, ClamAV, and `document-platform`). What it actually does:
 
-- Base: `python:3.11-slim`, pinned by digest (`@sha256:...`), as every Kazma Dockerfile is: a tag is whatever the registry serves that day. Dependabot proposes a new digest as a pull request.
+- Base: `python:3.14-slim`, pinned by digest (`@sha256:...`), as every Kazma Dockerfile is: a tag is whatever the registry serves that day. Dependabot proposes a new digest as a pull request. 3.14 is the newest Python every package Kazma's images install has wheels for (3.15 has no onnxruntime or Chroma yet); the document worker and broker images use the same one.
 - System deps: git, libpq, Noto Arabic fonts, LibreOffice, Tesseract (`eng`+`ara`), ClamAV, build-essential, curl.
 - Python: `pip install -e ".[rag,postgres,document-platform]"`.
 - Runs as non-root **`kazma`**. Listens on **container port 8000**.

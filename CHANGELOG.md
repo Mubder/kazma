@@ -1,5 +1,48 @@
 # CHANGELOG
 
+## PostgreSQL 18, and one command to move to it (2026-11-13)
+
+- A new install gets PostgreSQL 18. An install made before runs 16 until its
+  owner moves it: `kazma doctor` says so, and `kazma setup postgres
+  --upgrade` does it with Kazma running. It installs 18 beside 16 on a spare
+  port, waits until no chat turn runs, holds Kazma, copies the database and
+  compares every table and sequence, then puts 18 on 16's port, so no address
+  changes. 16 is kept, stopped, with its data and backups. A copy that is not
+  whole, or an 18 that does not answer, puts Kazma back on 16 unchanged, and
+  a run stopped halfway is undone or finished by the next one.
+- A repair run (`kazma setup postgres` again) repairs the Postgres the install
+  has; it no longer could have installed 18 beside 16. On Windows it now signs
+  in with the stored superuser password.
+- Each Postgres version keeps its own WAL archive, base backups and offsite
+  names. With one shared folder, 16's last base backup would have made the
+  archive cleanup delete 18's WAL. A restore to a time before the move reads
+  16's backups.
+- The compose deployments (`docker-compose.postgres.yml`,
+  `docker-compose.ha.yml`) run Postgres 18 on a volume of its own.
+  `scripts/pg_compose_upgrade.py` moves a 16 database into it. Until it has,
+  the database container refuses to start empty, so Kazma never comes up on
+  an empty database after a `git pull`. Drilled on real containers,
+  including a failed restore that puts 16 back exactly as it was.
+
+## Python 3.14 images, pypdf 7, Mermaid 12 (2026-11-13)
+
+- Kazma's container images (the app, the demo, the document worker and its
+  broker) run Python 3.14, the newest Python every package they install has
+  wheels for. All 65 container tests pass on the new worker image.
+- pypdf 7.1 (7.0 carries security fixes for image buffers, object streams and
+  XFA forms): 1,227 document and PDF tests pass on it, on the host and in the
+  worker image.
+- The docs site runs Mermaid 12 (with KaTeX 0.18, which fixes KaTeX's
+  advisory) and uuid 11 for the dev server; every moderate `npm audit` finding
+  is gone. A new test parses every diagram in the docs with the site's own
+  Mermaid. It found that the Commitment Layer page's diagram had never drawn
+  (a quote inside a label), which is now fixed. A broken release-notes link is
+  fixed too.
+- Container tests now use the developer's own Docker setup (they failed on a
+  machine whose only engine is Kazma's), and a test that had gone stale since
+  DOCX files started embedding the house font tests the profile's font bundle
+  again.
+
 ## Playwright 1.65 (2026-11-13)
 
 - Kazma's browser runs on Playwright 1.65.1. 1.65 rewrote the client Kazma's

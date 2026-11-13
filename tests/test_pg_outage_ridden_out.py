@@ -478,6 +478,7 @@ def test_the_boot_waits_where_it_opens_the_store():
 
 
 @pytest.mark.postgres
+@pytest.mark.real_docker
 def test_a_real_postgres_outage_is_ridden_out():
     """A real Postgres stopped and started under a real ``ConfigStore``.
 

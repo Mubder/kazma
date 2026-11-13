@@ -224,12 +224,22 @@ def test_the_pdf_route_converts_with_that_profile(tmp_path, monkeypatch):
 IMAGE = os.environ.get("KAZMA_TEST_DOCUMENT_WORKER_IMAGE", "")
 
 
+@pytest.mark.real_docker
 @pytest.mark.skipif(not IMAGE or not shutil.which("docker"), reason="needs KAZMA_TEST_DOCUMENT_WORKER_IMAGE and docker")
-def test_libreoffice_in_the_worker_image_renders_in_plex_only_with_the_bundle(tmp_path):
+def test_libreoffice_in_the_worker_image_renders_in_plex_only_with_the_bundle(tmp_path, monkeypatch):
     """The live failure, in the image: no bundle in the profile -> DejaVu and
-    Noto Serif (the negative control); the bundle -> Plex."""
+    Noto Serif (the negative control); the bundle -> Plex.
+
+    The DOCX is written without the house fonts embedded: since 2026-10-22
+    every DOCX carries them (``engines/docx_fonts.py``) and LibreOffice draws
+    an embedded face, so with them the control drew Plex too and proved
+    nothing about the profile's bundle, which a document with no embedded
+    face (an HTML conversion, a file from elsewhere) still needs."""
     import pymupdf
 
+    from kazma_core.documents.engines import docx_fonts
+
+    monkeypatch.setattr(docx_fonts, "embed_fonts", lambda *args, **kwargs: 0)
     model = ContentModel()
     model.add(TitleBlock(text="أرشيف تغريدات كاظمه على X", level=0))
     model.add(BodyBlock(text=ARCHIVE))
@@ -237,8 +247,14 @@ def test_libreoffice_in_the_worker_image_renders_in_plex_only_with_the_bundle(tm
     give_soffice_the_bundled_fonts(tmp_path / "with")
     (tmp_path / "without").mkdir()
     fonts = {}
+    # The folder as the engine in force mounts it (Kazma's engine takes /c/...,
+    # not C:\...), and the docker CLI Kazma itself finds.
+    from kazma_core.docker_cli import engine_host_path, find_docker_cli
+
+    mount = engine_host_path(str(tmp_path))
+    assert mount, f"the container engine in force cannot mount {tmp_path}"
     for profile in ("with", "without"):
-        subprocess.run(["docker", "run", "--rm", "--network", "none", "-v", f"{tmp_path}:/w",
+        subprocess.run([find_docker_cli() or "docker", "run", "--rm", "--network", "none", "-v", f"{mount}:/w",
                         "--entrypoint", "soffice", IMAGE, "--headless", "--nologo", "--norestore",
                         f"-env:UserInstallation=file:///w/{profile}", "--convert-to", "pdf",
                         "--outdir", f"/w/{profile}", "/w/a.docx"], check=True, timeout=300,

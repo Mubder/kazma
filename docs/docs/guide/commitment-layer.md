@@ -97,9 +97,9 @@ When a decision is `clarify` or `confirm`, the graph suspends via LangGraph
 
 ```mermaid
 flowchart LR
-    U[User: "remind me about the meeting"] --> M[Model calls schedule tool with ambiguous time]
+    U["User: #quot;remind me about the meeting#quot;"] --> M[Model calls schedule tool with ambiguous time]
     M --> G[Commitment gate: authorize_effect]
-    G -->|ambiguous| C[Clarify card: "Which meeting?"]
+    G -->|ambiguous| C["Clarify card: #quot;Which meeting?#quot;"]
     C --> O1[Option: Project sync — Tue 2pm]
     C --> O2[Option: 1:1 — Wed 10am]
     C --> OX[Cancel]

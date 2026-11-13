@@ -205,10 +205,10 @@ package manager:
 
 | OS | Installed with | Started by | With nobody signed in |
 |---|---|---|---|
-| Windows 10/11 | `winget` (`PostgreSQL.PostgreSQL.16`, the EDB installer, unattended) | the Windows service `postgresql-x64-16`, start type Automatic, restarted on failure | yes |
-| macOS | Homebrew `postgresql@16` | `sudo brew services start postgresql@16` (a LaunchDaemon) | yes, unless FileVault is on (see below) |
-| Debian / Ubuntu | the PostgreSQL project's apt repository, `postgresql-16` | systemd, `Restart=on-failure` | yes |
-| Fedora / RHEL | the PostgreSQL project's dnf repository, `postgresql16-server` | systemd, `Restart=on-failure` | yes |
+| Windows 10/11 | `winget` (`PostgreSQL.PostgreSQL.18`, the EDB installer, unattended) | the Windows service `postgresql-x64-18`, start type Automatic, restarted on failure | yes |
+| macOS | Homebrew `postgresql@18` | `sudo brew services start postgresql@18` (a LaunchDaemon) | yes, unless FileVault is on (see below) |
+| Debian / Ubuntu | the PostgreSQL project's apt repository, `postgresql-18` | systemd, `Restart=on-failure` | yes |
+| Fedora / RHEL | the PostgreSQL project's dnf repository, `postgresql18-server` | systemd, `Restart=on-failure` | yes |
 | WSL 2 | as Debian/Ubuntu, inside the distro Kazma runs in, with `systemd=true` in `/etc/wsl.conf` | systemd in the distro (the distro itself is started at boot by the Windows task that runs Kazma) | while that task runs |
 
 What it does, in order (it prints the plan and asks first; `-y` skips the
@@ -219,9 +219,10 @@ question, `--dry-run` prints the commands, `--check` only reports):
    Kazma has an address and no way to reach it, and the server waits at
    startup saying the driver is not installed. A second run installs it too.
    If it does not install, nothing after it is done.
-2. Installs Postgres 16 as a service that starts at boot and restarts when it
+2. Installs Postgres 18 as a service that starts at boot and restarts when it
    fails, listening on this machine only (`listen_addresses = 'localhost'`),
-   with `scram-sha-256` sign-in.
+   with `scram-sha-256` sign-in. (An install made before 13 November 2026 runs
+   Postgres 16; see "Moving to a newer Postgres" below.)
 3. Creates the `kazma` database and the `kazma_app` role (not a superuser,
    `deploy/postgres/kazma_app_role.sql`).
 4. Turns on WAL archiving (below).
@@ -234,8 +235,47 @@ question, `--dry-run` prints the commands, `--check` only reports):
 The superuser's password is kept in `<install>/.kazma/postgres_superuser.pass`
 (your account only); no password is put on a command line, except the Windows
 installer's throwaway one, which the next step replaces. A second run checks
-and repairs, and never reinstalls. Run it from an elevated terminal on
-Windows.
+and repairs, and never reinstalls: it repairs the Postgres the record names
+(16 on an older install), never installs another one beside it. Run it from
+an elevated terminal on Windows.
+
+**Moving to a newer Postgres.** `kazma doctor` says when the database runs an
+older major than Kazma installs now (16 before 18). One command moves it,
+with Kazma running:
+
+```bash
+kazma setup postgres --upgrade
+```
+
+A Postgres major cannot open another major's data folder, so the new one is
+a second server, filled with a copy:
+
+1. It installs the new major beside the old one, on a spare port (55432 or
+   the next free one), with Kazma's role, the password Kazma already uses and
+   its own WAL archive folder.
+2. Once no chat turn is running, it stops Kazma through its guard, so nothing
+   is written while the data is copied.
+3. It copies Kazma's database with the new major's `pg_dump` and
+   `pg_restore` (as `kazma_app`, in one transaction), then compares the row
+   count of every table and the value of every sequence.
+4. It switches the servers: the new one onto the old port, the old one
+   stopped and taken off the boot list. `.env` and every other address stay
+   as they are.
+5. It records the new server (the old one under `previous`), starts Kazma,
+   sees it signed in, and takes the new server's first base backup.
+
+The old server is kept, stopped, with its data, archive and base backups:
+the way back, and the server a restore to a time before the move reads.
+Remove it with its own uninstaller once you are sure. Every stage is written
+to `kazma-data/setup_record.json` first. A run that stops anywhere is safe to run again:
+before the switch Kazma still uses the old server and the new one holds only
+a copy (replaced only while Kazma has never started on it); a switch that did
+not finish is undone first (the old server back on its port and on the boot
+list). A copy that is not whole, or a new server that does not answer on the
+old port, puts Kazma back on the old server, unchanged. The guard's database
+watch leaves the services alone while a switch is under way, for at most 15
+minutes. Drilled on Windows; the Debian, Fedora and macOS steps are tested
+against their package managers' commands, not yet on a machine.
 
 **Moving off the Docker container.** One command switches Kazma, with Kazma
 running:
@@ -279,14 +319,19 @@ archiving every change is kept, and a restore can stop at any minute.
 `kazma setup postgres` turns it on: `archive_mode = on`, a segment at least
 every 5 minutes while anything is written (`archive_timeout = 300`), each
 finished segment copied into the archive folder (Windows
-`C:\ProgramData\Kazma\pg_wal_archive`, Debian
-`/var/lib/postgresql/16/wal_archive`, Fedora `/var/lib/pgsql/16/wal_archive`,
-macOS `kazma-data/backups/pg/wal`).
+`C:\ProgramData\Kazma\pg_wal_archive-18`, Debian
+`/var/lib/postgresql/18/wal_archive`, Fedora `/var/lib/pgsql/18/wal_archive`,
+macOS `kazma-data/backups/pg/wal-18`; an install made before 18 keeps the
+folder its record names). Each major has its own archive, base backups and
+offsite names: a new major numbers its segments from the start again, so
+beside an older major's base backup the prune would take the new major's
+segments for old ones.
 
 The maintenance sweep "WAL archive" reads the server's own numbers
 (`pg_stat_archiver`): a failing archiver, or no segment archived for 15
 minutes, pages `backup.wal_archive_stale`. It takes a base backup every week
-(`pg_basebackup` into `kazma-data/backups/pg/base/`, two kept), prunes the
+(`pg_basebackup` into `kazma-data/backups/pg/base-18/`, two kept; `base/`
+on an install made before 18), prunes the
 archived WAL the older one no longer needs, and sends new segments and base
 backups to your offsite backup provider (the one the universal backup uses).
 `kazma doctor` says whether the archive is current.
@@ -299,7 +344,9 @@ kazma restore postgres --to "2026-11-20 14:05" --into D:\pg-restore
 
 It lays out the newest base backup, sets it to replay the archived WAL up to
 that time, and prints the steps left: start it on a spare port, check it,
-then switch.
+then switch. A time before a move to a newer Postgres is restored from the
+server that move replaced (its archive and base backups were kept), and is
+started with that major's own programs; the command says which.
 
 ## Backup & disaster recovery
 

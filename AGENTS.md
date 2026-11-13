@@ -4385,6 +4385,60 @@ the drill VM), so `--install`'s boot task keeps `Highest`. Gates: `tests/test_se
 (every package manager faked; a password on psql's command line as the
 negative control), `tests/test_guard_database_service.py`.
 
+**G2. Postgres 18, and moving an install to it** (2026-11-13,
+`kazma_core/postgres_upgrade.py`, `kazma_cli/postgres_upgrade.py`).
+`postgres_service.PG_MAJOR` is 18: a new install gets 18, and every name
+that held 16 takes the major (`service_name`, `bin_dir_for`, `setup_plan(...,
+major=)`, `empty_database_steps`). **A repair keeps the major the record
+names**: `_setup_postgres` repairs the record's installed service (16 on an
+install made before), never installs 18 beside it, keeps the record's history
+fields, and signs in with the stored superuser password (a repair used the
+installer's throwaway, which no installer had set). `kazma setup postgres
+--upgrade` moves an install: 18 installed beside 16 on a spare port
+(`postgres_upgrade._free_port`, from 55432) with the role and the password
+Kazma already uses; Kazma held through its guard (`_MoveHold`, its own
+reason); `copy_database` (the new major's `pg_dump`/`pg_restore` as
+`kazma_app`, one transaction, every public table's count and every sequence
+compared; an earlier copy replaced only by `pg_move._replace_refusal`'s
+rule); the switch (`switch_steps`: the new server's port written ON DISK,
+`postgres_service.port_step` -- never through a connection -- then the new
+stopped, the old stopped and off the boot list, the new started on the old
+port, checked to answer as 18 and to sign Kazma in); the record (new server,
+the old under `previous`), Kazma started and seen signed in, the first base
+backup taken. `.env` and the memory backends' addresses do not change.
+Every stage is journaled first (`setup_record.json` `postgres_upgrade`);
+the record names the server about to be on the port before any server stops,
+and the guard's `DatabaseServiceWatch` leaves the service alone while the
+journal says `switching` (at most `DBSVC_UPGRADE_HOLD_S` =
+`postgres_upgrade.SWITCH_HOLD_S`), so the watch never starts the old one. A
+failed copy starts Kazma again on the old server; a failed switch is undone
+(`undo_steps`: the new stopped, off the boot list and back on its spare
+port; the old back on the boot list and started); a run killed in the switch
+is undone by the next run first. Gates: `tests/test_postgres_upgrade.py` (a
+fake Windows machine whose services keep their own ports and states: the
+order, each failure, a killed switch, the repair rule, each platform's
+switch; the run without the undo as the negative control),
+`tests/test_postgres_upgrade_real.py` (real 16 and 18 servers, opt-in
+`KAZMA_TEST_PG_UPGRADE_BIN`; a partial restore as the control).
+**Compose deployments** (`kazma_core/postgres_compose_upgrade.py`,
+`scripts/pg_compose_upgrade.py`): `docker-compose.postgres.yml` and
+`docker-compose.ha.yml` run 18 on a volume of its own (`kazma_pgdata18`,
+mounted at `/var/lib/postgresql`, the 18 image's layout), with 16's
+`kazma_pgdata` mounted read-only at `/kazma/pg16` only so the db entrypoint
+refuses an empty 18 while a 16 database is there (exit 78, naming the
+script; `KAZMA_PG_UPGRADING=1` lets the script's own start through): a
+`docker compose up` after a pull never starts Kazma on an empty database.
+The script dumps from the 16 container, or, when compose already replaced it,
+from a temporary 16 server on the 16 volume (`OLD_IMAGES`); keeps the 16
+container's definition in a journal beside the compose file (owner only: it
+holds the password), because compose finds a service's container by labels
+and removes the old one; restores into 18 and compares; any failure removes
+the 18 container and its volume and makes 16 again from the kept definition
+(`engine_move._create_args`). Gate: `tests/test_postgres_compose_upgrade_real.py`
+(a real compose project, opt-in `KAZMA_TEST_PG_COMPOSE_UPGRADE=1`: the refused
+`compose up` as the negative control, both sources, a planted restore failure
+put back and then moved).
+
 **H. WAL archiving and point-in-time restore** (A2,
 `kazma_core/backup/wal_archive.py`). `archive_mode = on`, `archive_timeout =
 300`, each segment copied by the OS's own copy then renamed (the server's
@@ -4394,11 +4448,21 @@ archive" reads `pg_stat_archiver` (a failing archiver, or none archived for
 (`pg_basebackup -Ft -z -X fetch`, two kept, a failed one leaves no folder),
 prunes the WAL the older one no longer needs, and sends new segments and base
 backups offsite (`pgwal-*`, `pgbase-*`, in order; a failed upload stops the
-pass). `kazma restore postgres --to TIME --into DIR` lays the newest base
+pass). **Each major has its own archive, base backups and offsite names**
+(2026-11-13): `wal_archive.default_archive_dir(platform, major)`,
+`default_base_dir(major)`, `offsite_tag(major)`, named by the record
+(`base_backup_dir`, `offsite_tag`; empty on an install made before 18, which
+keeps its folders). A new major numbers its segments from the start again on
+the same timeline: beside 16's base backup the prune took every 18 segment
+for older than that backup's start (the shared folder is the negative control
+in `tests/test_postgres_upgrade.py`). `kazma restore postgres --to TIME --into DIR` lays the newest base
 backup taken before TIME (`wal_archive._base_before`; a time without a zone is
 this machine's) into a new folder set to replay to TIME; the live database is
 never touched. It took the newest base whatever TIME was, and Postgres cannot
-replay a base back to a time before it was taken. Gate:
+replay a base back to a time before it was taken. A TIME before a move to a
+newer major is restored from the server it replaced
+(`wal_archive.generation_for`: the record's `previous`, its archive, base
+backups and programs). Gate:
 `tests/test_setup_postgres.py` (retention, the archiver's numbers, restore and
 its base, offsite order), `tests/test_resilience_postgres.py` (the archiver's
 numbers, outage or query error and the move from a container, on a real
@@ -11907,6 +11971,21 @@ sent. Gate: `tests/test_answer_quality_monitor.py`.
   port itself. Gates: `tests/test_suite_reaches_no_running_kazma.py`,
   `tests/test_egress_guard.py` (a planted test as the negative control),
   `tests/test_agent_turn.py`.
+- **A test that runs real containers is marked `real_docker`** (2026-11-13).
+  `tests/conftest.py`'s `_isolated_docker_config` points `DOCKER_CONFIG` at
+  an empty folder for every other test (which engine a developer's machine
+  uses never decides a test); its `default` context is the platform's own
+  Docker address, which on a machine whose engine is Kazma's (no Docker
+  Desktop) answers nothing: every container test failed there and the
+  sandbox's real run skipped without a word. A marked test keeps the
+  developer's settings. A test's own `docker run -v` names the folder as the
+  engine in force mounts it (`docker_cli.engine_host_path`). Gate:
+  `tests/test_real_docker_marker.py` (the two tests are each other's control).
+- **Every docs diagram parses** with the docs site's own Mermaid
+  (`tests/test_docs_mermaid_diagrams_parse.py`, in a blank Chromium page; it
+  needs `cd docs && npm install`, as building the site does). The site draws
+  diagrams in the browser, so a broken one is only a console error: the
+  Commitment Layer page's had never drawn.
 - **Compile check (Python):** `& '.venv\Scripts\python.exe' -c "import py_compile; py_compile.compile(r'<file>', doraise=True); print('OK')"`
 - **Syntax check (JS):** `node --check "<file>"`
 - **Run tests (single file):** `& '.venv\Scripts\python.exe' -m pytest <path> -v`
@@ -11989,4 +12068,4 @@ sent. Gate: `tests/test_answer_quality_monitor.py`.
 - `docs/plans/done/DOCS_CONSOLIDATION_PLAN.md` — Docs consolidation plan (completed)
 - `CHANGELOG.md` — Sprint history
 - Live docs only under `docs/docs/` (Docusaurus). Do not resurrect retired `docs-v2` / loose handover trees. A page added, moved or deleted there (or directly in `docs/`) changes `docs/website-pages.json` and `docs/sidebars.js` in the same commit (`tests/test_website_pages.py`, `tests/test_docs_sidebar.py`). Every `#anchor` a docs link names is a heading of its page -- a `{#id}` or the id Docusaurus derives -- because Docusaurus only warns and CI does not build the docs (`tests/test_docs_anchors.py`; five pointed at removed sections on 2026-10-01). kazma.ai honours `{#id}`, and its build fails on a missing anchor and on an Arabic page linking to an English page that has an Arabic one (docs/docs/ops/website-sync.md). Every file a published page names in a code span is a tracked file, or declared with its reason -- runtime, example, another repository, a removal the page states (`tests/test_docs_file_refs.py`; 39 pointed at nothing on 2026-10-01, one of them a security protection whose code had been deleted).
-- The docs site's build packages (`docs/package-lock.json`) are fixed with `npm audit fix`, never `--force`, and checked with `npm run build`; `docs/package.json` holds Mermaid on 11.x (`overrides`: the audit fix took Mermaid 12, a major Docusaurus 3 was not tested with). Each package the 2026-11 fix moved past its advisories has its first fixed release as a floor (`tests/test_docs_site_packages.py`, the old lock's versions as the negative control); what is left needs a major version Docusaurus 3.10.2 holds back (`docs/docs/contributing/development-setup.md`).
+- The docs site's build packages (`docs/package-lock.json`) are fixed with `npm audit fix`, never `--force`, and checked with `npm run build`; `docs/package.json` names Mermaid's major in `overrides` (12 since 2026-11-13) and `uuid` 11 (the dev server's sockjs asks for 8); every docs diagram parses with the site's own Mermaid (`tests/test_docs_mermaid_diagrams_parse.py`: the site draws diagrams in the browser, so a broken one is only a console error, and the Commitment Layer page's had never drawn). Each package the 2026-11 fix moved past its advisories has its first fixed release as a floor (`tests/test_docs_site_packages.py`, the old lock's versions as the negative control); what is left needs a major version Docusaurus 3.10.2 holds back (`docs/docs/contributing/development-setup.md`).

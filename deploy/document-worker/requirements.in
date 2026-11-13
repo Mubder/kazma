@@ -3,7 +3,7 @@
 # below a security floor pyproject.toml declares for the same package
 # (tests/test_document_worker_locks.py holds both).
 # Regenerate it after a change:
-#   uv pip compile deploy/document-worker/requirements.in --python-version 3.11 \
+#   uv pip compile deploy/document-worker/requirements.in --python-version 3.14 \
 #     --python-platform x86_64-manylinux_2_28 --generate-hashes \
 #     -o deploy/document-worker/requirements.txt
 # Not here on purpose: httpx (remote parse egress stays in the Kazma process,
@@ -28,7 +28,7 @@ pillow==13.0.0
 prometheus-client==0.26.0
 pygments==2.21.0
 pymupdf==1.28.2
-pypdf==6.21.4
+pypdf==7.1.0
 pypdfium2==5.15.2
 python-bidi==0.6.12
 python-docx==1.2.0

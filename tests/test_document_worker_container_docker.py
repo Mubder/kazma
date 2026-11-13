@@ -34,10 +34,13 @@ from kazma_core.documents.worker_broker import BrokerLimits, BrokerSettings, _Br
 
 IMAGE = (os.environ.get("KAZMA_TEST_DOCUMENT_WORKER_IMAGE") or "").strip()
 DOCKER = find_docker_cli() if IMAGE else None
-pytestmark = pytest.mark.skipif(
-    not (IMAGE and DOCKER),
-    reason="set KAZMA_TEST_DOCUMENT_WORKER_IMAGE (and have a docker CLI) to qualify the container profile",
-)
+pytestmark = [
+    pytest.mark.skipif(
+        not (IMAGE and DOCKER),
+        reason="set KAZMA_TEST_DOCUMENT_WORKER_IMAGE (and have a docker CLI) to qualify the container profile",
+    ),
+    pytest.mark.real_docker,
+]
 # Errnos the probe reports from INSIDE the Linux container (the host's errno
 # module differs on Windows: ENETUNREACH is 10051 there).
 LINUX_EAGAIN, LINUX_EACCES, LINUX_ENOSPC, LINUX_EROFS, LINUX_ENETUNREACH = 11, 13, 28, 30, 101

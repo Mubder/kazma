@@ -36,7 +36,7 @@ import pytest
 
 from kazma_core import postgres_service as pgs
 from kazma_core.backup import wal_archive
-from kazma_core.postgres_service import Platform, Step
+from kazma_core.postgres_service import PG_MAJOR, Platform, Step
 
 SUPER, THROW, APP = "Super-Secret-Pw-1", "Throwaway-Pw-2", "App-Pw-3"
 ROLE_SQL = "-- the role script\n"
@@ -92,11 +92,11 @@ def test_each_os_installs_a_service_that_starts_at_boot_and_restarts(platform):
     steps = _plan(platform)
     text = "\n".join(" ".join(s.argv) for s in steps)
     if platform.os == "windows":
-        assert "PostgreSQL.PostgreSQL.16" in text and "start= auto" in text and "sc failure" in text
+        assert f"PostgreSQL.PostgreSQL.{PG_MAJOR}" in text and "start= auto" in text and "sc failure" in text
     elif platform.os in ("debian", "fedora"):
         assert "systemctl enable --now" in text and "Restart=on-failure" in text
     else:
-        assert "sudo brew services start postgresql@16" in text
+        assert f"sudo brew services start postgresql@{PG_MAJOR}" in text
     stdin = "\n".join(s.stdin or "" for s in steps)
     assert "listen_addresses = 'localhost'" in stdin
     assert "archive_mode = 'on'" in stdin and "archive_timeout = '300'" in stdin
@@ -196,7 +196,7 @@ def test_a_full_setup_writes_env_and_the_record_and_prints_no_password(install, 
         assert not any(secret in " ".join(c["argv"]) for c in runner.calls)
     assert any(c["argv"][:2] == ["winget", "install"] for c in runner.calls)
     record = json.loads((install / "kazma-data" / "setup_record.json").read_text(encoding="utf-8"))
-    assert record["postgres"]["service"] == "postgresql-x64-16" and record["postgres"]["port"] == 5432
+    assert record["postgres"]["service"] == f"postgresql-x64-{PG_MAJOR}" and record["postgres"]["port"] == 5432
 
 
 def test_check_and_dry_run_change_nothing(install, capsys):
@@ -501,3 +501,47 @@ def test_the_record_is_written_whole(tmp_path):
     pgs.write_record(pgs.PostgresRecord(os="windows", manager="winget", service="s", port=5432,
                                         bin_dir="b", installed_at=time.time()), path)
     assert pgs.read_record(path)["postgres"]["service"] == "s"
+
+
+# -- a fresh Windows's winget (2026-11-13) --------------------------------------------------------
+#
+# The clean VM (2026-11-08) answered every winget install 0x8A15000F until its
+# package list was registered. `kazma setup system` repaired it
+# (run_system_step); the Postgres setup's own runner did not, so `kazma setup
+# postgres` alone -- and `--upgrade` -- failed at the install on a fresh
+# Windows.
+
+
+class _FreshWinget(_Runner):
+    """winget refuses installs until Add-AppxPackage registers its list."""
+
+    def __init__(self) -> None:
+        super().__init__(installed=False)
+        self.registered = False
+
+    def __call__(self, argv, **kw):
+        if argv[:2] == ["winget", "install"] and not self.registered:
+            self.calls.append({"argv": list(argv), "stdin": None, "env": {}})
+            return subprocess.CompletedProcess(argv, 0x8A15000F, "Data required by the source is missing", "")
+        if argv[:1] == ["powershell.exe"] and any("Add-AppxPackage" in a for a in argv):
+            self.registered = True
+        return super().__call__(argv, **kw)
+
+
+def test_the_postgres_setup_registers_wingets_package_list_and_tries_again(install, capsys):
+    from kazma_cli.setup import _setup_postgres
+
+    runner = _FreshWinget()
+    assert _setup_postgres(_options(), run=runner) == 0, capsys.readouterr().out
+    installs = [c for c in runner.calls if c["argv"][:2] == ["winget", "install"]]
+    assert len(installs) == 2 and runner.registered
+
+
+def test_without_the_repair_the_postgres_setup_stops_at_the_install(install, monkeypatch, capsys):
+    """The negative control: the runner before 2026-11-13."""
+    from kazma_cli import setup
+
+    monkeypatch.setattr(setup, "_winget_source_missing", lambda step, detail: False)
+    runner = _FreshWinget()
+    assert setup._setup_postgres(_options(), run=runner) == 1
+    assert not runner.registered

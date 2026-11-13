@@ -204,6 +204,10 @@ def test_the_cli_skips_the_folder_for_mcp_and_ask(argv, include_cwd, monkeypatch
 
 #: Entry points that must NOT load `.env`, and why.
 ENV_FREE_ENTRY_POINTS: dict[str, str] = {
+    "scripts/pg_compose_upgrade.py": (
+        "runs on a Docker host against a compose deployment: docker compose reads "
+        "that folder's .env itself; Kazma's own settings are not read"
+    ),
     "kazma-core/kazma_core/memory/backfill_v2.py": (
         "offline restored-generation migration: explicit --data-dir pins every "
         "store; loading an install's .env could redirect recovery to live data"

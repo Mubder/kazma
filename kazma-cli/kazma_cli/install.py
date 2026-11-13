@@ -596,7 +596,7 @@ def build_plan(parts, found: dict[str, PartState], states, machine: Machine, pla
                                                 (python, "-m", "playwright", "install", "chromium")),
                                 attempts=_SYSTEM_ATTEMPTS))
     if "postgres" in todo_ids:
-        plan.append(PlannedStep("postgres", Step("set up PostgreSQL 16 as a service", action="postgres",
+        plan.append(PlannedStep("postgres", Step("set up PostgreSQL as a service", action="postgres",
                                                  shown="kazma setup postgres -y", admin=True)))
     docker = "docker"
     if "document_container" in todo_ids and root is not None:

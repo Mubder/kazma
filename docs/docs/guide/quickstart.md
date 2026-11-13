@@ -89,7 +89,7 @@ prints the same list):
 | Node.js | yes | yes | MCP servers that need npx cannot start (health reads degraded) |
 | Browser tools (Playwright and Chromium) |  | yes | no browser tools; pages are read without running their JavaScript |
 | Docling (the hardest PDFs) |  | yes | a PDF the main readers cannot read gets no second local try |
-| PostgreSQL 16 as a service |  | yes | SQLite: a restore goes back to the last backup (every 6 hours) |
+| PostgreSQL as a service |  | yes | SQLite: a restore goes back to the last backup (every 6 hours) |
 | Docker | Windows, Linux | yes | no containers (documents parse in a limited process; no private search) |
 | Locked document worker (a container per document) |  | yes | documents are read in a limited process on this machine (not qualified for hostile files) |
 | Private web search (SearXNG) | Windows, Linux | yes | web search uses public engines' pages directly (or Tavily with your key) |

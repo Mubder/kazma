@@ -148,7 +148,7 @@ COMPONENTS: tuple[Component, ...] = (
         "a PDF the main readers cannot read gets no second local try",
         extras=("docling",), size="about 1 GB"),
     Component(
-        "postgres", "PostgreSQL 16 as a service",
+        "postgres", "PostgreSQL as a service",
         "a database service with point-in-time restore",
         "SQLite: a restore goes back to the last backup (every 6 hours)",
         extras=("postgres",), admin=True),

@@ -12,7 +12,8 @@ This module is what ``kazma setup postgres`` (``kazma_cli/setup.py``),
 * :func:`detect_platform` -- the OS and its package manager (winget on
   Windows, Homebrew on macOS, apt on Debian/Ubuntu, dnf on Fedora/RHEL; WSL is
   Linux inside its distro);
-* :func:`setup_plan` -- the steps that install Postgres 16 as a service that
+* :func:`setup_plan` -- the steps that install Postgres (:data:`PG_MAJOR`,
+  or the major an install already runs) as a service that
   starts at boot and restarts on failure, listening on this machine only,
   create Kazma's database and its ``kazma_app`` role
   (``deploy/postgres/kazma_app_role.sql``), and turn on WAL archiving (A2).
@@ -49,23 +50,35 @@ __all__ = [
     "detect_platform",
     "empty_database_steps",
     "read_record",
+    "service_name",
     "service_state",
     "setup_plan",
     "write_record",
 ]
 
-PG_MAJOR = 16
+#: The major a new install gets. An install made before runs its own major
+#: (its record names it) until ``kazma setup postgres --upgrade`` moves it
+#: (``postgres_upgrade``).
+PG_MAJOR = 18
 DEFAULT_PORT = 5432
 DATABASE = "kazma"
 APP_ROLE = "kazma_app"
 
-#: The service each platform's package registers.
-SERVICE = {
-    "windows": f"postgresql-x64-{PG_MAJOR}",
-    "debian": "postgresql",
-    "fedora": f"postgresql-{PG_MAJOR}",
-    "macos": f"homebrew.mxcl.postgresql@{PG_MAJOR}",
-}
+
+def service_name(os_name: str, major: int = PG_MAJOR) -> str | None:
+    """The service *os_name*'s package registers for *major* (None: no
+    package manager Kazma knows). Debian runs every cluster under one
+    ``postgresql`` service and controls each with ``pg_ctlcluster``."""
+    return {
+        "windows": f"postgresql-x64-{major}",
+        "debian": "postgresql",
+        "fedora": f"postgresql-{major}",
+        "macos": f"homebrew.mxcl.postgresql@{major}",
+    }.get(os_name)
+
+
+#: The service each platform's package registers for :data:`PG_MAJOR`.
+SERVICE = {name: service_name(name) for name in ("windows", "debian", "fedora", "macos")}
 
 Runner = Callable[..., subprocess.CompletedProcess]
 
@@ -96,6 +109,11 @@ class Step:
     ok_codes: tuple[int, ...] = (0,)
     action: str = ""
     dep: str = ""
+    #: For an ``action``: the service, its major and the port it acts on
+    #: (empty: the plan's own service and port).
+    service: str = ""
+    major: int = 0
+    port: int = 0
 
     def printable(self) -> str:
         return self.shown or " ".join(self.argv) or self.action
@@ -142,19 +160,31 @@ def detect_platform(*, system: str | None = None, which: Callable[[str], str | N
 # -- the plan ----------------------------------------------------------------------------
 
 
-def _bin_dir(p: Platform) -> str:
+def _bin_dir(p: Platform, major: int = PG_MAJOR) -> str:
     if p.os == "windows":
-        return rf"C:\Program Files\PostgreSQL\{PG_MAJOR}\bin"
+        return rf"C:\Program Files\PostgreSQL\{major}\bin"
     if p.os == "fedora":
-        return f"/usr/pgsql-{PG_MAJOR}/bin"
+        return f"/usr/pgsql-{major}/bin"
     if p.os == "debian":
-        return f"/usr/lib/postgresql/{PG_MAJOR}/bin"
-    return f"/opt/homebrew/opt/postgresql@{PG_MAJOR}/bin"
+        return f"/usr/lib/postgresql/{major}/bin"
+    return f"/opt/homebrew/opt/postgresql@{major}/bin"
 
 
-def _psql(p: Platform, *, port: int, database: str = "postgres") -> tuple[str, ...]:
+def data_dir_for(p: Platform, major: int = PG_MAJOR) -> str:
+    """Where the package puts *major*'s data folder (Debian: its
+    configuration folder, which ``pg_conftool`` edits)."""
+    if p.os == "windows":
+        return rf"C:\Program Files\PostgreSQL\{major}\data"
+    if p.os == "fedora":
+        return f"/var/lib/pgsql/{major}/data"
+    if p.os == "debian":
+        return f"/etc/postgresql/{major}/main"
+    return f"/opt/homebrew/var/postgresql@{major}"
+
+
+def _psql(p: Platform, *, port: int, database: str = "postgres", major: int = PG_MAJOR) -> tuple[str, ...]:
     """psql as the server's superuser on this machine."""
-    exe = str(Path(_bin_dir(p)) / ("psql.exe" if p.os == "windows" else "psql"))
+    exe = str(Path(_bin_dir(p, major)) / ("psql.exe" if p.os == "windows" else "psql"))
     # -w: a refused password is an error, never a prompt on the console (psql
     # asks there whatever its input is, and the setup waited for a key).
     common = ("-w", "-v", "ON_ERROR_STOP=1", "-X", "-q", "-p", str(port), "-d", database)
@@ -169,25 +199,49 @@ def _sql_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
+def port_step(p: Platform, major: int, port: int) -> Step:
+    """*major*'s server set to listen on *port* at its next start (it may be
+    running or stopped: the setting is written on disk, never through a
+    connection, so a server that cannot start on its old port can be moved).
+    Windows and macOS: :func:`set_port_on_disk` in this process (the folder
+    is the elevated setup's, or this account's); Debian: ``pg_conftool``;
+    Fedora: the same edit as the server's own account."""
+    title = f"PostgreSQL {major} on port {int(port)}"
+    if p.os == "debian":
+        return Step(title, ("sudo", "pg_conftool", str(major), "main", "set", "port", str(int(port))), admin=True,
+                    major=major, port=int(port))
+    if p.os == "fedora":
+        conf = f"{data_dir_for(p, major)}/postgresql.auto.conf"
+        script = f"sed -i '/^port[[:space:]]*=/d' {conf} && echo \"port = '{int(port)}'\" >> {conf}"
+        return Step(title, ("sudo", "-u", "postgres", "sh", "-c", script), admin=True, major=major, port=int(port))
+    return Step(title, action="set_port", major=major, port=int(port), admin=p.os != "macos",
+                shown=f"port = {int(port)} in postgresql.auto.conf ({data_dir_for(p, major)})")
+
+
 def setup_plan(p: Platform, *, port: int = DEFAULT_PORT, superuser_password: str,
                throwaway_password: str, app_password: str, role_sql: str,
-               wal_archive_command: str | None = None) -> list[Step]:
+               wal_archive_command: str | None = None, major: int = PG_MAJOR) -> list[Step]:
     """Every step for *p*, in order. Raises ValueError for a platform with no
-    package manager Kazma knows (the CLI prints the manual steps instead)."""
+    package manager Kazma knows (the CLI prints the manual steps instead).
+
+    A *port* other than the default (``postgres_upgrade``: the new major
+    beside the old one, on a spare port) is set before the server first
+    starts where the package would start it on its own default."""
     if p.manager is None:
         raise ValueError(f"no supported package manager on this {p.os} system")
-    service = SERVICE[p.os]
+    service = service_name(p.os, major)
     steps: list[Step] = []
+    other_port = port != DEFAULT_PORT
 
-    # 1. Install Postgres 16 as a service that starts at boot.
+    # 1. Install Postgres as a service that starts at boot.
     if p.os == "windows":
         override = (f"--mode unattended --unattendedmodeui none --disable-components stackbuilder,pgAdmin "
                     f"--servicename {service} --serverport {port} --superpassword {throwaway_password}")
         steps.append(Step(
-            "Install PostgreSQL 16 (a Windows service)",
-            ("winget", "install", "--id", f"PostgreSQL.PostgreSQL.{PG_MAJOR}", "--exact", "--silent",
+            f"Install PostgreSQL {major} (a Windows service)",
+            ("winget", "install", "--id", f"PostgreSQL.PostgreSQL.{major}", "--exact", "--silent",
              "--accept-package-agreements", "--accept-source-agreements", "--override", override),
-            shown=(f"winget install --id PostgreSQL.PostgreSQL.{PG_MAJOR} --exact --silent "
+            shown=(f"winget install --id PostgreSQL.PostgreSQL.{major} --exact --silent "
                    f"--override \"... --servicename {service} --serverport {port} --superpassword ****\""),
             admin=True))
         steps.append(Step("Start it at boot", ("sc", "config", service, "start=", "auto"), admin=True))
@@ -199,29 +253,36 @@ def setup_plan(p: Platform, *, port: int = DEFAULT_PORT, superuser_password: str
             Step("Add the PostgreSQL project's apt repository",
                  ("sudo", "apt-get", "install", "-y", "postgresql-common"), admin=True),
             Step("", ("sudo", "/usr/share/postgresql-common/pgdg/apt.postgresql.org.sh", "-y"), admin=True),
-            Step(f"Install postgresql-{PG_MAJOR}",
-                 ("sudo", "apt-get", "install", "-y", f"postgresql-{PG_MAJOR}"), admin=True),
-            Step("Start it at boot", ("sudo", "systemctl", "enable", "--now", service), admin=True),
+            Step(f"Install postgresql-{major}",
+                 ("sudo", "apt-get", "install", "-y", f"postgresql-{major}"), admin=True),
         ]
+        if other_port:
+            # apt makes and starts the cluster on the next free port.
+            steps += [port_step(p, major, port),
+                      Step("Restart it there", action="restart", service=service, major=major, port=port,
+                           admin=True)]
+        steps.append(Step("Start it at boot", ("sudo", "systemctl", "enable", "--now", service), admin=True))
     elif p.os == "fedora":
         steps += [
             Step("Add the PostgreSQL project's dnf repository",
                  ("sudo", "dnf", "install", "-y",
                   "https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-x86_64/"
                   "pgdg-redhat-repo-latest.noarch.rpm"), admin=True),
-            Step(f"Install postgresql{PG_MAJOR}-server",
-                 ("sudo", "dnf", "install", "-y", f"postgresql{PG_MAJOR}-server"), admin=True),
+            Step(f"Install postgresql{major}-server",
+                 ("sudo", "dnf", "install", "-y", f"postgresql{major}-server"), admin=True),
             Step("Create its data folder (sign-in by password on this machine)",
                  ("sudo", "env", "PGSETUP_INITDB_OPTIONS=--auth-host=scram-sha-256 --auth-local=peer",
-                  f"/usr/pgsql-{PG_MAJOR}/bin/postgresql-{PG_MAJOR}-setup", "initdb"),
+                  f"/usr/pgsql-{major}/bin/postgresql-{major}-setup", "initdb"),
                  admin=True, ok_codes=(0, 1)),
+            *([port_step(p, major, port)] if other_port else []),
             Step("Start it at boot", ("sudo", "systemctl", "enable", "--now", service), admin=True),
         ]
     elif p.os == "macos":
         steps += [
-            Step(f"Install postgresql@{PG_MAJOR}", ("brew", "install", f"postgresql@{PG_MAJOR}")),
+            Step(f"Install postgresql@{major}", ("brew", "install", f"postgresql@{major}")),
+            *([port_step(p, major, port)] if other_port else []),
             Step("Start it at boot (a LaunchDaemon: before anyone signs in)",
-                 ("sudo", "brew", "services", "start", f"postgresql@{PG_MAJOR}"), admin=True),
+                 ("sudo", "brew", "services", "start", f"postgresql@{major}"), admin=True),
         ]
     if p.os in ("debian", "fedora"):
         steps.append(Step(
@@ -231,7 +292,7 @@ def setup_plan(p: Platform, *, port: int = DEFAULT_PORT, superuser_password: str
              f"RestartSec=5s\\n' > /etc/systemd/system/{service}.service.d/kazma.conf && "
              "systemctl daemon-reload"), admin=True))
 
-    steps.append(Step("Wait for it to answer", action="wait"))
+    steps.append(Step("Wait for it to answer", action="wait", port=port))
 
     # 2. The superuser's password (Windows: replace the installer's throwaway),
     #    this machine only, Kazma's database. Read from stdin.
@@ -246,37 +307,41 @@ def setup_plan(p: Platform, *, port: int = DEFAULT_PORT, superuser_password: str
         sql += ["ALTER SYSTEM SET archive_mode = 'on';",
                 "ALTER SYSTEM SET archive_timeout = '300';",
                 f"ALTER SYSTEM SET archive_command = {_sql_literal(wal_archive_command)};"]
+    psql = _psql(p, port=port, major=major)
     steps.append(Step("Set the superuser's password, this machine only, Kazma's database",
-                      _psql(p, port=port), stdin="\n".join(sql) + "\n", env=env,
-                      shown=" ".join(_psql(p, port=port)) + " < (password, settings)"))
-    steps.append(Step("Restart it to apply the settings", action="restart"))
-    steps.append(Step("Wait for it to answer", action="wait"))
+                      psql, stdin="\n".join(sql) + "\n", env=env,
+                      shown=" ".join(psql) + " < (password, settings)"))
+    steps.append(Step("Restart it to apply the settings", action="restart", service=service, major=major,
+                      port=port))
+    steps.append(Step("Wait for it to answer", action="wait", port=port))
 
     # 3. Kazma's role: not a superuser, the owner of Kazma's objects.
     env = {"PGPASSWORD": superuser_password} if p.os == "windows" else {}
-    steps.append(Step(f"Create the {APP_ROLE} role (not a superuser)", _psql(p, port=port, database=DATABASE),
-                      stdin=role_sql, env=env,
-                      shown=" ".join(_psql(p, port=port, database=DATABASE)) + " < kazma_app_role.sql"))
-    steps.append(Step(f"Give {APP_ROLE} its password", _psql(p, port=port, database=DATABASE),
+    psql = _psql(p, port=port, database=DATABASE, major=major)
+    steps.append(Step(f"Create the {APP_ROLE} role (not a superuser)", psql,
+                      stdin=role_sql, env=env, shown=" ".join(psql) + " < kazma_app_role.sql"))
+    steps.append(Step(f"Give {APP_ROLE} its password", psql,
                       stdin=f"ALTER ROLE {APP_ROLE} PASSWORD {_sql_literal(app_password)};\n", env=env,
-                      shown=" ".join(_psql(p, port=port, database=DATABASE)) + " < (password)"))
+                      shown=" ".join(psql) + " < (password)"))
     return steps
 
 
 def empty_database_steps(p: Platform, *, port: int = DEFAULT_PORT, superuser_password: str,
-                         role_sql: str) -> list[Step]:
+                         role_sql: str, major: int = PG_MAJOR) -> list[Step]:
     """Kazma's database on this server dropped and made again, empty and
     owned by ``kazma_app``: before a move copies the container in again over
     an earlier copy Kazma never started on (``backup.pg_move``). A plain
     ``DROP DATABASE``, never ``WITH (FORCE)``: a session still connected
     fails the step instead of being cut off."""
     env = {"PGPASSWORD": superuser_password} if p.os == "windows" else {}
+    server = _psql(p, port=port, major=major)
+    kazma = _psql(p, port=port, database=DATABASE, major=major)
     return [
-        Step(f"Empty Kazma's database on the new server (drop and create {DATABASE})", _psql(p, port=port),
+        Step(f"Empty Kazma's database on the new server (drop and create {DATABASE})", server,
              stdin=f"DROP DATABASE IF EXISTS {DATABASE};\nCREATE DATABASE {DATABASE};\n", env=env,
-             shown=" ".join(_psql(p, port=port)) + f" < (DROP DATABASE {DATABASE}; CREATE DATABASE {DATABASE})"),
-        Step(f"Give it to {APP_ROLE}", _psql(p, port=port, database=DATABASE), stdin=role_sql, env=env,
-             shown=" ".join(_psql(p, port=port, database=DATABASE)) + " < kazma_app_role.sql"),
+             shown=" ".join(server) + f" < (DROP DATABASE {DATABASE}; CREATE DATABASE {DATABASE})"),
+        Step(f"Give it to {APP_ROLE}", kazma, stdin=role_sql, env=env,
+             shown=" ".join(kazma) + " < kazma_app_role.sql"),
     ]
 
 
@@ -343,20 +408,76 @@ def service_state(os_name: str, service: str, port: int = DEFAULT_PORT, *,
 
 def restart_service(os_name: str, service: str, port: int, *, run: Runner = subprocess.run,
                     answers: Callable[[int], bool] | None = None, sleep: Callable[[float], None] = time.sleep,
-                    wait_s: float = 60.0) -> bool:
-    """Stop and start the service, and wait until the port answers."""
+                    wait_s: float = 60.0, major: int = 0) -> bool:
+    """Stop and start the service, and wait until the port answers. On
+    Debian with *major*: that cluster only (``postgresql`` restarts every
+    cluster, the one Kazma uses among them)."""
     if os_name == "windows":
-        _out(run, ["sc", "stop", service])
-        for _ in range(30):
-            if "STOPPED" in _out(run, ["sc", "query", service])[1]:
-                break
-            sleep(1.0)
+        stop_service(os_name, service, run=run, sleep=sleep, wait_s=30.0)
         _out(run, ["sc", "start", service])
     elif os_name == "macos":
         _out(run, ["launchctl", "kickstart", "-k", f"system/{service}"])
+    elif os_name == "debian" and major:
+        _out(run, ["sudo", "pg_ctlcluster", str(major), "main", "restart"])
     else:
         _out(run, ["sudo", "systemctl", "restart", service])
     return wait_for_port(port, answers=answers, sleep=sleep, wait_s=wait_s)
+
+
+def stop_service(os_name: str, service: str, *, run: Runner = subprocess.run,
+                 sleep: Callable[[float], None] = time.sleep, major: int = 0, wait_s: float = 90.0) -> bool:
+    """Stop the service (Debian with *major*: that cluster) and wait until
+    the OS says it stopped. True when it is stopped (or was)."""
+    if os_name == "windows":
+        code, text = _out(run, ["sc", "query", service])
+        if code == 0 and "STOPPED" in text:
+            return True
+        _out(run, ["sc", "stop", service])
+        waited = 0.0
+        while waited <= wait_s:
+            code, text = _out(run, ["sc", "query", service])
+            if code != 0 or "STOPPED" in text:
+                return code == 0
+            sleep(1.0)
+            waited += 1.0
+        return False
+    if os_name == "macos":
+        return _out(run, ["sudo", "brew", "services", "stop", service.removeprefix("homebrew.mxcl.")])[0] == 0
+    if os_name == "debian" and major:
+        code, text = _out(run, ["sudo", "pg_ctlcluster", str(major), "main", "stop"])
+        return code == 0 or "not running" in text.lower()
+    return _out(run, ["sudo", "systemctl", "stop", service])[0] == 0
+
+
+def start_service(os_name: str, service: str, port: int, *, run: Runner = subprocess.run,
+                  answers: Callable[[int], bool] | None = None, sleep: Callable[[float], None] = time.sleep,
+                  major: int = 0, wait_s: float = 60.0) -> bool:
+    """Start the service (Debian with *major*: that cluster) and wait until
+    the port answers."""
+    if os_name == "windows":
+        _out(run, ["sc", "start", service])
+    elif os_name == "macos":
+        _out(run, ["sudo", "brew", "services", "start", service.removeprefix("homebrew.mxcl.")])
+    elif os_name == "debian" and major:
+        _out(run, ["sudo", "pg_ctlcluster", str(major), "main", "start"])
+    else:
+        _out(run, ["sudo", "systemctl", "start", service])
+    return wait_for_port(port, answers=answers, sleep=sleep, wait_s=wait_s)
+
+
+def set_port_on_disk(data_dir: str | Path, port: int) -> None:
+    """``port`` in the data folder's ``postgresql.auto.conf`` (where ``ALTER
+    SYSTEM`` writes, and which wins over ``postgresql.conf``). Read at the
+    server's next start; written whether it runs or not."""
+    from kazma_core.atomic_files import atomic_write_text
+
+    path = Path(data_dir) / "postgresql.auto.conf"
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        lines = ["# Do not edit this file manually!", "# It will be overwritten by the ALTER SYSTEM command."]
+    kept = [line for line in lines if line.split("=", 1)[0].strip().lower() != "port"]
+    atomic_write_text(path, "\n".join([*kept, f"port = '{int(port)}'"]) + "\n")
 
 
 def wait_for_port(port: int, *, answers: Callable[[int], bool] | None = None,
@@ -399,6 +520,15 @@ class PostgresRecord:
     major: int = PG_MAJOR
     wal_archive_dir: str = ""
     installed_at: float = 0.0
+    #: Where this server's base backups go (``wal_archive``). Empty: the
+    #: folder every install used before 18 (``<data dir>/backups/pg/base``).
+    base_backup_dir: str = ""
+    #: What the offsite copy's names carry after ``pgwal-``/``pgbase-``: each
+    #: major numbers its WAL segments from the start again.
+    offsite_tag: str = ""
+    #: The server this one replaced (``postgres_upgrade``): stopped and kept,
+    #: with its archive and base backups, for a restore to a time before.
+    previous: dict[str, Any] = field(default_factory=dict)
 
 
 def write_record(rec: PostgresRecord, path: Path | None = None) -> Path:
@@ -412,8 +542,8 @@ def write_record(rec: PostgresRecord, path: Path | None = None) -> Path:
     return target
 
 
-def bin_dir_for(p: Platform) -> str:
-    return _bin_dir(p)
+def bin_dir_for(p: Platform, major: int = PG_MAJOR) -> str:
+    return _bin_dir(p, major)
 
 
 def is_admin() -> bool:
