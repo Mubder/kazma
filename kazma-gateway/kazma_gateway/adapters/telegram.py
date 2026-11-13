@@ -371,7 +371,14 @@ class TelegramAdapter(SenderGate, BaseAdapter):
                         err_body = exc.response.text[:300]
                     except Exception:
                         err_body = "<unreadable>"
-                    logger.error("[telegram] HTTP %d polling error: %s", exc.response.status_code, err_body)
+                    # Telegram's own outage (5xx) or rate limit (429) passes by
+                    # itself: a WARNING. The daily digest lists ERROR lines as
+                    # needing attention, and live logged Telegram's 502s there
+                    # (2026-11-08/09). A refusal of this bot (401, 403, 404) is
+                    # the owner's to fix: an ERROR.
+                    status = exc.response.status_code
+                    logger.log(logging.WARNING if status == 429 or status >= 500 else logging.ERROR,
+                               "[telegram] HTTP %d polling error: %s", status, err_body)
                     self._receive.problem(f"Telegram answered HTTP {exc.response.status_code} while Kazma polled")
 
                     # 429: respect Telegram's retry_after parameter instead

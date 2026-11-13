@@ -1952,8 +1952,12 @@ async def _handle_native_pg_backup(payload: dict[str, Any]) -> bool:
                 await asyncio.to_thread(_enqueue_pg_offsite_retry, path)
                 await asyncio.to_thread(_alert_pg_offsite, failed)
         if path is None:
-            from kazma_core.db.pg_backup import last_pg_backup_failure
+            from kazma_core.db.pg_backup import last_pg_backup_failure, last_pg_backup_interrupted
 
+            if last_pg_backup_interrupted():
+                # Kazma's own stop ended pg_dump (a reload): nothing to page.
+                logger.info("[memory_worker] native_pg_backup interrupted by Kazma's stop; it runs again")
+                return False
             reason = last_pg_backup_failure()
             logger.warning("[memory_worker] native_pg_backup produced no dump: %s", reason)
             try:

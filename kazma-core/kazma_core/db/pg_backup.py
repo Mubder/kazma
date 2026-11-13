@@ -156,9 +156,19 @@ def last_pg_backup_failure() -> str | None:
     return _last_failure
 
 
-def _record_failure(reason: str | None) -> None:
-    global _last_failure
+def last_pg_backup_interrupted() -> bool:
+    """The most recent dump was ended by Kazma's own stop (a reload), which
+    is no failure: the next pass dumps again (``kazma_core.child_stop``)."""
+    return _last_interrupted
+
+
+_last_interrupted = False
+
+
+def _record_failure(reason: str | None, *, interrupted: bool = False) -> None:
+    global _last_failure, _last_interrupted
     _last_failure = reason
+    _last_interrupted = interrupted
 
 
 def pg_dump_tool_problem() -> str | None:
@@ -285,10 +295,15 @@ def perform_pg_backup(*, retention: int | None = None) -> Path | None:
         )
         return dest
     except Exception as exc:
-        logger.warning("[pg_backup] pg_dump failed", exc_info=True)
         from kazma_core.errors import validation_error
 
-        _record_failure(f"{type(exc).__name__}: {validation_error(exc)}")
+        if getattr(exc, "interrupted", False):
+            # A reload during the dump: the guard's stop reached pg_dump too.
+            logger.info("[pg_backup] the dump was stopped by Kazma's own stop; the next pass dumps again")
+            _record_failure(f"{type(exc).__name__}: {validation_error(exc)}", interrupted=True)
+        else:
+            logger.warning("[pg_backup] pg_dump failed", exc_info=True)
+            _record_failure(f"{type(exc).__name__}: {validation_error(exc)}")
         # Never leave a half-written dump behind.
         try:
             if "tmp" in locals():

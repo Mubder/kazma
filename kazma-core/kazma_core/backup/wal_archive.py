@@ -41,6 +41,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from kazma_core.child_stop import StoppedByKazma, ended_by_kazmas_stop
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -196,6 +198,8 @@ def _base_backup(record: dict[str, Any], superuser_password: str, *, run=subproc
     if done.returncode != 0:
         shutil.rmtree(partial, ignore_errors=True)
         said = ((done.stderr or done.stdout or "").strip().splitlines() or [""])[-1][:300]
+        if ended_by_kazmas_stop(done.returncode):
+            raise StoppedByKazma(f"pg_basebackup was stopped by Kazma's own stop: {said}")
         raise RuntimeError(f"pg_basebackup exited {done.returncode}: {said}")
     partial.rename(target)
     for old in _base_backups(root)[BASE_KEEP:]:
@@ -308,6 +312,8 @@ def wal_sweep(now: float | None = None) -> str:
             try:
                 base = _base_backup(record, password, now=now)
                 logger.info("[backup] base backup taken: %s", base.name)
+            except StoppedByKazma as exc:
+                logger.info("[backup] %s; the next sweep takes it", exc)
             except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
                 logger.warning("[backup] base backup failed: %s", exc)
                 alert("backup.pg_base_backup", "The weekly database base backup failed", str(exc)[:500],

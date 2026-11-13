@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## A reload during a backup no longer pages (2026-11-13)
+
+- A reload while the 6-hour database dump ran stopped pg_dump with the
+  server and paged "Postgres dump failed" (twice on 2026-11-12). A dump or
+  weekly base backup ended by Kazma's own stop is now said as interrupted, in
+  the log only, and runs again at the next pass; a real failure still pages.
+- Telegram's own outages and rate limits (HTTP 5xx, 429) while Kazma polls
+  are warnings now, not errors: they pass by themselves, and the daily digest
+  listed them as needing attention. A bot token Telegram refuses is still an
+  error.
+
 ## The terminal app talks to its own install only (2026-11-13)
 
 - `kazma tui`, `kazma ask` and the other commands that talk to the running

@@ -6215,6 +6215,20 @@ that file until it was restored. Run it from the dev checkout
 C:/Users/balfa/kazma`). Tests: `tests/test_restic_stop_is_not_a_failure.py`,
 `tests/test_deploy_live.py` (each with the old behaviour as the control).
 
+**D2b. A backup tool Kazma's stop ended is interrupted, never failed**
+(`kazma_core/child_stop.py`, 2026-11-13). pg_dump and pg_basebackup stay in
+the server's group -- killed at a stop, a dump starts again cleanly, where an
+orphan would leave a half-written file -- and a reload during the 6-hour dump
+paged "Postgres dump failed ... pg_dump: terminated by user" (2026-11-12,
+twice). `child_stop.ended_by_kazmas_stop(returncode)` is the one answer: a
+stop's exit code (`STOP_EXIT_CODES`: Windows' STATUS_CONTROL_C_EXIT, a POSIX
+SIGINT or SIGTERM) and Kazma stopping within `STOP_WAIT_S` (the child sees the
+signal 1-3 ms before the server marks its stop). The dump raises
+`PgBridgeError(interrupted=True)`, `pg_backup.last_pg_backup_interrupted()`
+says so, and the handler pages nobody; the base backup raises
+`child_stop.StoppedByKazma`, which a new backup tool the server starts and
+pages on raises too. Tests: `tests/test_child_stop.py` (real children).
+
 **D3. A restore can be removed by the account that made it**
 (`restic_repo.restore`, 2026-11-13). restic restores a snapshot under the
 source's absolute path and gives each folder it rebuilt above the backup

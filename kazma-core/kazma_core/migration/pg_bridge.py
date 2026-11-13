@@ -48,7 +48,15 @@ class PgToolNotFound(RuntimeError):
 
 
 class PgBridgeError(RuntimeError):
-    """Raised when pg_dump/pg_restore runs but exits non-zero."""
+    """Raised when pg_dump/pg_restore runs but exits non-zero.
+
+    ``interrupted``: Kazma's own stop ended the tool
+    (``kazma_core.child_stop``) -- nothing is wrong with the database.
+    """
+
+    def __init__(self, message: str = "", *, interrupted: bool = False) -> None:
+        super().__init__(message)
+        self.interrupted = interrupted
 
 
 @dataclass
@@ -246,9 +254,12 @@ def dump_database(
         raise
     if proc.returncode != 0:
         out_path.unlink(missing_ok=True)
+        from kazma_core.child_stop import ended_by_kazmas_stop
+
         raise PgBridgeError(
             f"pg_dump failed (exit {proc.returncode}): "
-            f"{proc.stderr.decode(errors='replace').strip()[:500]}"
+            f"{proc.stderr.decode(errors='replace').strip()[:500]}",
+            interrupted=ended_by_kazmas_stop(proc.returncode),
         )
     size_mb = out_path.stat().st_size / (1024 * 1024)
     logger.info("[pg_bridge] dump wrote %s (%.1f MB)", out_path.name, size_mb)
