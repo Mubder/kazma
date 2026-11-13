@@ -76,12 +76,14 @@ Every line below describes that setup.
 | Works in Arabic and English, Gulf dialect included | Shipped | `memory/query_terms.py` |
 | Nothing lost by accident: archiving never erases a memory's text | Shipped | `memory/macro_sleep.py` |
 | Shared memory between installs through Postgres | Partial — memories and facts mirror; each install keeps its own vectors and graph | [Postgres](docs/ops/postgres-and-saas.md) |
+| A copy of the memory graph in Neo4j (installed with Express on Windows and Linux), kept in step with Kazma's own store: a fact written, changed or forgotten while Neo4j was away reaches it at the next pass; edges Kazma did not write are never touched; Neo4j sends no usage data | Shipped | [Memory](docs/guide/memory-and-rag.md), Settings → Memory |
 
 ## Knowledge and documents
 
 | Feature | Status | Where |
 |---|---|---|
 | Knowledge Library: add files, web pages or whole sites; search by keywords and by meaning; Arabic-aware | Shipped | `/knowledge` |
+| Knowledge crawls that run for hours: the browser is renewed between pages, a site that keeps refusing stops the crawl (Resume continues it), a refresh removes pages the site removed (gone at once, not found confirmed an hour later), and each text is stored once | Shipped | [Knowledge library](docs/guide/knowledge-library.md) |
 | Documents: upload into quarantine with file-type checks; macro-enabled Office files and PDFs with scripts, outside actions, attachments or links to files and network shares are refused; text from PDF, Word, Excel, PowerPoint, HTML, Markdown, CSV and plain text, Arabic included (legacy .doc/.xls/.ppt through LibreOffice) | Shipped | `/documents` |
 | OCR of scanned PDFs and images, Arabic and Arabic-Indic digits included; ruled tables on a scanned page read cell by cell | Partial — Arabic is read by the neural engine (ONNX Runtime; its models installed by `scripts/ocr_models.py install`, and built into the document worker image); without them Tesseract reads, and it does not read Arabic-Indic digits. Every OCR case of Kazma's measured corpus qualifies with the neural engine; it is measured on one real scan so far | `documents/ocr/` |
 | Virus scanning of uploads | Opt-in — needs ClamAV installed; with `KAZMA_PRODUCTION=1` an upload is refused until a scan can run | `documents/malware.py` |
@@ -92,7 +94,7 @@ Every line below describes that setup.
 | A hard PDF sent to a third-party parser (LlamaParse, Reducto) when local extraction is weak | Opt-in — off by default; every upload is audited first | `documents.security.remote_parse` |
 | Deep web research with sources: search, read, crawl, summarize | Shipped | `/research` |
 | PDFs on the web (theses, articles, reports) read as their text layer by the sandboxed document worker, in chat and in research | Shipped — up to 20 MB, no OCR on a web read (a scan is refused); Knowledge crawls leave PDFs out | [Web research](docs/guide/web-research.md#pdf-sources) |
-| Web search through SearXNG (self-hosted metasearch, in the Docker setup) | Shipped | `tools/web_search.py` |
+| Web search through SearXNG (self-hosted metasearch, installed with Express on Windows and Linux) | Shipped | `tools/web_search.py` |
 | Search falls back to Bing, then Wikipedia's full-text search, when an engine answers with nothing or with results not about the query | Shipped — an answer counts only when at least half its results hold a word of the query | [Web research](docs/guide/web-research.md#stronger-search-searxng) |
 | Local HTTP extraction with optional local Chromium; hosted Firecrawl/Jina recovery requires explicit consent | Partial — local-only default; strict Chromium needs Linux network/cgroup controls; Windows strict rendering refuses launch and compatibility endurance is unqualified | [Web research](docs/guide/web-research.md) |
 | Durable research and crawl journals with explicit recovery after interruption | Shipped — finite job/history/report allowances; uncertain effects are not automatically replayed | [Web research](docs/guide/web-research.md) |
@@ -140,14 +142,17 @@ Every line below describes that setup.
 | Feature | Status | Where |
 |---|---|---|
 | A supervisor that restarts on real failure, reloads gracefully and pages you over Telegram | Shipped | `scripts/service/kazma_guard.py` |
+| The port of Kazma's page chosen at install (9090 by default) and changed later with one command; the supervisor and every `kazma` command follow it | Shipped | `kazma setup port`, [Quickstart](docs/guide/quickstart.md) |
 | On Windows, Kazma installs its own container engine (Docker as a service in a WSL distro of its own), which starts at boot with nobody signed in; Docker Desktop stays a choice | Shipped | `kazma setup engine`, Settings → System, [Quickstart](docs/guide/quickstart.md) |
 | An install whose containers run on Docker Desktop moves them to Kazma's engine in one command: only Kazma's own, their data checked file by file, and everything put back if a step fails | Shipped | `kazma setup engine --move-from-desktop`, [CLI reference](docs/guide/cli-reference.md) |
+| Kazma's container engine stops its containers cleanly when Windows shuts down or restarts, so nothing they just wrote is lost | Shipped | `kazma setup engine` |
 | When an update leaves Docker stopped, the supervisor starts it again (Kazma's own engine or Docker Desktop) and then the stopped containers Kazma uses (never another project's) | Shipped | `kazma_guard.py --status`, [Document processing](docs/ops/document-processing.md) |
 | One status card per restart: how long Kazma was down and whether each chat app connected (start and stop messages are optional) | Shipped | Settings → Alerts → Server status messages |
 | Backups of everything every 6 hours, snapshotted locally and offsite (restic), checked daily, with a weekly restore rehearsal of the database; a zip copy to a cloud provider that keeps only the newest N copies | Shipped | [Disaster recovery](docs/ops/disaster-recovery.md) |
 | Move an install to another machine or OS in one bundle | Shipped | `kazma migrate` |
 | Back up your settings to a file and restore them: you see what will change first, the keys you have are never replaced, a lost key comes back from the vault without typing it, and the restore can be undone | Shipped | Settings → System, [Configuration](docs/guide/configuration.md#settings-backup) |
 | Health checks that make a real round trip; alerts to Telegram, Discord or Slack; a daily digest and a weekly resilience report | Shipped | `/health/deep` |
+| A daily check crawls one known page for real and renders it in Kazma's own browser; a failure is an alert the same day | Shipped | Settings → System → Web acquisition |
 | Old chat step history pruned on a schedule you set | Shipped | Settings → System |
 | Every task Kazma runs is watched (chat turns, swarm tasks, scheduled jobs, documents, research and crawls, X posts, memory, maintenance): when one stalls, gets stuck or fails, a card in the chat it started from offers Retry, Cancel, Dismiss or Ask Kazma to diagnose; one optional automatic first step | Shipped | [Running work](docs/guide/running-work.md), `/runs` |
 | Postgres for settings, chats, tasks and checkpoints; SQLite with no setup | Shipped | [Postgres](docs/ops/postgres-and-saas.md) |
