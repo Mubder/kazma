@@ -34,7 +34,7 @@ import json
 import subprocess
 import tarfile
 import time
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from types import SimpleNamespace
 
 import pytest
@@ -160,8 +160,10 @@ def machine(install, monkeypatch):  # noqa: F811 - the imported fixture
     monkeypatch.setattr(pgs, "_port_answers", lambda port, host="127.0.0.1", timeout=2.0: m.answers(port))
     monkeypatch.setattr(pgs, "restart_service", lambda os_name, service, port, **kw: (
         m.run(["sc", "stop", service]), m.run(["sc", "start", service]), m.answers(port))[-1])
+    # The machine is a Windows one: its data folders are Windows paths, read
+    # as such on every OS the suite runs on (Linux CI split nothing at "\\").
     monkeypatch.setattr(pgs, "set_port_on_disk", lambda data_dir, port: m.services[
-        f"postgresql-x64-{Path(data_dir).parent.name}"].__setitem__("conf_port", port))
+        f"postgresql-x64-{PureWindowsPath(data_dir).parent.name}"].__setitem__("conf_port", port))
     monkeypatch.setattr(pgs, "time", SimpleNamespace(sleep=lambda s: None, time=time.time))
     monkeypatch.setattr(pgu, "server_major", lambda url: m.major_on(int(url.rsplit(":", 1)[1].split("/")[0])))
     monkeypatch.setattr(pgu, "_free_port", lambda *a, **kw: 55432)
