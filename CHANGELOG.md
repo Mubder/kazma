@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## Neo4j finds a memory graph node by an index (2026-11-13)
+
+- The memory graph's copy in Neo4j had no index, so every write looked for
+  its two nodes by reading every node. With 40,000 nodes, 500 edges written
+  in one statement took about 8.5 s; they now take about 0.1 s, and 500
+  separate writes about 0.85 s instead of about 8 s.
+- Each node now carries a key, the SHA-256 of its name, under a uniqueness
+  constraint on the tenant and the key. An index on the name itself cannot
+  be used: Neo4j refuses to index a value longer than about 8 KB, and a
+  fact's value can be 16 KB.
+- The maintenance pass gives existing nodes their keys (40,000 took about
+  5.5 s). Until every node has one, writes keep finding nodes by name, so
+  nothing is written twice. Two writers of the same new name now make one
+  node, where they could make two before.
+- A node an older Kazma makes later is keyed by the next pass; this install's
+  edges on a second copy of a node are moved to the keyed one, and another
+  install's edges are left where they are and counted. Memory health says
+  whether the copy is keyed and how many nodes still have no key.
+
 ## A reload during a backup no longer pages (2026-11-13)
 
 - A reload while the 6-hour database dump ran stopped pg_dump with the

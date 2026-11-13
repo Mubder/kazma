@@ -2219,11 +2219,52 @@ and Neo4j down at a process's first fact made it use SQLite until a restart.
   configured), from the last pass, never asking Neo4j. The hygiene counts
   had replaced that whole entry since 2026-10-03, and the Memory page said
   "graph: sqlite" over a Neo4j store; they sit beside it now.
+- **Nodes are found by key** (2026-11-13). With no index every write's
+  `MERGE (:Entity {name, tenant_id})` scanned every Entity node: 500 rows over
+  40,000 nodes took 8 s (neo4j 5.26). An index on `name` cannot hold a fact's
+  value (Neo4j refuses an indexed value past ~8 KB; a value is up to 4,000
+  characters, 16 KB in UTF-8) and a text index is not used by `MERGE`. So
+  every node carries `key`, the SHA-256 of its name (`graph_backend.entity_key`,
+  sent per row by `graph_backend.edge_row`), under the uniqueness constraint
+  `kazma_entity_key` on `(tenant_id, key)` (Community has composite
+  uniqueness; its index seeks every lookup, and `MERGE` locks its entry, so
+  two writers of a new name make one node). Each pass keys the copy first
+  (`graph_sync._key_nodes`): makes the constraint (read first with SHOW: the
+  driver logs the notice `IF NOT EXISTS` answers, every pass; keys two nodes
+  of a tenant share, written while there was none, are taken off all but the
+  one with the most edges), keys every node with a tenant, a string name and
+  no key -- never a node with no tenant -- streamed in one read
+  (`graph_sync.KEY_STAMPS_PER_PASS` at most), each guarded by its name and
+  "no key yet"; a keyless node whose keyed twin exists (an older writer made
+  it after the switch) has this install's edges moved to the twin, written
+  by key first and then removed, and goes once it has no edge; another
+  install's edges stay, and the node is counted `held_elsewhere`. A pass
+  that keys every node it can, the constraint there, records the copy
+  `keyed` (`graph_backend.KEYS_KEY`, runtime, per Neo4j `target`); writes,
+  `edges_at_keys`, `neighbors` and `delete_triple`'s subject-value branch then
+  find nodes by key (the backend reads the record at most every 30 s; the
+  sync's own process at once). Until then, and after any pass that cannot
+  finish (time, a refusal, an outage), it is `transitional`: nodes are found
+  by name, which is right in every state -- a new node gets its key when it
+  is made, only (setting a found node's key would be refused when its keyed
+  twin exists). Of two edges at one key the one between keyed nodes stands
+  (`Held.keyed`). Memory health says whether the copy is keyed and how many
+  nodes still have no key. Measured on neo4j 5.26 with 40,000 Entity nodes
+  (three runs each): 500 rows in one statement 8.4-8.7 s -> 0.07-0.19 s, 500
+  dual-writes 7.7-9.0 s -> 0.8-0.9 s; keying the 40,000 took 5.5-5.9 s.
 - Gate: `tests/test_memory_graph_sync.py` (an in-memory Neo4j answering the
   backend's statements, the product's writers; each case shows the copy as
   the old code left it first; a real-server case with
   `KAZMA_TEST_NEO4J_URL`, never this machine's 7687 unless
-  `KAZMA_TEST_NEO4J_THROWAWAY=1`).
+  `KAZMA_TEST_NEO4J_THROWAWAY=1`). For keys: one node per name through
+  every phase with writes between, an old writer after the switch converging
+  in one pass, a 4,000-character value of 4-byte characters, the plan an
+  index seek (EXPLAIN), foreign edges and nodes with no tenant unchanged, two
+  concurrent writers of a new name; negative controls: switching before
+  every node is keyed duplicates, the keyed write over a plain index (and
+  the write before keys) duplicates under concurrency, an index on `name`
+  refuses the value. One real-server test drops and remakes
+  `kazma_entity_key`.
 
 **L. The graph shows what memory holds, and extraction keeps it clean
 (2026-10-03, `memory/graph_view.py`, `entity_retire.py`, `graph_hygiene.py`).**

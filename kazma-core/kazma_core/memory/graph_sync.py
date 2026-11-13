@@ -44,6 +44,22 @@ fact this install never held is counted (``unknown_edges``) and left alone.
 Entity nodes of a tenant this install holds facts in, left with no edge, go
 (a forgotten value is a node, AUD-063).
 
+Every node carries a key (2026-11-13, ``graph_backend.entity_key``): the
+SHA-256 of its name, under the uniqueness constraint ``kazma_entity_key`` on
+``(tenant_id, key)``, so a write finds its node by an index seek, not a scan
+of every Entity node. Each pass first gives the copy's nodes their keys
+(:func:`_key_nodes`): it makes the constraint (taking the key off a second
+node of a tenant that shares one, written while there was none), keys every
+node with a tenant, a string name and no key, a page at a time -- never a
+node with no tenant -- and a keyless node whose keyed twin already exists (an
+older writer made it after the switch) has this install's edges moved to the
+twin through the ordinary delete/upsert; it goes once it has no edge, and
+another install's edges on it stay (counted). A pass that keys every node it
+can, with the constraint there, records the copy as ``keyed``
+(``graph_backend.KEYS_KEY``): writes, reads and deletes then find nodes by
+key. One that cannot finish (time, a refusal, an outage) records it
+``transitional``, and they find them by name, which is right in every state.
+
 A Neo4j that does not answer is waited out: the queue keeps every change (at
 most :data:`OUTBOX_MAX_ROWS` rows, then a full comparison is due instead),
 one WARNING when it stops answering, one INFO when it is back, and the pass
@@ -55,6 +71,7 @@ must not be pushed back).
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import sqlite3
 import threading
@@ -94,6 +111,11 @@ OUTBOX_MAX_ATTEMPTS = 5
 OUTBOX_MAX_ROWS = 100_000
 #: Isolated Entity nodes removed per tenant per full comparison.
 _ISOLATED_PER_PASS = 1000
+#: Nodes given their key per pass at most; the rest wait for the next pass
+#: (the copy stays ``transitional`` until none is left).
+KEY_STAMPS_PER_PASS = 100_000
+#: Groups of nodes sharing a key repaired per attempt at the constraint.
+_DUPLICATE_KEY_GROUPS = 500
 
 #: What the last full comparison found, kept in the settings store (runtime).
 FINDINGS_KEY = "memory.v2.graph_sync"
@@ -125,6 +147,44 @@ class Held:
     conf: float | None
     pred: str | None
     install: str | None
+    #: Both ends have their node key (``graph_backend.entity_key``).
+    keyed: bool = True
+
+
+@dataclass
+class _Keys:
+    """What giving the copy's nodes their keys did, and what it left."""
+
+    constraint: bool = False
+    stamped: int = 0
+    #: Keys taken off a second node of a tenant sharing one (to make the constraint).
+    unstamped: int = 0
+    #: Keyless nodes found with a keyed twin, and this install's edges moved off them.
+    twins: int = 0
+    written: int = 0
+    removed: int = 0
+    failed: int = 0
+    twins_removed: int = 0
+    #: Nodes still with a tenant, a string name and no key; of them, twins
+    #: held by another install's edges (or with no edge, in a tenant this
+    #: install holds no fact in): this install leaves them.
+    keyless: int = 0
+    held_elsewhere: int = 0
+    #: Nodes with a tenant whose name is not a string: never keyed.
+    unkeyable: int = 0
+    finished: bool = False
+    why: str = ""
+
+    @property
+    def open(self) -> int:
+        """Keyless nodes this install could still key or move its edges off."""
+        return max(0, self.keyless - self.held_elsewhere)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"constraint": self.constraint, "stamped": self.stamped, "unstamped": self.unstamped,
+                "twins": self.twins, "moved": self.written, "keyless": self.keyless,
+                "held_elsewhere": self.held_elsewhere, "unkeyable": self.unkeyable,
+                "finished": self.finished, "why": self.why}
 
 
 @dataclass
@@ -189,6 +249,7 @@ def _held(rec: dict[str, Any]) -> Held:
         conf=float(conf) if isinstance(conf, (int, float)) else None,
         pred=None if rec.get("pred") is None else str(rec.get("pred")),
         install=str(install) if install else None,
+        keyed=bool(rec.get("keyed", True)),
     )
 
 
@@ -200,12 +261,14 @@ def _plan_changes(wants: dict[Key, Want], held: Iterable[Held], *, install: str 
     key this install wants it counts as there (``held_elsewhere``) -- the
     write would land on it and change nothing. This install's edges (tagged,
     or untagged with a fact id in *known*) are corrected or removed; an
-    untagged edge of an unknown fact is counted (``unknown``) and left.
+    untagged edge of an unknown fact is counted (``unknown``) and left. Of
+    two edges at one key, the one between keyed nodes stands (the other is at
+    a keyless twin, which the sync empties).
     """
     plan = Plan()
     matched: set[Key] = set()
     elsewhere: set[Key] = set()
-    for h in held:
+    for h in sorted(held, key=lambda e: not e.keyed):
         want = wants.get(h.key)
         if not h.bid or (h.install is not None and h.install != install):
             if want is not None:
@@ -301,9 +364,9 @@ def _in_batches(items: list[Any], write: Callable[[list[Any]], None]) -> int:
 
 
 def _apply(conn: sqlite3.Connection, be: Any, tenant: str, plan: Plan, *, install: str | None,
-           budget: int, deadline: float) -> _Done:
+           budget: int, deadline: float, keyed: bool) -> _Done:
     """Carry *plan* out: removals first, then the newest facts, within *budget*
-    writes and *deadline* (monotonic)."""
+    writes and *deadline* (monotonic); the nodes found by key when *keyed*."""
     from kazma_core.memory.graph_backend import edge_row
 
     done = _Done()
@@ -332,7 +395,7 @@ def _apply(conn: sqlite3.Connection, be: Any, tenant: str, plan: Plan, *, instal
         _no_write_open(conn)
         refused = _in_batches(
             [edge_row(k[0], w.pred, k[2], w.bid, w.conf) for k, w in fresh],
-            lambda rows: be.upsert_edges(tenant, rows, install=install),
+            lambda rows: be.upsert_edges(tenant, rows, install=install, keyed=keyed),
         ) if fresh else 0
         done.written += len(fresh) - refused
         done.failed += refused
@@ -375,7 +438,7 @@ def _bound_queue(conn: sqlite3.Connection) -> int:
 
 
 def _sync_facts(conn: sqlite3.Connection, be: Any, tenant: str, bids: list[str], *,
-                install: str | None, budget: int, deadline: float) -> _Done:
+                install: str | None, budget: int, deadline: float, keyed: bool) -> _Done:
     """Bring the edges of the facts *bids* (and of every key they touch) in step."""
     from kazma_core.memory.graph_backend import rel_name
 
@@ -389,16 +452,16 @@ def _sync_facts(conn: sqlite3.Connection, be: Any, tenant: str, bids: list[str],
     by_bid = [_held(r) for r in be.edges_for_beliefs(tenant, bids)]
     keys |= {h.key for h in by_bid}
     wants = _wants_at(conn, tenant, keys)
-    at_keys = [_held(r) for r in be.edges_at_keys(tenant, sorted(keys))] if keys else []
+    at_keys = [_held(r) for r in be.edges_at_keys(tenant, sorted(keys), keyed=keyed)] if keys else []
     held = list({h.eid: h for h in [*by_bid, *at_keys]}.values())
     queued = set(bids)
     untagged = {h.bid for h in held if h.bid and h.install is None and h.bid not in queued}
     plan = _plan_changes(wants, held, install=install, known=queued | _known(conn, untagged))
-    return _apply(conn, be, tenant, plan, install=install, budget=budget, deadline=deadline)
+    return _apply(conn, be, tenant, plan, install=install, budget=budget, deadline=deadline, keyed=keyed)
 
 
 def _drain(conn: sqlite3.Connection, be: Any, *, install: str | None, budget: int,
-           deadline: float) -> _Done:
+           deadline: float, keyed: bool) -> _Done:
     """The queued facts, oldest change first, a batch at a time. ``left`` is
     the queue entries from before the pass still there after it (a change
     queued during the pass is not work this pass left)."""
@@ -413,7 +476,7 @@ def _drain(conn: sqlite3.Connection, be: Any, *, install: str | None, budget: in
         return total
     if upto is None:
         return total
-    _drain_batches(conn, be, rows, total, install=install, budget=budget, deadline=deadline)
+    _drain_batches(conn, be, rows, total, install=install, budget=budget, deadline=deadline, keyed=keyed)
     if total.failed:
         gone = conn.execute("DELETE FROM memory_graph_outbox WHERE attempts >= ?", (OUTBOX_MAX_ATTEMPTS,))
         conn.commit()
@@ -427,7 +490,7 @@ def _drain(conn: sqlite3.Connection, be: Any, *, install: str | None, budget: in
 
 
 def _drain_batches(conn: sqlite3.Connection, be: Any, rows: list[Any], total: _Done, *,
-                   install: str | None, budget: int, deadline: float) -> None:
+                   install: str | None, budget: int, deadline: float, keyed: bool) -> None:
     """Each tenant's queued facts, :data:`BATCH` at a time, into *total*; a
     batch done leaves the queue, one with a refused write counts an attempt,
     one cut short (writes or time) stays whole for the next pass."""
@@ -441,7 +504,8 @@ def _drain_batches(conn: sqlite3.Connection, be: Any, rows: list[Any], total: _D
             if room <= 0 or time.monotonic() >= deadline:
                 return
             chunk = bids[start:start + BATCH]
-            done = _sync_facts(conn, be, tenant, chunk, install=install, budget=room, deadline=deadline)
+            done = _sync_facts(conn, be, tenant, chunk, install=install, budget=room, deadline=deadline,
+                               keyed=keyed)
             total.written += done.written
             total.removed += done.removed
             total.failed += done.failed
@@ -461,7 +525,7 @@ def _drain_batches(conn: sqlite3.Connection, be: Any, rows: list[Any], total: _D
 
 
 def _compare_tenant(conn: sqlite3.Connection, be: Any, tenant: str, *, install: str | None,
-                    budget: int, deadline: float, holds_facts: bool) -> dict[str, int]:
+                    budget: int, deadline: float, holds_facts: bool, keyed: bool) -> dict[str, int]:
     """Every edge of *tenant* against every current fact of it. Neo4j is
     read first: a fact written meanwhile is pushed again (harmless), never
     taken for stale."""
@@ -471,7 +535,7 @@ def _compare_tenant(conn: sqlite3.Connection, be: Any, tenant: str, *, install: 
         f"SELECT {_FACT_COLUMNS} FROM beliefs WHERE tenant_id = ? AND {_CURRENT}", (tenant,)))  # nosec B608 - constants only
     untagged = {h.bid for h in held if h.bid and h.install is None}
     plan = _plan_changes(wants, held, install=install, known=_known(conn, untagged))
-    done = _apply(conn, be, tenant, plan, install=install, budget=budget, deadline=deadline)
+    done = _apply(conn, be, tenant, plan, install=install, budget=budget, deadline=deadline, keyed=keyed)
     isolated = 0
     if holds_facts and not done.left and time.monotonic() < deadline:
         _no_write_open(conn)
@@ -485,7 +549,7 @@ def _compare_tenant(conn: sqlite3.Connection, be: Any, tenant: str, *, install: 
 
 
 def _compare(conn: sqlite3.Connection, be: Any, *, install: str | None, budget: int,
-             deadline: float) -> dict[str, Any]:
+             deadline: float, keyed: bool) -> dict[str, Any]:
     """The full comparison, tenant by tenant: every tenant this install holds
     facts of (current or not), and every tenant Neo4j holds fact edges of."""
     mine = {str(r[0] or "default") for r in conn.execute("SELECT DISTINCT tenant_id FROM beliefs")}
@@ -500,11 +564,276 @@ def _compare(conn: sqlite3.Connection, be: Any, *, install: str | None, budget: 
             complete = False
             break
         part = _compare_tenant(conn, be, tenant, install=install, budget=room, deadline=deadline,
-                               holds_facts=tenant in mine)
+                               holds_facts=tenant in mine, keyed=keyed)
         for name in totals:
             totals[name] += part[name]
     totals["complete"] = complete
     return totals
+
+
+# ── node keys ───────────────────────────────────────────────────────────
+
+
+def _ensure_constraint(be: Any, keys: _Keys, deadline: float) -> bool:
+    """Make the uniqueness constraint. Two nodes of a tenant sharing a key
+    (written while there was none: a Neo4j recreated or restored under a
+    keyed copy) stop it; all but the one with the most edges lose the key,
+    become keyless twins of it, and are emptied like any other."""
+    from kazma_core.memory.graph_backend import GraphWriteRefused
+
+    while True:
+        try:
+            be.ensure_key_constraint()
+            return True
+        except GraphWriteRefused as exc:
+            groups = be.duplicate_keys(_DUPLICATE_KEY_GROUPS)
+            if not groups or time.monotonic() >= deadline:
+                keys.why = f"Neo4j refused the uniqueness constraint ({exc})" if not groups else "out of time"
+                return False
+            spare = [str(n["eid"]) for g in groups for n in sorted(
+                g.get("nodes") or [], key=lambda n: (-int(n.get("degree") or 0), str(n["eid"])))[1:]]
+            be.unstamp_keys(spare)
+            keys.unstamped += len(spare)
+
+
+def _stamp_page(be: Any, page: list[dict[str, Any]], keys: _Keys, twins: list[dict[str, Any]]) -> bool:
+    """Key one page of keyless nodes; a node whose keyed twin exists goes to
+    *twins*. False when a node changed meanwhile, or Neo4j refused its key
+    (the next pass sees it again)."""
+    from kazma_core.memory.graph_backend import GraphWriteRefused, entity_key
+
+    # One node per (tenant, key) to a statement (the constraint refuses the
+    # statement otherwise): the others are its twins once it is keyed.
+    first: dict[tuple[str, str], dict[str, Any]] = {}
+    rest: list[tuple[tuple[str, str], dict[str, Any]]] = []
+    for rec in page:
+        name = str(rec["name"])
+        node = {"eid": str(rec["eid"]), "tid": rec["tid"], "name": name, "key": entity_key(name)}
+        group = (repr(node["tid"]), node["key"])
+        if group in first:
+            rest.append((group, node))
+        else:
+            first[group] = node
+    whole = True
+    try:
+        outcome = be.stamp_keys(list(first.values()))
+    except GraphWriteRefused:  # a writer took a key meanwhile: one node at a time
+        outcome = {}
+        for node in first.values():
+            try:
+                outcome.update(be.stamp_keys([node]))
+            except GraphWriteRefused:
+                whole = False
+                keys.why = "Neo4j refused a node's key"
+                logger.debug("[memory] graph sync: Neo4j refused one node's key", exc_info=True)
+    for node in first.values():
+        done = outcome.get(node["eid"], "gone")
+        if done == "stamped":
+            keys.stamped += 1
+        elif done == "twin":
+            twins.append(node)
+    for group, node in rest:
+        if outcome.get(first[group]["eid"]) in ("stamped", "twin"):
+            twins.append(node)
+        else:
+            whole = False
+            keys.why = "a node changed while it was being keyed"
+    return whole
+
+
+def _stamp(be: Any, keys: _Keys, *, limit: int, deadline: float) -> tuple[list[dict[str, Any]], bool]:
+    """Key every keyless node, streamed in one read and keyed a page at a
+    time (one scan of the label however many there are). Returns the
+    keyless nodes found with a keyed twin, and whether all were done."""
+    twins: list[dict[str, Any]] = []
+    whole = True
+    page: list[dict[str, Any]] = []
+    with contextlib.closing(be.iter_keyless_nodes()) as stream:
+        for rec in stream:
+            cut = ("out of time" if time.monotonic() >= deadline else
+                   "more nodes than a pass keys" if keys.stamped + len(page) >= limit else "")
+            if cut:
+                if page:
+                    _stamp_page(be, page, keys, twins)
+                keys.why = cut
+                return twins, False
+            page.append(rec)
+            if len(page) >= BATCH:
+                whole = _stamp_page(be, page, keys, twins) and whole
+                page = []
+    if page:
+        whole = _stamp_page(be, page, keys, twins) and whole
+    return twins, whole
+
+
+@dataclass
+class _Twin:
+    """A keyless node whose keyed twin exists, and what holds it."""
+
+    node: dict[str, Any]
+    #: Edges at it (any; an edge between tenants too), -1 when it is gone.
+    degree: int = -1
+    #: This install's of them.
+    ours: int = 0
+
+    @property
+    def others(self) -> int:
+        return self.degree - self.ours
+
+
+def _twin_edges(conn: sqlite3.Connection, be: Any, twins: list[dict[str, Any]], *,
+                install: str | None) -> tuple[list[_Twin], dict[str, list[Held]]]:
+    """Each twin with its degree and how many of its edges are this
+    install's, and those edges by tenant. The degree is read apart: an edge
+    between tenants is no fact's edge, and still keeps the node."""
+    eids = [t["eid"] for t in twins]
+    degree: dict[str, int] = {}
+    rows: list[dict[str, Any]] = []
+    for start in range(0, len(eids), BATCH):
+        chunk = eids[start:start + BATCH]
+        degree.update({str(r["node"]): int(r.get("degree") or 0) for r in be.twin_degrees(chunk)})
+        rows += be.node_edges(chunk)
+    by_node: dict[str, list[tuple[Held, str]]] = {}
+    for r in rows:
+        by_node.setdefault(str(r.get("node")), []).append((_held(r), str(r.get("tid"))))
+    untagged = {h.bid for pairs in by_node.values() for h, _t in pairs if h.bid and h.install is None}
+    known = _known(conn, untagged)
+    ours: dict[str, dict[str, Held]] = {}
+    out: list[_Twin] = []
+    for node in twins:
+        twin = _Twin(node, degree.get(node["eid"], -1))
+        for h, tid in by_node.get(node["eid"], []):
+            if h.bid and (h.install == install or (h.install is None and h.bid in known)):
+                ours.setdefault(tid, {})[h.eid] = h
+                twin.ours += 1
+        out.append(twin)
+    return out, {tid: list(edges.values()) for tid, edges in ours.items()}
+
+
+def _empty_twins(conn: sqlite3.Connection, be: Any, twins: list[dict[str, Any]], keys: _Keys, *,
+                 install: str | None, mine: set[str], budget: int, deadline: float) -> bool:
+    """Move this install's edges off each keyless twin to its keyed twin
+    (the delete/upsert plan: a removal, then the fact's edge written by key);
+    a twin left with no edge goes (the removal takes an end it leaves with
+    none; one that had none goes when its tenant is one this install holds
+    facts in). Another install's edges stay, and so does their node: counted
+    as held elsewhere."""
+    found, ours = _twin_edges(conn, be, twins, install=install)
+    for twin in found:
+        if twin.others > 0 or (twin.degree == 0 and str(twin.node["tid"]) not in mine):
+            keys.held_elsewhere += 1
+    complete = True
+    for tenant, edges in ours.items():
+        # The fact's edge written by key first, the twin's removed after: a
+        # write refused or cut short leaves the twin's edge where it was.
+        wants = _wants_at(conn, tenant, {h.key for h in edges})
+        for plan in (Plan(upserts=sorted(wants.items(), key=lambda kw: (kw[1].at, kw[1].bid), reverse=True)),
+                     Plan(deletes=edges)):
+            room = budget - keys.written - keys.removed - keys.failed
+            if room <= 0 or time.monotonic() >= deadline:
+                keys.why = "out of time"
+                return False
+            done = _apply(conn, be, tenant, plan, install=install, budget=room, deadline=deadline, keyed=True)
+            keys.written += done.written
+            keys.removed += done.removed
+            keys.failed += done.failed
+            if done.left or done.failed:
+                keys.why = "a move was refused" if done.failed else "out of time"
+                complete = False
+                break
+    alone = [t.node for t in found if t.degree == 0 and str(t.node["tid"]) in mine]
+    for start in range(0, len(alone), BATCH):
+        _no_write_open(conn)
+        keys.twins_removed += be.remove_keyless_twins(alone[start:start + BATCH])
+    return complete
+
+
+def _key_nodes(conn: sqlite3.Connection, be: Any, *, install: str | None, budget: int,
+               deadline: float) -> _Keys:
+    """Give the copy's nodes their keys (the module docstring). ``finished``
+    and nothing ``open``: the copy is keyed."""
+    from kazma_core.memory.graph_backend import GraphWriteRefused
+
+    keys = _Keys()
+    _no_write_open(conn)
+    try:
+        if _ensure_constraint(be, keys, deadline):
+            keys.constraint = True
+            twins, stamped_all = _stamp(be, keys, limit=KEY_STAMPS_PER_PASS, deadline=deadline)
+            keys.twins = len(twins)
+            moved_all = True
+            if stamped_all and twins:
+                # Only once every node that can be keyed is: a moved edge's
+                # other end is found by key, and one still keyless would get
+                # a twin.
+                mine = {str(r[0] or "default") for r in conn.execute("SELECT DISTINCT tenant_id FROM beliefs")}
+                moved_all = _empty_twins(conn, be, twins, keys, install=install, mine=mine, budget=budget,
+                                         deadline=deadline)
+            keys.finished = stamped_all and moved_all
+        counts = be.count_keyless()
+        keys.keyless, keys.unkeyable = counts["keyless"], counts["unkeyable"]
+    except GraphWriteRefused as exc:  # the pass goes on; nodes are found by name meanwhile
+        keys.finished = False
+        keys.why = f"Neo4j refused a statement ({exc})"
+        logger.debug("[memory] graph sync: keying the copy's nodes was refused", exc_info=True)
+    if keys.finished and keys.open:
+        keys.finished = False  # written by an older writer while this pass ran
+        keys.why = keys.why or "keyless nodes written during the pass"
+    return keys
+
+
+def _load_keys() -> dict[str, Any] | None:
+    """The keys record (``{}`` when there is none), None when the settings
+    store cannot be read."""
+    from kazma_core.config_store import get_config_store
+    from kazma_core.db.pg_helpers import store_errors
+    from kazma_core.memory.graph_backend import KEYS_KEY
+
+    try:
+        kept = get_config_store().get(KEYS_KEY)
+    except store_errors():
+        logger.debug("[memory] graph sync: the keys record is unreadable", exc_info=True)
+        return None
+    return dict(kept) if isinstance(kept, dict) else {}
+
+
+def _record_keys(be: Any, target: str, keyed: bool, *, why: str = "", keys: _Keys | None = None,
+                 quiet: bool = False) -> None:
+    """Record whether the copy in *target* is keyed (what every process's
+    writes read, ``graph_backend.KEYS_KEY``), and take it in this process at
+    once. Written only when it changed; a change of state is said once (at
+    INFO when *quiet*: an outage has its own WARNING). A settings store that
+    cannot be read is left alone (it is written when it answers)."""
+    from kazma_core.config_store import get_config_store
+    from kazma_core.db.pg_helpers import store_errors
+    from kazma_core.memory.graph_backend import KEYS_KEY
+
+    prior = _load_keys()
+    be.set_keyed(keyed)
+    if prior is None:
+        return
+    record: dict[str, Any] = {"target": target, "state": "keyed" if keyed else "transitional",
+                              "why": "" if keyed else why}
+    if keys is not None:
+        record.update(constraint=keys.constraint, keyless=keys.keyless,
+                      held_elsewhere=keys.held_elsewhere, unkeyable=keys.unkeyable)
+    else:  # an outage: the counts are the last pass's
+        record.update({k: prior[k] for k in ("constraint", "keyless", "held_elsewhere", "unkeyable")
+                       if k in prior and prior.get("target") == target})
+    if {k: prior.get(k) for k in record} == record:
+        return
+    try:
+        get_config_store().set(KEYS_KEY, {**record, "at": time.time()}, category="memory")
+    except store_errors():  # every process's writes find nodes by name: right, only slower
+        logger.warning("[memory] graph sync: could not record whether the Neo4j copy is keyed", exc_info=True)
+    was_keyed = prior.get("target") == target and prior.get("state") == "keyed"
+    if keyed and not was_keyed:
+        logger.info("[memory] graph sync: every node of the Neo4j copy has its key; writes find nodes "
+                    "by key from now on")
+    elif was_keyed and not keyed:
+        logger.log(logging.INFO if quiet else logging.WARNING,
+                   "[memory] graph sync: the Neo4j copy is not keyed now (%s); writes find nodes by "
+                   "name until a pass keys every node", why or "unknown")
 
 
 # ── the pass ────────────────────────────────────────────────────────────
@@ -556,7 +885,7 @@ def _full_reason(findings: dict[str, Any], target: str, now: float, forced: bool
     return ""
 
 
-def _went_back(conn: sqlite3.Connection, be: Any, now: float) -> bool:
+def _went_back(conn: sqlite3.Connection, be: Any, now: float, *, keyed: bool) -> bool:
     """Whether Neo4j lost edges it was sent: none of the newest current facts
     (none waiting in the queue) has an edge at its key. A Neo4j recreated
     empty or restored from an older backup does that; nothing queued would
@@ -578,7 +907,8 @@ def _went_back(conn: sqlite3.Connection, be: Any, now: float) -> bool:
         return False
     for tenant, sub, pred, obj in rows:
         _no_write_open(conn)
-        if be.edges_at_keys(str(tenant or "default"), [(str(sub), rel_name(str(pred or "")), str(obj))]):
+        if be.edges_at_keys(str(tenant or "default"), [(str(sub), rel_name(str(pred or "")), str(obj))],
+                            keyed=keyed):
             return False
     with _STATE_LOCK:
         _STATE["went_back_at"] = now
@@ -665,23 +995,30 @@ def _pass(conn: sqlite3.Connection, *, full: bool | None, limit: int, deadline: 
     answers, why = be.reachable()
     if not answers:
         report["pending"] = _bound_queue(conn)
+        _record_keys(be, target, False, why="Neo4j does not answer", quiet=True)
         return _record("driver_missing" if why == "driver_missing" else "unreachable", report, reason=why)
     install = this_install()
     now = time.time()
     findings = _load_findings()
     try:
-        drained = _drain(conn, be, install=install, budget=limit, deadline=deadline)
-        report.update(mode="incremental", written=drained.written, removed=drained.removed,
-                      failed=drained.failed)
+        keys = _key_nodes(conn, be, install=install, budget=limit, deadline=deadline)
+        keyed = keys.finished and keys.constraint and not keys.open
+        _record_keys(be, target, keyed, why=keys.why, keys=keys)
+        report["keys"] = {"state": "keyed" if keyed else "transitional", **keys.as_dict()}
+        used = keys.written + keys.removed + keys.failed
+        drained = _drain(conn, be, install=install, budget=max(0, limit - used), deadline=deadline, keyed=keyed)
+        report.update(mode="incremental", written=keys.written + drained.written,
+                      removed=keys.removed + drained.removed, failed=keys.failed + drained.failed)
         reason = _full_reason(findings, target, now, full)
-        if not reason and _went_back(conn, be, now):
+        if not reason and _went_back(conn, be, now, keyed=keyed):
             reason = "went back"
         # A comparison due and not run (the queue took the pass's time) is
         # work left: the next pass runs it.
         compare_skipped = bool(reason) and time.monotonic() >= deadline
         if reason and not compare_skipped:
-            used = drained.written + drained.removed + drained.failed
-            compared = _compare(conn, be, install=install, budget=max(0, limit - used), deadline=deadline)
+            used += drained.written + drained.removed + drained.failed
+            compared = _compare(conn, be, install=install, budget=max(0, limit - used), deadline=deadline,
+                                keyed=keyed)
             for name in ("written", "removed", "failed"):
                 report[name] += compared[name]
             report.update(mode="full", why=reason, **{k: compared[k] for k in (
@@ -701,6 +1038,7 @@ def _pass(conn: sqlite3.Connection, *, full: bool | None, limit: int, deadline: 
                     behind, compared["unknown_edges"])
     except GraphUnavailable as exc:
         report["pending"] = _bound_queue(conn)
+        _record_keys(be, target, False, why="Neo4j does not answer", quiet=True)
         return _record("unreachable", report, reason=str(exc))
     report["pending"] = _outbox_depth(conn)
     # What is known to be left: what the last full comparison could not do
@@ -745,11 +1083,15 @@ def sync_now(*, time_budget_s: float = 60.0) -> dict[str, Any]:
 def graph_copy_status(conn: sqlite3.Connection | None = None) -> dict[str, Any]:
     """The copy's state for memory health, from the last pass (never asks
     Neo4j): ``status`` (``unknown`` before the first pass of this process),
-    what it left ``behind``, the changes waiting in the queue, and what the
-    last full comparison found."""
+    what it left ``behind``, the changes waiting in the queue, what the
+    last full comparison found, and ``keys``: whether the copy's nodes are
+    found by key (``state`` ``keyed`` or ``transitional``) and how many have
+    none yet (``keyless``; ``held_elsewhere`` of them another install's
+    edges keep)."""
     with _STATE_LOCK:
         state = dict(_STATE)
     findings = _load_findings()
+    kept = _load_keys() or {}
     last = state.get("last") or {}
     out: dict[str, Any] = {
         "status": state.get("status") or "unknown",
@@ -762,6 +1104,8 @@ def graph_copy_status(conn: sqlite3.Connection | None = None) -> dict[str, Any]:
         "held_elsewhere": findings.get("held_elsewhere"),
         "unknown_edges": findings.get("unknown_edges"),
         "refused": findings.get("refused"),
+        "keys": {k: kept.get(k) for k in ("state", "keyless", "held_elsewhere", "unkeyable", "constraint", "why")}
+        if kept else None,
     }
     if conn is not None:
         out["pending_changes"] = _outbox_depth(conn)

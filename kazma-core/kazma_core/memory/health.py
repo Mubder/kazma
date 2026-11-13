@@ -137,7 +137,27 @@ def _graph_copy_component(copy: dict[str, Any], gcap: dict[str, Any], get_backen
         "them across (at most 2,000 every 15 minutes)."
     )
     return _comp("graph_neo4j", "Neo4j dual-write", ok=True, status="ok",
-                 detail=f"{detail} Dashboard paint remains SQLite.", meta={**meta, "online": True})
+                 detail=f"{detail}{_graph_keys_detail(copy.get('keys'))} Dashboard paint remains SQLite.",
+                 meta={**meta, "online": True})
+
+
+def _graph_keys_detail(keys: dict[str, Any] | None) -> str:
+    """Whether the copy's nodes are found by key (``graph_sync``), as a sentence."""
+    from kazma_core.english_count import count_noun
+
+    if not keys:
+        return ""
+    elsewhere = int(keys.get("held_elsewhere") or 0)
+    left = (f" {count_noun(elsewhere, 'node')} another install's old writer made keep no key "
+            "(that install's edges hold them)." if elsewhere else "")
+    if keys.get("state") == "keyed":
+        return f" Its nodes are found by key.{left}"
+    if keys.get("constraint") is False:
+        return (" Neo4j did not take the uniqueness constraint kazma_entity_key: nodes are found by "
+                f"name, which is slower ({keys.get('why') or 'no reason given'}).")
+    open_ = max(0, int(keys.get("keyless") or 0) - elsewhere)
+    return (f" {count_noun(open_, 'node')} still to give a key; until then nodes are found by name, "
+            f"which is slower.{left}")
 
 
 def _findability_component(fnd: dict[str, Any]) -> dict[str, Any]:

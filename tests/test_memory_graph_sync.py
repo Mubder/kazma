@@ -25,6 +25,7 @@ their own.
 from __future__ import annotations
 
 import copy
+import dataclasses
 import itertools
 import logging
 import os
@@ -86,7 +87,9 @@ class FakeNeo4j:
     """Nodes and relationships in dicts; each statement the backend sends is
     carried out as Neo4j would (dispatched on its ``// kazma:`` line, and the
     dual-write's own delete statements by their text). A statement it does not
-    know fails the test."""
+    know fails the test. ``constraint`` is the uniqueness constraint on
+    ``(tenant_id, key)``: once made, a write giving two nodes of a tenant one
+    key is refused, as Neo4j refuses it."""
 
     def __init__(self) -> None:
         self.nodes: dict[int, dict[str, Any]] = {}
@@ -96,6 +99,8 @@ class FakeNeo4j:
         self.refuse_values: set[str] = set()
         self.statements: list[str] = []
         self.probe = None
+        self.constraint = False
+        self.refuse_constraint = False
 
     # the driver's surface
     def session(self, **_kw: Any) -> _Session:
@@ -121,6 +126,7 @@ class FakeNeo4j:
         return None
 
     def merge_entity(self, name: str, tid: str) -> int:
+        """A node as the code before keys made it: found by name, no key."""
         return self.entity(name, tid) or self.add_node("Entity", name=name, tenant_id=tid)
 
     def add_rel(self, start: int, end: int, rtype: str, **props: Any) -> int:
@@ -136,13 +142,50 @@ class FakeNeo4j:
         return [rid for rid, r in self.rels.items()
                 if self._in_tenant(r["start"], tid) and self._in_tenant(r["end"], tid)]
 
+    def _keyed(self, nid: int) -> bool:
+        return self.nodes[nid]["props"].get("key") is not None
+
     def _row(self, rid: int) -> dict[str, Any]:
         r = self.rels[rid]
         p = r["props"]
         return {"eid": f"5:fake:{rid}", "bid": p.get("belief_id") or "",
                 "sub": self.nodes[r["start"]]["props"].get("name"), "rel": r["type"],
                 "obj": self.nodes[r["end"]]["props"].get("name"), "conf": p.get("confidence"),
-                "pred": p.get("predicate"), "install": p.get("install")}
+                "pred": p.get("predicate"), "install": p.get("install"),
+                "keyed": self._keyed(r["start"]) and self._keyed(r["end"])}
+
+    # node keys
+    @staticmethod
+    def node_eid(nid: int) -> str:
+        return f"4:fake:{nid:08d}"
+
+    @staticmethod
+    def _nid(eid: str) -> int:
+        return int(eid.rsplit(":", 1)[1])
+
+    def _named(self, name: str, tid: str) -> list[int]:
+        return [nid for nid, n in self.nodes.items()
+                if "Entity" in n["labels"] and n["props"].get("name") == name and n["props"].get("tenant_id") == tid]
+
+    def _with_key(self, key: str, tid: Any) -> list[int]:
+        return [nid for nid, n in self.nodes.items()
+                if "Entity" in n["labels"] and n["props"].get("key") == key and n["props"].get("tenant_id") == tid]
+
+    def _set_key(self, nid: int, key: str) -> None:
+        tid = self.nodes[nid]["props"].get("tenant_id")
+        if self.constraint and any(other != nid for other in self._with_key(key, tid)):
+            from kazma_core.memory.graph_backend import GraphWriteRefused
+
+            raise GraphWriteRefused("ConstraintValidationFailed: the key is already held")
+        self.nodes[nid]["props"]["key"] = key
+
+    def per_name(self, tid: str = "default") -> dict[str, int]:
+        """How many Entity nodes of *tid* hold each name."""
+        out: dict[str, int] = {}
+        for n in self.nodes.values():
+            if "Entity" in n["labels"] and n["props"].get("tenant_id") == tid:
+                out[n["props"].get("name")] = out.get(n["props"].get("name"), 0) + 1
+        return out
 
     def _touches(self, nid: int) -> bool:
         return any(r["start"] == nid or r["end"] == nid for r in self.rels.values())
@@ -165,30 +208,68 @@ class FakeNeo4j:
                 if "Entity" in n["labels"] and n["props"].get("tenant_id") == tid}
 
     # the backend's statements
-    def _op_upsert_edges(self, query: str, p: dict[str, Any]) -> _Result:
+    def _merge(self, row: dict[str, Any], end: str, tid: str, how: str) -> list[int]:
+        """MERGE of one end, as Neo4j does it: every node that matches, else a new one."""
+        name, key = row[end], row.get("sk" if end == "sub" else "ok")
+        if how == "key":
+            found = self._with_key(key, tid)
+            if not found:
+                nid = self.add_node("Entity", tenant_id=tid)
+                self._set_key(nid, key)
+                self.nodes[nid]["props"]["name"] = name
+                found = [nid]
+            return found
+        found = self._named(name, tid)
+        if not found:
+            nid = self.add_node("Entity", name=name, tenant_id=tid)
+            if how == "name":  # ON CREATE SET key (the old statement set none)
+                self._set_key(nid, key)
+            found = [nid]
+        return found
+
+    def _upsert(self, query: str, p: dict[str, Any], how: str) -> _Result:
         rtype = _REL_IN_QUERY.search(query).group(1)
         from kazma_core.memory.graph_backend import GraphWriteRefused
 
         if any(row["obj"] in self.refuse_values or row["sub"] in self.refuse_values for row in p["rows"]):
             raise GraphWriteRefused("the stand-in refuses this statement")  # all or nothing, as a transaction
+        before = copy.deepcopy((self.nodes, self.rels))
+        try:
+            self._upsert_rows(rtype, p, how)
+        except GraphWriteRefused:
+            self.nodes, self.rels = before  # a refused statement leaves nothing
+            raise
+        return _Result()
+
+    def _upsert_rows(self, rtype: str, p: dict[str, Any], how: str) -> None:
         tid, inst = p["tid"], p["inst"]
         for row in p["rows"]:
-            a, b = self.merge_entity(row["sub"], tid), self.merge_entity(row["obj"], tid)
-            rid = next((k for k, r in self.rels.items()
-                        if r["start"] == a and r["end"] == b and r["type"] == rtype), None)
-            mine = {"belief_id": row["bid"], "confidence": row["conf"], "predicate": row["pred"]}
-            if rid is None:
-                rid = self.add_rel(a, b, rtype, **mine)
-            elif not (self.rels[rid]["props"].get("belief_id")
-                      and self.rels[rid]["props"].get("install") in (None, inst)):
-                continue
-            props = self.rels[rid]["props"]
-            props.update(mine)
-            if inst is None:
-                props.pop("install", None)
-            else:
-                props["install"] = inst
-        return _Result()
+            for a in self._merge(row, "sub", tid, how):
+                for b in self._merge(row, "obj", tid, how):
+                    rid = next((k for k, r in self.rels.items()
+                                if r["start"] == a and r["end"] == b and r["type"] == rtype), None)
+                    mine = {"belief_id": row["bid"], "confidence": row["conf"], "predicate": row["pred"]}
+                    if rid is None:
+                        rid = self.add_rel(a, b, rtype, **mine)
+                    elif not (self.rels[rid]["props"].get("belief_id")
+                              and self.rels[rid]["props"].get("install") in (None, inst)):
+                        continue
+                    props = self.rels[rid]["props"]
+                    props.update(mine)
+                    if inst is None:
+                        props.pop("install", None)
+                    else:
+                        props["install"] = inst
+
+    def _op_upsert_edges(self, query: str, p: dict[str, Any]) -> _Result:
+        """The statement before keys (``_OLD_UPSERT``): by name, no key."""
+        return self._upsert(query, p, "old")
+
+    def _op_upsert_edges_by_name(self, query: str, p: dict[str, Any]) -> _Result:
+        return self._upsert(query, p, "name")
+
+    def _op_upsert_edges_by_key(self, query: str, p: dict[str, Any]) -> _Result:
+        return self._upsert(query, p, "key")
 
     def _op_delete_edges(self, _query: str, p: dict[str, Any]) -> _Result:
         ends: set[int] = set()
@@ -210,13 +291,130 @@ class FakeNeo4j:
         return _Result(self._row(rid) for rid in self._tenant_rels(p["tid"])
                        if self.rels[rid]["props"].get("belief_id") in bids)
 
-    def _op_edges_at_keys(self, _query: str, p: dict[str, Any]) -> _Result:
+    def _op_edges_at_names(self, _query: str, p: dict[str, Any]) -> _Result:
         out = []
         for k in p["keys"]:
-            a, b = self.entity(k["sub"], p["tid"]), self.entity(k["obj"], p["tid"])
+            subs, objs = set(self._named(k["sub"], p["tid"])), set(self._named(k["obj"], p["tid"]))
             out += [self._row(rid) for rid, r in self.rels.items()
-                    if a and b and r["start"] == a and r["end"] == b and r["type"] == k["rel"]]
+                    if r["start"] in subs and r["end"] in objs and r["type"] == k["rel"]]
         return _Result(out)
+
+    #: The same read before keys (``// kazma:edges_at_keys``, by name): the
+    #: stand-in still answers the code before keys, so each key test can be
+    #: run against that code and fail on what it checks.
+    _op_edges_at_keys = _op_edges_at_names
+
+    def _op_edges_at_node_keys(self, _query: str, p: dict[str, Any]) -> _Result:
+        out = []
+        for k in p["keys"]:
+            subs, objs = set(self._with_key(k["sk"], p["tid"])), set(self._with_key(k["ok"], p["tid"]))
+            out += [self._row(rid) for rid, r in self.rels.items()
+                    if r["start"] in subs and r["end"] in objs and r["type"] == k["rel"]]
+        return _Result(out)
+
+    def _op_key_constraint_present(self, _query: str, _p: dict[str, Any]) -> _Result:
+        return _Result([{"n": int(self.constraint)}])
+
+    def _op_key_constraint(self, _query: str, _p: dict[str, Any]) -> _Result:
+        from kazma_core.memory.graph_backend import GraphWriteRefused
+
+        if self.refuse_constraint:
+            raise GraphWriteRefused("Neo.ClientError.Security.Forbidden")
+        if not self.constraint and self._duplicate_keys():
+            raise GraphWriteRefused("Neo.ClientError.Schema.ConstraintCreationFailed")
+        self.constraint = True
+        return _Result()
+
+    def _duplicate_keys(self) -> list[dict[str, Any]]:
+        groups: dict[tuple, list[str]] = {}
+        for nid, n in self.nodes.items():
+            props = n["props"]
+            if "Entity" in n["labels"] and props.get("tenant_id") is not None and props.get("key") is not None:
+                groups.setdefault((props["tenant_id"], props["key"]), []).append(nid)
+        return [{"tid": t, "key": k, "nodes": [
+                    {"eid": self.node_eid(n), "degree": sum(1 for r in self.rels.values() if n in (r["start"], r["end"]))}
+                    for n in nids]}
+                for (t, k), nids in groups.items() if len(nids) > 1]
+
+    def _op_duplicate_keys(self, _query: str, p: dict[str, Any]) -> _Result:
+        return _Result(self._duplicate_keys()[: p["lim"]])
+
+    def _op_unstamp_keys(self, _query: str, p: dict[str, Any]) -> _Result:
+        for eid in p["eids"]:
+            n = self.nodes.get(self._nid(eid))
+            if n is not None:
+                n["props"].pop("key", None)
+        return _Result()
+
+    def _keyless(self, nid: int) -> bool:
+        n = self.nodes[nid]
+        props = n["props"]
+        return ("Entity" in n["labels"] and props.get("tenant_id") is not None and props.get("key") is None
+                and isinstance(props.get("name"), str))
+
+    def _op_keyless_nodes(self, _query: str, _p: dict[str, Any]) -> _Result:
+        return _Result({"eid": self.node_eid(nid), "tid": self.nodes[nid]["props"]["tenant_id"],
+                        "name": self.nodes[nid]["props"]["name"]} for nid in list(self.nodes) if self._keyless(nid))
+
+    def _op_count_keyless(self, _query: str, _p: dict[str, Any]) -> _Result:
+        keyless = unkeyable = 0
+        for nid, n in self.nodes.items():
+            props = n["props"]
+            if "Entity" in n["labels"] and props.get("tenant_id") is not None and props.get("key") is None:
+                if isinstance(props.get("name"), str):
+                    keyless += 1
+                else:
+                    unkeyable += 1
+        return _Result([{"keyless": keyless, "unkeyable": unkeyable}])
+
+    def _op_stamp_keys(self, _query: str, p: dict[str, Any]) -> _Result:
+        from kazma_core.memory.graph_backend import GraphWriteRefused
+
+        if any(row["name"] in self.refuse_values for row in p["rows"]):
+            raise GraphWriteRefused("the stand-in refuses this statement")
+        out = []
+        for row in p["rows"]:
+            nid = self._nid(row["eid"])
+            n = self.nodes.get(nid)
+            ok = (n is not None and n["props"].get("tenant_id") == row["tid"]
+                  and n["props"].get("name") == row["name"] and n["props"].get("key") is None)
+            twin = self._with_key(row["key"], row["tid"])
+            if ok and not twin:
+                self._set_key(nid, row["key"])
+            out.append({"eid": row["eid"], "outcome": "gone" if not ok else ("twin" if twin else "stamped")})
+        return _Result(out)
+
+    def _op_node_edges(self, _query: str, p: dict[str, Any]) -> _Result:
+        out = []
+        for eid in p["eids"]:
+            nid = self._nid(eid)
+            for rid, r in self.rels.items():
+                if nid not in (r["start"], r["end"]):
+                    continue
+                a, b = self.nodes[r["start"]]["props"], self.nodes[r["end"]]["props"]
+                if a.get("tenant_id") is not None and a.get("tenant_id") == b.get("tenant_id"):
+                    out.append({**self._row(rid), "node": eid, "tid": a["tenant_id"]})
+        return _Result(out)
+
+    def _op_twin_degrees(self, _query: str, p: dict[str, Any]) -> _Result:
+        out = []
+        for eid in p["eids"]:
+            nid = self._nid(eid)
+            if nid in self.nodes and self.nodes[nid]["props"].get("key") is None:
+                out.append({"node": eid, "degree": sum(1 for r in self.rels.values() if nid in (r["start"], r["end"]))})
+        return _Result(out)
+
+    def _op_remove_keyless_twins(self, _query: str, p: dict[str, Any]) -> _Result:
+        removed = 0
+        for row in p["rows"]:
+            nid = self._nid(row["eid"])
+            n = self.nodes.get(nid)
+            if (n and n["props"].get("key") is None and n["props"].get("tenant_id") == row["tid"]
+                    and n["props"].get("name") == row["name"] and not self._touches(nid)
+                    and self._with_key(row["key"], row["tid"])):
+                del self.nodes[nid]
+                removed += 1
+        return _Result([{"removed": removed}])
 
     def _op_edge_tenants(self, _query: str, _p: dict[str, Any]) -> _Result:
         tids = set()
@@ -236,11 +434,21 @@ class FakeNeo4j:
 
     def _legacy(self, flat: str, p: dict[str, Any]) -> _Result:
         """The dual-write's delete and graph-clear statements."""
+        if flat.startswith("MATCH (a:Entity {") and "-[r]-(b:Entity)" in flat:  # neighbors
+            keyed = "key: $key" in flat
+            ends = set(self._with_key(p["key"], p["tid"]) if keyed else self._named(p["name"], p["tid"]))
+            return _Result({"subject": self.nodes[n]["props"].get("name"), "predicate": r["type"],
+                            "object": self.nodes[r["end"] if r["start"] == n else r["start"]]["props"].get("name"),
+                            "confidence": r["props"].get("confidence"), "id": r["props"].get("belief_id")}
+                           for r in self.rels.values() for n in ends if n in (r["start"], r["end"]))
         if "WHERE r.belief_id = $bid" in flat:
             gone = [rid for rid, r in self.rels.items() if r["props"].get("belief_id") == p["bid"]]
         elif flat.startswith("MATCH (a:Entity {name: $sub, tenant_id: $tid})"):
-            a, b = self.entity(p["sub"], p["tid"]), self.entity(p["obj"], p["tid"])
-            gone = [rid for rid, r in self.rels.items() if a and b and r["start"] == a and r["end"] == b]
+            subs, objs = set(self._named(p["sub"], p["tid"])), set(self._named(p["obj"], p["tid"]))
+            gone = [rid for rid, r in self.rels.items() if r["start"] in subs and r["end"] in objs]
+        elif flat.startswith("MATCH (a:Entity {tenant_id: $tid, key: $sk})"):
+            subs, objs = set(self._with_key(p["sk"], p["tid"])), set(self._with_key(p["ok"], p["tid"]))
+            gone = [rid for rid, r in self.rels.items() if r["start"] in subs and r["end"] in objs]
         elif "DELETE r" in flat and "MATCH (a:Entity {tenant_id: $tid})-[r]->(:Entity {tenant_id: $tid})" in flat:
             guarded = "r.install = $inst" in flat
             gone = [rid for rid in self._tenant_rels(p["tid"])
@@ -262,11 +470,17 @@ class FakeNeo4j:
 # ── the world: a private memory database, the stand-in as the graph store ─
 
 
+#: ``graph_backend.KEYS_KEY`` (spelled out: the fixture must run on the code
+#: before keys, where each key test then fails on what it checks).
+_KEYS_KEY = "memory.v2.graph_keys"
+
+
 def _forget_findings() -> None:
     from kazma_core.config_store import get_config_store
     from kazma_core.memory.graph_sync import FINDINGS_KEY
 
     get_config_store().delete(FINDINGS_KEY)
+    get_config_store().delete(_KEYS_KEY)
 
 
 @pytest.fixture()
@@ -848,6 +1062,336 @@ def test_the_sweep_runs_after_the_mirror_sync():
     assert labels.index("memory mirror sync") < labels.index("memory graph sync")
 
 
+# ── node keys: one node per name, found by an index ──────────────────────
+#
+# Every MERGE by {name, tenant_id} scanned every Entity node (no index): 500
+# rows over 40,000 nodes took 8 s on a real Neo4j. Each node now carries the
+# SHA-256 of its name as ``key`` under a uniqueness constraint; the sync keys
+# the copy, and once every node has its key writes find nodes by key.
+
+#: The fact-edge write before keys (2026-11-13): by name, no key.
+_OLD_UPSERT = """// kazma:upsert_edges
+UNWIND $rows AS row
+MERGE (a:Entity {name: row.sub, tenant_id: $tid})
+MERGE (b:Entity {name: row.obj, tenant_id: $tid})
+MERGE (a)-[r:%s]->(b)
+ON CREATE SET r.belief_id = row.bid, r.confidence = row.conf, r.predicate = row.pred, r.install = $inst
+WITH r, row
+WHERE coalesce(r.belief_id, '') <> '' AND (r.install IS NULL OR r.install = $inst)
+SET r.belief_id = row.bid, r.confidence = row.conf, r.predicate = row.pred, r.install = $inst"""
+
+
+def _old_write(session_of, subject: str, predicate: str, obj: str, bid: str, *, tenant: str = "default",
+               install: str | None = "install-a") -> None:
+    """One edge written as the code before keys wrote it (an older build, or
+    another install's): its new nodes have no key."""
+    from kazma_core.memory.graph_backend import _rel_type, edge_row
+
+    with session_of() as session:
+        result = session.run(_OLD_UPSERT % _rel_type(predicate), tid=tenant, inst=install,
+                             rows=[edge_row(subject, predicate, obj, bid, 0.7)])
+        result.consume()
+
+
+def _keys_record() -> dict[str, Any]:
+    from kazma_core.config_store import get_config_store
+    from kazma_core.memory.graph_backend import KEYS_KEY
+
+    assert KEYS_KEY == _KEYS_KEY
+    return dict(get_config_store().get(KEYS_KEY) or {})
+
+
+def _backend():
+    from kazma_core.memory import graph_backend
+
+    return graph_backend.get_graph_backend()
+
+
+def _statements_since(neo: FakeNeo4j, start: int) -> list[str]:
+    return [re.match(r"// kazma:(\w+)", s).group(1) for s in neo.statements[start:] if s.startswith("// kazma:")]
+
+
+def _all_keyed(neo: FakeNeo4j, tid: str = "default") -> bool:
+    from kazma_core.memory.graph_backend import entity_key
+
+    return all(n["props"].get("key") == entity_key(n["props"]["name"]) for n in neo.nodes.values()
+               if "Entity" in n["labels"] and n["props"].get("tenant_id") == tid)
+
+
+def test_a_copy_written_before_keys_is_keyed_in_one_pass_and_then_found_by_key(world):
+    from kazma_core.memory import graph_backend
+
+    _graph_store(world, "sqlite")
+    _fact(world, "user", "lives_in", "Kuwait")
+    _fact(world, "user", "likes", "tea")
+    _graph_store(world, "neo4j")
+    for subject, predicate, obj in (("user", "lives_in", "Kuwait"), ("user", "likes", "tea")):
+        _old_write(world.neo.session, subject, predicate, obj, f"b-{obj}")
+    assert not any(n["props"].get("key") for n in world.neo.nodes.values()), "the old code: no key, no index"
+    start = len(world.neo.statements)
+    assert graph_backend.upsert_belief_edge(subject="user", predicate="works_at", obj="Kazma", belief_id="b-k")
+    assert _statements_since(world.neo, start) == ["upsert_edges_by_name"], "not keyed yet: by name"
+    assert world.neo.per_name() == {"user": 1, "Kuwait": 1, "tea": 1, "Kazma": 1}
+    assert world.neo.nodes[world.neo.entity("Kazma", "default")]["props"]["key"], "a new node gets its key"
+
+    report = _sync(world)
+
+    assert world.neo.constraint, "the uniqueness constraint is made"
+    assert _all_keyed(world.neo)
+    assert report["keys"]["state"] == "keyed" and report["keys"]["stamped"] == 3
+    assert _keys_record()["state"] == "keyed" and _backend().keyed()
+    start = len(world.neo.statements)
+    assert graph_backend.upsert_belief_edge(subject="user", predicate="speaks", obj="Arabic", belief_id="b-a")
+    assert _statements_since(world.neo, start) == ["upsert_edges_by_key"]
+    assert set(world.neo.per_name().values()) == {1}
+
+
+def test_one_node_per_name_through_every_phase_with_writes_between(world, monkeypatch):
+    from kazma_core.memory import graph_backend, graph_sync
+
+    names = lambda: world.neo.per_name()  # noqa: E731
+
+    def write(subject: str, obj: str, bid: str) -> None:
+        assert graph_backend.upsert_belief_edge(subject=subject, predicate="noted", obj=obj, belief_id=bid)
+        assert max(names().values()) == 1, names()
+
+    _graph_store(world, "sqlite")
+    for i in range(6):
+        _row(world, f"b-{i}", "user", "noted", f"value {i}")
+    _graph_store(world, "neo4j")
+    for i in range(6):  # the copy as the code before keys left it
+        _old_write(world.neo.session, "user", "noted", f"value {i}", f"b-{i}")
+    write("user", "value 1", "b-1")  # a new build, before its first pass
+    write("kazma", "value 7", "b-7")
+    monkeypatch.setattr(graph_sync, "KEY_STAMPS_PER_PASS", 3)
+    cut = _sync(world)
+    assert cut["keys"]["state"] == "transitional" and cut["keys"]["stamped"] == 3, cut["keys"]
+    assert not _backend().keyed()
+    write("user", "value 2", "b-2")
+    write("someone", "value 8", "b-8")
+    monkeypatch.setattr(graph_sync, "KEY_STAMPS_PER_PASS", 100_000)
+    done = _sync(world)
+    assert done["keys"]["state"] == "keyed", done["keys"]
+    write("user", "value 3", "b-3")
+    write("other", "value 9", "b-9")
+    assert _all_keyed(world.neo)
+    assert max(names().values()) == 1
+
+
+def test_negative_control_switching_before_the_backfill_duplicates(world):
+    from kazma_core.memory import graph_backend
+
+    _old_write(world.neo.session, "user", "lives_in", "Kuwait", "b-1")
+    world.neo.constraint = True
+    _backend().set_keyed(True)  # what keying before every node has its key would do
+    assert graph_backend.upsert_belief_edge(subject="user", predicate="likes", obj="tea", belief_id="b-2")
+    assert world.neo.per_name()["user"] == 2, "a second 'user' node: the keyless one is not found by key"
+
+
+def test_an_old_writer_after_the_switch_converges_in_one_pass(world):
+    from kazma_core.memory import graph_backend
+
+    _fact(world, "user", "lives_in", "Kuwait")
+    assert _sync(world)["keys"]["state"] == "keyed"
+    _row(world, "b-fresh", "user", "noted", "fresh")
+    _row(world, "b-mention", "kazma", "mentions", "fresh")
+    world.conn.execute("DELETE FROM memory_graph_outbox")
+    world.conn.commit()
+    # An older build of this install writes one edge (a node "fresh" with no
+    # key), another install's older build writes an edge to "a place".
+    _old_write(world.neo.session, "user", "noted", "fresh", "b-fresh")
+    _old_write(world.neo.session, "owner", "visited", "a place", "b-theirs", install="install-b")
+    theirs = next(rid for rid, r in world.neo.rels.items() if r["type"] == "VISITED")
+    before = copy.deepcopy(world.neo.rels[theirs])
+    _row(world, "b-place", "user", "noted", "a place")
+    world.conn.execute("DELETE FROM memory_graph_outbox")
+    world.conn.commit()
+    # This build writes by key: "fresh" and "a place" get keyed twins.
+    for subject, predicate, obj, bid in (("kazma", "mentions", "fresh", "b-mention"),
+                                         ("user", "noted", "a place", "b-place")):
+        assert graph_backend.upsert_belief_edge(subject=subject, predicate=predicate, obj=obj, belief_id=bid)
+    assert world.neo.per_name()["fresh"] == 2 and world.neo.per_name()["a place"] == 2
+
+    report = _sync(world)
+
+    assert report["keys"]["state"] == "keyed", report["keys"]
+    assert world.neo.per_name()["fresh"] == 1, "this install's edge moved to the keyed node, the twin gone"
+    fresh = world.neo.entity("fresh", "default")
+    assert world.neo.nodes[fresh]["props"]["key"]
+    assert {r["props"]["belief_id"] for r in world.neo.rels.values() if r["end"] == fresh} == {"b-fresh", "b-mention"}
+    assert world.neo.rels[theirs] == before, "another install's edge stays where it was"
+    assert world.neo.per_name()["a place"] == 2 and report["keys"]["held_elsewhere"] == 1
+    assert _sync(world)["keys"]["state"] == "keyed", "a twin another install holds does not hold up the switch"
+
+
+def test_of_two_edges_at_one_key_the_one_between_keyed_nodes_stands():
+    from kazma_core.memory.graph_sync import Held, Want, _plan_changes
+
+    key = ("user", "NOTED", "fresh")
+    wants = {key: Want("b-1", "noted", 0.7, 1.0)}
+    at_twin = Held("e-twin", "b-1", key, 0.7, "noted", "install-a", keyed=False)
+    at_keyed = Held("e-keyed", "b-1", key, 0.7, "noted", "install-a", keyed=True)
+    plan = _plan_changes(wants, [at_twin, at_keyed], install="install-a", known={"b-1"})
+    assert [h.eid for h in plan.deletes] == ["e-twin"] and plan.in_sync == 1
+    # Negative control: told nothing of keys (as edges were read before), the
+    # first read stands -- here the twin's, and the keyed node's edge goes.
+    blind = [dataclasses.replace(at_twin, keyed=True), at_keyed]
+    old = _plan_changes(wants, blind, install="install-a", known={"b-1"})
+    assert [h.eid for h in old.deletes] == ["e-keyed"]
+
+
+def test_shared_keys_written_without_the_constraint_are_repaired(world):
+    from kazma_core.memory.graph_backend import entity_key
+
+    _graph_store(world, "sqlite")
+    _row(world, "b-1", "user", "lives_in", "Kuwait")
+    _row(world, "b-2", "kazma", "serves", "Kuwait")
+    _graph_store(world, "neo4j")
+    key = entity_key("Kuwait")
+    user = world.neo.add_node("Entity", name="user", tenant_id="default", key=entity_key("user"))
+    kazma = world.neo.add_node("Entity", name="kazma", tenant_id="default", key=entity_key("kazma"))
+    copies = [world.neo.add_node("Entity", name="Kuwait", tenant_id="default", key=key) for _ in range(3)]
+    world.neo.add_rel(user, copies[0], "LIVES_IN", belief_id="b-1", install="install-a", confidence=0.7,
+                      predicate="lives_in")
+    world.neo.add_rel(kazma, copies[1], "SERVES", belief_id="b-2", install="install-a", confidence=0.7,
+                      predicate="serves")  # copies[2] has no edge
+
+    report = _sync(world)
+
+    assert report["keys"]["unstamped"] == 2 and world.neo.constraint
+    assert world.neo.per_name()["Kuwait"] == 1
+    assert world.neo.facts() == {("user", "LIVES_IN", "Kuwait"), ("kazma", "SERVES", "Kuwait")}
+    assert report["keys"]["state"] == "keyed"
+
+
+def test_a_constraint_neo4j_refuses_keeps_writes_finding_nodes_by_name(world):
+    from kazma_core.memory import graph_backend
+    from kazma_core.memory.graph_sync import graph_copy_status
+    from kazma_core.memory.health import _graph_copy_component
+
+    world.neo.refuse_constraint = True
+    _fact(world, "user", "lives_in", "Kuwait")
+    report = _sync(world)
+    assert report["keys"]["state"] == "transitional" and report["keys"]["constraint"] is False
+    assert report["status"] == "in_sync", "the copy itself is whole; only slower to write"
+    start = len(world.neo.statements)
+    graph_backend.upsert_belief_edge(subject="user", predicate="likes", obj="tea", belief_id="b-t")
+    assert _statements_since(world.neo, start) == ["upsert_edges_by_name"]
+    comp = _graph_copy_component(graph_copy_status(world.conn), {}, _backend)
+    assert "did not take the uniqueness constraint" in comp["detail"] and "refused" in comp["detail"]
+    world.neo.refuse_constraint = False
+    assert _sync(world)["keys"]["state"] == "keyed"
+
+
+def test_a_pass_that_cannot_finish_drops_the_copy_back_to_transitional(world, monkeypatch, caplog):
+    from kazma_core.memory import graph_sync
+
+    _fact(world, "user", "lives_in", "Kuwait")
+    assert _sync(world)["keys"]["state"] == "keyed"
+    caplog.set_level(logging.INFO, logger=_SYNC_LOGGER)
+    world.neo.down = True
+    assert _sync(world)["status"] == "unreachable"
+    assert _keys_record()["state"] == "transitional" and not _backend().keyed()
+    warnings = [r for r in caplog.records if r.name == _SYNC_LOGGER and r.levelno >= logging.WARNING]
+    assert len(warnings) == 1 and "does not answer" in warnings[0].getMessage(), "an outage says it once"
+    world.neo.down = False
+    assert _sync(world)["keys"]["state"] == "keyed"
+    for i in range(5):
+        _old_write(world.neo.session, "user", "noted", f"old {i}", f"b-old-{i}", install="install-b")
+    monkeypatch.setattr(graph_sync, "KEY_STAMPS_PER_PASS", 2)
+    cut = _sync(world)
+    assert cut["keys"]["state"] == "transitional" and cut["keys"]["why"] == "more nodes than a pass keys"
+    assert any("not keyed now" in r.getMessage() for r in caplog.records if r.levelno == logging.WARNING)
+    monkeypatch.setattr(graph_sync, "KEY_STAMPS_PER_PASS", 100_000)
+    assert _sync(world)["keys"]["state"] == "keyed"
+
+
+def test_a_key_neo4j_refuses_keys_the_rest_and_the_pass_goes_on(world):
+    for value in ("Kuwait", "refused", "tea"):
+        _old_write(world.neo.session, "user", "noted", value, f"b-{value}", install="install-b")
+    world.neo.refuse_values = {"refused"}
+
+    report = _sync(world)
+
+    assert report["status"] == "in_sync" and report["keys"]["state"] == "transitional", report
+    assert report["keys"]["why"] == "Neo4j refused a node's key" and report["keys"]["stamped"] == 3
+    assert [n["props"]["name"] for n in world.neo.nodes.values() if not n["props"].get("key")] == ["refused"]
+    world.neo.refuse_values = set()
+    assert _sync(world)["keys"]["state"] == "keyed"
+
+
+def test_tenantless_nodes_and_foreign_edges_are_left_as_they_were(world):
+    from kazma_core.memory import graph_backend
+
+    _fact(world, "user", "lives_in", "Kuwait")
+    planted = _foreign(world.neo)  # edges Kazma did not write, or another install did
+    loose = [world.neo.add_node("Entity", name="no tenant"), world.neo.add_node("Entity", name="Kuwait"),
+             world.neo.add_node("Topic", name="maps", tenant_id="default")]
+    odd = world.neo.add_node("Entity", name=42, tenant_id="default")  # not a string: never keyed
+    planted["at_an_unkeyable_node"] = world.neo.add_rel(odd, world.neo.entity("owner", "default"), "CITES")
+    before_rels = {rid: copy.deepcopy(world.neo.rels[rid]) for rid in planted.values()}
+    before_nodes = {nid: copy.deepcopy(world.neo.nodes[nid]) for nid in [*loose, odd]}
+
+    _sync(world)
+    graph_backend.upsert_belief_edge(subject="user", predicate="likes", obj="tea", belief_id="b-t")
+    report = _sync(world, full=True)
+
+    assert report["keys"]["state"] == "keyed" and report["keys"]["unkeyable"] == 1
+    for name, rid in planted.items():
+        assert world.neo.rels.get(rid) == before_rels[rid], name
+    for nid, node in before_nodes.items():
+        assert world.neo.nodes.get(nid) == node
+
+
+def test_health_says_whether_nodes_are_found_by_key(world, monkeypatch):
+    from kazma_core.memory import graph_sync
+    from kazma_core.memory.graph_sync import graph_copy_status
+    from kazma_core.memory.health import _graph_copy_component
+
+    for i in range(4):
+        _old_write(world.neo.session, "user", "noted", f"v{i}", f"b-{i}", install="install-b")
+    monkeypatch.setattr(graph_sync, "KEY_STAMPS_PER_PASS", 2)
+    _sync(world)
+    status = graph_copy_status(world.conn)
+    assert status["keys"]["state"] == "transitional" and status["keys"]["keyless"] == 3
+    detail = _graph_copy_component(status, {}, _backend)["detail"]
+    assert "3 nodes still to give a key" in detail and "by name" in detail
+    monkeypatch.setattr(graph_sync, "KEY_STAMPS_PER_PASS", 100_000)
+    _sync(world)
+    status = graph_copy_status(world.conn)
+    assert status["keys"] == {"state": "keyed", "keyless": 0, "held_elsewhere": 0, "unkeyable": 0,
+                              "constraint": True, "why": ""}
+    assert "found by key" in _graph_copy_component(status, {}, _backend)["detail"]
+
+
+def test_a_long_value_is_found_by_its_digest(world):
+    from kazma_core.memory.graph_backend import entity_key
+
+    value = "\U0001F600" * 4000  # 4,000 characters, 16,000 bytes of UTF-8
+    bid = _fact(world, "user", "noted", value)
+    _sync(world)
+    node = world.neo.nodes[world.neo.entity(value, "default")]
+    assert node["props"]["key"] == entity_key(value) and len(node["props"]["key"]) == 64
+    assert ("user", "NOTED", value, bid, "install-a") in world.neo.edges()
+    assert _backend().keyed()
+    near = _backend().neighbors(value)
+    assert [(n["subject"], n["object"]) for n in near] == [(value, "user")]
+
+
+def test_once_keyed_the_dual_writes_delete_and_read_by_key(world):
+    from kazma_core.memory import graph_backend
+
+    _fact(world, "user", "lives_in", "Kuwait")
+    _sync(world)
+    start = len(world.neo.statements)
+    assert graph_backend.delete_belief_edge(subject="user", predicate="lives_in", obj="Kuwait")
+    assert _backend().neighbors("user") == []
+    seen = world.neo.statements[start:]
+    assert seen[0].startswith("MATCH (a:Entity {tenant_id: $tid, key: $sk})"), seen
+    assert "MATCH (a:Entity {tenant_id: $tid, key: $key})-[r]-(b:Entity)" in seen[1]
+    assert world.neo.facts() == set()
+
+
 # ── the same on a real Neo4j (opt-in) ───────────────────────────────────
 
 _REAL_URL = os.environ.get("KAZMA_TEST_NEO4J_URL", "").strip()
@@ -941,12 +1485,15 @@ def test_real_server_converges_and_leaves_what_is_not_its_own(real):
 def test_real_server_runs_every_statement_the_sync_sends(real, monkeypatch):
     """Every ``// kazma:<op>`` statement of ``graph_backend`` runs against the
     real server at least once (each was written against the in-memory stand-in
-    first): a first full comparison, a fact written and then superseded, each
-    followed by an ordinary pass, and a full comparison that meets an isolated
-    node. The copy ends holding the current value only."""
+    first): passes while the copy is not keyed yet (a node it may not key this
+    pass), a fact written and then superseded once it is, each followed by an
+    ordinary pass, a full comparison that meets an isolated node, and keys
+    two nodes share (written with the constraint dropped: this test drops
+    and remakes ``kazma_entity_key``, as a pass does). The copy ends holding
+    the current value only, one node per name."""
     from neo4j import Session
 
-    from kazma_core.memory import graph_backend
+    from kazma_core.memory import graph_backend, graph_sync
     from kazma_core.memory.belief_mutation import mutate_belief
     from kazma_core.memory.graph_sync import run_graph_sync
 
@@ -961,9 +1508,15 @@ def test_real_server_runs_every_statement_the_sync_sends(real, monkeypatch):
 
     monkeypatch.setattr(Session, "run", recording)
     t = real.tenant
+    session = real.be._get_driver().session
+    # Not keyed yet: a pass may key no node, writes find nodes by name.
+    _old_write(session, "kazma", "noted", "keyless", "b-keyless", tenant=t, install="another-install")
+    monkeypatch.setattr(graph_sync, "KEY_STAMPS_PER_PASS", 0)
     run_graph_sync(real.conn, full=True)
     first = mutate_belief(real.conn, "user", "favorite_color", "blue", tenant_id=t)["belief_id"]
-    run_graph_sync(real.conn)
+    assert run_graph_sync(real.conn)["keys"]["state"] == "transitional"
+    monkeypatch.setattr(graph_sync, "KEY_STAMPS_PER_PASS", 100_000)
+    assert run_graph_sync(real.conn)["keys"]["state"] == "keyed"
     second = mutate_belief(real.conn, "user", "favorite_color", "green", tenant_id=t)["belief_id"]
     run_graph_sync(real.conn)
     _cypher(real.be, "MERGE (n:Entity {name: 'stray', tenant_id: $tid})", tid=t)
@@ -973,6 +1526,20 @@ def test_real_server_runs_every_statement_the_sync_sends(real, monkeypatch):
                      "MERGE (a)-[r:NOTED]->(b) SET r.belief_id = 'b-gone', r.install = $inst", tid=t, inst=real.install)
     report = run_graph_sync(real.conn, full=True)
     assert report["status"] == "in_sync", report
+    # Keys two nodes share: two more 'green' nodes with its key, one holding
+    # a copy of this install's edge, one none.
+    key = graph_backend.entity_key("green")
+    try:
+        _cypher(real.be, f"DROP CONSTRAINT {graph_backend.KEY_CONSTRAINT} IF EXISTS")
+        _cypher(real.be, "MATCH (u:Entity {name: 'user', tenant_id: $tid}) "
+                         "CREATE (u)-[:FAVORITE_COLOR {belief_id: $bid, install: $inst, confidence: 0.5, "
+                         "predicate: 'favorite_color'}]->(:Entity {name: 'green', tenant_id: $tid, key: $key}) "
+                         "CREATE (:Entity {name: 'green', tenant_id: $tid, key: $key})",
+                tid=t, bid=second, inst=real.install, key=key)
+        repaired = run_graph_sync(real.conn)
+    finally:
+        real.be.ensure_key_constraint()
+    assert repaired["keys"]["unstamped"] == 2 and repaired["keys"]["state"] == "keyed", repaired["keys"]
 
     statements = set(re.findall(r"// kazma:(\w+)", Path(graph_backend.__file__).read_text(encoding="utf-8")))
     assert statements and statements <= seen, f"never run on a real server: {sorted(statements - seen)}"
@@ -980,3 +1547,293 @@ def test_real_server_runs_every_statement_the_sync_sends(real, monkeypatch):
     assert edges == {("user", "FAVORITE_COLOR", "green", second, real.install)}, (edges, first)
     names = {r["n"] for r in _cypher(real.be, "MATCH (n:Entity {tenant_id: $tid}) RETURN n.name AS n", tid=t)}
     assert "blue" not in names and "stray" not in names and "gone" not in names
+    assert _real_per_name(real.be, t)["green"] == 1
+
+
+# ── node keys on a real Neo4j (opt-in) ──────────────────────────────────
+
+
+def _real_per_name(be, tenant: str) -> dict[str, int]:
+    rows = _cypher(be, "MATCH (n:Entity {tenant_id: $tid}) RETURN n.name AS n, count(*) AS c", tid=tenant)
+    return {r["n"]: r["c"] for r in rows}
+
+
+def _plan_ops(be, query: str, **params: Any) -> list[str]:
+    """The operators of the plan Neo4j makes for *query* (EXPLAIN: nothing runs)."""
+    with be._get_driver().session() as session:
+        plan = session.run("EXPLAIN " + query, **params).consume().plan
+    out: list[str] = []
+
+    def walk(op: dict) -> None:
+        out.append(str(op["operatorType"]).split("@")[0])
+        for child in op.get("children") or []:
+            walk(child)
+
+    walk(plan)
+    return out
+
+
+def test_real_server_keys_a_copy_written_before_keys_and_then_seeks_by_index(real):
+    from kazma_core.memory import graph_backend
+    from kazma_core.memory.belief_mutation import mutate_belief
+    from kazma_core.memory.graph_sync import run_graph_sync
+
+    t = real.tenant
+    mutate_belief(real.conn, "user", "lives_in", "Kuwait", tenant_id=t)
+    _old_write(real.be._get_driver().session, "user", "likes", "tea", "b-tea", tenant=t, install=real.install)
+    keyless = _cypher(real.be, "MATCH (n:Entity {tenant_id: $tid}) WHERE n.key IS NULL RETURN n.name AS n", tid=t)
+    assert {r["n"] for r in keyless} == {"tea"}, "the old code: a node with no key"
+
+    report = run_graph_sync(real.conn, full=True)
+
+    assert report["keys"]["state"] == "keyed", report["keys"]
+    rows = _cypher(real.be, "MATCH (n:Entity {tenant_id: $tid}) RETURN n.name AS n, n.key AS k", tid=t)
+    assert rows and all(r["k"] == graph_backend.entity_key(r["n"]) for r in rows)
+    row = graph_backend.edge_row("user", "noted", "x", "b", 0.5)
+    for query, params in (
+        (graph_backend._UPSERT_EDGES_BY_KEY % "`NOTED`", {"rows": [row], "tid": t, "inst": "i"}),
+        (graph_backend._EDGES_AT_NODE_KEYS, {"keys": [{"sk": row["sk"], "rel": "NOTED", "ok": row["ok"]}], "tid": t}),
+        ("MATCH (a:Entity {tenant_id: $tid, key: $key})-[r]-(b:Entity) RETURN a.name", {"tid": t, "key": row["sk"]}),
+        (graph_backend._STAMP_KEYS, {"rows": []}),
+    ):
+        ops = _plan_ops(real.be, query, **params)
+        assert any(op.startswith("NodeUniqueIndexSeek") for op in ops) and "NodeByLabelScan" not in ops, (query, ops)
+    # Negative control: the write by name, the only one there was, scans the label.
+    ops = _plan_ops(real.be, graph_backend._UPSERT_EDGES_BY_NAME % "`NOTED`", rows=[row], tid=t, inst="i")
+    assert "NodeByLabelScan" in ops and not any(op.startswith("NodeUniqueIndexSeek") for op in ops)
+    constraints = _cypher(real.be, "SHOW CONSTRAINTS YIELD name, type, labelsOrTypes, properties "
+                                   "WHERE name = $n RETURN type, labelsOrTypes, properties",
+                          n=graph_backend.KEY_CONSTRAINT)
+    assert constraints == [{"type": "UNIQUENESS", "labelsOrTypes": ["Entity"], "properties": ["tenant_id", "key"]}]
+
+
+def test_real_server_a_pass_over_a_keyed_copy_draws_no_notice(real, caplog):
+    """The driver logs every notice Neo4j sends; ``CREATE CONSTRAINT ... IF
+    NOT EXISTS`` over a constraint that is there sends one, and a pass that
+    made it every 15 minutes would put that line in the log each time."""
+    from kazma_core.memory import graph_backend
+    from kazma_core.memory.belief_mutation import mutate_belief
+    from kazma_core.memory.graph_sync import run_graph_sync
+
+    mutate_belief(real.conn, "user", "lives_in", "Kuwait", tenant_id=real.tenant)
+    assert run_graph_sync(real.conn, full=True)["keys"]["state"] == "keyed"
+    caplog.set_level(logging.INFO, logger="neo4j.notifications")
+    caplog.clear()
+    assert run_graph_sync(real.conn, full=True)["keys"]["state"] == "keyed"
+    assert [r.getMessage()[:120] for r in caplog.records if r.name == "neo4j.notifications"] == []
+    # Negative control: the statement alone, over the constraint that is there.
+    _cypher(real.be, graph_backend._KEY_CONSTRAINT_DDL)
+    assert any("already exists" in r.getMessage() for r in caplog.records if r.name == "neo4j.notifications")
+
+
+def test_real_server_one_node_per_name_through_every_phase(real, monkeypatch):
+    from kazma_core.memory import graph_backend, graph_sync
+    from kazma_core.memory.graph_sync import run_graph_sync
+
+    t = real.tenant
+    session = real.be._get_driver().session
+
+    def write(subject: str, obj: str, bid: str) -> None:
+        assert graph_backend.upsert_belief_edge(subject=subject, predicate="noted", obj=obj, belief_id=bid,
+                                                tenant_id=t)
+        assert max(_real_per_name(real.be, t).values()) == 1, _real_per_name(real.be, t)
+
+    for i in range(6):
+        _row(real, f"b-{i}", "user", "noted", f"value {i}", tenant=t)
+        _old_write(session, "user", "noted", f"value {i}", f"b-{i}", tenant=t, install=real.install)
+    write("user", "value 1", "b-1")
+    write("kazma", "value 7", "b-7")
+    monkeypatch.setattr(graph_sync, "KEY_STAMPS_PER_PASS", 3)
+    assert run_graph_sync(real.conn)["keys"]["state"] == "transitional"
+    write("user", "value 2", "b-2")
+    write("someone", "value 8", "b-8")
+    monkeypatch.setattr(graph_sync, "KEY_STAMPS_PER_PASS", 100_000)
+    assert run_graph_sync(real.conn)["keys"]["state"] == "keyed"
+    write("user", "value 3", "b-3")
+    write("other", "value 9", "b-9")
+    rows = _cypher(real.be, "MATCH (n:Entity {tenant_id: $tid}) RETURN n.name AS n, n.key AS k", tid=t)
+    assert all(r["k"] == graph_backend.entity_key(r["n"]) for r in rows)
+
+
+def test_real_server_negative_control_switching_before_the_backfill_duplicates(real):
+    from kazma_core.memory import graph_backend
+
+    t = real.tenant
+    _old_write(real.be._get_driver().session, "user", "lives_in", "Kuwait", "b-1", tenant=t, install=real.install)
+    real.be.ensure_key_constraint()
+    real.be.set_keyed(True)  # keyed before every node has its key
+    assert graph_backend.upsert_belief_edge(subject="user", predicate="likes", obj="tea", belief_id="b-2",
+                                            tenant_id=t)
+    assert _real_per_name(real.be, t)["user"] == 2
+
+
+def test_real_server_an_old_writer_after_the_switch_converges_in_one_pass(real):
+    from kazma_core.memory import graph_backend
+    from kazma_core.memory.belief_mutation import mutate_belief
+    from kazma_core.memory.graph_sync import run_graph_sync
+
+    t = real.tenant
+    session = real.be._get_driver().session
+    mutate_belief(real.conn, "user", "lives_in", "Kuwait", tenant_id=t)
+    assert run_graph_sync(real.conn, full=True)["keys"]["state"] == "keyed"
+    _row(real, "b-fresh", "user", "noted", "fresh", tenant=t)
+    _row(real, "b-mention", "kazma", "mentions", "fresh", tenant=t)
+    _row(real, "b-place", "user", "noted", "a place", tenant=t)
+    real.conn.execute("DELETE FROM memory_graph_outbox")
+    real.conn.commit()
+    _old_write(session, "user", "noted", "fresh", "b-fresh", tenant=t, install=real.install)
+    _old_write(session, "owner", "visited", "a place", "b-theirs", tenant=t, install="another-install")
+    theirs = _cypher(real.be, "MATCH (:Entity {tenant_id: $tid})-[r:VISITED]->(b:Entity) "
+                              "RETURN elementId(r) AS r, properties(r) AS p, elementId(b) AS b", tid=t)
+    for subject, predicate, obj, bid in (("kazma", "mentions", "fresh", "b-mention"),
+                                         ("user", "noted", "a place", "b-place")):
+        assert graph_backend.upsert_belief_edge(subject=subject, predicate=predicate, obj=obj, belief_id=bid,
+                                                tenant_id=t)
+    assert _real_per_name(real.be, t)["fresh"] == 2, "the old writer's node and this build's keyed twin"
+
+    report = run_graph_sync(real.conn)
+
+    assert report["keys"]["state"] == "keyed" and report["keys"]["held_elsewhere"] >= 1, report["keys"]
+    assert _real_per_name(real.be, t)["fresh"] == 1
+    ends = _cypher(real.be, "MATCH (:Entity {tenant_id: $tid})-[r]->(b:Entity {name: 'fresh', tenant_id: $tid}) "
+                            "RETURN r.belief_id AS bid, b.key AS k", tid=t)
+    assert {r["bid"] for r in ends} == {"b-fresh", "b-mention"} and all(r["k"] for r in ends)
+    assert _cypher(real.be, "MATCH (:Entity {tenant_id: $tid})-[r:VISITED]->(b:Entity) "
+                            "RETURN elementId(r) AS r, properties(r) AS p, elementId(b) AS b", tid=t) == theirs
+
+
+def test_real_server_writes_and_reads_back_a_value_of_4000_four_byte_characters(real):
+    from kazma_core.memory import graph_backend
+    from kazma_core.memory.belief_mutation import mutate_belief
+    from kazma_core.memory.graph_sync import run_graph_sync
+
+    t = real.tenant
+    value = "\U0001F600" * 4000
+    assert len(value.encode("utf-8")) == 16_000
+    bid = mutate_belief(real.conn, "user", "noted", value, tenant_id=t)["belief_id"]
+    assert run_graph_sync(real.conn, full=True)["keys"]["state"] == "keyed"
+    rows = _cypher(real.be, "MATCH (n:Entity {tenant_id: $tid, key: $k}) RETURN n.name AS n", tid=t,
+                   k=graph_backend.entity_key(value))
+    assert rows == [{"n": value}]
+    assert ("user", "NOTED", value, bid, real.install) in _real_edges(real.be, t)
+    near = real.be.neighbors(value, tenant_id=t)
+    assert [(n["subject"], n["object"], n["id"]) for n in near] == [(value, "user", bid)]
+
+
+def test_real_server_negative_control_an_index_on_name_refuses_the_value(real):
+    from neo4j.exceptions import Neo4jError
+
+    label = f"KazmaTestNameIndex{uuid.uuid4().hex[:8]}"
+    index = f"kazma_test_name_{uuid.uuid4().hex[:8]}"
+    try:
+        _cypher(real.be, f"CREATE INDEX {index} FOR (n:{label}) ON (n.name)")
+        _cypher(real.be, "CALL db.awaitIndexes(60)")
+        with pytest.raises(Neo4jError, match="too large to index"):
+            _cypher(real.be, f"CREATE (:{label} {{name: $v}})", v="\U0001F600" * 4000)
+    finally:
+        _cypher(real.be, f"MATCH (n:{label}) DELETE n")
+        _cypher(real.be, f"DROP INDEX {index} IF EXISTS")
+
+
+def test_real_server_leaves_foreign_edges_and_tenantless_nodes_byte_identical(real):
+    from kazma_core.memory import graph_backend
+    from kazma_core.memory.belief_mutation import mutate_belief
+    from kazma_core.memory.graph_sync import run_graph_sync
+
+    t = real.tenant
+    marker = f"kazma-test-{uuid.uuid4().hex[:8]}"
+    _cypher(real.be, "MERGE (a:Entity {name: 'owner', tenant_id: $tid}) MERGE (b:Entity {name: 'notes', tenant_id: $tid}) "
+                     "MERGE (c:Entity {name: 'Kuwait', tenant_id: $tid}) "
+                     "CREATE (a)-[:WROTE {note: 'by hand'}]->(b) "
+                     "CREATE (a)-[:VISITED {belief_id: 'b-elsewhere', install: 'another-install'}]->(c) "
+                     "CREATE (:Entity {name: 'no tenant', marker: $m}) CREATE (:Entity {name: 'Kuwait', marker: $m}) "
+                     "CREATE (:Topic {name: 'maps', tenant_id: $tid, marker: $m})", tid=t, m=marker)
+
+    def foreign() -> list[dict]:
+        return _cypher(real.be, "MATCH (a:Entity {tenant_id: $tid})-[r]->(b) "
+                                "WHERE coalesce(r.belief_id, '') = '' OR r.install <> $inst "
+                                "RETURN elementId(r) AS r, type(r) AS t, properties(r) AS p, "
+                                "elementId(a) AS a, elementId(b) AS b ORDER BY r", tid=t, inst=real.install)
+
+    def tenantless() -> list[dict]:
+        return _cypher(real.be, "MATCH (n) WHERE n.tenant_id IS NULL OR n.marker = $m "
+                                "RETURN elementId(n) AS e, labels(n) AS l, properties(n) AS p ORDER BY e", m=marker)
+
+    before = (foreign(), tenantless())
+    assert len(before[0]) == 2 and len(before[1]) >= 3
+    try:
+        mutate_belief(real.conn, "user", "lives_in", "Kuwait", tenant_id=t)
+        run_graph_sync(real.conn, full=True)
+        graph_backend.upsert_belief_edge(subject="owner", predicate="likes", obj="maps", belief_id="b-maps",
+                                         tenant_id=t)
+        run_graph_sync(real.conn, full=True)
+        assert (foreign(), tenantless()) == before
+    finally:
+        _cypher(real.be, "MATCH (n {marker: $m}) DETACH DELETE n", m=marker)
+
+
+def _race(be, statement: str, params: dict[str, Any], *, hold_s: float = 2.0) -> list[BaseException]:
+    """Run *statement* in two transactions at once: each commits only after
+    both have run it, or after *hold_s* (a transaction blocked behind the
+    other's lock cannot run it until that one commits)."""
+    import threading
+
+    barrier = threading.Barrier(2, timeout=hold_s)
+    errors: list[BaseException] = []
+
+    def one() -> None:
+        with be._get_driver().session() as session:
+            tx = session.begin_transaction()
+            try:
+                tx.run(statement, **params).consume()
+            except Exception as exc:  # the constraint refusing the second writer
+                errors.append(exc)
+                tx.close()
+                return
+            try:
+                barrier.wait()
+            except threading.BrokenBarrierError:
+                pass
+            tx.commit()
+
+    threads = [threading.Thread(target=one) for _ in range(2)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join(30)
+    return errors
+
+
+def test_real_server_two_writers_of_a_new_name_make_one_node(real):
+    from kazma_core.memory import graph_backend
+    from neo4j.exceptions import ConstraintError
+
+    t = real.tenant
+    real.be.ensure_key_constraint()
+
+    def count(name: str, label: str = "Entity") -> int:
+        return _cypher(real.be, f"MATCH (n:{label} {{tenant_id: $tid, name: $n}}) RETURN count(n) AS c",
+                       tid=t, n=name)[0]["c"]
+
+    def params(name: str) -> dict[str, Any]:
+        return {"rows": [graph_backend.edge_row("user", "noted", name, "b-race", 0.5)], "tid": t, "inst": real.install}
+
+    assert _race(real.be, graph_backend._UPSERT_EDGES_BY_KEY % "`NOTED`", params("by key")) == []
+    assert count("by key") == 1, "the second writer waited for the first and found its node"
+    errors = _race(real.be, graph_backend._UPSERT_EDGES_BY_NAME % "`NOTED`", params("by name"))
+    assert count("by name") == 1 and len(errors) == 1 and isinstance(errors[0], ConstraintError), errors
+    # Negative controls: the write before keys made two; so does the keyed
+    # write with a plain index in place of the constraint.
+    assert _race(real.be, _OLD_UPSERT % "`NOTED`", params("old")) == []
+    assert count("old") == 2
+    label = f"KazmaTestPlain{uuid.uuid4().hex[:8]}"
+    index = f"kazma_test_plain_{uuid.uuid4().hex[:8]}"
+    try:
+        _cypher(real.be, f"CREATE INDEX {index} FOR (n:{label}) ON (n.tenant_id, n.key)")
+        _cypher(real.be, "CALL db.awaitIndexes(60)")
+        plain = (graph_backend._UPSERT_EDGES_BY_KEY % "`NOTED`").replace(":Entity", f":{label}")
+        assert _race(real.be, plain, params("plain index")) == []
+        assert count("plain index", label) == 2
+    finally:
+        _cypher(real.be, f"MATCH (n:{label}) DETACH DELETE n")
+        _cypher(real.be, f"DROP INDEX {index} IF EXISTS")
