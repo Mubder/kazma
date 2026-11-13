@@ -347,6 +347,11 @@ def _postgres_not_used(root: Path) -> bool:
 def _force_rmtree(path: Path) -> None:
     """Remove the staging tree. Windows needs three steps, not one.
 
+    Since 2026-11-13 ``restic_repo.restore`` gives the folders it rebuilt
+    the target's rights itself; this stays for a tree it could not release
+    (an unreadable snapshot list, a restore run by an administrator whose
+    restic also restored other owners).
+
     restic reconstructs the source's absolute path under the target, so it
     synthesises the drive-letter parents -- and restores the ORIGINAL
     metadata onto them. Those parents inherit the real directory's owner,

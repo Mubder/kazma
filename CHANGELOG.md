@@ -33,6 +33,18 @@
     at the screen, never installed Docker Desktop: Windows refused its
     `wsl --install`. It now installs WSL the way Kazma's engine does.
 
+## A restored backup can be deleted again (2026-11-13)
+
+- On Windows, restic restores a backup under its original full path and
+  gives each rebuilt folder above it the real folder's permissions. The
+  rebuilt `C\Users` folder let an ordinary account read it but not delete
+  it, so a restore could only be removed by an administrator.
+- pytest could not clean up after two restic tests, and kept every full
+  test run's temp folder: 29 of them, 7.5 GB, on one PC.
+- After a restore, Kazma now gives those rebuilt parent folders the
+  permissions of the folder restored into. The restored files keep their
+  own permissions.
+
 ## Kazma Watch refuses the old signature form (2026-11-12)
 
 - Kazma Watch now accepts only `v2` signatures, which include the route a
