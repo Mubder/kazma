@@ -4505,6 +4505,10 @@ Express gaining a part never installs one the owner declined.
   `KAZMA_NEO4J_HEAP` / `KAZMA_NEO4J_PAGECACHE`); Kazma uses it through
   `KAZMA_NEO4J_URL` and `KAZMA_NEO4J_DEFAULT=1` (`memory.backends`, SQLite
   stays the source of truth, Neo4j the dual-written copy).
+- **No service sends usage data home**: the Neo4j compose sets
+  `NEO4J_dbms_usage__report_enabled=false` (Neo4j's default reports;
+  `tests/test_container_services.py` holds every row to it, a Neo4j without
+  the setting as the control).
 - **Every image a shipped compose file runs is pinned by version and digest**
   (SearXNG, Neo4j, Postgres, nginx; a locally built image is the exception),
   and Dependabot's `docker-compose` ecosystem proposes updates.

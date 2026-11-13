@@ -936,3 +936,47 @@ def test_real_server_converges_and_leaves_what_is_not_its_own(real):
     run_graph_sync(real.conn)
     names = {r["n"] for r in _cypher(real.be, "MATCH (n:Entity {tenant_id: $tid}) RETURN n.name AS n", tid=t)}
     assert "BLUE-HERON-42" not in names and "true" in names
+
+
+def test_real_server_runs_every_statement_the_sync_sends(real, monkeypatch):
+    """Every ``// kazma:<op>`` statement of ``graph_backend`` runs against the
+    real server at least once (each was written against the in-memory stand-in
+    first): a first full comparison, a fact written and then superseded, each
+    followed by an ordinary pass, and a full comparison that meets an isolated
+    node. The copy ends holding the current value only."""
+    from neo4j import Session
+
+    from kazma_core.memory import graph_backend
+    from kazma_core.memory.belief_mutation import mutate_belief
+    from kazma_core.memory.graph_sync import run_graph_sync
+
+    seen: set[str] = set()
+    original = Session.run
+
+    def recording(self, query, *args, **kwargs):
+        match = re.match(r"\s*// kazma:(\w+)", str(query))
+        if match:
+            seen.add(match.group(1))
+        return original(self, query, *args, **kwargs)
+
+    monkeypatch.setattr(Session, "run", recording)
+    t = real.tenant
+    run_graph_sync(real.conn, full=True)
+    first = mutate_belief(real.conn, "user", "favorite_color", "blue", tenant_id=t)["belief_id"]
+    run_graph_sync(real.conn)
+    second = mutate_belief(real.conn, "user", "favorite_color", "green", tenant_id=t)["belief_id"]
+    run_graph_sync(real.conn)
+    _cypher(real.be, "MERGE (n:Entity {name: 'stray', tenant_id: $tid})", tid=t)
+    # An edge of this install whose fact is gone (written while a forget's
+    # delete could not reach the server): the comparison deletes it.
+    _cypher(real.be, "MERGE (a:Entity {name: 'user', tenant_id: $tid}) MERGE (b:Entity {name: 'gone', tenant_id: $tid}) "
+                     "MERGE (a)-[r:NOTED]->(b) SET r.belief_id = 'b-gone', r.install = $inst", tid=t, inst=real.install)
+    report = run_graph_sync(real.conn, full=True)
+    assert report["status"] == "in_sync", report
+
+    statements = set(re.findall(r"// kazma:(\w+)", Path(graph_backend.__file__).read_text(encoding="utf-8")))
+    assert statements and statements <= seen, f"never run on a real server: {sorted(statements - seen)}"
+    edges = {e for e in _real_edges(real.be, t) if e[0] == "user"}
+    assert edges == {("user", "FAVORITE_COLOR", "green", second, real.install)}, (edges, first)
+    names = {r["n"] for r in _cypher(real.be, "MATCH (n:Entity {tenant_id: $tid}) RETURN n.name AS n", tid=t)}
+    assert "blue" not in names and "stray" not in names and "gone" not in names

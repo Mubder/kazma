@@ -97,6 +97,10 @@
   unreachable or not configured. The Memory page now says "graph: neo4j"
   when Neo4j is the store; since 2026-10-03 the graph counts had hidden it,
   and it said "graph: sqlite".
+- Every statement the sync sends has run against a real Neo4j 5.26 in a test,
+  not only against the test's stand-in.
+- Kazma's Neo4j no longer sends anonymous usage data to Neo4j Inc. (its
+  default; `NEO4J_dbms_usage__report_enabled=false` in the compose file).
 
 ## Kazma's own container engine stops cleanly when Windows shuts down (2026-11-13)
 

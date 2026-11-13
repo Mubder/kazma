@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -140,3 +141,38 @@ def test_every_shipped_compose_image_is_pinned_by_digest():
     planted = {"old.yml": "services:\n  db:\n    image: postgres:16-alpine\n"
                           "  web:\n    image: nginx:1.27-alpine\n  graph:\n    image: neo4j:5\n"}
     assert len(unpinned_images(planted)) == 3
+
+
+#: What each service's image sends home unless told not to, and the setting
+#: that stops it (2026-11-13: the live Neo4j's log said "Anonymous Usage Data
+#: is being sent to Neo4j"). SearXNG sends nothing of its own.
+_PHONES_HOME = {"neo4j": ("NEO4J_dbms_usage__report_enabled", "false")}
+
+
+def _phone_home_problems(rows) -> list[str]:
+    problems = []
+    for svc in rows:
+        service = _compose(svc.compose_file)["services"][svc.service]
+        image = str(service.get("image", "")).split("@", 1)[0].split(":", 1)[0].rsplit("/", 1)[-1]
+        if image in _PHONES_HOME:
+            name, value = _PHONES_HOME[image]
+            if str((service.get("environment") or {}).get(name, "")).lower() != value:
+                problems.append(f"{svc.part}: {image} reports usage unless {name}={value}")
+    return problems
+
+
+def test_no_service_sends_usage_data_home():
+    assert not _phone_home_problems(cs.SERVICES)
+
+
+def test_control_a_neo4j_without_the_setting_is_caught(monkeypatch):
+    real = _compose
+
+    def without(rel):
+        data = real(rel)
+        for service in data.get("services", {}).values():
+            (service.get("environment") or {}).pop("NEO4J_dbms_usage__report_enabled", None)
+        return data
+
+    monkeypatch.setattr(sys.modules[__name__], "_compose", without)
+    assert any("graph_neo4j" in p for p in _phone_home_problems(cs.SERVICES))
