@@ -78,7 +78,7 @@ Discovery + fetch caps: `KAZMA_KB_MAX_PAGES` (default 200, hard cap 1000), `KAZM
 | URL **missing** from a later discovery | **Kept.** A sparse, capped or failed discovery never deletes indexed pages; a refresh still asks the site for it (below) |
 | The site answers **410 Gone** for a page the library holds | **Removed** at that crawl: its text, keyword entries, meaning vectors and fetched copy leave the library |
 | The site answers **404** for a page the library holds | Kept for now ("no longer on the site; stays until a later crawl confirms"). Removed when a crawl at least an hour later finds it missing again; a page that answers again is no longer counted missing |
-| The **same text** under another address (`/` and `/index.html`, `http` and `https`, a `?ref=` tag) | Stored once, under the first address; the other is kept out as a duplicate |
+| The **same text** under another address (a site's root and its index page, `http` and `https`, a `?ref=` tag) | Stored once, under the first address; the other is kept out as a duplicate |
 | Many addresses of one page that differ only after `?` (a calendar's months, a catalogue's filters) | At most 5 per page are crawled, so the page cap is spent on pages |
 | A page that **fails** | Counted as failed; the crawl ends partial and says so |
 
