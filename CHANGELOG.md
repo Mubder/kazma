@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## A deleted library's last crawl no longer reads as a broken journal (2026-11-13)
+
+- Deleting a Knowledge library just as its crawl finished could log "Durable
+  crawl journal unavailable" for that crawl. A settings snapshot answered
+  `{}` instead of "missing" for a key stored nowhere, and the journal removed
+  a finished job's two keys in an order that exposed half of it. Both are
+  fixed; the crawls and the library were never at risk.
+
 ## The daily crawl check also renders in Kazma's browser (2026-11-13)
 
 - Once a day Kazma already crawled one known page for real. It now also

@@ -2030,17 +2030,24 @@ class ConfigStore(_ChangeNotices):
                 value = row["value"]
                 raw = json.loads(value) if isinstance(value, str) else value
                 values[row["key"]] = self._resolve_vault_value(row["key"], raw, migrate=False)
+            # A prefix kazma.yaml does not hold is absent from the snapshot's
+            # YAML, never ``{}``: walking with ``{}`` as the default made
+            # ``snapshot(k).get(k)`` answer ``{}`` for a key stored nowhere,
+            # where ``get`` answers None -- and the crawl journal read a
+            # removed job as a broken row, "journal unavailable" (2026-11-13).
+            absent = object()
             yaml_value: Any = self._load_yaml()
             for part in prefix.split("."):
-                yaml_value = yaml_value.get(part, {}) if isinstance(yaml_value, dict) else {}
-            yaml_value = self._resolve_vault_value(prefix, yaml_value, migrate=False)
+                yaml_value = yaml_value.get(part, absent) if isinstance(yaml_value, dict) else absent
             yaml_data: dict[str, Any] = {}
-            target = yaml_data
-            parts = prefix.split(".")
-            for part in parts[:-1]:
-                target[part] = {}
-                target = target[part]
-            target[parts[-1]] = yaml_value
+            if yaml_value is not absent:
+                yaml_value = self._resolve_vault_value(prefix, yaml_value, migrate=False)
+                target = yaml_data
+                parts = prefix.split(".")
+                for part in parts[:-1]:
+                    target[part] = {}
+                    target = target[part]
+                target[parts[-1]] = yaml_value
             return SettingsSnapshot(prefix, values, yaml_data)
 
     def _sqlite_get_raw(self, key: str) -> Any:

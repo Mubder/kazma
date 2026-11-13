@@ -432,14 +432,27 @@ def _mutate(change):
             except ConfigRevisionConflict:
                 continue
             for job_id in gone:
-                store.delete(_job_key(job_id))
-                store.delete(_rev_key(job_id))
+                _forget_job_keys(store, job_id)
             return copy.deepcopy(answer)
         raise AcquisitionError(FetchErrorCode.LIMIT, 'Durable crawl journal is busy; retry after active work finishes.', transient=True)
     except _storage_failures() as exc:
         raise _storage_error() from exc
     finally:
         _REGISTRY_LOCK.release()
+
+
+def _forget_job_keys(store, job_id):
+    """Delete an evicted job's two keys, its revision first.
+
+    The row was already written ``{'evicted': True}`` with its revision in the
+    batch that evicted it. A read between two separate deletes must still see
+    that: the settings store answers a missing key with its stored children
+    merged, so with the row deleted first the job read as ``{'rev': N}`` --
+    an invalid row, "journal unavailable" -- to a crawl finishing at that
+    moment (CI 2026-11-13: a library deleted as its crawl ended). With the
+    revision deleted first the row reads evicted, and then gone."""
+    store.delete(_rev_key(job_id))
+    store.delete(_job_key(job_id))
 
 
 def _read_job(store, job_id):

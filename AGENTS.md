@@ -516,6 +516,17 @@ JSON". Gate: `tests/test_x_reasoning_off.py`.
   `worker_bootstrap.background_schedulers_enabled()` is False there (override
   with `KAZMA_TEST_BACKGROUND_SCHEDULERS=1`). One switch for all eight
   schedulers — the purge was simply the one that got caught.
+- **A snapshot answers a key stored nowhere as `get` does** (2026-11-13):
+  `ConfigStore.snapshot(prefix)` walked kazma.yaml with `{}` as each missing
+  level's default, so `snapshot(k).get(k)` answered `{}` for a key held in
+  neither the database nor the YAML, and the crawl journal read a removed
+  job as a broken row ("journal unavailable": CI, a library deleted as its
+  crawl ended). A prefix the YAML does not hold is now absent from the
+  snapshot. The journal also deletes an evicted job's revision key before
+  its row (`crawl_jobs._forget_job_keys`): between the two deletes, the row's
+  key read back as its child merged in. Gates:
+  `tests/test_config_store_snapshot.py`, `tests/test_knowledge_crawl_journal.py`
+  (the old walk and the old delete order as controls).
 - **A write drops only what it can change in the read cache**
   (`ConfigStore._invalidate_key`, 2026-10-01): the key, its ancestors (`get`
   merges a missing key's children, so `a`'s cached view holds `a.b`) and its

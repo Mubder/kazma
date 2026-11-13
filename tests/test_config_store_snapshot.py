@@ -183,3 +183,36 @@ def test_real_pg_snapshot_observes_committed_batches_without_stale_cache(tmp_pat
         for key in keys:
             writer.delete(key)
         writer.close()
+
+
+def test_a_key_stored_nowhere_reads_as_missing_like_get(tmp_path):
+    """``snapshot(k).get(k)`` answers what ``get(k)`` answers for a key held
+    neither in the database nor in kazma.yaml: None (or the default). It
+    answered ``{}`` -- the YAML walk defaulted every missing level to a dict
+    -- and the crawl journal read a removed job as a broken row (2026-11-13)."""
+    yaml_path = tmp_path / "kazma.yaml"
+    yaml_path.write_text("acquisition:\n  crawl: {}\ndocuments:\n  intake:\n    max_files: 3\n", encoding="utf-8")
+    store = ConfigStore(str(tmp_path / "settings.db"), yaml_path=str(yaml_path))
+    try:
+        key = "acquisition.crawl.0123456789abcdef"
+        assert store.get(key) is None
+        assert store.snapshot(key).get(key) is None
+        assert store.snapshot(key).get(key, "fallback") == "fallback"
+        # What the YAML does hold is still read through the snapshot.
+        assert store.snapshot("documents").get("documents.intake.max_files") == 3
+        store.set(key + ".rev", 4)
+        assert store.snapshot(key).get(key) == {"rev": 4}  # stored children still merge, as in get
+    finally:
+        store.close()
+
+
+def test_negative_control_the_old_walk_answered_an_empty_dict():
+    """The YAML walk as it was: every missing level a dict."""
+    from kazma_core.config_store import SettingsSnapshot
+
+    key = "acquisition.crawl.0123456789abcdef"
+    yaml_value = {"acquisition": {"crawl": {}}}
+    for part in key.split("."):
+        yaml_value = yaml_value.get(part, {}) if isinstance(yaml_value, dict) else {}
+    yaml_data = {"acquisition": {"crawl": {"0123456789abcdef": yaml_value}}}
+    assert SettingsSnapshot(key, {}, yaml_data).get(key) == {}

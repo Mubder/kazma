@@ -459,3 +459,44 @@ def test_the_api_reads_crawl_state_from_the_journal_only():
     imported = {alias.name for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
                 and (node.module or "").endswith("crawl_jobs") for alias in node.names}
     assert {"inspect_jobs", "projection"} <= imported
+
+
+def _read_between_the_deletes(journal, monkeypatch, *, revision_first: bool):
+    """Evict one finished job and read it in the window between its two key
+    deletes; returns what the read raised, or None."""
+    crawl_jobs._mutate(lambda jobs: jobs.__setitem__("done-1", _finished_row("done-1", "lib-x", 0, 10)))
+    seen: list[BaseException | None] = []
+    real_delete = journal.delete
+    deletes: list[str] = []
+
+    def delete(key):
+        result = real_delete(key)
+        deletes.append(key)
+        if len(deletes) == 1:
+            try:
+                crawl_jobs._read_job(journal, "done-1")
+                seen.append(None)
+            except AcquisitionError as exc:
+                seen.append(exc)
+        return result
+
+    if not revision_first:
+        def old_order(store, job_id):  # the order before 2026-11-13
+            store.delete(crawl_jobs._job_key(job_id))
+            store.delete(crawl_jobs._rev_key(job_id))
+
+        monkeypatch.setattr(crawl_jobs, "_forget_job_keys", old_order)
+    monkeypatch.setattr(journal, "delete", delete)
+    crawl_jobs._mutate(lambda jobs: jobs.pop("done-1"))
+    assert len(deletes) == 2
+    return seen[0]
+
+
+def test_a_job_read_while_its_eviction_deletes_reads_gone(journal, monkeypatch):
+    assert _read_between_the_deletes(journal, monkeypatch, revision_first=True) is None
+    assert crawl_jobs._read_job(journal, "done-1") == (None, 0)
+
+
+def test_negative_control_the_row_deleted_first_read_as_a_broken_journal(journal, monkeypatch):
+    raised = _read_between_the_deletes(journal, monkeypatch, revision_first=False)
+    assert isinstance(raised, AcquisitionError) and "journal unavailable" in str(raised)
