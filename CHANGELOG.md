@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## GitHub Actions and the HA proxy up to date (2026-11-13)
+
+- The workflows use setup-node 7.1, setup-uv 10.3, download-artifact 8.0 and
+  attest-build-provenance 4.2, each pinned to the commit its release tag
+  names (checked against the tag). The jobs that use Node run Node 24 (Node
+  20 reached its end of life in April). The release workflow may write the
+  artifact storage record attest 4 makes.
+- The HA compose file's nginx is 1.30.6, the newest of nginx's stable line;
+  its configuration was checked with `nginx -t` on that image. Dependabot no
+  longer proposes nginx's development line (odd minors) or Python images
+  newer than 3.14 (no onnxruntime or Chroma builds for 3.15 yet).
+
 ## Neo4j: each install's facts have their own edges; forget uses the index (2026-11-13)
 
 - Two Kazma installs sharing one Neo4j server (a development folder and the

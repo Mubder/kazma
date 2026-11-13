@@ -27,6 +27,8 @@ WRITES: dict[tuple[str, str, str], str] = {
         "Sigstore signing and SLSA provenance mint an OIDC token for the run",
     ("release.yml", "workflow", "attestations"):
         "build provenance is written to the attestations store",
+    ("release.yml", "workflow", "artifact-metadata"):
+        "actions/attest v4 records the attested files in the artifact storage record",
     ("pypi-reserve.yml", "publish", "id-token"):
         "PyPI Trusted Publishing mints an OIDC token; no PyPI token exists",
 }

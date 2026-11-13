@@ -71,8 +71,9 @@ services:
     restart: unless-stopped
 
   nginx:
-    # The stable line (1.27 no longer gets fixes), pinned by version and digest.
-    image: nginx:1.28.3-alpine@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236
+    # The stable line (an even minor: 1.30; an odd one is nginx's development
+    # line, which Dependabot proposes too), pinned by version and digest.
+    image: nginx:1.30.6-alpine@sha256:901e593c95dc85f5a729f5765516321366ef4ac401821431d408897e95287d0a
     container_name: kazma-nginx
     ports:
       - "${PUBLISH_HOST:-127.0.0.1}:${HOST_PORT:-9090}:80"

@@ -52,6 +52,12 @@ updates:
     labels:
       - "dependencies"
       - "docker"
+    ignore:
+      # Python 3.15 has no onnxruntime build (the OCR engines, Chroma's
+      # embedding stack) and Chroma does not resolve on it (2026-11-13): the
+      # images stay on the newest Python every package has wheels for.
+      - dependency-name: "python"
+        versions: [">= 3.15"]
 
   # The images Kazma's compose files run (2026-11-13): SearXNG and Neo4j are
   # pinned by version and digest (tests/test_container_services.py), so a new
@@ -68,3 +74,8 @@ updates:
     labels:
       - "dependencies"
       - "docker"
+    ignore:
+      # An odd nginx minor is its development ("mainline") line; Kazma's HA
+      # proxy runs the stable one (even minor).
+      - dependency-name: "nginx"
+        versions: ["1.31.x", "1.33.x", "1.35.x"]
