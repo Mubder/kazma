@@ -25,6 +25,14 @@ os.environ.pop("KAZMA_SECRET", None)
 # explicitly with a threshold.
 os.environ.setdefault("KAZMA_LOOP_STALL_WATCHDOG", "0")
 
+# Chroma's index inserts run on one thread, as Kazma's own clients make them
+# (memory/chroma_local.serial_index_inserts, §24F: a log replayed on several
+# threads can crash the process in hnswlib). The rayon pool reads this once
+# per process, the first time anything uses it, so which test got there first
+# decided it for every later index in the process; set before any test, every
+# index is built as Kazma builds it.
+os.environ.setdefault("RAYON_NUM_THREADS", "1")
+
 # Live-operator-file shield (2026-08-27 incident): test runs boot the real
 # app (create_app), whose logging attaches a daily-rotating handler to the
 # LIVE <repo>/.kazma/kazma.log. The suite rotated it at midnight, and the

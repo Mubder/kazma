@@ -168,6 +168,14 @@ class TestExecuteIntegration:
         assert "[hook] seen" in result["content"]
 
 
+#: A hook here starts a Python: under a loaded machine (the full suite) its
+#: start took longer than the 10 s default, the hook timed out, and a timed-out
+#: hook lets the call go on (documented: hooks are not a permission system),
+#: so the deny and rewrite cases failed. These test what a hook's answer does,
+#: not how fast Python starts: they give it the maximum.
+_HOOK_TIMEOUT_S = 30
+
+
 class TestCommandHooks:
     @pytest.mark.asyncio
     async def test_command_deny_exit_json(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -179,7 +187,7 @@ class TestCommandHooks:
             "kazma_core.agent.tool_hooks.load_hook_config",
             lambda: {
                 "enabled": True,
-                "pre_tool": [{"matcher": "*", "command": [sys.executable, "-c", code]}],
+                "pre_tool": [{"matcher": "*", "command": [sys.executable, "-c", code], "timeout_seconds": _HOOK_TIMEOUT_S}],
                 "post_tool": [],
             },
         )
@@ -194,7 +202,7 @@ class TestCommandHooks:
             "kazma_core.agent.tool_hooks.load_hook_config",
             lambda: {
                 "enabled": True,
-                "pre_tool": [{"matcher": "echo", "command": [sys.executable, "-c", code]}],
+                "pre_tool": [{"matcher": "echo", "command": [sys.executable, "-c", code], "timeout_seconds": _HOOK_TIMEOUT_S}],
                 "post_tool": [],
             },
         )
@@ -215,7 +223,7 @@ class TestCommandHooks:
             "kazma_core.agent.tool_hooks.load_hook_config",
             lambda: {
                 "enabled": True,
-                "pre_tool": [{"matcher": "*", "command": [sys.executable, "-c", code]}],
+                "pre_tool": [{"matcher": "*", "command": [sys.executable, "-c", code], "timeout_seconds": _HOOK_TIMEOUT_S}],
                 "post_tool": [],
             },
         )
@@ -230,7 +238,7 @@ class TestCommandHooks:
             "kazma_core.agent.tool_hooks.load_hook_config",
             lambda: {
                 "enabled": True,
-                "pre_tool": [{"matcher": "*", "command": [sys.executable, "-c", code]}],
+                "pre_tool": [{"matcher": "*", "command": [sys.executable, "-c", code], "timeout_seconds": _HOOK_TIMEOUT_S}],
                 "post_tool": [],
             },
         )

@@ -235,6 +235,18 @@ def _isolated_guard_files(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _update_brings_nothing_along(monkeypatch):
+    """``kazma update``'s follow-up step -- the Chromium build the installed
+    Playwright needs, Kazma's containers onto their pinned images -- starts
+    programs and asks docker. A test of the update's flow never runs it for
+    real; ``tests/test_update_brings_chromium_and_images.py`` drives each
+    step with fakes."""
+    from kazma_cli import update
+
+    monkeypatch.setattr(update, "_bring_along", lambda: True)
+
+
+@pytest.fixture(autouse=True)
 def _isolated_docker_config(tmp_path, monkeypatch):
     """The docker CLI's own settings (contexts, current context) come from an
     empty folder: which engine a developer's machine uses never decides a

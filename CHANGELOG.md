@@ -1,5 +1,50 @@
 # CHANGELOG
 
+## Neo4j: each install's facts have their own edges; forget uses the index (2026-11-13)
+
+- Two Kazma installs sharing one Neo4j server (a development folder and the
+  live install, say) shared one edge for a fact both held: the second
+  install's write landed on the first one's edge. When the first install
+  forgot the fact, the second install's fact left the graph until its daily
+  check. Each install now writes its own edge for its own facts, and never
+  changes another's. Tested end to end with two installs on a real Neo4j.
+- Forgetting a fact found its edge by reading every edge in the database. It
+  now goes straight to the fact's subject through the index, and touches
+  only this install's edges. The Memory page's fact edit also passes the
+  fact's tenant when it removes the old edge.
+
+## Two tests that failed under load (2026-11-13)
+
+- The Chroma recall test's negative control judged one index build, and a
+  build differs a little each time (34 to 39 of 40 measured): it now takes
+  the mean of three builds. The test suite also runs Chroma's inserts on one
+  thread, as Kazma does.
+- The tool-hook tests start Python, which can take longer than the hooks'
+  10-second default on a loaded machine; they now give the hook its maximum,
+  30 seconds. A hook that times out still lets the call go on, as documented.
+
+## A failed package update repairs itself; new packages bring what they need (2026-11-13)
+
+- A package update on the live install failed partway and left Kazma unable
+  to start for 18 minutes. Its fallback, `uv sync --inexact`, moved every
+  package to the lock file's version, and the failure removed about 200
+  packages. The update no longer uses that fallback: after a failed install
+  it rewrites every package (at most twice), and calls the update done only
+  when Kazma imports in a fresh Python (the old check only looked the
+  modules up, so a package whose files were gone passed). Each step's whole
+  output is in `.kazma/update.log`.
+- The deploy script keeps each step's whole output, names the error lines
+  instead of the last 300 characters, and when it reverts a change to
+  `pyproject.toml` it puts the old packages back (the update, else every
+  package rewritten while the guard holds Kazma) instead of only reloading.
+- `kazma update` downloads the Chromium build the installed Playwright
+  launches, where the browser tools were set up; Kazma's check now asks for
+  that build, not any Chromium folder.
+- `kazma update` puts each container setup made from this install's compose
+  files on the image the file pins (compose recreates it, keeping its
+  data). A container under the same name made elsewhere, by you or by
+  another Kazma folder of the same name, is never touched.
+
 ## A stopped app takes back what it registered; CI runs each chunk once (2026-11-13)
 
 - The app put its settings store, agent, chat adapters, gateway and session

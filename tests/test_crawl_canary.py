@@ -281,8 +281,10 @@ def test_the_install_and_the_canary_ask_one_rule_for_chromium(tmp_path, monkeypa
     from kazma_core.web_acquire import browser_isolation
 
     monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path))
+    monkeypatch.setattr(browser_isolation, "_chromium_revision", lambda: "1234")
     assert install._playwright_chromium() is browser_isolation.chromium_installed() is False
     (tmp_path / "chromium-1234").mkdir()
+    (tmp_path / "chromium_headless_shell-1234").mkdir()
     assert install._playwright_chromium() is browser_isolation.chromium_installed() is True
 
 

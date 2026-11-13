@@ -36,11 +36,21 @@ Three things break an install, and the update does none of them:
   `--extra`, it takes away the optional extras (vector memory, the TUI,
   OCR, the document platform...) and every package installed from Settings
   → Packages. The update installs additively (`uv pip install -e
-  ".[your extras]"`) and falls back to `uv sync --inexact` with your extras,
-  never a bare `uv sync`. If you run uv yourself, do the same:
+  ".[your extras]"`), never with `uv sync`. If you run uv yourself, use
   `uv sync --inexact --extra rag --extra tui`. If a sync already removed
   packages, `python -m kazma_cli update --reinstall -y` puts your extras back
   (it remembers them in `system.installed_extras`).
+- **An install that fails partway.** On Windows a file another program holds
+  open can stop an install after it has removed packages. The update then
+  rewrites every package (`uv pip install --reinstall`), at most twice with a
+  short pause, and counts the update done only when Kazma imports in a fresh
+  Python. Every step's whole output is in `.kazma/update.log`. If it still
+  fails, Kazma stays stopped and the update names the error.
+- **New packages need something outside Python.** After the packages, the
+  update downloads the Chromium build the installed Playwright launches
+  (only where the browser tools were set up), and puts each container setup
+  made from this install's compose files (SearXNG, Neo4j) on the image the
+  file now pins. A container of yours under another name is left alone.
 - **`kazma update` on Windows.** The update replaces `kazma.exe`, and Windows
   will not replace a running launcher; started from it, the update refuses
   and names `python -m kazma_cli update`.

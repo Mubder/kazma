@@ -23,8 +23,8 @@ import secrets as _secrets
 from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = ["SERVICES", "ContainerService", "by_part", "compose_up_argv", "ensure_secret",
-           "secret_is_set"]
+__all__ = ["SERVICES", "ContainerService", "ImageState", "by_part", "compose_up_argv", "ensure_secret",
+           "refresh_images", "secret_is_set"]
 
 
 @dataclass(frozen=True)
@@ -127,3 +127,133 @@ def compose_up_argv(svc: ContainerService, docker: str, root: Path, env_path: Pa
     if svc.profile:
         argv += ["--profile", svc.profile]
     return (*argv, "up", "-d", svc.service)
+
+
+# ── keeping a set-up service on its pinned image ──────────────────────────
+# A compose file names one image per service, pinned by version and digest,
+# and Dependabot moves the pin. `kazma update` installed the new compose file
+# and left the running container on the image it was created from: on
+# 2026-11-13 the owner's SearXNG still ran `searxng:latest`, created before the
+# pins existed. `refresh_images` brings each container setup made (compose's
+# own labels name this file's project and service) onto the pinned image;
+# compose recreates it, keeping its volumes. A container setup did not make --
+# the owner's own, under another name or another project -- is never touched.
+
+
+def _compose_project(svc: ContainerService, root: Path) -> str:
+    """The compose project *svc* runs under: its own, else the one compose
+    takes from the compose file's folder (lower case, letters, digits, ``-``
+    and ``_``)."""
+    if svc.project:
+        return svc.project
+    name = (Path(root) / svc.compose_file).resolve().parent.name.lower()
+    return "".join(ch for ch in name if ch.isalnum() or ch in "-_")
+
+
+def _made_from(config_files: str | None, svc: ContainerService, root: Path) -> bool:
+    """Whether compose made the container from *svc*'s compose file in *root*.
+
+    The project alone is not enough: compose names it after the file's
+    folder, so a checkout and an install both in a folder called ``kazma``
+    share it, and one install's update would have recreated the other's
+    container. Compose records the files it used, comma-separated."""
+    want = (Path(root) / svc.compose_file).resolve()
+    for name in str(config_files or "").split(","):
+        name = name.strip()
+        if not name:
+            continue
+        try:
+            if Path(name).resolve() == want:
+                return True
+        except (OSError, ValueError):
+            continue
+    return False
+
+
+def _pinned_image(svc: ContainerService, root: Path) -> str | None:
+    """The image the compose file pins for *svc*, or None when it names none."""
+    import yaml
+
+    try:
+        data = yaml.safe_load((Path(root) / svc.compose_file).read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return None
+    image = ((data.get("services") or {}).get(svc.service) or {}).get("image")
+    return str(image) if isinstance(image, str) and image.strip() else None
+
+
+@dataclass(frozen=True)
+class ImageState:
+    """What `_image_state` found for one service."""
+
+    svc: ContainerService
+    state: str  # "current", "stale", "absent", "not_ours", "unknown"
+    running: str = ""  # the image the container was created from
+    pinned: str = ""
+
+
+def _image_state(svc: ContainerService, root: Path, docker: str, *, run=None) -> ImageState:
+    """Whether *svc*'s container runs the image its compose file pins.
+
+    ``absent``: no container of that name (the part is not set up here).
+    ``not_ours``: a container of that name compose did not make from this
+    file's project and service. ``unknown``: docker did not answer, or the
+    file pins nothing.
+    """
+    import json
+    import subprocess
+
+    run = run or subprocess.run
+    pinned = _pinned_image(svc, root)
+    if not pinned:
+        return ImageState(svc, "unknown")
+    try:
+        found = run([docker, "inspect", svc.container], capture_output=True, text=True, timeout=60,
+                    stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return ImageState(svc, "unknown", pinned=pinned)
+    if found.returncode != 0:
+        text = f"{found.stdout}\n{found.stderr}".lower()
+        return ImageState(svc, "absent" if "no such object" in text else "unknown", pinned=pinned)
+    try:
+        row = (json.loads(found.stdout) or [{}])[0]
+    except (ValueError, IndexError):
+        return ImageState(svc, "unknown", pinned=pinned)
+    config = row.get("Config") or {}
+    labels = config.get("Labels") or {}
+    running = str(config.get("Image") or "")
+    if (labels.get("com.docker.compose.project") != _compose_project(svc, root)
+            or labels.get("com.docker.compose.service") != svc.service
+            or not _made_from(labels.get("com.docker.compose.project.config_files"), svc, root)):
+        return ImageState(svc, "not_ours", running=running, pinned=pinned)
+    return ImageState(svc, "current" if running == pinned else "stale", running=running, pinned=pinned)
+
+
+def refresh_images(root: Path, env_path: Path, docker: str, *, run=None) -> list[tuple[ImageState, str]]:
+    """Put every set-up service on its pinned image; one outcome per service.
+
+    Outcomes: ``current``, ``absent``, ``not_ours``, ``unknown``, ``updated``
+    or ``failed: <docker's last line>``. Compose recreates a container whose
+    image changed and keeps its volumes; nothing else is touched.
+    """
+    import subprocess
+
+    run = run or subprocess.run
+    outcomes: list[tuple[ImageState, str]] = []
+    for svc in SERVICES:
+        state = _image_state(svc, root, docker, run=run)
+        if state.state != "stale":
+            outcomes.append((state, state.state))
+            continue
+        try:
+            done = run(list(compose_up_argv(svc, docker, root, env_path)), capture_output=True, text=True,
+                       timeout=1800, stdin=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError) as exc:
+            outcomes.append((state, f"failed: {exc}"))
+            continue
+        if done.returncode == 0:
+            outcomes.append((state, "updated"))
+        else:
+            last = ((done.stderr or done.stdout or "").strip().splitlines() or ["no output"])[-1]
+            outcomes.append((state, f"failed: {last[:300]}"))
+    return outcomes

@@ -245,15 +245,26 @@ def edge_row(subject: str, predicate: str, obj: str, belief_id: str, confidence:
 # a Cypher comment, so the statement is self-describing in Neo4j's query log
 # and the tests' stand-in server can tell them apart.
 
-#: What both upserts do with the edge: a new one gets the fact's properties;
-#: an existing one only when it is Kazma's (``belief_id`` set) and this
-#: install's or untagged -- an edge Kazma did not write, or another install's,
-#: keeps its properties.
-_UPSERT_EDGE = """MERGE (a)-[r:%s]->(b)
-ON CREATE SET r.belief_id = row.bid, r.confidence = row.conf, r.predicate = row.pred, r.install = $inst
+#: What both upserts do with the edge: this install's own edge for the fact,
+#: matched by its install tag. Each install holding a fact has an edge of its
+#: own: matched by type alone, the second install's write landed on the first
+#: one's edge and changed nothing, so its fact had no edge once the first
+#: install forgot it (2026-11-13). An edge Kazma did not write, or another
+#: install wrote, is never matched, so never changed.
+_UPSERT_EDGE = """MERGE (a)-[r:%s {install: $inst}]->(b)
+ON CREATE SET r.belief_id = row.bid, r.confidence = row.conf, r.predicate = row.pred
 WITH r, row
-WHERE coalesce(r.belief_id, '') <> '' AND (r.install IS NULL OR r.install = $inst)
-SET r.belief_id = row.bid, r.confidence = row.conf, r.predicate = row.pred, r.install = $inst"""
+WHERE coalesce(r.belief_id, '') <> ''
+SET r.belief_id = row.bid, r.confidence = row.conf, r.predicate = row.pred"""
+
+#: The same for a writer with no install id (a script that never booted a
+#: server; Neo4j refuses a null in a MERGE pattern): an untagged edge, and an
+#: existing one at the key changed only when it is Kazma's and untagged.
+_UPSERT_EDGE_UNTAGGED = """MERGE (a)-[r:%s]->(b)
+ON CREATE SET r.belief_id = row.bid, r.confidence = row.conf, r.predicate = row.pred
+WITH r, row
+WHERE coalesce(r.belief_id, '') <> '' AND r.install IS NULL
+SET r.belief_id = row.bid, r.confidence = row.conf, r.predicate = row.pred"""
 
 #: Write fact edges of ONE relationship type (``%s``, quoted), the nodes
 #: found by name: a copy not yet keyed. It cannot make a second node of a name
@@ -261,23 +272,27 @@ SET r.belief_id = row.bid, r.confidence = row.conf, r.predicate = row.pred, r.in
 #: then -- setting the key of a node it found would be refused when the
 #: node's keyed twin exists (another install's old writer made it). Each MERGE
 #: scans the label.
-_UPSERT_EDGES_BY_NAME = """// kazma:upsert_edges_by_name
+_NODES_BY_NAME = """// kazma:upsert_edges_by_name
 UNWIND $rows AS row
 MERGE (a:Entity {name: row.sub, tenant_id: $tid})
 ON CREATE SET a.key = row.sk
 MERGE (b:Entity {name: row.obj, tenant_id: $tid})
 ON CREATE SET b.key = row.ok
-""" + _UPSERT_EDGE
+"""
+_UPSERT_EDGES_BY_NAME = _NODES_BY_NAME + _UPSERT_EDGE
+_UPSERT_EDGES_BY_NAME_UNTAGGED = _NODES_BY_NAME + _UPSERT_EDGE_UNTAGGED
 
 #: The same, the nodes found by key: a keyed copy. An index seek, and two
 #: writers of a new name make one node (MERGE locks the constraint's entry).
-_UPSERT_EDGES_BY_KEY = """// kazma:upsert_edges_by_key
+_NODES_BY_KEY = """// kazma:upsert_edges_by_key
 UNWIND $rows AS row
 MERGE (a:Entity {tenant_id: $tid, key: row.sk})
 ON CREATE SET a.name = row.sub
 MERGE (b:Entity {tenant_id: $tid, key: row.ok})
 ON CREATE SET b.name = row.obj
-""" + _UPSERT_EDGE
+"""
+_UPSERT_EDGES_BY_KEY = _NODES_BY_KEY + _UPSERT_EDGE
+_UPSERT_EDGES_BY_KEY_UNTAGGED = _NODES_BY_KEY + _UPSERT_EDGE_UNTAGGED
 
 #: Remove edges by element id, each only while it still carries the fact id
 #: it was planned for (a dual-write may have given it to a newer fact since),
@@ -436,6 +451,21 @@ _DELETE_ORPHANED_ENDS = """
                         WHERE NOT (n)--()
                         DELETE n"""
 
+
+#: A fact's edge removed by its id: Kazma's (this install's or untagged), at
+#: its subject's node -- found by key (an index seek) once the copy is keyed,
+#: by name until then (:meth:`Neo4jGraphBackend.delete_triple`) -- else, with
+#: no subject named, among every edge.
+_THIS_INSTALLS_FACT = "r.belief_id = $bid AND (r.install IS NULL OR r.install = $inst)"
+#: A subject-object delete takes only Kazma's edges of this install (or
+#: untagged): it took every edge between the two nodes, another install's
+#: and the owner's own included.
+_THIS_INSTALLS_EDGE = "coalesce(r.belief_id, '') <> '' AND (r.install IS NULL OR r.install = $inst)"
+_DELETE_BY_ID_AT_KEY = (f"MATCH (a:Entity {{tenant_id: $tid, key: $sk}})-[r]->(b) WHERE {_THIS_INSTALLS_FACT} "
+                        f"DELETE r{_DELETE_ORPHANED_ENDS}")
+_DELETE_BY_ID_AT_NAME = (f"MATCH (a:Entity {{name: $sub, tenant_id: $tid}})-[r]->(b) WHERE {_THIS_INSTALLS_FACT} "
+                         f"DELETE r{_DELETE_ORPHANED_ENDS}")
+_DELETE_BY_ID_ANYWHERE = f"MATCH (a)-[r]->(b) WHERE {_THIS_INSTALLS_FACT} DELETE r{_DELETE_ORPHANED_ENDS}"
 
 @runtime_checkable
 class GraphBackend(Protocol):
@@ -694,7 +724,10 @@ class Neo4jGraphBackend:
         type; the nodes found by key when *keyed* (default: :meth:`keyed`)."""
         if keyed is None:
             keyed = self.keyed()
-        statement = _UPSERT_EDGES_BY_KEY if keyed else _UPSERT_EDGES_BY_NAME
+        if install:
+            statement = _UPSERT_EDGES_BY_KEY if keyed else _UPSERT_EDGES_BY_NAME
+        else:
+            statement = _UPSERT_EDGES_BY_KEY_UNTAGGED if keyed else _UPSERT_EDGES_BY_NAME_UNTAGGED
         by_type: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
             if row.get("sub") and row.get("obj"):
@@ -804,22 +837,29 @@ class Neo4jGraphBackend:
         belief_id: str = "",
         tenant_id: str = "default",
     ) -> bool:
-        """Remove a dual-written edge (by belief_id preferred, else S-P-O)."""
+        """Remove a dual-written edge (by belief_id preferred, else S-P-O).
+
+        By id, the edge is looked for among its subject's edges -- the node
+        found by key (an index seek) once the copy is keyed, by name until
+        then -- and only among this install's (or untagged) ones. It was
+        ``MATCH (a)-[r]->(b) WHERE r.belief_id = $bid``: every edge of the
+        database read, every tenant and every install sharing the server,
+        for each forget; and another install's edge with that id would have
+        gone (2026-11-13). With no subject named, every edge is still read,
+        this install's only.
+        """
         drv = self._get_driver()
         if drv is None:
             return False
         try:
             with drv.session(database=self._database) as session:
                 if belief_id:
-                    session.run(
-                        f"""
-                        MATCH (a)-[r]->(b)
-                        WHERE r.belief_id = $bid
-                        DELETE r
-                        {_DELETE_ORPHANED_ENDS}
-                        """,
-                        bid=belief_id,
-                    )
+                    if subject:
+                        query = _DELETE_BY_ID_AT_KEY if self.keyed() else _DELETE_BY_ID_AT_NAME
+                        session.run(query, bid=belief_id, inst=this_install(), tid=tenant_id,
+                                    sk=entity_key(subject), sub=subject)
+                        return True
+                    session.run(_DELETE_BY_ID_ANYWHERE, bid=belief_id, inst=this_install())
                     return True
                 if subject and obj:
                     rel = _rel_type(predicate)
@@ -829,12 +869,14 @@ class Neo4jGraphBackend:
                             MATCH (a:Entity {{tenant_id: $tid, key: $sk}})
                                   -[r:{rel}]->
                                   (b:Entity {{tenant_id: $tid, key: $ok}})
+                            WHERE {_THIS_INSTALLS_EDGE}
                             DELETE r
                             {_DELETE_ORPHANED_ENDS}
                             """,
                             sk=entity_key(subject),
                             ok=entity_key(obj),
                             tid=tenant_id,
+                            inst=this_install(),
                         )
                         return True
                     session.run(
@@ -842,12 +884,14 @@ class Neo4jGraphBackend:
                         MATCH (a:Entity {{name: $sub, tenant_id: $tid}})
                               -[r:{rel}]->
                               (b:Entity {{name: $obj, tenant_id: $tid}})
+                        WHERE {_THIS_INSTALLS_EDGE}
                         DELETE r
                         {_DELETE_ORPHANED_ENDS}
                         """,
                         sub=subject,
                         obj=obj,
                         tid=tenant_id,
+                        inst=this_install(),
                     )
                     return True
             return False

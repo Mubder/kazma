@@ -23,12 +23,23 @@ never on a checkout's HEAD), pushes, pulls the revert
 into the live install and reloads; then it pages the owner (the live guard's
 ``--page``) with what failed. ``--no-revert`` stops after the page instead.
 Every step is printed; nothing secret is.
+
+Each deploy keeps the whole output of every step it ran on the live install
+in ``.kazma/deploy/<time>.log`` of the dev checkout, and a failure names the
+lines that say what went wrong, never the last 300 characters (2026-11-13: a
+package update's error was lost behind a settings warning). When the deploy
+had changed ``pyproject.toml``, the revert puts the reverted code's packages
+back -- ``kazma update --reinstall -y``, else every package rewritten with
+uv while the guard holds Kazma (:func:`repair_packages`) -- instead of a
+reload: that day the failed update had removed Kazma itself, the revert's
+reload lifted the update's hold, and the server crash-looped for 18 minutes.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 import time
@@ -56,6 +67,44 @@ def say(text: str) -> None:
     print(text, flush=True)
 
 
+#: This deploy's log: the whole output of every step run on the live install.
+_LOG: list[Path] = []
+
+
+def _start_log(dev: Path) -> Path:
+    folder = dev / ".kazma" / "deploy"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / time.strftime("%Y%m%d-%H%M%S.log")
+    _LOG[:] = [path]
+    return path
+
+
+def _record(argv: list[str], code: int, out: str) -> None:
+    if not _LOG:
+        return
+    try:
+        with _LOG[0].open("a", encoding="utf-8") as handle:
+            handle.write(f"\n$ {' '.join(argv)}\n[exit {code}]\n{out}\n")
+    except OSError:
+        pass
+
+
+#: Words of a line that says what went wrong.
+_PROBLEM_WORDS = ("error", "failed", "denied", "traceback", "exception", "cannot", "could not", "refused",
+                  "not found", "no module")
+
+
+def essential(out: str, limit: int = 6) -> str:
+    """The lines of *out* that say what went wrong (the last *limit*), else
+    its last 300 characters. Kazma's settings-store notice is never one."""
+    lines = [ln.strip() for ln in (out or "").splitlines() if ln.strip()]
+    picked = [ln for ln in lines
+              if any(w in ln.lower() for w in _PROBLEM_WORDS) and not ln.startswith("[ConfigStore]")]
+    text = " | ".join(picked[-limit:]) if picked else (out or "")[-300:]
+    where = f" (whole output: {_LOG[0]})" if _LOG else ""
+    return text[-1200:] + where
+
+
 def git(repo: Path, *args: str, check: bool = True) -> str:
     done = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=False)
     if check and done.returncode != 0:
@@ -71,9 +120,76 @@ def live_python(live: Path) -> str:
 
 
 def run_live(live: Path, *args: str, timeout: float = 1800) -> tuple[int, str]:
-    done = subprocess.run([live_python(live), *args], cwd=str(live), capture_output=True, text=True,
+    argv = [live_python(live), *args]
+    done = subprocess.run(argv, cwd=str(live), capture_output=True, text=True,
                           timeout=timeout, check=False, encoding="utf-8", errors="replace")
-    return done.returncode, ((done.stdout or "") + (done.stderr or "")).strip()
+    out = ((done.stdout or "") + (done.stderr or "")).strip()
+    _record(argv, done.returncode, out)
+    return done.returncode, out
+
+
+def run_cmd(argv: list[str], cwd: Path, timeout: float = 3600) -> tuple[int, str]:
+    """A program other than the live Python (uv), logged like :func:`run_live`."""
+    try:
+        done = subprocess.run(argv, cwd=str(cwd), capture_output=True, text=True, timeout=timeout, check=False,
+                              encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError) as exc:
+        _record(argv, -1, str(exc))
+        return -1, str(exc)
+    out = ((done.stdout or "") + (done.stderr or "")).strip()
+    _record(argv, done.returncode, out)
+    return done.returncode, out
+
+
+#: Imported in a child of the live Python: what a broken environment loses
+#: first (Kazma itself, its server, its settings loader).
+_WHOLE = "import kazma_core, kazma_cli, kazma_gateway, kazma_ui.app, dotenv"
+
+
+def environment_problem(live: Path) -> str:
+    """Why the live environment cannot run Kazma, or "" when it can."""
+    code, out = run_live(live, "-c", _WHOLE, timeout=600)
+    return "" if code == 0 else essential(out)
+
+
+def recorded_extras(live: Path) -> list[str]:
+    """The optional extras the live install records (``.kazma/installed_extras.json``)."""
+    try:
+        data = json.loads((live / ".kazma" / "installed_extras.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    extras = data.get("extras") if isinstance(data, dict) else None
+    return [str(e) for e in extras or () if str(e).replace("-", "").isalnum()]
+
+
+def repair_packages(live: Path, attempts: int = 2, pause_s: float = 15.0) -> str:
+    """Every package of the live environment rewritten for the checkout as it
+    is now, with Kazma held stopped by its guard; "" when Kazma can run again
+    (then resumed), else the problem (Kazma stays held: resumed broken, the
+    guard would only restart it and page).
+
+    ``--reinstall``: a failed install can leave a package's record with its
+    files gone, and a plain install takes it as installed (2026-11-13:
+    ``dotenv``)."""
+    uv = shutil.which("uv")
+    if not uv:
+        return "uv is not on PATH: the packages cannot be put back"
+    extras = recorded_extras(live)
+    spec = ".[" + ",".join(extras) + "]" if extras else "."
+    code, out = run_live(live, "scripts/service/kazma_guard.py", "--pause", "--stop", "--reason",
+                         "deploy: putting Kazma's packages back", timeout=300)
+    if code != 0:
+        return f"the guard did not hold Kazma: {essential(out)}"
+    problem = ""
+    for attempt in range(attempts):
+        if attempt:
+            time.sleep(pause_s)
+        code, out = run_cmd([uv, "pip", "install", "--reinstall", "--python", live_python(live), "-e", spec], live)
+        problem = essential(out) if code != 0 else environment_problem(live)
+        if not problem:
+            run_live(live, "scripts/service/kazma_guard.py", "--resume", timeout=120)
+            return ""
+    return f"the packages could not be put back; Kazma stays held: {problem}"
 
 
 def env_value(path: Path, key: str) -> str:
@@ -262,34 +378,38 @@ def deploy(live: Path, *, dev: Path = DEV, revert: bool = True, skip_turn: bool 
         return 0
     changed = git(live, "diff", "--name-only", before, after).splitlines()
     say(f"-> deployed {before[:12]}..{after[:12]} ({len(changed)} files)")
-    if "pyproject.toml" in changed:
+    packages = "pyproject.toml" in changed
+    if packages:
         say("-> pyproject.toml changed: kazma update --reinstall -y")
         code, out = run_live(live, "-m", "kazma_cli", "update", "--reinstall", "-y", timeout=3600)
         if code != 0:
-            return fail(live, dev, shipped, after, f"the package update failed: {out[-300:]}", revert)
+            return fail(live, dev, shipped, after, f"the package update failed: {essential(out)}", revert,
+                        packages=True)
     if any(path.startswith(DOCUMENT_PATHS) for path in changed):
         say("-> Kazma's core changed: building the document worker image for it")
         code, out = run_live(live, "scripts/document_worker_image.py", "build", timeout=3600)
         if code != 0:
-            return fail(live, dev, shipped, after, f"the worker image build failed: {out[-300:]}", revert)
+            return fail(live, dev, shipped, after, f"the worker image build failed: {essential(out)}", revert,
+                        packages=packages)
     boot_from = time.time()
     say("-> reload when idle")
     code, out = run_live(live, "scripts/service/kazma_guard.py", "--reload", "--when-idle", timeout=1200)
     if code != 0:
-        return fail(live, dev, shipped, after, f"the reload did not happen: {out[-300:]}", revert)
+        return fail(live, dev, shipped, after, f"the reload did not happen: {essential(out)}", revert,
+                    packages=packages)
     server = server or Server(live)
     for check in (lambda: wait_for_build(server, after), lambda: check_health(server),
                   (lambda: "") if skip_turn else (lambda: test_turn(server))):
         problem = check()
         if problem:
-            return fail(live, dev, shipped, after, problem, revert)
+            return fail(live, dev, shipped, after, problem, revert, packages=packages)
     errors = log_errors(live, new_boot(live, boot_from))
     if errors:
         say("   errors in the log since the boot:")
         for line in errors[:10]:
             say(f"     {line}")
         return fail(live, dev, shipped, after, f"{len(errors)} ERROR/CRITICAL line(s) in the log since the boot",
-                    revert)
+                    revert, packages=packages)
     say(f"Deployed {after[:12]}: healthy, the test turn answered, the log is clean.")
     return 0
 
@@ -319,7 +439,21 @@ def revert_on_origin(repo: Path, first: str, last: str) -> None:
             say(f"   the revert's worktree {where} was left behind; remove it with git worktree prune")
 
 
-def fail(live: Path, dev: Path, shipped: tuple[str, str], after: str, problem: str, revert: bool) -> int:
+def put_packages_back(live: Path) -> str:
+    """After a revert of a ``pyproject.toml`` change: the reverted code's
+    packages, through the update (it holds and resumes Kazma itself), else
+    every package rewritten (:func:`repair_packages`). "" or the problem."""
+    say("-> putting back the reverted code's packages: kazma update --reinstall -y")
+    code, out = run_live(live, "-m", "kazma_cli", "update", "--reinstall", "-y", timeout=3600)
+    problem = (essential(out) if code != 0 else "") or environment_problem(live)
+    if not problem:
+        return ""
+    say(f"   the update could not ({problem}); rewriting every package")
+    return repair_packages(live)
+
+
+def fail(live: Path, dev: Path, shipped: tuple[str, str], after: str, problem: str, revert: bool,
+         *, packages: bool = False) -> int:
     say(f"FAILED: {problem}")
     if not revert:
         page(live, "A deploy failed its checks", f"{after[:12]}: {problem}. Not reverted (--no-revert).")
@@ -329,8 +463,16 @@ def fail(live: Path, dev: Path, shipped: tuple[str, str], after: str, problem: s
     try:
         revert_on_origin(dev, first, last)
         git(live, "pull", "--no-rebase", "--no-edit")
-        code, out = run_live(live, "scripts/service/kazma_guard.py", "--reload", "--when-idle", timeout=1200)
-        reverted = code == 0
+        if packages:
+            # A reload cannot bring back packages a failed update removed,
+            # and it lifts the update's hold on Kazma (2026-11-13).
+            trouble = put_packages_back(live)
+            if trouble:
+                say(f"   {trouble}")
+            reverted = not trouble
+        else:
+            code, out = run_live(live, "scripts/service/kazma_guard.py", "--reload", "--when-idle", timeout=1200)
+            reverted = code == 0
     except RuntimeError as exc:
         say(f"   the revert did not complete: {exc}")
         reverted = False
@@ -345,6 +487,7 @@ def main() -> int:
     ap.add_argument("--no-revert", action="store_true", help="page on failure, but do not revert")
     ap.add_argument("--skip-turn", action="store_true", help="skip the test turn (no model calls)")
     options = ap.parse_args()
+    say(f"(the whole output of each step: {_start_log(DEV)})")
     return deploy(options.live.resolve(), revert=not options.no_revert, skip_turn=options.skip_turn)
 
 

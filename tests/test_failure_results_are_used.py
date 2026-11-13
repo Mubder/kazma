@@ -490,6 +490,11 @@ def _product_sources() -> dict[str, str]:
 #: Callees whose result no caller has to read: the callee reports its own
 #: failure, and a caller has nothing else to do with it.
 REPORTS_ITS_OWN_FAILURE: dict[str, str] = {
+    "update._bring_along": (
+        "the follow-up after new packages (Chromium, containers on their pinned images) "
+        "prints each thing it could not do with the command that does it, and must never "
+        "fail an update whose packages are installed and serving"
+    ),
     "observability.ops_alerts.alert": (
         "True means only that delivery was requested (False: alerts off, throttled, or it "
         "raised). alert() logs every occurrence ('[ops_alert] key | title'; a problem at "

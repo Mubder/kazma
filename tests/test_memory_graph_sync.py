@@ -40,7 +40,7 @@ from typing import Any
 import pytest
 
 REPO = Path(__file__).resolve().parents[1]
-_REL_IN_QUERY = re.compile(r"-\[r:`([^`]+)`\]->")
+_REL_IN_QUERY = re.compile(r"-\[r:`([^`]+)`(?: \{[^}]*\})?\]->")
 _SYNC_LOGGER = "kazma_core.memory.graph_sync"
 
 
@@ -235,19 +235,23 @@ class FakeNeo4j:
             raise GraphWriteRefused("the stand-in refuses this statement")  # all or nothing, as a transaction
         before = copy.deepcopy((self.nodes, self.rels))
         try:
-            self._upsert_rows(rtype, p, how)
+            self._upsert_rows(rtype, p, how, tagged="{install: $inst}" in query)
         except GraphWriteRefused:
             self.nodes, self.rels = before  # a refused statement leaves nothing
             raise
         return _Result()
 
-    def _upsert_rows(self, rtype: str, p: dict[str, Any], how: str) -> None:
+    def _upsert_rows(self, rtype: str, p: dict[str, Any], how: str, *, tagged: bool = False) -> None:
+        """MERGE as Neo4j does it: by type alone (the old write, and a writer
+        with no install id), or by type and install tag (``{install: $inst}``:
+        each install's own edge)."""
         tid, inst = p["tid"], p["inst"]
         for row in p["rows"]:
             for a in self._merge(row, "sub", tid, how):
                 for b in self._merge(row, "obj", tid, how):
                     rid = next((k for k, r in self.rels.items()
-                                if r["start"] == a and r["end"] == b and r["type"] == rtype), None)
+                                if r["start"] == a and r["end"] == b and r["type"] == rtype
+                                and (not tagged or r["props"].get("install") == inst)), None)
                     mine = {"belief_id": row["bid"], "confidence": row["conf"], "predicate": row["pred"]}
                     if rid is None:
                         rid = self.add_rel(a, b, rtype, **mine)
@@ -720,7 +724,10 @@ def test_edges_kazma_did_not_write_are_never_touched(world, caplog):
         assert world.neo.rels.get(rid) == before[rid], f"{name} was changed"
     assert ("user", "LIKES", "tea") in world.neo.facts()
     lives = [r for r in world.neo.rels.values() if r["type"] == "LIVES_IN"]
-    assert len(lives) == 1, "the hand-written edge at that key stands for the fact; no second one"
+    # Kazma's own edge beside the hand-written one: an edge Kazma does not
+    # control no longer stands for its fact (2026-11-13: another install's,
+    # forgotten there, took this install's fact out of the graph).
+    assert len(lives) == 2 and {r["props"].get("install") for r in lives} == {None, "install-a"}
     assert report["held_elsewhere"] == 1 and report["unknown_edges"] == 1
     assert report["status"] == "in_sync"
     again = _sync(world, full=True)
@@ -749,6 +756,8 @@ def test_the_dual_write_does_not_take_over_another_installs_edge(world):
     rid = world.neo.add_rel(a, b, "LIKES", belief_id="b-theirs", install="install-b", confidence=0.4)
     assert graph_backend.upsert_belief_edge(subject="user", predicate="likes", obj="tea", belief_id="b-mine")
     assert world.neo.rels[rid]["props"]["belief_id"] == "b-theirs"
+    mine = [r for r in world.neo.rels.values() if r["props"].get("belief_id") == "b-mine"]
+    assert len(mine) == 1 and mine[0]["props"]["install"] == "install-a", "its own edge, beside theirs"
 
 
 def test_tenants_are_kept_apart(world):
@@ -1837,3 +1846,125 @@ def test_real_server_two_writers_of_a_new_name_make_one_node(real):
     finally:
         _cypher(real.be, f"MATCH (n:{label}) DETACH DELETE n")
         _cypher(real.be, f"DROP INDEX {index} IF EXISTS")
+
+
+def test_real_server_a_forget_by_id_seeks_its_subject_and_keeps_to_this_install(real):
+    """The forget by id finds the subject's node by key and removes this
+    install's edge only; the statement it replaced read every relationship of
+    the database and took another install's edge with the same id."""
+    from kazma_core.memory import graph_backend
+    from kazma_core.memory.belief_mutation import mutate_belief
+    from kazma_core.memory.graph_sync import run_graph_sync
+
+    t = real.tenant
+    bid = mutate_belief(real.conn, "user", "lives_in", "Kuwait", tenant_id=t)["belief_id"]
+    assert run_graph_sync(real.conn, full=True)["keys"]["state"] == "keyed"
+    _cypher(real.be, "MATCH (a:Entity {tenant_id: $tid, key: $sk}) "
+                     "MERGE (b:Entity {tenant_id: $tid, key: $ok}) ON CREATE SET b.name = 'Doha' "
+                     "MERGE (a)-[r:LIVES_IN]->(b) SET r.belief_id = $bid, r.install = 'another-install'",
+            tid=t, sk=graph_backend.entity_key("user"), ok=graph_backend.entity_key("Doha"), bid=bid)
+    params = {"tid": t, "sk": graph_backend.entity_key("user"), "sub": "user", "bid": bid, "inst": real.install}
+    ops = _plan_ops(real.be, graph_backend._DELETE_BY_ID_AT_KEY, **params)
+    assert any(op.startswith("NodeUniqueIndexSeek") for op in ops), ops
+    assert real.be.keyed() and real.be.delete_triple(belief_id=bid, subject="user", tenant_id=t)
+    edges = _real_edges(real.be, t)
+    assert not any(e[3] == bid and e[4] == real.install for e in edges)
+    assert ("user", "LIVES_IN", "Doha", bid, "another-install") in edges
+    # Negative control: the old statement, every relationship read, takes
+    # the other install's edge too.
+    old = "MATCH (a)-[r]->(b) WHERE r.belief_id = $bid DELETE r"
+    old_ops = _plan_ops(real.be, old, bid=bid)
+    assert not any(op.startswith("NodeUniqueIndexSeek") for op in old_ops), old_ops
+    _cypher(real.be, old, bid=bid)
+    assert not any(e[3] == bid for e in _real_edges(real.be, t))
+
+
+def test_real_server_two_installs_share_one_copy(real, tmp_path, monkeypatch):
+    """Two installs sync their own memories into one Neo4j (this machine's dev
+    checkout and live install share 127.0.0.1:7687): one node per name, each
+    install's own edges, and one install's forget, full comparison and
+    graph-clear leave the other's edges as they were."""
+    from kazma_core.memory import graph_backend, graph_sync
+    from kazma_core.memory.belief_mutation import mutate_belief
+    from kazma_core.memory.forget import forget_mentions
+    from kazma_core.memory.graph_sync import run_graph_sync
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+
+    t = real.tenant
+    a_dir = Path(os.environ["KAZMA_MEMORY_STATE_DB"]).parent
+    b_dir = tmp_path / "install-b"
+    b_dir.mkdir()
+    b_install = f"test-{uuid.uuid4().hex[:12]}"
+    b_conn = sqlite3.connect(str(b_dir / "memory_state.db"), check_same_thread=False)
+    b_conn.row_factory = sqlite3.Row
+
+    def as_install(install: str, folder: Path) -> None:
+        monkeypatch.setattr(graph_backend, "this_install", lambda: install)
+        monkeypatch.setenv("KAZMA_MEMORY_STATE_DB", str(folder / "memory_state.db"))
+        monkeypatch.setenv("KAZMA_MEMORY_OPS_DB", str(folder / "memory_ops.db"))
+        monkeypatch.setattr(graph_sync, "_STATE", {})
+        graph_backend.reset_graph_backend_cache()
+
+    try:
+        as_install(b_install, b_dir)
+        ensure_primary_schema(b_conn)
+        as_install(real.install, a_dir)
+        a_home = mutate_belief(real.conn, "user", "lives_in", "Kuwait", tenant_id=t)["belief_id"]
+        mutate_belief(real.conn, "user", "noted", "ALPHA-7731", tenant_id=t)
+        assert run_graph_sync(real.conn, full=True)["status"] == "in_sync"
+        as_install(b_install, b_dir)
+        b_home = mutate_belief(b_conn, "user", "lives_in", "Kuwait", tenant_id=t)["belief_id"]
+        b_code = mutate_belief(b_conn, "user", "noted", "BRAVO-9942", tenant_id=t)["belief_id"]
+        assert run_graph_sync(b_conn, full=True)["status"] == "in_sync"
+
+        edges = _real_edges(real.be, t)
+        assert ("user", "LIVES_IN", "Kuwait", a_home, real.install) in edges
+        assert ("user", "LIVES_IN", "Kuwait", b_home, b_install) in edges
+        assert ("user", "NOTED", "BRAVO-9942", b_code, b_install) in edges
+        assert set(_real_per_name(real.be, t).values()) == {1}, "one node per name, shared"
+        b_edges = {e for e in edges if e[4] == b_install}
+
+        # A's full comparison, forget and graph-clear leave B's edges as they were.
+        as_install(real.install, a_dir)
+        assert run_graph_sync(real.conn, full=True)["status"] == "in_sync"
+        forget_mentions("ALPHA-7731", tenant_id=t)
+        run_graph_sync(real.conn)
+        assert real.be.delete_triple(belief_id=a_home, subject="user", tenant_id=t)
+        assert real.be.delete_triple(belief_id=b_home, subject="user", tenant_id=t), "B's id, asked by A"
+        names = {r["n"] for r in _cypher(real.be, "MATCH (n:Entity {tenant_id: $tid}) RETURN n.name AS n", tid=t)}
+        assert "ALPHA-7731" not in names and {"user", "Kuwait", "BRAVO-9942"} <= names
+        assert {e for e in _real_edges(real.be, t) if e[4] == b_install} == b_edges
+        graph_backend.clear_tenant_edges(tenant_id=t)
+        assert {e for e in _real_edges(real.be, t) if e[4] == b_install} == b_edges
+        assert not any(e[4] == real.install for e in _real_edges(real.be, t))
+
+        # B's own pass finds its copy whole.
+        as_install(b_install, b_dir)
+        assert run_graph_sync(b_conn, full=True)["status"] == "in_sync"
+        assert {e for e in _real_edges(real.be, t) if e[4] == b_install} == b_edges
+    finally:
+        b_conn.close()
+
+
+#: The write before installs had edges of their own: matched by type alone.
+_OLD_TYPE_ONLY_EDGE = """MERGE (a)-[r:%s]->(b)
+ON CREATE SET r.belief_id = row.bid, r.confidence = row.conf, r.predicate = row.pred, r.install = $inst
+WITH r, row
+WHERE coalesce(r.belief_id, '') <> '' AND (r.install IS NULL OR r.install = $inst)
+SET r.belief_id = row.bid, r.confidence = row.conf, r.predicate = row.pred, r.install = $inst"""
+
+
+def test_real_server_negative_control_the_type_only_write_gave_the_second_install_no_edge(real):
+    from kazma_core.memory import graph_backend
+
+    t = real.tenant
+    old = graph_backend._NODES_BY_KEY + _OLD_TYPE_ONLY_EDGE
+    for install, bid in (("install-a", "b-a"), ("install-b", "b-b")):
+        row = graph_backend.edge_row("user", "lives_in", "Kuwait", bid, 0.8)
+        _cypher(real.be, old % "`LIVES_IN`", rows=[row], tid=t, inst=install)
+    bids = {e[3] for e in _real_edges(real.be, t)}
+    assert bids == {"b-a"}, "the second install's fact has no edge of its own"
+    for install, bid in (("install-a", "b-a"), ("install-b", "b-b")):
+        row = graph_backend.edge_row("user", "lives_in", "Kuwait", bid, 0.8)
+        _cypher(real.be, graph_backend._UPSERT_EDGES_BY_KEY % "`LIVES_IN`", rows=[row], tid=t, inst=install)
+    assert {e[3] for e in _real_edges(real.be, t)} == {"b-a", "b-b"}

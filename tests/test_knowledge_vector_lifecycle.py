@@ -496,9 +496,11 @@ def _recall(settings: dict, lang: str = "en", size: int = 10_000, questions: int
         client.close()
 
 
-#: Chroma inserts in parallel, so a graph differs a little from build to
-#: build: on this English corpus the measured settings found 39-40 of 40,
-#: the defaults 34-37 (every language: 39-40 against 31-39).
+#: A graph differs a little from build to build, with one insert thread too
+#: (2026-11-13: the defaults found 36, 37 and 34 of 40 in three builds, the
+#: measured settings 40 each time): on this English corpus the measured
+#: settings found 39-40 of 40, the defaults 34-37 and once 39 (every
+#: language: 39-40 against 31-39).
 _RECALL_FLOOR = 39
 
 
@@ -508,6 +510,10 @@ def test_meaning_recall_at_ten_thousand_chunks_with_the_measured_settings():
 
 
 def test_chromas_default_index_passes_over_planted_answers():
-    """Negative control: Chroma's defaults on the same corpus."""
+    """Negative control: Chroma's defaults on the same corpus, the mean of
+    three builds. One build alone reached the floor once under load
+    (2026-11-13), and the control failed; three averaging 39 is not a
+    build's luck."""
     pytest.importorskip("chromadb")
-    assert _recall({"space": "cosine"}) < _RECALL_FLOOR
+    found = [_recall({"space": "cosine"}) for _ in range(3)]
+    assert sum(found) / len(found) < _RECALL_FLOOR, found

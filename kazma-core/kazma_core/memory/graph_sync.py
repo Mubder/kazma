@@ -257,18 +257,23 @@ def _plan_changes(wants: dict[Key, Want], held: Iterable[Held], *, install: str 
                  known: set[str]) -> Plan:
     """What brings the edges *held* at the keys of *wants* in step.
 
-    An edge with no fact id, or another install's, is never planned: at a
-    key this install wants it counts as there (``held_elsewhere``) -- the
-    write would land on it and change nothing. This install's edges (tagged,
-    or untagged with a fact id in *known*) are corrected or removed; an
-    untagged edge of an unknown fact is counted (``unknown``) and left. Of
-    two edges at one key, the one between keyed nodes stands (the other is at
-    a keyless twin, which the sync empties).
+    An edge with no fact id, or another install's, is never planned, and at
+    a key this install wants it is counted (``held_elsewhere``) beside this
+    install's own edge, which the write makes: each install's facts have
+    edges of their own (the write matches by install tag). Counted as there,
+    another install's edge stood for this install's fact, which lost it when
+    that install forgot its own (2026-11-13). A writer with no install id
+    still takes one as there (its write matches by type alone).
+    This install's edges (tagged, or untagged with a fact id in *known*) are
+    corrected or removed; an untagged edge of an unknown fact is counted
+    (``unknown``) and left. Of two edges at one key, the one between keyed
+    nodes stands (the other is at a keyless twin, which the sync empties),
+    then the tagged one (an untagged one is an older write of this install).
     """
     plan = Plan()
     matched: set[Key] = set()
     elsewhere: set[Key] = set()
-    for h in sorted(held, key=lambda e: not e.keyed):
+    for h in sorted(held, key=lambda e: (not e.keyed, e.install is None)):
         want = wants.get(h.key)
         if not h.bid or (h.install is not None and h.install != install):
             if want is not None:
@@ -287,9 +292,9 @@ def _plan_changes(wants: dict[Key, Want], held: Iterable[Held], *, install: str 
         else:
             plan.unknown += 1
     for key, want in wants.items():
-        if key not in matched and key not in elsewhere:
+        if key not in matched and (install or key not in elsewhere):
             plan.upserts.append((key, want))
-    plan.held_elsewhere = len(elsewhere - matched)
+    plan.held_elsewhere = len(elsewhere)
     plan.upserts.sort(key=lambda kw: (kw[1].at, kw[1].bid), reverse=True)
     return plan
 

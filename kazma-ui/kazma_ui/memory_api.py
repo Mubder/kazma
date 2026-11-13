@@ -1662,9 +1662,12 @@ def _edit_belief_sync(belief_id: str, payload: Any) -> dict[str, Any]:
                 subject=str(row["subject"]),
                 predicate=str(row["predicate"]),
                 obj=str(row["object"]),
+                # The fact's own tenant: the edge is found under its subject's
+                # node, which is the tenant's (it went to "default").
+                tenant_id=str(row["tenant_id"] or "default"),
             )
         except Exception:
-            pass
+            logger.debug("[memory_api] neo4j edge cleanup after an edit skipped", exc_info=True)
 
         def _restore_edit_sync() -> dict[str, Any]:
             c = _conn()

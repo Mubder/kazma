@@ -16,21 +16,64 @@ _NO_BOUNDARY = ('Bounded local Chromium currently requires Windows Job Objects o
                 'launch was refused.')
 
 
-def chromium_installed() -> bool:
-    """Playwright's Chromium is on this machine: a ``chromium-*`` folder where
-    Playwright keeps its browsers (``PLAYWRIGHT_BROWSERS_PATH``, else the
-    platform's cache folder). The install's browser part and the daily
-    canary ask this one rule."""
+def _browser_roots() -> list[Path]:
+    """Where Playwright keeps its browsers: ``PLAYWRIGHT_BROWSERS_PATH``, else
+    the platform's cache folder."""
     configured = (os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or "").strip()
     if configured and configured != "0":
-        roots = [Path(configured)]
-    elif os.name == "nt":
-        roots = [Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "ms-playwright"]
-    elif sys.platform == "darwin":
-        roots = [Path.home() / "Library" / "Caches" / "ms-playwright"]
-    else:
-        roots = [Path.home() / ".cache" / "ms-playwright"]
-    return any(any(root.glob("chromium-*")) for root in roots if root.is_dir())
+        return [Path(configured)]
+    if os.name == "nt":
+        return [Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "ms-playwright"]
+    if sys.platform == "darwin":
+        return [Path.home() / "Library" / "Caches" / "ms-playwright"]
+    return [Path.home() / ".cache" / "ms-playwright"]
+
+
+def _chromium_revision() -> str | None:
+    """The Chromium build the installed Playwright launches: its revision in
+    Playwright's own ``driver/package/browsers.json``, or None when Playwright
+    is not installed or the file cannot be read."""
+    import importlib.util
+    import json
+
+    try:
+        spec = importlib.util.find_spec("playwright")
+    except (ImportError, ValueError):
+        return None
+    for base in (spec.submodule_search_locations or ()) if spec is not None else ():
+        try:
+            data = json.loads((Path(base) / "driver" / "package" / "browsers.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        for browser in data.get("browsers") or ():
+            if browser.get("name") == "chromium" and browser.get("revision"):
+                return str(browser["revision"])
+    return None
+
+
+def chromium_was_installed() -> bool:
+    """Some build of Playwright's Chromium is on this machine (the browser
+    part was set up), whichever Playwright it was for."""
+    return any(any(root.glob("chromium-*")) for root in _browser_roots() if root.is_dir())
+
+
+def chromium_installed() -> bool:
+    """The Chromium build the installed Playwright launches is on this
+    machine: ``chromium-<revision>`` and ``chromium_headless_shell-<revision>``
+    (what ``playwright install chromium`` puts there) for the revision in
+    Playwright's ``browsers.json``. The install's browser part, the daily
+    canary and ``kazma update`` ask this one rule.
+
+    Any ``chromium-*`` folder used to count: after a Playwright update the old
+    build's folder said "installed" while every launch failed for want of the
+    new one, and ``kazma update`` downloaded no Chromium (2026-11-13). With no
+    revision to read (no Playwright), any build counts, as before.
+    """
+    revision = _chromium_revision()
+    if revision is None:
+        return chromium_was_installed()
+    return any((root / f"chromium-{revision}").is_dir() and (root / f"chromium_headless_shell-{revision}").is_dir()
+               for root in _browser_roots())
 
 
 def browser_unavailable():

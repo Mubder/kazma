@@ -31,6 +31,7 @@ import subprocess
 import sys
 import os
 import tempfile
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -74,6 +75,8 @@ _CHECK_TIMEOUT = 15.0
 _INSTALL_TIMEOUT = 120.0
 # RAG pulls sentence-transformers + torch — allow a long first install.
 _INSTALL_TIMEOUT_HEAVY = 900.0
+#: The wait between two attempts to rewrite the packages (a Windows file lock passes).
+_REPAIR_PAUSE_S = 15.0
 _GIT_TIMEOUT = 60.0
 
 # pyproject optional-dependencies → importable marker modules.
@@ -984,23 +987,54 @@ def _cleanup_broken_distributions() -> None:
         )
 
 
-def _verify_cli_importable() -> bool:
-    """True when ``kazma_cli`` (and core) import in a clean subprocess."""
-    probe = (
-        "import importlib.util, sys\n"
-        "missing = [m for m in ('kazma_cli', 'kazma_core') "
-        "if importlib.util.find_spec(m) is None]\n"
-        "sys.exit(1 if missing else 0)\n"
-    )
+#: Imported in a clean child: what a broken environment loses first -- Kazma
+#: itself, its server and gateway, its settings loader. Finding the modules
+#: (``find_spec``) is not enough: a failed install can leave a package's
+#: record with its files gone (2026-11-13: ``dotenv``).
+_WHOLE_PROBE = "import kazma_core, kazma_cli, kazma_gateway, kazma_ui.app, dotenv"
+
+
+def _environment_problem() -> str:
+    """Why this environment cannot run Kazma (the import's last line), or ""."""
     try:
-        result = _run_cmd(
-            [sys.executable, "-c", probe],
-            cwd=str(Path.cwd()),
-            timeout=30.0,
-        )
-        return result.returncode == 0
-    except Exception:
-        return False
+        result = _run_cmd([sys.executable, "-c", _WHOLE_PROBE], cwd=str(Path.cwd()), timeout=600.0)
+    except Exception as exc:
+        return str(exc)
+    _log_update_step("import check", [sys.executable, "-c", _WHOLE_PROBE], result)
+    if result.returncode == 0:
+        return ""
+    lines = [ln for ln in (result.stderr or result.stdout or "").splitlines() if ln.strip()]
+    return lines[-1].strip() if lines else f"exit {result.returncode}"
+
+
+def _verify_cli_importable() -> bool:
+    """True when Kazma imports in a clean subprocess (:func:`_environment_problem`)."""
+    return not _environment_problem()
+
+
+def _update_log() -> Path:
+    """``.kazma/update.log`` of this install: every package step's whole output."""
+    root = _find_git_root() or Path.cwd()
+    return root / ".kazma" / "update.log"
+
+
+def _log_update_step(label: str, argv: list[str], result: subprocess.CompletedProcess[str]) -> None:
+    try:
+        path = _update_log()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(f"\n== {time.strftime('%Y-%m-%d %H:%M:%S')} {label}\n$ {' '.join(argv)}\n"
+                         f"[exit {result.returncode}]\n{result.stdout or ''}{result.stderr or ''}\n")
+    except OSError:
+        logger.debug("update log not written", exc_info=True)
+
+
+def _problem_lines(result: subprocess.CompletedProcess[str], limit: int = 6) -> str:
+    """The lines of a failed step that say what went wrong, else its tail."""
+    words = ("error", "failed", "denied", "cannot", "could not", "not found", "no module", "traceback")
+    lines = [ln.strip() for ln in f"{result.stdout or ''}\n{result.stderr or ''}".splitlines() if ln.strip()]
+    picked = [ln for ln in lines if any(w in ln.lower() for w in words) and not ln.startswith("[ConfigStore]")]
+    return " | ".join(picked[-limit:]) if picked else (lines[-1] if lines else f"exit {result.returncode}")
 
 
 def _print_reinstall_recovery(spec: str) -> None:
@@ -1064,50 +1098,48 @@ def _reinstall_local(cwd: str) -> bool:
 
     _cleanup_broken_distributions()
 
-    # 1) Additive uv pip install (does NOT prune other packages)
-    uv_pip_cmd = [
-        "uv", "pip", "install", "--python", sys.executable, "-e", spec,
-    ]
-    attempts: list[tuple[list[str], str]] = [
-        (uv_pip_cmd, f"uv pip install -e {spec}"),
-    ]
-
-    # 2) uv sync --inexact + extras (retains extraneous packages)
-    sync_cmd = ["uv", "sync", "--inexact"]
-    for e in extras:
-        sync_cmd.extend(["--extra", e])
-    sync_label = "uv sync --inexact" + (
-        " " + " ".join(f"--extra {e}" for e in extras) if extras else ""
-    )
-    attempts.append((sync_cmd, sync_label))
-
-    for cmd, label in attempts:
-        console.print(f"[cyan]Reinstalling via {label}...[/cyan]")
+    # 1) Additive uv pip install (does NOT prune other packages). Then, when
+    # it failed or left Kazma unable to import, every package rewritten
+    # (--reinstall), at most twice with a pause: a Windows file lock passes,
+    # and a failed install can leave records whose files are gone, which a
+    # plain install takes as installed. There is no `uv sync` fallback: it
+    # moves every package to uv.lock's exact version -- hundreds where the
+    # install runs newer ones within the floors -- and a failure partway
+    # through removed about 200 packages, Kazma among them (2026-11-13).
+    uv_pip_cmd = ["uv", "pip", "install", "--python", sys.executable, "-e", spec]
+    repair_cmd = ["uv", "pip", "install", "--reinstall", "--python", sys.executable, "-e", spec]
+    plan = [(uv_pip_cmd, f"uv pip install -e {spec}"),
+            (repair_cmd, "uv pip install --reinstall (every package rewritten)"),
+            (repair_cmd, "uv pip install --reinstall, once more")]
+    uv_missing = False
+    for index, (cmd, label) in enumerate(plan):
+        if index:
+            time.sleep(_REPAIR_PAUSE_S)
+        console.print(f"[cyan]Installing via {label}...[/cyan]")
         try:
             result = _run_cmd(cmd, cwd=cwd, timeout=timeout)
-            if result.returncode == 0:
-                console.print(f"[green]{label} completed.[/green]")
-                if _verify_cli_importable():
-                    if extras:
-                        persist_extras(extras)
-                    console.print("[green]CLI import check passed (kazma_cli).[/green]")
-                    return True
-                console.print(
-                    f"[yellow]{label} exited 0 but kazma_cli is not importable "
-                    "— trying next method…[/yellow]"
-                )
-                _cleanup_broken_distributions()
-            else:
-                err = (result.stderr or result.stdout or "").strip()
-                console.print(f"[yellow]{label} failed:[/yellow] {err[:400]}")
         except FileNotFoundError:
-            console.print(f"[dim]{cmd[0]} not on PATH — trying next method.[/dim]")
+            console.print(f"[dim]{cmd[0]} not on PATH — trying pip.[/dim]")
+            uv_missing = True
+            break
         except subprocess.TimeoutExpired:
             console.print(f"[yellow]{label} timed out.[/yellow]")
-        except Exception as exc:
-            console.print(f"[yellow]{label} error:[/yellow] {exc}")
+            continue
+        _log_update_step(label, cmd, result)
+        problem = _problem_lines(result) if result.returncode != 0 else _environment_problem()
+        if not problem:
+            if extras:
+                persist_extras(extras)
+            console.print(f"[green]{label} completed; Kazma imports.[/green]")
+            return True
+        console.print(f"[yellow]{label}: {problem}[/yellow]  (whole output: {_update_log()})", soft_wrap=True)
+        _cleanup_broken_distributions()
 
-    # 3) python -m pip (may be missing in pure uv venvs)
+    if not uv_missing:
+        _print_reinstall_recovery(spec)
+        return False
+
+    # 2) python -m pip, only where uv is not installed (a pure pip venv)
     console.print(f"[cyan]Reinstalling via python -m pip install -e {spec}...[/cyan]")
     try:
         result = _run_cmd(
@@ -1879,6 +1911,120 @@ class _ServerHold:
         return True
 
 
+# ---------------------------------------------------------------------------
+# What new packages bring along: Chromium, and the containers' pinned images
+# ---------------------------------------------------------------------------
+
+#: Asked in a child (the packages just installed, Kazma's code as on disk
+#: now): "absent" -- no Playwright, or no Chromium was ever set up --,
+#: "current" or "missing".
+_CHROMIUM_PROBE = (
+    "import importlib.util\n"
+    "from kazma_core.web_acquire import browser_isolation as b\n"
+    "if importlib.util.find_spec('playwright') is None or not b.chromium_was_installed():\n"
+    "    print('absent')\n"
+    "elif b.chromium_installed():\n"
+    "    print('current')\n"
+    "else:\n"
+    "    print('missing')\n"
+)
+
+#: Asked in a child, with the install's .env loaded (the container engine's
+#: choice is a setting): one "<title>\t<outcome>" line per container service.
+_IMAGES_PROBE = (
+    "from kazma_core.env_files import load_env_files\n"
+    "load_env_files(include_cwd=False)\n"
+    "from kazma_core import container_services as cs\n"
+    "from kazma_core.docker_cli import find_docker_cli\n"
+    "from kazma_core.paths import get_project_root\n"
+    "docker = find_docker_cli()\n"
+    "if not docker:\n"
+    "    raise SystemExit(0)\n"
+    "root = get_project_root()\n"
+    "for state, outcome in cs.refresh_images(root, root / '.env', docker):\n"
+    "    print(f'{state.svc.title}\\t{outcome}')\n"
+)
+
+
+def _last_line(text: str | None) -> str:
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    return lines[-1] if lines else ""
+
+
+def _bring_chromium_along() -> bool:
+    """The Chromium build the Playwright just installed launches.
+
+    A Playwright release launches one Chromium build, and ``kazma update``
+    installed a new Playwright without it: the browser tools and the daily
+    canary's browser leg failed until someone ran ``playwright install
+    chromium`` by hand. Only where Chromium was set up before; False when it
+    was needed and could not be downloaded (said, with the command).
+    """
+    try:
+        probe = subprocess.run([sys.executable, "-c", _CHROMIUM_PROBE], capture_output=True, text=True,
+                               timeout=180, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError) as exc:
+        console.print(f"[yellow]Could not check Kazma's Chromium: {exc}[/yellow]")
+        return False
+    if _last_line(probe.stdout) != "missing":
+        return True
+    command = f"{_install_python(_find_git_root())} -m playwright install chromium"
+    console.print("Downloading the Chromium build the new Playwright launches…")
+    try:
+        done = subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], capture_output=True,
+                              text=True, timeout=1800, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError) as exc:
+        console.print(f"[yellow]Chromium was not downloaded ({exc}). The browser tools need it:[/yellow]\n"
+                      f"  [cyan]{command}[/cyan]", soft_wrap=True)
+        return False
+    if done.returncode == 0:
+        console.print("[green]Kazma's Chromium matches its Playwright.[/green]")
+        return True
+    console.print(f"[yellow]Chromium was not downloaded ({_last_line(done.stderr or done.stdout)}). "
+                  f"The browser tools need it:[/yellow]\n  [cyan]{command}[/cyan]", soft_wrap=True)
+    return False
+
+
+def _refresh_container_images() -> bool:
+    """Every container setup made, on the image its compose file now pins.
+
+    The compose files pin each image by version and digest, and a new pin
+    reached the file and never the running container (2026-11-13: SearXNG
+    still ran ``searxng:latest``). Compose recreates a container whose image
+    changed and keeps its volumes. A container setup did not make from this
+    install's own compose file is left as it is. False when one could not be
+    updated (said).
+    """
+    try:
+        probe = subprocess.run([sys.executable, "-c", _IMAGES_PROBE], capture_output=True, text=True,
+                               timeout=3600, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError) as exc:
+        console.print(f"[yellow]Could not check Kazma's containers: {exc}[/yellow]")
+        return False
+    ok = True
+    for line in (probe.stdout or "").splitlines():
+        title, _, outcome = line.partition("\t")
+        if outcome == "updated":
+            console.print(f"[green]{title} now runs the image its compose file pins.[/green]")
+        elif outcome.startswith("failed"):
+            ok = False
+            console.print(f"[yellow]{title} could not be moved to its pinned image: {outcome[7:].strip()}[/yellow]")
+    if probe.returncode != 0:
+        console.print(f"[yellow]Could not check Kazma's containers: {_last_line(probe.stderr)}[/yellow]")
+        return False
+    return ok
+
+
+def _bring_along() -> bool:
+    """After new packages are installed and Kazma serves again: what they
+    need outside the environment (:func:`_bring_chromium_along`,
+    :func:`_refresh_container_images`). Never fails the update: each says
+    what it could not do."""
+    chromium = _bring_chromium_along()
+    images = _refresh_container_images()
+    return chromium and images
+
+
 def _install_held(command: str, install: Callable[[], bool]) -> str:
     """Run *install* with Kazma's server held stopped (:class:`_ServerHold`).
 
@@ -1897,6 +2043,7 @@ def _install_held(command: str, install: Callable[[], bool]) -> str:
         back = hold.resume_after_update(ok)
     if not ok:
         return "failed"
+    _bring_along()
     return "done" if back else "not_back"
 
 
@@ -2120,6 +2267,8 @@ def do_git_update(
         ok = _reinstall_after_reset(cwd, from_commit, stash_msg)
     finally:
         back = hold.resume_after_update(ok)
+    if ok:
+        _bring_along()
     if not ok and not hold.held:
         console.print(
             "Repair the packages with:\n"

@@ -2205,7 +2205,20 @@ and Neo4j down at a process's first fact made it use SQLite until a restart.
   removed (the dev checkout and live share one Neo4j at 127.0.0.1:7687), and
   an untagged edge of a fact this install never held is counted and left.
   The dual-write's upsert takes the same rule, and graph-clear deletes only
-  this install's. Entity nodes left with no edge go.
+  this install's. Entity nodes left with no edge go. **Each install's facts
+  have edges of their own** (2026-11-13): the write matches by install tag
+  (`MERGE (a)-[r:TYPE {install: $inst}]->(b)`, `_UPSERT_EDGE`; a writer with
+  no install id `_UPSERT_EDGE_UNTAGGED`), and another install's edge, or one
+  with no fact id, at a key this install wants is counted (`held_elsewhere`)
+  beside this install's own. Matched by type alone, the second install's
+  write landed on the first's edge, so its fact left the graph when the
+  first install forgot its own (until a daily comparison). A forget by id
+  reads the subject's edges (`_DELETE_BY_ID_AT_KEY`, an index seek; by name
+  until keyed), this install's only, never every edge of the database; the
+  subject-object delete keeps to this install's too (`_THIS_INSTALLS_EDGE`).
+  Gates: `test_real_server_two_installs_share_one_copy`,
+  `test_real_server_a_forget_by_id_seeks_its_subject_and_keeps_to_this_install`
+  and the type-only write as the control (`tests/test_memory_graph_sync.py`).
 - **An outage is waited out:** one WARNING when Neo4j stops answering, one
   INFO when it is back, never a failed sweep; the queue keeps every change
   (100,000 at most, then a full comparison instead); no Neo4j chosen, it is
@@ -9480,8 +9493,25 @@ no Python update ever arrived.
   pull runs under the server, and a refusal there puts the checkout back. A
   failed install keeps Kazma stopped (the guard would restart, again and
   again, a server that may not boot); the repair is the same command, which
-  takes the pause over. A running server no guard supervises is refused with
-  the steps. A pause also stops a server that is still booting, and wakes the
+  takes the pause over. **A failed install is repaired, never left partway**
+  (2026-11-13): the additive `uv pip install -e` first, then every package
+  rewritten (`--reinstall`, `_REPAIR_PAUSE_S` apart, twice at most), each
+  judged by importing Kazma in a child (`update._environment_problem`:
+  `kazma_core, kazma_cli, kazma_gateway, kazma_ui.app, dotenv`; a
+  `find_spec` passed a package whose files were gone); the whole output of
+  every step in `.kazma/update.log`. No `uv sync` fallback: it moved every
+  package to uv.lock's version and, failing partway on live, removed about
+  200 packages, Kazma among them (18 minutes down). After the packages,
+  `update._bring_along` downloads the Chromium build the installed
+  Playwright launches (`browser_isolation.chromium_installed` asks for that
+  revision, in `chromium-<rev>` and `chromium_headless_shell-<rev>`, not any
+  build) and puts each container setup made from this install's compose
+  files on its pinned image (`container_services.refresh_images`: compose's
+  project, service AND config-file labels must be this install's -- a
+  checkout and an install in folders both called `kazma` share a project).
+  Gates: `tests/test_update_repairs_a_broken_environment.py`,
+  `tests/test_update_brings_chromium_and_images.py` (the old check, the old
+  any-build rule and the project-only rule as controls). A pause also stops a server that is still booting, and wakes the
   backoff and crash-loop cooldown. Every installer (`_reinstall_local`,
   `do_pip_update`) refuses under a running server itself
   (`test_every_installer_checks_the_server_before_it_installs`), so a caller
@@ -11770,7 +11800,13 @@ pull that changed document code also rebuilds the worker image:
 new *guard* (its own code, or other OS-level variables) still needs the
 `KazmaAgent` task restarted.
 
-**`scripts/deploy_live.py` does all of the above and checks it** (resilience
+**`scripts/deploy_live.py` keeps each step's whole output in `.kazma/deploy/`
+of the dev checkout and names the error lines (`essential`); its revert of a
+`pyproject.toml` change puts the reverted code's packages back
+(`put_packages_back`: the update, else `repair_packages`, every package
+rewritten with uv while the guard holds Kazma, which stays held if that
+fails) instead of a reload, which lifted a failed update's hold and left
+live crash-looping (2026-11-13).** **`scripts/deploy_live.py` does all of the above and checks it** (resilience
 plan C2): pull (refused over modified tracked files), the update and image
 build when their files changed, reload when idle, then the new commit on
 `/health/live`, ready and deep health, one test turn ("Reply with the word

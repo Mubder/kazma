@@ -27,7 +27,7 @@ from kazma_core.memory.graph_backend import Neo4jGraphBackend
 
 #: A Cypher name Neo4j takes unquoted, or one quoted in backticks.
 _NAME = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_]*|`[^`]+`)$")
-_REL = re.compile(r"-\[r:([^\]]+)\]->")
+_REL = re.compile(r"-\[r:([^\]{ ]+)(?: \{[^}]*\})?\]->")
 
 
 class _Session:
@@ -195,3 +195,32 @@ def test_real_server_graph_clear_leaves_no_node(real_neo):
                                 belief_id=f"{tenant}-{i}", tenant_id=tenant)
     assert be.clear_tenant_edges(tenant_id=tenant) == 2
     assert _names(be, tenant) == []
+
+
+@pytest.mark.parametrize("keyed", [True, False])
+def test_a_forget_by_id_reads_its_subject_s_edges_of_this_install_only(neo, monkeypatch, keyed):
+    """By id, the edge is looked for at its subject's node (by key once the
+    copy is keyed), among this install's edges. It was every edge of the
+    database, of every tenant and install (2026-11-13)."""
+    monkeypatch.setattr(neo, "keyed", lambda: keyed)
+    monkeypatch.setattr(graph_backend, "this_install", lambda: "install-a")
+    assert neo.delete_triple(belief_id="b-1", subject="user", tenant_id="t1")
+    (query, params), = neo._driver.log
+    want = graph_backend._DELETE_BY_ID_AT_KEY if keyed else graph_backend._DELETE_BY_ID_AT_NAME
+    assert query == " ".join(want.split())
+    assert params["tid"] == "t1" and params["inst"] == "install-a" and params["bid"] == "b-1"
+    assert params["sk"] == graph_backend.entity_key("user") and params["sub"] == "user"
+    assert _deletes_orphaned_ends(query)
+
+
+def test_the_memory_page_s_edit_names_the_fact_s_tenant():
+    """The Memory page's edit removed the old edge with no tenant: looked for
+    under tenant "default", another tenant's edge was not found."""
+    import inspect
+
+    from kazma_ui import memory_api
+
+    source = inspect.getsource(memory_api)
+    call = source[source.index("delete_belief_edge(\n                belief_id=bid,"):]
+    call = call[:call.index(")\n")]
+    assert 'tenant_id=str(row["tenant_id"] or "default")' in call
