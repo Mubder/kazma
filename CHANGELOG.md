@@ -16,6 +16,15 @@
   key set on the container by hand. The update now leaves the container and
   names `kazma setup install --with private_search`, which generates the key
   first.
+- `kazma setup install` checks the parts you did not choose too. A part that
+  is already on the machine is listed as "Here, not chosen", not as "Left
+  out" with what Kazma would lack. A run for SearXNG on the owner's install
+  had listed "PostgreSQL as a service" as left out ("SQLite: a restore goes
+  back to the last backup") while PostgreSQL 18 ran as a service. Its line
+  about disk space now says what the check asks for ("setup asks for about
+  10 GB free for Custom"), not that one container needs 10 GB.
+- The owner's SearXNG has its own generated key: `kazma setup install --with
+  private_search` wrote it into `.env` and recreated the container.
 - Two lines of the upgrade's output said what was not so: a step named
   "PostgreSQL 18 on port 5432" now says "Set PostgreSQL 18 to listen on port
   5432", and the wait after a maintenance hold no longer says "on the new

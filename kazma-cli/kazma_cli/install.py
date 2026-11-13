@@ -877,6 +877,35 @@ def _select_parts(options, recorded: dict, machine: Machine, say, os_name: str =
     return mode, parts, without
 
 
+def _check_every_part(mode: str, parts, machine: Machine, platform, docker: str, show):
+    """The chosen parts as found, the parts not chosen that are here anyway,
+    the parts left out, and the system dependencies; each said to *show*.
+
+    The parts not chosen are checked too: one already on this machine is
+    here, not missing. Live 2026-11-14: a Custom run for SearXNG listed
+    "PostgreSQL as a service" as left out, and the log said Kazma lacked it
+    ("SQLite: a restore goes back to the last backup"), on an install that
+    runs PostgreSQL 18 as a service. Only the chosen parts are recorded."""
+    from kazma_core.english_count import count_noun
+    from kazma_core.install_components import COMPONENTS, full_ids
+
+    not_chosen = [c for c in COMPONENTS if c.id not in {p.id for p in parts}]
+    every, states = _check_parts([*parts, *not_chosen], machine, platform, docker)
+    found = {p.id: every[p.id] for p in parts}
+    here_anyway = [c for c in not_chosen if every[c.id].ok]
+    left_out = [c for c in not_chosen if not every[c.id].ok]
+    show(f"Install: {mode.capitalize()} ({len(parts)} of {count_noun(len(full_ids()), 'part')})")
+    _show_parts(parts, found, show)
+    if here_anyway:
+        show("Here, though not chosen (setup leaves each as it is):")
+        _show_parts(here_anyway, every, show)
+    if left_out:
+        show("Not chosen (what Kazma lacks without each):")
+        for comp in left_out:
+            show(f"  --   {comp.title}: {comp.lacks}")
+    return found, here_anyway, left_out, states
+
+
 def _show_parts(parts, found: dict[str, PartState], say) -> None:
     for part in parts:
         state = found[part.id]
@@ -898,7 +927,8 @@ def _say_group(label: str, parts, say) -> None:
     say(textwrap.fill(text, width=width, initial_indent="  ", subsequent_indent="      "))
 
 
-def _say_summary(mode: str, parts, found: dict[str, PartState], pre: _Preflight, left_out, say) -> None:
+def _say_summary(mode: str, parts, found: dict[str, PartState], pre: _Preflight, left_out, say,
+                 here_anyway=()) -> None:
     """What the install will do, short: the details are in the log.
 
     The first run on a clean Windows printed every part's state, every part
@@ -914,6 +944,7 @@ def _say_summary(mode: str, parts, found: dict[str, PartState], pre: _Preflight,
     _say_group("Already here", [p for p in parts if found[p.id].ok], say)
     _say_group("Not possible here", [p for p in parts if p.id in pre.blocked], say)
     _say_group("Could not tell", [p for p in parts if found[p.id].ok is None], say)
+    _say_group("Here, not chosen", list(here_anyway), say)
     _say_group("Left out", left_out, say)
     if left_out:
         say("  What each part gives, and what Kazma lacks without it: kazma setup install --list")
@@ -1053,7 +1084,7 @@ def _attempt(item: PlannedStep, machine: Machine, env_path: Path, say, log) -> t
 def install(options, machine: Machine | None = None) -> int:
     from kazma_core import postgres_service as pgs
     from kazma_core.english_count import count_noun
-    from kazma_core.install_components import COMPONENTS, full_ids
+    from kazma_core.install_components import full_ids
     from kazma_core.system_deps import record_system
 
     machine = machine or Machine()
@@ -1087,15 +1118,9 @@ def install(options, machine: Machine | None = None) -> int:
     # and keeps all of that in its log.
     detailed = options.check or options.dry_run
     show = say if detailed else log.write
-    say(f"Checking {count_noun(len(parts), 'part')} of {mode.capitalize()}...")
-    found, states = _check_parts(parts, machine, platform, _docker_choice(options, platform))
-    show(f"Install: {mode.capitalize()} ({len(parts)} of {count_noun(len(full_ids()), 'part')})")
-    _show_parts(parts, found, show)
-    left_out = [c for c in COMPONENTS if c.id not in {p.id for p in parts}]
-    if left_out:
-        show("Not chosen (what Kazma lacks without each):")
-        for comp in left_out:
-            show(f"  --   {comp.title}: {comp.lacks}")
+    say(f"Checking {count_noun(len(full_ids()), 'part')} ({len(parts)} in {mode.capitalize()})...")
+    found, here_anyway, left_out, states = _check_every_part(mode, parts, machine, platform,
+                                                             _docker_choice(options, platform), show)
     pre = _preflight(parts, found, machine, platform, mode, options, say)
     todo = [p for p in parts if found[p.id].ok is False and p.id not in pre.blocked]
     plan = build_plan(todo, found, states, machine, platform, pre.readiness,
@@ -1106,7 +1131,7 @@ def install(options, machine: Machine | None = None) -> int:
         pre.problems.append("some steps need an administrator terminal: open PowerShell with "
                             "'Run as administrator' and run setup again")
     if not detailed:
-        _say_summary(mode, parts, found, pre, left_out, say)
+        _say_summary(mode, parts, found, pre, left_out, say, here_anyway=here_anyway)
     if pre.problems:
         say("Problems found before anything was done:", "warn")
         for problem in pre.problems:
@@ -1127,8 +1152,11 @@ def install(options, machine: Machine | None = None) -> int:
     if options.dry_run:
         return 0
     where = f"; every step and its command are in {log.path}" if log.path else ""
-    say(f"{count_noun(len(plan), 'step')} to run, needing about "
-        f"{DISK_NEEDED.get(mode, DISK_NEEDED['express']) / 2**30:.0f} GB of disk{where}.")
+    # The budget is the whole mode's, which the free-space check asks for; a
+    # plan of one container needs far less (it said "needing about 10 GB" for
+    # SearXNG alone).
+    say(f"{count_noun(len(plan), 'step')} to run (setup asks for about "
+        f"{DISK_NEEDED.get(mode, DISK_NEEDED['express']) / 2**30:.0f} GB free for {mode.capitalize()}){where}.")
     stop = _go_ahead(options, machine, admin_short=admin_short, say=say)
     if stop is not None:
         if stop == EXIT_NOTHING_DONE:

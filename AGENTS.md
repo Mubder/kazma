@@ -4584,8 +4584,10 @@ checklist from Express (`toggle`: on brings what a part needs, off takes what
 needs it). Every extra in pyproject.toml belongs to a part or is declared in
 `EXTRA_ALIASES` with why.
 
-`kazma setup install` (`kazma_cli/install.py`) checks every part, then lists
-every problem it can see before anything is done (`_preflight`: disk space,
+`kazma setup install` (`kazma_cli/install.py`) checks every part -- the ones
+not chosen too (`_check_every_part`: one already here is "Here, not chosen",
+never "Left out" with what Kazma lacks; only the chosen are recorded) -- then
+lists every problem it can see before anything is done (`_preflight`: disk space,
 the network, an administrator terminal, and `system_deps.docker_readiness`:
 virtualization off in the firmware refuses Docker and what needs it; a
 Windows virtual machine is told what its host must pass through; WSL 2

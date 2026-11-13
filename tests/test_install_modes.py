@@ -876,6 +876,44 @@ def test_an_install_shows_a_short_summary_and_logs_every_step(box, capsys):
     assert "After the install:" not in out and "After the install:" in log
 
 
+def test_a_part_here_though_not_chosen_is_never_called_left_out(box, capsys):
+    """Live 2026-11-14: a Custom run for SearXNG listed "PostgreSQL as a
+    service" as left out, and the log said Kazma lacked it ("SQLite: a restore
+    goes back to the last backup"), on an install that runs PostgreSQL 18 as
+    a service. The parts not chosen are checked too."""
+    from kazma_cli.install import install
+
+    box.pg = True
+    box.extras |= set(ic.by_id("postgres").extras)
+    assert install(_options(), _machine(box, answers=["", "", ""])) == 0
+    out = capsys.readouterr().out
+    assert "Here, not chosen (1): PostgreSQL as a service" in out
+    assert "Left out (5): " in out
+    log = (box.home / "install.log").read_text(encoding="utf-8")
+    assert "Here, though not chosen" in log and "PostgreSQL 16" in log
+    assert ic.by_id("postgres").lacks not in log
+    record = json.loads((box.home / "setup_record.json").read_text(encoding="utf-8"))["install"]
+    assert "postgres" not in record["components"], "a part not chosen is not recorded as chosen"
+
+
+def test_negative_control_unchecked_parts_not_chosen_read_as_left_out(box, capsys, monkeypatch):
+    from kazma_cli import install as inst
+
+    real = inst._check_parts
+    express = set(ic.express_ids("windows"))
+
+    def chosen_only(parts, machine, platform, docker="system"):
+        found, states = real(parts, machine, platform, docker)
+        return {k: v if k in express else inst.PartState(False, "not checked") for k, v in found.items()}, states
+
+    monkeypatch.setattr(inst, "_check_parts", chosen_only)
+    box.pg = True
+    box.extras |= set(ic.by_id("postgres").extras)
+    assert inst.install(_options(), _machine(box, answers=["", "", ""])) == 0
+    out = capsys.readouterr().out
+    assert "Left out (6): " in out and "Here, not chosen" not in out
+
+
 def test_a_dry_run_still_shows_every_step(box, capsys):
     """--dry-run and --check are for reading: they keep the whole listing."""
     from kazma_cli.install import install
