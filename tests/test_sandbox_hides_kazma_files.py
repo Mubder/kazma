@@ -332,8 +332,13 @@ def test_the_old_suffix_rule_missed_the_copies():
 # Class gate: one place builds a container mount of a workspace
 # --------------------------------------------------------------------------
 
-#: (file, function) allowed to spell a container bind mount.
-MOUNT_BUILDERS = {("kazma-core/kazma_core/tools/code_exec.py", "_workspace_mounts")}
+#: (file, function) allowed to spell a container bind mount, and why.
+#: ``_mount_args`` (the move from Docker Desktop, AGENTS.md section 63) makes
+#: a container again on Kazma's engine with the bind mounts it already had on
+#: Docker Desktop: the same folders, as the engine names them, never a new
+#: one Kazma chose.
+MOUNT_BUILDERS = {("kazma-core/kazma_core/tools/code_exec.py", "_workspace_mounts"),
+                  ("kazma-core/kazma_core/engine_move.py", "_mount_args")}
 _MOUNT_MARKERS = ("type=bind", "--volume")
 
 

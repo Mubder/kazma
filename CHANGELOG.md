@@ -1,5 +1,48 @@
 # CHANGELOG
 
+## Kazma's own container engine, step 3: move an install off Docker Desktop (2026-11-13)
+
+- `kazma setup engine --move-from-desktop` moves an existing Windows install
+  from Docker Desktop to Kazma's own engine in one run. It sets the engine
+  up first if it is not there yet.
+- Only the containers Kazma uses move: its private search and its memory
+  graph, found the same way Kazma tells its guard what it depends on.
+  Another project's container on Docker Desktop is never touched, and a
+  volume another project shares stops the move before anything changes.
+- Kazma's database in a container also stops it, with the command that
+  moves the database first (`kazma setup postgres --move-from-container`).
+- The images go to the engine while Kazma still runs: each container's
+  image, the code sandbox's image, and the document worker image (copied
+  when Docker Desktop has this code's build, otherwise built there).
+- Then Kazma is stopped through its guard once no chat turn is running.
+  Each container is stopped on Docker Desktop and kept, and its volumes are
+  copied only once it is seen stopped. Every file is compared on both
+  engines (path, owner, mode, size and SHA-256). The container is made again
+  from its own settings, started, and checked: healthy, and answering on its
+  ports from Windows.
+- Kazma is then switched to its engine and seen ready. The old containers
+  stay stopped on Docker Desktop, with their restart policy off, as the way
+  back.
+- If any step fails, everything is put back: the copies are removed from the
+  engine (or stopped and kept, once Kazma has run on them), the originals
+  run again on Docker Desktop, and Kazma stays there. A run that dies half
+  way is rolled back by the next run, and Ctrl+C rolls back before stopping.
+- `kazma setup engine` on its own, on an install that uses Docker Desktop,
+  now writes Docker Desktop down as Kazma's choice before it records the new
+  engine. Before this, Kazma's next start would have looked for its
+  containers on the new, empty engine.
+- Drilled on a clean Windows VM with Docker Desktop. The move took 766 s,
+  the engine's install included, and the graph's data came across. After a
+  restart with nobody signed in, both containers were up 39 s after boot.
+- The drill fixed three things:
+  - The move found Kazma's guard only through a `.git` folder, so it refused
+    to run on an install unpacked from a source zip. It now finds the guard
+    from the install's own folder.
+  - A Kazma that was up but waiting for a provider key counted as not ready
+    when an interrupted move was checked again.
+  - Files carried from inside a container are now said in one line per
+    container.
+
 ## Kazma Watch refuses the old signature form (2026-11-12)
 
 - Kazma Watch now accepts only `v2` signatures, which include the route a

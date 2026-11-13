@@ -42,7 +42,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_CLONE_HOSTS` | `""` | `kazma_gateway.routers.github` | yes |
 | `KAZMA_CODE_EXEC_ALLOW_LOCAL` | (none) | `kazma_core.tools.code_exec` | yes |
 | `KAZMA_CODE_EXEC_DOCKER` | (none) | `kazma_core.safety.post_hitl`, `kazma_core.tools.code_exec` | yes |
-| `KAZMA_CODE_EXEC_IMAGE` | (none) | `kazma_core.tools.code_exec` | yes |
+| `KAZMA_CODE_EXEC_IMAGE` | (none) | `kazma_core.engine_move`, `kazma_core.tools.code_exec` | yes |
 | `KAZMA_CODE_INDEX` | (none) | `kazma_core.code_index.indexer` | yes |
 | `KAZMA_COMMITMENT_ENABLED` | (none) | `kazma_core.safety.commitment.config` | yes |
 | `KAZMA_COMMITMENT_MODE` | (none) | `kazma_core.safety.commitment.config` | yes |
@@ -61,7 +61,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_DATA_DIR` | (none) | `kazma_core.backup.restore`, `kazma_core.config_store`, `kazma_core.memory.backfill_v2` +1 | yes |
 | `KAZMA_DB_BACKEND` | (none) | `kazma_core.db.backend` | yes |
 | `KAZMA_DB_BACKEND_SOURCE` | (none) | `kazma_core.migration.exporter` | yes |
-| `KAZMA_DB_CONTAINER` | `""` | `kazma_core.guard_dependencies`, `kazma_core.migration.pg_bridge`, `kazma_core.security.service_exposure` | yes |
+| `KAZMA_DB_CONTAINER` | `""` | `kazma_core.engine_move`, `kazma_core.guard_dependencies`, `kazma_core.migration.pg_bridge` +1 | yes |
 | `KAZMA_DB_INTERNAL_PORT` | `"5432"` | `kazma_core.migration.pg_bridge` | yes |
 | `KAZMA_DEMO_MODE` | (none) | `kazma_core.memory.belief_extractor`, `kazma_core.memory.health`, `kazma_core.security.boot_guard` +5 | yes |
 | `KAZMA_DETACHED_TTL_S` | `"300"` | `kazma_ui.active_turns` | yes |

@@ -311,6 +311,9 @@ def run(args: list[str]) -> int:
     engine.add_argument("--remove", action="store_true",
                         help="remove it (refused while another project's containers live in it)")
     engine.add_argument("--force", action="store_true", help="with --remove: remove it even then, with their data")
+    engine.add_argument("--move-from-desktop", action="store_true",
+                        help="move Kazma's containers from Docker Desktop to it (Windows): Kazma held while idle, "
+                             "the old containers stopped and kept")
     from kazma_cli.install import add_install_parser
 
     add_install_parser(sub)
@@ -539,6 +542,8 @@ def _setup_engine(options, *, run=subprocess.run, ask=input, platform=None, open
     from kazma_core import postgres_service as pgs
 
     platform = platform or pgs.detect_platform()
+    if getattr(options, "move_from_desktop", False):
+        return _move_from_desktop(options, run=run, ask=ask, platform=platform, opener=opener, admin=admin)
     if platform.os != "windows":
         if options.remove:
             _say("Kazma uses the system's Docker service here: there is no engine of Kazma's own to remove.")
@@ -581,21 +586,193 @@ def _setup_engine(options, *, run=subprocess.run, ask=input, platform=None, open
     if not options.yes and _ask(ask, "Set Kazma's engine up now? [y/N] ").strip().lower() not in ("y", "yes"):
         _say("Nothing was done.")
         return 1
+    stay = _keep_desktop_choice()
+    if not _run_engine_steps(steps, run=run, opener=opener, command="kazma setup engine"):
+        return 1
+    _say("Kazma's engine is set up: it starts at boot, with nobody signed in.")
+    if stay:
+        _say("Kazma keeps using Docker Desktop, where its containers are. Move them to its own engine with: "
+             "kazma setup engine --move-from-desktop")
+    return 0
+
+
+def _keep_desktop_choice() -> bool:
+    """On an install that uses Docker Desktop, write that choice down before
+    the engine is recorded: a recorded engine is Kazma's choice while nothing
+    is chosen, and its next start would look for its containers on an empty
+    engine (:func:`kazma_core.engine_move.keep_desktop`)."""
+    from kazma_core import engine_move
+    from kazma_core.safety.deployment_policy import policy_read_failures
+    from kazma_core.settings_validation import SettingRejected
+
+    try:
+        if engine_move.keep_desktop():
+            _say("-> containers.engine = desktop (Kazma's containers stay on Docker Desktop until they are moved)")
+            return True
+    except (*policy_read_failures(), SettingRejected) as exc:
+        _say(f"   Kazma's container engine setting could not be read or saved ({type(exc).__name__}).")
+    return False
+
+
+def _run_engine_steps(steps, *, run=subprocess.run, opener=None, command: str) -> bool:
+    """The engine's setup steps in order; False (said) at the first that
+    fails or waits for a Windows restart."""
+    from kazma_core import container_engine_setup as ces
+
     for step in steps:
         _say(f"-> {step.title}")
         ok, detail = ces.run_action(step.action, run=run, log=lambda m: _say(f"   {m}"),
                                     opener=opener)
         if ok and detail == ces.RESTART:
-            _say("Restart Windows to finish WSL, then run kazma setup engine again: it continues where it stopped.")
-            return 1
+            _say(f"Restart Windows to finish WSL, then run {command} again: it continues where it stopped.")
+            return False
         if not ok:
             _say(f"   FAILED: {detail}")
-            _say("Run kazma setup engine again: it repairs what is missing and keeps what is there.")
-            return 1
+            _say(f"Run {command} again: it repairs what is missing and keeps what is there.")
+            return False
         if detail:
             _say(f"   {detail}")
-    _say("Kazma's engine is set up: it starts at boot, with nobody signed in.")
-    return 0
+    return True
+
+
+#: The pause the engine's move asks Kazma's guard for while it copies.
+_ENGINE_MOVE_REASON = "kazma setup engine: moving Kazma's containers"
+_MOVE_COMMAND = "kazma setup engine --move-from-desktop"
+
+
+def _checkout_root(start: Path | None = None) -> Path | None:
+    """The install this CLI runs from: the folder above it that holds Kazma's
+    guard script, a git checkout or a source folder unpacked from a zip.
+    Finding it by ``.git`` alone, the move found no guard on a zip install and
+    refused to run (the drill VM, 2026-11-13); finding it from the working
+    folder, it depended on where the command was typed."""
+    current = (start or Path(__file__)).resolve().parent
+    for _ in range(8):
+        if (current / "scripts" / "service" / "kazma_guard.py").is_file():
+            return current
+        current = current.parent
+    return None
+
+
+def _install_root() -> Path | None:
+    root = _checkout_root()
+    return root if root is not None and (root / "scripts" / "document_worker_image.py").is_file() else None
+
+
+def _say_move_plan(plan, steps) -> None:
+    _say("The move from Docker Desktop to Kazma's own engine:")
+    lines = [step.title for step in steps]
+    lines.append("prepare it while Kazma runs: each container's image, the code sandbox's image, and the "
+                 "document worker image when documents run in containers")
+    lines.append("once no chat turn runs, stop Kazma through its guard and hold it while the containers move")
+    for moving in plan.containers:
+        volumes = ""
+        if moving.volumes:
+            from kazma_core.engine_move import _shown_volume
+
+            shown = [_shown_volume(v) for v in moving.volumes]
+            volumes = f"; its volume{'s' if len(shown) > 1 else ''} ({', '.join(shown)}) copied and checked"
+        lines.append(f"{moving.name} ({', '.join(moving.purposes)}): stopped on Docker Desktop and kept{volumes}; "
+                     "made on Kazma's engine" + (", started and seen answering" if moving.running
+                                                 else " (stopped, as it is)"))
+    if not plan.containers:
+        lines.append("no container of Kazma's is on Docker Desktop: nothing to copy")
+    lines.append("switch Kazma to its own engine (containers.engine = kazma), start it and see it ready")
+    for i, line in enumerate(lines, 1):
+        _say(f"  {i:2}. {line}")
+    for note in plan.notes:
+        _say(f"  note: {note}")
+    _say("  If any step fails, everything is put back: Kazma stays on Docker Desktop, as it is.")
+
+
+def _move_from_desktop(options, *, run=subprocess.run, ask=input, platform=None, opener=None, admin=None,
+                       docker=None, hold=None, answering=None, journal=None) -> int:
+    """``kazma setup engine --move-from-desktop`` (AGENTS.md section 63, the
+    plan's Stage 3): set Kazma's engine up if it is not, then move Kazma's
+    containers from Docker Desktop to it (:mod:`kazma_core.engine_move`).
+    Every refusal comes before anything changes."""
+    from kazma_core import engine_move as em
+    from kazma_core import postgres_service as pgs
+    from kazma_core.guard_dependencies import _port_answers, _read_record
+    from kazma_core.safety.deployment_policy import policy_read_failures
+
+    platform = platform or pgs.detect_platform()
+    if platform.os != "windows":
+        _say("Moving from Docker Desktop is for Windows: elsewhere Kazma's engine is the system's Docker "
+             "service (kazma setup engine).")
+        return 2
+    docker = docker or em.Docker.found()
+    if docker is None:
+        _say("The docker command was not found: Docker Desktop's containers cannot be read. Nothing was done.")
+        return 2
+    hold = hold or _MoveHold(reason=_ENGINE_MOVE_REASON, what="its containers' data")
+    journal = journal or em.Journal()
+    record = hold.record_path()
+    steps_for = em.MoveSteps(hold=hold, say=_say, answering=answering or _port_answers, guard_record=record,
+                             root=_install_root(), python=sys.executable, run=run)
+    try:
+        if journal.unfinished():
+            hold.adopt_leftover()
+            outcome = em.recover(docker, journal, steps_for)
+            if outcome == "finished":
+                return 0
+            if outcome != "rolled_back":
+                return 1
+        return _move_after_checks(options, docker, hold, journal, steps_for, run=run, ask=ask, opener=opener,
+                                  admin=admin, previous=_read_record(record) if record else [])
+    except policy_read_failures() as exc:
+        _say(f"The move could not go on ({type(exc).__name__}). Run {_MOVE_COMMAND} again once Kazma's "
+             "settings can be read.")
+        return 1
+    finally:
+        if hold.held:  # a pause this run took over from an earlier one, never lifted by a move
+            hold.resume()
+
+
+def _move_after_checks(options, docker, hold, journal, steps_for, *, run, ask, opener, admin, previous) -> int:
+    from kazma_core import container_engine_setup as ces
+    from kazma_core import engine_move as em
+    from kazma_core import postgres_service as pgs
+
+    if em.stored_engine() == "kazma":
+        _say("Kazma already uses its own engine (containers.engine = kazma): there is nothing to move. If its "
+             "containers are still on Docker Desktop, choose Docker Desktop in Settings -> System -> Container "
+             "engine, then run this again.")
+        return 2
+    plan = em.plan_move(docker, previous=previous, answering=steps_for.answering)
+    refusals = list(plan.refusals)
+    refusal = hold.refusal()
+    if refusal:
+        refusals.append(refusal)
+    found = ces.check(run)
+    if not found.ok:
+        problem = ces.preflight(run)
+        if problem:
+            refusals.append(f"Kazma's engine cannot run here: {problem}")
+    refusals += em.engine_conflicts(docker, plan)
+    if refusals:
+        for line in refusals:
+            _say(f"Cannot move: {line}")
+        _say("Nothing was done: Kazma stays on Docker Desktop.")
+        return 2
+    steps = ces.install_steps(found) if not found.ok else []
+    _say("Kazma's container engine (Docker as a service, started at boot):")
+    _say_engine(found)
+    _say_move_plan(plan, steps)
+    if options.dry_run or options.check:
+        return 0
+    if any(s.admin for s in steps) and not (pgs.is_admin() if admin is None else admin):
+        _say("Run this from an elevated terminal (Run as administrator): "
+             + "; ".join(s.title for s in steps if s.admin) + " needs it.")
+        return 2
+    if not options.yes and _ask(ask, "Move Kazma's containers now? [y/N] ").strip().lower() not in ("y", "yes"):
+        _say("Nothing was done.")
+        return 1
+    _keep_desktop_choice()
+    if steps and not _run_engine_steps(steps, run=run, opener=opener, command=_MOVE_COMMAND):
+        _say("Nothing was moved: Kazma stays on Docker Desktop.")
+        return 1
+    return 0 if em.move(docker, plan, journal, steps_for) else 1
 
 
 #: The pause ``--move-from-container`` asks Kazma's guard for while it copies.
@@ -607,7 +784,7 @@ _SIGN_IN_WAIT_S = 120.0
 
 
 class _MoveHold:
-    """Kazma stopped through its guard while its database is copied.
+    """Kazma stopped through its guard while its data is copied.
 
     The first move (live, 2026-11-06) copied the container while Kazma kept
     writing to it and then said to reload: a reload would have started Kazma
@@ -616,35 +793,38 @@ class _MoveHold:
     compared, and starts it again on the new database after ``.env`` names
     it -- one run, nothing written in between. A Kazma no guard supervises is
     not stopped here: the move is refused before anything changes, and the
-    operator stops it.
+    operator stops it. The engine's move (``kazma setup engine
+    --move-from-desktop``) holds Kazma the same way, under its own reason.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, reason: str = _MOVE_PAUSE_REASON, what: str = "its database") -> None:
         from kazma_cli.update import _find_git_root, _is_server_running, _load_guard, _resolve_server_port
 
-        self.guard = _load_guard(_find_git_root())
+        self.reason = reason
+        self.what = what
+        self.guard = _load_guard(_find_git_root() or _checkout_root())
         self.running = _is_server_running(_resolve_server_port())
         self.held = False
 
     def refusal(self) -> str | None:
         """Why the move must not start (Kazma runs and nothing can stop it), or None."""
-        if not self.running:
+        if not self.running or self.held:
             return None
-        plan = str(self.guard.maintenance_preview(_MOVE_PAUSE_REASON)) if self.guard is not None else "no_guard"
+        plan = str(self.guard.maintenance_preview(self.reason)) if self.guard is not None else "no_guard"
         if plan == "guard":
             return None
         why = "its guard is paused for something else" if plan == "paused" else "no guard supervises it"
-        return (f"Kazma is running and {why}, so it cannot be stopped while its database is copied: "
+        return (f"Kazma is running and {why}, so it cannot be stopped while {self.what} is copied: "
                 "what it wrote during the copy would be lost. Stop Kazma, run this again, then start it. "
                 "Nothing was done.")
 
     def stop(self) -> bool:
         """Kazma stopped and held (or it was not running). False: it still runs."""
-        if not self.running:
+        if not self.running or self.held:
             return True
         _say("-> Stopping Kazma through its guard once no chat turn runs (held while the data is copied)")
         try:
-            outcome = str(self.guard.stop_for_maintenance(_MOVE_PAUSE_REASON, idle_timeout_s=_MOVE_IDLE_TIMEOUT_S))
+            outcome = str(self.guard.stop_for_maintenance(self.reason, idle_timeout_s=_MOVE_IDLE_TIMEOUT_S))
         except OSError as exc:  # the pause file could not be written
             _say(f"   The guard could not stop Kazma ({exc}).")
             return False
@@ -665,12 +845,46 @@ class _MoveHold:
         if not self.held:
             return "not_held"
         try:
-            result = str(self.guard.resume_after_maintenance(_MOVE_PAUSE_REASON))
+            result = str(self.guard.resume_after_maintenance(self.reason))
         except OSError as exc:  # the pause file could not be removed
             _say(f"   Could not start Kazma again ({exc}): python scripts/service/kazma_guard.py --resume")
             return "error"
         self.held = False
         return result
+
+    def adopt_leftover(self) -> bool:
+        """An earlier run of this move died while it held Kazma: its pause is
+        still there, Kazma stopped. This run takes it over (and lifts it when
+        it ends), instead of moving with Kazma thought not running."""
+        if self.guard is None or self.held:
+            return False
+        try:
+            current = self.guard.read_pause()
+        except (OSError, ValueError):
+            return False
+        if isinstance(current, dict) and current.get("reason") == self.reason:
+            self.held = self.running = True
+            return True
+        return False
+
+    def ready(self) -> bool:
+        """Kazma answers ready now, or answers that it waits for its owner's
+        setup (a provider key): up, as the guard's own resume counts it."""
+        if self.guard is None:
+            return False
+        try:
+            result = self.guard.probe(self.guard.health_url(of_running_guard=True), 5.0)
+        except (OSError, ValueError):
+            return False
+        return bool(result[0]) or bool(getattr(result, "answered", False) and getattr(result, "needs_setup", ()))
+
+    def record_path(self) -> Path | None:
+        """Where the guard reads which engine and containers Kazma uses."""
+        find = getattr(self.guard, "_deps_record_path", None)
+        try:
+            return Path(find()) if find is not None else None
+        except (OSError, ValueError, TypeError):
+            return None
 
 
 def _kazma_signed_in(url: str, *, wait_s: float = _SIGN_IN_WAIT_S) -> bool:

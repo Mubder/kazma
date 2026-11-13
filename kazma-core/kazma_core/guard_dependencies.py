@@ -439,6 +439,23 @@ def _publish_dependencies() -> bool:
         return True
 
 
+def set_record_engine(path: Path, engine: str) -> bool:
+    """Tell the guard a new engine before Kazma starts on it (the move from
+    Docker Desktop, :mod:`kazma_core.engine_move`): the guard pins its
+    context and its document broker's from this record, and the server
+    rewrites it at its next start. True when the record changed; nothing
+    when no guard keeps one."""
+    if not path.is_file():
+        return False
+    with _publish_lock:
+        whole = _read_whole(path)
+        if str(whole.get("engine") or "") == engine:
+            return False
+        _write_atomic(path, {"version": RECORD_VERSION, "containers": _read_record(path),
+                             "engine": engine, "updated": time.time()})
+    return True
+
+
 def start_dependency_records() -> None:
     """At boot (in a thread): tell the guard now. Nothing when no guard
     handed a file."""

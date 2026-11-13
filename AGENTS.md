@@ -7685,9 +7685,10 @@ location rule, migration exporter, importer) — the bundle silently left
   `store_registry.kazma_paths_inside`; a list that cannot be worked out
   mounts no workspace), and the text check before the card reads
   `/workspace/...` as the workspace (`path_policy.sandbox_workspace_target`).
-  Only `_workspace_mounts` spells a container bind mount
-  (`tests/test_sandbox_hides_kazma_files.py`, each with its negative
-  control, a real Docker run where the image is present).
+  Only `_workspace_mounts` spells a container bind mount, besides the move
+  from Docker Desktop re-creating a container's own binds (`engine_move._mount_args`,
+  section 63) (`tests/test_sandbox_hides_kazma_files.py`, each with its
+  negative control, a real Docker run where the image is present).
 - **Drafts carry per-item state.** `used_at` / `used_via` / `used_ref` on the
   item; the row's `kind` is derived (`proposal_posted` only when every item
   is used). Marking requires the posting tool's own `"ok": true`. A startup
@@ -10774,6 +10775,69 @@ SERVICE (a tunnel) reach its published ports, and it is back 19 s after a
   line fails its step), `tests/test_install_modes.py` (Full installs the
   engine and never Docker Desktop; `--docker desktop` as the control),
   `tests/test_setup_system.py` (the docker group; Windows as the control).
+- **An install on Docker Desktop moves with one command** (Stage 3,
+  `kazma setup engine --move-from-desktop`, `kazma_core/engine_move.py`, on
+  the pattern of the database's move, section 21 G). It sets Kazma's engine
+  up if it is not, then moves only the containers Kazma's record names: the
+  rule the server tells the guard with
+  (`guard_dependencies._match_containers`), read against Docker Desktop's
+  containers; another project's container is never named, and a volume one
+  shares refuses the move. Kazma's database in a container refuses it too,
+  naming `kazma setup postgres --move-from-container`. Every refusal
+  (Docker Desktop down, a name or a port already on the engine, a mount the
+  engine cannot take, `containers.engine` already `kazma`) comes before
+  anything changes. Images (`docker save` into `docker load`, else pulled by
+  digest, held to the same layers), the sandbox image and the document
+  worker image (copied when Docker Desktop holds this code's build, else
+  built on the engine, only in the container profile) are put on the engine
+  while Kazma runs; then Kazma is held through its guard (`_MoveHold`, its
+  own pause reason), and each container is stopped on Docker Desktop with
+  restart `no` and kept, seen stopped (`_seen_stopped`: never a volume read
+  while its container runs), its volumes copied by tar between the engines
+  and compared entry by entry (path, kind, owner, mode, size, SHA-256; a
+  hard link counts as the file it names: `_manifest_of`), made again from
+  its own settings (`_create_args`; Docker Desktop's Windows or
+  `/run/desktop/mnt/host` bind sources as the engine mounts them,
+  `_engine_bind_source`), files added or changed inside it carried, started,
+  and seen healthy and answering on its ports from Windows. Then
+  `containers.engine` = `kazma`, the guard's record told
+  (`guard_dependencies.set_record_engine`), Kazma started and seen ready.
+  A failure puts everything back: before the switch this run's objects are
+  removed from the engine (they hold only the copy); after it they are
+  stopped and kept (Kazma may have written to them); Docker Desktop's
+  originals get their restart policy back and run; `containers.engine`
+  says `desktop`. Every change is journaled before it is made
+  (`setup_record.json`, `engine_move`): a run that died half way is rolled
+  back by the next one, which takes the dead run's pause over
+  (`_MoveHold.adopt_leftover`); Ctrl+C rolls back before it stops.
+  `kazma setup engine` alone on a Docker Desktop install writes
+  `containers.engine` = `desktop` before it records the engine
+  (`engine_move.keep_desktop`): recorded, the engine would be Kazma's choice
+  at its next start, with none of its containers. Gate:
+  `tests/test_engine_move.py`, against `tests/_fake_docker_engines.py` (a
+  fake docker CLI with two engines run as a real program: real argv, pipes
+  and tar streams), each rule with its negative control (a mover that trusts
+  the stop, a copy without the check, no journal, no Docker Desktop choice
+  written). **Drilled on a clean VM** (2026-11-13, Docker Desktop 4.99,
+  SearXNG and Neo4j from the shipped compose files, another project's
+  container beside them). The move ran in the signed-in session in 766 s,
+  the engine's install included; Neo4j's 528 MB came across entry for entry,
+  and the other project's container was untouched. After a restart with
+  nobody signed in, both containers were healthy 39 s after boot. The drill
+  found three things:
+  - The hold found its guard only through `.git`, so on an install
+    unpacked from a source zip it said "no guard supervises it" and refused.
+    `_MoveHold` now finds the guard from the install's own folder
+    (`setup._checkout_root`).
+  - `_MoveHold.ready` now counts a Kazma waiting for its provider key as
+    up, as the guard's resume does.
+  - The carried files are said in one line per container (Neo4j's start
+    changes the owner of its whole folder: 248 lines).
+
+  Open, the engine's: at a Windows restart its containers get only seconds
+  (Neo4j: "Stopping..." and never "Stopped."). A line Neo4j's start script
+  had just appended came back as NUL bytes after Windows Update restarted
+  the VM 32 s after boot, and Neo4j refused its config from then on.
 
 ## UI Conventions (Web)
 

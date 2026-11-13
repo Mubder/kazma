@@ -267,6 +267,72 @@ engine.
 
 Drilled on the VM with Docker Desktop installed first.
 
+Status (2026-11-13): shipped (`kazma_core/engine_move.py`, AGENTS.md section
+63). What changed from the list above, and why:
+- **What moves is Kazma's record, not a fixed list.** The containers are the
+  ones the server names to its guard (`guard_dependencies._match_containers`),
+  read against Docker Desktop: today SearXNG and Neo4j. Another project's
+  container is never named; one sharing a volume with Kazma's stops the move.
+  Kazma's database in a container stops it too: it has its own move, to the
+  Postgres service.
+- **SearXNG is recreated from its own settings**, as every moved container
+  is (`docker inspect` on Docker Desktop, `docker create` on the engine),
+  rather than from `docker-compose.yml`: the settings it runs with now (its
+  secret, its port) are what Kazma reaches, whether compose, setup or a
+  person made it.
+- **The images are prepared before Kazma is held**, not after: copying
+  them, and building the document worker image when Docker Desktop has no
+  build of this code, takes minutes, and none of it touches what Kazma
+  uses. Kazma is held only for the copies.
+- **Every volume is checked entry by entry** (owner, mode, size, SHA-256,
+  links), not by a list of checksums: measured on real GNU tar (Neo4j's
+  image) and BusyBox tar (SearXNG's), both carry owners, modes, hard links,
+  symlinks and FIFOs exactly.
+- **A failure puts everything back**, and a run that dies half way is rolled
+  back by the next from its journal.
+- **`kazma setup engine` alone** on a Docker Desktop install now writes
+  Docker Desktop down as the choice before it records the engine (found
+  while building this: recorded, the engine was Kazma's choice at its next
+  start, with none of its containers).
+
+Drilled 2026-11-13 on the clean VM (`clean Windows + SSH + nested
+virtualization (2026-11-12)`):
+- **Setup:** WSL from `engine:wsl`, then Docker Desktop 4.99 through
+  setup's winget step. Kazma (a source zip, its service registered) ran on
+  Docker Desktop with SearXNG and Neo4j from the shipped compose files, a
+  marker node in the graph, and another project's container with a volume.
+- **Run:** `kazma setup engine --move-from-desktop -y` ran in the signed-in
+  session, as an owner would from a terminal. It took 766 s, the engine's
+  install included.
+- **What the move did:** it carried both Neo4j volumes (528 MB; every entry
+  the same on both engines) and SearXNG's, and saw both containers healthy
+  and answering from Windows. Then `containers.engine` = `kazma`, the
+  guard's record said `kazma`, and Kazma was up.
+- **What was left:** the Docker Desktop copies were stopped with restart
+  `no`, and the other project's container ran untouched.
+- **After a restart with nobody signed in,** both containers were healthy
+  39 s after boot, and the graph still held its marker.
+
+The drill found three things:
+- **The hold found no guard on an install with no `.git`** (a source zip).
+  It said "no guard supervises it" over a running guard, and refused. The
+  move now finds the guard from the install's own folder
+  (`setup._checkout_root`).
+- **A Kazma waiting for a provider key read as not ready** in a rerun's
+  recovery. It now reads as up, as the guard's own resume counts it.
+- **248 "carried" lines for Neo4j:** its start changes the owner of its
+  whole folder. The move now says one line per container.
+
+**Open, the engine's, not the move's:** at a Windows restart the engine
+gets only seconds. Neo4j logged "Stopping..." 3 s after the shutdown began,
+and never "Stopped.". Windows Update then restarted the VM again 32 s after
+it booted, while Neo4j's start script was appending a line to its config.
+That line came back as 30 NUL bytes (the size kept, the data lost, as after
+a power cut), and Neo4j refused the file at every start after. A container
+copied the move's way, with and without the carried files, started three
+times cleanly; so did one never moved. Stopping the engine's containers
+before Windows ends the WSL VM is follow-up work for the engine.
+
 **Stage 4: Linux access.** Rootless Docker as a user service with linger,
 else the `docker` group with the reason; measured on a Linux machine.
 Status (2026-11-12): the `docker` group half is shipped (`kazma setup
