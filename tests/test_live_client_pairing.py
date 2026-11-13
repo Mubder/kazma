@@ -118,3 +118,46 @@ def test_catalog_lookup_failure_is_never_fatal(monkeypatch):
 
     monkeypatch.setattr(LLMProvider, "_known_models_for", staticmethod(_boom))
     assert live_llm._provider_serves("https://api.z.ai/x", "anything") is True
+
+
+def _registry_for(client):
+    """A registry that splits ``provider:model`` as the real one does."""
+    from kazma_core.model_refs import split_ref
+
+    return SimpleNamespace(get_client=lambda _m: client,
+                           split_model_ref=lambda ref: split_ref(ref, ["deepseek", "Z.AI"]))
+
+
+def test_a_chat_pinned_by_reference_gets_its_model_not_the_providers_default(catalog, monkeypatch):
+    """Live 2026-11-12: a turn pinned to ``deepseek:deepseek-flash`` was
+    compared whole against DeepSeek's model list and fell back to the
+    provider's default. With another model than the default the chat got the
+    wrong one."""
+    deepseek = _client("https://api.deepseek.com/v1", "deepseek-flash")
+    monkeypatch.setattr(live_llm, "current_turn_model", lambda: "deepseek:deepseek-v4-pro")
+    monkeypatch.setattr("kazma_core.model_registry.get_model_registry", lambda: _registry_for(deepseek))
+    client, model = live_llm.resolve_live_client(deepseek, state={}, model=None)
+    assert client is deepseek and model == "deepseek-v4-pro"
+
+
+def test_a_reference_is_never_sent_as_the_model_name(monkeypatch):
+    """A provider with no published model list: the pin is kept -- as the
+    model part, never the whole reference."""
+    from kazma_core.llm_provider import LLMProvider
+
+    monkeypatch.setattr(LLMProvider, "_known_models_for", staticmethod(lambda base_url: set()))
+    local = _client("http://127.0.0.1:11434/v1", "llama3:8b", key="")
+    monkeypatch.setattr(live_llm, "current_turn_model", lambda: "deepseek:deepseek-v4-pro")
+    monkeypatch.setattr("kazma_core.model_registry.get_model_registry", lambda: _registry_for(local))
+    _client_, model = live_llm.resolve_live_client(local, state={}, model=None)
+    assert model == "deepseek-v4-pro"
+
+
+def test_negative_control_the_whole_reference_lost_the_pin(catalog, monkeypatch):
+    """The resolution as it was: the registry's split ignored."""
+    deepseek = _client("https://api.deepseek.com/v1", "deepseek-flash")
+    monkeypatch.setattr(live_llm, "current_turn_model", lambda: "deepseek:deepseek-v4-pro")
+    monkeypatch.setattr("kazma_core.model_registry.get_model_registry",
+                        lambda: SimpleNamespace(get_client=lambda _m: deepseek))
+    _client_, model = live_llm.resolve_live_client(deepseek, state={}, model=None)
+    assert model == "deepseek-flash", "without the split the provider's default replaced the chat's model"

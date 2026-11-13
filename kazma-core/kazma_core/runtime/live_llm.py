@@ -244,6 +244,13 @@ def resolve_live_client(
     )
 
     registry_client = None
+    # The model id the provider is asked for. A pin may be a ``provider:model``
+    # reference (the chat's model picker, providers stage 3): the registry
+    # builds that provider's client from it, and the provider is asked for the
+    # model part alone. Compared or sent whole, a chat pinned to a model other
+    # than its provider's default got the default (live 2026-11-12: "does not
+    # serve 'deepseek:deepseek-flash' (its catalog has 'deepseek-flash')").
+    pinned_model = pinned
     try:
         from kazma_core.model_registry import get_model_registry
 
@@ -263,16 +270,20 @@ def resolve_live_client(
         # was fixed the same way, at the call site -- see
         # `tests/test_cron_tenant_context.py` for why the fix does not belong
         # in the vault's fallback.
+        registry = get_model_registry()
         with _turn_tenant(state):
-            registry_client = get_model_registry().get_client(pinned)
+            registry_client = registry.get_client(pinned)
+            split = getattr(registry, "split_model_ref", None)
+            if pinned and callable(split):
+                pinned_model = split(pinned)[1] or pinned
     except Exception:
         logger.debug("resolve_live_client: registry get_client failed", exc_info=True)
 
     if registry_client is None:
-        return fallback, pinned
+        return fallback, pinned_model
 
     if not _is_real_provider(fallback):
-        return fallback, pinned
+        return fallback, pinned_model
 
     fb_cfg = getattr(fallback, "config", None)
     rg_cfg = getattr(registry_client, "config", None)
@@ -305,7 +316,7 @@ def resolve_live_client(
         # model per request, so a differing `config.model` is a default, not
         # proof. No catalog => keep the pin (the pre-existing behaviour) and
         # say so, because guessing is what produced the bad pairing.
-        if rg_model and rg_model != pinned and not _provider_serves(rg_url, pinned):
+        if rg_model and rg_model != pinned_model and not _provider_serves(rg_url, pinned_model):
             logger.warning(
                 "[live_llm] %s does not serve %r (its catalog has %r) — using "
                 "the substituted provider's own model. A pinned model cannot "
@@ -313,12 +324,12 @@ def resolve_live_client(
                 _host_of(rg_url), pinned, rg_model,
             )
             return registry_client, rg_model
-        return registry_client, pinned
+        return registry_client, pinned_model
 
     if fb_url != rg_url or fb_key != rg_key:
-        return registry_client, rg_model or pinned
+        return registry_client, rg_model or pinned_model
 
     if url_is_cloud(fb_url) and not key_is_usable(fb_key):
-        return registry_client, rg_model or pinned
+        return registry_client, rg_model or pinned_model
 
-    return fallback, pinned or rg_model
+    return fallback, pinned_model or rg_model

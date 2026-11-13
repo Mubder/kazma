@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## A chat keeps the model picked for it (2026-11-13)
+
+- A chat whose model was picked by name (`provider:model`, the chat's model
+  picker or `/model`) was answered by that provider's default model whenever
+  the pick was another of its models: the whole reference was checked against
+  the provider's model list, and it lists bare names. The provider is now
+  asked for the model part, and the log no longer warns about it.
+- A kind of running work that cannot be read for the Running work card now
+  says why in the log ("timed out after 10 s", or the error), where it said
+  nothing after the colon.
+
 ## A deleted library's last crawl no longer reads as a broken journal (2026-11-13)
 
 - Deleting a Knowledge library just as its crawl finished could log "Durable
