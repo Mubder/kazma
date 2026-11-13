@@ -521,7 +521,8 @@ def _setup_system(options, *, run=subprocess.run, which=None, ask=input, platfor
 _ENGINE_PIECES = (("wsl", "WSL 2"), ("distro", "the kazma-engine WSL distro"),
                   ("docker", "Docker Engine in it, answering"), ("cli", "Docker's command-line tools"),
                   ("context", "the kazma-engine Docker context"),
-                  ("task", "the KazmaEngine task (starts it at boot, nobody signed in)"))
+                  ("task", "the KazmaEngine task (starts it at boot, nobody signed in)"),
+                  ("shutdown", "the KazmaEngineShutdown service (stops it cleanly when Windows shuts down)"))
 
 
 def _say_engine(found) -> None:

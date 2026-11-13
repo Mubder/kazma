@@ -18,7 +18,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
 from kazma_core import container_engine_setup as ces
 
 
@@ -41,6 +40,8 @@ class Machine:
         self.running: list[str] = [ces.DISTRO]
         self.dockerd_in: set[str] = set()
         self.task = True
+        #: The KazmaEngineShutdown service's state (None: not installed).
+        self.service: str | None = "RUNNING"
         self.engine_version = "29.9.3"
         self.containers = ["kazma-searxng"]
         self.ran: list[list[str]] = []
@@ -80,6 +81,17 @@ class Machine:
             if argv[1] == "/Delete":
                 self.task = False
             return 0, ""
+        if name == "sc.exe" and argv[2:3] == [ces.SHUTDOWN_SERVICE]:
+            if self.service is None:
+                return 1060, "The specified service does not exist as an installed service."
+            if argv[1] == "query":
+                return 0, (f"SERVICE_NAME: {ces.SHUTDOWN_SERVICE}\n        TYPE               : 10  WIN32_OWN_PROCESS\n"
+                           f"        STATE              : 4  {self.service}\n")
+            if argv[1] == "stop":
+                self.service = "STOPPED"
+            if argv[1] == "delete":
+                self.service = None
+            return 0, ""
         if name in ("docker.exe", "docker"):
             rest = argv[3:] if argv[1:2] == ["--context"] else argv[1:]
             if rest[:1] == ["version"]:
@@ -92,14 +104,34 @@ class Machine:
 
 @pytest.fixture
 def machine(monkeypatch, tmp_path):
+    return make_machine(monkeypatch, tmp_path)
+
+
+def make_machine(monkeypatch, tmp_path) -> Machine:
+    """A Windows machine with Kazma's engine complete (also used by
+    tests/test_engine_clean_shutdown.py)."""
     box = Machine()
     cli = tmp_path / "bin" / "docker.exe"
     monkeypatch.setattr("kazma_core.docker_cli.find_docker_cli", lambda: str(cli))
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    # The shutdown service's program goes under Program Files: the test's own.
+    monkeypatch.setenv("ProgramW6432", str(tmp_path / "Program Files"))
+    monkeypatch.setenv("ProgramFiles", str(tmp_path / "Program Files"))
     # Each test its own setup record (the data folder is the session's).
     monkeypatch.setattr("kazma_core.postgres_service._record_path", lambda: tmp_path / "setup_record.json")
     _context(ces.CONTEXT)
+    _clean_stop_installed()
     return box
+
+
+def _clean_stop_installed() -> None:
+    """This build's keep-engine.ps1 and the stamp of the helpers it put in the
+    distro, as the engine:shutdown step leaves them."""
+    folder = ces._engine_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "keep-engine.ps1").write_text(ces._asset("keep-engine.ps1"), encoding="utf-8")
+    ces._stop_helpers_stamp().write_text(
+        hashlib.sha256(ces._asset("engine-stop.sh").encode("utf-8")).hexdigest() + "\n", encoding="ascii")
 
 
 # ── checking ────────────────────────────────────────────────────────────
@@ -197,11 +229,11 @@ def test_nothing_in_the_way_is_quiet(machine, tmp_path):
 
 
 def test_a_bare_machine_gets_every_step_in_order():
-    found = ces.EngineCheck(False, "", ["wsl", "distro", "docker", "cli", "context", "task"])
+    found = ces.EngineCheck(False, "", ["wsl", "distro", "docker", "cli", "context", "task", "shutdown"])
     steps = ces.install_steps(found)
     assert [s.action for s in steps] == ["engine:wsl", "engine:distro", "engine:docker", "engine:cli",
-                                         "engine:context", "engine:task", "engine:record"]
-    assert {s.action for s in steps if s.admin} == {"engine:wsl", "engine:task"}
+                                         "engine:context", "engine:task", "engine:shutdown", "engine:record"]
+    assert {s.action for s in steps if s.admin} == {"engine:wsl", "engine:task", "engine:shutdown"}
     assert {s.dep for s in steps} == {"docker"}
 
 
@@ -328,7 +360,9 @@ def test_the_package_files_are_lf_on_disk():
     assert b"\r" not in (root / "setup-engine.sh").read_bytes()
 
 
-def test_the_docker_step_pipes_the_script_and_needs_its_ready_line(machine):
+def test_the_docker_step_pipes_the_script_and_needs_its_ready_line(machine, monkeypatch):
+    # The shutdown helpers it also installs: tests/test_engine_clean_shutdown.py.
+    monkeypatch.setattr(ces, "_install_stop_script", lambda run: (True, ""))
     machine.answers[("wsl.exe", "-d", ces.DISTRO, "-u", "root", "--", "bash")] = (0, "ENGINE_READY Docker 29.9.3")
     machine.answers[("powershell",)] = (0, "192.168.1.0/24\n10.213.0.0/16\n")
     ok, detail = ces.run_action("engine:docker", run=machine)

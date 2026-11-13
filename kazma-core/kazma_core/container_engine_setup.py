@@ -13,6 +13,16 @@ measurements and the independent review:
 chosen (Docker Desktop only with ``--docker desktop``); ``kazma setup engine``
 installs, repairs, checks or removes it. Express installs no container part.
 
+At a Windows shutdown or restart the ``KazmaEngineShutdown`` service (it takes
+Windows' preshutdown notice, which WslService does not) stops Docker in the
+distro the way a daemon shutdown does, writes its disks and powers it off
+before WSL's VM ends; Windows waits for it. It does so through the distro's
+holder, which keep-engine.ps1 starts through WMI with its stdin and stdout on
+the service's pipes: once a shutdown has begun, Task Scheduler has ended its
+tasks and starts none, and WSL refuses LocalSystem. Without it the VM ended
+like a power cut, and a container's last writes came back as NUL bytes
+(2026-11-13, measured on the drill VM).
+
 Every download is pinned by URL, size and SHA-256, and nothing is kept that
 does not match. Each step is idempotent: a second run repairs what is missing
 and changes nothing that is there.
@@ -44,6 +54,7 @@ __all__ = [
     "DISTRO",
     "DOWNLOADS",
     "RESTART",
+    "SHUTDOWN_SERVICE",
     "TASK_NAME",
     "EngineCheck",
     "check",
@@ -58,6 +69,12 @@ Runner = Callable[..., subprocess.CompletedProcess]
 DISTRO = KAZMA_DISTRO
 CONTEXT = KAZMA_CONTEXT
 TASK_NAME = "KazmaEngine"
+#: The service that takes Windows' preshutdown notice and holds the shutdown
+#: while keep-engine.ps1 stops the engine (``engine-shutdown.cs``).
+SHUTDOWN_SERVICE = "KazmaEngineShutdown"
+#: How long the service holds a Windows shutdown for the engine's stop: the
+#: slowest container's own stop timeout (10 s unless it sets one), with room.
+SHUTDOWN_BUDGET_S = 120
 PORT = 2376
 #: What an action answers when Windows must restart before the next step
 #: (the WSL features were just turned on).
@@ -118,6 +135,19 @@ def _client_dir() -> Path:
     """The client certificate Windows presents to the engine (account only)."""
     raw = (os.environ.get("DOCKER_CONFIG") or "").strip()
     return (Path(raw) if raw else Path.home() / ".docker") / "kazma-engine"
+
+
+def _shutdown_service_dir() -> Path:
+    """The shutdown service's program: under Program Files, which only
+    administrators can write (the service runs as LocalSystem)."""
+    base = os.environ.get("ProgramW6432") or os.environ.get("ProgramFiles") or r"C:\Program Files"
+    return Path(base) / "Kazma" / "engine-shutdown"
+
+
+def _csc() -> Path:
+    """The .NET Framework's C# compiler, part of every Windows 10 and 11."""
+    windows = os.environ.get("SystemRoot") or os.environ.get("WINDIR") or r"C:\Windows"
+    return Path(windows) / "Microsoft.NET" / "Framework64" / "v4.0.30319" / "csc.exe"
 
 
 def _plugins_dir() -> Path:
@@ -236,6 +266,8 @@ def check(run: Runner = subprocess.run) -> EngineCheck:
     code, _ = _out(run, ["schtasks", "/Query", "/TN", TASK_NAME])
     if code != 0:
         missing.append("task")
+    if _service_state(run) != "RUNNING" or not (_keep_engine_current() and _stop_helpers_current()):
+        missing.append("shutdown")
     version = ""
     code, text = (_docker(run, "version", "--format", "{{.Server.Version}}")
                   if not {"distro", "cli", "context"} & set(missing) else (1, ""))
@@ -248,8 +280,46 @@ def check(run: Runner = subprocess.run) -> EngineCheck:
     words = {"wsl": "WSL is not installed", "distro": "the kazma-engine distro is not there",
              "docker": "Docker in it does not answer", "cli": "Docker's CLI is not installed",
              "context": "the kazma-engine Docker context is not set up",
-             "task": "the KazmaEngine task that starts it at boot is not registered"}
+             "task": "the KazmaEngine task that starts it at boot is not registered",
+             "shutdown": "nothing stops it cleanly when Windows shuts down (the KazmaEngineShutdown service)"}
     return EngineCheck(False, "; ".join(words[m] for m in missing), missing, version)
+
+
+def _keep_engine_current() -> bool:
+    """keep-engine.ps1 is this build's: it makes the stop at a shutdown, and
+    an older copy has none (and starts the distro again mid-shutdown)."""
+    keep = _engine_dir() / "keep-engine.ps1"
+    try:
+        return keep.read_text(encoding="utf-8").replace("\r\n", "\n") == _asset("keep-engine.ps1")
+    except OSError:
+        return False
+
+
+def _stop_helpers_stamp() -> Path:
+    """The SHA-256 of the ``engine-stop.sh`` last installed in the distro
+    (written by :func:`_install_stop_script`; read without starting WSL)."""
+    return _engine_dir() / "engine-stop.sha256"
+
+
+def _stop_helpers_current() -> bool:
+    try:
+        stamp = _stop_helpers_stamp().read_text(encoding="ascii").strip()
+    except OSError:
+        return False
+    return stamp == hashlib.sha256(_asset("engine-stop.sh").encode("utf-8")).hexdigest()
+
+
+def _service_state(run: Runner) -> str | None:
+    """The shutdown service's state (``RUNNING``, ``STOPPED``...), None when
+    it is not installed."""
+    code, text = _out(run, ["sc.exe", "query", SHUTDOWN_SERVICE])
+    if code != 0:
+        return None
+    for line in text.splitlines():
+        key, _, value = line.partition(":")
+        if key.strip() == "STATE" and value.split():
+            return value.split()[-1]
+    return None
 
 
 def preflight(run: Runner = subprocess.run, *, wslconfig: Path | None = None) -> str:
@@ -289,6 +359,7 @@ _TITLES = {
     "engine:cli": "install Docker's command-line tools for Windows (pinned)",
     "engine:context": "connect Windows to it (the kazma-engine Docker context)",
     "engine:task": "start it at boot with nobody signed in (the KazmaEngine task)",
+    "engine:shutdown": "stop it cleanly when Windows shuts down (the KazmaEngineShutdown service)",
     "engine:record": "check it answers, and record it",
 }
 
@@ -305,9 +376,11 @@ def install_steps(found: EngineCheck) -> list[Any]:
         "engine:cli": "cli" in found.missing,
         "engine:context": bool({"wsl", "distro", "docker", "context"} & set(found.missing)),
         "engine:task": "task" in found.missing,
+        "engine:shutdown": "shutdown" in found.missing,
         "engine:record": True,
     }
-    return [Step(_TITLES[action], action=action, admin=action in ("engine:wsl", "engine:task"), dep="docker")
+    admin = ("engine:wsl", "engine:task", "engine:shutdown")
+    return [Step(_TITLES[action], action=action, admin=action in admin, dep="docker")
             for action, needed in wanted.items() if needed]
 
 
@@ -405,9 +478,25 @@ def _action_docker(run: Runner, log: Callable[[str], None], opener: Any) -> tupl
                       stdin=_asset("setup-engine.sh"), timeout=1800, env=_wsl_env())
     if code != 0 or "ENGINE_READY" not in text:
         return False, f"setting Docker up in the distro failed: {text.strip()[-400:]}"
+    ok, detail = _install_stop_script(run)
+    if not ok:
+        return False, detail
     # wsl.conf (systemd, drives at /c) applies from the distro's next start.
     _out(run, ["wsl.exe", "--terminate", DISTRO], env=_wsl_env())
     return True, text.strip().splitlines()[-1]
+
+
+def _install_stop_script(run: Runner) -> tuple[bool, str]:
+    """``/usr/local/sbin/kazma-engine-stop`` in the distro: what the stop task
+    runs at a Windows shutdown (``engine-stop.sh``)."""
+    script = _asset("engine-stop.sh")
+    code, text = _out(run, ["wsl.exe", "-d", DISTRO, "-u", "root", "--", "bash", "-s"],
+                      stdin=script, timeout=120, env=_wsl_env())
+    if code != 0 or "STOP_READY" not in text:
+        return False, f"installing the engine's shutdown stop in the distro failed: {text.strip()[-300:]}"
+    _engine_dir().mkdir(parents=True, exist_ok=True)
+    _stop_helpers_stamp().write_text(hashlib.sha256(script.encode("utf-8")).hexdigest() + "\n", encoding="ascii")
+    return True, ""
 
 
 def _action_cli(run: Runner, log: Callable[[str], None], opener: Any) -> tuple[bool, str]:
@@ -506,6 +595,81 @@ def _action_task(run: Runner, log: Callable[[str], None], opener: Any) -> tuple[
     return True, f"{TASK_NAME} registered and started"
 
 
+def _service_command() -> str:
+    """The service's command line: its program and how long it may hold a
+    shutdown for the engine's stop."""
+    exe = _shutdown_service_dir() / "kazma-engine-shutdown.exe"
+    return f'"{exe}" --budget {SHUTDOWN_BUDGET_S}'
+
+
+def _service_script() -> str:
+    """Creates the shutdown service, or points it at this build; restarts on a
+    crash; starts it. ``Win32_Service.Change`` sets the command line whole
+    (Windows PowerShell 5.1 would mangle its quotes on ``sc.exe``'s)."""
+    command = _service_command().replace("'", "''")
+    return (
+        "$ErrorActionPreference='Stop';"
+        f"$name='{SHUTDOWN_SERVICE}'; $bin='{command}';"
+        "$svc=Get-CimInstance Win32_Service -Filter \"Name='$name'\";"
+        "if ($svc) { $r=Invoke-CimMethod -InputObject $svc -MethodName Change "
+        "-Arguments @{PathName=$bin; StartMode='Automatic'}; "
+        "if ($r.ReturnValue -ne 0) { throw \"changing the service failed ($($r.ReturnValue))\" } } "
+        "else { New-Service -Name $name -BinaryPathName $bin -StartupType Automatic "
+        "-DisplayName 'Kazma container engine: clean stop at shutdown' "
+        "-Description \"Stops Kazma's container engine (the kazma-engine WSL distro) before Windows shuts "
+        "down, so its containers stop cleanly.\" | Out-Null };"
+        "sc.exe failure $name reset= 86400 actions= restart/60000/restart/60000/restart/60000 | Out-Null;"
+        "Start-Service -Name $name"
+    )
+
+
+def _action_shutdown(run: Runner, log: Callable[[str], None], opener: Any) -> tuple[bool, str]:
+    """The clean stop at a Windows shutdown: the helpers in the distro,
+    keep-engine.ps1 (which starts the holder the stop goes through), and the
+    ``KazmaEngineShutdown`` service that makes the stop and holds Windows
+    meanwhile (built here from ``engine-shutdown.cs`` with the .NET
+    Framework's compiler)."""
+    ok, detail = _install_stop_script(run)
+    if not ok:
+        return False, detail
+    _engine_dir().mkdir(parents=True, exist_ok=True)
+    # An older keep-engine.ps1 holds the distro with no channel to the
+    # service: it gets this one, and the running copy (which holds the old
+    # loop) is replaced by running the task again; the distro is held
+    # meanwhile, so no container restarts.
+    keep = _engine_dir() / "keep-engine.ps1"
+    there = keep.is_file()
+    if not _keep_engine_current():
+        keep.write_text(_asset("keep-engine.ps1"), encoding="utf-8")
+        if there:
+            _out(run, ["schtasks", "/End", "/TN", TASK_NAME])
+            _out(run, ["schtasks", "/Run", "/TN", TASK_NAME])
+    csc = _csc()
+    if not csc.is_file():
+        return False, f"the .NET Framework's C# compiler is not at {csc}"
+    # The running service holds its program open: stop it before replacing it.
+    if _service_state(run) not in (None, "STOPPED"):
+        _out(run, ["sc.exe", "stop", SHUTDOWN_SERVICE])
+        for _ in range(40):
+            if _service_state(run) in (None, "STOPPED"):
+                break
+            time.sleep(0.25)
+    folder = _shutdown_service_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    source = folder / "kazma-engine-shutdown.cs"
+    source.write_text(_asset("engine-shutdown.cs"), encoding="utf-8")
+    code, text = _out(run, [str(csc), "-nologo", "-optimize+", "-target:exe",
+                            f"-out:{folder / 'kazma-engine-shutdown.exe'}", str(source)], timeout=120)
+    if code != 0:
+        return False, f"building the {SHUTDOWN_SERVICE} service failed: {text.strip()[-300:]}"
+    code, text = _out(run, ["powershell", "-NoProfile", "-NonInteractive", "-Command", _service_script()],
+                      timeout=120)
+    if code != 0 or _service_state(run) != "RUNNING":
+        return False, f"installing the {SHUTDOWN_SERVICE} service failed: {text.strip()[-300:]}"
+    return True, (f"{SHUTDOWN_SERVICE} runs: at a shutdown it stops the engine's containers first "
+                  f"(up to {SHUTDOWN_BUDGET_S} s)")
+
+
 def _action_record(run: Runner, log: Callable[[str], None], opener: Any,
                    *, wait_s: float = 120.0) -> tuple[bool, str]:
     from kazma_core.atomic_files import atomic_write_text
@@ -545,6 +709,7 @@ _ACTIONS: dict[str, Callable[..., tuple[bool, str]]] = {
     "engine:cli": _action_cli,
     "engine:context": _action_context,
     "engine:task": _action_task,
+    "engine:shutdown": _action_shutdown,
     "engine:record": _action_record,
 }
 
@@ -576,8 +741,8 @@ def _foreign_containers(run: Runner = subprocess.run) -> list[str] | None:
 
 def remove(run: Runner = subprocess.run, log: Callable[[str], None] | None = None,
            *, force: bool = False) -> tuple[bool, str]:
-    """Remove Kazma's engine: its task, its distro (every image, container and
-    volume in it), its context, client keys and CLI. Refused while another
+    """Remove Kazma's engine: its tasks, its shutdown service, its distro (every
+    image, container and volume in it), its context, client keys and CLI. Refused while another
     project's containers live in it, or while it cannot be asked, unless
     *force*."""
     say = log or (lambda _m: None)
@@ -590,6 +755,9 @@ def remove(run: Runner = subprocess.run, log: Callable[[str], None] | None = Non
                            + ". Move them first, or remove with --force (their data goes with it)")
     _out(run, ["schtasks", "/End", "/TN", TASK_NAME])
     _out(run, ["schtasks", "/Delete", "/TN", TASK_NAME, "/F"])
+    _out(run, ["sc.exe", "stop", SHUTDOWN_SERVICE])
+    _out(run, ["sc.exe", "delete", SHUTDOWN_SERVICE])
+    shutil.rmtree(_shutdown_service_dir(), ignore_errors=True)
     code, text = _out(run, ["wsl.exe", "--unregister", DISTRO], timeout=300, env=_wsl_env())
     if code != 0 and DISTRO in (_distros(run) or []):
         return False, f"wsl --unregister failed: {text.strip()[-300:]}"

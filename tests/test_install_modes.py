@@ -248,7 +248,7 @@ class Box:
         self.house_font = _BoxFont()
         # Kazma's own container engine (Windows): what of it is missing, the
         # steps setup ran, and what its preflight finds.
-        self.engine_missing = ["distro", "docker", "cli", "context", "task"]
+        self.engine_missing = ["distro", "docker", "cli", "context", "task", "shutdown"]
         self.engine_actions: list[str] = []
         self.engine_problem = ""
 
@@ -268,7 +268,7 @@ class Box:
             self.wsl = True
             return True, RESTART
         gives = {"engine:distro": "distro", "engine:docker": "docker", "engine:cli": "cli",
-                 "engine:context": "context", "engine:task": "task"}
+                 "engine:context": "context", "engine:task": "task", "engine:shutdown": "shutdown"}
         if action in gives and gives[action] in self.engine_missing:
             self.engine_missing.remove(gives[action])
         if action == "engine:cli":
@@ -524,7 +524,7 @@ def test_full_installs_kazmas_engine_not_docker_desktop(box, capsys):
     assert install(_options(mode="full", yes=True), _machine(box)) == 0
     assert "Docker.DockerDesktop" not in _installs(box)
     assert box.engine_actions == ["engine:distro", "engine:docker", "engine:cli", "engine:context",
-                                  "engine:task", "engine:record"]
+                                  "engine:task", "engine:shutdown", "engine:record"]
     assert box.container and box.searxng, "the container parts ran on the engine"
     results = json.loads((box.home / "setup_record.json").read_text(encoding="utf-8"))["install"]["results"]
     assert results["docker"]["ok"] is True and "Kazma's engine" in results["docker"]["detail"]
