@@ -1,7 +1,7 @@
 # Pinned by digest (2026-11, supply chain): a tag is whatever the registry
 # serves that day. The document worker and broker images use the same one;
 # Dependabot proposes a new digest (.github/dependabot.yml).
-FROM python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534
+FROM python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f
 
 WORKDIR /app
 
