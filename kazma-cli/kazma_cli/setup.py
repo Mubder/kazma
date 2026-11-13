@@ -245,11 +245,12 @@ def _driver_step():
     Kazma runs in, or None when it is there. ``kazma setup postgres`` wrote
     ``KAZMA_DATABASE_URL`` into an environment without it (the drill VM,
     2026-11-06): the server then waited for a database it could not reach.
-    ``uv pip install`` adds; it never removes what is installed."""
-    import shutil as _shutil
-
+    ``uv pip install`` adds; it never removes what is installed. uv is found
+    where setup put it too (``uv_cli.find_uv``): a uv environment has no pip
+    (the drill VM, 2026-11-13: "No module named pip")."""
     from kazma_core.db.postgres_pool import driver_missing
     from kazma_core.postgres_service import Step
+    from kazma_core.uv_cli import find_uv, this_python_has_pip
 
     if not driver_missing():
         return None
@@ -257,9 +258,15 @@ def _driver_step():
     if not requirements:
         raise RuntimeError("Kazma's postgres extra lists no packages here (no package metadata, "
                            "no pyproject.toml): install kazma[postgres] by hand")
-    uv = _shutil.which("uv")
-    argv = ((uv, "pip", "install", "--python", sys.executable, *requirements) if uv
-            else (sys.executable, "-m", "pip", "install", *requirements))
+    uv = find_uv()
+    if uv:
+        argv = (uv, "pip", "install", "--python", sys.executable, *requirements)
+    elif this_python_has_pip():
+        argv = (sys.executable, "-m", "pip", "install", *requirements)
+    else:
+        raise RuntimeError("uv was not found (not on PATH, nor in ~/.local/bin, where setup puts it) and this "
+                           "Python has no pip: run setup again (setup.cmd or setup.sh installs uv), then this "
+                           "command. Nothing was done.")
     return Step("Install Kazma's Postgres driver (the kazma[postgres] extra)", argv)
 
 

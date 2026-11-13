@@ -521,9 +521,10 @@ def _extras_step(missing: list[str], machine: Machine):
     runs in: ``uv sync --inexact`` in a checkout (the lock's versions; it
     removes nothing), else each extra's requirements with ``uv pip``."""
     from kazma_core.postgres_service import Step
+    from kazma_core.uv_cli import find_uv
 
     root = machine.root
-    uv = machine.which("uv")
+    uv = find_uv(machine.which)
     in_checkout = (root is not None and (root / "uv.lock").is_file()
                    and Path(sys.prefix).resolve() == (root / ".venv").resolve())
     if uv and in_checkout:

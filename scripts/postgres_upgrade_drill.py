@@ -121,7 +121,10 @@ def _ssh_python(vm, code: str, timeout: float = 600) -> subprocess.CompletedProc
 
 def _run_detached(vm, args: str, name: str, timeout: float) -> tuple[int, str]:
     """``python -m kazma_cli <args>`` on the VM, detached; its exit and log."""
+    # ~/.local/bin on PATH, as in a terminal opened after setup (setup puts
+    # uv there): the code before 2026-11-13 found uv on PATH only.
     script = (f"$ErrorActionPreference = 'Continue'\n$env:NO_COLOR = '1'\n$env:PYTHONIOENCODING = 'utf-8'\n"
+              "$env:PATH = (Join-Path $env:USERPROFILE '.local\\bin') + \";$env:PATH\"\n"
               f"Set-Location '{VM_ROOT}'\n$start = Get-Date\n"
               f"& cmd.exe /c \".venv\\Scripts\\python.exe -m kazma_cli {args} > `\"{VM_DRILL}\\{name}.log`\" 2>&1\"\n"
               f"@{{exit = $LASTEXITCODE; seconds = [int]((Get-Date) - $start).TotalSeconds}} | ConvertTo-Json | "
