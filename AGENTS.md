@@ -10711,8 +10711,9 @@ hours. Plan, measurements and an independent review:
 `docs/plans/CONTAINERS_WITHOUT_A_SIGN_IN_PLAN.md`. On Windows the only
 "Docker as a service" for Linux containers is Docker Engine in a WSL distro
 started by a boot task: `kazma-engine`, kept up by the `KazmaEngine` task
-(S4U, normal rights; it holds `wsl.exe -d kazma-engine -- sleep infinity`,
-since WSL stops a distro about 15 s after the last `wsl.exe` leaves), reached
+(S4U, normal rights; its `keep-engine.ps1` holds a `wsl.exe` attached to the
+distro, since WSL stops a distro about 15 s after the last `wsl.exe` leaves;
+the holder is the channel of its clean stop at a shutdown, below), reached
 as the Docker context `kazma-engine` (mutual TLS on 127.0.0.1:2376). Drilled
 on a clean VM: it starts with nobody signed in, services as SYSTEM and LOCAL
 SERVICE (a tunnel) reach its published ports, and it is back 19 s after a
@@ -10751,7 +10752,7 @@ SERVICE (a tunnel) reach its published ports, and it is back 19 s after a
   desktop`).
 - **Setup installs it** (`kazma_core/container_engine_setup.py`, assets in
   `container_engine_assets/`): `check` names what is missing (wsl, distro,
-  docker, cli, context, task), `install_steps` puts in only that, in order,
+  docker, cli, context, task, shutdown), `install_steps` puts in only that, in order,
   the record last (it waits for `docker version` and writes
   `setup_record.json` `container_engine`, the setting's fallback). WSL first
   (pinned MSI, the two features); a step that needs Windows restarted
@@ -10898,10 +10899,63 @@ SERVICE (a tunnel) reach its published ports, and it is back 19 s after a
   - The carried files are said in one line per container (Neo4j's start
     changes the owner of its whole folder: 248 lines).
 
-  Open, the engine's: at a Windows restart its containers get only seconds
-  (Neo4j: "Stopping..." and never "Stopped."). A line Neo4j's start script
-  had just appended came back as NUL bytes after Windows Update restarted
-  the VM 32 s after boot, and Neo4j refused its config from then on.
+  At a Windows restart its containers got only seconds (Neo4j:
+  "Stopping..." and never "Stopped."), and a line Neo4j's start script had
+  just appended came back as NUL bytes: the next bullet.
+- **A Windows shutdown stops the engine cleanly** (2026-11-13,
+  `KazmaEngineShutdown`, `container_engine_assets/engine-shutdown.cs`,
+  `engine-stop.sh`, `keep-engine.ps1`). Measured on the drill VM, nobody
+  signed in: WSL's VM was ended about 2 s into a restart with no signal to
+  anything in it (WslService and vmcompute are `IGNORES_SHUTDOWN`; WSL shuts
+  a distro down gracefully only at a sign-out of the session that started
+  it, and the boot task's is session 0), and a writer container lost 760
+  bytes to NULs. Task Scheduler ends every running task and what it started
+  60 ms into a shutdown (event 111), before any service hears of it, and
+  starts none (`0x8007045B`, ERROR_SHUTDOWN_IN_PROGRESS); WSL refuses
+  LocalSystem. So the channel is opened before:
+  - the `KazmaEngineShutdown` service (LocalSystem, built at setup from
+    `engine-shutdown.cs` by the .NET Framework's own `csc.exe` into
+    `Program Files\Kazma\engine-shutdown`, never a folder the account can
+    write) takes the preshutdown notice, sets its own preshutdown timeout
+    (`SHUTDOWN_BUDGET_S`, 120, plus 30) and serves two named pipes
+    (`KazmaEngineHold-in`/`-out`; network denied);
+  - `keep-engine.ps1` starts the distro's holder through WMI
+    (`Win32_Process.Create`: outside Task Scheduler's job) as `cmd /c wsl.exe
+    ... kazma-engine-hold piped <in-pipe >out-pipe`, holds the distro itself
+    as before when no service listens, and starts nothing once
+    `SM_SHUTTINGDOWN` is set;
+  - at preshutdown the service writes `stop`: `kazma-engine-stop` stops
+    Docker, then containerd (a daemon shutdown: every container gets its
+    stop signal and its own stop timeout, and its restart policy brings it
+    back at the next boot; a `docker stop` would keep an `unless-stopped`
+    one down), then masks them at runtime (masking first reloaded them as
+    empty units with no order: containerd went at once under a Docker still
+    stopping, "Force shutdown daemon"), writes the distro's own disks
+    (`sync -f` per ext4/xfs/btrfs mount, bounded; a plain `sync` also
+    flushes the Windows drives at `/c` and never returned during a
+    shutdown), answers `ENGINE_STOPPED`; then `poweroff`. Windows waits for
+    it. Stop and poweroff are two lines so the answer crosses before the
+    distro ends; the holder strips a CR (.NET's `WriteLine` sent `stop\r`).
+  Control 128 (`sc.exe control KazmaEngineShutdown 128`) makes the same
+  stop without a restart, and keep-engine starts the engine again. Setup's
+  step is `engine:shutdown` (admin): check() counts the service not
+  running, an older `keep-engine.ps1` or older helpers in the distro
+  (`engine-stop.sha256`, read with no call into WSL) as missing, so
+  `kazma setup engine` brings an existing engine (the owner's PC) up to it;
+  the helpers also go in with Docker (`engine:docker`). Measured after: the
+  service heard the restart 1.1 s in, the writer got TERM, finished its 8 s
+  stop and wrote DONE, no NUL byte, and Windows went on at +10.2 s. The
+  drill is `scripts/engine_shutdown_drill.py` (a fresh VM, the engine
+  through setup, a writer, Windows restarted; `--control` on a commit
+  before it must be `unclean`): on 2026-11-13 the fix was `clean` in both
+  rounds (Windows took 9.4 s and 9.0 s) and the control `unclean` (the
+  writer cut off mid-run, no TERM; 0.3 s), report
+  `docs/audits/ENGINE_SHUTDOWN_DRILL_2026-11-13.md`. Not covered: a power cut or a crash (no
+  notice at all), and Docker Desktop (it runs only in a signed-in session;
+  not measured). Gates: `tests/test_engine_clean_shutdown.py` (the distro's
+  scripts run under bash with stand-ins, their first versions as negative
+  controls; the service built with `csc` on Windows),
+  `tests/test_engine_shutdown_drill.py`.
 
 ## UI Conventions (Web)
 

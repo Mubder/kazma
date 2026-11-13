@@ -1,5 +1,45 @@
 # CHANGELOG
 
+## Kazma's own container engine stops cleanly when Windows shuts down (2026-11-13)
+
+- Measured on a clean Windows VM with nobody signed in: when Windows
+  restarted, the WSL virtual machine that runs Kazma's engine was ended
+  about 2 s in, with no warning to anything inside it. Docker never began
+  stopping its containers, and a test container's last writes came back as
+  NUL bytes, as Neo4j's configuration line did in the move drill.
+- Windows gives a program time at a shutdown only through a Windows service
+  that asks for it, and WSL's own services do not. Task Scheduler ends every
+  task, and everything it started, 60 ms into a shutdown, and starts no new
+  one.
+- A new Windows service, `KazmaEngineShutdown`, asks Windows for that time.
+  At a shutdown or restart it stops Docker in the engine the way Docker
+  stops itself: every container gets its stop signal and its own stop
+  timeout, and comes back at the next boot by its restart policy. Then the
+  engine's disks are written out and its distro is powered off. Windows
+  waits for it, for up to two minutes.
+- The service reaches the engine through a channel opened before the
+  shutdown: the engine's keep-alive now starts the program that holds the
+  distro up outside Task Scheduler's reach, with its input and output on
+  the service's pipes.
+- `kazma setup engine` installs the service, and a Full install does too.
+  On an existing engine, such as one moved from Docker Desktop, running
+  `kazma setup engine` once adds it, without restarting any container.
+- After the fix, measured the same way: the service heard the restart 1.1 s
+  in. The test container got its stop signal, finished its 8 s stop and
+  wrote its last line, with no NUL byte. Windows went on 10 s after the
+  restart began, and the container came back after the boot.
+- The measurements found three more faults, each fixed and tested:
+  - Docker and containerd were stopped in the wrong order.
+  - A plain `sync` hung on the Windows drives during a shutdown.
+  - A stray carriage return in the stop request meant the stop was ignored.
+- `sc.exe control KazmaEngineShutdown 128` makes the same stop without a
+  restart, as a drill; the engine starts again by itself afterwards.
+- `scripts/engine_shutdown_drill.py` repeats the before-and-after on the
+  drill VM.
+- Not covered: a power cut or a crash, where Windows gives no warning at
+  all. Docker Desktop's behaviour was not measured: it runs only in a
+  signed-in session.
+
 ## Kazma's own container engine, step 4: move an install off Docker Desktop (2026-11-13)
 
 - `kazma setup engine --move-from-desktop` moves an existing Windows install

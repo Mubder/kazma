@@ -1,0 +1,80 @@
+{
+ "label": "control",
+ "control": true,
+ "meta": {
+  "vm": "KazmaVMs",
+  "checkpoint": "clean Windows + SSH + nested virtualization (2026-11-12)",
+  "commit": "220fbd5df48cbbd7111b0928dc33d7c8b1d94a44",
+  "install": [
+   {
+    "round": 1,
+    "exit": 1,
+    "seconds": 53,
+    "tail": "Kazma's container engine (Docker as a service, started at boot):\n  NO   WSL 2\n  NO   the kazma-engine WSL distro\n  NO   Docker Engine in it, answering\n  NO   Docker's command-line tools\n  NO   the kazma-engine Docker context\n  NO   the KazmaEngine task (starts it at boot, nobody signed in)\nThe plan:\n   1. install WSL 2 (pinned release) for Kazma's container engine\n   2. create the kazma-engine WSL distro (Ubuntu 24.04, pinned image)\n   3. install Docker Engine in it, with its TLS keys\n   4. install Docker's command-line tools for Windows (pinned)\n   5. connect Windows to it (the kazma-engine Docker context)\n   6. start it at boot with nobody signed in (the KazmaEngine task)\n   7. check it answers, and record it\n-> install WSL 2 (pinned release) for Kazma's container engine\n   WSL is installed; Windows must restart before the engine can be created\nRestart Windows to finish WSL, then run kazma setup engine again: it continues where it stopped.\n"
+   },
+   {
+    "round": 2,
+    "exit": 0,
+    "seconds": 295,
+    "tail": "Kazma's container engine (Docker as a service, started at boot):\n  ok   WSL 2\n  NO   the kazma-engine WSL distro\n  NO   Docker Engine in it, answering\n  NO   Docker's command-line tools\n  NO   the kazma-engine Docker context\n  NO   the KazmaEngine task (starts it at boot, nobody signed in)\nThe plan:\n   1. create the kazma-engine WSL distro (Ubuntu 24.04, pinned image)\n   2. install Docker Engine in it, with its TLS keys\n   3. install Docker's command-line tools for Windows (pinned)\n   4. connect Windows to it (the kazma-engine Docker context)\n   5. start it at boot with nobody signed in (the KazmaEngine task)\n   6. check it answers, and record it\n-> create the kazma-engine WSL distro (Ubuntu 24.04, pinned image)\n   created\n-> install Docker Engine in it, with its TLS keys\n   the engine's networks: 10.213.0.1/24, pool 10.213.128.0/17\n   ENGINE_READY Docker version 29.9.3, build 70efc0e\n-> install Docker's command-line tools for Windows (pinned)\n   docker.exe in C:\\Users\\KazmaDrill_1\\AppData\\Local\\Kazma\\engine\\bin, compose plugin in C:\\Users\\KazmaDrill_1\\.docker\\cli-plugins\n-> connect Windows to it (the kazma-engine Docker context)\n   context kazma-engine (created)\n-> start it at boot with nobody signed in (the KazmaEngine task)\n   KazmaEngine registered and started\n-> check it answers, and record it\n   Kazma's engine answers (Docker 29.9.3)\nKazma's engine is set up: it starts at boot, with nobody signed in.\n"
+   }
+  ],
+  "finished": "2026-11-13 03:57 UTC"
+ },
+ "verdict": {
+  "verdict": "unclean",
+  "reasons": [
+   "round 1: the writer never got its stop signal (no TERM)",
+   "round 2: the writer never got its stop signal (no TERM)"
+  ]
+ },
+ "rounds": [
+  {
+   "number": 1,
+   "before": {
+    "name": "w-c4bd66e5-4c49-4db1-b2b4-424aa71308af.log",
+    "mtime": 1794542176,
+    "size": 5349,
+    "nul_bytes": 0,
+    "term": false,
+    "done": false,
+    "last_line": "line 272 1794542176"
+   },
+   "came_back": true,
+   "windows": [
+    "SYS 2026-11-13T03:50:05.9999629Z 1074",
+    "SYS 2026-11-13T03:50:09.5074543Z 6006",
+    "SYS 2026-11-13T03:50:16.9155419Z 6005",
+    "SYS 2026-11-13T03:56:17.8702835Z 1074",
+    "SYS 2026-11-13T03:56:18.2209934Z 6006",
+    "SYS 2026-11-13T03:56:24.9060710Z 6005"
+   ],
+   "held_s": 0.35071
+  },
+  {
+   "number": 2,
+   "before": {
+    "name": "w-9f6001ec-4f57-4eea-9c28-e60bf646f2df.log",
+    "mtime": 1794542238,
+    "size": 6369,
+    "nul_bytes": 0,
+    "term": false,
+    "done": false,
+    "last_line": "line 323 1794542238"
+   },
+   "came_back": true,
+   "windows": [
+    "SYS 2026-11-13T03:50:05.9999629Z 1074",
+    "SYS 2026-11-13T03:50:09.5074543Z 6006",
+    "SYS 2026-11-13T03:50:16.9155419Z 6005",
+    "SYS 2026-11-13T03:56:17.8702835Z 1074",
+    "SYS 2026-11-13T03:56:18.2209934Z 6006",
+    "SYS 2026-11-13T03:56:24.9060710Z 6005",
+    "SYS 2026-11-13T03:57:18.8569390Z 1074",
+    "SYS 2026-11-13T03:57:19.1078000Z 6006",
+    "SYS 2026-11-13T03:57:26.4761029Z 6005"
+   ],
+   "held_s": 0.250861
+  }
+ ]
+}

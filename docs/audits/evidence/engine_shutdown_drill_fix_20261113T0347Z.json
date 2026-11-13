@@ -1,0 +1,99 @@
+{
+ "label": "fix",
+ "control": false,
+ "meta": {
+  "vm": "KazmaVMs",
+  "checkpoint": "clean Windows + SSH + nested virtualization (2026-11-12)",
+  "commit": "3038a5b4029f42a74280f8758941ecbf2fe22489",
+  "install": [
+   {
+    "round": 1,
+    "exit": 1,
+    "seconds": 58,
+    "tail": "Kazma's container engine (Docker as a service, started at boot):\n  NO   WSL 2\n  NO   the kazma-engine WSL distro\n  NO   Docker Engine in it, answering\n  NO   Docker's command-line tools\n  NO   the kazma-engine Docker context\n  NO   the KazmaEngine task (starts it at boot, nobody signed in)\n  NO   the KazmaEngineShutdown service (stops it cleanly when Windows shuts down)\nThe plan:\n   1. install WSL 2 (pinned release) for Kazma's container engine\n   2. create the kazma-engine WSL distro (Ubuntu 24.04, pinned image)\n   3. install Docker Engine in it, with its TLS keys\n   4. install Docker's command-line tools for Windows (pinned)\n   5. connect Windows to it (the kazma-engine Docker context)\n   6. start it at boot with nobody signed in (the KazmaEngine task)\n   7. stop it cleanly when Windows shuts down (the KazmaEngineShutdown service)\n   8. check it answers, and record it\n-> install WSL 2 (pinned release) for Kazma's container engine\n   WSL is installed; Windows must restart before the engine can be created\nRestart Windows to finish WSL, then run kazma setup engine again: it continues where it stopped.\n"
+   },
+   {
+    "round": 2,
+    "exit": 0,
+    "seconds": 314,
+    "tail": "Kazma's container engine (Docker as a service, started at boot):\n  ok   WSL 2\n  NO   the kazma-engine WSL distro\n  NO   Docker Engine in it, answering\n  NO   Docker's command-line tools\n  NO   the kazma-engine Docker context\n  NO   the KazmaEngine task (starts it at boot, nobody signed in)\n  NO   the KazmaEngineShutdown service (stops it cleanly when Windows shuts down)\nThe plan:\n   1. create the kazma-engine WSL distro (Ubuntu 24.04, pinned image)\n   2. install Docker Engine in it, with its TLS keys\n   3. install Docker's command-line tools for Windows (pinned)\n   4. connect Windows to it (the kazma-engine Docker context)\n   5. start it at boot with nobody signed in (the KazmaEngine task)\n   6. stop it cleanly when Windows shuts down (the KazmaEngineShutdown service)\n   7. check it answers, and record it\n-> create the kazma-engine WSL distro (Ubuntu 24.04, pinned image)\n   created\n-> install Docker Engine in it, with its TLS keys\n   the engine's networks: 10.213.0.1/24, pool 10.213.128.0/17\n   ENGINE_READY Docker version 29.9.3, build 70efc0e\n-> install Docker's command-line tools for Windows (pinned)\n   docker.exe in C:\\Users\\KazmaDrill_1\\AppData\\Local\\Kazma\\engine\\bin, compose plugin in C:\\Users\\KazmaDrill_1\\.docker\\cli-plugins\n-> connect Windows to it (the kazma-engine Docker context)\n   context kazma-engine (created)\n-> start it at boot with nobody signed in (the KazmaEngine task)\n   KazmaEngine registered and started\n-> stop it cleanly when Windows shuts down (the KazmaEngineShutdown service)\n   KazmaEngineShutdown runs: at a shutdown it stops the engine's containers first (up to 120 s)\n-> check it answers, and record it\n   Kazma's engine answers (Docker 29.9.3)\nKazma's engine is set up: it starts at boot, with nobody signed in.\n"
+   }
+  ],
+  "finished": "2026-11-13 03:47 UTC"
+ },
+ "verdict": {
+  "verdict": "clean",
+  "reasons": []
+ },
+ "rounds": [
+  {
+   "number": 1,
+   "before": {
+    "name": "w-10cac7b0-8ebd-4c02-a94b-bee5f6b22a02.log",
+    "mtime": 1794541534,
+    "size": 6652,
+    "nul_bytes": 0,
+    "term": true,
+    "done": true,
+    "last_line": "DONE 1794541534"
+   },
+   "came_back": true,
+   "windows": [
+    "SYS 2026-11-13T03:38:11.1348211Z 1074",
+    "SYS 2026-11-13T03:38:14.8556196Z 6006",
+    "SYS 2026-11-13T03:38:21.8270593Z 6005",
+    "SYS 2026-11-13T03:45:25.5777331Z 1074",
+    "SYS 2026-11-13T03:45:34.9700882Z 6006",
+    "SYS 2026-11-13T03:45:42.7899648Z 6005",
+    "SVC 2026-11-13T03:43:50.3071730Z ready: at a shutdown, Kazma's engine gets up to 120 s to stop",
+    "SVC 2026-11-13T03:43:50.7463107Z Kazma's engine is held: it can be stopped at a shutdown",
+    "SVC 2026-11-13T03:45:25.7930240Z Windows is shutting down: stopping Kazma's engine",
+    "SVC 2026-11-13T03:45:34.8768137Z the engine is stopped after 9.1 s: ENGINE_STOPPED in 8.8 s (docker stop exit 0, disks written)",
+    "SVC 2026-11-13T03:45:34.8911401Z the engine's holder went away",
+    "SVC 2026-11-13T03:45:34.8912021Z the engine's distro is powered off",
+    "SVC 2026-11-13T03:45:43.4174575Z ready: at a shutdown, Kazma's engine gets up to 120 s to stop",
+    "SVC 2026-11-13T03:45:47.8304925Z Kazma's engine is held: it can be stopped at a shutdown"
+   ],
+   "held_s": 9.392355
+  },
+  {
+   "number": 2,
+   "before": {
+    "name": "w-0d08ef44-b48a-42af-aaef-33a9eeffbae4.log",
+    "mtime": 1794541597,
+    "size": 5852,
+    "nul_bytes": 0,
+    "term": true,
+    "done": true,
+    "last_line": "DONE 1794541597"
+   },
+   "came_back": true,
+   "windows": [
+    "SYS 2026-11-13T03:38:11.1348211Z 1074",
+    "SYS 2026-11-13T03:38:14.8556196Z 6006",
+    "SYS 2026-11-13T03:38:21.8270593Z 6005",
+    "SYS 2026-11-13T03:45:25.5777331Z 1074",
+    "SYS 2026-11-13T03:45:34.9700882Z 6006",
+    "SYS 2026-11-13T03:45:42.7899648Z 6005",
+    "SYS 2026-11-13T03:46:28.4567466Z 1074",
+    "SYS 2026-11-13T03:46:37.4903636Z 6006",
+    "SYS 2026-11-13T03:46:45.5258361Z 6005",
+    "SVC 2026-11-13T03:43:50.3071730Z ready: at a shutdown, Kazma's engine gets up to 120 s to stop",
+    "SVC 2026-11-13T03:43:50.7463107Z Kazma's engine is held: it can be stopped at a shutdown",
+    "SVC 2026-11-13T03:45:25.7930240Z Windows is shutting down: stopping Kazma's engine",
+    "SVC 2026-11-13T03:45:34.8768137Z the engine is stopped after 9.1 s: ENGINE_STOPPED in 8.8 s (docker stop exit 0, disks written)",
+    "SVC 2026-11-13T03:45:34.8911401Z the engine's holder went away",
+    "SVC 2026-11-13T03:45:34.8912021Z the engine's distro is powered off",
+    "SVC 2026-11-13T03:45:43.4174575Z ready: at a shutdown, Kazma's engine gets up to 120 s to stop",
+    "SVC 2026-11-13T03:45:47.8304925Z Kazma's engine is held: it can be stopped at a shutdown",
+    "SVC 2026-11-13T03:46:28.5398273Z Windows is shutting down: stopping Kazma's engine",
+    "SVC 2026-11-13T03:46:37.3983351Z the engine is stopped after 8.9 s: ENGINE_STOPPED in 8.8 s (docker stop exit 0, disks written)",
+    "SVC 2026-11-13T03:46:37.4162894Z the engine's distro is powered off",
+    "SVC 2026-11-13T03:46:37.4163081Z the engine's holder went away",
+    "SVC 2026-11-13T03:46:45.9516115Z ready: at a shutdown, Kazma's engine gets up to 120 s to stop",
+    "SVC 2026-11-13T03:46:48.4728059Z Kazma's engine is held: it can be stopped at a shutdown"
+   ],
+   "held_s": 9.033617
+  }
+ ]
+}

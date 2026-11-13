@@ -335,15 +335,71 @@ The drill found three things:
 - **248 "carried" lines for Neo4j:** its start changes the owner of its
   whole folder. The move now says one line per container.
 
-**Open, the engine's, not the move's:** at a Windows restart the engine
-gets only seconds. Neo4j logged "Stopping..." 3 s after the shutdown began,
-and never "Stopped.". Windows Update then restarted the VM again 32 s after
-it booted, while Neo4j's start script was appending a line to its config.
-That line came back as 30 NUL bytes (the size kept, the data lost, as after
-a power cut), and Neo4j refused the file at every start after. A container
-copied the move's way, with and without the carried files, started three
-times cleanly; so did one never moved. Stopping the engine's containers
-before Windows ends the WSL VM is follow-up work for the engine.
+**Found by the drill, the engine's, not the move's** (resolved 2026-11-13:
+"A clean stop at a Windows shutdown", below): at a Windows restart the
+engine got only seconds. Neo4j logged "Stopping..." 3 s after the shutdown
+began, and never "Stopped.". Windows Update then restarted the VM again 32 s
+after it booted, while Neo4j's start script was appending a line to its
+config. That line came back as 30 NUL bytes (the size kept, the data lost,
+as after a power cut), and Neo4j refused the file at every start after. A
+container copied the move's way, with and without the carried files,
+started three times cleanly; so did one never moved.
+
+**A clean stop at a Windows shutdown** (2026-11-13). Measured on the drill
+VM, with a writer container appending a short line every 100 ms (no fsync)
+and taking 8 s to stop on SIGTERM, as Neo4j does:
+- **What Windows did.** WslService and vmcompute take no shutdown notice
+  (`IGNORES_SHUTDOWN`; WSL's source has no handler for it). WSL shuts a
+  distro down gracefully (`systemctl poweroff`, 10 s at most) only when the
+  Windows session that started it signs out, and the boot task's is session
+  0, never signed out. So with nobody signed in, WSL's VM was ended about 2
+  s into the restart with no signal to anything in it: no SIGTERM to a
+  probe in the distro, Docker never began stopping, and the writer's file
+  came back with 760 NUL bytes. With someone signed in who had started the
+  distro, the graceful stop began and was cut short (the Neo4j case above).
+- **What a fix may not use.** Task Scheduler ends every running task, and
+  every process it started, 60 ms into a shutdown (event 111: "Task
+  Scheduler terminated ... \KazmaEngine"), before any service hears of it,
+  and starts no task during one (`0x8007045B`, ERROR_SHUTDOWN_IN_PROGRESS).
+  WSL refuses LocalSystem. A GPO shutdown script runs as SYSTEM too.
+- **The fix.** A Windows service, `KazmaEngineShutdown`, takes the
+  preshutdown notice (Windows waits for it up to the service's own
+  preshutdown timeout, which it sets). Its channel into the distro is
+  opened before the shutdown: `keep-engine.ps1` starts the distro's holder
+  through WMI, outside Task Scheduler's job, with its stdin and stdout on
+  the service's named pipes. At preshutdown the service writes `stop`: the
+  distro stops Docker then containerd (a daemon shutdown: every container
+  its stop signal and its own stop timeout, restart policies kept), masks
+  them, writes its own disks, and answers; then `poweroff`. Setup installs
+  it (`engine:shutdown`, AGENTS.md section 63), and `kazma setup engine`
+  brings an existing engine up to it.
+- **What the measurements caught on the way**, each now held by a test:
+  masking the units before stopping them reloaded them with no order
+  (containerd stopped at once, Docker forced its shutdown after 36 s); a
+  plain `sync` also flushes the Windows drives at `/c` and never returned
+  during a shutdown (only the distro's own disks are written now); .NET's
+  `WriteLine` sent `stop\r`; and the first design, which had keep-engine
+  make the stop on a named event, lost the race with Task Scheduler.
+- **After.** The service heard the restart 1.1 s in; the writer got TERM,
+  finished its 8 s stop and wrote DONE, with no NUL byte; Windows went on at
+  +10.2 s, and the writer came back by its restart policy. The drill is
+  `scripts/engine_shutdown_drill.py`; from the clean checkpoint, the fix's
+  commit was `clean` in both rounds (Windows took 9.4 s and 9.0 s) and the
+  commit before it `unclean` (the writer cut off mid-run, no TERM, 0.3 s).
+  Report: `docs/audits/ENGINE_SHUTDOWN_DRILL_2026-11-13.md`.
+- **The owner's PC** gets it with one elevated `kazma setup engine` from the
+  live install: its engine was set up by hand on 2026-11-12, the
+  `KazmaEngine` task runs the same `keep-engine.ps1` setup replaces, and the
+  step keeps the distro held throughout (no container restarts).
+- **Considered, not shipped.** dockerd's `shutdown-timeout` gives no
+  container more time: at a daemon shutdown each container is stopped with
+  its own stop timeout, and the daemon's value only bounds its own wait. A
+  short ext4 commit interval and dirty-page expiry in the distro would
+  narrow, never close, the window of a real power cut or crash (no notice
+  at all), at the cost of every container's write traffic; that case
+  belongs to a UPS and the guard's power watch (AGENTS.md section 39).
+  Docker Desktop was not measured: it runs only in a signed-in session,
+  and the drill VM is reached over SSH with nobody signed in.
 
 **Stage 4: Linux access.** Rootless Docker as a user service with linger,
 else the `docker` group with the reason; measured on a Linux machine.
