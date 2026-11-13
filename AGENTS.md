@@ -5507,7 +5507,7 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   Poll it in ops dashboards — it exists to catch SILENT no-ops (the
   recall-NameError class), which structural checks cannot see.
 - CI (`ci.yml`) GATES on the full suite: `python scripts/fast_test.py --chunks
-  4 --chunk-timeout 1500` (crash-tolerant chunked serial pytest over ALL
+  4` (crash-tolerant chunked serial pytest over ALL
   testpaths — the package suites were previously orphaned by `pytest tests/`),
   `-m "not slow"`, per-chunk `--timeout=120`. Compile-check (py_compile over
   every repo `.py`) and `node --check` over static JS are separate GATES.
@@ -8090,7 +8090,16 @@ Read the named test before changing the code it guards.
   lock are module globals, and an agent-building test left its rebind
   subscribed for every later test (the probe pair in
   `tests/test_order_independence.py`, with its negative control). So are the
-  workspace store's singleton and rows (2026-11-08, §56).
+  workspace store's singleton and rows (2026-11-08, §56). So is the
+  process's service container (2026-11-13): an app a test built left its
+  chat adapters there, bound to that test's settings database, and a later
+  test's chat-app Test failed "no such table: settings" (CI, order-
+  dependent). The app releases what it registered when it stops
+  (`KazmaAppBuilder._release_container_entries`; a registration's token,
+  `ServiceContainer.release`, so a newer app's entry of the same shared
+  store stays). Gates: `tests/test_app_releases_its_container_entries.py`
+  (the app without the release as the control), the probe pair in
+  `tests/test_order_independence.py`.
   **No test reads a real `.env`** — two Postgres tests did, one the LIVE
   install's by hard-coded path. **`@pytest.mark.postgres` is the Postgres
   job's list** (`scripts/postgres_suite.py`), per test, verified on a real
@@ -11864,7 +11873,9 @@ sent. Gate: `tests/test_answer_quality_monitor.py`.
   processes; crashed/empty chunks are retried per-file; poison files are
   reported. One chunk per CPU, at most 8 (`DEFAULT_MAX_CHUNKS`: 32 chunks
   each loading torch crashed 12 of them, 2026-09-25); CI passes
-  `--chunks 4 --chunk-timeout 1500`. Locally, pass NO `--chunks`. **Every
+  `--chunks 4` and no budget (a fixed 1500 s was below what ~400 files need
+  on CI's runner: every chunk ran out of time in November 2026 and was
+  re-run whole, 60-75 minutes a run). Locally, pass NO `--chunks`. **Every
   pytest run is one killable unit** (2026-09-30: a `--chunks 4` run took
   1 h 22 min): a chunk's budget scales with its files (10 s each, floor 900 s)
   unless given; a timeout kills the whole tree -- a kill-on-close Job Object on

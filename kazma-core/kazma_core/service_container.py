@@ -24,6 +24,9 @@ class ServiceContainer:
     def __init__(self) -> None:
         self._services: dict[Type[Any] | str, Any] = {}
         self._factories: dict[Type[Any] | str, Callable[[], Any]] = {}
+        # One token per registration: whoever registered an entry, and only
+        # while it is still their registration, may release it (release()).
+        self._tokens: dict[Type[Any] | str, object] = {}
         self._lock = threading.RLock()
 
     def register(
@@ -31,18 +34,23 @@ class ServiceContainer:
         key: Type[T] | str,
         service: T | None = None,
         factory: Callable[[], T] | None = None,
-    ) -> None:
+    ) -> object:
         """Register a service instance or factory.
 
         Args:
             key: The type class or unique string key representing the service.
             service: An instantiated service instance.
             factory: A lazy callable returning the service instance when requested.
+
+        Returns:
+            This registration's token, for :meth:`release`.
         """
         if service is None and factory is None:
             raise ValueError("Must provide either a service instance or a factory callable.")
 
+        token = object()
         with self._lock:
+            self._tokens[key] = token
             if service is not None:
                 self._services[key] = service
                 # Clear any factory if we are explicitly setting an instance
@@ -55,6 +63,7 @@ class ServiceContainer:
                 if key in self._services:
                     del self._services[key]
                 logger.debug("[ServiceContainer] Registered service factory for: %s", key)
+        return token
 
     def get(self, key: Type[T] | str) -> T:
         """Retrieve a service instance.
@@ -88,13 +97,48 @@ class ServiceContainer:
                 del self._services[key]
             if key in self._factories:
                 del self._factories[key]
+            self._tokens.pop(key, None)
             logger.debug("[ServiceContainer] Removed service entry for: %s", key)
+
+    def release(self, key: Type[Any] | str, token: object) -> bool:
+        """Remove *key* only while it is still the registration *token* made.
+
+        What an app registered is released when that app stops. An entry
+        another app registered since is that app's and stays, even when it
+        is the same object: two apps in one process share the settings store
+        and the model registry. Returns whether the entry was removed.
+        """
+        with self._lock:
+            if self._tokens.get(key) is not token:
+                return False
+            self._services.pop(key, None)
+            self._factories.pop(key, None)
+            del self._tokens[key]
+            logger.debug("[ServiceContainer] Released service entry for: %s", key)
+            return True
+
+    def snapshot(self) -> tuple[dict, dict, dict]:
+        """Every entry as it is now, for :meth:`restore` (test isolation)."""
+        with self._lock:
+            return dict(self._services), dict(self._factories), dict(self._tokens)
+
+    def restore(self, state: tuple[dict, dict, dict]) -> None:
+        """Put back the entries a :meth:`snapshot` holds, and only those."""
+        services, factories, tokens = state
+        with self._lock:
+            self._services.clear()
+            self._services.update(services)
+            self._factories.clear()
+            self._factories.update(factories)
+            self._tokens.clear()
+            self._tokens.update(tokens)
 
     def reset_all(self) -> None:
         """Clear all registered services and factories."""
         with self._lock:
             self._services.clear()
             self._factories.clear()
+            self._tokens.clear()
             logger.info("[ServiceContainer] Container reset — all services cleared")
 
 

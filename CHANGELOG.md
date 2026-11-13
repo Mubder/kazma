@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## A stopped app takes back what it registered; CI runs each chunk once (2026-11-13)
+
+- The app put its settings store, agent, chat adapters, gateway and session
+  store in the process's service container and never took them out. A
+  second app in the same process (the test suite builds many) found the
+  stopped app's chat adapters there, and a chat app's Test ran against them.
+  An app now releases its own registrations when it stops; an entry a newer
+  app made stays. The test suite also restores the container after every
+  test.
+- CI's test job gave each chunk a fixed 25 minutes, less than ~400 test files
+  need on GitHub's runner: every chunk timed out and was run a second time,
+  and a run took 60-75 minutes. It now uses the runner's own budget, which
+  grows with the number of files.
+
 ## A guard update sends no repeated pages (2026-11-13)
 
 - Restarting the guard while Kazma was paused (a guard update) sent "Kazma

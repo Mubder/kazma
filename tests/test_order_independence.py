@@ -130,6 +130,45 @@ def test_without_the_guard_the_binding_reaches_the_next_test():
     assert "1 failed, 1 passed" in proc.stdout, proc.stdout[-2000:]
 
 
+# ── the service container ──────────────────────────────────────────────────
+# An app a test built and started left its chat adapters registered in the
+# process's service container, bound to that test's settings database; a
+# later test's chat-app Test ran against them and failed "no such table:
+# settings" (CI, 2026-11-13).
+
+
+class _ProbeService:
+    pass
+
+
+_PROBE_SERVICE = _ProbeService()
+
+
+def test_a_service_is_left_in_the_container_here():
+    """First of a pair: the shape an app built in a test left behind."""
+    from kazma_core.service_container import get_container
+
+    get_container().register(_ProbeService, _PROBE_SERVICE)
+    assert get_container().get(_ProbeService) is _PROBE_SERVICE
+
+
+def test_and_the_service_does_not_reach_the_next_test():
+    from kazma_core.service_container import get_container
+
+    assert not get_container().has(_ProbeService)
+
+
+def test_without_the_guard_the_service_reaches_the_next_test():
+    """Negative control: the same pair with test isolation off."""
+    proc = _child_pytest(
+        f"{HERE}::test_a_service_is_left_in_the_container_here",
+        f"{HERE}::test_and_the_service_does_not_reach_the_next_test",
+        KAZMA_TEST_ISOLATION="0",
+    )
+    assert proc.returncode == 1, proc.stdout[-2000:]
+    assert "1 failed, 1 passed" in proc.stdout, proc.stdout[-2000:]
+
+
 # ── the active workspace ───────────────────────────────────────────────────
 # The workspace store is one singleton over one file, and its active row
 # outranks the pin (resolve_active_root). On 2026-11-08 a research recovery

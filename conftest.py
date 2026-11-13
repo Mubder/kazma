@@ -568,8 +568,26 @@ def _isolate_process_singletons(tmp_path):
     except Exception:
         _prev_binding = _prev_rebind = None
 
+    # The process's service container: an app a test built and started left
+    # its chat adapters, gateway and stores registered, bound to that test's
+    # settings database, and a later test's chat-app Test ran against them
+    # ("no such table: settings", CI 2026-11-13). The app's stop now releases
+    # them; this keeps a test that builds without stopping from leaking too.
+    try:
+        from kazma_core.service_container import get_container as _get_container
+
+        _prev_container = _get_container().snapshot()
+    except Exception:
+        _prev_container = None
+
     # ---- teardown: restore + park (never close/GC — see _PARKED) ---------
     yield
+
+    if _prev_container is not None:
+        try:
+            _get_container().restore(_prev_container)
+        except Exception:
+            pass
 
     if _prev_binding is not None:
         try:

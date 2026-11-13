@@ -172,7 +172,12 @@ jobs:
         # (native lib), killing the run with no results. The chunked runner
         # executes file-chunks as independent serial pytest processes,
         # retries crashed chunks per-file, and still gates on every failure.
-        run: python scripts/fast_test.py --chunks 4 --chunk-timeout 1500
+        # No --chunk-timeout: the runner's own budget scales with the files
+        # (10 s each). A fixed 1500 s was below what ~400 files need on this
+        # runner: every chunk of every run in November 2026 ran out of time
+        # and was re-run whole as pieces, and the job took 60-75 minutes.
+        # A hung test is pytest-timeout's (--timeout=120), not this budget's.
+        run: python scripts/fast_test.py --chunks 4
         env:
           KAZMA_DB_BACKEND: sqlite
       - name: README metrics gate

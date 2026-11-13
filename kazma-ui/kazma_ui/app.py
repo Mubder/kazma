@@ -146,6 +146,9 @@ class KazmaAppBuilder:
         self.swarm_manager = None
         self.cron_scheduler = None
         self.cron_store = None
+        # What this app put in the process's service container; its stop
+        # takes each back out (_release_container_entries).
+        self._container_entries: list[tuple[Any, Any]] = []
         self._init_errors: list[dict[str, str]] = []
         self._graph_holder: dict[str, Any] = {"graph": None}  # mutable holder so SSE router sees post-startup recompiled graph+checkpointer+HITL (fixes C-3)
         self._checkpointer = None
@@ -328,7 +331,6 @@ class KazmaAppBuilder:
         from kazma_core.config_availability import wait_for_settings_store
         from kazma_core.config_store import ConfigStore, get_config_store, set_config_store
         from kazma_core.model_registry import ModelRegistry, initialize_model_registry
-        from kazma_core.service_container import get_container
 
         # Abort before vault migration, worker wiring or automation can use
         # defaults from a failed settings backend -- but wait for a database
@@ -531,10 +533,9 @@ class KazmaAppBuilder:
         from kazma_ui.config_errors import install_config_error_handler
 
         install_config_error_handler(self.app)
-        container = get_container()
-        container.register(ConfigStore, self.config_store)
-        container.register(ModelRegistry, self.registry)
-        container.register(KazmaAgent, self.agent)
+        self._register_service(ConfigStore, self.config_store)
+        self._register_service(ModelRegistry, self.registry)
+        self._register_service(KazmaAgent, self.agent)
 
     def _setup_templates_and_middlewares(self) -> None:
         """Configure auth, CORS, CSRF, language middleware, static files, and templates."""
@@ -880,7 +881,6 @@ class KazmaAppBuilder:
 
     def _setup_swarm(self) -> None:
         """Initialize SwarmManager, load persisted workers, and restore paused tasks."""
-        from kazma_core.service_container import get_container
 
         try:
             from kazma_core.swarm import (
@@ -982,8 +982,7 @@ class KazmaAppBuilder:
             self.swarm_manager = None
 
         if self.swarm_manager is not None:
-            container = get_container()
-            container.register(SwarmManager, self.swarm_manager)
+            self._register_service(SwarmManager, self.swarm_manager)
 
     def _start_background_loops(self) -> None:
         """Start the process-wide background loops. **Requires a running loop.**
@@ -1092,7 +1091,6 @@ class KazmaAppBuilder:
 
     def _setup_gateway_and_bus(self) -> None:
         """Initialize GatewayManager, register adapters, and wire the message bus."""
-        from kazma_core.service_container import get_container
 
         try:
             from kazma_gateway import GatewayManager
@@ -1210,10 +1208,9 @@ class KazmaAppBuilder:
                 logger.warning("[Gateway] Brain handler failed to register: %s", e)
 
             # Register services in Dependency Injection Container
-            container = get_container()
-            container.register(GatewayManager, self.gateway)
-            container.register(ChatAdapters, self.chat_adapters)
-            container.register(SQLiteSessionStore, self.session_store)
+            self._register_service(GatewayManager, self.gateway)
+            self._register_service(ChatAdapters, self.chat_adapters)
+            self._register_service(SQLiteSessionStore, self.session_store)
 
             # ── Sub-Agent Manager ─────────────────────────────────────
             try:
@@ -2390,10 +2387,35 @@ class KazmaAppBuilder:
             await self._shutdown_services()
         finally:
             self._stop_clock.mark("the chat apps")
+            self._release_container_entries()
             self._stop_clock.report()
         lease = getattr(self, "_server_lease", None)
         if lease is not None:
             await asyncio.to_thread(lease.release)
+
+    def _register_service(self, key: Any, service: Any) -> None:
+        """Put *service* in the process's service container under *key*, and
+        remember it: what an app registers, its stop releases."""
+        from kazma_core.service_container import get_container
+
+        self._container_entries.append((key, get_container().register(key, service)))
+
+    def _release_container_entries(self) -> None:
+        """Take back what this app put in the service container.
+
+        A stopped app's chat adapters, gateway and stores stayed there, bound
+        to the stopped app's settings store: a later app in the same process
+        -- every test that builds one -- ran a chat app's Test against them
+        ("no such table: settings", CI 2026-11-13). Only an entry that is
+        still this app's registration is removed: one a newer app made
+        stays, even of the same object (both apps share the settings store).
+        """
+        from kazma_core.service_container import get_container
+
+        container = get_container()
+        while self._container_entries:
+            key, token = self._container_entries.pop()
+            container.release(key, token)
 
     def _mark_stop(self, label: str) -> None:
         """The stop step *label* has ended (StopClock, resilience plan C3)."""
