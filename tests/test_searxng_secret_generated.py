@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from kazma_core import container_services as cs
 from kazma_core.security import searxng_secret as ss
 from kazma_core.security import service_exposure as se
 
@@ -29,6 +30,11 @@ from tests.test_install_modes import WINDOWS, _machine, _options, box  # noqa: F
 
 ROOT = Path(__file__).resolve().parents[1]
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _ensure(env_path: Path) -> bool:
+    """The install's step: SearXNG's row of the container services table."""
+    return cs.ensure_secret(env_path, ss.SECRET_VAR, (ss.PLACEHOLDER,))
 
 
 def _value(path: Path) -> str | None:
@@ -70,13 +76,13 @@ def test_setup_writes_a_generated_key_once_and_never_overwrites(tmp_path, monkey
         return True
 
     monkeypatch.setattr("kazma_core.security.file_access.restrict_to_owner", restrict)
-    assert ss.ensure_searxng_secret(env) is True
+    assert _ensure(env) is True
     first = _value(env)
     assert first and HEX64.match(first)
     assert seen and ss.SECRET_VAR + "=" + first not in seen[0], "restricted before the key was written"
     assert "KAZMA_PORT=9090" in env.read_text(encoding="utf-8")
 
-    assert ss.ensure_searxng_secret(env) is False
+    assert _ensure(env) is False
     assert _value(env) == first
 
 
@@ -85,7 +91,7 @@ def test_a_new_env_file_is_made_and_restricted_before_the_key_is_in_it(tmp_path,
     seen: list[str] = []
     monkeypatch.setattr("kazma_core.security.file_access.restrict_to_owner",
                         lambda path: seen.append(Path(path).read_text(encoding="utf-8")) or True)
-    assert ss.ensure_searxng_secret(env) is True
+    assert _ensure(env) is True
     assert seen == [""] and HEX64.match(_value(env) or "")
 
 
@@ -93,17 +99,17 @@ def test_an_owner_value_is_kept_and_the_placeholder_is_replaced(tmp_path, monkey
     monkeypatch.setattr("kazma_core.security.file_access.restrict_to_owner", lambda path: True)
     own = tmp_path / "own.env"
     own.write_text("SEARXNG_SECRET=the-owners-own-choice\n", encoding="utf-8")
-    assert ss.ensure_searxng_secret(own) is False and _value(own) == "the-owners-own-choice"
+    assert _ensure(own) is False and _value(own) == "the-owners-own-choice"
 
     placeholder = tmp_path / "placeholder.env"
     placeholder.write_text(f"SEARXNG_SECRET={ss.PLACEHOLDER}\n", encoding="utf-8")
-    assert ss.ensure_searxng_secret(placeholder) is True
+    assert _ensure(placeholder) is True
     assert _value(placeholder) != ss.PLACEHOLDER and HEX64.match(_value(placeholder) or "")
 
     in_shell = tmp_path / "shell.env"
     in_shell.write_text("", encoding="utf-8")
     monkeypatch.setenv(ss.SECRET_VAR, "set-in-the-shell-compose-runs-in")
-    assert ss.ensure_searxng_secret(in_shell) is False and _value(in_shell) is None
+    assert _ensure(in_shell) is False and _value(in_shell) is None
 
 
 # -- through kazma setup install, on a fake machine -----------------------------------
@@ -136,7 +142,7 @@ def test_negative_control_the_old_setup_leaves_searxng_on_the_placeholder(box, m
     real = inst._run_planned
 
     def old(item, machine, env_path, log):
-        if item.step.action == "searxng_secret":
+        if item.step.action.startswith("service_secret:"):
             return True, ""  # the old plan had no such step
         return real(item, machine, env_path, log)
 

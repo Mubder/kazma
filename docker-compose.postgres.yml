@@ -6,7 +6,9 @@
 # Optional: pip/install image with [postgres] extra for psycopg pool.
 services:
   db:
-    image: postgres:16-alpine
+    # Pinned by version and digest (tests/test_container_services.py);
+    # Dependabot's docker-compose updates propose new ones.
+    image: postgres:16.16-alpine@sha256:0adbf25a9e96d38823bb813f3ac0ed41fadb665c88f1df7fe6dbfb060cbdc106
     container_name: kazma-db
     environment:
       POSTGRES_USER: kazma

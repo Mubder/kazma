@@ -399,7 +399,11 @@ elif [[ ! -t 0 ]]; then
 fi
 INSTALL_EXIT=0
 $VENV_PYTHON "${INSTALL_ARGS[@]}" || INSTALL_EXIT=$?
-if [[ "$INSTALL_EXIT" -ne 0 ]]; then
+if [[ "$INSTALL_EXIT" -eq 3 ]]; then
+    # kazma_cli.install EXIT_RESTART: the computer must restart before the rest.
+    log_warn "Restart this computer, then run ./setup.sh again: it finishes what is left"
+    log_info "What happened is in .kazma/install.log"
+elif [[ "$INSTALL_EXIT" -ne 0 ]]; then
     log_warn "Not everything was installed: run ./setup.sh again to finish (it continues where it stopped)"
     log_info "What happened is in .kazma/install.log"
 fi
@@ -424,6 +428,8 @@ fi
 # seven parts were left out and setup still said "Setup Complete" and exited 0.
 if [[ "$INSTALL_EXIT" -eq 0 ]]; then
     log_header "5. Setup Complete"
+elif [[ "$INSTALL_EXIT" -eq 3 ]]; then
+    log_header "5. Restart this computer, then run ./setup.sh again to finish"
 else
     log_header "5. Setup Stopped Short (run ./setup.sh again to finish)"
 fi

@@ -3,7 +3,15 @@
 The owner's three installs (2026-11-07):
 
 * **Express** (the default): the least Kazma can lack, in one run. Every part
-  marked ``express`` below.
+  marked ``express`` below, on the systems its ``express_on`` names. Private
+  web search (SearXNG) and the container engine it runs on joined Express on
+  Windows and Linux on 2026-11-13 (the owner, reversing "Express stays
+  container-free" of 2026-11-12): Kazma's engine starts at boot with nobody
+  signed in, so a container no longer waits for a sign-in. macOS Express stays
+  container-free (Docker Desktop starts only at a sign-in there). They are
+  ``best_effort``: a computer that cannot run containers (virtualization off,
+  Docker already in another WSL distro) gets everything else, is told what it
+  lacks, and the install still ends as done.
 * **Full**: everything Kazma has. Full is not a list kept by hand: it is
   every part of :data:`COMPONENTS`, so a part added here joins Full the day it
   is added (``tests/test_install_modes.py``).
@@ -21,10 +29,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-__all__ = ["COMPONENTS", "EXTRA_ALIASES", "MODES", "Component", "by_id", "components_for", "express_ids",
-           "extras_for", "full_ids", "install_overview", "parts_of_extra", "toggle"]
+__all__ = ["COMPONENTS", "EXTRA_ALIASES", "MODES", "OS_NAMES", "Component", "by_id", "components_for",
+           "current_os", "express_ids", "extras_for", "full_ids", "install_overview",
+           "parts_of_extra", "toggle"]
 
 MODES = ("express", "full", "custom")
+
+#: The systems the table knows, as ``postgres_service.Platform.os`` names them.
+OS_NAMES = ("windows", "linux", "macos")
 
 
 @dataclass(frozen=True)
@@ -34,7 +46,12 @@ class Component:
     ``extras``: the Python extras it installs. ``system``: the system
     dependencies it needs (``kazma_core.system_deps.DEPENDENCIES``). ``needs``:
     the parts it cannot work without (chosen with it, dropped with them).
-    ``admin``: installing it on Windows needs an administrator terminal."""
+    ``admin``: installing it on Windows needs an administrator terminal.
+    ``express_on``: the systems (:data:`OS_NAMES`) where an ``express`` part is
+    in Express; empty means every system. ``best_effort``: a part some
+    computers cannot have (no virtualization, a conflicting Docker): when the
+    machine blocks it, the install says what Kazma lacks and still ends as
+    done; a step of it that fails is still a failure."""
 
     id: str
     title: str
@@ -46,6 +63,8 @@ class Component:
     needs: tuple[str, ...] = ()
     size: str = ""
     admin: bool = False
+    express_on: tuple[str, ...] = ()
+    best_effort: bool = False
 
 
 #: Every part, in install order: Kazma's own packages first, then what the
@@ -135,8 +154,10 @@ COMPONENTS: tuple[Component, ...] = (
         extras=("postgres",), admin=True),
     Component(
         "docker", "Docker",
-        "containers: the locked document worker, a container sandbox and private search",
+        "containers: private search, the locked document worker and a container sandbox "
+        "(Windows: Kazma's own engine, started at boot with nobody signed in)",
         "no containers (documents parse in a limited process; no private search)",
+        express=True, express_on=("windows", "linux"), best_effort=True,
         system=("docker",), size="about 1 GB", admin=True),
     Component(
         "document_container", "Locked document worker (a container per document)",
@@ -147,7 +168,7 @@ COMPONENTS: tuple[Component, ...] = (
         "private_search", "Private web search (SearXNG)",
         "web search runs on this machine",
         "web search uses public engines' pages directly (or Tavily with your key)",
-        needs=("docker",)),
+        express=True, express_on=("windows", "linux"), best_effort=True, needs=("docker",)),
     Component(
         "cloud_sandbox", "E2B cloud sandbox",
         "python_exec can run in an E2B cloud sandbox (your E2B key)",
@@ -159,10 +180,12 @@ COMPONENTS: tuple[Component, ...] = (
         "swarm runs are not resumed through Temporal",
         extras=("durable",)),
     Component(
-        "graph_neo4j", "Neo4j memory graph driver",
-        "the memory graph can live in Neo4j (with a Neo4j server)",
-        "the memory graph stays in SQLite",
-        extras=("neo4j",)),
+        "graph_neo4j", "Neo4j memory graph",
+        "a Neo4j server on this machine holds a copy of the memory graph (facts and how they connect), "
+        "for graph queries at scale",
+        "the memory graph stays in SQLite only",
+        express=True, express_on=("windows", "linux"), best_effort=True,
+        extras=("neo4j",), needs=("docker",), size="about 600 MB"),
     Component(
         "service", "Kazma as a service (its guard)",
         "Kazma starts at boot and is restarted when it stops",
@@ -191,8 +214,27 @@ def full_ids() -> list[str]:
     return [c.id for c in COMPONENTS]
 
 
-def express_ids() -> list[str]:
-    return [c.id for c in COMPONENTS if c.express]
+def current_os() -> str:
+    """This computer's system as the table names it (:data:`OS_NAMES`)."""
+    import sys
+
+    if sys.platform.startswith("win"):
+        return "windows"
+    if sys.platform == "darwin":
+        return "macos"
+    return "linux"
+
+
+def _in_express(comp: Component, os_name: str = "") -> bool:
+    """Whether *comp* is in Express on *os_name*. With no system named, only
+    the parts in Express on every system: a part limited to some systems is
+    never assumed."""
+    return comp.express and (not comp.express_on or os_name in comp.express_on)
+
+
+def express_ids(os_name: str = "") -> list[str]:
+    """Express's parts on *os_name* (see :func:`_in_express`), in install order."""
+    return [c.id for c in COMPONENTS if _in_express(c, os_name)]
 
 
 def _with_needs(chosen: set[str]) -> set[str]:
@@ -218,15 +260,15 @@ def _without_dependents(chosen: set[str], dropped: set[str]) -> set[str]:
 
 
 def components_for(mode: str, *, with_: tuple[str, ...] | list[str] = (),
-                   without: tuple[str, ...] | list[str] = ()) -> list[Component]:
-    """The parts a *mode* installs, in install order. ``custom`` starts from
-    Express. *with_* adds parts (and what they need); *without* drops parts
-    (and what needs them). An unknown id raises ``KeyError``."""
+                   without: tuple[str, ...] | list[str] = (), os_name: str = "") -> list[Component]:
+    """The parts a *mode* installs on *os_name*, in install order. ``custom``
+    starts from Express. *with_* adds parts (and what they need); *without*
+    drops parts (and what needs them). An unknown id raises ``KeyError``."""
     if mode not in MODES:
         raise ValueError(f"unknown install mode {mode!r}: choose one of {', '.join(MODES)}")
     for cid in (*with_, *without):
         by_id(cid)
-    chosen = set(full_ids() if mode == "full" else express_ids())
+    chosen = set(full_ids() if mode == "full" else express_ids(os_name))
     chosen = _with_needs(chosen | set(with_))
     dropped = set(without)
     chosen = _without_dependents(chosen - dropped, dropped)
@@ -258,17 +300,24 @@ def parts_of_extra(extra: str) -> list[str]:
     return [comp.id for comp in COMPONENTS if extra in comp.extras]
 
 
-def install_overview(record: dict | None) -> dict:
+def install_overview(record: dict | None, os_name: str = "") -> dict:
     """The install as `kazma setup install` recorded it, for Settings -> Packages.
 
     ``mode`` is None when no install was recorded (a hand install, an older
     one): then no part is called chosen or left out. With a record, a part
     left out reads as not chosen, never as missing: the VM's Express install
     showed the parts Express leaves out as "Missing" (2026-11-07).
+
+    ``new_in_express``: parts Express has on *os_name* now that an Express
+    install did not choose, and the owner did not leave out (``without``):
+    the table gained them after it ran. ``kazma setup install`` adds them;
+    ``kazma update`` never does (they can need administrator rights, a
+    download of about 1 GB and a Windows restart).
     """
     install = (record or {}).get("install") or {}
     mode = install.get("mode") if install.get("mode") in MODES else None
     chosen = set(install.get("components") or []) if mode else set()
+    declined = set(install.get("without") or [])
     results = install.get("results") or {}
     parts = []
     for comp in COMPONENTS:
@@ -276,10 +325,12 @@ def install_overview(record: dict | None) -> dict:
         parts.append({
             "id": comp.id,
             "title": comp.title,
-            "express": comp.express,
+            "express": _in_express(comp, os_name),
             "extras": list(comp.extras),
             "chosen": (comp.id in chosen) if mode else None,
             "ok": result.get("ok"),
         })
+    new = ([cid for cid in express_ids(os_name) if cid not in chosen and cid not in declined]
+           if mode == "express" else [])
     return {"mode": mode, "at": install.get("at"), "chosen": len(chosen) if mode else 0,
-            "total": len(COMPONENTS), "parts": parts}
+            "total": len(COMPONENTS), "parts": parts, "new_in_express": new}

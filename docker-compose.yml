@@ -64,7 +64,10 @@ services:
   # Point host Kazma at: KAZMA_SEARXNG_URL=http://127.0.0.1:8088
   searxng:
     profiles: ["search"]
-    image: docker.io/searxng/searxng:latest
+    # Pinned by version and digest (2026-11-13): `latest` ran whatever the
+    # registry served at each start. Dependabot's docker-compose updates
+    # propose new ones as reviewed pull requests.
+    image: docker.io/searxng/searxng:2026.11.12-de722ab1b@sha256:0b104e2e1117b0ca83a36f3ac6ecda7d9ee948ccea6ead74750a03e1b856229a
     container_name: kazma-searxng
     ports:
       - "${SEARXNG_PUBLISH_HOST:-127.0.0.1}:${SEARXNG_HOST_PORT:-8088}:8080"

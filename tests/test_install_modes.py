@@ -71,10 +71,39 @@ def _needs_closure(cid: str) -> set[str]:
     return seen
 
 
-def test_express_needs_no_docker():
-    for comp in ic.components_for("express"):
-        assert "docker" not in comp.system, comp.id
-        assert "docker" not in _needs_closure(comp.id), comp.id
+def _needs_containers(comp) -> bool:
+    return "docker" in comp.system or "docker" in _needs_closure(comp.id)
+
+
+def express_failing_for_want_of_docker(components=ic.COMPONENTS) -> list[tuple[str, str]]:
+    """(system, part) for every Express part that needs containers and is not
+    best effort: on a computer that cannot run them, it would fail Express."""
+    out = []
+    for os_name in ic.OS_NAMES:
+        for comp in components:
+            if ic._in_express(comp, os_name) and _needs_containers(comp) and not comp.best_effort:
+                out.append((os_name, comp.id))
+    return out
+
+
+def test_express_never_fails_for_want_of_docker():
+    """The owner (2026-11-13): SearXNG and Neo4j install by default, on
+    Kazma's container engine. Express on a computer that cannot run
+    containers must still end as done, so every Express part that needs them
+    is best effort; macOS Express stays container-free (Docker Desktop waits
+    for a sign-in there)."""
+    assert express_failing_for_want_of_docker() == []
+    for os_name in ("windows", "linux"):
+        assert {"docker", "private_search", "graph_neo4j"} <= set(ic.express_ids(os_name)), os_name
+    for comp in ic.components_for("express", os_name="macos"):
+        assert not _needs_containers(comp), comp.id
+    assert not any(_needs_containers(c) for c in ic.components_for("express")), "no system named: none"
+    # Negative control: Neo4j in Express without best effort.
+    import dataclasses
+
+    planted = tuple(dataclasses.replace(c, best_effort=False) if c.id == "graph_neo4j" else c
+                    for c in ic.COMPONENTS)
+    assert ("windows", "graph_neo4j") in express_failing_for_want_of_docker(planted)
 
 
 def test_every_part_says_what_it_gives_and_what_kazma_lacks():
@@ -120,9 +149,18 @@ def quickstart_parts(text: str) -> list[tuple[str, str, str]]:
     return rows
 
 
+def _express_mark(comp) -> str:
+    """The quickstart's Express column: "yes" everywhere, the systems by name
+    for a part limited to some (``express_on``), empty otherwise."""
+    if not comp.express:
+        return ""
+    names = {"windows": "Windows", "linux": "Linux", "macos": "macOS"}
+    return ", ".join(names[s] for s in comp.express_on) if comp.express_on else "yes"
+
+
 def test_the_quickstart_lists_every_part_as_the_table_says():
     text = (ROOT / "docs" / "docs" / "guide" / "quickstart.md").read_text(encoding="utf-8")
-    expected = [(c.title, "yes" if c.express else "", c.lacks) for c in ic.COMPONENTS]
+    expected = [(c.title, _express_mark(c), c.lacks) for c in ic.COMPONENTS]
     assert quickstart_parts(text) == expected
     # Negative control: a part the page does not name.
     assert quickstart_parts(text) != expected + [("Something new", "", "nothing")]
@@ -226,6 +264,7 @@ class Box:
         self.langs: tuple[str, ...] | None = None
         self.soffice = self.clam = self.scheduled = self.docker = self.node = False
         self.models = self.chromium = self.service = self.kazma_up = self.pg = self.searxng = False
+        self.neo4j = False
         self.embedding_model = False
         self.container = False
         #: How many /healthz asks a just-started SearXNG leaves unanswered
@@ -240,7 +279,8 @@ class Box:
         self.opened: list[str] = []
         self.root = tmp_path / "kazma"
         for rel in ("scripts/ocr_models.py", "scripts/service/install_service.py",
-                    "scripts/document_worker_image.py", "docker-compose.yml"):
+                    "scripts/document_worker_image.py", "docker-compose.yml", "deploy/docker-compose.neo4j.yml",
+                    "scripts/service/kazma_guard.py"):
             (self.root / rel).parent.mkdir(parents=True, exist_ok=True)
             (self.root / rel).write_text("", encoding="utf-8")
         (self.root / "deploy" / "document-worker").mkdir(parents=True)
@@ -349,7 +389,13 @@ class Box:
             self.container = True
             return done()
         if "compose" in argv:
-            self.searxng = True
+            if "kazma-neo4j" in argv:
+                self.neo4j = True
+            else:
+                self.searxng = True
+            return done()
+        if "kazma_guard.py" in line and "--reload" in argv:
+            self.reloaded = getattr(self, "reloaded", 0) + 1
             return done()
         if "Get-CimInstance" in line:
             return done(0, self.virtualization)
@@ -361,6 +407,8 @@ class Box:
         return done()
 
     def answers(self, url: str) -> bool:
+        if url == "http://127.0.0.1:7474/":
+            return self.neo4j
         if url.endswith("/healthz"):
             if not self.searxng or self.searxng_silent_for is None:
                 return False
@@ -439,27 +487,42 @@ def _installs(box: Box) -> list[str]:
     return [a[a.index("--id") + 1] for a in box.ran if a[:2] == ["winget", "install"]]
 
 
-def test_express_installs_everything_but_docker_and_a_second_run_does_nothing(box, capsys):
+def test_express_installs_the_engine_searxng_and_neo4j_and_a_second_run_does_nothing(box, capsys):
+    """Express on Windows: every everyday part, and (2026-11-13) private web
+    search and the Neo4j memory graph on Kazma's own engine, never Docker
+    Desktop. Each service gets its generated secret before it starts, and
+    Kazma is pointed at it."""
     from kazma_cli.install import install
 
     machine = _machine(box, answers=["", ""])  # Express (the default), then yes
     assert install(_options(), machine) == 0
     out = capsys.readouterr().out
     assert machine.asked == ["Choose 1, 2 or 3 [1]: ", "Install now? [Y/n] "]
-    assert box.extras == set(ic.extras_for(ic.components_for("express")))
+    assert box.extras == set(ic.extras_for(ic.components_for("express", os_name="windows")))
+    assert "neo4j" in box.extras
     assert _installs(box) == ["Microsoft.VCRedist.2015+.x64", "UB-Mannheim.TesseractOCR",
                               "TheDocumentFoundation.LibreOffice", "Cisco.ClamAV", "OpenJS.NodeJS.LTS"]
     assert box.models and box.embedding_model and box.service and box.scheduled and box.langs and "ara" in box.langs
     assert "Docker.DockerDesktop" not in _installs(box)
+    assert box.engine_actions == ["engine:distro", "engine:docker", "engine:cli", "engine:context",
+                                  "engine:task", "engine:shutdown", "engine:record"]
+    assert box.searxng and box.neo4j
+    env = (box.home / ".env").read_text(encoding="utf-8")
+    for line in ("KAZMA_SEARXNG_URL=http://127.0.0.1:8088", "KAZMA_NEO4J_URL=bolt://127.0.0.1:7687",
+                 "KAZMA_NEO4J_DEFAULT=1"):
+        assert line in env, line
+    for secret in ("SEARXNG_SECRET", "KAZMA_NEO4J_PASSWORD"):
+        value = [ln.split("=", 1)[1] for ln in env.splitlines() if ln.startswith(secret + "=")]
+        assert value and len(value[0]) >= 64, secret
     assert box.opened == ["http://127.0.0.1:9090/setup"], out  # the setup guide
     record = json.loads((box.home / "setup_record.json").read_text(encoding="utf-8"))["install"]
-    assert record["mode"] == "express" and record["components"] == ic.express_ids()
+    assert record["mode"] == "express" and record["components"] == ic.express_ids("windows")
     assert all(r["ok"] for r in record["results"].values()), record["results"]
     log = (box.home / "install.log").read_text(encoding="utf-8")
     assert "The plan:" in log and "Successfully installed" in log
     # Not chosen: named on screen; what Kazma lacks without each is in the log.
-    assert "Left out (9): " in out and "Docker" in out
-    assert "Not chosen" in log and ic.by_id("docker").lacks in log
+    assert "Left out (6): " in out and "Locked document worker" in out
+    assert "Not chosen" in log and ic.by_id("document_container").lacks in log
 
     box.ran.clear()
     again = _machine(box, answers=[])
@@ -507,11 +570,104 @@ def test_full_where_docker_cannot_run_installs_the_rest_and_says_why(box, capsys
     assert "Docker cannot run here: virtualization is turned off" in out
     assert "Docker.DockerDesktop" not in _installs(box) and not box.container and not box.searxng
     assert box.pg and box.chromium and box.models and box.service
-    assert box.extras == set(ic.extras_for(ic.components_for("full")))
+    # The Neo4j driver is not installed where Neo4j cannot run.
+    assert box.extras == set(ic.extras_for(ic.components_for("full"))) - {"neo4j"}
     results = json.loads((box.home / "setup_record.json").read_text(encoding="utf-8"))["install"]["results"]
     assert results["docker"]["ok"] is False and "firmware" in results["docker"]["detail"]
     assert results["document_container"]["ok"] is False and results["postgres"]["ok"] is True
     assert ic.by_id("private_search").lacks in out
+
+
+def test_express_where_containers_cannot_run_ends_as_done_and_says_what_kazma_lacks(box, capsys):
+    """The owner (2026-11-13): SearXNG and Neo4j in Express. A computer with
+    virtualization off gets every other part, is told what it lacks, and the
+    install ends as done: Fable's review found a blocked part made every run
+    end "stopped short" forever."""
+    from kazma_cli.install import EXIT_DONE, install
+
+    box.virtualization = _facts("Dell Inc. OptiPlex", False, False)
+    assert install(_options(yes=True), _machine(box)) == EXIT_DONE
+    out = capsys.readouterr().out
+    assert "Not available on this computer, and what Kazma lacks:" in out
+    for part in ("docker", "private_search", "graph_neo4j"):
+        assert ic.by_id(part).lacks in out, part
+    assert not box.searxng and not box.neo4j and box.engine_actions == []
+    assert box.service and box.models and box.embedding_model, "everything else is installed"
+    # A second run does nothing more and still ends as done.
+    assert install(_options(yes=True), _machine(box)) == EXIT_DONE
+
+
+def test_control_a_blocked_part_that_is_not_best_effort_fails_the_install(box, capsys, monkeypatch):
+    """Negative control: the same machine with the container parts not marked
+    best effort ends as not done, as every run did before 2026-11-13."""
+    import dataclasses
+
+    from kazma_cli.install import EXIT_NOT_DONE, install
+
+    old = tuple(dataclasses.replace(c, best_effort=False) for c in ic.COMPONENTS)
+    monkeypatch.setattr(ic, "COMPONENTS", old)
+    monkeypatch.setattr(ic, "_BY_ID", {c.id: c for c in old})
+    box.virtualization = _facts("Dell Inc. OptiPlex", False, False)
+    assert install(_options(yes=True), _machine(box)) == EXIT_NOT_DONE
+
+
+def test_express_without_wsl_asks_for_the_restart_then_the_next_run_finishes(box, capsys):
+    from kazma_cli.install import EXIT_DONE, EXIT_RESTART, install
+
+    box.wsl = False
+    assert install(_options(yes=True), _machine(box)) == EXIT_RESTART
+    out = capsys.readouterr().out
+    assert "Restart Windows to finish WSL, then run setup again" in out
+    assert box.engine_actions == ["engine:wsl"] and not box.searxng and not box.neo4j
+    assert box.service, "the rest is installed before the restart"
+    assert install(_options(yes=True), _machine(box)) == EXIT_DONE
+    assert box.searxng and box.neo4j
+
+
+def test_a_part_left_out_by_name_stays_out_on_the_next_run(box, capsys):
+    """Fable's review: `--without` was forgotten, so a re-run (or Express
+    gaining a part) installed what the owner had left out."""
+    from kazma_cli.install import EXIT_DONE, install
+
+    assert install(_options(yes=True, without=["graph_neo4j"]), _machine(box)) == EXIT_DONE
+    assert box.searxng and not box.neo4j
+    record = json.loads((box.home / "setup_record.json").read_text(encoding="utf-8"))["install"]
+    assert record["without"] == ["graph_neo4j"]
+    assert install(_options(yes=True), _machine(box)) == EXIT_DONE
+    assert not box.neo4j, "a plain re-run keeps it out"
+    assert install(_options(yes=True, with_=["graph_neo4j"]), _machine(box)) == EXIT_DONE
+    assert box.neo4j, "asking for it by name brings it in"
+
+
+def test_an_express_install_from_before_gains_the_new_parts_on_a_rerun(box, capsys):
+    """An Express install recorded before SearXNG and Neo4j joined Express:
+    Settings names them (install_overview), and a plain re-run adds them."""
+    from kazma_cli.install import EXIT_DONE, install
+
+    assert install(_options(yes=True, without=["docker"]), _machine(box)) == EXIT_DONE
+    record_path = box.home / "setup_record.json"
+    data = json.loads(record_path.read_text(encoding="utf-8"))
+    data["install"]["without"] = []  # what a record from before 2026-11-13 holds
+    record_path.write_text(json.dumps(data), encoding="utf-8")
+    overview = ic.install_overview(data, "windows")
+    assert overview["new_in_express"] == ["docker", "private_search", "graph_neo4j"]
+    assert ic.install_overview(data, "macos")["new_in_express"] == []
+    assert install(_options(yes=True), _machine(box)) == EXIT_DONE
+    assert box.searxng and box.neo4j
+    after = json.loads(record_path.read_text(encoding="utf-8"))
+    assert ic.install_overview(after, "windows")["new_in_express"] == []
+
+
+def test_a_running_kazma_is_reloaded_to_use_the_services_set_up(box, capsys):
+    """Kazma reads .env when it starts: when the service was already running,
+    setup asks its guard to reload it once no chat is running."""
+    from kazma_cli.install import EXIT_DONE, install
+
+    assert install(_options(yes=True, without=["docker"]), _machine(box)) == EXIT_DONE
+    assert box.service and not getattr(box, "reloaded", 0)
+    assert install(_options(yes=True, without=[], with_=["private_search", "graph_neo4j"]),
+                   _machine(box)) == EXIT_DONE
+    assert box.searxng and box.neo4j and box.reloaded == 1
 
 
 def test_full_installs_kazmas_engine_not_docker_desktop(box, capsys):
@@ -566,8 +722,10 @@ def test_a_searxng_that_never_answers_fails_its_step_in_bounded_time(box, capsys
 def test_full_installs_wsl_first_and_asks_for_the_restart(box, capsys):
     from kazma_cli.install import install
 
+    from kazma_cli.install import EXIT_RESTART
+
     box.wsl = False
-    assert install(_options(mode="full", yes=True), _machine(box)) in (0, 1)
+    assert install(_options(mode="full", yes=True), _machine(box)) == EXIT_RESTART
     out = capsys.readouterr().out
     assert box.engine_actions == ["engine:wsl"], "the engine's other steps wait for the restart"
     assert "after Windows restarts" in out
@@ -634,7 +792,7 @@ def test_without_a_terminal_nothing_is_done_and_packages_only_installs_packages(
     assert install(_options(), _machine(box, interactive=False)) == 1
     assert "no terminal to ask" in capsys.readouterr().out and not box.extras
     assert install(_options(packages_only=True), _machine(box, interactive=False)) in (0, 1)
-    assert box.extras == set(ic.extras_for(ic.components_for("express")))
+    assert box.extras == set(ic.extras_for(ic.components_for("express", os_name="windows")))
     assert not _installs(box) and not box.service
 
 
@@ -697,7 +855,7 @@ def test_an_install_shows_a_short_summary_and_logs_every_step(box, capsys):
     first = out.splitlines()[0]
     assert first == f"Kazma {get_version()}: setup on Windows, with winget", first
     before_question = out[: out.index("steps to run")]
-    assert "To install (" in before_question and "Left out (9): " in before_question
+    assert "To install (" in before_question and "Left out (6): " in before_question
     assert "Meaning search" in before_question and "(bge-m3)" not in before_question
     assert "winget install" not in out and "The plan:" not in out
     assert len(before_question.splitlines()) <= 20, before_question
@@ -828,7 +986,7 @@ def test_the_meaning_search_model_is_downloaded_by_the_install(box, capsys):
     with its model on disk, and the install downloads it."""
     from kazma_cli.install import install
 
-    box.extras = set(ic.extras_for(ic.components_for("express")))  # packages there, model not
+    box.extras = set(ic.extras_for(ic.components_for("express", os_name="windows")))  # packages there, model not
     assert install(_options(yes=True), _machine(box)) == 0
     downloads = [a for a in box.ran if "download_local_model" in " ".join(a)]
     assert len(downloads) == 1 and box.embedding_model

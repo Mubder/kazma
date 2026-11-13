@@ -1,26 +1,34 @@
-# Optional Neo4j for Kazma belief dual-write (not required for single-node).
+# Neo4j for Kazma's memory graph: a copy of the beliefs SQLite holds (SQLite
+# stays the source of truth), dual-written as facts change.
 #
-#   Set KAZMA_NEO4J_PASSWORD to a strong password, then:
-#   docker compose -f deploy/docker-compose.neo4j.yml up -d
-#
-# Then either:
-#   export KAZMA_NEO4J_DEFAULT=1
-#   export KAZMA_NEO4J_PASSWORD=YOUR_PASSWORD_HERE
-#   # optional: KAZMA_NEO4J_URL=bolt://localhost:7687
-#
-# Or Settings → Memory → Graph store = Neo4j, Save, Test, Sync.
+# `kazma setup install` starts it on Windows and Linux (Express and Full,
+# kazma_core.container_services): it keeps a generated KAZMA_NEO4J_PASSWORD in
+# the install's .env, runs
+#   docker compose -f deploy/docker-compose.neo4j.yml --env-file .env -p kazma-graph up -d kazma-neo4j
+# and points Kazma at it (KAZMA_NEO4J_URL, KAZMA_NEO4J_DEFAULT=1 in .env).
+# By hand: set KAZMA_NEO4J_PASSWORD in .env to a long random value, then run
+# the line above; or Settings -> Memory -> Graph store = Neo4j, Save, Test, Sync.
 #
 # Kazma still paints Dashboard topology from SQLite; Neo4j receives dual-writes.
 
+name: kazma-graph
+
 services:
   kazma-neo4j:
-    image: neo4j:5
+    # Pinned by version and digest (2026-11-13): `neo4j:5` ran whatever the
+    # registry served at each start. 5.26 is Neo4j's long-term-support line.
+    image: neo4j:5.26.29@sha256:89d577f2e49606de76441eca8cf7a0fe88e594cbaac4d2a3d86c6e59676e2b1e
     container_name: kazma-neo4j
     ports:
       - "127.0.0.1:7474:7474"
       - "127.0.0.1:7687:7687"
     environment:
       NEO4J_AUTH: neo4j/${KAZMA_NEO4J_PASSWORD:?Set KAZMA_NEO4J_PASSWORD to a strong password}
+      # Bounded for a computer that also runs Kazma: Neo4j's own default sizes
+      # its heap and page cache from the machine's memory.
+      NEO4J_server_memory_heap_initial__size: "${KAZMA_NEO4J_HEAP:-512m}"
+      NEO4J_server_memory_heap_max__size: "${KAZMA_NEO4J_HEAP:-512m}"
+      NEO4J_server_memory_pagecache_size: "${KAZMA_NEO4J_PAGECACHE:-512m}"
     volumes:
       - kazma-neo4j-data:/data
     restart: unless-stopped

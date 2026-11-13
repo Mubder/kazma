@@ -18,7 +18,9 @@
 # Required in .env: KAZMA_SECRET, KAZMA_VAULT_KEY, POSTGRES_PASSWORD
 services:
   db:
-    image: postgres:16-alpine
+    # Pinned by version and digest (tests/test_container_services.py);
+    # Dependabot's docker-compose updates propose new ones.
+    image: postgres:16.16-alpine@sha256:0adbf25a9e96d38823bb813f3ac0ed41fadb665c88f1df7fe6dbfb060cbdc106
     container_name: kazma-db
     environment:
       POSTGRES_USER: kazma
@@ -69,7 +71,8 @@ services:
     restart: unless-stopped
 
   nginx:
-    image: nginx:1.27-alpine
+    # The stable line (1.27 no longer gets fixes), pinned by version and digest.
+    image: nginx:1.28.3-alpine@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236
     container_name: kazma-nginx
     ports:
       - "${PUBLISH_HOST:-127.0.0.1}:${HOST_PORT:-9090}:80"

@@ -258,8 +258,10 @@ test server cannot start; its CI job sets it.
 | `KAZMA_GRAPH_PROVIDER` | `sqlite` | No | `neo4j` puts the knowledge graph on Neo4j, as does setting `KAZMA_NEO4J_URL` / `NEO4J_URI` or `KAZMA_NEO4J_DEFAULT=1`. These only fill settings that are empty: a provider already chosen in Settings wins. |
 | `KAZMA_NEO4J_URL` | `bolt://localhost:7687` | No | Neo4j address (`NEO4J_URI` / `NEO4J_URL` are accepted too); setting it selects Neo4j. |
 | `KAZMA_NEO4J_USER` | `neo4j` | No | Neo4j user (`NEO4J_USER` is accepted too). |
-| `KAZMA_NEO4J_PASSWORD` | unset | No | Neo4j password (`NEO4J_PASSWORD` is accepted too); fills an empty password only. |
-| `KAZMA_NEO4J_DEFAULT` | unset | No | `1` selects Neo4j with the defaults above; the `docker-compose.neo4j` profile sets it. |
+| `KAZMA_NEO4J_PASSWORD` | unset | No | Neo4j password (`NEO4J_PASSWORD` is accepted too); fills an empty password only. `kazma setup install` keeps a generated one in the install's `.env` before it starts Neo4j, and `deploy/docker-compose.neo4j.yml` refuses to start without it. |
+| `KAZMA_NEO4J_DEFAULT` | unset | No | `1` selects Neo4j with the defaults above; `kazma setup install` writes it into `.env` when it sets Neo4j up (Express and Full on Windows and Linux). |
+| `KAZMA_NEO4J_HEAP` | `512m` | No | `deploy/docker-compose.neo4j.yml`: Neo4j's heap (initial and largest). Read by compose from the install's `.env`, not by Kazma. |
+| `KAZMA_NEO4J_PAGECACHE` | `512m` | No | `deploy/docker-compose.neo4j.yml`: Neo4j's page cache. Read by compose from the install's `.env`, not by Kazma. |
 | `KAZMA_AUTO_STORE_BELIEFS` | `conservative` | No | Which facts the memory extractor saves from a conversation without being asked: `off`, `conservative` (default) or `aggressive` (every extracted belief — the old behaviour). Wins over `memory.auto_store_beliefs`. |
 | `KAZMA_TRANSCRIPT_RECALL` | on | No | `0` stops searching past Web chat transcripts when memory recall comes back empty (ConfigStore `memory.transcript_fallback`; the env value wins). Transcript text reaches the model fenced as untrusted data. |
 

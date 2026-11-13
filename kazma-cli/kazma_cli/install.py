@@ -3,7 +3,10 @@
 The owner's three installs (2026-11-07), from one table
 (:mod:`kazma_core.install_components`):
 
-* **Express** (the default): the least Kazma can lack, with no Docker.
+* **Express** (the default): the least Kazma can lack. On Windows and Linux
+  it includes private web search (SearXNG) on Kazma's container engine; a
+  computer that cannot run containers gets everything else and is told what
+  it lacks (``Component.best_effort``).
 * **Full**: every part, Docker and PostgreSQL among them.
 * **Custom**: a checklist; each part says what Kazma lacks without it.
 
@@ -39,6 +42,7 @@ import webbrowser
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from kazma_cli.setup import (
     _SYSTEM_ATTEMPTS,
@@ -51,16 +55,24 @@ from kazma_cli.setup import (
     run_system_step,
 )
 
+if TYPE_CHECKING:
+    from kazma_core.container_services import ContainerService
+
 #: The Windows task ``scripts/service/install_service.py`` registers.
 SERVICE_TASK = "KazmaAgent"
 #: The systemd user unit and the launchd label it writes.
 SERVICE_UNIT = "kazma"
 SERVICE_LABEL = "com.kazma.agent"
-#: Where SearXNG answers on this machine (docker-compose.yml's search profile).
+#: Where SearXNG answers on this machine (its row in kazma_core.container_services).
 SEARXNG_URL = "http://127.0.0.1:8088"
 #: Free space each mode asks for before it starts (PyTorch alone is ~2 GB;
-#: Docker's disk and the document worker image take most of Full's).
-DISK_NEEDED = {"express": 8 * 2**30, "full": 25 * 2**30, "custom": 8 * 2**30}
+#: Kazma's engine and SearXNG about 2 GB more; Docker's disk and the document
+#: worker image take most of Full's).
+DISK_NEEDED = {"express": 10 * 2**30, "full": 25 * 2**30, "custom": 10 * 2**30}
+#: The install's exit codes. ``EXIT_RESTART``: everything that could be done
+#: is done and Windows must restart (WSL) before the rest; setup.ps1 says so
+#: instead of "stopped short", and the next run continues.
+EXIT_DONE, EXIT_NOT_DONE, EXIT_NOTHING_DONE, EXIT_RESTART = 0, 1, 2, 3
 #: How long the end waits for a freshly started Kazma to answer.
 ANSWER_WAIT_S = 240.0
 #: How long setup waits for the SearXNG it just started to answer before the
@@ -69,7 +81,8 @@ ANSWER_WAIT_S = 240.0
 SEARXNG_READY_WAIT_S = 120.0
 
 _MODE_TEXT = {
-    "express": "everything that needs no Docker",
+    "express": "the everyday parts, with private web search and the memory graph where this computer "
+               "can run containers (Windows may restart once)",
     "full": "every part, Docker and PostgreSQL included (Windows may restart once)",
     "custom": "choose each part",
 }
@@ -341,6 +354,7 @@ def _check_parts(parts, machine: Machine, platform, docker: str = "system") -> t
     """Each part as found, and the system dependencies as ``kazma setup
     system`` sees them. With *docker* ``kazma`` (Windows) the Docker part is
     Kazma's own engine: a Docker Desktop on the machine is not it."""
+    from kazma_core import container_services
     from kazma_core.system_deps import DepState, check_all
 
     extras = _extras_present()
@@ -381,21 +395,8 @@ def _check_parts(parts, machine: Machine, platform, docker: str = "system") -> t
             ok, detail = _postgres_state(platform, machine)
         elif part.id == "document_container":
             ok, detail = _container_state(machine, root)
-        elif part.id == "private_search":
-            from kazma_core.security.searxng_secret import PLACEHOLDER, SECRET_VAR
-
-            url = _env_value(env_path, "KAZMA_SEARXNG_URL")
-            secret = _env_value(env_path, SECRET_VAR)
-            if not url:
-                ok, detail = False, "KAZMA_SEARXNG_URL is not set"
-            elif not secret or secret == PLACEHOLDER:
-                # Started without one, SearXNG runs on the placeholder key
-                # docker-compose.yml falls back to (2026-11-11).
-                ok, detail = False, f"{SECRET_VAR} is not set: SearXNG runs on the placeholder key"
-            else:
-                answered = machine.answers(url.rstrip("/") + "/healthz")
-                ok, detail = (True, f"SearXNG answers at {url}") if answered else (
-                    False, f"SearXNG does not answer at {url}")
+        elif container_services.by_part(part.id) is not None:
+            ok, detail = _container_service_state(container_services.by_part(part.id), machine, env_path)
         elif part.id == "service":
             ok, detail = _service_state(platform, machine.run)
         found[part.id] = PartState(ok, detail)
@@ -447,6 +448,65 @@ def _container_state(machine: Machine, root: Path | None) -> tuple[bool | None, 
     return False, ("the image is not built" if not image else "documents do not use the container profile")
 
 
+def _configured_in_settings(svc: ContainerService) -> str:
+    """The address Kazma's own settings give *svc*, set from the Settings
+    page or by hand: an install configured that way is judged by it, and
+    setup never starts a second copy beside it."""
+    try:
+        if svc.part == "private_search":
+            from kazma_core.config_store import get_config_store
+
+            return str(get_config_store().get("search.searxng_url") or "").strip()
+        if svc.part == "graph_neo4j":
+            from kazma_core.memory.backends import get_backends_cfg
+
+            graph = get_backends_cfg().get("graph") or {}
+            if str(graph.get("provider") or "").lower() == "neo4j":
+                return str(graph.get("url") or "").strip()
+    except (RuntimeError, OSError, ValueError, ImportError):  # the settings store may be away: judged by .env alone
+        return ""
+    return ""
+
+
+def _tcp_answers(url: str) -> bool:
+    """Whether the host and port of *url* accept a connection (a bolt:// address)."""
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(url)
+        with socket.create_connection((parts.hostname or "127.0.0.1", parts.port or 0), timeout=3):
+            return True
+    except (OSError, ValueError):
+        return False
+
+
+def _container_service_state(svc: ContainerService, machine: Machine, env_path: Path) -> tuple[bool | None, str]:
+    """A container service as found: Kazma told where it is, its secrets set
+    (when setup manages it through ``.env``), and its address answering."""
+    from kazma_core.container_services import secret_is_set
+
+    default = dict(svc.kazma_env)[svc.url_var]
+    url = _env_value(env_path, svc.url_var)
+    managed = bool(url)
+    url = url or _configured_in_settings(svc)
+    if not url:
+        return False, f"{svc.url_var} is not set"
+    if managed:
+        unset = [name for name in svc.secrets
+                 if not secret_is_set(_env_value(env_path, name), svc.placeholders)]
+        if unset:
+            # Started without one, it would run on a shipped placeholder (or,
+            # for Neo4j, refuse to start): docker-compose.yml's fallback.
+            return False, f"{', '.join(unset)} is not set"
+    if url.rstrip("/") == default.rstrip("/"):
+        answered = machine.answers(svc.ready_url)
+    elif url.startswith(("http://", "https://")):
+        answered = machine.answers(url.rstrip("/") + ("/healthz" if svc.part == "private_search" else "/"))
+    else:
+        answered = _tcp_answers(url)
+    return (True, f"{svc.title} answers at {url}") if answered else (False, f"{svc.title} does not answer at {url}")
+
+
 # -- the plan -----------------------------------------------------------------------------------
 
 
@@ -486,6 +546,7 @@ def build_plan(parts, found: dict[str, PartState], states, machine: Machine, pla
     """The steps that put in what *found* says is missing, in table order.
     With *docker* ``kazma`` (Windows) a container part brings Kazma's own
     engine, never Docker Desktop (docs/plans/CONTAINERS_WITHOUT_A_SIGN_IN_PLAN.md)."""
+    from kazma_core import container_services
     from kazma_core.install_components import extras_for
     from kazma_core.postgres_service import Step
     from kazma_core.system_deps import install_plan
@@ -547,25 +608,32 @@ def build_plan(parts, found: dict[str, PartState], states, machine: Machine, pla
         plan.append(PlannedStep("document_container", Step(
             "documents use the container profile", action="container_profile",
             shown="setting security.execution.document_worker_isolation = container")))
-    if "private_search" in todo_ids and root is not None:
-        env_path = machine.env_path or _env_path()
-        # A generated key before SearXNG starts: compose falls back to the
-        # placeholder settings.yml ships (2026-11-11). Compose reads it from
-        # the same .env (--env-file); a key already there is kept.
-        plan.append(PlannedStep("private_search", Step(
-            "keep a generated SearXNG secret key", action="searxng_secret",
-            shown=f"SEARXNG_SECRET=<generated> in {env_path.name}, unless one is set")))
-        plan.append(PlannedStep("private_search", Step(
-            "start SearXNG (docker compose, search profile)",
-            (docker, "compose", "-f", str(root / "docker-compose.yml"), "--env-file", str(env_path),
-             "--profile", "search", "up", "-d", "searxng")),
+    services = [(p, container_services.by_part(p.id)) for p in todo]
+    services = [(p, svc) for p, svc in services if svc is not None and root is not None]
+    env_path = machine.env_path or _env_path()
+    for part, svc in services:
+        # Its secrets before it starts: compose falls back to a shipped
+        # placeholder (SearXNG, 2026-11-11) or refuses (Neo4j). Compose reads
+        # them from the same .env (--env-file); a value already there is kept.
+        for name in svc.secrets:
+            plan.append(PlannedStep(part.id, Step(
+                f"keep a generated {svc.title} secret ({name})", action=f"service_secret:{svc.part}:{name}",
+                shown=f"{name}=<generated> in {env_path.name}, unless one is set")))
+        plan.append(PlannedStep(part.id, Step(
+            f"start {svc.title} (docker compose)", container_services.compose_up_argv(svc, docker, root, env_path)),
             attempts=_SYSTEM_ATTEMPTS, cwd=str(root)))
-        plan.append(PlannedStep("private_search", Step(f"point Kazma's web search at {SEARXNG_URL}",
-                                                       action="searxng_env",
-                                                       shown=f"KAZMA_SEARXNG_URL={SEARXNG_URL} in .env")))
-        plan.append(PlannedStep("private_search", Step(
-            "wait for SearXNG to answer", action="searxng_ready",
-            shown=f"GET {SEARXNG_URL}/healthz, for up to {int(SEARXNG_READY_WAIT_S)} s")))
+        plan.append(PlannedStep(part.id, Step(
+            f"point Kazma at {svc.title}", action=f"service_env:{svc.part}",
+            shown=", ".join(f"{k}={v}" for k, v in svc.kazma_env) + f" in {env_path.name}")))
+        plan.append(PlannedStep(part.id, Step(
+            f"wait for {svc.title} to answer", action=f"service_ready:{svc.part}",
+            shown=f"GET {svc.ready_url}, for up to {int(svc.ready_wait_s)} s")))
+    if services and found.get("service", PartState(False, "")).ok and root is not None:
+        # A running Kazma reads .env when it starts: ask its guard to reload
+        # it, once no chat turn runs, so it uses the services just set up.
+        plan.append(PlannedStep(services[-1][0].id, Step(
+            "reload Kazma so it uses them (when no chat is running)",
+            (python, str(root / "scripts" / "service" / "kazma_guard.py"), "--reload", "--when-idle"))))
     if "service" in todo_ids and root is not None:
         plan.append(PlannedStep("service", Step(
             "install Kazma as a service (its guard starts at boot)",
@@ -656,22 +724,51 @@ def _postgres(log) -> tuple[bool, str]:
     return code == 0, "" if code == 0 else f"kazma setup postgres ended with {code} (see above)"
 
 
-def _wait_for_searxng(machine: Machine) -> tuple[bool, str]:
-    """The SearXNG just started answers before the part is judged, within
-    SEARXNG_READY_WAIT_S. The time each try takes counts, as in ``_finish``:
-    a refused connection on Windows takes about 2 s."""
-    url = SEARXNG_URL.rstrip("/") + "/healthz"
+def _wait_for_service(svc: ContainerService, machine: Machine) -> tuple[bool, str]:
+    """A container service just started answers before its part is judged,
+    within its ``ready_wait_s``. The time each try takes counts, as in
+    ``_finish``: a refused connection on Windows takes about 2 s."""
+    address = dict(svc.kazma_env)[svc.url_var]
     spent = 0.0
     while True:
         started = time.monotonic()
-        answered = machine.answers(url)
+        answered = machine.answers(svc.ready_url)
         spent += time.monotonic() - started
         if answered:
             return True, f"answers after {int(spent)} s"
-        if spent >= SEARXNG_READY_WAIT_S:
-            return False, f"SearXNG did not answer at {SEARXNG_URL} within {int(SEARXNG_READY_WAIT_S)} s"
+        if spent >= svc.ready_wait_s:
+            return False, f"{svc.title} did not answer at {address} within {int(svc.ready_wait_s)} s"
         machine.sleep(3.0)
         spent += 3.0
+
+
+def _run_service_step(action: str, machine: Machine, env_path: Path, log) -> tuple[bool, str]:
+    """``service_secret:<part>:<NAME>``, ``service_env:<part>`` or ``service_ready:<part>``."""
+    from kazma_core.container_services import by_part, ensure_secret
+
+    kind, _, rest = action.partition(":")
+    part, _, name = rest.partition(":")
+    svc = by_part(part)
+    if svc is None:
+        return False, f"no container service for {part!r}"
+    if kind == "service_secret":
+        try:
+            wrote = ensure_secret(env_path, name, svc.placeholders)
+        except OSError as exc:
+            return False, str(exc)
+        log(f"{name} generated and kept" if wrote else f"{name} already set: kept")
+        return True, ""
+    if kind == "service_env":
+        try:
+            for key, value in svc.kazma_env:
+                _set_env_value(env_path, key, value)
+                os.environ[key] = value
+        except OSError as exc:
+            return False, str(exc)
+        return True, ""
+    if kind == "service_ready":
+        return _wait_for_service(svc, machine)
+    return False, f"unknown service step {action!r}"
 
 
 def _run_planned(item: PlannedStep, machine: Machine, env_path: Path, log) -> tuple[bool, str]:
@@ -687,24 +784,8 @@ def _run_planned(item: PlannedStep, machine: Machine, env_path: Path, log) -> tu
         return _postgres(log)
     if step.action == "container_profile":
         return _container_profile()
-    if step.action == "searxng_env":
-        try:
-            _set_env_value(env_path, "KAZMA_SEARXNG_URL", SEARXNG_URL)
-        except OSError as exc:
-            return False, str(exc)
-        os.environ["KAZMA_SEARXNG_URL"] = SEARXNG_URL
-        return True, ""
-    if step.action == "searxng_ready":
-        return _wait_for_searxng(machine)
-    if step.action == "searxng_secret":
-        from kazma_core.security.searxng_secret import ensure_searxng_secret
-
-        try:
-            wrote = ensure_searxng_secret(env_path)
-        except OSError as exc:
-            return False, str(exc)
-        log("SEARXNG_SECRET generated and kept" if wrote else "SEARXNG_SECRET already set: kept")
-        return True, ""
+    if step.action.startswith("service_"):
+        return _run_service_step(step.action, machine, env_path, log)
     if step.argv and step.argv[0] == "docker":
         from kazma_core.docker_cli import find_docker_cli
 
@@ -718,7 +799,11 @@ def _run_planned(item: PlannedStep, machine: Machine, env_path: Path, log) -> tu
     return _run_step(step, [], run=machine.run, cwd=item.cwd, log=log)
 
 
-def _record(mode: str, chosen: list[str], found: dict[str, PartState], path: Path | None) -> None:
+def _record(mode: str, chosen: list[str], found: dict[str, PartState], path: Path | None,
+            without: list[str] | None = None) -> None:
+    """What was chosen and how each part ended; ``without``: the parts the
+    owner left out by name, which a later run keeps out (a part Express
+    gained since is added only when not left out)."""
     import json
 
     from kazma_core.atomic_files import atomic_write_text
@@ -728,7 +813,7 @@ def _record(mode: str, chosen: list[str], found: dict[str, PartState], path: Pat
     data = read_record(target)
     now = time.time()
     data.update({"version": 1, "install": {
-        "mode": mode, "components": chosen, "at": now,
+        "mode": mode, "components": chosen, "at": now, "without": sorted(set(without or [])),
         "results": {cid: {"ok": state.ok, "detail": state.detail, "at": now} for cid, state in found.items()},
     }})
     try:
@@ -758,32 +843,40 @@ def _project_root() -> Path | None:
 
 
 def _list_parts(say) -> int:
-    from kazma_core.install_components import COMPONENTS
+    from kazma_core.install_components import COMPONENTS, OS_NAMES
 
     for comp in COMPONENTS:
-        where = "Express and Full" if comp.express else "Full"
+        systems = comp.express_on or OS_NAMES
+        on = "" if set(systems) == set(OS_NAMES) else " on " + ", ".join(_OS_NAMES[s] for s in systems)
+        where = f"Express{on} and Full" if comp.express else "Full"
         say(f"{comp.id:20} {comp.title} [{where}]")
         say(f"{'':20}   gives: {comp.gives}")
         say(f"{'':20}   without it: {comp.lacks}")
     return 0
 
 
-def _select_parts(options, recorded: dict, machine: Machine, say) -> tuple[str, list]:
-    """The mode and its parts; a recorded Custom choice is kept on a re-run.
-    An unknown part raises ``KeyError``, an unknown mode ``ValueError``."""
+def _select_parts(options, recorded: dict, machine: Machine, say, os_name: str = "") -> tuple[str, list, list]:
+    """The mode, its parts on *os_name*, and the parts left out by name.
+
+    A recorded Custom choice is kept on a re-run, and so is a recorded
+    ``--without`` (a run with no ``--with``/``--without`` of its own): Express
+    gaining a part must not install one the owner left out. An unknown part
+    raises ``KeyError``, an unknown mode ``ValueError``."""
     from kazma_core.install_components import COMPONENTS, components_for, express_ids
 
     mode = _choose_mode(options, recorded, machine, say)
     with_, without = _split(options.with_), _split(options.without)
     if mode == "custom" and not with_ and not without and recorded.get("mode") == "custom" and not options.mode:
         chosen = set(recorded.get("components") or [])
-        return mode, [c for c in COMPONENTS if c.id in chosen]
-    parts = components_for(mode, with_=with_, without=without)
+        return mode, [c for c in COMPONENTS if c.id in chosen], list(recorded.get("without") or [])
+    if not with_ and not without and recorded.get("mode") == mode:
+        without = [cid for cid in recorded.get("without") or [] if any(c.id == cid for c in COMPONENTS)]
+    parts = components_for(mode, with_=with_, without=without, os_name=os_name)
     if mode == "custom" and machine.interactive() and not options.yes and not (with_ or without):
         start = set(recorded.get("components") or []) if recorded.get("mode") == "custom" else set()
-        picked = _choose_custom(start or {p.id for p in parts} or set(express_ids()), machine, say)
+        picked = _choose_custom(start or {p.id for p in parts} or set(express_ids(os_name)), machine, say)
         parts = [c for c in COMPONENTS if c.id in picked]
-    return mode, parts
+    return mode, parts, without
 
 
 def _show_parts(parts, found: dict[str, PartState], say) -> None:
@@ -853,6 +946,15 @@ def _preflight(parts, found: dict[str, PartState], machine: Machine, platform, m
             if problem:
                 pre.blocked["docker"] = problem
                 pre.problems.append(f"Kazma's container engine cannot run here: {problem}")
+    from kazma_core.container_services import by_part
+
+    for part in todo:
+        svc = by_part(part.id)
+        if svc is not None and (machine.root is None or not (machine.root / svc.compose_file).is_file()):
+            # A wheel install has no compose definitions: the service cannot
+            # be started here (said, never counted as a failure: best effort).
+            pre.blocked[part.id] = (f"{svc.title} is started from Kazma's source folder ({svc.compose_file}), "
+                                    "which this install does not have")
     for part in todo:
         blocked_need = next((need for need in part.needs if need in pre.blocked), None)
         if blocked_need and part.id not in pre.blocked:
@@ -972,7 +1074,7 @@ def install(options, machine: Machine | None = None) -> int:
     log.write(f"--- kazma setup install ({' '.join(sys.argv[1:]) or 'no arguments'})")
     say(_header(platform), "brand")
     try:
-        mode, parts = _select_parts(options, recorded, machine, say)
+        mode, parts, without = _select_parts(options, recorded, machine, say, platform.os)
     except (KeyError, ValueError) as exc:
         say(f"Not a part of Kazma: {exc}. See: kazma setup install --list")
         return 2
@@ -1012,7 +1114,7 @@ def install(options, machine: Machine | None = None) -> int:
             return 1
         return 1 if pre.problems else 0
     if not plan:
-        return _nothing_to_do(mode, parts, found, pre, machine, options, say)
+        return _nothing_to_do(mode, parts, found, pre, machine, options, say, without)
     show("The plan:")
     for number, item in enumerate(plan, 1):
         show(f"  {number:2}. {item.step.title}\n      {item.step.printable()}")
@@ -1023,14 +1125,14 @@ def install(options, machine: Machine | None = None) -> int:
         f"{DISK_NEEDED.get(mode, DISK_NEEDED['express']) / 2**30:.0f} GB of disk{where}.")
     stop = _go_ahead(options, machine, admin_short=admin_short, say=say)
     if stop is not None:
-        if stop == 2:
-            _record(mode, [p.id for p in parts], found, machine.record_path)
+        if stop == EXIT_NOTHING_DONE:
+            _record(mode, [p.id for p in parts], found, machine.record_path, without)
         return stop
     if options.packages_only:
         plan = [item for item in plan if item.step.title.startswith("install Kazma's packages")]
     not_done, restart_needed = _execute(plan, machine, platform, say, log.write)
     return _conclude(mode, parts, pre, machine, platform, options, say, not_done=not_done,
-                     restart_needed=restart_needed, log_only=log.write)
+                     restart_needed=restart_needed, log_only=log.write, without=without)
 
 
 def _header(platform) -> str:
@@ -1047,29 +1149,51 @@ def _header(platform) -> str:
     return f"Kazma {get_version()}: setup on {where}, with {manager}"
 
 
+def _unavailable(parts, pre: _Preflight) -> list:
+    """The best-effort parts this computer cannot have (``Component.best_effort``)."""
+    return [p for p in parts if p.best_effort and p.id in pre.blocked]
+
+
+def _say_unavailable(parts, pre: _Preflight, say) -> None:
+    unavailable = _unavailable(parts, pre)
+    if unavailable:
+        say("Not available on this computer, and what Kazma lacks:", "warn")
+        for part in unavailable:
+            say(f"  -- {part.title} ({pre.blocked[part.id]}): {part.lacks}", "warn")
+
+
 def _nothing_to_do(mode: str, parts, found: dict[str, PartState], pre: _Preflight, machine: Machine, options,
-                   say) -> int:
+                   say, without: list[str] | None = None) -> int:
     if options.dry_run:
         say("Nothing to install.")
-        return 0
-    _record(mode, [p.id for p in parts], found, machine.record_path)
-    if pre.blocked:
-        say("Not installed: " + "; ".join(f"{k} ({v})" for k, v in pre.blocked.items()))
+        return EXIT_DONE
+    _record(mode, [p.id for p in parts], found, machine.record_path, without)
+    unavailable = {p.id for p in _unavailable(parts, pre)}
+    other = {k: v for k, v in pre.blocked.items() if k not in unavailable}
+    _say_unavailable(parts, pre, say)
+    if other:
+        say("Not installed: " + "; ".join(f"{k} ({v})" for k, v in other.items()))
     say("Nothing to install." if not pre.blocked else "Nothing else to install.")
     _finish(parts, found, machine, options, say)
-    return 0 if not pre.blocked else 1
+    return EXIT_DONE if not other else EXIT_NOT_DONE
 
 
 def _conclude(mode: str, parts, pre: _Preflight, machine: Machine, platform, options, say, *,
-              not_done: list[str], restart_needed: bool, log_only=None) -> int:
-    """Check every part again, record it, and say what Kazma lacks for now."""
+              not_done: list[str], restart_needed: bool, log_only=None, without: list[str] | None = None) -> int:
+    """Check every part again, record it, and say what Kazma lacks for now.
+
+    A best-effort part this computer cannot have is said, with what Kazma
+    lacks, and does not fail the install: a computer with virtualization off
+    would otherwise end every run "stopped short". A step that failed still
+    does. Windows waiting to restart (WSL) is ``EXIT_RESTART`` when nothing
+    else is missing."""
     from kazma_core.system_deps import record_system
 
     after, after_states = _check_parts(parts, machine, platform, _docker_choice(options, platform))
     for cid, reason in pre.blocked.items():
         after[cid] = PartState(False, reason)
     record_system(after_states, machine.record_path)
-    _record(mode, [p.id for p in parts], after, machine.record_path)
+    _record(mode, [p.id for p in parts], after, machine.record_path, without)
     # Every part's state is in the log; the screen names what is in place and,
     # for each part that is not, what Kazma lacks for now.
     from kazma_core.english_count import count_noun
@@ -1077,21 +1201,29 @@ def _conclude(mode: str, parts, pre: _Preflight, machine: Machine, platform, opt
     log_only = log_only or say
     log_only("After the install:")
     _show_parts(parts, after, log_only)
-    missing = [p for p in parts if after[p.id].ok is False]
+    unavailable = {p.id for p in _unavailable(parts, pre)}
+    waiting = {p.id for p in parts if after[p.id].ok is False and p.id not in unavailable
+               and restart_needed and (p.id == "docker" or "docker" in p.needs)}
+    missing = [p for p in parts if after[p.id].ok is False and p.id not in unavailable and p.id not in waiting]
     in_place = [p for p in parts if after[p.id].ok]
-    if not missing:
+    if not missing and not waiting:
         say(f"Done: {count_noun(len(in_place), 'part')} of {mode.capitalize()} in place.", "ok")
     else:
         _say_group("In place", in_place, say)
-        say("Not installed, and what Kazma lacks for now:", "warn")
-        for part in missing:
-            say(f"  -- {part.title}: {part.lacks}", "warn")
+        if missing:
+            say("Not installed, and what Kazma lacks for now:", "warn")
+            for part in missing:
+                say(f"  -- {part.title}: {part.lacks}", "warn")
+    _say_unavailable(parts, pre, say)
     if restart_needed:
+        _say_group("After Windows restarts", [p for p in parts if p.id in waiting], say)
         say("Restart Windows to finish WSL, then run setup again: it continues where it stopped.")
     elif missing or not_done:
         say("Run setup again to finish: it checks everything and continues where it stopped.")
     _finish(parts, after, machine, options, say)
-    return 0 if not missing and not not_done else 1
+    if missing or (not_done and not restart_needed):
+        return EXIT_NOT_DONE
+    return EXIT_RESTART if restart_needed else EXIT_DONE
 
 
 def _installed_anyway(step, platform, machine: Machine, say) -> bool:

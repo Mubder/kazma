@@ -21,7 +21,9 @@
   shutdown: the engine's keep-alive now starts the program that holds the
   distro up outside Task Scheduler's reach, with its input and output on
   the service's pipes.
-- `kazma setup engine` installs the service, and a Full install does too.
+- `kazma setup engine` installs the service, and so does every install that
+  sets the engine up (Express now does too, for private search and the
+  memory graph).
   On an existing engine, such as one moved from Docker Desktop, running
   `kazma setup engine` once adds it, without restarting any container.
 - After the fix, measured the same way: the service heard the restart 1.1 s
@@ -39,6 +41,41 @@
 - Not covered: a power cut or a crash, where Windows gives no warning at
   all. Docker Desktop's behaviour was not measured: it runs only in a
   signed-in session.
+
+## Private search and the memory graph install by default (2026-11-13)
+
+- On Windows and Linux, the default **Express** install now sets up private
+  web search (SearXNG) and the Neo4j memory graph, both on Kazma's own
+  container engine (on Windows, Docker in Kazma's WSL distro, started at boot
+  with nobody signed in). macOS Express stays container-free.
+- A computer that cannot run containers (virtualization off, Docker already in
+  another WSL distro) gets everything else, is told what it lacks, and the
+  install still ends as done. Before, any part the machine could not have
+  ended every run "stopped short".
+- Each service gets a generated secret in the install's `.env` before it
+  starts, and Kazma is pointed at it. When Kazma is already running, setup
+  asks its guard to reload it once no chat is running.
+- Container services are one table (`kazma_core/container_services.py`): a
+  new one is a row and a compose definition.
+- A part you leave out with `--without` stays out on the next run.
+- A Windows restart for WSL now ends setup with exit code 3, and the scripts
+  say "restart, then run setup again" instead of "stopped short".
+- Every image Kazma's compose files run is pinned by version and digest
+  (SearXNG, Neo4j, Postgres, nginx; nginx moved to its stable 1.28 line), and
+  Dependabot proposes updates.
+- Settings → Packages names the parts Express gained since your install ran,
+  with the command that adds them. `kazma update` never adds them on its own:
+  they can need administrator rights, a 1 GB download and a restart.
+
+## soupsieve security floor (2026-11-13)
+
+- soupsieve, which docling brings in through beautifulsoup4, had two
+  published advisories: a slow CSS selector on untrusted HTML (fixed in
+  2.10) and a denial of service in the descendant combinator (fixed in
+  4.0). Kazma now requires soupsieve 4.0 or later with the `docling` extra
+  on Python 3.11.5 and newer. Older 3.11 releases get 2.10 from the lock.
+- `kazma update` installs it on an existing install. Before, an install kept
+  the version it had.
 
 ## Kazma's own container engine, step 4: move an install off Docker Desktop (2026-11-13)
 

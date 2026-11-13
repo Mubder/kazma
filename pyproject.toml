@@ -197,6 +197,10 @@ docling = [
     "transformers>=5.21.0",
     "setuptools>=84.2.1",
     "filelock>=4.2.1",
+    # Through beautifulsoup4: GHSA-mmhr-3c5m-f64f (fixed 4.0) and
+    # GHSA-4j63-6c4x-wfg4 (fixed 2.10). soupsieve 4 needs Python 3.11.5,
+    # where the lock keeps 2.10.
+    "soupsieve>=4.0; python_full_version >= '3.11.5'",
 ]
 # Codebase index (tree-sitter languages; regex fallback always works)
 index = [

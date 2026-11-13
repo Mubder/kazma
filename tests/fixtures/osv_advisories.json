@@ -1,5 +1,5 @@
 {
- "recorded": "2026-11-07",
+ "recorded": "2026-11-13",
  "source": "OSV, for the versions installed in C:\\Users\\balfa\\kazma\\.venv\\Scripts\\python.exe, G:\\GitHubRepos\\kazma\\.venv\\Scripts\\python.exe (added to the earlier recordings)",
  "advisories": [
   {
@@ -379,6 +379,18 @@
    "version": "6.21.3",
    "vuln_id": "GHSA-mfr5-77xh-9j7h",
    "fixed_version": "6.21.4"
+  },
+  {
+   "package": "soupsieve",
+   "version": "2.9.2",
+   "vuln_id": "GHSA-4j63-6c4x-wfg4",
+   "fixed_version": "2.10.0"
+  },
+  {
+   "package": "soupsieve",
+   "version": "2.9.2",
+   "vuln_id": "GHSA-mmhr-3c5m-f64f",
+   "fixed_version": "4.0.0"
   }
  ]
 }
