@@ -6005,10 +6005,12 @@ kept each run's whole temp folder (29 of them, 7.5 GB). After the restore,
 parent, top down, the rights it inherits from the target (`icacls /reset`,
 never `/T`) and clears its read-only flag; the backed-up folder and its
 contents keep what the snapshot recorded. Every `restic restore` goes
-through `restic_repo.restore`. Tests: `tests/test_restic_repo.py` (parents
-that deny the account's own SID, so the case holds as administrator too;
-restic's command alone as the negative control; a planted second restore
-command fails the gate).
+through `restic_repo.restore`. Tests: `tests/test_restic_restore_removable.py`
+(parents that deny the account's own SID, so the case holds as administrator
+too; restic's command alone as the negative control; a planted second
+restore command fails the gate). Not in `tests/test_restic_repo.py`: the CI
+recovery-drills job runs that file and fails on any skip, and these cases
+need Windows.
 
 **E. The daily digest reads every source of its window**
 (`observability/daily_digest.py`, 2026-10-03). The live digest said "Turns
