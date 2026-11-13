@@ -216,6 +216,24 @@ def test_the_livekit_server_is_read_off_the_loop_and_kept(monkeypatch) -> None:
         security_headers._LIVEKIT.forget()
 
 
+def test_a_refresh_begun_before_a_forget_reads_nothing(monkeypatch) -> None:
+    """A background refresh still queued in its thread after the cache was
+    reset (an earlier test's app, a setting changed meanwhile) does not read:
+    the test above saw a second read on Linux CI once (2026-11-13)."""
+    from kazma_core.voice import livekit
+
+    reads: list[int] = []
+    monkeypatch.setattr(livekit, "get_livekit_config", lambda: reads.append(1) or livekit.LiveKitConfig(
+        enabled=True, url="wss://lk.example.com", api_key="k", api_secret="s"))
+    sources = security_headers._LiveKitSources()
+    begun_in = sources.generation
+    sources.forget()
+    assert sources.read(begun_in) == () and reads == []
+    assert "wss://lk.example.com" in sources.read(sources.generation) and reads == [1]
+    # The negative control: a read that names no generation reads.
+    assert sources.read() and reads == [1, 1]
+
+
 def test_negative_control_the_old_policy_had_no_script_or_connect_rule() -> None:
     """The policy before 2026-11-11 let a page load a script from any host."""
     old = (

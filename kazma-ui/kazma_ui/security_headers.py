@@ -187,15 +187,23 @@ class _LiveKitSources:
         self._read_at = 0.0
         self._warned = ""
         self.refreshing = False
+        #: Bumped by :meth:`forget`: a background read begun before it reads
+        #: nothing (a test's settings, a changed setting are read fresh).
+        self.generation = 0
 
     def cached(self) -> tuple[tuple[str, ...] | None, bool]:
         """What was read last (None: nothing yet) and whether it is due again."""
         value = self._value
         return value, value is None or time.monotonic() - self._read_at > self.TTL_S
 
-    def read(self) -> tuple[str, ...]:
-        """Read the configured server now. Blocking: call from a thread."""
+    def read(self, generation: int | None = None) -> tuple[str, ...]:
+        """Read the configured server now. Blocking: call from a thread. A
+        background refresh passes the *generation* it began in: one a
+        :meth:`forget` came after reads nothing (2026-11-13: an earlier app's
+        refresh, still queued in its thread, read a later test's settings)."""
         with self._lock:
+            if generation is not None and generation != self.generation:
+                return self._value or ()
             try:
                 # Never raises by its contract (a settings store that cannot
                 # answer reads as unset); a broken import or value still must
@@ -220,6 +228,7 @@ class _LiveKitSources:
         """Read again at the next response (tests, and a changed setting)."""
         with self._lock:
             self._value, self._read_at, self.refreshing = None, 0.0, False
+            self.generation += 1
 
 
 _LIVEKIT = _LiveKitSources()
@@ -238,7 +247,7 @@ async def _livekit_sources() -> tuple[str, ...]:
         from kazma_core.background import spawn_background
 
         _LIVEKIT.refreshing = True
-        spawn_background(asyncio.to_thread(_LIVEKIT.read), name="csp-livekit-sources")
+        spawn_background(asyncio.to_thread(_LIVEKIT.read, _LIVEKIT.generation), name="csp-livekit-sources")
     return value
 
 
