@@ -50,10 +50,15 @@ __all__ = [
     "ENGINE_CHOICES",
     "ENGINE_KEY",
     "KAZMA_CONTEXT",
+    "KAZMA_DISTRO",
     "apply_engine_choice",
     "engine_host_path",
+    "engine_in_force",
     "engine_installed",
+    "engine_label",
     "find_docker_cli",
+    "kazma_engine_dir",
+    "kazma_engine_disk_dir",
     "normalize_engine",
 ]
 
@@ -62,6 +67,8 @@ ENGINE_KEY = "containers.engine"
 #: ``kazma``: Kazma's own engine; ``desktop``: Docker Desktop.
 ENGINE_CHOICES = ("kazma", "desktop")
 KAZMA_CONTEXT = "kazma-engine"
+#: Kazma's engine's WSL distro (``container_engine_setup`` imports it there).
+KAZMA_DISTRO = "kazma-engine"
 DESKTOP_CONTEXT = "desktop-linux"
 
 _ENV = "KAZMA_DOCKER_BIN"
@@ -74,8 +81,7 @@ def _candidates() -> list[Path]:
     if os.name == "nt":
         # Kazma's own engine installs Docker's CLI here (container_engine_setup);
         # it is first: it works without Docker Desktop installed at all.
-        local = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
-        kazma = [Path(local) / "Kazma" / "engine" / "bin" / "docker.exe"]
+        kazma = [kazma_engine_dir() / "bin" / "docker.exe"]
         roots = [os.environ.get(v) for v in ("ProgramFiles", "ProgramW6432")] + [r"C:\Program Files"]
         out = kazma + [Path(r) / "Docker" / "Docker" / "resources" / "bin" / "docker.exe" for r in roots if r]
         data = os.environ.get("ProgramData") or r"C:\ProgramData"
@@ -162,6 +168,67 @@ def _context_in_force() -> str:
     except (OSError, ValueError):
         return "default"
     return str((data or {}).get("currentContext") or "default") if isinstance(data, dict) else "default"
+
+
+#: How Kazma names each engine where it says which one it waited for.
+_ENGINE_LABELS = {
+    "kazma": "Kazma's container engine",
+    "desktop": "Docker Desktop",
+    "system": "the Docker service",
+    "other": "the Docker engine",
+}
+
+
+def engine_in_force() -> str:
+    """Which engine a docker call reaches now: ``kazma`` (Kazma's own),
+    ``desktop`` (Docker Desktop), ``system`` (a Linux machine's Docker
+    service) or ``other`` (a context or ``DOCKER_HOST`` the operator chose).
+
+    Read from the context in force, as :func:`engine_host_path` is: no
+    process started, nothing asked of the engine, so a down engine is named
+    as well as a running one. The ``default`` context is Docker Desktop's
+    pipe or socket on Windows and macOS, the system service's on Linux.
+    Readiness (the code sandbox, the document isolation report) and the
+    guard's disk watch read it, so each says the engine it waited for.
+    """
+    if os.environ.get("DOCKER_HOST"):
+        return "other"
+    context = _context_in_force()
+    if context == KAZMA_CONTEXT:
+        return "kazma"
+    if context == DESKTOP_CONTEXT:
+        return "desktop"
+    if context == "default":
+        return "system" if sys.platform.startswith("linux") else "desktop"
+    return "other"
+
+
+def engine_label(engine: str | None = None) -> str:
+    """How Kazma names *engine* (default: the one in force) in what it says:
+    "Kazma's container engine", "Docker Desktop", "the Docker service", or
+    the operator's own context or ``DOCKER_HOST``."""
+    if engine is None:
+        engine = engine_in_force()
+        if engine == "other":
+            if os.environ.get("DOCKER_HOST"):
+                return "the Docker engine DOCKER_HOST names"
+            return f"the Docker engine of the {_context_in_force()!r} context"
+    return _ENGINE_LABELS.get(engine, _ENGINE_LABELS["other"])
+
+
+def kazma_engine_dir() -> Path:
+    """``%LOCALAPPDATA%\\Kazma\\engine``: Kazma's engine's folder on Windows
+    (its Docker CLI, its scripts, its downloads and its distro's disk).
+    ``container_engine_setup`` installs there; the guard watches its disk."""
+    base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+    return Path(base) / "Kazma" / "engine"
+
+
+def kazma_engine_disk_dir() -> Path:
+    """The folder holding the ``kazma-engine`` distro's virtual disk
+    (``wsl --import`` puts its ``ext4.vhdx`` there): what fills as the
+    engine's images, containers and volumes grow."""
+    return kazma_engine_dir() / KAZMA_DISTRO
 
 
 def engine_installed(engine: str) -> bool:

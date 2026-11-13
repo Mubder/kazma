@@ -598,23 +598,62 @@ def test_a_step_reads_what_it_is_given_or_nothing():
     assert seen.get("stdin") is subprocess.DEVNULL and "input" not in seen
 
 
+def test_the_engine_setup_s_programs_read_what_they_are_given_or_nothing():
+    """The boot drill (2026-11-12): run detached on a clean Windows, setup's
+    ``wsl.exe --version`` met Windows' WSL stub, which says "press any key to
+    install" and waited on setup's console until the 60 s timeout, at every
+    WSL call. ``_out`` passed ``input=None``, which is the console."""
+    from kazma_core.container_engine_setup import _out
+
+    child = "import sys; data = sys.stdin.read(); print('read', len(data))"
+    code, text = _out(subprocess.run, [sys.executable, "-I", "-c", child], timeout=30)
+    assert (code, text.strip()) == (0, "read 0")
+    code, text = _out(subprocess.run, [sys.executable, "-I", "-c", child], stdin="abc", timeout=30)
+    assert (code, text.strip()) == (0, "read 3")
+    seen: dict = {}
+
+    def record(argv, **kw):
+        seen.update(kw)
+        return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+    _out(record, ["wsl.exe", "--version"])
+    assert seen.get("stdin") is subprocess.DEVNULL and "input" not in seen
+
+
 #: The modules ``kazma setup`` runs programs from, at a terminal.
 _SETUP_MODULES = ("kazma-cli/kazma_cli/setup.py", "kazma-core/kazma_core/system_deps.py",
                   "kazma-core/kazma_core/postgres_service.py", "kazma-core/kazma_core/backup/pg_move.py",
-                  "kazma-core/kazma_core/backup/wal_archive.py")
+                  "kazma-core/kazma_core/backup/wal_archive.py", "kazma-cli/kazma_cli/install.py",
+                  "kazma-core/kazma_core/container_engine_setup.py")
+
+
+def _may_be_none(value) -> bool:
+    """An ``input=`` that can be None leaves the input as the terminal's."""
+    import ast
+
+    if isinstance(value, ast.Constant):
+        return value.value is None
+    if isinstance(value, ast.IfExp):
+        return _may_be_none(value.body) or _may_be_none(value.orelse)
+    return False
 
 
 def calls_on_the_terminal(source: str) -> list[int]:
     """Lines of process calls that capture output but leave the input as the
     terminal's: every call with ``capture_output``/``stdout`` must say its
-    ``stdin`` or ``input`` (``**feed`` counts as saying it)."""
+    ``stdin`` or ``input`` (``**feed`` counts as saying it), and an ``input``
+    that can be None says nothing (it is the terminal: the WSL stub's prompt,
+    2026-11-12)."""
     import ast
 
     lines = []
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Call):
-            names = {k.arg for k in node.keywords}
-            if names & {"capture_output", "stdout"} and not names & {"stdin", "input", None}:
+            given = {k.arg: k.value for k in node.keywords}
+            said = set(given) & {"stdin", None}
+            if "input" in given and not _may_be_none(given["input"]):
+                said.add("input")
+            if set(given) & {"capture_output", "stdout"} and not said:
                 lines.append(node.lineno)
     return lines
 
@@ -650,6 +689,9 @@ def test_no_setup_program_waits_on_the_terminal():
         assert postgres_clients_that_can_prompt(source) == [], module
     # Negative controls: the shapes of before.
     assert calls_on_the_terminal("run(argv, capture_output=True, text=True, timeout=60)") == [1]
+    assert calls_on_the_terminal(
+        'run(argv, input=None if stdin is None else stdin.encode("utf-8"), capture_output=True)') == [1]
+    assert calls_on_the_terminal('run(argv, input=data.encode("utf-8"), capture_output=True)') == []
     assert postgres_clients_that_can_prompt('run([pg_restore, "-h", "127.0.0.1", "-d", "kazma", dump])') == [1]
 
 

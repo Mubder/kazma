@@ -1,0 +1,2948 @@
+{
+ "label": "desktop",
+ "engine": "desktop",
+ "control": true,
+ "meta": {
+  "vm": "KazmaVMs",
+  "checkpoint": "clean Windows + SSH + nested virtualization (2026-11-12)",
+  "steps": [
+   "Strict code profile set on the VM: container_required = True from ['C:\\\\kazma-drill\\\\.env']"
+  ],
+  "commit": "41b4e09051571c37152bf80c9f4798f8c45a4dc0",
+  "install": [
+   {
+    "round": 1,
+    "exit": 1,
+    "seconds": 1692,
+    "restart": true,
+    "tail": "tabase\n      C:\\Program Files\\PostgreSQL\\16\\bin\\psql.exe -h 127.0.0.1 -U postgres -w -v ON_ERROR_STOP=1 -X -q -p 5432 -d postgres < (password, settings)\n   8. Restart it to apply the settings\n      restart\n   9. Wait for it to answer\n      wait\n  10. Create the kazma_app role (not a superuser)\n      C:\\Program Files\\PostgreSQL\\16\\bin\\psql.exe -h 127.0.0.1 -U postgres -w -v ON_ERROR_STOP=1 -X -q -p 5432 -d kazma < kazma_app_role.sql\n  11. Give kazma_app its password\n      C:\\Program Files\\PostgreSQL\\16\\bin\\psql.exe -h 127.0.0.1 -U postgres -w -v ON_ERROR_STOP=1 -X -q -p 5432 -d kazma < (password)\n  then: write KAZMA_DATABASE_URL into .env (not shown), and sign in once as Kazma will\n-> Create the WAL archive folder\n-> icacls C:\\ProgramData\\Kazma\\pg_wal_archive /inheritance:r /grant *S-1-5-20:(OI)(CI)M /grant KazmaDrill_1:(OI)(CI)M /grant *S-1-5-32-544:(OI)(CI)F\n-> Install PostgreSQL 16 (a Windows service)\n-> Start it at boot\n-> Restart it when it fails\n-> Wait for it to answer\n-> Set the superuser's password, this machine only, Kazma's database\n-> Restart it to apply the settings\n-> Wait for it to answer\n-> Create the kazma_app role (not a superuser)\n-> Give kazma_app its password\n-> KAZMA_DATABASE_URL written to C:\\kazma-drill\\.env (this account only)\n-> Kazma signs in as kazma_app (not a superuser).\nDone. Reload Kazma when it is idle to use the new database:\n  python scripts/service/kazma_guard.py --reload --when-idle\n-> build the document worker image: after Windows restarts (WSL)\n-> documents use the container profile: after Windows restarts (WSL)\n-> keep a generated SearXNG secret key: after Windows restarts (WSL)\n-> start SearXNG (docker compose, search profile): after Windows restarts (WSL)\n-> point Kazma's web search at http://127.0.0.1:8088: after Windows restarts (WSL)\n-> wait for SearXNG to answer: after Windows restarts (WSL)\n-> install Kazma as a service (its guard starts at boot)\n-> start it now\n  In place (20): Meaning search, Document reading and writing, Kazma's test suite, Code structure,\n      Database drivers, Push notifications, Metrics for Prometheus, OCR with Arabic and English,\n      Neural OCR for Arabic, Office documents, Malware scan, Arabic fonts, Node.js, Browser tools,\n      Docling, PostgreSQL 16 as a service, E2B cloud sandbox, Temporal, Neo4j memory graph driver,\n      Kazma as a service\nNot installed, and what Kazma lacks for now:\n  -- Docker: no containers (documents parse in a limited process; no private search)\n  -- Locked document worker (a container per document): documents are read in a limited process on this machine (not qualified for hostile files)\n  -- Private web search (SearXNG): web search uses public engines' pages directly (or Tavily with your key)\nRestart Windows to finish WSL, then run setup again: it continues where it stopped.\nWaiting for Kazma to answer at http://127.0.0.1:9090 (its first start loads its models) ...\nKazma is running: http://127.0.0.1:9090 (its setup guide connects the AI model)\n"
+   },
+   {
+    "round": 2,
+    "exit": 1,
+    "seconds": 132,
+    "restart": false,
+    "tail": "Kazma 0.21.2: setup on Windows, with winget\nChecking 23 parts of Full...\nNote: this Windows is a virtual machine: Docker runs here only when its host passes virtualization through (Hyper-V, with the VM off: Set-VMProcessor -VMName <name> -ExposeVirtualizationExtensions $true)\nFull: 23 of 23 parts\n  To install (3): Docker, Locked document worker, Private web search\n  Already here (20): Meaning search, Document reading and writing, Kazma's test suite, Code\n      structure, Database drivers, Push notifications, Metrics for Prometheus, OCR with Arabic and\n      English, Neural OCR for Arabic, Office documents, Malware scan, Arabic fonts, Node.js,\n      Browser tools, Docling, PostgreSQL 16 as a service, E2B cloud sandbox, Temporal, Neo4j memory\n      graph driver, Kazma as a service\n7 steps to run, needing about 25 GB of disk; every step and its command are in C:\\kazma-drill\\.kazma\\install.log.\n-> install Docker (the document container, the sandbox, SearXNG)\n-> build the document worker image\n   failed (exit 1); trying again in 15 s (attempt 2 of 2)\n   FAILED: exit 1: Building kazma-document-worker:src-277b200d0114458b for the code in C:\\kazma-drill ...\nERROR: failed to connect to the docker API at npipe:////./pipe/docker_engine; check if the path is correct and if the daemon is running: open //./pipe/docker_engine: The system cannot find the file specified.\nThe build failed (docker exit 1).\n-> documents use the container profile: not done (an earlier step it needs failed)\n-> keep a generated SearXNG secret key\n-> start SearXNG (docker compose, search profile)\n   failed (exit 1); trying again in 15 s (attempt 2 of 3)\n   failed (exit 1); trying again in 15 s (attempt 3 of 3)\n   FAILED: exit 1: failed to connect to the docker API at npipe:////./pipe/docker_engine; check if the path is correct and if the daemon is running: open //./pipe/docker_engine: The system cannot find the file specified.\n-> point Kazma's web search at http://127.0.0.1:8088: not done (an earlier step it needs failed)\n-> wait for SearXNG to answer: not done (an earlier step it needs failed)\n  In place (20): Meaning search, Document reading and writing, Kazma's test suite, Code structure,\n      Database drivers, Push notifications, Metrics for Prometheus, OCR with Arabic and English,\n      Neural OCR for Arabic, Office documents, Malware scan, Arabic fonts, Node.js, Browser tools,\n      Docling, PostgreSQL 16 as a service, E2B cloud sandbox, Temporal, Neo4j memory graph driver,\n      Kazma as a service\nNot installed, and what Kazma lacks for now:\n  -- Locked document worker (a container per document): documents are read in a limited process on this machine (not qualified for hostile files)\n  -- Private web search (SearXNG): web search uses public engines' pages directly (or Tavily with your key)\nRun setup again to finish: it checks everything and continues where it stopped.\nKazma is running: http://127.0.0.1:9090 (its setup guide connects the AI model)\n"
+   },
+   {
+    "round": 3,
+    "exit": 1,
+    "seconds": 49,
+    "restart": false,
+    "tail": "Kazma 0.21.2: setup on Windows, with winget\nChecking 23 parts of Full...\nFull: 23 of 23 parts\n  To install (2): Locked document worker, Private web search\n  Already here (20): Meaning search, Document reading and writing, Kazma's test suite, Code\n      structure, Database drivers, Push notifications, Metrics for Prometheus, OCR with Arabic and\n      English, Neural OCR for Arabic, Office documents, Malware scan, Arabic fonts, Node.js,\n      Browser tools, Docling, PostgreSQL 16 as a service, E2B cloud sandbox, Temporal, Neo4j memory\n      graph driver, Kazma as a service\n  Could not tell (1): Docker\n6 steps to run, needing about 25 GB of disk; every step and its command are in C:\\kazma-drill\\.kazma\\install.log.\n-> build the document worker image\n   failed (exit 1); trying again in 15 s (attempt 2 of 2)\n   FAILED: exit 1: Building kazma-document-worker:src-277b200d0114458b for the code in C:\\kazma-drill ...\nERROR: failed to connect to the docker API at npipe:////./pipe/docker_engine; check if the path is correct and if the daemon is running: open //./pipe/docker_engine: The system cannot find the file specified.\nThe build failed (docker exit 1).\n-> documents use the container profile: not done (an earlier step it needs failed)\n-> keep a generated SearXNG secret key\n-> start SearXNG (docker compose, search profile)\n   failed (exit 1); trying again in 15 s (attempt 2 of 3)\n   failed (exit 1); trying again in 15 s (attempt 3 of 3)\n   FAILED: exit 1: failed to connect to the docker API at npipe:////./pipe/docker_engine; check if the path is correct and if the daemon is running: open //./pipe/docker_engine: The system cannot find the file specified.\n-> point Kazma's web search at http://127.0.0.1:8088: not done (an earlier step it needs failed)\n-> wait for SearXNG to answer: not done (an earlier step it needs failed)\n  In place (20): Meaning search, Document reading and writing, Kazma's test suite, Code structure,\n      Database drivers, Push notifications, Metrics for Prometheus, OCR with Arabic and English,\n      Neural OCR for Arabic, Office documents, Malware scan, Arabic fonts, Node.js, Browser tools,\n      Docling, PostgreSQL 16 as a service, E2B cloud sandbox, Temporal, Neo4j memory graph driver,\n      Kazma as a service\nNot installed, and what Kazma lacks for now:\n  -- Locked document worker (a container per document): documents are read in a limited process on this machine (not qualified for hostile files)\n  -- Private web search (SearXNG): web search uses public engines' pages directly (or Tavily with your key)\nRun setup again to finish: it checks everything and continues where it stopped.\nKazma is running: http://127.0.0.1:9090 (its setup guide connects the AI model)\n"
+   }
+  ],
+  "finished": "2026-11-13 00:07 UTC"
+ },
+ "verdict": {
+  "verdict": "not_up",
+  "parts": {
+   "engine": {
+    "ready_at_s": null,
+    "ready_in_budget": false,
+    "ready_at_end": false,
+    "last": "not checked (idle)"
+   },
+   "code_sandbox": {
+    "ready_at_s": null,
+    "ready_in_budget": false,
+    "ready_at_end": false,
+    "last": "No available isolated execution backend: Docker Desktop is not running"
+   },
+   "document_worker": {
+    "ready_at_s": null,
+    "ready_in_budget": false,
+    "ready_at_end": false,
+    "last": "idle (not_requested), tcp://127.0.0.1:29504"
+   },
+   "private_search": {
+    "ready_at_s": null,
+    "ready_in_budget": false,
+    "ready_at_end": false,
+    "last": "KAZMA_SEARXNG_URL not set"
+   }
+  },
+  "signed_in": [],
+  "kazma_answered_at": 53.921,
+  "readings": 26,
+  "notes": []
+ },
+ "readings": [
+  {
+   "at": 1794528063.6150107,
+   "uptime_s": 13.984,
+   "users": "No User exists for *",
+   "signed_in": false,
+   "ready": {
+    "http": null,
+    "body": null,
+    "error": "URLError: <urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>"
+   },
+   "status": "supervision : active\nserver      : not answering (unreachable: [WinError 10061] No connection could be made because the target machine actively refused it)\nguard       : running (pid 4656, heartbeat 10s ago)\nguard child : pid 6656\ndocker      : not checked (idle)\ndoc broker  : idle (not_requested), tcp://127.0.0.1:29504\n  log       : C:\\kazma-drill\\.kazma\\document_broker.log\ndisk        : ok (50.7% / 50.2 GB free on C:, data)\ndatabase    : running (postgresql-x64-16)\noutside     : off\n",
+   "searxng": {
+    "url": "",
+    "http": null,
+    "error": "KAZMA_SEARXNG_URL not set"
+   },
+   "engine_task": "",
+   "docker_desktop_running": false
+  },
+  {
+   "at": 1794528083.6109128,
+   "uptime_s": 33.984,
+   "users": "No User exists for *",
+   "signed_in": false,
+   "ready": {
+    "http": null,
+    "body": null,
+    "error": "URLError: <urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>"
+   },
+   "status": "supervision : active\nserver      : not answering (unreachable: [WinError 10061] No connection could be made because the target machine actively refused it)\nguard       : running (pid 4656, heartbeat 8s ago)\nguard child : pid 6656\ndocker      : not checked (idle)\ndoc broker  : idle (not_requested), tcp://127.0.0.1:29504\n  log       : C:\\kazma-drill\\.kazma\\document_broker.log\ndisk        : ok (50.7% / 50.2 GB free on C:, data)\ndatabase    : running (postgresql-x64-16)\noutside     : off\n",
+   "searxng": {
+    "url": "",
+    "http": null,
+    "error": "KAZMA_SEARXNG_URL not set"
+   },
+   "engine_task": "",
+   "docker_desktop_running": false
+  },
+  {
+   "at": 1794528103.5488791,
+   "uptime_s": 53.921,
+   "users": "No User exists for *",
+   "signed_in": false,
+   "ready": {
+    "http": 503,
+    "body": {
+     "status": "not_ready",
+     "timestamp": 1794528104.8084397,
+     "checks": {
+      "config_store": {
+       "status": "ok",
+       "component": "config_store"
+      },
+      "database": {
+       "status": "ok",
+       "component": "database",
+       "backend": "postgres"
+      },
+      "swarm_engine": {
+       "status": "ok",
+       "component": "swarm_engine",
+       "workers": 0
+      },
+      "model_registry": {
+       "status": "ok",
+       "component": "model_registry",
+       "providers": 19,
+       "active_model": "gpt-4o-mini",
+       "active_provider": "custom"
+      },
+      "agent_runner": {
+       "status": "ok",
+       "component": "agent_runner"
+      },
+      "mcp": {
+       "status": "ok",
+       "component": "mcp",
+       "tools": 0
+      },
+      "cron": {
+       "status": "ok",
+       "component": "cron",
+       "running": true,
+       "state": "ok",
+       "last_poll_age_s": 0.8,
+       "stale_after_s": 90.0,
+       "fires_in_flight": 0,
+       "poll_interval_s": 30.0,
+       "alerts_pending": 0
+      },
+      "schedulers": {
+       "status": "ok",
+       "component": "schedulers",
+       "cron": "running",
+       "x_posts": "running"
+      },
+      "llm_provider": {
+       "status": "degraded",
+       "component": "llm_provider",
+       "model": "gpt-4o-mini",
+       "error": "no API key for a remote provider",
+       "needs_setup": "Settings -> Providers: add the provider's API key, or choose a local model"
+      },
+      "knowledge_vectors": {
+       "component": "knowledge_vectors",
+       "topology": "single_install",
+       "status": "ok",
+       "detail": "not checked yet"
+      },
+      "chat_runtime": {
+       "status": "ok",
+       "component": "chat_runtime",
+       "graph_ready": true,
+       "checkpointer_ready": true,
+       "checkpoint_bound": true
+      },
+      "code_execution": {
+       "status": "failed",
+       "component": "code_execution",
+       "error": "No available isolated execution backend: Docker Desktop is not running",
+       "waits_for": "docker",
+       "engine": "desktop"
+      }
+     },
+     "required_capabilities": [
+      "agent_runner",
+      "chat_runtime",
+      "code_execution",
+      "config_store",
+      "database",
+      "llm_provider",
+      "model_registry"
+     ],
+     "unavailable_capabilities": [
+      "llm_provider",
+      "code_execution"
+     ],
+     "database_availability": {
+      "state": "answering"
+     },
+     "waits_for": {
+      "code_execution": "docker"
+     }
+    }
+   },
+   "status": "supervision : active\nserver      : up, waiting for docker (llm_provider: no API key for a remote provider; code_execution: No available isolated execution backend: Docker Desktop is not running)\nguard       : running (pid 4656, heartbeat 5s ago)\nguard child : pid 6656\ndocker      : not checked (idle)\ndoc broker  : idle (not_requested), tcp://127.0.0.1:29504\n  log       : C:\\kazma-drill\\.kazma\\document_broker.log\ndisk        : ok (50.7% / 50.2 GB free on C:, data)\ndatabase    : running (postgresql-x64-16)\noutside     : off\n",
+   "searxng": {
+    "url": "",
+    "http": null,
+    "error": "KAZMA_SEARXNG_URL not set"
+   },
+   "engine_task": "",
+   "docker_desktop_running": false
+  },
+  {
+   "at": 1794528121.0224354,
+   "uptime_s": 71.39,
+   "users": "No User exists for *",
+   "signed_in": false,
+   "ready": {
+    "http": 503,
+    "body": {
+     "status": "not_ready",
+     "timestamp": 1794528121.187281,
+     "checks": {
+      "config_store": {
+       "status": "ok",
+       "component": "config_store"
+      },
+      "database": {
+       "status": "ok",
+       "component": "database",
+       "backend": "postgres"
+      },
+      "swarm_engine": {
+       "status": "ok",
+       "component": "swarm_engine",
+       "workers": 0
+      },
+      "model_registry": {
+       "status": "ok",
+       "component": "model_registry",
+       "providers": 19,
+       "active_model": "gpt-4o-mini",
+       "active_provider": "custom"
+      },
+      "agent_runner": {
+       "status": "ok",
+       "component": "agent_runner"
+      },
+      "mcp": {
+       "status": "ok",
+       "component": "mcp",
+       "tools": 0
+      },
+      "cron": {
+       "status": "ok",
+       "component": "cron",
+       "running": true,
+       "state": "ok",
+       "last_poll_age_s": 18.2,
+       "stale_after_s": 90.0,
+       "fires_in_flight": 0,
+       "poll_interval_s": 30.0,
+       "alerts_pending": 0
+      },
+      "schedulers": {
+       "status": "ok",
+       "component": "schedulers",
+       "cron": "running",
+       "x_posts": "running"
+      },
+      "llm_provider": {
+       "status": "degraded",
+       "component": "llm_provider",
+       "model": "gpt-4o-mini",
+       "error": "no API key for a remote provider",
+       "needs_setup": "Settings -> Providers: add the provider's API key, or choose a local model"
+      },
+      "knowledge_vectors": {
+       "component": "knowledge_vectors",
+       "topology": "single_install",
+       "status": "ok",
+       "detail": "not checked yet"
+      },
+      "chat_runtime": {
+       "status": "ok",
+       "component": "chat_runtime",
+       "graph_ready": true,
+       "checkpointer_ready": true,
+       "checkpoint_bound": true
+      },
+      "code_execution": {
+       "status": "failed",
+       "component": "code_execution",
+       "error": "No available isolated execution backend: Docker Desktop is not running",
+       "waits_for": "docker",
+       "engine": "desktop"
+      }
+     },
+     "required_capabilities": [
+      "agent_runner",
+      "chat_runtime",
+      "code_execution",
+      "config_store",
+      "database",
+      "llm_provider",
+      "model_registry"
+     ],
+     "unavailable_capabilities": [
+      "llm_provider",
+      "code_execution"
+     ],
+     "database_availability": {
+      "state": "answering"
+     },
+     "waits_for": {
+      "code_execution": "docker"
+     }
+    }
+   },
+   "status": "supervision : active\nserver      : up, waiting for docker (llm_provider: no API key for a remote provider; code_execution: No available isolated execution backend: Docker Desktop is not running)\nguard       : running (pid 4656, heartbeat 1s ago)\nguard child : pid 6656\ndocker      : not checked (idle)\ndoc broker  : idle (not_requested), tcp://127.0.0.1:29504\n  log       : C:\\kazma-drill\\.kazma\\document_broker.log\ndisk        : ok (51.0% / 50.4 GB free on C:, data)\ndatabase    : running (postgresql-x64-16)\noutside     : off\n",
+   "searxng": {
+    "url": "",
+    "http": null,
+    "error": "KAZMA_SEARXNG_URL not set"
+   },
+   "engine_task": "",
+   "docker_desktop_running": false
+  },
+  {
+   "at": 1794528137.1783698,
+   "uptime_s": 87.546,
+   "users": "No User exists for *",
+   "signed_in": false,
+   "ready": {
+    "http": 503,
+    "body": {
+     "status": "not_ready",
+     "timestamp": 1794528137.3664842,
+     "checks": {
+      "config_store": {
+       "status": "ok",
+       "component": "config_store"
+      },
+      "database": {
+       "status": "ok",
+       "component": "database",
+       "backend": "postgres"
+      },
+      "swarm_engine": {
+       "status": "ok",
+       "component": "swarm_engine",
+       "workers": 0
+      },
+      "model_registry": {
+       "status": "ok",
+       "component": "model_registry",
+       "providers": 19,
+       "active_model": "gpt-4o-mini",
+       "active_provider": "custom"
+      },
+      "agent_runner": {
+       "status": "ok",
+       "component": "agent_runner"
+      },
+      "mcp": {
+       "status": "ok",
+       "component": "mcp",
+       "tools": 0
+      },
+      "cron": {
+       "status": "ok",
+       "component": "cron",
+       "running": true,
+       "state": "ok",
+       "last_poll_age_s": 4.4,
+       "stale_after_s": 90.0,
+       "fires_in_flight": 0,
+       "poll_interval_s": 30.0,
+       "alerts_pending": 0
+      },
+      "schedulers": {
+       "status": "ok",
+       "component": "schedulers",
+       "cron": "running",
+       "x_posts": "running"
+      },
+      "llm_provider": {
+       "status": "degraded",
+       "component": "llm_provider",
+       "model": "gpt-4o-mini",
+       "error": "no API key for a remote provider",
+       "needs_setup": "Settings -> Providers: add the provider's API key, or choose a local model"
+      },
+      "knowledge_vectors": {
+       "component": "knowledge_vectors",
+       "topology": "single_install",
+       "status": "ok",
+       "detail": "not checked yet"
+      },
+      "chat_runtime": {
+       "status": "ok",
+       "component": "chat_runtime",
+       "graph_ready": true,
+       "checkpointer_ready": true,
+       "checkpoint_bound": true
+      },
+      "code_execution": {
+       "status": "failed",
+       "component": "code_execution",
+       "error": "No available isolated execution backend: Docker Desktop is not running",
+       "waits_for": "docker",
+       "engine": "desktop"
+      }
+     },
+     "required_capabilities": [
+      "agent_runner",
+      "chat_runtime",
+      "code_execution",
+      "config_store",
+      "database",
+      "llm_provider",
+      "model_registry"
+     ],
+     "unavailable_capabilities": [
+      "llm_provider",
+      "code_execution"
+     ],
+     "database_availability": {
+      "state": "answering"
+     },
+     "waits_for": {
+      "code_execution": "docker"
+     }
+    }
+   },
+   "status": "supervision : active\nserver      : up, waiting for docker (llm_provider: no API key for a remote provider; code_execution: No available isolated execution backend: Docker Desktop is not running)\nguard       : running (pid 4656, heartbeat 7s ago)\nguard child : pid 6656\ndocker      : not checked (idle)\ndoc broker  : idle (not_requested), tcp://127.0.0.1:29504\n  log       : C:\\kazma-drill\\.kazma\\document_broker.log\ndisk        : ok (51.0% / 50.4 GB free on C:, data)\ndatabase    : running (postgresql-x64-16)\noutside     : off\n",
+   "searxng": {
+    "url": "",
+    "http": null,
+    "error": "KAZMA_SEARXNG_URL not set"
+   },
+   "engine_task": "",
+   "docker_desktop_running": false
+  },
+  {
+   "at": 1794528153.3510604,
+   "uptime_s": 103.718,
+   "users": "No User exists for *",
+   "signed_in": false,
+   "ready": {
+    "http": 503,
+    "body": {
+     "status": "not_ready",
+     "timestamp": 1794528153.5185974,
+     "checks": {
+      "config_store": {
+       "status": "ok",
+       "component": "config_store"
+      },
+      "database": {
+       "status": "ok",
+       "component": "database",
+       "backend": "postgres"
+      },
+      "swarm_engine": {
+       "status": "ok",
+       "component": "swarm_engine",
+       "workers": 0
+      },
+      "model_registry": {
+       "status": "ok",
+       "component": "model_registry",
+       "providers": 19,
+       "active_model": "gpt-4o-mini",
+       "active_provider": "custom"
+      },
+      "agent_runner": {
+       "status": "ok",
+       "component": "agent_runner"
+      },
+      "mcp": {
+       "status": "ok",
+       "component": "mcp",
+       "tools": 0
+      },
+      "cron": {
+       "status": "ok",
+       "component": "cron",
+       "running": true,
+       "state": "ok",
+       "last_poll_age_s": 20.5,
+       "stale_after_s": 90.0,
+       "fires_in_flight": 0,
+       "poll_interval_s": 30.0,
+       "alerts_pending": 0
+      },
+      "schedulers": {
+       "status": "ok",
+       "component": "schedulers",
+       "cron": "running",
+       "x_posts": "running"
+      },
+      "llm_provider": {
+       "status": "degraded",
+       "component": "llm_provider",
+       "model": "gpt-4o-mini",
+       "error": "no API key for a remote provider",
+       "needs_setup": "Settings -> Providers: add the provider's API key, or choose a local model"
+      },
+      "knowledge_vectors": {
+       "component": "knowledge_vectors",
+       "topology": "single_install",
+       "status": "ok",
+       "detail": "not checked yet"
+      },
+      "chat_runtime": {
+       "status": "ok",
+       "component": "chat_runtime",
+       "graph_ready": true,
+       "checkpointer_ready": true,
+       "checkpoint_bound": true
+      },
+      "code_execution": {
+       "status": "failed",
+       "component": "code_execution",
+       "error": "No available isolated execution backend: Docker Desktop is not running",
+       "waits_for": "docker",
+       "engine": "desktop"
+      }
+     },
+     "required_capabilities": [
+      "agent_runner",
+      "chat_runtime",
+      "code_execution",
+      "config_store",
+      "database",
+      "llm_provider",
+      "model_registry"
+     ],
+     "unavailable_capabilities": [
+      "llm_provider",
+      "code_execution"
+     ],
+     "database_availability": {
+      "state": "answering"
+     },
+     "waits_for": {
+      "code_execution": "docker"
+     }
+    }
+   },
+   "status": "supervision : active\nserver      : up, waiting for docker (llm_provider: no API key for a remote provider; code_execution: No available isolated execution backend: Docker Desktop is not running)\nguard       : running (pid 4656, heartbeat 3s ago)\nguard child : pid 6656\ndocker      : not checked (idle)\ndoc broker  : idle (not_requested), tcp://127.0.0.1:29504\n  log       : C:\\kazma-drill\\.kazma\\document_broker.log\ndisk        : ok (51.0% / 50.4 GB free on C:, data)\ndatabase    : running (postgresql-x64-16)\noutside     : off\n",
+   "searxng": {
+    "url": "",
+    "http": null,
+    "error": "KAZMA_SEARXNG_URL not set"
+   },
+   "engine_task": "",
+   "docker_desktop_running": false
+  },
+  {
+   "at": 1794528169.5044508,
+   "uptime_s": 119.875,
+   "users": "No User exists for *",
+   "signed_in": false,
+   "ready": {
+    "http": 503,
+    "body": {
+     "status": "not_ready",
+     "timestamp": 1794528169.6858804,
+     "checks": {
+      "config_store": {
+       "status": "ok",
+       "component": "config_store"
+      },
+      "database": {
+       "status": "ok",
+       "component": "database",
+       "backend": "postgres"
+      },
+      "swarm_engine": {
+       "status": "ok",
+       "component": "swarm_engine",
+       "workers": 0
+      },
+      "model_registry": {
+       "status": "ok",
+       "component": "model_registry",
+       "providers": 19,
+       "active_model": "gpt-4o-mini",
+       "active_provider": "custom"
+      },
+      "agent_runner": {
+       "status": "ok",
+       "component": "agent_runner"
+      },
+      "mcp": {
+       "status": "ok",
+       "component": "mcp",
+       "tools": 0
+      },
+      "cron": {
+       "status": "ok",
+       "component": "cron",
+       "running": true,
+       "state": "ok",
+       "last_poll_age_s": 6.7,
+       "stale_after_s": 90.0,
+       "fires_in_flight": 0,
+       "poll_interval_s": 30.0,
+       "alerts_pending": 0
+      },
+      "schedulers": {
+       "status": "ok",
+       "component": "schedulers",
+       "cron": "running",
+       "x_posts": "running"
+      },
+      "llm_provider": {
+       "status": "degraded",
+       "component": "llm_provider",
+       "model": "gpt-4o-mini",
+       "error": "no API key for a remote provider",
+       "needs_setup": "Settings -> Providers: add the provider's API key, or choose a local model"
+      },
+      "knowledge_vectors": {
+       "component": "knowledge_vectors",
+       "topology": "single_install",
+       "status": "ok",
+       "detail": "not checked yet"
+      },
+      "chat_runtime": {
+       "status": "ok",
+       "component": "chat_runtime",
+       "graph_ready": true,
+       "checkpointer_ready": true,
+       "checkpoint_bound": true
+      },
+      "code_execution": {
+       "status": "failed",
+       "component": "code_execution",
+       "error": "No available isolated execution backend: Docker Desktop is not running",
+       "waits_for": "docker",
+       "engine": "desktop"
+      }
+     },
+     "required_capabilities": [
+      "agent_runner",
+      "chat_runtime",
+      "code_execution",
+      "config_store",
+      "database",
+      "llm_provider",
+      "model_registry"
+     ],
+     "unavailable_capabilities": [
+      "llm_provider",
+      "code_execution"
+     ],
+     "database_availability": {
+      "state": "answering"
+     },
+     "waits_for": {
+      "code_execution": "docker"
+     }
+    }
+   },
+   "status": "supervision : active\nserver      : up, waiting for docker (llm_provider: no API key for a remote provider; code_execution: No available isolated execution backend: Docker Desktop is not running)\nguard       : running (pid 4656, heartbeat 9s ago)\nguard child : pid 6656\ndocker      : not checked (idle)\ndoc broker  : idle (not_requested), tcp://127.0.0.1:29504\n  log       : C:\\kazma-drill\\.kazma\\document_broker.log\ndisk        : ok (51.0% / 50.4 GB free on C:, data)\ndatabase    : running (postgresql-x64-16)\noutside     : off\n",
+   "searxng": {
+    "url": "",
+    "http": null,
+    "error": "KAZMA_SEARXNG_URL not set"
+   },
+   "engine_task": "",
+   "docker_desktop_running": false
+  },
+  {
+   "at": 1794528185.6691718,
+   "uptime_s": 136.046,
+   "users": "No User exists for *",
+   "signed_in": false,
+   "ready": {
+    "http": 503,
+    "body": {
+     "status": "not_ready",
+     "timestamp": 1794528185.8542063,
+     "checks": {
+      "config_store": {
+       "status": "ok",
+       "component": "config_store"
+      },
+      "database": {
+       "status": "ok",
+       "component": "database",
+       "backend": "postgres"
+      },
+      "swarm_engine": {
+       "status": "ok",
+       "component": "swarm_engine",
+       "workers": 0
+      },
+      "model_registry": {
+       "status": "ok",
+       "component": "model_registry",
+       "providers": 19,
+       "active_model": "gpt-4o-mini",
+       "active_provider": "custom"
+      },
+      "agent_runner": {
+       "status": "ok",
+       "component": "agent_runner"
+      },
+      "mcp": {
+       "status": "ok",
+       "component": "mcp",
+       "tools": 0
+      },
+      "cron": {
+       "status": "ok",
+       "component": "cron",
+       "running": true,
+       "state": "ok",
+       "last_poll_age_s": 22.8,
+       "stale_after_s": 90.0,
+       "fires_in_flight": 0,
+       "poll_interval_s": 30.0,
+       "alerts_pending": 0
+      },
+      "schedulers": {
+       "status": "ok",
+       "component": "schedulers",
+       "cron": "running",
+       "x_posts": "running"
+      },
+      "llm_provider": {
+       "status": "degraded",
+       "component": "llm_provider",
+       "model": "gpt-4o-mini",
+       "error": "no API key for a remote provider",
+       "needs_setup": "Settings -> Providers: add the provider's API key, or choose a local model"
+      },
+      "knowledge_vectors": {
+       "component": "knowledge_vectors",
+       "topology": "single_install",
+       "status": "ok",
+       "detail": "not checked yet"
+      },
+      "chat_runtime": {
+       "status": "ok",
+       "component": "chat_runtime",
+       "graph_ready": true,
+       "checkpointer_ready": true,
+       "checkpoint_bound": true
+      },
+      "code_execution": {
+       "status": "failed",
+       "component": "code_execution",
+       "error": "No available isolated execution backend: Docker Desktop is not running",
+       "waits_for": "docker",
+       "engine": "desktop"
+      }
+     },
+     "required_capabilities": [
+      "agent_runner",
+      "chat_runtime",
+      "code_execution",
+      "config_store",
+      "database",
+      "llm_provider",
+      "model_registry"
+     ],
+     "unavailable_capabilities": [
+      "llm_provider",
+      "code_execution"
+     ],
+     "database_availability": {
+      "state": "answering"
+     },
+     "waits_for": {
+      "code_execution": "docker"
+     }
+    }
+   },
+   "status": "supervision : active\nserver      : up, waiting for docker (llm_provider: no API key for a remote provider; code_execution: No available isolated execution backend: Docker Desktop is not running)\n  port 9090  : held by pid 6680\nguard       : running (pid 4656, heartbeat 4s ago)\nguard child : pid 6656\ndocker      : not checked (idle)\ndoc broker  : idle (not_requested), tcp://127.0.0.1:29504\n  log       : C:\\kazma-drill\\.kazma\\document_broker.log\ndisk        : ok (51.0% / 50.4 GB free on C:, data)\ndatabase    : running (postgresql-x64-16)\noutside     : off\n",
+   "searxng": {
+    "url": "",
+    "http": null,
+    "error": "KAZMA_SEARXNG_URL not set"
+   },
+   "engine_task": "",
+   "docker_desktop_running": false
+  },
+  {
+   "at": 1794528201.8526702,
+   "uptime_s": 152.218,
+   "users": "No User exists for *",
+   "signed_in": false,
+   "ready": {
+    "http": 503,
+    "body": {
+     "status": "not_ready",
+     "timestamp": 1794528202.0370984,
+     "checks": {
+      "config_store": {
+       "status": "ok",
+       "component": "config_store"
+      },
+      "database": {
+       "status": "ok",
+       "component": "database",
+       "backend": "postgres"
+      },
+      "swarm_engine": {
+       "status": "ok",
+       "component": "swarm_engine",
+       "workers": 0
+      },
+      "model_registry": {
+       "status": "ok",
+       "component": "model_registry",
+       "providers": 19,
+       "active_model": "gpt-4o-mini",
+       "active_provider": "custom"
+      },
+      "agent_runner": {
+       "status": "ok",
+       "component": "agent_runner"
+      },
+      "mcp": {
+       "status": "ok",
+       "component": "mcp",
+       "tools": 0
+      },
+      "cron": {
+       "status": "ok",
+       "component": "cron",
+       "running": true,
+       "state": "ok",
+       "last_poll_age_s": 9.0,
+       "stale_after_s": 90.0,
+       "fires_in_flight": 0,
+       "poll_interval_s": 30.0,
+       "alerts_pending": 0
+      },
+      "schedulers": {
+       "status": "ok",
+       "component": "schedulers",
+       "cron": "running",
+       "x_posts": "running"
+      },
+      "llm_provider": {
+       "status": "degraded",
+       "component": "llm_provider",
+       "model": "gpt-4o-mini",
+       "error": "no API key for a remote provider",
+       "needs_setup": "Settings -> Providers: add the provider's API key, or choose a local model"
+      },
+      "knowledge_vectors": {
+       "component": "knowledge_vectors",
+       "topology": "single_install",
+       "missing": 0,
+       "bad_passes": 0,
+       "checked_at": 1794528193.2541256,
+       "status": "ok",
+       "detail": "every chunk has a vector of the active embedder"
+      },
+      "chat_runtime": {
+       "status": "ok",
+       "component": "chat_runtime",
+       "graph_ready": true,
+       "checkpointer_ready": true,
+       "checkpoint_bound": true
+      },
+      "code_execution": {
+       "status": "failed",
+       "component": "code_execution",
+       "error": "No available isolated execution backend: Docker Desktop is not running",
+       "waits_for": "docker",
+       "engine": "desktop"
+      }
+     },
+     "required_capabilities": [
+      "agent_runner",
+      "chat_runtime",
+      "code_execution",
+      "config_store",
+      "database",
+      "llm_provider",
+      "model_registry"
+     ],
+     "unavailable_capabilities": [
+      "llm_provider",
+      "code_execution"
+     ],
+     "database_availability": {
+      "state": "answering"
+     },
+     "waits_for": {
+      "code_execution": "docker"
+     }
+    }
+   },
+   "status": "supervision : active\nserver      : up, waiting for docker (llm_provider: no API key for a remote provider; code_execution: No available isolated execution backend: Docker Desktop is not running)\nguard       : running (pid 4656, heartbeat 10s ago)\nguard child : pid 6656\ndocker      : not checked (idle)\ndoc broker  : idle (not_requested), tcp://127.0.0.1:29504\n  log       : C:\\kazma-drill\\.kazma\\document_broker.log\ndisk        : ok (51.0% / 50.4 GB free on C:, data)\ndatabase    : running (postgresql-x64-16)\noutside     : off\n",
+   "searxng": {
+    "url": "",
+    "http": null,
+    "error": "KAZMA_SEARXNG_URL not set"
+   },
+   "engine_task": "",
+   "docker_desktop_running": false
+  },
+  {
+   "at": 1794528217.9881887,
+   "uptime_s": 168.359,
+   "users": "No User exists for *",
+   "signed_in": false,
+   "ready": {
+    "http": 503,
+    "body": {
+     "status": "not_ready",
+     "timestamp": 1794528218.1616082,
+     "checks": {
+      "config_store": {
+       "status": "ok",
+       "component": "config_store"
+      },
+      "database": {
+       "status": "ok",
+       "component": "database",
+       "backend": "postgres"
+      },
+      "swarm_engine": {
+       "status": "ok",
+       "component": "swarm_engine",
+       "workers": 0
+      },
+      "model_registry": {
+       "status": "ok",
+       "component": "model_registry",
+       "providers": 19,
+       "active_model": "gpt-4o-mini",
+       "active_provider": "custom"
+      },
+      "agent_runner": {
+       "status": "ok",
+       "component": "agent_runner"
+      },
+      "mcp": {
+       "status": "ok",
+       "component": "mcp",
+       "tools": 0
+      },
+      "cron": {
+       "status": "ok",
+       "component": "cron",
+       "running": true,
+       "state": "ok",
+       "last_poll_age_s": 25.1,
+       "stale_after_s": 90.0,
+       "fires_in_flight": 0,
+       "poll_interval_s": 30.0,
+       "alerts_pending": 0
+      },
+      "schedulers": {
+       "status": "ok",
+       "component": "schedulers",
+       "cron": "running",
+       "x_posts": "running"
+      },
+      "llm_provider": {
+       "status": "degraded",
+       "component": "llm_provider",
+       "model": "gpt-4o-mini",
+       "error": "no API key for a remote provider",
+       "needs_setup": "Settings -> Providers: add the provider's API key, or choose a local model"
+      },
+      "knowledge_vectors": {
+       "component": "knowledge_vectors",
+       "topology": "single_install",
+       "missing": 0,
+       "bad_passes": 0,
+       "checked_at": 1794528193.2541256,
+       "status": "ok",
+       "detail": "every chunk has a vector of the active embedder"
+      },
+      "chat_runtime": {
+       "status": "ok",
+       "component": "chat_runtime",
+       "graph_ready": true,
+       "checkpointer_ready": true,
+       "checkpoint_bound": true
+      },
+      "code_execution": {
+       "status": "failed",
+       "component": "code_execution",
+       "error": "No available isolated execution backend: Docker Desktop is not running",
+       "waits_for": "docker",
+       "engine": "desktop"
+      }
+     },
+     "required_capabilities": [
+      "agent_runner",
+      "chat_runtime",
+      "code_execution",
+      "config_store",
+      "database",
+      "llm_provider",
+      "model_registry"
+     ],
+     "unavailable_capabilities": [
+      "llm_provider",
+      "code_execution"
+     ],
+     "database_availability": {
+      "state": "answering"
+     },
+     "waits_for": {
+      "code_execution": "docker"
+     }
+    }
+   },
+   "status": "supervision : active\nserver      : up, waiting for docker (llm_provider: no API key for a remote provider; code_execution: No available isolated execution backend: Docker Desktop is not running)\nguard       : running (pid 4656, heartbeat 6s ago)\nguard child : pid 6656\ndocker      : not checked (idle)\ndoc broker  : idle (not_requested), tcp://127.0.0.1:29504\n  log       : C:\\kazma-drill\\.kazma\\document_broker.log\ndisk        : ok (51.0% / 50.4 GB free on C:, data)\ndatabase    : running (postgresql-x64-16)\noutside     : off\n",
+   "searxng": {
+    "url": "",
+    "http": null,
+    "error": "KAZMA_SEARXNG_URL not set"
+   },
+   "engine_task": "",
+   "docker_desktop_running": false
+  },
+  {
+   "at": 1794528234.119348,
+   "uptime_s": 184.5,
+   "users": "No User exists for *",
+   "signed_in": false,
+   "ready": {
+    "http": 503,
+    "body": {
+     "status": "not_ready",
+     "timestamp": 1794528234.3036118,
+     "checks": {
+      "config_store": {
+       "status": "ok",
+       "component": "config_store"
+      },
+      "database": {
+       "status": "ok",
+       "component": "database",
+       "backend": "postgres"
+      },
+      "swarm_engine": {
+       "status": "ok",
+       "component": "swarm_engine",
+       "workers": 0
+      },
+      "model_registry": {
+       "status": "ok",
+       "component": "model_registry",
+       "providers": 19,
+       "active_model": "gpt-4o-mini",
+       "active_provider": "custom"
+      },
+      "agent_runner": {
+       "status": "ok",
+       "component": "agent_runner"
+      },
+      "mcp": {
+       "status": "ok",
+       "component": "mcp",
+       "tools": 0
+      },
+      "cron": {
+       "status": "ok",
+       "component": "cron",
+       "running": true,
+       "state": "ok",
+       "last_poll_age_s": 11.3,
+       "stale_after_s": 90.0,
+       "fires_in_flight": 0,
+       "poll_interval_s": 30.0,
+       "alerts_pending": 0
+      },
+      "schedulers": {
+       "status": "ok",
+       "component": "schedulers",
+       "cron": "running",
+       "x_posts": "running"
+      },
+      "llm_provider": {
+       "status": "degraded",
+       "component": "llm_provider",
+       "model": "gpt-4o-mini",
+       "error": "no API key for a remote provider",
+       "needs_setup": "Settings -> Providers: add the provider's API key, or choose a local model"
+      },
+      "knowledge_vectors": {
+       "component": "knowledge_vectors",
+       "topology": "single_install",
+       "missing": 0,
+       "bad_passes": 0,
+       "checked_at": 1794528193.2541256,
+       "status": "ok",
+       "detail": "every chunk has a vector of the active embedder"
+      },
+      "chat_runtime": {
+       "status": "ok",
+       "component": "chat_runtime",
+       "graph_ready": true,
+       "checkpointer_ready": true,
+       "checkpoint_bound": true
+      },
+      "code_execution": {
+       "status": "failed",
+       "component": "code_execution",
+       "error": "No available isolated execution backend: Docker Desktop is not running",
+       "waits_for": "docker",
+       "engine": "desktop"
+      }
+     },
+     "required_capabilities": [
+      "agent_runner",
+      "chat_runtime",
+      "code_execution",
+      "config_store",
+      "database",
+      "llm_provider",
+      "model_registry"
+     ],
+     "unavailable_capabilities": [
+      "llm_provider",
+      "code_execution"
+     ],
+     "database_availability": {
+      "state": "answering"
+     },
+     "waits_for": {
+      "code_execution": "docker"
+     }
+    }
+   },
+   "status": "supervision : active\nserver      : up, waiting for docker (llm_provider: no API key for a remote provider; code_execution: No available isolated execution backend: Docker Desktop is not running)\nguard       : running (pid 4656, heartbeat 1s ago)\nguard child : pid 6656\ndocker      : not checked (idle)\ndoc broker  : idle (not_requested), tcp://127.0.0.1:29504\n  log       : C:\\kazma-drill\\.kazma\\document_broker.log\ndisk        : ok (51.0% / 50.4 GB free on C:, data)\ndatabase    : running (postgresql-x64-16)\noutside     : off\n",
+   "searxng": {
+    "url": "",
+    "http": null,
+    "error": "KAZMA_SEARXNG_URL not set"
+   },
+   "engine_task": "",
+   "docker_desktop_running": false
+  },
+  {
+   "at": 1794528250.3376248,
+   "uptime_s": 200.703,
+   "users": "No User exists for *",
+   "signed_in": false,
+   "ready": {
+    "http": 503,
+    "body": {
+     "status": "not_ready",
+     "timestamp": 1794528250.5370488,
+     "checks": {
+      "config_store": {
+       "status": "ok",
+       "component": "config_store"
+      },
+      "database": {
+       "status": "ok",
+       "component": "database",
+       "backend": "postgres"
+      },
+      "swarm_engine": {
+       "status": "ok",
+       "component": "swarm_engine",
+       "workers": 0
+      },
+      "model_registry": {
+       "status": "ok",
+       "component": "model_registry",
+       "providers": 19,
+       "active_model": "gpt-4o-mini",
+       "active_provider": "custom"
+      },
+      "agent_runner": {
+       "status": "ok",
+       "component": "agent_runner"
+      },
+      "mcp": {
+       "status": "ok",
+       "component": "mcp",
+       "tools": 0
+      },
+      "cron": {
+       "status": "ok",
+       "component": "cron",
+       "running": true,
+       "state": "ok",
+       "last_poll_age_s": 27.5,
+       "stale_after_s": 90.0,
+       "fires_in_flight": 0,
+       "poll_interval_s": 30.0,
+       "alerts_pending": 0
+      },
+      "schedulers": {
+       "status": "ok",
+       "component": "schedulers",
+       "cron": "running",
+       "x_posts": "running"
+      },
+      "llm_provider": {
+       "status": "degraded",
+       "component": "llm_provider",
+       "model": "gpt-4o-mini",
+       "error": "no API key for a remote provider",
+       "needs_setup": "Settings -> Providers: add the provider's API key, or choose a local model"
+      },
+      "knowledge_vectors": {
+       "component": "knowledge_vectors",
+       "topology": "single_install",
+       "missing": 0,
+       "bad_passes": 0,
+       "checked_at": 1794528193.2541256,
+       "status": "ok",
+       "detail": "every chunk has a vector of the active embedder"
+      },
+      "chat_runtime": {
+       "status": "ok",
+       "component": "chat_runtime",
+       "graph_ready": true,
+       "checkpointer_ready": true,
+       "checkpoint_bound": true
+      },
+      "code_execution": {
+       "status": "failed",
+       "component": "code_execution",
+       "error": "No available isolated execution backend: Docker Desktop is not running",
+       "waits_for": "docker",
+       "engine": "desktop"
+      }
+     },
+     "required_capabilities": [
+      "agent_runner",
+      "chat_runtime",
+      "code_execution",
+      "config_store",
+      "database",
+      "llm_provider",
+      "model_registry"
+     ],
+     "unavailable_capabilities": [
+      "llm_provider",
+      "code_execution"
+     ],
+     "database_availability": {
+      "state": "answering"
+     },
+     "waits_for": {
+      "code_execution": "docker"
+     }
+    }
+   },
+   "status": "supervision : active\nserver      : up, waiting for docker (llm_provider: no API key for a remote provider; code_execution: No available isolated execution backend: Docker Desktop is not running)\nguard       : running (pid 4656, heartbeat 7s ago)\nguard child : pid 6656\ndocker      : not checked (idle)\ndoc broker  : idle (not_requested), tcp://127.0.0.1:29504\n  log       : C:\\kazma-drill\\.kazma\\document_broker.log\ndisk        : ok (50.9% / 50.4 GB free on C:, data)\ndatabase    : running (postgresql-x64-16)\noutside     : off\n",
+   "searxng": {
+    "url": "",
+    "http": null,
+    "error": "KAZMA_SEARXNG_URL not set"
+   },
+   "engine_task": "",
+   "docker_desktop_running": false
+  },
+  {
+   "at": 1794528266.5562043,
+   "uptime_s": 216.921,
+   "users": "No User exists for *",
+   "signed_in": false,
+   "ready": {
+    "http": 503,
+    "body": {
+     "status": "not_ready",
+     "timestamp": 1794528266.7242694,
+     "checks": {
+      "config_store": {
+       "status": "ok",
+       "component": "config_store"
+      },
+      "database": {
+       "status": "ok",
+       "component": "database",
+       "backend": "postgres"
+      },
+      "swarm_engine": {
+       "status": "ok",
+       "component": "swarm_engine",
+       "workers": 0
+      },
+      "model_registry": {
+       "status": "ok",
+       "component": "model_registry",
+       "providers": 19,
+       "active_model": "gpt-4o-mini",
+       "active_provider": "custom"
+      },
+      "agent_runner": {
+       "status": "ok",
+       "component": "agent_runner"
+      },
+      "mcp": {
+       "status": "ok",
+       "component": "mcp",
+       "tools": 0
+      },
+      "cron": {
+       "status": "ok",
+       "component": "cron",
+       "running": true,
+       "state": "ok",
+       "last_poll_age_s": 13.7,
+       "stale_after_s": 90.0,
+       "fires_in_flight": 0,
+       "poll_interval_s": 30.0,
+       "alerts_pending": 0
+      },
+      "schedulers": {
+       "status": "ok",
+       "component": "schedulers",
+       "cron": "running",
+       "x_posts": "running"
+      },
+      "llm_provider": {
+       "status": "degraded",
+       "component": "llm_provider",
+       "model": "gpt-4o-mini",
+       "error": "no API key for a remote provider",
+       "needs_setup": "Settings -> Providers: add the provider's API key, or choose a local model"
+      },
+      "knowledge_vectors": {
+       "component": "knowledge_vectors",
+       "topology": "single_install",
+       "missing": 0,
+       "bad_passes": 0,
+       "checked_at": 1794528193.2541256,
+       "status": "ok",
+       "detail": "every chunk has a vector of the active embedder"
+      },
+      "chat_runtime": {
+       "status": "ok",
+       "component": "chat_runtime",
+       "graph_ready": true,
+       "checkpointer_ready": true,
+       "checkpoint_bound": true
+      },
+      "code_execution": {
+       "status": "failed",
+       "component": "code_execution",
+       "error": "No available isolated execution backend: Docker Desktop is not running",
+       "waits_for": "docker",
+       "engine": "desktop"
+      }
+     },
+     "required_capabilities": [
+      "agent_runner",
+      "chat_runtime",
+      "code_execution",
+      "config_store",
+      "database",
+      "llm_provider",
+      "model_registry"
+     ],
+     "unavailable_capabilities": [
+      "llm_provider",
+      "code_execution"
+     ],
+     "database_availability": {
+      "state": "answering"
+     },
+     "waits_for": {
+      "code_execution": "docker"
+     }
+    }
+   },
+   "status": "supervision : active\nserver      : up, waiting for docker (llm_provider: no API key for a remote provider; code_execution: No available isolated execution backend: Docker Desktop is not running)\nguard       : running (pid 4656, heartbeat 2s ago)\nguard child : pid 6656\ndocker      : not checked (idle)\ndoc broker  : idle (not_requested), tcp://127.0.0.1:29504\n  log       : C:\\kazma-drill\\.kazma\\document_broker.log\ndisk        : ok (50.9% / 50.4 GB free on C:, data)\ndatabase    : running (postgresql-x64-16)\noutside     : off\n",
+   "searxng": {
+    "url": "",
+    "http": null,
+    "error": "KAZMA_SEARXNG_URL not set"
+   },
+   "engine_task": "",
+   "docker_desktop_running": false
+  },
+  {
+   "at": 1794528282.680835,
+   "uptime_s": 233.046,
+   "users": "No User exists for *",
+   "signed_in": false,
+   "ready": {
+    "http": 503,
+    "body": {
+     "status": "not_ready",
+     "timestamp": 1794528282.851492,
+     "checks": {
+      "config_store": {
+       "status": "ok",
+       "component": "config_store"
+      },
+      "database": {
+       "status": "ok",
+       "component": "database",
+       "backend": "postgres"
+      },
+      "swarm_engine": {
+       "status": "ok",
+       "component": "swarm_engine",
+       "workers": 0
+      },
+      "model_registry": {
+       "status": "ok",
+       "component": "model_registry",
+       "providers": 19,
+       "active_model": "gpt-4o-mini",
+       "active_provider": "custom"
+      },
+      "agent_runner": {
+       "status": "ok",
+       "component": "agent_runner"
+      },
+      "mcp": {
+       "status": "ok",
+       "component": "mcp",
+       "tools": 0
+      },
+      "cron": {
+       "status": "ok",
+       "component": "cron",
+       "running": true,
+       "state": "ok",
+       "last_poll_age_s": 29.8,
+       "stale_after_s": 90.0,
+       "fires_in_flight": 0,
+       "poll_interval_s": 30.0,
+       "alerts_pending": 0
+      },
+      "schedulers": {
+       "status": "ok",
+       "component": "schedulers",
+       "cron": "running",
+       "x_posts": "running"
+      },
+      "llm_provider": {
+       "status": "degraded",
+       "component": "llm_provider",
+       "model": "gpt-4o-mini",
+       "error": "no API key for a remote provider",
+       "needs_setup": "Settings -> Providers: add the provider's API key, or choose a local model"
+      },
+      "knowledge_vectors": {
+       "component": "knowledge_vectors",
+       "topology": "single_install",
+       "missing": 0,
+       "bad_passes": 0,
+       "checked_at": 1794528193.2541256,
+       "status": "ok",
+       "detail": "every chunk has a vector of the active embedder"
+      },
+      "chat_runtime": {
+       "status": "ok",
+       "component": "chat_runtime",
+       "graph_ready": true,
+       "checkpointer_ready": true,
+       "checkpoint_bound": true
+      },
+      "code_execution": {
+       "status": "failed",
+       "component": "code_execution",
+       "error": "No available isolated execution backend: Docker Desktop is not running",
+       "waits_for": "docker",
+       "engine": "desktop"
+      }
+     },
+     "required_capabilities": [
+      "agent_runner",
+      "chat_runtime",
+      "code_execution",
+      "config_store",
+      "database",
+      "llm_provider",
+      "model_registry"
+     ],
+     "unavailable_capabilities": [
+      "llm_provider",
+      "code_execution"
+     ],
+     "database_availability": {
+      "state": "answering"
+     },
+     "waits_for": {
+      "code_execution": "docker"
+     }
+    }
+   },
+   "status": "supervision : active\nserver      : up, waiting for docker (llm_provider: no API key for a remote provider; code_execution: No available isolated execution backend: Docker Desktop is not running)\nguard       : running (pid 4656, heartbeat 8s ago)\nguard child : pid 6656\ndocker      : not checked (idle)\ndoc broker  : idle (not_requested), tcp://127.0.0.1:29504\n  log       : C:\\kazma-drill\\.kazma\\document_broker.log\ndisk        : ok (50.9% / 50.4 GB free on C:, data)\ndatabase    : running (postgresql-x64-16)\noutside     : off\n",
+   "searxng": {
+    "url": "",
+    "http": null,
+    "error": "KAZMA_SEARXNG_URL not set"
+   },
+   "engine_task": "",
+   "docker_desktop_running": false
+  },
+  {
+   "at": 1794528298.820505,
+   "uptime_s": 249.187,
+   "users": "No User exists for *",
+   "signed_in": false,
+   "ready": {
+    "http": 503,
+    "body": {
+     "status": "not_ready",
+     "timestamp": 1794528298.988183,
+     "checks": {
+      "config_store": {
+       "status": "ok",
+       "component": "config_store"
+      },
+      "database": {
+       "status": "ok",
+       "component": "database",
+       "backend": "postgres"
+      },
+      "swarm_engine": {
+       "status": "ok",
+       "component": "swarm_engine",
+       "workers": 0
+      },
+      "model_registry": {
+       "status": "ok",
+       "component": "model_registry",
+       "providers": 19,
+       "active_model": "gpt-4o-mini",
+       "active_provider": "custom"
+      },
+      "agent_runner": {
+       "status": "ok",
+       "component": "agent_runner"
+      },
+      "mcp": {
+       "status": "ok",
+       "component": "mcp",
+       "tools": 0
+      },
+      "cron": {
+       "status": "ok",
+       "component": "cron",
+       "running": true,
+       "state": "ok",
+       "last_poll_age_s": 16.0,
+       "stale_after_s": 90.0,
+       "fires_in_flight": 0,
+       "poll_interval_s": 30.0,
+       "alerts_pending": 0
+      },
+      "schedulers": {
+       "status": "ok",
+       "component": "schedulers",
+       "cron": "running",
+       "x_posts": "running"
+      },
+      "llm_provider": {
+       "status": "degraded",
+       "component": "llm_provider",
+       "model": "gpt-4o-mini",
+       "error": "no API key for a remote provider",
+       "needs_setup": "Settings -> Providers: add the provider's API key, or choose a local model"
+      },
+      "knowledge_vectors": {
+       "component": "knowledge_vectors",
+       "topology": "single_install",
+       "missing": 0,
+       "bad_passes": 0,
+       "checked_at": 1794528193.2541256,
+       "status": "ok",
+       "detail": "every chunk has a vector of the active embedder"
+      },
+      "chat_runtime": {
+       "status": "ok",
+       "component": "chat_runtime",
+       "graph_ready": true,
+       "checkpointer_ready": true,
+       "checkpoint_bound": true
+      },
+      "code_execution": {
+       "status": "failed",
+       "component": "code_execution",
+       "error": "No available isolated execution backend: Docker Desktop is not running",
+       "waits_for": "docker",
+       "engine": "desktop"
+      }
+     },
+     "required_capabilities": [
+      "agent_runner",
+      "chat_runtime",
+      "code_execution",
+      "config_store",
+      "database",
+      "llm_provider",
+      "model_registry"
+     ],
+     "unavailable_capabilities": [
+      "llm_provider",
+      "code_execution"
+     ],
+     "database_availability": {
+      "state": "answering"
+     },
+     "waits_for": {
+      "code_execution": "docker"
+     }
+    }
+   },
+   "status": "supervision : active\nserver      : up, waiting for docker (llm_provider: no API key for a remote provider; code_execution: No available isolated execution backend: Docker Desktop is not running)\nguard       : running (pid 4656, heartbeat 3s ago)\nguard child : pid 6656\ndocker      : not checked (idle)\ndoc broker  : idle (not_requested), tcp://127.0.0.1:29504\n  log       : C:\\kazma-drill\\.kazma\\document_broker.log\ndisk        : ok (50.9% / 50.4 GB free on C:, data)\ndatabase    : running (postgresql-x64-16)\noutside     : off\n",
+   "searxng": {
+    "url": "",
+    "http": null,
+    "error": "KAZMA_SEARXNG_URL not set"
+   },
+   "engine_task": "",
+   "docker_desktop_running": false
+  },
+  {
+   "at": 1794528314.9381435,
+   "uptime_s": 265.312,
+   "users": "No User exists for *",
+   "signed_in": false,
+   "ready": {
+    "http": 503,
+    "body": {
+     "status": "not_ready",
+     "timestamp": 1794528315.107999,
+     "checks": {
+      "config_store": {
+       "status": "ok",
+       "component": "config_store"
+      },
+      "database": {
+       "status": "ok",
+       "component": "database",
+       "backend": "postgres"
+      },
+      "swarm_engine": {
+       "status": "ok",
+       "component": "swarm_engine",
+       "workers": 0
+      },
+      "model_registry": {
+       "status": "ok",
+       "component": "model_registry",
+       "providers": 19,
+       "active_model": "gpt-4o-mini",
+       "active_provider": "custom"
+      },
+      "agent_runner": {
+       "status": "ok",
+       "component": "agent_runner"
+      },
+      "mcp": {
+       "status": "ok",
+       "component": "mcp",
+       "tools": 0
+      },
+      "cron": {
+       "status": "ok",
+       "component": "cron",
+       "running": true,
+       "state": "ok",
+       "last_poll_age_s": 2.1,
+       "stale_after_s": 90.0,
+       "fires_in_flight": 0,
+       "poll_interval_s": 30.0,
+       "alerts_pending": 0
+      },
+      "schedulers": {
+       "status": "ok",
+       "component": "schedulers",
+       "cron": "running",
+       "x_posts": "running"
+      },
+      "llm_provider": {
+       "status": "degraded",
+       "component": "llm_provider",
+       "model": "gpt-4o-mini",
+       "error": "no API key for a remote provider",
+       "needs_setup": "Settings -> Providers: add the provider's API key, or choose a local model"
+      },
+      "knowledge_vectors": {
+       "component": "knowledge_vectors",
+       "topology": "single_install",
+       "missing": 0,
+       "bad_passes": 0,
+       "checked_at": 1794528193.2541256,
+       "status": "ok",
+       "detail": "every chunk has a vector of the active embedder"
+      },
+      "chat_runtime": {
+       "status": "ok",
+       "component": "chat_runtime",
+       "graph_ready": true,
+       "checkpointer_ready": true,
+       "checkpoint_bound": true
+      },
+      "code_execution": {
+       "status": "failed",
+       "component": "code_execution",
+       "error": "No available isolated execution backend: Docker Desktop is not running",
+       "waits_for": "docker",
+       "engine": "desktop"
+      }
+     },
+     "required_capabilities": [
+      "agent_runner",
+      "chat_runtime",
+      "code_execution",
+      "config_store",
+      "database",
+      "llm_provider",
+      "model_registry"
+     ],
+     "unavailable_capabilities": [
+      "llm_provider",
+      "code_execution"
+     ],
+     "database_availability": {
+      "state": "answering"
+     },
+     "waits_for": {
+      "code_execution": "docker"
+     }
+    }
+   },
+   "status": "supervision : active\nserver      : up, waiting for docker (llm_provider: no API key for a remote provider; code_execution: No available isolated execution backend: Docker Desktop is not running)\nguard       : running (pid 4656, heartbeat 9s ago)\nguard child : pid 6656\ndocker      : not checked (idle)\ndoc broker  : idle (not_requested), tcp://127.0.0.1:29504\n  log       : C:\\kazma-drill\\.kazma\\document_broker.log\ndisk        : ok (50.9% / 50.4 GB free on C:, data)\ndatabase    : running (postgresql-x64-16)\noutside     : off\n",
+   "searxng": {
+    "url": "",
+    "http": null,
+    "error": "KAZMA_SEARXNG_URL not set"
+   },
+   "engine_task": "",
+   "docker_desktop_running": false
+  },
+  {
+   "at": 1794528331.073997,
+   "uptime_s": 281.453,
+   "users": "No User exists for *",
+   "signed_in": false,
+   "ready": {
+    "http": 503,
+    "body": {
+     "status": "not_ready",
+     "timestamp": 1794528331.251805,
+     "checks": {
+      "config_store": {
+       "status": "ok",
+       "component": "config_store"
+      },
+      "database": {
+       "status": "ok",
+       "component": "database",
+       "backend": "postgres"
+      },
+      "swarm_engine": {
+       "status": "ok",
+       "component": "swarm_engine",
+       "workers": 0
+      },
+      "model_registry": {
+       "status": "ok",
+       "component": "model_registry",
+       "providers": 19,
+       "active_model": "gpt-4o-mini",
+       "active_provider": "custom"
+      },
+      "agent_runner": {
+       "status": "ok",
+       "component": "agent_runner"
+      },
+      "mcp": {
+       "status": "ok",
+       "component": "mcp",
+       "tools": 0
+      },
+      "cron": {
+       "status": "ok",
+       "component": "cron",
+       "running": true,
+       "state": "ok",
+       "last_poll_age_s": 18.2,
+       "stale_after_s": 90.0,
+       "fires_in_flight": 0,
+       "poll_interval_s": 30.0,
+       "alerts_pending": 0
+      },
+      "schedulers": {
+       "status": "ok",
+       "component": "schedulers",
+       "cron": "running",
+       "x_posts": "running"
+      },
+      "llm_provider": {
+       "status": "degraded",
+       "component": "llm_provider",
+       "model": "gpt-4o-mini",
+       "error": "no API key for a remote provider",
+       "needs_setup": "Settings -> Providers: add the provider's API key, or choose a local model"
+      },
+      "knowledge_vectors": {
+       "component": "knowledge_vectors",
+       "topology": "single_install",
+       "missing": 0,
+       "bad_passes": 0,
+       "checked_at": 1794528193.2541256,
+       "status": "ok",
+       "detail": "every chunk has a vector of the active embedder"
+      },
+      "chat_runtime": {
+       "status": "ok",
+       "component": "chat_runtime",
+       "graph_ready": true,
+       "checkpointer_ready": true,
+       "checkpoint_bound": true
+      },
+      "code_execution": {
+       "status": "failed",
+       "component": "code_execution",
+       "error": "No available isolated execution backend: Docker Desktop is not running",
+       "waits_for": "docker",
+       "engine": "desktop"
+      }
+     },
+     "required_capabilities": [
+      "agent_runner",
+      "chat_runtime",
+      "code_execution",
+      "config_store",
+      "database",
+      "llm_provider",
+      "model_registry"
+     ],
+     "unavailable_capabilities": [
+      "llm_provider",
+      "code_execution"
+     ],
+     "database_availability": {
+      "state": "answering"
+     },
+     "waits_for": {
+      "code_execution": "docker"
+     }
+    }
+   },
+   "status": "supervision : active\nserver      : up, waiting for docker (llm_provider: no API key for a remote provider; code_execution: No available isolated execution backend: Docker Desktop is not running)\nguard       : running (pid 4656, heartbeat 5s ago)\nguard child : pid 6656\ndocker      : not checked (idle)\ndoc broker  : idle (not_requested), tcp://127.0.0.1:29504\n  log       : C:\\kazma-drill\\.kazma\\document_broker.log\ndisk        : ok (50.9% / 50.4 GB free on C:, data)\ndatabase    : running (postgresql-x64-16)\noutside     : off\n",
+   "searxng": {
+    "url": "",
+    "http": null,
+    "error": "KAZMA_SEARXNG_URL not set"
+   },
+   "engine_task": "",
+   "docker_desktop_running": false
+  },
+  {
+   "at": 1794528347.2673972,
+   "uptime_s": 297.64,
+   "users": "No User exists for *",
+   "signed_in": false,
+   "ready": {
+    "http": 503,
+    "body": {
+     "status": "not_ready",
+     "timestamp": 1794528347.4683857,
+     "checks": {
+      "config_store": {
+       "status": "ok",
+       "component": "config_store"
+      },
+      "database": {
+       "status": "ok",
+       "component": "database",
+       "backend": "postgres"
+      },
+      "swarm_engine": {
+       "status": "ok",
+       "component": "swarm_engine",
+       "workers": 0
+      },
+      "model_registry": {
+       "status": "ok",
+       "component": "model_registry",
+       "providers": 19,
+       "active_model": "gpt-4o-mini",
+       "active_provider": "custom"
+      },
+      "agent_runner": {
+       "status": "ok",
+       "component": "agent_runner"
+      },
+      "mcp": {
+       "status": "ok",
+       "component": "mcp",
+       "tools": 0
+      },
+      "cron": {
+       "status": "ok",
+       "component": "cron",
+       "running": true,
+       "state": "ok",
+       "last_poll_age_s": 4.4,
+       "stale_after_s": 90.0,
+       "fires_in_flight": 0,
+       "poll_interval_s": 30.0,
+       "alerts_pending": 0
+      },
+      "schedulers": {
+       "status": "ok",
+       "component": "schedulers",
+       "cron": "running",
+       "x_posts": "running"
+      },
+      "llm_provider": {
+       "status": "degraded",
+       "component": "llm_provider",
+       "model": "gpt-4o-mini",
+       "error": "no API key for a remote provider",
+       "needs_setup": "Settings -> Providers: add the provider's API key, or choose a local model"
+      },
+      "knowledge_vectors": {
+       "component": "knowledge_vectors",
+       "topology": "single_install",
+       "missing": 0,
+       "bad_passes": 0,
+       "checked_at": 1794528193.2541256,
+       "status": "ok",
+       "detail": "every chunk has a vector of the active embedder"
+      },
+      "chat_runtime": {
+       "status": "ok",
+       "component": "chat_runtime",
+       "graph_ready": true,
+       "checkpointer_ready": true,
+       "checkpoint_bound": true
+      },
+      "code_execution": {
+       "status": "failed",
+       "component": "code_execution",
+       "error": "No available isolated execution backend: Docker Desktop is not running",
+       "waits_for": "docker",
+       "engine": "desktop"
+      }
+     },
+     "required_capabilities": [
+      "agent_runner",
+      "chat_runtime",
+      "code_execution",
+      "config_store",
+      "database",
+      "llm_provider",
+      "model_registry"
+     ],
+     "unavailable_capabilities": [
+      "llm_provider",
+      "code_execution"
+     ],
+     "database_availability": {
+      "state": "answering"
+     },
+     "waits_for": {
+      "code_execution": "docker"
+     }
+    }
+   },
+   "status": "supervision : active\nserver      : up, waiting for docker (llm_provider: no API key for a remote provider; code_execution: No available isolated execution backend: Docker Desktop is not running)\nguard       : running (pid 4656, heartbeat 0s ago)\nguard child : pid 6656\ndocker      : not checked (idle)\ndoc broker  : idle (not_requested), tcp://127.0.0.1:29504\n  log       : C:\\kazma-drill\\.kazma\\document_broker.log\ndisk        : ok (50.9% / 50.4 GB free on C:, data)\ndatabase    : running (postgresql-x64-16)\noutside     : off\n",
+   "searxng": {
+    "url": "",
+    "http": null,
+    "error": "KAZMA_SEARXNG_URL not set"
+   },
+   "engine_task": "",
+   "docker_desktop_running": false
+  },
+  {
+   "at": 1794528363.485866,
+   "uptime_s": 313.859,
+   "users": "No User exists for *",
+   "signed_in": false,
+   "ready": {
+    "http": 503,
+    "body": {
+     "status": "not_ready",
+     "timestamp": 1794528363.676329,
+     "checks": {
+      "config_store": {
+       "status": "ok",
+       "component": "config_store"
+      },
+      "database": {
+       "status": "ok",
+       "component": "database",
+       "backend": "postgres"
+      },
+      "swarm_engine": {
+       "status": "ok",
+       "component": "swarm_engine",
+       "workers": 0
+      },
+      "model_registry": {
+       "status": "ok",
+       "component": "model_registry",
+       "providers": 19,
+       "active_model": "gpt-4o-mini",
+       "active_provider": "custom"
+      },
+      "agent_runner": {
+       "status": "ok",
+       "component": "agent_runner"
+      },
+      "mcp": {
+       "status": "ok",
+       "component": "mcp",
+       "tools": 0
+      },
+      "cron": {
+       "status": "ok",
+       "component": "cron",
+       "running": true,
+       "state": "ok",
+       "last_poll_age_s": 20.6,
+       "stale_after_s": 90.0,
+       "fires_in_flight": 0,
+       "poll_interval_s": 30.0,
+       "alerts_pending": 0
+      },
+      "schedulers": {
+       "status": "ok",
+       "component": "schedulers",
+       "cron": "running",
+       "x_posts": "running"
+      },
+      "llm_provider": {
+       "status": "degraded",
+       "component": "llm_provider",
+       "model": "gpt-4o-mini",
+       "error": "no API key for a remote provider",
+       "needs_setup": "Settings -> Providers: add the provider's API key, or choose a local model"
+      },
+      "knowledge_vectors": {
+       "component": "knowledge_vectors",
+       "topology": "single_install",
+       "missing": 0,
+       "bad_passes": 0,
+       "checked_at": 1794528193.2541256,
+       "status": "ok",
+       "detail": "every chunk has a vector of the active embedder"
+      },
+      "chat_runtime": {
+       "status": "ok",
+       "component": "chat_runtime",
+       "graph_ready": true,
+       "checkpointer_ready": true,
+       "checkpoint_bound": true
+      },
+      "code_execution": {
+       "status": "failed",
+       "component": "code_execution",
+       "error": "No available isolated execution backend: Docker Desktop is not running",
+       "waits_for": "docker",
+       "engine": "desktop"
+      }
+     },
+     "required_capabilities": [
+      "agent_runner",
+      "chat_runtime",
+      "code_execution",
+      "config_store",
+      "database",
+      "llm_provider",
+      "model_registry"
+     ],
+     "unavailable_capabilities": [
+      "llm_provider",
+      "code_execution"
+     ],
+     "database_availability": {
+      "state": "answering"
+     },
+     "waits_for": {
+      "code_execution": "docker"
+     }
+    }
+   },
+   "status": "supervision : active\nserver      : up, waiting for docker (llm_provider: no API key for a remote provider; code_execution: No available isolated execution backend: Docker Desktop is not running)\nguard       : running (pid 4656, heartbeat 6s ago)\nguard child : pid 6656\ndocker      : not checked (idle)\ndoc broker  : idle (not_requested), tcp://127.0.0.1:29504\n  log       : C:\\kazma-drill\\.kazma\\document_broker.log\ndisk        : ok (50.9% / 50.4 GB free on C:, data)\ndatabase    : running (postgresql-x64-16)\noutside     : off\n",
+   "searxng": {
+    "url": "",
+    "http": null,
+    "error": "KAZMA_SEARXNG_URL not set"
+   },
+   "engine_task": "",
+   "docker_desktop_running": false
+  },
+  {
+   "at": 1794528379.665681,
+   "uptime_s": 330.031,
+   "users": "No User exists for *",
+   "signed_in": false,
+   "ready": {
+    "http": 503,
+    "body": {
+     "status": "not_ready",
+     "timestamp": 1794528379.848951,
+     "checks": {
+      "config_store": {
+       "status": "ok",
+       "component": "config_store"
+      },
+      "database": {
+       "status": "ok",
+       "component": "database",
+       "backend": "postgres"
+      },
+      "swarm_engine": {
+       "status": "ok",
+       "component": "swarm_engine",
+       "workers": 0
+      },
+      "model_registry": {
+       "status": "ok",
+       "component": "model_registry",
+       "providers": 19,
+       "active_model": "gpt-4o-mini",
+       "active_provider": "custom"
+      },
+      "agent_runner": {
+       "status": "ok",
+       "component": "agent_runner"
+      },
+      "mcp": {
+       "status": "ok",
+       "component": "mcp",
+       "tools": 0
+      },
+      "cron": {
+       "status": "ok",
+       "component": "cron",
+       "running": true,
+       "state": "ok",
+       "last_poll_age_s": 6.8,
+       "stale_after_s": 90.0,
+       "fires_in_flight": 0,
+       "poll_interval_s": 30.0,
+       "alerts_pending": 0
+      },
+      "schedulers": {
+       "status": "ok",
+       "component": "schedulers",
+       "cron": "running",
+       "x_posts": "running"
+      },
+      "llm_provider": {
+       "status": "degraded",
+       "component": "llm_provider",
+       "model": "gpt-4o-mini",
+       "error": "no API key for a remote provider",
+       "needs_setup": "Settings -> Providers: add the provider's API key, or choose a local model"
+      },
+      "knowledge_vectors": {
+       "component": "knowledge_vectors",
+       "topology": "single_install",
+       "missing": 0,
+       "bad_passes": 0,
+       "checked_at": 1794528193.2541256,
+       "status": "ok",
+       "detail": "every chunk has a vector of the active embedder"
+      },
+      "chat_runtime": {
+       "status": "ok",
+       "component": "chat_runtime",
+       "graph_ready": true,
+       "checkpointer_ready": true,
+       "checkpoint_bound": true
+      },
+      "code_execution": {
+       "status": "failed",
+       "component": "code_execution",
+       "error": "No available isolated execution backend: Docker Desktop is not running",
+       "waits_for": "docker",
+       "engine": "desktop"
+      }
+     },
+     "required_capabilities": [
+      "agent_runner",
+      "chat_runtime",
+      "code_execution",
+      "config_store",
+      "database",
+      "llm_provider",
+      "model_registry"
+     ],
+     "unavailable_capabilities": [
+      "llm_provider",
+      "code_execution"
+     ],
+     "database_availability": {
+      "state": "answering"
+     },
+     "waits_for": {
+      "code_execution": "docker"
+     }
+    }
+   },
+   "status": "supervision : active\nserver      : up, waiting for docker (llm_provider: no API key for a remote provider; code_execution: No available isolated execution backend: Docker Desktop is not running)\nguard       : running (pid 4656, heartbeat 1s ago)\nguard child : pid 6656\ndocker      : not checked (idle)\ndoc broker  : idle (not_requested), tcp://127.0.0.1:29504\n  log       : C:\\kazma-drill\\.kazma\\document_broker.log\ndisk        : ok (50.9% / 50.4 GB free on C:, data)\ndatabase    : running (postgresql-x64-16)\noutside     : off\n",
+   "searxng": {
+    "url": "",
+    "http": null,
+    "error": "KAZMA_SEARXNG_URL not set"
+   },
+   "engine_task": "",
+   "docker_desktop_running": false
+  },
+  {
+   "at": 1794528395.8632123,
+   "uptime_s": 346.234,
+   "users": "No User exists for *",
+   "signed_in": false,
+   "ready": {
+    "http": 503,
+    "body": {
+     "status": "not_ready",
+     "timestamp": 1794528396.0494869,
+     "checks": {
+      "config_store": {
+       "status": "ok",
+       "component": "config_store"
+      },
+      "database": {
+       "status": "ok",
+       "component": "database",
+       "backend": "postgres"
+      },
+      "swarm_engine": {
+       "status": "ok",
+       "component": "swarm_engine",
+       "workers": 0
+      },
+      "model_registry": {
+       "status": "ok",
+       "component": "model_registry",
+       "providers": 19,
+       "active_model": "gpt-4o-mini",
+       "active_provider": "custom"
+      },
+      "agent_runner": {
+       "status": "ok",
+       "component": "agent_runner"
+      },
+      "mcp": {
+       "status": "ok",
+       "component": "mcp",
+       "tools": 0
+      },
+      "cron": {
+       "status": "ok",
+       "component": "cron",
+       "running": true,
+       "state": "ok",
+       "last_poll_age_s": 23.0,
+       "stale_after_s": 90.0,
+       "fires_in_flight": 0,
+       "poll_interval_s": 30.0,
+       "alerts_pending": 0
+      },
+      "schedulers": {
+       "status": "ok",
+       "component": "schedulers",
+       "cron": "running",
+       "x_posts": "running"
+      },
+      "llm_provider": {
+       "status": "degraded",
+       "component": "llm_provider",
+       "model": "gpt-4o-mini",
+       "error": "no API key for a remote provider",
+       "needs_setup": "Settings -> Providers: add the provider's API key, or choose a local model"
+      },
+      "knowledge_vectors": {
+       "component": "knowledge_vectors",
+       "topology": "single_install",
+       "missing": 0,
+       "bad_passes": 0,
+       "checked_at": 1794528193.2541256,
+       "status": "ok",
+       "detail": "every chunk has a vector of the active embedder"
+      },
+      "chat_runtime": {
+       "status": "ok",
+       "component": "chat_runtime",
+       "graph_ready": true,
+       "checkpointer_ready": true,
+       "checkpoint_bound": true
+      },
+      "code_execution": {
+       "status": "failed",
+       "component": "code_execution",
+       "error": "No available isolated execution backend: Docker Desktop is not running",
+       "waits_for": "docker",
+       "engine": "desktop"
+      }
+     },
+     "required_capabilities": [
+      "agent_runner",
+      "chat_runtime",
+      "code_execution",
+      "config_store",
+      "database",
+      "llm_provider",
+      "model_registry"
+     ],
+     "unavailable_capabilities": [
+      "llm_provider",
+      "code_execution"
+     ],
+     "database_availability": {
+      "state": "answering"
+     },
+     "waits_for": {
+      "code_execution": "docker"
+     }
+    }
+   },
+   "status": "supervision : active\nserver      : up, waiting for docker (llm_provider: no API key for a remote provider; code_execution: No available isolated execution backend: Docker Desktop is not running)\nguard       : running (pid 4656, heartbeat 7s ago)\nguard child : pid 6656\ndocker      : not checked (idle)\ndoc broker  : idle (not_requested), tcp://127.0.0.1:29504\n  log       : C:\\kazma-drill\\.kazma\\document_broker.log\ndisk        : ok (50.9% / 50.4 GB free on C:, data)\ndatabase    : running (postgresql-x64-16)\noutside     : off\n",
+   "searxng": {
+    "url": "",
+    "http": null,
+    "error": "KAZMA_SEARXNG_URL not set"
+   },
+   "engine_task": "",
+   "docker_desktop_running": false
+  },
+  {
+   "at": 1794528412.0783815,
+   "uptime_s": 362.453,
+   "users": "No User exists for *",
+   "signed_in": false,
+   "ready": {
+    "http": 503,
+    "body": {
+     "status": "not_ready",
+     "timestamp": 1794528412.255276,
+     "checks": {
+      "config_store": {
+       "status": "ok",
+       "component": "config_store"
+      },
+      "database": {
+       "status": "ok",
+       "component": "database",
+       "backend": "postgres"
+      },
+      "swarm_engine": {
+       "status": "ok",
+       "component": "swarm_engine",
+       "workers": 0
+      },
+      "model_registry": {
+       "status": "ok",
+       "component": "model_registry",
+       "providers": 19,
+       "active_model": "gpt-4o-mini",
+       "active_provider": "custom"
+      },
+      "agent_runner": {
+       "status": "ok",
+       "component": "agent_runner"
+      },
+      "mcp": {
+       "status": "ok",
+       "component": "mcp",
+       "tools": 0
+      },
+      "cron": {
+       "status": "ok",
+       "component": "cron",
+       "running": true,
+       "state": "ok",
+       "last_poll_age_s": 9.2,
+       "stale_after_s": 90.0,
+       "fires_in_flight": 0,
+       "poll_interval_s": 30.0,
+       "alerts_pending": 0
+      },
+      "schedulers": {
+       "status": "ok",
+       "component": "schedulers",
+       "cron": "running",
+       "x_posts": "running"
+      },
+      "llm_provider": {
+       "status": "degraded",
+       "component": "llm_provider",
+       "model": "gpt-4o-mini",
+       "error": "no API key for a remote provider",
+       "needs_setup": "Settings -> Providers: add the provider's API key, or choose a local model"
+      },
+      "knowledge_vectors": {
+       "component": "knowledge_vectors",
+       "topology": "single_install",
+       "missing": 0,
+       "bad_passes": 0,
+       "checked_at": 1794528193.2541256,
+       "status": "ok",
+       "detail": "every chunk has a vector of the active embedder"
+      },
+      "chat_runtime": {
+       "status": "ok",
+       "component": "chat_runtime",
+       "graph_ready": true,
+       "checkpointer_ready": true,
+       "checkpoint_bound": true
+      },
+      "code_execution": {
+       "status": "failed",
+       "component": "code_execution",
+       "error": "No available isolated execution backend: Docker Desktop is not running",
+       "waits_for": "docker",
+       "engine": "desktop"
+      }
+     },
+     "required_capabilities": [
+      "agent_runner",
+      "chat_runtime",
+      "code_execution",
+      "config_store",
+      "database",
+      "llm_provider",
+      "model_registry"
+     ],
+     "unavailable_capabilities": [
+      "llm_provider",
+      "code_execution"
+     ],
+     "database_availability": {
+      "state": "answering"
+     },
+     "waits_for": {
+      "code_execution": "docker"
+     }
+    }
+   },
+   "status": "supervision : active\nserver      : up, waiting for docker (llm_provider: no API key for a remote provider; code_execution: No available isolated execution backend: Docker Desktop is not running)\nguard       : running (pid 4656, heartbeat 3s ago)\nguard child : pid 6656\ndocker      : not checked (idle)\ndoc broker  : idle (not_requested), tcp://127.0.0.1:29504\n  log       : C:\\kazma-drill\\.kazma\\document_broker.log\ndisk        : ok (50.9% / 50.4 GB free on C:, data)\ndatabase    : running (postgresql-x64-16)\noutside     : off\n",
+   "searxng": {
+    "url": "",
+    "http": null,
+    "error": "KAZMA_SEARXNG_URL not set"
+   },
+   "engine_task": "",
+   "docker_desktop_running": false
+  },
+  {
+   "at": 1794528428.2651167,
+   "uptime_s": 378.64,
+   "users": "No User exists for *",
+   "signed_in": false,
+   "ready": {
+    "http": 503,
+    "body": {
+     "status": "not_ready",
+     "timestamp": 1794528428.4454038,
+     "checks": {
+      "config_store": {
+       "status": "ok",
+       "component": "config_store"
+      },
+      "database": {
+       "status": "ok",
+       "component": "database",
+       "backend": "postgres"
+      },
+      "swarm_engine": {
+       "status": "ok",
+       "component": "swarm_engine",
+       "workers": 0
+      },
+      "model_registry": {
+       "status": "ok",
+       "component": "model_registry",
+       "providers": 19,
+       "active_model": "gpt-4o-mini",
+       "active_provider": "custom"
+      },
+      "agent_runner": {
+       "status": "ok",
+       "component": "agent_runner"
+      },
+      "mcp": {
+       "status": "ok",
+       "component": "mcp",
+       "tools": 0
+      },
+      "cron": {
+       "status": "ok",
+       "component": "cron",
+       "running": true,
+       "state": "ok",
+       "last_poll_age_s": 25.4,
+       "stale_after_s": 90.0,
+       "fires_in_flight": 0,
+       "poll_interval_s": 30.0,
+       "alerts_pending": 0
+      },
+      "schedulers": {
+       "status": "ok",
+       "component": "schedulers",
+       "cron": "running",
+       "x_posts": "running"
+      },
+      "llm_provider": {
+       "status": "degraded",
+       "component": "llm_provider",
+       "model": "gpt-4o-mini",
+       "error": "no API key for a remote provider",
+       "needs_setup": "Settings -> Providers: add the provider's API key, or choose a local model"
+      },
+      "knowledge_vectors": {
+       "component": "knowledge_vectors",
+       "topology": "single_install",
+       "missing": 0,
+       "bad_passes": 0,
+       "checked_at": 1794528193.2541256,
+       "status": "ok",
+       "detail": "every chunk has a vector of the active embedder"
+      },
+      "chat_runtime": {
+       "status": "ok",
+       "component": "chat_runtime",
+       "graph_ready": true,
+       "checkpointer_ready": true,
+       "checkpoint_bound": true
+      },
+      "code_execution": {
+       "status": "failed",
+       "component": "code_execution",
+       "error": "No available isolated execution backend: Docker Desktop is not running",
+       "waits_for": "docker",
+       "engine": "desktop"
+      }
+     },
+     "required_capabilities": [
+      "agent_runner",
+      "chat_runtime",
+      "code_execution",
+      "config_store",
+      "database",
+      "llm_provider",
+      "model_registry"
+     ],
+     "unavailable_capabilities": [
+      "llm_provider",
+      "code_execution"
+     ],
+     "database_availability": {
+      "state": "answering"
+     },
+     "waits_for": {
+      "code_execution": "docker"
+     }
+    }
+   },
+   "status": "supervision : active\nserver      : up, waiting for docker (llm_provider: no API key for a remote provider; code_execution: No available isolated execution backend: Docker Desktop is not running)\n  port 9090  : held by pid 6680\nguard       : running (pid 4656, heartbeat 9s ago)\nguard child : pid 6656\ndocker      : not checked (idle)\ndoc broker  : idle (not_requested), tcp://127.0.0.1:29504\n  log       : C:\\kazma-drill\\.kazma\\document_broker.log\ndisk        : ok (50.9% / 50.4 GB free on C:, data)\ndatabase    : running (postgresql-x64-16)\noutside     : off\n",
+   "searxng": {
+    "url": "",
+    "http": null,
+    "error": "KAZMA_SEARXNG_URL not set"
+   },
+   "engine_task": "",
+   "docker_desktop_running": false
+  },
+  {
+   "at": 1794528444.422946,
+   "uptime_s": 394.796,
+   "users": "No User exists for *",
+   "signed_in": false,
+   "ready": {
+    "http": 503,
+    "body": {
+     "status": "not_ready",
+     "timestamp": 1794528444.603712,
+     "checks": {
+      "config_store": {
+       "status": "ok",
+       "component": "config_store"
+      },
+      "database": {
+       "status": "ok",
+       "component": "database",
+       "backend": "postgres"
+      },
+      "swarm_engine": {
+       "status": "ok",
+       "component": "swarm_engine",
+       "workers": 0
+      },
+      "model_registry": {
+       "status": "ok",
+       "component": "model_registry",
+       "providers": 19,
+       "active_model": "gpt-4o-mini",
+       "active_provider": "custom"
+      },
+      "agent_runner": {
+       "status": "ok",
+       "component": "agent_runner"
+      },
+      "mcp": {
+       "status": "ok",
+       "component": "mcp",
+       "tools": 0
+      },
+      "cron": {
+       "status": "ok",
+       "component": "cron",
+       "running": true,
+       "state": "ok",
+       "last_poll_age_s": 11.6,
+       "stale_after_s": 90.0,
+       "fires_in_flight": 0,
+       "poll_interval_s": 30.0,
+       "alerts_pending": 0
+      },
+      "schedulers": {
+       "status": "ok",
+       "component": "schedulers",
+       "cron": "running",
+       "x_posts": "running"
+      },
+      "llm_provider": {
+       "status": "degraded",
+       "component": "llm_provider",
+       "model": "gpt-4o-mini",
+       "error": "no API key for a remote provider",
+       "needs_setup": "Settings -> Providers: add the provider's API key, or choose a local model"
+      },
+      "knowledge_vectors": {
+       "component": "knowledge_vectors",
+       "topology": "single_install",
+       "missing": 0,
+       "bad_passes": 0,
+       "checked_at": 1794528193.2541256,
+       "status": "ok",
+       "detail": "every chunk has a vector of the active embedder"
+      },
+      "chat_runtime": {
+       "status": "ok",
+       "component": "chat_runtime",
+       "graph_ready": true,
+       "checkpointer_ready": true,
+       "checkpoint_bound": true
+      },
+      "code_execution": {
+       "status": "failed",
+       "component": "code_execution",
+       "error": "No available isolated execution backend: Docker Desktop is not running",
+       "waits_for": "docker",
+       "engine": "desktop"
+      }
+     },
+     "required_capabilities": [
+      "agent_runner",
+      "chat_runtime",
+      "code_execution",
+      "config_store",
+      "database",
+      "llm_provider",
+      "model_registry"
+     ],
+     "unavailable_capabilities": [
+      "llm_provider",
+      "code_execution"
+     ],
+     "database_availability": {
+      "state": "answering"
+     },
+     "waits_for": {
+      "code_execution": "docker"
+     }
+    }
+   },
+   "status": "supervision : active\nserver      : up, waiting for docker (llm_provider: no API key for a remote provider; code_execution: No available isolated execution backend: Docker Desktop is not running)\n  port 9090  : held by pid 6680\nguard       : running (pid 4656, heartbeat 4s ago)\nguard child : pid 6656\ndocker      : not checked (idle)\ndoc broker  : idle (not_requested), tcp://127.0.0.1:29504\n  log       : C:\\kazma-drill\\.kazma\\document_broker.log\ndisk        : ok (50.9% / 50.4 GB free on C:, data)\ndatabase    : running (postgresql-x64-16)\noutside     : off\n",
+   "searxng": {
+    "url": "",
+    "http": null,
+    "error": "KAZMA_SEARXNG_URL not set"
+   },
+   "engine_task": "",
+   "docker_desktop_running": false
+  },
+  {
+   "at": 1794528460.579545,
+   "uptime_s": 410.953,
+   "users": "No User exists for *",
+   "signed_in": false,
+   "ready": {
+    "http": 503,
+    "body": {
+     "status": "not_ready",
+     "timestamp": 1794528460.7636266,
+     "checks": {
+      "config_store": {
+       "status": "ok",
+       "component": "config_store"
+      },
+      "database": {
+       "status": "ok",
+       "component": "database",
+       "backend": "postgres"
+      },
+      "swarm_engine": {
+       "status": "ok",
+       "component": "swarm_engine",
+       "workers": 0
+      },
+      "model_registry": {
+       "status": "ok",
+       "component": "model_registry",
+       "providers": 19,
+       "active_model": "gpt-4o-mini",
+       "active_provider": "custom"
+      },
+      "agent_runner": {
+       "status": "ok",
+       "component": "agent_runner"
+      },
+      "mcp": {
+       "status": "ok",
+       "component": "mcp",
+       "tools": 0
+      },
+      "cron": {
+       "status": "ok",
+       "component": "cron",
+       "running": true,
+       "state": "ok",
+       "last_poll_age_s": 27.7,
+       "stale_after_s": 90.0,
+       "fires_in_flight": 0,
+       "poll_interval_s": 30.0,
+       "alerts_pending": 0
+      },
+      "schedulers": {
+       "status": "ok",
+       "component": "schedulers",
+       "cron": "running",
+       "x_posts": "running"
+      },
+      "llm_provider": {
+       "status": "degraded",
+       "component": "llm_provider",
+       "model": "gpt-4o-mini",
+       "error": "no API key for a remote provider",
+       "needs_setup": "Settings -> Providers: add the provider's API key, or choose a local model"
+      },
+      "knowledge_vectors": {
+       "component": "knowledge_vectors",
+       "topology": "single_install",
+       "missing": 0,
+       "bad_passes": 0,
+       "checked_at": 1794528193.2541256,
+       "status": "ok",
+       "detail": "every chunk has a vector of the active embedder"
+      },
+      "chat_runtime": {
+       "status": "ok",
+       "component": "chat_runtime",
+       "graph_ready": true,
+       "checkpointer_ready": true,
+       "checkpoint_bound": true
+      },
+      "code_execution": {
+       "status": "failed",
+       "component": "code_execution",
+       "error": "No available isolated execution backend: Docker Desktop is not running",
+       "waits_for": "docker",
+       "engine": "desktop"
+      }
+     },
+     "required_capabilities": [
+      "agent_runner",
+      "chat_runtime",
+      "code_execution",
+      "config_store",
+      "database",
+      "llm_provider",
+      "model_registry"
+     ],
+     "unavailable_capabilities": [
+      "llm_provider",
+      "code_execution"
+     ],
+     "database_availability": {
+      "state": "answering"
+     },
+     "waits_for": {
+      "code_execution": "docker"
+     }
+    }
+   },
+   "status": "supervision : active\nserver      : up, waiting for docker (llm_provider: no API key for a remote provider; code_execution: No available isolated execution backend: Docker Desktop is not running)\n  port 9090  : held by pid 6680\nguard       : running (pid 4656, heartbeat 0s ago)\nguard child : pid 6656\ndocker      : not checked (idle)\ndoc broker  : idle (not_requested), tcp://127.0.0.1:29504\n  log       : C:\\kazma-drill\\.kazma\\document_broker.log\ndisk        : ok (50.9% / 50.4 GB free on C:, data)\ndatabase    : running (postgresql-x64-16)\noutside     : off\n",
+   "searxng": {
+    "url": "",
+    "http": null,
+    "error": "KAZMA_SEARXNG_URL not set"
+   },
+   "engine_task": "",
+   "docker_desktop_running": false
+  },
+  {
+   "at": 1794528476.732613,
+   "uptime_s": 427.109,
+   "users": "No User exists for *",
+   "signed_in": false,
+   "ready": {
+    "http": 503,
+    "body": {
+     "status": "not_ready",
+     "timestamp": 1794528476.9188242,
+     "checks": {
+      "config_store": {
+       "status": "ok",
+       "component": "config_store"
+      },
+      "database": {
+       "status": "ok",
+       "component": "database",
+       "backend": "postgres"
+      },
+      "swarm_engine": {
+       "status": "ok",
+       "component": "swarm_engine",
+       "workers": 0
+      },
+      "model_registry": {
+       "status": "ok",
+       "component": "model_registry",
+       "providers": 19,
+       "active_model": "gpt-4o-mini",
+       "active_provider": "custom"
+      },
+      "agent_runner": {
+       "status": "ok",
+       "component": "agent_runner"
+      },
+      "mcp": {
+       "status": "ok",
+       "component": "mcp",
+       "tools": 0
+      },
+      "cron": {
+       "status": "ok",
+       "component": "cron",
+       "running": true,
+       "state": "ok",
+       "last_poll_age_s": 13.9,
+       "stale_after_s": 90.0,
+       "fires_in_flight": 0,
+       "poll_interval_s": 30.0,
+       "alerts_pending": 0
+      },
+      "schedulers": {
+       "status": "ok",
+       "component": "schedulers",
+       "cron": "running",
+       "x_posts": "running"
+      },
+      "llm_provider": {
+       "status": "degraded",
+       "component": "llm_provider",
+       "model": "gpt-4o-mini",
+       "error": "no API key for a remote provider",
+       "needs_setup": "Settings -> Providers: add the provider's API key, or choose a local model"
+      },
+      "knowledge_vectors": {
+       "component": "knowledge_vectors",
+       "topology": "single_install",
+       "missing": 0,
+       "bad_passes": 0,
+       "checked_at": 1794528193.2541256,
+       "status": "ok",
+       "detail": "every chunk has a vector of the active embedder"
+      },
+      "chat_runtime": {
+       "status": "ok",
+       "component": "chat_runtime",
+       "graph_ready": true,
+       "checkpointer_ready": true,
+       "checkpoint_bound": true
+      },
+      "code_execution": {
+       "status": "failed",
+       "component": "code_execution",
+       "error": "No available isolated execution backend: Docker Desktop is not running",
+       "waits_for": "docker",
+       "engine": "desktop"
+      }
+     },
+     "required_capabilities": [
+      "agent_runner",
+      "chat_runtime",
+      "code_execution",
+      "config_store",
+      "database",
+      "llm_provider",
+      "model_registry"
+     ],
+     "unavailable_capabilities": [
+      "llm_provider",
+      "code_execution"
+     ],
+     "database_availability": {
+      "state": "answering"
+     },
+     "waits_for": {
+      "code_execution": "docker"
+     }
+    }
+   },
+   "status": "supervision : active\nserver      : up, waiting for docker (llm_provider: no API key for a remote provider; code_execution: No available isolated execution backend: Docker Desktop is not running)\n  port 9090  : held by pid 6680\nguard       : running (pid 4656, heartbeat 5s ago)\nguard child : pid 6656\ndocker      : not checked (idle)\ndoc broker  : idle (not_requested), tcp://127.0.0.1:29504\n  log       : C:\\kazma-drill\\.kazma\\document_broker.log\ndisk        : ok (50.9% / 50.4 GB free on C:, data)\ndatabase    : running (postgresql-x64-16)\noutside     : off\n",
+   "searxng": {
+    "url": "",
+    "http": null,
+    "error": "KAZMA_SEARXNG_URL not set"
+   },
+   "engine_task": "",
+   "docker_desktop_running": false
+  }
+ ]
+}

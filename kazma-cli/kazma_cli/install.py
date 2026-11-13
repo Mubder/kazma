@@ -63,6 +63,10 @@ SEARXNG_URL = "http://127.0.0.1:8088"
 DISK_NEEDED = {"express": 8 * 2**30, "full": 25 * 2**30, "custom": 8 * 2**30}
 #: How long the end waits for a freshly started Kazma to answer.
 ANSWER_WAIT_S = 240.0
+#: How long setup waits for the SearXNG it just started to answer before the
+#: part is judged: the boot drill (2026-11-12) checked it 2 s after `docker
+#: compose up` and called private search not installed; it answered 49 s later.
+SEARXNG_READY_WAIT_S = 120.0
 
 _MODE_TEXT = {
     "express": "everything that needs no Docker",
@@ -484,7 +488,7 @@ def build_plan(parts, found: dict[str, PartState], states, machine: Machine, pla
     engine, never Docker Desktop (docs/plans/CONTAINERS_WITHOUT_A_SIGN_IN_PLAN.md)."""
     from kazma_core.install_components import extras_for
     from kazma_core.postgres_service import Step
-    from kazma_core.system_deps import install_plan, wsl_install_step
+    from kazma_core.system_deps import install_plan
 
     todo = [p for p in parts if found[p.id].ok is False]
     todo_ids = {p.id for p in todo}
@@ -505,7 +509,15 @@ def build_plan(parts, found: dict[str, PartState], states, machine: Machine, pla
             plan.append(PlannedStep(owner_of["docker"], step,
                                     attempts=1 if step.action == "engine:wsl" else _SYSTEM_ATTEMPTS))
     elif "docker" in wanted_deps and readiness is not None and readiness.wsl_missing:
-        plan.append(PlannedStep("docker", wsl_install_step()))
+        # Docker Desktop needs WSL too, installed the way Kazma's engine
+        # installs it (the two Windows features, WSL's own MSI pinned by
+        # SHA-256, a restart). It was `wsl --install`, which Windows refuses
+        # outside a signed-in console ("The Windows Subsystem for Linux is not
+        # installed", the boot drill's control, 2026-11-13): an unattended
+        # `--docker desktop` install never got Docker Desktop at all.
+        plan.append(PlannedStep("docker", Step(
+            "install WSL 2 for Docker Desktop (pinned release; Windows restarts after it)",
+            action="engine:wsl", admin=True, dep="docker")))
     for step in install_plan(platform, chosen_states):
         part = owner_of.get(step.dep, "")  # the package lists' refresh is no part's
         plan.append(PlannedStep(part, step, attempts=_SYSTEM_ATTEMPTS))
@@ -551,6 +563,9 @@ def build_plan(parts, found: dict[str, PartState], states, machine: Machine, pla
         plan.append(PlannedStep("private_search", Step(f"point Kazma's web search at {SEARXNG_URL}",
                                                        action="searxng_env",
                                                        shown=f"KAZMA_SEARXNG_URL={SEARXNG_URL} in .env")))
+        plan.append(PlannedStep("private_search", Step(
+            "wait for SearXNG to answer", action="searxng_ready",
+            shown=f"GET {SEARXNG_URL}/healthz, for up to {int(SEARXNG_READY_WAIT_S)} s")))
     if "service" in todo_ids and root is not None:
         plan.append(PlannedStep("service", Step(
             "install Kazma as a service (its guard starts at boot)",
@@ -641,6 +656,24 @@ def _postgres(log) -> tuple[bool, str]:
     return code == 0, "" if code == 0 else f"kazma setup postgres ended with {code} (see above)"
 
 
+def _wait_for_searxng(machine: Machine) -> tuple[bool, str]:
+    """The SearXNG just started answers before the part is judged, within
+    SEARXNG_READY_WAIT_S. The time each try takes counts, as in ``_finish``:
+    a refused connection on Windows takes about 2 s."""
+    url = SEARXNG_URL.rstrip("/") + "/healthz"
+    spent = 0.0
+    while True:
+        started = time.monotonic()
+        answered = machine.answers(url)
+        spent += time.monotonic() - started
+        if answered:
+            return True, f"answers after {int(spent)} s"
+        if spent >= SEARXNG_READY_WAIT_S:
+            return False, f"SearXNG did not answer at {SEARXNG_URL} within {int(SEARXNG_READY_WAIT_S)} s"
+        machine.sleep(3.0)
+        spent += 3.0
+
+
 def _run_planned(item: PlannedStep, machine: Machine, env_path: Path, log) -> tuple[bool, str]:
     step = item.step
     if step.action.startswith("engine:"):
@@ -661,6 +694,8 @@ def _run_planned(item: PlannedStep, machine: Machine, env_path: Path, log) -> tu
             return False, str(exc)
         os.environ["KAZMA_SEARXNG_URL"] = SEARXNG_URL
         return True, ""
+    if step.action == "searxng_ready":
+        return _wait_for_searxng(machine)
     if step.action == "searxng_secret":
         from kazma_core.security.searxng_secret import ensure_searxng_secret
 
@@ -867,8 +902,9 @@ def _execute(plan: list[PlannedStep], machine: Machine, platform, say, log) -> t
     failed: set[str] = set()
     not_done: list[str] = []
     restart_needed = False
-    # Kazma's engine waits for Windows to restart after WSL; Docker Desktop's
-    # installer does not, so its path keeps the order it had.
+    # The container steps wait for Windows to restart after WSL, on either
+    # path: Kazma's engine needs WSL running, and Docker Desktop is installed
+    # once WSL is (both get WSL from the same step, ``engine:wsl``).
     engine_waits = False
     needs_of = {c.id: set(c.needs) for c in COMPONENTS}
     from kazma_core.container_engine_setup import RESTART
@@ -895,7 +931,6 @@ def _execute(plan: list[PlannedStep], machine: Machine, platform, say, log) -> t
             not_done.append(item.step.title)
             failed.add(item.part)
             continue
-        restart_needed = restart_needed or item.step.argv[:2] == ("wsl", "--install")
         if platform.os == "windows":
             from kazma_core.path_refresh import refresh_path_from_os
 

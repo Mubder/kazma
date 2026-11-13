@@ -132,7 +132,10 @@ def test_the_outage_is_said_once_and_its_end_once(docker, caplog):
     infos = [r.getMessage() for r in caplog.records
              if r.name == health.logger.name and r.levelno == logging.INFO]
     assert len(warnings) == 2, [r.getMessage() for r in warnings]  # the outage, and the next one
-    assert infos.count("[Health] the Docker daemon answers again") == 1
+    # The engine is named (2026-11-12, test_engine_named_where_kazma_waits).
+    from kazma_core.docker_cli import engine_label
+
+    assert infos.count(f"[Health] {engine_label()} answers again") == 1, infos
     debug = [r for r in caplog.records if r.name == health.logger.name and r.levelno == logging.DEBUG]
     assert len(debug) == 3, "the repeats are kept, at DEBUG"
 

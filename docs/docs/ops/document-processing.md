@@ -501,7 +501,10 @@ The guard now starts what Kazma runs on (`KAZMA_GUARD_START_DEPENDENCIES`,
   minutes the guard runs that task and restarts Docker inside the distro; it
   never starts Docker Desktop for it. A missing or refused task is said in
   `guard.log`, and the guard keeps the distro up itself until it is repaired
-  (`kazma setup engine`).
+  (`kazma setup engine`). While it is down, readiness, `--status` and the
+  Documents page say "Kazma's container engine" (not just "Docker") and give
+  that command; with Docker Desktop they say Docker Desktop, which starts
+  only when someone signs in.
 - **Docker Desktop** (when it is the engine in use), when its engine has not answered for two minutes. On
   Windows the guard registers an on-demand task, `KazmaDockerDesktop`, that
   runs `Docker Desktop.exe` in the signed-in user's session with normal

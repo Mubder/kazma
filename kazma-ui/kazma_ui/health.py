@@ -542,16 +542,25 @@ def _say_docker_down(message: str, *args: Any, exc_info: bool = False) -> None:
     logger.warning(message + " (said once until it answers)", *args, exc_info=exc_info)
 
 
-def _say_docker_answers() -> None:
+def _say_docker_answers(label: str = "the Docker daemon") -> None:
     global _docker_down_said
     if _docker_down_said:
         _docker_down_said = False
-        logger.info("[Health] the Docker daemon answers again")
+        logger.info("[Health] %s answers again", label)
 
 
 def _check_code_execution() -> dict[str, Any]:
-    """Check the local jail daemon without running code or pulling an image."""
+    """Check the local jail daemon without running code or pulling an image.
+
+    A Docker-backed answer names the engine it probed (``engine``: ``kazma``,
+    ``desktop``, ``system``, ``other``; ``docker_cli.engine_in_force``), and
+    a failure says it in its ``error``: "Kazma's container engine does not
+    answer" and "Docker Desktop does not answer" call for different steps
+    (the guard brings the first back by itself; the second waits for a
+    sign-in), and the guard's page and ``--status`` quote the error.
+    """
     global _docker_answered_at
+    from kazma_core.docker_cli import engine_in_force, engine_label
     from kazma_core.safety.deployment_policy import container_required
     from kazma_core.sandbox.e2b import e2b_available
     from kazma_core.security.child_env import tool_child_env
@@ -564,42 +573,52 @@ def _check_code_execution() -> dict[str, Any]:
         return {"status": "ok", "component": "code_execution", "backend": "trusted_host",
                 "isolated": False}
     docker = code_exec._docker_cli()
+    # Read after the CLI lookup: its first call in a process pins the chosen
+    # engine (docker_cli.find_docker_cli).
+    engine = engine_in_force()
+    label = engine_label()
+
     # A Docker engine that is not installed, not running or not answering
     # waits for something outside Kazma: no restart of Kazma brings it back
     # (``waits_for``; the guard keeps Kazma up). After a Windows update
     # restart on 2026-11-12 nobody was signed in to start Docker Desktop, and
     # the guard restarted a Kazma that served chat 18 times in six hours.
-    failed = {"status": "failed", "component": "code_execution",
-              "error": "No available isolated execution backend"}
+    def waiting(problem: str) -> dict[str, Any]:
+        return {"status": "failed", "component": "code_execution",
+                "error": f"No available isolated execution backend: {label} {problem}",
+                "waits_for": "docker", "engine": engine}
+
     if docker is None:
-        return {**failed, "waits_for": "docker"}
+        return waiting("has no docker CLI on this machine")
     if code_exec.use_docker_jail():
         try:
             probe = subprocess.run([docker, "info", "--format", "{{.ServerVersion}}"],
                                    capture_output=True, text=True, timeout=2, env=tool_child_env())
             if probe.returncode == 0 and probe.stdout.strip():
                 _docker_answered_at = time.monotonic()
-                _say_docker_answers()
+                _say_docker_answers(label)
                 return {"status": "ok", "component": "code_execution", "backend": "docker",
-                        "check_mode": "daemon_only", "image_verified": False}
+                        "check_mode": "daemon_only", "image_verified": False, "engine": engine}
             _docker_answered_at = None  # it answered: not running
-            _say_docker_down("[Health] the Docker daemon is not running (docker info exit %s): %s",
-                             probe.returncode, (probe.stderr or "").strip()[:200])
+            _say_docker_down("[Health] %s is not running (docker info exit %s): %s",
+                             label, probe.returncode, (probe.stderr or "").strip()[:200])
+            return waiting("is not running")
         except subprocess.TimeoutExpired:
             seen = _docker_answered_at
             if seen is not None and time.monotonic() - seen < _DOCKER_SLOW_GRACE_S:
-                logger.info("[Health] docker info is slow (over 2 s); the daemon answered %.0f s ago",
-                            time.monotonic() - seen)
+                logger.info("[Health] docker info is slow (over 2 s); %s answered %.0f s ago",
+                            label, time.monotonic() - seen)
                 return {"status": "ok", "component": "code_execution", "backend": "docker",
                         "check_mode": "daemon_recently_answered", "probe": "slow",
-                        "image_verified": False}
-            _say_docker_down("[Health] code execution daemon probe failed: docker info did not answer "
-                             "in 2 s, and has not answered in the last %.0f s", _DOCKER_SLOW_GRACE_S)
+                        "image_verified": False, "engine": engine}
+            _say_docker_down("[Health] code execution daemon probe failed: %s did not answer "
+                             "docker info in 2 s, nor in the last %.0f s", label, _DOCKER_SLOW_GRACE_S)
         except OSError:
             _docker_answered_at = None
-            _say_docker_down("[Health] code execution daemon probe failed", exc_info=True)
-        return {**failed, "waits_for": "docker"}
-    return failed
+            _say_docker_down("[Health] code execution daemon probe failed (%s)", label, exc_info=True)
+        return waiting("does not answer")
+    return {"status": "failed", "component": "code_execution",
+            "error": "No available isolated execution backend"}
 
 
 async def _readiness(*, runtime: Any = None, required: Any = None):

@@ -3951,8 +3951,12 @@ def _dbsvc_status_lines(state: dict) -> list[str]:
 #
 # Resilience plan B2a. A full drive stops Kazma in a set order: the
 # document store refuses work below its floor first, then backups fail, then
-# the database (and Docker's disk image, when Docker keeps it on another
-# drive) stops writing. The guard checks the free space once a minute, warns
+# the database (and the container engine's disk, when it is on another
+# drive) stops writing. The container disk is the one of the engine in force
+# (docker_cli.engine_in_force, 2026-11-12): Kazma's own engine's distro disk
+# (%LOCALAPPDATA%\Kazma\engine\kazma-engine) when Kazma's engine is in
+# use, else Docker Desktop's disk image -- never a disk no Kazma container
+# lives on. The guard checks the free space once a minute, warns
 # once at the low level and pages once at the critical one, naming what
 # stops next, and says once when there is room again. Either measure (the
 # share or the bytes) crosses a level; leaving it needs both clear of a
@@ -4011,6 +4015,27 @@ def _existing(path: Path) -> Path | None:
     return None
 
 
+def _kazma_engine_disk_dir() -> Path | None:
+    """Where Kazma's own container engine keeps its distro's virtual disk
+    (``docker_cli.kazma_engine_disk_dir``, the folder setup imports the
+    distro into), when it is on this machine (Windows: elsewhere the folder
+    is never there)."""
+    try:
+        candidate = _docker_cli_module().kazma_engine_disk_dir()
+        return candidate if candidate.is_dir() else None
+    except (OSError, ImportError, SyntaxError, AttributeError):
+        return None
+
+
+def _engine_in_force() -> str:
+    """The engine a docker call of the guard reaches (``kazma``, ``desktop``,
+    ``system``, ``other``; ``docker_cli.engine_in_force``), or ``""``."""
+    try:
+        return str(_docker_cli_module().engine_in_force())
+    except (OSError, ImportError, SyntaxError, AttributeError):
+        return ""
+
+
 def _docker_disk_dir() -> Path | None:
     """Where Docker Desktop keeps its disk image, when it is on this machine."""
     if os.name == "nt":
@@ -4046,29 +4071,44 @@ class DiskWatch:
     the reader injectable for tests. Never raises out of a tick.
     """
 
-    def __init__(self, guard: Guard, *, reader=None, paths=None) -> None:
+    def __init__(self, guard: Guard, *, reader=None, paths=None, engine=None) -> None:
         self.guard = guard
         self.log = guard.log
         self.reader = reader or shutil.disk_usage
         self._paths = paths
+        self._engine = engine or _engine_in_force
         self._next_check = 0.0
         self.levels: dict[str, str] = {}
         self.readings: dict[str, dict] = {}
         self._paged: set[str] = set()
 
     def watched(self) -> list[tuple[str, str, Path]]:
-        """(key, role, path) of each volume to watch: the data dir, and
-        Docker's disk image when it is on another volume."""
+        """(key, role, path) of each volume to watch: the data dir, and the
+        container engine's disk when it is on another volume."""
         if self._paths is not None:
             return list(self._paths)
         found: list[tuple[str, str, Path]] = []
         data = _existing(_data_dir_guess())
         if data is not None:
             found.append((_drive_label(data), "data", data))
-        docker = _docker_disk_dir()
-        if docker is not None and (data is None or not _same_volume(docker, data)):
-            found.append((_drive_label(docker), "docker", docker))
+        container = self.container_disk()
+        if container is not None:
+            role, path = container
+            if data is None or not _same_volume(path, data):
+                found.append((_drive_label(path), role, path))
         return found
+
+    def container_disk(self) -> tuple[str, Path] | None:
+        """(role, folder) of the disk the engine in force keeps Kazma's
+        containers on: ``engine`` -- Kazma's own engine's distro disk -- when
+        that engine is in use, else ``docker`` -- Docker Desktop's disk image
+        (as before Kazma had an engine). None when it is not on this machine.
+        Asked every check: the engine can change while the guard runs."""
+        if self._engine() == "kazma":
+            disk = _kazma_engine_disk_dir()
+            return ("engine", disk) if disk is not None else None
+        docker = _docker_disk_dir()
+        return ("docker", docker) if docker is not None else None
 
     def mode(self) -> str:
         return "off" if (os.environ.get("KAZMA_GUARD_DISK_WATCH") or "").strip().lower() in (
@@ -4121,7 +4161,8 @@ class DiskWatch:
         gb = round(free / 1024 ** 3, 1)
         self.log("warn" if level != "ok" else "info", "disk.level", drive=key, role=role,
                  state=level, before=before, free_pct=pct, free_gb=gb)
-        where = "Docker's disk image" if role == "docker" else "Kazma's data"
+        where = {"docker": "Docker's disk image",
+                 "engine": "Kazma's container engine's disk"}.get(role, "Kazma's data")
         if level == "ok":
             if key in self._paged:
                 self._paged.discard(key)
@@ -4144,6 +4185,10 @@ class DiskWatch:
         if role == "docker":
             return ("When it fills, the database in Docker stops writing: chats, "
                     "settings and memory stop saving. Free space on this drive.")
+        if role == "engine":
+            return ("When it fills, the containers in Kazma's container engine stop writing: "
+                    "private search, the document worker and the code sandbox fail. Free "
+                    "space on this drive.")
         return (f"What stops first: documents refuse work below {floor_mb} MB free, "
                 "then backups fail, then the database stops writing. Free space on "
                 "this drive.")

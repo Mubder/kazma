@@ -33,8 +33,7 @@ from kazma_core.postgres_service import Platform, Step
 
 __all__ = ["DEPENDENCIES", "PACKAGES", "TESSDATA", "DepState", "DockerReadiness", "check_all",
            "docker_readiness", "fetch_tessdata", "freshclam_agent_plist", "install_plan", "installs_package",
-           "needed_here", "package_is_in", "record_system", "tessdata_folder",
-           "wsl_install_step"]
+           "needed_here", "package_is_in", "record_system", "tessdata_folder"]
 
 Runner = Callable[..., subprocess.CompletedProcess]
 
@@ -585,8 +584,3 @@ def docker_readiness(platform: Platform, *, run: Runner = subprocess.run) -> Doc
                                wsl_missing=wsl_missing)
     return DockerReadiness(True, wsl_missing=wsl_missing)
 
-
-def wsl_install_step() -> Step:
-    """WSL 2 for Docker Desktop (Windows asks for a restart after it)."""
-    return Step("install WSL 2 for Docker (restart Windows after it)", ("wsl", "--install", "--no-distribution"),
-                admin=True, dep="docker")

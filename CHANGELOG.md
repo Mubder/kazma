@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Kazma's own container engine, step 3: move an install off Docker Desktop (2026-11-13)
+## Kazma's own container engine, step 4: move an install off Docker Desktop (2026-11-13)
 
 - `kazma setup engine --move-from-desktop` moves an existing Windows install
   from Docker Desktop to Kazma's own engine in one run. It sets the engine
@@ -42,6 +42,51 @@
     when an interrupted move was checked again.
   - Files carried from inside a container are now said in one line per
     container.
+
+## Kazma's own container engine, step 3: named everywhere, and drilled (2026-11-13)
+
+- Kazma now says which container engine it is waiting for. When the code
+  sandbox can't run, readiness reads "Kazma's container engine is not
+  running" or "Docker Desktop is not running", not just "no isolated
+  execution backend". The guard's alert and `kazma_guard.py --status` quote
+  it.
+- The Documents page names the engine too. If Kazma's engine doesn't answer,
+  it says the guard keeps restarting it and gives the command that repairs
+  it. If Docker Desktop doesn't answer, it says Docker Desktop starts only
+  when someone signs in to the PC. Both in English and Arabic.
+- The guard's free-space watch now watches the drive that holds Kazma's
+  engine (its disk under `%LOCALAPPDATA%\Kazma\engine`) when that engine is
+  in use. Before, it watched only Docker Desktop's disk image. A filling
+  drive is reported once, naming what stops: private search, the document
+  worker and the code sandbox.
+- The plan's boot drill now runs as a script, `scripts/engine_boot_drill.py`,
+  on the clean drill VM. It does a Full install, restarts Windows with
+  nobody signed in, and checks every container part against a five-minute
+  limit. It passed: every part was ready within 90 seconds of boot. The
+  same drill with Docker Desktop had nothing up after seven minutes, and
+  Kazma said it was waiting for Docker Desktop.
+- The drill found three setup bugs, all fixed:
+  - On a Windows without WSL, each of setup's WSL checks waited 60 seconds
+    on a hidden "press any key to install WSL" prompt. Setup's programs now
+    get no input unless a step gives them one.
+  - A first Full install ended with "Private web search: not installed",
+    because it checked SearXNG two seconds after starting it. Setup now
+    waits up to two minutes for SearXNG to answer.
+  - `kazma setup install --docker desktop`, run without someone signed in
+    at the screen, never installed Docker Desktop: Windows refused its
+    `wsl --install`. It now installs WSL the way Kazma's engine does.
+
+## A restored backup can be deleted again (2026-11-13)
+
+- On Windows, restic restores a backup under its original full path and
+  gives each rebuilt folder above it the real folder's permissions. The
+  rebuilt `C\Users` folder let an ordinary account read it but not delete
+  it, so a restore could only be removed by an administrator.
+- pytest could not clean up after two restic tests, and kept every full
+  test run's temp folder: 29 of them, 7.5 GB, on one PC.
+- After a restore, Kazma now gives those rebuilt parent folders the
+  permissions of the folder restored into. The restored files keep their
+  own permissions.
 
 ## Kazma Watch refuses the old signature form (2026-11-12)
 

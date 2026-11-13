@@ -252,9 +252,21 @@ another project's containers live in it). The guard's supervision and
 Settings' choice shipped in Stage 1's commits. Drilled by hand on the clean
 VM the same day (`kazma setup engine`: WSL, a restart, the rest in 321 s;
 Docker answered 29 s after a reboot with nobody signed in; three bugs found
-and fixed, AGENTS.md section 63). Open: the automated boot drill
-(`scripts/engine_boot_drill.py`), and readiness and the disk watch naming the
-engine.
+and fixed, AGENTS.md section 63).
+
+Status (2026-11-13): Stage 2 is done. Readiness and the guard's disk watch
+name the engine: the code sandbox check and the document isolation report
+say "Kazma's container engine" or "Docker Desktop" (with the step for each),
+and the disk watch watches the `kazma-engine` distro's disk when Kazma's
+engine is in use (`docker_cli.engine_in_force`). The gate is automated
+(`scripts/engine_boot_drill.py`) and passed on the clean VM: a Full install,
+then after a restart with nobody signed in every container part was ready
+within 90 s of boot (the five-minute budget); the `--docker desktop` control
+had nothing up in seven minutes, and Kazma said it waited for Docker
+Desktop. Report: `docs/audits/ENGINE_BOOT_DRILL_2026-11-12.md`. The drill
+found three setup bugs, all fixed: WSL checks waiting on setup's console, a
+just-started SearXNG judged "not installed", and the Desktop path's `wsl
+--install`, which Windows refuses outside a signed-in console.
 
 **Stage 3: move an existing install.** `kazma setup engine
 --move-from-desktop`, on the pattern of the Postgres move (section 21 G):

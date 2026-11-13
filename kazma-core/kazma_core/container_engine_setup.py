@@ -36,6 +36,8 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
+from kazma_core.docker_cli import KAZMA_CONTEXT, KAZMA_DISTRO
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -53,8 +55,8 @@ __all__ = [
 
 Runner = Callable[..., subprocess.CompletedProcess]
 
-DISTRO = "kazma-engine"
-CONTEXT = "kazma-engine"
+DISTRO = KAZMA_DISTRO
+CONTEXT = KAZMA_CONTEXT
 TASK_NAME = "KazmaEngine"
 PORT = 2376
 #: What an action answers when Windows must restart before the next step
@@ -99,9 +101,12 @@ _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 def _engine_dir() -> Path:
-    """``%LOCALAPPDATA%\\Kazma\\engine``: the distro's disk, its scripts, downloads."""
-    base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
-    return Path(base) / "Kazma" / "engine"
+    """``%LOCALAPPDATA%\\Kazma\\engine``: the distro's disk, its scripts,
+    downloads. One definition, :func:`kazma_core.docker_cli.kazma_engine_dir`:
+    the guard's disk watch reads the same folder."""
+    from kazma_core.docker_cli import kazma_engine_dir
+
+    return kazma_engine_dir()
 
 
 def bin_dir() -> Path:
@@ -144,9 +149,16 @@ def _out(run: Runner, argv: list[str], *, timeout: float = 60, stdin: str | None
     # Bytes both ways: in text mode Windows writes every "\n" of stdin as
     # "\r\n", and bash then reads `set -o pipefail\r` (the clean VM,
     # 2026-11-12: the engine's setup script failed on its first line).
+    # No stdin of the step's own is no input at all, never setup's console:
+    # Windows' WSL stub answers `wsl.exe --version` with "press any key to
+    # install WSL" and waited on the console until the 60 s timeout, for each
+    # WSL call setup makes (the boot drill, 2026-11-12); a key pressed at
+    # that moment would have installed WSL from the Store.
+    feed: dict[str, Any] = ({"stdin": subprocess.DEVNULL} if stdin is None
+                            else {"input": stdin.encode("utf-8")})
     try:
-        done = run(argv, input=None if stdin is None else stdin.encode("utf-8"), capture_output=True,
-                   timeout=timeout, check=False, env=env, creationflags=_NO_WINDOW)
+        done = run(argv, **feed, capture_output=True, timeout=timeout, check=False, env=env,
+                   creationflags=_NO_WINDOW)
     except (OSError, subprocess.SubprocessError) as exc:
         return 127, str(exc)
     return done.returncode, (_text(done.stdout) + _text(done.stderr)).replace("\x00", "")
