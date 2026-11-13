@@ -409,14 +409,15 @@ function knowledgePage() {
     // How many pages ended each way, in report order; zero counts left out.
     reportCounts() {
       const pages = (this.activeJob && this.activeJob.pages) || [];
-      return ["ingested", "unchanged", "excluded", "failed", "uncertain", "pending"]
+      return ["ingested", "unchanged", "excluded", "removed", "failed", "uncertain", "pending"]
         .map((outcome) => ({ outcome: outcome, count: pages.filter((p) => p.outcome === outcome).length }))
         .filter((entry) => entry.count > 0);
     },
-    // The pages that did not reach the library, failures first.
+    // The pages that did not reach the library, failures first; then the
+    // pages the site removed, which left it.
     reportPages() {
       const pages = (this.activeJob && this.activeJob.pages) || [];
-      const rank = { failed: 0, uncertain: 1, pending: 2, excluded: 3 };
+      const rank = { failed: 0, uncertain: 1, pending: 2, excluded: 3, removed: 4 };
       return pages.filter((p) => p.outcome in rank).sort((a, b) => rank[a.outcome] - rank[b.outcome]);
     },
     outcomeLabel(outcome) {
@@ -425,7 +426,7 @@ function knowledgePage() {
     outcomeColor(outcome) {
       if (outcome === "failed") return "var(--danger)";
       if (outcome === "uncertain" || outcome === "pending") return "var(--warning)";
-      if (outcome === "excluded") return "var(--text-secondary)";
+      if (outcome === "excluded" || outcome === "removed") return "var(--text-secondary)";
       return "var(--success)";
     },
     // A page (or its reason code) worded from the catalog: why it was not

@@ -118,6 +118,11 @@ FIRING_SIGNATURES: tuple[Signature, ...] = (
     Signature("Knowledge page not stored", r"\[kb_ingest\] page \S+ \(",
               "a page a crawl did not store, by outcome and reason", kind=SYMPTOM,
               group=r"\[kb_ingest\] page (?P<k>\S+ \([^)]+\))"),
+    # A page the site no longer has, taken out of its library (2026-11-13):
+    # a 410 at once, a 404 once a later crawl found it missing again.
+    Signature("Knowledge page removed", r"\[kb_ingest\] page removed from the library \(",
+              "a page the site removed, taken out of its library", kind=ROUTINE,
+              group=r"\[kb_ingest\] page removed from the library \((?P<k>[^)]+)\)"),
     # Monthly (observability/failover_drill.py): the primary forced down,
     # the backup of another vendor answering, the notice, the switch back.
     Signature("backup-model drill", r"\[failover-drill\] (PASS|FAIL):",

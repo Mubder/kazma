@@ -28,7 +28,7 @@ def journal(tmp_path, monkeypatch):
 
 
 def ok(url):
-    return FetchResult(ok=True, url=url, final_url=url, text="# Page\n\n" + "useful words " * 40, http_status=200)
+    return FetchResult(ok=True, url=url, final_url=url, text=f"# Page {url}\n\n" + "useful words " * 40, http_status=200)
 
 
 def refused(url, code, *, status=None, transient=False):
@@ -252,7 +252,7 @@ async def test_a_link_walk_stopped_at_the_page_cap_says_so(journal, tmp_path, mo
     links = tuple(SEED + f"p{n}" for n in range(5))
 
     async def fetch(url, **kwargs):
-        return FetchResult(ok=True, url=url, final_url=url, text="# Page\n\n" + "useful words " * 40,
+        return FetchResult(ok=True, url=url, final_url=url, text=f"# Page {url}\n\n" + "useful words " * 40,
                            http_status=200, links=links, links_complete=True)
 
     async def nothing(*a, **k):

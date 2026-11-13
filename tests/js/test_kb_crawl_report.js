@@ -64,4 +64,21 @@ ok("nothing stored: yellow, said so", empty.jobEmpty() && empty.jobColor() === "
 const failed = page({ phase: "error" });
 ok("a failed crawl is red", failed.jobColor() === "var(--danger)");
 
+// 2026-11-13: a page the site removed left the library -- counted and listed
+// on its own, never a failure; a site that refused page after page stops the
+// crawl, its pages not reached listed with why.
+const refreshed = page({ notes: ["removed"], pages: [
+  { url: "kept", outcome: "unchanged" }, { url: "gone", outcome: "removed", reason: "removed" }] });
+ok("a removed page is counted as removed", JSON.stringify(refreshed.reportCounts()) === JSON.stringify([
+  { outcome: "unchanged", count: 1 }, { outcome: "removed", count: 1 }]), JSON.stringify(refreshed.reportCounts()));
+ok("a removed page is listed, never as a failure", refreshed.reportPages().map((p) => p.url).join() === "gone"
+  && refreshed.outcomeColor("removed") !== "var(--danger)" && !refreshed.jobPartial()
+  && refreshed.jobColor() === "var(--success)");
+const refused = page({ phase: "interrupted", notes: ["site_refusing"], pages: [
+  { url: "a", outcome: "ingested" }, { url: "b", outcome: "failed", reason: "bot_wall" },
+  { url: "c", outcome: "pending", reason: "site_refusing" }] });
+ok("a refusing site's stop is yellow and lists the pages not reached",
+  refused.jobColor() === "var(--warning)" && refused.reportPages().map((p) => p.url).join() === "b,c"
+  && refused.reasonText(refused.reportPages()[1]) === "site_refusing");
+
 process.exit(fail ? 1 : 0);

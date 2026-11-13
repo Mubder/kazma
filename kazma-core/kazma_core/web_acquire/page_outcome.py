@@ -86,5 +86,44 @@ def worth_retrying(error_code: str | None, http_status: int | None, *, transient
     return http_status in TRANSIENT_HTTP
 
 
+#: A site that refuses page after page stops its crawl (2026-11-13): this
+#: many failed pages of one class with nothing stored between, and the crawl
+#: ends ``interrupted`` (``site_refusing``) with the pages not reached left
+#: for Resume. Before, every remaining page ran the whole fetch ladder --
+#: up to 90 s each, a browser render each behind a bot wall -- up to the
+#: page cap.
+REFUSAL_STREAK = 10
+#: The page reasons a refusing site shows as, by class: what the streak
+#: counts. Other failures (no text, an unreadable format, Kazma's own
+#: problem) neither count nor clear it; only a stored page clears it.
+REFUSAL_CLASSES = {
+    'bot_wall': 'bot_wall',
+    'http_error': 'http_error',
+    'server_error': 'server_error',
+    'network': 'network',
+    'blocked_address': 'network',
+}
+
+
+class RefusalStreak:
+    """Failed pages of each refusal class since the last stored page."""
+
+    def __init__(self) -> None:
+        self.counts: dict[str, int] = {}
+
+    def stored(self) -> None:
+        self.counts.clear()
+
+    def failed(self, reason: str) -> str | None:
+        """Count a failed page; the class whose streak reached
+        :data:`REFUSAL_STREAK`, or None."""
+        klass = REFUSAL_CLASSES.get(reason)
+        if klass is None:
+            return None
+        self.counts[klass] = self.counts.get(klass, 0) + 1
+        return klass if self.counts[klass] >= REFUSAL_STREAK else None
+
+
 #: What a crawl's notes mean: limits and rules, never failures.
-NOTES = ('excluded', 'page_cap', 'link_walk_bounded', 'sitemap_bounded', 'nothing_stored')
+NOTES = ('excluded', 'page_cap', 'link_walk_bounded', 'sitemap_bounded', 'nothing_stored',
+         'removed', 'site_refusing', 'query_variants_capped', 'duplicates')

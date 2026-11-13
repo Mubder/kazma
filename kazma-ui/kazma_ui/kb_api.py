@@ -230,14 +230,16 @@ _RESUME_ROUTE: dict[str, Any] = {}
 
 
 async def resume_interrupted_crawls() -> list[str]:
-    """Resume the Knowledge crawls a restart cut off, once each.
+    """Resume the Knowledge crawls a restart cut off.
 
     A reload in the middle of a crawl left it "interrupted -- explicit
     recovery required" until the owner pressed Resume. A crawl the process's
     end stopped (``interrupted_by: process_ended``) in the last day resumes
-    on its own through the resume route; one the owner stopped, an older one,
-    or one already resumed once waits for the owner. Returns the job ids
-    resumed.
+    on its own through the resume route, up to three times a day and each
+    time only if it settled more pages since its last automatic resume
+    (``crawl_jobs.auto_resume_due``); one the owner stopped, one a refusing
+    site stopped, an older one, or one that made no progress waits for the
+    owner. Returns the job ids resumed.
     """
     from kazma_core.web_acquire.crawl_jobs import auto_resume_due, call, claim_auto_resume, inspect_jobs, recover
 

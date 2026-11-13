@@ -225,8 +225,15 @@ async def crawl_site(
                 queue: deque[tuple[str, int]] = deque(pending)
                 frontier_cap = max_pages * 4
                 seen: set[str] = known - {url for url, _ in pending}
+                # A site that refuses page after page stops the crawl, its
+                # frontier left for a resume (page_outcome.RefusalStreak,
+                # 2026-11-13): each refused page ran the whole ladder.
+                from kazma_core.web_acquire.page_outcome import RefusalStreak, judge
 
-                while queue and len(results) < max_pages:
+                streak = RefusalStreak()
+                refused = None
+
+                while queue and len(results) < max_pages and refused is None:
                     url, depth = queue.popleft()
                     if url in seen:
                         continue
@@ -270,7 +277,9 @@ async def crawl_site(
                     if not fr.ok:
                         status = "blocked_scope" if fr.error_code == "scope_blocked" else "blocked_robots" if fr.error_code == "robots_disallowed" else "error"
                         err = (fr.error or "empty extract")[:200]
+                        refused = streak.failed(judge(str(fr.error_code or ""), fr.http_status).reason)
                     else:
+                        streak.stored()
                         chars = len(text)
                         err = f"Acquisition partial: {', '.join(fr.truncation_reasons)}" if fr.truncated else ""
                         if depth < max_depth and fr.links_complete is not True:
@@ -351,6 +360,11 @@ async def crawl_site(
                 ]
                 if frontier_limited or queue:
                     lines.insert(2, f"Coverage partial: crawl frontier/page limit reached (URL cap={frontier_cap}, pending={len(queue)}).")
+                if refused is not None:
+                    from kazma_core.web_acquire.crawl_jobs import refusal_text
+
+                    lines.insert(2, "Stopped: " + refusal_text(
+                        {"refusal": {"reason": refused, "pages": streak.counts[refused]}}))
                 for i, r in enumerate(results):
                     lines.append(
                         f"| {i} | {r.get('depth', 0)} | {r['status']} | {r['chars']} | "

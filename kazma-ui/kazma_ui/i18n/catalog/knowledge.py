@@ -720,6 +720,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": 'Kept out',
         "ar": 'مستبعدة',
     },
+    "knowledge.outcome.removed": {
+        "en": 'Removed',
+        "ar": 'أُزيلت',
+    },
     "knowledge.outcome.failed": {
         "en": 'Failed',
         "ar": 'فشلت',
@@ -733,8 +737,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": 'لم يُوصل إليها',
     },
     "knowledge.note.excluded": {
-        "en": 'Some pages were kept out by robots.txt, the scope, a sign-in, removal or their size.',
-        "ar": 'استُبعدت صفحات بسبب robots.txt أو النطاق أو تسجيل الدخول أو حذفها أو حجمها.',
+        "en": 'Some pages were kept out by robots.txt, the scope, a sign-in, removal, their size or a duplicate text.',
+        "ar": 'استُبعدت صفحات بسبب robots.txt أو النطاق أو تسجيل الدخول أو حذفها أو حجمها أو تكرار نصها.',
     },
     "knowledge.note.page_cap": {
         "en": 'The crawl stopped at its page limit.',
@@ -751,6 +755,22 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "knowledge.note.nothing_stored": {
         "en": 'Nothing was stored: every page was kept out.',
         "ar": 'لم يُخزَّن شيء: استُبعدت كل الصفحات.',
+    },
+    "knowledge.note.removed": {
+        "en": 'Pages the site no longer has were taken out of the library.',
+        "ar": 'أُزيلت من المكتبة صفحات لم تعد موجودة في الموقع.',
+    },
+    "knowledge.note.site_refusing": {
+        "en": 'The site refused page after page, so the crawl stopped. Resume continues with the pages not reached.',
+        "ar": 'رفض الموقع صفحة تلو الأخرى فتوقف الزحف. يكمل الاستئناف الصفحات التي لم يُوصل إليها.',
+    },
+    "knowledge.note.query_variants_capped": {
+        "en": 'Addresses that differ only after "?" were limited to a few per page.',
+        "ar": 'اقتصرت العناوين التي لا تختلف إلا بعد "?" على عدد قليل لكل صفحة.',
+    },
+    "knowledge.note.duplicates": {
+        "en": 'Pages with the same text as another page were stored once.',
+        "ar": 'خُزّنت الصفحات ذات النص المطابق لصفحة أخرى مرة واحدة.',
     },
     "knowledge.reason.robots": {
         "en": 'robots.txt asks crawlers to stay out',
@@ -771,6 +791,22 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "knowledge.reason.too_large": {
         "en": 'larger than Kazma reads',
         "ar": 'أكبر مما يقرؤه Kazma',
+    },
+    "knowledge.reason.removed": {
+        "en": 'the site no longer has it; its text left the library',
+        "ar": 'لم تعد في الموقع؛ أُزيل نصها من المكتبة',
+    },
+    "knowledge.reason.gone_unconfirmed": {
+        "en": 'no longer on the site; it stays in the library until a later crawl finds it missing again',
+        "ar": 'لم تعد في الموقع؛ تبقى في المكتبة حتى يجدها زحف لاحق مفقودة مرة أخرى',
+    },
+    "knowledge.reason.duplicate": {
+        "en": 'the same text as another page of this crawl',
+        "ar": 'النص نفسه لصفحة أخرى في هذا الزحف',
+    },
+    "knowledge.reason.site_refusing": {
+        "en": 'not reached: the site refused page after page and the crawl stopped',
+        "ar": 'لم يُوصل إليها: رفض الموقع صفحة تلو الأخرى فتوقف الزحف',
     },
     "knowledge.reason.server_error": {
         "en": 'the site had an error',
@@ -835,6 +871,22 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "knowledge.hint.too_large": {
         "en": 'Pages are stored whole, up to a million characters; a part is never stored.',
         "ar": 'تُخزَّن الصفحات كاملة حتى مليون حرف؛ ولا يُخزَّن جزء منها أبداً.',
+    },
+    "knowledge.hint.removed": {
+        "en": 'Nothing to fix: a library keeps what the site still has.',
+        "ar": 'لا شيء لإصلاحه: تحتفظ المكتبة بما لا يزال في الموقع.',
+    },
+    "knowledge.hint.gone_unconfirmed": {
+        "en": 'A page missing for a moment (a site update) is never removed; Refresh again later to confirm.',
+        "ar": 'لا تُزال صفحة غابت لحظة (أثناء تحديث الموقع) أبداً؛ حدّث لاحقاً للتأكيد.',
+    },
+    "knowledge.hint.duplicate": {
+        "en": 'Stored once, under the first address that had it.',
+        "ar": 'خُزّنت مرة واحدة تحت أول عنوان وُجدت فيه.',
+    },
+    "knowledge.hint.site_refusing": {
+        "en": 'Kazma stops rather than hammer a site that refuses it. Resume later, or open the site in a browser to check it is up.',
+        "ar": 'يتوقف Kazma بدلاً من إلحاح الطلبات على موقع يرفضه. استأنف لاحقاً، أو افتح الموقع في المتصفح للتحقق من عمله.',
     },
     "knowledge.hint.server_error": {
         "en": 'Try again later with Refresh.',

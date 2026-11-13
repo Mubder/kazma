@@ -205,14 +205,16 @@ _BROWSER_UA = (
 class ProgressUpdate:
     """One progress tick yielded by :func:`ingest_site`."""
 
-    phase: str               # "discover" | "fetch" | "ingest" | "done" | "error"
+    phase: str               # "discover" | "fetch" | "ingest" | "done" | "error" | "interrupted"
     discovered: int = 0
     fetched: int = 0
     ingested: int = 0        # chunks written (after dedup)
     skipped: int = 0         # chunks skipped (dedup / unchanged pages)
     failed: int = 0          # pages that failed
     pages_unchanged: int = 0  # smart re-index full-page skips
-    excluded: int = 0        # pages a rule kept out (robots, scope, login, gone)
+    excluded: int = 0        # pages a rule kept out (robots, scope, login, gone, a duplicate)
+    removed: int = 0         # pages the site removed, taken out of the library
+    interrupted_by: str = ""  # phase "interrupted": why the crawl stopped ("site_refusing")
     current_url: str = ""
     message: str = ""
     errors: list[str] = field(default_factory=list)  # per-page failure reasons
@@ -1045,6 +1047,11 @@ async def _bfs_discover(
                 known=sorted(queued), ordered=ordered, extra=(state or {}).get('extra', []),
                 ambiguous=(state or {}).get('ambiguous', []), inflight=inflight, visited=visited, limited=limited))
     checker = lambda target: _in_scope(seed, target, scope_mode)
+    # A page's query-string addresses are walked a few at a time at most: a
+    # calendar's links lead to every month (_QUERY_VARIANTS_PER_PATH).
+    variants = _QueryVariants()
+    for known in sorted(queued):
+        variants.count(known)
     async with _pw_browser_scope():
         while queue and len(ordered) < max_pages and visited < work_cap:
             url, depth = queue.popleft()
@@ -1068,6 +1075,8 @@ async def _bfs_discover(
             for href in result.links:
                 key = _canonical_page_url(href)
                 if not key or key in queued or _is_infra_url(href) or not checker(href):
+                    continue
+                if not variants.admit(key):
                     continue
                 if len(queued) >= work_cap:
                     limited = True
@@ -1349,6 +1358,24 @@ def _provenance_dir(library_id: str) -> Path:
     return data_dir() / "knowledge_provenance" / safe
 
 
+def _provenance_file(library_id: str, url: str) -> Path:
+    """Where one page's fetched copy is kept (:func:`_save_provenance`)."""
+    import hashlib
+
+    slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", url)[:80].strip("-") or "page"
+    digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:8]
+    return _provenance_dir(library_id) / f"{slug}-{digest}.md"
+
+
+def _drop_provenance(library_id: str, url: str) -> None:
+    """A page the site removed leaves the library with its fetched copy. A
+    failure is a WARNING (the copy is outside every search)."""
+    try:
+        _provenance_file(library_id, url).unlink(missing_ok=True)
+    except OSError as exc:
+        logger.warning("[kb_ingest] the fetched copy of removed page %s was not deleted: %s", url[:120], exc)
+
+
 def _save_provenance(library_id: str, url: str, text: str) -> None:
     """Keep a fetched page's raw markdown with its library.
 
@@ -1359,13 +1386,9 @@ def _save_provenance(library_id: str, url: str, text: str) -> None:
     WARNING; the page is stored either way.
     """
     try:
-        import hashlib
-
-        folder = _provenance_dir(library_id)
+        target = _provenance_file(library_id, url)
+        folder = target.parent
         folder.mkdir(parents=True, exist_ok=True)
-        slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", url)[:80].strip("-") or "page"
-        digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:8]
-        target = folder / f"{slug}-{digest}.md"
         new = not target.exists()
         header = (
             f"# Source: {url}\n"
@@ -1678,6 +1701,14 @@ def crawl_verdict(status: str, row: dict) -> tuple[str, list[str]]:
         notes.append('link_walk_bounded')
     if row.get('metadata_limited'):
         notes.append('sitemap_bounded')
+    if row.get('query_variants_skipped'):
+        notes.append('query_variants_capped')
+    if any(page.get('reason') == 'duplicate' for page in row.get('pages', ())):
+        notes.append('duplicates')
+    if row.get('removed'):
+        notes.append('removed')  # pages the site removed left the library
+    if row.get('refusal'):
+        notes.append('site_refusing')
     if status == 'completed' and not row.get('fetched') and row.get('excluded'):
         notes.append('nothing_stored')  # every page kept out: a warning, not a success
     if status == 'completed' and (state.get('ambiguous') or any(
@@ -1753,6 +1784,106 @@ async def preview_site(seed_url: str, *, scope: str | None = None) -> dict[str, 
             "sitemap_limited": source == "sitemap" and bool(report.get("sitemap_limited"))}
 
 
+#: Addresses of one page that differ only in their query string, at most:
+#: a calendar's every month, a catalogue's every filter combination, a
+#: search page's every term filled the page cap with one page's copies. The
+#: page without a query string does not count (2026-11-13).
+_QUERY_VARIANTS_PER_PATH = 5
+#: Pages a refresh asks the site for again beyond what discovery found:
+#: the library's own pages, missing ones first (``web_page_urls``). A crawl's
+#: frontier holds at most ``crawl_jobs.FRONTIER_MAX`` pages in all.
+_REVISIT_MAX = 200
+
+
+class _QueryVariants:
+    """Counts each page's query-string addresses (scheme, host and path)."""
+
+    def __init__(self) -> None:
+        self.counts: dict[tuple[str, str, str], int] = {}
+
+    @staticmethod
+    def _key(url: str) -> tuple[str, str, str] | None:
+        parsed = urlparse(url)
+        if not parsed.query:
+            return None
+        return (parsed.scheme, (parsed.hostname or "").lower(), parsed.path or "/")
+
+    def count(self, url: str) -> None:
+        """Count *url*, already taken (a resumed walk's queue)."""
+        key = self._key(url)
+        if key is not None:
+            self.counts[key] = self.counts.get(key, 0) + 1
+
+    def admit(self, url: str) -> bool:
+        """Whether *url* may be taken; counted when it may."""
+        key = self._key(url)
+        if key is None:
+            return True
+        if self.counts.get(key, 0) >= _QUERY_VARIANTS_PER_PATH:
+            return False
+        self.counts[key] = self.counts.get(key, 0) + 1
+        return True
+
+
+def _cap_query_variants(urls: list[str]) -> tuple[list[str], int]:
+    """*urls* with at most :data:`_QUERY_VARIANTS_PER_PATH` query-string
+    addresses per page (in their order), and how many were left out."""
+    variants = _QueryVariants()
+    kept = [url for url in urls if variants.admit(url)]
+    return kept, len(urls) - len(kept)
+
+
+def _pages_to_revisit(store: Any, library_id: str, seed_url: str, scope_mode: str,
+                      discovered: list[str]) -> list[str]:
+    """The pages the library holds that discovery did not list, inside the
+    crawl's scope, that a refresh asks the site for again (bounded).
+    Blocking (SQLite): called through ``crawl_jobs.call``."""
+    from kazma_core.web_acquire.crawl_jobs import FRONTIER_MAX
+
+    room = max(0, min(_REVISIT_MAX, FRONTIER_MAX - len(discovered)))
+    if not room:
+        return []
+    known = {_canonical_page_url(url) or url for url in discovered}
+    out: list[str] = []
+    for url in store.web_page_urls(library_id):
+        key = _canonical_page_url(url) or url
+        if key in known or not _in_scope(seed_url, url, scope_mode):
+            continue
+        known.add(key)
+        out.append(url)
+        if len(out) >= room:
+            break
+    return out
+
+
+def _settle_gone_page(index: Any, library_id: str, url: str, fetch: Any) -> str:
+    """A page the site answered 404 or 410 for: ``removed`` when the library
+    held it and the site's answer takes it out (its fetched copy goes too),
+    ``pending`` when a 404 waits for a later crawl to confirm it, else
+    ``not_held``. A store that cannot record it leaves the page as it is
+    (WARNING): the page is still kept out of this crawl. Blocking."""
+    import sqlite3
+
+    status = getattr(fetch, "http_status", None)
+    try:
+        outcome = index.page_gone(library_id, url, status)["outcome"]
+    except (sqlite3.Error, OSError) as exc:
+        logger.warning("[kb_ingest] a page the site no longer has stays in library %s for now (%s): %s",
+                       library_id, type(exc).__name__, url[:200])
+        return "not_held"
+    if outcome == "removed":
+        _drop_provenance(library_id, url)
+    return outcome
+
+
+def _text_digest(text: str) -> str:
+    """A page's text, named for finding the same text under another address
+    (whitespace does not count)."""
+    import hashlib
+
+    return hashlib.sha256(" ".join(text.split()).encode("utf-8")).hexdigest()[:16]
+
+
 class _RetryBudget:
     """The retries one crawl has left for all its pages (``_PAGE_RETRY_BUDGET``):
     a site that is down costs a bounded wait, never one per page."""
@@ -1795,13 +1926,17 @@ def _log_outcome(row: dict, status: str, notes: list[str]) -> None:
 
     pages = page_outcomes(row)
     counts = {name: sum(page["outcome"] == name for page in pages)
-              for name in ("ingested", "unchanged", "excluded", "failed")}
-    logger.info("[kb_ingest] crawl outcome: %s library=%s ingested=%d unchanged=%d excluded=%d failed=%d notes=%s",
+              for name in ("ingested", "unchanged", "excluded", "removed", "failed")}
+    logger.info("[kb_ingest] crawl outcome: %s library=%s ingested=%d unchanged=%d excluded=%d removed=%d "
+                "failed=%d notes=%s",
                 status, row["library_id"], counts["ingested"], counts["unchanged"], counts["excluded"],
-                counts["failed"], ",".join(notes) or "-")
+                counts["removed"], counts["failed"], ",".join(notes) or "-")
     for page in pages:
         if page["outcome"] in ("excluded", "failed"):
             logger.info("[kb_ingest] page %s (%s): %s", page["outcome"], page["reason"] or "other", page["url"])
+        elif page["outcome"] == "removed":
+            logger.info("[kb_ingest] page removed from the library (%s): %s", page["reason"] or "gone",
+                        page["url"])
 
 
 async def ingest_site(
@@ -1829,6 +1964,7 @@ async def ingest_site(
         return
     iterator = _ingest_site_impl(library_id, seed_url, max_pages=page_cap, checkpoint=job)
     status = 'interrupted'
+    interrupted_by = None
     try:
         while True:
             token = crawl_jobs.current_crawl.set(job)
@@ -1841,8 +1977,13 @@ async def ingest_site(
                 crawl_jobs.current_crawl.reset(token)
             update.job_id = job.job_id
             await crawl_jobs.call(job.progress, update)
-            if update.phase in ('done', 'error'):
-                status = 'failed' if update.phase == 'error' else 'partial' if update.failed else 'completed'
+            if update.phase in ('done', 'error', 'interrupted'):
+                if update.phase == 'interrupted':
+                    # The crawl stopped itself (a refusing site): its pages
+                    # not reached wait for Resume, never auto-resumed.
+                    status, interrupted_by = 'interrupted', update.interrupted_by or None
+                else:
+                    status = 'failed' if update.phase == 'error' else 'partial' if update.failed else 'completed'
                 row = await crawl_jobs.call(job.read)
                 status, notes = crawl_verdict(status, row)
                 await crawl_jobs.call(job.update, lambda saved, notes=notes: saved.update(notes=notes))
@@ -1852,7 +1993,7 @@ async def ingest_site(
         try:
             await finish_owned(iterator.aclose())
         finally:
-            await finish_owned(crawl_jobs.call(job.finish, status))
+            await finish_owned(crawl_jobs.call(job.finish, status, interrupted_by=interrupted_by))
 
 
 async def _ingest_site_impl(
@@ -1951,11 +2092,28 @@ async def _ingest_site_impl(
             disco_task.cancel()
         await _aio.gather(disco_task, return_exceptions=True)
 
-    if len(pages) > page_cap and not saved['discovered']:
-        # The owner's page cap, a note on the result -- never a failure.
-        await call(checkpoint.update, lambda row: row.update(page_capped=True))
-    pages = pages[:page_cap]
+    from kazma_core.stores.knowledge import KnowledgeLibraryGone, KnowledgeStorageFull
+    from kazma_core.web_acquire.crawl_jobs import refusal_text, stop_refused
+    from kazma_core.web_acquire.page_outcome import RefusalStreak
+
+    index = await call(_knowledge_index)
+    store = await call(_knowledge_store)
     if not saved['discovered']:
+        # Addresses that differ only in their query string (a calendar's
+        # months, a catalogue's filters) are kept to a few per page before
+        # the page cap, so the cap is spent on pages (2026-11-13).
+        pages, variants_skipped = _cap_query_variants(pages)
+        if variants_skipped:
+            await call(checkpoint.update, lambda row, n=variants_skipped: row.update(query_variants_skipped=n))
+        if len(pages) > page_cap:
+            # The owner's page cap, a note on the result -- never a failure.
+            await call(checkpoint.update, lambda row: row.update(page_capped=True))
+        pages = pages[:page_cap]
+        if saved.get('kind') == 'refresh':
+            # A refresh asks the site for the pages the library holds too,
+            # so a page the site removed is seen even when it left the
+            # sitemap; only the site's answer for it takes it out (page_gone).
+            pages = pages + await call(_pages_to_revisit, store, library_id, seed_url, scope_mode, pages)
         await call(checkpoint.frontier, pages)
     result.pages_discovered = len(pages)
     yield ProgressUpdate(
@@ -1964,20 +2122,24 @@ async def _ingest_site_impl(
     )
 
     # ── Fetch + ingest each page (shared Playwright for the job) ─────
-    from kazma_core.stores.knowledge import KnowledgeLibraryGone, KnowledgeStorageFull
-
-    index = await call(_knowledge_index)
-    store = await call(_knowledge_store)
     fetched = saved['fetched']
     failed = saved['failed'] + sum(page['status'] == 'ambiguous' for page in saved['pages'])
     chunks_new = saved['ingested']
     chunks_skipped = saved['skipped']
     stored_as: set[str] = set()  # page identities stored by this run (KB-E14)
+    # Each text is stored once: a page whose text another page of this crawl
+    # already stored (the same article under several addresses) is a
+    # duplicate. Kept in the journal, so a resumed crawl knows them too.
+    texts: dict[str, str] = {page['digest']: page['url'] for page in saved['pages']
+                             if page.get('digest') and page['status'] == 'completed'}
     stopped = ""  # why the crawl stopped early, if it did
 
     pages_unchanged = saved['pages_unchanged']
     excluded = saved.get('excluded', 0)
+    removed = saved.get('removed', 0)
     budget = _RetryBudget()
+    streak = RefusalStreak()
+    refused = None  # the class of refusal that stopped the crawl, if one did
     async with _pw_browser_scope():
         for i, url in enumerate(pages):
             # A deleted library stops its crawl before the next fetch: no
@@ -1990,7 +2152,7 @@ async def _ingest_site_impl(
             yield ProgressUpdate(
                 phase="fetch",
                 discovered=len(pages), fetched=fetched, ingested=chunks_new,
-                skipped=chunks_skipped, failed=failed,
+                skipped=chunks_skipped, failed=failed, excluded=excluded, removed=removed,
                 current_url=url,
                 message=f"[{i + 1}/{len(pages)}] {url}",
                 started_at=started,
@@ -2000,16 +2162,37 @@ async def _ingest_site_impl(
                     if event == "retry":
                         yield ProgressUpdate(
                             phase="fetch", discovered=len(pages), fetched=fetched, ingested=chunks_new,
-                            skipped=chunks_skipped, failed=failed, excluded=excluded, current_url=url,
+                            skipped=chunks_skipped, failed=failed, excluded=excluded, removed=removed,
+                            current_url=url,
                             message=f"[{i + 1}/{len(pages)}] retrying in {text} s: {reason or 'no content'}",
                             started_at=started,
                         )
                 if status == "excluded":
+                    page_reason = _PAGE_REASON.get()
+                    if page_reason == "gone":
+                        # A page the library holds that the site no longer
+                        # has leaves the library (410 at once, a 404 once a
+                        # later crawl finds it missing again).
+                        gone = await call(_settle_gone_page, index, library_id, url, _PAGE_FETCH.get())
+                        if gone == "removed":
+                            removed += 1
+                            await call(checkpoint.end_page, url, error=reason, removed=True, reason="removed")
+                            yield ProgressUpdate(
+                                phase="fetch", discovered=len(pages), fetched=fetched, ingested=chunks_new,
+                                skipped=chunks_skipped, failed=failed, excluded=excluded, removed=removed,
+                                current_url=url,
+                                message=f"[{i + 1}/{len(pages)}] removed from the library: the site no longer has it",
+                                started_at=started,
+                            )
+                            continue
+                        if gone == "pending":
+                            page_reason = "gone_unconfirmed"
                     excluded += 1
-                    await call(checkpoint.end_page, url, error=reason, excluded=True, reason=_PAGE_REASON.get())
+                    await call(checkpoint.end_page, url, error=reason, excluded=True, reason=page_reason)
                     yield ProgressUpdate(
                         phase="fetch", discovered=len(pages), fetched=fetched, ingested=chunks_new,
-                        skipped=chunks_skipped, failed=failed, excluded=excluded, current_url=url,
+                        skipped=chunks_skipped, failed=failed, excluded=excluded, removed=removed,
+                        current_url=url,
                         message=f"[{i + 1}/{len(pages)}] excluded: {reason}",
                         started_at=started,
                     )
@@ -2024,18 +2207,25 @@ async def _ingest_site_impl(
                     else:
                         err_msg = f"{url}: fetch returned no content"
                         result.errors.append(err_msg)
+                    page_reason = _PAGE_REASON.get() or 'no_text'
                     await call(checkpoint.end_page, url, error=reason or 'No readable content',
-                               reason=_PAGE_REASON.get() or 'no_text')
+                               reason=page_reason)
                     yield ProgressUpdate(
                         phase="fetch",
                         discovered=len(pages), fetched=fetched, ingested=chunks_new,
-                        skipped=chunks_skipped, failed=failed, excluded=excluded,
+                        skipped=chunks_skipped, failed=failed, excluded=excluded, removed=removed,
                         current_url=url,
                         message=f"[{i + 1}/{len(pages)}] failed: {reason or 'no content'}",
                         errors=list(result.errors[-5:]),
                         started_at=started,
                     )
+                    refused = streak.failed(page_reason)
+                    if refused is not None:
+                        break
                     continue
+                # The site answered with a page: whatever is stored next,
+                # it is not refusing.
+                streak.stored()
                 # The page is stored under where the fetch landed: two links
                 # that redirect to one page index it once (KB-E14).
                 identity = _OBSERVED_URL.get() or url
@@ -2044,10 +2234,18 @@ async def _ingest_site_impl(
                     result.pages_fetched += 1
                     await call(checkpoint.end_page, url, unchanged=True)
                     continue
+                digest = _text_digest(text)
+                first = texts.get(digest)
+                if first is not None and first != identity:
+                    excluded += 1
+                    await call(checkpoint.end_page, url, excluded=True, reason="duplicate",
+                               error=f"The same text as {first}"[:1000])
+                    continue
                 new, unchanged_chunks, n_chunks = await call(
                     _store_page, index, library_id, identity, text
                 )
                 stored_as.add(identity)
+                texts[digest] = identity
                 chunks_new += new
                 chunks_skipped += unchanged_chunks
                 # Unchanged means the page's stored chunks equal the fetched
@@ -2058,7 +2256,7 @@ async def _ingest_site_impl(
                 fetched += 1
                 result.pages_fetched += 1
                 await call(checkpoint.end_page, url, new=new, skipped=unchanged_chunks,
-                    unchanged=unchanged)
+                    unchanged=unchanged, digest=digest)
             except KnowledgeLibraryGone:
                 failed += 1
                 result.failed_urls.append(url)
@@ -2084,7 +2282,8 @@ async def _ingest_site_impl(
             if delay_ms:
                 await asyncio.sleep(delay_ms / 1000.0)
 
-    # Refresh counts; discovery absence never authorizes deletion of old pages.
+    # Refresh counts. Absence from discovery never takes a page out: only the
+    # site's own answer for the page does (page_gone).
     await call(_refresh_chunk_count, store, library_id)
 
     if stopped:
@@ -2092,7 +2291,23 @@ async def _ingest_site_impl(
             phase="error",
             discovered=len(pages), fetched=fetched, ingested=chunks_new,
             skipped=chunks_skipped, failed=failed, pages_unchanged=pages_unchanged, excluded=excluded,
+            removed=removed,
             message=f"stopped: {stopped}", errors=list(result.errors) or [stopped],
+            started_at=started,
+        )
+        return
+
+    if refused is not None:
+        # The site refused page after page: the crawl stops here, its pages
+        # not reached wait for Resume (never resumed on their own).
+        await call(stop_refused, checkpoint, refused, streak.counts[refused])
+        message = refusal_text({"refusal": {"reason": refused, "pages": streak.counts[refused]}})
+        logger.warning("[kb_ingest] crawl of %s stopped: %s", library_id, message)
+        yield ProgressUpdate(
+            phase="interrupted", interrupted_by="site_refusing",
+            discovered=len(pages), fetched=fetched, ingested=chunks_new,
+            skipped=chunks_skipped, failed=failed, pages_unchanged=pages_unchanged, excluded=excluded,
+            removed=removed, message=message, errors=list(result.errors[-5:]),
             started_at=started,
         )
         return
@@ -2100,12 +2315,14 @@ async def _ingest_site_impl(
     # If everything failed, surface the FIRST failure reason in the done
     # message — that's what the user sees in the toast/progress panel, and
     # "0/1 pages, 0 chunks, 1 failed" without a reason is unactionable.
+    settled_without_fetch = excluded + removed
     done_msg = (
-        f"{'done' if fetched or (excluded and not failed) else 'failed'}: {fetched}/{len(pages)} pages, "
-        f"{chunks_new} new chunks"
+        f"{'done' if fetched or (settled_without_fetch and not failed) else 'failed'}: "
+        f"{fetched}/{len(pages)} pages, {chunks_new} new chunks"
         + (f", {pages_unchanged} pages unchanged" if pages_unchanged else "")
         + f", {failed} failed"
-        + (f", {excluded} excluded by robots.txt, scope, login, removal or size" if excluded else "")
+        + (f", {excluded} excluded by robots.txt, scope, login, removal, size or a duplicate" if excluded else "")
+        + (f", {removed} removed from the library (the site no longer has them)" if removed else "")
     )
     if failed > 0 and fetched == 0 and result.errors:
         # All pages failed — append the first reason to the summary so the
@@ -2113,18 +2330,18 @@ async def _ingest_site_impl(
         first_reason = result.errors[0]
         done_msg += f" — first failure: {first_reason}"
 
-    # Every page kept out by a rule and none failed: done, with nothing
-    # stored (a warning, ``nothing_stored``), never "failed".
+    # Every page kept out by a rule (or removed by the site) and none
+    # failed: done, never "failed" (nothing stored is a warning,
+    # ``nothing_stored``).
     yield ProgressUpdate(
-        phase="done" if fetched or (excluded and not failed) else "error",
+        phase="done" if fetched or (settled_without_fetch and not failed) else "error",
         discovered=len(pages), fetched=fetched, ingested=chunks_new,
         skipped=chunks_skipped, failed=failed,
-        pages_unchanged=pages_unchanged, excluded=excluded,
+        pages_unchanged=pages_unchanged, excluded=excluded, removed=removed,
         message=done_msg,
         errors=list(result.errors),
         started_at=started,
     )
-
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 

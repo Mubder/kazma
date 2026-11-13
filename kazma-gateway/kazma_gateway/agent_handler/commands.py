@@ -868,6 +868,9 @@ def _kb_outcome_text(lib_id: str, job: dict[str, Any] | None, verb: str) -> str:
     status = (job.get("acquisition") or {}).get("status", "unknown")
     counts = (f"{job.get('fetched', 0)} of {count_noun(job.get('discovered', 0), 'page')} stored, "
               f"{count_noun(job.get('ingested', 0), 'new chunk')}, failed: {job.get('failed', 0)}")
+    if job.get("removed"):
+        # Pages the site no longer has, taken out of the library (2026-11-13).
+        counts += f", removed: {job['removed']}"
     if status == "completed":
         return f"✅ The {verb} of `{lib_id}` finished: {counts}."
     if status == "partial":

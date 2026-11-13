@@ -75,8 +75,14 @@ Discovery + fetch caps: `KAZMA_KB_MAX_PAGES` (default 200, hard cap 1000), `KAZM
 |------|----------|
 | Page **unchanged** (same chunks in the same order) | Skipped: nothing written, counted as unchanged |
 | Page **changed** or shrank | Replaced in one transaction (old or new, never a mix) |
-| URL **missing** from a later discovery | **Kept.** A sparse, capped or failed discovery never deletes indexed pages |
+| URL **missing** from a later discovery | **Kept.** A sparse, capped or failed discovery never deletes indexed pages; a refresh still asks the site for it (below) |
+| The site answers **410 Gone** for a page the library holds | **Removed** at that crawl: its text, keyword entries, meaning vectors and fetched copy leave the library |
+| The site answers **404** for a page the library holds | Kept for now ("no longer on the site; stays until a later crawl confirms"). Removed when a crawl at least an hour later finds it missing again; a page that answers again is no longer counted missing |
+| The **same text** under another address (`/` and `/index.html`, `http` and `https`, a `?ref=` tag) | Stored once, under the first address; the other is kept out as a duplicate |
+| Many addresses of one page that differ only after `?` (a calendar's months, a catalogue's filters) | At most 5 per page are crawled, so the page cap is spent on pages |
 | A page that **fails** | Counted as failed; the crawl ends partial and says so |
+
+A **Refresh** asks the site again for the pages the library holds that discovery did not list (up to 200 a refresh, pages already found missing first), so a page that left the sitemap is still checked. Only the site's own answer for a page takes it out, never its absence from a list. A Document's chunks are never touched by a crawl.
 
 Agent tool `knowledge_ingest_site` is capped lower (default 5, at most 15 pages) than Web crawls — use `/knowledge` or `/kb crawl` for large trees.
 
@@ -265,15 +271,22 @@ Not measured: the corpus is small (76 chunks) and written for the purpose, and s
 
 ## What a crawl did, page by page
 
-Every page a crawl reaches ends one of four ways:
+Every page a crawl reaches ends one of these ways:
 
 - **Stored** (or **Unchanged**, when the library already holds the same text).
-- **Kept out** by a rule: robots.txt asks crawlers to stay out, the page is outside the crawl's scope, behind a sign-in, no longer on the site (404/410), or larger than Kazma reads (a page is stored whole, up to a million characters; a part is never stored).
+- **Kept out** by a rule: robots.txt asks crawlers to stay out, the page is outside the crawl's scope, behind a sign-in, no longer on the site (404/410), larger than Kazma reads (a page is stored whole, up to a million characters; a part is never stored), or the same text as another page of the crawl (stored once).
+- **Removed**: the library held the page and the site no longer has it (410 at once, a 404 when a later crawl confirms it): its text left the library.
 - **Failed**: the site had an error, refused the page, the connection failed, the address is on a private network, a bot check stood in the way, or the page had no readable text.
 
-A crawl is **Completed** (green) when nothing failed, **Finished with failures** (yellow) when a page failed or is uncertain, **Stored nothing** (yellow) when every page was kept out, and **Failed** (red) when the crawl itself could not run. The page cap, a link walk stopped at its depth and a very large sitemap read in part are notes on a completed crawl, never failures. The job card lists the pages that were not stored, failures first, each with what to do.
+A crawl is **Completed** (green) when nothing failed, **Finished with failures** (yellow) when a page failed or is uncertain, **Stored nothing** (yellow) when every page was kept out, and **Failed** (red) when the crawl itself could not run. The page cap, a link walk stopped at its depth, a very large sitemap read in part, pages removed and duplicates are notes on a completed crawl, never failures. The job card counts the pages each way and lists the ones that were not stored, failures first, each with what to do.
 
-A dropped connection, a server's "try later" (408, 425, 429, 5xx) or a DNS answer that came back private while the line was down is tried again inside the crawl, after 5 and then 30 seconds, at most 20 times a crawl. A crawl a restart cut off resumes once on its own at the next start (within a day); one you stopped waits for **Resume**.
+A dropped connection, a server's "try later" (408, 425, 429, 5xx) or a DNS answer that came back private while the line was down is tried again inside the crawl, after 5 and then 30 seconds, at most 20 times a crawl.
+
+**A site that refuses page after page stops the crawl.** After 10 pages in a row refused the same way (a bot check, an HTTP refusal, a server error, a failed connection) with nothing stored between, the crawl stops as **Interrupted** and says why. The pages not reached wait, each marked "not reached", and **Resume** continues with them when the site answers again. Kazma never resumes such a crawl on its own: it stops rather than keep asking a site that refuses it.
+
+**A crawl a restart cut off resumes on its own** at the next start, within a day, up to three times a day, each time only if it stored or settled more pages since its last automatic resume (a Windows update restarts the machine twice). One that made no progress, and one you stopped, waits for **Resume**.
+
+**A crawl outlives its browser.** Pages that need a browser are rendered in a Chromium that has a 30-minute lifetime and a memory cap. Kazma starts a fresh one between pages before either is reached (and after every 150 pages), and a page under which the browser died (a crash, out of memory) is rendered once more in a fresh browser. A crawl of several hours renders its last page as well as its first.
 
 robots.txt is read as RFC 9309 says: a 4xx answer means no rules apply, and a redirect is followed to another host (http://python.org/robots.txt moves to https://www.python.org/robots.txt). KazmaBot names a contact link in its user agent.
 
@@ -346,7 +359,7 @@ Indexed retrieval needs the `rag` extra (`pip install -e ".[rag]"` → `chromadb
 ## Limits & honest caveats
 
 - **Acquisition defaults to local-only.** Install the `web` extra and Chromium for JavaScript pages. Some bot walls defeat both HTTP and local Chromium; those pages must remain visible failures. Hosted Firecrawl/Jina require `KAZMA_ACQUISITION_MODE=local_first_with_remote_fallback` and their names in `KAZMA_ACQUISITION_REMOTE_PROVIDERS`, plus credentials where required. Stored keys and legacy Jina flags alone cannot authorize hosted fetching. See [web research](./web-research) for the policy and current accounting limitations.
-- **Refreshes preserve retained pages.** Missing a URL in discovery, including sparse/capped/failed discovery, does not delete its indexed content. An ingest where every page fails ends in error and keeps the reasons.
+- **Refreshes preserve retained pages.** Missing a URL in discovery, including sparse/capped/failed discovery, does not delete its indexed content; only the site's own 410 (or a 404 confirmed an hour later) for that page does. An ingest where every page fails ends in error and keeps the reasons.
 - **Robots checks default on.** KB discovery and ingest use bounded raw KazmaBot policies before content, redirects and browser assets. Missing 404/410 differs from failed or malformed checks, which refuse crawling. Explicit `KAZMA_CRAWL_RESPECT_ROBOTS=0` is recorded in acquisition evidence. Hosted readers cannot bypass enforcement; cross-origin control-file redirects are conservatively refused. See [web research](./web-research#robots-policy) for limits and remaining qualification.
 - **Chromium binary is separate from the Python package.** `pip install -e ".[web]"` installs the playwright Python bindings; you still need `playwright install chromium` to download the browser binary itself. The job error names this explicitly: *"Chromium binary not installed (run: playwright install chromium)"*.
 - **Linux Chromium needs delegated cgroup v2 controls.** The driver and browser share an aggregate memory/CPU/task budget. Missing memory, pids, CPU or group-kill controls cause a visible unavailable error; configure service delegation or `KAZMA_BROWSER_CGROUP_ROOT`. See [web research](./web-research) for limits, watchdog cleanup and remaining qualification.

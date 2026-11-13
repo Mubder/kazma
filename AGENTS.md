@@ -5004,6 +5004,23 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   only after OS verification of no live descendants; uncertainty quarantines it.
   The private Playwright Connection/stdio compatibility seam is isolated here,
   qualified against 1.61.0 and, 2026-10-17, 1.64.0 (35 boundary tests, real Chromium). Upgrades must pass the real-browser/boundary gates.
+  **A job's browser is relaunched between pages, before a limit ends it under
+  one** (2026-11-13, `BrowserJob._relaunch_reason` / `_retire_impl`): when its
+  tree has ended (a limit, a crash: `BrowserDriver.failure`), Chromium
+  disconnected, less than `_RELAUNCH_MARGIN_S` (180 s, at most a third) of
+  the lifetime or `_RELAUNCH_TRAFFIC_HEADROOM` (128 MiB) of the protocol
+  budget is left, or after `_RELAUNCH_AFTER_RENDERS` (150) renders. A job
+  kept its dead context before: every render after the 30-minute lifetime
+  failed `resource_limit` and a long Knowledge crawl lost every page that
+  needed the browser. The retire ends the old tree first and keeps the job's
+  capacity lease; a cleanup it cannot verify keeps every handle quarantined
+  and launches nothing (the next page tries the cleanup again). A page under
+  which the browser died (`RenderedDocument.lost`: the driver's failure, a
+  disconnected Chromium, Playwright's "closed"/"crashed") is rendered once
+  more in the relaunched browser (`_render_in_job` -> `_render_once`), never
+  a third time. Gate: `tests/test_browser_relaunch.py` (real Chromium with the
+  lifetime shrunk to seconds, and a Chromium killed mid-crawl: every page
+  stored; the old rule as the negative control).
   Gates: `tests/test_browser_driver_budget.py`,
   `tests/test_acquisition_resources.py` and the broker suite. This boundary does
   not constrain arbitrary Python HTTP/XML threads or all install storage,
@@ -5079,9 +5096,43 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   completed with `nothing_stored` (the monitor's yellow "empty", never red).
   A hiccup -- network, 408/425/429/5xx, a private DNS answer during an
   outage -- is tried again inside the crawl (`_fetch_with_retries`, 5 s then
-  30 s, at most 20 a crawl). A crawl a restart cut off in the last day resumes
-  once on its own (`interrupted_by: process_ended`,
-  `kb_api.resume_interrupted_crawls`); one the owner stopped waits. The
+  30 s, at most 20 a crawl). **A site that refuses page after page stops its
+  crawl** (2026-11-13, `page_outcome.RefusalStreak`): `REFUSAL_STREAK` (10)
+  failed pages of one class (`REFUSAL_CLASSES`: bot wall, HTTP refusal,
+  server error, network) with no page stored between end the crawl
+  `interrupted` (`interrupted_by: site_refusing`, `row['refusal']`,
+  `crawl_jobs.stop_refused` / `refusal_text`); the pages not reached stay
+  pending with the reason `site_refusing` for Resume, never resumed on their
+  own. Other failures (no text, an unreadable format) neither count nor clear
+  it. Every remaining page used to run the whole ladder (up to 90 s each, a
+  render behind a bot wall) to the page cap. A crawl a restart cut off in the
+  last day resumes on its own (`interrupted_by: process_ended`,
+  `kb_api.resume_interrupted_crawls`) up to `AUTO_RESUMES_PER_DAY` (3) times a
+  day, each only if it settled more pages since its last automatic resume
+  (`row['auto_resumes']`, `crawl_jobs.settled_pages`; it was once ever, and a
+  Windows update restarts twice); one the owner stopped waits. **A refresh
+  takes out what the site removed, and only that** (2026-11-13): it also asks
+  the site for the pages the library holds that discovery did not list
+  (`_pages_to_revisit`, at most `_REVISIT_MAX` 200, missing ones first:
+  `KnowledgeStore.web_page_urls`); the site's own answer decides -- 410
+  takes the page out at once, a 404 is recorded (`knowledge_pages_gone`,
+  `gone_unconfirmed`) and takes it out when a later crawl finds it missing
+  again at least `_GONE_CONFIRM_S` (an hour) after the first; a page that
+  answers again clears its record (`publish_page`). Absence from discovery
+  alone never takes a page out (KB-S14 stands). The page leaves the chunks,
+  the keyword index (like a replaced page's words), its vectors and its
+  fetched copy in one transaction (`KnowledgeStore.page_gone`,
+  `KnowledgeIndex.page_gone`); never a Document's chunks. Outcome `removed`,
+  counted apart (`row['removed']`, the note `removed`). Before, a 404/410 was
+  "excluded: gone" and the text stayed searchable for good. **One text is
+  stored once, and one page's query-string copies do not fill a crawl**
+  (2026-11-13): a page whose text another page of the crawl stored (digest
+  of the whitespace-folded text, `_text_digest`, kept on the journal's page
+  so a resume knows it) is excluded `duplicate`; at most
+  `_QUERY_VARIANTS_PER_PATH` (5) query-string addresses per page in the
+  frontier (`_cap_query_variants`, note `query_variants_capped`) and in the
+  link walk (`_QueryVariants`). The corpus held three duplicate pairs
+  (`/` and `/index.html`, http and https, a `/stable/` alias). The
   Knowledge page previews a crawl (`knowledge_ingest.preview_site`: the
   crawl's own discovery, nothing stored) and takes a scope in the owner's
   words (this section / whole site / just this page), kept per library
@@ -5093,9 +5144,15 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   the target of 99% stored or kept out by a rule (`crawl_jobs.PAGE_TARGET`),
   are the Dashboard's Knowledge crawls card (`/api/kb/outcomes`), `/metrics`
   (`kazma_kb_crawl_*`) and the weekly report ("Knowledge crawl", "Knowledge
-  page not stored"). Gates: `tests/test_crawl_outcomes.py`,
+  page not stored", "Knowledge page removed"); a removed page counts as
+  handled. Gates: `tests/test_crawl_outcomes.py`,
   `tests/test_crawl_auto_resume.py`, `tests/test_crawl_preview.py`,
-  `tests/test_crawl_report.py`, `tests/js/test_kb_crawl_report.js`.
+  `tests/test_crawl_report.py`, `tests/js/test_kb_crawl_report.js`,
+  `tests/test_crawl_refusing_site.py` (a replayed site that turns to 403 after
+  five pages: 15 fetched of 40; the streak out of reach as the control),
+  `tests/test_crawl_removed_pages.py` (410 at once, 404 an hour later, the old
+  refresh as the control), `tests/test_crawl_duplicates.py` (a replayed site
+  of sixty months of one page; no cap and no text check as the controls).
   **Twenty real sites are recorded and replayed through the whole crawl**
   (`tests/_crawl_replay.py`, `tests/fixtures/crawl_corpus/`): every HTTP
   response a real crawl received, through the one HTTP seam

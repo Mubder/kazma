@@ -84,8 +84,12 @@ class _Transport:
         self._closer = None
         self.active_task = None
         self.cleanup_deadline = None
+        #: When the hard lifetime ends (monotonic), set as the launch
+        #: starts: the owner relaunches its browser before it (BrowserJob).
+        self.deadline = None
 
     async def connect(self):
+        self.deadline = time.monotonic() + _LIFETIME
         self.launch = asyncio.create_task(asyncio.to_thread(_start_driver))
         self.proc, self.tree = await asyncio.shield(self.launch)
         with self._lock:
@@ -104,7 +108,7 @@ class _Transport:
         self.request_stop()
 
     def _watchdog(self):
-        deadline = time.monotonic() + _LIFETIME
+        deadline = self.deadline
         while not self._stop.wait(0.05):
             if self.active_task is not None and self.active_task.cancelling():
                 self.request_stop()
@@ -333,6 +337,26 @@ class BrowserDriver:
     @property
     def ending(self):
         return self.transport is not None and self.transport._stop.is_set()
+
+    @property
+    def failure(self):
+        """Why the owned process tree ended, or None while it runs."""
+        return self.transport.failure if self.transport is not None else None
+
+    def seconds_left(self):
+        """Seconds before the hard lifetime ends the tree (None before launch)."""
+        transport = self.transport
+        if transport is None or transport.deadline is None:
+            return None
+        return transport.deadline - time.monotonic()
+
+    def traffic_left(self):
+        """Protocol bytes this owner may still exchange before its budget ends it."""
+        transport = self.transport
+        if transport is None:
+            return _TRAFFIC
+        with transport._lock:
+            return _TRAFFIC - transport._traffic
 
     def cleanup_window(self):
         self.transport.cleanup_deadline = time.monotonic() + _GRACE

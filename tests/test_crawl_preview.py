@@ -56,7 +56,7 @@ def site(tmp_path, monkeypatch, journal):
 
     async def fetch(url, **kwargs):
         state["fetched"].append(url)
-        return FetchResult(ok=True, url=url, final_url=url, text="# Page\n\n" + "useful words " * 40, http_status=200)
+        return FetchResult(ok=True, url=url, final_url=url, text=f"# Page {url}\n\n" + "useful words " * 40, http_status=200)
 
     async def no_llms(seed):
         return []

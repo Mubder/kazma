@@ -250,6 +250,13 @@ def register_knowledge_tools(registry: Any) -> None:
                 final_msg = getattr(upd, "message", "") or final_msg
             if last is None or last.phase == 'error':
                 return effect_unknown(f"Error: knowledge_ingest_site failed — {final_msg or 'No terminal crawl outcome received.'}")
+            if last.phase == 'interrupted':
+                # The site refused page after page and the crawl stopped
+                # itself; what was stored stays, the rest waits for a resume.
+                return (f"Site ingest stopped for library '{lib_id}': {final_msg} "
+                        f"fetched={last.fetched} failed={last.failed} chunks_indexed={last.ingested}. "
+                        f"Crawl job={getattr(last, 'job_id', '')}; resume it later with "
+                        f"knowledge_ingest_site(resume_job_id={getattr(last, 'job_id', '')!r}).")
             lib = await asyncio.to_thread(store.get_library, lib_id) or {}
             failed = getattr(last, "failed", 0)
             return (

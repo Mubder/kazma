@@ -1,11 +1,14 @@
 {
   "alpine-start": {
-    "chunks": 82,
-    "notes": [],
+    "chunks": 41,
+    "notes": [
+      "duplicates",
+      "excluded"
+    ],
     "pages": {
       "http://alpinejs.dev/start-here": [
-        "ingested",
-        ""
+        "excluded",
+        "duplicate"
       ],
       "https://alpinejs.dev/start-here": [
         "ingested",
@@ -96,8 +99,10 @@
     "status": "completed"
   },
   "llmstxt": {
-    "chunks": 124,
+    "chunks": 109,
     "notes": [
+      "duplicates",
+      "excluded",
       "page_cap"
     ],
     "pages": {
@@ -118,8 +123,8 @@
         ""
       ],
       "https://llmstxt.org/index.html": [
-        "ingested",
-        ""
+        "excluded",
+        "duplicate"
       ]
     },
     "status": "completed"
@@ -275,8 +280,9 @@
     "status": "completed"
   },
   "rust-book": {
-    "chunks": 41,
+    "chunks": 38,
     "notes": [
+      "duplicates",
       "excluded",
       "page_cap"
     ],
@@ -298,8 +304,8 @@
         "too_large"
       ],
       "https://doc.rust-lang.org/stable/book/": [
-        "ingested",
-        ""
+        "excluded",
+        "duplicate"
       ]
     },
     "status": "completed"

@@ -25,6 +25,46 @@
   compose file had no health check and showed one probing the wrong port; they
   describe the one it has.
 
+## Knowledge crawls that run for hours, sites that refuse, pages that go (2026-11-13)
+
+- **A crawl outlives its browser.** The browser a crawl renders pages in has
+  a 30-minute lifetime, a 512 MiB protocol budget and a 2 GiB memory cap.
+  Once one of them ended it, the crawl kept the dead browser and every page
+  that needed rendering failed (`resource_limit`) until the crawl ended. Now
+  the browser is replaced between pages before a limit is reached (three
+  minutes of lifetime or 128 MiB of protocol left, and after every 150
+  pages), and when it ended or Chromium crashed; the old browser is ended
+  and verified first, and a page under which the browser died is rendered
+  once more in the new one. Real Chromium with the lifetime shrunk to six
+  seconds stores all ten pages of a crawl; the old rule lost every page
+  after the first browser ended. A Chromium killed in the middle of a crawl
+  costs no page either.
+- **A site that refuses page after page stops the crawl.** After 10 pages
+  in a row refused the same way (a bot check, an HTTP refusal, a server
+  error, a failed connection) with nothing stored between, the crawl stops
+  as interrupted ("the site refused page after page"); the pages not
+  reached wait for Resume and are never resumed on their own. A replayed
+  site that turns to 403 after five pages is asked for 15 pages, not 40.
+- **A refresh takes out what the site removed, and only that.** A refresh
+  also asks the site for the library's own pages that discovery no longer
+  lists (up to 200). A 410 answer takes the page out at once; a 404 is
+  recorded and takes it out when a crawl at least an hour later finds it
+  missing again; a page that answers again is no longer counted missing.
+  The page's text, keyword entries, meaning vectors and fetched copy go in
+  one transaction. Absence from a sitemap alone never removes anything.
+  Removed pages are counted as "Removed" on the crawl report, the
+  Dashboard card, `/metrics` and the weekly report.
+- **One text is stored once.** A page with the same text as another page of
+  the crawl (`/` and `/index.html`, `http` and `https`, a `?ref=` tag) is
+  kept out as a duplicate; three such pairs were in the recorded crawl
+  corpus, whose expected outcomes were re-locked. At most five addresses of
+  one page that differ only after `?` are crawled, in the frontier and in
+  the link walk, so a calendar no longer fills the page cap.
+- **A restart resumes a crawl up to three times a day** (it was once ever),
+  each time only if the crawl settled more pages since its last automatic
+  resume. A Windows update restarts twice; a crawl that dies on the same
+  page every time waits for the owner.
+
 ## Kazma's own container engine stops cleanly when Windows shuts down (2026-11-13)
 
 - Measured on a clean Windows VM with nobody signed in: when Windows

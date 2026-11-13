@@ -206,6 +206,8 @@ async def test_browser_resource_failure_receipt_keeps_the_os_budget():
     from kazma_core.web_acquire import browser
     from kazma_core.web_acquire.result import FetchErrorCode
 
+    original_settle = browser.BrowserNetwork.settle
+
     async def verify():
         owner = browser.BrowserJob()
         try:
@@ -215,13 +217,30 @@ async def test_browser_resource_failure_receipt_keeps_the_os_budget():
                 await owner.context.new_page()
             assert caught.value.code == FetchErrorCode.LIMIT
             await owner._driver.transport.wait_until_stopped()
-            rendered = await browser._render_in_job(owner, 'https://example.com/',
-                challenge=lambda html, status: False, profile='generic')
+
+            # The budget ending the tree under a page, on the try and on the
+            # one retry in a relaunched browser (2026-11-13): the receipt
+            # still names the failure and the OS budget it ran under.
+            async def settle_then_die(broker):
+                await original_settle(broker)
+                owner._driver.transport._fail('fixture: browser resource budget exhausted')
+                await owner._driver.transport.wait_until_stopped()
+            browser.BrowserNetwork.settle = settle_then_die
+            try:
+                rendered = await browser._render_in_job(owner, 'about:blank',
+                    challenge=lambda html, status: False, profile='generic')
+            finally:
+                browser.BrowserNetwork.settle = original_settle
             evidence = rendered.result.evidence()
             assert not rendered.result.ok and rendered.result.error_code == FetchErrorCode.LIMIT
+            assert rendered.lost and rendered.result.meta['browser_lost'] is True
             assert evidence['browser_process']['memory_bytes'] == 2 * 1024**3
             assert evidence['browser_process']['failed'] is True
+            # The dead tree from before the page, and the one the first try
+            # lost, were each replaced; never a second tree over a live one.
+            assert owner.relaunches == 2
         finally:
+            browser.BrowserNetwork.settle = original_settle
             await owner._close_impl()
     await run_in_browser_loop(verify())
 

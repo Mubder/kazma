@@ -239,6 +239,16 @@ CREATE TABLE IF NOT EXISTS knowledge_vector_status (
     checked_at  TEXT NOT NULL,
     store_id    TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS knowledge_pages_gone (
+    library_id  TEXT NOT NULL,
+    source_url  TEXT NOT NULL,
+    gone_since  TEXT NOT NULL,
+    last_seen   TEXT NOT NULL,
+    last_http   INTEGER NOT NULL DEFAULT 0,
+    sightings   INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (library_id, source_url),
+    FOREIGN KEY (library_id) REFERENCES knowledge_libraries(id) ON DELETE CASCADE
+);
 """
 
 # The FTS index is derived data and is rebuilt in place by
@@ -290,6 +300,17 @@ _PURGE_DUE_KEY = "keyword_purge_due"
 
 #: The keyword index's FTS5 table.
 _FTS_TABLE = "knowledge_chunks_fts"
+
+#: A page the site removed leaves its library (2026-11-13). Absence from
+#: discovery is never evidence (KB-S14): only the site's own answer for the
+#: page is. HTTP 410 ("gone for good") retires the page at once; a 404 is
+#: recorded (``knowledge_pages_gone``) and retires the page when a later
+#: crawl finds it missing again at least this long after the first -- a
+#: deploy that 404s for a few minutes, or Refresh pressed twice, takes no
+#: page out. A page stored again clears its record.
+_GONE_CONFIRM_S = 3600
+#: The statuses that say a page is no longer on the site.
+_GONE_AT_ONCE = frozenset({410})
 
 #: Test hook: called with the name of each step of a page publication, a
 #: library delete and its keyword-index purge (fault injection,
@@ -1101,6 +1122,112 @@ class KnowledgeStore:
             if (r["source_url"] if isinstance(r, sqlite3.Row) else r[0])
         ]
 
+    def web_page_urls(self, library_id: str, *, limit: int | None = None) -> list[str]:
+        """The web pages a library holds (not Documents), in the order a
+        refresh revisits them: pages an earlier crawl found missing first
+        (they wait for their confirming visit), then the least recently
+        stored. A refresh revisits them, so a page the site removed is seen
+        even when it left the sitemap (``knowledge_ingest``)."""
+        with self._lock:
+            conn = self._get_conn()
+            rows = conn.execute(
+                """SELECT c.source_url, MIN(c.created_at) AS stored_at, g.gone_since
+                   FROM knowledge_chunks c
+                   LEFT JOIN knowledge_pages_gone g
+                     ON g.library_id = c.library_id AND g.source_url = c.source_url
+                   WHERE c.library_id = ? AND c.document_id IS NULL AND c.source_url != ''
+                     AND c.active = 1 AND c.tombstoned = 0
+                   GROUP BY c.source_url
+                   ORDER BY (g.gone_since IS NULL), g.gone_since, stored_at, c.source_url""",
+                (library_id,),
+            ).fetchall()
+        urls = [str(r[0]) for r in rows if _is_web_url(str(r[0]))]
+        return urls if limit is None else urls[:max(0, int(limit))]
+
+    def gone_record(self, library_id: str, source_url: str) -> dict[str, Any] | None:
+        """What a crawl recorded of a page it found missing, or None."""
+        with self._lock:
+            row = self._get_conn().execute(
+                """SELECT gone_since, last_seen, last_http, sightings FROM knowledge_pages_gone
+                   WHERE library_id = ? AND source_url = ?""",
+                (library_id, source_url),
+            ).fetchone()
+        return None if row is None else {"gone_since": row[0], "last_seen": row[1],
+                                         "last_http": int(row[2]), "sightings": int(row[3])}
+
+    def page_gone(self, library_id: str, source_url: str, http_status: int | None, *,
+                  now: datetime | None = None) -> dict[str, Any]:
+        """A crawl found a page missing (HTTP 404 or 410): record it, or take
+        it out of the library, in ONE transaction.
+
+        Returns ``{"outcome": "not_held" | "pending" | "removed",
+        "retired_ids": [...]}``. Only a web page the library holds is
+        touched (never a Document's chunks). ``removed`` when the site says
+        the page is gone for good (410), or when a 404 was already recorded
+        at least :data:`_GONE_CONFIRM_S` before; otherwise the 404 is
+        recorded (``pending``) and the page stays searchable. The chunks
+        leave the table and the keyword index like a replaced page's (their
+        words stay in older index segments, unsearchable, until FTS5's own
+        merges); the caller drops their vectors (``KnowledgeIndex``).
+        """
+        now = now or datetime.now(UTC)
+        stamp = now.isoformat()
+        status = int(http_status or 0)
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                _fault("gone_begin")
+                conn.execute("BEGIN IMMEDIATE")
+                held = conn.execute(
+                    """SELECT rowid, id FROM knowledge_chunks
+                       WHERE library_id = ? AND source_url = ? AND document_id IS NULL""",
+                    (library_id, source_url),
+                ).fetchall()
+                record = conn.execute(
+                    "SELECT gone_since FROM knowledge_pages_gone WHERE library_id = ? AND source_url = ?",
+                    (library_id, source_url),
+                ).fetchone()
+                if not held:
+                    if record is not None:
+                        conn.execute("DELETE FROM knowledge_pages_gone WHERE library_id = ? AND source_url = ?",
+                                     (library_id, source_url))
+                    conn.execute("COMMIT")
+                    return {"outcome": "not_held", "retired_ids": []}
+                confirmed = record is not None and (
+                    now - datetime.fromisoformat(str(record[0]))).total_seconds() >= _GONE_CONFIRM_S
+                if status not in _GONE_AT_ONCE and not confirmed:
+                    conn.execute(
+                        """INSERT INTO knowledge_pages_gone
+                           (library_id, source_url, gone_since, last_seen, last_http, sightings)
+                           VALUES (?, ?, ?, ?, ?, 1)
+                           ON CONFLICT(library_id, source_url) DO UPDATE SET
+                             last_seen = excluded.last_seen, last_http = excluded.last_http,
+                             sightings = sightings + 1""",
+                        (library_id, source_url, stamp, stamp, status),
+                    )
+                    conn.execute("COMMIT")
+                    return {"outcome": "pending", "retired_ids": []}
+                self._fts_delete(conn, [(r[0], r[1]) for r in held])
+                _fault("gone_fts_deleted")
+                conn.executemany("DELETE FROM knowledge_chunks WHERE rowid = ?", [(r[0],) for r in held])
+                conn.execute("DELETE FROM knowledge_pages_gone WHERE library_id = ? AND source_url = ?",
+                             (library_id, source_url))
+                conn.execute(
+                    "UPDATE knowledge_libraries SET chunk_count = "
+                    "(SELECT COUNT(*) FROM knowledge_chunks WHERE library_id = ? AND active = 1 "
+                    "AND tombstoned = 0), updated_at = ? WHERE id = ?",
+                    (library_id, stamp, library_id),
+                )
+                _fault("gone_rows_deleted")
+                conn.execute("COMMIT")
+            except BaseException:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
+                raise
+        logger.info("[KnowledgeStore] took %d chunk(s) of %s out of library %s: the site no longer has it "
+                    "(HTTP %s)", len(held), source_url[:120], library_id, status or "?")
+        return {"outcome": "removed", "retired_ids": [str(r[1]) for r in held]}
+
     def list_source_content_hashes(
         self, library_id: str, source_url: str
     ) -> list[str]:
@@ -1209,6 +1336,10 @@ class KnowledgeStore:
                        ORDER BY chunk_index""",
                     (library_id, url),
                 ).fetchall()
+                # The page answered with content: it is on the site, whatever
+                # an earlier crawl recorded (page_gone).
+                conn.execute("DELETE FROM knowledge_pages_gone WHERE library_id = ? AND source_url = ?",
+                             (library_id, url))
                 if not force and [(r[1], r[2]) for r in existing] == wanted:
                     conn.execute("COMMIT")
                     return {"outcome": "unchanged", "new_ids": [w[0] for w in wanted], "retired_ids": []}

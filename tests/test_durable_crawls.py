@@ -171,7 +171,8 @@ async def test_public_crawl_resume_skips_completed_and_ambiguous_pages_and_reset
         return pages
     async def extract(url,**kwargs):
         fetched.append(url)
-        return '# Content\n'+'body '*40,'ok',''
+        # Each page its own text: one text is stored once (2026-11-13).
+        return f'# Content of {url}\n'+'body '*40,'ok',''
     monkeypatch.setattr(ssrf,'validate_url',lambda *args,**kwargs: ())
     monkeypatch.setattr(ki,'kb_discover_pages',discover)
     monkeypatch.setattr(ki,'_extract_page',extract)

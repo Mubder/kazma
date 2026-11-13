@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import Callable
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
@@ -21,12 +22,33 @@ logger = logging.getLogger(__name__)
 _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 _DOM_CAP = 5_000_000  # the HTTP path's default body budget, so both read the same pages
 _NATIVE_CONNECTION_CAP = 16
+#: A job's browser is relaunched between pages, before one of its own limits
+#: ends it under a page (2026-11-13). A Knowledge crawl renders for hours;
+#: the owned process tree has a 30-minute hard lifetime, a 512 MiB protocol
+#: budget and a 2 GiB memory cap (``browser_driver``). Once one of them ended
+#: the tree, the job kept its dead context: every later render failed
+#: ``resource_limit`` and the crawl lost every page that needed the browser.
+#: Relaunched: after this many renders (Chromium's memory grows over a long
+#: job) ...
+_RELAUNCH_AFTER_RENDERS = 150
+#: ... when less than this much of its hard lifetime is left (a page with its
+#: tabs can take minutes), at most a third of the lifetime ...
+_RELAUNCH_MARGIN_S = 180.0
+#: ... and when less than this much of its protocol budget is left (fulfilled
+#: responses and DOM snapshots cross it base64- or JSON-encoded), at most a
+#: quarter of the budget.
+_RELAUNCH_TRAFFIC_HEADROOM = 128 * 1024 ** 2
+#: How Playwright says the browser or its page is gone (not a page error).
+_LOST = re.compile(r"has been closed|target closed|crashed", re.I)
 
 
 @dataclass
 class RenderedDocument:
     result: FetchResult
     html: str = ""
+    #: The browser (driver, Chromium or the page's renderer) died during the
+    #: render: the page itself is not known to be at fault.
+    lost: bool = False
 
 
 class BrowserJob:
@@ -52,6 +74,12 @@ class BrowserJob:
         self._deny_tasks: set[asyncio.Task] = set()
         self._deny_closing = False
         self.native_denials = 0
+        #: Renders since the browser was (re)launched, and how many times this
+        #: job relaunched it (``_relaunch_reason``).
+        self._renders = 0
+        self.relaunches = 0
+        #: Set by a render that lost the browser: the next start relaunches.
+        self._relaunch_due: str | None = None
 
     async def __aenter__(self):
         self._token = current_browser_job.set(self)
@@ -95,7 +123,10 @@ class BrowserJob:
             if self._closed:
                 raise RuntimeError("Browser job scope has already closed.")
             if self.context is not None:
-                return
+                why = self._relaunch_reason()
+                if why is None:
+                    return
+                await self._retire_impl(why)
             from kazma_core.web_acquire import resources
 
             if self._capacity_lease is None:
@@ -108,6 +139,60 @@ class BrowserJob:
                 self._closed = True
                 await self._close_owned_impl()
                 raise
+
+    def _relaunch_reason(self) -> str | None:
+        """Why the running browser must be replaced before the next page, or
+        None while it can take one. Asked under the start lock, between
+        renders (the render lock), never while a page is open."""
+        if self._relaunch_due is not None:
+            return self._relaunch_due
+        driver = self._driver
+        if driver is not None:
+            from kazma_core.web_acquire import browser_driver
+
+            if driver.failure is not None or driver.ending:
+                return "browser_ended"
+            left = driver.seconds_left()
+            if left is not None and left < min(_RELAUNCH_MARGIN_S, browser_driver._LIFETIME / 3):
+                return "lifetime"
+            if driver.traffic_left() < min(_RELAUNCH_TRAFFIC_HEADROOM, browser_driver._TRAFFIC // 4):
+                return "protocol_budget"
+        if self.browser is not None and not _connected(self.browser):
+            return "browser_closed"
+        if self._renders >= _RELAUNCH_AFTER_RENDERS:
+            return "page_budget"
+        return None
+
+    async def _retire_impl(self, why: str) -> None:
+        """End the running browser and its deny endpoint, keeping this job's
+        capacity lease for the browser that replaces it.
+
+        A cleanup that cannot be verified keeps every handle and quarantines
+        the lease: no second process tree is ever launched over a retained
+        one, and the next start tries the cleanup again. A graceful close
+        that ran past its grace and was ended by force is a verified end.
+        """
+        logger.info("[browser] relaunching the job's browser (%s) after %d page(s)", why, self._renders)
+        try:
+            await self._cleanup_owned_impl(release=False)
+        except Exception as exc:
+            if self._driver is not None or self._deny_server is not None or any(
+                    obj is not None for obj in (self.context, self.browser, self.pw)):
+                if self._capacity_lease is not None:
+                    self._capacity_lease.quarantine()
+                logger.error("[browser] the job's browser could not be ended for a relaunch; "
+                             "its capacity stays quarantined until the cleanup succeeds", exc_info=True)
+                if isinstance(exc, AcquisitionError):
+                    raise
+                raise AcquisitionError(FetchErrorCode.LIMIT,
+                    "Local browser relaunch could not end the previous browser; capacity remains "
+                    "quarantined.") from exc
+            logger.warning("[browser] the retired browser did not close in its grace; its process tree was ended")
+        if self._capacity_lease is not None:
+            self._capacity_lease.clear_quarantine()
+        self.relaunches += 1
+        self._renders = 0
+        self._relaunch_due = None
 
     async def _launch_impl(self):
         from kazma_core.web_acquire.browser_driver import BrowserDriver
@@ -145,7 +230,7 @@ class BrowserJob:
             if self._capacity_lease is not None:
                 self._capacity_lease.quarantine()
 
-    async def _cleanup_owned_impl(self):
+    async def _cleanup_owned_impl(self, *, release: bool = True):
         forced = False
         if self._driver is not None:
             self._driver.cleanup_window()
@@ -162,7 +247,7 @@ class BrowserJob:
             self._driver = None
         else:
             await self._close_playwright_objects()
-        await self._close_endpoint()
+        await self._close_endpoint(release=release)
         if forced:
             raise AcquisitionError(FetchErrorCode.LIMIT,
                 'Local browser graceful cleanup exceeded five seconds; its contained process tree was terminated and capacity released.')
@@ -191,7 +276,7 @@ class BrowserJob:
                 "Local browser cleanup did not complete; its capacity remains quarantined. "
                 "The native deny endpoint remains active. Check the browser cleanup error log before retrying.")
 
-    async def _close_endpoint(self):
+    async def _close_endpoint(self, *, release: bool = True):
         self._deny_closing = True
         if self._deny_server is not None:
             self._deny_server.close()
@@ -202,7 +287,7 @@ class BrowserJob:
         if self._deny_server is not None:
             await self._deny_server.wait_closed()
             self._deny_server = None
-        if self.context is self.browser is self.pw is None and self._capacity_lease is not None:
+        if release and self.context is self.browser is self.pw is None and self._capacity_lease is not None:
             self._capacity_lease.release()
             self._capacity_lease = None
 
@@ -231,6 +316,13 @@ class BrowserJob:
 current_browser_job: ContextVar[BrowserJob | None] = ContextVar("acquisition_browser_job", default=None)
 
 
+def _connected(browser) -> bool:
+    try:
+        return bool(browser.is_connected())
+    except Exception:
+        return False
+
+
 async def render_document(
     url: str, *, challenge: Callable[[str, int], bool],
     profile: str = "generic",
@@ -244,6 +336,18 @@ async def render_document(
 
 
 async def _render_in_job(owner, url, *, challenge, profile):
+    """Render one page in the job's browser; a page under which the browser
+    died is rendered once more, in a relaunched browser (the next start
+    relaunches it: ``BrowserJob._relaunch_reason``)."""
+    document = await _render_once(owner, url, challenge=challenge, profile=profile)
+    if document.lost and not owner._closed:
+        logger.warning("[browser] the browser was lost rendering %s (%s); relaunched, the page is tried once more",
+                       url[:200], document.result.error_code)
+        document = await _render_once(owner, url, challenge=challenge, profile=profile)
+    return document
+
+
+async def _render_once(owner, url, *, challenge, profile):
     page = None
     broker = None
     final_url = None
@@ -251,6 +355,7 @@ async def _render_in_job(owner, url, *, challenge, profile):
         require_scope(url)
         async with owner._render_lock:
             await owner._start_impl()
+            owner._renders = getattr(owner, "_renders", 0) + 1
             if owner._driver is not None:
                 owner._driver.watch(asyncio.current_task())
             page = await owner.context.new_page()
@@ -331,6 +436,9 @@ async def _render_in_job(owner, url, *, challenge, profile):
         exc = raised
         if broker is not None and broker.failure is not None:
             exc = broker.failure
+        lost = _browser_lost(owner, raised, broker)
+        if lost and isinstance(owner, BrowserJob):
+            owner._relaunch_due = "browser_lost"
         exc = _driver_failure(owner) or exc
         code, transient = classify_failure(exc)
         # Playwright's timeout has no relationship to Python/HTTPX timeout.
@@ -344,7 +452,9 @@ async def _render_in_job(owner, url, *, challenge, profile):
             error_code=code, error=redact_secrets(str(exc))[:350], transient=transient,
             quality="failed", meta={"proxy_used": bool(broker and broker.via_proxy),
                                     "browser_network": broker.evidence() if broker is not None else None,
-                                    "browser_process": owner._driver.evidence() if owner._driver is not None else None}))
+                                    "browser_process": owner._driver.evidence() if owner._driver is not None else None,
+                                    "browser_lost": lost,
+                                    "browser_relaunches": getattr(owner, "relaunches", 0)}), lost=lost)
     finally:
         if page is not None:
             await _close_render_resources(owner, broker, page)
@@ -352,6 +462,20 @@ async def _render_in_job(owner, url, *, challenge, profile):
 
 def _driver_failure(owner):
     return owner._driver.transport.failure if owner._driver is not None else None
+
+
+def _browser_lost(owner, raised, broker) -> bool:
+    """The render failed because the browser went, not because of the page:
+    its driver tree ended (a limit, a crash), Chromium disconnected, or
+    Playwright says the target closed or crashed while the broker had not
+    closed the page itself (its request limit)."""
+    if _driver_failure(owner) is not None:
+        return True
+    browser = getattr(owner, "browser", None)
+    if browser is not None and not _connected(browser):
+        return True
+    return ((broker is None or broker.failure is None) and type(raised).__module__.startswith("playwright")
+            and bool(_LOST.search(str(raised))))
 
 
 async def _close_render_resources(owner, broker, page):

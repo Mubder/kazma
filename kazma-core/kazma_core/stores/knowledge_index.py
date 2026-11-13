@@ -357,6 +357,23 @@ class KnowledgeIndex:
             )
         return n
 
+    def page_gone(self, library_id: str, source_url: str, http_status: int | None) -> dict[str, Any]:
+        """A crawl found a page missing: :meth:`KnowledgeStore.page_gone`
+        records it or takes it out of the library in one transaction; a page
+        taken out loses its meaning vectors here. A vector this cannot drop
+        is a WARNING; the repair sweep removes vectors whose chunk is gone."""
+        result = self._store.page_gone(library_id, source_url, http_status)
+        retired = result["retired_ids"]
+        if retired:
+            vs = self._vector_store_for(library_id)
+            if vs.available:
+                try:
+                    vs.delete_many(retired)
+                except Exception as exc:
+                    logger.warning("[KnowledgeIndex] the vectors of removed page %s stay until the repair "
+                                   "sweep: %s", source_url[:120], exc)
+        return result
+
     def index(
         self,
         library_id: str,

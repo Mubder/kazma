@@ -35,6 +35,12 @@ class _Lease:
             if self.token in self.pool._active:
                 self.pool._quarantined.add(self.token)
 
+    def clear_quarantine(self):
+        """The cleanup that quarantined this lease was retried and verified:
+        the lease is held by its owner again, no longer reported stuck."""
+        with self.pool._lock:
+            self.pool._quarantined.discard(self.token)
+
     async def __aenter__(self):
         return self
 

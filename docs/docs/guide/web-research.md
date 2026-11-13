@@ -356,6 +356,12 @@ the browser even while its Python event loop is stalled. Parent-process death
 also ends the browser tree. Graceful cleanup gets five seconds before forced
 termination; capacity releases only after OS verification that descendants ended.
 Readiness reports quarantined capacity when cleanup cannot be verified.
+A job that renders for longer than one browser may live -- a Knowledge crawl of
+hours -- gets a fresh browser between pages, within its own capacity slot: when
+the old one ended or crashed, when less than three minutes of its lifetime or
+128MiB of its protocol budget is left, and after 150 pages. The old tree is ended
+and verified first; a page under which the browser died is rendered once more in
+the fresh one.
 
 Linux requires writable delegated memory, pids, CPU and group-kill controls.
 `KAZMA_BROWSER_CGROUP_ROOT` may select that delegation; otherwise Kazma tries

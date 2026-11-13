@@ -76,6 +76,8 @@ _LEASE_S = 300.0
 _FENCE = 1 << 20
 #: Knowledge Library crawl kinds (one at a time per library).
 _KB_KINDS = frozenset({'site', 'refresh'})
+#: The most pages one crawl's frontier holds.
+FRONTIER_MAX = 1000
 current_crawl = ContextVar('current_acquisition_crawl', default=None)
 _TERMINAL = {'completed', 'partial', 'failed', 'interrupted'}
 _ACTIVE, _ACTIVE_LOCK = set(), threading.Lock()
@@ -310,11 +312,18 @@ def _valid_row(row):
             return False
     if any(key in row and type(row[key]) is not bool for key in ('metadata_limited', 'sitemap_limited', 'page_capped', 'auto_resumed')):
         return False
-    if 'excluded' in row and (type(row['excluded']) is not int or row['excluded'] < 0):
+    if any(key in row and (type(row[key]) is not int or row[key] < 0)
+           for key in ('excluded', 'removed', 'query_variants_skipped')):
+        return False
+    if 'refusal' in row and not (isinstance(row['refusal'], dict) and isinstance(row['refusal'].get('reason'), str)
+                                 and len(row['refusal']['reason']) <= 40
+                                 and type(row['refusal'].get('pages')) is int):
+        return False
+    if 'auto_resumes' in row and not _valid_auto_resumes(row['auto_resumes']):
         return False
     if 'failure' in row and (not isinstance(row['failure'], str) or len(row['failure']) > _FAILURE_MAX):
         return False
-    if 'notes' in row and (not isinstance(row['notes'], list) or len(row['notes']) > 8
+    if 'notes' in row and (not isinstance(row['notes'], list) or len(row['notes']) > 16
                            or any(not isinstance(note, str) for note in row['notes'])):
         return False
     if not all(isinstance(page, dict) and isinstance(page.get('url'), str) and len(page['url']) <= 8192
@@ -331,6 +340,12 @@ def _valid_row(row):
         if not valid(row):
             return False
     return True
+
+
+def _valid_auto_resumes(entries):
+    return isinstance(entries, list) and len(entries) <= AUTO_RESUMES_PER_DAY and all(
+        isinstance(entry, dict) and isinstance(entry.get('at'), (int, float))
+        and type(entry.get('settled')) is int for entry in entries)
 
 
 def _valid_discovery(state):
@@ -561,6 +576,8 @@ def start(library, seed, policy, *, job_id=None, resume=False, kind=None):
             jobs[job_id] = row
         elif (row.get('kind', 'site') in _KB_KINDS):
             row.pop('interrupted_by', None)
+            row.pop('refusal', None)  # the site is asked again (a refusing site stopped it)
+            row.pop('notes', None)  # the resumed crawl's own, written when it ends (crawl_verdict)
             # A Knowledge page's effect is idempotent (one transaction per
             # page, KB-E02): an explicit resume replays the pages a crash
             # left uncertain.
@@ -613,8 +630,8 @@ class _CrawlJob:
 
     def frontier(self, urls):
         urls = list(dict.fromkeys(urls))
-        if len(urls) > 1000 or any(not isinstance(url, str) or len(url) > 8192 for url in urls):
-            raise AcquisitionError(FetchErrorCode.LIMIT, 'Durable crawl frontier exceeds 1000 URLs or its URL budget.')
+        if len(urls) > FRONTIER_MAX or any(not isinstance(url, str) or len(url) > 8192 for url in urls):
+            raise AcquisitionError(FetchErrorCode.LIMIT, f'Durable crawl frontier exceeds {FRONTIER_MAX} URLs or its URL budget.')
         # Bounded at admission (KB-E04): the frontier with a full receipt per
         # page must fit the job's budget, or nothing is fetched.
         if sum(len(url) for url in urls) + len(urls) * _PAGE_BUDGET_BYTES > _MAX_JOB_BYTES - 64 * 1024:
@@ -680,20 +697,33 @@ class _CrawlJob:
                             other['receipt'] = None
         self.update(change)
 
-    def end_page(self, url, *, error='', new=0, skipped=0, unchanged=False, excluded=False, reason=''):
+    def end_page(self, url, *, error='', new=0, skipped=0, unchanged=False, excluded=False, reason='',
+                 removed=False, digest=''):
         """Settle one page: stored, ``excluded`` by a rule (robots, scope,
         login, gone -- never a failure), or failed; ``reason`` is the code
-        the report words (``page_outcome``)."""
+        the report words (``page_outcome``). ``removed``: the site no longer
+        has a page the library held, and its text was taken out of the
+        library (counted apart from ``excluded``). ``digest`` names a stored
+        page's text, so a resumed crawl still stores each text once."""
         def change(row):
             page = next(page for page in row['pages'] if page['url'] == url)
             if page['status'] != 'running':
                 raise AcquisitionError(FetchErrorCode.POLICY, 'Page outcome already settled; duplicate completion refused.')
-            status = 'excluded' if excluded else 'failed' if error else 'completed'
+            status = 'excluded' if excluded or removed else 'failed' if error else 'completed'
             page.update(status=status, error=str(error)[:1000])
+            # A reason is this outcome's own: a page a stopped crawl left
+            # pending ("site_refusing") and a resume stored has none.
+            page.pop('reason', None)
             if reason:
                 page['reason'] = str(reason)[:40]
+            if digest:
+                page['digest'] = str(digest)[:16]
             if unchanged:
                 page['unchanged'] = True
+            if removed:
+                page['removed'] = True
+                row['removed'] = row.get('removed', 0) + 1
+                return
             if excluded:
                 row['excluded'] = row.get('excluded', 0) + 1
                 return
@@ -759,8 +789,10 @@ _REPORT_PAGES = 1000
 def page_outcomes(row):
     """Each page's outcome for the report: the page, what happened, why.
 
-    ``outcome`` is ``ingested`` / ``unchanged`` / ``excluded`` / ``failed`` /
-    ``uncertain`` / ``pending``; ``reason`` is ``page_outcome``'s code.
+    ``outcome`` is ``ingested`` / ``unchanged`` / ``excluded`` / ``removed``
+    / ``failed`` / ``uncertain`` / ``pending``; ``reason`` is
+    ``page_outcome``'s code. ``removed``: the library held the page, the site
+    no longer has it, and its text left the library.
     """
     names = {'completed': 'ingested', 'ambiguous': 'uncertain', 'running': 'pending'}
     out = []
@@ -768,6 +800,8 @@ def page_outcomes(row):
         outcome = names.get(page['status'], page['status'])
         if outcome == 'ingested' and page.get('unchanged'):
             outcome = 'unchanged'
+        if page.get('removed'):
+            outcome = 'removed'
         out.append({'url': page['url'], 'outcome': outcome, 'reason': page.get('reason', ''),
                     'error': str(page.get('error') or '')[:300]})
     return out
@@ -776,8 +810,9 @@ def page_outcomes(row):
 #: The crawl target (2026-10-31): of every page a Knowledge crawl reached,
 #: this share ends stored (ingested or unchanged) or kept out by a rule.
 PAGE_TARGET = 0.99
-#: The outcomes the target counts as handled.
-_HANDLED = ('ingested', 'unchanged', 'excluded')
+#: The outcomes the target counts as handled (a page the site removed and
+#: the library let go of is handled as much as one a rule kept out).
+_HANDLED = ('ingested', 'unchanged', 'excluded', 'removed')
 
 
 def outcome_summary():
@@ -850,6 +885,8 @@ def failure_reason(row):
     if row.get('failure'):
         return str(row['failure'])
     if row.get('status') == 'interrupted':
+        if row.get('interrupted_by') == 'site_refusing':
+            return refusal_text(row)
         return ('Kazma restarted while it ran' if row.get('interrupted_by') == 'process_ended'
                 else 'Stopped before it finished')
     for key, effect in (row.get('effects') or {}).items():
@@ -862,6 +899,32 @@ def failure_reason(row):
     if counts['failed'] or counts['ambiguous']:
         return f"{counts['failed']} failed, {counts['ambiguous']} uncertain"
     return ''
+
+
+#: How each class of refusal reads in the crawl's one-line reason.
+_REFUSAL_WORDS = {'bot_wall': 'a bot check', 'http_error': 'an HTTP refusal',
+                  'server_error': 'a server error', 'network': 'a failed connection'}
+
+
+def refusal_text(row):
+    """Why a crawl a refusing site stopped (``interrupted_by: site_refusing``)."""
+    refusal = row.get('refusal') or {}
+    words = _REFUSAL_WORDS.get(refusal.get('reason'), 'a refusal')
+    return (f"The site refused {refusal.get('pages', 0)} pages in a row ({words}); the crawl stopped. "
+            "Resume continues with the pages not reached.")
+
+
+def stop_refused(job, reason, pages):
+    """Record that the site refused *pages* pages in a row (class *reason*):
+    the pages not reached keep ``pending`` with the reason
+    ``site_refusing``, for Resume. The caller ends the job ``interrupted``
+    with ``interrupted_by='site_refusing'``."""
+    def change(row):
+        row['refusal'] = {'reason': str(reason)[:40], 'pages': int(pages)}
+        for page in row['pages']:
+            if page['status'] == 'pending':
+                page['reason'] = 'site_refusing'
+    job.update(change)
 
 
 def _summary_counts(row):
@@ -911,27 +974,60 @@ def recover():
 #: How recent a crawl a restart cut off may be to resume on its own. Older,
 #: the owner decides (the Knowledge page's Resume).
 AUTO_RESUME_WITHIN_S = 24 * 3600
+#: How many times a crawl resumes on its own within :data:`AUTO_RESUME_WITHIN_S`
+#: (2026-11-13). Once was not enough: a Windows update restarts the machine
+#: twice, and the second restart left the crawl waiting for Resume.
+AUTO_RESUMES_PER_DAY = 3
+
+
+def settled_pages(row):
+    """The pages a crawl has finished with -- stored, kept out, removed or
+    failed: what grows while it makes progress."""
+    return sum(page['status'] in ('completed', 'excluded', 'failed') for page in row.get('pages', ()))
+
+
+def _auto_resumes(row, now):
+    """This crawl's automatic resumes in the last day, oldest first. A row
+    from before the count (``auto_resumed: true``) resumed once, with its
+    progress then unknown."""
+    entries = row.get('auto_resumes')
+    if entries is None:
+        entries = [{'at': float(row.get('updated_at') or 0), 'settled': -1}] if row.get('auto_resumed') else []
+    return [entry for entry in entries if now - float(entry['at']) <= AUTO_RESUME_WITHIN_S]
 
 
 def auto_resume_due(row, now=None):
-    """A Knowledge crawl a restart cut off, recently, not yet resumed on its
-    own: it resumes at the next start, once. A crawl the owner stopped, an
-    older one, a research crawl, or one already resumed once are not."""
+    """A Knowledge crawl a restart cut off, recently: it resumes at the next
+    start on its own, up to :data:`AUTO_RESUMES_PER_DAY` times a day, each
+    time only if it settled more pages since its last automatic resume (a
+    crawl that dies on the same page every time waits for the owner). A
+    crawl the owner stopped, an older one, a research crawl, or one a site
+    refused (``site_refusing``) are not."""
     now = time.time() if now is None else now
-    return (row.get('status') == 'interrupted' and row.get('interrupted_by') == 'process_ended'
-            and row.get('kind', 'site') in _KB_KINDS and not row.get('auto_resumed')
-            and now - float(row.get('updated_at') or 0) <= AUTO_RESUME_WITHIN_S)
+    if not (row.get('status') == 'interrupted' and row.get('interrupted_by') == 'process_ended'
+            and row.get('kind', 'site') in _KB_KINDS
+            and now - float(row.get('updated_at') or 0) <= AUTO_RESUME_WITHIN_S):
+        return False
+    history = _auto_resumes(row, now)
+    if len(history) >= AUTO_RESUMES_PER_DAY:
+        return False
+    return not history or settled_pages(row) > int(history[-1]['settled'])
 
 
 def claim_auto_resume(job_id):
-    """Mark a due crawl as resumed on its own, once (compare-and-set)."""
+    """Count a due crawl's automatic resume, with its progress at that
+    moment (compare-and-set): two starts never resume it twice."""
     def change(row):
-        if row is None or not auto_resume_due(row):
+        now = time.time()
+        if row is None or not auto_resume_due(row, now):
             return False
-        row['auto_resumed'] = True
+        history = _auto_resumes(row, now)
+        history.append({'at': now, 'settled': settled_pages(row)})
+        row['auto_resumes'] = history[-AUTO_RESUMES_PER_DAY:]
+        row.pop('auto_resumed', None)
         # A changed row: if the resume is refused, the monitor reports the
         # crawl interrupted (an older row would read as quiet history).
-        row['updated_at'] = time.time()
+        row['updated_at'] = now
         return True
     return _mutate_job(job_id, change)
 
@@ -990,6 +1086,7 @@ def projection(job_id):
     return {**row['progress'], 'job_id': job_id, 'library_id': row['library_id'], 'url': row['seed'], 'kind': row.get('kind', 'site'),
         'phase': phase, 'fetched': fetched, 'failed': failed + len(ambiguous),
         'excluded': 0 if pipeline else row.get('excluded', 0),
+        'removed': 0 if pipeline else row.get('removed', 0),
         'notes': list(row.get('notes', [])),
         'pages': [] if pipeline else page_outcomes(row),
         'ingested': row['ingested'], 'skipped': row['skipped'], 'discovered': len(pages),
@@ -1009,5 +1106,6 @@ def projection(job_id):
         'message': ('Research resume refused: a required stage is failed or uncertain.' if blocked else
                     'Research interrupted; explicit resume reuses verified stages and skips uncertain sources.')
             if pipeline and status == 'interrupted' else
+            refusal_text(row) if status == 'interrupted' and row.get('interrupted_by') == 'site_refusing' else
             'Crawl interrupted; resume continues pending pages and retries uncertain Knowledge pages.'
             if status == 'interrupted' else row['progress'].get('message', '')}

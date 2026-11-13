@@ -502,6 +502,12 @@ _NOTE_WORDS = {
     'page_cap': ('stopped at the page limit', 'توقف عند حد الصفحات'),
     'link_walk_bounded': ('link walk stopped at its depth or size limit', 'توقف تتبع الروابط عند حد العمق أو الحجم'),
     'sitemap_bounded': ('sitemap read up to its limit', 'قُرئت خريطة الموقع حتى حدها'),
+    'removed': ('pages the site no longer has left the library', 'أُزيلت من المكتبة صفحات لم تعد في الموقع'),
+    'site_refusing': ('the site refused page after page; the crawl stopped, Resume continues it',
+                      'رفض الموقع صفحة تلو الأخرى؛ توقف الزحف ويكمله الاستئناف'),
+    'query_variants_capped': ('addresses differing only after "?" limited per page',
+                              'اقتصرت العناوين المختلفة بعد "?" فقط لكل صفحة'),
+    'duplicates': ('pages with the same text stored once', 'خُزّنت الصفحات ذات النص المطابق مرة واحدة'),
 }
 
 
