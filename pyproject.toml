@@ -137,7 +137,7 @@ observability = [
     "prometheus-client>=0.26.0",
 ]
 web = [
-    "playwright>=1.64.1,<1.65",  # 1.65 rewrote the private client Kazma's bounded driver uses (2026-11-13)
+    "playwright>=1.65.0,<1.66",  # 1.65 rewrote the private client Kazma's bounded driver uses (2026-11-13)
 ]
 # Multi-replica / SaaS shared state (Phase 4.3)
 postgres = [
