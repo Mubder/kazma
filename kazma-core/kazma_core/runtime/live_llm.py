@@ -270,10 +270,9 @@ def resolve_live_client(
         # was fixed the same way, at the call site -- see
         # `tests/test_cron_tenant_context.py` for why the fix does not belong
         # in the vault's fallback.
-        registry = get_model_registry()
         with _turn_tenant(state):
-            registry_client = registry.get_client(pinned)
-            split = getattr(registry, "split_model_ref", None)
+            registry_client = get_model_registry().get_client(pinned)
+            split = getattr(get_model_registry(), "split_model_ref", None)
             if pinned and callable(split):
                 pinned_model = split(pinned)[1] or pinned
     except Exception:
