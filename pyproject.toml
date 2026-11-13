@@ -185,7 +185,7 @@ document-platform = [
     # 2 untested (2026-11-09): its find_tables runs an ONNX layout model that
     # crashed the parser worker (SIGSEGV), and `kazma update` and CI's pip do
     # not read uv.lock, so an unbounded floor installed it.
-    "pymupdf>=1.24.0,<2",
+    "pymupdf>=2.1,<3",
     # Optional PDFium peer in the multi-engine PDF bake-off (safe if unused).
     "pypdfium2>=5.15.2",
 ]
