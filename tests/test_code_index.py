@@ -64,6 +64,58 @@ def test_regex_python_symbols(tmp_path: Path) -> None:
     assert ("baz", "function") in names
 
 
+_PY_SOURCE = (
+    "class Foo:\n"
+    "    def bar(self, x=1):\n"
+    "        def helper():\n"
+    "            return x\n"
+    "        return helper()\n"
+    "\n"
+    "    @property\n"
+    "    def size(self):\n"
+    "        return 2\n"
+    "\n"
+    "def baz():\n"
+    "    return 2\n"
+)
+
+
+def test_tree_sitter_names_a_class_s_function_a_method_as_the_regex_path_does() -> None:
+    """With tree-sitter installed (the ``index`` extra) every Python method
+    was a "function" and its signature "function bar": the index answered
+    differently depending on which extractor the machine had (2026-11-13)."""
+    pytest.importorskip("tree_sitter_python")
+    from kazma_core.code_index.symbols import _regex_symbols, _tree_sitter_symbols
+
+    ts = {(s.name, s.kind, s.signature) for s in _tree_sitter_symbols("python", _PY_SOURCE)}
+    assert ("Foo", "class", "class Foo") in ts
+    assert ("bar", "method", "def bar(self, x=1)") in ts
+    assert ("size", "method", "def size(self)") in ts  # a decorated method
+    assert ("baz", "function", "def baz()") in ts
+    assert ("helper", "function", "def helper()") in ts  # a function inside a method
+    regex = {(s.name, s.kind) for s in _regex_symbols("python", _PY_SOURCE)}
+    for name in ("Foo", "bar", "size", "baz"):
+        assert {k for n, k, _sig in ts if n == name} == {k for n, k in regex if n == name}, name
+
+
+def test_negative_control_the_capture_name_alone_calls_a_method_a_function(monkeypatch) -> None:
+    pytest.importorskip("tree_sitter_python")
+    from kazma_core.code_index import symbols
+
+    monkeypatch.setattr(symbols, "_ts_kind", lambda node, cap: "class" if "class" in cap else "function")
+    kinds = {(s.name, s.kind) for s in symbols._tree_sitter_symbols("python", _PY_SOURCE)}
+    assert ("bar", "function") in kinds and ("bar", "method") not in kinds
+
+
+def test_tree_sitter_indexes_a_javascript_class_s_methods() -> None:
+    pytest.importorskip("tree_sitter_javascript")
+    from kazma_core.code_index.symbols import _tree_sitter_symbols
+
+    source = "class Greeter {\n  hello(name) { return name; }\n}\nfunction main() {}\n"
+    found = {(s.name, s.kind) for s in _tree_sitter_symbols("javascript", source)}
+    assert {("Greeter", "class"), ("hello", "method"), ("main", "function")} <= found
+
+
 def test_search_finds_symbol(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = _workspace(tmp_path, monkeypatch)
     st = ensure_index(root)

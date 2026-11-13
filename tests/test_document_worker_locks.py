@@ -100,7 +100,12 @@ def test_the_engines_hold_no_egress_and_no_salvage_tier():
 def test_negative_control_the_locks_as_they_were():
     old_engines = "pillow==12.3.0 \\\npypdf==6.19.0 \\\nbrotli==1.2.0 \\\nweasyprint==70.0 \\\n"
     old_stage = "filelock==3.32.3 \\\nsetuptools==83.0.0 \\\ntorch==2.14.1+cpu \\\n"
-    assert _below(_locked(old_engines)) == ["brotli 1.2.0 < 1.2.1", "pillow 12.3.0 < 13.0.0",
-                                            "pypdf 6.19.0 < 6.21.4"]
-    assert _below(_locked(old_stage)) == ["filelock 3.32.3 < 4.2.1", "setuptools 83.0.0 < 84.2.1"]
+    # The old locks' packages below today's floors, named without the floor:
+    # a floor raised later (filelock 4.2.10, 2026-11-13) must not fail the
+    # control that shows the old locks were below theirs.
+    def held(found: list[str]) -> list[str]:
+        return [item.split(" < ")[0] for item in found]
+
+    assert held(_below(_locked(old_engines))) == ["brotli 1.2.0", "pillow 12.3.0", "pypdf 6.19.0"]
+    assert held(_below(_locked(old_stage))) == ["filelock 3.32.3", "setuptools 83.0.0"]
     assert "6.1.1" not in _uv_lock()["lxml"], "the old lxml pin is one uv.lock does not hold"

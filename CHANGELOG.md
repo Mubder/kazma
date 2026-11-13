@@ -1,5 +1,33 @@
 # CHANGELOG
 
+## Dependency updates: the minor and patch releases (2026-11-13)
+
+- Dependabot's minor and patch updates are in, applied together with the
+  lock made once: LangGraph 1.2.21, langchain-core 1.8, FastAPI 0.162.6,
+  pydantic 2.14.3, psycopg 3.3.9, transformers 5.23, torch 2.15 for new
+  installs, docling 2.150, arabic-reshaper 3.1, pypdfium2 5.15.2, pytest 9.2,
+  and twenty more. Neo4j's image is 5.26.32; the document broker's Docker CLI
+  is 29.8.
+- The meaning-search model gives bit-identical vectors on the new torch and
+  transformers, so stored memories and Knowledge vectors stay valid.
+- The document worker image follows: arabic-reshaper, markdown and pypdfium2
+  are the versions Kazma itself runs.
+- torch's minimum stays 2.13: raising it would force the OCR model build onto
+  a new torch with no security reason. Playwright stays 1.64: `kazma update`
+  does not yet download the Chromium a new Playwright needs, so a Playwright
+  update would leave the browser tools without a browser.
+- With tree-sitter installed (the code index's extra), the terminal app's
+  editor did not open: it asked Textual for a language named "plaintext",
+  which Textual ignores without tree-sitter and refuses with it. Plain text
+  is no language now, and a file's language is set only when Textual has it.
+- The code index called a Python method a function, with the signature
+  "function bar", when tree-sitter was installed, and "def bar(self)"
+  without it. Both now say "method" and "def bar(self)"; JavaScript class
+  methods are indexed too.
+- Not taken: the major updates (Postgres 18, Python 3.15 images, PyMuPDF 2,
+  GitHub Actions majors), nginx 1.31 (nginx's development branch), and the
+  docs site's group (it moves Mermaid to 12, which the site holds at 11).
+
 ## A stopped app takes back what it registered; CI runs each chunk once (2026-11-13)
 
 - The app put its settings store, agent, chat adapters, gateway and session
