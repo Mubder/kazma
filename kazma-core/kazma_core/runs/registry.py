@@ -115,9 +115,12 @@ async def list_runs(
         if isinstance(result, BaseException):
             if isinstance(result, asyncio.CancelledError):
                 raise result
-            reason = "timed out" if isinstance(result, TimeoutError) else type(result).__name__
-            logger.warning("[runs] %s runs could not be read: %s", kind, result,
-                           exc_info=not isinstance(result, TimeoutError))
+            timed_out = isinstance(result, TimeoutError)
+            reason = "timed out" if timed_out else type(result).__name__
+            # A TimeoutError has no text of its own: the log said "could not
+            # be read: " and nothing more (live 2026-11-13, three kinds at once).
+            said = f"timed out after {ADAPTER_DEADLINE_S:g} s" if timed_out else (str(result) or reason)
+            logger.warning("[runs] %s runs could not be read: %s", kind, said, exc_info=not timed_out)
             errors[kind] = reason
             continue
         runs.extend(result)
