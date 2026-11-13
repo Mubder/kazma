@@ -197,6 +197,159 @@ def test_restore_refuses_a_non_empty_target(repo, payload, tmp_path):
     assert (target / "leftover.txt").is_file(), "must not have touched anything"
 
 
+# ── a restore its own account can remove ──────────────────────────────
+
+_windows_only = pytest.mark.skipif(
+    os.name != "nt", reason="restic rebuilds parents with their recorded Windows rights"
+)
+
+
+def _remove_like_pytest(path):
+    """Remove *path* the way pytest removes its temp folders: an entry it
+    cannot remove is made writable and tried once more, nothing else."""
+    import shutil
+    import sys
+
+    def retry(func, p, _exc):
+        os.chmod(p, stat.S_IWRITE)
+        func(p)
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=retry)
+    else:
+        shutil.rmtree(path, onerror=retry)
+
+
+@pytest.fixture
+def locked_source(tmp_path):
+    """A payload below two folders that deny this account deleting, the way
+    ``C:\\Users`` does: ``parent`` refuses deleting what is in it, ``locked``
+    refuses being deleted. A deny for the account's own SID holds even when
+    the test runs as an administrator, so the case does not depend on where
+    the temp folder is or on the account's rights."""
+    import subprocess
+
+    sid = subprocess.run(
+        ["whoami", "/user", "/fo", "csv", "/nh"], capture_output=True, text=True,
+        encoding="utf-8", errors="replace", check=True, stdin=subprocess.DEVNULL,
+    ).stdout.strip().split(",")[-1].strip('"')
+    parent = tmp_path / "src" / "parent"
+    locked = parent / "locked"
+    data = locked / "data"
+    data.mkdir(parents=True)
+    (data / "kazma.yaml").write_text("mcp: []\n", encoding="utf-8")
+    for folder, right in ((parent, "DC"), (locked, "DE")):
+        subprocess.run(["icacls", str(folder), "/deny", f"*{sid}:({right})"],
+                       capture_output=True, check=True, stdin=subprocess.DEVNULL)
+    yield data
+    for folder in (parent, locked):
+        subprocess.run(["icacls", str(folder), "/reset"], capture_output=True,
+                       check=False, stdin=subprocess.DEVNULL)
+
+
+@_windows_only
+def test_a_restore_can_be_removed_by_the_account_that_made_it(repo, locked_source, tmp_path):
+    """restic rebuilds the source's absolute path under the target and gives
+    each rebuilt parent the REAL folder's rights. ``C:\\Users`` lets an
+    ordinary account read but not delete, so pytest could not remove the
+    restic tests' restores and kept each run's whole temp folder: 29 of
+    them, 7.5 GB, found on 2026-11-13. The rebuilt parents now take the
+    target's rights; the restored files keep theirs."""
+    assert rr.backup(repo, _PW, [str(locked_source)]).ok
+    target = tmp_path / "restored"
+    res = rr.restore(repo, _PW, str(target))
+    assert res.ok, res.error
+    assert next(target.rglob("kazma.yaml")).read_text(encoding="utf-8") == "mcp: []\n"
+    assert res.detail.get("parents_released", 0) >= 3, res.detail
+    assert "parents_kept" not in res.detail, res.detail
+
+    _remove_like_pytest(target)
+    assert not target.exists()
+
+
+@_windows_only
+def test_control_restic_alone_leaves_a_restore_its_account_cannot_remove(
+        repo, locked_source, tmp_path):
+    """Negative control: the same restore made by restic's command alone, as
+    ``restore`` ran it before, cannot be removed by the account that made it."""
+    import subprocess
+
+    assert rr.backup(repo, _PW, [str(locked_source)]).ok
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    rr._run(["restore", "latest", "--target", str(raw)], repo, _PW, action="restore")
+    assert next(raw.rglob("kazma.yaml")).is_file()
+    try:
+        with pytest.raises(PermissionError) as refused:
+            _remove_like_pytest(raw)
+        assert str(refused.value.filename).endswith("locked"), refused.value
+    finally:
+        # The control leaves nothing behind: the owner resets every right.
+        subprocess.run(["icacls", str(raw), "/reset", "/T", "/C", "/Q"],
+                       capture_output=True, check=False, stdin=subprocess.DEVNULL)
+        _remove_like_pytest(raw)
+    assert not raw.exists()
+
+
+def test_rebuilt_parents_are_the_folders_above_each_backed_up_path(tmp_path):
+    """Only the folders restic rebuilt are changed, top down; the backed-up
+    folder keeps the rights its snapshot recorded."""
+    target = tmp_path / "t"
+    for rel in ("C/a/b/data", "C/a/other", "D/x/y"):
+        (target / rel).mkdir(parents=True)
+    got = rr._rebuilt_parents(target, [r"C:\a\b\data", r"C:\a\other", r"D:\x\y",
+                                       r"\\server\share\z", "C:\\"])
+    assert got == [target / "C", target / "D", target / "C" / "a",
+                   target / "D" / "x", target / "C" / "a" / "b"]
+
+
+def _restic_restores_outside_restore(sources: dict[str, str]) -> list[str]:
+    """Every ``restic restore`` built anywhere but ``restic_repo.restore``."""
+    import ast
+
+    found = []
+    for name, src in sources.items():
+        tree = ast.parse(src)
+        allowed: set[int] = set()
+        if name.endswith("restic_repo.py"):
+            for fn in ast.walk(tree):
+                if isinstance(fn, ast.FunctionDef) and fn.name == "restore":
+                    allowed |= {id(n) for n in ast.walk(fn)}
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.List, ast.Tuple)) or id(node) in allowed:
+                continue
+            words = [e.value if isinstance(e, ast.Constant) else None for e in node.elts]
+            restic_command = "restic" in words and "restore" in words
+            # restic_repo's own runner takes the arguments without "restic".
+            run_command = (name.endswith("restic_repo.py") and words[:1] == ["restore"])
+            if restic_command or run_command:
+                found.append(f"{name}:{node.lineno}")
+    return found
+
+
+def test_every_restic_restore_goes_through_restore():
+    """``restic_repo.restore`` is what releases the rebuilt parents, so no
+    product code or script runs ``restic restore`` any other way."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    sources = {}
+    for folder in ("kazma-core", "kazma-ui", "kazma-gateway", "kazma-cli",
+                   "kazma-tui", "kazma-skills", "scripts"):
+        for f in (root / folder).rglob("*.py"):
+            if "tests" not in f.relative_to(root).parts:
+                sources[f.relative_to(root).as_posix()] = f.read_text(encoding="utf-8")
+    assert "kazma-core/kazma_core/backup/restic_repo.py" in sources
+    assert _restic_restores_outside_restore(sources) == []
+
+    planted = {
+        "scripts/x.py": 'subprocess.run(["restic", "restore", "latest", "--target", t])',
+        "kazma-core/kazma_core/backup/restic_repo.py":
+            'def other():\n    _run(["restore", s, "--target", t], r, p, action="restore")\n',
+    }
+    assert len(_restic_restores_outside_restore(planted)) == 2
+
+
 def test_init_is_idempotent(repo):
     again = rr.init_repo(repo, _PW)
     assert again.ok

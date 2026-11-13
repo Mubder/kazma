@@ -5995,6 +5995,21 @@ that file until it was restored. Run it from the dev checkout
 C:/Users/balfa/kazma`). Tests: `tests/test_restic_stop_is_not_a_failure.py`,
 `tests/test_deploy_live.py` (each with the old behaviour as the control).
 
+**D3. A restore can be removed by the account that made it**
+(`restic_repo.restore`, 2026-11-13). restic restores a snapshot under the
+source's absolute path and gives each folder it rebuilt above the backup
+the REAL folder's recorded rights. `C:\Users` lets an ordinary account read
+but not delete, so pytest could not remove the restic tests' restores and
+kept each run's whole temp folder (29 of them, 7.5 GB). After the restore,
+`_release_rebuilt_parents` reads the snapshot's paths and gives each rebuilt
+parent, top down, the rights it inherits from the target (`icacls /reset`,
+never `/T`) and clears its read-only flag; the backed-up folder and its
+contents keep what the snapshot recorded. Every `restic restore` goes
+through `restic_repo.restore`. Tests: `tests/test_restic_repo.py` (parents
+that deny the account's own SID, so the case holds as administrator too;
+restic's command alone as the negative control; a planted second restore
+command fails the gate).
+
 **E. The daily digest reads every source of its window**
 (`observability/daily_digest.py`, 2026-10-03). The live digest said "Turns
 completed: 0" over a day with four turns (three web, one Telegram that paused

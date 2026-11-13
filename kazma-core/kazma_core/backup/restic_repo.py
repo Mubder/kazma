@@ -946,7 +946,105 @@ def restore(repo: str, password: str, target: str, *,
                 "not be set (Windows path reconstruction, data unaffected)",
                 count,
             )
+    if os.name == "nt" and not res.skipped and any(t.iterdir()):
+        _release_rebuilt_parents(t, repo, password, snapshot, res)
     return res
+
+
+def _release_rebuilt_parents(target: Path, repo: str, password: str,
+                             snapshot: str, res: ResticResult) -> None:
+    """Give the folders restic rebuilt above a backup the target's rights.
+
+    restic restores a snapshot under the source's absolute path, so
+    ``C:\\Users\\me\\data`` comes back as ``<target>\\C\\Users\\me\\data``,
+    and every rebuilt parent takes the rights recorded for the REAL folder.
+    ``C:\\Users`` lets an ordinary account read but not delete, and carries
+    the read-only flag, so a restore made by that account could not be
+    removed by it. pytest could not clean up after the restic tests and kept
+    each run's whole temp folder (29 of them, 7.5 GB, on 2026-11-13).
+
+    Only the rebuilt parents change: their recorded rights describe folders
+    outside the backup. Each one, top down, takes the rights it inherits
+    from the target (``icacls /reset``, never ``/T``) and loses the
+    read-only flag. The backed-up folder and everything in it keep what the
+    snapshot recorded.
+    """
+    import json as _json
+
+    listed = _run(["snapshots", snapshot, "--json"], repo, password,
+                  action="snapshots", timeout=300)
+    paths: list[str] = []
+    if listed.ok:
+        try:
+            for snap in _json.loads(listed.stdout or "[]"):
+                if isinstance(snap, dict):
+                    paths += [str(p) for p in snap.get("paths") or []]
+        except ValueError:
+            paths = []
+    if not paths:
+        logger.warning(
+            "[restic] could not read which paths snapshot %s holds; the "
+            "folders rebuilt above them in %s keep their original rights "
+            "and may need an administrator to remove", snapshot, target)
+        return
+    parents = _rebuilt_parents(target, paths)
+    kept = [d for d in parents if not _take_target_rights(d)]
+    res.detail["parents_released"] = len(parents) - len(kept)
+    if kept:
+        res.detail["parents_kept"] = [str(d) for d in kept]
+        logger.warning(
+            "[restic] %d folder(s) rebuilt above the restored backup keep "
+            "their original rights and may need an administrator to remove: "
+            "%s", len(kept), kept[0])
+
+
+def _rebuilt_parents(target: Path, paths: list[str]) -> list[Path]:
+    """The folders restic rebuilt under *target* above each snapshot path, top down.
+
+    ``C:\\a\\b\\data`` is restored as ``<target>\\C\\a\\b\\data``: the rebuilt
+    parents are ``C``, ``C\\a`` and ``C\\a\\b``. A path that is not on a
+    drive letter, or a drive root, has none.
+    """
+    from pathlib import PureWindowsPath
+
+    depth_of: dict[Path, int] = {}
+    for raw in paths:
+        p = PureWindowsPath(raw)
+        if len(p.drive) != 2 or p.drive[1] != ":" or len(p.parts) < 2:
+            continue
+        here = target / p.drive[0]
+        depth_of[here] = 0
+        for depth, part in enumerate(p.parts[1:-1], start=1):
+            here = here / part
+            depth_of[here] = depth
+    ordered = sorted(depth_of, key=lambda d: (depth_of[d], str(d)))
+    return [d for d in ordered if d.is_dir()]
+
+
+def _take_target_rights(folder: Path) -> bool:
+    """Reset *folder* to the rights it inherits and clear its read-only flag.
+
+    The account that ran the restore owns what restic rebuilt (restic cannot
+    give an ordinary account's folder to another owner), and an owner may
+    always rewrite a folder's rights: no administrator is needed.
+    """
+    import stat
+
+    try:
+        done = subprocess.run(
+            ["icacls", str(folder), "/reset", "/Q"], capture_output=True,
+            text=True, encoding="utf-8", errors="replace", timeout=60,
+            check=False, stdin=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if done.returncode != 0:
+        return False
+    try:
+        os.chmod(folder, stat.S_IREAD | stat.S_IWRITE)
+    except OSError:
+        return False
+    return True
 
 
 def _only_directory_timestamp_errors(text: str) -> tuple[bool, int]:
