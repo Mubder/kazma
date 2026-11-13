@@ -169,6 +169,7 @@ curl -s https://your.domain/api/auth/status
 | `KAZMA_PG_POOL_MIN` | `1` | Optional | Minimum connections in the psycopg pool. |
 | `KAZMA_PG_POOL_MAX` | `10` | Optional | Maximum connections in the psycopg pool. |
 | `KAZMA_PG_POOL_TIMEOUT` | `5` | Optional | Seconds a caller waits for a free pool connection. A hang here used to freeze `/health/ready` on the event loop. |
+| `KAZMA_PG_UPGRADING` | `0` | Never set it by hand | Compose deployments only (`docker-compose.postgres.yml`, `docker-compose.ha.yml`): `1` lets the Postgres 18 container start empty while a Postgres 16 database is still in the old volume. `scripts/pg_compose_upgrade.py` sets it for its own start, then restores the 16 data into it; set by hand, Kazma could start on an empty database. |
 | `KAZMA_REPLICA_AFFINITY` | on | Multi-replica | `0` stops setting the `kazma-replica` cookie (HttpOnly). Chat SSE and some swarm state live in one process, so behind a load balancer keep it on and make the balancer sticky on that cookie (or on a source-IP hash). |
 | `KAZMA_REPLICA_ID` | hostname | Multi-replica | The value this node writes into the `kazma-replica` cookie. |
 | `KAZMA_SHARED_BREAKERS` | on in production / multi-user | Multi-replica | Keep swarm circuit-breaker state in the settings store (`swarm.breaker.<worker>`) so every replica sees a breaker another one opened. `1` / `0` force it either way. |

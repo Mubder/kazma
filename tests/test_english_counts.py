@@ -56,6 +56,9 @@ _LOGGING = frozenset({"debug", "info", "warning", "error", "exception", "critica
 
 #: What the rule reads as a count but is not, by file and text, with why.
 DECLARED = {
+    "kazma-cli/kazma_cli/postgres_upgrade.py: {up.port} answers": "a port, then a verb",
+    "kazma-cli/kazma_cli/postgres_upgrade.py: {up.new_major} stays": "a Postgres major version, then a verb",
+    "kazma-cli/kazma_cli/update.py: {title} now runs": "a part's name, then a verb",
     "kazma-cli/kazma_cli/doctor.py: {pname} in Settings": "a provider's name before a page's",
     "kazma-cli/kazma_cli/doctor.py: {_cat_owner} offers": "a provider's name, then a verb",
     "kazma-cli/kazma_cli/doctor.py: {_host(base)} serves": "a host, then a verb",

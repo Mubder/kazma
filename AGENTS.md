@@ -4419,7 +4419,15 @@ fake Windows machine whose services keep their own ports and states: the
 order, each failure, a killed switch, the repair rule, each platform's
 switch; the run without the undo as the negative control),
 `tests/test_postgres_upgrade_real.py` (real 16 and 18 servers, opt-in
-`KAZMA_TEST_PG_UPGRADE_BIN`; a partial restore as the control).
+`KAZMA_TEST_PG_UPGRADE_BIN`; a partial restore as the control). Drilled end to
+end on the Windows drill VM (`scripts/postgres_upgrade_drill.py`: 16 set up by
+the code before, seeded, upgraded, 12 checks; passed 2026-11-13,
+`docs/audits/evidence/postgres_upgrade_drill_2026_11_13.json`). Its first runs
+found three faults, each fixed with a test: the Postgres setup's runner lacked
+the winget package-list repair (`setup._do_setup_step`), uv was looked for on
+PATH only (`kazma_core/uv_cli.py`, `find_uv`: also `~/.local/bin`, where setup
+puts it; a uv environment has no pip), and the finish waited for a Kazma that
+was not running.
 **Compose deployments** (`kazma_core/postgres_compose_upgrade.py`,
 `scripts/pg_compose_upgrade.py`): `docker-compose.postgres.yml` and
 `docker-compose.ha.yml` run 18 on a volume of its own (`kazma_pgdata18`,

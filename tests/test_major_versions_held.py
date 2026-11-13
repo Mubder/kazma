@@ -5,7 +5,8 @@ read uv.lock, and CI's pip installs do not either. So a floor with no ceiling
 installs a major version nobody tested the day it is published:
 
 * pypdf 7 reached the drill VM's update while the lock said 6.21.4
-  (2026-11-07; held below 7 since).
+  (2026-11-07; held below 7 until 7.1 was tested on 2026-11-13: 1,227
+  document and PDF tests on the host and 65 in the worker image).
 * PyMuPDF 2 reached CI's first full run in four weeks (run 42612068022,
   2026-11-09): its ``find_tables`` runs an ONNX layout model, the parser
   worker crashed in it (SIGSEGV unsandboxed, killed or timed out in the
@@ -32,7 +33,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 #: package -> (first major version not yet tested, why it is held)
 HELD: dict[str, tuple[str, str]] = {
-    "pypdf": ("7", "untested; `kazma update` installed it on the drill VM (2026-11-07)"),
+    "pypdf": ("8", "untested; 7 was held from 2026-11-07 until 7.1 was tested (2026-11-13)"),
     "pymupdf": ("2", "its find_tables runs an ONNX layout model that crashed the parser worker (2026-11-09)"),
 }
 

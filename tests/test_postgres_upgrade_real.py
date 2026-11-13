@@ -70,7 +70,7 @@ def servers():
                             "-p", f"127.0.0.1:{port}:5432", image], check=True, capture_output=True, timeout=300)
             names.append(name)
             urls[major] = f"postgresql://kazma_app:{password}@127.0.0.1:{port}/kazma"
-        import psycopg
+        psycopg = pytest.importorskip("psycopg")
 
         for url in urls.values():
             deadline = time.monotonic() + 120
@@ -93,7 +93,7 @@ def servers():
 def _empty(url: str):
     """Drop and make Kazma's database again on the destination, as the
     upgrade's ``empty_database_steps`` do (here as the container's superuser)."""
-    import psycopg
+    psycopg = pytest.importorskip("psycopg")
 
     def empty() -> bool:
         with psycopg.connect(url.rsplit("/", 1)[0] + "/postgres", autocommit=True) as conn:
@@ -108,7 +108,7 @@ def test_a_real_16_database_is_copied_whole_into_18(servers):
     assert pgu.server_major(servers[16]) == 16 and pgu.server_major(servers[18]) == 18
     assert pgu.copy_database(servers[16], servers[18], bin_dir=BIN, say=said.append), "\n".join(said)
     assert any("251 rows" in line or "rows) and" in line for line in said), said
-    import psycopg
+    psycopg = pytest.importorskip("psycopg")
 
     with psycopg.connect(servers[18]) as conn:
         assert conn.execute("SELECT title FROM kazma_chat_sessions WHERE id = 251").fetchone()[0] == "محادثة عربية"

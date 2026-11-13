@@ -1,0 +1,121 @@
+{
+  "started": "2026-11-13 22:22:43",
+  "from": "66a1bbf0414d38b258cf76a3531dfdf01fe5cae3",
+  "setup16": {
+    "exit": 0,
+    "tail": "\n      C:\\Program Files\\PostgreSQL\\16\\bin\\psql.exe -h 127.0.0.1 -U postgres -w -v ON_ERROR_STOP=1 -X -q -p 5432 -d postgres < (password, settings)\n   9. Restart it to apply the settings\n      restart\n  10. Wait for it to answer\n      wait\n  11. Create the kazma_app role (not a superuser)\n      C:\\Program Files\\PostgreSQL\\16\\bin\\psql.exe -h 127.0.0.1 -U postgres -w -v ON_ERROR_STOP=1 -X -q -p 5432 -d kazma < kazma_app_role.sql\n  12. Give kazma_app its password\n      C:\\Program Files\\PostgreSQL\\16\\bin\\psql.exe -h 127.0.0.1 -U postgres -w -v ON_ERROR_STOP=1 -X -q -p 5432 -d kazma < (password)\n  then: write KAZMA_DATABASE_URL into .env (not shown), and sign in once as Kazma will\n-> Install Kazma's Postgres driver (the kazma[postgres] extra)\n-> Create the WAL archive folder\n-> icacls C:\\ProgramData\\Kazma\\pg_wal_archive /inheritance:r /grant *S-1-5-20:(OI)(CI)M /grant KazmaDrill_1:(OI)(CI)M /grant *S-1-5-32-544:(OI)(CI)F\n-> Install PostgreSQL 16 (a Windows service)\n-> Start it at boot\n-> Restart it when it fails\n-> Wait for it to answer\n-> Set the superuser's password, this machine only, Kazma's database\n-> Restart it to apply the settings\n-> Wait for it to answer\n-> Create the kazma_app role (not a superuser)\n-> Give kazma_app its password\n-> KAZMA_DATABASE_URL written to C:\\kazma-drill\\.env (this account only)\n-> Kazma signs in as kazma_app (not a superuser).\nDone. Reload Kazma when it is idle to use the new database:\n  python scripts/service/kazma_guard.py --reload --when-idle\n\n"
+  },
+  "seed": "major 160016",
+  "before": {
+    "record": {
+      "version": 1,
+      "postgres": {
+        "os": "windows",
+        "manager": "winget",
+        "service": "postgresql-x64-16",
+        "port": 5432,
+        "bin_dir": "C:\\Program Files\\PostgreSQL\\16\\bin",
+        "major": 16,
+        "wal_archive_dir": "C:\\ProgramData\\Kazma\\pg_wal_archive",
+        "installed_at": 1794598431.8335302
+      }
+    },
+    "server_version_num": "160016",
+    "rows": {
+      "kazma_settings": 1,
+      "kazma_chat_sessions": 5001,
+      "document_audit_events": 700
+    },
+    "arabic": "محادثة عربية",
+    "next_id": 5002,
+    "trigger": "refused the update",
+    "archived_before_switch": 0,
+    "archived_after_switch": 1,
+    "archive_failed": 0,
+    "postgresql-x64-16": {
+      "running": true,
+      "auto": true
+    },
+    "postgresql-x64-18": {
+      "running": false,
+      "auto": false
+    },
+    "base_backups": []
+  },
+  "to": "c0520e7fdb216146940f9767b0bd34c6b15897f6",
+  "upgrade": {
+    "exit": 0,
+    "log": "PostgreSQL 16 -> 18 (windows), Kazma's database on port 5432:\n   1. Create the WAL archive folder\n      cmd /c if not exist C:\\ProgramData\\Kazma\\pg_wal_archive-18 mkdir C:\\ProgramData\\Kazma\\pg_wal_archive-18\n   2.   (continued)\n      icacls C:\\ProgramData\\Kazma\\pg_wal_archive-18 /inheritance:r /grant *S-1-5-20:(OI)(CI)M /grant KazmaDrill_1:(OI)(CI)M /grant *S-1-5-32-544:(OI)(CI)F\n   3. Install PostgreSQL 18 (a Windows service)\n      winget install --id PostgreSQL.PostgreSQL.18 --exact --silent --override \"... --servicename postgresql-x64-18 --serverport 55432 --superpassword ****\"\n   4. Start it at boot\n      sc config postgresql-x64-18 start= auto\n   5. Restart it when it fails\n      sc failure postgresql-x64-18 reset= 86400 actions= restart/5000/restart/30000/restart/60000\n   6. Wait for it to answer\n      wait\n   7. Set the superuser's password, this machine only, Kazma's database\n      C:\\Program Files\\PostgreSQL\\18\\bin\\psql.exe -h 127.0.0.1 -U postgres -w -v ON_ERROR_STOP=1 -X -q -p 55432 -d postgres < (password, settings)\n   8. Restart it to apply the settings\n      restart\n   9. Wait for it to answer\n      wait\n  10. Create the kazma_app role (not a superuser)\n      C:\\Program Files\\PostgreSQL\\18\\bin\\psql.exe -h 127.0.0.1 -U postgres -w -v ON_ERROR_STOP=1 -X -q -p 55432 -d kazma < kazma_app_role.sql\n  11. Give kazma_app its password\n      C:\\Program Files\\PostgreSQL\\18\\bin\\psql.exe -h 127.0.0.1 -U postgres -w -v ON_ERROR_STOP=1 -X -q -p 55432 -d kazma < (password)\n  then: once no chat turn runs, stop Kazma through its guard and hold it\n  then: copy Kazma's database from PostgreSQL 16 into 18 (port 55432) and compare every table and sequence\n  then: PostgreSQL 18 on port 5432\n  then: Stop PostgreSQL 18 (it moves to port 5432)\n  then: Stop PostgreSQL 16 (Kazma's database until now)\n  then: PostgreSQL 16 no longer starts at boot (kept: the way back)\n  then: Start PostgreSQL 18 on port 5432\n  then: start Kazma and see it signed in to PostgreSQL 18. .env does not change.\n  PostgreSQL 16 is kept, stopped, with its data: the way back.\n-> Create the WAL archive folder\n-> icacls C:\\ProgramData\\Kazma\\pg_wal_archive-18 /inheritance:r /grant *S-1-5-20:(OI)(CI)M /grant KazmaDrill_1:(OI)(CI)M /grant *S-1-5-32-544:(OI)(CI)F\n-> Install PostgreSQL 18 (a Windows service)\n-> Start it at boot\n-> Restart it when it fails\n-> Wait for it to answer\n-> Set the superuser's password, this machine only, Kazma's database\n-> Restart it to apply the settings\n-> Wait for it to answer\n-> Create the kazma_app role (not a superuser)\n-> Give kazma_app its password\n-> Dumping Kazma's database from PostgreSQL on port 5432\n-> Restoring it into PostgreSQL on port 55432 (28 KiB)\n-> Every one of 3 tables (5702 rows) and 2 sequences is the same on the new server.\n-> PostgreSQL 18 on port 5432\n-> Stop PostgreSQL 18 (it moves to port 5432)\n-> Stop PostgreSQL 16 (Kazma's database until now)\n-> PostgreSQL 16 no longer starts at boot (kept: the way back)\n-> Start PostgreSQL 18 on port 5432\n-> The first base backup of PostgreSQL 18 is taken (1794598587): point-in-time restore starts here.\nDone. Kazma runs on PostgreSQL 18 when it starts. PostgreSQL 16 is stopped and kept (postgresql-x64-16, not started at boot), with its data and backups: remove it with its own uninstaller once you are sure.\n\n"
+  },
+  "after": {
+    "record": {
+      "version": 1,
+      "postgres": {
+        "os": "windows",
+        "manager": "winget",
+        "service": "postgresql-x64-18",
+        "port": 5432,
+        "bin_dir": "C:\\Program Files\\PostgreSQL\\18\\bin",
+        "major": 18,
+        "wal_archive_dir": "C:\\ProgramData\\Kazma\\pg_wal_archive-18",
+        "installed_at": 1794598584.3210747,
+        "base_backup_dir": "C:\\kazma-drill\\kazma-data\\backups\\pg\\base-18",
+        "offsite_tag": "pg18-",
+        "previous": {
+          "os": "windows",
+          "manager": "winget",
+          "service": "postgresql-x64-16",
+          "port": 5432,
+          "bin_dir": "C:\\Program Files\\PostgreSQL\\16\\bin",
+          "major": 16,
+          "wal_archive_dir": "C:\\ProgramData\\Kazma\\pg_wal_archive",
+          "installed_at": 1794598431.8335302,
+          "retired_at": 1794598584.3210747
+        }
+      }
+    },
+    "server_version_num": "180007",
+    "rows": {
+      "kazma_settings": 1,
+      "kazma_chat_sessions": 5001,
+      "document_audit_events": 700
+    },
+    "arabic": "محادثة عربية",
+    "next_id": 5003,
+    "trigger": "refused the update",
+    "archived_before_switch": 4,
+    "archived_after_switch": 5,
+    "archive_failed": 0,
+    "postgresql-x64-16": {
+      "running": false,
+      "auto": false
+    },
+    "postgresql-x64-18": {
+      "running": true,
+      "auto": true
+    },
+    "base_backups": [
+      "1794598587"
+    ]
+  },
+  "again": {
+    "exit": 0,
+    "tail": "Nothing to upgrade: the database already runs PostgreSQL 18.\n\n"
+  },
+  "doctor": "e 360, in get_postgres_pool\n    _ensure_core_schema(_pool)\n  File \"C:\\kazma-drill\\kazma-core\\kazma_core\\db\\postgres_pool.py\", line 480, in _ensure_core_schema\n    ensure_schema(cur, [\n  File \"C:\\kazma-drill\\kazma-core\\kazma_core\\db\\pg_schema.py\", line 111, in ensure_schema\n    cur.execute(statement)\n  File \"C:\\kazma-drill\\.venv\\Lib\\site-packages\\psycopg\\cursor.py\", line 117, in execute\n    raise ex.with_traceback(None)\npsycopg.errors.UndefinedColumn: column \"updated_at\" does not exist\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File \"C:\\kazma-drill\\kazma-core\\kazma_core\\config_store.py\", line 3054, in get_config_store\n    _config_store = ConfigStore()\n                    ^^^^^^^^^^^^^\n  File \"C:\\kazma-drill\\kazma-core\\kazma_core\\config_store.py\", line 1152, in __init__\n    self._init_db()\n  File \"C:\\kazma-drill\\kazma-core\\kazma_core\\config_store.py\", line 1264, in _init_db\n    self._pg_pool()\n  File \"C:\\kazma-drill\\kazma-core\\kazma_core\\config_store.py\", line 1177, in _pg_pool\n    pool = get_postgres_pool()\n           ^^^^^^^^^^^^^^^^^^^\n  File \"C:\\kazma-drill\\kazma-core\\kazma_core\\db\\postgres_pool.py\", line 391, in get_postgres_pool\n    raise PostgresUnreachable(attempts, reason) from last_exc\nkazma_core.db.postgres_pool.PostgresUnreachable: Postgres pool unreachable after 5 attempts\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File \"<frozen runpy>\", line 198, in _run_module_as_main\n  File \"<frozen runpy>\", line 88, in _run_code\n  File \"C:\\kazma-drill\\kazma-cli\\kazma_cli\\__main__.py\", line 13, in <module>\n    main()\n  File \"C:\\kazma-drill\\kazma-cli\\kazma_cli\\main.py\", line 111, in main\n    sys.exit(_run_doctor(sys.argv[2:]))\n             ^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\kazma-drill\\kazma-cli\\kazma_cli\\doctor.py\", line 380, in run\n    rows = collect()\n           ^^^^^^^^^\n  File \"C:\\kazma-drill\\kazma-cli\\kazma_cli\\doctor.py\", line 125, in collect\n    return _collect()\n           ^^^^^^^^^^\n  File \"C:\\kazma-drill\\kazma-cli\\kazma_cli\\doctor.py\", line 138, in _collect\n    cs = get_config_store()\n         ^^^^^^^^^^^^^^^^^^\n  File \"C:\\kazma-drill\\kazma-core\\kazma_core\\config_store.py\", line 3081, in get_config_store\n    raise error from last_exc\nkazma_core.config_availability.ConfigStoreUnavailableError: Kazma could not open its settings database (postgres); it may still be starting. Check PostgreSQL connectivity and credentials.\n\n",
+  "checks": {
+    "upgrade exit 0": true,
+    "server is 18": true,
+    "record names 18, 16 under previous": true,
+    "rows the same": true,
+    "arabic the same": true,
+    "sequence the same": true,
+    "trigger kept": true,
+    "18 running at boot": true,
+    "16 stopped, not at boot": true,
+    "WAL archived on 18": true,
+    "first base backup taken": true,
+    "a second upgrade does nothing": true
+  },
+  "verdict": "pass"
+}

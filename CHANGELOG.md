@@ -23,6 +23,13 @@
   the database container refuses to start empty, so Kazma never comes up on
   an empty database after a `git pull`. Drilled on real containers,
   including a failed restore that puts 16 back exactly as it was.
+- Drilled end to end on a clean Windows machine: 16 set up by the code
+  before, then upgraded; every row, sequence and trigger arrived, 18 runs on
+  the old port and starts at boot, 16 is stopped and kept. The drill's first
+  runs found three faults, now fixed: the Postgres setup did not repair a
+  fresh Windows's winget package list, it looked for uv on PATH only (Kazma's
+  environment has no pip, so it failed), and the move waited for a Kazma that
+  was not running.
 
 ## Python 3.14 images, pypdf 7, Mermaid 12 (2026-11-13)
 
@@ -38,6 +45,8 @@
   Mermaid. It found that the Commitment Layer page's diagram had never drawn
   (a quote inside a label), which is now fixed. A broken release-notes link is
   fixed too.
+- OpenTelemetry 1.45.2. psycopg's minimum is 3.3.9, the version the lock
+  already held and the tests ran on.
 - Container tests now use the developer's own Docker setup (they failed on a
   machine whose only engine is Kazma's), and a test that had gone stale since
   DOCX files started embedding the house font tests the profile's font bundle

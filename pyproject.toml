@@ -141,7 +141,7 @@ web = [
 ]
 # Multi-replica / SaaS shared state (Phase 4.3)
 postgres = [
-    "psycopg[binary,pool]>=3.3.7",
+    "psycopg[binary,pool]>=3.3.9",
     "langgraph-checkpoint-postgres>=3.1.3",
 ]
 # Compatibility alias. These libraries are already base dependencies.
@@ -224,7 +224,7 @@ neo4j = [
 # Database drivers beyond SQLite (database_client skill)
 database = [
     "sqlglot==30.30.0",
-    "psycopg[binary]>=3.3.7",
+    "psycopg[binary]>=3.3.9",
     "pymysql>=1.2.4",
     "pymongo>=4.18.3",
     "dnspython>=2.9.2",  # security floor (see the base list): pymongo brings it

@@ -11,7 +11,7 @@ description: Every KAZMA_* variable the code reads, where, and its default. Gene
 > `python scripts/generate_env_reference.py` after adding or removing a variable;
 > `tests/test_env_reference.py` fails while this page is stale.
 
-**292** variables are read by the product code; **292** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
+**293** variables are read by the product code; **293** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
 the undocumented count is on a ratchet that may only go down.
 
 | Variable | Default in code | Read in | Described |
@@ -215,6 +215,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_PG_POOL_RETRY_DELAY` | `"1.0"` | `kazma_core.db.postgres_pool` | yes |
 | `KAZMA_PG_POOL_TIMEOUT` | `"5"` | `kazma_core.db.postgres_pool` | yes |
 | `KAZMA_PG_RESTORE_REHEARSAL` | (none) | `kazma_core.backup.restore_rehearsal` | yes |
+| `KAZMA_PG_UPGRADING` | (none) | `kazma_core.postgres_compose_upgrade` | yes |
 | `KAZMA_PLAN_MODE` | (none) | `kazma_core.agent.plan_mode` | yes |
 | `KAZMA_PORT` | (none) | `kazma_cli.port_setup`, `kazma_core.server_port` | yes |
 | `KAZMA_PROCESS_PRIORITY` | (none) | `kazma_core.process_priority` | yes |
