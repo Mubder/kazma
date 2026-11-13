@@ -170,6 +170,8 @@ KEY_RULES: tuple[KeyRule, ...] = (
     KeyRule("memory.v2.last_reconsolidation", RUNTIME, "when reconsolidation last ran"),
     KeyRule("memory.v2.mirror_full_verify", RUNTIME, "when the memory mirror was last compared in full"),
     KeyRule("memory.v2.mirror_verify_result", RUNTIME, "what the memory mirror's last full comparison found"),
+    KeyRule("memory.v2.graph_sync", RUNTIME, "what the Neo4j graph copy's last full comparison found, "
+            "and whether one is due; an older one would skip a comparison a restore needs"),
     KeyRule("memory.v2.rehydrate", RUNTIME, "the recovery sweep's progress"),
     KeyRule("memory.v2.turn_reconcile", RUNTIME, "the turn reconcile's last report (its cursor is in memory_state.db)"),
     KeyRule("observability.daily_digest.last_sent", RUNTIME, "when the daily digest was last sent"),

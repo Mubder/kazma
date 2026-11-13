@@ -1564,8 +1564,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Click Test Neo4j — must say Connected",
     },
     "settings.memory_neo4j_step4": {
-        "ar": "انقر مزامنة المعتقدات ثم افتح رسم اللوحة (نفس اللوحة، قد يظهر المصدر neo4j)",
-        "en": "Click Sync beliefs → Neo4j, then open Dashboard graph (same canvas, source may say neo4j)",
+        "ar": "يُحدِّث Kazma النسخة في Neo4j بنفسه كل 15 دقيقة؛ زر مزامنة المعتقدات يفعل ذلك الآن",
+        "en": "Kazma brings the copy in Neo4j up to date by itself every 15 minutes; Sync beliefs → Neo4j does it now",
     },
     "settings.memory_neo4j_title": {
         "ar": "رسم المعتقدات — Neo4j (اختياري)",
@@ -6043,6 +6043,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.agentjs.st_syncing_neo4j": {
         "ar": "جارٍ مزامنة المعتقدات إلى Neo4j…",
         "en": "Syncing beliefs to Neo4j…",
+    },
+    "settings.agentjs.st_neo4j_more_follow": {
+        "ar": "والباقي يُنسخ في دورات الصيانة التالية (كل 15 دقيقة).",
+        "en": "The rest follow on the next maintenance passes (every 15 minutes).",
     },
     "settings.agentjs.st_synced_beliefs.zero": {
         "ar": "لم يُزامَن أي معتقد",

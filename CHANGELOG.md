@@ -65,6 +65,32 @@
   resume. A Windows update restarts twice; a crawl that dies on the same
   page every time waits for the owner.
 
+## The Neo4j copy of the memory graph keeps itself up to date (2026-11-13)
+
+- A new maintenance pass, "memory graph sync", runs every 15 minutes. It
+  brings every fact changed since the last pass across to Neo4j, and once a
+  day compares every current fact with every edge there.
+- A fact written while Neo4j was down now reaches it at the next pass. So
+  does a fact superseded, invalidated or forgotten while it was down: its
+  edge leaves, and a forgotten value's node with it. Before, each stayed
+  wrong for good.
+- An install that had memories before Neo4j was added is filled at the first
+  pass. Before, only the Settings button filled it, with the first 1,000
+  facts. A Neo4j recreated empty or restored from an older backup is
+  compared in full at once, and so is the copy after a memory restore.
+- Settings → Memory → **Sync beliefs → Neo4j** runs the same pass now.
+- Every edge Kazma writes carries this install's id. Edges written by
+  something else, or by another install sharing the same Neo4j, are never
+  changed or removed, and **Clear graph** keeps them too.
+- Neo4j down is waited out: one warning when it stops answering, one line
+  when it is back, and changes wait in a queue. Neo4j not answering when a
+  process wrote its first fact no longer stops the dual-write until a
+  restart: Kazma asks again after a minute.
+- Memory health shows the copy: in sync, behind (and by how much),
+  unreachable or not configured. The Memory page now says "graph: neo4j"
+  when Neo4j is the store; since 2026-10-03 the graph counts had hidden it,
+  and it said "graph: sqlite".
+
 ## Kazma's own container engine stops cleanly when Windows shuts down (2026-11-13)
 
 - Measured on a clean Windows VM with nobody signed in: when Windows

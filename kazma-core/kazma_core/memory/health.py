@@ -93,6 +93,53 @@ def _comp(
     }
 
 
+_GRAPH_COPY_DOWN = {
+    "unreachable": "Neo4j does not answer ({reason}); {waiting} waiting for it. The copy is "
+                   "brought up to date when it answers.",
+    "driver_missing": "The neo4j driver is not installed in Kazma's Python: no fact reaches Neo4j "
+                      '(uv pip install -e ".[neo4j]", then restart).',
+    "needs_url": "The graph store is Neo4j but has no address (memory.backends.graph.url).",
+}
+
+
+def _graph_copy_component(copy: dict[str, Any], gcap: dict[str, Any], get_backend: Any) -> dict[str, Any]:
+    """The Neo4j copy of the memory graph, as the last graph sync pass left
+    it (``graph_sync``); before this process's first pass, whether Neo4j
+    answers now."""
+    from kazma_core.english_count import count_noun
+
+    status = str(copy.get("status") or "unknown")
+    meta: dict[str, Any] = {"provider": "neo4j", "paint_source": "sqlite", "copy": copy}
+    if status == "unknown":
+        gb = get_backend()
+        online = getattr(gb, "name", "") == "neo4j" and bool(getattr(gb, "available", False))
+        return _comp(
+            "graph_neo4j", "Neo4j dual-write", ok=online, status="ok" if online else "warn",
+            detail=(
+                f"Neo4j online — dual-write on belief mutate; Dashboard paint remains SQLite. "
+                f"{gcap.get('detail') or ''}"
+                if online else
+                "Graph provider=neo4j but server/driver auth failed — "
+                "Settings → Memory → Test Neo4j (re-enter password if masked)."
+            ),
+            meta={**meta, "online": online},
+        )
+    if status in _GRAPH_COPY_DOWN:
+        waiting = count_noun(int(copy.get("pending_changes") or 0), "change")
+        detail = _GRAPH_COPY_DOWN[status].format(reason=copy.get("reason") or "no answer", waiting=waiting)
+        return _comp("graph_neo4j", "Neo4j dual-write", ok=False, status="warn", detail=detail,
+                     meta={**meta, "online": False})
+    behind = int(copy.get("behind") or 0)
+    detail = (
+        "Neo4j online; its copy of the memory graph is in step with the facts."
+        if status == "in_sync" else
+        f"Neo4j online; {count_noun(behind, 'change')} still to copy: the maintenance pass brings "
+        "them across (at most 2,000 every 15 minutes)."
+    )
+    return _comp("graph_neo4j", "Neo4j dual-write", ok=True, status="ok",
+                 detail=f"{detail} Dashboard paint remains SQLite.", meta={**meta, "online": True})
+
+
 def _findability_component(fnd: dict[str, Any]) -> dict[str, Any]:
     """The "every memory findable" row: meaning vectors waiting for repair,
     and memories an old archive rule erased that wait for recovery."""
@@ -433,24 +480,8 @@ def build_memory_health() -> dict[str, Any]:
         gcap = graph_capability(_bcfg)
         gprov = str(((_bcfg.get("graph") or {}).get("provider") or "sqlite")).lower()
         if gprov == "neo4j":
-            gb = get_graph_backend()
-            online = getattr(gb, "name", "") == "neo4j" and bool(getattr(gb, "available", False))
-            components.append(_comp(
-                "graph_neo4j",
-                "Neo4j dual-write",
-                ok=online,
-                status="ok" if online else "warn",
-                detail=(
-                    f"Neo4j online — dual-write on belief mutate; Dashboard paint remains SQLite. "
-                    f"{gcap.get('detail') or ''}"
-                    if online
-                    else (
-                        "Graph provider=neo4j but server/driver auth failed — "
-                        "Settings → Memory → Test Neo4j (re-enter password if masked)."
-                    )
-                ),
-                meta={"provider": "neo4j", "online": online, "paint_source": "sqlite"},
-            ))
+            copy = (v2.get("graph") or {}).get("copy") or {}
+            components.append(_graph_copy_component(copy, gcap, get_graph_backend))
         else:
             components.append(_comp(
                 "graph_neo4j",

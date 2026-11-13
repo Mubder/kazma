@@ -316,7 +316,8 @@
                 const data = await resp.json();
                 if (data.ok) {
                     this.memoryNeo4jOk = true;
-                    this.memoryNeo4jStatus = data.detail || window.kazmaCount('settings.agentjs.st_synced_beliefs', data.synced || 0);
+                    this.memoryNeo4jStatus = window.kazmaCount('settings.agentjs.st_synced_beliefs', data.synced || 0)
+                        + (data.behind ? ' ' + _k('settings.agentjs.st_neo4j_more_follow', 'The rest follow on the next maintenance passes (every 15 minutes).') : '');
                     showToast(window.kazmaCount('settings.agentjs.synced_neo4j', data.synced || 0), 'success');
                 } else {
                     this.memoryNeo4jStatus = data.error || _k('settings.agentjs.st_sync_failed', 'Sync failed');

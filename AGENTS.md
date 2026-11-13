@@ -1401,7 +1401,7 @@ scheduler needs a case there.
   (§19 E), dependency advisories (§57), model failover drill (§38), provider
   health (§60), forget convergence (§15I), memory vector repair, memory recovery,
   retired knowledge promotions and memory turn reconcile (§15F), memory
-  mirror sync (§15K), weekly topic summaries (§15J), entity count repair
+  mirror sync (§15K), memory graph sync (§15K2), weekly topic summaries (§15J), entity count repair
   (§15L) and knowledge vector repair (§24F, last), run by ONE isolated
   runner so a failing sweep never stops the rest -- and is logged at WARNING
   (it was DEBUG: a sweep failing every pass is a feature that is off). A new periodic cleanup is a
@@ -2166,6 +2166,53 @@ an answer ("User prefers dark mode").
   malformed metadata row must not fail the query) and never spends the push
   budget on a refused row. The two policies behaved the same until
   2026-09-27. `tests/test_memory_mirror_sync.py`.
+
+**K2. The Neo4j copy of the graph converges (2026-11-13, `memory/graph_sync.py`).**
+`kazma setup install` sets Neo4j up by default since that day, and the copy
+was kept by the dual-write alone (best effort, after the commit): a fact
+written while Neo4j was down never reached it, an install with memories
+before Neo4j was added had an empty one (the Settings button pushed the
+first 1,000 current facts and removed nothing), a fact invalidated or
+forgotten while it was down kept its edge -- and its value node -- for good,
+and Neo4j down at a process's first fact made it use SQLite until a restart.
+- **The sweep** "memory graph sync" (after the mirror sync,
+  `run_graph_sync`), as the mirror's: triggers queue every fact written,
+  changed in a column its edge depends on (`schema_v2.GRAPH_EDGE_COLUMNS`) or
+  deleted, in `memory_graph_outbox` (`schema_v2._ensure_graph_outbox`), and
+  each pass brings those facts' edges in step; a full comparison (every
+  current fact against every edge of each tenant, Neo4j read first) runs
+  daily, at once for a copy never compared or another Neo4j, one that went
+  back (the newest facts it was sent are missing: recreated, restored),
+  after a memory restore (`graph_sync.mark_full_due`, from
+  `restore_memory_backup`) and while one is catching up. At most 2,000 writes
+  and 120 s a pass, removals first, then the newest facts; a fact is read
+  again just before its edge is written (a forget in between is not pushed
+  back). Findings are the runtime setting `memory.v2.graph_sync`.
+- **Only this install's edges change.** Every write carries the fact id and
+  the install's id (the edge's install tag, `graph_backend.this_install`); an
+  edge with no fact id, or another install's tag, is never written or
+  removed (the dev checkout and live share one Neo4j at 127.0.0.1:7687), and
+  an untagged edge of a fact this install never held is counted and left.
+  The dual-write's upsert takes the same rule, and graph-clear deletes only
+  this install's. Entity nodes left with no edge go.
+- **An outage is waited out:** one WARNING when Neo4j stops answering, one
+  INFO when it is back, never a failed sweep; the queue keeps every change
+  (100,000 at most, then a full comparison instead); no Neo4j chosen, it is
+  emptied. No Neo4j call inside a memory write transaction (§15D2,
+  `graph_sync._no_write_open`). The dual-write's SQLite stand-in for an
+  unreachable Neo4j expires after a minute (`graph_backend._FALLBACK_RETRY_S`).
+- **One implementation:** Settings -> Memory's "Sync beliefs -> Neo4j" runs
+  a pass with the full comparison (`graph_sync.sync_now`; the old one-shot
+  push is gone). Memory health shows the copy
+  (`v2_health` graph entry's `copy`: in sync, behind N, unreachable, not
+  configured), from the last pass, never asking Neo4j. The hygiene counts
+  had replaced that whole entry since 2026-10-03, and the Memory page said
+  "graph: sqlite" over a Neo4j store; they sit beside it now.
+- Gate: `tests/test_memory_graph_sync.py` (an in-memory Neo4j answering the
+  backend's statements, the product's writers; each case shows the copy as
+  the old code left it first; a real-server case with
+  `KAZMA_TEST_NEO4J_URL`, never this machine's 7687 unless
+  `KAZMA_TEST_NEO4J_THROWAWAY=1`).
 
 **L. The graph shows what memory holds, and extraction keeps it clean
 (2026-10-03, `memory/graph_view.py`, `entity_retire.py`, `graph_hygiene.py`).**

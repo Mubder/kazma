@@ -1152,6 +1152,17 @@ def _sync_memory_mirror() -> None:
         conn.close()
 
 
+def _sync_memory_graph() -> None:
+    # The Neo4j copy of the memory graph kept whole (graph_sync, 2026-11-13):
+    # the facts changed since the last pass (the queue), and once a day every
+    # current fact against every edge. A fact written or forgotten while Neo4j
+    # was down reaches it here. Neo4j not chosen: nothing to do; away: waited
+    # out (one WARNING when it stops answering, never a failed sweep).
+    from kazma_core.memory.graph_sync import run_graph_sync
+
+    run_graph_sync()
+
+
 def _queue_topic_summaries() -> None:
     # Weekly topic summaries (plan C2): the weeks that ended over a day ago
     # (two a pass, oldest first) and the summaries a forgotten turn emptied.
@@ -1317,6 +1328,7 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("retired knowledge promotions", _retire_knowledge_promotions),
     ("memory turn reconcile", _reconcile_memory_turns),
     ("memory mirror sync", _sync_memory_mirror),
+    ("memory graph sync", _sync_memory_graph),
     ("memory topic summaries", _queue_topic_summaries),
     ("entity count repair", _repair_entity_counts),
     ("knowledge vector repair", _embed_knowledge_chunks),

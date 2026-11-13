@@ -265,6 +265,11 @@ def build_v2_health(
         primary_conn.row_factory = sqlite3.Row
         ensure_primary_schema(primary_conn)
         out["db_available"] = True
+        # The Neo4j copy as the last graph sync pass left it (never a call to
+        # Neo4j from health): in sync, behind N, unreachable, not configured.
+        from kazma_core.memory.graph_sync import graph_copy_status
+
+        out["graph"]["copy"] = graph_copy_status(primary_conn)
 
         # Beliefs
         out["beliefs"]["active"] = _safe_count(
@@ -311,11 +316,14 @@ def build_v2_health(
 
         out["mirror"] = last_mirror_sync()
 
-        # How clean the graph is (graph_hygiene): read-only counts + examples.
+        # How clean the graph is (graph_hygiene): read-only counts + examples,
+        # beside the graph store's own entries. Assigned whole from 2026-10-03,
+        # it dropped them: the Memory page said "graph: sqlite" over a Neo4j
+        # store, and the copy's state never reached health (found 2026-11-13).
         try:
             from kazma_core.memory.graph_hygiene import graph_hygiene_report
 
-            out["graph"] = graph_hygiene_report(primary_conn, tenant_id=tenant_id)
+            out["graph"] = {**out["graph"], **graph_hygiene_report(primary_conn, tenant_id=tenant_id)}
         except sqlite3.Error:
             logger.warning("[v2_health] graph hygiene counts unreadable", exc_info=True)
 

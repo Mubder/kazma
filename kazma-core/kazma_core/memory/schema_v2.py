@@ -494,6 +494,7 @@ def ensure_primary_schema(conn: Any) -> None:
     # Phase B: real FTS5 indexes (MATCH + bm25) with LIKE fallback in recall.
     _ensure_fts5(conn)
     _ensure_mirror_outbox(conn)
+    _ensure_graph_outbox(conn)
     # Phase 3: one-shot backfill of stale entity counts on first boot after
     # the columns are added (rows default to -1). Idempotent — only touches
     # rows still at the sentinel. Safe to re-run; cheap when nothing's stale.
@@ -553,6 +554,48 @@ def _ensure_mirror_outbox(conn: Any) -> None:
         END;
         CREATE TRIGGER IF NOT EXISTS beliefs_mirror_ad AFTER DELETE ON beliefs BEGIN
           INSERT INTO memory_mirror_outbox(kind, row_id) VALUES ('belief', old.id);
+        END;
+    """)
+
+
+#: What a fact's edge in the Neo4j copy depends on (``graph_sync``): a change
+#: to one of these columns queues the fact for the next graph sync pass.
+GRAPH_EDGE_COLUMNS = ("subject", "predicate", "object", "confidence", "valid_until", "invalidated_at",
+                      "tenant_id")
+
+
+def _ensure_graph_outbox(conn: Any) -> None:
+    """The change queue the graph sync drains (2026-11-13, ``graph_sync``).
+
+    The dual-write to Neo4j is best effort: a fact written, invalidated,
+    forgotten or deleted while Neo4j was down never reached it. Triggers name
+    each fact written, changed in a column its edge depends on, or deleted, in
+    ``memory_graph_outbox`` -- in the same transaction as the change, so no
+    write is missed -- and each graph sync pass brings those facts' edges in
+    step. The sync empties it on an install whose graph store is not Neo4j.
+    """
+    changed = " OR ".join(f"old.{c} IS NOT new.{c}" for c in GRAPH_EDGE_COLUMNS)
+    conn.executescript(f"""
+        CREATE TABLE IF NOT EXISTS memory_graph_outbox (
+          seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+          belief_id  TEXT NOT NULL,
+          tenant_id  TEXT NOT NULL,
+          attempts   INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TRIGGER IF NOT EXISTS beliefs_graph_ai AFTER INSERT ON beliefs BEGIN
+          INSERT INTO memory_graph_outbox(belief_id, tenant_id)
+            VALUES (new.id, COALESCE(new.tenant_id, 'default'));
+        END;
+        CREATE TRIGGER IF NOT EXISTS beliefs_graph_au
+          AFTER UPDATE OF {", ".join(GRAPH_EDGE_COLUMNS)} ON beliefs WHEN {changed} BEGIN
+          INSERT INTO memory_graph_outbox(belief_id, tenant_id)
+            VALUES (new.id, COALESCE(new.tenant_id, 'default'));
+          INSERT INTO memory_graph_outbox(belief_id, tenant_id)
+            SELECT old.id, COALESCE(old.tenant_id, 'default') WHERE old.tenant_id IS NOT new.tenant_id;
+        END;
+        CREATE TRIGGER IF NOT EXISTS beliefs_graph_ad AFTER DELETE ON beliefs BEGIN
+          INSERT INTO memory_graph_outbox(belief_id, tenant_id)
+            VALUES (old.id, COALESCE(old.tenant_id, 'default'));
         END;
     """)
 

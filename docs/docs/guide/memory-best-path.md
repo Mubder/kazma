@@ -102,10 +102,10 @@ Choose a strong password before starting Compose; an unset password refuses
 startup. The published HTTP and Bolt ports bind to loopback. Its heap and page
 cache are 512 MB each (`KAZMA_NEO4J_HEAP`, `KAZMA_NEO4J_PAGECACHE` in `.env`).
 
-Or UI: Graph store **Neo4j** → Save → **Test Neo4j** → **Sync beliefs → Neo4j**.
+Or UI: Graph store **Neo4j** → Save → **Test Neo4j** → **Sync beliefs → Neo4j** (or wait for the next maintenance pass, within 15 minutes).
 
 - Masked password `***` in the form does **not** wipe the vault secret on Test.  
-- **Clear graph** invalidates SQLite beliefs **and** deletes that tenant's Neo4j edges. A manual Sync is only needed if dual-write was down during the clear.  
+- **Clear graph** invalidates SQLite beliefs **and** deletes that tenant's Neo4j edges written by this install. If Neo4j was down during the clear, the next maintenance pass removes them.  
 - Do **not** make Neo4j a required install for single-user setups.
 
 ## Maintenance
@@ -115,6 +115,7 @@ Or UI: Graph store **Neo4j** → Save → **Test Neo4j** → **Sync beliefs → 
 | macro_sleep (rule-based tiers + archival; in-use memories are never archived) + ego-anchor backfill + FTS drift rebuild | ~6h |
 | backup + export (beliefs, episodes, merges, archive, audit JSONL) + mirror-drift warning | ~6h |
 | global reconsolidation (dedupe + re-embed + count recompute) | ~24h; **auto-partitions** large corpora |
+| memory graph sync (the Neo4j copy: changed facts each pass, every fact daily) | 15 min, when Neo4j is the graph store |
 
 Dashboard: **Run reconsolidation**, queue **retry** / **Clear failed**, component health board.
 

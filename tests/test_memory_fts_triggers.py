@@ -70,13 +70,15 @@ def conn(tmp_path):
 
 
 def _outbox_rows(conn: sqlite3.Connection) -> int:
-    return conn.execute("SELECT COUNT(*) FROM memory_mirror_outbox").fetchone()[0]
+    return sum(conn.execute(f"SELECT COUNT(*) FROM {queue}").fetchone()[0]  # nosec B608 - fixed names
+               for queue in ("memory_mirror_outbox", "memory_graph_outbox"))
 
 
 def _rows_written(conn: sqlite3.Connection, sql: str) -> int:
-    """Rows the statement wrote, the mirror outbox's entry aside: a tier or
-    validity change is one the Postgres mirror must hear about (Memory audit
-    M31), and that queue is not the full-text index this file measures."""
+    """Rows the statement wrote, the change queues' entries aside: a tier or
+    validity change is one the Postgres mirror (Memory audit M31) and the
+    Neo4j graph copy (graph_sync) must hear about, and those queues are not
+    the full-text index this file measures."""
     before, queued = conn.total_changes, _outbox_rows(conn)
     conn.execute(sql)
     return conn.total_changes - before - (_outbox_rows(conn) - queued)

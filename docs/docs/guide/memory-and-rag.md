@@ -313,8 +313,11 @@ Deep dive: [Knowledge Library](./knowledge-library.md).
 
 - **SoT for beliefs remains SQLite** (bi-temporal, scrub, Dashboard filters).  
 - **Dashboard topology paints from SQLite** when Neo4j is configured (types + bi-temporal).  
-- Neo4j receives dual-writes on mutate; **Sync beliefs → Neo4j** backfills existing rows.  
-- Soft-invalidate / supersede / **graph-clear** best-effort **deletes** Neo4j edges (tenant-scoped). You should not need a manual Sync after Clear graph.
+- Neo4j receives dual-writes on mutate, and soft-invalidate / supersede / **graph-clear** delete edges at once (tenant-scoped). Both are best effort.  
+- **The copy converges by itself** (since 2026-11-13). The maintenance pass "memory graph sync" runs every 15 minutes: it brings across every fact changed since the last pass, and once a day compares every current fact with every edge. A fact written, superseded or forgotten while Neo4j was down reaches it at the next pass; a forgotten value leaves with its node. An install that had memories before Neo4j was added is filled at the first pass. A Neo4j recreated empty or restored from an older backup is compared in full at once, and so is the copy after a memory restore. A pass makes at most 2,000 writes (removals first, then the newest facts); a larger set takes a few passes.  
+- **Sync beliefs → Neo4j** runs the same pass now, with the full comparison.  
+- **Only this install's edges change.** Every edge Kazma writes carries the fact's id and this install's id. An edge without a fact id, or written by another install sharing the Neo4j, is never changed or removed.  
+- **Neo4j down is waited out:** changes wait in a queue (up to 100,000, then the next pass compares everything instead), Kazma says once that Neo4j does not answer and once that it is back. Memory health shows the copy: in sync, behind (with how much), unreachable, or not configured.
 
 ### Operator setup
 
@@ -329,7 +332,7 @@ on Kazma's container engine (`deploy/docker-compose.neo4j.yml`, project
 2. Install the driver in Kazma's Python: the `neo4j` extra (`kazma setup install --with graph_neo4j`, or Settings → Packages). Without it the graph stays in SQLite, and Kazma says so once at boot and Settings shows `driver_missing`.  
 3. Settings → Memory → Graph store **Neo4j**, URL `bolt://localhost:7687`, password, **Save**.  
 4. **Test Neo4j** (masked `***` passwords do not overwrite the vault secret).  
-5. **Sync beliefs → Neo4j**.  
+5. **Sync beliefs → Neo4j** fills the copy now; without it, the next maintenance pass does (within 15 minutes).  
 
 ### Env install default (fail-open)
 

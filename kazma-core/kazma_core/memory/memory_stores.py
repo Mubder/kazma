@@ -139,6 +139,15 @@ MEMORY_TABLES: tuple[MemoryStore, ...] = (
         bound="rows changed since the last pass; while Postgres is away, every change since",
     ),
     MemoryStore(
+        "memory_graph_outbox", "state", "no_turn_text", "ids_only",
+        forget="nothing to forget: the id and tenant of a fact changed since the last graph sync pass",
+        export="", excluded="the Neo4j graph copy's change queue (graph_sync.run_graph_sync)",
+        retention="until the graph sync pass brings the fact's edge in step (5 failed passes at most); "
+                  "emptied when Neo4j is not the graph store",
+        bound="facts changed since the last pass; while Neo4j is away, every change since, at most "
+              "100,000 (then a full comparison instead)",
+    ),
+    MemoryStore(
         "memory_forget_applied", "state", "no_turn_text", "ids_only",
         forget="the forget journal's bookkeeping: which journal entries this copy of the database applied",
         export="", excluded="bookkeeping of the forget journal (memory_forget_journal.db)",
@@ -259,7 +268,9 @@ EXTERNAL_STORES: tuple[MemoryStore, ...] = (
     ),
     MemoryStore(
         "graph backend (Neo4j edges)", "external", "forget", "fact_text",
-        forget="hygiene.invalidate_belief removes a forgotten fact's edge",
+        forget="hygiene.invalidate_belief removes a forgotten fact's edge; the graph sync "
+               "(graph_sync.run_graph_sync) removes one a Neo4j outage kept, and the value node "
+               "left with no edge",
         export="", excluded="current facts as edges, rebuilt from them",
     ),
     MemoryStore(

@@ -205,10 +205,12 @@ def register_settings_routes(self: Any) -> None:
         return await asyncio.to_thread(_probe_neo4j, body)
     @self.app.post("/api/settings/memory/backends/sync-neo4j", dependencies=[Depends(rate_limit("admin_ops", 10))])
     def _settings_memory_sync_neo4j():
-        """Backfill active SQLite beliefs into Neo4j (needed once after enabling)."""
-        from kazma_core.memory.graph_backend import sync_beliefs_to_neo4j
+        """Bring the Neo4j copy of the memory graph up to date now: one pass of
+        the graph sync the maintenance sweep runs every 15 minutes, with the
+        full comparison (``graph_sync.sync_now``)."""
+        from kazma_core.memory.graph_sync import sync_now
 
-        return sync_beliefs_to_neo4j(tenant_id="default", limit=1000)
+        return sync_now()
     @self.app.post("/api/settings/memory/backends/sync-postgres", dependencies=[Depends(rate_limit("admin_ops", 10))])
     def _settings_memory_sync_postgres():
         """Backfill existing SQLite beliefs + episodes into the Postgres state mirror.

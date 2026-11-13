@@ -173,7 +173,10 @@ def restore_memory_backup(src: Path, *, reconcile_budget_s: float = 120.0) -> di
       cursor (``turn_reconcile.read_state``) and writes the turns since the
       backup back as memories. What is lost is only what never was a chat
       turn (an agent's saved note since the backup). A large gap goes on at
-      the next pass (``more``).
+      the next pass (``more``);
+    * the Neo4j copy of the graph, when there is one, is compared in full by
+      the next graph sync pass (``graph_sync.mark_full_due``): it holds the
+      facts written since the backup, and its queue knows nothing of them.
 
     Measured by ``tests/test_memory_restore_drill.py`` (RPO and RTO).
     """
@@ -182,9 +185,14 @@ def restore_memory_backup(src: Path, *, reconcile_budget_s: float = 120.0) -> di
     from kazma_core.memory.turn_reconcile import run_turn_reconcile_pass
     from kazma_core.paths import primary_memory_db
 
+    from kazma_core.memory.graph_sync import mark_full_due
+
     started = time.monotonic()
     snapshot_copy(Path(src), Path(primary_memory_db()))
     _bring_schema_up_to_date(Path(primary_memory_db()))
+    # The Neo4j copy holds the facts written since the backup: the next graph
+    # sync pass compares every fact (the queue knows nothing of them).
+    mark_full_due("memory restored")
     forgets = forget.converge()
     reconcile = run_turn_reconcile_pass(time_budget_s=reconcile_budget_s)
     return {
