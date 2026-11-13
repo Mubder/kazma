@@ -1,5 +1,38 @@
 # CHANGELOG
 
+## Kazma's own container engine, step 3: named everywhere, and drilled (2026-11-13)
+
+- Kazma now says which container engine it is waiting for. When the code
+  sandbox can't run, readiness reads "Kazma's container engine is not
+  running" or "Docker Desktop is not running", not just "no isolated
+  execution backend". The guard's alert and `kazma_guard.py --status` quote
+  it.
+- The Documents page names the engine too. If Kazma's engine doesn't answer,
+  it says the guard keeps restarting it and gives the command that repairs
+  it. If Docker Desktop doesn't answer, it says Docker Desktop starts only
+  when someone signs in to the PC. Both in English and Arabic.
+- The guard's free-space watch now watches the drive that holds Kazma's
+  engine (its disk under `%LOCALAPPDATA%\Kazma\engine`) when that engine is
+  in use. Before, it watched only Docker Desktop's disk image. A filling
+  drive is reported once, naming what stops: private search, the document
+  worker and the code sandbox.
+- The plan's boot drill now runs as a script, `scripts/engine_boot_drill.py`,
+  on the clean drill VM. It does a Full install, restarts Windows with
+  nobody signed in, and checks every container part against a five-minute
+  limit. It passed: every part was ready within 90 seconds of boot. The
+  same drill with Docker Desktop had nothing up after seven minutes, and
+  Kazma said it was waiting for Docker Desktop.
+- The drill found three setup bugs, all fixed:
+  - On a Windows without WSL, each of setup's WSL checks waited 60 seconds
+    on a hidden "press any key to install WSL" prompt. Setup's programs now
+    get no input unless a step gives them one.
+  - A first Full install ended with "Private web search: not installed",
+    because it checked SearXNG two seconds after starting it. Setup now
+    waits up to two minutes for SearXNG to answer.
+  - `kazma setup install --docker desktop`, run without someone signed in
+    at the screen, never installed Docker Desktop: Windows refused its
+    `wsl --install`. It now installs WSL the way Kazma's engine does.
+
 ## A reload no longer reports the offsite backup as broken (2026-11-12)
 
 - A deploy's reload stopped the server while its six-hourly check of the

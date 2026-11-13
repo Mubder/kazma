@@ -10763,6 +10763,55 @@ SERVICE (a tunnel) reach its published ports, and it is back 19 s after a
   text mode on Windows wrote `\r\n`, and bash refused the script's first
   line). Docker's CLI folder joins the user's PATH (`_on_user_path`, never
   `setx`), and Kazma's own CLI off PATH is no warning.
+- **Readiness and the disk watch name the engine** (2026-11-12). Kazma's
+  engine comes back by itself and Docker Desktop waits for a sign-in, so
+  "Docker does not answer" asked for two different steps.
+  `docker_cli.engine_in_force` is the one answer (`kazma`, `desktop`,
+  `system`, `other`), read from the context in force with no process
+  started, so a down engine is named too; `docker_cli.engine_label` names it.
+  Readiness's code sandbox check carries `engine` and says it in its error
+  ("Kazma's container engine is not running"), which the guard quotes in its
+  page and `--status`. The document isolation report carries `engine`, and
+  its step is `start_kazma_engine` (with `kazma setup engine` to repair it)
+  or `start_docker_desktop` (sign in), in both languages. The guard's
+  `DiskWatch` watches the disk of the engine in force: the `kazma-engine`
+  distro's folder (`docker_cli.kazma_engine_disk_dir`, where setup imports
+  it) when Kazma's engine is in use, else Docker Desktop's disk image; never
+  a disk no Kazma container lives on. Gate:
+  `tests/test_engine_named_where_kazma_waits.py` (22 of its 24 fail on the
+  old code; the general step and the catalog are the controls).
+- **The boot drill is a script** (`scripts/engine_boot_drill.py`, Stage 2's
+  gate, run from the host). It reverts the drill VM to its clean checkpoint,
+  copies one commit (`git archive`) and `uv`, runs `kazma setup install
+  --mode full -y` detached (an SSH drop must not end it), restarts Windows
+  when setup asks (WSL) and runs it again, sets the strict code profile from
+  the install folder (it refuses unless the install's `.env` is the one
+  loaded: from the home folder the first drill wrote it to a store of its
+  own), restarts Windows with nobody signed in, and reads Kazma's readiness,
+  `kazma_guard.py --status` and SearXNG every 15 s. Every container part must
+  be ready within 5 minutes of boot; a reading with a session in `query
+  user` makes the verdict `invalid`. Passed on 2026-11-13: every part ready
+  within 90 s (`docs/audits/ENGINE_BOOT_DRILL_2026-11-12.md`). `--docker
+  desktop` is the negative control (verdict `not_up`). Changing the
+  `KazmaEngine` task's trigger is no control: the guard runs that task on
+  demand and holds its own keep-alive. Its reading of `--status` is held to
+  the guard's own line builders: `tests/test_engine_boot_drill.py`.
+- **Setup's programs get no input, and it waits for what it started** (the
+  drill, 2026-11-12). `container_engine_setup._out` passed `input=None`:
+  `wsl.exe` inherited setup's console, and Windows' WSL stub waited on "press
+  any key to install" until the 60 s timeout at every WSL call (a key
+  pressed then would have installed WSL from the Store); it passes
+  `stdin=DEVNULL`, and the terminal gate (`tests/test_setup_system.py`)
+  covers this module and `install.py` and counts an `input` that can be None
+  as the terminal. A Full install asked SearXNG 2 s after `docker compose
+  up` and ended "not installed", exit 1; the step "wait for SearXNG to
+  answer" (`SEARXNG_READY_WAIT_S`, 120 s) waits for it
+  (`tests/test_install_modes.py`, a SearXNG that never answers as the
+  control). `--docker desktop` installed WSL with `wsl --install`, which
+  Windows refuses outside a signed-in console, so an unattended Desktop
+  install never got Docker Desktop; both paths get WSL from one step,
+  `engine:wsl` (the pinned MSI), and the container steps wait for the
+  restart on either path.
 - Gates: `tests/test_container_engine_choice.py` (the first rule, "the
   context exists", as the negative control), the engine cases in
   `tests/test_guard_dependencies.py` (the same outage on Docker Desktop as
