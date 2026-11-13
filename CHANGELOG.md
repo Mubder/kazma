@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## A guard update sends no repeated pages (2026-11-13)
+
+- Restarting the guard while Kazma was paused (a guard update) sent "Kazma
+  supervision paused" twice and "Disk space low" again with nothing changed.
+  The guard now remembers what it announced: the pause is announced once,
+  and a low drive is paged again only after six hours, as a reminder.
+
 ## Neo4j finds a memory graph node by an index (2026-11-13)
 
 - The memory graph's copy in Neo4j had no index, so every write looked for

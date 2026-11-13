@@ -4085,6 +4085,10 @@ def _same_volume(a: Path, b: Path) -> bool:
         return str(a.drive).lower() == str(b.drive).lower() if os.name == "nt" else False
 
 
+#: How old a disk record a restarted guard takes as already paged.
+DISK_INHERIT_S = 6 * 3600.0
+
+
 class DiskWatch:
     """Free space where Kazma writes (see the section comment).
 
@@ -4102,6 +4106,30 @@ class DiskWatch:
         self.levels: dict[str, str] = {}
         self.readings: dict[str, dict] = {}
         self._paged: set[str] = set()
+        self._inherit()
+
+    def _inherit(self) -> None:
+        """Take the levels the guard before this one recorded and paged.
+
+        A restarted guard (a guard update) began every drive at "ok" and paged
+        a low drive again ("Disk space low on C:" at 14:56 and again at 20:36
+        on 2026-11-12, nothing changed). A record older than DISK_INHERIT_S is
+        not taken: a level still there after that is paged again, a reminder.
+        """
+        record = _read_state().get("disk")
+        if not isinstance(record, dict) or not isinstance(record.get("volumes"), dict):
+            return
+        try:
+            age = time.time() - float(record.get("updated") or 0.0)
+        except (TypeError, ValueError):
+            return
+        if not 0 <= age <= DISK_INHERIT_S:
+            return
+        for key, vol in record["volumes"].items():
+            level = vol.get("level") if isinstance(vol, dict) else None
+            if level in ("low", "critical"):
+                self.levels[str(key)] = level
+                self._paged.add(str(key))
 
     def watched(self) -> list[tuple[str, str, Path]]:
         """(key, role, path) of each volume to watch: the data dir, and the
@@ -5956,18 +5984,24 @@ class Guard:
             datetime.fromtimestamp(until, UTC).strftime("%H:%M UTC")
             if until else "no expiry"
         )
+        # A guard restarted while paused (a guard update) holds the same
+        # pause: the guard before it announced it, and it was announced again
+        # -- two "paused" pages six seconds apart, twice on 2026-11-12/13.
+        announced = _read_state().get("pause_announced") == held
         self.log("warn", "maintenance.active",
                  reason=pause.get("reason"), by=pause.get("by"),
-                 expires=human_until, file=str(_pause_path()))
-        self._page(
-            "warn",
-            "Kazma supervision paused",
-            f"{pause.get('reason')}. It will not be restarted until resumed. "
-            f"Expires: {human_until}.",
-            kind="maintenance.active",
-            fingerprint="pause",
-            force=True,
-        )
+                 expires=human_until, file=str(_pause_path()), announced_before=announced)
+        if not announced:
+            self._page(
+                "warn",
+                "Kazma supervision paused",
+                f"{pause.get('reason')}. It will not be restarted until resumed. "
+                f"Expires: {human_until}.",
+                kind="maintenance.active",
+                fingerprint="pause",
+                force=True,
+            )
+            _update_state(pause_announced=held)
 
         next_nag = time.monotonic() + PAUSE_NAG_EVERY_S
         while not self._stop:
@@ -5983,7 +6017,7 @@ class Guard:
                 _update_state(pause_held=current.get("since"))
                 continue
             if current is None:
-                _update_state(pause_held=None)
+                _update_state(pause_held=None, pause_announced=None)
                 self.log("info", "maintenance.resumed")
                 self._page(
                     "info",

@@ -8556,6 +8556,16 @@ code) and Kazma ran with nobody supervising it.
   does: a CI runner has less than the low line). Gate:
   `tests/test_guard_disk_watch.py` (the rule without the margin and a guard
   without the watch as negative controls).
+- **A restarted guard pages nothing the guard before it paged** (2026-11-13).
+  A guard update restarts the guard while Kazma is paused; each one sent a
+  second "Kazma supervision paused" (the new guard read the same pause file)
+  and "Disk space low" again (its disk watch started every drive at ok). The
+  state file says what was announced: `pause_announced` (the pause's
+  signature, cleared at the resume) and the disk record, whose levels a new
+  `DiskWatch` takes as paged when younger than `DISK_INHERIT_S` (6 h; older,
+  a level still there is paged again as a reminder). Gate:
+  `tests/test_guard_restart_pages_nothing_new.py` (two guards on one state
+  file; the old behaviour as each control).
 - **The guard watches the power** (`PowerWatch`, resilience plan B2c). A USB
   UPS is a battery to the OS (`_power_state`: `GetSystemPowerStatus`,
   `/sys/class/power_supply`). Every 30 s: on battery, one page; at
