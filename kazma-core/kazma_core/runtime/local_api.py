@@ -76,11 +76,11 @@ def candidate_api_bases() -> list[str]:
     ``KAZMA_PUBLIC_URL`` is *not* used — that host is for browsers/OAuth and
     typically 302s to a login HTML page.
     """
-    found: list[str] = []
-    port = (os.environ.get("KAZMA_PORT") or "").strip()
-    if port:
-        found.append(f"http://127.0.0.1:{port}")
-    found.append("http://127.0.0.1:9090")
+    from kazma_core.server_port import DEFAULT_PORT, local_url, server_port
+
+    found: list[str] = [local_url()]
+    if server_port() != DEFAULT_PORT:
+        found.append(local_url(port=DEFAULT_PORT))
     found.append("http://127.0.0.1:8000")
     raw = (os.environ.get("KAZMA_BASE_URL") or "").strip().rstrip("/")
     if raw:

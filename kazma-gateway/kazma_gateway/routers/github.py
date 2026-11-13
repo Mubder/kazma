@@ -462,8 +462,9 @@ def _oauth_redirect_uri(request: Request) -> str:
     host = (os.environ.get("KAZMA_HOST") or "").strip() or "127.0.0.1"
     if host in ("0.0.0.0", "::", "[::]"):
         host = "127.0.0.1"
-    port = (os.environ.get("KAZMA_PORT") or "9090").strip() or "9090"
-    return f"http://{host}:{port}/api/github/oauth/callback"
+    from kazma_core.server_port import server_port
+
+    return f"http://{host}:{server_port()}/api/github/oauth/callback"
 
 
 @router.get("/oauth/status")

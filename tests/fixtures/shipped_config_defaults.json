@@ -215,8 +215,6 @@
  "time_travel.db_path": "kazma-data/snapshots.db",
  "time_travel.enabled": true,
  "time_travel.max_snapshots": 50,
- "ui.host": "127.0.0.1",
- "ui.port": 9090,
  "ui.rtl": true,
  "ui.title": "Kazma Dashboard",
  "voice.enabled": false,

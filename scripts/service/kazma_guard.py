@@ -103,16 +103,26 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-DEFAULT_HEALTH_URL = "http://127.0.0.1:9090/health/ready"
+#: Kazma's page when nothing chose another port (``server_port.DEFAULT_PORT``;
+#: this file is standard-library only, so it keeps its own copy, held equal by
+#: tests/test_server_port.py).
+DEFAULT_PORT = 9090
+DEFAULT_HEALTH_URL = f"http://127.0.0.1:{DEFAULT_PORT}/health/ready"
+#: The document worker broker's loopback ports (``server_port.BROKER_RANGE``:
+#: the install refuses a page port in it).
+BROKER_PORT_LOW, BROKER_PORT_HIGH = 20000, 29999
 
 
 def _env_files() -> list[Path]:
-    """The ``.env`` files the server reads its port from, in its order:
-    the install's, then ``KAZMA_ENV_FILE`` (the later wins)."""
-    files = [REPO_ROOT / ".env"]
+    """The ``.env`` files the server reads its port from, in its order
+    (``env_files.env_file_ladder`` without the launch folder): Kazma's home
+    (``KAZMA_USER_HOME``, else ``<install>/.kazma``), the install's, then
+    ``KAZMA_ENV_FILE`` (the later wins)."""
+    home = (os.environ.get("KAZMA_USER_HOME") or "").strip()
+    files = [(Path(home).expanduser() if home else REPO_ROOT / ".kazma") / ".env", REPO_ROOT / ".env"]
     named = (os.environ.get("KAZMA_ENV_FILE") or "").strip()
     if named:
-        files.append(Path(named))
+        files.append(Path(named).expanduser())
     return files
 
 
@@ -131,13 +141,20 @@ def install_port(env_files: list[Path] | None = None) -> int | None:
                 line = line.strip()
                 if line.startswith("export "):
                     line = line[len("export "):].lstrip()
-                if line.startswith("KAZMA_PORT="):
-                    raw = line.split("=", 1)[1].split("#", 1)[0].strip().strip("'\"")
-    try:
-        port = int(raw)
-    except ValueError:
+                key, sep, value = line.partition("=")
+                if sep and key.strip() == "KAZMA_PORT":
+                    found = value.split(" #", 1)[0].strip().strip("'\"")
+                    if found:
+                        raw = found
+    if not raw.isdigit():
         return None
+    port = int(raw)
     return port if 1 <= port <= 65535 else None
+
+
+def _local_base() -> str:
+    """Kazma's page on this machine, without a path."""
+    return f"http://127.0.0.1:{install_port() or DEFAULT_PORT}"
 
 
 def health_url(*, of_running_guard: bool = False, env_files: list[Path] | None = None) -> str:
@@ -2305,12 +2322,16 @@ def _choose_broker_port(preferred: int | None, *, avoid: frozenset[int] = frozen
     named = _named_broker_port()
     if named is not None:
         return named
+    # Kazma's own page port is never the broker's: the broker starts while
+    # Kazma is stopped, when that port looks free.
+    avoid = avoid | {install_port() or DEFAULT_PORT}
     if preferred and preferred not in avoid and _port_is_free(preferred):
         return preferred
+    span = BROKER_PORT_HIGH - BROKER_PORT_LOW + 1
     digest = hashlib.sha256(str(REPO_ROOT).lower().encode("utf-8")).hexdigest()
-    base = 20000 + int(digest[:8], 16) % 10000
-    for step in range(10000):
-        port = 20000 + (base - 20000 + step) % 10000
+    base = BROKER_PORT_LOW + int(digest[:8], 16) % span
+    for step in range(span):
+        port = BROKER_PORT_LOW + (base - BROKER_PORT_LOW + step) % span
         if port not in avoid and _port_is_free(port):
             return port
     return base
@@ -4914,6 +4935,18 @@ class Guard:
     # outside watch: see _note_probe.
     _probe_note: dict | None = None
 
+    def _follow_port(self) -> None:
+        """Take the port Kazma will bind now (``health_url``): the owner may
+        have changed ``KAZMA_PORT`` since this guard started (``kazma setup
+        port``), and a guard probing the old port would restart a healthy
+        Kazma as "not answering". Recorded in the state file for
+        ``--status`` and ``--reload``."""
+        url = health_url()
+        if url != self.health_url:
+            self.log("info", "guard.port_changed", old=self.health_url, new=url)
+            self.health_url = url
+            _update_state(health_url=url)
+
     def __init__(self, *, once: bool = False) -> None:
         self.log = GuardLog(_default_log_path())
         self.cmd = build_command()
@@ -5674,6 +5707,10 @@ class Guard:
                         continue
                     if self._stop:
                         break
+                    # The port is read again before every start: `kazma
+                    # setup port` changes it in .env and asks for a reload,
+                    # and this guard runs from boot to boot.
+                    self._follow_port()
                     # A previous instance (or its orphaned grandchild) may
                     # still own the port. Clearing it here costs one netstat;
                     # discovering it after the spawn costs a discarded child
@@ -6560,7 +6597,7 @@ def _stop_recorded_child(log: GuardLog, *, spawned_before: float | None = None) 
 def _live_commit(health_url: str) -> str:
     live = health_url.rstrip("/").rsplit("/", 1)[0] + "/live"
     if not live.endswith("/health/live"):
-        live = "http://127.0.0.1:9090/health/live"
+        live = _local_base() + "/health/live"
     try:
         with urllib.request.urlopen(_request(live), timeout=5) as resp:
             data = json.loads(resp.read().decode("utf-8") or "{}")
@@ -6579,7 +6616,7 @@ def _activity(health_url: str) -> dict | None:
     that is down; the caller decides what not knowing means.
     """
     base = health_url.rstrip("/").rsplit("/", 1)[0]
-    url = base + "/activity" if base.endswith("/health") else "http://127.0.0.1:9090/health/activity"
+    url = base + "/activity" if base.endswith("/health") else _local_base() + "/health/activity"
     try:
         with urllib.request.urlopen(_request(url), timeout=5) as resp:
             data = json.loads(resp.read().decode("utf-8") or "{}")
@@ -6667,12 +6704,26 @@ def _old_server_serving(health_url: str, requested_at: float) -> bool:
     return boot is not None and boot <= requested_at
 
 
+def _recorded_health(fallback: str) -> str:
+    """The readiness URL the running guard probes now, else *fallback*.
+
+    A guard reads the port again before each start (``Guard._follow_port``),
+    so after ``kazma setup port`` the new server answers on the new port and
+    the guard's state file names it."""
+    recorded = _read_state().get("health_url")
+    if isinstance(recorded, str) and recorded.startswith("http") and _guard_alive():
+        return recorded
+    return fallback
+
+
 def _wait_for_new_boot(health_url: str, requested_at: float, before: str | None,
                        log: GuardLog, *, event: str = "reload") -> int:
     """Wait until a server that booted AFTER the request answers ready.
 
     *before* is the build that served before a reload; None after a
-    maintenance stop, which says nothing about the build.
+    maintenance stop, which says nothing about the build. The address is the
+    one the guard probes now: a reload that moved Kazma to another port
+    answers there.
     """
     print("Waiting for Kazma to come back on the new code…")
     print(
@@ -6683,6 +6734,7 @@ def _wait_for_new_boot(health_url: str, requested_at: float, before: str | None,
     deadline = started + START_TIMEOUT_S + GRACEFUL_STOP_S
     next_progress = started + 30.0
     while time.monotonic() < deadline:
+        health_url = _recorded_health(health_url)
         boot = server_started_at(health_url, 5.0)
         if boot is not None and boot > requested_at:
             result = probe(health_url, 5.0)

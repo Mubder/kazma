@@ -38,7 +38,14 @@ import uuid
 from pathlib import Path
 
 DEV = Path(__file__).resolve().parents[1]
-HEALTH = "http://127.0.0.1:9090"
+DEFAULT_PORT = 9090  # kazma_core.server_port.DEFAULT_PORT; this script runs before the live install's code
+
+
+def live_base(live: Path) -> str:
+    """The live install's page: its ``KAZMA_PORT`` (its .env), else 9090."""
+    raw = env_value(live / ".env", "KAZMA_PORT").strip()
+    port = int(raw) if raw.isdigit() and 1 <= int(raw) <= 65535 else DEFAULT_PORT
+    return f"http://127.0.0.1:{port}"
 # The document worker image's tag hashes every file of kazma_core the build
 # sends, its Dockerfile and requirements (kazma_core.documents.worker_image):
 # any change there needs the image built for the new code, BEFORE the reload.
@@ -85,8 +92,8 @@ def env_value(path: Path, key: str) -> str:
 class Server:
     """The live server's HTTP API, signed in with the install's secret."""
 
-    def __init__(self, live: Path, base: str = HEALTH) -> None:
-        self.base = base
+    def __init__(self, live: Path, base: str | None = None) -> None:
+        self.base = base or live_base(live)
         self.secret = env_value(live / ".env", "KAZMA_SECRET")
 
     def request(self, method: str, path: str, body: dict | None = None, timeout: float = 30.0):

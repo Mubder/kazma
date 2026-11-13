@@ -12,6 +12,7 @@ from textual.containers import Vertical
 from textual.widgets import Input, ListItem, ListView, ProgressBar, RichLog, Static
 
 from kazma_core.english_count import count_noun
+from kazma_core.server_port import server_port
 
 __all__ = ["ChatPanel", "ROLE_HEX"]
 
@@ -375,7 +376,7 @@ class ChatPanel(Vertical):
                 log.write(
                     "[dim](empty response — the server sent no assistant text. "
                     "If this keeps happening, the TUI is not reaching "
-                    "127.0.0.1:9090; check KAZMA_PORT / KAZMA_SECRET.)[/]"
+                    f"127.0.0.1:{server_port()}; check KAZMA_PORT / KAZMA_SECRET.)[/]"
                 )
         except Exception as e:
             log.write(f"\n[#ef4444]Error: {e}[/]")

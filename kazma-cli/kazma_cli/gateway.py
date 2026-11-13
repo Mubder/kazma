@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import sys
 from typing import Any
 
@@ -18,13 +17,13 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 from kazma_core.http_tls import shared_ssl_context
+from kazma_core.server_port import DEFAULT_PORT
 
 logger = logging.getLogger(__name__)
 
 console = Console()
 
 DEFAULT_TIMEOUT = 10.0
-DEFAULT_PORT = 9090
 
 __all__ = [
     "DEFAULT_PORT",
@@ -48,21 +47,20 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 def resolve_port(port: int | None = None) -> int:
-    """Resolve the server port from *port*, then ``KAZMA_PORT`` env, then default."""
+    """The server port: *port*, else Kazma's own (``server_port``: the shell's
+    ``KAZMA_PORT``, else the install's ``.env``, else the default)."""
     if port is not None:
         return port
-    env_port = os.environ.get("KAZMA_PORT")
-    if env_port:
-        try:
-            return int(env_port)
-        except ValueError:
-            logger.warning("Invalid KAZMA_PORT value '%s', using default %d", env_port, DEFAULT_PORT)
-    return DEFAULT_PORT
+    from kazma_core.server_port import server_port
+
+    return server_port()
 
 
 def resolve_base_url(port: int | None = None) -> str:
     """Return the base URL for the Kazma server."""
-    return f"http://localhost:{resolve_port(port)}"
+    from kazma_core.server_port import local_url
+
+    return local_url(port=resolve_port(port))
 
 
 def extract_port(args: list[str]) -> tuple[int | None, list[str]]:
@@ -313,7 +311,7 @@ def print_help() -> None:
     console.print("  refresh   Hot-reload adapters from config")
     console.print()
     console.print("Options:")
-    console.print("  --port N  Server port (default: 9090, or KAZMA_PORT env var)")
+    console.print(f"  --port N  Server port (default: KAZMA_PORT, else {DEFAULT_PORT})")
 
 
 # ---------------------------------------------------------------------------

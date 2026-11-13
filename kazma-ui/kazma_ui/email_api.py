@@ -168,8 +168,9 @@ def _request_base(request: Request) -> str:
     if public:
         return public
     host = (os.environ.get("KAZMA_HOST") or "").strip() or "127.0.0.1"
-    port = (os.environ.get("KAZMA_PORT") or "9090").strip()
-    return f"http://{host}:{port}"
+    from kazma_core.server_port import server_port
+
+    return f"http://{host}:{server_port()}"
 
 
 # CSRF guard for mutating email POST endpoints (audit H4): a custom

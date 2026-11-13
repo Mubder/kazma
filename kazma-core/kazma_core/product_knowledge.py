@@ -82,6 +82,8 @@ def _always_ask_sentence() -> str:
 
 def build_product_knowledge() -> str:
     """Full product-knowledge block for the supervisor system prompt."""
+    from kazma_core.server_port import DEFAULT_PORT
+
     try:
         from kazma_core.agent.research_policy import RESEARCH_PROTOCOL
 
@@ -136,7 +138,7 @@ Project data lives under **`kazma-data/`** (settings, checkpoints, swarm tasks, 
 11. **Self-improvement** — after chat turns and swarm tasks, Kazma can append short `[SelfImprovement]` learnings to the main agent Soul (kept in Kazma's settings store) or worker prompts. Disable with `KAZMA_SELF_IMPROVEMENT=0`.
 
 ### How-to cheat sheet (tell users accurately)
-- **Start Web (dev):** from repo root, venv active → `kazma serve` or uvicorn factory on `127.0.0.1` (default port often 9090 CLI / 8000 Docker). Set `KAZMA_SECRET` for non-loopback.
+- **Start Web (dev):** from repo root, venv active → `kazma serve` or uvicorn factory on `127.0.0.1`, port `KAZMA_PORT` (default {DEFAULT_PORT}; chosen at install, changed with `kazma setup port N`; 8000 inside the Docker image). Set `KAZMA_SECRET` for non-loopback.
 - **Reset conversation:** `/reset` (history only; memory DB not wiped).
 - **Same season, any mouth:** `/sessions` lists every conversation (Web + Telegram + Discord + Slack). `/session 2` continues that season on the current platform. Web sidebar is the same list; `/chat?s=<id>` opens one.
 - **Work in chat:** `/research deep <topic>` and `/swarm <task>` go through the same agent as a normal message (tools + HITL). `/swarm status` stays instant.

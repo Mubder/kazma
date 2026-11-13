@@ -87,7 +87,7 @@ scale), `KAZMA_TEST_REAL_SCANS_MANIFEST` (real-scan measurements).
 | Variable | Default | Prod required? | Purpose |
 |----------|---------|----------------|---------|
 | `KAZMA_HOST` | `127.0.0.1` | Set deliberately | Bind address. Non-loopback **requires** `KAZMA_SECRET`. |
-| `KAZMA_PORT` / serve arg | `9090` | No | HTTP port: `serve.py` (what the guard runs; it ignored the variable until 2026-11) and `kazma serve [port]`. Docker images may differ — check compose. |
+| `KAZMA_PORT` / serve arg | `9090` | No | Kazma's page port, for the server (`serve.py`, `kazma serve [port]`, `kazma-web`), its guard and every `kazma` command: the shell's value, else the install's `.env`. `kazma setup install` asks for it on a first install (`--port N`, `setup.cmd -Port N`, `setup.sh --port N`) and writes it to `.env`; `kazma setup port N` changes it later and reloads Kazma when idle. A port below 1024, one of Kazma's own services' (5432, 2376, 8088, 7474, 7687), the guard's broker range 20000-29999 or a range Windows reserves is refused. Inside the Docker image Kazma listens on 8000. |
 | `KAZMA_SECRET` | generated on loopback | **Yes** on public bind | Auth shared secret / session material. Known-bad default **refused**. |
 | `KAZMA_PRODUCTION` | unset | **Yes** for prod | Enables vault-required, workspace root, code_exec policy, YOLO hard-block, etc. |
 | `KAZMA_PUBLIC_URL` | unset | Recommended behind proxy | Public origin for OAuth/OIDC redirects. |
@@ -173,7 +173,7 @@ curl -s https://your.domain/api/auth/status
 | `KAZMA_REPLICA_ID` | hostname | Multi-replica | The value this node writes into the `kazma-replica` cookie. |
 | `KAZMA_SHARED_BREAKERS` | on in production / multi-user | Multi-replica | Keep swarm circuit-breaker state in the settings store (`swarm.breaker.<worker>`) so every replica sees a breaker another one opened. `1` / `0` force it either way. |
 | `KAZMA_SWARM_MAX_ACTIVE` | swarm `max_concurrent_tasks` (`10`) | No | How many swarm tasks may run at once; the next one is refused ("Swarm at capacity"). Pipelines paused at a checkpoint do not count. |
-| `KAZMA_MIGRATE_CHECK_PORT` | off | Migration | `1` makes `kazma migrate import` also refuse while something listens on `KAZMA_PORT` / `PORT` (default `9090`). The main check is the running server's heartbeat; the port probe is off by default because an unrelated dev server on that port would block every import. |
+| `KAZMA_MIGRATE_CHECK_PORT` | off | Migration | `1` makes `kazma migrate import` also refuse while something listens on Kazma's port (`KAZMA_PORT`, default `9090`). The main check is the running server's heartbeat; the port probe is off by default because an unrelated dev server on that port would block every import. |
 | `KAZMA_DB_BACKEND_SOURCE` | — | Not an input | Written, never read: `kazma migrate export` records the source database backend under this name in the bundle's `meta.env`. |
 | `KAZMA_PG_RESTORE_REHEARSAL` | unset (on with Postgres) | Optional | `0` turns OFF the weekly restore rehearsal (on by default since 2026-09-27), whatever the setting says; `1` turns it on over a setting of false. The rehearsal: the newest `pg_dump` is restored into a scratch database `kazma_restore_rehearsal_<epoch>` on the SAME server, checked (Kazma's tables present, `kazma_settings` not empty) and dropped. The user needs `CREATEDB`; without it the drill reports UNVERIFIED with the grant to add. Leftover scratch databases older than a day are removed by the next run; nothing else is ever created or dropped. |
 

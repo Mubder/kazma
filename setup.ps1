@@ -31,6 +31,7 @@
     .\setup.cmd
     .\setup.cmd -Mode full
     .\setup.cmd -Mode express -Yes
+    .\setup.cmd -Port 9191      # Kazma's page on another port (9090 by default)
     .\setup.cmd -Debug
 #>
 
@@ -42,6 +43,9 @@ param(
     [switch]$Debug,
     [string]$Mode = "",
     [switch]$Yes,
+    # Kazma's page port. Unset: a first install asks (Enter keeps 9090), and an
+    # install made before keeps its port. `kazma setup port N` changes it later.
+    [int]$Port = 0,
     [switch]$NoElevate
 )
 
@@ -268,6 +272,10 @@ Write-Host ""
 Write-Kazma "  This installs uv and a Python when they are missing, Kazma's packages, then" dim
 Write-Kazma "  asks how to install Kazma: Express, Full or Custom." dim
 
+if ($Port -and ($Port -lt 1024 -or $Port -gt 65535)) {
+    Write-Kazma "  -Port is a port from 1024 to 65535 (not '$Port')" fail
+    exit 2
+}
 if ($Mode -and @("express", "full", "custom") -notcontains $Mode.ToLower()) {
     Write-Kazma "  -Mode is express, full or custom (not '$Mode')" fail
     exit 2
@@ -290,6 +298,7 @@ if ($Interactive -and -not $IsAdmin -and -not $NoElevate -and $env:OS -eq "Windo
     $forward = @()
     if ($Mode) { $forward += "-Mode $Mode" }
     if ($Yes) { $forward += "-Yes" }
+    if ($Port) { $forward += "-Port $Port" }
     if ($Debug) { $forward += "-Debug" }
     $here = (Get-Location).Path -replace "'", "''"
     $self = $PSCommandPath -replace "'", "''"
@@ -518,6 +527,7 @@ if (-not (Test-Path ".env") -and (Test-Path ".env.example")) {
 Log-Header "4. Install (Express, Full or Custom)"
 $installArgs = @("-m", "kazma_cli", "setup", "install")
 if ($Mode) { $installArgs += @("--mode", $Mode.ToLower()) }
+if ($Port) { $installArgs += @("--port", "$Port") }
 if ($Yes) { $installArgs += "-y" }
 elseif (-not $Interactive) { $installArgs += "--packages-only" }
 & $VenvPython @installArgs
@@ -561,7 +571,12 @@ else { Log-Header "5. Setup Stopped Short (run .\setup.cmd again to finish)" }
 Write-Host ""
 $ScriptsDir = Split-Path $VenvPython
 Log-Info "First visit:    the chat page asks for a provider key (or edit .env)"
-Log-Info "Kazma:          runs as a service when that part is installed (http://127.0.0.1:9090)"
+# The port the install kept (KAZMA_PORT in .env); 9090 when none is set.
+$KazmaPort = "9090"
+$PortLine = Select-String -Path ".env" -Pattern '^\s*KAZMA_PORT\s*=\s*(\d+)' -ErrorAction SilentlyContinue | Select-Object -Last 1
+if ($PortLine) { $KazmaPort = $PortLine.Matches[0].Groups[1].Value }
+Log-Info "Kazma:          runs as a service when that part is installed (http://127.0.0.1:$KazmaPort)"
+Log-Info "Port:           $VenvPython -m kazma_cli setup port <N> changes it"
 Log-Info "Without it:     & '$(Join-Path $ScriptsDir 'kazma.exe')' serve"
 Log-Info "Run TUI:        & '$(Join-Path $ScriptsDir 'kazma-tui.exe')'"
 Log-Info "Run tests:      $VenvPython scripts\fast_test.py"

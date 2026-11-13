@@ -4463,6 +4463,43 @@ kept; an older Express record gaining the parts; a running Kazma reloaded),
 `tests/test_container_services.py` (every row against its compose file, a
 drifted row and an unpinned image as controls).
 
+**Kazma's port is chosen at install and asked for in one place** (the owner,
+2026-11-13; `kazma_core/server_port.py`, `kazma_cli/port_setup.py`). Before,
+9090 was written out in some twenty places, most reading the shell's
+`KAZMA_PORT` alone: a port kept in `.env` reached the server and not a
+`kazma` command from another shell, and the guard probed its first port until
+it was restarted.
+- **One answer**: `server_port.server_port` -- the shell's `KAZMA_PORT`, else
+  the install's `.env` files (`env_file_ladder(include_cwd=False)`, the most
+  specific last; one key read), else `DEFAULT_PORT` (9090). The CLI's clients,
+  `kazma serve`, `kazma-web`, the OAuth redirect addresses, the IDE note, the
+  importer and the local API ask it; the guard keeps a standard-library copy
+  (`install_port`, which now reads Kazma's home `.env` too), held equal on every
+  layout.
+- **`port_problem`** says why a port cannot be Kazma's: below 1024, one of
+  Kazma's own services (`KAZMA_SERVICE_PORTS`), the guard's broker range
+  (`BROKER_RANGE`; the broker also never takes Kazma's port), a range Windows
+  keeps (`netsh ... show excludedportrange`, read only), or another listener
+  (a bind and a connect). The port this install's Kazma holds is its own.
+- **The install** (`--port N`; `setup.ps1 -Port`, `setup.sh --port`): a first
+  install asks once after the mode (Enter keeps 9090), `-y` takes 9090 or the
+  first usable port after it (said), a port already set -- or an install from
+  before the record that answers on 9090 -- is kept and never asked; the choice
+  is written as `KAZMA_PORT` after the go-ahead. `--port` on an installed Kazma
+  moves it and reloads it through the guard when idle.
+- **`kazma setup port [N] [--check]`** shows it, checks a port, or keeps a new
+  one, reloads when idle, and names what still points at the old port
+  (`KAZMA_PUBLIC_URL`, a cloudflared configuration, sign-in redirect addresses,
+  bookmarks).
+- **The guard reads the port again before every start** (`Guard._follow_port`,
+  `guard.port_changed`), and a reload waits on the address the guard probes now
+  (`_recorded_health`).
+- `ui.port` and `ui.host` in kazma.yaml were read by nothing and are retired.
+Gates: `tests/test_server_port.py` (the two copies on every layout, each refusal,
+the install and the command, the guard following the port; no product code
+writing 9090 outside the two definitions, a planted one as the control; the
+install without its port step as the control).
+
 **Windows setup starts from `setup.cmd`** (the clean drill VM, 2026-11-07):
 a Windows client's PowerShell execution policy is Restricted until someone
 changes it, so the README's `.\setup.ps1` was refused before its first line

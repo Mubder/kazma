@@ -526,7 +526,7 @@
 
         async copyTokenCurl() {
             if (!this.lastCreatedToken) return;
-            const origin = window.location.origin || 'http://127.0.0.1:9090';
+            const origin = window.location.origin;
             const cmd =
                 'curl -s -H "Authorization: Bearer ' + this.lastCreatedToken + '" \\\n  ' +
                 origin + '/api/memory/v2/health';

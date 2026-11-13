@@ -13,18 +13,25 @@ if [[ "${DEBUG:-0}" == "1" ]]; then
     set -x
 fi
 
-# Options: --mode express|full|custom, -y/--yes (install without the question).
+# Options: --mode express|full|custom, -y/--yes (install without the question),
+# --port N (Kazma's page port; a first install asks, Enter keeps 9090).
 MODE=""
 YES=0
+PORT=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --mode) MODE="${2:-}"; shift 2 ;;
         --mode=*) MODE="${1#*=}"; shift ;;
         -y|--yes) YES=1; shift ;;
-        *) echo "unknown option: $1 (use --mode express|full|custom, -y)"; exit 2 ;;
+        --port) PORT="${2:-}"; shift 2 ;;
+        --port=*) PORT="${1#*=}"; shift ;;
+        *) echo "unknown option: $1 (use --mode express|full|custom, -y, --port N)"; exit 2 ;;
     esac
 done
 case "$MODE" in ""|express|full|custom) ;; *) echo "--mode is express, full or custom (not '$MODE')"; exit 2 ;; esac
+if [[ -n "$PORT" ]] && { [[ ! "$PORT" =~ ^[0-9]+$ ]] || (( PORT < 1024 || PORT > 65535 )); }; then
+    echo "--port is a port from 1024 to 65535 (not '$PORT')"; exit 2
+fi
 
 # Kazma's colours, readable on a light terminal and a dark one: its royal blue
 # (#3b82f6, the web app's identity colour) and darker green, amber and red
@@ -392,6 +399,7 @@ fi
 log_header "4. Install (Express, Full or Custom)"
 INSTALL_ARGS=(-m kazma_cli setup install)
 [[ -n "$MODE" ]] && INSTALL_ARGS+=(--mode "$MODE")
+[[ -n "$PORT" ]] && INSTALL_ARGS+=(--port "$PORT")
 if [[ "$YES" == "1" ]]; then
     INSTALL_ARGS+=(-y)
 elif [[ ! -t 0 ]]; then
@@ -435,7 +443,10 @@ else
 fi
 echo ""
 log_info "First visit:    the chat page asks for a provider key (or edit .env)"
-log_info "Run Web UI:     .venv/bin/kazma serve          # http://127.0.0.1:9090"
+# The port the install kept (KAZMA_PORT in .env); 9090 when none is set.
+KAZMA_PORT_SHOWN="$(grep -E '^[[:space:]]*KAZMA_PORT[[:space:]]*=[[:space:]]*[0-9]+' .env 2>/dev/null | tail -n 1 | sed -E 's/[^0-9]*([0-9]+).*/\1/' || true)"
+log_info "Run Web UI:     .venv/bin/kazma serve          # http://127.0.0.1:${KAZMA_PORT_SHOWN:-9090}"
+log_info "Port:           .venv/bin/python -m kazma_cli setup port <N> changes it"
 log_info "Run TUI:        .venv/bin/kazma-tui"
 log_info "Run tests:      .venv/bin/python scripts/fast_test.py"
 log_info "Parts:          .venv/bin/python -m kazma_cli setup install --list"

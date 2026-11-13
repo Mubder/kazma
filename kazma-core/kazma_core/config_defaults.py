@@ -314,6 +314,23 @@ RETIRED_DEFAULTS: tuple[RetiredDefault, ...] = (
             "garbled tool sentence (functional audit FA-121)"
         ),
     ),
+    RetiredDefault(
+        key="ui.port",
+        removed=True,
+        old=(9090,),
+        since="2026-11-13",
+        why=(
+            "read by nothing: Kazma's port is KAZMA_PORT (kazma_core.server_port), chosen at "
+            "install and changed with kazma setup port; a ui.port edited here changed nothing"
+        ),
+    ),
+    RetiredDefault(
+        key="ui.host",
+        removed=True,
+        old=("127.0.0.1",),
+        since="2026-11-13",
+        why="read by nothing: the address Kazma binds is KAZMA_HOST (serve.py, boot_guard)",
+    ),
 )
 
 #: Settings keys whose new shipped value applies to new installs only: key

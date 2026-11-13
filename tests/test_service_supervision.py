@@ -324,10 +324,16 @@ def test_every_platform_runs_the_same_guard():
         assert "kazma_guard.py" in unit
 
 
-def test_docker_notes_call_out_the_missing_healthcheck():
+def test_docker_notes_name_the_healthcheck_on_the_container_s_port():
+    """The compose file has had a healthcheck since; the notes said it had
+    none and showed one probing 9090 inside a container that listens on 8000
+    (found 2026-11-13 by the gate against written-out ports)."""
     notes = installer.docker_notes()
     assert "healthcheck" in notes.lower()
     assert "/health/ready" in notes
+    assert "8000" in notes and "9090" not in notes
+    compose = (Path(__file__).resolve().parents[1] / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "healthcheck:" in compose and "localhost:8000/health/ready" in compose
 
 
 def test_wsl_requires_both_layers():

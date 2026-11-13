@@ -50,8 +50,9 @@ def public_base_url(request_base: str | None = None) -> str:
         return env
     if request_base:
         return str(request_base).rstrip("/")
-    port = (os.environ.get("KAZMA_PORT") or "9090").strip()
-    return f"http://127.0.0.1:{port}"
+    from kazma_core.server_port import local_url
+
+    return local_url()
 
 
 def authorize_redirect(url: str, params: dict[str, str]) -> str:

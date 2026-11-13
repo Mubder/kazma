@@ -191,8 +191,9 @@ Docker Desktop starts only when someone signs in, so after an unattended
 restart (a Windows update, a power cut) its containers wait; Kazma's engine
 does not. When Windows shuts down or restarts, the `KazmaEngineShutdown` service stops the engine's
 containers cleanly first (each gets its own stop time, up to two minutes in all), so nothing they just
-wrote is lost. An install with no container part (a Custom one without them, or a computer that cannot
-run containers) installs no engine. On
+wrote is lost. Express installs it on Windows and Linux (private search and the memory graph run on
+it); on macOS Express installs no container part, and an install with no container part (a Custom
+one without them, or a computer that cannot run containers) installs no engine. On
 Windows `kazma setup engine` installs, repairs or checks it on its own
 (`--check`, `--dry-run`, `-y`; `--remove` takes it away, refused while
 another project's containers live in it), and Settings → System chooses which
@@ -329,32 +330,19 @@ OPENAI_API_KEY=sk-...
 
 ### Check `kazma.yaml`
 
-Open `kazma.yaml` and confirm:
+`kazma.yaml` holds the shipped defaults; what you change in Settings is kept in
+Kazma's settings store and wins over it. The two keys worth a look first:
 
 ```yaml
 agent:
   name: kazma
-  language: ar        # 'ar' enables RTL + Arabic UI; 'en' for English
-  rtl: true
-
-models:
-  default: gpt-4o-mini
-  router: kazma       # Kazma's own router — not an import of LiteLLM
-  fallback: gpt-4o-mini
-
-llm:
-  base_url: https://api.openai.com/v1
-  model: gpt-4o-mini
-  max_tokens: 4096
-  temperature: 0.7
-  timeout: 60.0
-  input_cost_per_1m: 0.15
-  output_cost_per_1m: 0.6
-
-ui:
-  host: 127.0.0.1
-  port: 9090
+  language: en        # 'ar' for the Arabic interface (right to left)
+  rtl: false
 ```
+
+The model is chosen in the setup guide (`/setup`) or Settings → Providers, not
+here. Kazma's port is `KAZMA_PORT` in `.env` (9090 unless you chose another at
+install; `kazma setup port N` changes it).
 
 The complete key-by-key reference is in [Configuration](configuration).
 
@@ -369,9 +357,15 @@ already running and setup opened the browser on it. `kazma serve` is for an
 install without the service: Path B, or Custom with the service left out.
 
 ```bash
-kazma serve              # default host 127.0.0.1, port 9090
-kazma serve 9091         # if 9090 is taken (common on Windows + WSL/Docker)
+kazma serve              # host 127.0.0.1, port KAZMA_PORT (9090 unless you chose another)
+kazma serve 9091         # this once, on another port
+kazma setup port 9191    # for good: written to .env, Kazma reloaded when idle
 ```
+
+The install asks for the port on a first install (Enter keeps 9090), or takes
+it from `--port N` (`setup.cmd -Port N`, `setup.sh --port N`). It refuses a
+port below 1024, one Kazma's own services use, the guard's range 20000-29999,
+a range Windows reserves, or one another program listens on.
 
 On a watched host (Scheduled Task / systemd / launchd), pick up a `git pull` with the guard — do not kill `python`/`uvicorn` by hand:
 

@@ -286,6 +286,9 @@ class Box:
         (self.root / "deploy" / "document-worker").mkdir(parents=True)
         self.home = tmp_path
         self.house_font = _BoxFont()
+        #: Ports another program listens on (the install's port check reads
+        #: these, never this computer's real ports).
+        self.busy_ports: set[int] = set()
         # Kazma's own container engine (Windows): what of it is missing, the
         # steps setup ran, and what its preflight finds.
         self.engine_missing = ["distro", "docker", "cli", "context", "task", "shutdown"]
@@ -314,6 +317,13 @@ class Box:
         if action == "engine:cli":
             self.docker = True
         return True, "done"
+
+    def port_problem(self, port, *, current=None):
+        from kazma_core.server_port import port_problem
+
+        return port_problem(port, current=current, ranges=[],
+                            in_use=lambda n, host: "another program already listens on it" if n in self.busy_ports
+                            else None)
 
     def which(self, name):
         found = {"tesseract": self.langs is not None, "clamscan": self.clam, "freshclam": self.clam,
@@ -421,7 +431,7 @@ class Box:
 
 def _options(**kw) -> argparse.Namespace:
     base = dict(mode=None, with_=[], without=[], yes=False, check=False, dry_run=False, list=False,
-                packages_only=False, no_browser=False, docker="kazma")
+                packages_only=False, no_browser=False, docker="kazma", port=None)
     base.update(kw)
     return argparse.Namespace(**base)
 
@@ -478,7 +488,7 @@ def _machine(box: Box, *, answers=(), interactive=True, admin=True, online=True,
                       reachable=lambda host: online, is_admin=lambda: admin, interactive=lambda: interactive,
                       platform=WINDOWS, finders=box.finders(), root=box.root, python="py",
                       log_path=box.home / "install.log", record_path=box.home / "setup_record.json",
-                      env_path=box.home / ".env")
+                      env_path=box.home / ".env", port_problem=box.port_problem)
     machine.asked, machine.sleeps = asked, sleeps
     return machine
 
@@ -494,10 +504,11 @@ def test_express_installs_the_engine_searxng_and_neo4j_and_a_second_run_does_not
     Kazma is pointed at it."""
     from kazma_cli.install import install
 
-    machine = _machine(box, answers=["", ""])  # Express (the default), then yes
+    machine = _machine(box, answers=["", "", ""])  # Express (the default), port 9090 (Enter), then yes
     assert install(_options(), machine) == 0
     out = capsys.readouterr().out
-    assert machine.asked == ["Choose 1, 2 or 3 [1]: ", "Install now? [Y/n] "]
+    assert machine.asked == ["Choose 1, 2 or 3 [1]: ", "Port for Kazma's page [9090]: ", "Install now? [Y/n] "]
+    assert "KAZMA_PORT=9090" in (box.home / ".env").read_text(encoding="utf-8")
     assert box.extras == set(ic.extras_for(ic.components_for("express", os_name="windows")))
     assert "neo4j" in box.extras
     assert _installs(box) == ["Microsoft.VCRedist.2015+.x64", "UB-Mannheim.TesseractOCR",
@@ -543,7 +554,7 @@ def test_control_without_the_runtime_meaning_search_and_neural_ocr_fail(box, cap
                 for c in ic.COMPONENTS)
     monkeypatch.setattr(ic, "COMPONENTS", old)
     monkeypatch.setattr(ic, "_BY_ID", {c.id: c for c in old})
-    machine = _machine(box, answers=["", ""])
+    machine = _machine(box, answers=["", "", ""])
     install(_options(), machine)
     assert "Microsoft.VCRedist.2015+.x64" not in _installs(box)
     assert not box.embedding_model and not box.models, "the model steps failed without the runtime"
@@ -552,7 +563,7 @@ def test_control_without_the_runtime_meaning_search_and_neural_ocr_fail(box, cap
 def test_problems_are_said_before_anything_is_done(box, capsys):
     from kazma_cli.install import install
 
-    machine = _machine(box, answers=["", "n"], online=False, free=2 * 2**30)
+    machine = _machine(box, answers=["", "", "n"], online=False, free=2 * 2**30)
     assert install(_options(), machine) == 1
     out = capsys.readouterr().out
     assert out.index("Problems found before anything was done") < out.index("steps to run")
@@ -809,7 +820,7 @@ def test_custom_is_a_checklist_and_a_rerun_keeps_the_choice(box, capsys):
 
     rag = 1 + ic.full_ids().index("meaning_search")
     browser = 1 + ic.full_ids().index("browser")
-    machine = _machine(box, answers=["3", f"{rag} {browser}", "", ""])
+    machine = _machine(box, answers=["3", f"{rag} {browser}", "", "", ""])
     assert install(_options(), machine) == 0
     assert "rag" not in box.extras and "web" in box.extras and box.chromium
     record = json.loads((box.home / "setup_record.json").read_text(encoding="utf-8"))["install"]
@@ -849,7 +860,7 @@ def test_an_install_shows_a_short_summary_and_logs_every_step(box, capsys):
     from kazma_cli.install import install
     from kazma_core.version import get_version
 
-    machine = _machine(box, answers=["", ""])
+    machine = _machine(box, answers=["", "", ""])
     assert install(_options(), machine) == 0
     out = capsys.readouterr().out
     first = out.splitlines()[0]
@@ -923,7 +934,7 @@ def test_colours_only_on_a_terminal_and_the_log_stays_plain(box, capsys, monkeyp
     painted = inst._paint("Kazma", "brand")
     assert painted == f"{ESC}[1;38;5;33mKazma{ESC}[0m"
     assert inst._paint("Kazma") == "Kazma"
-    inst.install(_options(), _machine(box, answers=["", ""]))
+    inst.install(_options(), _machine(box, answers=["", "", ""]))
     out = capsys.readouterr().out
     log = (box.home / "install.log").read_text(encoding="utf-8")
     assert ESC in out and ESC not in log

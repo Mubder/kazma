@@ -2952,7 +2952,9 @@ def main() -> None:
 
     import uvicorn
 
-    _default_port = int(_os3.environ.get("KAZMA_PORT", "9090") or "9090")
+    from kazma_core.server_port import server_port as _server_port
+
+    _default_port = _server_port()
     parser = argparse.ArgumentParser(description="Kazma Web UI")
     parser.add_argument(
         "--port", "-p", type=int, default=_default_port,

@@ -292,28 +292,12 @@ def docker_notes() -> str:
     return """\
 # Docker -- supervision notes
 #
-# docker-compose.yml already declares `restart: unless-stopped`, which
-# covers process exit. It does NOT cover "running but wedged", because no
-# HEALTHCHECK is declared -- so a hung server keeps its container alive and
-# Docker never intervenes.
-#
-# Add to the kazma service in docker-compose.yml:
-#
-#     healthcheck:
-#       test: ["CMD", "python", "-c",
-#              "import urllib.request,sys;
-#               sys.exit(0 if urllib.request.urlopen(
-#                 'http://127.0.0.1:9090/health/ready', timeout=5).status==200 else 1)"]
-#       interval: 30s
-#       timeout: 10s
-#       retries: 3
-#       start_period: 180s
-#
-# With a healthcheck present, an orchestrator (Swarm, Kubernetes, Compose
-# with a restart policy plus an external watchdog) can act on unhealthy.
-# Plain `docker compose up` marks the container unhealthy but will not
-# restart it on its own -- run kazma_guard.py as the container entrypoint if
-# you want health-gated restart inside a standalone container.
+# docker-compose.yml declares `restart: unless-stopped` (the process exits)
+# and a healthcheck on /health/ready, inside the container on its port 8000
+# (the host publishes it on HOST_PORT). Plain `docker compose up` marks a
+# wedged container unhealthy but does not restart it: an orchestrator
+# (Swarm, Kubernetes) acts on unhealthy, or run kazma_guard.py as the
+# container entrypoint for a health-gated restart in a standalone one.
 """
 
 

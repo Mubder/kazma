@@ -197,7 +197,9 @@ def _live_server_detected() -> tuple[bool, str]:
         import socket as _socket
 
         try:
-            port = int(_os.environ.get("KAZMA_PORT") or _os.environ.get("PORT") or 9090)
+            from kazma_core.server_port import server_port
+
+            port = server_port()
             with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as s:
                 s.settimeout(0.5)
                 if s.connect_ex(("127.0.0.1", port)) == 0:

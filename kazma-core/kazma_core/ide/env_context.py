@@ -269,13 +269,9 @@ def _build_env_context_sync(workspace_id: str | None = None) -> str:
         or os.environ.get("KAZMA_BASE_URL")
         or ""
     ).strip()
-    port_hint = (
-        os.environ.get("KAZMA_PORT")
-        or os.environ.get("PORT")
-        or "9090"
-    ).strip()
-    # Port is interpolated into a URL — keep only digits to prevent injection.
-    port_hint = "".join(ch for ch in port_hint if ch.isdigit()) or "9090"
+    from kazma_core.server_port import server_port
+
+    port_hint = str(server_port())  # a number: nothing to escape in the URL
 
     lines: list[str] = [
         "## You are Kazma (this process)",

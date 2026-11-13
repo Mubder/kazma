@@ -136,7 +136,9 @@ def main() -> None:
         sys.exit(_run_maintenance(sys.argv[2:]))
 
     elif cmd == "serve":
-        port = int(sys.argv[2]) if len(sys.argv) > 2 else 9090
+        from kazma_core.server_port import server_port
+
+        port = int(sys.argv[2]) if len(sys.argv) > 2 else server_port()
         _run_serve(port)
 
     elif cmd == "wizard":
@@ -187,7 +189,7 @@ def main() -> None:
         print("  setup      Set up what Kazma runs on (setup postgres: PostgreSQL 16 as an OS service)")
         print("  restore    Restore the database to a point in time (restore postgres --to TIME)")
         print("  maintenance  An update window: begin (pause the guard when idle), end (resume and check)")
-        print("  serve      Start the WebUI server (default port 9090)")
+        print("  serve      Start the WebUI server (on KAZMA_PORT; kazma setup port shows it)")
         print("  wizard     Start interactive skill installation wizard")
         print("  hub        Kazma Hub commands (search, install, list, etc.)")
         print("  agent-skills  Agent Skills (sign, list, verify)")
@@ -203,7 +205,7 @@ def main() -> None:
         print("  mcp        Serve Kazma's tools over MCP (stdio), HITL-gated")
         print("")
         print("Options:")
-        print("  serve [port]  Start server on specified port (default: 9090)")
+        print("  serve [port]  Start server on specified port (default: KAZMA_PORT, see kazma setup port)")
         print("  ask [prompt]  kazma ask \"fix the tests\"  |  kazma ask --plan --json")
 
     else:
@@ -372,8 +374,8 @@ def _run_serve(port: int) -> None:
                 f"  Try:  kazma serve {port + 1}\n"
                 "  On Windows, check WSL/Docker portproxy:\n"
                 "    netsh interface portproxy show all\n"
-                "  If 127.0.0.1:9090 forwards elsewhere, browsers get ERR_CONNECTION_RESET\n"
-                "  even when Kazma is not running — pick a free port (e.g. 9091).\n"
+                f"  If 127.0.0.1:{port} forwards elsewhere, browsers get ERR_CONNECTION_RESET\n"
+                "  even when Kazma is not running: choose another port with kazma setup port <N>.\n"
             )
             sys.exit(1)
         raise
@@ -783,7 +785,6 @@ def _run_update(args: list[str]) -> None:
 
 def _run_status() -> None:
     """Show real Kazma status: server health, gateway, swarm, and environment."""
-    import os
     import platform
 
     from kazma_cli.banner import _find_project_root, _get_version, show_banner
@@ -793,13 +794,9 @@ def _run_status() -> None:
     print()
 
     # --- Server / gateway / swarm health (best-effort) ---------------------
-    port = 9090
-    env_port = os.environ.get("KAZMA_PORT")
-    if env_port:
-        try:
-            port = int(env_port)
-        except ValueError:
-            logger.debug("Invalid KAZMA_PORT value: %s", env_port)
+    from kazma_core.server_port import server_port
+
+    port = server_port()
 
     server_running = False
     gateway_summary = "n/a"
@@ -851,7 +848,7 @@ def _run_status() -> None:
         print(f"  Swarm:     {swarm_count} worker(s) registered")
     else:
         print("  Server:    [!] not running")
-        print("  Start with: kazma serve" + (f" {port}" if env_port else ""))
+        print("  Start with: kazma serve")
     print("─" * 52)
 
     # --- Environment -------------------------------------------------------

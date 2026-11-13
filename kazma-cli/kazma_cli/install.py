@@ -44,6 +44,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from kazma_cli.port_setup import PortChoice, PortRefused, choose_for_install, keep, still_pointing_at
 from kazma_cli.setup import (
     _SYSTEM_ATTEMPTS,
     _SYSTEM_RETRY_WAIT_S,
@@ -142,6 +143,8 @@ def add_install_parser(sub) -> None:
     install.add_argument("--packages-only", action="store_true",
                          help="install Kazma's Python packages for the mode only; show the rest as the plan")
     install.add_argument("--no-browser", action="store_true", help="do not open the browser at the end")
+    install.add_argument("--port", type=int, metavar="N",
+                         help="the port Kazma's page listens on (a first install asks; Enter keeps the default)")
     install.add_argument("--docker", choices=("kazma", "desktop"), default="kazma",
                          help="Windows, when a container part is chosen: kazma (default: Kazma's own engine, "
                               "starts with Windows, no sign-in needed) or desktop (Docker Desktop, waits for a "
@@ -243,6 +246,8 @@ class Machine:
     is_admin: Callable[[], bool] | None = None
     interactive: Callable[[], bool] = _interactive
     platform: object | None = None
+    #: Why a port cannot be Kazma's, or None (``server_port.port_problem``).
+    port_problem: Callable[..., str | None] | None = None
     finders: dict = field(default_factory=dict)
     root: Path | None = None
     python: str = sys.executable
@@ -823,13 +828,12 @@ def _record(mode: str, chosen: list[str], found: dict[str, PartState], path: Pat
         pass
 
 
-def _kazma_url() -> str:
-    port = (os.environ.get("KAZMA_PORT") or "").strip()
-    if not port:
-        from kazma_cli.setup import _env_file_value
+def _kazma_url(env_path: Path | None = None) -> str:
+    """Kazma's page: the port this install keeps (the shell's ``KAZMA_PORT``,
+    else its ``.env``), else the server's default."""
+    from kazma_core.server_port import configured_port, local_url
 
-        port = (_env_file_value(_env_path(), "KAZMA_PORT") or "").strip()
-    return f"http://127.0.0.1:{port if port.isdigit() else '9090'}"
+    return local_url(port=configured_port([env_path or _env_path()]))
 
 
 def _project_root() -> Path | None:
@@ -1078,6 +1082,12 @@ def install(options, machine: Machine | None = None) -> int:
     except (KeyError, ValueError) as exc:
         say(f"Not a part of Kazma: {exc}. See: kazma setup install --list")
         return 2
+    env_path = machine.env_path or _env_path()
+    try:
+        port = _choose_port(options, recorded, machine, env_path, say)
+    except PortRefused as exc:
+        say(f"Port {options.port} cannot be Kazma's: {exc}.", "warn")
+        return 2
     # --check and --dry-run are for reading: every part's state, what each
     # part left out lacks, every step's command. An install shows a summary
     # and keeps all of that in its log.
@@ -1114,6 +1124,8 @@ def install(options, machine: Machine | None = None) -> int:
             return 1
         return 1 if pre.problems else 0
     if not plan:
+        if not options.dry_run:
+            _keep_port(port, env_path, found, machine, say, reload_now=True)
         return _nothing_to_do(mode, parts, found, pre, machine, options, say, without)
     show("The plan:")
     for number, item in enumerate(plan, 1):
@@ -1130,9 +1142,66 @@ def install(options, machine: Machine | None = None) -> int:
         return stop
     if options.packages_only:
         plan = [item for item in plan if item.step.title.startswith("install Kazma's packages")]
+    elif _keep_port(port, env_path, found, machine, say, reload_now=False) and not any(
+            "--reload" in (item.step.argv or ()) for item in plan):
+        # A running Kazma that moves is reloaded once no chat runs (a plan
+        # with a container service already reloads it).
+        plan.append(_reload_step(machine))
     not_done, restart_needed = _execute(plan, machine, platform, say, log.write)
     return _conclude(mode, parts, pre, machine, platform, options, say, not_done=not_done,
                      restart_needed=restart_needed, log_only=log.write, without=without)
+
+
+def _choose_port(options, recorded: dict, machine: Machine, env_path: Path, say) -> PortChoice:
+    """The port for this run (``port_setup.choose_for_install``). An install
+    made before keeps its port and is never asked: one setup recorded, one
+    whose guard ran (its state file, from before the record), and one where a
+    Kazma answers on 9090 -- never moved by a run that cannot tell it is
+    another install's (that one is given ``--port``)."""
+    from kazma_core.server_port import DEFAULT_PORT, local_url, port_problem
+
+    guard_ran = machine.root is not None and (machine.root / ".kazma" / "guard.state.json").is_file()
+    kazma_answers = machine.answers(local_url("/health/live", port=DEFAULT_PORT))
+    installed_before = bool(recorded.get("mode")) or guard_ran or kazma_answers
+    if kazma_answers and not (recorded.get("mode") or guard_ran) and getattr(options, "port", None) is None:
+        say(f"A Kazma already answers on port {DEFAULT_PORT}: this install keeps that port. To run a "
+            "second Kazma beside it, run setup again with --port N.", "warn")
+    reading = options.check or options.dry_run
+    return choose_for_install(
+        getattr(options, "port", None), env_path, installed_before=installed_before,
+        interactive=not (options.yes or reading or options.packages_only) and machine.interactive(),
+        ask=lambda question: _ask(machine.ask, question), say=say,
+        problem=machine.port_problem or port_problem)
+
+
+def _reload_step(machine: Machine) -> PlannedStep:
+    from kazma_core.postgres_service import Step
+
+    root = machine.root or Path(".")
+    return PlannedStep("service", Step(
+        "reload Kazma on its new port (when no chat is running)",
+        (machine.python, str(root / "scripts" / "service" / "kazma_guard.py"), "--reload", "--when-idle")))
+
+
+def _keep_port(choice: PortChoice, env_path: Path, found: dict[str, PartState], machine: Machine, say, *,
+               reload_now: bool) -> bool:
+    """Write the chosen port into the install's ``.env`` when it is new or
+    changed; True when a running Kazma moves and must be reloaded (done here
+    when *reload_now*)."""
+    if not choice.needs_writing:
+        return False
+    keep(choice.port, env_path)
+    say(f"Kazma's page: http://127.0.0.1:{choice.port} (KAZMA_PORT={choice.port} in {env_path.name})")
+    if not choice.moves:
+        return False
+    for note in still_pointing_at(choice.previous or 0, choice.port):
+        say(f"  - {note}")
+    running = bool(found.get("service", PartState(False, "")).ok) and machine.root is not None
+    if running and reload_now:
+        item = _reload_step(machine)
+        ok, detail = _run_step(item.step, [], run=machine.run, log=None)
+        say("Kazma reloaded on its new port." if ok else f"Reload Kazma to move it: {detail}")
+    return running and not reload_now
 
 
 def _header(platform) -> str:
@@ -1242,7 +1311,7 @@ def _installed_anyway(step, platform, machine: Machine, say) -> bool:
 def _finish(parts, found: dict[str, PartState], machine: Machine, options, say) -> None:
     """Point the owner at Kazma: wait for it and open the browser when the
     service runs it, else say how to start it."""
-    url = _kazma_url()
+    url = _kazma_url(machine.env_path)
     service = next((p for p in parts if p.id == "service"), None)
     if service is None or not found.get("service", PartState(False, "")).ok:
         say(f"Start Kazma with: {machine.python} -m kazma_cli serve -- then open {url}")

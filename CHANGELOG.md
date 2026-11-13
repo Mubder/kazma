@@ -1,5 +1,30 @@
 # CHANGELOG
 
+## Choose Kazma's port at install (2026-11-13)
+
+- A first install asks which port Kazma's page uses; Enter keeps 9090.
+  `kazma setup install --port N` (`setup.cmd -Port N`, `setup.sh --port N`)
+  sets it with no question, and with `-y` an install takes 9090, or the next
+  free port when 9090 is taken, and says so.
+- `kazma setup port` shows the port; `kazma setup port N` changes it, reloads
+  Kazma once no chat is running, and names what still points at the old port
+  (`KAZMA_PUBLIC_URL`, a Cloudflare tunnel, sign-in redirect addresses,
+  bookmarks). `--check` only says whether a port can be used.
+- A port is refused below 1024, when one of Kazma's own services uses it
+  (Postgres, SearXNG, Neo4j, the container engine), in the guard's range
+  20000-29999, in a range Windows reserves, or when another program listens
+  on it.
+- The server, its guard and every `kazma` command read the port from one
+  place: the shell's `KAZMA_PORT`, else the install's `.env`. Before, most of
+  them read the shell alone and fell back to 9090, so a port set in `.env`
+  reached the server but not `kazma gateway`, `kazma maintenance` or a sign-in
+  redirect address. The guard now reads the port again before each start, so
+  a changed port needs no guard restart.
+- `ui.port` and `ui.host` in kazma.yaml are gone: nothing read them.
+- The Docker supervision notes (`install_service.py --print --platform docker`) said the
+  compose file had no health check and showed one probing the wrong port; they
+  describe the one it has.
+
 ## Kazma's own container engine stops cleanly when Windows shuts down (2026-11-13)
 
 - Measured on a clean Windows VM with nobody signed in: when Windows

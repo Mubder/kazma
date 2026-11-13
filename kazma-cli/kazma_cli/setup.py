@@ -315,9 +315,15 @@ def run(args: list[str]) -> int:
                         help="move Kazma's containers from Docker Desktop to it (Windows): Kazma held while idle, "
                              "the old containers stopped and kept")
     from kazma_cli.install import add_install_parser
+    from kazma_cli.port_setup import add_port_parser
 
     add_install_parser(sub)
+    add_port_parser(sub)
     options = parser.parse_args(args)
+    if options.what == "port":
+        from kazma_cli import port_setup
+
+        return port_setup.run(options)
     if options.what == "system":
         return _setup_system(options)
     if options.what == "engine":

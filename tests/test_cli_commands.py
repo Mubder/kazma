@@ -97,8 +97,10 @@ class TestGatewayArgParsing:
             assert resolve_port() == 9090
 
     def test_resolve_base_url(self) -> None:
-        assert resolve_base_url(8000) == "http://localhost:8000"
-        assert resolve_base_url(9000) == "http://localhost:9000"
+        # 127.0.0.1, what Kazma binds: on Windows "localhost" tries ::1 first,
+        # and a refused connection there costs about 2 s.
+        assert resolve_base_url(8000) == "http://127.0.0.1:8000"
+        assert resolve_base_url(9000) == "http://127.0.0.1:9000"
 
 
 # ---------------------------------------------------------------------------

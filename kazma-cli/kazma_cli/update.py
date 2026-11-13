@@ -144,14 +144,10 @@ _CANONICAL_REMOTE_MARKERS = ("github.com/mubder/kazma",)
 
 
 def _resolve_server_port() -> int:
-    """Resolve the port ``kazma serve`` listens on (KAZMA_PORT or 9090)."""
-    env_port = os.environ.get("KAZMA_PORT")
-    if env_port:
-        try:
-            return int(env_port)
-        except ValueError:
-            pass
-    return 9090
+    """The port Kazma listens on (``kazma_core.server_port``)."""
+    from kazma_core.server_port import server_port
+
+    return server_port()
 
 
 def _origin_remote_url(cwd: str) -> str:
@@ -1599,9 +1595,10 @@ def _postflight_ok(cwd: str) -> bool:
     return ok
 
 
-def _is_server_running(port: int = 9090) -> bool:
+def _is_server_running(port: int | None = None) -> bool:
     """Check if the Kazma server is running by probing the port."""
     import socket
+    port = port or _resolve_server_port()
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(0.5)

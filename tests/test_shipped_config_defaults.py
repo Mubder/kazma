@@ -64,16 +64,16 @@ def test_kazma_yaml_matches_its_snapshot():
 def test_an_undeclared_changed_default_is_refused(monkeypatch):
     """Negative control: a change the lists do not declare fails; either
     declaration passes it."""
-    changed = {"ui.port": (9090, 9191)}
-    assert shipped_defaults.undeclared(changed) == ["ui.port"]
+    changed = {"ui.title": ("Kazma Dashboard", "Other")}
+    assert shipped_defaults.undeclared(changed) == ["ui.title"]
 
     monkeypatch.setattr(shipped_defaults, "RETIRED_DEFAULTS", (
-        RetiredDefault(key="ui.port", old=(9090,), since="2026-09-29", why="test"),
+        RetiredDefault(key="ui.title", old=("Kazma Dashboard",), since="2026-09-29", why="test"),
     ))
     assert shipped_defaults.undeclared(changed) == []
 
     monkeypatch.setattr(shipped_defaults, "RETIRED_DEFAULTS", ())
-    monkeypatch.setattr(shipped_defaults, "NEW_INSTALLS_ONLY", {"ui.port": "test"})
+    monkeypatch.setattr(shipped_defaults, "NEW_INSTALLS_ONLY", {"ui.title": "test"})
     assert shipped_defaults.undeclared(changed) == []
 
 

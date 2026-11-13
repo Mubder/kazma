@@ -740,7 +740,9 @@ def print_help() -> None:
     console.print("                    Show or reset circuit breakers")
     console.print()
     console.print("Options:")
-    console.print("  --port N          Server port (default: 9090, or KAZMA_PORT env var)")
+    from kazma_core.server_port import DEFAULT_PORT
+
+    console.print(f"  --port N          Server port (default: KAZMA_PORT, else {DEFAULT_PORT})")
 
 
 # ---------------------------------------------------------------------------

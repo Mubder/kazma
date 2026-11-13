@@ -33,7 +33,9 @@ def _port() -> int:
     -- the one the guard runs -- bound 9090 whatever it said (roadmap theme 2,
     2026-11: the reload drill could not run a second server beside a live one).
     """
-    raw = (os.environ.get("KAZMA_PORT") or "").strip() or "9090"
+    from kazma_core.server_port import DEFAULT_PORT
+
+    raw = (os.environ.get("KAZMA_PORT") or "").strip() or str(DEFAULT_PORT)
     try:
         port = int(raw)
     except ValueError:

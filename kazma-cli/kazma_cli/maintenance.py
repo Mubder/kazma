@@ -26,7 +26,13 @@ import time
 import urllib.error
 import urllib.request
 
-HEALTH_DEEP = "http://127.0.0.1:9090/health/deep"
+
+def _health_deep() -> str:
+    """Kazma's deep health check, on the port this install uses."""
+    from kazma_core.server_port import local_url
+
+    return local_url("/health/deep")
+
 END_WAIT_S = 300.0
 
 
@@ -39,7 +45,8 @@ def _guard(*args: str, timeout: float = 1200) -> tuple[int, str]:
     return done.returncode, ((done.stdout or "") + (done.stderr or "")).strip()
 
 
-def _deep_ok(url: str = HEALTH_DEEP) -> bool:
+def _deep_ok(url: str | None = None) -> bool:
+    url = url or _health_deep()
     try:
         with urllib.request.urlopen(url, timeout=30) as resp:  # noqa: S310 -- loopback, fixed scheme
             return resp.status == 200
