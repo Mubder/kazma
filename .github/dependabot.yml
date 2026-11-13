@@ -52,3 +52,19 @@ updates:
     labels:
       - "dependencies"
       - "docker"
+
+  # The images Kazma's compose files run (2026-11-13): SearXNG and Neo4j are
+  # pinned by version and digest (tests/test_container_services.py), so a new
+  # one reaches an install only as a reviewed pull request.
+  - package-ecosystem: "docker-compose"
+    directories:
+      - "/"
+      - "/deploy"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(docker)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "docker"

@@ -182,9 +182,9 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_MISSION_RECURSION` | (none) | `kazma_core.agent.long_task` | yes |
 | `KAZMA_MODEL` | `""` | `kazma_core.model_registry`, `kazma_core.web_acquire.research_pipeline_job`, `kazma_ui.app` | yes |
 | `KAZMA_MULTI_USER` | (none) | `kazma_core.security.platform_rbac`, `kazma_ui.auth` | yes |
-| `KAZMA_NEO4J_DEFAULT` | (none) | `kazma_core.guard_dependencies`, `kazma_core.memory.backends` | yes |
-| `KAZMA_NEO4J_PASSWORD` | (none) | `kazma_core.memory.backends` | yes |
-| `KAZMA_NEO4J_URL` | (none) | `kazma_core.guard_dependencies`, `kazma_core.memory.backends` | yes |
+| `KAZMA_NEO4J_DEFAULT` | (none) | `kazma_core.container_services`, `kazma_core.guard_dependencies`, `kazma_core.memory.backends` | yes |
+| `KAZMA_NEO4J_PASSWORD` | (none) | `kazma_core.container_services`, `kazma_core.memory.backends` | yes |
+| `KAZMA_NEO4J_URL` | (none) | `kazma_core.container_services`, `kazma_core.guard_dependencies`, `kazma_core.memory.backends` | yes |
 | `KAZMA_NEO4J_USER` | (none) | `kazma_core.memory.backends` | yes |
 | `KAZMA_NO_TRUNCATE` | (none) | `kazma_core.agent.graph_helpers` | yes |
 | `KAZMA_OBSERVER_PAIRING_TOKEN` | (none) | `kazma_cli.observer` | yes |
@@ -244,7 +244,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_RESEARCH_SYNTH_MAX_IN` | `48000` | `kazma_core.tools.research_synthesize`, `kazma_core.web_acquire.research_pipeline_job` | yes |
 | `KAZMA_RESTIC_PASSWORD` | `""` | `kazma_core.backup.restic_repo` | yes |
 | `KAZMA_RUNTIME_HA` | `"0"` | `kazma_core.runtime_ownership`, `kazma_core.stores.workspaces` | yes |
-| `KAZMA_SEARXNG_URL` | (none) | `kazma_cli.install`, `kazma_core.guard_dependencies`, `kazma_core.tools.research_readiness` +2 | yes |
+| `KAZMA_SEARXNG_URL` | (none) | `kazma_core.container_services`, `kazma_core.guard_dependencies`, `kazma_core.tools.research_readiness` +2 | yes |
 | `KAZMA_SECRET` | `""` | `kazma_cli.main`, `kazma_core.config_store`, `kazma_core.runtime.local_api` +4 | yes |
 | `KAZMA_SELF_IMPROVEMENT` | (none) | `kazma_core.skills.self_improvement` | yes |
 | `KAZMA_SEMANTIC_CACHE` | (none) | `kazma_ui.app` | yes |

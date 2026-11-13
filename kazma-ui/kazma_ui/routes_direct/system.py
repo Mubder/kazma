@@ -711,10 +711,10 @@ def register_system_routes(self: Any) -> None:
         # <part>`, which also installs the part's system pieces, and an extra
         # of a part left out of the recorded install is "not chosen", not
         # missing (kazma_core.install_components.install_overview).
-        from kazma_core.install_components import install_overview, parts_of_extra
+        from kazma_core.install_components import by_id, current_os, install_overview, parts_of_extra
         from kazma_core.postgres_service import read_record
 
-        install = install_overview(await asyncio.to_thread(read_record))
+        install = install_overview(await asyncio.to_thread(read_record), current_os())
         chosen_parts = {p["id"] for p in install["parts"] if p["chosen"]}
         for extra in extras_list:
             owners = parts_of_extra(str(extra.get("name") or ""))
@@ -781,7 +781,10 @@ def register_system_routes(self: Any) -> None:
             "db_backend": _db_backend,
             "db_url_set": bool(_db_url),
             "memory": memory_summary,
-            "install": {k: install[k] for k in ("mode", "at", "chosen", "total")},
+            "install": {**{k: install[k] for k in ("mode", "at", "chosen", "total")},
+                        # Parts Express gained after this install ran: added by
+                        # `kazma setup install`, never by `kazma update`.
+                        "new_in_express": [by_id(cid).title for cid in install["new_in_express"]]},
         }
     @self.app.post("/api/system/memory/backup")
     async def _create_memory_backup():

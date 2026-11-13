@@ -785,6 +785,13 @@
                 { mode: mode, date: when, chosen: inst.chosen });
         },
 
+        // The parts Express gained after this install ran (their titles, as
+        // the install names them), or '' -- `kazma setup install` adds them.
+        pkgNewInExpress() {
+            const parts = (this.pkgInstall && this.pkgInstall.new_in_express) || [];
+            return parts.length ? parts.join(', ') : '';
+        },
+
         get pkgMemoryLayerRows() {
             const layers = (this.pkgMemory && this.pkgMemory.layers) || {};
             const layerText = (k) => (typeof window.tOr === 'function' ? window.tOr(k, k) : k);

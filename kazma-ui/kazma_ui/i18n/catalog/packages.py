@@ -228,6 +228,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Installed as {mode} on {date}: {chosen} of {n} parts.",
     },
     "packages.not_chosen_badge": {"ar": "غير مختار", "en": "Not chosen"},
+    "packages.new_in_express": {
+        "ar": "صار نمط Express يشمل أيضًا، بعد هذا التثبيت:",
+        "en": "Express now also includes, since this install:",
+    },
+    "packages.new_in_express_run": {
+        "ar": "أضفها بالأمر",
+        "en": "Add them with",
+    },
     "packages.not_chosen_hint": {
         "ar": "تُرك خارج هذا التثبيت. لإضافته:",
         "en": "Left out of this install. To add it:",

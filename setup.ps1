@@ -508,9 +508,10 @@ if (-not (Test-Path ".env") -and (Test-Path ".env.example")) {
 
 # ── 4. Install: Express, Full or Custom ─────────────────────────────────────
 # One list of parts (kazma_core/install_components.py), three ways to take it:
-# Express (the default: everything that needs no Docker), Full (every part,
-# Docker and PostgreSQL among them) or Custom (a checklist; each part says
-# what Kazma lacks without it). It checks everything first, shows one plan,
+# Express (the default: the everyday parts, with private web search and the
+# memory graph on Kazma's container engine where this computer can run
+# containers), Full (every part, PostgreSQL among them) or Custom (a
+# checklist; each part says what Kazma lacks without it). It checks everything first, shows one plan,
 # asks once, installs, and records what it did: run setup again and it
 # continues where it stopped. Without a terminal it installs Kazma's own
 # packages and shows the rest as the plan (-Yes installs everything).
@@ -521,7 +522,13 @@ if ($Yes) { $installArgs += "-y" }
 elseif (-not $Interactive) { $installArgs += "--packages-only" }
 & $VenvPython @installArgs
 $installExit = $LASTEXITCODE
-if ($installExit -ne 0) {
+# 3: everything that could be done is done, and Windows must restart (WSL)
+# before the container parts (kazma_cli.install EXIT_RESTART).
+if ($installExit -eq 3) {
+    Log-Warn "Restart Windows, then run .\setup.cmd again: it finishes the container parts (WSL needs the restart)"
+    Log-Info "What happened is in .kazma\install.log"
+}
+elseif ($installExit -ne 0) {
     Log-Warn "Not everything was installed: run .\setup.cmd again to finish (it continues where it stopped)"
     Log-Info "What happened is in .kazma\install.log"
 }
@@ -549,6 +556,7 @@ if ($LASTEXITCODE -eq 0) {
 # parts were left out and setup still said "Setup Complete" and exited 0, so a
 # script that ran it could not tell.
 if ($installExit -eq 0) { Log-Header "5. Setup Complete" }
+elseif ($installExit -eq 3) { Log-Header "5. Restart Windows, then run .\setup.cmd again to finish" }
 else { Log-Header "5. Setup Stopped Short (run .\setup.cmd again to finish)" }
 Write-Host ""
 $ScriptsDir = Split-Path $VenvPython

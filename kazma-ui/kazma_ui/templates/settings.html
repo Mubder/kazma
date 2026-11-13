@@ -3059,6 +3059,7 @@
                 <h4 class="pkg-h4">{{ t('packages.optional_deps') }}</h4>
                 <p class="pkg-muted">{{ t('packages.optional_deps_hint') }}</p>
                 <p class="pkg-muted" id="pkg-install-line" x-show="pkgInstallLine()" x-text="pkgInstallLine()" x-cloak></p>
+                <p class="pkg-muted" id="pkg-new-in-express" x-show="pkgNewInExpress()" x-cloak>{{ t('packages.new_in_express') }} <bdi translate="no" x-text="pkgNewInExpress()"></bdi>. {{ t('packages.new_in_express_run') }} <code translate="no">kazma setup install</code></p>
             </div>
             <div x-show="pkgLoading" class="pkg-loading" x-cloak>{{ t('common.loading') }}</div>
             <template x-for="extra in pkgExtras" :key="extra.name">

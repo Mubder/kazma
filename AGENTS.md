@@ -4382,8 +4382,10 @@ The owner's three installs (2026-11-07, after the drill VM needed a dozen
 manual steps and met about ten fresh-install bugs one at a time). `COMPONENTS`
 is the one table: each part's extras, system dependencies (21b), the parts it
 `needs`, what it `gives` and what Kazma `lacks` without it, whether Express
-holds it. **Express** (the default) is the parts marked `express`: everything
-that needs no Docker. **Full** is the whole table (`full_ids`), never a list
+holds it. **Express** (the default) is the parts marked `express`, on the
+systems a part's `express_on` names (`express_ids(os_name)`,
+`components_for(..., os_name=)`; with no system named, only
+the parts in Express everywhere). **Full** is the whole table (`full_ids`), never a list
 kept by hand, so a part added joins Full the day it is added. **Custom** is a
 checklist from Express (`toggle`: on brings what a part needs, off takes what
 needs it). Every extra in pyproject.toml belongs to a part or is declared in
@@ -4413,8 +4415,53 @@ Gates: `tests/test_install_modes.py` (a fake Windows machine: Express end to
 end and a second run that does nothing, problems said first, Full where
 Docker cannot run, WSL before Docker, a failing part and what needs it, an
 administrator terminal, Custom kept on a re-run; every extra covered with a
-planted one as the control; Express needs no Docker; the quickstart's table
-equal to `COMPONENTS`).
+planted one as the control; Express never fails for want of Docker; the
+quickstart's table equal to `COMPONENTS`).
+
+**Private search and the memory graph install by default** (the owner,
+2026-11-13, reversing "Express stays container-free" of 2026-11-12, decided
+with Fable's review). `docker`, `private_search` and `graph_neo4j` are in
+Express on Windows and Linux (`express_on`); macOS Express stays
+container-free (Docker Desktop starts only at a sign-in there); the locked
+document worker stays in Full. They are `best_effort`: a part the computer
+cannot have (virtualization off, Docker already in another WSL distro, no
+compose definition on a wheel install) is said with what Kazma lacks
+(`_say_unavailable`) and the install still ends `EXIT_DONE`; a step that fails
+is still `EXIT_NOT_DONE`. Before, any blocked part ended every run "stopped
+short". Windows waiting for its WSL restart ends `EXIT_RESTART` (3), which
+setup.ps1/setup.sh say as "restart, then run setup again". A part left out by
+name is recorded (the install record's `without`) and a plain re-run keeps it out, so
+Express gaining a part never installs one the owner declined.
+- **Container services are one table** (`kazma_core/container_services.py`):
+  each row names the part, its compose file and service, the container, the
+  secrets setup generates into the install's `.env` before it starts (kept
+  when set; compose reads the same file with `--env-file`), what Kazma is told
+  to reach it (`kazma_env`, written into `.env`) and the address that answers
+  once it is ready. `build_plan` makes the same four steps for every row
+  (secret, `compose up`, point Kazma at it, wait for it) and `_check_parts`
+  judges every row the same way; an install whose Kazma already reaches the
+  service through its own settings (the SearXNG address setting, the memory
+  graph's Neo4j provider) is judged by them, so setup never starts a second copy.
+  With Kazma already running, the plan ends by asking the guard to reload it
+  when idle (`.env` is read at start). A new service is a row and a compose
+  definition. Neo4j runs from `deploy/docker-compose.neo4j.yml` (project
+  `kazma-graph`, `KAZMA_NEO4J_PASSWORD` required, heap and page cache bounded,
+  `KAZMA_NEO4J_HEAP` / `KAZMA_NEO4J_PAGECACHE`); Kazma uses it through
+  `KAZMA_NEO4J_URL` and `KAZMA_NEO4J_DEFAULT=1` (`memory.backends`, SQLite
+  stays the source of truth, Neo4j the dual-written copy).
+- **Every image a shipped compose file runs is pinned by version and digest**
+  (SearXNG, Neo4j, Postgres, nginx; a locally built image is the exception),
+  and Dependabot's `docker-compose` ecosystem proposes updates.
+- **Settings -> Packages names the parts Express gained** after an install
+  ran (`install_overview(..., os_name)` `new_in_express`, without the parts
+  left out by name) with `kazma setup install`; `kazma update` never installs
+  them (administrator rights, about 1 GB, a possible Windows restart).
+Gates: `tests/test_install_modes.py` (Express on Windows with the engine,
+SearXNG and Neo4j; virtualization off ends done, the same table without
+`best_effort` as the control; the WSL restart then a finishing run; `--without`
+kept; an older Express record gaining the parts; a running Kazma reloaded),
+`tests/test_container_services.py` (every row against its compose file, a
+drifted row and an unpinned image as controls).
 
 **Windows setup starts from `setup.cmd`** (the clean drill VM, 2026-11-07):
 a Windows client's PowerShell execution policy is Restricted until someone
@@ -10691,7 +10738,7 @@ the old code:
   - **SearXNG's secret key is generated by setup** (2026-11-11, the owner's
     decision; `security/searxng_secret.py`). `kazma setup install`'s private
     search part keeps a generated `SEARXNG_SECRET` in its `.env` before it
-    starts SearXNG (`ensure_searxng_secret`, through
+    starts SearXNG (`container_services.ensure_secret`, through
     `env_files.persist_generated_secret(path=)`: restricted before the value
     is written; an owner's value, in the file or the shell, is never
     replaced; the placeholder is not a value) and runs compose with
@@ -10747,10 +10794,11 @@ SERVICE (a tunnel) reach its published ports, and it is back 19 s after a
   restarts Docker inside the distro (a running keep-alive does not mean a
   running dockerd), and holds a keep-alive of its own when the task is
   missing or refused (`engine_task_missing`, `engine_task_denied`).
-- **Express stays container-free** (the owner's decision after the review):
-  setup installs Kazma's engine when a container part is chosen; Docker
-  Desktop only when the user picks it (`kazma setup install --docker
-  desktop`).
+- **Express holds the engine on Windows and Linux since 2026-11-13** (the
+  owner's request: private search and the Neo4j memory graph install by
+  default, §21c); it was container-free from 2026-11-12. Setup installs
+  Kazma's engine when a container part is chosen; Docker Desktop only when
+  the user picks it (`kazma setup install --docker desktop`).
 - **Setup installs it** (`kazma_core/container_engine_setup.py`, assets in
   `container_engine_assets/`): `check` names what is missing (wsl, distro,
   docker, cli, context, task), `install_steps` puts in only that, in order,

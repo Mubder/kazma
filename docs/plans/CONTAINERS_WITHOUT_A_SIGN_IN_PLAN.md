@@ -21,6 +21,15 @@ Written 2026-11-12. Stage 0 shipped the same day (commit 76aee4e8).
 | Postgres | an OS service (section 21 G) | an OS service | an OS service |
 | Containers (Full installs only) | Docker Desktop: **waits for a sign-in** | the `docker.io` / `moby-engine` service: starts at boot, but setup never gives Kazma's user access to its socket (found while writing this plan) | Docker Desktop: waits for a sign-in, as Kazma does |
 
+**Changed 2026-11-13** (the owner: "SearXNG should be installed by default
+with kazma install, as Kazma and Docker run as services"; Neo4j too, decided
+with Fable's review): Express on Windows and Linux now holds Kazma's engine,
+private search and the Neo4j memory graph, as best-effort parts (a computer
+that cannot run containers gets everything else and the install still ends
+as done); macOS Express stays container-free; the locked document worker stays
+a Full part. AGENTS.md section 21c. What follows describes the 2026-11-12
+state.
+
 Express installs (the default) use no container: private search, the
 document container and the container sandbox are Full parts
 (`install_components`: `docker`, `document_container`, `private_search`).
@@ -448,7 +457,9 @@ from it:
    missing or refused.
 5. **Express stays container-free** (the owner's decision after the review):
    the engine is installed when a container part is chosen; Docker Desktop
-   only when the user picks it.
+   only when the user picks it. *Reversed 2026-11-13 by the owner: Express on
+   Windows and Linux installs the engine with private search and Neo4j, best
+   effort (see the note at the top).*
 6. Still to build, from the review: a preflight for another Docker inside a
    WSL distro and for `.wslconfig` networking; Docker updates only through
    `kazma update` (never at a random hour); a dated Ubuntu image; a watch on

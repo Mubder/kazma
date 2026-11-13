@@ -318,8 +318,15 @@ Deep dive: [Knowledge Library](./knowledge-library.md).
 
 ### Operator setup
 
-1. Run Neo4j (e.g. `docker compose -f deploy/docker-compose.neo4j.yml up -d`).  
-2. Install the driver in Kazma's Python: the `neo4j` extra (`uv pip install -e ".[neo4j]"`, or Settings → Packages). Without it the graph stays in SQLite, and Kazma says so once at boot and Settings shows `driver_missing`.  
+`kazma setup install` does all of this on Windows and Linux (the Neo4j memory
+graph part, in Express and Full since 2026-11-13): it installs the driver,
+keeps a generated `KAZMA_NEO4J_PASSWORD` in the install's `.env`, starts Neo4j
+on Kazma's container engine (`deploy/docker-compose.neo4j.yml`, project
+`kazma-graph`) and points Kazma at it (`KAZMA_NEO4J_URL`,
+`KAZMA_NEO4J_DEFAULT=1`). By hand:
+
+1. Run Neo4j: `docker compose -f deploy/docker-compose.neo4j.yml --env-file .env -p kazma-graph up -d kazma-neo4j` (with `KAZMA_NEO4J_PASSWORD` set in `.env`).  
+2. Install the driver in Kazma's Python: the `neo4j` extra (`kazma setup install --with graph_neo4j`, or Settings → Packages). Without it the graph stays in SQLite, and Kazma says so once at boot and Settings shows `driver_missing`.  
 3. Settings → Memory → Graph store **Neo4j**, URL `bolt://localhost:7687`, password, **Save**.  
 4. **Test Neo4j** (masked `***` passwords do not overwrite the vault secret).  
 5. **Sync beliefs → Neo4j**.  

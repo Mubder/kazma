@@ -65,8 +65,8 @@ setup and installs nothing):
 
 | Install | What it is |
 |---|---|
-| **Express** (the default) | Everything that needs no Docker: the least Kazma can lack, in one run. |
-| **Full** | Every part, Docker, PostgreSQL and private search among them. Docker needs the CPU's virtualization; on Windows a restart may come in the middle. |
+| **Express** (the default) | The least Kazma can lack, in one run. On Windows and Linux it includes private web search (SearXNG) and the Neo4j memory graph, on Kazma's container engine (Windows: Docker in Kazma's own WSL distro, started at boot with nobody signed in). A computer that cannot run containers (virtualization off, Docker already in another WSL distro) gets everything else and is told what it lacks; the install still ends as done. On Windows a restart may come in the middle (WSL); setup then says so and the next run finishes. |
+| **Full** | Every part, PostgreSQL, the locked document worker and the browser tools among them. |
 | **Custom** | A checklist that starts from Express; each part says what Kazma lacks without it. |
 
 The parts, and what Kazma lacks without each (`kazma setup install --list`
@@ -90,12 +90,12 @@ prints the same list):
 | Browser tools (Playwright and Chromium) |  | yes | no browser tools; pages are read without running their JavaScript |
 | Docling (the hardest PDFs) |  | yes | a PDF the main readers cannot read gets no second local try |
 | PostgreSQL 16 as a service |  | yes | SQLite: a restore goes back to the last backup (every 6 hours) |
-| Docker |  | yes | no containers (documents parse in a limited process; no private search) |
+| Docker | Windows, Linux | yes | no containers (documents parse in a limited process; no private search) |
 | Locked document worker (a container per document) |  | yes | documents are read in a limited process on this machine (not qualified for hostile files) |
-| Private web search (SearXNG) |  | yes | web search uses public engines' pages directly (or Tavily with your key) |
+| Private web search (SearXNG) | Windows, Linux | yes | web search uses public engines' pages directly (or Tavily with your key) |
 | E2B cloud sandbox |  | yes | no E2B sandbox for python_exec |
 | Temporal (durable swarm steps) |  | yes | swarm runs are not resumed through Temporal |
-| Neo4j memory graph driver |  | yes | the memory graph stays in SQLite |
+| Neo4j memory graph | Windows, Linux | yes | the memory graph stays in SQLite only |
 | Kazma as a service (its guard) | yes | yes | you start Kazma yourself (kazma serve), and nothing restarts it |
 
 How a run goes:

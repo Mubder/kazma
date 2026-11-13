@@ -84,18 +84,23 @@ Includes isolation, KB toggles, backends, Neo4j Test/Sync, **and embedder** (no 
 | `tenant_mode` | shared / per_platform / per_user |
 | `KAZMA_MEMORY_ENFORCE_TENANT=1` | Scope every `/api/memory` route by the request tenant -- reads, counts, mutations, undo, hygiene, graph-clear (always on in production and multi-user; off = `default`) |
 
-## Optional Neo4j
+## Neo4j
+
+`kazma setup install` sets Neo4j up on Windows and Linux (Express and Full,
+since 2026-11-13): a generated password in the install's `.env`, Neo4j on
+Kazma's container engine, and Kazma pointed at it. By hand:
 
 ```bash
-export KAZMA_NEO4J_PASSWORD=YOUR_PASSWORD_HERE
-docker compose -f deploy/docker-compose.neo4j.yml up -d
+# KAZMA_NEO4J_PASSWORD=<a long random value> in .env, then:
+docker compose -f deploy/docker-compose.neo4j.yml --env-file .env -p kazma-graph up -d kazma-neo4j
 
 # Env install default (fail-open if server down):
 export KAZMA_NEO4J_DEFAULT=1
 ```
 
 Choose a strong password before starting Compose; an unset password refuses
-startup. The published HTTP and Bolt ports bind to loopback.
+startup. The published HTTP and Bolt ports bind to loopback. Its heap and page
+cache are 512 MB each (`KAZMA_NEO4J_HEAP`, `KAZMA_NEO4J_PAGECACHE` in `.env`).
 
 Or UI: Graph store **Neo4j** → Save → **Test Neo4j** → **Sync beliefs → Neo4j**.
 

@@ -7,8 +7,8 @@ compose falls back to it when ``SEARXNG_SECRET`` is unset, so a one-command
 never ran setup. The owner's decision (2026-11-11): setup generates one rather
 than asking the owner to.
 
-* :func:`ensure_searxng_secret` -- ``kazma setup install``'s step before it
-  starts SearXNG: keep ``SEARXNG_SECRET`` in the install's ``.env`` (the file
+* ``kazma setup install``'s step before it starts SearXNG
+  (``container_services.ensure_secret``, SearXNG's row): keep ``SEARXNG_SECRET`` in the install's ``.env`` (the file
   compose reads) when it holds none, through
   ``env_files.persist_generated_secret`` (the file restricted to this account
   before the value is written). A value already there -- the owner's, or one
@@ -23,12 +23,10 @@ than asking the owner to.
 
 from __future__ import annotations
 
-import os
-import secrets
 from pathlib import Path
 from typing import Any
 
-__all__ = ["PLACEHOLDER", "SECRET_VAR", "ensure_searxng_secret", "uses_placeholder"]
+__all__ = ["PLACEHOLDER", "SECRET_VAR", "uses_placeholder"]
 
 #: The placeholder settings.yml and docker-compose.yml ship.
 PLACEHOLDER = "change-me-in-production-use-long-random"
@@ -44,35 +42,6 @@ def _set(value: str | None) -> bool:
     """A real key: something other than empty or the placeholder."""
     text = (value or "").strip().strip('"').strip("'")
     return bool(text) and text != PLACEHOLDER
-
-
-def _file_value(path: Path, name: str) -> str | None:
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return None
-    found = None
-    for line in lines:
-        key, sep, value = line.partition("=")
-        if sep and not key.lstrip().startswith("#") and key.strip() == name:
-            found = value.strip()
-    return found
-
-
-def ensure_searxng_secret(env_path: Path) -> bool:
-    """Keep a generated ``SEARXNG_SECRET`` in *env_path* when none is set.
-
-    True when one was written. An owner's value -- in the file or in the
-    environment compose runs with -- or one written before is kept; only an
-    empty line or the placeholder is replaced. Raises ``OSError`` when the
-    file cannot be written.
-    """
-    if _set(os.environ.get(SECRET_VAR)) or _set(_file_value(env_path, SECRET_VAR)):
-        return False
-    from kazma_core.env_files import persist_generated_secret
-
-    persist_generated_secret(SECRET_VAR, secrets.token_hex(32), path=env_path)
-    return True
 
 
 def _settings_key(text: str) -> str | None:
