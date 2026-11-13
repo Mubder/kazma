@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import sys
 from collections.abc import Callable
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
@@ -317,11 +318,16 @@ current_browser_job: ContextVar[BrowserJob | None] = ContextVar("acquisition_bro
 
 
 def _connected(browser) -> bool:
-    from playwright.async_api import Error as BrowserError
-
+    """Whether Chromium still answers. Playwright raises its own ``Error``
+    from a closed connection. It is taken from the loaded module, never
+    imported here: a browser that is Playwright's means Playwright is loaded,
+    and the job's tests drive stand-in browsers where it is not installed
+    (CI's test job, 2026-11-13)."""
+    api = sys.modules.get("playwright.async_api")
+    closed = (api.Error,) if api is not None else ()
     try:
         return bool(browser.is_connected())
-    except BrowserError:
+    except closed:
         return False
 
 

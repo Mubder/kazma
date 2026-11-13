@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## The terminal app talks to its own install only (2026-11-13)
+
+- `kazma tui`, `kazma ask` and the other commands that talk to the running
+  server ask only the port Kazma is configured on (`KAZMA_PORT`, or the one
+  `kazma setup port` chose), then `KAZMA_BASE_URL` if set. They also tried
+  9090 and 8000, so with two installs on one machine a command could reach
+  the other one. Inside the Docker image `KAZMA_PORT` is 8000, the port the
+  server there listens on.
+- The test suite no longer sends requests to a Kazma running on the same
+  machine: the terminal app's tests polled the live install's port.
+
 ## A chat keeps the model picked for it (2026-11-13)
 
 - A chat whose model was picked by name (`provider:model`, the chat's model

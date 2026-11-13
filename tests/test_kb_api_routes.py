@@ -295,15 +295,23 @@ def test_no_route_touches_a_store_on_the_event_loop(kb):
     )
     assert len(calls) >= 16, calls
     started_jobs = []
+    waited = False
     for method, path in calls:
+        if method == "DELETE" and not waited:
+            # Background crawls record progress too -- and deleting lib1
+            # removes its crawls from the journal (crawl_jobs.forget_library),
+            # so they are waited for before the first delete. Waited after it,
+            # a crawl finishing late read back 404 (CI, 2026-11-13).
+            for job_id in started_jobs:
+                _wait_for_job(kb.client, job_id)
+            waited = True
         url = path.replace("{library_id}", "lib1").replace("{job_id}", "lib1:none")
         resp = kb.client.request(method, url, json=_BODIES.get((method, path)))
         # Every route answers; an unknown job is a 404, never a 500.
         assert resp.status_code < 500, (method, path, resp.text)
         if resp.json().get("job_id"):
             started_jobs.append(resp.json()["job_id"])
-    for job_id in started_jobs:  # background crawls record progress too
-        _wait_for_job(kb.client, job_id)
+    assert waited, "the walk no longer reaches a delete route"
     assert started_jobs, "the walk no longer starts a background crawl"
     assert kb.seen.on_loop == [], f"blocking store calls on the event loop: {sorted(set(kb.seen.on_loop))}"
 

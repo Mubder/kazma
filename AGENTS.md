@@ -11775,6 +11775,21 @@ sent. Gate: `tests/test_answer_quality_monitor.py`.
   test built loaded the model at boot) and the Hugging Face offline
   switches. Gate: `tests/test_egress_guard.py` (planted tests in a child
   pytest as the negative control).
+- **No test reaches the Kazma running on this machine** (2026-11-13). The
+  terminal app's tests mount the real app, and its polling went to
+  `127.0.0.1:9090`: the live install's log held 33-44 unauthenticated
+  requests a dozen times a day, a `PUT /api/settings/single` among them,
+  refused only because live asks for a sign-in. The local API asks only the
+  configured port (`runtime.local_api.candidate_api_bases`: `server_port`,
+  then `KAZMA_BASE_URL`; it also guessed 9090 and 8000, which on a machine
+  with two installs reached the other one; the Docker image sets
+  `KAZMA_PORT=8000` for commands run inside it). The root conftest gives the
+  suite a port nothing listens on, and the egress guard refuses a loopback
+  connection to a Kazma outside the run (`KAZMA_TEST_OUTSIDE_PORTS`: 9090
+  and the port the environment named before), unless the test bound that
+  port itself. Gates: `tests/test_suite_reaches_no_running_kazma.py`,
+  `tests/test_egress_guard.py` (a planted test as the negative control),
+  `tests/test_agent_turn.py`.
 - **Compile check (Python):** `& '.venv\Scripts\python.exe' -c "import py_compile; py_compile.compile(r'<file>', doraise=True); print('OK')"`
 - **Syntax check (JS):** `node --check "<file>"`
 - **Run tests (single file):** `& '.venv\Scripts\python.exe' -m pytest <path> -v`

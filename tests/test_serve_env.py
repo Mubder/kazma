@@ -34,7 +34,9 @@ def test_serve_binds_the_host_named_in_dotenv(tmp_path: Path):
     env = {
         k: v
         for k, v in os.environ.items()
-        if k not in {"KAZMA_HOST", "KAZMA_SECRET", "KAZMA_ENV_FILE", "KAZMA_TRUSTED_PROXIES"}
+        # KAZMA_PORT too: the suite takes a port of its own (conftest.py), and
+        # this test is about the default.
+        if k not in {"KAZMA_HOST", "KAZMA_SECRET", "KAZMA_ENV_FILE", "KAZMA_TRUSTED_PROXIES", "KAZMA_PORT"}
     }
     env.update({"KAZMA_USER_HOME": str(home), "KAZMA_DB_BACKEND": "sqlite"})
     result = subprocess.run(

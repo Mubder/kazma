@@ -72,16 +72,17 @@ def _is_loopback(url: str) -> bool:
 def candidate_api_bases() -> list[str]:
     """Deduped API roots for in-process mouths (TUI / CLI).
 
-    Loopback first. ``KAZMA_BASE_URL`` is an explicit override (may be remote).
-    ``KAZMA_PUBLIC_URL`` is *not* used — that host is for browsers/OAuth and
-    typically 302s to a login HTML page.
+    This install's own server (``server_port``, the one answer for the port),
+    then ``KAZMA_BASE_URL``, an explicit override (may be remote). No other
+    port is guessed (2026-11-13): the list also tried 9090 and 8000, so a
+    terminal app of an install on another port talked to whichever Kazma
+    answered there -- and the suite's terminal-app tests reached the live
+    install on this machine. ``KAZMA_PUBLIC_URL`` is *not* used -- that host
+    is for browsers/OAuth and typically 302s to a login HTML page.
     """
-    from kazma_core.server_port import DEFAULT_PORT, local_url, server_port
+    from kazma_core.server_port import local_url
 
     found: list[str] = [local_url()]
-    if server_port() != DEFAULT_PORT:
-        found.append(local_url(port=DEFAULT_PORT))
-    found.append("http://127.0.0.1:8000")
     raw = (os.environ.get("KAZMA_BASE_URL") or "").strip().rstrip("/")
     if raw:
         found.append(raw)

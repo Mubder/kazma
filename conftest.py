@@ -68,6 +68,25 @@ os.environ["KAZMA_SKILLS_HOME"] = _tempfile.mkdtemp(prefix="kazma-test-skills-ho
 # relative file_write landed in the repository (and, in a live install, would
 # land in the install). A test that needs its own workspace still sets one.
 os.environ["KAZMA_WORKSPACE"] = _tempfile.mkdtemp(prefix="kazma-test-workspace-")
+# And the port of Kazma's page (2026-11-13). The terminal app's tests mount
+# the real app, whose polling asked KAZMA_PORT -- 9090 by default, the live
+# install's port on this machine: dozens of unauthenticated requests a run,
+# a settings write among them, refused only because the live install asks
+# for a sign-in. The suite takes a port nothing listens on (asked of the OS,
+# then let go); a process a test starts inherits it. The ports a Kazma
+# outside the run answers on are handed to tests/_egress_guard.py, which
+# refuses a test's connection to them (tests/test_suite_reaches_no_running_kazma.py).
+import socket as _socket
+
+_outside_ports = {p for p in (os.environ.get("KAZMA_TEST_OUTSIDE_PORTS") or "").split(",") if p.strip()}
+_outside_ports.add("9090")  # server_port.DEFAULT_PORT (no product import here)
+if (os.environ.get("KAZMA_PORT") or "").strip():
+    _outside_ports.add(os.environ["KAZMA_PORT"].strip())
+with _socket.socket() as _free:
+    _free.bind(("127.0.0.1", 0))
+    os.environ["KAZMA_PORT"] = str(_free.getsockname()[1])
+_outside_ports.discard(os.environ["KAZMA_PORT"])
+os.environ["KAZMA_TEST_OUTSIDE_PORTS"] = ",".join(sorted(_outside_ports))
 #: Every per-store path override ``kazma_core/paths.py`` reads.
 _STORE_PATH_OVERRIDES = (
     "KAZMA_BACKUPS_DIR",

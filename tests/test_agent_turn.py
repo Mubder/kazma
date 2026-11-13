@@ -58,14 +58,22 @@ def test_iter_sse_frames_done_and_capacity_carry_text():
     assert evs[1].text == "YOLO ON"
 
 
-def test_candidate_api_bases_include_9090_and_8000(monkeypatch):
+def test_candidate_api_bases_default_to_9090(monkeypatch):
     monkeypatch.delenv("KAZMA_PUBLIC_URL", raising=False)
     monkeypatch.delenv("KAZMA_BASE_URL", raising=False)
     monkeypatch.delenv("KAZMA_PORT", raising=False)
-    bases = candidate_api_bases()
-    assert "http://127.0.0.1:9090" in bases
-    assert "http://127.0.0.1:8000" in bases
-    assert bases[0] == "http://127.0.0.1:9090"
+    monkeypatch.setattr("kazma_core.server_port._env_files", lambda: [])  # no .env names a port
+    assert candidate_api_bases() == ["http://127.0.0.1:9090"]
+
+
+def test_candidate_api_bases_guess_no_other_port(monkeypatch):
+    """One answer for the port: an install on 9191 never asks 9090 or 8000.
+    The old list did, so a terminal app talked to whichever Kazma answered
+    there -- and the suite's terminal-app tests reached the live install
+    (2026-11-13)."""
+    monkeypatch.delenv("KAZMA_BASE_URL", raising=False)
+    monkeypatch.setenv("KAZMA_PORT", "9191")
+    assert candidate_api_bases() == ["http://127.0.0.1:9191"]
 
 
 def test_candidate_api_bases_honor_env(monkeypatch):

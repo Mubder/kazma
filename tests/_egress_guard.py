@@ -9,7 +9,7 @@ that runs on the same machine) and called a real model provider over the
 network, which answered 401. A test like that passes or fails with the
 machine it runs on: on CI the cache is empty and the provider unreachable.
 
-Two closed doors, for every test:
+Three closed doors, for every test:
 
 * **The network.** A DNS lookup of any name but this machine's own and the
   loopback names, and a connection (or UDP send) to any address but loopback
@@ -30,6 +30,12 @@ Two closed doors, for every test:
   so the embedder's breaker, open after an earlier test's refusal, cannot
   hide a later test that reaches for the model; and it is the same here,
   where the model is cached, and on CI, where the package is not installed.
+* **A running Kazma** (2026-11-13). A loopback connection to a port a Kazma
+  outside the run answers on (``KAZMA_TEST_OUTSIDE_PORTS``, set by the root
+  ``conftest.py``: 9090 and the port the environment named before the suite
+  took its own) is refused, unless this process bound that port itself (a
+  test's own server). The terminal app's tests reached the live install on
+  this machine through it -- a settings write among their requests.
 
 The refusal raises where the call is made, so nothing leaves the machine or
 loads, and the test FAILS with the call site whatever the code under test did
@@ -60,6 +66,8 @@ from typing import Any
 import pytest
 
 GUARD_ENV = "KAZMA_TEST_EGRESS_GUARD"
+#: The ports a Kazma outside the run answers on (the root conftest sets it).
+OUTSIDE_PORTS_ENV = "KAZMA_TEST_OUTSIDE_PORTS"
 REAL_MODEL_ENV = "KAZMA_TEST_REAL_MODEL"
 REAL_MODEL_MARK = "real_model"
 NETWORK_ENV = "KAZMA_TEST_NETWORK"
@@ -196,11 +204,37 @@ def _take() -> list[str]:
     return taken
 
 
+def outside_ports() -> frozenset[int]:
+    """The ports a Kazma outside this run answers on."""
+    ports = set()
+    for part in (os.environ.get(OUTSIDE_PORTS_ENV) or "").split(","):
+        try:
+            ports.add(int(part))
+        except ValueError:
+            continue
+    return frozenset(ports)
+
+
+#: Ports of ``outside_ports()`` this process bound itself (a test's server).
+_bound_here: set[int] = set()
+
+
+def _refuse_running_kazma(host: Any, port: Any) -> None:
+    if not isinstance(port, int) or port not in outside_ports() or port in _bound_here:
+        return
+    note(f"a connection to the Kazma running on this machine ({_host_text(host)}:{port})")
+    raise EgressRefusedError(f"tests may not connect to the Kazma running on port {port} -- start "
+                             "a server of the test's own (tests/_egress_guard.py)")
+
+
 def _refuse_connection(address: Any) -> None:
     host = address[0] if isinstance(address, tuple) and address else None
-    if host is None or not guard_on() or is_local_address(host):
+    if host is None or not guard_on():
         return
     port = address[1] if len(address) > 1 else ""
+    if is_local_address(host):
+        _refuse_running_kazma(host, port)
+        return
     note(f"a connection to {_host_text(host)}:{port}")
     raise EgressRefusedError(f"tests may not connect to {host}:{port} -- the network is closed to "
                         "the suite (tests/_egress_guard.py)")
@@ -234,6 +268,20 @@ def _guarded_gethostbyname(host):
 def _guarded_gethostbyname_ex(host):
     _refuse_lookup(host)
     return _real_gethostbyname_ex(host)
+
+
+_real_bind = socket.socket.bind
+
+
+def _noting_bind(self, address):
+    result = _real_bind(self, address)
+    try:
+        port = self.getsockname()[1]
+    except (OSError, IndexError, TypeError):
+        return result
+    if isinstance(port, int) and port in outside_ports():
+        _bound_here.add(port)
+    return result
 
 
 _real_connect = socket.socket.connect
@@ -365,6 +413,7 @@ def install() -> None:
     socket.getaddrinfo = _guarded_getaddrinfo
     socket.gethostbyname = _guarded_gethostbyname
     socket.gethostbyname_ex = _guarded_gethostbyname_ex
+    socket.socket.bind = _noting_bind
     socket.socket.connect = _guarded_connect
     socket.socket.connect_ex = _guarded_connect_ex
     socket.socket.sendto = _guarded_sendto
@@ -378,11 +427,12 @@ def install() -> None:
 
 def _report(hits: list[str]) -> str:
     return (
-        "This test reached outside the machine or loaded the real model -- the "
-        "suite must not depend on the network, a provider or a model cache "
-        "(tests/_egress_guard.py). Stub it (a fake LLM client, a fake "
-        "embedder: tests/_no_models.py), or mark the test real_model or "
-        "network.\n  " + "\n  ".join(dict.fromkeys(hits))
+        "This test reached outside the machine, a Kazma running on it, or the "
+        "real model -- the suite must not depend on the network, a provider, a "
+        "model cache or a running install (tests/_egress_guard.py). Stub it (a "
+        "fake LLM client, a fake embedder: tests/_no_models.py; a server of the "
+        "test's own), or mark the test real_model or network.\n  "
+        + "\n  ".join(dict.fromkeys(hits))
     )
 
 

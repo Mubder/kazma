@@ -70,6 +70,9 @@ RUN groupadd -g 10001 kazma \
 USER kazma
 
 EXPOSE 8000
+# The port the server below listens on, for every command run inside the
+# container (kazma tui, kazma ask): server_port() is the one answer.
+ENV KAZMA_PORT=8000
 
 # --host 0.0.0.0 is required inside Docker so the port mapping
 # (ports: 8000:8000) actually reaches the service. Docker's network

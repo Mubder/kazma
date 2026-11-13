@@ -142,6 +142,38 @@ def test_planted_dns_lookup_swallowed():
         pass
 
 
+def test_planted_connection_to_the_running_kazma():
+    """A terminal-app test that polled the live install's port (2026-11-13).
+    The parent hands over a port nothing listens on as an outside port."""
+    if not _probing():
+        return
+    try:
+        socket.create_connection(("127.0.0.1", int(os.environ["KAZMA_EGRESS_PROBE_PORT"])),
+                                 timeout=0.5).close()
+    except OSError:
+        pass
+
+
+def test_a_server_of_the_test_s_own_on_an_outside_port_is_reachable(monkeypatch):
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    monkeypatch.setenv(guard.OUTSIDE_PORTS_ENV, str(port))
+    server = socket.socket()
+    try:
+        server.bind(("127.0.0.1", port))
+    except OSError:
+        server.close()
+        pytest.skip("the port was taken in between")
+    server.listen(1)
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=5):
+            pass
+    finally:
+        server.close()
+        guard._bound_here.discard(port)
+
+
 def test_planted_connection_to_another_host():
     if not _probing():
         return
@@ -239,15 +271,25 @@ _REACHING = (
     "test_planted_asyncio_connection_in_a_thread_and_a_loop[selector]",
     "test_planted_real_embedder",
     "test_planted_import_of_the_model_package",
+    "test_planted_connection_to_the_running_kazma",
 )
 
 
+def _free_port() -> str:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return str(probe.getsockname()[1])
+
+
 def test_the_guard_fails_each_planted_test():
+    port = _free_port()
     proc = _child_pytest(*(f"{HERE}::{name}" for name in _REACHING),
-                         f"{HERE}::test_planted_marked_real_model")
+                         f"{HERE}::test_planted_marked_real_model",
+                         KAZMA_TEST_OUTSIDE_PORTS=port, KAZMA_EGRESS_PROBE_PORT=port)
     out = proc.stdout
     assert proc.returncode == 1, out[-3000:]
-    assert "6 failed, 1 skipped" in out, out[-3000:]
+    assert "7 failed, 1 skipped" in out, out[-3000:]
+    assert f"a connection to the Kazma running on this machine (127.0.0.1:{port})" in out
     for name in _REACHING:
         assert f"FAILED {HERE}::{name}" in out, (name, out[-3000:])
     assert "a DNS lookup of 'api.openai.com'" in out
@@ -270,11 +312,14 @@ def test_without_the_guard_the_planted_model_probes_pass():
     leaves the machine and nothing large loads.) Unguarded, the embedder
     gets the stand-in's vector, so the probe's own ``== []`` fails --
     proof that the guarded run answered without reaching the model."""
+    port = _free_port()  # nothing listens: unguarded, the probe is refused by the OS
     proc = _child_pytest(f"{HERE}::test_planted_real_embedder",
                          f"{HERE}::test_planted_import_of_the_model_package",
-                         KAZMA_TEST_EGRESS_GUARD="0")
+                         f"{HERE}::test_planted_connection_to_the_running_kazma",
+                         KAZMA_TEST_EGRESS_GUARD="0", KAZMA_TEST_OUTSIDE_PORTS=port,
+                         KAZMA_EGRESS_PROBE_PORT=port)
     out = proc.stdout
-    assert "1 failed, 1 passed" in out, out[-3000:]
+    assert "1 failed, 2 passed" in out, out[-3000:]
     assert f"FAILED {HERE}::test_planted_real_embedder" in out, out[-3000:]
     assert "assert [0.5, 0.5] == []" in out, out[-3000:]
     assert "reached outside the machine" not in out, out[-3000:]
