@@ -56,7 +56,7 @@ async def test_bad_driver_ends_its_process_without_unbounded_read_or_wait(fake_d
     finally:
         await driver.stop()
     assert children[0].poll() is not None
-    assert driver.connection._init_task.done()
+    assert driver.init_task.done()
     assert not loop_errors
 
 

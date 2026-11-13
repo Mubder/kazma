@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## Playwright 1.65 (2026-11-13)
+
+- Kazma's browser runs on Playwright 1.65.1. 1.65 rewrote the client Kazma's
+  bounded browser driver starts Chromium through, and every page that needed
+  the browser failed on it; the driver now connects to it the way
+  Playwright's own client does, inside Kazma's own process budget, and all
+  141 browser tests pass on it with a real Chromium.
+- `kazma update` downloads the matching Chromium build (1254) by itself.
+  Playwright stays on one tested minor version at a time (below 1.66).
+- PyMuPDF stays on 1.28: 2.1 was tried again and its table finder still
+  crashes (its new layout model), as it did on 2026-11-09.
+
 ## GitHub Actions and the HA proxy up to date (2026-11-13)
 
 - The workflows use setup-node 7.1, setup-uv 10.3, download-artifact 8.0 and

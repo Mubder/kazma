@@ -255,32 +255,59 @@ class _Transport:
 
 
 class BrowserDriver:
-    """Retain transport/connection ownership until the process tree is gone."""
+    """Retain transport/connection ownership until the process tree is gone.
+
+    Playwright's own client (``playwright._impl.out_of_process``) runs its
+    driver with a pipe transport of its own; this one runs it through
+    :class:`_Transport` -- the OS budget, the byte and frame limits, the
+    watchdog -- wired to Playwright's connection the way its client wires its
+    own (1.65 rewrote the client: ``Connection(loop)`` with ``onmessage`` and
+    ``dispatch``, ``initialize_playwright()``, ``close()``; 1.64's
+    ``_impl._connection`` took the transport and ran it, and is gone).
+    """
     def __init__(self):
         self.transport = self.connection = self.task = None
+        self.init_task = None
         self.playwright = None
 
     async def start(self):
-        from playwright._impl._connection import Connection
-        from playwright._impl._object_factory import create_remote_object
+        from playwright._impl.connection import Connection
         from playwright.async_api import Playwright
 
         loop = asyncio.get_running_loop()
-        self.transport = _Transport(loop)
-        self.connection = Connection(None, create_remote_object, self.transport, loop)
-        self.transport.on_send = self._observe_command
-        self.task = asyncio.create_task(self.connection.run())
+        self.transport = transport = _Transport(loop)
+        self.connection = connection = Connection(loop)
+        connection.onmessage = transport.send
+        transport.on_send = self._observe_command
+
+        def on_message(message):
+            # Playwright's client: a listener's exception is raised by the
+            # next API call, and the transport goes on.
+            try:
+                connection.dispatch(message)
+            except Exception as error:  # noqa: BLE001 -- handed to the connection, as its client does
+                connection._on_event_listener_error(error)
+
+        transport.on_message = on_message
+        self.task = asyncio.create_task(self._serve())
         self.task.add_done_callback(self._done)
-        future = self.connection.playwright_future
-        future.add_done_callback(_observe_future)
-        done, _ = await asyncio.wait({future, self.transport.on_error_future, self.task}, return_when=asyncio.FIRST_COMPLETED)
-        if future not in done or self.transport.failure is not None:
+        self.init_task = asyncio.create_task(connection.initialize_playwright())
+        self.init_task.add_done_callback(_observe_future)
+        done, _ = await asyncio.wait({self.init_task, transport.on_error_future, self.task},
+                                     return_when=asyncio.FIRST_COMPLETED)
+        if self.init_task not in done or transport.failure is not None:
             if self.task.done() and not self.task.cancelled() and self.task.exception() is not None:
                 raise self.task.exception()
-            raise self.transport.failure or AcquisitionError(FetchErrorCode.UNAVAILABLE, 'Bounded Playwright driver did not initialize.')
-        self.playwright = Playwright(future.result())
+            raise transport.failure or AcquisitionError(FetchErrorCode.UNAVAILABLE, 'Bounded Playwright driver did not initialize.')
+        self.playwright = Playwright(self.init_task.result())
         self.playwright.stop = self.stop
         return self.playwright
+
+    async def _serve(self):
+        """Start the bounded driver, then read it until it ends."""
+        await self.transport.connect()
+        if not self.transport._stop.is_set():
+            await self.transport.run()
 
     def _observe_command(self, message):
         # Cancellation and forced termination can race a Playwright promise.
@@ -293,11 +320,11 @@ class BrowserDriver:
     def _done(self, task):
         if not task.cancelled() and task.exception() is not None:
             self.transport._fail('Local browser driver connection failed; its process tree was terminated.')
+        if self.init_task is not None and not self.init_task.done():
+            # Nothing will answer it: the driver is gone.
+            self.init_task.cancel()
         if self.connection is not None:
-            initial = self.connection._init_task
-            if initial is not None:
-                initial.add_done_callback(_observe_future)
-            self.connection.cleanup(str(self.transport.failure) if self.transport.failure else None)
+            self.connection.close(str(self.transport.failure) if self.transport.failure else None)
 
     async def stop(self):
         from kazma_core.playwright_loop import finish_owned
@@ -323,10 +350,11 @@ class BrowserDriver:
         else:
             transport._reader.shutdown(wait=False, cancel_futures=True)
         if self.connection is not None:
-            self.connection.cleanup()
-            initial = self.connection._init_task
-            if initial is not None:
-                await asyncio.gather(initial, return_exceptions=True)
+            self.connection.close()
+        if self.init_task is not None:
+            if not self.init_task.done():
+                self.init_task.cancel()
+            await asyncio.gather(self.init_task, return_exceptions=True)
         if self.task is not None:
             await asyncio.gather(self.task, return_exceptions=True)
         self.playwright = None

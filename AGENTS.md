@@ -5129,6 +5129,13 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   only after OS verification of no live descendants; uncertainty quarantines it.
   The private Playwright Connection/stdio compatibility seam is isolated here,
   qualified against 1.61.0 and, 2026-10-17, 1.64.0 (35 boundary tests, real Chromium). Upgrades must pass the real-browser/boundary gates.
+  **1.65 rewrote Playwright's client** (2026-11-13): `_impl._connection` is gone, and 1.65.1 failed
+  every page that needed the browser (37 browser tests). `BrowserDriver.start` now wires
+  `_impl.connection.Connection(loop)` to `_Transport` as Playwright's own client does
+  (`onmessage` -> `send`, `on_message` -> `dispatch`, `initialize_playwright()`, `close()`);
+  qualified on 1.65.1 (141 browser tests, real Chromium). pyproject holds Playwright to one
+  qualified minor (`>=1.65.1,<1.66`): `kazma update` installs the newest allowed and does not
+  read uv.lock, so a new minor reaches installs only after these tests pass on it.
   **A job's browser is relaunched between pages, before a limit ends it under
   one** (2026-11-13, `BrowserJob._relaunch_reason` / `_retire_impl`): when its
   tree has ended (a limit, a crash: `BrowserDriver.failure`), Chromium
