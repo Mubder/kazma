@@ -9,7 +9,7 @@
 #
 # Build from the repository root:
 #   docker build -f deploy/document-broker/Dockerfile -t kazma-document-broker:local .
-FROM docker:29.8-cli@sha256:35cfcf893c20f2931f4909151b5407aaaeab711277de7ce8b8f521f095d54c32 AS cli
+FROM docker:29.0-cli@sha256:858bb1e05af16840f5a55143c3e5e14073891fbc92f2c1f6f38dd9c5f2cca03c AS cli
 
 FROM python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534
 COPY --from=cli /usr/local/bin/docker /usr/local/bin/docker

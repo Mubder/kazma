@@ -9,10 +9,10 @@
 # Not here on purpose: httpx (remote parse egress stays in the Kazma process,
 # and the worker has no network), docling/torch (the local salvage tier is
 # not part of the container profile), psutil (Windows-only tree cleanup).
-arabic-reshaper==3.1.0
+arabic-reshaper==3.0.1
 defusedxml==0.7.1
 lxml==6.1.3
-markdown==3.11.3
+markdown==3.11.2
 # The neural OCR engine (documents.ocr.engine): ONNX Runtime, OpenCV's image
 # operations, polygon offsetting. Its models are baked in by the ocr-models
 # build stage (deploy/document-worker/Dockerfile).
@@ -29,7 +29,7 @@ prometheus-client==0.26.0
 pygments==2.21.0
 pymupdf==1.28.2
 pypdf==6.21.4
-pypdfium2==5.15.2
+pypdfium2==5.14.0
 python-bidi==0.6.12
 python-docx==1.2.0
 python-pptx==1.0.2

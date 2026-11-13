@@ -23,11 +23,13 @@ __all__ = ["EditorScreen", "PromptScreen"]
 
 logger = logging.getLogger(__name__)
 
-# A file's language is set only when this Textual build can highlight it
-# (``TextArea.available_languages``); plain text is no language at all. With
-# tree-sitter installed (the code index's extra), Textual raises for any name
-# it does not have -- "plaintext" included -- and the editor screen did not
-# open (2026-11-13). Without tree-sitter it ignored the name, which hid it.
+# Languages Textual can highlight. Unknown ones are set defensively and
+# silently skipped (Textual raises if a language is not registered).
+_KNOWN_LANGS = {
+    "python", "json", "toml", "yaml", "markdown", "bash", "xml", "ini",
+    "javascript", "typescript", "html", "css", "sql", "rust", "go", "java",
+    "c", "cpp", "ruby", "php", "sh",
+}
 
 
 class PromptScreen(ModalScreen[str]):
@@ -129,7 +131,7 @@ class EditorScreen(Screen[None]):
     def compose(self) -> ComposeResult:
         abs_path = (self.workspace_root / self.rel_path).as_posix()
         yield Static(f"[bold]Editing:[/] {self.rel_path or '(workspace root)'}  [dim]{abs_path}[/]", classes="editor-header")
-        yield TextArea(id="editor-text")
+        yield TextArea(id="editor-text", language="plaintext")
         with Horizontal(classes="editor-toolbar"):
             yield Button("Save (^S)", id="btn-save", variant="primary")
             yield Button("Run (^R)", id="btn-run")
@@ -172,8 +174,11 @@ class EditorScreen(Screen[None]):
         text_area.load_text(content)
 
         lang = result.get("lang", "plaintext")
-        if lang in text_area.available_languages:
-            text_area.language = lang
+        if lang in _KNOWN_LANGS:
+            try:
+                text_area.language = lang
+            except Exception as exc:  # language not registered in this build
+                logger.debug("TextArea language unsupported: %s (%s)", lang, exc)
         self._set_status(f"Loaded {count_noun(result.get('lines') or 0, 'line')} · lang={lang}")
 
     # ── Actions ──────────────────────────────────────────────────────────
