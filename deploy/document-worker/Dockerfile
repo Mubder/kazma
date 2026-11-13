@@ -19,14 +19,14 @@
 # two PyTorch recognizers converted to ONNX and checked against PyTorch, all
 # by scripts/ocr_models.py. Only the resulting /models folder reaches the
 # final image: no PyTorch, no network at run time (the worker has none).
-FROM python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534 AS ocr-models
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 AS ocr-models
 COPY deploy/document-worker/ocr-models.txt /tmp/ocr-models.txt
 RUN pip install --no-cache-dir --require-hashes -r /tmp/ocr-models.txt
 COPY kazma-core/kazma_core/documents/ocr/neural_models.py /src/kazma-core/kazma_core/documents/ocr/neural_models.py
 COPY scripts/ocr_models.py /src/scripts/ocr_models.py
 RUN python -I /src/scripts/ocr_models.py install --dir /models
 
-FROM python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928
 
 # Tesseract (+ara/eng) for OCR, poppler-utils for page rasterization,
 # LibreOffice (no GUI) for legacy Office conversion and the libreoffice
