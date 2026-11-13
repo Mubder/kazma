@@ -206,7 +206,7 @@ def port_step(p: Platform, major: int, port: int) -> Step:
     Windows and macOS: :func:`set_port_on_disk` in this process (the folder
     is the elevated setup's, or this account's); Debian: ``pg_conftool``;
     Fedora: the same edit as the server's own account."""
-    title = f"PostgreSQL {major} on port {int(port)}"
+    title = f"Set PostgreSQL {major} to listen on port {int(port)}"
     if p.os == "debian":
         return Step(title, ("sudo", "pg_conftool", str(major), "main", "set", "port", str(int(port))), admin=True,
                     major=major, port=int(port))

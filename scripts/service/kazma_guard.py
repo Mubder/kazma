@@ -3859,6 +3859,7 @@ class DatabaseServiceWatch:
         self.start_refused = False
         self.state = "none"
         self.service = ""
+        self._written_service = ""
 
     def on_guard_start(self) -> None:
         self._write()
@@ -3968,7 +3969,11 @@ class DatabaseServiceWatch:
         self._set("down")
 
     def _set(self, state: str) -> None:
-        if state != self.state:
+        # The service as well as the state: ``kazma setup postgres --upgrade``
+        # moves the record to another service in well under one check, so the
+        # watch can see 16 running, then 18 running, and the state file kept
+        # naming 16 (live, 2026-11-14).
+        if state != self.state or self.service != self._written_service:
             self.state = state
             self._write()
 
@@ -3976,6 +3981,7 @@ class DatabaseServiceWatch:
         return {"state": self.state, "service": self.service, "updated": time.time()}
 
     def _write(self) -> None:
+        self._written_service = self.service
         _update_state(database_service=self.record())
 
 
@@ -6778,7 +6784,10 @@ def _wait_for_new_boot(health_url: str, requested_at: float, before: str | None,
     one the guard probes now: a reload that moved Kazma to another port
     answers there.
     """
-    print("Waiting for Kazma to come back on the new code…")
+    # A maintenance stop (an update's hold, a database move) has no new code
+    # to wait for: say only what is true (2026-11-14).
+    print("Waiting for Kazma to come back on the new code…" if before is not None
+          else "Waiting for Kazma to start again…")
     print(
         f"(Typical bind is under 2 minutes; budget {int(START_TIMEOUT_S)}s. "
         "Do not Ctrl+C unless you intend to abort.)"

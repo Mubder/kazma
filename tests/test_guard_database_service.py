@@ -130,6 +130,35 @@ def test_status_says_the_service():
     assert "database_service" in guard.GUARD_FEATURES
 
 
+def test_a_switch_to_another_service_is_written_while_both_run(monkeypatch):
+    """Live 2026-11-14: ``kazma setup postgres --upgrade`` moved the record
+    from postgresql-x64-16 to postgresql-x64-18 between two checks. The watch
+    saw "running" before and after, wrote nothing, and ``--status`` kept
+    naming 16."""
+    h = _Harness(monkeypatch)
+    h.run(60)
+    assert guard._read_state()["database_service"]["service"] == "postgresql-x64-16"
+    h.record = {**h.record, "service": "postgresql-x64-18"}
+    h.run(60)
+    assert guard._read_state()["database_service"] == {
+        **guard._read_state()["database_service"], "state": "running", "service": "postgresql-x64-18"}
+
+
+def test_negative_control_writing_on_a_state_change_alone_keeps_the_old_service(monkeypatch):
+    h = _Harness(monkeypatch)
+
+    def old_set(state):
+        if state != h.g.dbsvc.state:
+            h.g.dbsvc.state = state
+            h.g.dbsvc._write()
+
+    monkeypatch.setattr(h.g.dbsvc, "_set", old_set)
+    h.run(60)
+    h.record = {**h.record, "service": "postgresql-x64-18"}
+    h.run(60)
+    assert guard._read_state()["database_service"]["service"] == "postgresql-x64-16"
+
+
 # -- a guard without admin rights (2026-11-11) --------------------------------
 #
 # The user-level task (--install from a shell without admin rights) runs the

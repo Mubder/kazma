@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## After the live move to PostgreSQL 18 (2026-11-14)
+
+- The owner's install moved from PostgreSQL 16 to 18 with `kazma setup
+  postgres --upgrade`: 24 tables, 99,931 rows and 2 sequences compared equal,
+  Kazma stopped for about two minutes, the first base backup taken, 16 stopped
+  and kept.
+- The guard's `--status` kept naming the 16 service after the move. The watch
+  wrote its record only when the state changed, and the move took less than
+  one check: "running" before and after. It now writes when the service
+  changes too.
+- `kazma update` no longer recreates a container whose secret the install's
+  `.env` lacks. Recreated, SearXNG took the shipped placeholder key: on the
+  owner's install, set up before setup generated that key, an update undid a
+  key set on the container by hand. The update now leaves the container and
+  names `kazma setup install --with private_search`, which generates the key
+  first.
+- Two lines of the upgrade's output said what was not so: a step named
+  "PostgreSQL 18 on port 5432" now says "Set PostgreSQL 18 to listen on port
+  5432", and the wait after a maintenance hold no longer says "on the new
+  code".
+
 ## PostgreSQL 18, and one command to move to it (2026-11-13)
 
 - A new install gets PostgreSQL 18. An install made before runs 16 until its

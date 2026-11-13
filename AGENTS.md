@@ -9587,7 +9587,11 @@ no Python update ever arrived.
   build) and puts each container setup made from this install's compose
   files on its pinned image (`container_services.refresh_images`: compose's
   project, service AND config-file labels must be this install's -- a
-  checkout and an install in folders both called `kazma` share a project).
+  checkout and an install in folders both called `kazma` share a project),
+  never one whose secret `.env` lacks (`container_services._missing_secrets`:
+  an update writes no secret, and recreated, SearXNG took the shipped
+  placeholder key -- live 2026-11-14, on an install set up before setup
+  generated it; the update names `kazma setup install --with <part>`).
   Gates: `tests/test_update_repairs_a_broken_environment.py`,
   `tests/test_update_brings_chromium_and_images.py` (the old check, the old
   any-build rule and the project-only rule as controls). A pause also stops a server that is still booting, and wakes the

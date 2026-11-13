@@ -13,6 +13,9 @@ Two gaps of ``kazma update`` (2026-11-13):
   file's folder, so a checkout and an install both in a folder called
   ``kazma`` share one: a refresh by project alone would have recreated the
   live install's container from the checkout's file.
+* (2026-11-14) A container whose secret the install's ``.env`` lacks is never
+  recreated: compose would give SearXNG the shipped placeholder key. The
+  update names ``kazma setup install --with <part>``, which generates it.
 
 Each case drives the real code with fakes for the programs; each negative
 control is the old rule.
@@ -223,8 +226,22 @@ def _container(image: str, project: str, service: str, files: Path) -> dict:
         "com.docker.compose.project.config_files": str(files)}}}
 
 
+def _with_secrets(root: Path) -> Path:
+    """The install's .env holding a generated key for every container service."""
+    (root / ".env").write_text("SEARXNG_SECRET=" + "c" * 64 + "\nKAZMA_NEO4J_PASSWORD=" + "d" * 32 + "\n",
+                               encoding="utf-8")
+    return root
+
+
+@pytest.fixture(autouse=True)
+def _no_secrets_in_the_environment(monkeypatch):
+    for svc in cs.SERVICES:
+        for name in svc.secrets:
+            monkeypatch.delenv(name, raising=False)
+
+
 def test_a_set_up_container_on_an_old_image_is_recreated_through_compose(tmp_path):
-    root = _install(tmp_path)
+    root = _with_secrets(_install(tmp_path))
     docker = _Docker({"kazma-searxng": _container("docker.io/searxng/searxng:latest", "kazma", "searxng",
                                                   root / "docker-compose.yml")})
     outcomes = {state.svc.title: outcome for state, outcome in cs.refresh_images(root, root / ".env", "docker",
@@ -255,8 +272,51 @@ def test_another_install_s_container_of_the_same_project_is_never_touched(tmp_pa
     assert states["SearXNG"] == "not_ours" and docker.ups == []
 
 
+def test_a_container_whose_secret_env_lacks_is_never_recreated(tmp_path):
+    """Live 2026-11-14: SearXNG, set up before setup generated its key, had
+    the key set on the container by hand; an update's refresh recreated it,
+    and compose gave it the shipped placeholder. The update now leaves it and
+    names the setup command, which generates the key first."""
+    root = _install(tmp_path)
+    (root / ".env").write_text("SEARXNG_SECRET=change-me-in-production-use-long-random\n", encoding="utf-8")
+    docker = _Docker({"kazma-searxng": _container("docker.io/searxng/searxng:latest", "kazma", "searxng",
+                                                  root / "docker-compose.yml")})
+    (outcome,) = [o for s, o in cs.refresh_images(root, root / ".env", "docker", run=docker)
+                  if s.svc.title == "SearXNG"]
+    assert docker.ups == []
+    assert outcome == "needs_setup: SEARXNG_SECRET (kazma setup install --with private_search)"
+
+
+def test_negative_control_without_the_secret_check_the_placeholder_is_recreated(tmp_path, monkeypatch):
+    root = _install(tmp_path)
+    docker = _Docker({"kazma-searxng": _container("docker.io/searxng/searxng:latest", "kazma", "searxng",
+                                                  root / "docker-compose.yml")})
+    monkeypatch.setattr(cs, "_missing_secrets", lambda svc, env_path: [])
+    states = {s.svc.title: o for s, o in cs.refresh_images(root, root / ".env", "docker", run=docker)}
+    assert states["SearXNG"] == "updated" and len(docker.ups) == 1
+
+
+def test_a_secret_compose_reads_from_the_environment_counts(tmp_path, monkeypatch):
+    root = _install(tmp_path)
+    monkeypatch.setenv("SEARXNG_SECRET", "e" * 64)
+    docker = _Docker({"kazma-searxng": _container("docker.io/searxng/searxng:latest", "kazma", "searxng",
+                                                  root / "docker-compose.yml")})
+    states = {s.svc.title: o for s, o in cs.refresh_images(root, root / ".env", "docker", run=docker)}
+    assert states["SearXNG"] == "updated"
+
+
+def test_a_container_left_for_its_secret_is_said_with_the_command(update, monkeypatch, capsys):
+    runs = _Runs("current", images="SearXNG\tneeds_setup: SEARXNG_SECRET "
+                                   "(kazma setup install --with private_search)\nNeo4j\tabsent\n")
+    monkeypatch.setattr(update.subprocess, "run", runs)
+    assert update._refresh_container_images() is False
+    out = " ".join(capsys.readouterr().out.split())
+    assert "SearXNG was left on its old image: SEARXNG_SECRET is not in .env" in out
+    assert "Run kazma setup install --with private_search:" in out
+
+
 def test_negative_control_the_project_alone_takes_the_other_install_s_container(tmp_path, monkeypatch):
-    checkout = _install(tmp_path / "dev")
+    checkout = _with_secrets(_install(tmp_path / "dev"))
     live = _install(tmp_path / "live")
     docker = _Docker({"kazma-searxng": _container("docker.io/searxng/searxng:latest", "kazma", "searxng",
                                                   live / "docker-compose.yml")})

@@ -102,6 +102,16 @@ def secret_is_set(value: str | None, placeholders: tuple[str, ...] = ()) -> bool
     return bool(text) and text not in placeholders
 
 
+def _missing_secrets(svc: ContainerService, env_path: Path) -> list[str]:
+    """*svc*'s secrets set neither in compose's environment nor in *env_path*
+    (a shipped placeholder does not count). Started now, compose would give
+    the container the placeholder (SearXNG's compose falls back to it) or
+    refuse it (a required variable)."""
+    return [name for name in svc.secrets
+            if not (secret_is_set(os.environ.get(name), svc.placeholders)
+                    or secret_is_set(_file_value(env_path, name), svc.placeholders))]
+
+
 def ensure_secret(env_path: Path, name: str, placeholders: tuple[str, ...] = ()) -> bool:
     """Keep a generated *name* in *env_path* when none is set; True when one was written.
 
@@ -232,9 +242,17 @@ def _image_state(svc: ContainerService, root: Path, docker: str, *, run=None) ->
 def refresh_images(root: Path, env_path: Path, docker: str, *, run=None) -> list[tuple[ImageState, str]]:
     """Put every set-up service on its pinned image; one outcome per service.
 
-    Outcomes: ``current``, ``absent``, ``not_ours``, ``unknown``, ``updated``
-    or ``failed: <docker's last line>``. Compose recreates a container whose
-    image changed and keeps its volumes; nothing else is touched.
+    Outcomes: ``current``, ``absent``, ``not_ours``, ``unknown``, ``updated``,
+    ``needs_setup: <secrets> (<command>)`` or ``failed: <docker's last line>``.
+    Compose recreates a container whose image changed and keeps its volumes;
+    nothing else is touched.
+
+    A container whose secret ``.env`` does not hold is left as it is: an
+    update never writes a secret (setup generates it, before it starts the
+    container), and recreated, the container would take the shipped
+    placeholder. Live 2026-11-14: an install set up before setup generated
+    SearXNG's key had it set on the container by hand, and an update's
+    refresh recreated SearXNG on the placeholder.
     """
     import subprocess
 
@@ -244,6 +262,10 @@ def refresh_images(root: Path, env_path: Path, docker: str, *, run=None) -> list
         state = _image_state(svc, root, docker, run=run)
         if state.state != "stale":
             outcomes.append((state, state.state))
+            continue
+        missing = _missing_secrets(svc, env_path)
+        if missing:
+            outcomes.append((state, f"needs_setup: {', '.join(missing)} (kazma setup install --with {svc.part})"))
             continue
         try:
             done = run(list(compose_up_argv(svc, docker, root, env_path)), capture_output=True, text=True,

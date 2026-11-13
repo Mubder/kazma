@@ -2009,6 +2009,14 @@ def _refresh_container_images() -> bool:
         elif outcome.startswith("failed"):
             ok = False
             console.print(f"[yellow]{title} could not be moved to its pinned image: {outcome[7:].strip()}[/yellow]")
+        elif outcome.startswith("needs_setup:"):
+            ok = False
+            secrets, _, command = outcome[len("needs_setup:"):].strip().partition(" (")
+            console.print(
+                f"[yellow]{title} was left on its old image: {secrets} is not in .env, and recreated it "
+                f"would start on the shipped placeholder. Run {command.rstrip(')') or 'kazma setup install'}: "
+                "it generates the secret, then moves it to its pinned image.[/yellow]",
+                soft_wrap=True)
     if probe.returncode != 0:
         console.print(f"[yellow]Could not check Kazma's containers: {_last_line(probe.stderr)}[/yellow]")
         return False
