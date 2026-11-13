@@ -143,7 +143,7 @@ def still_pointing_at(old: int, new: int, *, configs: list[Path] | None = None) 
         except OSError:
             continue
         if f"localhost:{old}" in text or f"127.0.0.1:{old}" in text:
-            notes.append(f"The Cloudflare tunnel's configuration {path} sends visitors to port {old}: "
+            notes.append(f"Visitors reach port {old} through the Cloudflare tunnel's configuration ({path}): "
                          f"change it to {new} and restart cloudflared.")
     if not public:
         notes.append(f"A sign-in made through http://127.0.0.1:{old} (Gmail, Outlook, GitHub) used a redirect "

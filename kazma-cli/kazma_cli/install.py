@@ -502,7 +502,7 @@ def _container_service_state(svc: ContainerService, machine: Machine, env_path: 
         answered = machine.answers(url.rstrip("/") + ("/healthz" if svc.part == "private_search" else "/"))
     else:
         answered = _tcp_answers(url)
-    return (True, f"{svc.title} answers at {url}") if answered else (False, f"{svc.title} does not answer at {url}")
+    return (True, f"answering at {url} ({svc.title})") if answered else (False, f"{svc.title} does not answer at {url}")
 
 
 # -- the plan -----------------------------------------------------------------------------------

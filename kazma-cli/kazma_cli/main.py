@@ -374,7 +374,7 @@ def _run_serve(port: int) -> None:
                 f"  Try:  kazma serve {port + 1}\n"
                 "  On Windows, check WSL/Docker portproxy:\n"
                 "    netsh interface portproxy show all\n"
-                f"  If 127.0.0.1:{port} forwards elsewhere, browsers get ERR_CONNECTION_RESET\n"
+                f"  If a portproxy rule forwards 127.0.0.1:{port} elsewhere, browsers get ERR_CONNECTION_RESET\n"
                 "  even when Kazma is not running: choose another port with kazma setup port <N>.\n"
             )
             sys.exit(1)
