@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## OCR keeps to its CPU budget (2026-11-13)
+
+- Tesseract now uses as many threads as the document worker may (one by
+  default). It used to start one per CPU it could see, whatever the worker's
+  limit: in the document worker container at one CPU, eight table reads took
+  4.8-6.0 s instead of 2.5-3.2 s. It is never slower this way.
+
 ## Choose Kazma's port at install (2026-11-13)
 
 - A first install asks which port Kazma's page uses; Enter keeps 9090.

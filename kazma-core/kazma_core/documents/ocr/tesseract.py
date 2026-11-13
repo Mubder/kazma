@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+import os
 import re
 import shutil
 import unicodedata
@@ -182,6 +183,21 @@ def _parse_tsv(
     )
 
 
+def thread_limit() -> str:
+    """The OpenMP threads one Tesseract call may use: the caller's own budget
+    (``OMP_NUM_THREADS``: 1 in the document worker), else 1.
+
+    The sandbox passes a child only the variables it names, so Tesseract never
+    saw the worker's ``OMP_NUM_THREADS=1`` and started a thread per CPU:
+    inside the worker's one-CPU Job Object on Windows, and four at once on a
+    four-CPU CI runner, its threads waited on each other (OpenMP spins), and a
+    table page ran past its 60 s limit (CI, 2026-11-13). Tesseract's own advice
+    for several processes at once is ``OMP_THREAD_LIMIT=1``.
+    """
+    raw = (os.environ.get("OMP_NUM_THREADS") or "").strip()
+    return raw if raw.isdigit() and int(raw) >= 1 else "1"
+
+
 class TesseractProvider:
     """Tesseract CLI provider. No pytesseract process indirection is used."""
 
@@ -209,6 +225,7 @@ class TesseractProvider:
                     timeout_seconds=timeout,
                     stdout_limit_bytes=stdout_limit,
                     stderr_limit_bytes=65_536,
+                    env={"OMP_THREAD_LIMIT": thread_limit()},
                 )
             )
         except OSError as exc:

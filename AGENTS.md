@@ -3409,6 +3409,15 @@ pages, the numbers, symbols and single terms each holds -- never page text --
 the searches and the floors; without it the test skips). Since 2026-10-15
 each engine is held to its own floors there (`floors_by_engine`), with a long
 worker time limit so every page stays with the engine asked for.
+**Every Tesseract call names its thread budget** (2026-11-13,
+`ocr.tesseract.thread_limit`): `OMP_THREAD_LIMIT` is the caller's
+`OMP_NUM_THREADS` (1 in the document worker), else 1. The sandbox passes a
+child only the variables it names, so Tesseract started a thread per CPU it
+could see (32 here) whatever the worker's CPU limit. Measured in the document
+worker image (Tesseract 5.5, libgomp), eight reads four at once: 4.8-6.0 s
+unlimited against 2.5-3.2 s at `--cpus=1`, 1.0 s against 0.6 s at `--cpus=4`;
+never slower. Gate: `tests/test_tesseract_thread_limit.py` (through the real
+sandbox; the old request, which passed no limit, as the control).
 
 **G4. The neural OCR engine** (2026-10-15, Q02: Arabic and Arabic-Indic
 digits). `documents.ocr.engine`: `auto` (default; the neural engine when its
