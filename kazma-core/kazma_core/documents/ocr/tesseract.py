@@ -183,7 +183,7 @@ def _parse_tsv(
     )
 
 
-def thread_limit() -> str:
+def _thread_limit() -> str:
     """The OpenMP threads one Tesseract call may use: the caller's own budget
     (``OMP_NUM_THREADS``: 1 in the document worker), else 1.
 
@@ -225,7 +225,7 @@ class TesseractProvider:
                     timeout_seconds=timeout,
                     stdout_limit_bytes=stdout_limit,
                     stderr_limit_bytes=65_536,
-                    env={"OMP_THREAD_LIMIT": thread_limit()},
+                    env={"OMP_THREAD_LIMIT": _thread_limit()},
                 )
             )
         except OSError as exc:

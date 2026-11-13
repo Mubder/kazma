@@ -317,9 +317,11 @@ current_browser_job: ContextVar[BrowserJob | None] = ContextVar("acquisition_bro
 
 
 def _connected(browser) -> bool:
+    from playwright.async_api import Error as BrowserError
+
     try:
         return bool(browser.is_connected())
-    except Exception:
+    except BrowserError:
         return False
 
 

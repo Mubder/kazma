@@ -16,6 +16,35 @@ _NO_BOUNDARY = ('Bounded local Chromium currently requires Windows Job Objects o
                 'launch was refused.')
 
 
+def chromium_installed() -> bool:
+    """Playwright's Chromium is on this machine: a ``chromium-*`` folder where
+    Playwright keeps its browsers (``PLAYWRIGHT_BROWSERS_PATH``, else the
+    platform's cache folder). The install's browser part and the daily
+    canary ask this one rule."""
+    configured = (os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or "").strip()
+    if configured and configured != "0":
+        roots = [Path(configured)]
+    elif os.name == "nt":
+        roots = [Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "ms-playwright"]
+    elif sys.platform == "darwin":
+        roots = [Path.home() / "Library" / "Caches" / "ms-playwright"]
+    else:
+        roots = [Path.home() / ".cache" / "ms-playwright"]
+    return any(any(root.glob("chromium-*")) for root in roots if root.is_dir())
+
+
+def browser_unavailable():
+    """Why Kazma cannot render a page in its browser here, or None: the
+    browser part is not installed (Playwright, its Chromium) or the host
+    refuses to start it (:func:`launch_refusal`). Reads the disk and the
+    environment: call it off the loop."""
+    import importlib.util
+
+    if importlib.util.find_spec("playwright") is None or not chromium_installed():
+        return "Kazma's browser is not installed (kazma setup install --with browser)"
+    return launch_refusal()
+
+
 def launch_refusal():
     """Why this host would refuse to start the browser, or None.
 

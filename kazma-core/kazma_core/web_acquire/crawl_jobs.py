@@ -305,6 +305,26 @@ def _valid_row(row):
         return False
     if row.get('discovery') is not None and not _valid_discovery(row['discovery']):
         return False
+    if not _valid_optional_fields(row):
+        return False
+    if not all(isinstance(page, dict) and isinstance(page.get('url'), str) and len(page['url']) <= 8192
+            and page.get('status') in {'pending', 'running', 'completed', 'failed', 'ambiguous', 'excluded'} for page in pages):
+        return False
+    if row.get('kind') == 'research_crawl':
+        from kazma_core.web_acquire.research_crawl import valid
+
+        if not valid(row):
+            return False
+    if row.get('kind') == 'research_pipeline':
+        from kazma_core.web_acquire.research_pipeline_job import valid
+
+        if not valid(row):
+            return False
+    return True
+
+
+def _valid_optional_fields(row):
+    """The fields a row holds only once its crawl reached them."""
     if 'metadata' in row:
         from kazma_core.web_acquire.discovery_metadata import _valid
 
@@ -323,23 +343,8 @@ def _valid_row(row):
         return False
     if 'failure' in row and (not isinstance(row['failure'], str) or len(row['failure']) > _FAILURE_MAX):
         return False
-    if 'notes' in row and (not isinstance(row['notes'], list) or len(row['notes']) > 16
-                           or any(not isinstance(note, str) for note in row['notes'])):
-        return False
-    if not all(isinstance(page, dict) and isinstance(page.get('url'), str) and len(page['url']) <= 8192
-            and page.get('status') in {'pending', 'running', 'completed', 'failed', 'ambiguous', 'excluded'} for page in pages):
-        return False
-    if row.get('kind') == 'research_crawl':
-        from kazma_core.web_acquire.research_crawl import valid
-
-        if not valid(row):
-            return False
-    if row.get('kind') == 'research_pipeline':
-        from kazma_core.web_acquire.research_pipeline_job import valid
-
-        if not valid(row):
-            return False
-    return True
+    return not ('notes' in row and (not isinstance(row['notes'], list) or len(row['notes']) > 16
+                                    or any(not isinstance(note, str) for note in row['notes'])))
 
 
 def _valid_auto_resumes(entries):
@@ -980,7 +985,7 @@ AUTO_RESUME_WITHIN_S = 24 * 3600
 AUTO_RESUMES_PER_DAY = 3
 
 
-def settled_pages(row):
+def _settled_pages(row):
     """The pages a crawl has finished with -- stored, kept out, removed or
     failed: what grows while it makes progress."""
     return sum(page['status'] in ('completed', 'excluded', 'failed') for page in row.get('pages', ()))
@@ -1011,7 +1016,7 @@ def auto_resume_due(row, now=None):
     history = _auto_resumes(row, now)
     if len(history) >= AUTO_RESUMES_PER_DAY:
         return False
-    return not history or settled_pages(row) > int(history[-1]['settled'])
+    return not history or _settled_pages(row) > int(history[-1]['settled'])
 
 
 def claim_auto_resume(job_id):
@@ -1022,7 +1027,7 @@ def claim_auto_resume(job_id):
         if row is None or not auto_resume_due(row, now):
             return False
         history = _auto_resumes(row, now)
-        history.append({'at': now, 'settled': settled_pages(row)})
+        history.append({'at': now, 'settled': _settled_pages(row)})
         row['auto_resumes'] = history[-AUTO_RESUMES_PER_DAY:]
         row.pop('auto_resumed', None)
         # A changed row: if the resume is refused, the monitor reports the

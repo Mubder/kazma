@@ -12,6 +12,14 @@ sees, kept in place of the install's by ``knowledge_ingest._PRIVATE_KNOWLEDGE``)
 It passes when the page was stored (unchanged, after the first day) and its
 stored text holds the marker words.
 
+A second leg renders the same page in Kazma's own browser (2026-11-13): the
+crawl reads a plain page over HTTP and reaches Chromium only when that fails,
+so a broken browser -- the driver, its contained process tree, the request
+broker -- went unseen until a page that needs JavaScript. The leg is
+``render`` in the outcome: ``passed``, ``failed`` (the canary fails), or
+``skipped`` with why (the browser part not installed, or a host that refuses
+to start it: ``browser_isolation.browser_unavailable``).
+
 A failure is an ops alert at once (``acquisition.canary_failed``, error),
 naming what failed; the first pass after one says so
 (``acquisition.canary_recovered``). Its journal row (kind ``canary``) is
@@ -44,6 +52,8 @@ _SETTINGS_KEY = "acquisition.canary_settings"
 _CATEGORY = "acquisition_canary"
 #: The longest one canary crawl may take.
 _DEADLINE_S = 600.0
+#: The longest the browser leg may take (a cold Chromium start included).
+_RENDER_DEADLINE_S = 180.0
 _DEFAULTS = dict(enabled=True, url="https://www.rfc-editor.org/rfc/rfc2606.html",
                  marker="Reserved Top Level DNS Names")
 _TASK: asyncio.Task | None = None
@@ -129,6 +139,43 @@ def _judge(store, projection: dict[str, Any] | None, url: str, marker: str) -> s
     return ""
 
 
+async def _public_check(url: str) -> None:
+    """The check the crawl's fetch makes before it connects (the browser leg's
+    seam for tests: the crawl keeps its own)."""
+    from kazma_core.web_acquire.dns_worker import validate_public_url
+
+    await validate_public_url(url)
+
+
+async def _render_leg(url: str, marker: str) -> tuple[str, str]:
+    """The page rendered in Kazma's browser: ``("passed", "")``,
+    ``("skipped", why)`` or ``("failed", what)``."""
+    from kazma_core.playwright_loop import run_in_browser_loop
+    from kazma_core.tools.read_url import _looks_like_bot_block
+    from kazma_core.web_acquire.browser import render_document
+    from kazma_core.web_acquire.browser_isolation import browser_unavailable
+    from kazma_core.web_acquire.result import AcquisitionError
+
+    why_not = await asyncio.to_thread(browser_unavailable)
+    if why_not:
+        return "skipped", why_not
+    try:
+        await _public_check(url)
+        document = await run_in_browser_loop(render_document(url, challenge=_looks_like_bot_block),
+                                             timeout=_RENDER_DEADLINE_S)
+    except TimeoutError:
+        return "failed", f"Kazma's browser did not render it in {int(_RENDER_DEADLINE_S)} s"
+    except AcquisitionError as exc:
+        return "failed", f"Kazma's browser was refused ({exc.code.value}): {exc}"
+    result = document.result
+    if not result.ok:
+        code = result.error_code.value if result.error_code else "failed"
+        return "failed", f"Kazma's browser did not render it ({code}: {result.error or 'no text'})"
+    if marker.lower() not in (result.text or "").lower():
+        return "failed", f"the page Kazma's browser rendered does not hold {marker!r}"
+    return "passed", ""
+
+
 async def run_canary(*, alert=None) -> dict[str, Any]:
     """One canary crawl; records and announces the outcome, returns it."""
     from kazma_core.bounded_cancel import wait_for_bounded
@@ -177,17 +224,22 @@ async def run_canary(*, alert=None) -> dict[str, Any]:
         except AcquisitionError:  # a leftover row is evicted with the history
             logger.warning("[acquisition] the canary's journal row could not be removed", exc_info=True)
         await asyncio.to_thread(store.close)
-    return await asyncio.to_thread(_record, reason, started, config["url"], alert)
+    render, render_reason = await _render_leg(config["url"], config["marker"])
+    if render == "failed":
+        reason = f"{reason}; and {render_reason}" if reason else render_reason
+    return await asyncio.to_thread(_record, reason, started, config["url"], alert,
+                                   {"status": render, "reason": render_reason})
 
 
-def _record(reason: str, started: float, url: str, alert) -> dict[str, Any]:
+def _record(reason: str, started: float, url: str, alert, render: dict[str, str] | None = None) -> dict[str, Any]:
     from kazma_core.config_store import get_config_store
     from kazma_core.observability.cadence import stamp_run
 
     before = state()
     now = time.time()
     outcome = dict(ok=not reason, ran_at=now, seconds=round(now - started, 1), url=url, reason=reason,
-                   failing_since=None if not reason else before.get("failing_since") or now)
+                   failing_since=None if not reason else before.get("failing_since") or now,
+                   render=render or {"status": "skipped", "reason": "not run"})
     get_config_store().set(_STATE_KEY, outcome, category=_CATEGORY)
     stamp_run(_CADENCE_KEY, now)
     if reason:
@@ -196,7 +248,10 @@ def _record(reason: str, started: float, url: str, alert) -> dict[str, Any]:
               f"Kazma crawled {url} and {reason}. Knowledge crawls may be failing the same way; "
               "check the server log and the Knowledge page.", severity="error", cooldown_s=20 * 3600.0)
     else:
-        logger.info("[acquisition] canary passed in %.1f s", outcome["seconds"])
+        render_note = outcome["render"]["status"]
+        if render_note == "skipped":
+            render_note += ": " + outcome["render"]["reason"]
+        logger.info("[acquisition] canary passed in %.1f s (browser leg %s)", outcome["seconds"], render_note)
         if before.get("ok") is False:
             alert("acquisition.canary_recovered", "The daily crawl check passes again",
                   f"It had failed since {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(before.get('failing_since') or now))}: "

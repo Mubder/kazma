@@ -3,6 +3,10 @@
 The canary crawls one known page through the product's whole crawl into a
 private store, and alerts at once when the page is not stored or does not say
 what it should. It never touches the owner's libraries or crawl history.
+Since 2026-11-13 it also renders the page in Kazma's own browser (the crawl
+reaches Chromium only when plain HTTP fails, so a broken browser went
+unseen): the crawl tests below stub that leg, and the browser-leg tests drive
+it (a real Chromium where one is installed).
 """
 from __future__ import annotations
 
@@ -56,6 +60,11 @@ def live(tmp_path, monkeypatch):
     monkeypatch.setattr(vsg, "_CLIENTS", {})
     monkeypatch.setattr(vsg, "get_encoder", lambda model_name=None: cr.ToyEmbedder())
     alerts = []
+
+    async def browser_leg_not_under_test(url, marker):
+        return "skipped", "the browser leg has its own tests"
+
+    monkeypatch.setattr(canary, "_render_leg", browser_leg_not_under_test)
     yield settings, alerts
     settings.close()
     vault_mod.reset_vault()
@@ -159,3 +168,135 @@ def test_the_monitor_never_shows_the_canary(live, monkeypatch, tmp_path):
                                                      delay_ms=0), kind="canary")
     job.finish("failed")
     assert all(entry["key"] != "job:" + job.job_id for entry in monitor._collect()[0])
+
+
+# -- the browser leg ---------------------------------------------------------------------------
+
+
+def _browser(monkeypatch, *, unavailable=None, result=None, raises=None):
+    """The browser leg's seams: whether a browser can start here, the public
+    address check, and the render itself (on the browser loop)."""
+    from kazma_core import playwright_loop
+    from kazma_core.web_acquire import browser, browser_isolation
+
+    calls = []
+    monkeypatch.setattr(browser_isolation, "browser_unavailable", lambda: unavailable)
+
+    async def public(url, **kw):
+        calls.append(("validated", url))
+
+    async def render(url, *, challenge, profile="generic"):
+        calls.append(("rendered", url))
+        if raises is not None:
+            raise raises
+        return browser.RenderedDocument(result=result)
+
+    async def on_the_browser_loop(coro, timeout=180.0, **kw):
+        return await coro
+
+    monkeypatch.setattr(canary, "_public_check", public)
+    monkeypatch.setattr(browser, "render_document", render)
+    monkeypatch.setattr(playwright_loop, "run_in_browser_loop", on_the_browser_loop)
+    return calls
+
+
+@pytest.fixture
+def browser_leg(live, monkeypatch):
+    """The live fixture with the real browser leg back in place."""
+    monkeypatch.setattr(canary, "_render_leg", _REAL_RENDER_LEG)
+    return live
+
+
+_REAL_RENDER_LEG = canary._render_leg
+
+
+@pytest.mark.asyncio
+async def test_a_browser_that_cannot_render_fails_the_canary(browser_leg, monkeypatch):
+    from kazma_core.web_acquire.result import FetchErrorCode, FetchResult
+
+    settings, alerts = browser_leg
+    calls = _browser(monkeypatch, result=FetchResult(ok=False, url=URL, error_code=FetchErrorCode.UNAVAILABLE,
+                                                     error="the driver ended"))
+    with cr.replaying(monkeypatch, _site()):
+        outcome = await canary.run_canary(alert=_alert(alerts))
+    assert outcome["ok"] is False and "Kazma's browser did not render it" in outcome["reason"]
+    assert outcome["render"]["status"] == "failed"
+    assert [key for key, _severity, _detail in alerts] == ["acquisition.canary_failed"]
+    assert calls == [("validated", URL), ("rendered", URL)]
+
+
+@pytest.mark.asyncio
+async def test_a_rendered_page_without_its_words_fails_too(browser_leg, monkeypatch):
+    from kazma_core.web_acquire.result import FetchResult
+
+    settings, alerts = browser_leg
+    _browser(monkeypatch, result=FetchResult(ok=True, url=URL, text="a challenge page"))
+    with cr.replaying(monkeypatch, _site()):
+        outcome = await canary.run_canary(alert=_alert(alerts))
+    assert outcome["ok"] is False and "rendered does not hold" in outcome["reason"]
+
+
+@pytest.mark.asyncio
+async def test_a_browser_that_renders_passes_and_is_recorded(browser_leg, monkeypatch):
+    from kazma_core.web_acquire.result import FetchResult
+
+    settings, alerts = browser_leg
+    _browser(monkeypatch, result=FetchResult(ok=True, url=URL, text="Reserved Top Level DNS Names ..."))
+    with cr.replaying(monkeypatch, _site()):
+        outcome = await canary.run_canary(alert=_alert(alerts))
+    assert outcome["ok"] is True and outcome["render"] == {"status": "passed", "reason": ""}
+    assert canary.state()["render"]["status"] == "passed" and alerts == []
+
+
+@pytest.mark.asyncio
+async def test_no_browser_installed_is_said_and_passes(browser_leg, monkeypatch):
+    settings, alerts = browser_leg
+    calls = _browser(monkeypatch, unavailable="Kazma's browser is not installed (kazma setup install --with browser)")
+    with cr.replaying(monkeypatch, _site()):
+        outcome = await canary.run_canary(alert=_alert(alerts))
+    assert outcome["ok"] is True and outcome["render"]["status"] == "skipped"
+    assert "--with browser" in outcome["render"]["reason"] and calls == [] and alerts == []
+
+
+@pytest.mark.asyncio
+async def test_negative_control_the_crawl_alone_passes_over_a_broken_browser(browser_leg, monkeypatch):
+    """The canary as it was (no browser leg): the same broken browser, a pass."""
+    from kazma_core.web_acquire.result import FetchErrorCode, FetchResult
+
+    settings, alerts = browser_leg
+    _browser(monkeypatch, result=FetchResult(ok=False, url=URL, error_code=FetchErrorCode.UNAVAILABLE,
+                                             error="the driver ended"))
+
+    async def the_old_canary(url, marker):
+        return "skipped", "not part of the canary then"
+
+    monkeypatch.setattr(canary, "_render_leg", the_old_canary)
+    with cr.replaying(monkeypatch, _site()):
+        outcome = await canary.run_canary(alert=_alert(alerts))
+    assert outcome["ok"] is True and alerts == []
+
+
+def test_the_install_and_the_canary_ask_one_rule_for_chromium(tmp_path, monkeypatch):
+    from kazma_cli import install
+    from kazma_core.web_acquire import browser_isolation
+
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path))
+    assert install._playwright_chromium() is browser_isolation.chromium_installed() is False
+    (tmp_path / "chromium-1234").mkdir()
+    assert install._playwright_chromium() is browser_isolation.chromium_installed() is True
+
+
+@pytest.mark.asyncio
+async def test_a_real_chromium_renders_the_replayed_page(browser_leg, monkeypatch):
+    """Where Kazma's browser is installed and may start, the leg drives a real
+    Chromium through the request broker, against the replayed site."""
+    from kazma_core.web_acquire import browser_isolation
+
+    why_not = browser_isolation.browser_unavailable()
+    if why_not:
+        pytest.skip(why_not)
+    settings, alerts = browser_leg
+    with cr.replaying(monkeypatch, _site()):
+        outcome = await canary.run_canary(alert=_alert(alerts))
+    assert outcome["render"] == {"status": "passed", "reason": ""}, outcome
+    assert outcome["ok"] is True

@@ -285,16 +285,9 @@ def _env_value(path: Path, key: str) -> str:
 
 
 def _playwright_chromium() -> bool:
-    configured = (os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or "").strip()
-    if configured and configured != "0":
-        roots = [Path(configured)]
-    elif os.name == "nt":
-        roots = [Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "ms-playwright"]
-    elif sys.platform == "darwin":
-        roots = [Path.home() / "Library" / "Caches" / "ms-playwright"]
-    else:
-        roots = [Path.home() / ".cache" / "ms-playwright"]
-    return any(any(root.glob("chromium-*")) for root in roots if root.is_dir())
+    from kazma_core.web_acquire.browser_isolation import chromium_installed
+
+    return chromium_installed()
 
 
 def _service_state(platform, run) -> tuple[bool | None, str]:

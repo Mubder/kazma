@@ -647,12 +647,10 @@ class KnowledgeStore:
 
     @staticmethod
     def _current_tenant() -> str:
-        try:
-            from kazma_core.tenant_isolation import require_tenant_id
+        # require_tenant_id never raises: no tenant bound is "default" there.
+        from kazma_core.tenant_isolation import require_tenant_id
 
-            return require_tenant_id()
-        except Exception:
-            return "default"
+        return require_tenant_id()
 
     @staticmethod
     def _tenant_filter_enabled() -> bool:
@@ -662,12 +660,11 @@ class KnowledgeStore:
             "0", "false", "off", "no",
         ):
             return False
-        try:
-            from kazma_core.tenant_isolation import multi_user_or_production
+        # multi_user_or_production never raises, and fails closed (a broken
+        # user store is multi-user); a False here used to undo that.
+        from kazma_core.tenant_isolation import multi_user_or_production
 
-            return multi_user_or_production()
-        except Exception:
-            return False
+        return multi_user_or_production()
 
     @staticmethod
     def _checked_text(value: str, what: str) -> str:
@@ -1220,10 +1217,11 @@ class KnowledgeStore:
                 )
                 _fault("gone_rows_deleted")
                 conn.execute("COMMIT")
-            except BaseException:
+            finally:
+                # Whatever ended the transaction early (a fault, a refusal,
+                # a cancellation) leaves nothing half done.
                 if conn.in_transaction:
                     conn.execute("ROLLBACK")
-                raise
         logger.info("[KnowledgeStore] took %d chunk(s) of %s out of library %s: the site no longer has it "
                     "(HTTP %s)", len(held), source_url[:120], library_id, status or "?")
         return {"outcome": "removed", "retired_ids": [str(r[1]) for r in held]}

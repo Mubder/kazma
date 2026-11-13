@@ -2,11 +2,13 @@
 
 The document sandbox passes a child only the variables it names, so
 Tesseract never saw the worker's ``OMP_NUM_THREADS=1`` and started a thread
-per CPU: inside the worker's one-CPU Job Object on Windows, and four at once
-on a four-CPU CI runner, the threads waited on each other and an Arabic table
-page ran past its 60 s limit (CI run 43353265350, 2026-11-13). Every call now
-names ``OMP_THREAD_LIMIT`` (``ocr.tesseract.thread_limit``), which Tesseract
-reads. The old request, without it, is the negative control.
+per CPU it could see, whatever the worker's CPU limit. Measured in the
+document worker image, eight reads four at once at one CPU: 4.8-6.0 s against
+2.5-3.2 s with the limit (found from CI run 43353265350, 2026-11-13, where an
+Arabic table page's call ran past its 60 s limit; that stall itself was not
+reproduced). Every call now names ``OMP_THREAD_LIMIT``
+(``ocr.tesseract._thread_limit``), which Tesseract reads. The old request,
+without it, is the negative control.
 """
 
 from __future__ import annotations
@@ -28,7 +30,7 @@ def test_the_limit_is_the_callers_budget(monkeypatch, budget, expected):
         monkeypatch.delenv("OMP_NUM_THREADS", raising=False)
     else:
         monkeypatch.setenv("OMP_NUM_THREADS", budget)
-    assert tesseract.thread_limit() == expected
+    assert tesseract._thread_limit() == expected
 
 
 def test_every_tesseract_call_names_the_limit(monkeypatch, tmp_path):

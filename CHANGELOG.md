@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## The daily crawl check also renders in Kazma's browser (2026-11-13)
+
+- Once a day Kazma already crawled one known page for real. It now also
+  renders that page in its own browser (Chromium, through its request
+  broker). A crawl reaches the browser only when plain HTTP fails, so a
+  broken browser went unnoticed until a page that needs JavaScript. A failed
+  render raises the same "daily crawl check failed" alert; an install without
+  the browser part says so and passes.
+
 ## OCR keeps to its CPU budget (2026-11-13)
 
 - Tesseract now uses as many threads as the document worker may (one by

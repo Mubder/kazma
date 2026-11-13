@@ -3410,7 +3410,7 @@ the searches and the floors; without it the test skips). Since 2026-10-15
 each engine is held to its own floors there (`floors_by_engine`), with a long
 worker time limit so every page stays with the engine asked for.
 **Every Tesseract call names its thread budget** (2026-11-13,
-`ocr.tesseract.thread_limit`): `OMP_THREAD_LIMIT` is the caller's
+`ocr.tesseract._thread_limit`): `OMP_THREAD_LIMIT` is the caller's
 `OMP_NUM_THREADS` (1 in the document worker), else 1. The sandbox passes a
 child only the variables it names, so Tesseract started a thread per CPU it
 could see (32 here) whatever the worker's CPU limit. Measured in the document
@@ -5169,7 +5169,7 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   last day resumes on its own (`interrupted_by: process_ended`,
   `kb_api.resume_interrupted_crawls`) up to `AUTO_RESUMES_PER_DAY` (3) times a
   day, each only if it settled more pages since its last automatic resume
-  (`row['auto_resumes']`, `crawl_jobs.settled_pages`; it was once ever, and a
+  (`row['auto_resumes']`, `crawl_jobs._settled_pages`; it was once ever, and a
   Windows update restarts twice); one the owner stopped waits. **A refresh
   takes out what the site removed, and only that** (2026-11-13): it also asks
   the site for the pages the library holds that discovery did not list
@@ -5228,7 +5228,15 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   kind `canary` removed after; a failure is the ops alert
   `acquisition.canary_failed` (error) the same day, a pass after one
   `acquisition.canary_recovered`; the weekly report expects seven runs
-  (`tests/test_crawl_canary.py`).
+  (`tests/test_crawl_canary.py`). It also renders the page in Kazma's own
+  browser (2026-11-13, `canary._render_leg`, the outcome's `render`): the
+  crawl reaches Chromium only when plain HTTP fails, so a broken driver,
+  contained process tree or request broker went unseen until a page needed
+  JavaScript. A failed render fails the canary; no browser part, or a host
+  that refuses to start it (`browser_isolation.browser_unavailable`, which
+  holds the one "is Chromium installed" rule the install asks too), is
+  `skipped` with why. A real Chromium renders the replayed page in the test
+  where one is installed; the canary without the leg is the control.
   The factory provides
   (proxy provider + rotating UA pool); `web_acquire` is the façade
   (`fetch_text`/`search`/`rank_urls`/profiles) used by research pipeline, KB

@@ -284,6 +284,17 @@ class KnowledgeHit:
     strength: str = ""
 
 
+def _drop_vectors(vs, ids: list[str], what: str) -> None:
+    """Remove *ids* from a library's vector collection. A collection that
+    refuses (Chroma raises its own error types) leaves them to the repair
+    sweep, which removes vectors whose chunk is gone: a WARNING, never a
+    failed publication."""
+    try:
+        vs.delete_many(ids)
+    except Exception as exc:
+        logger.warning("[KnowledgeIndex] the vectors of %s stay until the repair sweep: %s", what, exc)
+
+
 class KnowledgeIndex:
     """Per-library vector + lexical retrieval with RRF blending.
 
@@ -367,11 +378,7 @@ class KnowledgeIndex:
         if retired:
             vs = self._vector_store_for(library_id)
             if vs.available:
-                try:
-                    vs.delete_many(retired)
-                except Exception as exc:
-                    logger.warning("[KnowledgeIndex] the vectors of removed page %s stay until the repair "
-                                   "sweep: %s", source_url[:120], exc)
+                _drop_vectors(vs, retired, f"removed page {source_url[:120]}")
         return result
 
     def index(
@@ -466,11 +473,7 @@ class KnowledgeIndex:
         identity = vs.identity
         retired = [i for page in published for i in page["retired_ids"]]
         if retired:
-            try:
-                vs.delete_many(retired)
-            except Exception as exc:
-                logger.warning("[KnowledgeIndex] could not remove replaced vectors of %s: %s",
-                               library_id, exc)
+            _drop_vectors(vs, retired, f"the replaced pages of {library_id}")
         docs = [
             (chunk["id"], chunk["content"], self._chunk_vector_metadata(library_id, chunk, identity))
             for page in published for chunk in page.get("chunks", []) if chunk.get("content")
