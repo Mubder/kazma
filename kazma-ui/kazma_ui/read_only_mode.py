@@ -207,9 +207,12 @@ def create_read_only_app(start: ReadOnlyStart, *, probe: Any = None, on_back: An
         return bool(url) and refusal_reason(url) is None
 
     async def _watch() -> None:
+        from kazma_core.shutdown import sleep_or_shutdown
+
         check = probe or _database_answers
         while True:
-            await asyncio.sleep(PROBE_EVERY_S)
+            if await sleep_or_shutdown(PROBE_EVERY_S):
+                return
             answers = await asyncio.to_thread(check)
             state["probed_at"] = time.time()
             # The guard keeps the start open while the boot says what it waits for.

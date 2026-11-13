@@ -2210,13 +2210,13 @@ class KazmaAppBuilder:
             from kazma_ui.kb_api import resume_interrupted_crawls
 
             async def _resume_crawls_after_start() -> None:
-                await asyncio.sleep(20)  # the server answers first
                 try:
                     await resume_interrupted_crawls()
                 except AcquisitionError as exc:  # the owner's Resume still works
                     logger.warning("[kb_api] resuming interrupted crawls failed: %s", exc)
 
-            spawn_background(_resume_crawls_after_start(), name="kb-crawl-auto-resume")
+            # The server answers first; a reload during the wait ends it at once.
+            spawn_background(_resume_crawls_after_start(), name="kb-crawl-auto-resume", start_after=20)
 
         # ── V2 memory worker (durable task queue) ────────────────────
         # Registers the macro_sleep / entity_merge / micro_consolidation

@@ -10119,6 +10119,11 @@ has a gate that fails on the old code.
   daily digest is sent at `observability.daily_digest.time` (08:00, the
   operator's zone), not 24 hours after the last boot (FA-208); every loop
   sleep is `shutdown.sleep_or_shutdown`, so a stop ends it at once (FA-265).
+  A delay before background work is `spawn_background(..., start_after=)`,
+  which a stop ends with the work never started; a background coroutine
+  that is not `never_completes` never sleeps with `asyncio.sleep` (the crawl
+  auto-resume's 20 s wait held a reload for the drain's 10 s, 2026-11-13;
+  `tests/test_background_tasks_end_at_a_stop.py`).
   `/abort` pauses an active `/long` task (`pause_long_task_for_abort`,
   FA-148). Gates: `tests/test_rate_limits_follow_settings.py`,
   `tests/test_scheduler_cadence.py`, `tests/test_abort_pauses_the_long_task.py`.

@@ -75,11 +75,34 @@ def _on_done(task: asyncio.Task[Any]) -> None:
         logger.error("[bg] %s failed: %s", task.get_name(), exc, exc_info=exc)
 
 
+async def _after(seconds: float, coro: Coroutine[Any, Any, _T]) -> _T | None:
+    """Run *coro* after *seconds*, or never if the server begins to stop first.
+
+    The wait is :func:`kazma_core.shutdown.sleep_or_shutdown`: a plain
+    ``asyncio.sleep`` before the work held :func:`drain_background` for its
+    whole timeout when a reload came during the wait (live 2026-11-13,
+    "kb-crawl-auto-resume did not finish in 10s", 17 s after a boot).
+    """
+    from kazma_core.shutdown import sleep_or_shutdown
+
+    stopping = True  # a cancelled wait closes the coroutine too
+    try:
+        stopping = await sleep_or_shutdown(seconds)
+    finally:
+        if stopping:
+            coro.close()
+    if stopping:
+        logger.debug("[bg] not started: the server is stopping")
+        return None
+    return await coro
+
+
 def spawn_background(
     coro: Coroutine[Any, Any, _T],
     *,
     name: str,
     never_completes: bool = False,
+    start_after: float = 0.0,
 ) -> asyncio.Task[_T]:
     """Start *coro* as a background task that cannot be garbage-collected.
 
@@ -92,6 +115,11 @@ def spawn_background(
             cancellation. :func:`drain_background` then CANCELS it instead of
             waiting for it. Waiting is what made the drain burn its full
             timeout on every single shutdown — see ``_never_completes``.
+        start_after: Seconds to wait before *coro* starts (``0``: at once).
+            A stop that begins during the wait ends the task at once and
+            *coro* never runs. Never ``await asyncio.sleep(...)`` at the top
+            of a background coroutine instead: the drain waits that sleep
+            out (``tests/test_background_tasks_end_at_a_stop.py``).
 
     Returns:
         The created task. Callers that do not need it may discard it safely;
@@ -101,6 +129,8 @@ def spawn_background(
     # started from an approved or graph-gated tool call asks the bus itself.
     from kazma_core.safety.call_authority import detached_context
 
+    if start_after > 0:
+        coro = _after(float(start_after), coro)
     task = asyncio.create_task(coro, name=name, context=detached_context())
     _background.add(task)
     if never_completes:

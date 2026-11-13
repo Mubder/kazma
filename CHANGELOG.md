@@ -10,6 +10,8 @@
 - A kind of running work that cannot be read for the Running work card now
   says why in the log ("timed out after 10 s", or the error), where it said
   nothing after the colon.
+- A reload in the first 20 seconds after a start no longer waits 10 s for
+  the crawl auto-resume task, which was still in its start-up delay.
 
 ## A deleted library's last crawl no longer reads as a broken journal (2026-11-13)
 
