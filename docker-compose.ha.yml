@@ -72,7 +72,7 @@ services:
 
   nginx:
     # The stable line (1.27 no longer gets fixes), pinned by version and digest.
-    image: nginx:1.28.3-alpine@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236
+    image: nginx:1.31.8-alpine@sha256:713fc2ebfd92e8217db451477182ee91944b123d2b1ee9fd5a8c6e91ca6c3a11
     container_name: kazma-nginx
     ports:
       - "${PUBLISH_HOST:-127.0.0.1}:${HOST_PORT:-9090}:80"
