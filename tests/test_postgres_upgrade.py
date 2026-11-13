@@ -119,9 +119,12 @@ class _Machine:
 
 
 class _Hold:
-    def __init__(self, events: list[str], *, refusal: str | None = None) -> None:
+    """The guard's stop and start, as setup._MoveHold: a Kazma that is not
+    running is not held (and not waited for)."""
+
+    def __init__(self, events: list[str], *, refusal: str | None = None, running: bool = True) -> None:
         self.events, self._refusal = events, refusal
-        self.held, self.running = False, True
+        self.held, self.running = False, running
 
     def refusal(self):
         return self._refusal
@@ -131,7 +134,7 @@ class _Hold:
 
     def stop(self) -> bool:
         self.events.append("hold")
-        self.held = True
+        self.held = self.running
         return True
 
     def resume(self) -> str:
@@ -476,3 +479,44 @@ def test_the_watch_neither_starts_nor_pages_during_a_switch(monkeypatch):
     h2.running = h2.answers = False
     h2.run(900)
     assert h2.starts() == 1 and len(h2.pages) == 1
+
+
+# -- a Kazma that is not running (the drill VM, 2026-11-13) --------------------------------------
+#
+# On the drill VM no Kazma ran. The finish still waited to see Kazma sign in to
+# the new server, gave up after two minutes, returned 1 before the first base
+# backup and left the journal: a second run waited again.
+
+
+def test_with_no_kazma_running_the_upgrade_finishes_without_waiting_for_it(machine, monkeypatch, capsys):
+    base_backups = []
+    monkeypatch.setattr("kazma_cli.setup._kazma_signed_in", lambda url, **kw: False)   # nobody connects
+    monkeypatch.setattr(wal_archive, "_base_backup", lambda rec, pw, **kw: base_backups.append(pw) or Path("1"))
+    hold = _Hold(machine.events, running=False)
+    assert _upgrade(machine, hold=hold) == 0, capsys.readouterr().out
+    assert base_backups == [SUPER_PW] and pgu.JOURNAL_KEY not in _record()
+    assert "resume" not in machine.events
+    capsys.readouterr()
+    assert _upgrade(machine, hold=_Hold(machine.events, running=False)) == 0
+    assert "already runs PostgreSQL" in capsys.readouterr().out
+
+
+def test_a_running_kazma_must_still_be_seen_on_the_new_server(machine, monkeypatch, capsys):
+    """The other side: Kazma was running, and it never signs in to 18."""
+    monkeypatch.setattr("kazma_cli.setup._kazma_signed_in", lambda url, **kw: False)
+    assert _upgrade(machine) == 1
+    assert "was not seen signed in" in capsys.readouterr().out
+    assert _record()[pgu.JOURNAL_KEY]["stage"] == "switched"       # the next run finishes it
+
+
+def test_a_finish_picked_up_by_a_later_run_takes_the_base_backup(machine, monkeypatch, capsys):
+    from kazma_cli import postgres_upgrade as cli
+
+    base_backups = []
+    monkeypatch.setattr(wal_archive, "_base_backup", lambda rec, pw, **kw: base_backups.append(pw) or Path("1"))
+    rec = _record()["postgres"]
+    pgu.write_postgres_record({**rec, "major": NEW, "service": NEW_SVC, "previous": rec})
+    pgu.write_journal({"stage": "switched", "from": OLD, "to": NEW, "port": 5432, "temp_port": 55432,
+                       "old_record": rec})
+    assert cli._finish(pgu.journal(), _Hold(machine.events, running=False), run=machine.run) == 0
+    assert base_backups == [SUPER_PW] and pgu.JOURNAL_KEY not in _record()

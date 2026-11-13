@@ -164,6 +164,12 @@ def main(argv: list[str] | None = None) -> int:
     with tempfile.TemporaryDirectory(prefix="kazma-pg-upgrade-drill-") as tmp:
         work = Path(tmp)
         report["from"] = boot.prepare(vm, options.ref, work)
+        # A real install's system steps register winget's package list first
+        # (a fresh Windows refuses every install until then); the code before
+        # 2026-11-13 did not do it in kazma setup postgres itself.
+        from kazma_cli.setup import WINGET_SOURCE_PACKAGE
+
+        vm.ssh(f"Add-AppxPackage -Path '{WINGET_SOURCE_PACKAGE}' -ErrorAction SilentlyContinue; 'ok'", timeout=600)
         boot._say("Setting up PostgreSQL 16 with the old code (kazma setup postgres -y)")
         code, log = _run_detached(vm, "setup postgres -y", "setup16", 3600)
         report["setup16"] = {"exit": code, "tail": log[-1500:]}

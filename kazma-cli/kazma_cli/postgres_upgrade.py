@@ -195,24 +195,31 @@ def upgrade_postgres(options, *, run=subprocess.run, hold: _MoveHold | None = No
 
 
 def _finish(entry: dict[str, Any], hold: _MoveHold, *, run, superuser_password: str = "") -> int:
-    """Kazma started on the new server and seen signed in there; its first
-    base backup taken; the journal cleared."""
+    """Kazma started on the new server and seen signed in there (when it was
+    running: a Kazma that was not started is not waited for); its first base
+    backup taken; the journal cleared. A finish a later run picks up reads
+    the superuser's password itself."""
     from kazma_core import postgres_service as pgs
     from kazma_core import postgres_upgrade as pgu
     from kazma_core.backup import wal_archive
 
     rec = pgs.read_record().get("postgres") or {}
-    url_password = _setup._existing_app_password(int(rec.get("port") or 5432))
-    if hold.held or (hold.adopt_leftover() and hold.held):
+    port = int(rec.get("port") or 5432)
+    url_password = _setup._existing_app_password(port)
+    kazma_runs = bool(hold.running) or hold.adopt_leftover()
+    if hold.held:
         _say(f"-> Starting Kazma on PostgreSQL {rec.get('major')}")
         result = hold.resume()
         if result != "up":
             _say(f"Kazma has not answered yet ({result}); its guard keeps at it: "
                  "python scripts/service/kazma_guard.py --status")
             return 1
-    if url_password and not _setup._kazma_signed_in(pgs.database_url(url_password, int(rec.get("port") or 5432))):
+    if kazma_runs and url_password and not _setup._kazma_signed_in(pgs.database_url(url_password, port)):
         _say(f"Kazma answers, but was not seen signed in to PostgreSQL {rec.get('major')}: check kazma doctor.")
         return 1
+    if not superuser_password:
+        pass_file = _setup._superuser_pass_file()
+        superuser_password = pass_file.read_text(encoding="utf-8").strip() if pass_file.exists() else ""
     if superuser_password:
         try:
             base = wal_archive._base_backup(rec, superuser_password, root=wal_archive._base_root(rec))
@@ -222,7 +229,7 @@ def _finish(entry: dict[str, Any], hold: _MoveHold, *, run, superuser_password: 
             _say(f"   The first base backup was not taken ({exc}); the WAL archive sweep takes one within the hour.")
     pgu.clear_journal()
     old = rec.get("previous") or {}
-    _say(f"Done. Kazma runs on PostgreSQL {rec.get('major')}. PostgreSQL {old.get('major')} is stopped and kept "
-         f"({old.get('service')}, not started at boot), with its data and backups: remove it with its own "
-         "uninstaller once you are sure.")
+    _say(f"Done. Kazma runs on PostgreSQL {rec.get('major')}" + ("" if kazma_runs else " when it starts")
+         + f". PostgreSQL {old.get('major')} is stopped and kept ({old.get('service')}, not started at boot), with "
+         "its data and backups: remove it with its own uninstaller once you are sure.")
     return 0
