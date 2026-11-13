@@ -11,7 +11,7 @@
 #   docker build -f deploy/document-broker/Dockerfile -t kazma-document-broker:local .
 FROM docker:29.0-cli@sha256:858bb1e05af16840f5a55143c3e5e14073891fbc92f2c1f6f38dd9c5f2cca03c AS cli
 
-FROM python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928
 COPY --from=cli /usr/local/bin/docker /usr/local/bin/docker
 COPY kazma-core/kazma_core/documents/worker_broker.py /opt/kazma-broker/worker_broker.py
 RUN python -m py_compile /opt/kazma-broker/worker_broker.py \
