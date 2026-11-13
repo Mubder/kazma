@@ -7,9 +7,10 @@
 //
 // (v2Message). The route is in what is signed, so a signature made for one
 // route is refused on another. The older "v1=<hex>", over "<timestamp>." +
-// body, did not bind the route. v1 is accepted while ACCEPT_V1 is true -- the
-// transition, until every guard and Kazma sends v2 -- and each one accepted
-// is logged. The shared test vector is
+// body, did not bind the route: one signed heartbeat body, replayed to
+// /v1/leave, unpaired the install. v1 was accepted, and logged, only during
+// the transition; it is refused since 2026-11-12 (ACCEPT_V1 false), when the
+// owner's guard and Kazma both signed v2. The shared test vector is
 // tests/fixtures/observer/heartbeat_vector.json.
 
 const enc = new TextEncoder();
@@ -17,9 +18,9 @@ const enc = new TextEncoder();
 // How far a signed request's timestamp may be from the observer's clock.
 export const CLOCK_WINDOW_S = 300;
 
-// The one switch that drops v1: set false (and deploy) once no install sends
-// it -- `wrangler tail` shows "accepted a v1 signature" while one still does.
-export const ACCEPT_V1 = true;
+// v1 is retired: a v1 signature is refused ("v1_retired") before any key is
+// read. Kept as a switch only so the tests can show what v1 allowed.
+export const ACCEPT_V1 = false;
 
 export const INSTALL_RE = /^[0-9a-f]{16}$/;
 const SIGNATURE_RE = /^v[12]=[0-9a-f]{64}$/;

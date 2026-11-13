@@ -160,32 +160,41 @@ test("a v2 heartbeat is accepted; the same signature on another route is refused
   assert.equal((await beat(e, T0 + 60)).status, 200, "still paired");
 });
 
-test("negative control: the v1 form binds no route, so the same replay unpairs", async (t) => {
+test("a replayed v1 signature is refused and unpairs nothing; the v1 verifier would have unpaired", async (t) => {
   const warn = t.mock.method(console, "warn", () => {});
   const e = env();
   await pair(e);
   const raw = JSON.stringify({ v: 1, install: INSTALL });
   const signature = await sign(KEY, T0 + 5, raw);   // what a heartbeat's v1 signature covered
-  const left = await post(e, "/v1/leave", raw, {
-    "X-Kazma-Install": INSTALL, "X-Kazma-Timestamp": String(T0 + 5), "X-Kazma-Signature": signature,
-  }, T0 + 5);
-  assert.equal(left.status, 200, "the old verifier takes it: the hole v2 closes");
-  assert.equal((await beat(e, T0 + 60)).status, 401, "unpaired by a replayed signature");
+  const headers = { "X-Kazma-Install": INSTALL, "X-Kazma-Timestamp": String(T0 + 5), "X-Kazma-Signature": signature };
+  const left = await post(e, "/v1/leave", raw, headers, T0 + 5);
+  assert.equal(left.status, 401);
+  assert.equal((await left.json()).error, "v1_retired");
+  assert.equal((await beat(e, T0 + 60)).status, 200, "still paired");
+  // Negative control: the verifier as it was while v1 was accepted takes the
+  // same request, which binds no route -- the hole v2 closes.
+  const req = new Request("https://status.kazma.example/v1/leave", { method: "POST", body: raw, headers });
+  const h = signingHeaders(req, T0 + 5, { acceptV1: true });
+  assert.equal(await verifyRequest(KEY, h, req, raw, { acceptV1: true }), true);
   assert.ok(warn.mock.calls.some((c) => /accepted a v1 signature on POST \/v1\/leave/.test(c.arguments[0])));
 });
 
-test("v1 is still accepted during the transition, and logged as such", async (t) => {
-  assert.equal(ACCEPT_V1, true, "drop v1 by setting ACCEPT_V1 false once no install sends it");
+test("v1 is retired: the heartbeat and the summary refuse it, and log nothing as accepted", async (t) => {
+  assert.equal(ACCEPT_V1, false, "v1 was dropped on 2026-11-12, once the guard and Kazma signed v2");
   const warn = t.mock.method(console, "warn", () => {});
   const e = env();
   await pair(e);
-  assert.equal((await beat(e, T0, heartbeatBody(), { v1: true })).status, 200);
-  const logged = warn.mock.calls.map((c) => c.arguments[0]);
-  assert.ok(logged.some((m) => m.includes("accepted a v1 signature on POST /v1/heartbeat")), logged);
-  assert.ok(!logged.some((m) => m.includes(KEY)), "the key is never logged");
-  warn.mock.resetCalls();
-  assert.equal((await beat(e, T0 + 60)).status, 200);
-  assert.equal(warn.mock.callCount(), 0, "a v2 signature logs nothing");
+  const old = await beat(e, T0, heartbeatBody(), { v1: true });
+  assert.equal(old.status, 401);
+  assert.equal((await old.json()).error, "v1_retired");
+  const summary = await handle(new Request("https://status.kazma.example/v1/summary", {
+    method: "GET", headers: {
+      "X-Kazma-Install": INSTALL, "X-Kazma-Timestamp": String(T0 + 1),
+      "X-Kazma-Signature": await sign(KEY, T0 + 1, "GET /v1/summary") } }), e, T0 + 1);
+  assert.equal(summary.status, 401);
+  assert.equal((await summary.json()).error, "v1_retired");
+  assert.ok(!warn.mock.calls.some((c) => /accepted a v1 signature/.test(c.arguments[0])));
+  assert.equal((await beat(e, T0 + 60)).status, 200, "a v2 heartbeat is taken");
 });
 
 test("with v1 dropped, a v1 signature is refused before any key is read", async () => {
@@ -194,8 +203,9 @@ test("with v1 dropped, a v1 signature is refused before any key is read", async 
     method: "POST", body: raw, headers: {
       "X-Kazma-Install": INSTALL, "X-Kazma-Timestamp": String(T0),
       "X-Kazma-Signature": await sign(KEY, T0, raw) } });
+  assert.deepEqual(signingHeaders(req, T0), { error: "v1_retired" }, "the default");
   assert.deepEqual(signingHeaders(req, T0, { acceptV1: false }), { error: "v1_retired" });
-  const h = signingHeaders(req, T0);
+  const h = signingHeaders(req, T0, { acceptV1: true });
   assert.equal(await verifyRequest(KEY, h, req, raw, { acceptV1: false }), false);
 });
 
