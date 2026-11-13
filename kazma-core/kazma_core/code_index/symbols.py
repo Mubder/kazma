@@ -122,18 +122,66 @@ def _tree_sitter_symbols(lang: str, source: str) -> list[Symbol]:
                 captures = list(raw)
         else:
             captures = list(query.captures(tree.root_node))
+        seen: set[tuple[int, str]] = set()
         for node, cap_name in captures:
-            kind = "class" if "class" in cap_name else "function"
             name = getattr(node, "text", b"")
             if isinstance(name, bytes):
                 name_s = name.decode("utf-8", errors="replace")
             else:
                 name_s = source[node.start_byte : node.end_byte]
             line = int(getattr(node, "start_point", (0, 0))[0]) + 1
-            out.append(Symbol(name=name_s, kind=kind, line=line, signature=f"{kind} {name_s}"))
-        return out
+            kind = _ts_kind(node, cap_name)
+            if (line, name_s) in seen:
+                continue
+            seen.add((line, name_s))
+            out.append(Symbol(name=name_s, kind=kind, line=line, signature=_ts_signature(lang, node, kind, name_s)))
+        return sorted(out, key=lambda s: s.line)
     except Exception:
         return []
+
+
+#: A definition that belongs to a class, and the node types that end the
+#: search for one: a function inside a function is a function.
+_CLASS_NODES = {"class_definition", "class_declaration", "class_body", "class"}
+_FUNCTION_NODES = {"function_definition", "function_declaration", "method_definition", "arrow_function",
+                   "function_expression", "generator_function_declaration"}
+
+
+def _ts_kind(node, cap_name: str) -> str:  # noqa: ANN001
+    """The symbol's kind as the regex path names it: ``class``; ``method``
+    for a function whose nearest enclosing definition is a class; else
+    ``function``. The capture name alone called every Python method a
+    function, so the index answered differently with tree-sitter installed
+    (2026-11-13)."""
+    if "class" in cap_name:
+        return "class"
+    if "method" in cap_name:
+        return "method"
+    definition = getattr(node, "parent", None)
+    ancestor = getattr(definition, "parent", None)
+    while ancestor is not None:
+        kind = getattr(ancestor, "type", "")
+        if kind in _CLASS_NODES:
+            return "method"
+        if kind in _FUNCTION_NODES:
+            return "function"
+        ancestor = getattr(ancestor, "parent", None)
+    return "function"
+
+
+def _ts_signature(lang: str, node, kind: str, name: str) -> str:  # noqa: ANN001
+    """The signature the regex path writes: ``def name(params)`` for Python
+    functions and methods, ``class Name``, else the kind and the name."""
+    if kind == "class":
+        return f"class {name}"
+    if lang == "python":
+        definition = getattr(node, "parent", None)
+        params = definition.child_by_field_name("parameters") if definition is not None else None
+        text = getattr(params, "text", b"") if params is not None else b""
+        if isinstance(text, bytes) and text:
+            inner = text.decode("utf-8", errors="replace").strip()[1:-1].strip()
+            return f"def {name}({inner})"
+    return f"{kind} {name}"
 
 
 _QUERIES: dict[str, str] = {
@@ -144,11 +192,13 @@ _QUERIES: dict[str, str] = {
     "javascript": """
         (function_declaration name: (identifier) @function)
         (class_declaration name: (identifier) @class)
+        (method_definition name: (property_identifier) @method)
         (lexical_declaration (variable_declarator name: (identifier) @function))
     """,
     "typescript": """
         (function_declaration name: (identifier) @function)
         (class_declaration name: (type_identifier) @class)
+        (method_definition name: (property_identifier) @method)
     """,
 }
 

@@ -45,6 +45,41 @@
   data). A container under the same name made elsewhere, by you or by
   another Kazma folder of the same name, is never touched.
 
+## Dependency updates: the minor and patch releases, applied again (2026-11-13)
+
+- The first attempt failed on the live install and was undone (the entries
+  above say how the update now repairs itself); this is the same set.
+
+- Dependabot's minor and patch updates are in, applied together with the
+  lock made once: LangGraph 1.2.21, langchain-core 1.8, FastAPI 0.162.6,
+  pydantic 2.14.3, psycopg 3.3.9, transformers 5.23, torch 2.15 for new
+  installs, docling 2.150, arabic-reshaper 3.1, pypdfium2 5.15.2, pytest 9.2,
+  and twenty more. Neo4j's image is 5.26.32; the document broker's Docker CLI
+  is 29.8.
+- The meaning-search model gives bit-identical vectors on the new torch and
+  transformers, so stored memories and Knowledge vectors stay valid.
+- The document worker image follows: arabic-reshaper, markdown and pypdfium2
+  are the versions Kazma itself runs.
+- torch's minimum stays 2.13: raising it would force the OCR model build onto
+  a new torch with no security reason.
+- Playwright is held below 1.65: 1.65 rewrote the private client that Kazma's
+  bounded browser driver starts the browser through, and every page that
+  needs the browser failed on it (`playwright._impl._connection` is gone).
+  The driver moves to 1.65 in its own change, once it passes the browser
+  tests against a real Chromium.
+- With tree-sitter installed (the code index's extra), the terminal app's
+  editor did not open: it asked Textual for a language named "plaintext",
+  which Textual ignores without tree-sitter and refuses with it. Plain text
+  is no language now, and a file's language is set only when Textual has it.
+- The code index called a Python method a function, with the signature
+  "function bar", when tree-sitter was installed, and "def bar(self)"
+  without it. Both now say "method" and "def bar(self)"; JavaScript class
+  methods are indexed too.
+- Not taken: the major updates (Postgres 18, Python 3.15 images, PyMuPDF 2,
+  GitHub Actions majors), nginx 1.31 (nginx's development branch), and the
+  docs site's group (it moves Mermaid to 12, which the site holds at 11).
+
+
 ## A stopped app takes back what it registered; CI runs each chunk once (2026-11-13)
 
 - The app put its settings store, agent, chat adapters, gateway and session
