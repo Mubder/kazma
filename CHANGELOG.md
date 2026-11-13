@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## soupsieve security floor (2026-11-13)
+
+- soupsieve, which docling brings in through beautifulsoup4, had two
+  published advisories: a slow CSS selector on untrusted HTML (fixed in
+  2.10) and a denial of service in the descendant combinator (fixed in
+  4.0). Kazma now requires soupsieve 4.0 or later with the `docling` extra
+  on Python 3.11.5 and newer. Older 3.11 releases get 2.10 from the lock.
+- `kazma update` installs it on an existing install. Before, an install kept
+  the version it had.
+
 ## Kazma's own container engine, step 4: move an install off Docker Desktop (2026-11-13)
 
 - `kazma setup engine --move-from-desktop` moves an existing Windows install
