@@ -318,6 +318,7 @@ Deep dive: [Knowledge Library](./knowledge-library.md).
 - **Sync beliefs → Neo4j** runs the same pass now, with the full comparison.  
 - **Only this install's edges change.** Every edge Kazma writes carries the fact's id and this install's id. An edge without a fact id, or written by another install sharing the Neo4j, is never changed or removed.  
 - **Neo4j down is waited out:** changes wait in a queue (up to 100,000, then the next pass compares everything instead), Kazma says once that Neo4j does not answer and once that it is back. Memory health shows the copy: in sync, behind (with how much), unreachable, or not configured.
+- **Nodes are found by an index** (since 2026-11-13). Each node carries a key, the SHA-256 of its name, under a uniqueness constraint on the tenant and the key; 500 edges written at once over 40,000 nodes take about 0.1 s instead of 8.5 s, and two writers of one new name make one node. An index on the name itself cannot be used: Neo4j refuses a value longer than about 8 KB, and a fact's value can be 16 KB. The pass gives existing nodes their keys (40,000 in about 5.5 s); until every node has one, writes find nodes by name. Memory health says whether the copy is keyed.  
 
 ### Operator setup
 
