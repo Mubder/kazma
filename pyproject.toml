@@ -277,6 +277,10 @@ asyncio_default_fixture_loop_scope = "function"
 # is the one that works on Windows, and it dumps the stack of every thread,
 # which is how the deadlock above was located in a single run.
 addopts = "-v --strict-markers --tb=short --timeout=300 --timeout-method=thread"
+# Only a failed test's temporary folder is kept (2026-11-14: the temp folder
+# held 54 runs, 23 GB, from one day of chunked runs: a run cut off holds its
+# lock for three days, so pytest's own cleanup of old runs skipped it).
+tmp_path_retention_policy = "failed"
 markers = [
     "unit: Unit tests",
     "integration: Integration tests",

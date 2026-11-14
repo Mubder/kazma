@@ -646,3 +646,14 @@ def test_long_serial_suite_uses_owned_argument_file_and_runs_real_pytest(tmp_pat
     code, log = runner.run_pytest(args, 45)
     assert code == 0 and runner._parse_summary(log)['passed'] == 1, log
     assert len(observed) == 1 and not observed[0].exists()
+
+
+def test_only_a_failed_test_keeps_its_temporary_folder() -> None:
+    """2026-11-14: one day of chunked runs left 54 runs (23 GB) in the temp
+    folder. A run cut off by its chunk's budget keeps its lock for three days,
+    so pytest's removal of old runs skipped it, whole. With the "failed"
+    policy a finished run keeps only its failed tests' folders."""
+    import tomllib
+
+    options = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
+    assert options["tool"]["pytest"]["ini_options"]["tmp_path_retention_policy"] == "failed"
