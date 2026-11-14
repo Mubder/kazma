@@ -42,7 +42,14 @@ def _host(url: str) -> str:
 
 
 def _line(status: str, label: str, detail: str = "") -> tuple[str, str]:
-    return status, f"{_MARK[status]} {label}" + (f"\n         {detail}" if detail else "")
+    """One row of the report. A provider's address can carry a user and
+    password, and the report printed it whole (``endpoint: ...``, the URL the
+    registry would use): every row passes ``mask_urls_in_text`` (2026-11-14,
+    CodeQL py/clear-text-logging-sensitive-data)."""
+    from kazma_core.security.url_credentials import mask_urls_in_text
+
+    text = f"{_MARK[status]} {label}" + (f"\n         {detail}" if detail else "")
+    return status, mask_urls_in_text(text)
 
 
 def _diagnose_vault_pointer(ptr: str) -> str:

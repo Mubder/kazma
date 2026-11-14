@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 import { d1 } from "./d1_standin.mjs";
-import { handle, runMinute, scheduledRun, SITE } from "../src/index.js";
+import { handle, runMinute, scheduledRun, SITE, withoutTrailingSlashes } from "../src/index.js";
 import { classifyLive, diagnose, sanitize, severityOf, titleOf } from "../src/diagnose.js";
 import { duration, OPEN_AFTER_S, pageText } from "../src/incidents.js";
 import { forgetCerts } from "../src/access.js";
@@ -599,4 +599,15 @@ test("the status page is the owner's only", async () => {
 test("unknown paths are 404", async () => {
   const res = await handle(new Request("https://status.kazma.example/admin"), env(), T0);
   assert.equal(res.status, 404);
+});
+
+test("an address loses only the slashes it ends with, in one pass", () => {
+  assert.equal(withoutTrailingSlashes("https://kazma.example/"), "https://kazma.example");
+  assert.equal(withoutTrailingSlashes("https://kazma.example//a//"), "https://kazma.example//a");
+  assert.equal(withoutTrailingSlashes("///"), "");
+  assert.equal(withoutTrailingSlashes(""), "");
+  const long = "/".repeat(50000) + "x";
+  const started = Date.now();
+  assert.equal(withoutTrailingSlashes(long), long);
+  assert.ok(Date.now() - started < 200);
 });

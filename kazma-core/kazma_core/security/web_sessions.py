@@ -21,6 +21,7 @@ __all__ = [
     "list_sessions",
     "revoke_session",
     "revoke_user_sessions",
+    "session_label",
     "validate_session",
     "use_opaque_sessions",
     "purge_expired_sessions",
@@ -93,6 +94,16 @@ def use_opaque_sessions() -> bool:
 
 def _hash(session_id: str) -> str:
     return hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+
+
+def session_label(session_id: str) -> str:
+    """A session's name in logs and audit rows: the start of its hash, the
+    ``id`` Settings lists (``list_sessions``). Never any part of the session
+    id itself, which is the bearer credential: four actor labels kept its
+    first eight characters in kazma.log and the audit tables (2026-11-14,
+    CodeQL py/clear-text-logging-sensitive-data). Gate:
+    tests/test_session_label_never_the_cookie.py."""
+    return _hash(str(session_id).strip())[:12]
 
 
 def _ttl() -> int:

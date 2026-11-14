@@ -151,7 +151,11 @@ _WORK_ITEM_RE = re.compile(
 # a product the user talks about losing its node costs more than a ticket
 # keeping one (the health report lists those).
 _TICKET_RE = re.compile(r"^[a-z]{2,10}-\d{3,}$", re.I)
-_VERSION_RE = re.compile(r"^v?\d+([._]\d+)+([._-]?[a-z0-9]+)*$", re.I)
+# Possessive and one character a step: ``([._-]?[a-z0-9]+)*`` could split a
+# run of letters every way there is, and "0.0" with thirty letters and a "!"
+# took minutes (2026-11-14, CodeQL py/redos). Gate:
+# tests/test_regexes_stay_linear.py.
+_VERSION_RE = re.compile(r"^v?\d++(?:[._]\d++)++(?:[._-]?[a-z0-9])*+$", re.I)
 _HASH_RE = re.compile(r"^(?=[0-9a-f]*\d)[0-9a-f]{7,40}$", re.I)
 _MAX_SUBJECT_WORDS = 6
 

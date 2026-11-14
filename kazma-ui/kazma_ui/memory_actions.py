@@ -85,8 +85,8 @@ def action_counts() -> dict[str, int]:
 
 
 def _actor_and_tenant(headers: list[tuple[bytes, bytes]]) -> tuple[str, str]:
-    """``web:<role>:<session8>`` and the session's tenant, from the session
-    cookie (the approve route's rule: never a client-supplied label)."""
+    """``web:<role>:<session label>`` and the session's tenant, from the
+    session cookie (the approve route's rule: never a client-supplied label)."""
     from http.cookies import SimpleCookie
 
     from kazma_core.security.web_sessions import SESSION_COOKIE, get_session_payload
@@ -101,10 +101,11 @@ def _actor_and_tenant(headers: list[tuple[bytes, bytes]]) -> tuple[str, str]:
     if not sid:
         auth = any(k.lower() == b"authorization" for k, _v in headers)
         return ("web:token" if auth else "web:anon"), "default"
+    from kazma_ui.web_actor import actor_for_session
+
     payload = get_session_payload(sid) or {}
-    role = str(payload.get("role") or "viewer")
     tenant = str(payload.get("tenant_id") or "default")
-    return f"web:{role}:{str(payload.get('session_id') or sid)[:8]}", tenant
+    return actor_for_session(sid, payload), tenant
 
 
 def _record(action: str, ids: list[str], status: int, headers: list[tuple[bytes, bytes]]) -> None:

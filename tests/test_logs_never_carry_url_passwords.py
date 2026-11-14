@@ -1,0 +1,70 @@
+"""No log line, doctor row or settings log carries a password inside a URL.
+
+A provider's or a database's address can carry ``user:password@``. Model
+discovery, the model registry and ``kazma doctor`` wrote such addresses as they
+were, and the settings store's change log showed a list's nested key whenever
+the vault had not taken it (CodeQL py/clear-text-logging-sensitive-data,
+2026-11-14). The log writer masks every message and traceback before it is
+queued (``logging_config._LogQueueHandler.prepare``), so a new log call cannot
+bring it back.
+"""
+
+from __future__ import annotations
+
+import logging
+import logging.handlers
+import queue
+
+from kazma_core import logging_config
+from kazma_core.config_store import _redact_for_log
+from kazma_cli import doctor
+
+SECRET = "pw-7f3c9a1e"
+URL = f"https://kazma:{SECRET}@llm.example.test/v1"
+
+
+def _record(msg: str, *args, exc: BaseException | None = None) -> logging.LogRecord:
+    exc_info = (type(exc), exc, exc.__traceback__) if exc else None
+    return logging.LogRecord("kazma.test", logging.WARNING, __file__, 1, msg, args, exc_info)
+
+
+def _raised(text: str) -> BaseException:
+    try:
+        raise ConnectionError(text)
+    except ConnectionError as exc:  # noqa: PERF203 - a real traceback
+        return exc
+
+
+def test_the_log_writer_masks_url_passwords_in_messages_and_tracebacks():
+    handler = logging_config._LogQueueHandler(queue.Queue())
+    out = handler.prepare(_record("Ollama not running at %s", URL,
+                                  exc=_raised(f"refused by {URL}")))
+    assert SECRET not in out.getMessage()
+    assert SECRET not in (out.exc_text or "")
+    assert "llm.example.test" in out.getMessage()  # the host still says where
+
+
+def test_the_server_logs_through_that_writer():
+    # setup_logging puts _LogQueueHandler in front of the file and console
+    # handlers; the masking is in its prepare(), which every record passes.
+    assert logging_config._LogQueueHandler.prepare is not logging.handlers.QueueHandler.prepare
+
+
+def test_control_a_plain_queue_handler_keeps_the_password():
+    out = logging.handlers.QueueHandler(queue.Queue()).prepare(_record("at %s", URL))
+    assert SECRET in out.getMessage()
+
+
+def test_doctor_rows_mask_the_endpoint():
+    _status, text = doctor._line(doctor.OK, "configured: 'm' via 'p'", f"endpoint: {URL}")
+    assert SECRET not in text and "llm.example.test" in text
+
+
+def test_the_settings_log_masks_a_lists_nested_key():
+    shown = _redact_for_log("providers.list", [{"name": "p", "api_key": "sk-live-abcdef123456"}])
+    assert "sk-live" not in shown and "'name': 'p'" in shown
+    assert SECRET not in _redact_for_log("memory.backends.state.url", f"postgresql://u:{SECRET}@db/kazma")
+
+
+def test_control_the_old_settings_log_showed_it():
+    assert "sk-live" in repr([{"name": "p", "api_key": "sk-live-abcdef123456"}])[:77]

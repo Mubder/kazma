@@ -137,6 +137,14 @@ Around the fence:
   backups hold pointers; every page and API masks secrets by name and by
   value (a password inside a URL); secrets reach other programs on stdin,
   never on a command line; offsite backups leave secret files out.
+- **Logs hold no secrets.** Kazma's log writer masks a password inside an
+  address in every line and traceback, whatever wrote it; the update log and
+  `kazma doctor` do the same; a web session is named in logs and audit
+  records by the start of its hash, never by any part of its sign-in cookie.
+- **A path from outside is read as text before it is touched.** A network
+  or device path (`\\host\share`) is refused before anything resolves it,
+  in the tools, the IDE, the Workspace page and the folder settings, so a
+  path can never make Kazma connect to another machine.
 
 ## 6. Risky work runs boxed in
 

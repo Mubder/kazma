@@ -161,7 +161,7 @@
     // guarantees this (partKey), so a duplicate here means a malformed doc —
     // take the later stamp rather than rendering the gate twice.
     var order = [];
-    var byKey = {};
+    var byKey = Object.create(null);
     for (i = 0; i < parts.length; i++) {
       p = parts[i];
       if (!p || p.type !== 'hitl') continue;
@@ -244,7 +244,12 @@
      *  way to find a turn's bubble. A DOM query can match a bubble the
      *  layout happens to have left behind; this map only ever holds what we
      *  ourselves bound. */
-    var byTurn = {};
+    //: Every map here is keyed by ids and keys that arrive in server frames.
+    //: A plain object answers "__proto__" with Object.prototype, and the slot
+    //: table written next would land on every object of the page (CodeQL
+    //: js/prototype-polluting-assignment, 2026-11-14): no prototype, no key
+    //: that means anything but itself. Gate: tests/js/test_turn_view.js ("keys name only themselves").
+    var byTurn = Object.create(null);
     /** bubble element → { key → element }. Kept on the element itself so a
      *  removed bubble takes its slot table with it (no leak, no stale map
      *  entry pointing at a detached node). */
@@ -252,7 +257,7 @@
 
     function slotsOf(el) {
       if (!el) return null;
-      if (!el[SLOTS]) el[SLOTS] = {};
+      if (!el[SLOTS]) el[SLOTS] = Object.create(null);
       return el[SLOTS];
     }
 
@@ -309,7 +314,7 @@
      *  by `elFor`'s isConnected check, and a second way to evict would be a
      *  second thing to keep in sync. */
     function releaseAll() {
-      byTurn = {};
+      byTurn = Object.create(null);
     }
 
     /** A new turn is starting: 'live' stops meaning the previous one.
@@ -445,7 +450,7 @@
 
       // 1. Materialise every planned slot.
       var ordered = [];
-      var planned = {};
+      var planned = Object.create(null);
       var i, entry, node;
       for (i = 0; i < plan.length; i++) {
         entry = plan[i];
@@ -591,7 +596,7 @@
       var groupUp = !!(group && group.parentNode === content);
       //: Every gate key the document holds. Used twice below: once to
       //: find a gate with no card, once to find a card with no gate.
-      var docGateKeys = {};
+      var docGateKeys = Object.create(null);
       for (var dk = 0; dk < parts.length; dk++) {
         if (parts[dk] && parts[dk].type === 'hitl') {
           docGateKeys[gateSlotKey(parts[dk], TD)] = 1;

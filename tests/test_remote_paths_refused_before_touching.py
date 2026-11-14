@@ -160,6 +160,89 @@ def test_research_download_still_serves_a_report_by_name(monkeypatch, tmp_path):
     assert client.get("/api/research/download", params={"path": "../x"}).status_code == 403
 
 
+# ── 2026-11-14 (CodeQL py/path-injection): the places the rule missed ──────
+
+def test_the_ide_resolver_refuses_before_resolving(touches, monkeypatch, tmp_path):
+    from kazma_core.ide import service
+
+    monkeypatch.setattr(service, "_resolve_workspace_root", lambda: tmp_path)
+    ide = service.IdeService()
+    for text in REMOTE[:3]:
+        with pytest.raises(ValueError, match="network"):
+            ide.resolve(text)
+    assert ide.resolve("a.txt") == (tmp_path / "a.txt").resolve()
+    assert touches == []
+
+
+def test_the_workspace_file_list_refuses_before_resolving(touches, monkeypatch, tmp_path):
+    from kazma_ui import workspace_api
+
+    monkeypatch.setattr(workspace_api, "_resolve_workspace_root", lambda: tmp_path)
+    (tmp_path / "sub").mkdir()
+    client = _client(workspace_api.create_workspace_router())
+    for text in (r"\\attacker\share\x", "//attacker/share/x", r"\attacker", "C:attacker"):
+        got = client.get("/api/workspace/files", params={"path": text})
+        assert got.status_code == 200 and got.json()["files"] == [], (text, got.json())
+    assert client.get("/api/workspace/files", params={"path": "sub"}).json()["path"] == "sub"
+    assert touches == []
+
+
+def test_extra_roots_refuse_and_skip_network_paths(touches, monkeypatch):
+    from kazma_core.workspace import path_grants
+
+    stored: dict = {}
+
+    class _Store:
+        def get(self, key, default=None):
+            return stored.get(key, default)
+
+        def set(self, key, value, **_kw):
+            stored[key] = value
+
+    monkeypatch.setattr(path_grants, "_cs", lambda: _Store())
+    for text in REMOTE[:3]:
+        assert "network" in (path_grants._extra_root_problem(text) or "")
+        with pytest.raises(ValueError, match="network"):
+            path_grants.set_durable_roots([{"path": text}])
+    stored["workspace.extra_roots"] = [{"path": r"\\attacker\share\kept", "mode": "read"}]
+    assert path_grants.list_durable_roots() == []
+    assert touches == []
+
+
+def test_the_store_check_before_a_card_never_resolves_a_network_path(touches, tmp_path):
+    from kazma_core.workspace.path_policy import control_plane_store_targeted
+
+    for text in (r"\\attacker\share\x.db", "//attacker/share/vault.db"):
+        assert control_plane_store_targeted(text, cwd=tmp_path) is None
+    assert touches == []
+
+
+async def test_skill_install_refuses_a_network_folder(touches):
+    from kazma_core.agent_skills.installer import install_from_any
+
+    result = await install_from_any(r"\\attacker\share\skill")
+    assert not result.success and "network" in result.message
+    assert touches == []
+
+
+def test_workspace_roots_policy_refuses_a_network_folder(touches):
+    from kazma_core.safety.deployment_policy import normalize_workspace_roots
+
+    with pytest.raises(ValueError, match="network"):
+        normalize_workspace_roots([r"\\attacker\share\work"])
+    assert touches == []
+
+
+def test_control_the_old_ide_and_list_bodies_touch_the_network_path(touches, tmp_path):
+    text = r"\\attacker\share\x.txt"
+    # IdeService.resolve before 2026-11-14: an absolute input resolved first.
+    if os.path.isabs(text):
+        Path(text).resolve()
+    # /api/workspace/files: only "/" stripped, then root / rel resolved.
+    (tmp_path / text.strip("/")).resolve()
+    assert len(touches) == 2, touches
+
+
 # ── Negative controls: the old bodies touch the path first ─────────────────
 
 def test_control_the_old_bodies_touch_the_network_path(touches, tmp_path):

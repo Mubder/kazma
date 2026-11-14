@@ -69,6 +69,8 @@ import time as _time
 from datetime import datetime, time, UTC
 from typing import Any
 
+from kazma_core.security.url_credentials import mask_urls_in_text
+
 __all__ = [
     "StructuredJSONFormatter",
     "SafeTimedRotatingFileHandler",
@@ -465,7 +467,14 @@ class _LogQueueHandler(logging.handlers.QueueHandler):
     log writer thread and returns. The file and console handlers ran in the
     caller's thread, so a slow disk, a full console pipe or a rotation stalled
     the event loop for every chat. The turn id is read here (``TurnIdFilter``
-    on this handler): the writer thread has no turn bound."""
+    on this handler): the writer thread has no turn bound.
+
+    Every message and traceback has its URL passwords masked here
+    (``mask_urls_in_text``): a provider's or a database's address can carry a
+    user and password, and model discovery, the model registry and others
+    logged it as it was (2026-11-14, CodeQL
+    py/clear-text-logging-sensitive-data). Gate:
+    tests/test_logs_never_carry_url_passwords.py."""
 
     def __init__(self, target: queue.Queue) -> None:
         super().__init__(target)
@@ -477,13 +486,15 @@ class _LogQueueHandler(logging.handlers.QueueHandler):
         # was made; each formatter downstream still formats the record its
         # own way (the default prepare() formatted it once for everyone).
         record = copy.copy(record)
-        record.message = record.getMessage()
+        record.message = mask_urls_in_text(record.getMessage())
         record.msg = record.message
         record.args = None
         if record.exc_info:
             if not record.exc_text:
                 record.exc_text = _EXC_FORMATTER.formatException(record.exc_info)
             record.exc_info = None
+        if record.exc_text:
+            record.exc_text = mask_urls_in_text(record.exc_text)
         return record
 
     def enqueue(self, record: logging.LogRecord) -> None:

@@ -553,6 +553,15 @@ async def install_from_any(
             errors=["Provide owner/repo, a GitHub URL, or a local path"],
         )
 
+    # A network path is refused on its text: exists() below would connect
+    # to its host (2026-11-14; the 2026-11-10 rule, workspace.remote_paths).
+    from kazma_core.workspace.remote_paths import remote_path_reason
+
+    remote = remote_path_reason(raw) or (
+        remote_path_reason(urlparse(raw).path) if raw.startswith("file:") else None)
+    if remote:
+        return InstallResult(success=False, message=remote, errors=[remote])
+
     # Local path?
     p = Path(raw).expanduser()
     if p.exists():

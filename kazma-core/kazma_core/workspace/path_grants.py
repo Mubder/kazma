@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from kazma_core.workspace.remote_paths import remote_path_reason
+
 __all__ = [
     "AccessMode",
     "PathGrant",
@@ -125,6 +127,11 @@ def list_durable_roots() -> list[PathGrant]:
             continue
         if not path:
             continue
+        if remote_path_reason(path):
+            # Never resolved: that would connect to the host on every
+            # path check (2026-11-14). set_durable_roots refuses new ones.
+            logger.warning("[path_grants] a network path kept as an extra root is skipped")
+            continue
         try:
             resolved = str(Path(path).expanduser().resolve())
         except OSError:
@@ -154,6 +161,9 @@ def _extra_root_problem(path: str) -> str | None:
     raw = (path or "").strip()
     if not raw:
         return "Enter a folder path."
+    remote = remote_path_reason(raw)
+    if remote:
+        return remote
     candidate = Path(raw).expanduser()
     if not candidate.is_absolute():
         # The path as typed: a repr doubled every backslash on the page.
@@ -193,6 +203,9 @@ def set_durable_roots(entries: list[dict[str, Any]]) -> list[PathGrant]:
         path = str(item.get("path") or "").strip()
         if not path:
             continue
+        remote = remote_path_reason(path)
+        if remote:
+            raise ValueError(remote)  # before resolve(), which would connect
         try:
             normalized = str(Path(path).expanduser().resolve())
         except OSError:

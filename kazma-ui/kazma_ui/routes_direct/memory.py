@@ -1105,7 +1105,7 @@ def register_memory_routes(self: Any) -> None:
 
         def _xml(value: object) -> str:
             # Characters XML 1.0 cannot hold at all are dropped.
-            return _re.sub("[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]", "", str(value or ""))
+            return _re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]", "", str(value or ""))
 
         fmt = (format or "json").strip().lower()
         cap = max(10, min(limit, 2000))

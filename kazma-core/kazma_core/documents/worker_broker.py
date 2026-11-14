@@ -1178,6 +1178,10 @@ def _tcp_listen_refused(listen: str) -> OSError | None:
     if not listen.startswith("tcp:"):
         return None
     host, _, port = listen[4:].rpartition(":")
+    if not host.strip("[]"):
+        # No host is every interface: the test bind would listen there for a
+        # moment, and _make_server refuses the address anyway (loopback only).
+        return None
     try:
         family = socket.AF_INET6 if ":" in host.strip("[]") else socket.AF_INET
         with socket.socket(family, socket.SOCK_STREAM) as probe:

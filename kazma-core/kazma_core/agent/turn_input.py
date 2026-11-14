@@ -912,7 +912,7 @@ def extract_active_attachments(
     blob = user_text or extract_latest_user_text(messages)
     stub_spans: list[tuple[int, int]] = []
     for m in re.finditer(
-        r"\[Attached(?:\s+file)?[:\s]+([^\]]+?)\]",
+        r"\[Attached(?:\s+file)?[:\s]++([^\]]+?)\]",  # possessive: linear (2026-11-14)
         blob or "",
         flags=re.IGNORECASE,
     ):

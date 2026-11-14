@@ -147,6 +147,11 @@ def control_plane_store_targeted(
         text = text[1:-1].strip()
     if not text or text.startswith("-") or not _looks_like_store_token(text):
         return None
+    if remote_path_reason(text):
+        # A network path is no store of this install, and resolving it below
+        # would connect to its host before any approval card (2026-11-14):
+        # the tool that runs the command refuses it on its own.
+        return None
     candidates: list[Path] = []
     raw = Path(text)
     if raw.is_absolute():

@@ -49,6 +49,11 @@ def normalize_workspace_roots(value: Any) -> list[str]:
     for item in value:
         if not isinstance(item, str) or not item.strip() or any(ord(c) < 32 for c in item):
             raise ValueError("Each workspace root must be an absolute directory.")
+        from kazma_core.workspace.remote_paths import remote_path_reason
+
+        remote = remote_path_reason(item)
+        if remote:
+            raise ValueError(remote)  # before is_dir(), which would connect (2026-11-14)
         path = Path(item.strip()).expanduser()
         if not path.is_absolute() or not path.is_dir():
             raise ValueError("Each workspace root must be an existing absolute directory.")

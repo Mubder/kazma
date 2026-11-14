@@ -175,6 +175,17 @@ def create_workspace_router() -> APIRouter:
         """
         root = _resolve_workspace_root()
 
+        # A network path, an absolute one or one on a drive is refused on its
+        # text: "/" was the only separator stripped, so a backslash path
+        # became the join itself and resolve() connected to its host before
+        # the containment check (2026-11-14).
+        from kazma_core.workspace.remote_paths import remote_path_reason
+
+        raw = (path or "").strip()
+        if raw and (remote_path_reason(raw) or os.path.isabs(raw.lstrip("/"))
+                    or os.path.splitdrive(raw)[0] or raw.startswith("\\")):
+            return {"files": [], "path": "", "parent": "", "error": "Path outside workspace"}
+
         # Resolve requested sub-path
         if path and path.strip("/"):
             # Strip leading slashes to keep it relative

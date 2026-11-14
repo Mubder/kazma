@@ -69,6 +69,11 @@ def test_the_bridge_records_the_session_not_the_body(monkeypatch, gate_db):
     row = hg.gate_for(gate.gate_id)
     assert row is not None
     assert row.decision == "approve"
-    assert row.actor == "web:admin:sess1234", row.actor
+    # The session's label is the start of its hash, never the cookie's text
+    # (web_sessions.session_label, 2026-11-14).
+    from kazma_core.security.web_sessions import session_label
+
+    assert row.actor == f"web:admin:{session_label('cookie-value')}", row.actor
+    assert "cookie-v" not in row.actor
     assert "the-owner-said-so" not in row.actor
 

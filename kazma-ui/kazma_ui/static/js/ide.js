@@ -543,8 +543,7 @@ function ideApp() {
       }
       var key = _idePendingRequests.get(fingerprint);
       try { if (!key && slot) key = sessionStorage.getItem(slot); } catch (e) {}
-      if (!key) key = (window.crypto && crypto.randomUUID)
-        ? crypto.randomUUID() : ('ide-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+      if (!key) key = window.kazmaRandomId ? window.kazmaRandomId() : crypto.randomUUID();
       _idePendingRequests.set(fingerprint, key);
       try { if (slot) sessionStorage.setItem(slot, key); } catch (e) {}
       var r = await fetch(url, {

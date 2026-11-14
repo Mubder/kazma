@@ -1114,13 +1114,25 @@ def _update_log() -> Path:
     return root / ".kazma" / "update.log"
 
 
+#: ``user:password@`` after a scheme. uv names a package index by its address,
+#: and an index the owner configured can carry a password; the update log kept
+#: it (2026-11-14). A local copy of ``url_credentials.mask_urls_in_text``: the
+#: updater runs while Kazma's own package may not import.
+_URL_PASSWORD = re.compile(r"(://[^/\s:@]{1,256}):[^/\s@]{1,256}@")
+
+
+def _without_url_passwords(text: str) -> str:
+    return _URL_PASSWORD.sub(r"\1:****@", text)
+
+
 def _log_update_step(label: str, argv: list[str], result: subprocess.CompletedProcess[str]) -> None:
     try:
         path = _update_log()
         path.parent.mkdir(parents=True, exist_ok=True)
+        entry = (f"\n== {time.strftime('%Y-%m-%d %H:%M:%S')} {label}\n$ {' '.join(argv)}\n"
+                 f"[exit {result.returncode}]\n{result.stdout or ''}{result.stderr or ''}\n")
         with path.open("a", encoding="utf-8") as handle:
-            handle.write(f"\n== {time.strftime('%Y-%m-%d %H:%M:%S')} {label}\n$ {' '.join(argv)}\n"
-                         f"[exit {result.returncode}]\n{result.stdout or ''}{result.stderr or ''}\n")
+            handle.write(_without_url_passwords(entry))
     except OSError:
         logger.debug("update log not written", exc_info=True)
 

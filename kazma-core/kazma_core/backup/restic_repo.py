@@ -244,13 +244,19 @@ def ensure_password(*, create: bool = False) -> tuple[str, bool]:
 
     import secrets
 
+    from kazma_core.security.file_access import restrict_to_owner
+
     secret = secrets.token_urlsafe(32)
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Empty, restricted to this account, THEN written: chmod 0600 after the
+    # write did nothing on Windows, where the file kept the folder's readers
+    # (2026-11-14; the .env writer's order, env_files.persist_generated_secret).
+    if not path.exists():
+        os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+    if not restrict_to_owner(path):
+        logger.warning("[restic] could not restrict %s to this account; the passphrase "
+                       "is kept there anyway (without it no backup can be read)", path)
     path.write_text(secret, encoding="utf-8")
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass  # best effort; Windows ACLs are not POSIX modes
     logger.critical(
         "[restic] A NEW repository passphrase was generated at %s. "
         "COPY IT SOMEWHERE THAT IS NOT THIS MACHINE. Without it every "

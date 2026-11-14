@@ -1,11 +1,6 @@
-import http
-import ws
-import json
-import time
-import random
-from k6 import check, sleep, fail
-from k6.http import get, post, websocket
-from k6.ws import connect
+import { check, sleep } from 'k6';
+import { get, post } from 'k6/http';
+import ws from 'k6/ws';
 
 // Kazma Load Test Script (k6)
 // Run: k6 run --vus 50 --duration 60s loadtests/k6_swarm.js

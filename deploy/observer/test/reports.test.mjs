@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 
 import { d1 } from "./d1_standin.mjs";
 import { handle } from "../src/index.js";
-import { KEEP_S, PER_DAY, PER_SOURCE_HOUR, REPORT_MAX, pruneReports } from "../src/reports.js";
+import { KEEP_S, PER_DAY, PER_SOURCE_HOUR, REPORT_MAX, newId, pruneReports } from "../src/reports.js";
 
 const NOW = 1_800_000_000;
 
@@ -19,7 +19,7 @@ function netWith() {
   return {
     sent,
     fetcher: async (url, init = {}) => {
-      if (String(url).includes("api.telegram.org")) {
+      if (new URL(String(url)).hostname === "api.telegram.org") {
         sent.push(JSON.parse(init.body).text);
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
       }
@@ -100,4 +100,23 @@ test("the reports page is closed without Cloudflare Access, and old reports go",
     .bind("oldoldold1", NOW - KEEP_S - 1, "s", "0", "", "{}").run();
   await pruneReports(e.DB, NOW);
   assert.equal(await e.DB.prepare("SELECT COUNT(*) AS n FROM problem_reports").first("n"), 0);
+});
+
+test("a report id draws every letter evenly: a byte past the last whole alphabet is drawn again", () => {
+  const ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
+  // 248 is 8 x 31: those bytes would give a..h one more chance each than the rest.
+  let calls = 0;
+  const id = newId((n) => {
+    calls += 1;
+    return calls === 1 ? new Uint8Array(n).fill(250) : new Uint8Array(n).fill(1);
+  });
+  assert.equal(id, "b".repeat(10));
+  assert.equal(calls, 2);
+  // Control: the old draw, b % 31, took 250 as the letter "c" (248..255 give a..h).
+  assert.equal(ALPHABET[250 % ALPHABET.length], "c");
+  // Every byte below the limit maps to each letter the same number of times.
+  const counts = new Map();
+  for (let b = 0; b < 248; b += 1) counts.set(ALPHABET[b % 31], (counts.get(ALPHABET[b % 31]) || 0) + 1);
+  assert.deepEqual(new Set(counts.values()), new Set([8]));
+  assert.match(newId(), /^[a-hjkmnp-z2-9]{10}$/);
 });

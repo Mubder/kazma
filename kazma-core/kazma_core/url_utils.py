@@ -141,7 +141,10 @@ def normalize_provider_url(
 
     # Step 2b: Deduplicate repeated /v1 suffixes (e.g. /v1/v1 -> /v1, /v1/v1/v1 -> /v1).
     # Some code paths append /v1 to a base_url that already includes it.
-    path = re.sub(r"(/v1)+$", "/v1", path)
+    # A loop: ``(/v1)+$`` was tried at every "/v1" and read to the end each
+    # time (quadratic, 2026-11-14).
+    while path.endswith("/v1/v1"):
+        path = path[: -len("/v1")]
 
     # Step 3: Determine port
     port = parsed.port
@@ -157,7 +160,7 @@ def normalize_provider_url(
     # Anywhere in the path, not only at its end: DeepInfra serves its
     # OpenAI-compatible API at /v1/openai, and /v1 was added after it
     # (.../v1/openai/v1/chat/completions, a 404; providers stage 1).
-    already_versioned = re.search(r"/v\d+[a-z0-9]*(?:/|$)", path) is not None
+    already_versioned = re.search(r"/v\d++[a-z0-9]*+(?:/|$)", path) is not None
     if ensure_v1 and not already_versioned:
         # Don't append /v1 for Ollama (it uses /api/* endpoints)
         # or LiteLLM proxy (it handles routing itself)
@@ -167,7 +170,8 @@ def normalize_provider_url(
         # (generativelanguage.googleapis.com/v1beta/openai and
         # {region}-aiplatform.googleapis.com/endpoints/openapi) — appending
         # /v1 produced .../openai/v1/chat/completions, a 404 on every call.
-        is_google = hostname.lower().endswith("googleapis.com")
+        host = hostname.lower()
+        is_google = host == "googleapis.com" or host.endswith(".googleapis.com")
 
         if not is_ollama and not is_litellm and not is_google:
             path = f"{path}/v1"

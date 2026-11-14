@@ -220,8 +220,13 @@ INJECTION_RE: re.Pattern[str] = re.compile(
 # text appear as instructions to the model. format_untrusted_block strips these
 # from the body so content cannot break out of the <kazma:data>...</kazma:data>
 # envelope. (Audit AC1 — the body was interpolated raw before this fix.)
+# Up to the next ">" or "<" (or the end), never past it: ``[^>]*>`` read to
+# the end of the text from every "<kazma:data" with no ">" after it, so a
+# fetched page of repeated openers took seconds a megabyte, squared
+# (2026-11-14, CodeQL py/polynomial-redos). An opener with no ">" is
+# redacted too: the tag's name is what must not survive.
 _FENCE_TAG_RE: re.Pattern[str] = re.compile(
-    r"</?kazma:data[^>]*>", re.IGNORECASE
+    r"</?kazma:data[^<>]*+>?", re.IGNORECASE
 )
 # The internal "END OBSERVATION" sentinel could also trick a model into thinking
 # the data block ended mid-content; neutralize exact-match sentinels too.

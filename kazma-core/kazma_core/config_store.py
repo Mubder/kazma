@@ -337,7 +337,14 @@ def _try_get_vault():
 def _redact_for_log(key: str, value: Any) -> str:
     if is_sensitive_config_key(key) or is_vault_ref(value):
         return "****"
-    # A DSN is shorter than the cut below: its password went out whole.
+    # A mapping or list keeps its secrets in plaintext when the vault is off
+    # or its write failed (``{'api_key': 'sk-...``): masked by name, as the
+    # Settings API shows them (2026-11-14). A DSN is shorter than the cut
+    # below: its password went out whole.
+    if isinstance(value, (dict, list, tuple)):
+        from kazma_core.security.config_mask import mask_deep
+
+        value = mask_deep(value)
     s = mask_urls_in_text(repr(value))
     return s if len(s) < 80 else s[:77] + "..."
 

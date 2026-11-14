@@ -240,3 +240,29 @@
         return fallback || "";
     };
 })();
+
+/**
+ * window.kazmaRandomId() -> string — a random id in UUID v4 form, from the
+ * browser's cryptographic random source.
+ *
+ * crypto.randomUUID exists only on a secure page (https or localhost). Over
+ * plain http on the local network a page has crypto.getRandomValues alone, and
+ * the chat's new-chat id, the IDE's request key and X Studio's booking key fell
+ * back to Math.random there (2026-11-14). Gate: tests/js/test_random_ids.js.
+ */
+(function () {
+    "use strict";
+    if (typeof window.kazmaRandomId === "function") return;
+
+    window.kazmaRandomId = function () {
+        var c = window.crypto;
+        if (c && typeof c.randomUUID === "function") {
+            try { return c.randomUUID(); } catch (e) { /* not a secure page */ }
+        }
+        var b = c.getRandomValues(new Uint8Array(16));
+        b[6] = (b[6] & 0x0f) | 0x40;
+        b[8] = (b[8] & 0x3f) | 0x80;
+        var h = Array.prototype.map.call(b, function (x) { return (x < 16 ? "0" : "") + x.toString(16); }).join("");
+        return h.slice(0, 8) + "-" + h.slice(8, 12) + "-" + h.slice(12, 16) + "-" + h.slice(16, 20) + "-" + h.slice(20);
+    };
+})();

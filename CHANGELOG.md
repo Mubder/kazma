@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## GitHub's code scanning, reviewed alert by alert (2026-11-14)
+
+- GitHub's code scanner (CodeQL) went through Kazma and raised 388 alerts.
+  Each was read against the code. The real ones are fixed below, each with a
+  test that fails on the old code; the rest were mistaken readings, closed on
+  GitHub with the reason.
+- Logs hold no passwords: a provider's or database's address that carries a
+  user and password is masked in every log line, in `kazma doctor` and in the
+  update log, and a web session is named in logs and audit records by a hash,
+  never by part of its sign-in cookie.
+- A network path (`\\server\share`) is refused before Kazma touches it in the
+  IDE, the Workspace page, the extra-folders setting and skill installs, as
+  the file tools already did.
+- Five text patterns that could take seconds to minutes on hostile text (one
+  on every fetched web page) now take the same time whatever the text.
+- Smaller fixes: the k6 load test began with Python lines and could not run;
+  the Kuwaiti tokenizer called Arabic presentation forms, Chinese and Korean
+  "emoji"; ids the web pages make are cryptographically random on plain-http
+  pages too; a new backup passphrase file is locked to your account before it
+  is written; Kazma Watch's report ids are evenly random. CI now checks that
+  every JavaScript file in the repository parses.
+
 ## Long swarm tasks from a chat finish and come back (2026-11-14)
 
 - A task Kazma hands to the swarm from Telegram, Discord or Slack now sends

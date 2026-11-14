@@ -39,9 +39,20 @@ async function sourceOf(request, env) {
   return [...mac.slice(0, 12)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function newId() {
-  const bytes = crypto.getRandomValues(new Uint8Array(10));
-  return [...bytes].map((b) => ID_ALPHABET[b % ID_ALPHABET.length]).join("");
+const ID_LENGTH = 10;
+// The largest multiple of the alphabet's size a byte can hold: a byte at or
+// above it is drawn again, or `b % 31` would favour the first eight letters.
+const ID_BYTE_LIMIT = 256 - (256 % ID_ALPHABET.length);
+
+/** A report id: ten letters, each equally likely. */
+export function newId(randomBytes = (n) => crypto.getRandomValues(new Uint8Array(n))) {
+  let id = "";
+  while (id.length < ID_LENGTH) {
+    for (const b of randomBytes(16)) {
+      if (b < ID_BYTE_LIMIT && id.length < ID_LENGTH) id += ID_ALPHABET[b % ID_ALPHABET.length];
+    }
+  }
+  return id;
 }
 
 /** Why *report* is not a problem report Kazma makes, or "". */

@@ -957,20 +957,11 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
-      - name: node --check all static JS
-        run: |
-          failures=0
-          for f in $(find kazma-ui/kazma_ui/static/js -name '*.js'); do
-            if ! node --check "$f"; then
-              echo "FAILED: $f"
-              failures=$((failures+1))
-            fi
-          done
-          if [ "$failures" -ne 0 ]; then
-            echo "$failures JS file(s) failed syntax check"
-            exit 1
-          fi
-          echo "All static JS files passed node --check"
+      # Every tracked JavaScript file, not only the web UI's: a k6 script
+      # that began with Python imports went unseen until CodeQL reported it
+      # (2026-11-14).
+      - name: Every JavaScript file parses
+        run: python3 scripts/check_js_syntax.py
       # Every JavaScript test file (tests/test_js_suites.py runs the same set
       # in the Python suite). Until 2026-09-30 only the seven the
       # unified-turn job names ran; 24 others, gates AGENTS.md cites among

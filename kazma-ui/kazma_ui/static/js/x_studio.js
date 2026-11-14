@@ -791,8 +791,7 @@ function xStudioPage() {
       const signature = JSON.stringify(body);
       if (!this._intentKey || this._intentSignature !== signature) {
         this._intentSignature = signature;
-        this._intentKey = (window.crypto && window.crypto.randomUUID)
-          ? window.crypto.randomUUID() : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+        this._intentKey = window.kazmaRandomId ? window.kazmaRandomId() : crypto.randomUUID();
       }
       body.idempotency_key = this._intentKey;
       return body;

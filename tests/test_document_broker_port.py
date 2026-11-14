@@ -151,3 +151,20 @@ def test_the_guard_and_the_broker_agree_on_the_exit_codes():
             guard.BROKER_EXIT_PORT_UNAVAILABLE) == (
         worker_broker.EXIT_NO_IMAGE, worker_broker.EXIT_NO_ENGINE, worker_broker.EXIT_NEWER_IMAGE,
         worker_broker.EXIT_PORT_UNAVAILABLE)
+
+
+def test_an_address_with_no_host_is_never_test_bound(monkeypatch):
+    """"tcp::9999" is every interface: the test bind would listen there for a
+    moment, and _make_server refuses the address anyway (2026-11-14, CodeQL
+    py/bind-socket-all-network-interfaces)."""
+    def no_socket(*_a, **_k):
+        raise AssertionError("a socket was opened for an address with no host")
+
+    monkeypatch.setattr(worker_broker.socket, "socket", no_socket)
+    assert worker_broker._tcp_listen_refused("tcp::9999") is None
+    assert worker_broker._tcp_listen_refused("tcp:[]:9999") is None
+    with pytest.raises(ValueError):
+        worker_broker._make_server(
+            "tcp::9999", None, allow_non_loopback=False,
+            socket_mode=0o600, socket_gid=None,
+        )

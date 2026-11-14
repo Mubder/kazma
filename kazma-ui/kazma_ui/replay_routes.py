@@ -149,9 +149,11 @@ def create_replay_router(
             payload: dict[str, Any] = {}
             if sid:
                 payload = await asyncio.to_thread(get_session_payload, sid) or {}
-            role = str(payload.get("role") or "user")
-            short = str(payload.get("session_id") or sid or "")[:8]
-            return f"web:{role}:{short}" if short else "web:token"
+            if not sid:
+                return "web:token"
+            from kazma_ui.web_actor import actor_for_session
+
+            return actor_for_session(sid, payload, default_role="user")
         except Exception:  # noqa: BLE001 - the audit row still names the surface
             return "web:anon"
 

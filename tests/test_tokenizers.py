@@ -15,6 +15,21 @@ class TestKuwaitiTokenizer:
     def test_empty_input(self):
         assert self.tok.tokenize("") == []
 
+    def test_only_emoji_are_emoji(self):
+        """The copied range U+24C2-U+1F251 held Arabic presentation forms,
+        CJK and Hangul, all tokenized as emoji (2026-11-14)."""
+        import re
+
+        for text in ("ﻻﺎ", "漢字", "한국", "あ"):
+            kinds = {t.token_type for t in self.tok.tokenize(text)}
+            assert TokenType.EMOJI not in kinds, text
+            # Control: the old class took each of them.
+            assert re.match("[\U000024c2-\U0001f251]", text), text
+        family = "\U0001f468‍\U0001f469‍\U0001f467"
+        for text in ("\U0001f600", family, "❤️", "⭐", "\U0001f1f0\U0001f1fc"):
+            tokens = [t for t in self.tok.tokenize(text) if t.token_type != TokenType.WHITESPACE]
+            assert [(t.text, t.token_type) for t in tokens] == [(text, TokenType.EMOJI)], text
+
     def test_none_like_input(self):
         assert self.tok.tokenize("") == []
 

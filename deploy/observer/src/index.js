@@ -206,8 +206,16 @@ export async function handle(request, env, now, deps = {}) {
 
 // -- the minute run -------------------------------------------------------------
 
+/** *text* without the slashes it ends with: a loop, where /\/+$/ backtracks
+ * once for every slash run inside the address. */
+export function withoutTrailingSlashes(text) {
+  let end = text.length;
+  while (end > 0 && text[end - 1] === "/") end -= 1;
+  return text.slice(0, end);
+}
+
 async function probe(env, path, fetcher) {
-  const base = String(env.PULL_URL || "").replace(/\/+$/, "");
+  const base = withoutTrailingSlashes(String(env.PULL_URL || ""));
   if (!base) return { error: "no_url" };
   const headers = {};
   if (env.ACCESS_CLIENT_ID && env.ACCESS_CLIENT_SECRET) {
@@ -291,7 +299,7 @@ export async function runMinute(env, now, deps = {}) {
 }
 
 async function pingHealthchecks(env, ok, fetcher) {
-  const url = String(env.HEALTHCHECKS_URL || "").replace(/\/+$/, "");
+  const url = withoutTrailingSlashes(String(env.HEALTHCHECKS_URL || ""));
   if (!url.startsWith("https://")) return;
   try {
     await fetcher(ok ? url : `${url}/fail`, { method: "POST", signal: AbortSignal.timeout(8000) });

@@ -70,7 +70,9 @@ def _python_calls(source: str) -> list[tuple[str, str]]:
 
 
 _JS_COMMENT = re.compile(r"/\*.*?\*/|(?<![:\\])//[^\n]*", re.S)
-_JS_PATH = re.compile(r"(/(?:api|ws|health)(?:/[^`'\"\s?)]*)?)")
+# A route starts a string or follows an interpolated base (``${BASE_URL}/api``);
+# ``'k6/ws'`` in an import is not one.
+_JS_PATH = re.compile(r"(?<=[`'\"}])(/(?:api|ws|health)(?:/[^`'\"\s?)]*)?)")
 
 
 def _k6_paths(source: str) -> list[str]:

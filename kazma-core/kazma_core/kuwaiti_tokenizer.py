@@ -59,19 +59,19 @@ for _k, _v in _CANON.items():
         DIALECT_MARKERS[_k] = _v
 
 
-# Emoji pattern
+# Emoji: the emoji blocks, then any variation selectors and ZWJ-joined parts
+# of one sequence. The pattern copied from the web held "\U000024c2-\U0001f251",
+# which is most of Unicode: Arabic presentation forms (U+FB50-FEFF), CJK and
+# Hangul were tokenized as emoji (2026-11-14, CodeQL py/overly-large-range).
+_EMOJI_CHARS = (
+    "Ⓜ⤴⤵〰〽㊗㊙"
+    "▪-◾"  # geometric shapes used as emoji
+    "☀-➿"  # miscellaneous symbols, dingbats
+    "⬀-⯿"  # symbols and arrows (star, circles)
+    "\U0001f000-\U0001faff"  # every supplementary emoji block, flags included
+)
 _EMOJI_RE = re.compile(
-    "["
-    "\U0001f600-\U0001f64f"  # emoticons
-    "\U0001f300-\U0001f5ff"  # symbols & pictographs
-    "\U0001f680-\U0001f6ff"  # transport & map
-    "\U0001f1e0-\U0001f1ff"  # flags
-    "\U00002702-\U000027b0"
-    "\U000024c2-\U0001f251"
-    "\U0001f900-\U0001f9ff"  # supplemental
-    "\U0001fa00-\U0001fa6f"  # chess symbols
-    "\U0001fa70-\U0001faff"  # symbols extended
-    "]+",
+    f"[{_EMOJI_CHARS}](?:️|‍?[{_EMOJI_CHARS}])*",
     flags=re.UNICODE,
 )
 

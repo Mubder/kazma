@@ -150,6 +150,14 @@ class IdeService:
         ws_root = self.root  # re-resolves, honoring workspace_scope
         if not rel_path:
             return ws_root
+        # On the text, before anything below resolves it: resolving a
+        # network path connects to its host (2026-11-14, the 2026-11-10 rule
+        # this resolver missed; gate tests/test_remote_paths_refused_before_touching.py).
+        from kazma_core.workspace.remote_paths import remote_path_reason
+
+        remote = remote_path_reason(rel_path)
+        if remote:
+            raise ValueError(remote)
         rel = rel_path.strip()
         if not os.path.isabs(rel):
             # Root-relative inputs may carry leading separators — strip

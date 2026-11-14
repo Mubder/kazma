@@ -52,7 +52,10 @@ MAX_PER_HOUR = 10
 _SENT_KEY = "system.support.reports_sent"
 _MAX_BYTES = 60_000
 
-_EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+# Bounded parts (an address's own limits): an unbounded local part read to the
+# end of the text from every character with no "@" after it (quadratic,
+# 2026-11-14).
+_EMAIL = re.compile(r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,63}")
 _IPV4 = re.compile(r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b")
 _IPV6 = re.compile(r"\b(?:[0-9a-fA-F]{1,4}:){3,7}[0-9a-fA-F]{1,4}\b")
 _ERROR = re.compile(r'"level":\s*"(ERROR|CRITICAL)"|\s(ERROR|CRITICAL)\s|Traceback \(most recent call last\)')

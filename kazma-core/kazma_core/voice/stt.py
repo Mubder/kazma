@@ -491,8 +491,13 @@ def _nvidia_asr_base_url() -> str | None:
 
 def _is_llm_only_nvidia_url(url: str) -> bool:
     """True if URL is the chat integrate API (no /audio/transcriptions)."""
-    low = url.lower()
-    return "integrate.api.nvidia.com" in low and "/asr" not in low
+    from urllib.parse import urlparse
+
+    try:
+        host = (urlparse(url.strip()).hostname or "").lower()
+    except ValueError:
+        return False
+    return host == "integrate.api.nvidia.com" and "/asr" not in url.lower()
 
 
 def list_nvidia_stt_models() -> list[dict[str, str]]:

@@ -115,9 +115,11 @@ async def _request_actor(request: Any) -> str:
 
         actor_sid = request.cookies.get(_SC) or ""
         payload = await asyncio.to_thread(get_session_payload, actor_sid) or {}
-        role = str(payload.get("role") or "user")
-        sid_short = str(payload.get("session_id") or actor_sid or "")[:8]
-        return f"web:{role}:{sid_short}" if sid_short else "web:token"
+        if not actor_sid:
+            return "web:token"
+        from kazma_ui.web_actor import actor_for_session
+
+        return actor_for_session(actor_sid, payload, default_role="user")
     except Exception:
         logger.debug("[HITL] approval actor lookup failed", exc_info=True)
         return "web:anon"

@@ -208,10 +208,9 @@
   }
 
   function generateSessionId() {
-    try {
-      if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
-    } catch (e) {}
-    return 's-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+    // kazmaRandomId (auth-guard.js) also works over plain http on the network,
+    // where crypto.randomUUID does not exist.
+    return window.kazmaRandomId ? window.kazmaRandomId() : crypto.randomUUID();
   }
 
   function persistSessionId() {

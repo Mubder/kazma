@@ -1057,6 +1057,29 @@ function feed(events, turnId) {
     env.invariants.filter((r) => r.code === "orphaned-gate").length === 0,
     JSON.stringify(env.invariants));
 }
+
+// ══════════════════════════════════════════════════════════
+// Keys name only themselves (CodeQL js/prototype-polluting-assignment,
+// 2026-11-14). Turn ids and slot keys arrive in server frames; on a plain
+// object "__proto__" answered with Object.prototype, which elFor handed back
+// as a bubble and the next render gave a slot table on every object.
+// ══════════════════════════════════════════════════════════
+
+{
+  const env = newEnv();
+  assert("keys: an unbound __proto__ is no bubble", env.view.elFor("__proto__") === null,
+    env.view.elFor("__proto__"));
+  const bubble = env.assistantBubble({ turnId: "__proto__" });
+  env.ROOT.appendChild(bubble);
+  env.view.bind("__proto__", bubble);
+  assert("keys: __proto__ binds like any id", env.view.elFor("__proto__") === bubble);
+  assert("keys: and is counted", env.view.stats().ids.indexOf("__proto__") >= 0, env.view.stats().ids);
+  env.view.render(bubble, feed([{ type: "token", content: "hi" }], "__proto__"), makeRenderers(env));
+  assert("keys: nothing lands on Object.prototype",
+    !Object.prototype.hasOwnProperty.call(Object.prototype, "__kzSlots") && ({}).__kzSlots === undefined);
+  // Control: a plain object's "__proto__" is Object.prototype.
+  assert("keys: control, a plain map answers __proto__", ({})["__proto__"] === Object.prototype);
+}
 
 if (fail) {
   console.error("\n" + fail + " assertion(s) failed");
