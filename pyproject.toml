@@ -248,6 +248,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["kazma-core/kazma_core", "kazma-skills/kazma_skills", "kazma-ui/kazma_ui", "kazma-cli/kazma_cli", "kazma-tui/kazma_tui", "kazma-gateway/kazma_gateway"]
+# The versions a release was tested with (uv.lock as constraints), written by
+# the release workflow before it builds and read by `kazma update` from the
+# verified wheel. Git ignores it; an artifact is included all the same.
+artifacts = ["kazma-cli/kazma_cli/locked_versions.txt"]
 
 [tool.pytest.ini_options]
 # Package suites + root regression corpus. TUI uses kazma_tui_tests to avoid

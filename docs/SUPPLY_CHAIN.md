@@ -54,7 +54,11 @@ checked by their SHA-256 alone, and the command says so; a bundle one of them
 does carry is still verified, never ignored. Otherwise it stops and names the
 release page. Sigstore's root of trust comes from its TUF repository, read at
 each check; without the network the copy on the machine is used, and the
-check is never skipped. The Settings update check reads the same release.
+check is never skipped. The wheel also carries the versions the release was
+tested with (`kazma_cli/locked_versions.txt`, `uv.lock` exported by the
+release workflow before it builds), so the same signature covers them; the
+update installs exactly those versions. The Settings update check reads the
+same release.
 Until 2026-09-30 both asked PyPI, and `kazma update` then had pip upgrade
 `kazma` by name.
 

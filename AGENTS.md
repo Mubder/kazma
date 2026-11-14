@@ -9563,6 +9563,20 @@ no Python update ever arrived.
   range, so only a minimum makes an existing install upgrade. The lock changes
   only fresh installs.
 - **The lock must match:** CI and the release SBOM run `uv export --locked`.
+- **An update installs the locked versions** (2026-11-14). A checkout's
+  install (`update._reinstall_local` -> `_install_editable`) passes `-c` with
+  its `uv.lock` exported (`update._locked_versions`: `--locked`, every extra;
+  a lock that no longer matches is not used, and the update says so). A wheel
+  carries `LOCKED_VERSIONS_MEMBER` (`kazma_cli/locked_versions.txt`), written
+  by the release workflow before `uv build` and kept in the wheel by hatch's
+  `artifacts` although git ignores it, so the wheel's Sigstore signature
+  covers it; `do_pip_update` reads it from the verified wheel
+  (`_locked_versions_in_wheel`) and installs with it. A file that is not
+  exact pins (`_LOCKED_LINE`: an option line could name another index) stops
+  the update; a wheel with none (0.21.2 and older) installs unpinned, said.
+  The release workflow fails a wheel that carries none. Gate:
+  `tests/test_update_installs_tested_versions.py` (a stale lock and hostile
+  files as negative controls).
   Dependabot uses the `uv` ecosystem.
 - **The server says when it is behind.** A deploy is a `git pull` and installs
   nothing. At boot (background thread) `report_unmet_requirements` compares

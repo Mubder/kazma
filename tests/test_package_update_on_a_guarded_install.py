@@ -324,7 +324,9 @@ def _checks_first(fn: ast.FunctionDef, first_install: int) -> bool:
 def test_every_installer_checks_the_server_before_it_installs() -> None:
     tree = ast.parse(UPDATE_PY.read_text(encoding="utf-8"))
     installers = _installer_calls(tree)
-    assert {"do_pip_update", "_reinstall_local"} <= set(installers), installers
+    # _reinstall_local's install runs in _install_editable since 2026-11-14
+    # (the locked versions, REMAINING 2.1).
+    assert {"do_pip_update", "_install_editable"} <= set(installers), installers
     functions = {f.name: f for f in ast.walk(tree) if isinstance(f, ast.FunctionDef)}
     unchecked = [
         name for name, lines in installers.items()

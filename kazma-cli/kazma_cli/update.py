@@ -27,11 +27,13 @@ import hashlib
 import importlib.util
 import json
 import logging
+import re
 import subprocess
 import sys
 import os
 import tempfile
 import time
+import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -129,6 +131,16 @@ _RELEASE_API = f"https://api.github.com/repos/{_GITHUB_REPO}/releases/latest"
 _RELEASE_DOWNLOAD_PREFIX = f"https://github.com/{_GITHUB_REPO}/releases/download/"
 # A release wheel is a few MB; anything this large is not one.
 _MAX_WHEEL_BYTES = 256 * 1024 * 1024
+
+#: The versions a release was tested with: uv.lock as a constraints file,
+#: written into the wheel by the release workflow before it builds (so the
+#: wheel's signature covers it). Older wheels carry none.
+LOCKED_VERSIONS_MEMBER = "kazma_cli/locked_versions.txt"
+_MAX_LOCKED_BYTES = 1024 * 1024
+#: One line of a constraints file uv export writes: a name pinned to one
+#: version, with an optional environment marker. Nothing else is accepted (an
+#: option line could name another index).
+_LOCKED_LINE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*==[A-Za-z0-9.+!_-]+( ; .+)?")
 _STASH_MSG_PREFIX = "kazma-update-"
 
 #: ``do_git_update``'s answer when the code was updated but the operator's
@@ -336,6 +348,70 @@ def _parse_sha256sums(text: str) -> dict[str, str]:
         if len(parts) == 2 and _is_sha256(parts[0].lower()):
             out[parts[1].lstrip("*")] = parts[0].lower()
     return out
+
+
+# ---------------------------------------------------------------------------
+# The versions CI tested (uv.lock)
+# ---------------------------------------------------------------------------
+
+
+def _locked_text_problem(text: str) -> str:
+    """Why *text* is not a constraints file of exact pins, or ""."""
+    pins = 0
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if not _LOCKED_LINE.fullmatch(line):
+            return f"an unexpected line: {line[:80]}"
+        pins += 1
+    return "" if pins else "no pinned versions"
+
+
+def _locked_versions(cwd: str, folder: Path) -> tuple[Path | None, str]:
+    """A checkout's uv.lock as a constraints file in *folder*, every extra
+    included: the versions CI tested. ``(None, why)`` when the lock cannot be
+    read or no longer matches pyproject.toml (``--locked`` refuses it)."""
+    out = folder / "locked-versions.txt"
+    cmd = ["uv", "export", "--locked", "--no-dev", "--no-emit-project", "--no-hashes", "--no-header",
+           "--all-extras", "--format", "requirements-txt", "-o", str(out)]
+    try:
+        result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=_INSTALL_TIMEOUT)
+    except FileNotFoundError:
+        return None, "uv is not installed"
+    except subprocess.TimeoutExpired:
+        return None, "uv export took too long"
+    if result.returncode != 0 or not out.is_file():
+        said = (result.stderr or result.stdout or "").strip().splitlines()
+        return None, (said[-1] if said else f"uv export exited {result.returncode}")[:200]
+    problem = _locked_text_problem(out.read_text(encoding="utf-8", errors="replace"))
+    return (None, problem) if problem else (out, "")
+
+
+def _locked_versions_in_wheel(wheel: Path, folder: Path) -> tuple[Path | None, str]:
+    """The locked versions a release wheel carries, written to *folder*.
+
+    ``(None, "")`` for a wheel that carries none (built before the release
+    workflow wrote them); ``(None, why)`` for one whose file cannot be used."""
+    try:
+        with zipfile.ZipFile(wheel) as zf:
+            try:
+                info = zf.getinfo(LOCKED_VERSIONS_MEMBER)
+            except KeyError:
+                return None, ""
+            if info.file_size > _MAX_LOCKED_BYTES:
+                return None, "its locked versions are larger than any lock Kazma makes"
+            text = zf.read(info).decode("utf-8")
+    except (zipfile.BadZipFile, OSError):
+        return None, ""
+    except UnicodeDecodeError:
+        return None, "its locked versions are not text"
+    problem = _locked_text_problem(text)
+    if problem:
+        return None, f"its locked versions cannot be used ({problem})"
+    out = folder / "locked-versions.txt"
+    out.write_text(text, encoding="utf-8")
+    return out, ""
 
 
 def get_latest_release() -> ReleaseInfo | None:
@@ -622,6 +698,19 @@ def do_pip_update(
                 console.print(f"[yellow]v{release.version} is older than Kazma's signed releases: it is "
                               "checked by its SHA-256 only.[/yellow]")
                 checked = "SHA-256 verified"
+            # The versions the release was tested with, from inside the
+            # verified wheel: installed exactly, as CI ran them.
+            locked, locked_problem = _locked_versions_in_wheel(wheel, Path(tmp))
+            if locked_problem:
+                console.print(f"[red]Not installing v{release.version}: {locked_problem}.[/red]")
+                console.print(f"Release: {page}")
+                return False
+            pins = ["-c", str(locked)] if locked is not None else []
+            if locked is not None:
+                console.print("[cyan]Installing the versions this release was tested with (its uv.lock).[/cyan]")
+            else:
+                console.print(f"[yellow]v{release.version} carries no locked versions: installing the newest "
+                              "versions its requirements allow.[/yellow]")
             spec = str(wheel)
             if extras:
                 spec += f"[{','.join(extras)}]"
@@ -636,9 +725,9 @@ def do_pip_update(
                     ["install", "--force-reinstall", "--no-deps", str(wheel)], timeout=_INSTALL_TIMEOUT,
                 )
                 if result.returncode == 0:
-                    result = _run_pip(["install", spec], timeout=timeout)
+                    result = _run_pip(["install", spec, *pins], timeout=timeout)
             else:
-                result = _run_pip(["install", "--upgrade", spec], timeout=timeout)
+                result = _run_pip(["install", "--upgrade", spec, *pins], timeout=timeout)
         if result.returncode == 0:
             console.print("[green]pip upgrade completed.[/green]")
             return True
@@ -1098,6 +1187,28 @@ def _reinstall_local(cwd: str) -> bool:
 
     _cleanup_broken_distributions()
 
+    # The versions CI tested: the checkout's uv.lock, as constraints (every
+    # extra's pins; an install takes only what it needs). Without them uv
+    # keeps any installed version within pyproject's floors, so an install
+    # ran versions no test had (2026-11-14, REMAINING 2.1).
+    with tempfile.TemporaryDirectory(prefix="kazma-locked-") as tmp:
+        locked, why = _locked_versions(cwd, Path(tmp))
+        if locked is not None:
+            console.print("[cyan]Installing the versions uv.lock names: the ones CI tested.[/cyan]")
+            pins = ["-c", str(locked)]
+        else:
+            console.print(f"[yellow]uv.lock could not be used ({why}): installing the newest versions "
+                          "pyproject.toml allows.[/yellow]", soft_wrap=True)
+            pins = []
+        return _install_editable(cwd, spec, extras, timeout, pins)
+
+
+def _install_editable(cwd: str, spec: str, extras: list[str], timeout: float, pins: list[str]) -> bool:
+    """The editable install of :func:`_reinstall_local`, with *pins* (``-c
+    <locked versions>``, or nothing) on every attempt."""
+    if _packages_in_use():  # _reinstall_local asked already; any other caller too
+        console.print(_IN_USE)
+        return False
     # 1) Additive uv pip install (does NOT prune other packages). Then, when
     # it failed or left Kazma unable to import, every package rewritten
     # (--reinstall), at most twice with a pause: a Windows file lock passes,
@@ -1106,8 +1217,8 @@ def _reinstall_local(cwd: str) -> bool:
     # moves every package to uv.lock's exact version -- hundreds where the
     # install runs newer ones within the floors -- and a failure partway
     # through removed about 200 packages, Kazma among them (2026-11-13).
-    uv_pip_cmd = ["uv", "pip", "install", "--python", sys.executable, "-e", spec]
-    repair_cmd = ["uv", "pip", "install", "--reinstall", "--python", sys.executable, "-e", spec]
+    uv_pip_cmd = ["uv", "pip", "install", "--python", sys.executable, "-e", spec, *pins]
+    repair_cmd = ["uv", "pip", "install", "--reinstall", "--python", sys.executable, "-e", spec, *pins]
     plan = [(uv_pip_cmd, f"uv pip install -e {spec}"),
             (repair_cmd, "uv pip install --reinstall (every package rewritten)"),
             (repair_cmd, "uv pip install --reinstall, once more")]
@@ -1143,7 +1254,7 @@ def _reinstall_local(cwd: str) -> bool:
     console.print(f"[cyan]Reinstalling via python -m pip install -e {spec}...[/cyan]")
     try:
         result = _run_cmd(
-            [sys.executable, "-m", "pip", "install", "-e", spec],
+            [sys.executable, "-m", "pip", "install", "-e", spec, *pins],
             cwd=cwd,
             timeout=timeout,
         )

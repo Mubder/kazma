@@ -36,7 +36,7 @@ Three things break an install, and the update does none of them:
   `--extra`, it takes away the optional extras (vector memory, the TUI,
   OCR, the document platform...) and every package installed from Settings
   → Packages. The update installs additively (`uv pip install -e
-  ".[your extras]"`), never with `uv sync`. If you run uv yourself, use
+  ".[your extras]"` with the locked versions), never with `uv sync`. If you run uv yourself, use
   `uv sync --inexact --extra rag --extra tui`. If a sync already removed
   packages, `python -m kazma_cli update --reinstall -y` puts your extras back
   (it remembers them in `system.installed_extras`).
@@ -60,12 +60,25 @@ Three things break an install, and the update does none of them:
 
 ### What versions it installs
 
-The update installs what this build of Kazma declares in `pyproject.toml`
-and keeps any installed version that already satisfies it. It does not move
-every package to its newest release. When a security advisory is fixed, the
-fixed release becomes Kazma's minimum in `pyproject.toml`, so the next
-update installs it; until then the server says at boot which installed
-packages are below what the build requires (see
+The update installs the versions Kazma's tests ran with: the ones `uv.lock`
+names (since 2026-11-14).
+
+- **A git install** installs with its own `uv.lock` as constraints (`uv
+  export --locked`, every extra's pins; an install takes only the packages it
+  needs). A package installed at another version is moved to the locked one.
+  If the lock no longer matches `pyproject.toml` (an edited checkout), the
+  update says so and installs the newest versions `pyproject.toml` allows.
+- **A wheel install** reads the locked versions from inside the release's
+  wheel (`kazma_cli/locked_versions.txt`, written by the release workflow
+  before it builds, so the wheel's signature covers them) and installs with
+  them. A release from 0.21.2 or older carries none: it installs as before,
+  and the update says so. A file inside a wheel that is not exact pins stops
+  the update.
+
+When a security advisory is fixed, the fixed release becomes Kazma's minimum
+in `pyproject.toml` and the lock moves with it, so the next update installs
+it; until then the server says at boot which installed packages are below
+what the build requires (see
 [below](#when-the-server-says-its-packages-are-behind)).
 
 ## What it does (git install)

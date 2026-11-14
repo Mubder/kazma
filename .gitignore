@@ -171,3 +171,6 @@ test-artifacts/
 # Deployment secrets (deploy/docker-compose.document-broker.yml reads
 # secrets/document_broker_token). Never committed, never in an image.
 /secrets/
+
+# Written by the release workflow before it builds (kazma update reads it from the wheel).
+kazma-cli/kazma_cli/locked_versions.txt

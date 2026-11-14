@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Updates install the versions Kazma was tested with (2026-11-14)
+
+- `kazma update` now installs the exact versions in `uv.lock`, the ones CI
+  ran, instead of the newest versions `pyproject.toml` allows. A git install
+  uses its own lock; a wheel install reads them from inside the release's
+  wheel, where the release workflow writes them before it builds, so the
+  wheel's signature covers them. A lock that no longer matches, or a release
+  from before this change, installs as before, and the update says so.
+
 ## WhatsApp (2026-11-14)
 
 - Kazma answers on WhatsApp, through Meta's WhatsApp Cloud API, as it does on

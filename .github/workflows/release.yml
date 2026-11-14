@@ -97,11 +97,26 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
 
+      # The versions this release was tested with: uv.lock as a constraints
+      # file, every extra included, written into the package before it is
+      # built (pyproject's hatch `artifacts` takes it although git ignores
+      # it). `kazma update` reads it from the verified wheel and installs
+      # exactly these versions, so the wheel's signature covers them.
+      # --locked refuses a lock that no longer matches pyproject.toml.
+      - name: Write the locked versions into the package
+        run: |
+          set -euo pipefail
+          uv export --locked --no-dev --no-emit-project --no-hashes --no-header --all-extras \
+            --format requirements-txt -o kazma-cli/kazma_cli/locked_versions.txt
+          grep -c '==' kazma-cli/kazma_cli/locked_versions.txt
+
       - name: Build wheel + sdist
         run: |
           set -euo pipefail
           uv build --out-dir dist
           ls -la dist
+          # The wheel must carry its locked versions (kazma update installs them).
+          python3 -c "import glob,sys,zipfile; w=glob.glob('dist/kazma-*.whl')[0]; n=zipfile.ZipFile(w).namelist(); sys.exit(0 if 'kazma_cli/locked_versions.txt' in n else 'the wheel carries no locked versions')"
           # Checksums of the built files, taken before any other tool runs
           # (the SBOM generator below is fetched at run time). They
           # live outside dist/ so they are not uploaded; every later step that
