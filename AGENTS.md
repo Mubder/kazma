@@ -752,6 +752,33 @@ compatibility. **All public API methods and constructors are unchanged.**
   the stagnation guard ended the turn 3.8 s into a 36 s task (live
   2026-10-20). Gate: `tests/test_check_swarm_task_waits.py` (no wait as the
   negative control).
+- **A wait is progress, not a loop; a finished task goes back to its chat;
+  `/unrestricted` reaches the worker** (2026-11-14, live: a 15-minute data
+  task from an `/unrestricted` Telegram chat ended "partial" on the third
+  90 s wait, the worker ran out of 40 rounds, and no one sent its result).
+  `check_swarm_task`'s "still running" answer begins
+  `tool_loop_breaker.STILL_RUNNING_PREFIX`, and `stagnation_signatures`
+  leaves such an answer out of the stagnation window -- only from a tool in
+  `WAITING_TOOLS`; the task's time limit and the turn's budgets still bound
+  it. `SwarmEngine._finalize_task` calls
+  `swarm.chat_delivery.deliver_finished_task` for every ending but a pause: a
+  task whose `source_platform` is the chat app of its `source_delivery_target`
+  (Telegram, Discord, Slack; a web turn's target is the operator's Telegram,
+  so not sent) is sent there after `HANDOVER_GRACE_S`, unless the chat's turn
+  read the result (`note_result_handed`); past `INLINE_MAX_CHARS` the result
+  is a Markdown file. Under `/unrestricted` (`agent.unrestricted`:
+  `is_unrestricted`, recorded on the task as `unrestricted` and bound around
+  the worker by `worker_dispatch` with `unrestricted_scope`) the task's time
+  limit is one to six hours, the worker gets `UNRESTRICTED_WORKER_ROUNDS` and
+  reads `UNRESTRICTED_TOOL_RESULT_CHARS` of each tool result. The forced
+  report at the round limit turns hidden reasoning off. It lifts no safety
+  gate (always-ask tools, outbound allowlist, protected keys, denylist) and
+  not the browser's network isolation, which is the install's
+  `KAZMA_BROWSER_NETWORK_MODE` (one shared browser, not a chat's). A message
+  that is a template with blanks still in it (`turn_input.unfilled_blanks`:
+  `<FILL IN ...>`, `[FILL IN]`, `{{name}}`, EN/AR) gets "ask, don't guess"
+  in its latest-message note. Gate: `tests/test_unrestricted_swarm_runs.py`
+  (the old window and planted look-alikes as negative controls).
 - **The task store** strips NUL from every Postgres parameter
   (`_pg_execute`) and runs SQLite at `synchronous=FULL` (the RUNNING row is
   crash evidence, SW-E16); worker-metric days follow the task retention.

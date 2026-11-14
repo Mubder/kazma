@@ -1673,20 +1673,15 @@ async def tool_worker_node(
         # (tool, canonical-args) signatures over a sliding window; a signature
         # repeated >= threshold times trips the same "stop and synthesize"
         # path with a strategy-change hint for the model.
-        from kazma_core.agent.tool_loop_breaker import detect_stagnation, tool_signature
+        from kazma_core.agent.tool_loop_breaker import detect_stagnation, stagnation_signatures, tool_signature
 
         # Only outcomes that represent real model behaviour feed the window:
         # policy denials / user denies / empties are control-plane signals and
         # must NOT count as stagnation (mirrors the hard-breaker credit rules —
         # repeating a denied call is the model being correctly blocked).
-        _id_to_outcome = {str(tr.get("tool_call_id")): str(tr.get("outcome", "")) for tr in results}
-        sigs = list(state.get("tool_signatures") or [])
-        for tc in safe_tools + danger_tools:
-            outcome = _id_to_outcome.get(str(tc.get("id")), "")
-            if outcome in ("policy", "user_deny", "empty", "refused"):
-                continue
-            sigs.append(tool_signature(tc["name"], tc.get("arguments") or {}))
-        sigs = sigs[-24:]  # bounded window
+        # A wait that ended "still running" is progress, not a loop
+        # (tool_loop_breaker.STILL_RUNNING_PREFIX).
+        sigs = stagnation_signatures(state.get("tool_signatures") or [], safe_tools + danger_tools, results)
         stagnant_sig = detect_stagnation(sigs)
         if stagnant_sig and not breaker_tripped_now:
             stagnant_names = [

@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## Long swarm tasks from a chat finish and come back (2026-11-14)
+
+- A task Kazma hands to the swarm from Telegram, Discord or Slack now sends
+  its result back to that chat when it finishes, as a file when it is long.
+  Waiting on it no longer looks like a stuck loop, so the chat's turn is not
+  cut off at the third wait.
+- `/unrestricted` now reaches the swarm worker too: up to six hours, 400 tool
+  rounds, and whole pages read instead of 2,000-character pieces. Approval
+  cards for public posts, folder access and the other safeguards stay.
+- A pasted template with blanks still in it (`<FILL IN ...>`) makes Kazma ask
+  for the values instead of guessing them from the examples.
+
 ## Updates install the versions Kazma was tested with (2026-11-14)
 
 - Report a problem from anywhere: the **?** beside the bell (and **Report

@@ -24,29 +24,49 @@ def _swarm_origin() -> dict[str, str]:
     """The chat a dispatched task came from, so the run supervisor can tell
     that chat when the task stalls or fails (``kazma_core.runs``)."""
     from kazma_core.safety.hitl import get_current_thread_id
-    from kazma_core.tools.send_message import get_current_delivery_target, is_valid_delivery_target
+    from kazma_core.tools.send_message import (
+        get_current_delivery_target,
+        get_current_platform,
+        is_valid_delivery_target,
+    )
 
     target = get_current_delivery_target() or ""
     origin = {"source_thread_id": get_current_thread_id() or ""}
     if is_valid_delivery_target(target):
         origin["source_delivery_target"] = target
+    # The conversation's own platform: a web turn's delivery target is the
+    # operator's Telegram, kept for reminders (AGENTS §16 B2), and a finished
+    # task's result goes back to the conversation only (swarm.chat_delivery).
+    platform = get_current_platform() or ""
+    if platform:
+        origin["source_platform"] = platform
     return origin
 
 
 #: Bounds of a task's time limit the agent may ask for (``dispatch_swarm``).
 _DISPATCH_TIMEOUT_MIN_S = 5.0
 _DISPATCH_TIMEOUT_MAX_S = 1800.0
+#: The ceiling from a chat under ``/unrestricted`` (``agent.unrestricted``):
+#: a data-collection task can take hours; six is still a bound on a task
+#: nobody watches.
+_DISPATCH_TIMEOUT_UNRESTRICTED_MAX_S = 6 * 3600.0
+#: The time limit an unrestricted chat's task gets when the model asks for
+#: less than this (it asked 900 s for a 100-shop directory, live 2026-11-14).
+_DISPATCH_TIMEOUT_UNRESTRICTED_MIN_S = 3600.0
 
 
-def _dispatch_timeout(value: Any) -> float:
+def _dispatch_timeout(value: Any, *, unrestricted: bool = False) -> float:
     """The time limit a dispatched task runs under: the model's value, kept
-    within the bounds; a value that is not a number is the default."""
+    within the bounds; a value that is not a number is the default. Under
+    ``/unrestricted`` the bounds are an hour to six hours."""
     try:
         seconds = float(value)
     except (TypeError, ValueError):
-        return 300.0
+        seconds = 300.0
     if seconds != seconds:  # NaN
-        return 300.0
+        seconds = 300.0
+    if unrestricted:
+        return min(max(seconds, _DISPATCH_TIMEOUT_UNRESTRICTED_MIN_S), _DISPATCH_TIMEOUT_UNRESTRICTED_MAX_S)
     return min(max(seconds, _DISPATCH_TIMEOUT_MIN_S), _DISPATCH_TIMEOUT_MAX_S)
 
 
@@ -886,13 +906,20 @@ def register_system_tools(registry: Any) -> None:
         auto = (worker or "auto").strip().lower() == "auto"
         workers = ["auto"] if auto else [worker]
 
+        # Whether the chat is under /unrestricted, recorded on the task: the
+        # worker runs in a task of its own, where the chat is not bound
+        # (``agent.unrestricted``). A settings read, in a thread.
+        from kazma_core.agent.unrestricted import is_unrestricted
+
+        unrestricted = await _asyncio.to_thread(is_unrestricted)
         task = SwarmTask(
             prompt=prompt,
             workers=workers,
             type=TaskType.DISPATCH,
             context=context,
-            timeout=_dispatch_timeout(timeout_seconds),
-            metadata={"source": "chat", "kind": "research", **_swarm_origin()},
+            timeout=_dispatch_timeout(timeout_seconds, unrestricted=unrestricted),
+            metadata={"source": "chat", "kind": "research", "unrestricted": unrestricted,
+                      **_swarm_origin()},
         )
         # Dispatch in the background so the tool returns immediately.
         # Register on engine._task_handles so cancel_task / panel Stop
@@ -923,10 +950,15 @@ def register_system_tools(registry: Any) -> None:
         _bg_task.add_done_callback(_cleanup_handle)
         to = ("the worker best suited to it (the swarm routes it, or starts one from a template)"
               if auto else f"worker '{worker}'")
+        from kazma_core.swarm.chat_delivery import chat_target
+
+        tells = (" When it finishes, its result is sent to this chat by itself, so you "
+                 "may end your turn instead of waiting."
+                 if chat_target(task.metadata) else "")
         return (
             f"Swarm task dispatched to {to} "
-            f"(id: {task.id}). It's visible in the Swarm panel. "
-            f"Use check_swarm_task('{task.id}') to get the result."
+            f"(id: {task.id}). Time limit: {task.timeout / 60:.0f} min. It's visible in the "
+            f"Swarm panel. Use check_swarm_task('{task.id}') to wait for the result.{tells}"
         )
     @registry.register(
         description=(
@@ -934,7 +966,8 @@ def register_system_tools(registry: Any) -> None:
             "to wait_seconds (default 60, at most 90) for the task to finish "
             "and returns the full result as soon as it does; if it is still "
             "running then, says so -- call again with the same id to keep "
-            "waiting (a research task takes one to three minutes). "
+            "waiting, or end your turn: a task started from a chat sends its "
+            "result to that chat by itself when it finishes. "
             "wait_seconds=0 checks once without waiting."
         ),
         category="swarm",
@@ -995,9 +1028,12 @@ def register_system_tools(registry: Any) -> None:
                     pass
             workers_str = f", worker: {task.workers[0]}" if task.workers else ""
             waited = f" Waited {wait:.0f}s." if wait else ""
+            from kazma_core.agent.tool_loop_breaker import STILL_RUNNING_PREFIX
+
             return (
-                f"Task {task_id} is still {status_str}{elapsed_str}{workers_str}.{waited} "
-                f"Call check_swarm_task again with the same id to keep waiting."
+                f"{STILL_RUNNING_PREFIX} {task_id} is still {status_str}{elapsed_str}{workers_str}.{waited} "
+                f"Call check_swarm_task again with the same id to keep waiting, or end your turn: "
+                f"a task started from a chat sends its result there when it finishes."
             )
 
         # A worker's text is what it read and wrote -- web pages, files, other
@@ -1007,6 +1043,12 @@ def register_system_tools(registry: Any) -> None:
 
         worker_name = (task.workers[0] if task.workers else "swarm")
         result = task.result
+        if result is not None:
+            # The chat's turn has the result: it is not sent to the chat
+            # again (``swarm.chat_delivery``).
+            from kazma_core.swarm.chat_delivery import note_result_handed
+
+            note_result_handed(task_id)
         if result and result.error:
             return (f"Task {task_id} failed:\n"
                     + fence_untrusted(result.error, source=f"swarm_worker:{worker_name}"))

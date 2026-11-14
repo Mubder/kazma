@@ -39,13 +39,30 @@ logger = logging.getLogger(__name__)
 _TRUNCATOR = TruncationMiddleware()
 
 
+#: A worker's tool rounds when its task came from a chat under
+#: ``/unrestricted`` (``agent.unrestricted``): a 100-shop data collection ran
+#: out of the 40 Research rounds in six minutes (live 2026-11-14). The task's
+#: time limit still bounds it.
+UNRESTRICTED_WORKER_ROUNDS = 400
+#: How much of each tool result such a worker reads (the default is
+#: ``middleware.MAX_TOKENS``): at 2,000 characters it read every page and
+#: file in pieces, again and again.
+UNRESTRICTED_TOOL_RESULT_CHARS = 16000
+
+
 def worker_iteration_budget(thread_id: str | None = None) -> int:
     """Swarm worker ReAct ceiling from Settings / long-task, capped at Research (40).
 
     Workers must not inherit a 500-round mission wall — that would multiply
     cost across every dispatched worker. House default (often 15) applies;
-    Research (40) is the hard cap.
+    Research (40) is the hard cap -- except for a task the owner sent from a
+    chat under ``/unrestricted``: :data:`UNRESTRICTED_WORKER_ROUNDS`. Reads
+    settings: call it off the event loop.
     """
+    from kazma_core.agent.unrestricted import is_unrestricted
+
+    if is_unrestricted():
+        return UNRESTRICTED_WORKER_ROUNDS
     try:
         from kazma_core.agent.long_task import PRESETS, resolve_turn_budgets
 
@@ -294,6 +311,10 @@ class InProcessWorker(SwarmWorker):
         import json as _json
 
         MAX_ITERATIONS = await asyncio.to_thread(worker_iteration_budget)  # a settings read (audit 2026-10-26 AUD-111)
+        from kazma_core.agent.unrestricted import is_unrestricted
+
+        truncator = (TruncationMiddleware(UNRESTRICTED_TOOL_RESULT_CHARS)
+                     if await asyncio.to_thread(is_unrestricted) else _TRUNCATOR)
         task_id = f"swarm-{self.name}-{uuid.uuid4().hex}"
         from kazma_core.agent.effect_journal import EffectUncertain, execute_effect
         from kazma_core.tenant_context import get_current_tenant_id
@@ -712,7 +733,7 @@ class InProcessWorker(SwarmWorker):
                     # truncates via truncate_tool_result; this brings the swarm
                     # worker to parity.
                     _raw = result.get("content", "")
-                    _truncated = _TRUNCATOR.process(tc.name, _raw)
+                    _truncated = truncator.process(tc.name, _raw)
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
@@ -745,6 +766,11 @@ class InProcessWorker(SwarmWorker):
                         thread_id=task_id,
                         iteration=MAX_ITERATIONS + 1,
                         label=f"InProcessWorker:{self.name}:final",
+                        # The whole report is the answer: hidden reasoning
+                        # spent half of a 16,384-token limit and cut it off
+                        # (live 2026-11-14). resilient_chat passes the switch
+                        # only to a client that takes it.
+                        reasoning="off",
                     )
                     final_output = _final_resp.content or last_content or "Max tool-use iterations reached without a final answer."
                     _final_usage = getattr(_final_resp, "usage", {}) or {}

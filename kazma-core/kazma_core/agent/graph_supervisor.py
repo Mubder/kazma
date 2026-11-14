@@ -817,12 +817,15 @@ async def supervisor_node(
         # Continuations get CONTINUITY above instead of fighting priority text.
         # Only on iteration 0 so ReAct tool rounds do not re-stack system notes.
         if iteration == 0 and last_user_content.strip() and not _is_continue:
+            from kazma_core.agent.turn_input import unfilled_blanks
+
             _prio = latest_turn_priority_note(
                 store_intent=_store_intent,
                 graph_cleanup=_graph_cleanup,
                 multi_part=_multi_part,
                 topic_shift=_is_shift,
                 focus=_store_focus,
+                blanks=unfilled_blanks(last_user_content),
             )
             _ins = 1 if messages and messages[0].get("role") == "system" else 0
             messages.insert(_ins, {"role": "system", "content": _prio})

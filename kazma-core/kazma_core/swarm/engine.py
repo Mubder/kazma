@@ -1957,6 +1957,11 @@ class SwarmEngine:
                 "task_completed",
                 {"task_id": task.id, "result": result.to_dict()},
             )
+            # A task from a chat app sends its ending back to that chat
+            # (the chat's turn may be long over).
+            from kazma_core.swarm.chat_delivery import deliver_finished_task
+
+            deliver_finished_task(task, result)
 
         # Persist to SQLite when a task store is configured. The store's
         # transition table refuses a write from a superseded run or over a

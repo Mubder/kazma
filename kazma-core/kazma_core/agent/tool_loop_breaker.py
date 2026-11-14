@@ -29,6 +29,9 @@ __all__ = [
     "RECOVERY_SPIRAL_THRESHOLD",
     "STAGNATION_REPEAT_THRESHOLD",
     "STAGNATION_WINDOW",
+    "STILL_RUNNING_PREFIX",
+    "WAITING_TOOLS",
+    "stagnation_signatures",
 ]
 
 HARD_FAILURE_THRESHOLD = 3
@@ -119,6 +122,24 @@ def recovery_honest_message(probes: int) -> str:
 # rounds never trip the hard breaker by design).
 STAGNATION_WINDOW = 8
 STAGNATION_REPEAT_THRESHOLD = 3
+
+#: How a tool that WAITS says the thing it waited on is still going
+#: (``check_swarm_task``). Such a call is progress, not a loop: it waited its
+#: full time and was told to call again. Counted as stagnation, the third
+#: wait on a 15-minute swarm task ended the turn "partial" while the worker
+#: was healthy (live 2026-11-14). The waited-on work keeps its own deadline
+#: (the task's time limit) and the turn its own (iterations, wall clock).
+STILL_RUNNING_PREFIX = "[still running]"
+#: The tools that wait and may answer :data:`STILL_RUNNING_PREFIX`. Only
+#: their answers count: another tool's text (a fetched page) that happens to
+#: begin the same way is not a wait.
+WAITING_TOOLS = frozenset({"check_swarm_task"})
+
+
+def _is_progress_wait(content: Any, tool_name: str = "") -> bool:
+    """*content* is a waiting tool's "still running" answer."""
+    return (tool_name in WAITING_TOOLS and isinstance(content, str)
+            and content.startswith(STILL_RUNNING_PREFIX))
 
 # Silent Windows SelectorEventLoop / Playwright deaths (AGENTS.md §23).
 # These used to return is_error=False in 0ms and never trip the breaker.
@@ -291,6 +312,34 @@ def tool_signature(name: str, arguments: Any) -> str:
         canon = repr(arguments)
     digest = hashlib.sha1(f"{name}:{canon}".encode("utf-8", "replace"), usedforsecurity=False).hexdigest()
     return digest[:16]
+
+
+#: Outcomes that are control-plane signals, never the model looping:
+#: repeating a denied call is the model being correctly blocked.
+_NOT_STAGNATION = ("policy", "user_deny", "empty", "refused")
+
+
+def stagnation_signatures(
+    previous: list[str] | tuple[str, ...],
+    calls: list[dict[str, Any]],
+    results: list[dict[str, Any]],
+    *,
+    keep: int = 24,
+) -> list[str]:
+    """The stagnation window after this round: *previous* plus a signature
+    for each of *calls* that is real model behaviour -- neither a
+    control-plane outcome nor a wait that ended "still running"
+    (:func:`_is_progress_wait`)."""
+    outcome = {str(r.get("tool_call_id")): str(r.get("outcome", "")) for r in results}
+    waits = {str(r.get("tool_call_id")) for r in results
+             if _is_progress_wait(r.get("content"), str(r.get("name") or ""))}
+    sigs = list(previous)
+    for call in calls:
+        call_id = str(call.get("id"))
+        if outcome.get(call_id, "") in _NOT_STAGNATION or call_id in waits:
+            continue
+        sigs.append(tool_signature(call["name"], call.get("arguments") or {}))
+    return sigs[-keep:]
 
 
 def detect_stagnation(

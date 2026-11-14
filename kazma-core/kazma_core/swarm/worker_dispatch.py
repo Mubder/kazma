@@ -241,21 +241,27 @@ async def dispatch_worker(
 
             async def _do_dispatch():
                 """Run the worker dispatch, honoring per-task workspace + commitment scope."""
+                from kazma_core.agent.unrestricted import unrestricted_scope
                 from kazma_core.ide.workspace_scope import workspace_scope
                 from kazma_core.safety.commitment.scope import swarm_scope
                 from kazma_core.safety.outside_text_fetch import outside_text_scope
                 from kazma_core.tenant_context import tenant_scope
 
                 tid = None
+                unrestricted = None
                 if isinstance(context, SwarmDispatchContext):
                     raw = (context.metadata or {}).get("tenant_id")
                     if raw:
                         tid = str(raw)
+                    # Sent from a chat under /unrestricted: the worker's
+                    # budgets follow it (agent.unrestricted).
+                    if "unrestricted" in (context.metadata or {}):
+                        unrestricted = bool(context.metadata["unrestricted"])
                 # Settings-saved API keys live under tenant 'default'. A
                 # worker with no ContextVar reads every vault:// pointer as
                 # missing and the registry substitutes a different provider
                 # (audit 2026-09-17). Install metadata tenant, else default.
-                with tenant_scope(tid or "default"):
+                with tenant_scope(tid or "default"), unrestricted_scope(unrestricted):
                     # Both managers no-op when their token is None, so always wrap.
                     async with workspace_scope(_ws_id), swarm_scope(_scope_token):
                         # The task's text is the user's message for its

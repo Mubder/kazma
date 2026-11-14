@@ -545,6 +545,33 @@ def extract_store_focus_query(text: str) -> str:
     return q[:240] if q else t[:200]
 
 
+#: A blank left in a template the user pasted: ``<FILL IN, e.g. ...>``,
+#: ``[FILL IN]``, ``<your name>``, ``{{area}}``, ``<اكتب ...>``. Live
+#: 2026-11-14 a data-collection prompt arrived with both "Scope" lines still
+#: ``<FILL IN, e.g. ...>``, and the model ran a 15-minute task on the examples.
+_BLANK = re.compile(
+    r"<\s*(?:fill\s*in|your\s|enter\s|insert\s|todo|tbd|placeholder|"
+    r"اكتب|أدخل|ادخل|املأ)"
+    r"[^<>\n]{0,160}>"
+    r"|\[\s*(?:fill\s*in|todo|tbd|placeholder|اكتب|أدخل|املأ)"
+    r"[^\[\]\n]{0,160}\]"
+    r"|\{\{\s*[A-Za-z_؀-ۿ][\w ؀-ۿ-]{0,40}\}\}",
+    re.IGNORECASE,
+)
+
+
+def unfilled_blanks(text: str, *, limit: int = 5) -> list[str]:
+    """The template blanks *text* still holds, in order, each once."""
+    found: list[str] = []
+    for match in _BLANK.finditer(text or ""):
+        blank = match.group(0).strip()
+        if blank not in found:
+            found.append(blank)
+        if len(found) >= limit:
+            break
+    return found
+
+
 def latest_turn_priority_note(
     *,
     store_intent: bool = False,
@@ -552,8 +579,11 @@ def latest_turn_priority_note(
     multi_part: bool = False,
     topic_shift: bool = False,
     focus: str = "",
+    blanks: list[str] | None = None,
 ) -> str:
-    """System note so the model does not pivot to an old recalled topic."""
+    """System note so the model does not pivot to an old recalled topic.
+    *blanks* are template blanks the message still holds
+    (:func:`unfilled_blanks`): the model asks for them before it acts."""
     base = (
         "LATEST USER MESSAGE PRIORITY: Your job this turn is to fulfill the "
         "user's *most recent* message. Recalled memory and earlier chat are "
@@ -561,6 +591,15 @@ def latest_turn_priority_note(
         "recalled topic (e.g. reminders, quota resets, prior tools) when the "
         "latest message is about something else."
     )
+    if blanks:
+        shown = "; ".join(b[:80] for b in blanks)
+        base += (
+            " UNFILLED BLANKS: the message is a template whose blanks are still "
+            f"empty ({shown}). Do not fill them from the template's own examples "
+            "and do not start the work: ask the user for each value in one short "
+            "message, in their language, and stop. Only if the user says to use "
+            "the examples may you use them."
+        )
     if topic_shift:
         base += (
             " TOPIC SHIFT: The user changed subject or suspended the prior "
