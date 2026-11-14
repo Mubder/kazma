@@ -78,7 +78,7 @@ _DAY_S = 86_400.0
 #: past it (a reply each would be an amplifier).
 _MAX_TOLD = 500
 
-_LABELS = {"telegram": "Telegram", "discord": "Discord", "slack": "Slack"}
+_LABELS = {"telegram": "Telegram", "discord": "Discord", "slack": "Slack", "whatsapp": "WhatsApp"}
 
 _told: dict[str, float] = {}
 _told_lock = threading.Lock()
@@ -125,17 +125,24 @@ def private_notice(platform: str, user_id: Any, user_text: str | None) -> str:
 
     label = _LABELS.get(platform, platform)
     uid = _norm(user_id)
+    if platform == "whatsapp":
+        # A WhatsApp id is the person's phone number, and the card asks for numbers.
+        mine_en, mine_ar = f"Your WhatsApp number is +{uid}.", f"رقمك في WhatsApp هو \u200e+{uid}."
+        list_en, list_ar = "Allowed numbers", "الأرقام المسموح لها"
+    else:
+        mine_en, mine_ar = f"Your {label} user id is {uid}.", f"معرّفك في {label} هو {uid}."
+        list_en, list_ar = "Allowed User IDs", "معرّفات المستخدمين المسموح لهم"
     english = (
         "Kazma here. This bot is private: it answers its owner only.\n"
-        f"Your {label} user id is {uid}.\n"
+        f"{mine_en}\n"
         f"If you are the owner, add it in Kazma: Settings → Adapters & Routes → {label} → "
-        "Allowed User IDs, then Save."
+        f"{list_en}, then Save."
     )
     arabic = (
         "هنا Kazma. هذا البوت خاص: لا يرد إلا على مالكه.\n"
-        f"معرّفك في {label} هو {uid}.\n"
+        f"{mine_ar}\n"
         f"إن كنت المالك فأضفه في Kazma: الإعدادات ← المحوّلات والمسارات ← {label} ← "
-        "معرّفات المستخدمين المسموح لهم، ثم احفظ."
+        f"{list_ar}، ثم احفظ."
     )
     return in_their_language(user_text, english, arabic)
 

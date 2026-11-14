@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -49,6 +50,7 @@ OWNER_ID_KEYS: dict[str, tuple[str, ...]] = {
     "telegram": ("guard.telegram.chat_id", "connectors.telegram.swarm_chat_id"),
     "discord": (),
     "slack": (),
+    "whatsapp": (),
 }
 
 
@@ -67,6 +69,16 @@ def split_ids(raw: Any) -> list[str]:
     if isinstance(raw, (list, tuple, set)):
         return [str(x).strip() for x in raw if str(x).strip()]
     return [s.strip() for s in str(raw).split(",") if s.strip()]
+
+
+def _platform_user_id(platform: str, raw: Any) -> str:
+    """A user id as the platform's adapter writes it: a WhatsApp number in
+    digits ("+965 9999-1234" -> "96599991234", the ``wa_id`` WhatsApp sends);
+    every other platform's as written."""
+    text = str(raw if raw is not None else "").strip()
+    if (platform or "").strip().lower() == "whatsapp":
+        return re.sub(r"\D", "", text)
+    return text
 
 
 def _candidate_tokens(sender_id: str) -> set[str]:
@@ -123,7 +135,7 @@ def known_owner_ids(config_store: Any, platform: str) -> list[OwnerId]:
         if entry_plat.lower() != plat or not entry_id:
             continue
         # A full Discord sender id is discord:<user>:<channel>; the user is first.
-        uid = entry_id.split(":", 1)[0] if plat == "discord" else entry_id
+        uid = entry_id.split(":", 1)[0] if plat == "discord" else _platform_user_id(plat, entry_id)
         if uid:
             found.append(OwnerId(uid, GATEWAY_ADMINS_ENV))
     seen: set[str] = set()
@@ -175,10 +187,11 @@ def is_gateway_admin(sender_id: str, platform: str = "") -> bool:
                 # silently grants admin on a platform the operator never named
                 # (audit 2026-09-16 F-8).
                 entry_plat, entry_id = part.split(":", 1)
+                entry_uid = _platform_user_id(entry_plat, entry_id)
                 if (
                     entry_plat.strip().lower() == sender_plat
-                    and entry_id.strip()
-                    and entry_id.strip() in candidates
+                    and entry_uid
+                    and entry_uid in candidates
                 ):
                     return True
             elif part in candidates:
@@ -204,7 +217,7 @@ def is_gateway_admin(sender_id: str, platform: str = "") -> bool:
             return False
         allow_tokens: set[str] = set()
         for part in listed:
-            allow_tokens |= _candidate_tokens(part)
+            allow_tokens |= _candidate_tokens(_platform_user_id(plat, part))
         return bool(candidates & allow_tokens)
     return False
 
@@ -246,6 +259,11 @@ def apply_adapter_allowlists(adapter: Any, config_store: Any) -> None:
             adapter.set_allowed_guilds(
                 split_ids(_cs_get(config_store, "connectors.discord.guild_id", ""))
             )
+        return
+    if name == "whatsapp":
+        # Numbers in any spelling: the adapter keeps them as WhatsApp ids.
+        if hasattr(adapter, "set_allowed_users"):
+            adapter.set_allowed_users(split_ids(_cs_get(config_store, "connectors.whatsapp.allowed_users", "")))
         return
     if name == "slack":
         users = split_ids(_cs_get(config_store, "connectors.slack.allowed_users", ""))

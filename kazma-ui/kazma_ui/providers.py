@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -37,7 +38,7 @@ logger = logging.getLogger(__name__)
 __all__ = ["create_providers_router"]
 
 # Connectors whose primary secret is stored under ``connectors.{name}.token``.
-_CONNECTOR_PLATFORMS = ("telegram", "discord", "slack", "email", "webhook")
+_CONNECTOR_PLATFORMS = ("telegram", "discord", "slack", "whatsapp", "email", "webhook")
 
 # Keys that are considered secrets and must be masked before leaving the backend.
 _SECRET_KEY_HINTS = ("token", "secret", "password", "key", "api_key")
@@ -240,6 +241,12 @@ def _mask_connector_entry(name: str, config: dict[str, Any]) -> dict[str, Any]:
         if key in ("incoming_url", "outgoing_url", "webhook_url", "base_url"):
             endpoint = str_value
         extras[key] = str_value
+    if name == "whatsapp":
+        # The address Meta must call (the card shows it): Kazma's public one.
+        from kazma_gateway.adapters.whatsapp import WEBHOOK_PATH
+
+        public = (os.environ.get("KAZMA_PUBLIC_URL") or "").strip().rstrip("/")
+        endpoint = f"{public}{WEBHOOK_PATH}" if public else ""
 
     return {
         "name": name,
@@ -333,6 +340,27 @@ def _slack_test_settings(config_store: ConfigStore) -> dict[str, Any]:
         "channel_id": str(config_store.get("connectors.slack.swarm_channel_id", "") or "").strip(),
         "allowed_users": split_ids(config_store.get("connectors.slack.allowed_users", "")),
         **_who_it_answers(config_store, "slack"),
+    }
+
+
+def _whatsapp_test_settings(config_store: ConfigStore) -> dict[str, Any]:
+    """What the WhatsApp Test checks against (store reads: off the loop): the
+    number, the Meta app's secret, the verify token, the allowed numbers, and
+    the public address Meta must reach the webhook at."""
+    from kazma_gateway.allowlists import split_ids
+
+    def text(name: str) -> str:
+        value = str(config_store.get(f"connectors.whatsapp.{name}", "") or "").strip()
+        return "" if is_vault_ref(value) or _is_masked_placeholder(value) else value
+
+    return {
+        "phone_number_id": text("phone_number_id"),
+        "app_secret": text("app_secret"),
+        "verify_token": text("verify_token"),
+        "api_version": text("api_version"),
+        "public_url": (os.environ.get("KAZMA_PUBLIC_URL") or "").strip(),
+        "allowed_users": split_ids(config_store.get("connectors.whatsapp.allowed_users", "")),
+        **_who_it_answers(config_store, "whatsapp"),
     }
 
 
@@ -904,6 +932,17 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                 return await diagnose_slack(token, live=_live_adapter_diagnostics("slack"), **settings)
             except Exception:
                 logger.warning("[connectors] Slack test failed", exc_info=True)
+                return {"success": False, "error": "Connection test failed"}
+
+        if name == "whatsapp":
+            from kazma_gateway.adapters.whatsapp_diagnose import diagnose as diagnose_whatsapp
+
+            settings = await asyncio.to_thread(_whatsapp_test_settings, config_store)
+            try:
+                await _adapter_from_saved_settings("whatsapp")
+                return await diagnose_whatsapp(token, live=_live_adapter_diagnostics("whatsapp"), **settings)
+            except Exception:
+                logger.warning("[connectors] WhatsApp test failed", exc_info=True)
                 return {"success": False, "error": "Connection test failed"}
 
         # Generic connectors cannot be tested remotely; report token presence.

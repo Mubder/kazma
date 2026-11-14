@@ -55,6 +55,11 @@ NOT_CALLED_BY_A_PAGE: dict[str, str] = {
         "(listed under its real path since the route listing kept include prefixes, 2026-10-15)"
     ),
     "/api/webhooks/telegram/health": "a check for the operator's webhook setup and its proxy",
+    "/api/webhooks/whatsapp": (
+        "Meta's servers verify the subscription (GET) and deliver every WhatsApp message (POST) here, "
+        "signed with the Meta app's secret"
+    ),
+    "/api/webhooks/whatsapp/health": "a check for the operator's webhook setup and its proxy",
     "/api/email/oauth/gmail/callback": "Google's OAuth redirect lands here",
     "/api/email/oauth/microsoft/callback": "Microsoft's OAuth redirect lands here",
     "/api/github/oauth/callback": "GitHub's OAuth redirect lands here",

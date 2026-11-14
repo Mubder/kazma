@@ -570,9 +570,13 @@ def test_the_routes_run_each_diagnosis_with_the_saved_settings(monkeypatch) -> N
 
 def test_every_check_of_every_adapter_has_a_title_on_the_card() -> None:
     keys: set[str] = set()
-    for name in ("discord_diagnose", "telegram_diagnose", "slack_diagnose"):
-        src = (GATEWAY / "adapters" / f"{name}.py").read_text(encoding="utf-8")
-        keys |= set(re.findall(r'add\("([a-z_]+)"', src))
+    # Every chat app's Test, found by its file name: a new chat app's checks
+    # need titles the day it is added (WhatsApp, 2026-11-14).
+    diagnoses = sorted((GATEWAY / "adapters").glob("*_diagnose.py"))
+    assert {p.stem for p in diagnoses} >= {"discord_diagnose", "telegram_diagnose", "slack_diagnose",
+                                            "whatsapp_diagnose"}, diagnoses
+    for path in diagnoses:
+        keys |= set(re.findall(r'add\("([a-z_]+)"', path.read_text(encoding="utf-8")))
     keys.add("listening")
     js = (REPO / "kazma-ui" / "kazma_ui" / "static" / "js" / "settings_hub.js").read_text(encoding="utf-8")
     body = js[js.index("connectorCheckTitle(key)"):]
@@ -584,7 +588,7 @@ def test_every_check_of_every_adapter_has_a_title_on_the_card() -> None:
     assert "connectorCheckTitle(c.key)" in macro and 'translate="no" x-text="c.detail"' in macro
     assert 'x-if="connectorLinkOk(c.link)"' in macro and 'rel="noopener noreferrer"' in macro
     for card, platform in (("<!-- Telegram main bot -->", "telegram"), ("<!-- Discord -->", "discord"),
-                           ("<!-- Slack -->", "slack")):
+                           ("<!-- Slack -->", "slack"), ("<!-- WhatsApp -->", "whatsapp")):
         start = html.index(card)
         assert f"{{{{ connector_checks('{platform}') }}}}" in html[start: start + 6000], platform
     # A check's link opens the platform's own app only.

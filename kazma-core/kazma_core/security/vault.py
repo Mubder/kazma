@@ -108,6 +108,7 @@ INSTALL_SCOPED_SECRETS: tuple[tuple[str, str], ...] = (
     ("cfg:connectors.slack.", "newest"),  # bot + app-level (Socket Mode) tokens
     ("cfg:connectors.discord.", "newest"),  # bot token
     ("cfg:connectors.telegram.", "newest"),  # bot token, webhook secret
+    ("cfg:connectors.whatsapp.", "newest"),  # access token, app secret, webhook verify token
     # MCP servers' keys, tokens and passwords (kazma_core/mcp/secrets.py):
     # the manager connects every server at boot, with no tenant bound.
     ("cfg:mcp.servers.", "newest"),

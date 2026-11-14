@@ -42,7 +42,7 @@
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:var(--sp-5)">
             <button class="btn btn-sm" id="hub-subtab-providers" :class="hubSubtab === 'providers' ? 'btn-primary' : 'btn-secondary'" @click="hubSubtab = 'providers'">{{ t('settings.llm_providers_models') }}</button>
             <button class="btn btn-sm" id="hub-subtab-models" :class="hubSubtab === 'models' ? 'btn-primary' : 'btn-secondary'" @click="hubSubtab = 'models'">{{ t('settings.models_subtab') }}</button>
-            <button class="btn btn-sm" :class="hubSubtab === 'connectors' ? 'btn-primary' : 'btn-secondary'" @click="hubSubtab = 'connectors'">{{ t('settings.platform_connectors') }}</button>
+            <button class="btn btn-sm" id="hub-subtab-connectors" :class="hubSubtab === 'connectors' ? 'btn-primary' : 'btn-secondary'" @click="hubSubtab = 'connectors'">{{ t('settings.platform_connectors') }}</button>
             <a href="/setup" class="btn btn-sm btn-secondary" id="settings-setup-guide" style="margin-inline-start:auto"
                title="{{ t('setup.reopen_hint') }}">{{ t('setup.reopen') }}</a>
         </div>
@@ -572,7 +572,7 @@
                         </p>
                     </div>
                     <div style="display:flex;align-items:center;gap:10px">
-                        <button class="btn btn-primary btn-sm" @click="saveAdapterRouting()" :disabled="adapterRoutingSaving">
+                        <button class="btn btn-primary btn-sm" id="adapter-routing-save" @click="saveAdapterRouting()" :disabled="adapterRoutingSaving">
                             <span x-text="adapterRoutingSaving ? t('settings.hub.saving') : t('settings.save')"></span>
                         </button>
                     </div>
@@ -805,6 +805,87 @@
                         <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
                                :value="adapterRouting.slackAllowed" @input="adapterRouting.slackAllowed = $event.target.value"
                                placeholder="{{ t('settings.hub.slack_allowed_ph') }}">
+                    </div>
+                </div>
+
+                <!-- WhatsApp -->
+                <div class="card-nested mb-4" id="whatsapp-card">
+                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+                        <span class="icon-tile icon-tile-sm" aria-hidden="true"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('message')"></span></span>
+                        <strong style="font-size:0.95rem">WhatsApp</strong>
+                        <span class="badge" :class="adapterRouting.waToken && adapterRouting.waPhoneId ? 'badge-success' : 'badge-warning'"
+                              x-text="adapterRouting.waToken && adapterRouting.waPhoneId ? t('settings.hub.configured') : t('settings.hub.not_configured')"></span>
+                        <label class="toggle" title="{{ t('settings.hub.enable_adapter') }}">
+                            <input type="checkbox" :checked="adapterRouting.waEnabled" @change="adapterRouting.waEnabled = $event.target.checked">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <span style="flex:1"></span>
+                        <button class="btn btn-secondary btn-sm" id="wa-test" @click="testRoute('whatsapp')" :disabled="adapterRoutingTesting === 'whatsapp'"
+                                title="{{ t('settings.hub.whatsapp_test_title') }}"
+                                x-text="adapterRoutingTesting === 'whatsapp' ? t('settings.hub.testing') : t('settings.test')"></button>
+                        <template x-if="adapterRoutingTest && adapterRoutingTest.name === 'whatsapp' && !adapterRoutingTest.checks">
+                            <span translate="no" style="font-size:0.75rem" :class="adapterRoutingTest.success ? 'text-success' : 'text-error'"
+                                  x-text="adapterRoutingTest.success ? t('settings.bk.connected') : ('✗ ' + adapterRoutingTest.error)"></span>
+                        </template>
+                    </div>
+                    <p class="form-hint" style="margin:0 0 10px">{{ t('settings.hub.whatsapp_intro') }}</p>
+                    {{ connector_checks('whatsapp') }}
+                    <div class="two-col-grid">
+                        <div>
+                            <label class="form-label">{{ t('settings.hub.whatsapp_token') }} <span class="text-muted">{{ t('settings.hub.whatsapp_token_hint') }}</span></label>
+                            <div class="input-with-toggle">
+                                <input id="wa-token" :type="routingShow.waToken ? 'text' : 'password'" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
+                                       :value="adapterRouting.waToken" @input="adapterRouting.waToken = $event.target.value" translate="no">
+                                <button class="btn btn-icon" type="button" @click="routingShow.waToken = !routingShow.waToken"
+                                        :title="routingShow.waToken ? t('settings.hub.hide') : t('settings.hub.show')"
+                                        x-html="routingShow.waToken ? KazmaIcons.get('eye-off') : KazmaIcons.get('eye')"></button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="form-label">{{ t('settings.hub.whatsapp_phone_id') }} <span class="text-muted">{{ t('settings.hub.whatsapp_phone_id_hint') }}</span></label>
+                            <input id="wa-phone-id" type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" translate="no"
+                                   :value="adapterRouting.waPhoneId" @input="adapterRouting.waPhoneId = $event.target.value"
+                                   placeholder="123456789012345">
+                        </div>
+                    </div>
+                    <div class="two-col-grid" style="margin-top:8px">
+                        <div>
+                            <label class="form-label">{{ t('settings.hub.whatsapp_app_secret') }} <span class="text-muted">{{ t('settings.hub.whatsapp_app_secret_hint') }}</span></label>
+                            <div class="input-with-toggle">
+                                <input id="wa-app-secret" :type="routingShow.waAppSecret ? 'text' : 'password'" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
+                                       :value="adapterRouting.waAppSecret" @input="adapterRouting.waAppSecret = $event.target.value" translate="no">
+                                <button class="btn btn-icon" type="button" @click="routingShow.waAppSecret = !routingShow.waAppSecret"
+                                        :title="routingShow.waAppSecret ? t('settings.hub.hide') : t('settings.hub.show')"
+                                        x-html="routingShow.waAppSecret ? KazmaIcons.get('eye-off') : KazmaIcons.get('eye')"></button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="form-label">{{ t('settings.hub.whatsapp_verify_token') }} <span class="text-muted">{{ t('settings.hub.whatsapp_verify_hint') }}</span></label>
+                            <div class="input-with-toggle">
+                                <input id="wa-verify-token" :type="routingShow.waVerifyToken ? 'text' : 'password'" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
+                                       :value="adapterRouting.waVerifyToken" @input="adapterRouting.waVerifyToken = $event.target.value" translate="no">
+                                <button class="btn btn-icon" type="button" @click="routingShow.waVerifyToken = !routingShow.waVerifyToken"
+                                        :title="routingShow.waVerifyToken ? t('settings.hub.hide') : t('settings.hub.show')"
+                                        x-html="routingShow.waVerifyToken ? KazmaIcons.get('eye-off') : KazmaIcons.get('eye')"></button>
+                                <button class="btn btn-secondary btn-sm" id="wa-make-verify" type="button" @click="makeWhatsAppVerifyToken()">{{ t('settings.hub.whatsapp_generate') }}</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="margin-top:8px">
+                        <label class="form-label">{{ t('settings.hub.whatsapp_webhook') }}</label>
+                        <template x-if="adapterRouting.waWebhook">
+                            <input id="wa-webhook" type="text" class="form-input" readonly translate="no" dir="ltr" style="font-family:var(--font-mono);font-size:0.8rem"
+                                   :value="adapterRouting.waWebhook" @focus="$event.target.select()">
+                        </template>
+                        <template x-if="!adapterRouting.waWebhook">
+                            <p class="form-hint" style="margin:0">{{ t('settings.hub.whatsapp_webhook_missing') }}</p>
+                        </template>
+                    </div>
+                    <div style="margin-top:8px">
+                        <label class="form-label">{{ t('settings.hub.whatsapp_allowed') }}</label>
+                        <input id="wa-allowed" type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" translate="no"
+                               :value="adapterRouting.waAllowed" @input="adapterRouting.waAllowed = $event.target.value"
+                               placeholder="{{ t('settings.hub.whatsapp_allowed_ph') }}">
                     </div>
                 </div>
 

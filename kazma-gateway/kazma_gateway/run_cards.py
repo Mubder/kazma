@@ -1,4 +1,4 @@
-"""Incident cards on Telegram, Discord and Slack: one button per action.
+"""Incident cards on Telegram, Discord, Slack and WhatsApp: one button per action.
 
 The run supervisor (``kazma_core.runs.notify``) sends an incident through
 ``send_message(..., run_card={"incident_id", "actions", "labels"})``; the
@@ -76,17 +76,22 @@ def _slack(card: dict[str, Any], text: str) -> list[dict[str, Any]]:
     return blocks
 
 
+def _whatsapp(card: dict[str, Any]) -> dict[str, Any]:
+    """Reply buttons (three at most, a list past that), titles of 20 characters."""
+    buttons = [(encode_callback_data(data, max_bytes=256), label[:20]) for _a, label, data in _buttons(card)]
+    return {"prompt": "Choose what to do with this incident:", "buttons": buttons, "list_button": "Actions"}
+
+
 def apply_run_card_markup(ctx: dict[str, Any], *, platform: str, run_card: dict[str, Any] | None,
                           text: str = "") -> dict[str, Any]:
     """Attach an incident's buttons to a send context (no buttons: unchanged)."""
     out = dict(ctx or {})
     if not isinstance(run_card, dict) or not _buttons(run_card):
         return out
+    from kazma_gateway.adapters.markup import attach_markup
+
     plat = (platform or "telegram").lower()
-    if plat == "telegram":
-        out["reply_markup"] = _telegram(run_card)
-    elif plat == "discord":
-        out["components"] = _discord(run_card)
-    elif plat == "slack":
-        out["blocks"] = _slack(run_card, text)
-    return out
+    builders = {"telegram": lambda: _telegram(run_card), "discord": lambda: _discord(run_card),
+                "slack": lambda: _slack(run_card, text), "whatsapp": lambda: _whatsapp(run_card)}
+    build = builders.get(plat)
+    return attach_markup(out, plat, build() if build else None)

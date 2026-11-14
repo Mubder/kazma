@@ -1,7 +1,7 @@
 """The chat apps' adapters and swarm senders, built from saved settings by one builder.
 
-Boot, Settings' Refresh and every saved setting build Telegram, Discord and
-Slack here. Until 2026-10-01 boot and Refresh each kept a copy of this code,
+Boot, Settings' Refresh and every saved setting build Telegram, Discord,
+Slack and WhatsApp here. Until 2026-10-01 boot and Refresh each kept a copy of this code,
 and the copies drifted:
 
 * a token saved in Settings reached no running adapter -- the adapter kept
@@ -49,9 +49,9 @@ __all__ = [
     "ChatAdapters",
 ]
 
-CHAT_PLATFORMS: tuple[str, ...] = ("telegram", "discord", "slack")
+CHAT_PLATFORMS: tuple[str, ...] = ("telegram", "discord", "slack", "whatsapp")
 
-_LABELS = {"telegram": "Telegram", "discord": "Discord", "slack": "Slack"}
+_LABELS = {"telegram": "Telegram", "discord": "Discord", "slack": "Slack", "whatsapp": "WhatsApp"}
 
 #: ``connectors.<platform>.<field>`` values a running adapter is built from: a
 #: change rebuilds that platform's adapter.
@@ -59,6 +59,7 @@ ADAPTER_FIELDS: dict[str, tuple[str, ...]] = {
     "telegram": ("enabled", "token", "webhook_secret"),
     "discord": ("enabled", "token"),
     "slack": ("enabled", "token", "app_token"),
+    "whatsapp": ("enabled", "token", "phone_number_id", "app_secret", "verify_token", "api_version"),
 }
 
 #: Allowlists: a change is applied to the running adapter in place.
@@ -66,6 +67,7 @@ ALLOWLIST_FIELDS: dict[str, tuple[str, ...]] = {
     "telegram": ("allowed_users",),
     "discord": ("allowed_users", "guild_id"),
     "slack": ("allowed_users", "allowed_teams", "allowed_channels"),
+    "whatsapp": ("allowed_users",),
 }
 
 #: The swarm bus's sender for a platform: switch, bot token, destination.
@@ -73,6 +75,10 @@ BUS_FIELDS: dict[str, tuple[str, ...]] = {
     "telegram": ("enabled", "token", "swarm_chat_id"),
     "discord": ("enabled", "token", "swarm_channel_id"),
     "slack": ("enabled", "token", "swarm_channel_id"),
+    # No swarm sender: WhatsApp lets a business message a person only within
+    # 24 hours of their last message (outside it, approved templates only), so
+    # a swarm card could not reach the owner reliably.
+    "whatsapp": (),
 }
 
 #: Settings outside ``connectors.<platform>.`` that name the owner's own
@@ -117,13 +123,20 @@ class _PlatformSettings:
     token: str = field(default="", repr=False)
     app_token: str = field(default="", repr=False)
     webhook_secret: str = field(default="", repr=False)
+    #: WhatsApp: the business phone number's id, the Meta app's secret (it
+    #: signs every webhook call), the webhook's verify token, the Graph API version.
+    phone_number_id: str = ""
+    app_secret: str = field(default="", repr=False)
+    verify_token: str = field(default="", repr=False)
+    api_version: str = ""
     swarm_target: str = ""
     allowlists: tuple[str, ...] = ()
     #: The settings naming the owner's own account here (OWNER_ID_KEYS).
     owners: tuple[str, ...] = ()
 
     def adapter_key(self) -> tuple[Any, ...]:
-        return (self.enabled, self.token, self.app_token, self.webhook_secret)
+        return (self.enabled, self.token, self.app_token, self.webhook_secret,
+                self.phone_number_id, self.app_secret, self.verify_token, self.api_version)
 
     def sender_key(self) -> tuple[Any, ...]:
         return (self.enabled, self.token, self.swarm_target)
@@ -186,6 +199,19 @@ def _read_platform_settings(config_store: Any, platform: str) -> _PlatformSettin
             allowlists=allowlists,
             owners=owners,
         )
+    if platform == "whatsapp":
+        # Settings only: the owner enters Meta's values on the WhatsApp card.
+        return _PlatformSettings(
+            platform,
+            enabled,
+            token=_text(config_store, prefix + "token"),
+            phone_number_id=_text(config_store, prefix + "phone_number_id"),
+            app_secret=_text(config_store, prefix + "app_secret"),
+            verify_token=_text(config_store, prefix + "verify_token"),
+            api_version=_text(config_store, prefix + "api_version"),
+            allowlists=allowlists,
+            owners=owners,
+        )
     raise ValueError(f"not a chat platform: {platform!r}")
 
 
@@ -198,7 +224,10 @@ def _say_who_it_answers(
         return
     label = _LABELS[platform]
     where = f"connectors.{platform}.allowed_users"
-    fix = f"Put your {label} user id in Settings → Adapters & Routes → {label} → Allowed User IDs"
+    if platform == "whatsapp":
+        fix = "Put your WhatsApp number in Settings → Adapters & Routes → WhatsApp → Allowed numbers"
+    else:
+        fix = f"Put your {label} user id in Settings → Adapters & Routes → {label} → Allowed User IDs"
     if open_switch:
         logger.warning(
             "[Gateway] %s lets everyone in: its allowlist is empty (%s) and %s is on. %s, then turn %s off",
@@ -258,6 +287,27 @@ def _build_chat_adapter(
         from kazma_gateway.adapters.discord import DiscordAdapter
 
         adapter = DiscordAdapter(token=settings.token, allow_all=allow_all)
+    elif platform == "whatsapp":
+        from kazma_gateway.adapters.whatsapp import WhatsAppAdapter
+        from kazma_gateway.adapters.whatsapp_api import DEFAULT_API_VERSION
+
+        if not settings.phone_number_id:
+            logger.info("[Gateway] No WhatsApp phone number id -- WhatsApp adapter not started")
+            return None
+        adapter = WhatsAppAdapter(
+            settings.token,
+            settings.phone_number_id,
+            app_secret=settings.app_secret,
+            verify_token=settings.verify_token,
+            api_version=settings.api_version or DEFAULT_API_VERSION,
+            allow_all=allow_all,
+        )
+        if not (settings.app_secret and settings.verify_token):
+            logger.warning(
+                "[Gateway] WhatsApp has no %s: Meta's webhook calls are refused until it is saved "
+                "(Settings → Adapters & Routes → WhatsApp)",
+                "app secret" if not settings.app_secret else "verify token",
+            )
     else:
         from kazma_gateway.adapters.slack import SlackAdapter
 
@@ -284,7 +334,7 @@ def _build_chat_adapter(
 def _build_swarm_sender(settings: _PlatformSettings) -> Any | None:
     """The swarm bus's sender for one platform, or None (switched off, no
     token, or -- Discord and Slack -- no destination channel)."""
-    if not (settings.enabled and settings.token):
+    if not (settings.enabled and settings.token) or not BUS_FIELDS.get(settings.platform):
         return None
     if settings.platform == "telegram":
         from kazma_gateway.adapters.telegram_bus import TelegramBusAdapter

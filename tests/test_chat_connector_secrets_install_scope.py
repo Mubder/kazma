@@ -163,7 +163,7 @@ def test_the_boot_scan_would_flag_a_new_platform() -> None:
     is sensitive and not install-scoped -- exactly what the gate refuses."""
     from kazma_core.config_store import is_sensitive_config_key
 
-    line = 'tok = self.config_store.get("connectors.whatsapp.token", "")'
+    line = 'tok = self.config_store.get("connectors.signal.token", "")'
     (key,) = _BOOT_READ.findall(line)
     assert is_sensitive_config_key(key)
     assert not vault_mod.is_install_scoped_secret("cfg:" + key)

@@ -251,7 +251,7 @@
         },
 
         // ── Connectors Tab ──
-        connectors: { telegram: {}, discord: {}, slack: {}, email: {}, webhook: {} },
+        connectors: { telegram: {}, discord: {}, slack: {}, whatsapp: {}, email: {}, webhook: {} },
         connectorStatuses: {},
         testingConnector: null,
         showTelegramToken: false,
@@ -275,13 +275,15 @@
             tgGroupEnabled: false, tgGroupChat: '', tgGroupToken: '',
             discordToken: '', discordEnabled: true, discordGuild: '', discordAllowed: '', discordChannel: '',
             slackToken: '', slackAppToken: '', slackWorkspace: '', slackAllowed: '', slackEnabled: true, slackChannel: '',
+            waToken: '', waEnabled: true, waPhoneId: '', waAppSecret: '', waVerifyToken: '', waAllowed: '', waWebhook: '',
             // Where alerts go and the server status messages moved to
             // Settings -> Alerts (settings_alerts.js).
             swarmRoutes: [],
         },
         adapterRoutingSaving: false,
         adapterRoutingSnapshot: '',
-        routingShow: { tgToken: false, tgGroupToken: false, discordToken: false, slackToken: false, slackAppToken: false },
+        routingShow: { tgToken: false, tgGroupToken: false, discordToken: false, slackToken: false, slackAppToken: false,
+            waToken: false, waAppSecret: false, waVerifyToken: false },
         adapterRoutingTesting: '',
         adapterRoutingTest: null,
         hubProfiles: [],

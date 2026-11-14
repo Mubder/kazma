@@ -1925,16 +1925,12 @@ def create_graph_handler(
                     prompt = await asyncio.to_thread(
                         _build_approval_prompt, hitl_payload, thread_id, platform=msg.platform
                     )
-                    # Interactive controls travel in context_metadata:
-                    # Telegram → reply_markup, Discord → components, Slack → blocks.
+                    # Interactive controls travel in context_metadata, in the
+                    # platform's own field (adapters.markup.MARKUP_KEYS).
+                    from kazma_gateway.adapters.markup import attach_markup
+
                     prompt_text, send_ctx = _prepare_tg_outbound(msg, prompt["text"], ctx)
-                    if prompt.get("markup"):
-                        if msg.platform == "telegram":
-                            send_ctx["reply_markup"] = prompt["markup"]
-                        elif msg.platform == "discord":
-                            send_ctx["components"] = prompt["markup"]
-                        elif msg.platform == "slack":
-                            send_ctx["blocks"] = prompt["markup"]
+                    attach_markup(send_ctx, msg.platform, prompt.get("markup"))
                     card_sent = await manager.send(
                         OutboundMessage(
                             target_id=_build_target_id(msg.platform, ctx),

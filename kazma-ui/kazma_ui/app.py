@@ -1105,7 +1105,7 @@ class KazmaAppBuilder:
 
             self.gateway.set_outbox(ChatOutbox(_dd_outbox() / "chat_outbox.db"))
 
-            # Telegram, Discord, Slack and the swarm bus's senders: one
+            # Telegram, Discord, Slack, WhatsApp and the swarm bus's senders: one
             # builder for boot, Settings' Refresh and every saved setting
             # (kazma_gateway.chat_adapters). Boot and Refresh kept a copy
             # each until 2026-10-01, and the copies drifted.
@@ -1141,6 +1141,15 @@ class KazmaAppBuilder:
             self.app.include_router(
                 telegram_webhook_router(lambda: gateway.adapter_named("telegram")),
                 prefix="/api/webhooks/telegram",
+            )
+            # WhatsApp: Meta delivers every message to this webhook (there is
+            # no polling); it answers with the WhatsApp adapter running now.
+            from kazma_gateway.adapters.whatsapp import WEBHOOK_PATH as _WA_WEBHOOK
+            from kazma_gateway.adapters.whatsapp import whatsapp_webhook_router
+
+            self.app.include_router(
+                whatsapp_webhook_router(lambda: gateway.adapter_named("whatsapp")),
+                prefix=_WA_WEBHOOK,
             )
 
             # Session Store

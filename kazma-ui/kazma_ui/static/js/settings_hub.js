@@ -290,6 +290,14 @@
                 r.slackWorkspace = ex('slack', 'workspace');
                 r.slackAllowed = ex('slack', 'allowed_users');
                 r.slackEnabled = (byName.slack || {}).enabled !== false;
+                r.waToken = String((byName.whatsapp || {}).token || '');
+                r.waEnabled = (byName.whatsapp || {}).enabled !== false;
+                r.waPhoneId = ex('whatsapp', 'phone_number_id');
+                r.waAppSecret = ex('whatsapp', 'app_secret');
+                r.waVerifyToken = ex('whatsapp', 'verify_token');
+                r.waAllowed = ex('whatsapp', 'allowed_users');
+                // The address Meta must call: the server's public one (KAZMA_PUBLIC_URL).
+                r.waWebhook = String((byName.whatsapp || {}).endpoint || '');
                 r.tgMainChat = String(grouped(conn, 'connectors', 'connectors.telegram.swarm_chat_id') || '');
                 r.discordChannel = String(grouped(conn, 'connectors', 'connectors.discord.swarm_channel_id') || '');
                 r.slackChannel = String(grouped(conn, 'connectors', 'connectors.slack.swarm_channel_id') || '');
@@ -337,6 +345,12 @@
                 slackWorkspace: String(r.slackWorkspace || '').trim(),
                 slackAllowed: String(r.slackAllowed || '').trim(),
                 slackChannel: String(r.slackChannel || '').trim(),
+                waToken: String(r.waToken || ''),
+                waEnabled: !!r.waEnabled,
+                waPhoneId: String(r.waPhoneId || '').trim(),
+                waAppSecret: String(r.waAppSecret || ''),
+                waVerifyToken: String(r.waVerifyToken || ''),
+                waAllowed: String(r.waAllowed || '').trim(),
                 swarmRoutes: [...(r.swarmRoutes || [])].sort(),
             };
         },
@@ -369,6 +383,17 @@
                     extras: {
                         guild_id: String(r.discordGuild || '').trim(),
                         allowed_users: String(r.discordAllowed || '').trim(),
+                    },
+                };
+            }
+            if (name === 'whatsapp') {
+                return {
+                    name, token: String(r.waToken || '').trim(), enabled: !!r.waEnabled,
+                    extras: {
+                        phone_number_id: String(r.waPhoneId || '').trim(),
+                        app_secret: String(r.waAppSecret || '').trim(),
+                        verify_token: String(r.waVerifyToken || '').trim(),
+                        allowed_users: String(r.waAllowed || '').trim(),
                     },
                 };
             }
@@ -456,6 +481,11 @@
                             },
                         }),
                     },
+                    {
+                        name: 'whatsapp',
+                        dirty: ['waToken', 'waEnabled', 'waPhoneId', 'waAppSecret', 'waVerifyToken', 'waAllowed'].some(changed),
+                        payload: () => this._connectorPayloadFor('whatsapp'),
+                    },
                 ];
                 for (const p of platforms) {
                     if (!p.dirty) continue;
@@ -523,7 +553,7 @@
             // Mirrors the old modal's test: save this platform's card state
             // first (the test runs against SAVED credentials), then run the
             // platform health check and show the result inline.
-            if (!['telegram', 'discord', 'slack'].includes(name)) return;
+            if (!['telegram', 'discord', 'slack', 'whatsapp'].includes(name)) return;
             this.adapterRoutingTesting = name;
             this.adapterRoutingTest = null;
             try {
@@ -569,8 +599,23 @@
                 allowed: _k('settings.hub.check_allowed', 'Allowed users'),
                 listening: _k('settings.hub.check_listening', 'Kazma is listening'),
                 commands: _k('settings.hub.check_commands', 'Command registration'),
+                app_secret: _k('settings.hub.check_app_secret', 'App secret'),
+                webhook: _k('settings.hub.check_webhook', 'Webhook'),
+                window: _k('settings.hub.check_window', '24-hour window'),
             };
             return titles[key] || key;
+        },
+
+        makeWhatsAppVerifyToken() {
+            // A long random verify token for Meta's webhook setup: shown, and
+            // copied so it can be pasted there before Save masks it.
+            const bytes = new Uint8Array(24);
+            window.crypto.getRandomValues(bytes);
+            const token = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+            this.adapterRouting.waVerifyToken = token;
+            this.routingShow.waVerifyToken = true;
+            try { navigator.clipboard.writeText(token); } catch (eCopy) { /* shown on the card */ }
+            showToast(_k('settings.hub.whatsapp_generated', "A verify token was made and copied. Paste it into Meta's webhook setup, then Save here."), 'info');
         },
 
         connectorLinkOk(link) {
@@ -905,6 +950,7 @@
                 telegram: { allowed_users: '' },
                 discord: { guild_id: '', allowed_users: '' },
                 slack: { app_token: '', workspace: '', allowed_users: '' },
+                whatsapp: { phone_number_id: '', app_secret: '', verify_token: '', allowed_users: '' },
                 email: { smtp_host: '', smtp_port: '', username: '', password: '', imap_host: '' },
                 webhook: { incoming_url: '', outgoing_url: '', secret: '' },
             };

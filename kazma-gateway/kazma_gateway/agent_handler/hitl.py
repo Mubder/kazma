@@ -681,28 +681,10 @@ def _build_approval_prompt(
             ]
         )
         text_multi = "\n".join(lines)
-        markup_multi = None
+        from kazma_gateway.adapters.markup import approval_markup
+
         plat_multi = (platform or "telegram").lower()
-        try:
-            if plat_multi == "telegram":
-                from kazma_gateway.adapters.telegram import TelegramAdapter
-
-                markup_multi = TelegramAdapter.build_approval_keyboard(request_id, **_labels)
-            elif plat_multi == "discord":
-                from kazma_gateway.adapters.discord import DiscordAdapter
-
-                markup_multi = DiscordAdapter.build_approval_keyboard(request_id, **_labels)
-            elif plat_multi == "slack":
-                from kazma_gateway.adapters.slack import SlackAdapter
-
-                markup_multi = SlackAdapter.build_approval_keyboard(request_id, details=text_multi, **_labels)
-        except Exception as exc:
-            logger.debug(
-                "Approval keyboard build failed for platform=%s: %s",
-                plat_multi,
-                exc,
-                exc_info=True,
-            )
+        markup_multi = approval_markup(plat_multi, request_id, details=text_multi, **_labels)
         return {"text": text_multi, "markup": markup_multi, "platform": plat_multi}
     # Phase 3: semantic clarify/confirm → render question + per-option keyboard
     kind = payload.get("kind", "security")
@@ -712,53 +694,19 @@ def _build_approval_prompt(
                     or payload.get("message", "")) or "Needs clarification"
         options = (items[0].get("options") if items else []) or []
         text = f"❓ {question}\n\nChoose an option below."
-        markup = None
+        from kazma_gateway.adapters.markup import semantic_markup
+
         plat = (platform or "telegram").lower()
-        if plat == "telegram":
-            try:
-                from kazma_gateway.adapters.telegram_keyboards import build_semantic_keyboard
-                markup = build_semantic_keyboard(request_id, options)
-            except Exception:
-                pass
-        elif plat == "discord":
-            try:
-                from kazma_gateway.adapters.platform_keyboards import discord_semantic_components
-                markup = discord_semantic_components(request_id, options)
-            except Exception:
-                pass
-        elif plat == "slack":
-            try:
-                from kazma_gateway.adapters.platform_keyboards import slack_semantic_blocks
-                markup = slack_semantic_blocks(request_id, question, options)
-            except Exception:
-                pass
+        markup = semantic_markup(plat, request_id, question, options)
         return {"text": text, "markup": markup, "platform": plat}
     text = _single_tool_card_text(
         tool, args_str, proposal_lines, request_id, _public, always=not _labels["task"],
         notes=_note_lines,
     )
-    markup = None
+    from kazma_gateway.adapters.markup import approval_markup
+
     plat = (platform or "telegram").lower()
-    try:
-        if plat == "telegram":
-            from kazma_gateway.adapters.telegram import TelegramAdapter
-
-            markup = TelegramAdapter.build_approval_keyboard(request_id, **_labels)
-        elif plat == "discord":
-            from kazma_gateway.adapters.discord import DiscordAdapter
-
-            markup = DiscordAdapter.build_approval_keyboard(request_id, **_labels)
-        elif plat == "slack":
-            from kazma_gateway.adapters.slack import SlackAdapter
-
-            markup = SlackAdapter.build_approval_keyboard(request_id, details=text, **_labels)
-    except Exception as exc:
-        logger.debug(
-            "Approval keyboard build failed for platform=%s: %s",
-            plat,
-            exc,
-            exc_info=True,
-        )
+    markup = approval_markup(plat, request_id, details=text, **_labels)
     return {"text": text, "markup": markup, "platform": plat}
 
 
@@ -871,13 +819,9 @@ async def _deliver_resume(
         # The card reads the HITL settings and the gate registry (AUD-111).
         prompt = await asyncio.to_thread(_build_approval_prompt, chained, thread_id, platform=platform)
         prompt_text, send_ctx = _prepare_outbound(platform, prompt["text"], ctx)
-        if prompt.get("markup"):
-            if platform == "telegram":
-                send_ctx["reply_markup"] = prompt["markup"]
-            elif platform == "discord":
-                send_ctx["components"] = prompt["markup"]
-            elif platform == "slack":
-                send_ctx["blocks"] = prompt["markup"]
+        from kazma_gateway.adapters.markup import attach_markup
+
+        attach_markup(send_ctx, platform, prompt.get("markup"))
         await manager.send(
             OutboundMessage(
                 target_id=target_id,

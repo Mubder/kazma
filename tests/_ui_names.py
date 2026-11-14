@@ -22,6 +22,7 @@ UI_NAMES = frozenset({
     "Slack",
     "Telegram",
     "Tesseract",
+    "WhatsApp",
     # keyboard keys, as printed on them
     "Ctrl",
     "Enter",

@@ -6788,4 +6788,80 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "لم يتغيّر النموذج الافتراضي: ",
         "en": "The default model was not changed: ",
     },
+    "settings.hub.whatsapp_test_title": {
+        "ar": 'يفحص رمز الوصول والرقم لدى Meta، وسرّ التطبيق، والـ webhook، وما حدث لآخر رسالة أُرسلت إلى الرقم',
+        "en": 'Checks the access token and number with Meta, the app secret, the webhook, and what became of the last message sent to the number',
+    },
+    "settings.hub.whatsapp_intro": {
+        "ar": 'واجهة WhatsApp Cloud من Meta. أنشئ تطبيقًا في developers.facebook.com وأضف إليه منتج WhatsApp، ثم انسخ قيمه هنا. ترسل Meta كل رسالة إلى webhook الخاص بـ Kazma، لذا يجب أن يصل إليه الإنترنت.',
+        "en": "Meta's WhatsApp Cloud API. Make an app at developers.facebook.com with the WhatsApp product, then copy its values here. Meta delivers each message to Kazma's webhook, so Kazma must be reachable over the internet.",
+    },
+    "settings.hub.whatsapp_token": {
+        "ar": 'رمز الوصول',
+        "en": 'Access token',
+    },
+    "settings.hub.whatsapp_token_hint": {
+        "ar": '(دائم من مستخدم نظام؛ المؤقت يدوم 24 ساعة)',
+        "en": '(a permanent one from a system user; a temporary one lasts 24 hours)',
+    },
+    "settings.hub.whatsapp_phone_id": {
+        "ar": 'معرّف رقم الهاتف',
+        "en": 'Phone number ID',
+    },
+    "settings.hub.whatsapp_phone_id_hint": {
+        "ar": '(WhatsApp ← API Setup، وليس الرقم نفسه)',
+        "en": '(WhatsApp → API Setup, not the number itself)',
+    },
+    "settings.hub.whatsapp_app_secret": {
+        "ar": 'سرّ التطبيق',
+        "en": 'App secret',
+    },
+    "settings.hub.whatsapp_app_secret_hint": {
+        "ar": '(App settings ← Basic: تُوقّع Meta به كل استدعاء للـ webhook)',
+        "en": '(App settings → Basic: Meta signs every webhook call with it)',
+    },
+    "settings.hub.whatsapp_verify_token": {
+        "ar": 'رمز التحقق من الـ webhook',
+        "en": 'Webhook verify token',
+    },
+    "settings.hub.whatsapp_verify_hint": {
+        "ar": '(أي نص عشوائي طويل: نفسه في إعداد الـ webhook لدى Meta)',
+        "en": "(any long random text: the same in Meta's webhook setup)",
+    },
+    "settings.hub.whatsapp_generate": {
+        "ar": 'أنشئ رمزًا',
+        "en": 'Make one',
+    },
+    "settings.hub.whatsapp_generated": {
+        "ar": 'أُنشئ رمز تحقق ونُسخ. الصقه في إعداد الـ webhook لدى Meta، ثم احفظ هنا.',
+        "en": "A verify token was made and copied. Paste it into Meta's webhook setup, then Save here.",
+    },
+    "settings.hub.whatsapp_webhook": {
+        "ar": 'عنوان الـ webhook لـ Meta',
+        "en": 'Webhook address for Meta',
+    },
+    "settings.hub.whatsapp_webhook_missing": {
+        "ar": 'لا يعرف Kazma عنوانه العام: اضبط KAZMA_PUBLIC_URL في ملف .env وأعد التشغيل، ثم يظهر العنوان هنا.',
+        "en": 'Kazma does not know its public address: set KAZMA_PUBLIC_URL in .env and restart, then the address shows here.',
+    },
+    "settings.hub.whatsapp_allowed": {
+        "ar": 'الأرقام المسموح لها',
+        "en": 'Allowed numbers',
+    },
+    "settings.hub.whatsapp_allowed_ph": {
+        "ar": '\u200e+965 9999 1234 — مع رمز الدولة، مفصولة بفواصل',
+        "en": '+965 9999 1234 — with the country code, comma-separated',
+    },
+    "settings.hub.check_app_secret": {
+        "ar": 'سرّ التطبيق',
+        "en": 'App secret',
+    },
+    "settings.hub.check_webhook": {
+        "ar": 'الـ webhook',
+        "en": 'Webhook',
+    },
+    "settings.hub.check_window": {
+        "ar": 'نافذة الـ 24 ساعة',
+        "en": '24-hour window',
+    },
 }

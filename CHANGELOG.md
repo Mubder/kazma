@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## WhatsApp (2026-11-14)
+
+- Kazma answers on WhatsApp, through Meta's WhatsApp Cloud API, as it does on
+  Telegram, Discord and Slack: text, photos, documents and voice notes in;
+  answers in WhatsApp's own text marks, split at 4,096 characters, files out;
+  approvals as reply buttons (Approve, Deny, Approve for task). Set it up in
+  Settings → Providers & Connectors → Platform Connectors → WhatsApp; the
+  steps for Meta's side are in the Gateways & Platforms guide.
+- Meta delivers every message to Kazma's webhook, `/api/webhooks/whatsapp`.
+  Kazma answers only calls signed with the Meta app's secret, and none while
+  no secret is saved.
+- With Allowed numbers empty the number is private, as on every chat app; a
+  stranger is told once a day which number to add. A number is accepted in
+  any spelling ("+965 9999 1234").
+- WhatsApp allows a business to write to a person only within 24 hours of
+  their last message, so reminders and swarm cards keep going to your other
+  chat apps.
+- The connector card's Test asks Meta about the number and says what became
+  of the last message sent to it.
+- The approval card, the incident card and the gateway now take each chat
+  app's buttons from one table (`kazma_gateway/adapters/markup.py`).
+
 ## Kazma's own Docker tools (2026-11-14)
 
 - On Windows, `kazma setup engine` now installs Kazma's own copy of Docker's

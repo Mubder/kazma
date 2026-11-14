@@ -112,6 +112,8 @@ def allowlist_check(
     live: dict[str, Any] | None = None,
     platform: str,
     find_id: str,
+    field: str = "Allowed User IDs",
+    id_word: str = "user id",
 ) -> tuple[bool | None, str]:
     """Who the chat app answers (``sender_rule``), and the fix when its
     allowlist is empty: private is a problem to fix too -- the owner's own
@@ -121,20 +123,20 @@ def allowlist_check(
         return True, f"{len(allowed)} allowed user(s): {', '.join(allowed)}."
     if open_to_everyone is None:
         open_to_everyone = bool(live and live.get("allow_all"))
-    fix = f"Put your {platform} user id in Allowed User IDs and Save ({find_id})."
+    fix = f"Put your {platform} {id_word} in {field} and Save ({find_id})."
     if open_to_everyone:
         return False, (
-            "Allowed User IDs is empty and KAZMA_GATEWAY_OPEN_TO_EVERYONE is on: anyone who can "
+            f"{field} is empty and KAZMA_GATEWAY_OPEN_TO_EVERYONE is on: anyone who can "
             f"message the bot is answered. {fix} Then turn the switch off."
         )
     if owner_ids:
         return False, (
-            "Allowed User IDs is empty, so Kazma is private: it answers only the owner's own "
+            f"{field} is empty, so Kazma is private: it answers only the owner's own "
             f"{platform} account it already knows ({', '.join(owner_ids)}) and refuses everyone "
             f"else. {fix}"
         )
     return False, (
-        f"Allowed User IDs is empty, so every message is refused: Kazma knows no {platform} "
+        f"{field} is empty, so every message is refused: Kazma knows no {platform} "
         f"account of its owner's. {fix}"
     )
 

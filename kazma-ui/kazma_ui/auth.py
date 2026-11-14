@@ -850,6 +850,11 @@ ALWAYS_OPEN_PREFIXES: tuple[str, ...] = (
     # not KAZMA_SECRET. Auth is the Telegram header (adapter fail-closed
     # without webhook_secret). (audit M-14)
     "/api/webhooks/telegram",
+    # WhatsApp webhook: Meta signs every call (X-Hub-Signature-256, an HMAC of
+    # the body under the Meta app's secret) and verifies the subscription with
+    # the verify token; KAZMA_SECRET is never sent. The adapter answers nothing
+    # without an app secret saved (fail-closed), and a bad signature is 401.
+    "/api/webhooks/whatsapp",
     # NOTE: there is deliberately no "/api/auth" prefix entry. Every route that
     # must be reachable before login is listed individually in
     # ALWAYS_OPEN_PATHS, so a new /api/auth/* endpoint is gated by default.

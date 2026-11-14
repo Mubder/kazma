@@ -20,6 +20,7 @@ flowchart LR
         TG[TelegramAdapter]
         DC[DiscordAdapter]
         SL[SlackAdapter]
+        WA[WhatsAppAdapter]
     end
     subgraph agent_handler package
         ST[store.py<br/>SessionStore + isolation]
@@ -29,12 +30,12 @@ flowchart LR
     SS[(SessionStore<br/>SQLite / in-memory)]
     GB[Supervisor Graph]
 
-    TG & DC & SL -->|IncomingMessage| GH
+    TG & DC & SL & WA -->|IncomingMessage| GH
     GH --> ST
     ST <--> SS
     GH -->|graph.ainvoke| GB
     GB -->|final state| GH
-    GH -->|OutboundMessage| TG & DC & SL
+    GH -->|OutboundMessage| TG & DC & SL & WA
 ```
 
 - **Adapters** (`adapters/`) — one per platform; all extend `BaseAdapter` (`gateway.py:239`). Each translates platform-native events into Kazma's `IncomingMessage` and renders `OutboundMessage` back.
@@ -96,6 +97,7 @@ Each adapter keeps a record of what its connection received (`kazma_gateway/rece
 | Telegram | The bot token; a webhook that would stop polling, and updates waiting; group privacy; the delivery chat (did the person press Start, did they block the bot); the group route; the last message a person sent and what became of it; allowed users; the connection |
 | Discord | The bot token; the Message Content intent; the servers the bot is in; the delivery channel; the newest message a person wrote there; each allowed user's direct messages to the bot, with a link that opens the conversation; allowed users; the connection |
 | Slack | The bot token; the app-level token (Socket Mode); the permissions the token carries; the delivery channel and whether the bot is in it; the newest message there and in each allowed user's direct messages, with a link; allowed users; the connection |
+| WhatsApp | The access token and the phone number (Meta's answer); the app secret; the webhook address and whether Meta has called it; the last message a person sent and what became of it; the 24-hour window; allowed numbers; the connection ([2.7](#whatsapp)) |
 
 The Test writes nothing, except that on Discord and Slack it opens the direct-message channel with each allowed user, which sends no message. The card saves its fields before it tests, and the Test checks the connection made with what was saved: if the running adapter was built from other settings, it is rebuilt first, and the Test waits up to ten seconds for the new connection's first attempt.
 
@@ -127,6 +129,36 @@ A refused sender writing to the bot in a direct message is told, at most once a 
 At each boot an adapter with an empty list logs one WARNING saying whom it answers and how to fix it, and its **Test** shows the empty list as a problem with the fix. To find your id, message the bot: the private notice names it.
 
 `KAZMA_GATEWAY_OPEN_TO_EVERYONE=1` brings back the posture before 2026-11-11: a bot with an empty list answers anyone who can reach it. It is warned at every boot while it is on. `KAZMA_GATEWAY_STRICT_ALLOWLIST`, the old way to ask for what is now the default, changes nothing on its own and wins over the open switch when both are set. The rule is `kazma_gateway/sender_rule.py`; every adapter asks it.
+
+### 2.7 WhatsApp (`adapters/whatsapp.py`) {#whatsapp}
+
+Kazma talks on WhatsApp through Meta's **WhatsApp Cloud API**, with a business phone number of yours (Meta's test number works for trying it).
+
+| Aspect | Detail |
+|---|---|
+| Class | `WhatsAppAdapter`, `name = "whatsapp"`. |
+| Receive | A **webhook**: Meta sends every message to `/api/webhooks/whatsapp` on Kazma's public address (`KAZMA_PUBLIC_URL`). There is no polling, so Kazma must be reachable from the internet, for example through a Cloudflare Tunnel. |
+| Who is calling | Meta signs every call with the Meta app's secret (`X-Hub-Signature-256`). Kazma checks the signature before it reads anything and answers 401 to a call without it. With no app secret saved it answers no call at all. |
+| Send | Graph API `POST /<phone number id>/messages`, with the access token in a header, never in an address. Answers are converted to WhatsApp's own marks (`*bold*`, `_italic_`, code kept as written) and split at 4,096 characters. Links get no preview. |
+| Reads | Text, photos, documents (downloaded and handed on as files), voice notes (transcribed by the same speech-to-text as the other chat apps), and Kazma's own buttons. A sticker, location, contact or reaction is recorded and not answered. |
+| Approvals | Reply buttons: **Approve**, **Deny** and **Approve for task**. A question with more than three choices is a list. A public action (an X post) names itself on its button and has no task approval, as on every chat app. |
+| Context keys | `chat_id` (the person's WhatsApp id: their phone number in digits), `user_id`, `username`, `message_id`, `chat_type` (`private`). |
+
+**Allowed numbers.** WhatsApp's allowlist is a list of phone numbers with their country code, in any spelling (`+965 9999 1234`, `96599991234`). It follows the same rule as every chat app ([2.6](#who-it-answers)): with the list empty the number is private. A `KAZMA_GATEWAY_ADMINS` entry `whatsapp:+96599991234` makes that number the owner's.
+
+**The 24-hour window.** WhatsApp lets a business write to a person only within 24 hours of that person's last message; after that only templates Meta has approved can be sent. Kazma answers inside the window. A reminder or alert due later reaches your other chat apps, not WhatsApp, and WhatsApp has no swarm sender for the same reason. A send outside the window fails with Meta's error 131047, which the log and the chat outbox name.
+
+**Setting it up.** In Meta's developer site (developers.facebook.com):
+
+1. Create an app of the **Business** type and add the **WhatsApp** product. Meta gives you a test number, or you add your own.
+2. Under **WhatsApp → API Setup**, copy the **Phone number ID** (not the phone number itself) and an access token. The temporary token lasts 24 hours; for one that lasts, make a **system user** in Meta Business settings, give it the app and your WhatsApp account, and generate its token with the `whatsapp_business_messaging` permission.
+3. With Meta's test number, add your own phone under **To** as a recipient: the test number writes only to numbers listed there.
+4. Under **App settings → Basic**, copy the **App secret**.
+5. In Kazma, **Settings → Providers & Connectors → Platform Connectors → WhatsApp**: paste the access token, the Phone number ID and the app secret; press **Make one** for a webhook verify token (it is copied for the next step); put your number in **Allowed numbers**; **Save**. The card shows the webhook address to give Meta.
+6. Back in Meta, **WhatsApp → Configuration → Webhook → Edit**: the callback URL is the address the card shows, the verify token is the one you made. **Verify and save**, then subscribe the **messages** field.
+7. Send the number a WhatsApp message from your phone, then press **Test** on the card.
+
+**The Test** asks Meta about the number and joins its answer with what the webhook received: the access token and number, the app secret, the webhook (the address and whether Meta has called it since Kazma started), the last message a person sent and what became of it, the 24-hour window, the allowed numbers and the connection. The code is `kazma_gateway/adapters/whatsapp.py`, `whatsapp_api.py`, `whatsapp_parse.py`, `whatsapp_format.py` and `whatsapp_diagnose.py`.
 
 ---
 
@@ -214,6 +246,7 @@ The full SSE event contract (`token`, `tool_call`, `tool_result`, `approval_requ
 | **Telegram** | Inline keyboard buttons | `hitl:approve:\{id\}` / `hitl:deny:\{id\}` | `telegram.py:733` |
 | **Discord** | Components v2 buttons | `swarm_approve_\{task_id\}` / `swarm_reject_\{task_id\}` | `discord.py:312` |
 | **Slack** | Interactive callback | swarm approval block | `slack.py:401` |
+| **WhatsApp** | Reply buttons (a list past three) | `hitl:approve:\{id\}` / `hitl:deny:\{id\}` / `hitl:approve_task:\{id\}` | `adapters/whatsapp.py` |
 | **Web UI** | Button → `POST /api/approve/\{thread_id\}` + `approval_required` SSE event | — | `routes_direct/misc.py` |
 
 The Discord and Slack rows are the swarm bus's approvals. Chat approval cards
@@ -228,18 +261,18 @@ delivered there.
 
 ## 7. Feature parity matrix
 
-| Feature | Telegram | Discord | Slack | Web UI | TUI |
-|---|:---:|:---:|:---:|:---:|:---:|
-| Receive mechanism | HTTP long-poll | Gateway WS | Socket Mode / poll | HTTP POST (SSE) | local |
-| HITL approval buttons | ✅ | ✅ | ✅ | ✅ | modal |
-| Markdown rendering | → Telegram HTML | plain text | plain text | client-side | plain |
-| Slash commands | full set (registered) | plain-text parse | `hitl` w/o `/` | UI buttons | — |
-| Voice / STT (inbound transcribe) | ✅ | ✅ | ✅ | ✅ `/api/voice/stt` | — |
-| Voice / TTS (outbound reply) | ✅ | ✅ | ✅ | ✅ `/api/voice/tts` | — |
-| Media in/out (photo/doc/video) | ✅ | ✅ | ✅ | ✅ `/api/chat/upload` | — |
-| Typing indicator | ✅ | ✅ | ✅ | n/a | n/a |
-| Reactions | ✅ ✅/🎯/❌ | ❌ | ❌ | n/a | n/a |
-| Model selector UI | ✅ inline keyboard | ❌ | ❌ | ✅ settings | read-only |
+| Feature | Telegram | Discord | Slack | WhatsApp | Web UI | TUI |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| Receive mechanism | HTTP long-poll | Gateway WS | Socket Mode / poll | Meta webhook | HTTP POST (SSE) | local |
+| HITL approval buttons | ✅ | ✅ | ✅ | ✅ reply buttons | ✅ | modal |
+| Markdown rendering | → Telegram HTML | plain text | plain text | → WhatsApp marks | client-side | plain |
+| Slash commands | full set (registered) | plain-text parse | `hitl` w/o `/` | plain-text parse | UI buttons | — |
+| Voice / STT (inbound transcribe) | ✅ | ✅ | ✅ | ✅ | ✅ `/api/voice/stt` | — |
+| Voice / TTS (outbound reply) | ✅ | ✅ | ✅ | ❌ | ✅ `/api/voice/tts` | — |
+| Media in/out (photo/doc/video) | ✅ | ✅ | ✅ | photo/doc in, files out | ✅ `/api/chat/upload` | — |
+| Typing indicator | ✅ | ✅ | ✅ | ❌ (read ticks) | n/a | n/a |
+| Reactions | ✅ ✅/🎯/❌ | ❌ | ❌ | ❌ | n/a | n/a |
+| Model selector UI | ✅ inline keyboard | ❌ | ❌ | ❌ | ✅ settings | read-only |
 
 ---
 
