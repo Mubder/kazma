@@ -41,6 +41,7 @@ _FENCE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
 NOT_REPOSITORY_FILES = {
     # created at runtime, by Kazma or the operator
     "swarm_registry.json": "the swarm's worker registry, written at runtime (git-ignored)",
+    ".well-known/agent-card.json": "Kazma's A2A agent card, a URL path the server answers (kazma_ui/a2a_api.py)",
     "kazma-data/update-state.json": "written by kazma update",
     ".kazma/guard_dependencies.json": "the containers Kazma uses, written by the server for its guard",
     ".kazma/boot_status.json": "what a booting server waits for, written by the server for its guard",

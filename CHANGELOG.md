@@ -8,6 +8,10 @@
   chats, memories, documents, settings or keys, with home folders, emails and
   IP addresses taken out. It goes to Kazma's private inbox (a setting), or is
   saved on your computer when it cannot be sent.
+- Other AI agents can call Kazma (A2A, agent to agent), once you switch it on
+  in Settings → System: they sign in with one of your API tokens and Kazma
+  only reads for them (web, Knowledge Library, memory); it never sends,
+  changes or runs anything, and nothing they ask is remembered.
 - Two new pages for people who want to look closer: Benchmarks (how well
   Kazma remembers, searches and reads documents, written from the results its
   tests hold) and Safety design (how its safeguards are built).

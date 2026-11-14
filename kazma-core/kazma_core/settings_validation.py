@@ -517,6 +517,7 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
     )
     from kazma_core.observability.outside_watch import EMAIL_TO_KEY
     from kazma_core.runs.runbooks import RUNBOOKS_KEY, validate_runbooks
+    from kazma_core.a2a_protocol import ENABLED_KEY as A2A_ENABLED_KEY
     from kazma_core.support.problem_report import REPORT_URL_KEY
     from kazma_core.swarm.task_store import TASK_RETENTION_KEY
 
@@ -556,6 +557,7 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
         MODEL_DETAILS_KEY: (_model_details, "models"),
         OFFSITE_KEEP_KEY: (_offsite_keep, "backups"),
         REPORT_URL_KEY: (_report_url, "support"),
+        A2A_ENABLED_KEY: (_strict_bool, "a2a"),
     }
 
 

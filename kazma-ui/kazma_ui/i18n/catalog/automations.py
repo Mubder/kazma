@@ -43,4 +43,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "تم التجهيز: تجدها في مهامك المجدولة.",
     },
     "scheduled.recipe_failed": {"en": "Not set up: {why}", "ar": "لم تُجهَّز: {why}"},
+    # A2A: other agents call Kazma (Settings -> System; kazma_core/a2a_protocol.py).
+    "settings.a2a_title": {"en": "Agent-to-agent (A2A)", "ar": "من وكيل إلى وكيل (A2A)"},
+    "settings.a2a_enable": {"en": "Let other AI agents call Kazma", "ar": "اسمح لوكلاء الذكاء الاصطناعي الآخرين بمراسلة Kazma"},
+    "settings.a2a_hint": {
+        "en": "Another agent that speaks A2A can ask Kazma questions, signed in with one of your API tokens "
+              "(Settings → Account). Kazma only reads for it: web search, the Knowledge Library and memory. "
+              "It never sends, changes, deletes or runs anything, and nothing it is asked is written to memory.",
+        "ar": "يستطيع وكيل آخر يتحدث A2A أن يسأل Kazma، بعد تسجيل الدخول بأحد رموز API الخاصة بك "
+              "(الإعدادات ← الحساب). يقرأ Kazma له فقط: البحث في الويب ومكتبة المعرفة والذاكرة. "
+              "لا يرسل ولا يغيّر ولا يحذف ولا يشغّل شيئًا، ولا يُكتب شيء مما يُسأل عنه في الذاكرة.",
+    },
+    "settings.a2a_card": {"en": "Its agent card:", "ar": "بطاقة الوكيل:"},
+    "settings.a2a_saved": {"en": "Saved: agent-to-agent", "ar": "حُفظ: من وكيل إلى وكيل"},
 }

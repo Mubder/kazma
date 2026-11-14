@@ -11529,6 +11529,27 @@ SERVICE (a tunnel) reach its published ports, and it is back 19 s after a
   controls; the service built with `csc` on Windows),
   `tests/test_engine_shutdown_drill.py`.
 
+### 65. A2A: other agents call Kazma (`kazma_ui/a2a_api.py`, 2026-11-14)
+
+REMAINING 4.5. `kazma_core/a2a_protocol.py` holds the protocol (A2A 0.3,
+JSON-RPC 2.0): the agent card, reading `message/send`, task and error
+objects. `kazma_ui/a2a_api.py` serves `/.well-known/agent-card.json` and
+`POST /api/a2a` only while `ENABLED_KEY` (`a2a.enabled`, off; Settings ->
+System; `_strict_bool`, a SETTING) is on; off, both answer 404.
+
+- **Sign-in is the API's**: `/api/a2a` is under `/api`, so the auth
+  middleware requires a credential; an agent uses an operator API token.
+- **Read only, no memory, no approvals**: a request is one turn on
+  `cron_fire_graph(capabilities="read")` (the scheduled task's set: read and
+  safe tiers, never write, danger, always-ask or MCP), run by
+  `run_agent_turn(persist=False)`, labelled as another agent's (`_NOTE`).
+  Widening what A2A may do is a decision for the owner, never a default.
+- **Bounded**: `MAX_RUNNING` turns at once (`busy` past it), `TURN_BUDGET_S`
+  each (`asyncio.timeout`), rate bucket `a2a`; tasks and a conversation's
+  last turns are kept in this process (`_Store`), a day.
+- Gate: `tests/test_a2a.py` (every call, the read-only graph by name, no
+  memory, cancel, busy, a failed turn, refusals as JSON-RPC errors).
+
 ### 64. WhatsApp (`kazma_gateway/adapters/whatsapp.py`, 2026-11-14)
 
 The fourth chat app, through Meta's WhatsApp Cloud API. It is built by the one

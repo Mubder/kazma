@@ -721,6 +721,26 @@
             this.reportUrlSaving = false;
         },
 
+        async loadA2a() {
+            const data = window.kazmaGetJson ? await window.kazmaGetJson('/api/a2a/status') : null;
+            if (data) this.a2a = { enabled: !!data.enabled, card: data.card || '', endpoint: data.endpoint || '', loaded: true };
+        },
+
+        async saveA2a() {
+            this.a2aSaving = true;
+            try {
+                await window.kazmaSave('/api/settings/single', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key: 'a2a.enabled', value: !!this.a2a.enabled, category: 'a2a' }),
+                });
+                showToast(_t('settings.a2a_saved', 'Saved: agent-to-agent'), 'success');
+            } catch (e) {
+                showToast(e.message || _t('settings.save_failed', 'Save failed'), 'error');
+            }
+            this.a2aSaving = false;
+        },
+
         async loadTurnTimeout() {
             try {
                 const data = await this._fetch('/api/settings/turn-timeout');

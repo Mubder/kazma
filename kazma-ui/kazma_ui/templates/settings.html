@@ -2900,6 +2900,20 @@
                     :disabled="reportUrlSaving || !reportUrl.loaded">{{ t('settings.save') }}</button>
         </div>
 
+        <!-- A2A: other agents call Kazma, read only (kazma_core/a2a_protocol.py) -->
+        <div class="settings-group mb-6" id="a2a-section">
+            <h3>{{ t('settings.a2a_title') }}</h3>
+            <label class="form-group" style="display:flex;gap:8px;align-items:center;">
+                <input type="checkbox" id="a2a-enabled" x-model="a2a.enabled" :disabled="!a2a.loaded">
+                <span>{{ t('settings.a2a_enable') }}</span>
+            </label>
+            <div class="form-hint">{{ t('settings.a2a_hint') }}</div>
+            <p class="form-hint" x-show="a2a.card" x-cloak>{{ t('settings.a2a_card') }}
+                <code id="a2a-card-url" dir="ltr" translate="no" x-text="a2a.card"></code></p>
+            <button class="btn btn-primary" id="a2a-save" @click="saveA2a()"
+                    :disabled="a2aSaving || !a2a.loaded">{{ t('settings.save') }}</button>
+        </div>
+
         <!-- What a turn and a day may spend (kazma_core.agent.turn_token_budget) -->
         <div class="settings-group mb-6" id="turn-spending-section">
             <h3>{{ t('settings.turn_spending_title') }}</h3>

@@ -1552,6 +1552,11 @@ class KazmaAppBuilder:
 
         self.app.include_router(create_history_import_router())
 
+        # ── A2A: other agents call Kazma, read-only (REMAINING 4.5) ──
+        from kazma_ui.a2a_api import create_a2a_router
+
+        self.app.include_router(create_a2a_router(lambda: self.agent))
+
         # ── Scheduled Tasks (universal page: cron jobs + scheduled X posts) ──
         try:
             from kazma_ui.scheduled_api import create_scheduled_router

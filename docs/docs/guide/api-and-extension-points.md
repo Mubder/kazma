@@ -140,6 +140,36 @@ criterion. Restore remains available through
 
 ---
 
+### 2.8 A2A: other agents call Kazma {#a2a}
+
+Kazma speaks the Agent2Agent protocol (A2A 0.3, JSON-RPC 2.0 over HTTP), so
+another AI agent can find it and ask it something. It is off until you switch
+it on in **Settings → System → Agent-to-agent (A2A)**.
+
+- **The agent card** is at `/.well-known/agent-card.json` (open, while A2A
+  is on). It names the endpoint, `/api/a2a`, and the sign-in: one of your API
+  tokens (**Settings → Account → API tokens**) as `Authorization: Bearer`.
+  An agent holding a token acts with your authority: give each its own token
+  and revoke it when you are done.
+- **What it can do:** each request is one agent turn with read tools only --
+  web search, the Knowledge Library, memory, reading email -- so it never
+  waits for an approval, and it can never send, change, delete or run
+  anything. The request reaches the model labelled as another agent's, not
+  as you, and nothing of it is written to memory.
+- **Calls:** `message/send` (text parts; `configuration.blocking: false`
+  answers at once with the task `working`), `tasks/get`, `tasks/cancel`. A
+  conversation (`contextId`) keeps its last six turns, in the running
+  process only. At most two requests run at once, each within five minutes,
+  and 30 a minute per caller.
+
+```bash
+curl -s https://my.example.org/api/a2a   -H "Authorization: Bearer $KAZMA_TOKEN" -H "Content-Type: application/json"   -d '{"jsonrpc":"2.0","id":1,"method":"message/send","params":{"message":
+       {"role":"user","messageId":"m1","parts":[{"kind":"text","text":"What did we decide about the tiles?"}]}}}'
+```
+
+The answer is an A2A task: `status.state` (`completed`, `failed`,
+`canceled`, `working`) and the answer as the `answer` artifact's text.
+
 ## 3. SSE event contract {#sse-event-contract}
 
 `POST /api/chat/stream` answers with Server-Sent Events: an `event:` line naming the frame and one `data:` line holding a JSON object. Source: `kazma-ui/kazma_ui/sse_chat/` (the route and the turn streamer `_streaming.py`) and the turn journal `kazma-ui/kazma_ui/delivery.py`; the browser reads it with `dispatch` in `static/js/streaming.js`.

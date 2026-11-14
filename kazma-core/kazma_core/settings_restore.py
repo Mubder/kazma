@@ -210,6 +210,7 @@ KEY_RULES: tuple[KeyRule, ...] = (
     KeyRule("agent.turn_timeout_seconds", SETTING, "how long one running stretch of a turn may take "
             "(0: no limit; the environment's value wins)"),
     KeyRule("support.report_url", SETTING, "where problem reports go (empty: they are only saved here)"),
+    KeyRule("a2a.enabled", SETTING, "whether other agents may call Kazma (A2A, read only)"),
     KeyRule("agent.turn_token_budget", SETTING, "how many tokens one chat turn may spend (0: no limit)"),
     KeyRule("agent.daily_cost_limit_usd", SETTING, "the most the model calls of one day may cost "
             "(0: no limit)"),
