@@ -2,6 +2,15 @@
 
 ## After the live move to PostgreSQL 18 (2026-11-14)
 
+- A point-in-time restore of Kazma's Postgres works on Windows. It never had:
+  `kazma restore postgres` wrote its copy command into the restored folder's
+  `postgresql.auto.conf` with single backslashes, which Postgres reads as
+  escapes, so the restore found no archived WAL and stopped at its base
+  backup. Found by restoring the owner's first PostgreSQL 18 backup into a
+  scratch folder; restored with the fix, the copy matched the live database
+  table for table. A new test restores a real cluster to a moment between
+  two writes.
+
 - The owner's install moved from PostgreSQL 16 to 18 with `kazma setup
   postgres --upgrade`: 24 tables, 99,931 rows and 2 sequences compared equal,
   Kazma stopped for about two minutes, the first base backup taken, 16 stopped

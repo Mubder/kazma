@@ -400,6 +400,19 @@ def generation_for(target_time: str, record: dict[str, Any]) -> dict[str, Any]:
     return previous if when < float(record.get("installed_at") or 0) else record
 
 
+def _conf_string(value: str) -> str:
+    """*value* as a quoted string of a Postgres configuration file.
+
+    The file's reader takes a backslash as an escape (``\\P`` reads as ``P``)
+    and a doubled quote as one quote. Written as it is, a Windows path lost
+    every separator: on the owner's install (2026-11-14) the restore command
+    read ``copy "C:ProgramDataKazmapg_wal_archive-18%f"``, found no segment,
+    and no point-in-time restore on Windows could replay past its base
+    backup. ``ALTER SYSTEM`` quotes this way too; the restore writes the file
+    itself (the server is not running)."""
+    return "'" + str(value).replace("\\", "\\\\").replace("'", "''") + "'"
+
+
 def restore_to(target_time: str, new_data_dir: Path, archive_dir: Path, *, base: Path | None = None,
                os_name: str = "windows", base_root: Path | None = None) -> list[str]:
     """Lay the newest base backup older than *target_time* into *new_data_dir*
@@ -416,8 +429,8 @@ def restore_to(target_time: str, new_data_dir: Path, archive_dir: Path, *, base:
     copy = (f'copy "{archive_dir}\\%f" "%p"' if os_name == "windows"
             else f'cp "{Path(archive_dir).as_posix()}/%f" "%p"')
     with (new_data_dir / "postgresql.auto.conf").open("a", encoding="utf-8") as fh:
-        fh.write(f"\nrestore_command = '{copy}'\n"
-                 f"recovery_target_time = '{target_time}'\n"
+        fh.write(f"\nrestore_command = {_conf_string(copy)}\n"
+                 f"recovery_target_time = {_conf_string(target_time)}\n"
                  "recovery_target_action = 'promote'\n"
                  "archive_mode = 'off'\n")
     (new_data_dir / "recovery.signal").write_text("", encoding="utf-8")

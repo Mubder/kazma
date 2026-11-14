@@ -346,7 +346,23 @@ It lays out the newest base backup, sets it to replay the archived WAL up to
 that time, and prints the steps left: start it on a spare port, check it,
 then switch. A time before a move to a newer Postgres is restored from the
 server that move replaced (its archive and base backups were kept), and is
-started with that major's own programs; the command says which.
+started with that major's own programs; the command says which. The restored
+copy never archives (`archive_mode = 'off'`), so it cannot write into the
+live archive.
+
+Check a restore by connecting to it, not by `pg_ctl`'s answer: `pg_ctl
+start -w` can say a server started whose recovery failed a moment later. A
+failed one says why in its log (`recovery ended before configured recovery
+target was reached` means a segment it needed was not found). Before
+2026-11-14 every point-in-time restore on Windows failed that way: the copy
+command lost its backslashes. Restore again with an updated Kazma.
+
+To prove your backups work without touching anything, restore to a time a
+few minutes ago (the newest archived segment is at most 5 minutes old),
+start the copy on a spare port and compare its tables with the live
+database; then stop it and delete the folder. Done on the owner's install
+on 2026-11-14, the copy matched live table for table (24 tables, 99,935
+rows).
 
 ## Backup & disaster recovery
 

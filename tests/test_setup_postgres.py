@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import subprocess
 import sys
 import tarfile
@@ -430,6 +431,72 @@ def test_a_restore_goes_into_a_new_folder_and_replays_to_a_time(tmp_path):
     assert any("55432" in s for s in steps)
     with pytest.raises(ValueError, match="not empty"):
         wal_archive.restore_to("2026-11-20 14:05", target, tmp_path / "wal", base=root / "300")
+
+
+def _postgres_reads(conf: str, name: str) -> str:
+    """*name*'s value as Postgres's configuration reader takes it (guc-file.l):
+    the last line naming it wins; in a quoted value ``''`` is one quote, and a
+    backslash escapes the next character -- ``\\b \\f \\n \\r \\t`` and up to
+    three octal digits are control characters, any other character stands for
+    itself."""
+    value = None
+    for line in conf.splitlines():
+        key, sep, rest = line.partition("=")
+        if sep and key.strip() == name:
+            value = rest.strip()
+    assert value is not None and value[:1] == value[-1:] == "'", (name, value)
+    body, out, i = value[1:-1], [], 0
+    while i < len(body):
+        ch = body[i]
+        if ch == "\\" and i + 1 < len(body):
+            octal = re.match(r"[0-7]{1,3}", body[i + 1:])
+            if octal:
+                out.append(chr(int(octal.group(0), 8)))
+                i += 1 + len(octal.group(0))
+                continue
+            out.append({"b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t"}.get(body[i + 1], body[i + 1]))
+            i += 2
+        elif ch == "'" and body[i + 1:i + 2] == "'":
+            out.append("'")
+            i += 2
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
+def test_a_windows_restore_command_reads_back_as_written(tmp_path):
+    """The owner's install, 2026-11-14: the first point-in-time restore of
+    PostgreSQL 18 replayed nothing past its base backup. The restore wrote
+    its Windows copy command into postgresql.auto.conf as it was, and the
+    file's reader takes a backslash as an escape: it read
+    ``copy "C:ProgramDataKazmapg_wal_archive-18%f"``, and every segment was
+    "not found"."""
+    root = tmp_path / "base"
+    _base(root, 300, "000000010000000000000030")
+    archive = Path(r"C:\ProgramData\Kazma\pg_wal_archive-18")
+    target = tmp_path / "restored"
+    wal_archive.restore_to("2026-11-20 14:05", target, archive, base=root / "300", os_name="windows")
+    conf = (target / "postgresql.auto.conf").read_text(encoding="utf-8")
+    assert _postgres_reads(conf, "restore_command") == r'copy "C:\ProgramData\Kazma\pg_wal_archive-18\%f" "%p"'
+    assert _postgres_reads(conf, "recovery_target_time") == "2026-11-20 14:05"
+    assert _postgres_reads(conf, "archive_mode") == "off"
+
+
+def test_negative_control_the_value_written_as_it_was_loses_its_separators(tmp_path, monkeypatch):
+    monkeypatch.setattr(wal_archive, "_conf_string", lambda value: f"'{value}'")
+    root = tmp_path / "base"
+    _base(root, 300, "000000010000000000000030")
+    target = tmp_path / "restored"
+    wal_archive.restore_to("2026-11-20 14:05", target, Path(r"C:\ProgramData\Kazma\pg_wal_archive-18"),
+                           base=root / "300", os_name="windows")
+    conf = (target / "postgresql.auto.conf").read_text(encoding="utf-8")
+    assert _postgres_reads(conf, "restore_command") == 'copy "C:ProgramDataKazmapg_wal_archive-18%f" "%p"'
+
+
+@pytest.mark.parametrize("value", [r"D:\2026\o'brien\wal\%f", "/var/lib/postgresql/18/wal_archive", "it's"])
+def test_a_config_string_reads_back_whole(value):
+    assert _postgres_reads(f"x = {wal_archive._conf_string(value)}\n", "x") == value
 
 
 def test_a_restore_takes_the_newest_base_backup_before_the_time(tmp_path):

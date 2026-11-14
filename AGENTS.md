@@ -4470,11 +4470,23 @@ never touched. It took the newest base whatever TIME was, and Postgres cannot
 replay a base back to a time before it was taken. A TIME before a move to a
 newer major is restored from the server it replaced
 (`wal_archive.generation_for`: the record's `previous`, its archive, base
-backups and programs). Gate:
+backups and programs). **Every value the restore writes into
+`postgresql.auto.conf` goes through `wal_archive._conf_string`** (backslashes
+and quotes doubled): the file's reader takes a backslash as an escape, and
+written plain the Windows copy command read `copy
+"C:ProgramDataKazmapg_wal_archive-18%f"` -- no point-in-time restore on Windows
+had ever replayed past its base backup (found 2026-11-14 restoring the owner's
+first 18 backup into a scratch folder). Gate:
 `tests/test_setup_postgres.py` (retention, the archiver's numbers, restore and
-its base, offsite order), `tests/test_resilience_postgres.py` (the archiver's
-numbers, outage or query error and the move from a container, on a real
-Postgres; a row lost in the move as the negative control).
+its base, offsite order; the written file read back with Postgres's own
+quoting rules, the plain writer as the negative control),
+`tests/test_wal_restore_real.py` (opt-in `KAZMA_TEST_PG_UPGRADE_BIN`: a real
+cluster archiving with the product's command, its base backup, rows before and
+after a moment, the restore holding exactly the rows before it with archiving
+off; the plain writer cannot replay on Windows),
+`tests/test_resilience_postgres.py` (the archiver's numbers, outage or query
+error and the move from a container, on a real Postgres; a row lost in the
+move as the negative control).
 
 ### 21b. Every system dependency is installed by Kazma (`kazma_core/system_deps.py`)
 
