@@ -20,13 +20,14 @@ REPO = Path(__file__).resolve().parents[1]
 TRIVIAL = "tests/test_real_docker_marker.py::test_an_unmarked_test_gets_an_empty_docker_config"
 
 
-def _root_conftest():
-    """The root conftest's module, found by the function it defines: pytest
-    names it differently by import mode and platform (on Linux CI its path did
-    not match REPO / "conftest.py")."""
+def _root_conftest(config):
+    """The root conftest's module, from pytest's own list of the conftests it
+    loaded. ``sys.modules["conftest"]`` is whichever conftest was imported
+    last: in a CI batch holding a package suite (kazma-core/tests has its
+    own conftest.py) it was not the root one, and the lookup found nothing."""
     return next(
-        module for module in list(sys.modules.values())
-        if callable(getattr(module, "_remove_ended_test_temp", None))
+        plugin for plugin in config.pluginmanager.get_plugins()
+        if callable(getattr(plugin, "_remove_ended_test_temp", None))
     )
 
 
@@ -36,7 +37,7 @@ def _ended_pid() -> int:
     return int(proc.stdout.strip())
 
 
-def test_only_the_folders_of_ended_processes_are_removed(tmp_path, monkeypatch):
+def test_only_the_folders_of_ended_processes_are_removed(tmp_path, monkeypatch, request):
     import tempfile
 
     monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
@@ -52,7 +53,7 @@ def test_only_the_folders_of_ended_processes_are_removed(tmp_path, monkeypatch):
     for name in names:
         (tmp_path / name).mkdir()
         (tmp_path / name / "f.txt").write_text("x", encoding="utf-8")
-    assert _root_conftest()._remove_ended_test_temp() == 2
+    assert _root_conftest(request.config)._remove_ended_test_temp() == 2
     assert {n: (tmp_path / n).exists() for n in names} == names
 
 
