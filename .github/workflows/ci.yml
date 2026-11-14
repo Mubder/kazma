@@ -820,7 +820,8 @@ jobs:
           # Ready, or not ready only because no model is set up yet.
           code=$(curl -s -o ready.json -w '%{http_code}' http://127.0.0.1:9090/health/ready)
           cat ready.json; echo
-          if [ "$code" != "200" ]; then grep -q '"needs_setup": *true' ready.json; fi
+          if [ "$RUNNER_OS" = "Windows" ]; then PY=.venv/Scripts/python.exe; else PY=.venv/bin/python; fi
+          "$PY" scripts/fresh_install_ready.py "$code" ready.json
       - name: Upload the install's log
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
