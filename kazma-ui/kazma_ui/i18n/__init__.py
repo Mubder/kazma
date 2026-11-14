@@ -152,6 +152,14 @@ def set_install_language(lang: str) -> None:
     _install_lang = lang if lang in ("ar", "en") else "en"
 
 
+def install_language() -> str:
+    """The install's language, as ``set_install_language`` last set it (the
+    app's startup). The root conftest restores it after every test: an app a
+    test built on Arabic settings left every later test's page in Arabic
+    (CI, 2026-11-14)."""
+    return _install_lang
+
+
 def set_request_language(lang: str) -> contextvars.Token:
     """Bind the current request's language (the app's middleware only)."""
     return _REQUEST_LANG.set(lang)

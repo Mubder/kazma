@@ -169,6 +169,37 @@ def test_without_the_guard_the_service_reaches_the_next_test():
     assert "1 failed, 1 passed" in proc.stdout, proc.stdout[-2000:]
 
 
+# ── the install's language ─────────────────────────────────────────────────
+# An app built on Arabic settings sets the process's install language at its
+# startup; until 2026-11-14 it stayed Arabic for every later test, and CI's
+# /replay test answered in Arabic whenever such a test ran before it.
+
+
+def test_the_install_language_is_set_to_arabic_here():
+    """First of a pair: the shape an app built on Arabic settings left."""
+    from kazma_ui.i18n import install_language, set_install_language
+
+    set_install_language("ar")
+    assert install_language() == "ar"
+
+
+def test_and_the_language_does_not_reach_the_next_test():
+    from kazma_ui.i18n import current_language, install_language
+
+    assert install_language() == "en" and current_language() == "en"
+
+
+def test_without_the_guard_the_language_reaches_the_next_test():
+    """Negative control: the same pair with test isolation off."""
+    proc = _child_pytest(
+        f"{HERE}::test_the_install_language_is_set_to_arabic_here",
+        f"{HERE}::test_and_the_language_does_not_reach_the_next_test",
+        KAZMA_TEST_ISOLATION="0",
+    )
+    assert proc.returncode == 1, proc.stdout[-2000:]
+    assert "1 failed, 1 passed" in proc.stdout, proc.stdout[-2000:]
+
+
 # ── the active workspace ───────────────────────────────────────────────────
 # The workspace store is one singleton over one file, and its active row
 # outranks the pin (resolve_active_root). On 2026-11-08 a research recovery

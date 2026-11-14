@@ -8344,7 +8344,11 @@ Read the named test before changing the code it guards.
   `ServiceContainer.release`, so a newer app's entry of the same shared
   store stays). Gates: `tests/test_app_releases_its_container_entries.py`
   (the app without the release as the control), the probe pair in
-  `tests/test_order_independence.py`.
+  `tests/test_order_independence.py`. So is the install's language
+  (2026-11-14, `kazma_ui.i18n.install_language`): an app a test built on
+  Arabic settings set it at startup, and CI's `/replay` test answered in
+  Arabic whenever such a test landed earlier in its chunk (the probe pair
+  there, isolation off as the control).
   **No test reads a real `.env`** — two Postgres tests did, one the LIVE
   install's by hard-coded path. **`@pytest.mark.postgres` is the Postgres
   job's list** (`scripts/postgres_suite.py`), per test, verified on a real

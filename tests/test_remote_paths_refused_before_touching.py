@@ -234,12 +234,14 @@ def test_workspace_roots_policy_refuses_a_network_folder(touches):
 
 
 def test_control_the_old_ide_and_list_bodies_touch_the_network_path(touches, tmp_path):
-    text = r"\\attacker\share\x.txt"
-    # IdeService.resolve before 2026-11-14: an absolute input resolved first.
+    # IdeService.resolve before 2026-11-14: an absolute input resolved first
+    # ("//host/share" is absolute on every platform; a backslash one only on
+    # Windows, where CI does not run).
+    text = "//attacker/share/x.txt"
     if os.path.isabs(text):
         Path(text).resolve()
     # /api/workspace/files: only "/" stripped, then root / rel resolved.
-    (tmp_path / text.strip("/")).resolve()
+    (tmp_path / r"\\attacker\share\x.txt".strip("/")).resolve()
     assert len(touches) == 2, touches
 
 

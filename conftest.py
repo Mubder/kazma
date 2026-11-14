@@ -588,12 +588,30 @@ def _isolate_process_singletons(tmp_path):
     except Exception:
         _prev_container = None
 
+    # The install's language: an app a test built on Arabic settings set it
+    # for the process at its startup, and every later test's page answered
+    # in Arabic (CI, 2026-11-14: /replay in the web chat).
+    try:
+        from kazma_ui.i18n import install_language as _install_language
+
+        _prev_install_lang = _install_language()
+    except Exception:
+        _prev_install_lang = None
+
     # ---- teardown: restore + park (never close/GC — see _PARKED) ---------
     yield
 
     if _prev_container is not None:
         try:
             _get_container().restore(_prev_container)
+        except Exception:
+            pass
+
+    if _prev_install_lang is not None:
+        try:
+            from kazma_ui.i18n import set_install_language as _set_install_language
+
+            _set_install_language(_prev_install_lang)
         except Exception:
             pass
 
