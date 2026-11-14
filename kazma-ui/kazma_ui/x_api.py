@@ -12,7 +12,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
-from kazma_core.errors import validation_error
+from kazma_core.errors import described_error, validation_error
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -86,19 +86,18 @@ class _XComposerBody(BaseModel):
     thread_segments: list[Annotated[str, Field(max_length=32000)]] = Field(default_factory=lambda: ["", ""], min_length=2, max_length=25)
 
 
-def _is_production() -> bool:
-    from kazma_core.security.boot_guard import env_flag
-
-    return env_flag("KAZMA_PRODUCTION")
-
-
 def _safe_error(exc: Exception, status: int = 500) -> JSONResponse:
-    logger.exception("[x_api] %s", exc)
+    """An unexpected failure: a stable code and a reference, the exception
+    logged under it (``kazma_core.errors.safe_error``). ``detail`` echoed the
+    exception's own text whenever ``KAZMA_PRODUCTION`` was unset."""
+    info = described_error("Something went wrong", exc)
     return JSONResponse(
         {
             "ok": False,
             "error": "internal_error",
-            "detail": "" if _is_production() else str(exc)[:300],
+            "detail": str(info),
+            "code": info.code,
+            "ref": info.ref,
         },
         status_code=status,
     )
@@ -221,7 +220,7 @@ def x_resume() -> JSONResponse:
     try:
         resume_verified_account()
     except ValueError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
+        return JSONResponse({"ok": False, "error": validation_error(exc)}, status_code=409)
     return JSONResponse(_status_payload())
 
 
@@ -248,7 +247,7 @@ def x_composer_save(request: Request, body: _XComposerBody) -> JSONResponse:
         content = body.model_dump(exclude={"expected_revision"})
         result = save(actor=_composer_actor(request), expected_revision=body.expected_revision, content=content)
     except PublicationConflictError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
+        return JSONResponse({"ok": False, "error": validation_error(exc)}, status_code=409)
     return JSONResponse({"ok": True, **result})
 
 
@@ -259,7 +258,7 @@ def x_operations(limit: int = 50, state: str = "", query: str = "", cursor: str 
     try:
         return JSONResponse({"ok": True, **operation_inventory(limit=limit, state=state, query=query, cursor=cursor)})
     except ValueError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+        return JSONResponse({"ok": False, "error": validation_error(exc)}, status_code=400)
 
 
 @router.get("/operations/{operation_id}")
@@ -329,7 +328,7 @@ def x_queue(limit: int = 50, cursor: str = "", include_finished: bool = False) -
 
         return JSONResponse({"ok": True, **queue_inventory(limit=limit, cursor=cursor, include_finished=include_finished)})
     except ValueError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+        return JSONResponse({"ok": False, "error": validation_error(exc)}, status_code=400)
     except Exception as exc:
         return _safe_error(exc)
 
@@ -345,7 +344,7 @@ def x_queue_action(operation_id: str, action: str, body: _XQueueActionBody) -> J
         return JSONResponse({"ok": changed, "error": "" if changed else "Queue revision changed or the action is no longer allowed. Refresh and review again."},
                             status_code=200 if changed else 409)
     except ValueError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+        return JSONResponse({"ok": False, "error": validation_error(exc)}, status_code=400)
     except Exception as exc:
         return _safe_error(exc)
 
@@ -355,6 +354,7 @@ async def x_generate(body: _XGenerateBody) -> JSONResponse:
     """Save manual alternatives using the X model; never send to X."""
     from kazma_core.agent.artifacts import get_artifact_store
     from kazma_core.x_api.post_drafting import draft_posts
+    from kazma_core.x_api.references import ReferenceUnreadable
     from kazma_core.x_api.reply import DraftFailed
 
     try:
@@ -366,8 +366,12 @@ async def x_generate(body: _XGenerateBody) -> JSONResponse:
         return JSONResponse({"ok": True, "proposal": saved, "models": list(result.models),
                              "review_required": True, "subject_id": result.subject_id, "usage": result.usage,
                              "references": list(result.references)})
-    except (DraftFailed, ValueError) as exc:
+    except ReferenceUnreadable as exc:
+        # Names the reference file the owner set in Settings -> X, which
+        # validation_error would show as <redacted>.
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    except (DraftFailed, ValueError) as exc:
+        return JSONResponse({"ok": False, "error": validation_error(exc, max_chars=600)}, status_code=400)
     except Exception as exc:
         return _safe_error(exc)
 
@@ -386,7 +390,7 @@ def x_drafts(limit: int = 50, dismissed: bool = False, query: str = "", cursor: 
         page = get_artifact_store().proposal_page(tenant_id=_tenant_id(), limit=limit, only_discarded=dismissed, query=query, cursor=cursor)
         return JSONResponse({"ok": True, **page})
     except ValueError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+        return JSONResponse({"ok": False, "error": validation_error(exc)}, status_code=400)
     except Exception as exc:
         return _safe_error(exc)
 
@@ -445,7 +449,7 @@ async def x_post_now(body: XPostBody) -> JSONResponse:
             )
         except ValueError as exc:
             return JSONResponse(
-                {"ok": False, "posted": False, "error": str(exc)},
+                {"ok": False, "posted": False, "error": validation_error(exc)},
                 status_code=400,
             )
         ok, payload = await publish_x_post(

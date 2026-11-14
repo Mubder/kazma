@@ -1241,14 +1241,17 @@ def maintain_snapshots(
         finally:
             conn.close()
     except Exception as exc:  # noqa: BLE001 - never let maintenance take the server down
-        logger.warning("[TimeTravel] snapshot prune failed: %s", exc)
+        # SQLite's text names the database file: logged under the reference,
+        # never put in the stats the Memory page shows.
+        from kazma_core.errors import described_error
+
         return {
             "deleted": 0,
             "size_before": size_before,
             "size_after": size_before,
             "reclaimed": 0,
             "retention_days": int(retention_days),
-            "prune": f"failed: {exc}",
+            "prune": described_error("Snapshot prune failed", exc, level=logging.WARNING),
             "vacuum": "skipped",
         }
 
@@ -1268,8 +1271,9 @@ def maintain_snapshots(
         else:
             vacuum_status = f"skipped: {ratio:.0%} free ({free_bytes} bytes)"
     except Exception as exc:  # noqa: BLE001
-        logger.warning("[TimeTravel] snapshot VACUUM failed: %s", exc)
-        vacuum_status = f"failed: {exc}"
+        from kazma_core.errors import described_error
+
+        vacuum_status = described_error("Snapshot VACUUM failed", exc, level=logging.WARNING)
 
     # Verify with the read that can fail the same way the write did. `rowcount`
     # is what the DELETE *intended*; it reported 3,079 rows removed while the

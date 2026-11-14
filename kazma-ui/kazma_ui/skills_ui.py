@@ -16,7 +16,7 @@ from fastapi.templating import Jinja2Templates
 
 from kazma_ui.models import SkillInstallRequest, SkillToggleRequest
 from kazma_ui.rate_limit import rate_limit
-from kazma_core.errors import safe_error
+from kazma_core.errors import safe_error, validation_error
 from kazma_core.http_tls import shared_ssl_context
 from kazma_ui.json_body import InvalidJsonBody, invalid_json_response, read_json
 
@@ -373,9 +373,9 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
         except HubInstallNotImplemented as exc:
             # The hub registry installs nothing (AGENTS.md §22G); this answered
             # "ok" over an empty folder (audit 2026-10-26 AUD-074).
-            return JSONResponse({"status": "error", "error": str(exc)}, status_code=501)
+            return JSONResponse({"status": "error", "error": validation_error(exc)}, status_code=501)
         except ValueError as exc:
-            return JSONResponse({"status": "error", "error": str(exc)}, status_code=400)
+            return JSONResponse({"status": "error", "error": validation_error(exc)}, status_code=400)
         except Exception as exc:
             logger.exception("Hub skill install failed")
             return JSONResponse({"status": "error", "error": safe_error(exc)}, status_code=500)

@@ -19,6 +19,8 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from kazma_core.errors import described_error, validation_error
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -71,7 +73,8 @@ def _is_safe_to_delete_files(root: Path) -> tuple[bool, str]:
     try:
         resolved = root.expanduser().resolve()
     except Exception as exc:
-        return False, f"Cannot resolve path: {exc}"
+        logger.warning("[workspaces] cannot resolve %s: %s", root, exc)
+        return False, f"Cannot resolve the path ({type(exc).__name__})."
 
     if not resolved.exists():
         return True, "path already absent"  # registry delete still useful
@@ -201,8 +204,8 @@ def create_workspaces_router() -> APIRouter:
 
         try:
             root_policy.validate_root(resolved_path)
-        except PermissionError as exc:
-            raise HTTPException(status_code=403, detail=str(exc)) from None
+        except PermissionError as exc:  # root_policy's own refusal
+            raise HTTPException(status_code=403, detail=validation_error(exc)) from None
 
         try:
             # Safely generate the directory structure
@@ -252,8 +255,8 @@ def create_workspaces_router() -> APIRouter:
 
             try:
                 root_policy.validate_root(Path(proposed["root_path"]))
-            except PermissionError as exc:
-                raise HTTPException(status_code=403, detail=str(exc)) from None
+            except PermissionError as exc:  # root_policy's own refusal
+                raise HTTPException(status_code=403, detail=validation_error(exc)) from None
             # Activate the workspace in the database
             success = ws_store.set_active_workspace(ws_id)
             if not success:
@@ -333,12 +336,9 @@ def create_workspaces_router() -> APIRouter:
                         reason,
                     )
             except Exception as exc:
-                logger.exception("[workspaces] rmtree failed for %s", root)
-                files_error = str(exc)[:300]
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Failed to delete files: {files_error}",
-                ) from exc
+                logger.warning("[workspaces] rmtree failed for %s", root)
+                files_error = described_error("Failed to delete the workspace's files", exc)
+                raise HTTPException(status_code=500, detail=files_error) from exc
 
         deleted = store.delete_workspace(ws_id)
         if not deleted:

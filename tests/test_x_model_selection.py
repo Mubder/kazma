@@ -153,7 +153,10 @@ async def test_local_model_outage_does_not_use_global(registry):
             parent_text="Coffee", subject_override=Subject(id="voice", match=("*",), view="Talk about coffee"),
         )
     assert result.action == "failed"
-    assert "Local server is stopped" in result.reason
+    # Kazma's sentence, never the exception's own text (it can name the
+    # provider's address and answer; it is in the log).
+    assert "could not be reached (ConnectionError)" in result.reason
+    assert "Local server is stopped" not in result.reason
     assert registry[0] == [("local", "local-model")]
 
 

@@ -22,6 +22,12 @@ from kazma_skills.native.email_manager.models import (
 logger = logging.getLogger(__name__)
 
 
+class MailboxRefused(RuntimeError):
+    """The mail server refused a mailbox step after the login (a folder it
+    would not select). The message is Kazma's sentence naming the step, so
+    the page that adds an account may show it (``email_api._login_refusal``)."""
+
+
 class ImapSmtpBackend:
     """IMAP list/get/delete/flags + SMTP send.
 
@@ -122,7 +128,7 @@ class ImapSmtpBackend:
         try:
             typ, _ = M.select(folder, readonly=True)
             if typ != "OK":
-                raise RuntimeError(f"Cannot select folder {folder}")
+                raise MailboxRefused(f"Cannot select folder {folder}")
             criteria = "UNSEEN" if query.unread_only else "ALL"
             if query.query:
                 # Simple subject search

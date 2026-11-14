@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -671,3 +672,24 @@ def test_a_run_removes_its_temporary_folders_and_keeps_pytests_default(tmp_path,
     assert code == 0, log
     used = Path(next(line.split("TMP=", 1)[1].strip() for line in log.splitlines() if "TMP=" in line))
     assert "kazma-pytest-run-" in str(used) and not used.exists()
+
+
+def test_the_digest_names_the_test_a_leaked_thread_came_after() -> None:
+    """The root conftest says which test a non-daemon thread first appeared
+    after; the digest keeps that line (2026-11-14: two leaked threads, and the
+    run's output said only their ids)."""
+    runner = _runner()
+    log = (
+        "...\n"
+        "========================= threads left running =========================\n"
+        "ERROR conftest.py::thread_left_running[Thread-9 (_worker)] - a non-daemon thread "
+        "'Thread-9 (_worker)' was still running at the end of the session, so the process "
+        "could never exit; it first appeared after tests/test_x.py::test_y\n"
+        "=========================== short test summary info ===========================\n"
+        "ERROR conftest.py::thread_left_running[Thread-9 (_worker)]\n"
+        "======================== 3 passed, 1 error in 1.00s ========================\n"
+    )
+    digest = runner._failure_digest(log)
+    assert "first appeared after tests/test_x.py::test_y" in digest
+    # Negative control: the FAILURES/ERRORS banners alone never held it.
+    assert not re.search(r"=+\s*(FAILURES|ERRORS)\s*=+", log)

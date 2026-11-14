@@ -27,6 +27,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
+from kazma_core.errors import validation_error
 from kazma_core.x_api.ownership import x_config_key, x_tenant_id
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
@@ -420,7 +421,7 @@ def x_reply_conversations(limit: int = 30, query: str = "", state: str = "", cur
             })
         return JSONResponse({"ok": True, **page, "rows": out})
     except ValueError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+        return JSONResponse({"ok": False, "error": validation_error(exc)}, status_code=400)
     except Exception as exc:  # noqa: BLE001
         return _safe_error(exc)
 
@@ -463,7 +464,7 @@ async def x_reply_save(body: ReplyConfigBody) -> JSONResponse:
                 ai = validate_selection(body.ai.model_dump(exclude_unset=True))
                 await asyncio.to_thread(validate_provider, ai)
             except XModelUnavailableError as exc:
-                problems.append(str(exc))
+                problems.append(validation_error(exc))
         if problems:
             return JSONResponse(
                 {"ok": False, "error": "Fix these first.", "problems": problems},
@@ -542,7 +543,7 @@ async def x_reply_save(body: ReplyConfigBody) -> JSONResponse:
             try:
                 style = normalize_style(body.reply_style)
             except ValueError as exc:
-                return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+                return JSONResponse({"ok": False, "error": validation_error(exc)}, status_code=400)
 
         from kazma_core.x_api.references import ReferenceUnreadable, load_references, validate_paths
 
@@ -556,7 +557,7 @@ async def x_reply_save(body: ReplyConfigBody) -> JSONResponse:
             try:
                 references = list(validate_paths(body.drafting_references))
             except ValueError as exc:
-                return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+                return JSONResponse({"ok": False, "error": validation_error(exc)}, status_code=400)
             # Saved either way (the file may be created next); said now, not
             # at the first Generate.
             try:
@@ -652,7 +653,7 @@ async def x_reply_save(body: ReplyConfigBody) -> JSONResponse:
             await asyncio.to_thread(get_config_store().batch_set, keyed,
                                     expected=(revision_key, revision))
         except ConfigRevisionConflict as exc:
-            return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
+            return JSONResponse({"ok": False, "error": validation_error(exc)}, status_code=409)
 
         # Start/stop the poller now so Save is the action, not a restart.
         try:
@@ -850,7 +851,7 @@ async def x_reply_preview(body: PreviewBody) -> JSONResponse:
                 try:
                     cfg = replace(cfg, reply_style=normalize_style(body.reply_style))
                 except ValueError as exc:
-                    return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+                    return JSONResponse({"ok": False, "error": validation_error(exc)}, status_code=400)
 
             # Unsaved model selection is tested without activating it.
             async with x_model_scope(body.ai.model_dump(exclude_unset=True) if body.ai else None):
@@ -916,6 +917,12 @@ def x_qualification_install(body: _QualificationBody) -> JSONResponse:
 
     try:
         metrics = install_report(body.report)
-    except (ValueError, TypeError, KeyError) as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    except ValueError as exc:  # the qualification check's own refusals
+        return JSONResponse({"ok": False, "error": validation_error(exc)}, status_code=400)
+    except (TypeError, KeyError):
+        # A report missing a field or holding the wrong type: Python's words
+        # name the field, not what to fix.
+        logger.warning("[x_reply_api] qualification report has the wrong shape", exc_info=True)
+        return JSONResponse({"ok": False, "error": "The report is not in the shape a qualification report has."},
+                            status_code=400)
     return JSONResponse({"ok": True, "metrics": metrics})

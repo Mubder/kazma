@@ -189,6 +189,32 @@ def _ftp_errors() -> tuple[type[BaseException], ...]:
     return (*ftplib.all_errors, *PROVIDER_ERRORS)
 
 
+def _test_failure(label: str, exc: BaseException) -> dict[str, Any]:
+    """A connection test that failed, said in words the Settings page shows.
+
+    The provider's own refusal stays -- an FTP server's reply, or the sign-in
+    and folder helpers' sentences (a ``RuntimeError`` Kazma words, quoting
+    the provider's answer) -- because it is what the owner fixes. A network
+    library's text names hosts and addresses, and anything else a module's
+    internals: said as what happened, the text logged under a reference.
+    """
+    import ftplib  # nosec B402 - its error classes only
+
+    from kazma_core.errors import described_error, validation_error
+
+    if isinstance(exc, ftplib.Error):
+        return {"ok": False, "error": f"{label} error: {validation_error(exc)}"}
+    if isinstance(exc, RuntimeError):
+        return {"ok": False, "error": validation_error(exc)}
+    if isinstance(exc, (httpx.TimeoutException, TimeoutError)):
+        logger.warning("[cloud-sync] %s test timed out: %s", label, exc)
+        return {"ok": False, "error": f"{label} did not answer in time."}
+    if isinstance(exc, (httpx.TransportError, OSError)):
+        logger.warning("[cloud-sync] %s test could not connect: %s", label, exc)
+        return {"ok": False, "error": f"Kazma could not connect to {label}. Check the address and the network."}
+    return {"ok": False, "error": described_error(f"The {label} test failed", exc, level=logging.WARNING)}
+
+
 def _backup_name_ok(name: str) -> bool:
     """A name ``delete_backup`` may act on: one plain entry of the folder."""
     return bool(name) and name not in (".", "..") and "/" not in name and "\\" not in name
@@ -528,7 +554,7 @@ class GoogleDriveSync:
                     return {"ok": True, "message": f"Google Drive: {email}"}
                 return {"ok": False, "error": _google_drive_error(resp)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return _test_failure("Google Drive", exc)
 
     def status(self) -> dict[str, Any]:
         has_token = bool(
@@ -800,7 +826,7 @@ class OneDriveSync:
                     return {"ok": True, "message": f"OneDrive: {owner}"}
                 return {"ok": False, "error": f"Graph API error: {resp.status_code}"}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return _test_failure("OneDrive", exc)
 
     def status(self) -> dict[str, Any]:
         has_token = bool(
@@ -938,7 +964,7 @@ class WebDAVSync:
                     return {"ok": True, "message": f"WebDAV: {url}"}
                 return {"ok": False, "error": f"WebDAV error: HTTP {resp.status_code}"}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return _test_failure("WebDAV", exc)
 
     def status(self) -> dict[str, Any]:
         url, username, _ = self._get_config()
@@ -1171,7 +1197,7 @@ class FTPSync:
             host = await asyncio.to_thread(_run)
             return {"ok": True, "message": f"FTP: {host}"}
         except Exception as exc:
-            return {"ok": False, "error": f"FTP error: {exc}"}
+            return _test_failure("FTP", exc)
 
     def status(self) -> dict[str, Any]:
         cfg = self._get_config()
@@ -1554,7 +1580,7 @@ class S3Sync:
                     return {"ok": True, "message": f"S3 bucket: {bucket}"}
                 return {"ok": False, "error": f"S3 error: HTTP {resp.status_code}"}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return _test_failure("S3", exc)
 
     def status(self) -> dict[str, Any]:
         config = self._get_config()

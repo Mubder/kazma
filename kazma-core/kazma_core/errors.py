@@ -38,6 +38,7 @@ __all__ = [
     "ErrorInfo",
     "redact_secrets",
     "safe_error",
+    "described_error",
     "validation_error",
     "error_payload",
     "verbose_errors",
@@ -152,6 +153,33 @@ def safe_error(exc: BaseException, *, log: bool = True) -> ErrorInfo:
         if detail:
             text = f"{text}: {detail}"
     return ErrorInfo(text, code=code, ref=ref)
+
+
+def described_error(
+    sentence: str, exc: BaseException, *, level: int = logging.ERROR,
+) -> ErrorInfo:
+    """*sentence* with *exc*'s stable code and a reference, for a page that
+    shows the error to a person.
+
+    "Could not resolve the clone URL (upstream_unavailable, ref: 1a2b3c4d)."
+    The real exception is logged under the reference, as :func:`safe_error`
+    logs it; its text -- a path, a SQL statement, a host name -- never reaches
+    the caller. *level* is the log level: ``logging.WARNING`` for a probe a
+    page polls, so an outage does not fill the log with tracebacks (they are
+    logged at ``ERROR`` and above).
+    """
+    info = safe_error(exc, log=False)
+    logger.log(
+        level, "[error] ref=%s code=%s (%s) %s: %s",
+        info.ref, info.code, sentence, type(exc).__name__, exc,
+        exc_info=exc if level >= logging.ERROR else None,
+    )
+    text = f"{sentence.rstrip(' .')} ({info.code}, ref: {info.ref})."
+    if verbose_errors():
+        detail = _REDACT.sub("<redacted>", str(exc))[:_MAX_VERBOSE_CHARS]
+        if detail:
+            text = f"{text} {detail}"
+    return ErrorInfo(text, code=info.code, ref=info.ref)
 
 
 def validation_error(exc: BaseException, *, max_chars: int = _MAX_VERBOSE_CHARS) -> str:

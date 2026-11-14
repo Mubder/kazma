@@ -22,7 +22,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
-from kazma_core.errors import safe_error, validation_error
+from kazma_core.errors import described_error, safe_error, validation_error
 from kazma_core.http_tls import shared_ssl_context
 from kazma_core.security.child_env import tool_child_env
 
@@ -174,8 +174,10 @@ async def save_app_config(body: AppConfigSaveRequest) -> JSONResponse:
         ])
         return JSONResponse({"status": "ok", "message": "GitHub App credentials configured successfully."})
     except Exception as exc:
-        logger.error("[github/app/config] Failed to write to ConfigStore: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Failed to save GitHub App configuration: {exc}") from exc
+        raise HTTPException(
+            status_code=500,
+            detail=described_error("Failed to save GitHub App configuration", exc),
+        ) from exc
 
 
 
@@ -1167,7 +1169,11 @@ async def clone_repo(body: CloneRepoRequest) -> JSONResponse:
                 repo_info = await gh.get(f"/repos/{full_name}")
             url = (repo_info.get("ssh_url") if body.use_ssh else repo_info.get("clone_url")) or ""
         except Exception as exc:
-            return JSONResponse({"error": f"Could not resolve clone URL: {exc}"}, status_code=502)
+            return JSONResponse(
+                {"error": described_error("Could not resolve the clone URL from GitHub", exc,
+                                          level=logging.WARNING)},
+                status_code=502,
+            )
     if not url:
         return JSONResponse({"error": "Could not determine clone URL."}, status_code=422)
     # Scheme/host allowlist — no http/file/arbitrary-host remotes (L1).
@@ -1240,8 +1246,11 @@ async def clone_repo(body: CloneRepoRequest) -> JSONResponse:
     except subprocess.TimeoutExpired:
         return JSONResponse({"error": "git clone timed out."}, status_code=504)
     except Exception as exc:
+        # Not git's own answer (that is the CalledProcessError above): an
+        # OS or library failure, whose text can name paths -- logged, never
+        # sent.
         return JSONResponse(
-            {"error": f"git clone failed: {_redact_token(str(exc), gh_token)}"},
+            {"error": described_error("git clone could not run", exc)},
             status_code=502,
         )
 

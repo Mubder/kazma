@@ -29,6 +29,8 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from kazma_core.errors import validation_error
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -196,8 +198,8 @@ def create_workspace_select_router() -> APIRouter:
 
         try:
             root_policy.validate_root(resolved)
-        except PermissionError as exc:
-            raise HTTPException(status_code=403, detail=str(exc)) from None
+        except PermissionError as exc:  # root_policy's own refusal
+            raise HTTPException(status_code=403, detail=validation_error(exc)) from None
 
         from kazma_core.config_store import get_config_store
         from kazma_core.stores import get_workspace_store

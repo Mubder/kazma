@@ -527,6 +527,14 @@ def _failure_digest(log: str, limit: int = _DIGEST_LIMIT) -> str:
         m2 = re.search(r"=+\s*(short test summary|slowest\d*\s*test)", rest)
         section = rest[: m2.start()] if m2 else rest
         sections.append(section[:limit])
+    # The root conftest's report of a non-daemon thread left running names the
+    # test it first appeared after; the failing-test list keeps only its id
+    # (2026-11-14: two leaked threads, and no way to tell from which test).
+    m = re.search(r"=+\s*threads left running\s*=+\n", log)
+    if m is not None:
+        rest = log[m.end():]
+        m2 = re.search(r"^=+ ", rest, flags=re.M)
+        sections.append("threads left running:\n" + (rest[: m2.start()] if m2 else rest)[:limit])
     joined = "\n".join(sections).strip()
     if joined:
         return joined[:limit]

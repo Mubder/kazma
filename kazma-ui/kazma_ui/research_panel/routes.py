@@ -37,7 +37,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from kazma_ui.rate_limit import rate_limit
 from kazma_ui.sse_utils import sse_frame
-from kazma_core.errors import safe_error
+from kazma_core.errors import safe_error, validation_error
 from kazma_core.web_acquire.result import AcquisitionError, FetchErrorCode
 
 logger = logging.getLogger(__name__)
@@ -301,7 +301,7 @@ def create_research_router() -> APIRouter:
             report = await call(cached_status)
             return JSONResponse({"ok": True, "report": report, "text": format_cached_status(report, language=language)})
         except AcquisitionError as exc:
-            return JSONResponse({"ok": False, "error": str(exc), "error_code": str(exc.code)}, status_code=400)
+            return JSONResponse({"ok": False, "error": validation_error(exc), "error_code": str(exc.code)}, status_code=400)
         except Exception as exc:
             return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=503)
 
@@ -332,7 +332,7 @@ def create_research_router() -> APIRouter:
             )
             return JSONResponse({"ok": True, "session": sess.to_dict()})
         except AcquisitionError as exc:
-            return JSONResponse({'ok': False, 'error': str(exc), 'error_code': str(exc.code),
+            return JSONResponse({'ok': False, 'error': validation_error(exc), 'error_code': str(exc.code),
                                  'transient': exc.transient},
                 status_code=503 if exc.code == FetchErrorCode.LIMIT else 400)
         except Exception as exc:
@@ -346,9 +346,9 @@ def create_research_router() -> APIRouter:
             session = await start_deep_research('', resume_session_id=session_id)
             return JSONResponse({'ok': True, 'session': session.to_dict()})
         except ResearchSessionBusyError as exc:
-            return JSONResponse({'ok': False, 'error_code': 'research_session_busy', 'error': str(exc)}, status_code=409)
+            return JSONResponse({'ok': False, 'error_code': 'research_session_busy', 'error': validation_error(exc)}, status_code=409)
         except AcquisitionError as exc:
-            return JSONResponse({'ok': False, 'error_code': str(exc.code), 'error': str(exc)},
+            return JSONResponse({'ok': False, 'error_code': str(exc.code), 'error': validation_error(exc)},
                                 status_code=503 if exc.code == FetchErrorCode.LIMIT else 400)
 
     @router.get("/api/research/sessions")
@@ -422,7 +422,7 @@ def create_research_router() -> APIRouter:
             return JSONResponse({"ok": True, "deleted": session_id})
         except ResearchSessionBusyError as exc:
             return JSONResponse({"ok": False, "error_code": "research_session_busy",
-                                 "error": str(exc)}, status_code=409)
+                                 "error": validation_error(exc)}, status_code=409)
         except Exception as exc:
             logger.exception("[research] delete session failed")
             return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
@@ -454,7 +454,7 @@ def create_research_router() -> APIRouter:
                 {"ok": True, "session": sess.to_dict() if sess else None}
             )
         except ResearchSessionBusyError as exc:
-            return JSONResponse({"ok": False, "error_code": "research_session_busy", "error": str(exc)}, status_code=409)
+            return JSONResponse({"ok": False, "error_code": "research_session_busy", "error": validation_error(exc)}, status_code=409)
         except Exception as exc:
             logger.exception("[research] cancel session failed")
             return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)

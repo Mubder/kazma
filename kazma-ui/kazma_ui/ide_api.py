@@ -46,6 +46,21 @@ logger = logging.getLogger(__name__)
 __all__ = ["create_ide_router"]
 
 
+def _restore_failure(exc: Exception) -> dict[str, Any]:
+    """A checkpoint restore that did not happen, said without the OS's text.
+
+    The checkpoint store's own refusals ("path not in checkpoint: x",
+    "hunk_index out of range") are ``ValueError`` s Kazma words, and nothing
+    was written. Anything else -- an ``OSError`` naming the file's absolute
+    path, a decode error -- is a code and a reference, and the write may have
+    begun (``effect_uncertain``). A decode error is a ``ValueError`` too, but
+    the library's words.
+    """
+    if isinstance(exc, ValueError) and not isinstance(exc, UnicodeError):
+        return {"ok": False, "error": validation_error(exc), "effect_uncertain": False}
+    return {"ok": False, "error": safe_error(exc), "effect_uncertain": not isinstance(exc, ValueError)}
+
+
 def create_ide_router() -> APIRouter:
     """Create and return the IDE API router."""
 
@@ -197,7 +212,7 @@ def create_ide_router() -> APIRouter:
         try:
             restored = get_file_checkpoint_store().restore_hunk(checkpoint_id, path, idx)
         except (OSError, UnicodeDecodeError, ValueError) as exc:
-            return {"ok": False, "error": str(exc), "effect_uncertain": not isinstance(exc, ValueError)}
+            return _restore_failure(exc)
         return {"ok": True, "path": restored, "hunk_index": idx}
 
     @router.post("/checkpoints/{checkpoint_id}/restore-path")
@@ -211,7 +226,7 @@ def create_ide_router() -> APIRouter:
             restored = get_file_checkpoint_store().restore_one(checkpoint_id, path)
             return {"ok": True, "path": restored, "checkpoint_id": checkpoint_id}
         except Exception as exc:
-            return {"ok": False, "error": str(exc), "effect_uncertain": not isinstance(exc, ValueError)}
+            return _restore_failure(exc)
 
     @router.post("/checkpoints/{checkpoint_id}/restore")
     async def restore_checkpoint_route(checkpoint_id: str) -> dict[str, Any]:

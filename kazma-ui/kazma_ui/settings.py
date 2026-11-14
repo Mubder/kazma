@@ -347,7 +347,7 @@ class SettingsRouterBuilder:
                 try:
                     value, category = validate_setting(u.key, u.value)
                 except SettingRejected as exc:
-                    raise HTTPException(status_code=400, detail=f"{u.key}: {exc}") from None
+                    raise HTTPException(status_code=400, detail=f"{u.key}: {validation_error(exc)}") from None
                 items.append((u.key, value, category or u.category))
             count = config_store.batch_set(items)
             return {"status": "ok", "updated": str(count)}
@@ -362,7 +362,7 @@ class SettingsRouterBuilder:
             try:
                 value, category = validate_setting(setting.key, setting.value)
             except SettingRejected as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from None
+                raise HTTPException(status_code=400, detail=validation_error(exc)) from None
             config_store.set(setting.key, value, category=category or setting.category)
             return {"status": "ok"}
 
@@ -783,7 +783,7 @@ class SettingsRouterBuilder:
             try:
                 _apply_offsite_payload(req)
             except SettingRejected as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from None
+                raise HTTPException(status_code=400, detail=validation_error(exc)) from None
             return {"status": "ok"}
 
         @router.post("/api/settings/backup/offsite/test")
@@ -800,7 +800,7 @@ class SettingsRouterBuilder:
                 try:
                     remote = rclone_policy.validate_remote(remote)
                 except ValueError as exc:
-                    return {"ok": False, "error": str(exc)}
+                    return {"ok": False, "error": validation_error(exc)}
                 import shutil as _shutil
                 import asyncio as _aio
                 rclone = _shutil.which("rclone")
@@ -834,7 +834,7 @@ class SettingsRouterBuilder:
                     return {"ok": False, "error": f"Unknown provider: {provider_name}"}
                 return await provider.test_connection()
             except SettingRejected as exc:
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": validation_error(exc)}
             except Exception as exc:
                 return {"ok": False, "error": safe_error(exc)}
 
@@ -915,7 +915,7 @@ class SettingsRouterBuilder:
             try:
                 return save_settings(req)
             except ValueError as exc:
-                raise HTTPException(status_code=422, detail=str(exc)) from exc
+                raise HTTPException(status_code=422, detail=validation_error(exc)) from exc
 
         @router.get("/api/settings/acquisition/canary")
         def api_get_crawl_canary() -> dict[str, Any]:
@@ -932,7 +932,7 @@ class SettingsRouterBuilder:
             try:
                 return canary.save_settings(req)
             except ValueError as exc:
-                raise HTTPException(status_code=422, detail=str(exc)) from exc
+                raise HTTPException(status_code=422, detail=validation_error(exc)) from exc
 
         @router.post("/api/settings/acquisition/canary/run")
         async def api_run_crawl_canary() -> dict[str, Any]:
@@ -1306,7 +1306,7 @@ class SettingsRouterBuilder:
             try:
                 _get_sm().save_nonstop_settings(req)
             except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from None
+                raise HTTPException(status_code=400, detail=validation_error(exc)) from None
             return {"status": "ok"}
 
         @router.get("/api/settings/failover-backup")
@@ -1492,7 +1492,7 @@ class SettingsRouterBuilder:
                 try:
                     value, category = validate_setting(key, req[field])
                 except SettingRejected as exc:
-                    raise HTTPException(status_code=400, detail=f"{key}: {exc}") from None
+                    raise HTTPException(status_code=400, detail=f"{key}: {validation_error(exc)}") from None
                 items.append((key, value, category or cat))
             if "worker_isolation" in req:
                 # Where untrusted documents run: a security setting, checked
@@ -1503,7 +1503,7 @@ class SettingsRouterBuilder:
                     value, category = validate_setting(
                         DOCUMENT_WORKER_ISOLATION_KEY, req["worker_isolation"])
                 except SettingRejected as exc:
-                    raise HTTPException(status_code=400, detail=str(exc)) from None
+                    raise HTTPException(status_code=400, detail=validation_error(exc)) from None
                 items.append((DOCUMENT_WORKER_ISOLATION_KEY, value, category or "security"))
             if items:
                 config_store.batch_set(items)
@@ -1694,11 +1694,11 @@ class SettingsRouterBuilder:
                     dry_run=dry_run, sections=wanted, expect=expect or None,
                 )
             except NotABackup as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from None
+                raise HTTPException(status_code=400, detail=validation_error(exc)) from None
             except PlanChanged as exc:
                 return JSONResponse(
                     status_code=409,
-                    content={"status": "error", "detail": str(exc), "plan": exc.summary},
+                    content={"status": "error", "detail": validation_error(exc), "plan": exc.summary},
                 )
             return {"status": "ok", **result, "restart_recommended": bool(result.get("restored"))}
 
@@ -1720,7 +1720,7 @@ class SettingsRouterBuilder:
             except PlanChanged as exc:
                 return JSONResponse(
                     status_code=409,
-                    content={"status": "error", "detail": str(exc), "plan": exc.summary},
+                    content={"status": "error", "detail": validation_error(exc), "plan": exc.summary},
                 )
             if not result.get("available"):
                 raise HTTPException(status_code=409, detail="There is no restore to undo.")

@@ -78,7 +78,10 @@ async def retry_task(task_id: str, *, acknowledge_unknown: bool = False) -> dict
     try:
         new_task = await engine.retry_task(task_id, acknowledge_unknown=acknowledge_unknown)
     except RetryNeedsAcknowledgement as exc:
-        return {"ok": False, "code": "retry_outcome_unknown", "message": str(exc), "tools": exc.tools}
+        from kazma_core.errors import validation_error
+
+        return {"ok": False, "code": "retry_outcome_unknown", "message": validation_error(exc, max_chars=600),
+                "tools": exc.tools}
     if new_task is None:
         return {"ok": False, "code": "not_found", "message": f"Task '{task_id}' not found"}
     await _dispatch(engine, new_task)

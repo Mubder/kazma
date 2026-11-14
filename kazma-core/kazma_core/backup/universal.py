@@ -1589,7 +1589,11 @@ def delete_universal_backup(dir_name: str) -> dict[str, Any]:
         logger.info("[universal-backup] deleted %s", dir_name)
         return {"ok": True, "deleted": dir_name}
     except Exception as exc:
-        return {"ok": False, "error": str(exc)[:200]}
+        # The OS's text names the backup's absolute path: logged, never sent
+        # (the Settings page shows "error").
+        from kazma_core.errors import described_error
+
+        return {"ok": False, "error": described_error("some of its files could not be removed", exc)}
 
 
 def archive_universal_backup(dir_name: str) -> dict[str, Any]:
@@ -1611,4 +1615,6 @@ def archive_universal_backup(dir_name: str) -> dict[str, Any]:
         logger.info("[universal-backup] archived %s → %s (%.1f MB)", dir_name, zip_path.name, size_mb)
         return {"ok": True, "archive": str(zip_path), "size_mb": size_mb}
     except Exception as exc:
-        return {"ok": False, "error": str(exc)[:200]}
+        from kazma_core.errors import described_error
+
+        return {"ok": False, "error": described_error("the archive could not be written", exc)}

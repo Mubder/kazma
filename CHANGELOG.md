@@ -13,6 +13,11 @@
 - A network path (`\\server\share`) is refused before Kazma touches it in the
   IDE, the Workspace page, the extra-folders setting and skill installs, as
   the file tools already did.
+- Error messages no longer quote a library's or the system's own error text
+  (which can name files, servers or database statements): the page says what
+  failed with a short code and a reference, and the details are in Kazma's
+  log under that reference. A mail server's own login answer is still shown,
+  since that is what you fix.
 - Five text patterns that could take seconds to minutes on hostile text (one
   on every fetched web page) now take the same time whatever the text.
 - Smaller fixes: the k6 load test began with Python lines and could not run;

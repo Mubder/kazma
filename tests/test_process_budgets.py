@@ -11,6 +11,8 @@ import pytest
 from kazma_core.security.child_env import tool_child_env
 from kazma_core.security.process_budget import OutputLimitExceeded, run_bounded, run_bounded_async
 
+from tests._published_files import read_published_text
+
 
 def run(code, **kwargs):
     return run_bounded([sys.executable, "-I", "-c", code], env=tool_child_env(), text=True, **kwargs)
@@ -57,7 +59,7 @@ def test_timeout_kills_the_descendant_not_only_the_launcher(tmp_path):
     with pytest.raises(subprocess.TimeoutExpired):
         run(parent, timeout=1)
     assert marker.exists(), "descendant did not start; this would not test tree cleanup"
-    ended(int(marker.read_text()))
+    ended(int(read_published_text(marker)))
 
 
 def test_an_exited_parent_cannot_leave_a_background_child():
@@ -84,7 +86,7 @@ async def test_cancellation_tells_the_worker_to_end_its_tree(tmp_path):
         async with asyncio.timeout(15):
             while not marker.exists():
                 await asyncio.sleep(0.01)
-        pid = int(marker.read_text())
+        pid = int(read_published_text(marker))
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
@@ -150,7 +152,7 @@ async def test_repeated_cancellation_waits_for_real_worker_cleanup(monkeypatch, 
         assert await asyncio.to_thread(finished.wait, 5), 'Fixture worker did not finish'
     assert task.cancelled()
     assert len(children) == 1 and children[0].poll() is not None
-    ended(int(marker.read_text()))
+    ended(int(read_published_text(marker)))
 
 
 @pytest.mark.asyncio
@@ -250,7 +252,7 @@ async def test_real_stdio_handshake_and_disconnect_reap_a_server_child(tmp_path,
         async with asyncio.timeout(3):
             while not marker.exists():
                 await asyncio.sleep(0.01)
-        pid = int(marker.read_text())
+        pid = int(read_published_text(marker))
         assert psutil.pid_exists(pid)
     finally:
         if implementation == "manager":
@@ -296,7 +298,7 @@ async def test_cancelled_mcp_setup_closes_its_unregistered_child(tmp_path, monke
         async with asyncio.timeout(5):
             while not marker.exists():
                 await asyncio.sleep(0.01)
-        pid = int(marker.read_text())
+        pid = int(read_published_text(marker))
         assert psutil.pid_exists(pid)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -326,7 +328,7 @@ async def test_cancelled_diagnostic_handshake_closes_its_child(tmp_path):
         async with asyncio.timeout(5):
             while not marker.exists():
                 await asyncio.sleep(0.01)
-        pid = int(marker.read_text())
+        pid = int(read_published_text(marker))
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task

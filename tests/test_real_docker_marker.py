@@ -28,3 +28,20 @@ def test_an_unmarked_test_gets_an_empty_docker_config(tmp_path):
 def test_a_real_docker_test_keeps_the_developers_settings(tmp_path):
     config = os.environ.get("DOCKER_CONFIG")
     assert config is None or tmp_path not in Path(config).parents
+
+
+def test_an_unmarked_test_never_sees_the_machines_kazma_engine(tmp_path, monkeypatch):
+    """This PC's own Kazma docker CLI (``%LOCALAPPDATA%\\Kazma\\engine\\bin``)
+    is out of sight; a test naming its own LOCALAPPDATA gets that folder."""
+    from kazma_core import docker_cli
+
+    assert tmp_path in docker_cli.kazma_engine_dir().parents
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "own"))
+    assert docker_cli.kazma_engine_dir() == tmp_path / "own" / "Kazma" / "engine"
+
+
+@pytest.mark.real_docker
+def test_a_real_docker_test_sees_the_machines_kazma_engine(tmp_path):
+    from kazma_core import docker_cli
+
+    assert tmp_path not in docker_cli.kazma_engine_dir().parents

@@ -14,6 +14,8 @@ from kazma_core.security.process_budget import run_bounded
 from kazma_core.web_acquire import crawl_jobs, policy
 from kazma_core.web_acquire.result import AcquisitionError, FetchErrorCode, FetchResult
 
+from tests._published_files import publish_code, read_published_text
+
 
 @pytest.fixture
 def journal(tmp_path, monkeypatch):
@@ -220,7 +222,7 @@ def test_separate_processes_share_one_first_writer_capacity_budget(journal, tmp_
            'KAZMA_DATA_DIR': str(crawl_jobs_data_dir())}
     def launch(index):
         marker = tmp_path / f'child-{index}.json'
-        program = (f'import sys,json,time;from pathlib import Path;sys.path.insert(0,{core!r});'
+        program = (f'import os,sys,json,time;from pathlib import Path;sys.path.insert(0,{core!r});'
             'from kazma_core import config_store;from kazma_core.web_acquire import crawl_jobs;'
             'from kazma_core.web_acquire.result import AcquisitionError;'
             f'store=config_store.ConfigStore({str(tmp_path / "settings.db")!r});config_store.get_config_store=lambda:store\n'
@@ -229,7 +231,7 @@ def test_separate_processes_share_one_first_writer_capacity_budget(journal, tmp_
             f' job=crawl_jobs.start("lib{index}","https://docs.example/tree/",{snapshot()!r},job_id="process-{index}")\n'
             ' outcome="admitted"\n'
             'except AcquisitionError as error: outcome=str(error.code)\n'
-            f'Path({str(marker)!r}).write_text(json.dumps(outcome))\n'
+            + publish_code(marker, 'json.dumps(outcome)') +
             'deadline=time.monotonic()+15\n'
             f'while not Path({str(release)!r}).exists():\n'
             ' assert time.monotonic()<deadline\n time.sleep(.01)\n'
@@ -244,12 +246,12 @@ def test_separate_processes_share_one_first_writer_capacity_budget(journal, tmp_
             while not all((tmp_path/f'child-{i}.json').exists() for i in range(4)):
                 assert time.monotonic()<deadline
                 time.sleep(.01)
-            assert [json.loads((tmp_path/f'child-{i}.json').read_text()) for i in range(4)] == ['admitted']*4
+            assert [json.loads(read_published_text(tmp_path/f'child-{i}.json')) for i in range(4)] == ['admitted']*4
             futures.append(executor.submit(launch,4))
             while not (tmp_path/'child-4.json').exists():
                 assert time.monotonic()<deadline
                 time.sleep(.01)
-            assert json.loads((tmp_path/'child-4.json').read_text()) == 'resource_limit'
+            assert json.loads(read_published_text(tmp_path/'child-4.json')) == 'resource_limit'
         finally:
             release.touch()
         for future in futures:

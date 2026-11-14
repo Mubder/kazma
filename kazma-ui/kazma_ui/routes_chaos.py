@@ -10,6 +10,7 @@ import os
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
+from kazma_core.errors import validation_error
 from kazma_ui.json_body import InvalidJsonBody, invalid_json_response, read_json
 
 logger = logging.getLogger(__name__)
@@ -66,7 +67,7 @@ def register_chaos_routes(app: FastAPI) -> None:
                 "experiment": experiment_name,
             }
         except ValueError as e:
-            raise HTTPException(status_code=404, detail=str(e)) from e
+            raise HTTPException(status_code=404, detail=validation_error(e)) from e
         except Exception as e:
             logger.error(
                 "[Chaos] Failed to run experiment %s: %s",
@@ -161,7 +162,7 @@ def register_chaos_routes(app: FastAPI) -> None:
         except HTTPException:
             raise
         except (ValueError, TypeError) as e:
-            raise HTTPException(status_code=400, detail=f"Invalid value: {e}") from e
+            raise HTTPException(status_code=400, detail=f"Invalid value: {validation_error(e)}") from e
 
         injection = FailureInjection(
             failure_type=failure_type,

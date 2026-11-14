@@ -14,6 +14,7 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
+from kazma_core.errors import validation_error
 
 # New POST operations receive receipts by default. Only declared reads bypass
 # them, so adding an endpoint cannot silently create another mutation path.
@@ -95,7 +96,7 @@ class IdeEffectRoute(APIRoute):
                 response.headers["Idempotency-Key"] = key
                 return response
             except EffectUncertain as exc:
-                return JSONResponse({"ok": False, "error": str(exc), "effect_uncertain": True},
+                return JSONResponse({"ok": False, "error": validation_error(exc), "effect_uncertain": True},
                                     status_code=409, headers={"Idempotency-Key": key})
 
         return handler

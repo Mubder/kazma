@@ -6320,6 +6320,22 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
 - 4xx **validation** paths use `validation_error(exc)` instead: the message
   is the caller's answer, and replacing it with a code makes the API
   unusable. Redaction applies either way.
+- **No answer carries an exception's own text** (2026-11-14). A page that
+  shows the error gets `described_error(sentence, exc)`: Kazma's sentence
+  with the code and the reference ("Could not resolve the clone URL from
+  GitHub (upstream_unavailable, ref: 1a2b3c4d)."), the text logged under it.
+  The clone route, the email and X helpers (`str(exc)[:300]` whenever
+  `KAZMA_PRODUCTION` was unset), the backup delete, the memory backend
+  tests, the MCP add and the Knowledge page's "not stored" reasons answered
+  library, OS and driver text: paths, hosts, SQL. A mail server's login
+  answer, an FTP server's reply and the X API's answer stay (what the owner
+  fixes). Gate: `tests/test_route_errors_carry_no_exception_text.py` -- every
+  module under `kazma-ui/kazma_ui` and `kazma-gateway/kazma_gateway/routers`,
+  every `except ... as e` (and parameter typed as an exception) whose text
+  reaches a `return`, `raise`, `yield` or `*Response(...)`, also through a
+  local value; Kazma's refusal classes and one site are declared with why,
+  a declaration that excuses nothing fails, planted old shapes as the
+  negative control.
 
 **G. Fenced tool output.**
 - Fetched pages, search results, saved research chunks and MCP resource
@@ -11709,6 +11725,12 @@ code it names.
   folder (`install_from_any`) and the workspace-roots policy
   (`normalize_workspace_roots`). Gate:
   `tests/test_remote_paths_refused_before_touching.py`.
+- **No answer carries an exception's own text** (§26 F, the rule and its
+  gate): 17 routes and 5 near misses CodeQL named (py/stack-trace-exposure),
+  and the helpers they answer through, now answer `described_error` or
+  `safe_error`; Kazma's own refusals go through `validation_error`, except
+  where its redaction would hide the folder the owner typed
+  (`put_extra_roots`, declared).
 - **Patterns that read untrusted text stay linear** (possessive quantifiers,
   bounded classes; Python 3.11.5 is the floor): the memory graph's version
   test (`ego_anchor._VERSION_RE`, exponential: a subject of "0.0", thirty
@@ -12365,8 +12387,17 @@ sent. Gate: `tests/test_answer_quality_monitor.py`.
   Desktop) answers nothing: every container test failed there and the
   sandbox's real run skipped without a word. A marked test keeps the
   developer's settings. A test's own `docker run -v` names the folder as the
-  engine in force mounts it (`docker_cli.engine_host_path`). Gate:
-  `tests/test_real_docker_marker.py` (the two tests are each other's control).
+  engine in force mounts it (`docker_cli.engine_host_path`). The same fixture
+  hides the machine's own Kazma engine folder (`docker_cli.kazma_engine_dir`:
+  once this PC's setup installed Kazma's docker CLI there, every lookup test
+  found it, 2026-11-14); a test that sets its own `LOCALAPPDATA` gets that
+  folder. Gate: `tests/test_real_docker_marker.py` (the marked and unmarked
+  tests are each other's control).
+- **A file a child process publishes is renamed into place and read with
+  `tests/_published_files.read_published_text`** (2026-11-14): a child that
+  wrote in place was read empty, and on Windows a file just renamed can be
+  held for a moment by the scanner (`PermissionError`); both failed only on a
+  loaded machine.
 - **Every docs diagram parses** with the docs site's own Mermaid
   (`tests/test_docs_mermaid_diagrams_parse.py`, in a blank Chromium page; it
   needs `cd docs && npm install`, as building the site does). The site draws

@@ -49,6 +49,14 @@ _DEFAULT_TIMEOUT = httpx.Timeout(15.0, connect=10.0)
 _USER_AGENT = "Kazma-Agent-Framework"
 
 
+def _transport_error(what: str, exc: httpx.RequestError) -> GitHubError:
+    """A request that did not reach GitHub, said by kind: the network
+    library's text (a host, an address, a proxy) is logged, never carried
+    to the page that shows a GitHubError's message."""
+    logger.warning("[github] transport error %s: %s: %s", what, type(exc).__name__, exc)
+    return GitHubError(0, f"Transport error {what} ({type(exc).__name__}).")
+
+
 class GitHubError(Exception):
     """Raised when a GitHub API call fails.
 
@@ -273,7 +281,7 @@ class GitHubClient:
         try:
             resp = await client.request(method, path, params=params, json=json)
         except httpx.RequestError as exc:
-            raise GitHubError(0, f"Transport error calling GitHub: {exc}") from exc
+            raise _transport_error("calling GitHub", exc) from exc
         self._raise_for_status(resp, method=method, path=path)
         if resp.status_code == 204 or not resp.content:
             return None
@@ -334,7 +342,7 @@ class GitHubClient:
                 else:
                     resp = await client.get(path, params=base_params)
             except httpx.RequestError as exc:
-                raise GitHubError(0, f"Transport error paginating GitHub: {exc}") from exc
+                raise _transport_error("paginating GitHub", exc) from exc
             self._raise_for_status(resp, method="GET", path=path)
             data = resp.json()
             chunk = data[key] if key and isinstance(data, dict) else data
@@ -360,7 +368,7 @@ class GitHubClient:
         try:
             resp = await client.post(_GRAPHQL_URL, json=payload)
         except httpx.RequestError as exc:
-            raise GitHubError(0, f"Transport error in GraphQL call: {exc}") from exc
+            raise _transport_error("in the GraphQL call", exc) from exc
         self._raise_for_status(resp, method="POST", path="/graphql")
         data = resp.json()
         if data.get("errors"):
@@ -429,7 +437,7 @@ async def exchange_code_for_token(code: str, redirect_uri: str) -> dict[str, Any
         async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT, verify=shared_ssl_context()) as client:
             resp = await client.post(_OAUTH_TOKEN_URL, json=payload, headers=headers)
     except httpx.RequestError as exc:
-        raise GitHubError(0, f"Transport error during OAuth exchange: {exc}") from exc
+        raise _transport_error("during the OAuth exchange", exc) from exc
     if resp.status_code != 200:
         raise GitHubError(resp.status_code, f"OAuth token exchange failed: HTTP {resp.status_code}")
     data = resp.json()

@@ -25,6 +25,8 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from kazma_core.errors import validation_error
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["create_history_import_router"]
@@ -167,7 +169,7 @@ def create_history_import_router() -> APIRouter:
             summary = await asyncio.to_thread(read)
         except ImportRefused as exc:
             await asyncio.to_thread(path.unlink, True)
-            return _refused("not_an_export", str(exc), 422)
+            return _refused("not_an_export", validation_error(exc), 422)
         with _UPLOADS_LOCK:
             _UPLOADS[token] = (path, time.time(), summary)
         return JSONResponse({"ok": True, "token": token, "summary": summary})

@@ -34,6 +34,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
+from kazma_core.errors import validation_error
+
 from kazma_ui.rate_limit import rate_limit
 
 logger = logging.getLogger(__name__)
@@ -221,6 +223,6 @@ def create_a2a_router(agent_getter: Callable[[], Any]) -> APIRouter:
                 return JSONResponse({"jsonrpc": "2.0", "id": rid, "result": found.view()})
             raise A2AError("method_not_found", f"Kazma does not answer {method}")
         except A2AError as exc:
-            return JSONResponse(error_response(rid, exc.code, str(exc)))
+            return JSONResponse(error_response(rid, exc.code, validation_error(exc)))
 
     return router

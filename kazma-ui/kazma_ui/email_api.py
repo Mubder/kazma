@@ -22,6 +22,8 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
+from kazma_core.errors import described_error, validation_error
+
 logger = logging.getLogger(__name__)
 
 # Open router: GET / status / OAuth callbacks (callbacks are browser-redirect
@@ -103,12 +105,6 @@ class ProtocolDisconnectBody(BaseModel):
 # ── Helpers ────────────────────────────────────────────────────────────
 
 
-def _is_production() -> bool:
-    from kazma_core.security.boot_guard import env_flag
-
-    return env_flag("KAZMA_PRODUCTION")
-
-
 def _vault_refused(exc: Exception) -> JSONResponse | None:
     """A sign-in the vault could not keep, said as such (FA-104): 503 with
     the reason, never the generic internal error."""
@@ -116,28 +112,33 @@ def _vault_refused(exc: Exception) -> JSONResponse | None:
 
     if isinstance(exc, VaultWriteFailed):
         logger.warning("[email_api] %s", exc)
-        return JSONResponse({"ok": False, "error": "vault_unavailable", "message": str(exc)},
+        # VaultWriteFailed's message is Kazma's own sentence (it names the
+        # failure's type only, never its text).
+        return JSONResponse({"ok": False, "error": "vault_unavailable",
+                             "message": validation_error(exc, max_chars=600)},
                             status_code=503)
     return None
 
 
 def _safe_error(exc: Exception, status: int = 500) -> JSONResponse:
-    """Sanitized error response — full detail is logged server-side only.
+    """An unexpected failure: a stable code and a reference, the exception
+    logged under it (``kazma_core.errors.safe_error``).
 
-    Internal exception text is only echoed to the client in non-production
-    mode (audit H5). Mirrors the global handler's intent but uses the
-    canonical ``KAZMA_PRODUCTION`` flag (the global catch-all in app.py uses
-    ``KAZMA_ENV``, a narrower one-off).
+    ``detail`` is what the page shows. It echoed the exception's own text
+    whenever ``KAZMA_PRODUCTION`` was unset -- every install but a
+    production one -- and a library's text names paths, hosts and SQL.
     """
     refused = _vault_refused(exc)
     if refused is not None:
         return refused
-    logger.exception("[email_api] %s", exc)
+    info = described_error("Something went wrong", exc)
     return JSONResponse(
         {
             "ok": False,
             "error": "internal_error",
-            "detail": "" if _is_production() else str(exc)[:300],
+            "detail": str(info),
+            "code": info.code,
+            "ref": info.ref,
         },
         status_code=status,
     )
@@ -608,13 +609,24 @@ _AUTH_REFUSALS = (
 def _login_refusal(exc: BaseException, kind: str, cfg: dict[str, str]) -> str:
     """A failed login, said so the person adding the account can act on it.
     A mistyped server name used to come back as the socket's own words,
-    "[Errno 11001] getaddrinfo failed" (2026-09-29, live)."""
+    "[Errno 11001] getaddrinfo failed" (2026-09-29, live).
+
+    The mail server's own answer ("AUTHENTICATIONFAILED Invalid
+    credentials") is the reply: it is what the person fixes. Only a mail
+    protocol's or the connection's error carries one; any other failure is
+    Kazma's or a library's, and is said with a code and a reference."""
+    import imaplib
+    import poplib
     import smtplib
     import socket
     import ssl
 
-    from kazma_core.errors import validation_error
+    from kazma_core.errors import described_error, validation_error
+    from kazma_skills.native.email_manager.backends.imap_smtp import MailboxRefused
 
+    server_said = (imaplib.IMAP4.error, poplib.error_proto, smtplib.SMTPException, OSError, MailboxRefused)
+    if not isinstance(exc, server_said):
+        return described_error("The login could not be tried", exc)
     host = (
         cfg.get("imap_host")
         or cfg.get("pop_host")

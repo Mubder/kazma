@@ -1787,7 +1787,12 @@ def backfill_state_mirror(*, tenant_id: str = "default") -> dict[str, Any]:
         ).fetchall()
         conn.close()
     except Exception as exc:
-        return {"ok": False, "synced": 0, "error": f"read sqlite failed: {exc}"[:300]}
+        # SQLite's text names the database file: logged, never sent (the
+        # Settings page shows "error").
+        from kazma_core.errors import described_error
+
+        return {"ok": False, "synced": 0,
+                "error": described_error("The local memory database could not be read", exc)}
 
     ep_ok = ep_fail = bel_ok = bel_fail = 0
     for r in ep_rows:

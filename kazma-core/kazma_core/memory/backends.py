@@ -1647,8 +1647,17 @@ def test_embedder_backend(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
             "provider": (cfg or get_backends_cfg()).get("embedder", {}).get("provider"),
         }
     except Exception as exc:
+        # A remote embedder's error names its endpoint and quotes its answer:
+        # logged under the reference, never sent (Settings shows "error").
+        from kazma_core.errors import described_error
+
         ms = (time.perf_counter() - t0) * 1000
-        return {"ok": False, "error": str(exc)[:300], "latency_ms": round(ms, 1)}
+        return {
+            "ok": False,
+            "error": described_error("the embedder did not encode a test text", exc,
+                                     level=logging.WARNING),
+            "latency_ms": round(ms, 1),
+        }
 
 
 def _test_local_vector_store(provider: str, t0: float) -> dict[str, Any]:
@@ -1733,11 +1742,15 @@ def test_vector_backend(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
             result["error"] = _remote_state_detail(provider, state, auto=auto)
         return result
     except Exception as exc:
+        # SQLite's or a driver's text names files, hosts and statements.
+        from kazma_core.errors import described_error
+
         ms = (time.perf_counter() - t0) * 1000
         failover = (c.get("failover") or {}).get("on_remote_error", "local")
         return {
             "ok": False,
-            "error": str(exc)[:300],
+            "error": described_error("the vector store did not answer the test", exc,
+                                     level=logging.WARNING),
             "latency_ms": round(ms, 1),
             "failover": failover,
         }

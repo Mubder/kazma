@@ -375,7 +375,10 @@ def register_misc_routes(self: Any) -> None:
         try:
             ids = clean_ids((body or {}).get("ids") if isinstance(body, dict) else None)
         except ValueError as exc:
-            return _JSONResponse({"ok": False, "error": str(exc), "code": "invalid_ids"}, status_code=400)
+            from kazma_core.errors import validation_error
+
+            return _JSONResponse({"ok": False, "error": validation_error(exc), "code": "invalid_ids"},
+                                 status_code=400)
         marked = await asyncio.to_thread(mark_read, ids)
         return {"ok": True, "read": marked}
     @self.app.get("/packages")

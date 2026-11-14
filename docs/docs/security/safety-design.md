@@ -141,6 +141,10 @@ Around the fence:
   address in every line and traceback, whatever wrote it; the update log and
   `kazma doctor` do the same; a web session is named in logs and audit
   records by the start of its hash, never by any part of its sign-in cookie.
+- **Errors say what failed, not what a library said.** An answer names the
+  failure with a code and a reference; the library's or system's own text,
+  which can name files, servers and statements, stays in the log under that
+  reference.
 - **A path from outside is read as text before it is touched.** A network
   or device path (`\\host\share`) is refused before anything resolves it,
   in the tools, the IDE, the Workspace page and the folder settings, so a

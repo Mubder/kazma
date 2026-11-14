@@ -16,6 +16,10 @@ import kazma_ui.i18n  # noqa: F401
 import pytest
 import pytest_asyncio
 
+# The machine's own LOCALAPPDATA, read before any test changes it: the folder
+# ``_isolated_docker_config`` keeps out of sight.
+_MACHINE_LOCALAPPDATA = os.environ.get("LOCALAPPDATA")
+
 
 @pytest.fixture(autouse=True)
 def _isolated_x_publications(tmp_path):
@@ -263,6 +267,21 @@ def _isolated_docker_config(request, tmp_path, monkeypatch):
         return
     monkeypatch.setenv("DOCKER_CONFIG", str(tmp_path / "docker-config"))
     monkeypatch.delenv("DOCKER_CONTEXT", raising=False)
+    # Nor does the machine's own Kazma engine folder (2026-11-14: once this
+    # PC's setup installed Kazma's docker CLI in %LOCALAPPDATA%\Kazma\engine,
+    # every lookup test found it). A test that names its own LOCALAPPDATA
+    # gets that folder, as the product would.
+    from kazma_core import docker_cli
+
+    machine = docker_cli.kazma_engine_dir
+    hidden = tmp_path / "machine-local-appdata" / "Kazma" / "engine"
+
+    def _engine_dir():
+        if os.environ.get("LOCALAPPDATA") == _MACHINE_LOCALAPPDATA:
+            return hidden
+        return machine()
+
+    monkeypatch.setattr(docker_cli, "kazma_engine_dir", _engine_dir)
 
 
 @pytest.fixture(autouse=True)

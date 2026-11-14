@@ -8,6 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
+from kazma_core.errors import validation_error
 from kazma_core.x_api.datasets import DatasetStore
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
@@ -51,8 +52,13 @@ def _call(action: Any) -> JSONResponse:
         return JSONResponse({"ok": True, "dataset": action()})
     except KeyError:
         return JSONResponse({"ok": False, "error": "Dataset not found."}, status_code=404)
-    except (ValueError, TypeError) as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=409 if "another editor" in str(exc) else 422)
+    except ValueError as exc:  # the dataset store's own refusals
+        message = validation_error(exc)
+        return JSONResponse({"ok": False, "error": message}, status_code=409 if "another editor" in message else 422)
+    except TypeError:
+        # Python's words about a value of the wrong shape, not the store's.
+        logger.warning("X dataset request had a value of the wrong type", exc_info=True)
+        return JSONResponse({"ok": False, "error": "A value in the request has the wrong type."}, status_code=422)
     except (sqlite3.Error, OSError, RuntimeError):
         logger.exception("X dataset request failed")
         return JSONResponse({"ok": False, "error": "Dataset request failed. Check the server log."}, status_code=500)

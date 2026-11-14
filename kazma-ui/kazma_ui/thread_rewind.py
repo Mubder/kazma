@@ -146,7 +146,10 @@ async def _load(recorder: Any, thread_id: str, snapshot_id: str) -> Any:
     try:
         record = await asyncio.to_thread(recorder.get, snapshot_id, thread_id=thread_id)
     except SnapshotStoreError as exc:
-        raise RewindRefused("store_unavailable", str(exc), status=503) from exc
+        # Its text carries SQLite's: logged, never sent (the pages word the code).
+        logger.warning("[time-travel] snapshot store unavailable: %s", exc)
+        raise RewindRefused("store_unavailable", "The Time Travel store could not be read.",
+                            status=503) from exc
     if record is None:
         raise RewindRefused("not_found", "No such step of this chat.", status=404)
     if record.truncated:

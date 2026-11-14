@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from kazma_core.agent.pipeline_schema import PipelineDAG, PipelineNode
+from kazma_core.errors import validation_error
 from kazma_core.swarm.registry import get_worker_registry
 
 logger = logging.getLogger(__name__)
@@ -79,7 +80,7 @@ def create_pipeline_router() -> APIRouter:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 content={
                     "valid": False,
-                    "errors": [str(exc)],
+                    "errors": [validation_error(exc)],
                 },
             )
 

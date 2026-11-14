@@ -123,6 +123,7 @@ function makeEnv(opts) {
     kazmaGetJson: async () => null,
     kazmaConfirm: async () => false,
     kazmaSave: async () => ({}),
+    kazmaRandomId: () => globalThis.crypto.randomUUID(),
     showToast() {},
     KazmaFormat: { relative: () => "", date: () => "", pluralCategory: () => "other" },
     KazmaUtils: { escapeHtml: (x) => String(x) },
@@ -141,6 +142,7 @@ function makeEnv(opts) {
     localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     navigator: { userAgent: "node", language: "en" },
+    crypto: globalThis.crypto,
     location: window.location,
     fetch: (url) => {
       fetched.push(String(url));

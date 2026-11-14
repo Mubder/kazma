@@ -429,7 +429,7 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
             # A prompt missing or too long is the request's fault (422); a
             # cap reached is the install's state (409). FA-241.
             status = 422 if exc.code in ("prompt_required", "prompt_too_long") else 409
-            return JSONResponse({"ok": False, "code": exc.code, "error": str(exc)}, status_code=status)
+            return JSONResponse({"ok": False, "code": exc.code, "error": validation_error(exc)}, status_code=status)
         except ValueError as exc:
             return JSONResponse({"ok": False, "code": "invalid", "error": validation_error(exc)}, status_code=400)
         except Exception as exc:  # noqa: BLE001
@@ -461,7 +461,7 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
         try:
             booking = booking_for(recipe_id, at=body.at, topic=body.topic, language=current_language())
         except RecipeError as exc:
-            return JSONResponse({"ok": False, "code": "invalid", "error": str(exc)}, status_code=422)
+            return JSONResponse({"ok": False, "code": "invalid", "error": validation_error(exc)}, status_code=422)
         return await _book(request, **booking)
 
     @protected.put("/api/scheduled/cron/{job_id}", dependencies=mutating)

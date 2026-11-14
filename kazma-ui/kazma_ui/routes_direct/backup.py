@@ -71,7 +71,8 @@ def register_backup_routes(self: Any) -> None:
                 await asyncio.to_thread(perform_universal_backup, trigger="manual")
             except Exception as exc:
                 from kazma_core.backup.universal import _set_progress
-                _set_progress("error", detail=safe_error(exc), error=str(exc)[:300])
+                info = safe_error(exc)  # the backup status poll shows both
+                _set_progress("error", detail=info, error=info)
 
         # Named for what it runs: it was "memory-maintenance", which a stall
         # dump or a task list then blamed on memory (audit 2026-10-26 AUD-082).

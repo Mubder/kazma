@@ -70,4 +70,5 @@ async def abort_turn(thread_id: str, graph_inst: Any, *, session_id: str = "") -
         return {"ok": True, "cancelled": cancelled}
     except Exception as exc:  # noqa: BLE001 — never fail the HTTP call
         logger.warning("[SSE] Abort marker write failed thread=%s: %s", thread_id[:12], exc)
-        return {"ok": cancelled, "cancelled": cancelled, "warning": str(exc)}
+        return {"ok": cancelled, "cancelled": cancelled,
+                "warning": "The stop could not be written into the chat's history."}

@@ -17,6 +17,19 @@ __all__ = ["build_memory_health", "mark_recall_degraded", "recall_degraded"]
 
 logger = logging.getLogger(__name__)
 
+
+def _failed(sentence: str, exc: BaseException) -> str:
+    """A component's failed probe, said without the exception's text.
+
+    The Memory and Packages pages show a component's ``detail``; a driver's
+    text names the database host, files and statements. The text is logged
+    under the reference (at WARNING: the pages poll this).
+    """
+    from kazma_core.errors import described_error
+
+    return described_error(sentence, exc, level=logging.WARNING)
+
+
 # ── Recall degradation tracking ──────────────────────────────────────────
 # recall() fails soft (returns []) on DB/embedder failure. Without a signal,
 # a broken embedder feels like amnesia — the operator sees no error unless
@@ -379,7 +392,7 @@ def build_memory_health() -> dict[str, Any]:
                 emb_status = "error"
                 emb_detail = "Embedder encode() returned empty vector."
     except Exception as exc:
-        emb_detail = f"Embedder failed: {exc}"
+        emb_detail = _failed("Embedder failed", exc)
 
     if provider in ("openai-compatible", "openai", "nim", "remote") and not has_key:
         # Remote configured but no key — may still be OK if local fallback worked.
@@ -515,7 +528,7 @@ def build_memory_health() -> dict[str, Any]:
         components.append(_comp(
             "graph_neo4j", "Neo4j dual-write",
             ok=False, status="warn",
-            detail=f"Graph backend probe failed: {exc}",
+            detail=_failed("Graph backend probe failed", exc),
         ))
 
     # Knowledge Library → chat inject (product merge)
@@ -742,7 +755,7 @@ def build_memory_health() -> dict[str, Any]:
                 components[-1] = _comp(
                     "store_config", "ConfigStore",
                     ok=False, status="error",
-                    detail=f"Postgres pool probe failed: {exc}",
+                    detail=_failed("Postgres pool probe failed", exc),
                     meta={"backend": "postgres"},
                 )
         else:
@@ -758,7 +771,7 @@ def build_memory_health() -> dict[str, Any]:
         components.append(_comp(
             "store_config", "ConfigStore",
             ok=False, status="warn",
-            detail=f"Could not resolve DB backend: {exc}",
+            detail=_failed("Could not resolve DB backend", exc),
         ))
 
     # Checkpointer backend is best-effort (module may not expose status)
@@ -831,7 +844,7 @@ def build_memory_health() -> dict[str, Any]:
         components.append(_comp(
             "store_checkpoints", "LangGraph checkpoints",
             ok=False, status="warn",
-            detail=f"Checkpoint probe failed: {exc}",
+            detail=_failed("Checkpoint probe failed", exc),
         ))
 
     # ── Overall rollup ────────────────────────────────────────────────

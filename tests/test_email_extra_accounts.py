@@ -451,7 +451,9 @@ def test_adding_a_password_account_tries_the_login_first(vault, monkeypatch) -> 
 
     class Refused:
         async def list_messages(self, query):
-            raise RuntimeError("AUTHENTICATIONFAILED Invalid credentials")
+            import imaplib  # what IMAP4.login raises for a refused password
+
+            raise imaplib.IMAP4.error("AUTHENTICATIONFAILED Invalid credentials")
 
     body = {"alias": "Side Box", "type": "gmail", "address": "side@gmail.com", "password": "abcd efgh ijkl mnop"}
     c = _client()
@@ -485,6 +487,8 @@ def _failures():
     import socket
     import ssl
 
+    from kazma_skills.native.email_manager.backends.imap_smtp import MailboxRefused
+
     return [
         (socket.gaierror(11001, "getaddrinfo failed"),
          "The mail server imap.example.invalid could not be found. Check its name."),
@@ -492,11 +496,14 @@ def _failures():
          "imap.example.invalid refused the connection"),
         (ssl.SSLError(1, "[SSL: WRONG_VERSION_NUMBER] wrong version number"),
          "The secure connection to imap.example.invalid failed"),
-        (RuntimeError("Cannot select folder INBOX"), "The login did not work: Cannot select folder INBOX"),
+        (MailboxRefused("Cannot select folder INBOX"), "The login did not work: Cannot select folder INBOX"),
+        # Not the mail server's answer: Kazma's or a library's, said with a
+        # code and a reference, its text logged (never "/srv/secret-path").
+        (RuntimeError("cannot open /srv/secret-path/state.db"), "The login could not be tried (internal_error, ref: "),
     ]
 
 
-@pytest.mark.parametrize("raised, says", _failures(), ids=["not-found", "refused", "tls", "other"])
+@pytest.mark.parametrize("raised, says", _failures(), ids=["not-found", "refused", "tls", "folder", "other"])
 def test_a_failed_login_says_what_to_fix(vault, monkeypatch, raised, says) -> None:
     """A mistyped server name came back as "[Errno 11001] getaddrinfo
     failed" on the live install (2026-09-29)."""
@@ -512,6 +519,7 @@ def test_a_failed_login_says_what_to_fix(vault, monkeypatch, raised, says) -> No
         "imap_host": "imap.example.invalid",
     })
     assert r.status_code == 400 and says in r.json()["error"], r.json()
+    assert "/srv/secret-path" not in r.text
     assert "email.account.box.password" not in vault
 
 

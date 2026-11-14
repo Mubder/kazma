@@ -86,10 +86,18 @@ def handle_lsp(
     try:
         resolved = _resolve(path)
     except ValueError as exc:
-        return {"ok": False, "error": str(exc)}
+        # IdeService.resolve's own refusal ("Path traversal outside
+        # workspace: x"): the caller's answer.
+        from kazma_core.errors import validation_error
+
+        return {"ok": False, "error": validation_error(exc)}
     except Exception as exc:
-        logger.debug("[ide.lsp] resolve failed", exc_info=True)
-        return {"ok": False, "error": str(exc)}
+        # Anything else is the workspace store's or the OS's, whose text
+        # names absolute paths: a code and a reference, the text logged.
+        from kazma_core.errors import described_error
+
+        return {"ok": False, "error": described_error("The file could not be opened", exc,
+                                                      level=logging.WARNING)}
 
     buf = _buffer(resolved, content)
     line = max(0, int(line or 0))

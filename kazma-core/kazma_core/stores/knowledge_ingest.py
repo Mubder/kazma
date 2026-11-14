@@ -1455,6 +1455,7 @@ async def ingest_url(
     refused URL as its seed). A URL that is not http(s), or a store at its
     quota, is refused before anything is fetched.
     """
+    from kazma_core.errors import validation_error
     from kazma_core.stores.knowledge import (
         KnowledgeStorageFull,
         KnowledgeUrlRefused,
@@ -1487,7 +1488,16 @@ async def ingest_url(
 
         await validate_public_url(url, validator=validate_url)
     except Exception as exc:
-        result.errors.append(f"SSRF/invalid URL {url}: {exc}")
+        # The address check's own refusals (SSRFError, a ValueError, and the
+        # resolver's AcquisitionError) are Kazma's words and say what to
+        # fix. Anything else is a library's, whose text the page never
+        # shows: its type, the text logged.
+        if isinstance(exc, (ValueError, AcquisitionError)):
+            why = validation_error(exc)
+        else:
+            logger.warning("[kb_ingest] could not check %s: %s", url, exc)
+            why = f"the address could not be checked ({type(exc).__name__})"
+        result.errors.append(f"SSRF/invalid URL {url}: {why}")
         result.failed_urls.append(url)
         result.pages_failed = 1
         result.refused = True
@@ -1522,7 +1532,7 @@ async def ingest_url(
     except Exception as exc:
         result.pages_failed = 1
         result.failed_urls.append(url)
-        result.errors.append(f"not stored: {url} — {exc}")
+        result.errors.append(f"not stored: {url} — {_not_stored_reason(exc, url)}")
         return result
     result.pages_fetched = 1
     result.chunks_new += new
@@ -2073,6 +2083,24 @@ def _page_unchanged(n_chunks: int, new: int, unchanged_chunks: int) -> bool:
     return bool(n_chunks and new == 0 and unchanged_chunks >= n_chunks)
 
 
+def _not_stored_reason(exc: BaseException, url: str) -> str:
+    """Why a fetched page was not stored, said without a library's text.
+
+    A Knowledge refusal (the store at its quota, the library deleted) or an
+    acquisition refusal is Kazma's sentence. Anything else -- SQLite's or the
+    vector store's error, whose text names files and statements -- is its
+    type, logged with the text; the Knowledge page shows the reason.
+    """
+    from kazma_core.errors import validation_error
+    from kazma_core.stores.knowledge import KnowledgeLibraryGone, KnowledgeStorageFull
+
+    if isinstance(exc, (KnowledgeStorageFull, KnowledgeLibraryGone, AcquisitionError)):
+        logger.warning("[kb_ingest] page failed %s: %s", url, exc)
+        return validation_error(exc)
+    logger.warning("[kb_ingest] page failed %s: %s", url, exc, exc_info=exc)
+    return f"the store refused it ({type(exc).__name__}; the server log has the details)"
+
+
 def _stops_the_crawl(exc: BaseException) -> bool:
     """An error of the crawl itself (its journal, its policy, its capacity),
     not of one page: it ends the crawl instead of failing a page."""
@@ -2326,9 +2354,9 @@ async def _ingest_site_impl(
                     raise
                 failed += 1
                 result.failed_urls.append(url)
-                result.errors.append(f"{url}: {exc}")
-                logger.warning("[kb_ingest] page failed %s: %s", url, exc)
-                await call(checkpoint.end_page, url, error=str(exc), reason="other")
+                why = _not_stored_reason(exc, url)
+                result.errors.append(f"{url}: not stored -- {why}")
+                await call(checkpoint.end_page, url, error=f"Not stored: {why}", reason="other")
 
             if delay_ms:
                 await asyncio.sleep(delay_ms / 1000.0)

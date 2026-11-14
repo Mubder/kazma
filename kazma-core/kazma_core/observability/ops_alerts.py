@@ -984,7 +984,8 @@ def send_test_alert(*, timeout_s: float = 45.0) -> dict[str, Any]:
         else:
             asyncio.run(_deliver(text, outcome))
     except RuntimeError as exc:  # the loop closed between the check and the send
-        error = str(exc)[:300]
+        logger.warning("[ops_alerts] test alert could not be sent: %s", exc)
+        error = "the server stopped before it was sent"
 
     sent = list(dict.fromkeys(outcome["sent"]))
     failed = [r for r in dict.fromkeys(outcome["failed"]) if r not in sent]

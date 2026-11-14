@@ -25,6 +25,8 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from kazma_core.errors import validation_error
+
 from kazma_ui.rate_limit import rate_limit
 from kazma_ui.same_origin import verify_same_origin
 
@@ -171,7 +173,7 @@ def create_runs_router() -> APIRouter:
         try:
             wanted = validate_runbooks(body)
         except ValueError as exc:
-            return JSONResponse({"ok": False, "code": "invalid", "error": str(exc)}, status_code=422)
+            return JSONResponse({"ok": False, "code": "invalid", "error": validation_error(exc)}, status_code=422)
 
         def save() -> dict[str, bool]:
             from kazma_core.config_store import get_config_store

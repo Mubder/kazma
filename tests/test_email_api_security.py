@@ -112,15 +112,22 @@ def test_safe_error_sanitizes_in_production(monkeypatch):
     assert "internal_error" in body
 
 
-def test_safe_error_leaks_in_dev(monkeypatch):
-    """In dev mode, the detail is echoed for debugging."""
+def test_safe_error_keeps_the_text_out_without_production_too(monkeypatch):
+    """Without KAZMA_PRODUCTION -- every install but a production one -- the
+    detail echoed ``str(exc)[:300]`` (2026-11-14). The text is in the log
+    under the reference the answer gives; a developer who wants it in the
+    answer sets KAZMA_VERBOSE_ERRORS=1 (kazma_core.errors), redacted."""
     monkeypatch.delenv("KAZMA_PRODUCTION", raising=False)
+    monkeypatch.delenv("KAZMA_VERBOSE_ERRORS", raising=False)
     from kazma_ui.email_api import _safe_error
 
     exc = RuntimeError("connection refused on imap.gmail.com:993")
-    resp = _safe_error(exc)
-    body = _resp_body(resp)
-    assert "connection refused" in body  # helpful in dev
+    body = _resp_body(_safe_error(exc))
+    assert "connection refused" not in body
+    assert "ref: " in body and "internal_error" in body
+
+    monkeypatch.setenv("KAZMA_VERBOSE_ERRORS", "1")
+    assert "connection refused" in _resp_body(_safe_error(exc)), "the developer's opt-in"
 
 
 # ── H6: _request_base never trusts the Host header ────────────────────

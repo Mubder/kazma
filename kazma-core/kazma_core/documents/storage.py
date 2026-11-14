@@ -243,8 +243,11 @@ class ContentAddressedStorage:
                 if target.exists():
                     existing_digest, existing_size = _file_digest(target)
                     if existing_digest != computed or existing_size != total:
+                        # The blob's absolute path is the operator's to find
+                        # (logged); the upload's answer names its digest only.
+                        logger.error("[documents] immutable blob is corrupt: %s", target)
                         raise BlobChecksumError(
-                            f"existing immutable blob is corrupt: {target}"
+                            f"existing immutable blob is corrupt (sha256 {computed[:16]})"
                         )
                     # GC uses mtime as an additional grace-period backstop.
                     # Refresh it when immutable content is deduplicated so a

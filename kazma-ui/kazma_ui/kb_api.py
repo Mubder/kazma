@@ -62,7 +62,7 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from kazma_core.background import spawn_background
-from kazma_core.errors import safe_error
+from kazma_core.errors import safe_error, validation_error
 from kazma_core.playwright_loop import finish_owned
 from kazma_core.web_acquire.result import AcquisitionError, FetchErrorCode
 
@@ -134,7 +134,7 @@ def _acquisition_failure(exc: AcquisitionError) -> JSONResponse:
         code = exc.code.value
         status, level = _ACQUISITION_STATUS.get(code, (409, logging.INFO))
     logger.log(level, "[kb_api] refused (%s): %s", code, exc)
-    return _fail(code, str(exc), status, transient=bool(exc.transient))
+    return _fail(code, validation_error(exc), status, transient=bool(exc.transient))
 
 
 def _capacity_refusal(lib_id: str, exc: Exception) -> JSONResponse:
@@ -144,9 +144,9 @@ def _capacity_refusal(lib_id: str, exc: Exception) -> JSONResponse:
 
     if isinstance(exc, KnowledgeLibraryLimit):
         logger.info("[kb_api] library %s refused: %s", lib_id, exc)
-        return _fail("kb_library_limit", str(exc), 409, limit=exc.ceiling)
+        return _fail("kb_library_limit", validation_error(exc), 409, limit=exc.ceiling)
     logger.warning("[kb_api] work on %s refused: %s", lib_id, exc)
-    return _fail("kb_storage_full", str(exc), 507)
+    return _fail("kb_storage_full", validation_error(exc), 507)
 
 
 class _Body(BaseModel):
@@ -327,9 +327,9 @@ def create_kb_router() -> APIRouter:
         except KnowledgeStorageFull as exc:  # the library ceiling (KB-Q01)
             return _capacity_refusal(lib_id, exc)
         except KnowledgeUrlRefused as exc:
-            return _fail("url_refused", str(exc), 422)
+            return _fail("url_refused", validation_error(exc), 422)
         except ValueError as exc:
-            return _fail("invalid_request", str(exc), 422)
+            return _fail("invalid_request", validation_error(exc), 422)
         except Exception as exc:
             logger.exception("[kb_api] create_library failed")
             return _fail("internal_error", safe_error(exc), 500)
@@ -385,9 +385,9 @@ def create_kb_router() -> APIRouter:
                 return _not_found()
             return {"ok": True, "library": lib}
         except KnowledgeUrlRefused as exc:
-            return _fail("url_refused", str(exc), 422)
+            return _fail("url_refused", validation_error(exc), 422)
         except ValueError as exc:
-            return _fail("invalid_request", str(exc), 422)
+            return _fail("invalid_request", validation_error(exc), 422)
         except Exception as exc:
             logger.exception("[kb_api] update_library failed")
             return _fail("internal_error", safe_error(exc), 500)
@@ -411,10 +411,10 @@ def create_kb_router() -> APIRouter:
             return {"ok": True, **outcome}
         except KnowledgeLibraryBusy as exc:
             logger.info("[kb_api] delete of %s refused: a crawl owns it", library_id)
-            return _fail("crawl_owns_library", str(exc), 409, transient=True, jobs=exc.jobs)
+            return _fail("crawl_owns_library", validation_error(exc), 409, transient=True, jobs=exc.jobs)
         except KnowledgeDocumentsUnavailable as exc:
             logger.warning("[kb_api] delete of %s refused: %s", library_id, exc)
-            return _fail("documents_unavailable", str(exc), 503, transient=True)
+            return _fail("documents_unavailable", validation_error(exc), 503, transient=True)
         except AcquisitionError as exc:
             return _acquisition_failure(exc)
         except Exception as exc:

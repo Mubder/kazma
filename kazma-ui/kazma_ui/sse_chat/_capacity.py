@@ -201,4 +201,6 @@ def _yolo_confirmation(thread_id: str, session_id: str, raw_msg: str) -> str:
             "⚠️ Use only when you fully trust this session."
         )
     except YoloDisabledError as yde:
-        return f"🛡️ {yde}"
+        from kazma_core.errors import validation_error
+
+        return f"🛡️ {validation_error(yde, max_chars=600)}"

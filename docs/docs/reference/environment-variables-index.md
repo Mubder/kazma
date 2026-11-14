@@ -220,7 +220,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_PLAN_MODE` | (none) | `kazma_core.agent.plan_mode` | yes |
 | `KAZMA_PORT` | (none) | `kazma_cli.port_setup`, `kazma_core.server_port` | yes |
 | `KAZMA_PROCESS_PRIORITY` | (none) | `kazma_core.process_priority` | yes |
-| `KAZMA_PRODUCTION` | (none) | `kazma_core.agent.tool_builtins.system`, `kazma_core.documents.config`, `kazma_core.mcp.manager` +11 | yes |
+| `KAZMA_PRODUCTION` | (none) | `kazma_core.agent.tool_builtins.system`, `kazma_core.documents.config`, `kazma_core.mcp.manager` +9 | yes |
 | `KAZMA_PROJECT_ROOT` | (none) | `kazma_core.mcp.server`, `kazma_core.paths` | yes |
 | `KAZMA_PROMPT_CACHE` | (none) | `kazma_core.prompt_cache` | yes |
 | `KAZMA_PROVIDER` | `""` | `kazma_core.model_registry`, `kazma_core.web_acquire.research_pipeline_job`, `kazma_ui.app` | yes |

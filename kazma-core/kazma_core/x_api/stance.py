@@ -67,6 +67,26 @@ __all__ = [
 ]
 
 
+class _InvalidDecision(ValueError):
+    """The classifier's answer broke the decision schema (Kazma's sentence)."""
+
+
+def _classifier_failure(exc: BaseException) -> str:
+    """Why the classifier could not run, in words X Studio may show.
+
+    The reason is stored on the summon and shown on the page. Kazma's own
+    sentences stay; a provider's or a library's text (its endpoint, its
+    answer) is logged by the caller and said here by kind only.
+    """
+    if isinstance(exc, (ClassifierUnavailable, _InvalidDecision)):
+        return str(exc)[:200]
+    if isinstance(exc, json.JSONDecodeError):
+        return "the model's answer was not JSON"
+    status = getattr(exc, "status_code", None) or getattr(exc, "status", None)
+    said = f"HTTP {status}" if isinstance(status, int) and status else type(exc).__name__
+    return f"the model call failed ({said})"
+
+
 class ClassifierUnavailable(Exception):
     """The LLM classifier could not run — which is NOT "no match".
 
@@ -704,21 +724,21 @@ async def _llm_pick(text: str, subjects: tuple[Subject, ...]) -> Subject | None:
                 or any(not isinstance(value, str) for value in answer.values())
                 or answer["state"] not in ("ready", "no_match", "needs_review")
                 or len(answer["reason"]) > 1000 or len(answer["evidence"]) > 500):
-            raise ValueError("Classifier returned an invalid decision schema.")
+            raise _InvalidDecision("Classifier returned an invalid decision schema.")
         selected = next((s for s in specifics if s.id == answer["subject_id"]), None)
         if answer["state"] == "no_match":
             if answer["subject_id"] or answer["evidence"]:
-                raise ValueError("No-match classifier decision contains a subject or evidence.")
+                raise _InvalidDecision("No-match classifier decision contains a subject or evidence.")
             return None
         if not answer["evidence"] or answer["evidence"] not in observed:
-            raise ValueError("Classifier evidence is not an exact passage from the post.")
+            raise _InvalidDecision("Classifier evidence is not an exact passage from the post.")
         if answer["subject_id"] and selected is None:
-            raise ValueError("Classifier returned an undeclared subject.")
+            raise _InvalidDecision("Classifier returned an undeclared subject.")
     except Exception as exc:
         # NOT a no-match. Swallowing this told the operator their subject did
         # not fit a post the classifier never read.
         logger.warning("[x-reply] subject classifier could not run: %s", exc)
-        raise ClassifierUnavailable(str(exc)[:200]) from exc
+        raise ClassifierUnavailable(_classifier_failure(exc)) from exc
 
     from kazma_core.x_api.routing import AmbiguousSubjectError, RoutingDecision, route_subject
 

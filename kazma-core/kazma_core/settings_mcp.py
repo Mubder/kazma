@@ -12,6 +12,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kazma_core.errors import described_error, validation_error
+
 __all__ = ["MCPSettingsService"]
 
 logger = logging.getLogger(__name__)
@@ -110,11 +112,12 @@ class MCPSettingsService:
                 yaml_path=_agent_yaml_path(),
                 replace=True,
             ))
-        except ValueError as exc:
-            return {"error": str(exc)}
+        except ValueError as exc:  # the store's own refusal of the entry
+            return {"error": validation_error(exc)}
         except Exception as exc:
-            logger.warning("[MCPSettings] add failed: %s", exc)
-            return {"error": str(exc)}
+            # The settings store's or the vault's text names files and hosts:
+            # logged under the reference, never sent.
+            return {"error": described_error("The MCP server could not be saved", exc)}
 
     def delete_mcp_server(self, name: str) -> dict[str, Any]:
         """Remove an MCP server.
@@ -141,8 +144,8 @@ class MCPSettingsService:
                 yaml_path=yaml_path,
             )
         except Exception as exc:
-            logger.warning("[MCPSettings] delete failed: %s", exc)
-            return {"status": "error", "error": str(exc)}
+            return {"status": "error",
+                    "error": described_error("The MCP server could not be removed", exc)}
 
         # Verify: the merged view must no longer contain the server.
         try:

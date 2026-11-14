@@ -565,22 +565,39 @@ def _empty_content_reason(resp: Any, provider: Any) -> str:
 
 
 def _draft_error_text(exc: BaseException) -> str:
-    """Operator-facing reason. Names the thing to go fix, not the traceback."""
+    """Operator-facing reason. Names the thing to go fix, not the traceback.
+
+    The reason is stored on the reply and shown in X Studio; the error's own
+    text -- a provider's endpoint and answer, a library's internals -- is
+    logged, never quoted (it named the provider's URL and body).
+    """
     msg = str(exc).strip() or type(exc).__name__
+    if isinstance(exc, DraftFailed):
+        # Kazma's own reason (no provider configured, an empty answer from a
+        # reasoning model): the sentence that says what to change.
+        return msg
     low = msg.lower()
+    logger.warning("[x-reply] draft model call failed: %s: %s", type(exc).__name__, msg[:500])
+    status = getattr(exc, "status_code", None) or getattr(exc, "status", None)
+    said = f"HTTP {status}" if isinstance(status, int) and status else type(exc).__name__
     if "no usable api key" in low or "401" in low:
         return (
-            f"the model provider rejected the credentials ({msg[:160]}). "
+            f"the model provider rejected the credentials ({said}). "
             "Settings → Models: confirm the active provider's key is saved."
         )
     if "not found in any configured provider" in low or "unknown model" in low:
         return (
-            f"the configured model is not available ({msg[:160]}). "
+            f"the configured model is not available ({said}). "
             "Settings → Models: pick a model the active provider actually serves."
         )
     if "timeout" in low or "timed out" in low:
-        return f"the model call timed out ({msg[:160]})."
-    return f"the model call failed: {msg[:200]}"
+        return f"the model call timed out ({said})."
+    if isinstance(exc, ConnectionError) or "connect" in low:
+        return (
+            f"the model server could not be reached ({said}). "
+            "Check that the server is running, or Settings → Models: the provider's address."
+        )
+    return f"the model call failed ({said}); the server log has the details."
 
 
 @dataclass(frozen=True)

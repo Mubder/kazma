@@ -13,7 +13,7 @@ from contextlib import closing
 from typing import Any
 
 from fastapi import Request
-from kazma_core.errors import safe_error
+from kazma_core.errors import described_error, safe_error
 
 logger = logging.getLogger(__name__)
 
@@ -183,10 +183,10 @@ def register_system_routes(self: Any) -> None:
             elif live in ("DEMO", "DEGRADED", "ACTIVE"):
                 status = live
         except Exception as _e:
-            logger.warning("memory health probe failed: %s", _e)
             health = {
                 "components": [],
-                "issues": [str(_e)],
+                "issues": [described_error("The memory health probe failed", _e,
+                                           level=logging.WARNING)],
                 "summary": "health probe failed",
             }
 
@@ -768,7 +768,8 @@ def register_system_routes(self: Any) -> None:
                 "issues": (mh.get("issues") or [])[:6],
             }
         except Exception as exc:
-            memory_summary["summary"] = f"health probe failed: {exc}"
+            memory_summary["summary"] = described_error("The memory health probe failed", exc,
+                                                        level=logging.WARNING)
 
         # Count total installed (from distributions, not just our deps)
         total_installed = len(all_dists)
@@ -892,7 +893,7 @@ def register_system_routes(self: Any) -> None:
                     conn.close()
                     details[label] = "VACUUM + ANALYZE ok"
                 except Exception as exc:
-                    details[label] = f"failed: {exc}"
+                    details[label] = described_error(f"{label} database maintenance failed", exc)
                 finally:
                     try:
                         conn.close()
