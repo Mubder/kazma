@@ -83,6 +83,18 @@ def _user_and_answer_texts(messages: list[dict[str, Any]]) -> list[str]:
     return [str(m.get("content") or "") for m in messages if str(m.get("role") or "") in ("user", "assistant")]
 
 
+def _call_that_answered(seen: list[list[dict[str, Any]]], question: str) -> list[dict[str, Any]]:
+    """The model call that answered *question*: the newest whose last user
+    message is the question itself. Never the newest call: the turn's memory
+    pass runs after the turn and calls the model too ("User: ... /
+    Assistant: ..."), and on CI (2026-11-14) it landed last."""
+    for messages in reversed(seen):
+        users = [m for m in messages if str(m.get("role") or "") == "user"]
+        if users and str(users[-1].get("content") or "").strip() == question:
+            return messages
+    raise AssertionError(f"no model call answered {question!r}: {[_user_and_answer_texts(m) for m in seen]}")
+
+
 def test_the_page_restores_a_chat_reached_by_the_sidebar_in_english_and_arabic():
     from playwright.sync_api import sync_playwright
 
@@ -149,7 +161,7 @@ def test_the_page_restores_a_chat_reached_by_the_sidebar_in_english_and_arabic()
             # The next question reaches the model without the rewound turn.
             third = drive_turn(h, "third question about water", [], session_id=sid)
             assert third.finished
-            sent = _user_and_answer_texts(script.seen[-1])
+            sent = _user_and_answer_texts(_call_that_answered(script.seen, "third question about water"))
             assert any("tea" in s for s in sent), sent
             assert not any("coffee" in s for s in sent), f"the rewound turn reached the model: {sent}"
 
