@@ -203,6 +203,9 @@ class ImageState:
     #: The named volumes the container mounts (its data), for an uninstall
     #: that removes them (``kazma uninstall --remove-data``).
     volumes: tuple[str, ...] = ()
+    #: The id of the image the container was created from: the one an update
+    #: removes once the recreated container runs another (``refresh_images``).
+    image_id: str = ""
 
 
 def _image_state(svc: ContainerService, root: Path, docker: str, *, run=None) -> ImageState:
@@ -242,7 +245,35 @@ def _image_state(svc: ContainerService, root: Path, docker: str, *, run=None) ->
     volumes = tuple(str(m.get("Name")) for m in (row.get("Mounts") or [])
                     if isinstance(m, dict) and m.get("Type") == "volume" and m.get("Name"))
     return ImageState(svc, "current" if running == pinned else "stale", running=running, pinned=pinned,
-                      volumes=volumes)
+                      volumes=volumes, image_id=str(row.get("Image") or ""))
+
+
+def _remove_replaced_image(state: ImageState, docker: str, *, run) -> str:
+    """Remove the image *state*'s container ran before compose recreated it;
+    "" when it is gone (or there was none), else docker's reason for keeping
+    it. Never forced: an image another container still uses, or that another
+    repository's tag names, stays. Nothing is removed when the recreated
+    container runs the same image (only the reference changed)."""
+    import subprocess
+
+    if not state.image_id:
+        return ""
+    try:
+        now = run([docker, "inspect", "--format", "{{.Image}}", state.svc.container], capture_output=True,
+                  text=True, timeout=60, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if now.returncode != 0 or (now.stdout or "").strip() == state.image_id:
+        return ""
+    try:
+        done = run([docker, "image", "rm", state.image_id], capture_output=True, text=True, timeout=120,
+                   stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return str(exc)[:200]
+    text = (done.stderr or done.stdout or "").strip()
+    if done.returncode == 0 or "no such image" in text.lower():
+        return ""
+    return (text.splitlines() or ["refused"])[-1][:200]
 
 
 def refresh_images(root: Path, env_path: Path, docker: str, *, run=None) -> list[tuple[ImageState, str]]:
@@ -251,7 +282,10 @@ def refresh_images(root: Path, env_path: Path, docker: str, *, run=None) -> list
     Outcomes: ``current``, ``absent``, ``not_ours``, ``unknown``, ``updated``,
     ``needs_setup: <secrets> (<command>)`` or ``failed: <docker's last line>``.
     Compose recreates a container whose image changed and keeps its volumes;
-    nothing else is touched.
+    the image the container ran before is then removed (``updated``), or kept
+    and said (``updated; old image kept: <why>``), never anything else: each
+    update left the old version behind, about 3.9 GB of them on the live
+    engine by 2026-11-14 (:func:`_remove_replaced_image`).
 
     A container whose secret ``.env`` does not hold is left as it is: an
     update never writes a secret (setup generates it, before it starts the
@@ -280,7 +314,8 @@ def refresh_images(root: Path, env_path: Path, docker: str, *, run=None) -> list
             outcomes.append((state, f"failed: {exc}"))
             continue
         if done.returncode == 0:
-            outcomes.append((state, "updated"))
+            kept = _remove_replaced_image(state, docker, run=run)
+            outcomes.append((state, f"updated; old image kept: {kept}" if kept else "updated"))
         else:
             last = ((done.stderr or done.stdout or "").strip().splitlines() or ["no output"])[-1]
             outcomes.append((state, f"failed: {last[:300]}"))

@@ -202,13 +202,27 @@ def _install(tmp_path: Path, name: str = "kazma") -> Path:
 class _Docker:
     """docker inspect / compose up, answering from *containers*."""
 
-    def __init__(self, containers: dict[str, dict]) -> None:
+    def __init__(self, containers: dict[str, dict], *, recreated_on: str = "sha256:new",
+                 rm_refuses: str = "") -> None:
         self.containers = containers
         self.ups: list[list[str]] = []
+        self.recreated_on = recreated_on  # the image id compose up leaves the container on
+        self.rm_refuses = rm_refuses      # docker's refusal of an image rm, or ""
+        self.removed: list[str] = []
 
     def __call__(self, argv, **kwargs):
         argv = list(argv)
         assert kwargs.get("stdin") is subprocess.DEVNULL
+        if argv[1] == "inspect" and argv[2] == "--format":
+            row = self.containers.get(argv[4])
+            if row is None:
+                return subprocess.CompletedProcess(argv, 1, stdout="", stderr=f"Error: No such object: {argv[4]}")
+            return subprocess.CompletedProcess(argv, 0, stdout=str(row.get("Image", "")) + "\n", stderr="")
+        if argv[1:3] == ["image", "rm"]:
+            if self.rm_refuses:
+                return subprocess.CompletedProcess(argv, 1, stdout="", stderr=self.rm_refuses)
+            self.removed.append(argv[3])
+            return subprocess.CompletedProcess(argv, 0, stdout=f"Deleted: {argv[3]}\n", stderr="")
         if argv[1] == "inspect":
             row = self.containers.get(argv[2])
             if row is None:
@@ -216,12 +230,14 @@ class _Docker:
             return subprocess.CompletedProcess(argv, 0, stdout=json.dumps([row]), stderr="")
         if argv[1] == "compose" and "up" in argv:
             self.ups.append(argv)
+            for row in self.containers.values():
+                row["Image"] = self.recreated_on
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
         raise AssertionError(argv)
 
 
-def _container(image: str, project: str, service: str, files: Path) -> dict:
-    return {"Config": {"Image": image, "Labels": {
+def _container(image: str, project: str, service: str, files: Path, image_id: str = "sha256:old") -> dict:
+    return {"Image": image_id, "Config": {"Image": image, "Labels": {
         "com.docker.compose.project": project, "com.docker.compose.service": service,
         "com.docker.compose.project.config_files": str(files)}}}
 
@@ -337,3 +353,54 @@ def test_the_shipped_compose_files_pin_what_the_table_names():
     for svc in cs.SERVICES:
         image = cs._pinned_image(svc, root)
         assert image and "@sha256:" in image, svc.title
+
+
+# ── the image an update replaces is removed (2026-11-14) ──────────────────
+# Each update left the old version of a service image on the engine: about
+# 3.9 GB on the live engine. Exactly the image the recreated container ran
+# before is removed, never forced.
+
+
+def _stale_searxng(root: Path) -> dict:
+    return {"kazma-searxng": _container("docker.io/searxng/searxng:latest", "kazma", "searxng",
+                                        root / "docker-compose.yml")}
+
+
+def test_the_image_a_recreated_container_left_is_removed(tmp_path):
+    root = _with_secrets(_install(tmp_path))
+    docker = _Docker(_stale_searxng(root))
+    outcomes = {s.svc.title: o for s, o in cs.refresh_images(root, root / ".env", "docker", run=docker)}
+    assert outcomes["SearXNG"] == "updated" and docker.removed == ["sha256:old"]
+
+
+def test_an_old_image_docker_refuses_to_remove_is_kept_and_said(tmp_path):
+    root = _with_secrets(_install(tmp_path))
+    docker = _Docker(_stale_searxng(root), rm_refuses="Error response from daemon: conflict: unable to delete "
+                     "sha256:old (must be forced) - image is being used by stopped container 1a2b3c")
+    outcomes = {s.svc.title: o for s, o in cs.refresh_images(root, root / ".env", "docker", run=docker)}
+    assert outcomes["SearXNG"].startswith("updated; old image kept: ") and "being used" in outcomes["SearXNG"]
+    assert docker.removed == []
+
+
+def test_a_recreate_on_the_same_image_removes_nothing(tmp_path):
+    """Only the reference changed (a tag pinned to its digest): the container
+    still runs the image it ran; nothing is removed."""
+    root = _with_secrets(_install(tmp_path))
+    docker = _Docker(_stale_searxng(root), recreated_on="sha256:old")
+    outcomes = {s.svc.title: o for s, o in cs.refresh_images(root, root / ".env", "docker", run=docker)}
+    assert outcomes["SearXNG"] == "updated" and docker.removed == []
+
+
+def test_control_without_the_removal_the_old_image_stays(tmp_path, monkeypatch):
+    root = _with_secrets(_install(tmp_path))
+    docker = _Docker(_stale_searxng(root))
+    monkeypatch.setattr(cs, "_remove_replaced_image", lambda state, docker, run: "")
+    cs.refresh_images(root, root / ".env", "docker", run=docker)
+    assert docker.removed == []
+
+
+def test_the_update_says_a_kept_old_image():
+    from kazma_cli import update
+
+    source = Path(update.__file__).read_text(encoding="utf-8")
+    assert 'outcome.startswith("updated; old image kept:")' in source

@@ -2,6 +2,10 @@
 
 ## Less left behind on disk (2026-11-14)
 
+- `kazma update` removes the old image of each service it moves to a newer
+  pinned image (SearXNG, Neo4j): exactly the image the container ran before,
+  never one another container still uses. Every update used to leave the old
+  version behind.
 - The programs Kazma starts with a minimal environment (the browser, the
   page parser, the search and DNS workers, the document workers and broker,
   the shell tool, the local code runner) keep Windows' `SystemDrive`. Without

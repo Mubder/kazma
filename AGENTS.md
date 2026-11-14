@@ -9809,6 +9809,11 @@ no Python update ever arrived.
   an update writes no secret, and recreated, SearXNG took the shipped
   placeholder key -- live 2026-11-14, on an install set up before setup
   generated it; the update names `kazma setup install --with <part>`).
+  After a recreate it removes the image the container ran before
+  (`container_services._remove_replaced_image`: exactly that image, by id,
+  never forced, nothing when the container still runs it; a refusal is said
+  as `updated; old image kept: <why>`): every update left the old version,
+  about 4.8 GB on the live engine by 2026-11-14.
   Gates: `tests/test_update_repairs_a_broken_environment.py`,
   `tests/test_update_brings_chromium_and_images.py` (the old check, the old
   any-build rule and the project-only rule as controls). A pause also stops a server that is still booting, and wakes the

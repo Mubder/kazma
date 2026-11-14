@@ -2135,7 +2135,12 @@ def _refresh_container_images() -> bool:
     for line in (probe.stdout or "").splitlines():
         title, _, outcome = line.partition("\t")
         if outcome == "updated":
-            console.print(f"[green]{title} now runs the image its compose file pins.[/green]")
+            console.print(f"[green]{title} now runs the image its compose file pins; its old image "
+                          "is removed.[/green]")
+        elif outcome.startswith("updated; old image kept:"):
+            console.print(f"[green]{title} now runs the image its compose file pins.[/green] "
+                          f"[yellow]Its old image was kept: {outcome.split(':', 1)[1].strip()}[/yellow]",
+                          soft_wrap=True)
         elif outcome.startswith("failed"):
             ok = False
             console.print(f"[yellow]{title} could not be moved to its pinned image: {outcome[7:].strip()}[/yellow]")
