@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+from kazma_core.english_count import count_noun
 from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
@@ -171,7 +172,8 @@ class WhatsAppClient:
             raise WhatsAppError(0, None, "Meta gave no download address for this file")
         size = int(info.get("file_size") or 0)
         if size and size > max_bytes:
-            raise WhatsAppError(0, None, f"the file is {size} bytes, more than Kazma reads ({max_bytes})")
+            raise WhatsAppError(0, None, f"the file is {count_noun(size, 'byte')}, more than Kazma reads "
+                                         f"({count_noun(max_bytes, 'byte')})")
         async with self._client().stream("GET", url, headers=self._auth()) as resp:
             if resp.status_code >= 400:
                 raise WhatsAppError(resp.status_code, None, "the file could not be downloaded")
@@ -180,7 +182,7 @@ class WhatsAppClient:
             async for chunk in resp.aiter_bytes():
                 total += len(chunk)
                 if total > max_bytes:
-                    raise WhatsAppError(0, None, f"the file is more than Kazma reads ({max_bytes} bytes)")
+                    raise WhatsAppError(0, None, f"the file is more than Kazma reads ({count_noun(max_bytes, 'byte')})")
                 chunks.append(chunk)
         return b"".join(chunks), str(info.get("mime_type") or "")
 

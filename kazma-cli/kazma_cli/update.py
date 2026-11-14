@@ -709,8 +709,8 @@ def do_pip_update(
             if locked is not None:
                 console.print("[cyan]Installing the versions this release was tested with (its uv.lock).[/cyan]")
             else:
-                console.print(f"[yellow]v{release.version} carries no locked versions: installing the newest "
-                              "versions its requirements allow.[/yellow]")
+                console.print(f"[yellow]Release v{release.version}: no locked versions inside it, so the newest "
+                              "versions its requirements allow are installed.[/yellow]")
             spec = str(wheel)
             if extras:
                 spec += f"[{','.join(extras)}]"

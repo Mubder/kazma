@@ -307,6 +307,34 @@ kazma maintenance begin --reason "Windows updates"
 kazma maintenance end
 ```
 
+### 2.16 `kazma uninstall` {#kazma-uninstall}
+
+Takes Kazma off this computer. It shows the plan first and does nothing until
+you type `uninstall` (or pass `-y`).
+
+| Option | What it does |
+|---|---|
+| (none) | Stops Kazma through its guard, removes the service that starts it at boot, ClamAV's daily signature task setup made, the containers setup made (their data kept), Kazma's own container engine (refused while another project's containers live in it) and Kazma's Python environment. Your data and Kazma's home are **kept**. |
+| `--remove-data` | Also moves the data folder (memory, chats, settings, the vault, backups), Kazma's home and the containers' data aside, to `Kazma-uninstalled-<date>` in your home folder. Nothing is deleted. |
+| `--remove-data --purge` | Deletes them for good instead (you type `delete` to confirm). |
+| `--dry-run` | Shows the plan and changes nothing. |
+
+Always kept, and named with the command that removes each: PostgreSQL (it may
+hold Kazma's database, and other programs may use it), the programs setup
+installed (Tesseract, LibreOffice, ClamAV, Node.js, the Visual C++ runtime),
+the fonts installed for all users, and the source folder of a git install.
+
+The service's name is the same for every Kazma on a computer. When it starts
+another install (another folder), it is left alone, and so are the pieces the
+computer shares (ClamAV's task, Kazma's container engine). Steps that need an
+administrator on Windows are refused, and named, in a terminal that is not one.
+
+```bash
+kazma uninstall --dry-run
+kazma uninstall
+kazma uninstall --remove-data
+```
+
 ---
 
 ## 3. `kazma completion`

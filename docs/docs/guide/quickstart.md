@@ -475,6 +475,7 @@ Restart the server. The Telegram adapter polls via long-polling (or a webhook at
 | Run a multi-worker swarm | [Swarm Orchestration](swarm-orchestration) |
 | Lock down a production deploy | [Security & Safety](security-and-safety) + [Deployment](deployment) |
 | Use Kazma in Arabic | [Arabic & Cultural Features](arabic-cultural-features) |
+| Take Kazma off this computer | [`kazma uninstall`](cli-reference#kazma-uninstall) |
 
 ---
 

@@ -4625,6 +4625,25 @@ administrator terminal, Custom kept on a re-run; every extra covered with a
 planted one as the control; Express never fails for want of Docker; the
 quickstart's table equal to `COMPONENTS`).
 
+**`kazma uninstall` takes off what setup put on, and keeps data unless
+asked** (2026-11-14, REMAINING 2.5; `kazma_cli/uninstall.py`). One plan
+(`build_plan`), shown and accepted before anything runs: Kazma stopped through
+its guard; the service (`install_service.py --uninstall`, the `KazmaAgent`
+task ended first); `KazmaFreshclam` / the macOS signature job; the containers
+setup made (`container_services._image_state` says which: never another's,
+volumes only with `--remove-data`); Kazma's engine
+(`container_engine_setup.remove`, with its own refusal); `.venv` (Windows:
+deleted by a detached `cmd` once Python has exited). Data and Kazma's home are
+kept; `--remove-data` MOVES them to `<home>/Kazma-uninstalled-<date>`, and only
+`--purge` deletes (typed `delete`). PostgreSQL, system programs, fonts, uv and
+the source folder are kept and named with their removal commands. **A service
+that starts another folder is never taken** (`_service_folder`: the task XML's
+`WorkingDirectory`, the systemd unit's or plist's guard path), nor the pieces
+the computer shares while it exists: live 2026-11-14 a dry run from the dev
+checkout planned to end and delete the live install's `KazmaAgent`. Gate:
+`tests/test_uninstall.py` (that witness, admin refusals, nothing before the
+plan is accepted, data moved not deleted).
+
 **The setup scripts pass install options through, and CI installs from
 scratch** (2026-11-14, REMAINING 2.2): `./setup.sh ... -- <options>` and
 `setup.cmd ... -InstallOptions "<options>"` (split at spaces: `-File` hands

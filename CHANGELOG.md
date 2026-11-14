@@ -2,6 +2,13 @@
 
 ## Updates install the versions Kazma was tested with (2026-11-14)
 
+- `kazma uninstall` takes Kazma off a computer: it stops Kazma, removes its
+  service, its scheduled tasks, the containers setup made, Kazma's container
+  engine and its Python environment, and keeps your data unless you ask
+  (`--remove-data` moves it aside; only `--purge` deletes it). It shows the
+  plan first, and never touches another Kazma install's service on the same
+  computer.
+
 - CI now installs Kazma from scratch on clean Linux and Windows machines on
   every push, with the same setup scripts a person runs, and checks that
   every part is in place and Kazma answers. The setup scripts pass options

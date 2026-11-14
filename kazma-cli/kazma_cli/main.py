@@ -135,6 +135,11 @@ def main() -> None:
 
         sys.exit(_run_maintenance(sys.argv[2:]))
 
+    elif cmd == "uninstall":
+        from kazma_cli.uninstall import main as _run_uninstall
+
+        sys.exit(_run_uninstall(sys.argv[2:]))
+
     elif cmd == "serve":
         from kazma_core.server_port import server_port
 
@@ -186,7 +191,7 @@ def main() -> None:
         print("  doctor     Check provider/model resolution (which model, where, will it work)")
         print("  acquisition  Inspect cached crawler errors, usage and credits")
         print("  observer   Pair with the outside observer (pair, status, unpair)")
-        print("  setup      Set up what Kazma runs on (setup postgres: PostgreSQL 16 as an OS service)")
+        print("  setup      Set up what Kazma runs on (setup postgres: PostgreSQL as an OS service)")
         print("  restore    Restore the database to a point in time (restore postgres --to TIME)")
         print("  maintenance  An update window: begin (pause the guard when idle), end (resume and check)")
         print("  serve      Start the WebUI server (on KAZMA_PORT; kazma setup port shows it)")
@@ -199,6 +204,7 @@ def main() -> None:
         print("  gateway    Gateway control (status, start, stop, restart, refresh)")
         print("  swarm      Swarm orchestration (workers, dispatch, metrics, ...)")
         print("  update     Check for and install Kazma CLI updates")
+        print("  uninstall  Take Kazma off this computer (keeps your data unless --remove-data)")
         print("  migrate    Export/import a Kazma installation (cross-machine migration)")
         print("  ask        Run the agent on a prompt (no web server)")
         print("  acp        Agent Client Protocol JSON-RPC on stdio (Zed / JetBrains)")
