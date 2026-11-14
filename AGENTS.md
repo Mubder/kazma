@@ -2486,6 +2486,18 @@ not fire while HITL is off unless the operator set
 §45). Gate: `tests/test_cron_capabilities.py` (the old builder's whole
 registry as the negative control).
 
+**A3. Ready-made automations** (2026-11-14, REMAINING 4.3,
+`cron/recipes.py`): a recipe is an ordinary `task` with `capabilities="read"`
+(days fixed, time chosen, the page's language), booked by the Scheduled page's
+own path (`scheduled_api` `_book`, which the page's form uses too: delivery
+address, zone, outbox, approval card all apply). The `read` set includes the
+`safe` tier (email reading: `side_effects` and the MCP server already count
+it as read), never `email_send`/`email_delete`/`email_categorize`. Gates:
+`tests/test_automation_recipes.py` (the real scheduler; every recipe a card
+and words), `tests/test_cron_capabilities.py`
+(`test_a_read_task_reads_email_and_never_sends_it`, the old read set as the
+control), `tests/e2e/test_automation_gallery_browser.py`.
+
 **B. `delivery_target` is captured at schedule time, not resolved at fire time.**
 `schedule_task` reads `get_current_delivery_target()` (the
 `_current_delivery_target` ContextVar, bound at the gateway handler entry

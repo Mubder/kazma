@@ -65,10 +65,11 @@ def test_the_fire_is_offered_exactly_its_declared_tools(capabilities):
     offered = _names(kwargs["tool_definitions"])
     declared = _declared_tool_names(list(registry.get_tool_definitions()), capabilities)
     assert offered == declared and offered
-    tiers = {"read"} if capabilities == "read" else {"read", "write"}
+    tiers = {"read", "safe"} if capabilities == "read" else {"read", "safe", "write"}
     assert all(get_tool_tier(n) in tiers for n in offered)
     assert not set(offered) & set(ALWAYS_HITL_TOOLS)
     assert not {"schedule_task", "send_message", "shell_exec", "file_write"} & set(offered)
+    assert not {"email_send", "email_delete", "email_categorize"} & set(offered)
     if capabilities == "read":
         assert not {"dispatch_swarm", "spawn_agent", "memory_store"} & set(offered)
     else:
@@ -280,3 +281,16 @@ async def test_negative_control_without_the_thread_the_resolvers_never_ran(tmp_p
                          request_at=datetime.now(UTC), memory_beliefs=[])  # no thread: the old call
     assert d.decision == "allow"
     await asyncio.sleep(0)
+
+
+def test_a_read_task_reads_email_and_never_sends_it():
+    """The ``safe`` tier reads private data and changes nothing (email): a
+    read task is offered it, so an inbox automation can read the inbox
+    (2026-11-14). Sending, deleting and labelling stay out."""
+    defs = [{"function": {"name": n}} for n in
+            ("email_list", "email_get", "email_send", "email_delete", "email_categorize", "list_events", "file_write")]
+    assert _declared_tool_names(defs, "read") == ["email_get", "email_list", "list_events"]
+    # The negative control: the read set before (read tier alone) left the inbox out.
+    from kazma_core.safety.hitl import get_tool_tier
+
+    assert [n for n in ("email_list", "email_get") if get_tool_tier(n) in {"read"}] == []

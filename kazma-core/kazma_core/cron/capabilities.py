@@ -6,7 +6,10 @@ pipelines, memory writes, skill activation), and with approvals switched off,
 everything. Now each job declares its capability set when it is booked, the
 approval card shows it, and the fire is built with exactly those tools:
 
-* ``read`` (the default): read-tier tools only, plus the one delivery the
+* ``read`` (the default): read-tier tools only -- with the ``safe`` tier,
+  which reads private data and changes nothing (reading email: the tier
+  ``side_effects`` and the MCP server already count as read; 2026-11-14, an
+  inbox automation could not read the inbox) -- plus the one delivery the
   scheduler makes itself.
 * ``read_write``: read- and write-tier tools, declared at booking.
 
@@ -35,7 +38,7 @@ KINDS = ("reminder", "task")
 CAPABILITIES = ("read", "read_write")
 DEFAULT_CAPABILITIES = "read"
 
-_TIERS = {"read": frozenset({"read"}), "read_write": frozenset({"read", "write"})}
+_TIERS = {"read": frozenset({"read", "safe"}), "read_write": frozenset({"read", "safe", "write"})}
 
 
 def normalize_kind(kind: str | None, *, default: str = "reminder") -> str:

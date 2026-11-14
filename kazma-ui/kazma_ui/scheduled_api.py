@@ -126,6 +126,11 @@ class CronEditBody(BaseModel):
     expected_version: int | None = None
 
 
+class _RecipeBody(BaseModel):
+    at: str = Field(default="", max_length=5)
+    topic: str = Field(default="", max_length=200)
+
+
 class _CronRestoreBody(BaseModel):
     timing: str = Field(..., min_length=1, max_length=_TIMING_MAX)
     expected_version: int | None = None
@@ -378,8 +383,8 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
         job.pop("tenant_id", None)
         return JSONResponse({"ok": True, "job": {**job, "actions": _cron_actions(job.get("status", ""))}})
 
-    @protected.post("/api/scheduled/cron", dependencies=mutating)
-    async def create_cron(body: CronCreateBody, request: Request) -> JSONResponse:
+    async def _book(request: Request, *, timing: str, prompt: str, kind: str, capabilities: str) -> JSONResponse:
+        """Book one scheduled job for the page: its own form and a ready-made automation."""
         from kazma_core.cron.scheduler import CronLimitError, get_cron_scheduler
 
         sched = get_cron_scheduler()
@@ -405,13 +410,13 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
             ctx = await asyncio.to_thread(_request_context, request)
             platform = delivery_target.split(":", 1)[0] if ":" in delivery_target else "telegram"
             result = await sched.schedule(
-                timing=body.timing.strip(),
-                prompt=body.prompt.strip(),
+                timing=timing,
+                prompt=prompt,
                 platform=platform,
                 thread_id="",
                 delivery_target=delivery_target,
-                kind=body.kind,
-                capabilities=body.capabilities,
+                kind=kind,
+                capabilities=capabilities,
                 tenant_id=ctx["tenant"] or "default",
                 actor=ctx["actor"],
                 source="web",
@@ -430,6 +435,34 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
         except Exception as exc:  # noqa: BLE001
             logger.exception("[scheduled] cron create failed")
             return JSONResponse({"ok": False, "error": safe_error(exc), "code": "internal_error"}, status_code=500)
+
+    @protected.post("/api/scheduled/cron", dependencies=mutating)
+    async def create_cron(body: CronCreateBody, request: Request) -> JSONResponse:
+        return await _book(request, timing=body.timing.strip(), prompt=body.prompt.strip(), kind=body.kind,
+                           capabilities=body.capabilities)
+
+    # ── Ready-made automations (REMAINING 4.3, kazma_core/cron/recipes.py) ──
+
+    @protected.get("/api/scheduled/recipes")
+    def list_recipes() -> dict[str, Any]:
+        from kazma_core.cron.recipes import recipe_list
+
+        return {"ok": True, "recipes": recipe_list()}
+
+    @protected.post("/api/scheduled/recipes/{recipe_id}", dependencies=mutating)
+    async def book_recipe(recipe_id: str, body: _RecipeBody, request: Request) -> JSONResponse:
+        """One click: the recipe's instruction at its days and the chosen time,
+        answered in the page's language, booked like the page's own form."""
+        from kazma_core.cron.recipes import RECIPES, RecipeError, booking_for
+        from kazma_ui.i18n import current_language
+
+        if recipe_id not in {r.id for r in RECIPES}:
+            return JSONResponse({"ok": False, "code": "not_found", "error": "No such automation."}, status_code=404)
+        try:
+            booking = booking_for(recipe_id, at=body.at, topic=body.topic, language=current_language())
+        except RecipeError as exc:
+            return JSONResponse({"ok": False, "code": "invalid", "error": str(exc)}, status_code=422)
+        return await _book(request, **booking)
 
     @protected.put("/api/scheduled/cron/{job_id}", dependencies=mutating)
     async def edit_cron(job_id: str, body: CronEditBody, request: Request) -> JSONResponse:

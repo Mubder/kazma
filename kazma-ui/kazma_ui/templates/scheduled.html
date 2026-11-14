@@ -37,6 +37,13 @@
   .type-badge, .st-badge { white-space: nowrap; }
   .sched-summary .detail { color: var(--text-muted); font-size: .7rem; margin-top: 3px; }
   .sched-banner { margin-bottom: 16px; }
+  /* Ready-made automations (kazma_core/cron/recipes.py): cards that flow. */
+  .sched-recipes { margin-bottom: 1rem; }
+  .sched-recipe-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: .75rem; }
+  .sched-recipe { display: flex; flex-direction: column; gap: 6px; }
+  .sched-recipe p { margin: 0; }
+  .sched-recipe-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: auto; }
+  .sched-recipe-time { width: auto; }
 
   .row-actions { display: flex; gap: 4px; flex-shrink: 0; justify-content: flex-end; }
   .sched-empty { margin: 0 0 .5rem; font-size: .85rem; }
@@ -90,6 +97,40 @@
       <button class="btn btn-secondary btn-sm" @click="refreshAll()">{{ t('scheduled.refresh') }}</button>
       <button class="btn btn-secondary btn-sm" @click="openCreateX()">{{ t('scheduled.new_x') }}</button>
       <button class="btn btn-primary btn-sm" @click="openCreateCron()">{{ t('scheduled.new_task') }}</button>
+    </div>
+  </div>
+
+  {# ── Ready-made automations: one click (REMAINING 4.3) ── #}
+{% macro recipe_card(id, title, what, when, needs_topic=False) %}
+      <div class="card-nested sched-recipe" id="recipe-{{ id }}">
+        <strong>{{ title }}</strong>
+        <p class="form-hint">{{ what }}</p>
+        {% if needs_topic %}
+        <input type="text" class="form-input" id="recipe-topic-{{ id }}" maxlength="120"
+               x-model="topics['{{ id }}']" placeholder="{{ t('scheduled.recipe_topic') }}"
+               aria-label="{{ t('scheduled.recipe_topic') }}">
+        {% endif %}
+        <div class="sched-recipe-row">
+          <span class="form-hint">{{ when }}</span>
+          <input type="time" class="form-input sched-recipe-time" id="recipe-time-{{ id }}"
+                 x-model="times['{{ id }}']" aria-label="{{ t('scheduled.recipe_time') }}">
+          <button class="btn btn-primary btn-sm" type="button" id="recipe-book-{{ id }}"
+                  @click="book('{{ id }}')" :disabled="!canBook('{{ id }}', {{ 'true' if needs_topic else 'false' }})"
+                  x-text="booking === '{{ id }}' ? bookingLabel : bookLabel">{{ t('scheduled.recipe_book') }}</button>
+        </div>
+      </div>
+{% endmacro %}
+  <div class="card sched-recipes" id="sched-recipes" x-data="automationGallery()" x-show="filter !== 'x'" x-cloak
+       data-book-label="{{ t('scheduled.recipe_book') }}" data-booking-label="{{ t('scheduled.recipe_booking') }}">
+    <div class="card-header">
+      <h3 class="card-title" id="sched-recipes-title">{{ t('scheduled.recipes_title') }}</h3>
+    </div>
+    <p class="card-sub">{{ t('scheduled.recipes_hint') }}</p>
+    <div class="sched-recipe-grid">
+      {{ recipe_card('morning_briefing', t('scheduled.recipe.morning_briefing.title'), t('scheduled.recipe.morning_briefing.what'), t('scheduled.recipe_every_day')) }}
+      {{ recipe_card('inbox_triage', t('scheduled.recipe.inbox_triage.title'), t('scheduled.recipe.inbox_triage.what'), t('scheduled.recipe_weekdays')) }}
+      {{ recipe_card('weekly_report', t('scheduled.recipe.weekly_report.title'), t('scheduled.recipe.weekly_report.what'), t('scheduled.recipe_fridays')) }}
+      {{ recipe_card('news_digest', t('scheduled.recipe.news_digest.title'), t('scheduled.recipe.news_digest.what'), t('scheduled.recipe_every_day'), needs_topic=True) }}
     </div>
   </div>
 
@@ -341,4 +382,5 @@
 </div>
 
 <script src="/static/js/scheduled.js?v={{ js_version() }}"></script>
+<script src="/static/js/automation_gallery.js?v={{ js_version() }}"></script>
 {% endblock %}

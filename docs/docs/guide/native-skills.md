@@ -279,6 +279,26 @@ refused. Install the `[database]` extra for SQLGlot and the remote drivers.
 Scheduled page (`/scheduled`) shows the same jobs, with the X posts booked in
 [X Studio](x-publisher). Booking, editing and cancelling each ask for approval.
 
+### Ready-made automations {#ready-made-automations}
+
+The Scheduled page starts with a gallery of automations you set up in one
+click. Each is an ordinary scheduled task that only reads (the `read` set
+below: it never sends, changes or deletes anything) and answers you where
+your reminders go, in the page's language. Change its time before you set it
+up, and edit or cancel it later like any scheduled task.
+
+| Automation | When | What it does |
+|---|---|---|
+| Morning briefing | every day, 07:30 | today's calendar, the important unread emails, today's reminders |
+| Inbox triage | weekdays, 09:00 | yesterday's unread email sorted into needs a reply, for information, can wait |
+| Weekly report | Fridays, 16:00 | your week in review, from memory and your scheduled tasks |
+| News digest | every day, 08:00 | the most important news on a topic you name, with sources |
+
+An automation that needs email or a calendar says so in its answer when
+neither is connected. The `read` set includes reading email (its tools are
+in the `safe` tier: they read private data and change nothing); sending,
+deleting and labelling email stay out of it.
+
 ### What a scheduled job can do when it fires
 
 A job is one of two kinds, chosen when it is booked:
@@ -286,7 +306,7 @@ A job is one of two kinds, chosen when it is booked:
 | Kind | When it fires | Tools |
 |---|---|---|
 | `reminder` (the default) | Sends its stored text, as written, to the chat it was booked from. No model call. | None |
-| `task` | Runs one agent turn on its stored instruction, then sends the answer to that chat. | Only the set declared at booking: `read` (read-only tools, the default) or `read_write` (write tools too). Never MCP tools, and never the tools that always need approval. |
+| `task` | Runs one agent turn on its stored instruction, then sends the answer to that chat. | Only the set declared at booking: `read` (read-only tools and reading email, the default) or `read_write` (write tools too). Never MCP tools, and never the tools that always need approval. |
 
 - The approval card of the booking says which kind it is and which tools the
   task will have. A call to any other tool is refused when the job fires.

@@ -8,6 +8,10 @@
   chats, memories, documents, settings or keys, with home folders, emails and
   IP addresses taken out. It goes to Kazma's private inbox (a setting), or is
   saved on your computer when it cannot be sent.
+- Ready-made automations on the Scheduled page: a morning briefing, inbox
+  triage, a weekly report and a news digest, each set up in one click. They
+  only read (never send, change or delete), and a scheduled task that reads
+  can now read your email.
 - Bring your history: import your ChatGPT or Claude conversations into Kazma's
   memory, from the Memory page or with `kazma import <export.zip>`. Each turn
   keeps its own date, and Forget forgets it like any memory.
