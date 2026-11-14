@@ -21,9 +21,12 @@ TRIVIAL = "tests/test_real_docker_marker.py::test_an_unmarked_test_gets_an_empty
 
 
 def _root_conftest():
+    """The root conftest's module, found by the function it defines: pytest
+    names it differently by import mode and platform (on Linux CI its path did
+    not match REPO / "conftest.py")."""
     return next(
         module for module in list(sys.modules.values())
-        if getattr(module, "__file__", None) and Path(module.__file__).resolve() == REPO / "conftest.py"
+        if callable(getattr(module, "_remove_ended_test_temp", None))
     )
 
 

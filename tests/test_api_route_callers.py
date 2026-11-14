@@ -60,6 +60,10 @@ NOT_CALLED_BY_A_PAGE: dict[str, str] = {
         "signed with the Meta app's secret"
     ),
     "/api/webhooks/whatsapp/health": "a check for the operator's webhook setup and its proxy",
+    "/api/research/ready": (
+        "the research stack's readiness (search, acquisition, model) for an operator or a "
+        "monitor; its one caller was an August smoke script, removed 2026-11-15"
+    ),
     "/api/a2a": (
         "other AI agents call Kazma here over A2A's JSON-RPC (POST), signed in with the operator's API "
         "token; the agent card at /.well-known/agent-card.json names it (kazma_ui/a2a_api.py)"
