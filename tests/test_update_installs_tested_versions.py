@@ -193,7 +193,6 @@ def _release(tmp_path: Path, locked: str | None) -> tuple[Any, list[list[str]], 
 
 def test_the_wheel_path_installs_with_the_versions_the_release_was_tested_with(monkeypatch, tmp_path) -> None:
     import httpx
-
     from kazma_cli import update
 
     release, client, _data = _release(tmp_path, PINS)
@@ -214,7 +213,6 @@ def test_the_wheel_path_installs_with_the_versions_the_release_was_tested_with(m
 
 def test_the_wheel_path_refuses_a_release_whose_locked_versions_are_hostile(monkeypatch, tmp_path) -> None:
     import httpx
-
     from kazma_cli import update
 
     release, client, _data = _release(tmp_path, "--index-url https://evil.example/simple\n")

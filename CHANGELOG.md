@@ -2,6 +2,12 @@
 
 ## Updates install the versions Kazma was tested with (2026-11-14)
 
+- Every release is now tested as an upgrade from the release before it: the
+  previous release runs on a data folder of its own, is upgraded the way
+  `kazma update` upgrades a wheel, and must start on the same data, keep it
+  and log no error. A release that fails is not published, and CI runs the
+  same upgrade on Linux and Windows on every push.
+
 - `kazma update` now installs the exact versions in `uv.lock`, the ones CI
   ran, instead of the newest versions `pyproject.toml` allows. A git install
   uses its own lock; a wheel install reads them from inside the release's

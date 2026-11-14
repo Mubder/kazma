@@ -200,6 +200,19 @@ jobs:
           uv run --no-project --with sigstore==4.5.1 python scripts/verify_release_signatures.py dist
           sha256sum -c build-artifacts.sha256
 
+      # Every release is tested as an upgrade from the one before (REMAINING
+      # 2.6): the previous release installed with its own locked versions, run
+      # on a data folder of its own, upgraded to this wheel as `kazma update`
+      # does, and run again on that data (scripts/upgrade_drill.py). A release
+      # that cannot be upgraded to is never published.
+      - name: Upgrade from the previous release (GATE)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          uv run --frozen python scripts/upgrade_drill.py --wheel "dist/kazma-*.whl"
+          sha256sum -c build-artifacts.sha256
+
       - name: Publish the GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -9577,6 +9577,19 @@ no Python update ever arrived.
   The release workflow fails a wheel that carries none. Gate:
   `tests/test_update_installs_tested_versions.py` (a stale lock and hostile
   files as negative controls).
+- **Every release is tested as an upgrade from the one before**
+  (`scripts/upgrade_drill.py`, 2026-11-14): the previous release's wheel,
+  checked as the updater checks one and installed with its own locked
+  versions (inside it, else its tag's `uv.lock`), runs on a private data
+  folder; the new wheel is installed over it with its locked versions; it must
+  report the new version, answer `/health/live` and `/health/ready` (or
+  `needs_setup` only), keep a setting and every database the old one made, and
+  log no ERROR line or traceback. Nothing of an install on the machine is read:
+  `scrubbed_env` drops every `KAZMA_*` and credential variable and the servers
+  start in an empty folder. The release workflow runs it before publishing; CI
+  runs it on Linux and Windows on every push (`--any-version`: `main`'s version
+  moves only at a release). Gate: `tests/test_upgrade_drill.py` (the whole
+  drill opt-in with `KAZMA_TEST_UPGRADE_DRILL=1`).
   Dependabot uses the `uv` ecosystem.
 - **The server says when it is behind.** A deploy is a `git pull` and installs
   nothing. At boot (background thread) `report_unmet_requirements` compares

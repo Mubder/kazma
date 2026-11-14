@@ -752,6 +752,35 @@ jobs:
         env:
           KAZMA_DB_BACKEND: sqlite
 
+  upgrade-drill:
+    # The upgrade a release must pass (scripts/upgrade_drill.py, REMAINING
+    # 2.6), on every push and on both systems: the newest published release
+    # upgraded to a wheel built from this commit, with the versions it locks.
+    name: Upgrade from the last release (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - name: Build this commit's wheel with its locked versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv export --locked --no-dev --no-emit-project --no-hashes --no-header --all-extras             --format requirements-txt -o kazma-cli/kazma_cli/locked_versions.txt
+          uv build --wheel --out-dir "$RUNNER_TEMP/wheel"
+      - name: Upgrade the last release to it (GATE)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: uv run --frozen python scripts/upgrade_drill.py --wheel "$RUNNER_TEMP/wheel/kazma-*.whl" --any-version
+
   windows-selector-loop:
     name: Windows selector-loop subset
     runs-on: windows-latest

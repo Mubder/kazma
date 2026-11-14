@@ -81,6 +81,26 @@ it; until then the server says at boot which installed packages are below
 what the build requires (see
 [below](#when-the-server-says-its-packages-are-behind)).
 
+### Every release is tested as an upgrade {#upgrade-drill}
+
+Before a release is published, the release workflow upgrades the release
+before it to the new one and checks that Kazma still runs on its data
+(`scripts/upgrade_drill.py`, since 2026-11-14):
+
+1. the previous release's wheel, checked as `kazma update` checks one,
+   installed in a fresh environment with the versions it was tested with;
+2. it starts on a data folder of its own, answers, stops, and a setting is
+   written into that data;
+3. the new wheel is installed over it with the versions inside it, as
+   `kazma update` installs a wheel;
+4. it must report the new version, start on the same data, answer as ready
+   (or as waiting only for a model to be set up), keep the setting and every
+   database the old release made, and log no error.
+
+A release that fails it is not published. CI runs the same drill on every
+push, on Linux and Windows, from the newest release to a wheel built from that
+commit. Nothing of an install on the machine running it is read or written.
+
 ## What it does (git install)
 
 1. **Preflight** — git available, no `.git/index.lock`, branch is `main`/`master`
