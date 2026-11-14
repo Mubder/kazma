@@ -435,6 +435,3 @@ def main(argv: list[str] | None = None, *, machine: Machine | None = None,
         "or do them by hand.")
     return code
 
-
-if __name__ == "__main__":
-    sys.exit(main())

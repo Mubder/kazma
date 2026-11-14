@@ -140,6 +140,11 @@ def main() -> None:
 
         sys.exit(_run_uninstall(sys.argv[2:]))
 
+    elif cmd == "report":
+        from kazma_cli.report import main as _run_report
+
+        sys.exit(_run_report(sys.argv[2:]))
+
     elif cmd == "serve":
         from kazma_core.server_port import server_port
 
@@ -205,6 +210,7 @@ def main() -> None:
         print("  swarm      Swarm orchestration (workers, dispatch, metrics, ...)")
         print("  update     Check for and install Kazma CLI updates")
         print("  uninstall  Take Kazma off this computer (keeps your data unless --remove-data)")
+        print("  report     Report a problem to Kazma's makers (you see the report first)")
         print("  migrate    Export/import a Kazma installation (cross-machine migration)")
         print("  ask        Run the agent on a prompt (no web server)")
         print("  acp        Agent Client Protocol JSON-RPC on stdio (Zed / JetBrains)")

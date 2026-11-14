@@ -197,6 +197,9 @@ def changes_global_config(text: str) -> bool:
         # clear); showing it takes none. The hand list missed `disable`
         # (2026-11, FA-153).
         return sub == "config" and bool(arg)
+    if head == "/report":
+        # A problem report carries the install's diagnostics out of it.
+        return True
     if head == "/runs":
         # Acting on a run (cancel, retry, close, dismiss, diagnose) -- an
         # incident card's button arrives as "/runs act <incident> <action>".
@@ -330,7 +333,8 @@ def _cmd_help() -> str:
         "• `/status` — Gateway health overview\n"
         "• `/model` (`/models`) — This chat's model: show, pick, `reset`; `default` sets the install's (admin)\n"
         "• `/memory` — Report memory usage; `/memory off` / `/memory on` — keep this chat out of memory, or let it back in\n"
-        "• `/cost` — Tokens and cost of this chat\n\n"
+        "• `/cost` — Tokens and cost of this chat\n"
+        "• `/report <what happened>` — Report a problem: shows what would be sent, then `/report send` (admin)\n\n"
         "For anything else, just ask the agent directly!"
     )
 

@@ -1982,6 +1982,25 @@ tbody tr:last-child td {
 }
 
 /* ── 11. Modal ──────────────────────────────────────────────────── */
+/* The problem report (REMAINING 3.1): the whole report, scrollable, read
+   left to right in either language (it is JSON). */
+.report-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.report-preview-wrap { margin-top: 10px; }
+.report-preview {
+    max-height: 40vh;
+    overflow: auto;
+    padding: var(--sp-3, 12px);
+    background: var(--surface-sunken);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+    text-align: start;
+}
+.notif-report { width: 100%; text-align: start; color: var(--text-muted); }
+
 .modal-overlay {
   position: fixed;
   inset: 0;

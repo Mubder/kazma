@@ -529,7 +529,7 @@ def whatsapp_webhook_router(resolve: Callable[[], WhatsAppAdapter | None]) -> An
     router = APIRouter(tags=["whatsapp-webhook"])
 
     @router.get("")
-    async def verify(request: Request) -> Any:
+    def verify(request: Request) -> Any:
         adapter = resolve()
         if adapter is None:
             return JSONResponse({"error": "WhatsApp is not connected"}, status_code=503)
@@ -576,7 +576,7 @@ def whatsapp_webhook_router(resolve: Callable[[], WhatsAppAdapter | None]) -> An
         return JSONResponse({"status": "accepted", "messages": count})
 
     @router.get("/health")
-    async def health() -> dict[str, Any]:
+    def health() -> dict[str, Any]:
         from kazma_core.diagnostic_scope import read_only_diagnostic
 
         with read_only_diagnostic("whatsapp webhook /health"):

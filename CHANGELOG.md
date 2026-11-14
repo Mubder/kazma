@@ -2,6 +2,16 @@
 
 ## Updates install the versions Kazma was tested with (2026-11-14)
 
+- Report a problem from anywhere: the **?** beside the bell (and **Report
+  this** on an open problem), `kazma report`, or `/report` in a chat app. You
+  see the whole report before it is sent, and it holds nothing private: no
+  chats, memories, documents, settings or keys, with home folders, emails and
+  IP addresses taken out. It goes to Kazma's private inbox (a setting), or is
+  saved on your computer when it cannot be sent.
+- Kazma is now tested on a clean Linux machine from start to finish: install
+  with `./setup.sh`, a reboot (Kazma starts by itself), `kazma update` and
+  `kazma uninstall`, which keeps your data.
+
 - `kazma uninstall` takes Kazma off a computer: it stops Kazma, removes its
   service, its scheduled tasks, the containers setup made, Kazma's container
   engine and its Python environment, and keeps your data unless you ask

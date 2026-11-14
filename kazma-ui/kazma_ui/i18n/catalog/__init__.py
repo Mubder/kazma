@@ -16,6 +16,7 @@ from kazma_ui.i18n.catalog import runs as _runs
 from kazma_ui.i18n.catalog import scheduled as _scheduled
 from kazma_ui.i18n.catalog import settings as _settings
 from kazma_ui.i18n.catalog import setup as _setup
+from kazma_ui.i18n.catalog import support as _support
 from kazma_ui.i18n.catalog import swarm as _swarm
 from kazma_ui.i18n.catalog import tool as _tool
 from kazma_ui.i18n.catalog import workspace as _workspace
@@ -39,6 +40,7 @@ CATALOG_MODULES = (
     _scheduled,
     _settings,
     _setup,
+    _support,
     _swarm,
     _tool,
     _workspace,

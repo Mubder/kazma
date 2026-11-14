@@ -4625,6 +4625,23 @@ administrator terminal, Custom kept on a re-run; every extra covered with a
 planted one as the control; Express never fails for want of Docker; the
 quickstart's table equal to `COMPONENTS`).
 
+**A problem report is one report, seen before it is sent** (2026-11-14,
+REMAINING 3.1; `kazma_core/support/problem_report.py`). `collect` gathers the
+note, where it was asked from, version/commit, system, install parts,
+readiness check results, open problems' titles and the last ERROR lines of
+the log; everything passes `redacted` (credentials, the home folder, emails,
+IPs); no chat, memory, document, setting or key is read. Every surface shows
+`preview` first: the `?` beside the bell and "Report this" (`Alpine.store
+('report')`, `components/report_dialog.html`, `/api/support/*`, admin),
+`kazma report`, `/report` then `/report send` in a chat app (an admin's:
+`changes_global_config`). `send` posts to `support.report_url` (default
+`https://status.kazma.ai/v1/report`, the Kazma Watch Worker's
+`src/reports.js`: size-capped, rate-limited, D1, the owner told, listed behind
+Access at `/reports`), at most `MAX_PER_HOUR` an hour; anything it cannot send
+is saved in `<data dir>/problem_reports/` and the person told where. Gates:
+`tests/test_problem_report.py`, `tests/e2e/test_problem_report_browser.py`,
+`deploy/observer/test/reports.test.mjs`.
+
 **`kazma uninstall` takes off what setup put on, and keeps data unless
 asked** (2026-11-14, REMAINING 2.5; `kazma_cli/uninstall.py`). One plan
 (`build_plan`), shown and accepted before anything runs: Kazma stopped through
@@ -4654,6 +4671,15 @@ without `meaning_search` and `neural_ocr`; Windows also without the container
 parts, no virtualization there), then `setup install --check` and Kazma's
 `/health/live` and `/health/ready` on its port. Gate:
 `tests/test_setup_passes_install_options.py` (each script's own parsing run).
+**A clean Linux machine is drilled end to end** (REMAINING 2.3,
+`scripts/linux_drill.py`, run from Windows): a fresh Ubuntu 24.04 WSL distro
+of its own (`kazma-linux-drill`, Ubuntu's image checked against its
+`SHA256SUMS`, systemd and lingering on), `./setup.sh --mode express -y` at a
+given commit, a reboot (Kazma back by itself), `kazma update` to `main`,
+`kazma uninstall` (service and `.venv` gone, port closed, data kept). It
+leaves out the model downloads and the container parts: every WSL distro
+shares one network with Kazma's engine. Passed 2026-11-14 (fc01c83a7 to
+de5d671ce). Gate: `tests/test_linux_drill.py` (its parts and options exist).
 
 **Private search and the memory graph install by default** (the owner,
 2026-11-13, reversing "Express stays container-free" of 2026-11-12, decided

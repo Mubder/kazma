@@ -145,6 +145,9 @@
         checkpointRetention: { days: 30, source: 'default', default: 30, max: 3650, keep_per_chat: 200, idle_keep: 10 },
         checkpointRetentionSaving: false,
         turnTimeout: { seconds: 0, source: 'default', max: 86400 },
+        // Where problem reports go (support.report_url; REMAINING 3.1).
+        reportUrl: { value: '', default: '', loaded: false },
+        reportUrlSaving: false,
         turnTimeoutSaving: false,
         turnSpending: { tokens: 500000, tokensMax: 100000000, dailyUsd: 0, dailyMax: 1000000 },
         turnSpendingSaving: false,
@@ -943,7 +946,7 @@
                 case 'shortcuts': this.shortcutConflicts = this.detectConflicts(); break;
                 case 'account': await this.loadAccount(); break;
                 case 'tools': await this.loadTools(); break;
-                case 'system': await this.loadDiagnostics(); await this.loadLogs(); await this.loadVaultStatus(); await this.loadLogging(); await this.loadSwarmRetention(); await this.loadCheckpointRetention(); await this.loadTurnTimeout(); await this.loadTurnSpending(); await this.loadChatReasoning(); await this.loadContainerEngine(); await this.loadProxy(); await this.loadRestoreUndo(); break;
+                case 'system': await this.loadDiagnostics(); await this.loadLogs(); await this.loadVaultStatus(); await this.loadLogging(); await this.loadSwarmRetention(); await this.loadCheckpointRetention(); await this.loadTurnTimeout(); await this.loadReportUrl(); await this.loadTurnSpending(); await this.loadChatReasoning(); await this.loadContainerEngine(); await this.loadProxy(); await this.loadRestoreUndo(); break;
                 case 'backup': await Promise.all([this.loadBackupList(), this.loadOffsiteConfig(), this.syncBackupState()]); break;
                 case 'packages': await this.loadPackages(); break;
                 case 'import': break;

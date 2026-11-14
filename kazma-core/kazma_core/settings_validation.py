@@ -298,6 +298,17 @@ def _email_address(value: Any) -> Any:
     return text
 
 
+def _report_url(value: Any) -> Any:
+    # Where problem reports go (kazma_core.support.problem_report): an https
+    # address, or empty (reports are only saved on this machine).
+    text = str(value if value is not None else "").strip()
+    if not text:
+        return ""
+    if not text.startswith("https://") or len(text) > 300 or any(c.isspace() for c in text):
+        raise SettingRejected("The inbox is an https:// address (or empty: reports are only saved here).")
+    return text
+
+
 def _strict_bool(value: Any) -> Any:
     if isinstance(value, bool):
         return value
@@ -506,6 +517,7 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
     )
     from kazma_core.observability.outside_watch import EMAIL_TO_KEY
     from kazma_core.runs.runbooks import RUNBOOKS_KEY, validate_runbooks
+    from kazma_core.support.problem_report import REPORT_URL_KEY
     from kazma_core.swarm.task_store import TASK_RETENTION_KEY
 
     return {
@@ -543,6 +555,7 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
         OWNER_PRICES_KEY: (_model_prices, "models"),
         MODEL_DETAILS_KEY: (_model_details, "models"),
         OFFSITE_KEEP_KEY: (_offsite_keep, "backups"),
+        REPORT_URL_KEY: (_report_url, "support"),
     }
 
 

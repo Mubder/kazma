@@ -230,6 +230,20 @@ The owner's part, once:
 
    Anything else you route there is paged as the generic card.
 
+## Problem reports
+
+Kazma's **?**, `kazma report` and `/report` send to `POST /v1/report` here by
+default (`src/reports.js`, Kazma's `kazma_core/support/problem_report.py`):
+JSON of kind `kazma-problem-report`, at most 64 KB, five an hour from one
+address and 300 a day in all, kept 180 days. The owner is told on Kazma
+Watch's channels (at most 30 a day). `GET /reports` lists them and
+`/reports/<number>` shows one, behind the same Access application as the
+status page (it covers everything but `/v1/*`) and the Worker's own check of
+its token. A sender's address is kept only as an HMAC, to count. The
+`problem_reports` table is in `schema.sql`: apply it with
+`npx wrangler d1 execute kazma-observer --remote --file=schema.sql` before
+deploying the Worker that reads it.
+
 ## Tests
 
 ```bash

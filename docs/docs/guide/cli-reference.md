@@ -307,6 +307,18 @@ kazma maintenance begin --reason "Windows updates"
 kazma maintenance end
 ```
 
+### 2.17 `kazma report` {#kazma-report}
+
+Sends a problem report to Kazma's makers ([what it holds](troubleshooting-and-workarounds#report-a-problem)).
+It prints the whole report first and sends it only when you answer `y`
+(`-y` answers for you; `--dry-run` only prints it). A report that cannot be
+sent is saved, and the command says where.
+
+```bash
+kazma report "the PDF of my notes came out empty"
+kazma report --dry-run "what would be sent"
+```
+
 ### 2.16 `kazma uninstall` {#kazma-uninstall}
 
 Takes Kazma off this computer. It shows the plan first and does nothing until

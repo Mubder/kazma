@@ -16,6 +16,7 @@
 //
 // Each run pings Healthchecks.io, which emails the owner if the runs stop.
 
+import { handleReport, handleReportsPage, pruneReports } from "./reports.js";
 import { checkAccess } from "./access.js";
 import { page } from "./alerts.js";
 import { closeHeldNotice, handleCloudflare, pagedNotices, processNotices } from "./cloudflare.js";
@@ -195,6 +196,10 @@ export async function handle(request, env, now, deps = {}) {
     return handleTestPage(request, env, now, { fetcher: d.fetcher });
   }
   if (route === "POST /v1/leave") return handleLeave(request, env, now);
+  if (route === "POST /v1/report") return handleReport(request, env, now, d);
+  if (request.method === "GET" && (url.pathname === "/reports" || url.pathname.startsWith("/reports/"))) {
+    return handleReportsPage(request, env, now, d);
+  }
   if (route === "GET /") return handleStatusPage(request, env, now, d);
   return json({ error: "not_found" }, 404);
 }
@@ -278,6 +283,7 @@ export async function runMinute(env, now, deps = {}) {
     installs: watched, fetcher });
   if (minute % 60 === 7) {
     await store.prune(now);
+    await pruneReports(env.DB, now);
     await store.pruneNotices(now);
   }
   return { live, seen, cloudflare };

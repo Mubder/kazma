@@ -12,6 +12,29 @@ description: Kazma Troubleshooting — code-audited reference (unified docs, v0.
 > **[Diagnosis map](../ops/diagnosis-map)** — “symptom → first files” and
 > “X is related to Y” tables. Then return here for operational workarounds.
 
+## Report a problem {#report-a-problem}
+
+When something is wrong and this page does not cover it, send a problem report.
+It is the same report from every place you can ask for it:
+
+- the **?** beside the bell in the web app (and **Report this** on an open
+  problem in the Dashboard, or at the foot of the notifications);
+- `kazma report "what happened"` in a terminal;
+- `/report what happened` in a chat app, then `/report send` (an admin's).
+
+The report holds your words, where you asked from, Kazma's version and
+commit, the system (OS, Python), the install's parts, the readiness checks,
+the open problems' titles and the last error lines of Kazma's log. It never
+holds chats, memories, documents, settings or keys, and home folders, emails
+and IP addresses are taken out. You see the whole report before it is sent.
+
+Reports go to Kazma's private inbox (`https://status.kazma.ai/v1/report`); the
+reply gives the report's number. Settings → System → **Problem reports**
+changes where they go, and empty keeps them on this computer only. A report
+that cannot be sent is saved in the data folder's `problem_reports` and you are
+told where, so you can attach it to a GitHub issue. At most ten reports leave
+an install in an hour.
+
 ---
 
 ## 1. Provider & LLM issues

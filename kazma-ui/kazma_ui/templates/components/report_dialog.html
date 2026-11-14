@@ -1,0 +1,44 @@
+{# The problem report (2026-11-14, REMAINING 3.1): opened by the ? beside the
+   bell, the bell's footer and "Report this" (window.kazmaReportProblem). The
+   report is shown whole before it is sent; Alpine.store('report'). #}
+<template x-if="$store.report.shown">
+    <div class="modal-overlay" id="report-dialog"
+         @click.self="$store.report.close()" @keydown.escape.window="$store.report.close()">
+        <div class="modal modal-lg" role="dialog" aria-modal="true" aria-labelledby="report-dialog-title">
+            <div class="modal-header">
+                <h2 id="report-dialog-title">{{ t('support.report_title') }}</h2>
+                <button class="modal-close" @click="$store.report.close()" aria-label="{{ t('common.close') }}">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="form-hint">{{ t('support.report_intro') }}</p>
+                <label class="form-label" for="report-note">{{ t('support.note_label') }}</label>
+                <textarea id="report-note" class="form-input" rows="4" maxlength="4000"
+                          placeholder="{{ t('support.note_placeholder') }}"
+                          :value="$store.report.note"
+                          @input="$store.report.note = $event.target.value; $store.report.preview = ''"></textarea>
+                <div class="report-actions">
+                    <button type="button" class="btn btn-secondary btn-sm" id="report-show"
+                            @click="$store.report.load()" :disabled="$store.report.loading"
+                            x-text="$store.report.loading ? t('support.preparing') : t('support.show')"></button>
+                    <button type="button" class="btn btn-primary btn-sm" id="report-send"
+                            @click="$store.report.send()"
+                            :disabled="!$store.report.preview || $store.report.sending || !!$store.report.result"
+                            x-text="$store.report.sending ? t('support.sending') : t('support.send')"></button>
+                </div>
+                <template x-if="$store.report.preview">
+                    <div class="report-preview-wrap">
+                        <label class="form-label">{{ t('support.preview_label') }}</label>
+                        <pre class="report-preview" translate="no" dir="ltr" x-text="$store.report.preview"></pre>
+                    </div>
+                </template>
+                <template x-if="$store.report.result">
+                    <p class="notice tone-info" id="report-result" role="status" translate="no"
+                       x-text="$store.report.resultText()"></p>
+                </template>
+                <template x-if="$store.report.failed">
+                    <p class="notice tone-danger" role="alert">{{ t('support.failed') }}</p>
+                </template>
+            </div>
+        </div>
+    </div>
+</template>

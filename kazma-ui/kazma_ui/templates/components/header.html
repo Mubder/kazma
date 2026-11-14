@@ -65,6 +65,14 @@
             <span class="lang-toggle-mark" x-text="lang === 'ar' ? 'EN' : 'ع'"></span>
         </button>
 
+        {# Report a problem (REMAINING 3.1): the report is shown whole before it is sent. #}
+        <button class="header-btn" id="report-problem" type="button" @click="window.kazmaReportProblem({})"
+                title="{{ t('support.report_title') }}" aria-label="{{ t('support.report_title') }}">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 015 .5c0 1.5-2.5 2-2.5 3.5M12 17h.01"/>
+            </svg>
+        </button>
+
         {# Notifications — live /api/alerts/recent (not a dead empty store).
            The reference's menu: a head, then rows that lead with an icon
            tile in the severity's tone (and its symbol: never colour alone). #}
@@ -107,6 +115,8 @@
                         </span>
                     </a>
                 </template>
+                <button type="button" class="dropdown-item notif-report" id="notifications-report"
+                        @click="$store.notifications.open = false; window.kazmaReportProblem({where: 'notifications'})">{{ t('support.report_footer') }}</button>
             </div>
         </div>
 

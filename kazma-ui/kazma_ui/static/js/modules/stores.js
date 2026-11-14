@@ -471,6 +471,68 @@ export function registerStores() {
             },
         });
 
+        // ── Problem report (the ? beside the bell, "Report this") ──────
+        // kazma_core.support.problem_report through /api/support: the report
+        // is shown whole before it is sent (2026-11-14, REMAINING 3.1).
+        Alpine.store('report', {
+            shown: false,
+            note: '',
+            where: '',
+            preview: '',
+            loading: false,
+            sending: false,
+            result: null,
+            failed: false,
+            open(opts) {
+                const o = opts || {};
+                this.note = String(o.note || '');
+                this.where = String(o.where || window.location.pathname || '');
+                this.preview = '';
+                this.result = null;
+                this.failed = false;
+                this.shown = true;
+            },
+            close() { this.shown = false; },
+            async _post(path) {
+                const resp = await fetch(path, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ note: this.note.slice(0, 4000), where: this.where.slice(0, 200) }),
+                });
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                return resp.json();
+            },
+            async load() {
+                this.loading = true;
+                this.failed = false;
+                try {
+                    this.preview = (await this._post('/api/support/report/preview')).preview || '';
+                } catch (e) {
+                    this.failed = true;
+                }
+                this.loading = false;
+            },
+            async send() {
+                this.sending = true;
+                this.failed = false;
+                try {
+                    this.result = await this._post('/api/support/report');
+                } catch (e) {
+                    this.failed = true;
+                }
+                this.sending = false;
+            },
+            resultText() {
+                const r = this.result;
+                if (!r) return '';
+                return r.sent
+                    ? window.kazmaT('support.sent', 'Sent.', { id: r.id })
+                    : window.kazmaT('support.saved', 'Not sent.', { why: r.why, path: r.saved });
+            },
+        });
+        window.kazmaReportProblem = (opts) => Alpine.store('report').open(opts);
+
         // ── 4. Notifications Store ─────────────────────────────────────
         Alpine.store('notifications', {
             open: false,

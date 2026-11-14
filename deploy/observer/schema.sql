@@ -128,3 +128,18 @@ CREATE TABLE IF NOT EXISTS install_settings (
   test_ts      INTEGER NOT NULL DEFAULT 0,
   updated_at   INTEGER NOT NULL DEFAULT 0
 );
+
+-- Problem reports (Kazma REMAINING 3.1; src/reports.js): what Kazma's `?`,
+-- `kazma report` and `/report` send. ``source`` is an HMAC of the sender's
+-- address (to count, never to read back); kept 180 days.
+CREATE TABLE IF NOT EXISTS problem_reports (
+  id           TEXT PRIMARY KEY,
+  received_at  INTEGER NOT NULL,
+  source       TEXT NOT NULL,
+  version      TEXT,
+  note         TEXT,
+  body         TEXT NOT NULL,
+  notified     INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS problem_reports_time ON problem_reports (received_at);
+CREATE INDEX IF NOT EXISTS problem_reports_source ON problem_reports (source, received_at);

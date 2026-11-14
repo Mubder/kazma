@@ -700,6 +700,27 @@
             } catch (e) { /* keep defaults */ }
         },
 
+        async loadReportUrl() {
+            const data = window.kazmaGetJson ? await window.kazmaGetJson('/api/support/settings') : null;
+            if (data) this.reportUrl = { value: data.report_url || '', default: data.default || '', loaded: true };
+        },
+
+        async saveReportUrl() {
+            this.reportUrlSaving = true;
+            try {
+                await window.kazmaSave('/api/settings/single', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key: 'support.report_url', value: String(this.reportUrl.value || '').trim(),
+                        category: 'support' }),
+                });
+                showToast(_t('settings.report_url_saved', 'Saved: where problem reports go'), 'success');
+            } catch (e) {
+                showToast(e.message || _t('settings.save_failed', 'Save failed'), 'error');
+            }
+            this.reportUrlSaving = false;
+        },
+
         async loadTurnTimeout() {
             try {
                 const data = await this._fetch('/api/settings/turn-timeout');

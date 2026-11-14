@@ -396,6 +396,9 @@ DATA_DIR_ENTRIES: dict[str, DataDirEntry] = {
         "files sent in chats and files shared into a web chat", "bundle"),
     "documents": DataDirEntry("documents the agent generated or processed", "bundle"),
     "exports": DataDirEntry("exports the operator asked for", "bundle"),
+    "problem_reports": DataDirEntry(
+        "problem reports that could not be sent (kazma_core.support.problem_report)", "machine",
+        reason="a report describes this machine's install at the moment it was made"),
     "images": DataDirEntry("generated images and browser screenshots", "bundle"),
     "workspace": DataDirEntry("the default workspace: the files the agent works on", "bundle"),
     "document-store": DataDirEntry(

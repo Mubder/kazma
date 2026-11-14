@@ -660,6 +660,7 @@ Lists all available commands grouped by category.
 • `/model` (`/models`) — This chat's model: show, pick, `reset`; `default` sets the install's (admin)
 • `/memory` — Report memory usage; `/memory off` / `/memory on` — keep this chat out of memory, or let it back in
 • `/cost` — Tokens and cost of this chat
+• `/report <what happened>` — Report a problem: shows what would be sent, then `/report send` (admin)
 
 For anything else, just ask the agent directly!
 ```
@@ -785,6 +786,30 @@ ledger (`llm_calls.db`).
 **Context keys:** `total_tokens`, `total_cost`, `total_calls` — summed from the ledger for this chat's thread.
 
 **Required permissions:** None.
+
+### `/report` {#report}
+
+Reports a problem to Kazma's makers, the same report as the web app's `?`
+beside the bell and `kazma report` (`kazma_core/support/problem_report.py`).
+
+**Usage:**
+```
+/report The PDF of my notes came out empty
+/report send
+/report cancel
+```
+
+`/report <what happened>` answers with what the report holds: your words,
+Kazma's version, the system, the install's parts, the readiness checks, the
+open problems and the last error lines of the log. Nothing private goes in it:
+no chats, memories, documents, settings or keys, and home folders, emails and
+IP addresses are taken out. `/report send` sends that report (the reply gives
+its number); `/report cancel` drops it. A report shown and not sent is
+forgotten after ten minutes. A report that cannot be sent is saved on the
+server (`<data dir>/problem_reports/`) and the reply says where.
+
+**Required permissions:** a gateway admin (it carries the install's
+diagnostics out).
 
 ---
 

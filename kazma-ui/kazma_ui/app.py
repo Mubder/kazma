@@ -1537,6 +1537,11 @@ class KazmaAppBuilder:
         self.app.include_router(create_runs_router())
         self.app.include_router(create_problems_router())
 
+        # ── Problem reports (the ? beside the bell, "Report this") ──
+        from kazma_ui.support_api import create_support_router
+
+        self.app.include_router(create_support_router())
+
         # ── Scheduled Tasks (universal page: cron jobs + scheduled X posts) ──
         try:
             from kazma_ui.scheduled_api import create_scheduled_router

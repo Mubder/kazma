@@ -152,6 +152,14 @@ COMMANDS: tuple[Command, ...] = (
             web=True, page=None, arguments=""),
     Command("replay", "Time travel snapshots", "لقطات خطوات المحادثة", web=True, page=None, arguments=""),
     Command(
+        "report",
+        "Report a problem to Kazma's makers (you see it first)",
+        "الإبلاغ عن مشكلة لصانعي Kazma (تراها أولاً)",
+        web=False,
+        page=None,
+        arguments="<what happened>",
+    ),
+    Command(
         "runs",
         "Running work: stalled, failed or waiting for you",
         "الأعمال الجارية: المتوقفة والفاشلة والمنتظرة",

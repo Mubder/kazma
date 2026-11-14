@@ -1562,6 +1562,12 @@ def create_graph_handler(
         if await try_runs_command(msg, _runs_reply):
             return  # /runs handled, skip graph
 
+        # ── A problem report (/report), seen before it is sent ──────
+        from .report_command import try_report_command
+
+        if await try_report_command(msg, _runs_reply):
+            return  # /report handled, skip graph
+
         # ── Knowledge Library slash-command intercept ───────────────
         # /kb list|add|crawl|search|status|delete manages Knowledge
         # Libraries (ingested doc corpora used by the knowledge_search

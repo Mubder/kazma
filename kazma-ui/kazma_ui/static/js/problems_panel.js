@@ -131,6 +131,15 @@
       tools.appendChild(ack);
       tools.appendChild(snooze);
     }
+    // A problem report about this one (REMAINING 3.1), shown whole before it is sent.
+    if (typeof window.kazmaReportProblem === 'function') {
+      var report = el('button', 'btn btn-sm btn-ghost', tr('support.report_this', 'Report this'));
+      report.type = 'button';
+      report.addEventListener('click', function () {
+        window.kazmaReportProblem({ note: String(problem.title || ''), where: 'problem:' + problem.id });
+      });
+      tools.appendChild(report);
+    }
     main.appendChild(tools);
     return item;
   }

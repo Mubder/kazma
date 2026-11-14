@@ -2885,6 +2885,19 @@
             <button class="btn btn-primary" @click="saveTurnTimeout()" :disabled="turnTimeoutSaving || turnTimeout.source === 'env'">{{ t('settings.save_turn_timeout') }}</button>
         </div>
 
+        <!-- Where problem reports go (support.report_url; REMAINING 3.1) -->
+        <div class="settings-group mb-6" id="report-url-section">
+            <h3>{{ t('settings.report_url_title') }}</h3>
+            <div class="form-group">
+                <label for="report-url">{{ t('settings.report_url_label') }}</label>
+                <input id="report-url" type="url" class="form-input" translate="no" dir="ltr" maxlength="300"
+                       x-model="reportUrl.value" :placeholder="reportUrl.default">
+                <div class="form-hint">{{ t('settings.report_url_hint') }}</div>
+            </div>
+            <button class="btn btn-primary" id="report-url-save" @click="saveReportUrl()"
+                    :disabled="reportUrlSaving || !reportUrl.loaded">{{ t('settings.save') }}</button>
+        </div>
+
         <!-- What a turn and a day may spend (kazma_core.agent.turn_token_budget) -->
         <div class="settings-group mb-6" id="turn-spending-section">
             <h3>{{ t('settings.turn_spending_title') }}</h3>

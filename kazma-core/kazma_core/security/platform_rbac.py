@@ -51,6 +51,8 @@ ROLE_RANK: dict[str, int] = {
 # Path prefixes that require at least admin
 _ADMIN_PREFIXES = (
     "/api/settings",
+    # A problem report carries the install's diagnostics out of it (3.1).
+    "/api/support",
     "/api/system",
     "/api/mcp",
     "/api/connectors",
