@@ -1542,6 +1542,11 @@ class KazmaAppBuilder:
 
         self.app.include_router(create_support_router())
 
+        # ── Kazma as an app: the web app manifest (REMAINING 4.1) ──
+        from kazma_ui.web_app import create_web_app_router
+
+        self.app.include_router(create_web_app_router())
+
         # ── Scheduled Tasks (universal page: cron jobs + scheduled X posts) ──
         try:
             from kazma_ui.scheduled_api import create_scheduled_router

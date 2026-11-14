@@ -10756,6 +10756,12 @@ provider list as data with per-type forms, per-model details with
   temperature but the default, is asked once more without it, and the fix is
   remembered per endpoint and model (`llm_provider._PARAM_FIXES`,
   `_retry_refused_parameters`).
+- **A call to OpenRouter names Kazma** (2026-11-14, REMAINING 4.6,
+  `llm_provider._attribution_headers`): `HTTP-Referer: https://kazma.ai` and
+  `X-Title: Kazma`, OpenRouter's app attribution, to openrouter.ai's own API
+  only, the same from every install (never the person); a provider row's own
+  headers win; `KAZMA_OPENROUTER_ATTRIBUTION=0` turns them off. Gate:
+  `tests/test_openrouter_attribution.py`.
 - **Vision is one order** (`vision_capability.classify`):
   1. a name that says it sees (`*vision*`, `*-vl*`, `KAZMA_VISION_MODELS`);
   2. the text-only families;
@@ -11930,6 +11936,17 @@ The three credentials are install-scoped in the vault
   least important region first: the IDE puts its AI chat below the editor
   at 1000px and stacks the file tree only below 560px, capped in height --
   stacking everything at once put the editor 2,400px down the page.
+- **Kazma installs as an app** (2026-11-14, REMAINING 4.1,
+  `kazma_ui/web_app.py`): every page (and the login page) links
+  `/manifest.webmanifest` (name, `start_url` `/chat`, standalone, the icons
+  `scripts/make_app_icons.py` makes, shortcuts, `lang`/`dir` in the page's
+  language), served before sign-in. `/sw.js` -- Web Push's worker, registered
+  by every page at load -- answers a failed NAVIGATION with the one page it
+  caches, `/static/offline.html` (bilingual, retries `/health/live`); it never
+  answers or caches anything else. Gates: `tests/test_web_app_manifest.py`,
+  `tests/e2e/test_web_app_install_browser.py` (Chrome's own
+  `Page.getInstallabilityErrors` empty on a page reached by the sidebar; the
+  offline page with the network gone).
 - **Dates, times and numbers go through `window.KazmaFormat`**
   (`static/js/locale_format.js`, loaded by `base.html`): `Intl` in the page's
   language (`<html lang>`), Latin digits in Arabic like every other number

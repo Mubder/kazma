@@ -11,7 +11,7 @@ description: Every KAZMA_* variable the code reads, where, and its default. Gene
 > `python scripts/generate_env_reference.py` after adding or removing a variable;
 > `tests/test_env_reference.py` fails while this page is stale.
 
-**293** variables are read by the product code; **293** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
+**294** variables are read by the product code; **294** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
 the undocumented count is on a ratchet that may only go down.
 
 | Variable | Default in code | Read in | Described |
@@ -201,6 +201,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_OIDC_SCOPES` | (none) | `kazma_core.security.oidc` | yes |
 | `KAZMA_OIDC_TENANT_CLAIM` | (none) | `kazma_core.security.oidc` | yes |
 | `KAZMA_OPAQUE_SESSIONS` | (none) | `kazma_core.security.web_sessions` | yes |
+| `KAZMA_OPENROUTER_ATTRIBUTION` | (none) | `kazma_core.llm_provider` | yes |
 | `KAZMA_OPS_ALERTS` | `""` | `kazma_core.observability.ops_alerts` | yes |
 | `KAZMA_OPS_ALERT_COOLDOWN_S` | `"900"` | `kazma_core.observability.ops_alerts` | yes |
 | `KAZMA_OTLP_ENDPOINT` | (none) | `kazma_core.swarm.tracing` | yes |
@@ -223,7 +224,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_PROJECT_ROOT` | (none) | `kazma_core.mcp.server`, `kazma_core.paths` | yes |
 | `KAZMA_PROMPT_CACHE` | (none) | `kazma_core.prompt_cache` | yes |
 | `KAZMA_PROVIDER` | `""` | `kazma_core.model_registry`, `kazma_core.web_acquire.research_pipeline_job`, `kazma_ui.app` | yes |
-| `KAZMA_PUBLIC_URL` | `""` | `kazma_cli.port_setup`, `kazma_core.ide.env_context`, `kazma_core.migration.exporter` +8 | yes |
+| `KAZMA_PUBLIC_URL` | `""` | `kazma_cli.port_setup`, `kazma_core.ide.env_context`, `kazma_core.migration.exporter` +10 | yes |
 | `KAZMA_RATE_LIMIT_ENABLED` | `""` | `kazma_ui.rate_limit` | yes |
 | `KAZMA_READ_ONLY_START` | (none) | `kazma_ui.read_only_mode` | yes |
 | `KAZMA_READ_URL_MAX_CHARS` | (none) | `kazma_core.tools.read_url` | yes |

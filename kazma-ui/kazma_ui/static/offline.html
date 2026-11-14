@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0e1626">
+<title>Kazma</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #0e1626; color: #e8edf5;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 14px; padding: 24px 16px; box-sizing: border-box; text-align: center; }
+  img { width: 72px; height: 72px; }
+  p { margin: 0; max-width: 32rem; line-height: 1.5; }
+  .ar { direction: rtl; font-family: "IBM Plex Sans Arabic", system-ui, sans-serif; }
+  .muted { color: #9aa7bd; font-size: 0.9rem; }
+  button { margin-top: 6px; padding: 10px 20px; border-radius: 22px; border: 0; background: #2f6fed;
+    color: #ffffff; font: inherit; cursor: pointer; }
+</style>
+</head>
+<body>
+<main>
+  <img src="/static/img/app-icon-192.png" alt="">
+  <p>Kazma is not answering right now. It may be restarting, or the computer it runs on may be asleep.</p>
+  <p class="ar" lang="ar">لا يجيب Kazma الآن. ربما يُعاد تشغيله، أو أن الجهاز الذي يعمل عليه في وضع السكون.</p>
+  <p class="muted" id="offline-retry">This page tries again by itself. · تحاول هذه الصفحة مجددًا من تلقاء نفسها.</p>
+  <button type="button" id="offline-again">Try again · حاول مجددًا</button>
+</main>
+<script>
+  (function () {
+    function again() { location.reload(); }
+    document.getElementById('offline-again').addEventListener('click', again);
+    setInterval(function () {
+      fetch('/health/live', { cache: 'no-store' }).then(function (r) { if (r.ok) again(); }).catch(function () {});
+    }, 5000);
+  })();
+</script>
+</body>
+</html>

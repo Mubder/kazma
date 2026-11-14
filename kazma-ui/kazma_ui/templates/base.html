@@ -31,7 +31,19 @@
     <title>{% block title %}Kazma{% endblock %}</title>
     <link rel="icon" type="image/png" href="/static/img/favicon.png">
     <link rel="shortcut icon" href="/favicon.ico">
-    <link rel="apple-touch-icon" href="/static/img/kazma-icon.png">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Kazma">
+    <link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png">
+    {# The installed app's offline page (kazma_ui/web_app.py): the service
+       worker answers a navigation the server cannot with it. #}
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('/sw.js').catch(function () {});
+        });
+      }
+    </script>
     {# Web fonts — IBM Plex Sans Arabic (RTL) served LOCALLY from
        /static/fonts (OFL, same files generated documents use); Latin and
        code fall back to the system stack in --font-sans / --font-mono.

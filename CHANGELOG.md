@@ -8,6 +8,12 @@
   chats, memories, documents, settings or keys, with home folders, emails and
   IP addresses taken out. It goes to Kazma's private inbox (a setting), or is
   saved on your computer when it cannot be sent.
+- Install Kazma as an app on your computer or phone ("Install app", "Add to
+  Home Screen"): its own window, its icon, New chat and Dashboard on the
+  icon's menu, and a page that tries again by itself while Kazma restarts.
+- Calls to OpenRouter now name Kazma (two headers OpenRouter reads for its
+  public app rankings; never you). `KAZMA_OPENROUTER_ATTRIBUTION=0` turns
+  them off.
 - Kazma Watch in one command: `kazma observer setup` puts your own watch on
   your Cloudflare account (the free plan is enough), with a Telegram bot of
   its own, and pairs this install with it. It asks for what it needs one step

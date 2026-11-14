@@ -20,6 +20,7 @@ import os
 import re
 import threading
 import time
+import urllib.parse
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -518,6 +519,27 @@ def _is_balance_exhausted(detail: str) -> bool:
     return any(sig in body for sig in _BALANCE_EXHAUSTED_SIGNALS)
 
 
+#: OpenRouter's app attribution (REMAINING 4.6): the two headers OpenRouter
+#: reads to name the app a call came from on its public app rankings. They
+#: name Kazma, never the person: the same two values from every install.
+_ATTRIBUTION = {"HTTP-Referer": "https://kazma.ai", "X-Title": "Kazma"}
+_ATTRIBUTION_HOSTS = ("openrouter.ai",)
+
+
+def _attribution_headers(base_url: str) -> dict[str, str]:
+    """The app attribution headers for a call to *base_url*: OpenRouter's
+    own API only (the host or a subdomain of it), and not when
+    ``KAZMA_OPENROUTER_ATTRIBUTION=0``."""
+    if (os.environ.get("KAZMA_OPENROUTER_ATTRIBUTION") or "").strip().lower() in ("0", "false", "no", "off"):
+        return {}
+    try:
+        host = (urllib.parse.urlsplit(base_url or "").hostname or "").lower()
+    except ValueError:
+        return {}
+    if any(host == h or host.endswith("." + h) for h in _ATTRIBUTION_HOSTS):
+        return dict(_ATTRIBUTION)
+    return {}
+
 class LLMProvider:
     """OpenAI-compatible LLM client using httpx.
 
@@ -853,6 +875,7 @@ class LLMProvider:
                 headers={
                     "Authorization": f"Bearer {safe_key}",
                     "Content-Type": "application/json",
+                    **_attribution_headers(base),
                     # The row's own headers win: a gateway that signs in with
                     # its own Authorization header gets it (providers stage 2).
                     **self.config.extra_headers,

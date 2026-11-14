@@ -230,6 +230,7 @@ test server cannot start; its CI job sets it.
 | `GOOGLE_CALENDAR_TOKEN` / `MS_CALENDAR_TOKEN` | unset | Optional | Override only. Calendar tokens normally live in the vault (`calendar.google.*` / `calendar.microsoft.*`) via Settings → Email → Connect Calendar / Connect with Microsoft. |
 | `KAZMA_CALENDAR_PROVIDER` | `auto` | No | Calendar backend when a call names none: `auto` picks Google if connected, else Microsoft, else the sandbox. `google`, `outlook` (also `microsoft` / `graph`) or `sandbox` force one; a forced provider with no credentials fails instead of falling back. |
 | `KAZMA_VISION_MODELS` | unset | No | Comma-separated extra model-id patterns (shell wildcards, case-insensitive) to treat as vision-capable, e.g. so `analyze_image` can pick a model the built-in list does not know. The built-in text-only list still wins. |
+| `KAZMA_OPENROUTER_ATTRIBUTION` | on | No | `0` stops sending OpenRouter the two app attribution headers (`HTTP-Referer: https://kazma.ai`, `X-Title: Kazma`) that put Kazma on its public app rankings. They name Kazma, never you, and go only to OpenRouter's own API. |
 | Provider-specific | — | As used | e.g. DeepSeek, Groq, xAI, OpenRouter, Mistral, Together, Cohere, Fireworks, Perplexity, AI21, Google ADC — see Configuration. |
 
 ---

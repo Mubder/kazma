@@ -385,6 +385,15 @@ On a watched host (Scheduled Task / systemd / launchd), pick up a `git pull` wit
 
 Open the URL printed in the terminal (e.g. `http://127.0.0.1:9090` or `:9091`). Use **http**, not https. Navigate to **Chat** and send a message.
 
+**As an app.** Kazma installs as an app on a computer or a phone: in Chrome
+or Edge, the install icon in the address bar (or the menu's **Install
+Kazma**); on an iPhone, Safari's **Share → Add to Home Screen**; on Android,
+**Install app**. It opens in its own window on the chat, with **New chat**
+and **Dashboard** on the icon's menu. A phone reaches it through your own
+https address (a tunnel, `KAZMA_PUBLIC_URL`); browsers install only from
+https or this computer. When Kazma does not answer (a restart, the computer
+asleep), the app shows a page that tries again by itself.
+
 Smoke-test:
 
 ```bash

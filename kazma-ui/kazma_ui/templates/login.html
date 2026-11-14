@@ -18,7 +18,10 @@
   </style>
   <title>{{ t('login.page_title') }}</title>
   <link rel="icon" href="/static/img/favicon.png">
-  <link rel="apple-touch-icon" href="/static/img/kazma-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Kazma">
+  <link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png">
   {# Vendored faces, same as every authenticated page. The Google Fonts link
      that used to sit here leaked the visitor's IP to a third party before
      they had even signed in, and render-blocked a local-first login. #}
