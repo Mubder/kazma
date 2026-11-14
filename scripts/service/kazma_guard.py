@@ -6349,7 +6349,15 @@ def _cmd_status() -> int:
         print(line)
     for line in _outside_status_lines(state):
         print(line)
+    if not ok and not (result.answered and result.needs_setup):
+        # REMAINING 3.1: wherever Kazma is unwell, the way to tell someone.
+        print(REPORT_HINT)
     return 0
+
+
+#: What --status says when Kazma is not healthy (setup waiting for its owner
+#: is not a problem to report). The report is shown before it is sent.
+REPORT_HINT = 'report it  : kazma report "what happened"   (you see it before it is sent)'
 
 
 def _broker_status_lines(state: dict, alive: bool) -> list[str]:

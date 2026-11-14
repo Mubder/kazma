@@ -4672,7 +4672,8 @@ is saved in `<data dir>/problem_reports/` and the person told where. It is
 offered where something went wrong: a turn that failed or ended without an
 answer (`turn-header-report`), stuck or failed work (the Running work card),
 an error toast (its action), `/report` in the web chat (opens the dialog), and
-`kazma doctor` and an unfinished setup name `kazma report`; the dialog's Save
+`kazma doctor`, an unfinished setup and the guard's `--status` (when Kazma is
+not healthy, `REPORT_HINT`) name `kazma report`; the dialog's Save
 to file keeps the report shown. Gates:
 `tests/test_problem_report.py`, `tests/e2e/test_problem_report_browser.py`,
 `deploy/observer/test/reports.test.mjs`.

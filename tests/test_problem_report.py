@@ -251,3 +251,36 @@ def test_doctor_says_how_to_report_when_a_check_fails(monkeypatch, capsys) -> No
     monkeypatch.setattr(doctor, "_database_service_rows", lambda: [])
     assert doctor.run([]) == 1
     assert 'kazma report "what happened"' in capsys.readouterr().out
+
+
+def test_the_guard_status_names_the_report_only_when_kazma_is_unwell(monkeypatch, capsys) -> None:
+    import importlib.util
+    import sys
+
+    path = ROOT / "scripts" / "service" / "kazma_guard.py"
+    spec = importlib.util.spec_from_file_location("kazma_guard_report_hint", path)
+    guard = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = guard
+    try:
+        spec.loader.exec_module(guard)
+        for name in ("KAZMA_GUARD_HEALTH_URL", "KAZMA_PORT", "KAZMA_ENV_FILE"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setattr(guard, "_read_state", lambda: {})
+        monkeypatch.setattr(guard, "_guard_alive", lambda: True)
+        monkeypatch.setattr(guard, "_port_holder_pid", lambda port: None)
+        monkeypatch.setattr(guard, "read_pause", lambda: None)
+        answers = {
+            "healthy": guard.ProbeResult(True, "ready"),
+            "setup": guard.ProbeResult(False, "provider", answered=True, needs_setup=("provider",)),
+            "down": guard.ProbeResult(False, "connection refused", answered=False),
+        }
+        said = {}
+        for name, answer in answers.items():
+            monkeypatch.setattr(guard, "probe", lambda url, timeout, a=answer: a)
+            guard._cmd_status()
+            said[name] = capsys.readouterr().out
+        assert guard.REPORT_HINT not in said["healthy"]
+        assert guard.REPORT_HINT not in said["setup"]
+        assert guard.REPORT_HINT in said["down"]
+    finally:
+        sys.modules.pop(spec.name, None)
