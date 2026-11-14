@@ -131,6 +131,17 @@ def bin_dir() -> Path:
     return _engine_dir() / "bin"
 
 
+def _own_cli_installed_check() -> bool:
+    """Kazma's own Docker CLI and compose plugin, where the ``engine:cli``
+    step puts them.
+
+    Any docker CLI on the machine is not enough: Docker Desktop's goes away
+    with Docker Desktop. On the owner's PC (2026-11-14) the check took Docker
+    Desktop's for Kazma's, so setup never installed its own, and uninstalling
+    Docker Desktop would have cut Kazma off from its engine."""
+    return (bin_dir() / "docker.exe").is_file() and (_plugins_dir() / "docker-compose.exe").is_file()
+
+
 def _client_dir() -> Path:
     """The client certificate Windows presents to the engine (account only)."""
     raw = (os.environ.get("DOCKER_CONFIG") or "").strip()
@@ -259,7 +270,7 @@ def check(run: Runner = subprocess.run) -> EngineCheck:
         missing += ["wsl", "distro"]  # no WSL, so no distro either
     elif DISTRO not in distros:
         missing.append("distro")
-    if not find_docker_cli():
+    if not _own_cli_installed_check():
         missing.append("cli")
     if not engine_installed("kazma"):
         missing.append("context")
@@ -269,8 +280,11 @@ def check(run: Runner = subprocess.run) -> EngineCheck:
     if _service_state(run) != "RUNNING" or not (_keep_engine_current() and _stop_helpers_current()):
         missing.append("shutdown")
     version = ""
+    # The engine is asked through any docker CLI there is (Docker Desktop's
+    # too): Kazma's own copy missing is the "cli" step's, never a reason to
+    # set up a Docker that answers again.
     code, text = (_docker(run, "version", "--format", "{{.Server.Version}}")
-                  if not {"distro", "cli", "context"} & set(missing) else (1, ""))
+                  if not {"distro", "context"} & set(missing) and find_docker_cli() else (1, ""))
     if code == 0 and text.strip():
         version = text.strip().splitlines()[-1]
     else:

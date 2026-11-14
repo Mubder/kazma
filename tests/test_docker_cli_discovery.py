@@ -38,6 +38,7 @@ def fake_docker(tmp_path, monkeypatch):
     exe.parent.mkdir(parents=True)
     exe.write_bytes(b"")
     monkeypatch.delenv("KAZMA_DOCKER_BIN", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))  # no Kazma engine CLI here
     monkeypatch.setattr(docker_cli.shutil, "which", lambda name: None)
     monkeypatch.setattr(docker_cli, "_candidates", lambda: [tmp_path / "missing.exe", exe])
     monkeypatch.setattr(docker_cli, "_reported", set())
@@ -77,9 +78,25 @@ def test_a_wrong_explicit_path_falls_back_loudly(fake_docker, tmp_path, monkeypa
 
 def test_nothing_found_is_none(monkeypatch, tmp_path):
     monkeypatch.delenv("KAZMA_DOCKER_BIN", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
     monkeypatch.setattr(docker_cli.shutil, "which", lambda name: None)
     monkeypatch.setattr(docker_cli, "_candidates", lambda: [tmp_path / "missing.exe"])
     assert docker_cli.find_docker_cli() is None
+
+
+@pytest.mark.skipif(__import__("os").name != "nt", reason="Kazma's own engine CLI is Windows'")
+def test_kazma_s_own_cli_wins_over_docker_desktop_s_on_path(fake_docker, tmp_path, monkeypatch):
+    """2026-11-14: the owner's PC reached its engine through Docker Desktop's
+    CLI, first on PATH. Once Kazma's own is installed it is used, so removing
+    Docker Desktop changes nothing for Kazma."""
+    monkeypatch.setattr(docker_cli.shutil, "which",
+                        lambda name: r"C:\Program Files\Docker\Docker\resources\bin\docker.exe")
+    own = docker_cli.kazma_engine_dir() / "bin" / "docker.exe"
+    own.parent.mkdir(parents=True)
+    own.write_bytes(b"")
+    assert docker_cli.find_docker_cli() == str(own)
+    own.unlink()
+    assert docker_cli.find_docker_cli().endswith(r"resources\bin\docker.exe"), "without it, PATH as before"
 
 
 # ── the dump path uses it ─────────────────────────────────────────────────

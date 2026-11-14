@@ -121,7 +121,16 @@ def make_machine(monkeypatch, tmp_path) -> Machine:
     monkeypatch.setattr("kazma_core.postgres_service._record_path", lambda: tmp_path / "setup_record.json")
     _context(ces.CONTEXT)
     _clean_stop_installed()
+    _own_cli_installed()
     return box
+
+
+def _own_cli_installed() -> None:
+    """Kazma's own docker.exe and compose plugin, as the engine:cli step leaves them."""
+    ces.bin_dir().mkdir(parents=True, exist_ok=True)
+    (ces.bin_dir() / "docker.exe").write_bytes(b"cli")
+    ces._plugins_dir().mkdir(parents=True, exist_ok=True)
+    (ces._plugins_dir() / "docker-compose.exe").write_bytes(b"compose")
 
 
 def _clean_stop_installed() -> None:
@@ -152,6 +161,32 @@ def test_each_missing_piece_is_named(machine, monkeypatch, tmp_path):
     assert found.missing == ["distro", "task", "docker"], "no distro, so no Docker answering in it"
     assert "the kazma-engine distro is not there" in found.detail
     assert "KazmaEngine task" in found.detail
+
+
+def test_docker_desktop_s_cli_is_not_kazma_s_own(machine):
+    """The owner's PC, 2026-11-14: the only docker CLI was Docker Desktop's,
+    the check called the CLI installed, and setup never put in Kazma's own.
+    Uninstalling Docker Desktop would have cut Kazma off from its engine. The
+    engine is still asked through the CLI there is, so a Docker that answers
+    is never set up again: only the CLI and the record are steps, and neither
+    needs an administrator."""
+    (ces.bin_dir() / "docker.exe").unlink()
+    found = ces.check(machine)
+    assert found.missing == ["cli"], found.missing
+    steps = ces.install_steps(found)
+    assert [s.action for s in steps] == ["engine:cli", "engine:record"]
+    assert not any(s.admin for s in steps)
+
+
+def test_negative_control_any_cli_read_as_kazma_s_own(machine, monkeypatch):
+    (ces.bin_dir() / "docker.exe").unlink()
+    monkeypatch.setattr(ces, "_own_cli_installed_check", lambda: True)  # the old rule: find_docker_cli() was enough
+    assert "cli" not in ces.check(machine).missing
+
+
+def test_without_the_compose_plugin_the_cli_is_not_whole(machine):
+    (ces._plugins_dir() / "docker-compose.exe").unlink()
+    assert ces.check(machine).missing == ["cli"]
 
 
 def test_wsl_with_no_distro_yet_is_wsl_installed(machine):
@@ -191,6 +226,7 @@ def test_an_engine_that_does_not_answer_is_missing_docker(machine):
 
 def test_without_the_context_the_engine_is_not_asked(machine, monkeypatch, tmp_path):
     monkeypatch.setenv("DOCKER_CONFIG", str(tmp_path / "other-config"))
+    _own_cli_installed()  # the compose plugin lives in the docker config folder too
     found = ces.check(machine)
     assert found.missing == ["context", "docker"]
 
@@ -577,9 +613,9 @@ def test_removing_takes_only_kazmas_pieces(machine, monkeypatch, tmp_path):
 
     atomic_write_text(_record_path(), json.dumps({"version": 1, "postgres": {"x": 1}, RECORD_KEY: {"kind": "kazma"}}))
     plugins = Path(os.environ["DOCKER_CONFIG"]) / "cli-plugins"
-    plugins.mkdir(parents=True)
+    plugins.mkdir(parents=True, exist_ok=True)
     (plugins / "docker-compose.exe").write_bytes(b"the owner's own compose")
-    ces.bin_dir().mkdir(parents=True)
+    ces.bin_dir().mkdir(parents=True, exist_ok=True)
     (ces.bin_dir() / "docker.exe").write_bytes(b"cli")
     ok, detail = ces.remove(machine)
     assert ok, detail

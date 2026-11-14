@@ -11190,7 +11190,16 @@ SERVICE (a tunnel) reach its published ports, and it is back 19 s after a
   image, Docker Engine set up by `setup-engine.sh` piped over stdin (LF,
   idempotent, docker packages held, TLS keys made once, listening on
   127.0.0.1 only with client certificates); Docker's Windows CLI and the
-  compose plugin from Docker's own downloads. Every download is pinned by
+  compose plugin from Docker's own downloads. **Kazma's own CLI, not any
+  CLI** (2026-11-14): the check's "cli" is
+  `container_engine_setup._own_cli_installed_check` (`docker.exe` in
+  `%LOCALAPPDATA%\Kazma\engine\bin` and the compose plugin), and
+  `find_docker_cli` takes that copy first on Windows. The check took Docker
+  Desktop's CLI for Kazma's, so the owner's PC never got its own, and
+  uninstalling Docker Desktop would have cut Kazma off from its engine; the
+  engine is still asked through whatever CLI there is, so a Docker that
+  answers is never set up again (gate: `tests/test_container_engine_setup.py`,
+  the old rule as the control). Every download is pinned by
   URL, size and SHA-256 and kept only when it matches (`_fetch`). What would
   stop it is said before anything is installed (`preflight`: WSL's
   localhost forwarding off, Docker already in another distro), and stops

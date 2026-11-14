@@ -10,8 +10,11 @@ container through ``docker exec``, stopped: "native_pg_backup produced no
 dump". The CLI was installed and the container was running the whole time;
 only the lookup was wrong.
 
-Lookup order: ``KAZMA_DOCKER_BIN`` (an explicit path), then PATH, then the
-places Docker installs itself on each OS. A CLI found off PATH is used, and
+Lookup order: ``KAZMA_DOCKER_BIN`` (an explicit path), then on Windows the
+CLI Kazma's own engine setup installed (``%LOCALAPPDATA%\\Kazma\\engine\\bin``:
+it stays when Docker Desktop is uninstalled, and Kazma does not depend on a
+copy another product may take away, 2026-11-14), then PATH, then the places
+Docker installs itself on each OS. A CLI found off PATH is used, and
 said once, so the operator can put it back on PATH instead of depending on
 the fallback without knowing it. A reload is then enough: the server adopts
 PATH entries the OS settings gained since its supervisor started
@@ -120,6 +123,10 @@ def find_docker_cli() -> str | None:
             "[docker] %s=%s does not exist -- falling back to PATH and the "
             "standard install locations", _ENV, explicit,
         )
+    if os.name == "nt":
+        own = kazma_engine_dir() / "bin" / "docker.exe"
+        if own.is_file():
+            return str(own)
     on_path = shutil.which("docker")
     if on_path:
         return on_path

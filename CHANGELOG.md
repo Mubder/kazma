@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Kazma's own Docker tools (2026-11-14)
+
+- On Windows, `kazma setup engine` now installs Kazma's own copy of Docker's
+  command-line tools even when Docker Desktop's are present, and Kazma uses
+  its own copy first. Before, the setup took Docker Desktop's copy for
+  Kazma's, so uninstalling Docker Desktop would have cut Kazma off from its
+  containers. A working engine is never set up again for this: only the tools
+  and the record are steps, and neither needs an administrator.
+
 ## After the live move to PostgreSQL 18 (2026-11-14)
 
 - A point-in-time restore of Kazma's Postgres works on Windows. It never had:
