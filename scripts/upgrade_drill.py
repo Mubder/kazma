@@ -115,10 +115,13 @@ def previous_release(tag: str | None, new_version: str, *, any_version: bool = F
     update`` reads one."""
     from kazma_cli import update
 
+    # CI hands the job's own token: GitHub's anonymous limit is shared by
+    # every job on a runner's address, and once refused the lookup (403).
+    token = os.environ.get("GH_TOKEN") or None
     if tag:
-        release = update._get_release(tag.removeprefix("v"))
+        release = update._get_release(tag.removeprefix("v"), token=token)
     else:
-        release = update.get_latest_release()
+        release = update.get_latest_release(token=token)
         if release is not None and not any_version and not update.is_newer(release.version, new_version):
             # The newest published release is this one (a re-run): go one back.
             raise SystemExit(f"the newest release is v{release.version}; name the one to upgrade from with --from")

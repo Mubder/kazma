@@ -72,11 +72,38 @@ def test_a_release_is_never_upgraded_from_itself_unless_ci_asks(monkeypatch) -> 
     from kazma_cli import update
 
     d = _drill()
-    monkeypatch.setattr(update, "get_latest_release", lambda: update.ReleaseInfo(version="0.22.0"))
+    monkeypatch.setattr(update, "get_latest_release", lambda **_: update.ReleaseInfo(version="0.22.0"))
     with pytest.raises(SystemExit):
         d.previous_release(None, "0.22.0")
     assert d.previous_release(None, "0.22.0", any_version=True).version == "0.22.0"
     assert d.previous_release(None, "0.23.0").version == "0.22.0"
+
+
+def test_the_drill_reads_the_release_with_ci_s_token_and_kazma_update_with_none(monkeypatch) -> None:
+    """A shared runner's anonymous GitHub limit once failed the gate (403);
+    the drill sends the job's token. ``kazma update`` itself sends none."""
+    import httpx
+
+    from kazma_cli import update
+
+    seen: list[str | None] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers.get("Authorization"))
+        return httpx.Response(403)
+
+    real = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(answer), **kw))
+    assert update.get_latest_release() is None
+    assert seen == [None], "kazma update sends no token"
+    monkeypatch.setenv("GH_TOKEN", "demo-ci-token")
+    with pytest.raises(SystemExit):
+        _drill().previous_release(None, "0.23.0")
+    assert seen[-1] == "Bearer demo-ci-token"
+    monkeypatch.delenv("GH_TOKEN")
+    with pytest.raises(SystemExit):
+        _drill().previous_release("v0.21.2", "0.23.0")
+    assert seen[-1] is None, "no token in the environment: none sent (the control)"
 
 
 def test_the_release_runs_the_drill_before_it_publishes_and_ci_runs_it_on_both_systems() -> None:

@@ -414,7 +414,7 @@ def _locked_versions_in_wheel(wheel: Path, folder: Path) -> tuple[Path | None, s
     return out, ""
 
 
-def get_latest_release() -> ReleaseInfo | None:
+def get_latest_release(*, token: str | None = None) -> ReleaseInfo | None:
     """The newest Kazma release on GitHub -- the one channel Kazma ships through.
 
     Each release carries its wheel, a ``SHA256SUMS`` file and Sigstore
@@ -429,23 +429,30 @@ def get_latest_release() -> ReleaseInfo | None:
 
     Returns ``None`` when GitHub cannot be read; a release whose wheel may not
     be installed automatically comes back with ``problem`` set.
+
+    *token* is for CI's upgrade drill (the job's own token, so a shared
+    runner's anonymous rate limit cannot fail the gate); ``kazma update``
+    sends none.
     """
-    return _read_release(_RELEASE_API)
+    return _read_release(_RELEASE_API, token=token)
 
 
-def _get_release(version: str) -> ReleaseInfo | None:
+def _get_release(version: str, *, token: str | None = None) -> ReleaseInfo | None:
     """Release ``v<version>``: a wheel install's own release, for ``--reinstall``."""
     base = version.split("+", 1)[0].strip().removeprefix("v")
-    return _read_release(f"https://api.github.com/repos/{_GITHUB_REPO}/releases/tags/v{base}")
+    return _read_release(f"https://api.github.com/repos/{_GITHUB_REPO}/releases/tags/v{base}", token=token)
 
 
-def _read_release(api_url: str) -> ReleaseInfo | None:
+def _read_release(api_url: str, *, token: str | None = None) -> ReleaseInfo | None:
     """The release *api_url* answers with (see :func:`get_latest_release`)."""
     try:
         import httpx
 
+        headers = {"Accept": "application/vnd.github+json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
         with httpx.Client(timeout=_CHECK_TIMEOUT, follow_redirects=True) as client:
-            resp = client.get(api_url, headers={"Accept": "application/vnd.github+json"})
+            resp = client.get(api_url, headers=headers)
             if resp.status_code != 200:
                 logger.warning("GitHub answered %s for %s", resp.status_code, api_url)
                 return None
