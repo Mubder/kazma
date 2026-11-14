@@ -72,5 +72,5 @@ def test_a_dispatched_task_runs_under_the_limit_asked(dispatched, asked, runs_un
 
 def test_the_old_tool_ignored_the_limit(dispatched, monkeypatch):
     """Negative control: the fixed 300 s the tool gave every task."""
-    monkeypatch.setattr(system, "_dispatch_timeout", lambda _value: 300.0)
+    monkeypatch.setattr(system, "_dispatch_timeout", lambda _value, **_kwargs: 300.0)
     assert dispatched(timeout_seconds=5) == 300.0
