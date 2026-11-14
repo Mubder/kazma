@@ -317,18 +317,19 @@ if ($Interactive -and -not $IsAdmin -and -not $NoElevate -and $env:OS -eq "Windo
 
 Log-Header "1. Environmental Guardrails"
 
-# 1a. Python 3.11+
+# 1a. Python 3.11.5+ (pyproject's requires-python; soupsieve 4 needs 3.11.5)
 $PythonCmd = $null
 $PythonCandidates = @("python", "python3", "py")
 
 foreach ($cmd in $PythonCandidates) {
     try {
-        $versionOutput = Invoke-Native -StdoutOnly { & $cmd -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" }
+        $versionOutput = Invoke-Native -StdoutOnly { & $cmd -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')" }
         if ($LASTEXITCODE -eq 0 -and $versionOutput) {
             $parts = "$versionOutput".Trim() -split '\.'
             $major = [int]$parts[0]
             $minor = [int]$parts[1]
-            if ($major -ge 3 -and $minor -ge 11) {
+            $micro = [int]$parts[2]
+            if ($major -eq 3 -and ($minor -gt 11 -or ($minor -eq 11 -and $micro -ge 5))) {
                 $PythonCmd = $cmd
                 $fullVersion = Invoke-Native -StdoutOnly { & $cmd -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')" }
                 Log-Ok "Python $fullVersion detected ($cmd)"
@@ -344,7 +345,7 @@ if (-not $PythonCmd) {
     # uv downloads a Python for Kazma's environment (pyproject's
     # requires-python): a fresh Windows has none, and installing one by hand
     # was the first manual step of every install.
-    Log-Warn "No Python 3.11+ here: uv will download one for Kazma"
+    Log-Warn "No Python 3.11.5+ here: uv will download one for Kazma"
 }
 
 # 1b. uv package manager

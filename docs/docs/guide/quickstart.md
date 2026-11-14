@@ -16,7 +16,7 @@ description: Kazma Quickstart — code-audited reference (unified docs, v0.9+)
 
 | Requirement | Detail |
 |---|---|
-| **Python** | `>=3.11, &lt;3.15` (declared in `pyproject.toml`). 3.12 or 3.13 recommended. |
+| **Python** | `>=3.11.5, &lt;3.15` (declared in `pyproject.toml`). 3.12 or 3.13 recommended. |
 | **Git** | For cloning / operator upgrades via [`kazma update`](../ops/kazma-update) (git install path). |
 | **An LLM provider key** | At least one of: OpenAI, Anthropic, Google (ADC), DeepSeek, xAI, OpenRouter, NVIDIA NIM, Mistral, Together, Cohere, Fireworks, Perplexity, AI21 — or a local server (Ollama / LM Studio). Azure OpenAI and AWS Bedrock are also supported natively. |
 | **Node.js** (optional) | Only if you want to build/serve the Docusaurus docs site (`docs/`). Not required to run Kazma itself. |

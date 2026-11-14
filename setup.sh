@@ -203,13 +203,11 @@ echo -e "  ${DIM}asks how to install Kazma: Express, Full or Custom.${NC}"
 
 log_header "1. Environmental Guardrails"
 
-# 1a. Python 3.11+
+# 1a. Python 3.11.5+ (pyproject's requires-python; soupsieve 4 needs 3.11.5)
 PYTHON_CMD=""
 for cmd in python3.12 python3.11 python3; do
     if command -v "$cmd" &>/dev/null; then
-        PY_MAJOR=$("$cmd" -c 'import sys; print(sys.version_info.major)' 2>/dev/null || true)
-        PY_MINOR=$("$cmd" -c 'import sys; print(sys.version_info.minor)' 2>/dev/null || true)
-        if [[ "$PY_MAJOR" -ge 3 && "$PY_MINOR" -ge 11 ]]; then
+        if "$cmd" -c 'import sys; sys.exit(0 if sys.version_info[:3] >= (3, 11, 5) and sys.version_info[0] == 3 else 1)' 2>/dev/null; then
             PYTHON_CMD="$cmd"
             break
         fi
@@ -221,7 +219,7 @@ if [[ -n "$PYTHON_CMD" ]]; then
     log_ok "Python $PY_VERSION detected ($PYTHON_CMD)"
 else
     # uv downloads a Python for Kazma's environment (pyproject's requires-python).
-    log_warn "No Python 3.11+ here: uv will download one for Kazma"
+    log_warn "No Python 3.11.5+ here: uv will download one for Kazma"
 fi
 
 # 1b. uv package manager (pip-first, snap-fallback)

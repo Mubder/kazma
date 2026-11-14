@@ -23,6 +23,13 @@
   back to the last backup") while PostgreSQL 18 ran as a service. Its line
   about disk space now says what the check asks for ("setup asks for about
   10 GB free for Custom"), not that one container needs 10 GB.
+- Kazma needs Python 3.11.5 or later (it needed 3.11). soupsieve, which the
+  Docling extra brings in through BeautifulSoup, had three new advisories
+  (two denials of service and unbounded recursion), fixed in 3.0.2 and 4.0.
+  soupsieve 4 needs Python 3.11.5, so the lock kept the vulnerable 2.10 for
+  3.11.0 to 3.11.4. That branch is gone: every install gets soupsieve 4.1.
+  The setup scripts accept a Python from 3.11.5 on; with none, uv downloads
+  one, as before.
 - The owner's SearXNG has its own generated key: `kazma setup install --with
   private_search` wrote it into `.env` and recreated the container.
 - Two lines of the upgrade's output said what was not so: a step named

@@ -8,7 +8,7 @@ sidebar_position: 1
 
 ## Prerequisites
 
-- Python 3.11+
+- Python 3.11.5+ (soupsieve 4, which closes three 2026 advisories, needs it)
 - Node.js 18+ (for docs)
 - Git
 
