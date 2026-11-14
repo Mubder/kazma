@@ -2,6 +2,16 @@
 
 ## Less left behind on disk (2026-11-14)
 
+- The programs Kazma starts with a minimal environment (the browser, the
+  page parser, the search and DNS workers, the document workers and broker,
+  the shell tool, the local code runner) keep Windows' `SystemDrive`. Without
+  it Windows created a folder literally named `%SystemDrive%` in the install
+  (the browser's font cache), found there after four browser launches today.
+- A cleanup of both repositories: merged branches, closed Dependabot
+  branches, finished agent working copies, files nothing used (an old init
+  script, one-off scripts, an unused image and script, a June skill, 255
+  evidence logs nothing names), and a test's real address and IP replaced
+  with documentation ones.
 - Building the document worker image now removes the builds of older code,
   keeping the newest one besides, the one being served and any a running
   job still uses. Every deploy used to add one: 34 of them, about 7.7 GB.
@@ -5854,7 +5864,7 @@ access. What the run found, fixed:
   none and the agent read it out of Sent Items to email the owner. The
   sign-in's OpenID token names the account; it is now kept (apart from any
   IMAP/POP address), shown in Settings, and every email tool says which
-  mailbox answered ("mailbox b.alfaris@msn.com"). The two Microsoft sign-in
+  mailbox answered ("mailbox owner@example.com"). The two Microsoft sign-in
   flows kept two copies of the token-storing code; there is one now.
   Existing connections learn the address at their next sign-in.
 - **A deleted post gave its slot back.** Kazma's daily and monthly X caps
@@ -7272,7 +7282,7 @@ undeclared-proxy alarm. `*` is ignored by both.
 
 Since 2026-09-23 the first request through the Cloudflare Tunnel after every
 boot logged `[SECURITY] x-forwarded-for/x-forwarded-proto arrived from peer
-46.186.228.227 ... Set KAZMA_TRUSTED_PROXIES=46.186.228.227`. The tunnel
+203.0.113.27 ... Set KAZMA_TRUSTED_PROXIES=203.0.113.27`. The tunnel
 (`cloudflared` on 127.0.0.1) was declared correctly; the server listens on
 127.0.0.1 only. uvicorn, told to honour the declared proxy's forwarded
 headers, replaced the connection's address with the visitor's before Kazma's

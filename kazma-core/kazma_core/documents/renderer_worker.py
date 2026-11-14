@@ -806,7 +806,7 @@ def _libreoffice(request: dict[str, Any], source: Path, output: Path) -> None:
     target = output.suffix.lstrip(".")
     env = {
         key: os.environ[key]
-        for key in ("PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP")
+        for key in ("PATH", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "TEMP", "TMP")
         if key in os.environ
     }
     try:

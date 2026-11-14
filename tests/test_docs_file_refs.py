@@ -79,7 +79,6 @@ NOT_REPOSITORY_FILES = {
     "src/data/docs-sync.json": "kazma.ai's file",
     "src/plugins/check-internal-links.mjs": "kazma.ai's file",
     "src/plugins/remark-heading-ids.mjs": "kazma.ai's file",
-    "scripts/sync_from_kazma.py": "kazma.ai's retired port script, named as one not to reuse",
     "kazma/scripts/website_sync_plan.py": "this repository's script, seen from beside it",
 }
 

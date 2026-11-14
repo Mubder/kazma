@@ -225,6 +225,7 @@ def restricted_child_env(*, cwd: str) -> dict[str, str]:
         "TEMP": tmp,
         "TMP": tmp,
         "SYSTEMROOT": os.environ.get("SYSTEMROOT") or "",
+        "SYSTEMDRIVE": os.environ.get("SYSTEMDRIVE") or "",
         "COMSPEC": os.environ.get("COMSPEC") or "",
         "PATHEXT": os.environ.get("PATHEXT") or "",
         "WINDIR": os.environ.get("WINDIR") or "",

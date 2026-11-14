@@ -84,7 +84,7 @@ def _scan(root):
 def _inventory(owner, root):
     from kazma_core.security.process_budget import run_bounded
     import subprocess
-    allowed = {'systemroot', 'windir', 'temp', 'tmp', 'path'}
+    allowed = {'systemroot', 'systemdrive', 'windir', 'temp', 'tmp', 'path'}
     payload = json.dumps(dict(root=str(root), parent_pid=os.getpid())).encode()
     if len(payload) > 16384:
         raise AcquisitionError(FetchErrorCode.LIMIT, 'Research inventory path exceeds its budget.')

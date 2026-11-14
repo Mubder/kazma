@@ -70,7 +70,7 @@ def _run_http_search(backend, query, count, *, base=None, local=False, key=None)
         parent_pid=os.getpid(), lifetime=timeout, key=key)).encode('utf-8')
     if len(payload) > 32768:
         raise AcquisitionError(FetchErrorCode.LIMIT, 'Search worker input exceeds its 32KiB budget.')
-    allowed = {'systemroot', 'windir', 'temp', 'tmp', 'path', 'ssl_cert_file', 'ssl_cert_dir'}
+    allowed = {'systemroot', 'systemdrive', 'windir', 'temp', 'tmp', 'path', 'ssl_cert_file', 'ssl_cert_dir'}
     env = {key: value for key, value in os.environ.items() if key.lower() in allowed}
     if proxy:
         from kazma_core.web_acquire import accounting

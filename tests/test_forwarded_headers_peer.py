@@ -3,8 +3,8 @@
 Live, the first tunnelled request of every boot since 2026-09-23 logged::
 
     [SECURITY] x-forwarded-for/x-forwarded-proto arrived from peer
-    46.186.228.227, which is not in KAZMA_TRUSTED_PROXIES ... Peer-address
-    trust is now DISABLED ... Set KAZMA_TRUSTED_PROXIES=46.186.228.227
+    203.0.113.27, which is not in KAZMA_TRUSTED_PROXIES ... Peer-address
+    trust is now DISABLED ... Set KAZMA_TRUSTED_PROXIES=203.0.113.27
 
 The server listened on 127.0.0.1 only; the peer was ``cloudflared`` on
 127.0.0.1, declared. uvicorn (``proxy_headers=True`` for the declared
@@ -33,7 +33,7 @@ from kazma_ui.proxy_headers import ForwardedHeadersMiddleware
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TUNNEL = ("127.0.0.1", 40123)  # cloudflared, on the same host
-VISITOR = "46.186.228.227"
+VISITOR = "203.0.113.27"
 FORWARDED = {"X-Forwarded-For": VISITOR, "X-Forwarded-Proto": "https"}
 
 

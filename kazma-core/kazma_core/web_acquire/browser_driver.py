@@ -46,7 +46,7 @@ def _start_driver():
     command = network_command([*compute_driver_executable(), 'run-driver'])
     # Do not hand browser processes the vault, provider keys, proxy passwords,
     # NODE_OPTIONS, debug sinks or unrelated install/environment credentials.
-    allowed = {'systemroot', 'windir', 'temp', 'tmp', 'path', 'home', 'userprofile',
+    allowed = {'systemroot', 'systemdrive', 'windir', 'temp', 'tmp', 'path', 'home', 'userprofile',
                'localappdata', 'appdata', 'playwright_browsers_path', 'display', 'wayland_display',
                'xdg_runtime_dir', 'lang', 'lc_all'}
     env = {key: value for key, value in os.environ.items() if key.lower() in allowed}

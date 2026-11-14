@@ -38,7 +38,7 @@ def _jwt(claims: dict) -> str:
 def test_the_id_token_names_the_account() -> None:
     from kazma_skills.native.email_manager.oauth_common import address_from_id_token
 
-    assert address_from_id_token(_jwt({"preferred_username": "B.Alfaris@MSN.com"})) == "b.alfaris@msn.com"
+    assert address_from_id_token(_jwt({"preferred_username": "Owner@Example.COM"})) == "owner@example.com"
     assert address_from_id_token(_jwt({"email": "me@outlook.com", "preferred_username": "x@y.com"})) == "me@outlook.com"
     # Not an address, not a token, or no token at all: nothing, never a guess.
     assert address_from_id_token(_jwt({"preferred_username": "live.com#someone"})) == ""
@@ -73,11 +73,11 @@ def test_a_sign_in_keeps_its_address_apart_from_a_protocol_login(vault: dict[str
     vault["email.microsoft.address"] = "old-imap@hotmail.com"  # a leftover IMAP login
     got = store_microsoft_tokens(
         {"access_token": "a", "refresh_token": "r", "scope": "Mail.Send openid",
-         "id_token": _jwt({"preferred_username": "b.alfaris@msn.com"})},
+         "id_token": _jwt({"preferred_username": "owner@example.com"})},
         "client-1",
     )
-    assert got == "b.alfaris@msn.com"
-    assert vault["email.microsoft.oauth_address"] == "b.alfaris@msn.com"
+    assert got == "owner@example.com"
+    assert vault["email.microsoft.oauth_address"] == "owner@example.com"
     assert vault["email.microsoft.address"] == "old-imap@hotmail.com", "the protocol address is not overwritten"
     assert vault["email.microsoft.access_token"] == "a" and vault["email.microsoft.auth"] == "oauth"
 
@@ -94,8 +94,8 @@ def test_settings_name_the_oauth_account_not_the_leftover(vault: dict[str, str],
 
     monkeypatch.setattr(credentials, "microsoft_auth_mode", lambda: "oauth")
     vault["email.microsoft.address"] = "old-imap@hotmail.com"
-    vault["email.microsoft.oauth_address"] = "b.alfaris@msn.com"
-    assert credentials.status_summary()["microsoft_address"] == "b.alfaris@msn.com"
+    vault["email.microsoft.oauth_address"] = "owner@example.com"
+    assert credentials.status_summary()["microsoft_address"] == "owner@example.com"
 
     monkeypatch.setattr(credentials, "microsoft_auth_mode", lambda: "imap")
     assert credentials.status_summary()["microsoft_address"] == "old-imap@hotmail.com"
@@ -106,8 +106,8 @@ def test_the_tools_banner_names_the_mailbox() -> None:
     from kazma_skills.native.email_manager.backends.sandbox import SandboxBackend
     from kazma_skills.native.email_manager.router import mode_banner
 
-    graph = MicrosoftGraphBackend(access_token="t", address="b.alfaris@msn.com")
-    assert mode_banner(graph) == "[microsoft_graph mode · mailbox b.alfaris@msn.com]"
+    graph = MicrosoftGraphBackend(access_token="t", address="owner@example.com")
+    assert mode_banner(graph) == "[microsoft_graph mode · mailbox owner@example.com]"
     assert mode_banner(MicrosoftGraphBackend(access_token="t")) == "[microsoft_graph mode]"
     assert mode_banner(SandboxBackend()) == "[sandbox mode]"
 

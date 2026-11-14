@@ -10,8 +10,8 @@ field, so it saw the VISITOR's address carrying ``X-Forwarded-For`` and
 concluded an undeclared proxy was in front::
 
     [SECURITY] x-forwarded-for/x-forwarded-proto arrived from peer
-    46.186.228.227, which is not in KAZMA_TRUSTED_PROXIES ...
-    Set KAZMA_TRUSTED_PROXIES=46.186.228.227 and restart.
+    203.0.113.27, which is not in KAZMA_TRUSTED_PROXIES ...
+    Set KAZMA_TRUSTED_PROXIES=203.0.113.27 and restart.
 
 A false alarm on the first tunnelled request of every process, whose advice
 would have made a client address a trusted proxy. The same substitution made

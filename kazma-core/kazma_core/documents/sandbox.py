@@ -31,6 +31,7 @@ _INHERITED_ENV = frozenset(
         "PATH",
         "PATHEXT",
         "SYSTEMROOT",
+        "SYSTEMDRIVE",
         "TEMP",
         "TMP",
         "TZ",

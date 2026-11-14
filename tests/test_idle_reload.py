@@ -29,7 +29,7 @@ from starlette.testclient import TestClient
 REPO = Path(__file__).resolve().parents[1]
 LOCAL = ("127.0.0.1", 40555)  # the guard, on the same host
 TUNNEL = ("127.0.0.1", 40123)  # cloudflared, on the same host
-FORWARDED = {"X-Forwarded-For": "46.186.228.227", "X-Forwarded-Proto": "https"}
+FORWARDED = {"X-Forwarded-For": "203.0.113.27", "X-Forwarded-Proto": "https"}
 
 
 @pytest.fixture(autouse=True)

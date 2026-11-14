@@ -59,7 +59,7 @@ def _parse(owner, html, url, profile, login_only):
         raise AcquisitionError(FetchErrorCode.LIMIT, 'HTML parser input exceeds its 24MiB encoded budget.')
     if owner.cancelled.is_set():
         raise InterruptedError('HTML parsing cancelled before child dispatch')
-    allowed = {'systemroot', 'windir', 'temp', 'tmp', 'path'}
+    allowed = {'systemroot', 'systemdrive', 'windir', 'temp', 'tmp', 'path'}
     env = {key: value for key, value in os.environ.items() if key.lower() in allowed}
     try:
         result = run_bounded([sys.executable, '-I', os.path.abspath(__file__)], env=env,

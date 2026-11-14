@@ -108,9 +108,9 @@ machine-readable output).
   `:::info` becomes `:::note` and `:::warning` becomes `:::caution`.
 - **Code is copied exactly**, into both languages: comments included. The
   sources use no MDX imports or components; an `import` line inside a code
-  block is part of the example. (The site's first port script,
-  `scripts/sync_from_kazma.py`, drops every line starting with `import`, code
-  examples included: do not reuse it.) The plan compares the code.
+  block is part of the example. (The site's first port script dropped every
+  line starting with `import`, code examples included; it was removed on
+  2026-11-14.) The plan compares the code.
 - **Everything else stays as the source says it:** the same headings, tables
   and code blocks, the same limits and status words. Do not summarize, soften
   or add. The plan compares the structure (ENGLISH DRIFT).

@@ -50,7 +50,7 @@ from kazma_core.security.url_credentials import (
     url_password_is_masked,
 )
 
-__all__ = ["CONFIG_STORE_MIGRATIONS", "ChangeListener", "ConfigStore", "ConfigStoreProtocol", "Migration", "MigrationRunner", "SettingsSnapshot", "apply_sqlite_pragmas", "apply_sqlite_pragmas_async", "get_config_store", "get_kazma_secret", "get_or_create_disclosure_key", "get_validated_config", "is_masked_secret_placeholder", "is_sensitive_config_key", "is_vault_ref", "reset_config_store", "run_config_store_migrations", "set_config_store"]
+__all__ = ["CONFIG_STORE_MIGRATIONS", "ChangeListener", "ConfigStore", "ConfigStoreProtocol", "MigrationRunner", "SettingsSnapshot", "apply_sqlite_pragmas", "apply_sqlite_pragmas_async", "get_config_store", "get_kazma_secret", "get_or_create_disclosure_key", "get_validated_config", "is_masked_secret_placeholder", "is_sensitive_config_key", "is_vault_ref", "reset_config_store", "run_config_store_migrations", "set_config_store"]
 
 logger = logging.getLogger(__name__)
 
@@ -638,7 +638,7 @@ def shipped_settings(data: dict[str, Any]) -> list[tuple[str, Any, str]]:
 
 # ─── Migration Framework ────────────────────────────────────────────────
 
-class Migration:
+class _Migration:
     """A single database migration."""
     
     def __init__(self, version: int, name: str, sql: str) -> None:
@@ -654,8 +654,8 @@ class Migration:
 # Versions start at 100 to avoid collision with migrations.py's
 # CONFIG_STORE_MIGRATIONS (v1-v3). These run automatically on init;
 # the migrations.py runner is used by the admin UI.
-CONFIG_STORE_MIGRATIONS: list[Migration] = [
-    Migration(
+CONFIG_STORE_MIGRATIONS: list[_Migration] = [
+    _Migration(
         version=100,
         name="initial_schema",
         sql="""
@@ -673,7 +673,7 @@ CONFIG_STORE_MIGRATIONS: list[Migration] = [
     # v101 was "add_scope_column" (ALTER TABLE). Now a no-op because
     # the column is included in the initial_schema above. Kept as a
     # placeholder for databases already migrated to v101.
-    Migration(
+    _Migration(
         version=101,
         name="add_scope_column",
         sql="""
@@ -688,7 +688,7 @@ CONFIG_STORE_MIGRATIONS: list[Migration] = [
 class MigrationRunner:
     """Runs database migrations for a store."""
     
-    def __init__(self, db_path: str, migrations: list[Migration]) -> None:
+    def __init__(self, db_path: str, migrations: list[_Migration]) -> None:
         self.db_path = db_path
         self.migrations = sorted(migrations, key=lambda m: m.version)
         self._migration_table = "schema_migrations"
@@ -707,7 +707,7 @@ class MigrationRunner:
         cursor = conn.execute(f"SELECT version FROM {self._migration_table}")
         return {row[0] for row in cursor.fetchall()}
     
-    def run(self) -> list[Migration]:
+    def run(self) -> list[_Migration]:
         """Run all pending migrations. Returns list of applied migrations."""
         import sqlite3
         from datetime import UTC, datetime
@@ -745,7 +745,7 @@ class MigrationRunner:
         return applied
 
 
-def run_config_store_migrations(db_path: str) -> list[Migration]:
+def run_config_store_migrations(db_path: str) -> list[_Migration]:
     """Run ConfigStore migrations. Returns list of applied migrations."""
     runner = MigrationRunner(db_path, CONFIG_STORE_MIGRATIONS)
     return runner.run()

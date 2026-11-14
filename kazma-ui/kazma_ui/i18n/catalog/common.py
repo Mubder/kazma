@@ -717,10 +717,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "جدولة مهام خلفية متكررة ولمرة واحدة.",
         "en": "Schedule recurring and one-shot background tasks.",
     },
-    "skill.desc.tui-worker": {
-        "ar": "عامل لمهام استبدال واجهة الطرفية (تنظيف، مكوّنات، اختبارات).",
-        "en": "Worker for TUI replacement tasks (cleanup, components, tests).",
-    },
     "skill.desc.visual-interpreter-generator": {
         "ar": "تحليل لقطات الشاشة وتوليد نماذج واجهة.",
         "en": "Screenshot analysis and UI mockup generation.",

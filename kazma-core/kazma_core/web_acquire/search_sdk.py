@@ -34,7 +34,7 @@ def _run_ddg(query: str, max_results: int, proxy: str | None) -> tuple[list[dict
         owner.before_dispatch()
     timeout = remaining()
     # A whitelist also keeps unrelated provider credentials out of the child.
-    allowed = {'systemroot', 'windir', 'temp', 'tmp', 'path', 'ssl_cert_file', 'ssl_cert_dir'}
+    allowed = {'systemroot', 'systemdrive', 'windir', 'temp', 'tmp', 'path', 'ssl_cert_file', 'ssl_cert_dir'}
     env = {key: value for key, value in os.environ.items() if key.lower() in allowed}
     payload = json.dumps({'query': query, 'max_results': max_results, 'proxy': proxy,
         'parent_pid': os.getpid(), 'lifetime': timeout})

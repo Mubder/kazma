@@ -6397,6 +6397,15 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
   covers those folders, sees `asyncio.to_thread(subprocess.run, ...)`, and a
   dict that unpacks another is not minimal. Settings' server restart is the
   one exemption (it starts the server itself).
+- **A minimal environment keeps Windows' `SystemDrive`** (2026-11-14). Every
+  list of variables a child keeps held `SystemRoot` and dropped `SystemDrive`
+  (the browser's, the page parser's, the search and DNS workers', the document
+  workers' and broker's, the shell tool's, the local code runner's), and
+  Windows expands `%SystemDrive%` in its own paths: the browser's font cache
+  made a folder literally named `%SystemDrive%` in the live install. Gate:
+  `tests/test_child_env_keeps_system_drive.py` (every literal list in the
+  product that keeps SystemRoot keeps SystemDrive; a real `cmd` started with
+  the old list prints `%SystemDrive%` as the control).
 - **A shell command's home and temp folder are its own**
   (`post_hitl._tool_home_for`, 2026-10-02): one folder per workspace under
   the system temp folder (`kazma-tool-home/<hash>`, kept between commands so

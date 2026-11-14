@@ -533,6 +533,13 @@ async def _run_local_subprocess(code_file: Path, tmp_dir: str, timeout: int) -> 
         "PYTHONIOENCODING": "utf-8",
         "PYTHONDONTWRITEBYTECODE": "1",
     }
+    if sys.platform == "win32":
+        # Windows' own variables: without them a program expands
+        # "%SystemDrive%\ProgramData\..." literally and creates that folder
+        # in its working folder (tests/test_child_env_keeps_system_drive.py).
+        for key in ("SYSTEMROOT", "SYSTEMDRIVE", "WINDIR"):
+            if os.environ.get(key):
+                child_env[key] = os.environ[key]
 
     try:
         ws = await asyncio.to_thread(_fw._get_workspace)

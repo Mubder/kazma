@@ -34,7 +34,7 @@ class _DnsBudget(ProcessOwner):
             raise InterruptedError('DNS validation cancelled')
         if len(host.rstrip('.').encode('idna')) > 253:
             raise AcquisitionError(FetchErrorCode.INVALID_URL, 'DNS hostname exceeds its 253-byte limit.')
-        allowed = {'systemroot', 'windir', 'temp', 'tmp', 'path'}
+        allowed = {'systemroot', 'systemdrive', 'windir', 'temp', 'tmp', 'path'}
         env = {key: value for key, value in os.environ.items() if key.lower() in allowed}
         try:
             result = run_bounded([sys.executable, '-I', os.path.abspath(__file__)], env=env,
