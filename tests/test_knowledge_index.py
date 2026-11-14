@@ -18,6 +18,21 @@ import pytest
 from tests._no_models import finish_turn_memory, keep_models_out
 
 
+
+#: The folder the helpers below make their stores in: the test's own
+#: tmp_path, which pytest rotates. They used the system temp folder and
+#: nothing removed them (2026-11-14: about 700 left there).
+_TMP_ROOT: str | None = None
+
+
+@pytest.fixture(autouse=True)
+def _stores_in_tmp_path(tmp_path):
+    global _TMP_ROOT
+    _TMP_ROOT = str(tmp_path)
+    yield
+    _TMP_ROOT = None
+
+
 @pytest.fixture(autouse=True)
 def _no_models(monkeypatch):
     """No real embedder or model behind this file's memory and swarm paths
@@ -60,7 +75,7 @@ def _contain_project_root(monkeypatch):
 
 def _setup(monkeypatch):
     """Fresh store + index against a temp DB, installed for this test only."""
-    tmp = tempfile.mkdtemp(prefix="kazma_kbi_test_")
+    tmp = tempfile.mkdtemp(prefix="kazma_kbi_test_", dir=_TMP_ROOT)
     monkeypatch.setenv("KAZMA_PROJECT_ROOT", tmp)
     # Reset BOTH singletons — the auto-inject getter uses the store singleton.
     reset_knowledge_index()

@@ -1792,7 +1792,7 @@ def _planted(seed: int, lib: str, lang: str, size: int, questions: int) -> list[
 
 
 def run_scale(args: argparse.Namespace) -> int:
-    work = Path(tempfile.mkdtemp(prefix="kazma-kb-scale-"))
+    work = _scratch("kazma-kb-scale-")
     root = Path(args.data_dir) if args.data_dir else work / "data"
     root.mkdir(parents=True, exist_ok=True)
     sizes = [int(s) for s in args.chunks.split(",") if s.strip()]
@@ -1940,7 +1940,7 @@ def run_breadth(args: argparse.Namespace) -> int:
     """Meaning recall and latency of one library's collection at each search
     breadth, per size and language. A build is kept (``breadth-build.json``
     beside its store) and reused by a later run with ``--reuse-builds``."""
-    work = Path(tempfile.mkdtemp(prefix="kazma-kb-breadth-"))
+    work = _scratch("kazma-kb-breadth-")
     root = Path(args.data_dir) if args.data_dir else work / "data"
     root.mkdir(parents=True, exist_ok=True)
     sizes = [int(s) for s in args.chunks.split(",") if s.strip()]
@@ -2615,7 +2615,7 @@ def run_soak(args: argparse.Namespace) -> int:
 
 
 def _run_soak(args: argparse.Namespace) -> int:
-    work = Path(tempfile.mkdtemp(prefix="kazma-kb-soak-"))
+    work = _scratch("kazma-kb-soak-")
     data_dir = Path(args.data_dir) if args.data_dir else work / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
     os.environ.update(_env(data_dir))  # the parent reads the chunker only, never a store
@@ -2869,7 +2869,33 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+
+#: This run's scratch folders (``_scratch``): removed when the run passes,
+#: kept with their path said when it fails. Every run used to leave its
+#: folder in the temp folder, one per harness test (2026-11-14: about 130).
+_SCRATCH: list[Path] = []
+
+
+def _scratch(prefix: str) -> Path:
+    path = Path(tempfile.mkdtemp(prefix=prefix))
+    _SCRATCH.append(path)
+    return path
+
+
+def _end(code: int, *, keep: bool = False) -> int:
+    """A passing run leaves no scratch folder; a failing one (or ``keep``)
+    keeps it for the post-mortem and says where."""
+    import shutil as _shutil
+
+    for path in _SCRATCH:
+        if (code == 0 and not keep) or (path.is_dir() and not any(path.iterdir())):
+            _shutil.rmtree(path, ignore_errors=True)  # an empty one holds nothing to keep
+        elif path.exists():
+            print(f"scratch kept: {path}", file=sys.stderr)
+    _SCRATCH.clear()
+    return code
+
+def _main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv[:1] == ["--child"]:
         return _child(Path(argv[1]))
@@ -2877,6 +2903,12 @@ def main(argv: list[str] | None = None) -> int:
     runs = {"scale": run_scale, "breadth": run_breadth, "soak": run_soak}
     return runs[args.command](args)
 
+
+
+def main(argv: list[str] | None = None) -> int:
+    code = _main(argv)
+    keep = "--keep-data" in (sys.argv[1:] if argv is None else list(argv))
+    return _end(code, keep=keep)
 
 if __name__ == "__main__":
     sys.exit(main())

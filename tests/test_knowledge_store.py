@@ -24,6 +24,21 @@ from tests._fts5_segments import held_only_by_deleted_rows, segment_terms
 # ── Slugification ───────────────────────────────────────────────────────────
 
 
+
+#: The folder the helpers below make their stores in: the test's own
+#: tmp_path, which pytest rotates. They used the system temp folder and
+#: nothing removed them (2026-11-14: about 700 left there).
+_TMP_ROOT: str | None = None
+
+
+@pytest.fixture(autouse=True)
+def _stores_in_tmp_path(tmp_path):
+    global _TMP_ROOT
+    _TMP_ROOT = str(tmp_path)
+    yield
+    _TMP_ROOT = None
+
+
 def test_slugify_normalizes_user_input():
     """Library IDs become ChromaDB collection names + URL segments, so they
     must be lowercase [a-z0-9_-].  Without slugification, a user entering
@@ -78,7 +93,7 @@ def test_create_or_use_pattern_does_not_race_on_slug_mismatch():
 
 
 def _fresh_store() -> KnowledgeStore:
-    tmp = tempfile.mkdtemp(prefix="kazma_kb_test_")
+    tmp = tempfile.mkdtemp(prefix="kazma_kb_test_", dir=_TMP_ROOT)
     return KnowledgeStore(db_path=os.path.join(tmp, "settings.db"))
 
 

@@ -117,6 +117,20 @@ class TestItProvesTheSecretsAreRecoverable:
         chk = _check(res, "vault:decrypt")
         assert chk and chk["ok"], chk
 
+    def test_the_drill_leaves_no_copy_of_the_vault(self, tmp_path, monkeypatch):
+        """The drill's copy of the vault is removed: the vault's connection
+        stayed open, and on Windows every drill left one in the temp folder
+        (2026-11-14: 146)."""
+        import tempfile
+
+        scratch_root = tmp_path / "temp"
+        scratch_root.mkdir()
+        monkeypatch.setattr(tempfile, "tempdir", str(scratch_root))
+        d = _backup(tmp_path, vault_key="K" * 32, stored_key="K" * 32)
+        res = restore_drill.verify_backup(d)
+        assert _check(res, "vault:decrypt")["ok"]
+        assert list(scratch_root.iterdir()) == []
+
     def test_a_stale_key_is_caught(self, tmp_path):
         """The failure that matters: every file is perfect and nothing in the
         backup can be read back."""

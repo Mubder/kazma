@@ -43,9 +43,54 @@ os.environ.setdefault("RAYON_NUM_THREADS", "1")
 # log file location.
 import tempfile as _tempfile
 
+# Every test process makes five folders below (log, data, home, skills,
+# workspace), named with its process id. Nothing removed them: on 2026-11-14
+# the temp folder held about 1,600 of each, 2.3 GB, from five days of runs.
+# A run first removes the folders of test processes that have ended; a
+# folder whose process still runs (a 72-hour soak under pytest) is kept, and
+# one whose id another process now has is kept too (the safe side). A run
+# under scripts/fast_test.py makes them in its own run folder, removed whole.
+# KAZMA_TEST_KEEP_TEMP=1 keeps every one. tests/test_test_temp_folders.py.
+_TEST_TEMP_KINDS = ("log", "data", "home", "skills-home", "workspace")
+
+
+def _test_temp(kind: str) -> str:
+    return _tempfile.mkdtemp(prefix=f"kazma-test-{kind}-{os.getpid()}-")
+
+
+def _remove_ended_test_temp() -> int:
+    """Remove the test folders of processes that have ended; the count."""
+    import re as _re
+    import shutil as _shutil
+
+    try:
+        import psutil as _psutil
+    except ImportError:  # without it no process is known to have ended
+        return 0
+    named = _re.compile(r"^kazma-test-(?:%s)-(\d+)-" % "|".join(_re.escape(k) for k in _TEST_TEMP_KINDS))
+    removed = 0
+    try:
+        entries = list(os.scandir(_tempfile.gettempdir()))
+    except OSError:
+        return 0
+    for entry in entries:
+        match = named.match(entry.name)
+        if not match or not entry.is_dir(follow_symlinks=False):
+            continue
+        pid = int(match.group(1))
+        if pid == os.getpid() or _psutil.pid_exists(pid):
+            continue
+        _shutil.rmtree(entry.path, ignore_errors=True)
+        removed += 1
+    return removed
+
+
+if os.environ.get("KAZMA_TEST_KEEP_TEMP") != "1":
+    _remove_ended_test_temp()
+
 os.environ.setdefault(
     "KAZMA_LOG_FILE",
-    str(Path(_tempfile.mkdtemp(prefix="kazma-test-log-")) / "kazma.log"),
+    str(Path(_test_temp("log")) / "kazma.log"),
 )
 
 # Install-data shield (2026-09-27). ``paths.data_dir()`` defaults to
@@ -61,21 +106,21 @@ os.environ.setdefault(
 # product module, and the per-store overrides that would point around it are
 # cleared. A test that needs a directory of its own still sets the variable.
 # tests/test_install_data_shield.py holds it.
-_TEST_DATA_DIR = _tempfile.mkdtemp(prefix="kazma-test-data-")
-_TEST_USER_HOME = _tempfile.mkdtemp(prefix="kazma-test-home-")
+_TEST_DATA_DIR = _test_temp("data")
+_TEST_USER_HOME = _test_temp("home")
 os.environ["KAZMA_DATA_DIR"] = _TEST_DATA_DIR
 os.environ["KAZMA_USER_HOME"] = _TEST_USER_HOME
 # The skill folders in the user's home (~/.agents/skills and its siblings,
 # agent_skills/discovery.skills_home) too (2026-10-01): the live install runs
 # as the same user and reads them, an install writes there and an uninstall
 # removes from there.
-os.environ["KAZMA_SKILLS_HOME"] = _tempfile.mkdtemp(prefix="kazma-test-skills-home-")
+os.environ["KAZMA_SKILLS_HOME"] = _test_temp("skills-home")
 # The coding workspace too (2026-11): a fresh workspace store seeds its first
 # active row from KAZMA_WORKSPACE, else from the working folder -- the checkout
 # the tests run in -- and that row outranks everything after it, so a test's
 # relative file_write landed in the repository (and, in a live install, would
 # land in the install). A test that needs its own workspace still sets one.
-os.environ["KAZMA_WORKSPACE"] = _tempfile.mkdtemp(prefix="kazma-test-workspace-")
+os.environ["KAZMA_WORKSPACE"] = _test_temp("workspace")
 # And the port of Kazma's page (2026-11-13). The terminal app's tests mount
 # the real app, whose polling asked KAZMA_PORT -- 9090 by default, the live
 # install's port on this machine: dozens of unauthenticated requests a run,

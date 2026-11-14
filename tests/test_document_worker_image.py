@@ -390,6 +390,7 @@ def test_the_build_script_tags_and_labels_the_build(tmp_path, monkeypatch):
 
     monkeypatch.setattr(module, "find_docker_cli", lambda: "docker")
     monkeypatch.setattr(module, "_image", image)
+    monkeypatch.setattr(module, "_built", lambda docker: [])
     monkeypatch.setattr(module.subprocess, "call", call_then_built)
     assert module.main(["build"]) == 0
     argv = built["argv"]
@@ -416,3 +417,80 @@ def test_the_old_template_fails_on_an_image_without_labels():
     answer = _docker29_inspect({}, "{{.Id}}|{{json .Config.Labels}}")
     assert answer.returncode == 1 and "Labels" in answer.stderr
     assert _docker29_inspect({"a": "b"}, "{{.Id}}|{{json .Config.Labels}}").returncode == 0
+
+
+def _image_script(monkeypatch, *, built_now: bool):
+    """The build script with Docker answered here: what is built, what the
+    broker serves, and every ``image rm`` it sends."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_dwi_prune", REPO / "scripts" / "document_worker_image.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    source = worker_image.build_fingerprint(REPO)
+    tag = worker_image.tag_for(source)
+    state = {"after": built_now}
+    images = [tag, "kazma-document-worker:src-0000000000000001", "kazma-document-worker:src-0000000000000002",
+              "kazma-document-worker:src-0000000000000003", "kazma-document-worker:src-0000000000000004",
+              "kazma-document-worker:src-0000000000000005"]
+    removed: list[str] = []
+
+    def image(docker, ref):
+        if ref == tag and state["after"]:
+            return {"id": IMAGE_ID, "created": "now", "labels": {worker_image.SOURCE_LABEL: source}}
+        return None
+
+    def call(argv, cwd=None):
+        state["after"] = True
+        return 0
+
+    def run(docker, *args, timeout=60.0):
+        if args[:2] == ("image", "rm"):
+            ref = args[2]
+            if ref.endswith("0003"):  # a document job's container still uses it
+                return SimpleNamespace(returncode=1, stdout="", stderr="conflict: image is being used by running container")
+            removed.append(ref)
+            images.remove(ref)
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        raise AssertionError(args)
+
+    monkeypatch.setattr(module, "find_docker_cli", lambda: "docker")
+    monkeypatch.setattr(module, "_image", image)
+    monkeypatch.setattr(module, "_built", lambda docker: list(images))
+    monkeypatch.setattr(module, "_run", run)
+    monkeypatch.setattr(module, "_guard_broker", lambda: {"image": "kazma-document-worker:src-0000000000000004"})
+    monkeypatch.setattr(module.subprocess, "call", call)
+    return module, tag, images, removed
+
+
+@pytest.mark.parametrize("built_now", [False, True], ids=["a new build", "already built"])
+def test_a_build_removes_the_older_builds(monkeypatch, capsys, built_now):
+    """Every build used to stay: one per deploy, 34 on the live engine
+    (2026-11-14). A build now removes the others, keeping this code's, what
+    the guard's broker serves, the newest other one (a revert finds its
+    image) and one a job's container still uses -- said, never a failed
+    build."""
+    module, tag, images, removed = _image_script(monkeypatch, built_now=built_now)
+    assert module.main(["build"]) == 0
+    assert removed == ["kazma-document-worker:src-0000000000000002",
+                       "kazma-document-worker:src-0000000000000005"]
+    assert images == [tag, "kazma-document-worker:src-0000000000000001",
+                      "kazma-document-worker:src-0000000000000003",
+                      "kazma-document-worker:src-0000000000000004"]
+    assert "kept kazma-document-worker:src-0000000000000003: conflict" in capsys.readouterr().out
+
+
+def test_control_a_build_without_the_prune_keeps_every_build(monkeypatch):
+    """Negative control: the build as it was (``--no-prune``) leaves them all."""
+    module, _tag, images, removed = _image_script(monkeypatch, built_now=False)
+    before = list(images)
+    assert module.main(["build", "--no-prune"]) == 0
+    assert removed == [] and images == before
+
+
+def test_prune_alone_says_a_kept_build_failed(monkeypatch):
+    """``prune`` run by hand still exits 1 when a removal was refused."""
+    module, _tag, _images, removed = _image_script(monkeypatch, built_now=True)
+    assert module.main(["prune", "--keep", "0"]) == 1
+    assert "kazma-document-worker:src-0000000000000001" in removed

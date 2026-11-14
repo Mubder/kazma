@@ -82,10 +82,21 @@ def _no_hooks_dir() -> str:
     """An empty directory for ``core.hooksPath``: no hook is found in it."""
     global _NO_HOOKS_DIR
     if _NO_HOOKS_DIR is None or not os.path.isdir(_NO_HOOKS_DIR):
+        import atexit
         import tempfile
 
         _NO_HOOKS_DIR = tempfile.mkdtemp(prefix="kazma-git-no-hooks-")
+        # Removed when the process ends: one was left per server start and
+        # per test process (2026-11-14: 63 in the temp folder).
+        atexit.register(_remove_no_hooks_dir, _NO_HOOKS_DIR)
     return _NO_HOOKS_DIR
+
+
+def _remove_no_hooks_dir(path: str) -> None:
+    try:
+        os.rmdir(path)  # empty by design; a folder holding anything is kept
+    except OSError:
+        pass
 
 
 def _filter_driver_overrides(listing: str) -> list[str]:

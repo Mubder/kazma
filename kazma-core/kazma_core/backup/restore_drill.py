@@ -287,6 +287,7 @@ def _check_vault_opens(backup: Path, res: DrillResult) -> None:
 
     scratch = Path(tempfile.mkdtemp(prefix="kazma-vault-drill-"))
     previous = os.environ.get("KAZMA_VAULT_KEY")
+    vault = None
     try:
         copy = scratch / "vault.db"
         shutil.copy2(vault_db, copy)
@@ -354,7 +355,14 @@ def _check_vault_opens(backup: Path, res: DrillResult) -> None:
             os.environ.pop("KAZMA_VAULT_KEY", None)
         else:
             os.environ["KAZMA_VAULT_KEY"] = previous
+        # Closed before the removal: an open connection kept the copy of the
+        # vault on Windows, and every drill left one in the temp folder
+        # (2026-11-14: 146). A copy that cannot be removed is said.
+        if vault is not None:
+            vault.close()
         shutil.rmtree(scratch, ignore_errors=True)
+        if scratch.exists():
+            logger.warning("[restore-drill] could not remove the vault copy in %s", scratch)
 
 
 def _check_completeness(backup: Path, res: DrillResult) -> None:

@@ -347,7 +347,33 @@ def _plan(cycle: int, rng: random.Random, args: argparse.Namespace, chats: dict[
     return plan
 
 
-def main(argv: list[str] | None = None) -> int:
+
+#: This run's scratch folders (``_scratch``): removed when the run passes,
+#: kept with their path said when it fails. Every run used to leave its
+#: folder in the temp folder, one per harness test (2026-11-14: about 130).
+_SCRATCH: list[Path] = []
+
+
+def _scratch(prefix: str) -> Path:
+    path = Path(tempfile.mkdtemp(prefix=prefix))
+    _SCRATCH.append(path)
+    return path
+
+
+def _end(code: int, *, keep: bool = False) -> int:
+    """A passing run leaves no scratch folder; a failing one (or ``keep``)
+    keeps it for the post-mortem and says where."""
+    import shutil as _shutil
+
+    for path in _SCRATCH:
+        if (code == 0 and not keep) or (path.is_dir() and not any(path.iterdir())):
+            _shutil.rmtree(path, ignore_errors=True)  # an empty one holds nothing to keep
+        elif path.exists():
+            print(f"scratch kept: {path}", file=sys.stderr)
+    _SCRATCH.clear()
+    return code
+
+def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--duration", type=float, default=600.0, help="seconds to run")
     parser.add_argument("--cycle-seconds", type=float, default=30.0, help="pause between cycles")
@@ -368,7 +394,7 @@ def main(argv: list[str] | None = None) -> int:
         print("SOAK-RESULT " + json.dumps(result, ensure_ascii=True))
         return 0
 
-    work = Path(tempfile.mkdtemp(prefix="kazma-memory-soak-"))
+    work = _scratch("kazma-memory-soak-")
     data_dir = Path(args.data_dir) if args.data_dir else work / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
     os.environ.update(_env(data_dir))  # the parent's own reads (question_sha) are pure
@@ -501,6 +527,10 @@ def _forgotten(data_dir: Path, token: str) -> bool:
     finally:
         conn.close()
 
+
+
+def main(argv: list[str] | None = None) -> int:
+    return _end(_main(argv))
 
 if __name__ == "__main__":
     sys.exit(main())

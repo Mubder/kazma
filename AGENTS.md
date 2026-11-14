@@ -3311,7 +3311,13 @@ lines and a hand-run process -- and every document was refused.
   `test_the_tag_covers_exactly_what_the_build_sends` holds the walk to the
   `.dockerignore`. `scripts/document_worker_image.py build` builds and labels
   it (`io.kazma.document-worker-image.source` / `.documents-code`); never make
-  a boot build an image. The broker serves the newest labelled build while
+  a boot build an image. A build then removes the builds of other code
+  (`_prune_older`, `--no-prune` keeps them): this code's, what the broker
+  serves or asks for, the newest other one (a revert finds it) and one a
+  job's container still uses are kept, a refused removal is said and never
+  fails the build. Every build used to stay, one per deploy: 34 (about 7.7
+  GB) on the live engine by 2026-11-14 (`tests/test_document_worker_image.py`,
+  `--no-prune` as the control). The broker serves the newest labelled build while
   the tag asked for is missing (`--fallback-to-newest-built`, status
   `image_fallback`/`image_source`) and exits 6 to switch, idle, once it
   appears. Readiness: `image_current: false` or `image_fallback` is
@@ -12337,6 +12343,20 @@ sent. Gate: `tests/test_answer_quality_monitor.py`.
   and without `KAZMA_ENV_FILE` are the negative controls. A new write
   location outside them needs a mount. Unverified on a cluster.
 
+- **A finished run leaves nothing in the temp folder** (2026-11-14: about
+  5 GB from five days of runs). The root conftest's five folders carry their
+  process id (`kazma-test-<kind>-<pid>-`), and each run first removes those
+  of processes that have ended (`_remove_ended_test_temp`; a folder whose
+  process still runs, a soak under pytest, is kept; `KAZMA_TEST_KEEP_TEMP=1`
+  keeps all); `scripts/fast_test.py` does the same with its run folders
+  (`remove_ended_run_folders`); a helper making a store in a test uses the
+  test's `tmp_path`; a soak script removes its scratch folder when the run
+  passes (`_scratch` / `_end`, kept and named when it fails); the vault drill
+  closes the vault before removing its copy (an open connection left an
+  encrypted vault copy per drill on Windows); the git tools' empty hooks
+  folder is removed at exit. Gate: `tests/test_test_temp_folders.py` (two real
+  runs leave one run's folders; `KAZMA_TEST_KEEP_TEMP=1` as the control), the
+  drill's `test_the_drill_leaves_no_copy_of_the_vault`.
 - **A test run never touches an install's data** (2026-09-27). The root
   `conftest.py` pins `KAZMA_DATA_DIR` and `KAZMA_USER_HOME` to fresh temp
   folders before any product module is imported and clears the per-store

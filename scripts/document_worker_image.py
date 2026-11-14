@@ -7,7 +7,8 @@ The guard's broker asks for the image built from this checkout, tagged by a
 fingerprint of everything the build reads
 (``kazma_core/documents/worker_image.py``)::
 
-    python scripts/document_worker_image.py build     # build (or say it is built)
+    python scripts/document_worker_image.py build     # build (or say it is built),
+                                                      # then remove older builds
     python scripts/document_worker_image.py status    # what is built, what serves
     python scripts/document_worker_image.py prune     # remove older builds
 
@@ -122,6 +123,8 @@ def cmd_build(args: argparse.Namespace) -> int:
     existing = _image(docker, tag)
     if existing and not args.force:
         print(f"Already built for this code: {tag} ({existing['id'][:19]})")
+        if not args.no_prune:
+            _prune_older(docker, tag, keep_older=1)
         return 0
     print(f"Building {tag} for the code in {REPO} ...", flush=True)
     argv = [docker, "build", "-f", str(DOCKERFILE), "-t", tag,
@@ -141,6 +144,8 @@ def cmd_build(args: argparse.Namespace) -> int:
     print(f"Built {tag} ({built['id'][:19]}).")
     print("The guard's broker switches to it by itself within a minute when it serves an "
           "older one, or starts with it the next time it starts.")
+    if not args.no_prune:
+        _prune_older(docker, tag, keep_older=1)
     return 0
 
 
@@ -174,26 +179,37 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_prune(args: argparse.Namespace) -> int:
-    docker = _docker()
-    source, _documents = _fingerprints()
-    keep = {worker_image.tag_for(source)}
+def _prune_older(docker: str, tag: str, *, keep_older: int) -> int:
+    """Remove the builds of other code, keeping this code's (*tag*), what the
+    guard's broker serves or asks for, and the *keep_older* newest others (a
+    revert finds its image). An image still in use (a job's container) is
+    kept and said. Returns the number of removals that failed.
+
+    Every build used to stay: one per deploy, 34 of them (about 7.7 GB) on
+    the live engine by 2026-11-14, and nothing ran ``prune``."""
+    keep = {tag}
     broker = _guard_broker()
     for key in ("image", "image_requested"):
         if broker.get(key):
             keep.add(str(broker[key]))
-    older = [ref for ref in _built(docker) if ref not in keep][args.keep:]
+    older = [ref for ref in _built(docker) if ref not in keep][max(0, keep_older):]
     failed = 0
     for ref in older:
         result = _run(docker, "image", "rm", ref, timeout=120)
         if result.returncode == 0:
-            print(f"removed {ref}")
+            print(f"removed older build {ref}")
         else:
             failed += 1
             print(f"kept {ref}: {(result.stderr or result.stdout).strip()[:200]}")
     if not older:
-        print("Nothing to remove.")
-    return 1 if failed else 0
+        print("No older builds to remove.")
+    return failed
+
+
+def cmd_prune(args: argparse.Namespace) -> int:
+    docker = _docker()
+    source, _documents = _fingerprints()
+    return 1 if _prune_older(docker, worker_image.tag_for(source), keep_older=args.keep) else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -202,6 +218,8 @@ def main(argv: list[str] | None = None) -> int:
     build = sub.add_parser("build", help="build the image for this code (if not built)")
     build.add_argument("--force", action="store_true", help="build even when it is built")
     build.add_argument("--no-cache", action="store_true", help="rebuild every layer")
+    build.add_argument("--no-prune", action="store_true",
+                       help="keep older builds (by default the build removes all but the newest other one)")
     build.set_defaults(func=cmd_build)
     status = sub.add_parser("status", help="what this code needs, what is built, what serves")
     status.add_argument("--json", action="store_true")

@@ -1687,7 +1687,33 @@ _ENV_KEYS = ("KAZMA_DATA_DIR", "KAZMA_DB_BACKEND", "KAZMA_DATABASE_URL", "KAZMA_
              "KAZMA_USER_HOME", "KAZMA_SKILLS_HOME", "KAZMA_PROCESS_PRIORITY")
 
 
-def main(argv: list[str] | None = None) -> int:
+
+#: This run's scratch folders (``_scratch``): removed when the run passes,
+#: kept with their path said when it fails. Every run used to leave its
+#: folder in the temp folder, one per harness test (2026-11-14: about 130).
+_SCRATCH: list[Path] = []
+
+
+def _scratch(prefix: str) -> Path:
+    path = Path(tempfile.mkdtemp(prefix=prefix))
+    _SCRATCH.append(path)
+    return path
+
+
+def _end(code: int, *, keep: bool = False) -> int:
+    """A passing run leaves no scratch folder; a failing one (or ``keep``)
+    keeps it for the post-mortem and says where."""
+    import shutil as _shutil
+
+    for path in _SCRATCH:
+        if (code == 0 and not keep) or (path.is_dir() and not any(path.iterdir())):
+            _shutil.rmtree(path, ignore_errors=True)  # an empty one holds nothing to keep
+        elif path.exists():
+            print(f"scratch kept: {path}", file=sys.stderr)
+    _SCRATCH.clear()
+    return code
+
+def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n", 1)[0])
     parser.add_argument("--days", type=float, default=7.0, help="simulated days of load")
     parser.add_argument("--jobs", type=int, default=2000, help="jobs in all (a fifth booked during the run)")
@@ -1726,7 +1752,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ledger", default=None, help="default: beside the report, as .ledger.json")
     args = parser.parse_args(argv)
 
-    work = Path(tempfile.mkdtemp(prefix="kazma-scheduled-soak-"))
+    work = _scratch("kazma-scheduled-soak-")
     data_dir = Path(args.data_dir) if args.data_dir else work / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
     saved = {k: os.environ.get(k) for k in _ENV_KEYS}
@@ -1756,6 +1782,10 @@ def main(argv: list[str] | None = None) -> int:
     print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=True, default=str))
     return 0 if healthy else 1
 
+
+
+def main(argv: list[str] | None = None) -> int:
+    return _end(_main(argv))
 
 if __name__ == "__main__":
     sys.exit(main())

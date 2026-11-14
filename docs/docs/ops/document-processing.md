@@ -452,6 +452,12 @@ on Windows):
    .venv\Scripts\python.exe scripts\document_worker_image.py build
    ```
 
+   Each build then removes the builds of older code, keeping the newest one
+   besides (an update you take back finds its image), the one the broker is
+   serving, and any a running document job still uses. `--no-prune` keeps
+   them all; `scripts\document_worker_image.py prune --keep N` removes them by
+   hand.
+
 2. **Choose the container profile**: Settings → Documents → *Use the container
    profile* (or the switch, then **Save**).
 

@@ -30,6 +30,7 @@ import concurrent.futures
 import contextlib
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -355,6 +356,36 @@ def _start(cmd: list[str], env: dict[str, str]) -> tuple[subprocess.Popen, _Tree
     return proc, _Tree(proc)
 
 
+
+def remove_ended_run_folders() -> int:
+    """Remove the run folders of runners that have ended; the count.
+
+    A run's folder is removed when the run ends, but not what a process it
+    could not stop still held open (``ignore_cleanup_errors``): nine were
+    left by 2026-11-14. Each folder names its runner's process id; one whose
+    runner still runs (another run beside this one) is kept, and so is one
+    whose id another process now has."""
+    try:
+        import psutil
+    except ImportError:
+        return 0
+    named = re.compile(r"^kazma-pytest-run-(\d+)-")
+    removed = 0
+    try:
+        entries = list(os.scandir(tempfile.gettempdir()))
+    except OSError:
+        return 0
+    for entry in entries:
+        match = named.match(entry.name)
+        if not match or not entry.is_dir(follow_symlinks=False):
+            continue
+        pid = int(match.group(1))
+        if pid == os.getpid() or psutil.pid_exists(pid):
+            continue
+        shutil.rmtree(entry.path, ignore_errors=True)
+        removed += 1
+    return removed
+
 def run_pytest(args: list[str], timeout: float) -> tuple[int, str]:
     """Run pytest serially; return (exit_code, output). Crash-tolerant.
 
@@ -370,7 +401,7 @@ def run_pytest(args: list[str], timeout: float) -> tuple[int, str]:
         # "failed" retention) broke later tests on Linux, where a store a test
         # opened still pointed into a folder deleted under it.
         run_temp = Path(owned_arguments.enter_context(
-            tempfile.TemporaryDirectory(prefix='kazma-pytest-run-', ignore_cleanup_errors=True)))
+            tempfile.TemporaryDirectory(prefix=f'kazma-pytest-run-{os.getpid()}-', ignore_cleanup_errors=True)))
         args = [*args, f'--basetemp={run_temp / "t"}']
         cmd = pytest_command(args)
         # Windows has a 32K UTF-16 command-line ceiling. One serial full-suite
@@ -635,6 +666,9 @@ def main() -> int:
     BACKGROUND = not args.foreground
     THREADS_PER_PROCESS = max(1, (os.cpu_count() or 4) // max(1, args.chunks))
 
+    removed = remove_ended_run_folders()
+    if removed:
+        print(f"[fast-test] removed {removed} run folder(s) earlier runs left")
     files = discover_test_files()
     chunks = chunk_files(files, args.chunks)
     budget = max(chunk_timeout_for(len(c), args.chunk_timeout) for c in chunks)

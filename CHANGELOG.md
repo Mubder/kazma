@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## Less left behind on disk (2026-11-14)
+
+- Building the document worker image now removes the builds of older code,
+  keeping the newest one besides, the one being served and any a running
+  job still uses. Every deploy used to add one: 34 of them, about 7.7 GB.
+  `--no-prune` keeps them.
+- The backup restore drill no longer leaves a copy of the (encrypted) vault
+  in the temp folder each time it runs, and Kazma's git tools remove their
+  empty helper folder when Kazma stops.
+- Test runs and soak runs clean up after themselves: a finished run leaves
+  nothing in the temp folder.
+
 ## GitHub's code scanning, reviewed alert by alert (2026-11-14)
 
 - GitHub's code scanner (CodeQL) went through Kazma and raised 388 alerts.
