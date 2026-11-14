@@ -89,6 +89,17 @@ too, and Kazma Watch pages its guard as gone; update that install.
 
 ## Setting it up (the owner, once)
 
+**The easy way:** `kazma observer setup` on the machine Kazma runs on
+(`kazma_core/observability/watch_setup.py`) does steps 1, 2, 5, 6 and 9 and
+pairs the install: it signs in with `wrangler login`, makes the D1 database
+and its tables, deploys the Worker to `<name>.<subdomain>.workers.dev` with
+no custom domain, no status page and no email, sends the secrets on stdin
+(`wrangler secret bulk`), keeps the pairing token in Kazma's vault and pairs.
+An install with no public address is watched by heartbeats alone
+(`PULL_URL` empty: `heartbeat_silent` when they stop). Its work folder is
+`<data dir>/kazma-watch`. The steps below are for everything else: a domain
+of its own, the status page behind Access, email, Cloudflare's notifications.
+
 Everything below runs on the owner's Cloudflare account and needs the
 owner's credentials; Kazma never holds them.
 

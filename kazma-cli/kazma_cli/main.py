@@ -195,7 +195,7 @@ def main() -> None:
         print("  status     Show Kazma status")
         print("  doctor     Check provider/model resolution (which model, where, will it work)")
         print("  acquisition  Inspect cached crawler errors, usage and credits")
-        print("  observer   Pair with the outside observer (pair, status, unpair)")
+        print("  observer   Kazma Watch, the outside observer (setup, pair, status, unpair)")
         print("  setup      Set up what Kazma runs on (setup postgres: PostgreSQL as an OS service)")
         print("  restore    Restore the database to a point in time (restore postgres --to TIME)")
         print("  maintenance  An update window: begin (pause the guard when idle), end (resume and check)")

@@ -9,7 +9,7 @@
 //   - the condition is one only it can see (its catalog entry owns it);
 //   - the inside page was not delivered within five minutes, or none was
 //     made five minutes after Kazma Watch would have paged on its own;
-//   - the heartbeats stop (machine_unreachable, guard_gone: its own).
+//   - the heartbeats stop (machine_unreachable, guard_gone, heartbeat_silent: its own).
 // A heartbeat with no receipts at all (a guard from before Stage 2) is read
 // as before: Kazma Watch pages what it sees.
 //

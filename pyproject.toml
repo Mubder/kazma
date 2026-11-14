@@ -253,6 +253,13 @@ packages = ["kazma-core/kazma_core", "kazma-skills/kazma_skills", "kazma-ui/kazm
 # verified wheel. Git ignores it; an artifact is included all the same.
 artifacts = ["kazma-cli/kazma_cli/locked_versions.txt"]
 
+# Kazma Watch's Worker, for `kazma observer setup` on an install made from a
+# wheel (a checkout reads deploy/observer itself: watch_setup.worker_source).
+[tool.hatch.build.targets.wheel.force-include]
+"deploy/observer/src" = "kazma_core/observability/watch_worker/src"
+"deploy/observer/schema.sql" = "kazma_core/observability/watch_worker/schema.sql"
+"deploy/observer/wrangler.jsonc" = "kazma_core/observability/watch_worker/wrangler.jsonc"
+
 [tool.pytest.ini_options]
 # Package suites + root regression corpus. TUI uses kazma_tui_tests to avoid
 # ImportPathMismatch with root tests/conftest.py.

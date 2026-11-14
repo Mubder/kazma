@@ -193,6 +193,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Not paired: nothing outside this machine is watching it. Paste Kazma Watch's pairing token once to pair.",
         "ar": "غير مربوط: لا شيء خارج هذا الجهاز يراقبه. الصق رمز الربط الخاص بالمراقب مرة واحدة للربط.",
     },
+    "settings.alerts.watch_setup_hint": {
+        "en": "No Kazma Watch yet? Run this on the computer Kazma runs on: it puts one on your Cloudflare "
+              "account (the free plan is enough) and pairs this install with it.",
+        "ar": "ليس لديك Kazma Watch بعد؟ شغّل هذا الأمر على الجهاز الذي يعمل عليه Kazma: يضع واحدًا في حسابك على "
+              "Cloudflare (تكفي الخطة المجانية) ويربط هذا التثبيت به.",
+    },
     "settings.alerts.watch_token": {"en": "Pairing token", "ar": "رمز الربط"},
     "settings.alerts.watch_token_hint": {
         "en": "Kazma Watch's PAIRING_TOKEN. Used once to pair and never kept.",

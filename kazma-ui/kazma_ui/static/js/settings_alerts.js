@@ -516,7 +516,8 @@
             guard_gone: ['settings.outside_watch_cond_guard_gone', 'The guard stopped; Kazma is unsupervised'],
             disk_critical: ['settings.outside_watch_cond_disk_critical', 'The disk is almost full'],
             observer_refused: ['settings.outside_watch_cond_observer_refused', 'The observer cannot pass Cloudflare Access'],
-            unreachable: ['settings.outside_watch_cond_unreachable', 'Kazma is not reachable']
+            unreachable: ['settings.outside_watch_cond_unreachable', 'Kazma is not reachable'],
+            heartbeat_silent: ['settings.outside_watch_cond_heartbeat_silent', 'Kazma Watch hears nothing from Kazma (power, network, sleep or its guard)']
         },
 
         _OUTSIDE_GUARD: {

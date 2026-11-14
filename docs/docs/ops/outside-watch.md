@@ -37,6 +37,11 @@ Together the two say what happened:
 | The tunnel answers but Kazma does not, the heartbeat says Kazma is down | Kazma is down; the guard is restarting it |
 | The site answers but is not ready | Kazma is up; a dependency (the database, Docker) is away |
 | The site answers, no heartbeat | The guard stopped; Kazma is unsupervised |
+| No address to look at (heartbeats only), no heartbeat | Kazma Watch hears nothing from Kazma: power, network, sleep or its guard |
+
+An install with no address on the internet is watched by its heartbeats
+alone: Kazma Watch then tells how Kazma is from what the guard says, and
+when the heartbeats stop it says it hears nothing.
 
 A problem has to last three minutes before you are paged, so a restart or
 a short network hiccup pages nobody. You get one message when it starts, a
@@ -55,14 +60,53 @@ a signed request is refused at any other of the observer's addresses (see
 `deploy/observer/README.md`, "Signatures"). When Kazma and the observer are
 both updated, deploy the observer first, then Kazma.
 
-## Setting it up
+## Setting it up {#setting-it-up}
 
-The observer runs on your Cloudflare account, so setting it up needs your
-Cloudflare, Telegram and (optionally) Healthchecks.io accounts. The steps,
-from creating its database to deploying it, are in
-`deploy/observer/README.md`. Then pair this install, in **Settings → Alerts
-→ Kazma Watch** (paste the pairing token you gave the observer and press
-**Pair**), or on the machine Kazma runs on:
+### One command {#one-command}
+
+On the computer Kazma runs on:
+
+```bash
+kazma observer setup
+```
+
+It puts your own Kazma Watch on your Cloudflare account (the free plan is
+enough) and pairs this install with it, saying each step as it goes:
+
+1. It signs you in to Cloudflare in your browser, if you are not already
+   (Cloudflare's own tool, `wrangler`, which runs on Node: Kazma installs
+   Node as one of its parts).
+2. It asks for a Telegram bot for the watch: in Telegram, open @BotFather,
+   send `/newbot`, and paste the token it gives you (it is not shown). Then
+   send the new bot any message, and the setup finds your chat.
+3. It asks for Kazma's address on the internet, if it has one, and checks it
+   from here. With none, Kazma Watch watches by the heartbeats alone. An
+   address behind Cloudflare Access needs an Access service token for the
+   watch to get in; without one, heartbeats only.
+4. It makes the watch's database and deploys the watch to
+   `kazma-watch.<your subdomain>.workers.dev`.
+5. It pairs this install, tells the watch your time zone, and sends you a
+   test message on Telegram.
+
+Nothing secret is put on a command line or kept in a file: the bot's token
+and the watch's pairing token go to Cloudflare as the Worker's secrets, and
+the pairing token is kept in Kazma's vault. Run it again after an update to
+deploy that build's watch (`--update` asks nothing); it keeps the database,
+the bot and the pairing. With several Cloudflare accounts, add
+`--account-id <id>`. An install already paired with another watch is left
+alone unless you add `--move`.
+
+When Kazma offers a watch it hosts for everyone, pairing with it will be
+`kazma observer pair --url <its address>` with the code it gives you:
+nothing else on the install changes.
+
+### By hand {#by-hand}
+
+The steps the command takes, and the rest (your own domain for the watch,
+its status page behind Cloudflare Access, email pages, Cloudflare's
+notifications), are in `deploy/observer/README.md`. Then pair this install,
+in **Settings → Alerts → Kazma Watch** (paste the pairing token you gave
+the observer and press **Pair**), or on the machine Kazma runs on:
 
 ```bash
 kazma observer pair

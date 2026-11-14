@@ -2845,6 +2845,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "لا يمكن الوصول إلى Kazma",
         "en": "Kazma is not reachable",
     },
+    "settings.outside_watch_cond_heartbeat_silent": {
+        "ar": "لا يسمع Kazma Watch شيئًا من Kazma (الكهرباء أو الشبكة أو السكون أو حارسه)",
+        "en": "Kazma Watch hears nothing from Kazma (power, network, sleep or its guard)",
+    },
     "settings.outside_watch_week": {
         "ar": "هذا الأسبوع",
         "en": "This week",

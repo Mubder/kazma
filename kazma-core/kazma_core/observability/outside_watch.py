@@ -78,6 +78,7 @@ _CAUSE_WORDS = {
     "disk_critical": "disk almost full",
     "observer_refused": "observer refused by Access",
     "unreachable": "not reachable",
+    "heartbeat_silent": "no heartbeat",
 }
 
 #: Who Kazma Watch emails (Settings -> Alerts): kept here so it is told again

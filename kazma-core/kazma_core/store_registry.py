@@ -399,6 +399,9 @@ DATA_DIR_ENTRIES: dict[str, DataDirEntry] = {
     "problem_reports": DataDirEntry(
         "problem reports that could not be sent (kazma_core.support.problem_report)", "machine",
         reason="a report describes this machine's install at the moment it was made"),
+    "kazma-watch": DataDirEntry(
+        "your own Kazma Watch's code and configuration (kazma observer setup; no secret)", "machine",
+        reason="made again by the next kazma observer setup from this build's code"),
     "images": DataDirEntry("generated images and browser screenshots", "bundle"),
     "workspace": DataDirEntry("the default workspace: the files the agent works on", "bundle"),
     "document-store": DataDirEntry(

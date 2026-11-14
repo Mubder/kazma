@@ -4,6 +4,7 @@
 //   pull probe            heartbeat                    condition
 //   200                   fresh                        up
 //   530 / 1033 / error    missing                      machine_unreachable
+//   no address set        missing                      heartbeat_silent
 //   530 / 1033 / error    fresh                        tunnel_down
 //   502 / 504             fresh, Kazma not running     kazma_restarting
 //   200, ready 503        fresh                        dependency_down
@@ -118,6 +119,25 @@ export function diagnose({ live, ready, heartbeat, now, expectHeartbeat = true }
   const readyDown = !!(ready && ready.status >= 500 && now - ready.at <= READY_FRESH_S && !newerReady);
 
   if (hb && hb.maintenance) return { condition: "maintenance", detail: "planned work" };
+  // No address to look at (a watch set up for an install with no public
+  // address, `kazma observer setup`): the heartbeat alone says how Kazma is,
+  // and its silence is all the watch can tell of the machine.
+  if (live && live.error === "no_url") {
+    if (!hb) return { condition: "heartbeat_silent", detail: "no heartbeat, and no address to look at" };
+    if (DOWN_STATES.has(hb.kazma.state)) {
+      return { condition: "kazma_restarting", detail: `Kazma ${hb.kazma.state}` };
+    }
+    if (hb.kazma.state === "not_ready") {
+      const why = [...hb.kazma.why];
+      if (hb.database.state === "away" && !why.includes("database")) why.push("database");
+      if (hb.docker === "down" && !why.includes("docker")) why.push("docker");
+      return { condition: "dependency_down", detail: why.length ? why.join(", ") : "not ready" };
+    }
+    if (hb.disk && hb.disk.level === "critical") {
+      return { condition: "disk_critical", detail: `${hb.disk.free_pct}% free` };
+    }
+    return { condition: "up" };
+  }
   if (site === "refused") {
     return { condition: "observer_refused", detail: `HTTP ${live.status} from Cloudflare Access` };
   }

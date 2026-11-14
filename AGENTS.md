@@ -8797,6 +8797,24 @@ code) and Kazma ran with nobody supervising it.
   Gates: `tests/test_outside_watch.py` (the guard reads what pairing writes;
   a refused pairing or an unrestrictable file leaves no key; it runs the
   Worker's own `node --test` suite, a D1 stand-in over `node:sqlite`).
+  **`kazma observer setup` puts a watch on the person's own Cloudflare**
+  (2026-11-14, REMAINING 3.2; `kazma_core/observability/watch_setup.py`):
+  one guided command -- `wrangler` (pinned `WRANGLER_VERSION`, through npx)
+  signs in, makes the D1 database and its tables, deploys the Worker from
+  this build (`worker_source`: the wheel's `watch_worker`, force-included
+  from `deploy/observer`, else the checkout) to workers.dev, sends the
+  secrets on stdin (`secret bulk`), keeps the pairing token in the vault
+  (`PAIRING_TOKEN_NAME`, install-scoped), pairs, tells the zone, sends a
+  test page. A second run keeps database, token and bot; `--update` asks
+  nothing; an install paired elsewhere is refused without `--move`. With no
+  address the Worker judges by heartbeats alone (`PULL_URL` empty:
+  `diagnose` -> `heartbeat_silent` when they stop; nothing watched with no
+  install). The pairing (`POST /v1/pair`, Bearer code) is the contract a
+  watch Kazma hosts later will use: the install does not change. Gates:
+  `tests/test_watch_setup.py` (a stand-in wrangler and Telegram; no secret on
+  a command line or on disk), `deploy/observer/test/heartbeat_only.test.mjs`
+  (the old reading, which blamed the tunnel, as the control). Drilled once
+  on Cloudflare with a throwaway name, then deleted.
   **Signatures bind the route** (2026-11-11). Every signed request -- the
   guard's heartbeat, Kazma's summary, settings, test page and leave -- sends
   `X-Kazma-Signature: v2=<hex>`, HMAC-SHA256 under the pairing key of

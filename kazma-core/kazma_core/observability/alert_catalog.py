@@ -383,6 +383,10 @@ CATALOG: tuple[_Entry, ...] = (
     _watch("watch.observer_refused", "warn", "The observer cannot pass Cloudflare Access",
            "لا يستطيع المراقب اجتياز Cloudflare Access", condition="observer_refused"),
     _watch("watch.unreachable", "error", "Kazma is not reachable", "كاظمه غير متاح"),
+    # A watch with no address to look at hears only the heartbeats (kazma observer setup).
+    _watch("watch.heartbeat_silent", "error", "Kazma Watch hears nothing from Kazma (power, network, sleep or its guard)",
+           "لا يسمع Kazma Watch شيئًا من كاظمه (الكهرباء أو الشبكة أو السكون أو حارسه)",
+           condition="heartbeat_silent"),
     _watch("watch.recovered", "success", "Kazma is back", "عاد كاظمه", closed_by=""),
     # -- Cloudflare's notifications (deploy/observer/src/cloudflare.js) -----------------------------------
     _cf("cloudflare.tunnel_down", "error", "Cloudflare says the tunnel is down", "تقول Cloudflare إن النفق متوقف",

@@ -289,6 +289,7 @@ away (setting it up on Cloudflare: `deploy/observer/README.md`).
 
 | Subcommand | Description |
 |---|---|
+| `kazma observer setup [--update] [--move] [--no-address] [--account-id ID]` | Put your own Kazma Watch on your Cloudflare account and pair this install with it, one guided step at a time ([Outside watch](../ops/outside-watch#one-command)). Again after an update: deploys that build's watch. |
 | `kazma observer pair [--url URL]` | Pair this install with the observer: the guard then sends it a signed heartbeat every minute. The key is kept in a file only the guard's account can read; it is never printed. |
 | `kazma observer status [--json]` | What the observer sees now: its last heartbeat, its own check of the public address, any open incident. |
 | `kazma observer unpair [--forget]` | Stop the heartbeat and remove the key. `--forget` also deletes what the observer kept for this install. |

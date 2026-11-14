@@ -243,7 +243,8 @@ export async function runMinute(env, now, deps = {}) {
   const minute = Math.floor(now / 60);
   const ready = minute % 5 === 0 ? await probe(env, "/health/ready", fetcher) : null;
   const installs = await store.listInstalls();
-  const watched = installs.length ? installs : [SITE];
+  // The site alone is watched only when there is an address to look at.
+  const watched = installs.length ? installs : String(env.PULL_URL || "").trim() ? [SITE] : [];
   const seen = {};
   const notices = await pagedNotices(store);
   for (const install of watched) {

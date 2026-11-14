@@ -123,6 +123,9 @@ INSTALL_SCOPED_SECRETS: tuple[tuple[str, str], ...] = (
     # admin's request, read by every alert -- background jobs, the guard's
     # settings lookup -- with no tenant bound.
     ("cfg:notifications.ops.telegram_bot_token", "newest"),
+    # The pairing token of the Kazma Watch `kazma observer setup` deployed
+    # (2026-11-14): read by the CLI, with no tenant bound.
+    ("observer.", "global"),
 )
 
 

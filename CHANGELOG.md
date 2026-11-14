@@ -8,6 +8,11 @@
   chats, memories, documents, settings or keys, with home folders, emails and
   IP addresses taken out. It goes to Kazma's private inbox (a setting), or is
   saved on your computer when it cannot be sent.
+- Kazma Watch in one command: `kazma observer setup` puts your own watch on
+  your Cloudflare account (the free plan is enough), with a Telegram bot of
+  its own, and pairs this install with it. It asks for what it needs one step
+  at a time and keeps nothing secret on disk. An install with no address on
+  the internet is watched by its heartbeats.
 - Kazma is now tested on a clean Linux machine from start to finish: install
   with `./setup.sh`, a reboot (Kazma starts by itself), `kazma update` and
   `kazma uninstall`, which keeps your data.

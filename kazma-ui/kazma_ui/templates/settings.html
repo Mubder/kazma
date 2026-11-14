@@ -2588,6 +2588,8 @@
                 <!-- Not paired: pair from here -->
                 <div x-show="alerts.loaded && alerts.watch && !alerts.watch.paired" x-cloak data-watch-not-paired>
                     <p>{{ t('settings.alerts.watch_not_paired') }}</p>
+                    <p class="form-hint" id="alerts-watch-setup-hint">{{ t('settings.alerts.watch_setup_hint') }}
+                        <code dir="ltr" translate="no">kazma observer setup</code></p>
                     <div class="form-group">
                         <label class="form-label" for="alerts-watch-token">{{ t('settings.alerts.watch_token') }}</label>
                         <input id="alerts-watch-token" type="password" class="form-input" dir="ltr" autocomplete="off"
