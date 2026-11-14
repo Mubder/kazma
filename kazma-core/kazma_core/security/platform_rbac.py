@@ -53,6 +53,7 @@ _ADMIN_PREFIXES = (
     "/api/settings",
     # A problem report carries the install's diagnostics out of it (3.1).
     "/api/support",
+    "/api/import",
     "/api/system",
     "/api/mcp",
     "/api/connectors",

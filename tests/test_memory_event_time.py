@@ -354,10 +354,12 @@ def test_a_history_row_reaches_the_mirror_but_never_the_graph(conn, monkeypatch)
 #: the LLM deep pass, turn reconcile. Each call must pass the turn's time.
 _LATE_WRITERS = ("kazma-core/kazma_core/memory/consolidator.py",
                  "kazma-core/kazma_core/memory/worker_bootstrap.py",
-                 "kazma-core/kazma_core/memory/turn_reconcile.py")
+                 "kazma-core/kazma_core/memory/turn_reconcile.py",
+                 # A ChatGPT or Claude export: every turn written at its own time (REMAINING 4.2).
+                 "kazma-core/kazma_core/memory/history_import.py")
 _TIME_KEYWORD = {"mutate_belief": "now", "_apply_beliefs_to_v2": "now",
                  "extract_and_apply_beliefs_sync": "now", "_v2_extract_sync": "now",
-                 "mirror_episode": "created_at"}
+                 "mirror_episode": "created_at", "write_episode": "created_at", "episode_row": "created_at"}
 
 
 def _untimed_writes(source: str) -> list[tuple[int, str]]:

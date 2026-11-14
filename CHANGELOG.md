@@ -8,6 +8,9 @@
   chats, memories, documents, settings or keys, with home folders, emails and
   IP addresses taken out. It goes to Kazma's private inbox (a setting), or is
   saved on your computer when it cannot be sent.
+- Bring your history: import your ChatGPT or Claude conversations into Kazma's
+  memory, from the Memory page or with `kazma import <export.zip>`. Each turn
+  keeps its own date, and Forget forgets it like any memory.
 - Install Kazma as an app on your computer or phone ("Install app", "Add to
   Home Screen"): its own window, its icon, New chat and Dashboard on the
   icon's menu, and a page that tries again by itself while Kazma restarts.

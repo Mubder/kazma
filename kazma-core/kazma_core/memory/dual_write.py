@@ -75,7 +75,7 @@ def _episode_id(session_id: str, turn: int, content: str) -> str:
 #: Sources whose turns are written after the fact, so they are not the live
 #: session's short-term buffer and stay episodic.
 _AFTER_THE_FACT_SOURCES = frozenset(
-    {"turn_reconcile", "benchmark", "golden_eval"}
+    {"turn_reconcile", "benchmark", "golden_eval", "history_import"}
 )
 
 

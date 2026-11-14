@@ -1,0 +1,30 @@
+{# Bring your history (REMAINING 4.2): a ChatGPT or Claude export into memory.
+   Script: static/js/history_import.js; routes: kazma_ui/history_import_api.py. #}
+<div class="card" id="history-import" x-data="historyImport()" style="margin-bottom:1.5rem;">
+  <div class="card-header">
+    <h3 class="card-title" id="history-import-title">{{ t('memory.import.title') }}</h3>
+  </div>
+  <p class="card-sub">{{ t('memory.import.intro') }}</p>
+  <div class="form-group">
+    <label class="form-label" for="history-import-file">{{ t('memory.import.file') }}</label>
+    <input id="history-import-file" type="file" class="form-input" accept=".zip,.json,application/zip,application/json"
+           @change="choose($event)" :disabled="busy !== '' || running">
+    <div class="form-hint">{{ t('memory.import.file_hint') }}</div>
+  </div>
+  <div class="alerts-actions" style="display:flex;gap:8px;flex-wrap:wrap;">
+    <button class="btn btn-secondary btn-sm" type="button" id="history-import-read" @click="read()"
+            :disabled="!file || busy !== '' || running"
+            x-text="busy === 'read' ? t('memory.import.reading') : t('memory.import.read')"></button>
+    <button class="btn btn-primary btn-sm" type="button" id="history-import-start" @click="start()"
+            x-show="summary && !running" x-cloak :disabled="busy !== '' || !summary || !summary.turns">{{ t('memory.import.start') }}</button>
+    <button class="btn btn-secondary btn-sm" type="button" id="history-import-stop" @click="stop()"
+            x-show="running" x-cloak>{{ t('memory.import.stop') }}</button>
+  </div>
+  <p id="history-import-summary" x-show="summary" x-cloak x-text="summaryText()" style="margin-top:10px;"></p>
+  <div x-show="running" x-cloak style="margin-top:10px;">
+    <div class="progress"><div class="progress-bar" :style="'width:' + percent() + '%'"></div></div>
+    <p class="form-hint" id="history-import-progress" x-text="progressText()"></p>
+  </div>
+  <p id="history-import-result" role="status" x-show="result" x-cloak x-text="result" style="margin-top:10px;"></p>
+  <p translate="no" role="alert" x-show="error" x-cloak x-text="error" style="margin-top:10px;color:var(--danger);"></p>
+</div>

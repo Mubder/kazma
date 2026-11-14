@@ -1876,6 +1876,21 @@ four injected were noise.
   embedder remembers short texts (<= 256 characters, 4,096 of them): each
   extraction with a fact re-embedded every entity name of the tenant.
 
+**H2. Bring your history** (2026-11-14, REMAINING 4.2,
+`memory/history_import.py`): a ChatGPT or Claude export (`.zip` or
+`conversations.json`, read at most `MAX_JSON_BYTES`) becomes episodes through
+`dual_write.write_episode` -- the ledger asked first, one vector, each turn at
+its own time (`_LATE_WRITERS`), source `history_import` (after the fact:
+episodic, never the working buffer), chat `import-<source>-<id>`. ChatGPT: the
+`current_node` branch only, visible text only (no tool calls or output, hidden
+instructions, images); Claude: `chat_messages` text. A turn already held is
+skipped before it is embedded (re-import goes on where it stopped). No facts
+(the deep pass calls the model). Surfaces: `kazma import` and the Memory
+page's card (`kazma_ui/history_import_api.py`, admin, single-operator, one
+import at a time, the upload deleted when it ends). Gates:
+`tests/test_history_import.py` (real writer, recall after),
+`tests/e2e/test_history_import_browser.py`.
+
 **I. The user decides what is kept (U1, 2026-09-27, `memory/forget.py`).**
 "Nothing lost" (F) guards against accidents; a user who takes a memory back
 has decided otherwise, and every path that rebuilds memory must respect it.

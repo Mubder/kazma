@@ -470,12 +470,15 @@
     <div x-show="loading" role="status" aria-live="polite" style="padding:0.5rem;color:var(--text-muted);font-size:0.85rem;">{{ t('common.loading') }}</div>
     <div translate="no" x-show="error" role="alert" aria-live="assertive" style="padding:0.5rem;color:var(--danger);font-size:0.85rem;" x-text="error"></div>
   </div>
+
+  {% include "components/history_import.html" %}
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script src="/static/js/memory.js?v={{ js_version() }}"></script>
 <script src="/static/js/memory_console.js?v={{ js_version() }}"></script>
+<script src="/static/js/history_import.js?v={{ js_version() }}"></script>
 <script>
   // Deep-link: /memory#hygiene or #console
   (function () {

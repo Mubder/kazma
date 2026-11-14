@@ -140,6 +140,10 @@ def main() -> None:
 
         sys.exit(_run_uninstall(sys.argv[2:]))
 
+    elif cmd == "import":
+        from kazma_cli.history_import import main as _import_main
+
+        sys.exit(_import_main(sys.argv[2:]))
     elif cmd == "report":
         from kazma_cli.report import main as _run_report
 
@@ -210,6 +214,7 @@ def main() -> None:
         print("  swarm      Swarm orchestration (workers, dispatch, metrics, ...)")
         print("  update     Check for and install Kazma CLI updates")
         print("  uninstall  Take Kazma off this computer (keeps your data unless --remove-data)")
+        print("  import     Import a ChatGPT or Claude export into Kazma's memory")
         print("  report     Report a problem to Kazma's makers (you see the report first)")
         print("  migrate    Export/import a Kazma installation (cross-machine migration)")
         print("  ask        Run the agent on a prompt (no web server)")

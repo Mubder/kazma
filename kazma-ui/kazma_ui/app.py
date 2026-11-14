@@ -1547,6 +1547,11 @@ class KazmaAppBuilder:
 
         self.app.include_router(create_web_app_router())
 
+        # ── Bring your history: a ChatGPT or Claude export into memory (REMAINING 4.2) ──
+        from kazma_ui.history_import_api import create_history_import_router
+
+        self.app.include_router(create_history_import_router())
+
         # ── Scheduled Tasks (universal page: cron jobs + scheduled X posts) ──
         try:
             from kazma_ui.scheduled_api import create_scheduled_router

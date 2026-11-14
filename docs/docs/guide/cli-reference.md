@@ -308,6 +308,19 @@ kazma maintenance begin --reason "Windows updates"
 kazma maintenance end
 ```
 
+### 2.18 `kazma import` {#kazma-import}
+
+Imports a ChatGPT or Claude export into Kazma's memory
+([Bring your history](memory-and-rag#bring-your-history)). It says what the
+export holds (conversations, turns, from when to when) and imports on a yes
+(`-y` answers for you; `--dry-run` only says). Run again, it skips what is
+there.
+
+```bash
+kazma import ~/Downloads/chatgpt-export.zip
+kazma import conversations.json --dry-run
+```
+
 ### 2.17 `kazma report` {#kazma-report}
 
 Sends a problem report to Kazma's makers ([what it holds](troubleshooting-and-workarounds#report-a-problem)).

@@ -428,6 +428,30 @@ freed but not yet reused. Kazma's lessons for itself are reached only by
 could quote the message they came from. The
 Forget dialog says so too.
 
+## Bring your history {#bring-your-history}
+
+Kazma can remember what you talked about with ChatGPT or Claude before you
+had it. Ask the service for your data (ChatGPT: **Settings → Data controls →
+Export data**; Claude: **Settings → Privacy → Export data**); it emails you a
+`.zip`. Then, on the **Memory** page, **Bring your history**: choose the zip
+(or the conversations.json file inside it, if the zip is large), **Read it** to
+see what it holds, then **Import**. Or in a terminal:
+
+```bash
+kazma import ~/Downloads/chatgpt-export.zip
+```
+
+Each question and its answer become one memory, dated when you asked it, so
+recall finds them by meaning and words, and an old turn is history, never
+news. Each conversation is a memory chat of its own; the Memory page lists
+the turns, and Forget forgets one like any memory. Only what you and the
+assistant wrote is taken: not ChatGPT's tool calls or their output, hidden
+instructions, branches you left, or images. Importing the same export again
+skips what is there, so an import that was stopped goes on where it ended.
+No facts are extracted (that would call the model for every turn); the
+weekly summaries cover the imported weeks over the next hours, as for every
+turn.
+
 ## About me
 
 **Settings → Memory → About me** is a short text (up to 2,000 characters)
