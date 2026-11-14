@@ -752,6 +752,74 @@ jobs:
         env:
           KAZMA_DB_BACKEND: sqlite
 
+  fresh-install:
+    # A clean machine, installed the way a person installs Kazma (REMAINING
+    # 2.2): setup.sh / setup.cmd from a fresh checkout, Express without the
+    # two multi-gigabyte model downloads (meaning search and neural OCR), the
+    # service included. Every part it chose must then be in place, and Kazma
+    # must answer on its port. The drill VM found about ten fresh-install bugs
+    # one at a time (2026-11-07); this finds the next one on the next push.
+    name: Fresh install (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Let the runner's account keep its own services (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          # Kazma's service is a systemd user unit; a CI account has no
+          # login session, so its user manager runs only with lingering on.
+          sudo loginctl enable-linger "$USER"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          for _ in $(seq 1 30); do
+            [ -S "/run/user/$(id -u)/bus" ] && break
+            sleep 1
+          done
+      - name: Express install (Linux)
+        if: runner.os == 'Linux'
+        run: ./setup.sh --mode express -y -- --without meaning_search --without neural_ocr --no-browser
+      - name: Express install (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        # No virtualization on a hosted Windows runner: the container parts
+        # (Kazma's own engine in WSL) cannot run there, and are left out.
+        run: >-
+          .\setup.cmd -Mode express -Yes -NoElevate -InstallOptions
+          "--without meaning_search --without neural_ocr --without docker --without private_search --without graph_neo4j --no-browser"
+      - name: Every part the install chose is in place (GATE)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then PY=.venv/Scripts/python.exe; else PY=.venv/bin/python; fi
+          "$PY" -m kazma_cli setup install --check
+      - name: Kazma answers on its port (GATE)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:9090/health/live >/dev/null 2>&1; then break; fi
+            sleep 5
+          done
+          curl -fsS http://127.0.0.1:9090/health/live
+          # Ready, or not ready only because no model is set up yet.
+          code=$(curl -s -o ready.json -w '%{http_code}' http://127.0.0.1:9090/health/ready)
+          cat ready.json; echo
+          if [ "$code" != "200" ]; then grep -q '"needs_setup": *true' ready.json; fi
+      - name: Upload the install's log
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: fresh-install-${{ matrix.os }}
+          path: |
+            .kazma/install.log
+            .kazma/guard.log
+            .kazma/kazma.log
+            .kazma/server.stderr.log
+          if-no-files-found: warn
+
   upgrade-drill:
     # The upgrade a release must pass (scripts/upgrade_drill.py, REMAINING
     # 2.6), on every push and on both systems: the newest published release

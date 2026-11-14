@@ -15,17 +15,21 @@ fi
 
 # Options: --mode express|full|custom, -y/--yes (install without the question),
 # --port N (Kazma's page port; a first install asks, Enter keeps 9090).
+# Anything after -- goes to `kazma setup install` as it is, for example
+#   ./setup.sh --mode express -y -- --without meaning_search
 MODE=""
 YES=0
 PORT=""
+INSTALL_EXTRA=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --) shift; INSTALL_EXTRA=("$@"); break ;;
         --mode) MODE="${2:-}"; shift 2 ;;
         --mode=*) MODE="${1#*=}"; shift ;;
         -y|--yes) YES=1; shift ;;
         --port) PORT="${2:-}"; shift 2 ;;
         --port=*) PORT="${1#*=}"; shift ;;
-        *) echo "unknown option: $1 (use --mode express|full|custom, -y, --port N)"; exit 2 ;;
+        *) echo "unknown option: $1 (use --mode express|full|custom, -y, --port N, -- <install options>)"; exit 2 ;;
     esac
 done
 case "$MODE" in ""|express|full|custom) ;; *) echo "--mode is express, full or custom (not '$MODE')"; exit 2 ;; esac
@@ -403,6 +407,8 @@ if [[ "$YES" == "1" ]]; then
 elif [[ ! -t 0 ]]; then
     INSTALL_ARGS+=(--packages-only)
 fi
+# The ${a[@]+...} form: bash 3.2 (macOS) calls an empty array unbound under set -u.
+INSTALL_ARGS+=(${INSTALL_EXTRA[@]+"${INSTALL_EXTRA[@]}"})
 INSTALL_EXIT=0
 $VENV_PYTHON "${INSTALL_ARGS[@]}" || INSTALL_EXIT=$?
 if [[ "$INSTALL_EXIT" -eq 3 ]]; then

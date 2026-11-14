@@ -2,6 +2,12 @@
 
 ## Updates install the versions Kazma was tested with (2026-11-14)
 
+- CI now installs Kazma from scratch on clean Linux and Windows machines on
+  every push, with the same setup scripts a person runs, and checks that
+  every part is in place and Kazma answers. The setup scripts pass options
+  through to `kazma setup install` (`./setup.sh ... -- --without <part>`,
+  `setup.cmd ... -InstallOptions "--without <part>"`).
+
 - Every release is now tested as an upgrade from the release before it: the
   previous release runs on a data folder of its own, is upgraded the way
   `kazma update` upgrades a wheel, and must start on the same data, keep it

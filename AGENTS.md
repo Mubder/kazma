@@ -4625,6 +4625,17 @@ administrator terminal, Custom kept on a re-run; every extra covered with a
 planted one as the control; Express never fails for want of Docker; the
 quickstart's table equal to `COMPONENTS`).
 
+**The setup scripts pass install options through, and CI installs from
+scratch** (2026-11-14, REMAINING 2.2): `./setup.sh ... -- <options>` and
+`setup.cmd ... -InstallOptions "<options>"` (split at spaces: `-File` hands
+every argument over as one string; not `-InstallArgs`, which PowerShell would
+read as the script's own `$installArgs`) reach `kazma setup install`. The CI
+job `fresh-install` runs them on clean Ubuntu and Windows runners (Express
+without `meaning_search` and `neural_ocr`; Windows also without the container
+parts, no virtualization there), then `setup install --check` and Kazma's
+`/health/live` and `/health/ready` on its port. Gate:
+`tests/test_setup_passes_install_options.py` (each script's own parsing run).
+
 **Private search and the memory graph install by default** (the owner,
 2026-11-13, reversing "Express stays container-free" of 2026-11-12, decided
 with Fable's review). `docker`, `private_search` and `graph_neo4j` are in

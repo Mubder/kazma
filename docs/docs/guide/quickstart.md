@@ -167,7 +167,17 @@ kazma setup install --with browser --without push
 `setup.cmd` (and `setup.ps1`) take `-Mode express|full|custom` and `-Yes`; `setup.sh` takes
 `--mode` and `-y`. Without a terminal (a script, CI) setup installs Kazma's own
 packages for the mode and shows the rest as the plan; `-Yes` / `-y` installs
-everything.
+everything. Options for `kazma setup install` itself pass through:
+
+```bash
+./setup.sh --mode express -y -- --without meaning_search
+```
+
+```bash
+.\setup.cmd -Mode express -Yes -InstallOptions "--without meaning_search"
+```
+
+CI installs Kazma this way on clean Linux and Windows machines on every push.
 
 Settings → Packages shows the install: which one it was and when, each part's
 packages, a part the install left out as **Not chosen** (never "Missing"), and

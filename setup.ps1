@@ -32,6 +32,7 @@
     .\setup.cmd -Mode full
     .\setup.cmd -Mode express -Yes
     .\setup.cmd -Port 9191      # Kazma's page on another port (9090 by default)
+    .\setup.cmd -Mode express -Yes -InstallOptions "--without meaning_search"
     .\setup.cmd -Debug
 #>
 
@@ -46,6 +47,9 @@ param(
     # Kazma's page port. Unset: a first install asks (Enter keeps 9090), and an
     # install made before keeps its port. `kazma setup port N` changes it later.
     [int]$Port = 0,
+    # Passed to `kazma setup install` as it is, split at spaces (a -File call
+    # hands every argument over as one string).
+    [string]$InstallOptions = "",
     [switch]$NoElevate
 )
 
@@ -531,6 +535,7 @@ if ($Mode) { $installArgs += @("--mode", $Mode.ToLower()) }
 if ($Port) { $installArgs += @("--port", "$Port") }
 if ($Yes) { $installArgs += "-y" }
 elseif (-not $Interactive) { $installArgs += "--packages-only" }
+if ($InstallOptions) { $installArgs += @($InstallOptions -split '\s+' | Where-Object { $_ }) }
 & $VenvPython @installArgs
 $installExit = $LASTEXITCODE
 # 3: everything that could be done is done, and Windows must restart (WSL)
