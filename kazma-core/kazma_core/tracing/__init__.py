@@ -37,6 +37,9 @@ class TraceEntry:
     tokens: int = 0
     cost: float = 0.0
     details: str = ""
+    #: False for a model call whose price Kazma does not know: its cost is
+    #: counted as 0, and the dashboard says the total is unknown, not $0.
+    priced: bool = True
 
 
 class TraceStore:
@@ -52,6 +55,7 @@ class TraceStore:
         self._total_cost: float = 0.0
         self._total_tokens: int = 0
         self._total_llm_calls: int = 0
+        self._unpriced_llm_calls: int = 0
         self._total_tool_calls: int = 0
         self._start_time: float = time.time()
         self._ws_clients: set[Any] = set()
@@ -83,6 +87,7 @@ class TraceStore:
                     "total_cost": round(self._total_cost, 6),
                     "total_tokens": self._total_tokens,
                     "total_llm_calls": self._total_llm_calls,
+                    "unpriced_llm_calls": self._unpriced_llm_calls,
                     "total_tool_calls": self._total_tool_calls,
                     "total_traces": len(self._traces),
                     "uptime_seconds": time.time() - self._start_time,
@@ -104,6 +109,8 @@ class TraceStore:
         self._total_tokens += entry.tokens
         if entry.trace_type == "llm":
             self._total_llm_calls += 1
+            if not entry.priced:
+                self._unpriced_llm_calls += 1
         elif entry.trace_type == "tool":
             self._total_tool_calls += 1
         try:
@@ -123,6 +130,7 @@ class TraceStore:
             "total_cost": round(self._total_cost, 4),
             "total_tokens": self._total_tokens,
             "total_llm_calls": self._total_llm_calls,
+            "unpriced_llm_calls": self._unpriced_llm_calls,
             "total_tool_calls": self._total_tool_calls,
             "total_traces": len(self._traces),
             "uptime_seconds": time.time() - self._start_time,
@@ -205,6 +213,8 @@ class KazmaTracer:
         tokens: int,
         cost: float,
         duration_ms: float = 0.0,
+        *,
+        priced: bool = True,
     ) -> None:
         _trace_store.add(
             TraceEntry(
@@ -216,6 +226,7 @@ class KazmaTracer:
                 tokens=tokens,
                 cost=cost,
                 details=prompt[:200],
+                priced=priced,
             )
         )
 

@@ -69,7 +69,7 @@
     <div class="stat-tile tone-success">
       <div class="stat-tile-icon"><span class="ki" data-icon="dollar-sign" aria-hidden="true"></span></div>
       <div class="stat-tile-label">{{ t('dashboard.total_cost') }}</div>
-      <div class="stat-tile-value" id="metric-cost">${{ "%.4f"|format(cost_current) }}</div>
+      <div class="stat-tile-value" id="metric-cost">{{ cost_text }}</div>
       <div class="dash-tile-sub" id="metric-headroom">${{ "%.4f"|format(cost_headroom) }} {{ t('dashboard.headroom') }}</div>
     </div>
     <div class="stat-tile tone-accent" id="spend-today-card">

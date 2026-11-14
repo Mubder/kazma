@@ -1942,6 +1942,7 @@ async def supervisor_node(
         tokens=response.usage.get("total_tokens", 0),
         cost=response.cost_usd,
         duration_ms=duration_ms,
+        priced=bool(getattr(response, "cost_known", True)),
     )
 
     logger.info(

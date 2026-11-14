@@ -157,6 +157,16 @@ def _format_uptime(uptime_seconds: float) -> str:
     return f"{days}d {rem_h}h"
 
 
+def cost_text(cost: float, unpriced: int) -> str:
+    """The Total cost card's text: "—" when every call's price is unknown,
+    "≥ $x" when some are, else "$x". It showed $0.0000 over calls of a model
+    with no known price (live 2026-11-15), the one card AGENTS.md §60 says
+    never does; static/js/dashboard.js ``costText`` is the same rule."""
+    if unpriced and not cost:
+        return "—"
+    return ("≥ " if unpriced else "") + f"${cost:.4f}"
+
+
 def _get_metrics() -> dict[str, Any]:
     """Get aggregate metrics from the in-memory TraceStore.
 
@@ -173,6 +183,7 @@ def _get_metrics() -> dict[str, Any]:
         "total_cost": float(stats.get("total_cost") or 0.0),
         "total_tokens": int(stats.get("total_tokens") or 0),
         "total_llm_calls": int(stats.get("total_llm_calls") or 0),
+        "unpriced_llm_calls": int(stats.get("unpriced_llm_calls") or 0),
         "total_tool_calls": int(stats.get("total_tool_calls") or 0),
         "total_traces": int(stats.get("total_traces") or 0),
         "uptime_seconds": uptime_s,
@@ -251,6 +262,7 @@ def dashboard(request: Request) -> HTMLResponse:
         "dashboard.html",
         {
             "cost_current": cost_current,
+            "cost_text": cost_text(cost_current, raw_metrics["unpriced_llm_calls"]),
             "cost_max": cost_max,
             "cost_headroom": cost_headroom,
             "cost_color": cost_color,

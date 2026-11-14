@@ -191,8 +191,9 @@ def enable_long_task(
     """Enable long-task mode for *thread_id*. Returns status dict.
 
     Modes:
-      - ``budget`` (default): raised soft ceilings (Research = 40). Still
-        force-stops and may reply PARTIAL — user must continue.
+      - ``budget`` (default): raised soft ceilings (Research = 40, never
+        below the Settings baseline). Still force-stops and may reply
+        PARTIAL — user must continue.
       - ``mission``: true run-until-done for this chat — ``max_iterations``
         and LangGraph recursion are set to the mission hard wall (default
         500 rounds / ~2500 steps). Not literally infinite (cost, process
@@ -246,6 +247,11 @@ def enable_long_task(
             mi = PRESETS["research"]
 
         mi = min(mi, _env_max_iter_cap())
+        if preset_key != "custom":
+            # A budget preset only ever raises the ceiling: on an install whose
+            # Settings baseline is above it, "/long on" set 40 tool rounds where
+            # the chat had 100 (live 2026-11-15). An explicit number stays.
+            mi = max(mi, _baseline_iterations())
         recursion = derive_recursion_limit(mi)
         hard = mi
 
@@ -552,7 +558,7 @@ def resolve_turn_budgets(thread_id: str | None = None) -> dict[str, Any]:
         if default_on and not (thread_id and long_task_status(thread_id).get("active")):
             preset = str(cs.get("agent.long_task.default_preset") or "research").lower()
             if preset in PRESETS:
-                mi = PRESETS[preset]
+                mi = max(mi, PRESETS[preset])  # never below the Settings baseline
             # else keep baseline max_iterations from Settings
     except Exception:
         pass

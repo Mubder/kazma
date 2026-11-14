@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Found testing live (2026-11-15)
+
+- `/long on` never lowers a chat's tool-round limit. Its research preset is
+  40 rounds; on an install whose own limit is higher (live: 100), turning long
+  mode on cut the limit to 40. It now takes the higher of the two.
+- The Dashboard's Total cost card says "—" (or "at least") when model prices
+  are unknown, as "Spent today" beside it does; it said $0.0000.
+
 ## Less left behind on disk (2026-11-14)
 
 - `kazma update` removes the old image of each service it moves to a newer

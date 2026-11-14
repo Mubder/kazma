@@ -309,6 +309,13 @@
     return days + 'd ' + (hours % 24) + 'h';
   }
 
+  // The Total cost card's text: "—" when every call's price is unknown,
+  // "≥ $x" when some are (dashboard.py cost_text is the same rule).
+  function costText(cost, unpriced) {
+    if (unpriced && !cost) return '—';
+    return (unpriced ? '≥ ' : '') + '$' + cost.toFixed(4);
+  }
+
   function updateMetrics(data) {
     var metrics = data.metrics || data;
 
@@ -327,7 +334,7 @@
       headroom = Math.max(0, maxBudget - totalCost);
     }
 
-    setMetric('metric-cost', '$' + displayCost.toFixed(4));
+    setMetric('metric-cost', costText(displayCost, parseMetricNumber(metrics.unpriced_llm_calls)));
     // Keep trailing label from SSR when present (i18n "headroom")
     var headEl = $('metric-headroom');
     if (headEl) {

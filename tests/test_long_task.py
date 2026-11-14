@@ -253,3 +253,41 @@ def test_baseline_research_settings_raise_recursion(monkeypatch) -> None:
                 pass
         else:
             cs.set("agent.max_iterations", prev, category="agent")
+
+
+def _with_baseline(monkeypatch, rounds: int) -> None:
+    from kazma_core.agent import long_task
+
+    monkeypatch.setattr(long_task, "_baseline_iterations", lambda: rounds)
+
+
+def test_long_on_never_lowers_the_installs_baseline(monkeypatch) -> None:
+    """Live 2026-11-15: the Settings baseline was 100 tool rounds and
+    "/long on" set the research preset's 40 -- turning long mode on cut the
+    chat's budget. A budget preset only ever raises it."""
+    _with_baseline(monkeypatch, 100)
+    tid = "long-never-lowers"
+    try:
+        st = enable_long_task(tid, actor="t")
+        assert st["max_iterations"] == 100
+        assert resolve_turn_budgets(tid)["max_iterations"] == 100
+    finally:
+        disable_long_task(tid)
+
+
+def test_long_on_still_raises_a_low_baseline(monkeypatch) -> None:
+    _with_baseline(monkeypatch, 15)
+    tid = "long-raises"
+    try:
+        assert enable_long_task(tid, actor="t")["max_iterations"] == PRESETS["research"]
+    finally:
+        disable_long_task(tid)
+
+
+def test_an_explicit_number_is_kept(monkeypatch) -> None:
+    _with_baseline(monkeypatch, 100)
+    tid = "long-explicit"
+    try:
+        assert enable_long_task(tid, actor="t", max_iterations=30)["max_iterations"] == 30
+    finally:
+        disable_long_task(tid)

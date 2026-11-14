@@ -6176,6 +6176,11 @@ executing commands after a mission ended Partial) — full diagnosis in
 - An active `/long` (budget, mission or `/unrestricted`) lifts the turn's
   wall-clock limit for its chat on every surface; a paused one does not
   (§31, `agent/turn_budget.py`).
+- **A budget preset never lowers the Settings baseline** (2026-11-15):
+  `/long on` set the research preset's 40 tool rounds where the live chat had
+  100 (`agent.max_iterations`); `enable_long_task` and the "long task by
+  default" setting now take the higher of the two (an explicit number stays).
+  Gate: `tests/test_long_task.py` (`test_long_on_never_lowers_the_installs_baseline`).
 - **The gateway does both through `_settle_recursion_partial`**
   (`agent_handler/graph.py`), and a failure there is a WARNING. Inline, it
   imported a name removed 2026-09-04 inside `except Exception: pass`, so
@@ -10858,6 +10863,11 @@ provider list as data with per-type forms, per-model details with
   none, and its made-up cost is not shown (`chat.js` `_savedCost`). A write
   to `models.prices`, by any path, rebuilds the cached clients
   (`ModelRegistry._on_settings_written`). Gate: `tests/test_model_prices.py`.
+  The Dashboard's Total cost card reads the in-memory trace store, which now
+  counts the calls of unknown price (`TraceEntry.priced`,
+  `unpriced_llm_calls`): it said `$0.0000` beside "Spent today"'s "—" (live
+  2026-11-15). `dashboard.cost_text` and `dashboard.js` `costText` are one rule
+  (`tests/test_dashboard_total_cost.py`).
 - **Requests newer models take**: OpenAI's own API gets
   `max_completion_tokens`. A 400 that refuses `max_tokens`, or any
   temperature but the default, is asked once more without it, and the fix is
