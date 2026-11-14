@@ -224,7 +224,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_PROJECT_ROOT` | (none) | `kazma_core.mcp.server`, `kazma_core.paths` | yes |
 | `KAZMA_PROMPT_CACHE` | (none) | `kazma_core.prompt_cache` | yes |
 | `KAZMA_PROVIDER` | `""` | `kazma_core.model_registry`, `kazma_core.web_acquire.research_pipeline_job`, `kazma_ui.app` | yes |
-| `KAZMA_PUBLIC_URL` | `""` | `kazma_cli.port_setup`, `kazma_core.ide.env_context`, `kazma_core.migration.exporter` +10 | yes |
+| `KAZMA_PUBLIC_URL` | `""` | `kazma_cli.port_setup`, `kazma_core.ide.env_context`, `kazma_core.migration.exporter` +11 | yes |
 | `KAZMA_RATE_LIMIT_ENABLED` | `""` | `kazma_ui.rate_limit` | yes |
 | `KAZMA_READ_ONLY_START` | (none) | `kazma_ui.read_only_mode` | yes |
 | `KAZMA_READ_URL_MAX_CHARS` | (none) | `kazma_core.tools.read_url` | yes |

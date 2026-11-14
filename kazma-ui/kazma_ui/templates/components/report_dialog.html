@@ -16,6 +16,11 @@
                           placeholder="{{ t('support.note_placeholder') }}"
                           :value="$store.report.note"
                           @input="$store.report.note = $event.target.value; $store.report.preview = ''"></textarea>
+                <label class="report-include" x-show="$store.report.chatSession" x-cloak>
+                    <input type="checkbox" id="report-include-chat" x-model="$store.report.includeChat"
+                           @change="$store.report.preview = ''">
+                    <span>{{ t('support.include_chat') }}</span>
+                </label>
                 <div class="report-actions">
                     <button type="button" class="btn btn-secondary btn-sm" id="report-show"
                             @click="$store.report.load()" :disabled="$store.report.loading"
@@ -24,6 +29,8 @@
                             @click="$store.report.send()"
                             :disabled="!$store.report.preview || $store.report.sending || !!$store.report.result"
                             x-text="$store.report.sending ? t('support.sending') : t('support.send')"></button>
+                    <button type="button" class="btn btn-ghost btn-sm" id="report-save"
+                            @click="$store.report.saveToFile()" :disabled="!$store.report.preview">{{ t('support.save_file') }}</button>
                 </div>
                 <template x-if="$store.report.preview">
                     <div class="report-preview-wrap">

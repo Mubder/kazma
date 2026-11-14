@@ -2864,6 +2864,17 @@
       return;
     }
 
+    // /report <what happened>: the problem report dialog, filled in (REMAINING 3.1).
+    if (/^\/report(\s|$)/i.test(text)) {
+      if (typeof window.kazmaReportProblem === 'function') {
+        window.kazmaReportProblem({ note: text.replace(/^\/report\s*/i, ''), where: '/chat',
+          chatSession: chatSessionId || '' });
+      }
+      inputEl.value = '';
+      inputEl.style.height = 'auto';
+      return;
+    }
+
     // Handle /new command locally
     if (text.toLowerCase() === '/new') {
       newSession();
@@ -7954,7 +7965,8 @@
       '<span class="turn-header-conn" hidden></span>' +
       '<span class="turn-header-live sr-only" role="status" aria-live="polite"></span>' +
       '<button type="button" class="turn-header-act turn-header-stop" hidden></button>' +
-      '<button type="button" class="turn-header-act turn-header-retry" hidden></button>';
+      '<button type="button" class="turn-header-act turn-header-retry" hidden></button>' +
+      '<button type="button" class="turn-header-act turn-header-report" hidden></button>';
     var stop = el.querySelector('.turn-header-stop');
     if (stop) {
       stop.textContent = ti('stop_generation', 'Stop');
@@ -7974,6 +7986,19 @@
       retryBtn.addEventListener('click', function (e) {
         e.preventDefault();
         try { retry(); } catch (e2) { /* ignore */ }
+      });
+    }
+    // A turn that failed or ended without an answer: a problem report about
+    // it, shown whole before it is sent (REMAINING 3.1).
+    var reportBtn = el.querySelector('.turn-header-report');
+    if (reportBtn) {
+      reportBtn.textContent = ti('report_this', 'Report this');
+      reportBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        if (typeof window.kazmaReportProblem === 'function') {
+          window.kazmaReportProblem({ note: ti('report_failed_turn', 'A chat turn failed or ended without an answer.'),
+            where: '/chat', chatSession: chatSessionId || '' });
+        }
       });
     }
     return el;
@@ -8036,6 +8061,8 @@
 
     setHidden('.turn-header-stop', !model.canStop);
     setHidden('.turn-header-retry', !model.canRetry);
+    setHidden('.turn-header-report', !(model.terminal && (model.phase === 'failed'
+      || model.phase === 'no_answer' || model.phase === 'interrupted')));
 
     // Announce the coarse phase, not every token or timer tick (plan §11).
     var live = el.querySelector('.turn-header-live');
@@ -8888,6 +8915,8 @@
   // Expose for inline handlers + agentStore turn lifecycle bridge
   window.KazmaChat = {
     sendMessage: sendMessage,
+    /** The chat open now (the problem report's "include this chat"). */
+    currentSessionId: function () { return chatSessionId || ''; },
     newSession: newSession,
     /** The sidebar's delete, with its "also forget" choice (plan S3). */
     deleteSession: deleteSession,

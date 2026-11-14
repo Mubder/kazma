@@ -419,7 +419,7 @@ class WhatsAppAdapter(SenderGate, BaseAdapter):
                 await self._client.send_text(to, part)
                 part_delivered()
             for attachment in outbound.attachments:
-                await self._send_attachment(to, attachment)
+                await self._upload_and_send(to, attachment)
                 part_delivered()
             buttons = ctx.get(BUTTONS_KEY)
             if isinstance(buttons, dict) and buttons.get("buttons"):
@@ -431,7 +431,9 @@ class WhatsAppAdapter(SenderGate, BaseAdapter):
             return False
         return True
 
-    async def _send_attachment(self, to: str, attachment: Attachment) -> None:
+    async def _upload_and_send(self, to: str, attachment: Attachment) -> None:
+        """Upload one file and send it; a failure RAISES (``_META_FAILURES``), so the
+        send loop reports it -- there is no answer to drop."""
         if attachment.data is None:
             raise WhatsAppError(0, None, "an attachment with no bytes cannot be sent")
         mime = attachment.mime or "application/octet-stream"

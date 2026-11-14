@@ -689,6 +689,19 @@ jobs:
         run: python -m pytest tests/e2e/test_scheduled_reads_in_arabic.py -q --timeout=600
         env:
           KAZMA_DB_BACKEND: sqlite
+      - name: The night's pages in a browser (2026-11-14)
+        # WhatsApp's Settings card, the problem report, Kazma as an installable
+        # app (Chrome's own installability check), Bring your history and the
+        # automations gallery: each reached by the sidebar, English and Arabic.
+        run: >-
+          python -m pytest -q --timeout=600
+          tests/e2e/test_whatsapp_settings_browser.py
+          tests/e2e/test_problem_report_browser.py
+          tests/e2e/test_web_app_install_browser.py
+          tests/e2e/test_history_import_browser.py
+          tests/e2e/test_automation_gallery_browser.py
+        env:
+          KAZMA_DB_BACKEND: sqlite
       - name: Time travel page restores and reads in Arabic (2026-10-14)
         # Time Travel audit TT-Q1: reached by the sidebar, a restore that
         # rewinds the chat, the restored chat, Arabic with no English, and

@@ -206,3 +206,23 @@ async def test_a_set_whose_restore_did_not_hold_stays_unknown(
     )
     assert out.startswith("Error: patch 2 of 2") and "may not be as they were" in out
     assert str(paper) in out
+
+
+def test_the_checkpoint_store_survives_its_file_being_removed(tmp_path, monkeypatch) -> None:
+    """A store whose database file was removed (its folder cleaned away)
+    makes it again with its table; one kept from another data folder is
+    replaced. Both made every patch set refuse with "no such table"."""
+    from kazma_core.ide import file_checkpoints as fc
+
+    first = tmp_path / "one" / "file_checkpoints.db"
+    monkeypatch.setenv("KAZMA_FILE_CHECKPOINTS_DB", str(first))
+    store = fc.get_file_checkpoint_store()
+    first.unlink()
+    target = tmp_path / "ws" / "a.txt"
+    target.parent.mkdir()
+    target.write_text("x", encoding="utf-8")
+    with store._connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM file_checkpoints").fetchone()[0] == 0
+    second = tmp_path / "two" / "file_checkpoints.db"
+    monkeypatch.setenv("KAZMA_FILE_CHECKPOINTS_DB", str(second))
+    assert fc.get_file_checkpoint_store()._db_path == str(second)

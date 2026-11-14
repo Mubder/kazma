@@ -58,8 +58,14 @@ def _machine(tmp_path: Path, *, os_name: str = "windows", admin: bool = True, re
         unit.parent.mkdir(parents=True)
         guard = root / "scripts" / "service" / "kazma_guard.py"
         unit.write_text(f"[Service]\nExecStart={root / '.venv' / 'bin' / 'python'} {guard}\n", encoding="utf-8")
+    # A program that outlives the uninstall (cmd.exe's delayed delete): recorded,
+    # never started -- on Linux CI there is no cmd.exe, and the real one would
+    # delete this test's folder behind it.
+    def spawn(argv, **_kw):
+        runner.ran.append(["spawn", *argv])
+
     return un.Machine(os_name=os_name, root=root, data=data, home=home, user_home=tmp_path / "user",
-                      python="python", run=runner, admin=admin, record=record or {},
+                      python="python", run=runner, spawn=spawn, admin=admin, record=record or {},
                       now=lambda: 1763100000.0)
 
 
@@ -183,13 +189,46 @@ def test_containers_setup_made_are_removed_their_volumes_only_with_remove_data(t
 
     monkeypatch.setattr(docker_cli, "find_docker_cli", lambda *a, **k: "docker")
     monkeypatch.setattr(cs, "_image_state",
-                        lambda svc, root, docker, run=None: cs.ImageState(svc, "current" if svc.part == "private_search"
-                                                                          else "absent"))
+                        lambda svc, root, docker, run=None: cs.ImageState(
+                            svc, "current" if svc.part == "private_search" else "absent",
+                            volumes=("kazma_searxng_cache",)))
     machine = _machine(tmp_path)
-    (item,) = [i for i in un.build_plan(machine) if i.how == "remove" and "rm" in i.argv]
-    assert item.argv[1:3] == ("compose", "-f") and "rm" in item.argv and "--volumes" not in item.argv
-    (item2,) = [i for i in un.build_plan(machine, remove_data=True) if i.argv and "rm" in i.argv]
-    assert "--volumes" in item2.argv
+    plan = un.build_plan(machine)
+    (item,) = [i for i in plan if i.how == "remove" and "rm" in i.argv]
+    assert item.argv[1:3] == ("compose", "-f") and "rm" in item.argv
+    assert not [i for i in plan if i.argv[1:3] == ("volume", "rm")], "its data is kept unless asked"
+    with_data = un.build_plan(machine, remove_data=True)
+    removes = [i for i in with_data if i.argv and ("rm" in i.argv)]
+    assert removes[0].argv[1:3] == ("compose", "-f")
+    assert removes[1].argv == ("docker", "volume", "rm", "kazma_searxng_cache"), "its named volumes, after it"
+
+
+def test_the_named_volumes_come_from_dockers_own_answer(tmp_path) -> None:
+    """compose rm --volumes removes anonymous volumes only: Neo4j's data is a
+    named volume, read from the container's mounts (the old flag as control)."""
+    import json
+    import subprocess
+
+    from kazma_core import container_services as cs
+
+    svc = next(s for s in cs.SERVICES if s.part == "graph_neo4j")
+    root = tmp_path
+    (root / svc.compose_file).parent.mkdir(parents=True, exist_ok=True)
+    lines = ["services:", "  kazma-neo4j:", "    image: neo4j:5.26@sha256:" + "a" * 64, ""]
+    (root / svc.compose_file).write_text(chr(10).join(lines), encoding="utf-8")
+    pinned = cs._pinned_image(svc, root)
+    row = {"Config": {"Image": pinned, "Labels": {
+        "com.docker.compose.project": cs._compose_project(svc, root),
+        "com.docker.compose.service": svc.service,
+        "com.docker.compose.project.config_files": str(root / svc.compose_file)}},
+        "Mounts": [{"Type": "volume", "Name": "kazma-graph_kazma-neo4j-data"},
+                   {"Type": "bind", "Source": "/x"}]}
+
+    def run(argv, **_kw):
+        return subprocess.CompletedProcess(argv, 0, json.dumps([row]), "")
+
+    state = cs._image_state(svc, root, "docker", run=run)
+    assert state.state == "current" and state.volumes == ("kazma-graph_kazma-neo4j-data",)
 
 
 def test_kazmas_engine_is_removed_through_its_own_removal(tmp_path, monkeypatch) -> None:
@@ -209,3 +248,67 @@ def test_the_cli_names_the_command() -> None:
 
     main = (_P(un.__file__).with_name("main.py")).read_text(encoding="utf-8")
     assert 'elif cmd == "uninstall":' in main and "uninstall  Take Kazma off this computer" in main
+
+
+# -- Kazma's database (REMAINING 2.5): backed up, then dropped, only when asked --
+
+
+class _DbRun:
+    """psql and pg_dump as the uninstall calls them; the dump writes bytes."""
+
+    def __init__(self, dump_code: int = 0) -> None:
+        self.calls: list[tuple[list[str], dict]] = []
+        self.dump_code = dump_code
+
+    def __call__(self, argv, **kw):
+        import subprocess
+
+        self.calls.append((list(argv), kw))
+        if any(str(a).endswith(("pg_dump", "pg_dump.exe")) for a in argv):
+            if self.dump_code == 0:
+                kw["stdout"].write(b"PGDMP-fake")
+            return subprocess.CompletedProcess(argv, self.dump_code, None, b"pg_dump: connection refused")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+
+def _db_machine(tmp_path, run):
+    machine = _machine(tmp_path)
+    machine.record = {"postgres": {"os": "windows", "manager": "winget", "service": "postgresql-x64-18",
+                                   "port": 5432, "bin_dir": "C:/PG/18/bin", "major": 18}}
+    machine.run = run
+    machine.home.mkdir(parents=True, exist_ok=True)
+    (machine.home / "postgres_superuser.pass").write_text("s3cret-superuser", encoding="utf-8")
+    return machine
+
+
+def test_the_database_goes_only_when_asked_and_before_the_data_moves(tmp_path) -> None:
+    machine = _db_machine(tmp_path, _DbRun())
+    assert not [i for i in un.build_plan(machine) if i.action == "database"], "kept unless asked"
+    plan = un.build_plan(machine, remove_data=True)
+    actions = [i.action for i in plan if i.how != "keep"]
+    assert "database" in actions and actions.index("database") < actions.index("move")
+
+
+def test_the_database_is_backed_up_then_dropped(tmp_path) -> None:
+    run = _DbRun()
+    machine = _db_machine(tmp_path, run)
+    ok, said = un._database(machine)
+    assert ok, said
+    dump_argv, dump_kw = run.calls[0]
+    assert dump_argv[0].endswith("pg_dump.exe") and "-Fc" in dump_argv and dump_argv[-1] == "kazma"
+    dumps = list(machine.data.glob("kazma-database-*.dump"))
+    assert len(dumps) == 1 and dumps[0].read_bytes() == b"PGDMP-fake", "the backup lands in the data folder"
+    drop_argv, drop_kw = run.calls[1]
+    assert "DROP DATABASE IF EXISTS kazma;" in drop_kw["input"] and "DROP ROLE IF EXISTS kazma_app;" in drop_kw["input"]
+    for argv, kw in run.calls:
+        assert "s3cret-superuser" not in " ".join(argv), "the password never on a command line"
+        assert kw["env"]["PGPASSWORD"] == "s3cret-superuser"
+
+
+def test_a_failed_backup_drops_nothing(tmp_path) -> None:
+    run = _DbRun(dump_code=1)
+    machine = _db_machine(tmp_path, run)
+    ok, said = un._database(machine)
+    assert not ok and "nothing was dropped" in said
+    assert len(run.calls) == 1, "no DROP after a failed backup"
+    assert not list(machine.data.glob("kazma-database-*.dump"))

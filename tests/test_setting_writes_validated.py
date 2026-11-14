@@ -124,7 +124,10 @@ def test_the_table_names_the_keys_the_owning_modules_define() -> None:
                              # does not have would send every docker call nowhere.
                              ENGINE_KEY,
                              "notifications.ops.channels", "guard.telegram.chat_id",
-                             "agent.language", "agent.max_iterations"}
+                             "agent.language", "agent.max_iterations",
+                             # Where problem reports go and A2A's switch, 2026-11-14: an
+                             # address that is not https, a switch that is not a yes or no.
+                             "support.report_url", "a2a.enabled"}
 
 
 # ── the TUI's client: an answered refusal is not "no server" ───────────────

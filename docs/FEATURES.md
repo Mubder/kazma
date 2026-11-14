@@ -2,7 +2,7 @@
 
 Written from the code on **2026-09-29** for the website: every line was
 checked against the source, and each names where to look. It says what exists,
-not what is planned. The changes below were checked again on **2026-10-12**, and the document lines on **2026-10-15** and **2026-10-21**. Disclosures about bounded bilingual review and deployment qualification are in [Known gaps](KNOWN_GAPS.md).
+not what is planned. The changes below were checked again on **2026-10-12**, the document lines on **2026-10-15** and **2026-10-21**, and the additions of **2026-11-14** that day. Disclosures about bounded bilingual review and deployment qualification are in [Known gaps](KNOWN_GAPS.md).
 
 **Status words.** **Shipped**: works out of the box or one setting away.
 **Opt-in**: works once you install or configure the named extra.
@@ -22,6 +22,7 @@ Every line below describes that setup.
 |---|---|---|
 | Web chat with streaming answers, a step-by-step activity view per answer, and approvals inline | Shipped | `/chat` |
 | Telegram, Discord and Slack: text, photos and documents, voice notes transcribed, approve/deny buttons, per-platform allowed-user lists | Shipped | `kazma-gateway/` |
+| WhatsApp, through Meta's WhatsApp Cloud API: text, photos, documents, voice notes, approve/deny buttons, allowed numbers; Meta's signature checked on every call | Opt-in — your own Meta app, number and token; Meta allows a reply only within 24 hours of your last message; tested against a stand-in for Meta, not yet against Meta's own servers | Settings → Providers & Connectors → Platform Connectors → WhatsApp |
 | Native Telegram command menus and Discord/Slack `/kazma` commands | Opt-in — external application registration is required; private continuation credentials expire on restart | [Documentation](docs/ops/native-slash-commands.md) |
 | Each chat app's Test diagnoses the connection: the token, the chat or channel Kazma delivers to, direct messages, allowed users, and what became of the last message a person sent | Shipped | Settings → Providers & Connectors → Platform Connectors |
 | Finalized chat replies delivered without gateway tone rewriting, with one terminal persistence owner | Shipped | [Documentation](docs/guide/recent-features.md) |
@@ -30,6 +31,8 @@ Every line below describes that setup.
 | Terminal UI, including a file editor | Shipped | `kazma-tui` |
 | Command line: one-shot questions (`kazma ask`), and the Agent Client Protocol for editors (`kazma acp`) | Shipped | `kazma-cli/` |
 | An MCP server: other agents can use Kazma's tools, with the same approval gate (`kazma mcp`) | Shipped | `kazma_core/mcp/server.py` |
+| Other AI agents can call Kazma over A2A (agent to agent), signed in with one of your API tokens; Kazma only reads for them (web, Knowledge Library, memory) and nothing they ask is remembered | Opt-in — off until switched on | Settings → System → Agent-to-agent, [API](docs/guide/api-and-extension-points.md#a2a) |
+| Install Kazma as an app on a computer or phone (its own window and icon); while Kazma restarts the app shows a page that tries again by itself | Shipped — browsers install only from https or this computer | the browser's "Install app" / "Add to Home Screen" |
 | Spoken replies (text-to-speech) and speech input; click-to-play in web chat | Shipped | Settings → Voice |
 | Live two-way voice in the browser through LiveKit | Opt-in | `LIVEKIT_URL` + keys |
 | English and Arabic interface, full right-to-left layout; your words, the model's replies, names and server diagnostics are shown as written, each paragraph in its own language's direction (English left to right, Arabic right to left) in either interface | Shipped | every page, the login page included |
@@ -71,6 +74,7 @@ Every line below describes that setup.
 | Recall by evidence: a memory is used only when it matches the question well enough — nothing when nothing does | Shipped | `memory/recall.py` |
 | Every answer shows which memories it used | Shipped | chat activity: "Memory used" |
 | "About me": a short text you write, read at the start of every reply | Shipped | Settings → Memory |
+| Bring your history: a ChatGPT or Claude export imported into memory, each turn at its own date | Shipped — no facts are extracted from it | Memory page → Bring your history, `kazma import` |
 | Weekly topic summaries of long threads | Shipped | Memory page |
 | Forget one memory or a whole chat, from the page or by asking in chat ("forget everything that mentions X" reaches every memory holding it); keep a chat out of memory; export everything | Shipped | chat menu → Memory…, Memory page, `memory_forget_mentions` |
 | Works in Arabic and English, Gulf dialect included | Shipped | `memory/query_terms.py` |
@@ -129,6 +133,7 @@ Every line below describes that setup.
 | Feature | Status | Where |
 |---|---|---|
 | Reminders and scheduled tasks, delivered to the chat you asked from | Shipped | `/scheduled` |
+| Ready-made automations in one click: a morning briefing, inbox triage, a weekly report, a news digest; each only reads | Shipped | `/scheduled` |
 | X (Twitter): drafts, schedule, post through the official API, reply to mentions | Shipped | `/x` |
 | X subject setup, scoped Support/Against, reply language and optional profanity; previews and model compatibility tests | Shipped | Settings → X; `/x` Conversations |
 | X posts drafted from your brief and up to three reference documents you name (for example the page describing Kazma), in X Studio or by asking in chat; each draft is fact-checked against them and saved for review, never sent; posts have their own length setting | Shipped | Settings → X → Reference documents and Post length; `/x` Composer; `x_draft_posts` |
@@ -142,6 +147,8 @@ Every line below describes that setup.
 | Feature | Status | Where |
 |---|---|---|
 | A supervisor that restarts on real failure, reloads gracefully and pages you over Telegram | Shipped | `scripts/service/kazma_guard.py` |
+| Kazma Watch: a watcher outside the computer, on your own Cloudflare account, that tells you on Telegram when the machine, the tunnel or Kazma stops answering; set up in one command | Opt-in — a free Cloudflare account and a Telegram bot | `kazma observer setup`, [Outside watch](docs/ops/outside-watch.md) |
+| Report a problem from anywhere: you see the whole report first, and it holds nothing private (a chat only if you tick it) | Shipped | the ? beside the bell, `kazma report`, `/report` |
 | The port of Kazma's page chosen at install (9090 by default) and changed later with one command; the supervisor and every `kazma` command follow it | Shipped | `kazma setup port`, [Quickstart](docs/guide/quickstart.md) |
 | On Windows, Kazma installs its own container engine (Docker as a service in a WSL distro of its own), which starts at boot with nobody signed in; Docker Desktop stays a choice | Shipped | `kazma setup engine`, Settings → System, [Quickstart](docs/guide/quickstart.md) |
 | An install whose containers run on Docker Desktop moves them to Kazma's engine in one command: only Kazma's own, their data checked file by file, and everything put back if a step fails | Shipped | `kazma setup engine --move-from-desktop`, [CLI reference](docs/guide/cli-reference.md) |
@@ -159,6 +166,9 @@ Every line below describes that setup.
 | Admin answer-quality signals without storing answer text in the signal record | Shipped | [Documentation](docs/guide/api-and-extension-points.md) |
 | Prometheus metrics; OpenTelemetry and Langfuse traces | Shipped / Opt-in | `/metrics`, [OpenTelemetry](docs/ops/opentelemetry.md) |
 | Updates in one command: on a supervised install it waits for the chats to go quiet, stops Kazma, installs and starts it again | Shipped | [`kazma update`](docs/ops/kazma-update.md) |
+| Updates install the package versions Kazma was tested with, and every release is tested as an upgrade from the one before | Shipped | [`kazma update`](docs/ops/kazma-update.md) |
+| Uninstall: takes off what setup put on; your data is kept unless you ask, and then moved aside (Kazma's database backed up first) | Shipped | `kazma uninstall`, [CLI reference](docs/guide/cli-reference.md) |
+| A Postgres install moves to a new major version in one command, put back if a step fails | Shipped | `kazma setup postgres --upgrade`, [Postgres](docs/ops/postgres-and-saas.md) |
 | Active-passive recovery preparation with one active runtime owner, fencing and paired backups | Partial — target-cluster drills are required; shared Postgres alone does not qualify concurrent runtimes | [Documentation](docs/ops/multi-region.md) |
 | Fault injection to test retries and failover: slow or failing model calls, tool calls and reply saves (other targets have no injection point yet); off unless enabled | Opt-in | `KAZMA_CHAOS_ENABLED`, [Chaos testing](docs/ops/chaos-testing.md) |
 

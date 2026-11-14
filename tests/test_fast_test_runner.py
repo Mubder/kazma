@@ -269,7 +269,9 @@ def test_the_runner_starts_every_pytest_through_the_command_builder(monkeypatch)
 
     monkeypatch.setattr(runner, "_start", fake_start)
     runner.run_pytest(["tests/test_x.py"], 10)
-    assert seen == [runner.pytest_command(["tests/test_x.py"])]
+    basetemp = [a for a in seen[0] if a.startswith("--basetemp=")]
+    assert len(basetemp) == 1, "every run has a temporary folder of its own"
+    assert [a for a in seen[0] if a not in basetemp] == runner.pytest_command(["tests/test_x.py"])
     assert seen[0][1:3] == ["-c", runner._BACKGROUND_BOOTSTRAP], "background is the default"
 
     # One process launch in the whole runner, inside ``_start`` (which only
@@ -648,12 +650,24 @@ def test_long_serial_suite_uses_owned_argument_file_and_runs_real_pytest(tmp_pat
     assert len(observed) == 1 and not observed[0].exists()
 
 
-def test_only_a_failed_test_keeps_its_temporary_folder() -> None:
+def test_a_run_removes_its_temporary_folders_and_keeps_pytests_default(tmp_path, monkeypatch) -> None:
     """2026-11-14: one day of chunked runs left 54 runs (23 GB) in the temp
-    folder. A run cut off by its chunk's budget keeps its lock for three days,
-    so pytest's removal of old runs skipped it, whole. With the "failed"
-    policy a finished run keeps only its failed tests' folders."""
+    folder (a run cut off keeps pytest's lock for three days). Each run now
+    has a base folder of its own, removed when it ends -- a real pytest run
+    whose test wrote into tmp_path leaves nothing. pytest's "failed"
+    retention, the first fix, broke later tests on Linux: it stays out."""
     import tomllib
 
     options = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
-    assert options["tool"]["pytest"]["ini_options"]["tmp_path_retention_policy"] == "failed"
+    assert "tmp_path_retention_policy" not in options["tool"]["pytest"]["ini_options"]
+    runner = _runner()
+    probe = tmp_path / "test_writes_tmp.py"
+    lines = ["def test_writes(tmp_path):",
+             "    (tmp_path / 'f.txt').write_text('x')",
+             "    print('TMP=' + str(tmp_path))", ""]
+    probe.write_text(chr(10).join(lines), encoding="utf8")
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    code, log = runner.run_pytest([str(probe), "-s"], 60)
+    assert code == 0, log
+    used = Path(next(line.split("TMP=", 1)[1].strip() for line in log.splitlines() if "TMP=" in line))
+    assert "kazma-pytest-run-" in str(used) and not used.exists()

@@ -49,8 +49,11 @@ kazma
 ├── migrate ...            # export/verify/import an installation
 ├── setup ...              # install what Kazma runs on (postgres, system)
 ├── restore postgres ...   # restore the database to a point in time, into a new folder
-├── observer ...           # pair with the outside observer (pair, status, unpair)
+├── observer ...           # Kazma Watch, the outside observer (setup, pair, status, unpair)
 ├── maintenance ...        # an update window: begin, end
+├── uninstall              # take Kazma off this computer (data kept unless asked)
+├── report <what happened> # send a problem report (you see it first)
+├── import <export>        # bring a ChatGPT or Claude export into memory
 └── --help | -h | help     # print command list
 ```
 

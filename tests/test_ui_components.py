@@ -140,7 +140,9 @@ class TestBaseTemplate:
     def test_brand_mark_is_favicon_and_apple_touch(self, base_html):
         assert "/static/img/favicon.png" in base_html
         assert 'rel="apple-touch-icon"' in base_html
-        assert "/static/img/kazma-icon.png" in base_html
+        # The home-screen icon is the app icon on the brand's ground (REMAINING 4.1).
+        assert "/static/img/apple-touch-icon.png" in base_html
+        assert '<link rel="manifest" href="/manifest.webmanifest">' in base_html
 
     def test_page_title_block_is_captured_for_the_header(self, base_html):
         """Child `{% block page_title %}` must be captured in base.html

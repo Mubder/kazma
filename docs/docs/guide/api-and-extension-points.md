@@ -163,7 +163,9 @@ it on in **Settings → System → Agent-to-agent (A2A)**.
   and 30 a minute per caller.
 
 ```bash
-curl -s https://my.example.org/api/a2a   -H "Authorization: Bearer $KAZMA_TOKEN" -H "Content-Type: application/json"   -d '{"jsonrpc":"2.0","id":1,"method":"message/send","params":{"message":
+curl -s https://my.example.org/api/a2a \
+  -H "Authorization: Bearer $KAZMA_TOKEN" -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"message/send","params":{"message":
        {"role":"user","messageId":"m1","parts":[{"kind":"text","text":"What did we decide about the tiles?"}]}}}'
 ```
 

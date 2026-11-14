@@ -479,6 +479,9 @@ export function registerStores() {
             note: '',
             where: '',
             preview: '',
+            // This chat's id when opened on a chat; its messages go in only when ticked.
+            chatSession: '',
+            includeChat: false,
             loading: false,
             sending: false,
             result: null,
@@ -487,6 +490,9 @@ export function registerStores() {
                 const o = opts || {};
                 this.note = String(o.note || '');
                 this.where = String(o.where || window.location.pathname || '');
+                this.chatSession = String(o.chatSession || (window.KazmaChat && typeof window.KazmaChat.currentSessionId === 'function'
+                    ? (window.KazmaChat.currentSessionId() || '') : ''));
+                this.includeChat = false;
                 this.preview = '';
                 this.result = null;
                 this.failed = false;
@@ -498,7 +504,8 @@ export function registerStores() {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     credentials: 'same-origin',
-                    body: JSON.stringify({ note: this.note.slice(0, 4000), where: this.where.slice(0, 200) }),
+                    body: JSON.stringify({ note: this.note.slice(0, 4000), where: this.where.slice(0, 200),
+                        chat_session: this.includeChat ? this.chatSession.slice(0, 200) : '' }),
                 });
                 if (!resp.ok) throw new Error('HTTP ' + resp.status);
                 return resp.json();
@@ -522,6 +529,17 @@ export function registerStores() {
                     this.failed = true;
                 }
                 this.sending = false;
+            },
+            // The report, as shown, kept on this computer (to attach to a GitHub issue).
+            saveToFile() {
+                if (!this.preview) return;
+                const blob = new Blob([this.preview], { type: 'application/json' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'kazma-problem-report-' + new Date().toISOString().slice(0, 10) + '.json';
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
             },
             resultText() {
                 const r = this.result;

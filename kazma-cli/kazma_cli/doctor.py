@@ -394,7 +394,8 @@ def run(argv: list[str] | None = None) -> int:
         rows = rows + db_rows
     worst = {s for s, _ in rows}
     if BAD in worst:
-        print("\nOne or more checks FAILED — the next turn will likely error.\n")
+        print("\nOne or more checks FAILED — the next turn will likely error.")
+        print('If you need help: kazma report "what happened" (you see the report before it is sent).\n')
         return 1
     if WARN in worst:
         print("\nUsable, with warnings.\n")

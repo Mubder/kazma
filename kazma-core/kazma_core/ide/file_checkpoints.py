@@ -76,8 +76,14 @@ class FileCheckpointStore:
         parent = os.path.dirname(self._db_path)
         if parent:
             os.makedirs(parent, exist_ok=True)
+        # A database file removed under the store (its folder cleaned away) is
+        # made again with its table, never left empty: "no such table" made
+        # every patch set refuse to checkpoint (2026-11-14).
+        fresh = not os.path.exists(self._db_path)
         conn = sqlite3.connect(self._db_path, timeout=10.0)
         apply_sqlite_pragmas(conn)
+        if fresh:
+            conn.executescript(_SCHEMA)
         return committed_and_closed(conn)
 
     def _ensure_schema(self) -> None:
@@ -252,8 +258,11 @@ class FileCheckpointStore:
 def get_file_checkpoint_store() -> FileCheckpointStore:
     global _store
     with _lock:
-        if _store is None:
-            _store = FileCheckpointStore(_db_path())
+        # The store follows the data folder: a store kept from another one
+        # (KAZMA_DATA_DIR changed, a test's folder) wrote where nobody reads.
+        path = str(_db_path())
+        if _store is None or _store._db_path != path:
+            _store = FileCheckpointStore(path)
         return _store
 
 

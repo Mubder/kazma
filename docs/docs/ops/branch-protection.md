@@ -38,6 +38,10 @@ checks for `.github/workflows/ci.yml`:
 | `Lint (Ruff)` | advisory findings reported; the step itself must pass |
 | `Security Scan` | bandit HIGH gate over product, `tests/`, `scripts/` |
 | `Shipped wheel and locked dependencies` | the wheel builds and its pins resolve |
+| `Fresh install (ubuntu-latest)` | `./setup.sh` installs Kazma from scratch on a clean runner, every part it chose is in place, and Kazma answers live and ready |
+| `Fresh install (windows-latest)` | the same with `setup.cmd` on a clean Windows runner (no container parts: no virtualization there) |
+| `Upgrade from the last release (ubuntu-latest)` | the previous release, installed with its own locked versions, is upgraded to this commit's wheel on the same data; it starts, answers and keeps its settings and stores (`scripts/upgrade_drill.py`) |
+| `Upgrade from the last release (windows-latest)` | the same drill on Windows |
 | `Recovery drills (real restic, a real Postgres stopped)` | a backup restored by real restic recalls its memory (a SQLite install's restore passes), a throwaway Postgres stopped and started under a real settings store, the memory restore drill on Postgres, and the real guard reloading the real server with a chat turn and an OCR job running (a hard kill as the control); a skip fails the job |
 | `Temporal recovery drill` | real Temporal protocol and workflow sandbox, including acknowledgement loss |
 | `Runtime hardening (ubuntu-latest, Python 3.11)` | recovery, workspace isolation, approvals and review |

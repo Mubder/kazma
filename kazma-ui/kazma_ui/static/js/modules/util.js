@@ -57,7 +57,12 @@ export const KazmaAPI = {
 export function showToast(message, type = 'info', duration) {
     // Wait for Alpine to initialize
     if (window.Alpine && Alpine.store('toast')) {
-        Alpine.store('toast').add(message, type, duration);
+        // An error offers a problem report about it (REMAINING 3.1), shown first.
+        const report = type === 'error' && typeof window.kazmaReportProblem === 'function'
+            ? { label: window.kazmaT ? window.kazmaT('support.error_report', 'Report') : 'Report',
+                run: () => window.kazmaReportProblem({ note: String(message || '').slice(0, 500) }) }
+            : undefined;
+        Alpine.store('toast').add(message, type, duration, report);
     } else {
         // Fallback: vanilla toast
         const container = document.querySelector('.toast-container');

@@ -26,6 +26,18 @@ __all__ = ["create_support_router"]
 class _ReportBody(BaseModel):
     note: str = Field("", max_length=4000)
     where: str = Field("", max_length=200)
+    # This chat's last messages, only when the person ticked "include this chat".
+    chat_session: str = Field("", max_length=200)
+
+
+def _chat_messages(session_id: str) -> list[dict]:
+    """The messages of the chat *session_id* (the chat store's); none when absent."""
+    if not session_id:
+        return []
+    from kazma_ui.session_manager import get_session_manager
+
+    session = get_session_manager().get(session_id)
+    return list(getattr(session, "messages", None) or []) if session is not None else []
 
 
 def create_support_router() -> APIRouter:
@@ -36,7 +48,7 @@ def create_support_router() -> APIRouter:
         """The report as it would be sent (a plain def: FastAPI runs it in a thread)."""
         from kazma_core.support import problem_report
 
-        report = problem_report.collect(body.note, where=body.where)
+        report = problem_report.collect(body.note, where=body.where, chat=_chat_messages(body.chat_session))
         return {"preview": problem_report.preview(report)}
 
     @router.post("/report", dependencies=[Depends(rate_limit("support", 10))])
@@ -44,7 +56,8 @@ def create_support_router() -> APIRouter:
         """Send it; a report that cannot leave is saved, and the answer says where."""
         from kazma_core.support import problem_report
 
-        result = problem_report.send(problem_report.collect(body.note, where=body.where))
+        result = problem_report.send(problem_report.collect(body.note, where=body.where,
+                                                            chat=_chat_messages(body.chat_session)))
         return {"sent": result.sent, "id": result.report_id, "saved": result.saved, "why": result.why}
 
     @router.get("/settings")

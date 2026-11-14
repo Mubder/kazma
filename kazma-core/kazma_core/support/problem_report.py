@@ -9,8 +9,10 @@ in a chat:
   a chat app), Kazma's version and commit, the system (OS, Python), the parts
   the install chose and their state, the readiness checks' names and results,
   the open problems' titles, and the last error lines of Kazma's log;
-* **what is never in it** -- chats, memories, documents, settings, keys or the
-  vault; and every text that goes in passes :func:`redacted`: credentials
+* **what is never in it** -- memories, documents, settings, keys or the vault,
+  nor a chat unless the person ticks "include this chat" (its last
+  :data:`MAX_CHAT_MESSAGES` messages); and every text that goes in passes
+  :func:`redacted`: credentials
   (``errors.redact_secrets``), the home folder (written ``~``), email
   addresses, IP addresses;
 * **who sees it first** -- the person: every surface shows :func:`preview`, the
@@ -132,8 +134,34 @@ def _problems() -> list[str]:
     return [redacted(f"{p['source']}: {p['title']}") for p in found.get("problems", [])[:20]]
 
 
-def collect(note: str, *, where: str = "", port: int | None = None, log: Path | None = None) -> dict[str, Any]:
-    """The report for *note*, asked from *where* (blocking: run off the loop)."""
+#: A chat the person chose to include: its last messages, each cut.
+MAX_CHAT_MESSAGES = 10
+MAX_CHAT_CHARS = 1500
+
+
+def _chat_excerpt(messages: list[dict[str, Any]] | None) -> list[dict[str, str]]:
+    """The last :data:`MAX_CHAT_MESSAGES` messages a person chose to send with
+    a report: role and text only, each through :func:`redacted`, cut at
+    :data:`MAX_CHAT_CHARS`."""
+    out: list[dict[str, str]] = []
+    for message in (messages or [])[-MAX_CHAT_MESSAGES:]:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "")
+        if role not in ("user", "assistant"):
+            continue
+        text = message.get("content")
+        if not isinstance(text, str):
+            continue
+        out.append({"role": role, "text": redacted(text)[:MAX_CHAT_CHARS]})
+    return out
+
+
+def collect(note: str, *, where: str = "", port: int | None = None, log: Path | None = None,
+            chat: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """The report for *note*, asked from *where* (blocking: run off the loop).
+    *chat* is a conversation the person chose to include (:func:`_chat_excerpt`);
+    without it, the report holds no chat at all."""
     from kazma_core.version import get_version
 
     try:
@@ -142,7 +170,7 @@ def collect(note: str, *, where: str = "", port: int | None = None, log: Path | 
         commit = str(get_build_info().get("commit") or "")
     except ImportError:
         commit = ""
-    return {
+    report: dict[str, Any] = {
         "kind": REPORT_KIND,
         "version": get_version(),
         "commit": commit,
@@ -156,6 +184,9 @@ def collect(note: str, *, where: str = "", port: int | None = None, log: Path | 
         "recent_errors": _error_lines(log),
         "made_at": int(time.time()),
     }
+    if chat:
+        report["chat"] = _chat_excerpt(chat)
+    return report
 
 
 def preview(report: dict[str, Any]) -> str:

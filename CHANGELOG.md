@@ -7,7 +7,9 @@
   see the whole report before it is sent, and it holds nothing private: no
   chats, memories, documents, settings or keys, with home folders, emails and
   IP addresses taken out. It goes to Kazma's private inbox (a setting), or is
-  saved on your computer when it cannot be sent.
+  saved on your computer when it cannot be sent. A failed answer, stuck work
+  and an error message offer it too, `/report` works in the web chat, you can
+  include the chat if you choose, and Save to file keeps a copy.
 - Other AI agents can call Kazma (A2A, agent to agent), once you switch it on
   in Settings → System: they sign in with one of your API tokens and Kazma
   only reads for them (web, Knowledge Library, memory); it never sends,
@@ -40,7 +42,8 @@
 - `kazma uninstall` takes Kazma off a computer: it stops Kazma, removes its
   service, its scheduled tasks, the containers setup made, Kazma's container
   engine and its Python environment, and keeps your data unless you ask
-  (`--remove-data` moves it aside; only `--purge` deletes it). It shows the
+  (`--remove-data` moves it aside, after backing up Kazma's database and
+  removing it from PostgreSQL; only `--purge` deletes it). It shows the
   plan first, and never touches another Kazma install's service on the same
   computer.
 

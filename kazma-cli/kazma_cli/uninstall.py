@@ -13,11 +13,14 @@ can be, and what it cannot know is safe to remove is kept and said:
   (``.venv``; on Windows after this command ends, as Python is running from it).
 * **Kept unless asked** (``--remove-data``) -- the data folder (memory, chats,
   settings, the vault, backups), Kazma's home (``.kazma``: the install log,
-  keys) and the containers' volumes. Asked, they are MOVED to
-  ``<home>/Kazma-uninstalled-<date>/``, never deleted; ``--purge`` deletes
-  them for good.
-* **Always kept, and said** -- PostgreSQL (it may hold Kazma's database and
-  other programs may use it; the commands to remove it are shown), the
+  keys), the containers' volumes, and Kazma's database on the PostgreSQL setup
+  installed. Asked, the database is first backed up into the data folder
+  (``kazma-database-<date>.dump``, ``pg_restore`` reads it), then dropped with
+  its role; the folders are MOVED to ``<home>/Kazma-uninstalled-<date>/``,
+  never deleted; ``--purge`` deletes them for good. A database whose backup
+  fails is not dropped.
+* **Always kept, and said** -- the PostgreSQL server (other programs may use
+  it; the command to remove it is shown), the
   system programs setup installed (Tesseract, LibreOffice, ClamAV, Node.js,
   the Visual C++ runtime: other programs may use them; each with its removal
   command), the fonts installed for all users, uv, and Kazma's source folder
@@ -77,6 +80,8 @@ class Machine:
     user_home: Path
     python: str = sys.executable
     run: Callable[..., Any] = subprocess.run
+    #: Starts a program that outlives this one (the delayed delete of .venv on Windows).
+    spawn: Callable[..., Any] = subprocess.Popen
     which: Callable[[str], str | None] = shutil.which
     admin: bool = True
     record: dict[str, Any] = field(default_factory=dict)
@@ -234,12 +239,14 @@ def _container_items(machine: Machine, *, remove_data: bool) -> list[Item]:
             argv += ["-p", svc.project]
         if svc.profile:
             argv += ["--profile", svc.profile]
-        argv += ["rm", "--stop", "--force"]
-        if remove_data:
-            argv.append("--volumes")
-        argv.append(svc.service)
-        items.append(Item(f"{svc.title} (its container{' and its data' if remove_data else '; its data is kept'})",
+        argv += ["rm", "--stop", "--force", svc.service]
+        items.append(Item(f"{svc.title} (its container{'' if remove_data else '; its data is kept'})",
                           "remove", argv=tuple(argv)))
+        # Its data is its named volumes (compose's own rm never removes those):
+        # removed only when asked, after the container that holds them.
+        if remove_data and state.volumes:
+            items.append(Item(f"{svc.title}'s data ({', '.join(state.volumes)})", "remove",
+                              argv=(docker, "volume", "rm", *state.volumes)))
     return items
 
 
@@ -293,6 +300,62 @@ def _data_items(machine: Machine, *, remove_data: bool, purge: bool) -> list[Ite
     return items
 
 
+def _database_items(machine: Machine, *, remove_data: bool) -> list[Item]:
+    """Kazma's database on the PostgreSQL setup installed: backed up, then
+    dropped -- only when asked (``--remove-data``)."""
+    pg = machine.record.get("postgres") or {}
+    if not pg or not remove_data:
+        return []
+    service = pg.get("service") or "PostgreSQL"
+    return [Item(f"Kazma's database (kazma on {service})", "remove",
+                 "backed up into the data folder first (kazma-database-<date>.dump), then dropped with its "
+                 "role; not dropped if the backup fails", action="database")]
+
+
+def _database(machine: Machine) -> tuple[bool, str]:
+    """Back up Kazma's database into the data folder, then drop it and its role."""
+    from kazma_core import postgres_service as ps
+
+    pg = machine.record.get("postgres") or {}
+    platform = ps.Platform(str(pg.get("os") or machine.os_name), pg.get("manager"))
+    port, major = int(pg.get("port") or ps.DEFAULT_PORT), int(pg.get("major") or ps.PG_MAJOR)
+    env = dict(os.environ)
+    if platform.os == "windows":
+        try:
+            env["PGPASSWORD"] = (machine.home / "postgres_superuser.pass").read_text(encoding="utf-8").strip()
+        except OSError:
+            return False, "the superuser's password file is missing; nothing was dropped"
+    psql = ps._psql(platform, port=port, major=major)
+    dump_exe = str(Path(ps._bin_dir(platform, major)) / ("pg_dump.exe" if platform.os == "windows" else "pg_dump"))
+    # As the server's superuser, as setup's psql runs (postgres_service._psql).
+    prefix = ["sudo", "-u", "postgres"] if platform.os in ("debian", "fedora") else []
+    connect = ["-h", "127.0.0.1", "-U", "postgres"] if platform.os == "windows" else (
+        ["-h", "127.0.0.1"] if platform.os == "macos" else [])
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(machine.now()))
+    dump = machine.data / f"kazma-database-{stamp}.dump"
+    dump.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with dump.open("wb") as fh:
+            done = machine.run([*prefix, dump_exe, *connect, "-w", "-p", str(port), "-Fc", ps.DATABASE],
+                               stdout=fh, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, timeout=3600, env=env)
+    except (OSError, subprocess.SubprocessError) as exc:
+        dump.unlink(missing_ok=True)
+        return False, f"the backup could not run ({exc}); nothing was dropped"
+    if done.returncode != 0 or not dump.exists() or dump.stat().st_size == 0:
+        dump.unlink(missing_ok=True)
+        said = (done.stderr.decode("utf-8", "replace") if isinstance(done.stderr, bytes) else str(done.stderr or ""))
+        return False, f"the backup failed ({said.strip()[-200:] or done.returncode}); nothing was dropped"
+    sql = f"DROP DATABASE IF EXISTS {ps.DATABASE};\nDROP ROLE IF EXISTS {ps.APP_ROLE};\n"
+    try:
+        dropped = machine.run(list(psql), input=sql, capture_output=True, text=True, timeout=300, env=env)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"backed up to {dump}, but not dropped ({exc})"
+    if dropped.returncode != 0:
+        said = (dropped.stderr or dropped.stdout or "").strip().splitlines()
+        return False, f"backed up to {dump}, but not dropped ({(said[-1] if said else dropped.returncode)})"
+    return True, f"backed up to {dump}, then dropped"
+
+
 def _kept_items(machine: Machine) -> list[Item]:
     from kazma_core.system_deps import DEPENDENCIES, LABELS, PACKAGES
 
@@ -301,8 +364,8 @@ def _kept_items(machine: Machine) -> list[Item]:
     if pg:
         service = pg.get("service") or "PostgreSQL"
         items.append(Item(f"PostgreSQL ({service})", "keep",
-                          "it may hold Kazma's database, and other programs may use it. To remove Kazma's "
-                          "database: dropdb kazma (as its superuser); the server: your package manager"))
+                          "other programs may use it. Kazma's database on it goes with --remove-data (backed "
+                          "up first); the server: your package manager"))
     manager = {"windows": "winget", "macos": "brew"}.get(machine.os_name, "apt")
     for dep in DEPENDENCIES:
         packages = (PACKAGES.get(manager) or {}).get(dep)
@@ -323,6 +386,8 @@ def build_plan(machine: Machine, *, remove_data: bool = False, purge: bool = Fal
     owner = _service_folder(machine)
     return [*_service_items(machine, owner), *_container_items(machine, remove_data=remove_data),
             *_engine_items(machine, owner), *_environment_items(machine),
+            # The database's backup lands in the data folder, which moves (or goes) after it.
+            *_database_items(machine, remove_data=remove_data),
             *_data_items(machine, remove_data=remove_data, purge=purge), *_kept_items(machine)]
 
 
@@ -334,7 +399,7 @@ def _remove_later(path: Path, machine: Machine) -> tuple[bool, str]:
     script = (f'ping -n 6 127.0.0.1 >nul & rmdir /s /q "{path}"')
     flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     try:
-        subprocess.Popen(["cmd.exe", "/c", script], creationflags=flags, close_fds=True,  # noqa: S603 - fixed program
+        machine.spawn(["cmd.exe", "/c", script], creationflags=flags, close_fds=True,  # noqa: S603 - fixed program
                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError as exc:
         return False, f"could not start the delete ({exc}); delete {path} yourself"
@@ -353,6 +418,8 @@ def _do(item: Item, machine: Machine, target: Path) -> tuple[bool, str]:
         said = (done.stdout or done.stderr or "").strip().splitlines()
         return done.returncode in item.ok_codes, (said[-1] if said else f"exit {done.returncode}")[:300]
     path = Path(item.path)
+    if item.action == "database":
+        return _database(machine)
     if item.action == "engine":
         from kazma_core import container_engine_setup
 

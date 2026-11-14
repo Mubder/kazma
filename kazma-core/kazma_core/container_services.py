@@ -200,6 +200,9 @@ class ImageState:
     state: str  # "current", "stale", "absent", "not_ours", "unknown"
     running: str = ""  # the image the container was created from
     pinned: str = ""
+    #: The named volumes the container mounts (its data), for an uninstall
+    #: that removes them (``kazma uninstall --remove-data``).
+    volumes: tuple[str, ...] = ()
 
 
 def _image_state(svc: ContainerService, root: Path, docker: str, *, run=None) -> ImageState:
@@ -236,7 +239,10 @@ def _image_state(svc: ContainerService, root: Path, docker: str, *, run=None) ->
             or labels.get("com.docker.compose.service") != svc.service
             or not _made_from(labels.get("com.docker.compose.project.config_files"), svc, root)):
         return ImageState(svc, "not_ours", running=running, pinned=pinned)
-    return ImageState(svc, "current" if running == pinned else "stale", running=running, pinned=pinned)
+    volumes = tuple(str(m.get("Name")) for m in (row.get("Mounts") or [])
+                    if isinstance(m, dict) and m.get("Type") == "volume" and m.get("Name"))
+    return ImageState(svc, "current" if running == pinned else "stale", running=running, pinned=pinned,
+                      volumes=volumes)
 
 
 def refresh_images(root: Path, env_path: Path, docker: str, *, run=None) -> list[tuple[ImageState, str]]:

@@ -4657,7 +4657,10 @@ REMAINING 3.1; `kazma_core/support/problem_report.py`). `collect` gathers the
 note, where it was asked from, version/commit, system, install parts,
 readiness check results, open problems' titles and the last ERROR lines of
 the log; everything passes `redacted` (credentials, the home folder, emails,
-IPs); no chat, memory, document, setting or key is read. Every surface shows
+IPs); no memory, document, setting or key is read, and a chat only when the
+person ticks "include this chat" (`chat_session`: its last `MAX_CHAT_MESSAGES`
+user and assistant messages, each cut at `MAX_CHAT_CHARS`, `_chat_excerpt`).
+Every surface shows
 `preview` first: the `?` beside the bell and "Report this" (`Alpine.store
 ('report')`, `components/report_dialog.html`, `/api/support/*`, admin),
 `kazma report`, `/report` then `/report send` in a chat app (an admin's:
@@ -4665,7 +4668,12 @@ IPs); no chat, memory, document, setting or key is read. Every surface shows
 `https://status.kazma.ai/v1/report`, the Kazma Watch Worker's
 `src/reports.js`: size-capped, rate-limited, D1, the owner told, listed behind
 Access at `/reports`), at most `MAX_PER_HOUR` an hour; anything it cannot send
-is saved in `<data dir>/problem_reports/` and the person told where. Gates:
+is saved in `<data dir>/problem_reports/` and the person told where. It is
+offered where something went wrong: a turn that failed or ended without an
+answer (`turn-header-report`), stuck or failed work (the Running work card),
+an error toast (its action), `/report` in the web chat (opens the dialog), and
+`kazma doctor` and an unfinished setup name `kazma report`; the dialog's Save
+to file keeps the report shown. Gates:
 `tests/test_problem_report.py`, `tests/e2e/test_problem_report_browser.py`,
 `deploy/observer/test/reports.test.mjs`.
 
@@ -4677,8 +4685,12 @@ task ended first); `KazmaFreshclam` / the macOS signature job; the containers
 setup made (`container_services._image_state` says which: never another's,
 volumes only with `--remove-data`); Kazma's engine
 (`container_engine_setup.remove`, with its own refusal); `.venv` (Windows:
-deleted by a detached `cmd` once Python has exited). Data and Kazma's home are
-kept; `--remove-data` MOVES them to `<home>/Kazma-uninstalled-<date>`, and only
+deleted by a detached `cmd` once Python has exited, started through
+`Machine.spawn` so a test starts nothing). Data and Kazma's home are
+kept; `--remove-data` MOVES them to `<home>/Kazma-uninstalled-<date>` -- first
+backing up Kazma's database on the PostgreSQL setup installed (`pg_dump -Fc`
+into the data folder) and then dropping it and its role (`_database`; a backup
+that fails drops nothing) -- and only
 `--purge` deletes (typed `delete`). PostgreSQL, system programs, fonts, uv and
 the source folder are kept and named with their removal commands. **A service
 that starts another folder is never taken** (`_service_folder`: the task XML's

@@ -362,6 +362,16 @@ def run_pytest(args: list[str], timeout: float) -> tuple[int, str]:
     it; a run that finished has anything it left running reaped.
     """
     with contextlib.ExitStack() as owned_arguments:
+        # Every run's temporary folders live under a folder this run owns and
+        # removes when it ends (2026-11-14). One day of chunked runs left 54
+        # runs (23 GB) in the temp folder: a run its budget cut off keeps
+        # pytest's lock for three days, so pytest's own cleanup skipped it.
+        # Deleting each passed test's folder at once instead (pytest's
+        # "failed" retention) broke later tests on Linux, where a store a test
+        # opened still pointed into a folder deleted under it.
+        run_temp = Path(owned_arguments.enter_context(
+            tempfile.TemporaryDirectory(prefix='kazma-pytest-run-', ignore_cleanup_errors=True)))
+        args = [*args, f'--basetemp={run_temp / "t"}']
         cmd = pytest_command(args)
         # Windows has a 32K UTF-16 command-line ceiling. One serial full-suite
         # chunk can exceed it; pytest argument files keep the exact file set.

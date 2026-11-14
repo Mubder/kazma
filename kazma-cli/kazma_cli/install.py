@@ -1313,6 +1313,7 @@ def _conclude(mode: str, parts, pre: _Preflight, machine: Machine, platform, opt
         say("Run setup again to finish: it checks everything and continues where it stopped.")
     _finish(parts, after, machine, options, say)
     if missing or (not_done and not restart_needed):
+        say('If it keeps failing: kazma report "what happened" (you see the report before it is sent).')
         return EXIT_NOT_DONE
     return EXIT_RESTART if restart_needed else EXIT_DONE
 

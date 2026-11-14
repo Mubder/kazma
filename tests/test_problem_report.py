@@ -184,3 +184,70 @@ def test_the_inbox_kazma_sends_to_is_the_worker_route() -> None:
     reports = (REPO / "deploy" / "observer" / "src" / "reports.js").read_text(encoding="utf-8")
     assert pr.DEFAULT_REPORT_URL == "https://status.kazma.ai/v1/report"
     assert 'route === "POST /v1/report"' in index and f'const KIND = "{pr.REPORT_KIND}"' in reports
+
+
+# -- what the plan promised besides (REMAINING 3.1, the rest) --
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_a_chat_goes_in_only_when_given_and_cut(monkeypatch) -> None:
+    from kazma_core.support import problem_report as pr
+
+    monkeypatch.setattr(pr, "_readiness", lambda port: {})
+    monkeypatch.setattr(pr, "_problems", lambda: [])
+    monkeypatch.setattr(pr, "_install_parts", lambda: {})
+    assert "chat" not in pr.collect("it broke")
+    messages = [{"role": "system", "content": "SYSTEM PROMPT"}, {"role": "tool", "content": "TOOL OUTPUT"}]
+    messages += [{"role": "user", "content": f"question {n} from me@example.com"} for n in range(15)]
+    messages.append({"role": "assistant", "content": "x" * 5000})
+    chat = pr.collect("it broke", chat=messages)["chat"]
+    assert len(chat) <= pr.MAX_CHAT_MESSAGES and chat[-1]["role"] == "assistant"
+    assert len(chat[-1]["text"]) == pr.MAX_CHAT_CHARS
+    text = repr(chat)
+    assert "SYSTEM PROMPT" not in text and "TOOL OUTPUT" not in text and "me@example.com" not in text
+
+
+def test_the_page_sends_the_chat_only_when_ticked(monkeypatch) -> None:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from kazma_ui import support_api
+
+    seen: list[str] = []
+    monkeypatch.setattr(support_api, "_chat_messages",
+                        lambda sid: (seen.append(sid) or [{"role": "user", "content": "the chat's own words"}])
+                        if sid else [])
+    monkeypatch.setattr("kazma_core.support.problem_report._readiness", lambda port: {})
+    monkeypatch.setattr("kazma_core.support.problem_report._problems", lambda: [])
+    app = FastAPI()
+    app.include_router(support_api.create_support_router())
+    client = TestClient(app)
+    plain = client.post("/api/support/report/preview", json={"note": "n"}).json()["preview"]
+    assert "the chat's own words" not in plain
+    ticked = client.post("/api/support/report/preview", json={"note": "n", "chat_session": "s-1"}).json()["preview"]
+    assert "the chat's own words" in ticked and seen[-1] == "s-1"
+
+
+def test_every_promised_place_offers_a_report() -> None:
+    js = ROOT / "kazma-ui" / "kazma_ui" / "static" / "js"
+    chat = (js / "chat.js").read_text(encoding="utf-8")
+    assert "turn-header-report" in chat and "kazmaReportProblem" in chat, "a failed turn offers it"
+    assert "/^\\/report(\\s|$)/i" in chat, "/report in the web chat opens the dialog"
+    assert "kazmaReportProblem" in (js / "runs_panel.js").read_text(encoding="utf-8"), "stuck or failed work"
+    assert "kazmaReportProblem" in (js / "modules" / "util.js").read_text(encoding="utf-8"), "an error toast"
+    dialog = (ROOT / "kazma-ui" / "kazma_ui" / "templates" / "components" / "report_dialog.html").read_text(encoding="utf-8")
+    assert 'id="report-include-chat"' in dialog and 'id="report-save"' in dialog
+    from kazma_core.agent.command_catalog import COMMANDS
+
+    assert next(c for c in COMMANDS if c.name == "report").web, "listed in the web chat's / menu"
+
+
+def test_doctor_says_how_to_report_when_a_check_fails(monkeypatch, capsys) -> None:
+    from kazma_cli import doctor
+
+    monkeypatch.setattr(doctor, "collect", lambda: [(doctor.BAD, "  x a check")])
+    monkeypatch.setattr(doctor, "_system_rows", lambda: [])
+    monkeypatch.setattr(doctor, "_database_service_rows", lambda: [])
+    assert doctor.run([]) == 1
+    assert 'kazma report "what happened"' in capsys.readouterr().out

@@ -155,7 +155,7 @@ COMMANDS: tuple[Command, ...] = (
         "report",
         "Report a problem to Kazma's makers (you see it first)",
         "الإبلاغ عن مشكلة لصانعي Kazma (تراها أولاً)",
-        web=False,
+        web=True,
         page=None,
         arguments="<what happened>",
     ),

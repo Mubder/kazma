@@ -127,6 +127,17 @@
       a.href = link;
       actions.appendChild(a);
     }
+    if (typeof window.kazmaReportProblem === 'function') {
+      var report = el('button', 'btn btn-sm btn-ghost', tr('support.report_this', 'Report this'));
+      report.type = 'button';
+      report.addEventListener('click', function () {
+        window.kazmaReportProblem({
+          note: tr('support.stuck_work', 'Stuck or failed work: {title}', { title: String(row.title || row.kind || '') }),
+          where: 'run:' + String(row.id || ''),
+        });
+      });
+      actions.appendChild(report);
+    }
     if (actions.childNodes.length) card.appendChild(actions);
     return card;
   }

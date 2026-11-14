@@ -1985,6 +1985,7 @@ tbody tr:last-child td {
 /* The problem report (REMAINING 3.1): the whole report, scrollable, read
    left to right in either language (it is JSON). */
 .report-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.report-include { display: flex; gap: 8px; align-items: flex-start; margin-top: 8px; }
 .report-preview-wrap { margin-top: 10px; }
 .report-preview {
     max-height: 40vh;

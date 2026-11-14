@@ -5,11 +5,11 @@ from __future__ import annotations
 TRANSLATIONS: dict[str, dict[str, str]] = {
     "support.report_title": {"en": "Report a problem", "ar": "الإبلاغ عن مشكلة"},
     "support.report_intro": {
-        "en": "Tell us what happened. Kazma adds what helps us understand it and nothing private: no chats, "
-              "memories, documents, settings or keys, and home folders, emails and IP addresses are taken out. "
-              "You see all of it before it is sent.",
-        "ar": "أخبرنا بما حدث. يضيف Kazma ما يساعدنا على فهمه ولا شيء خاصًّا: لا محادثات ولا ذكريات ولا مستندات "
-              "ولا إعدادات ولا مفاتيح، وتُحذف مجلدات المستخدم والبريد الإلكتروني وعناوين IP. "
+        "en": "Tell us what happened. Kazma adds what helps us understand it and nothing private: no "
+              "memories, documents, settings or keys, no chat unless you tick it, and home folders, emails and "
+              "IP addresses are taken out. You see all of it before it is sent.",
+        "ar": "أخبرنا بما حدث. يضيف Kazma ما يساعدنا على فهمه ولا شيء خاصًّا: لا ذكريات ولا مستندات "
+              "ولا إعدادات ولا مفاتيح، ولا محادثة إلا إن اخترتها، وتُحذف مجلدات المستخدم والبريد الإلكتروني وعناوين IP. "
               "ترى كل ذلك قبل الإرسال.",
     },
     "support.note_label": {"en": "What happened?", "ar": "ماذا حدث؟"},
@@ -35,6 +35,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "تعذّر إعداد التقرير. حاول مرة أخرى، أو شغّل kazma report في الطرفية.",
     },
     "support.report_this": {"en": "Report this", "ar": "أبلغ عن هذا"},
+    "support.include_chat": {
+        "en": "Include this chat's last 10 messages (they are shown below before anything is sent)",
+        "ar": "أرفق آخر 10 رسائل من هذه المحادثة (تظهر أدناه قبل أن يُرسل أي شيء)",
+    },
+    "support.save_file": {"en": "Save to file", "ar": "احفظ في ملف"},
+    "support.failed_turn": {
+        "en": "A chat turn failed or ended without an answer.",
+        "ar": "فشل دور في المحادثة أو انتهى دون إجابة.",
+    },
+    "support.stuck_work": {"en": "Stuck or failed work: {title}", "ar": "عمل متعثر أو فاشل: {title}"},
+    "support.error_report": {"en": "Report", "ar": "أبلغ"},
     "support.report_footer": {"en": "Something wrong? Report it", "ar": "هناك خطأ؟ أبلغ عنه"},
     "settings.report_url_title": {"en": "Problem reports", "ar": "بلاغات المشكلات"},
     "settings.report_url_label": {"en": "Where problem reports go", "ar": "وجهة بلاغات المشكلات"},
