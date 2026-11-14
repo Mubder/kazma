@@ -81,6 +81,7 @@
     {"source": "docs/KNOWN_GAPS.md", "site": "security/known-gaps"},
     {"source": "docs/docs/security/hardening-guide.md", "site": "security/hardening-guide"},
     {"source": "docs/docs/security/document-security.md", "site": "security/document-security"},
+    {"source": "docs/docs/security/safety-design.md", "site": "security/safety-design"},
     {"source": "docs/SUPPLY_CHAIN.md", "site": "security/supply-chain"},
     {"source": "docs/docs/security/security-policy.md", "site": "security/security-policy"},
     {"source": "docs/docs/security/vulnerability-reporting.md", "site": "security/vulnerability-reporting"},
@@ -101,6 +102,7 @@
     {"source": "docs/docs/contributing/pull-requests.md", "site": "contributing/pull-requests"},
 
     {"source": "docs/docs/reference/system-map.md", "site": "system-map"},
+    {"source": "docs/docs/reference/benchmarks.md", "site": "benchmarks"},
     {"source": "docs/docs/reference/slash-commands.md", "site": "slash-commands"},
     {"source": "docs/docs/reference/llm-providers.md", "site": "llm-providers"},
     {"source": "docs/docs/reference/tools-catalog.md", "site": "tools-catalog"},

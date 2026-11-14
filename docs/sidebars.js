@@ -72,6 +72,7 @@ const sidebars = {
         'reference/api-routes',
         'reference/skill-manifest',
         'reference/system-map',
+        'reference/benchmarks',
       ],
     },
     {
@@ -127,6 +128,7 @@ const sidebars = {
     'security/vulnerability-reporting',
     'security/hardening-guide',
     'security/document-security',
+    'security/safety-design',
   ],
 
   contributing: [

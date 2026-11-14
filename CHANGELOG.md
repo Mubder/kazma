@@ -8,6 +8,9 @@
   chats, memories, documents, settings or keys, with home folders, emails and
   IP addresses taken out. It goes to Kazma's private inbox (a setting), or is
   saved on your computer when it cannot be sent.
+- Two new pages for people who want to look closer: Benchmarks (how well
+  Kazma remembers, searches and reads documents, written from the results its
+  tests hold) and Safety design (how its safeguards are built).
 - Ready-made automations on the Scheduled page: a morning briefing, inbox
   triage, a weekly report and a news digest, each set up in one click. They
   only read (never send, change or delete), and a scheduled task that reads
