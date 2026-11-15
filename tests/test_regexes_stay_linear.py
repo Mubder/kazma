@@ -108,16 +108,23 @@ def test_hostile_inputs_finish_at_once():
     assert _timed(problem_report._EMAIL.sub, "x", "%" * 200000) < 1.0
 
 
-def _grows_faster_than_linear(fn, make, small: int) -> bool:
-    """True when doubling the input more than triples the time."""
+def _grows_faster_than_linear(fn, make, small: int, factor: int = 2) -> bool:
+    """True when multiplying the input by ``factor`` multiplies the time by more than 1.5 x ``factor``.
+
+    The quadratic controls use a factor of 4: their time then grows 16-fold
+    against a bar of 6, so a busy CI runner's noise cannot hide it (a factor
+    of 2 gave 4-fold against 3, and a loaded Linux runner measured under it,
+    2026-11-15). The exponential one keeps 2: four times its input would take
+    minutes.
+    """
     fn(make(small))  # warm
-    t1 = min(_timed(fn, make(small)) for _ in range(2))
-    t2 = min(_timed(fn, make(2 * small)) for _ in range(2))
-    return t2 > 3 * t1
+    t1 = min(_timed(fn, make(small)) for _ in range(3))
+    t2 = min(_timed(fn, make(factor * small)) for _ in range(3))
+    return t2 > 1.5 * factor * t1
 
 
 def test_control_the_old_patterns_grow_faster_than_the_input():
     assert _grows_faster_than_linear(OLD_VERSION.match, lambda n: "0.0" + "a" * n + "!", 9)
-    assert _grows_faster_than_linear(lambda s: OLD_FENCE.sub("x", s), lambda n: "<kazma:data" * n, 1500)
-    assert _grows_faster_than_linear(lambda s: OLD_VERSIONED.search(s), lambda n: "/v0" + "0" * n + "!", 3000)
-    assert _grows_faster_than_linear(lambda s: OLD_EMAIL.sub("x", s), lambda n: "%" * n, 3000)
+    assert _grows_faster_than_linear(lambda s: OLD_FENCE.sub("x", s), lambda n: "<kazma:data" * n, 1500, 4)
+    assert _grows_faster_than_linear(lambda s: OLD_VERSIONED.search(s), lambda n: "/v0" + "0" * n + "!", 3000, 4)
+    assert _grows_faster_than_linear(lambda s: OLD_EMAIL.sub("x", s), lambda n: "%" * n, 3000, 4)
