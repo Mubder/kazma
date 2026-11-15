@@ -11258,6 +11258,36 @@ repository is public).
   case), no `:` in the path, never one of Kazma's own files. Any other
   destination is `file_write`'s, which asks. Gate:
   `tests/test_extract_saves_are_notes.py` (the old rule as the control).
+  Since 2026-11-15 every save lands under `research/` (or
+  `KAZMA_RESEARCH_DIR`; `notes/x.md` becomes `research/notes/x.md`), never
+  under a name in `read_url.LOADED_FILE_NAMES` (`requirements*.txt`,
+  `constraints*.txt`, `CMakeLists.txt`, `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`,
+  `SKILL.md`...): a page's text saved at the workspace root as
+  `requirements.txt` was code at the next `pip install -r`.
+- **shell_exec resolves what it is given** (`safety/shell_paths.py`,
+  2026-11-15, the defensive check before the independent review: with the
+  workspace the install folder, `grep -r` over `.` and the Windows short name
+  `ENV~1` read the vault key). Every value is resolved to the file it opens
+  (8.3 names, trailing dots, `::$DATA`, links, junctions, `~`, wildcards by
+  long and short name) and asked `is_kazma_store`; a folder the program walks
+  (`WALKS`: recursive grep, find, ls -R, du, tar -c, cp -r, git add...; the
+  working folder when none is named) may not hold Kazma's files
+  (`store_registry.kazma_file_under`). Asked before the card
+  (`call_preflight.call_refusal` -> `shell_target_refusal`) and by the tool.
+  git runs `shell_arguments.GIT_SUBCOMMANDS` only (an allowlist: aliases,
+  `web--browse`, `send-email`, `instaweb` are out); tar refuses volume scripts
+  and `host:path` archives. `git_commit` refuses to stage a Kazma file
+  (`git add --dry-run` first). Gate: `tests/test_shell_exec_kazma_files.py`
+  (every allowlisted binary is in `WALKS` or `NO_WALK`).
+- **Kazma's configuration is readable, never writable**:
+  `is_kazma_store(path, write=True)` covers `CONFIG_FILE_NAMES` (`kazma.yaml`,
+  `kazma.local.yaml`, `kazma-permissions.yaml`) wherever Kazma reads them and
+  the data-dir entries declared `config`; every write door asks with
+  `write=True`. An approved `file_write` of `kazma.local.yaml` turned the
+  approval gate off and added a hook command. Gate:
+  `tests/test_kazma_config_files_protected.py`. Containment is by real path,
+  and walks prune links (`workspace/real_paths.py`; gate
+  `test_no_product_code_asks_isjunction`).
 - **A workspace's `kazma.yaml` is content, never configuration** (SEC-02).
   The settings store's YAML fallback is the install's own file for the life
   of the store. `ConfigStore.reload_from_root` (boot, every workspace switch

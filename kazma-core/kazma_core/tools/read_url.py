@@ -11,7 +11,7 @@ Research features
 * **Paging:** ``offset`` + ``max_chars`` to walk a long page without re-fetch
   (in-process full-text cache keyed by URL).
 * **Caps:** default window from ``KAZMA_READ_URL_MAX_CHARS`` (default 16000).
-* **Save:** ``read_url_to_file`` writes full extract under the workspace.
+* **Save:** ``read_url_to_file`` writes full extract in the workspace's research folder.
 * **Chunks:** ``list_research_chunks`` / ``read_research_chunk`` /
   ``summarize_research_file`` for map-style research without flooding context.
 
@@ -1308,11 +1308,25 @@ def _default_research_subdir() -> str:
     return raw
 
 
-def _safe_workspace_path(rel_or_name: str | None, url: str) -> Path | str:
-    """Resolve a save path **anywhere under the workspace** (not research-only).
+def _research_roots(root: Path) -> list[Path]:
+    """The folders a saved extract may land in: ``research/`` and
+    ``KAZMA_RESEARCH_DIR`` (the deep research pipeline writes
+    ``research/reports/<run>/`` whatever the variable says)."""
+    return list(dict.fromkeys([root / "research", root / _default_research_subdir()]))
 
-    * Explicit ``path`` → workspace-relative (or under research/ if bare name).
+
+def _safe_workspace_path(rel_or_name: str | None, url: str) -> Path | str:
+    """Resolve a save path **inside the workspace's research folder**.
+
+    * A path already under ``research/`` (or ``KAZMA_RESEARCH_DIR``) stays.
+    * Any other name or path lands under ``{KAZMA_RESEARCH_DIR|research}/``:
+      ``notes/page.md`` -> ``research/notes/page.md``, ``./x.md`` ->
+      ``research/x.md``. The answer names where it was saved.
     * Omitted → ``{KAZMA_RESEARCH_DIR|research}/<slug>-<hash>.md``
+
+    Until 2026-11 a path with a slash was workspace-relative, so ``./name``
+    landed at the workspace root, beside files other programs load
+    (``requirements.txt``, ``AGENTS.md``): see :func:`_extract_path_refusal`.
     """
     root = _workspace_root().resolve()
     default_dir = root / _default_research_subdir()
@@ -1320,13 +1334,16 @@ def _safe_workspace_path(rel_or_name: str | None, url: str) -> Path | str:
 
     if rel_or_name and str(rel_or_name).strip():
         name = str(rel_or_name).strip().replace("\\", "/").lstrip("/")
-        if ".." in name.split("/"):
+        parts = [part for part in name.split("/") if part not in ("", ".")]
+        if ".." in parts:
             return "Error: path traversal not allowed."
-        # Bare filename → research subdir; paths with / stay workspace-relative
-        if "/" not in name and "\\" not in str(rel_or_name):
-            target = (default_dir / name).resolve()
+        if not parts:
+            return "Error: an extract needs a file name."
+        as_given = root.joinpath(*parts)
+        if any(_is_under(as_given, research) for research in _research_roots(root)):
+            target = as_given.resolve()
         else:
-            target = (root / name).resolve()
+            target = default_dir.joinpath(*parts).resolve()
     else:
         slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", url)[:80].strip("-") or "page"
         digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:10]
@@ -1346,6 +1363,27 @@ def _safe_workspace_path(rel_or_name: str | None, url: str) -> Path | str:
 #: What a saved extract may be: text a person or the research readers open.
 _EXTRACT_SUFFIXES = (".md", ".txt")
 
+#: Names other programs load as code, build input or instructions, wherever
+#: they find them, even as ``.md`` / ``.txt`` (lower case, fnmatch): pip and
+#: dependency scanners read every ``requirements*.txt`` and
+#: ``constraints*.txt``, CMake a ``CMakeLists.txt``, coding agents an
+#: ``AGENTS.md`` / ``CLAUDE.md`` / ``GEMINI.md`` in the folder they work in,
+#: Kazma's skill discovery a ``SKILL.md``. A saved extract is never one.
+LOADED_FILE_NAMES: tuple[str, ...] = (
+    "requirements*.txt", "*requirements.txt", "*-requirements*.txt",
+    "constraints*.txt", "*constraints.txt", "cmakelists.txt", "runtime.txt",
+    "agents.md", "agent.md", "claude.md", "claude.local.md", "gemini.md",
+    "copilot-instructions.md", "conventions.md", "skill.md",
+)
+
+
+def _is_under(path: Path, folder: Path) -> bool:
+    try:
+        Path(os.path.normpath(path)).relative_to(Path(os.path.normpath(folder)))
+        return True
+    except ValueError:
+        return False
+
 
 def _extract_path_refusal(target: Path, relative: Path) -> str:
     """Why a saved extract may not be written at *target*, or ``""``.
@@ -1356,14 +1394,24 @@ def _extract_path_refusal(target: Path, relative: Path) -> str:
     path in the workspace was accepted: ``.venv/Lib/site-packages/x.pth``
     (Python runs its ``import`` lines at the next start) or
     ``kazma.local.yaml`` (settings) could be planted by a fetched page that
-    steered the model (security audit SEC-01).
+    steered the model (security audit SEC-01). Since 2026-11 it lands under
+    the research folder only, never under a name in
+    :data:`LOADED_FILE_NAMES` (``requirements.txt``, ``AGENTS.md``...).
     """
+    import fnmatch
+
     from kazma_core.store_registry import is_kazma_store
     from kazma_core.workspace.project_files import GENERATED_DIRS
 
     parts = relative.parts
     if any(":" in part for part in parts):
         return "a save path may not contain ':'."
+    root = target
+    for _ in parts:
+        root = root.parent
+    if not any(_is_under(target, research) for research in _research_roots(root)):
+        return (f"extracts are saved under `{_default_research_subdir()}/` only "
+                "(a notes folder no program loads).")
     skipped = {name.lower() for name in GENERATED_DIRS}
     for part in parts[:-1]:
         if part.startswith(".") or part.lower() in skipped:
@@ -1373,7 +1421,10 @@ def _extract_path_refusal(target: Path, relative: Path) -> str:
     if name.startswith(".") or target.suffix.lower() not in _EXTRACT_SUFFIXES:
         return ("a saved extract is a `.md` or `.txt` file with a plain name. "
                 "Use file_write (which asks first) for any other file.")
-    if is_kazma_store(target):
+    if any(fnmatch.fnmatchcase(name.lower(), pattern) for pattern in LOADED_FILE_NAMES):
+        return (f"`{name}` is a name other programs load (dependencies, build "
+                "files, agent instructions); save the extract under another name.")
+    if is_kazma_store(target, write=True):
         return "that path is one of Kazma's own files."
     return ""
 

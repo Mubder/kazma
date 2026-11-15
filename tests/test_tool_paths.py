@@ -444,6 +444,9 @@ _NOT_TOOL_INPUT = {
         "the sandbox mailbox database under the data dir",
     ("kazma-core/kazma_core/tools/text_newlines.py", "existing_newline"):
         "receives a path the calling tool already resolved",
+    ("kazma-core/kazma_core/tools/research_files.py", "saved_from_web"):
+        "receives the path file_read already resolved with resolve_tool_path "
+        "and checked (it reads the first line to know a page Kazma saved)",
     ("kazma-skills/kazma_skills/native/system_health_monitor/tools.py", "_tail_lines"):
         "a log file from the tool's fixed candidate list (the home and active-"
         "workspace logs); read_system_logs takes only a line count",

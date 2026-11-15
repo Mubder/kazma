@@ -122,7 +122,9 @@ async def test_read_url_to_file_and_chunks(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_save_anywhere_under_workspace(tmp_path: Path) -> None:
+async def test_save_lands_under_the_research_folder(tmp_path: Path) -> None:
+    """A path outside research/ is kept, under research/ (2026-11: extracts
+    land in the research folder only); the answer names where."""
     from kazma_core.web_acquire import FetchResult
     ru.clear_url_cache()
     ws = tmp_path / "ws"
@@ -132,8 +134,9 @@ async def test_save_anywhere_under_workspace(tmp_path: Path) -> None:
         patch.object(ru, "_workspace_root", return_value=ws),
     ):
         msg = await ru.read_url_to_file("https://example.com/x", path="notes/out.md")
-        assert "notes/out.md" in msg.replace("\\", "/")
-        assert (ws / "notes" / "out.md").is_file()
+        assert "research/notes/out.md" in msg.replace("\\", "/")
+        assert (ws / "research" / "notes" / "out.md").is_file()
+        assert not (ws / "notes").exists()
 
 
 @pytest.mark.asyncio

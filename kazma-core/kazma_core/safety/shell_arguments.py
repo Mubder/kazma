@@ -176,6 +176,251 @@ def attached_values(argument: str) -> list[str]:
     return [argument[i:] for i in range(2, len(argument))]
 
 
+def program_name(argv0: str) -> str:
+    """The program a command's first word names (``git.exe`` and a full path to git are git)."""
+    from pathlib import Path
+
+    p = Path(argv0)
+    if os.name == "nt" and p.suffix.lower() == ".exe":
+        return p.stem
+    return p.name
+
+
+# ── options that start another program, or write where no check sees ─────
+#
+# The binary allowlist vets the first word only, and the path guard vets
+# the values; neither catches an allowlisted binary asked to run another
+# program by name (audit F-03: ``find . -exec whoami +``). One table, read
+# by shell_exec after its approval and by the check before the card
+# (safety/shell_paths).
+
+_EXEC_CAPABLE_ARGS: dict[str, tuple[str, ...]] = {
+    "find": (
+        "-exec", "-execdir", "-ok", "-okdir",
+        "-delete", "-fprintf", "-fprint", "-fprint0", "-fls",
+    ),
+    "git": (
+        "--upload-pack", "--receive-pack", "--exec-path",
+        "-c", "--config-env", "--upload-archive",
+        # git grep opens matching files in a program it names.
+        "--open-files-in-pager",
+        # git difftool runs the command it names.
+        "--extcmd",
+    ),
+    # sort compresses temporary files through a program it names, and
+    # writes where -o/--output says; --files0-from takes the files to read
+    # from a list no path check sees.
+    "sort": (
+        "--compress-program", "-o", "--output", "--files0-from",
+    ),
+    "wc": ("--files0-from",),
+    "du": ("--files0-from",),
+    # GNU tar runs a program at a volume change (-F/--info-script,
+    # --new-volume-script; -M/--multi-volume asks for one, --tape-length
+    # starts the change), at a checkpoint (--checkpoint-action=exec=), for
+    # each member (--to-command), as its compressor (-I), and to reach a
+    # remote archive (--rsh-command, --rmt-command). The 2026-11 review ran
+    # `tar -c --multi-volume --tape-length=10 --info-script=<cmd>`.
+    "tar": (
+        "--use-compress-program", "--to-command", "-I",
+        "--checkpoint-action", "--rmt-command", "--rsh-command",
+        "-F", "--info-script", "--new-volume-script",
+        "-M", "--multi-volume", "--tape-length",
+        "--index-file", "--listed-incremental", "-g", "--volno-file",
+        "-T", "--files-from", "--extract", "--get", "--absolute-names", "--dereference",
+    ),
+    "zip": ("-TT", "--unzip-command"),
+    "unzip": ("-TT",),
+    "grep": ("-f", "--file"),  # reads a pattern file outside cwd
+    "jq": ("-f", "--from-file"),
+}
+
+#: The git subcommands shell_exec runs: ones that start no program beyond
+#: what the repository itself configures (hooks, filters, drivers -- named
+#: on the approval card, safety/git_repo_programs) and reach no network.
+#: An allowlist, never a longer denylist: ``web--browse --browser=<cmd>``,
+#: ``send-email --to-cmd=<cmd>`` and ``instaweb --httpd=<cmd>`` each ran a
+#: program (2026-11 review), and an alias (``alias.x = !cmd``) is a name no
+#: list of git's own commands holds. Network and history rewriting go
+#: through the native git tools (git_pull, git_push, git_checkout...).
+GIT_SUBCOMMANDS: frozenset[str] = frozenset({
+    # reading
+    "status", "log", "show", "diff", "blame", "annotate", "shortlog",
+    "describe", "rev-parse", "rev-list", "ls-files", "ls-tree", "cat-file",
+    "show-ref", "for-each-ref", "name-rev", "merge-base", "diff-tree",
+    "diff-index", "diff-files", "whatchanged", "reflog", "grep",
+    "check-ignore", "check-attr", "count-objects", "range-diff", "cherry",
+    "show-branch", "version", "config",
+    # changing the local repository
+    "init", "add", "commit", "checkout", "switch", "restore", "branch", "tag",
+    "merge", "stash", "mv", "rm", "cherry-pick", "revert", "worktree",
+})
+
+#: git subcommands refused outright, with the words of the old denylist
+#: (network, credentials, history rewriting, programs it names).
+_GIT_BLOCKED = frozenset({
+    "push", "credential", "credential-manager",
+    "credential-store", "credential-cache",
+    "reset", "rebase", "filter-branch", "filter-repo",
+    "remote", "submodule",
+    # `clone` reaches the network and honours transport helpers (ext::,
+    # gitProxy). Cloning belongs to the audited /api/github/repos/clone
+    # route (audit F-03).
+    "clone", "fetch", "archive", "daemon", "http-backend",
+    # They start the merge or diff tool the configuration (or -x/--extcmd)
+    # names, whatever the arguments.
+    "mergetool", "difftool",
+})
+
+
+def _tar_archive_names(words: list[str]) -> list[str]:
+    """The archive names a tar command names (``-f X``, ``-fX``, ``--file=X``, ``-cvf X``)."""
+    names: list[str] = []
+    i = 0
+    while i < len(words):
+        word = words[i]
+        if word == "--":
+            break
+        if word.startswith("--"):
+            flag, has_value, value = word.partition("=")
+            # Exactly: every shorter prefix is also one of --files-from's.
+            if flag == "--file":
+                if has_value:
+                    names.append(value)
+                elif i + 1 < len(words):
+                    names.append(words[i + 1])
+                    i += 1
+        elif word.startswith("-") and len(word) > 1:
+            letters = word[1:]
+            for j, ch in enumerate(letters):
+                if ch in _SHORT_VALUES["tar"]:
+                    if ch == "f":
+                        rest = letters[j + 1:]
+                        if rest:
+                            names.append(rest)
+                        elif i + 1 < len(words):
+                            names.append(words[i + 1])
+                            i += 1
+                    elif not letters[j + 1:]:
+                        i += 1  # the value of -C/-I/-T is the next word
+                    break
+        i += 1
+    return names
+
+
+def _remote_archive_reason(name: str) -> str | None:
+    """Why a tar archive name is refused as ``host:path`` (GNU tar's remote form), or None.
+
+    GNU tar reads an archive name holding a colon before any slash as
+    ``[user@]host:file`` and reaches that host over rsh/ssh. A Windows drive
+    path (``C:\\x.tar``, ``C:/x.tar``) is a local file.
+    """
+    text = str(name or "")
+    if ":" not in text:
+        return None
+    if (
+        os.name == "nt"
+        and len(text) >= 3
+        and text[0].isalpha()
+        and text[1] == ":"
+        and text[2] in "\\/"
+    ):
+        return None
+    head = text.split(":", 1)[0]
+    if "/" in head or "\\" in head:
+        return None
+    return (
+        f"tar archive '{text}' is in the host:path form, which tar opens on "
+        "another machine over rsh/ssh. Name a local archive inside the workspace."
+    )
+
+
+def argument_refusal(binary: str, sub: str, words: list[str], sub_words: list[str]) -> str | None:
+    """What shell_exec refuses from a command's options alone, or None.
+
+    *words* are the command's words after the program, *sub* git's or uv's
+    subcommand (``split_subcommand``) and *sub_words* the words after it.
+    The one answer for the tool (after its approval) and the check before
+    the approval card.
+    """
+    for word in words:
+        flag = word.split("=", 1)[0]
+        # A long option may be abbreviated (``--open-files=``).
+        if matches_blocked(flag, _EXEC_CAPABLE_ARGS.get(binary, ())):
+            return (
+                f"'{flag}' is not allowed for {binary} — it runs "
+                f"another program (or writes/deletes outside the vetted "
+                f"argument set) and would bypass the binary allowlist. "
+                f"Use python_exec for multi-step work, or a native "
+                f"file_*/git_* tool."
+            )
+    if binary == "tar":
+        if words and not words[0].startswith("-"):
+            return "tar requires explicit dash options; old-style option clusters are refused."
+        for name in _tar_archive_names(words):
+            reason = _remote_archive_reason(name)
+            if reason:
+                return reason
+    # uv and git run other programs by subcommand, not by flag (audit
+    # 2026-10-26 AUD-085): `uv run python -c ...` and `uv tool run` start an
+    # interpreter, and `git config alias.x "!cmd"` then `git x` runs a shell
+    # command -- each after one approved card, the class F-03 closed for
+    # `find -exec`.
+    if binary == "uv" and (
+        sub in ("run", "tool")
+        or any(w.split("=", 1)[0] == "--with" for w in words)
+    ):
+        return (
+            f"'uv {sub or 'run'}' runs another program and would bypass the "
+            "binary allowlist. Use python_exec, or `uv pip`/`uv sync`."
+        )
+    if binary != "git":
+        return None
+    if sub == "config" and not any(
+        w in ("--get", "--get-all", "--get-regexp", "--list", "-l", "--show-origin")
+        for w in sub_words
+    ):
+        return (
+            "git config may only be read here (--get/--list): a written "
+            "alias or core.* value runs a program on the next git call."
+        )
+    if (
+        # -O may sit in a cluster (``-iO<cmd>``); a pattern attached to -e
+        # that holds an O is refused too (use ``-e PATTERN``).
+        (sub == "grep" and any(
+            w.startswith("-") and not w.startswith("--") and "O" in w[1:]
+            for w in sub_words
+        ))
+        or (sub == "bisect" and "run" in sub_words)
+    ):
+        return (
+            f"git {sub} with these arguments runs another program "
+            "(grep -O, bisect run) and would bypass the binary "
+            "allowlist. Use a native git_* tool."
+        )
+    joined = " ".join(words).lower()
+    if (
+        sub in _GIT_BLOCKED
+        or "config --global" in joined
+        or "clean -fd" in joined
+        or " push " in f" {joined} "
+        or "--force" in joined
+        or " -f " in f" {joined} "
+    ):
+        return (
+            f"git subcommand/args not allowed: {' '.join(words)}. "
+            "push/force/credential/reset/rebase/global config/clean -fd are blocked."
+        )
+    if sub and sub not in GIT_SUBCOMMANDS:
+        return (
+            f"'git {sub}' is not an allowed git subcommand here: shell_exec "
+            "runs git's own reading and local commands only (status, log, diff, "
+            "show, grep, add, commit, branch, checkout...). Others start "
+            "another program or reach the network; use a native git_* tool."
+        )
+    return None
+
+
 def short_option_values(binary: str, argument: str) -> list[tuple[str, str]]:
     """Decode attached values; refuse ambiguous tar clusters and old-style flags.
 

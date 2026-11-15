@@ -40,9 +40,14 @@ async def call_refusal(name: str, arguments: Any) -> str | None:
     """Why this call would be refused before it acts, or None."""
     args = arguments if isinstance(arguments, dict) else {}
     if name == "shell_exec":
+        from kazma_core.safety.shell_paths import shell_target_refusal
         from kazma_core.safety.shell_preflight import shell_refusal
 
-        return await shell_refusal(str(args.get("command") or ""))
+        command = str(args.get("command") or "")
+        # The policy and the command's text, then what its values and
+        # folders resolve to (Kazma's own files, the workspace boundary,
+        # options that start a program): the tool refuses each of these.
+        return await shell_refusal(command) or await shell_target_refusal(command)
     if name in BROWSER_TOOLS:
         return await browser_refusal()
     return None

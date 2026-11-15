@@ -126,11 +126,14 @@ class _Glob:
 
 
 def _is_linked_dir(path: str) -> bool:
-    """A symlinked or junctioned directory: a walk that follows it can leave the root."""
-    if os.path.islink(path):
-        return True
-    isjunction = getattr(os.path, "isjunction", None)
-    return bool(isjunction and isjunction(path))
+    """A symlinked or junctioned directory: a walk that follows it can leave the root.
+
+    ``workspace.real_paths.is_linked``: Python 3.11 has no
+    ``os.path.isjunction``, and the walk entered junctions there.
+    """
+    from kazma_core.workspace.real_paths import is_linked
+
+    return is_linked(path)
 
 
 def _walk(root: Path, *, max_depth: int | None = None) -> Iterator[tuple[Path, bool]]:
@@ -216,9 +219,10 @@ def _searchable_text(path: Path, root: Path) -> str | None:
     their lines (audit 2026-11, FA-001).
     """
     from kazma_core.store_registry import is_kazma_store
+    from kazma_core.workspace.real_paths import inside, is_linked
 
     try:
-        if path.is_symlink() and not path.resolve().is_relative_to(root):
+        if is_linked(path) and not inside(path, root):
             return None
         if is_kazma_store(path):
             return None

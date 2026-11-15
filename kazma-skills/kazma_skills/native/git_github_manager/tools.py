@@ -275,6 +275,41 @@ async def git_diff(target: str = "", path: str = "", stat: bool = False) -> str:
     return fence_untrusted(text, source="git_diff")
 
 
+_DRY_RUN_ADD = re.compile(r"^add '(.*)'$")
+
+
+def _kazma_file_to_stage(cwd: Any, files: list[str] | None) -> str | None:
+    """Why staging *files* (all changes when None) is refused, or None.
+
+    Asks git what it would stage (``git add --dry-run``: no index change,
+    no hook) and refuses when that holds one of Kazma's own files
+    (``store_registry.is_kazma_store``). A dry run git cannot answer is left
+    to the real ``git add``, which fails the same way. Blocking: a thread.
+    """
+    from pathlib import Path
+
+    from kazma_core.security.child_env import tool_child_env
+    from kazma_core.store_registry import is_kazma_store, store_refusal
+
+    root = Path(str(cwd))
+    argv = ["git", "-c", "core.fsmonitor=false", "-c", "core.quotePath=false",
+            "add", "--dry-run", "--", *(files or ["."])]
+    try:
+        res = subprocess.run(  # noqa: S603 -- git, a fixed argv; nothing is staged
+            argv, cwd=str(root), env=tool_child_env(), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=30, stdin=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.SubprocessError):
+        logger.debug("[git_commit] dry-run add could not run", exc_info=True)
+        return None
+    for line in (res.stdout or "").splitlines():
+        match = _DRY_RUN_ADD.match(line.strip())
+        if match and is_kazma_store(root / match.group(1)):
+            return "git_commit would stage it. " + store_refusal(
+                root / match.group(1), door="git_commit")
+    return None
+
+
 async def git_commit(message: str, files: list[str] | None = None) -> str:
     """Commit modified or untracked files with a detailed commit message.
 
@@ -284,6 +319,12 @@ async def git_commit(message: str, files: list[str] | None = None) -> str:
     repo's ``.git/config``.
     """
     cwd = await asyncio.to_thread(_get_workspace)
+    # Before anything is staged: git add would put one of Kazma's own files
+    # (restic.pass is not in Kazma's .gitignore) into the index and the
+    # commit, where git_diff / git_log print it (2026-11 review).
+    refusal = await asyncio.to_thread(_kazma_file_to_stage, cwd, files)
+    if refusal:
+        raise RefusedBeforeEffect(refusal)
     try:
         # Resolve bot identity env (no-op when disabled).
         from kazma_core.git_identity import get_commit_env

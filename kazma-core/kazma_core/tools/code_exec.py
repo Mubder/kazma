@@ -824,7 +824,7 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
     if not code or not code.strip():
         raise RefusedBeforeEffect("No code provided.")
 
-    from kazma_core.store_registry import store_refusal
+    from kazma_core.store_registry import is_config_file_name, store_refusal
     from kazma_core.workspace.path_policy import code_mentions_control_plane
 
     # The store list and the policy switches are settings reads (audit 2026-10-26 AUD-111).
@@ -832,10 +832,12 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
     if mentioned:
         # Normally refused before the approval card (commitment exec
         # resolver); this is the backstop when that layer is off.
-        raise RefusedBeforeEffect(
-            "Kazma control-plane store — python_exec may not open it. "
-            + store_refusal(mentioned, door="python_exec")
+        kind = (
+            "Kazma configuration file — python_exec may not change it. "
+            if is_config_file_name(mentioned)
+            else "Kazma control-plane store — python_exec may not open it. "
         )
+        raise RefusedBeforeEffect(kind + store_refusal(mentioned, door="python_exec"))
 
     from kazma_core.safety.deployment_policy import container_required, policy_read_failures
 

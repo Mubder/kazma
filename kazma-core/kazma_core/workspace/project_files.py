@@ -97,7 +97,44 @@ def git_project_files(root: Path) -> list[Path] | None:
     res = _git(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
     if res is None or res.returncode != 0:
         return None
-    return [root / name for name in res.stdout.decode("utf-8", "replace").split("\0") if name]
+    listed = [root / name for name in res.stdout.decode("utf-8", "replace").split("\0") if name]
+    return _inside_the_root(root, listed)
+
+
+def _inside_the_root(root: Path, listed: list[Path]) -> list[Path]:
+    """*listed* without what a link or junction leads out of *root* to.
+
+    Git lists the files of a folder that is a junction (``mklink /J``) as
+    the repository's own, so ``file_search`` read files outside the
+    workspace through one (2026-11 review). Each folder of the list is asked
+    once (``real_paths``), and a file that is itself a link must lead inside.
+    """
+    from kazma_core.workspace.real_paths import inside, is_linked
+
+    base = Path(root)
+    verdicts: dict[Path, bool] = {}
+
+    def _folder_ok(folder: Path) -> bool:
+        if folder == base or folder == folder.parent:
+            return True
+        known = verdicts.get(folder)
+        if known is None:
+            known = _folder_ok(folder.parent) and not (is_linked(folder) and not inside(folder, base))
+            verdicts[folder] = known
+        return known
+
+    kept: list[Path] = []
+    for path in listed:
+        try:
+            path.relative_to(base)
+        except ValueError:
+            continue
+        if not _folder_ok(path.parent):
+            continue
+        if is_linked(path) and not inside(path, base):
+            continue
+        kept.append(path)
+    return kept
 
 
 def skipped_dir(name: str) -> bool:
@@ -122,8 +159,15 @@ def iter_project_files(root: Path) -> Iterator[Path]:
     root = Path(root)
     listed = git_project_files(root)
     if listed is None:
+        from kazma_core.workspace.real_paths import is_linked
+
+        # followlinks=False does not stop os.walk at a junction (islink is
+        # False for one); is_linked does, on every Python version.
         for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
-            dirnames[:] = sorted(d for d in dirnames if not skipped_dir(d))
+            dirnames[:] = sorted(
+                d for d in dirnames
+                if not skipped_dir(d) and not is_linked(os.path.join(dirpath, d))
+            )
             for name in sorted(filenames):
                 yield Path(dirpath) / name
         return

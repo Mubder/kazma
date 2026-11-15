@@ -353,13 +353,14 @@ async def test_typed_save_preserves_content_and_reports_existing_file(target, mo
     monkeypatch.setattr(ru, "_workspace_root", lambda: tmp_path)
     saved = await ru.save_url_extract("https://first.example/save", path="notes/article.md")
     assert saved.ok and saved.acquisition.ok
-    assert saved.saved_bytes == (tmp_path / "notes/article.md").stat().st_size
+    # Saves land under research/ (2026-11): notes/article.md -> research/notes/article.md.
+    assert saved.saved_bytes == (tmp_path / "research/notes/article.md").stat().st_size
     loaded, path = ru._load_research_body(saved.path)
     assert loaded == body and path.is_file()
     assert "# Backend:" not in loaded
     again = await ru.save_url_extract("https://first.example/save", path="notes/article.md")
     assert not again.ok and again.error_code == FetchErrorCode.EXISTS
-    assert (tmp_path / "notes/article.md").read_text(encoding="utf-8").endswith(body)
+    assert (tmp_path / "research/notes/article.md").read_text(encoding="utf-8").endswith(body)
 
 
 @pytest.mark.asyncio

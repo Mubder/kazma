@@ -485,11 +485,10 @@ def register_system_tools(registry: Any) -> None:
             args = [resolved, *args[1:]]
 
             from kazma_core.safety.shell_arguments import (
-                attached_values,
-                matches_blocked,
-                short_option_values,
+                argument_refusal,
                 split_subcommand,
             )
+            from kazma_core.safety.shell_paths import path_candidates, path_refusal
 
             # git's and uv's subcommand comes after their global options,
             # some of which take a value: ``git -C . config ...`` and
@@ -502,209 +501,32 @@ def register_system_tools(registry: Any) -> None:
                 raise RefusedBeforeEffect(f"{exc}")
             _sub_args = args[2 + _sub_index:]
 
-            # Reject absolute paths outside workspace (audit H4).
-            # Flag-prefixed args carry paths too (``--file=../../x``,
-            # ``-oC:\out``) — check the value after ``=`` and short-flag
-            # payloads, not just bare operands (audit L-14). Every binary's
-            # attached short values are checked, not only the binaries with a
-            # known option table: ``sort -oC:\x.bat`` and ``date -f<file>``
-            # skipped the check (2026-11-10 audit).
-            for a in args[1:]:
-                if not a:
-                    continue
-                candidates_a = [a]
-                try:
-                    attached = short_option_values(binary, a)
-                except ValueError as exc:
-                    raise RefusedBeforeEffect(f"{exc}")
-                for flag, value in attached:
-                    blocked = {
-                        "tar": {"-I", "-T"}, "grep": {"-f"}, "jq": {"-f"},
-                        "sort": {"-o"},
-                    }
-                    if flag in blocked.get(binary, set()):
-                        raise RefusedBeforeEffect(f"'{flag}' is not allowed for {binary}; use a native tool.")
-                    if binary == "sort" and flag in ("-t", "-k"):
-                        continue  # a field separator or key, never a path
-                    candidates_a.append(value)
-                # One character is a delimiter (``cut -d/``), not a path.
-                candidates_a.extend(v for v in attached_values(a) if len(v) > 1)
-                if a.startswith("-") and "=" in a:
-                    candidates_a.append(a.split("=", 1)[1])
-                for check in candidates_a:
-                    if not check or check.startswith("-"):
-                        continue
-                    from kazma_core.workspace.path_policy import (
-                        control_plane_store_targeted,
-                    )
-                    from kazma_core.workspace.remote_paths import (
-                        remote_path_reason,
-                    )
+            # Every value the command carries -- a bare operand, the value
+            # after ``=``, a short option's attached value (``-oC:\out``,
+            # audit L-14 and 2026-11-10) -- is resolved to the file it opens
+            # (short names, links, junctions) and held to the workspace and
+            # away from Kazma's own files; a folder the program walks
+            # (``grep -r``, ``find``, ``tar -c``, ``cp -r``, the working
+            # folder when none is named) may not hold any (2026-11 review:
+            # ``grep -r KAZMA_VAULT_KEY .`` and ``cat ENV~1`` printed the
+            # vault key). The same check runs before the approval card
+            # (safety/call_preflight -> safety/shell_paths).
+            try:
+                _candidates = path_candidates(binary, args[1:])
+            except ValueError as exc:
+                raise RefusedBeforeEffect(f"{exc}")
+            _refused = await asyncio.to_thread(
+                path_refusal, binary, _sub, args[1:], _candidates, cwd_s,
+            )
+            if _refused:
+                raise RefusedBeforeEffect(_refused)
 
-                    # Before the store check and realpath, which would
-                    # connect to the host a network path names.
-                    _remote = remote_path_reason(check)
-                    if _remote:
-                        raise RefusedBeforeEffect(f"{_remote} (argument '{a}')")
-
-                    targeted = control_plane_store_targeted(check, cwd=cwd_s)
-                    if targeted:
-                        from kazma_core.store_registry import store_refusal
-
-                        raise RefusedBeforeEffect(
-                            "Kazma control-plane store — shell_exec may "
-                            "not open it. "
-                            + store_refusal(targeted, door="shell_exec")
-                        )
-                    # Rough path detection
-                    looks_path = (
-                        check.startswith("/")
-                        or check.startswith("\\")
-                        or (len(check) > 2 and check[1] == ":" and check[0].isalpha())
-                        or ".." in check.replace("\\", "/")
-                    )
-                    if not looks_path:
-                        continue
-                    try:
-                        import os as _os
-
-                        cand = _os.path.realpath(
-                            check if _os.path.isabs(check) else _os.path.join(cwd_s, check)
-                        )
-                        root_n = _os.path.realpath(cwd_s)
-                        if _os.name == "nt":
-                            cand, root_n = cand.lower(), root_n.lower()
-                        if cand != root_n and not cand.startswith(root_n + _os.sep):
-                            raise RefusedBeforeEffect(
-                                f"path '{check}' (argument '{a}') is outside "
-                                f"the workspace ({cwd_s}). Absolute paths must stay "
-                                "inside the workspace."
-                            )
-                    except RefusedBeforeEffect:
-                        raise
-                    except Exception:
-                        pass
-
-            # Per-binary argument policy (audit F-03).
-            #
-            # The allowlist above vets args[0] only, and the path guard below
-            # vets arguments that *look like paths*. Neither catches an
-            # allowlisted binary being asked to run another program by name:
-            # `find . -exec whoami +` passes both (bare name is not
-            # path-shaped, and `+` avoids the `;` metacharacter rejection),
-            # which defeats the "no interpreters even after one HITL approval"
-            # rule this allowlist exists to enforce.
-            _EXEC_CAPABLE_ARGS: dict[str, tuple[str, ...]] = {
-                "find": (
-                    "-exec", "-execdir", "-ok", "-okdir",
-                    "-delete", "-fprintf", "-fprint", "-fprint0", "-fls",
-                ),
-                "git": (
-                    "--upload-pack", "--receive-pack", "--exec-path",
-                    "-c", "--config-env", "--upload-archive",
-                    # git grep opens matching files in a program it names.
-                    "--open-files-in-pager",
-                    # git difftool runs the command it names.
-                    "--extcmd",
-                ),
-                # sort compresses temporary files through a program it names,
-                # and writes where -o/--output says; --files0-from takes the
-                # files to read from a list no path check sees.
-                "sort": (
-                    "--compress-program", "-o", "--output", "--files0-from",
-                ),
-                "wc": ("--files0-from",),
-                "du": ("--files0-from",),
-                "tar": (
-                    "--use-compress-program", "--to-command", "-I",
-                    "--checkpoint-action", "--rmt-command", "--rsh-command",
-                    "-T", "--files-from", "--extract", "--get", "--absolute-names", "--dereference",
-                ),
-                "zip": ("-TT", "--unzip-command"),
-                "unzip": ("-TT",),
-                "grep": ("-f", "--file"),  # reads a pattern file outside cwd
-                "jq": ("-f", "--from-file"),
-            }
-            for _a in args[1:]:
-                _flag = _a.split("=", 1)[0]
-                # A long option may be abbreviated (``--open-files=``).
-                if matches_blocked(_flag, _EXEC_CAPABLE_ARGS.get(binary, ())):
-                    raise RefusedBeforeEffect(
-                        f"'{_flag}' is not allowed for {binary} — it runs "
-                        f"another program (or writes/deletes outside the vetted "
-                        f"argument set) and would bypass the binary allowlist. "
-                        f"Use python_exec for multi-step work, or a native "
-                        f"file_*/git_* tool."
-                    )
-            if binary == "tar" and args[1:] and not args[1].startswith("-"):
-                raise RefusedBeforeEffect("tar requires explicit dash options; old-style option clusters are refused.")
-
-            # uv and git run other programs by subcommand, not by flag (audit
-            # 2026-10-26 AUD-085): `uv run python -c ...` and `uv tool run`
-            # start an interpreter, and `git config alias.x "!cmd"` then
-            # `git x` runs a shell command -- each after one approved card,
-            # the class F-03 closed for `find -exec`. `_sub` is the real
-            # subcommand, after the global options (split_subcommand above).
-            if binary == "uv" and (
-                _sub in ("run", "tool")
-                or any(a.split("=", 1)[0] == "--with" for a in args[1:])
-            ):
-                raise RefusedBeforeEffect(
-                    f"'uv {_sub or 'run'}' runs another program and would bypass the "
-                    "binary allowlist. Use python_exec, or `uv pip`/`uv sync`."
-                )
-            if binary == "git" and _sub == "config" and not any(
-                a in ("--get", "--get-all", "--get-regexp", "--list", "-l", "--show-origin")
-                for a in _sub_args
-            ):
-                raise RefusedBeforeEffect(
-                    "git config may only be read here (--get/--list): a written "
-                    "alias or core.* value runs a program on the next git call."
-                )
-            if binary == "git" and (
-                # -O may sit in a cluster (``-iO<cmd>``); a pattern attached
-                # to -e that holds an O is refused too (use ``-e PATTERN``).
-                (_sub == "grep" and any(
-                    a.startswith("-") and not a.startswith("--") and "O" in a[1:]
-                    for a in _sub_args
-                ))
-                or (_sub == "bisect" and "run" in _sub_args)
-            ):
-                raise RefusedBeforeEffect(
-                    f"git {_sub} with these arguments runs another program "
-                    "(grep -O, bisect run) and would bypass the binary "
-                    "allowlist. Use a native git_* tool."
-                )
-
-            # git subcommand denylist (destructive / credential / rewrite)
-            if binary == "git" and len(args) > 1:
-                sub = _sub
-                blocked_git = {
-                    "push", "credential", "credential-manager",
-                    "credential-store", "credential-cache",
-                    "reset", "rebase", "filter-branch", "filter-repo",
-                    "remote", "submodule",
-                    # `clone` reaches the network and honours transport helpers
-                    # (ext::, gitProxy). Cloning belongs to the audited
-                    # /api/github/repos/clone route (audit F-03).
-                    "clone", "fetch", "archive", "daemon", "http-backend",
-                    # They start the merge or diff tool the configuration
-                    # (or -x/--extcmd) names, whatever the arguments.
-                    "mergetool", "difftool",
-                }
-                joined = " ".join(args[1:]).lower()
-                if (
-                    sub in blocked_git
-                    or "config --global" in joined
-                    or "clean -fd" in joined
-                    or " push " in f" {joined} "
-                    or "--force" in joined
-                    or " -f " in f" {joined} "
-                ):
-                    raise RefusedBeforeEffect(
-                        f"git subcommand/args not allowed: {' '.join(args[1:])}. "
-                        "push/force/credential/reset/rebase/global config/clean -fd are blocked."
-                    )
+            # Options that run another program, git's subcommand allowlist,
+            # tar's remote archive form, uv run: one table
+            # (safety/shell_arguments.argument_refusal, audit F-03 onward).
+            _refused = argument_refusal(binary, _sub, args[1:], _sub_args)
+            if _refused:
+                raise RefusedBeforeEffect(_refused)
 
             # Check if command uses shell pipelines or metacharacters (| && ; > <)
             # SECURITY: These are REJECTED, not passed to a shell. The old code

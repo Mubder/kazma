@@ -59,9 +59,10 @@ def register_external_tools(registry: Any) -> None:
             "read_url_to_file",
             read_url_to_file,
             description=(
-                "Fetch URL and save FULL extract under the workspace "
-                "(default research/). Preferred for multi-source research so you can "
-                "digest later. Args: url, path=workspace-relative."
+                "Fetch URL and save FULL extract in the workspace's research/ folder "
+                "(a .md or .txt note; any other path lands under research/). Preferred "
+                "for multi-source research so you can digest later. Args: url, "
+                "path=a file name or a path under research/."
             ),
             category="search",
         )

@@ -42,15 +42,18 @@ _HIT_PATH = re.compile(r"^(.*?):(\d+):")
 def _without_kazma_stores(root: Path, hits: list[str]) -> list[str]:
     """Drop hits in Kazma's own stores and secret files (``.env``,
     ``restic.pass``): ``--hidden`` reads dot files, and the workspace can be
-    the install folder (audit 2026-11, FA-001)."""
+    the install folder (audit 2026-11, FA-001). A hit whose real path leads
+    out of *root* (a link or junction) is dropped too."""
     from kazma_core.store_registry import is_kazma_store
+    from kazma_core.workspace.real_paths import inside
 
     kept: list[str] = []
     for hit in hits:
         match = _HIT_PATH.match(hit)
         if match:
             where = Path(match.group(1))
-            if is_kazma_store(where if where.is_absolute() else root / where):
+            where = where if where.is_absolute() else root / where
+            if is_kazma_store(where) or not inside(where, root):
                 continue
         kept.append(hit)
     return kept

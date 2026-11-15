@@ -54,6 +54,17 @@
   earlier page or the Knowledge Library's text.
 - The data fence also catches disguised fence tags and role tokens, and its
   filter no longer slows down on long runs of dashes.
+- `shell_exec` judges a path by the file it opens (short names, links and
+  wildcards included) and refuses to walk a folder that holds Kazma's secret
+  files.
+- Kazma's configuration files can be read but never changed by any tool.
+- `shell_exec` runs only an allowlist of git subcommands; tar refuses volume
+  scripts and remote archives; `git_commit` refuses to stage Kazma's secret
+  files.
+- A link or junction inside the workspace no longer leads searches or the
+  shell out of it.
+- Saved web pages land in the research folder, never under a name other
+  programs load.
 
 - `/long on` never lowers a chat's tool-round limit. Its research preset is
   40 rounds; on an install whose own limit is higher (live: 100), turning long

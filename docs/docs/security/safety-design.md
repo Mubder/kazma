@@ -128,7 +128,18 @@ Around the fence:
   that touches a path -- file tools, the SQL tools, `python_exec`,
   `shell_exec`, research readers -- asks the same rule and refuses Kazma's
   databases, its `.env` files, the vault and backup copies, naming the tool
-  that reads the data properly instead.
+  that reads the data properly instead. A path is judged by the file it
+  opens, not by how it is spelled: a Windows short name, a trailing dot, a
+  link or a junction, a wildcard. A command that reads, copies or archives a
+  whole folder is refused when that folder holds one of Kazma's files.
+- **Kazma's configuration is read-only to tools.** `kazma.yaml`,
+  `kazma.local.yaml`, the permissions file and the configuration Kazma keeps
+  in its data folder can be read, but no tool may change them -- not the
+  file tools, `shell_exec`, `python_exec` or a saved web page. Settings are
+  changed in Settings.
+- **The workspace ends where its real paths end.** A link or junction
+  inside the workspace that leads elsewhere is not followed by the file
+  tools, searches or `shell_exec`.
 - **Processes Kazma starts get no secrets.** A command, a test run, an
   installer or a hook gets an environment without Kazma's variables,
   credentials or passwords in URLs, a home folder of its own, and no
@@ -156,7 +167,10 @@ Around the fence:
   read-only mounts, limits on memory and processes, and the snippet's own
   restricted builtins; a cloud microVM (E2B) is available for code that is
   genuinely untrusted. `shell_exec` runs only allowlisted programs, refuses
-  their flags that start other programs, and keeps paths in the workspace.
+  their flags that start other programs, runs only git's reading and local
+  commands (an allowlist), refuses a tar archive on another machine, and
+  keeps paths in the workspace. A saved web page is a note in the research
+  folder, never a file another program loads.
 - **Documents.** Parsing, OCR and rendering run in a separate worker
   process with time, memory and CPU limits, or in a per-job container with
   no network and a read-only root (the profile to use for documents you do

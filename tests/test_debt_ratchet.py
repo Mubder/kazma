@@ -88,9 +88,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 #: Lower these whenever the counts drop. Never raise them casually.
 BASELINE = {
     # except Exception / except BaseException / bare except, any body
-    "blind_except": 3357,
+    "blind_except": 3356,
     # ...whose body is only `pass` (or a docstring): the error vanishes
-    "silent_except": 383,
+    "silent_except": 382,
 }
 
 #: Structural debt, 2026-09-25 (see the module docstring). Same rules.
@@ -112,7 +112,7 @@ STRUCTURAL_BASELINE = {
     "shared_temp_names": 0,
     "async_inline_db_calls": 8,
     "async_tools_never_await": 1,
-    "functions_over_complexity_50": 34,
+    "functions_over_complexity_50": 33,
 }
 
 

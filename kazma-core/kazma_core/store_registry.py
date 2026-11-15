@@ -55,6 +55,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 __all__ = [
+    "CONFIG_FILE_NAMES",
     "CONTEXT_FEEDERS",
     "DATA_DIR_ENTRIES",
     "DYNAMIC_NAME_SITES",
@@ -70,9 +71,13 @@ __all__ = [
     "bundle_store_names",
     "carried_in_bundle",
     "distinctive_store_names",
+    "is_config_file_name",
+    "is_kazma_config_file",
     "is_kazma_secret_file",
     "is_kazma_store",
     "is_secret_file_name",
+    "kazma_file_under",
+    "kazma_files_in",
     "readers_for_store",
     "store_name_for",
     "store_refusal",
@@ -373,6 +378,9 @@ class DataDirEntry:
     #: wrong (``outage_pages.json``: restored, it owes notes for pages long
     #: since followed by their recovery).
     backed_up: bool = True
+    #: Configuration the server reads (``is_kazma_config_file``): no write
+    #: door the model has may change it; reads stay open.
+    config: bool = False
 
 
 #: Every entry product code puts directly in the data dir that is not a
@@ -389,9 +397,10 @@ class DataDirEntry:
 DATA_DIR_ENTRIES: dict[str, DataDirEntry] = {
     ".runtime-state-id": DataDirEntry("the state volume's identity paired with its HA Postgres database", "bundle", state=True),
     ".runtime-writer.lock": DataDirEntry("the server process's local writer fence", "machine", reason="OS ownership is reacquired after restore; the inode is never copied", backed_up=False),
-    "swarm_registry.json": DataDirEntry("the swarm's registered workers", "bundle", state=True),
+    "swarm_registry.json": DataDirEntry(
+        "the swarm's registered workers", "bundle", state=True, config=True),
     "swarm_templates.json": DataDirEntry(
-        "the operator's own worker templates", "bundle", state=True),
+        "the operator's own worker templates", "bundle", state=True, config=True),
     "attachments": DataDirEntry(
         "files sent in chats and files shared into a web chat", "bundle"),
     "documents": DataDirEntry("documents the agent generated or processed", "bundle"),
@@ -435,10 +444,10 @@ DATA_DIR_ENTRIES: dict[str, DataDirEntry] = {
     "settings_snapshot.yaml": DataDirEntry(
         "the settings' local copy for a start without the database (secrets as vault pointers)",
         "machine", reason="rewritten every 15 minutes from the settings themselves; a bundle "
-                          "carries the settings"),
+                          "carries the settings", config=True),
     "setup_record.json": DataDirEntry(
         "what kazma setup postgres installed: the database service and its WAL archive", "machine",
-        reason="names this machine's service, ports and folders"),
+        reason="names this machine's service, ports and folders", config=True),
     "install_id": DataDirEntry(
         "this install's identity", "machine",
         reason="two installs must never share one: shared-store peers and the "
@@ -934,9 +943,273 @@ def kazma_paths_inside(root: str | Path) -> tuple[list[Path], list[Path]]:
     return folders, list(dict.fromkeys(files))
 
 
-def is_kazma_store(path: str | Path) -> bool:
+# ── Kazma's own configuration ───────────────────────────────────────────
+#
+# Not secret, and readable; never writable by a door the model has. On the
+# live install the workspace IS the install folder, and an approved
+# file_write of kazma.local.yaml (2026-11 review) turned safety.hitl.enabled
+# off and added agent.hooks.pre_tool commands that tool_hooks runs before
+# every tool call: config_save refused those keys (safety/protected_config),
+# the file that sets them was any file.
+
+#: The files the config loader reads (``config_loader.SHIPPED_CONFIG_NAME``,
+#: ``LOCAL_CONFIG_NAME``) and the permissions file the RBAC layer reads
+#: (``permissions._DEFAULT_CONFIG``), each where Kazma reads it
+#: (:func:`_kazma_config_dirs`). ``tests/test_kazma_config_files_protected.py``
+#: finds every ``kazma*.yaml`` name product code reads and fails on one
+#: missing here.
+CONFIG_FILE_NAMES: frozenset[str] = frozenset(
+    {"kazma.yaml", "kazma.local.yaml", "kazma-permissions.yaml"}
+)
+
+
+def is_config_file_name(name: str) -> bool:
+    """True when a bare file name is one of Kazma's configuration files.
+
+    By name only, for text checks; :func:`is_kazma_config_file` decides for
+    a path (a project's own ``kazma.yaml`` elsewhere is the user's).
+    """
+    lowered = Path(str(name or "")).name.strip().lower()
+    if lowered in CONFIG_FILE_NAMES:
+        return True
+    entry = DATA_DIR_ENTRIES.get(lowered)
+    return entry is not None and entry.config
+
+
+def _kazma_config_dirs() -> list[Path]:
+    """The folders Kazma reads its configuration files from, resolved.
+
+    The server's working directory (``ConfigStore`` and ``tool_hooks`` read
+    ``kazma.yaml`` / ``kazma.local.yaml`` relative to it), the install and
+    project roots (``config_loader.install_yaml_section``), the checkout the
+    packages run from (``permissions``, the slash commands) and the folder
+    the running settings store reads its YAML from.
+    """
+    found: list[Path] = []
+
+    def _add(candidate: object) -> None:
+        if not candidate:
+            return
+        try:
+            found.append(Path(str(candidate)).expanduser().resolve())
+        except (OSError, RuntimeError, ValueError):
+            pass  # an unresolvable folder is no config folder
+
+    try:
+        _add(os.getcwd())
+    except OSError:
+        pass  # a deleted working directory reads no config
+    try:
+        from kazma_core import paths as _paths
+    except ImportError:
+        _paths = None
+    for getter in ("installed_project_root", "get_project_root"):
+        fn = getattr(_paths, getter, None) if _paths is not None else None
+        if fn is None:
+            continue
+        try:
+            _add(fn())
+        except (OSError, RuntimeError, ValueError):
+            continue
+    _add(Path(__file__).resolve().parents[2])
+    try:
+        from kazma_core import config_store as _cs
+
+        live = getattr(_cs, "_config_store", None)
+        yaml_path = getattr(live, "_yaml_path", None) if live is not None else None
+        if yaml_path is not None:
+            _add(Path(yaml_path).expanduser().resolve().parent)
+    except ImportError:
+        pass  # no settings store module: the other folders still count
+    return list(dict.fromkeys(found))
+
+
+def is_kazma_config_file(path: str | Path) -> bool:
+    """True if *path* is one of Kazma's own configuration files.
+
+    A :data:`CONFIG_FILE_NAMES` file directly in a folder Kazma reads it
+    from (:func:`_kazma_config_dirs`), or a data-dir entry declared
+    ``config`` (the swarm's templates and registry, the settings snapshot,
+    the setup record). Readable by every door; no write door may change it
+    (``is_kazma_store(path, write=True)``).
+    """
+    try:
+        resolved = Path(path).expanduser().resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+    name = resolved.name.lower()
+    if name in CONFIG_FILE_NAMES and resolved.parent in _kazma_config_dirs():
+        return True
+    entry = DATA_DIR_ENTRIES.get(name)
+    if entry is None or not entry.config:
+        return False
+    try:
+        from kazma_core.paths import data_dir
+
+        return resolved.parent == data_dir().resolve()
+    except (ImportError, OSError, RuntimeError):
+        return False
+
+
+def _kazma_folders() -> list[Path]:
+    """Folders that are Kazma's own throughout: the data dir and Kazma's home."""
+    folders: list[Path] = []
+    try:
+        from kazma_core import paths as _paths
+    except ImportError:
+        return folders
+    for getter in ("data_dir", "user_home"):
+        fn = getattr(_paths, getter, None)
+        if fn is None:
+            continue
+        try:
+            folders.append(Path(fn()).expanduser().resolve())
+        except (OSError, RuntimeError, ValueError):
+            continue
+    return folders
+
+
+#: Folders a search for stray copies never enters (the same list every walk
+#: of a project skips, plus git's own folder).
+_STRAY_WALK_SKIP = frozenset({".git"})
+
+
+def kazma_file_under(
+    folder: str | Path,
+    *,
+    recursive: bool = True,
+    write: bool = False,
+    budget: int = 20_000,
+) -> Path | None:
+    """One of Kazma's own files at or under *folder*, or None.
+
+    For a command that reads a whole folder (``grep -r``, ``find``, ``tar
+    -c``, ``cp -r``, a wildcard): the folder is refused when it holds a
+    store or a secret file (and, with *write*, a configuration file).
+    *recursive* False looks at the folder's own files only (a wildcard in a
+    folder). Recursive: the data dir and Kazma's home count as a whole (the
+    data dir's coding sandbox is the user's), the install and config
+    folders' own files are asked :func:`is_kazma_store`, and a bounded walk
+    (*budget* entries, skipping generated folders) looks for stray copies
+    of the files refused by name wherever they are. A folder inside a Kazma
+    folder is Kazma's.
+    """
+    try:
+        base = Path(folder).expanduser().resolve()
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if not base.is_dir():
+        return None
+    if not recursive:
+        found = kazma_files_in(base, write=write, budget=budget, limit=1)
+        return found[0] if found else None
+    sandbox: Path | None = None
+    try:
+        from kazma_core.paths import data_dir
+
+        sandbox = (data_dir() / "workspace").resolve()
+    except (ImportError, OSError, RuntimeError):
+        sandbox = None
+    in_sandbox = sandbox is not None and (base == sandbox or _under(base, sandbox))
+    kazma_folders = [f for f in _kazma_folders() if f.is_dir()]
+    if not in_sandbox:
+        for place in kazma_folders:
+            if base == place or _under(base, place):
+                return base
+    for place in kazma_folders:
+        if place != base and _under(place, base):
+            return place
+    own_dirs = list(_install_env_dirs())
+    if write:
+        own_dirs += _kazma_config_dirs()
+    for place in dict.fromkeys(own_dirs):
+        if not (place == base or _under(place, base)):
+            continue
+        found = kazma_file_under(place, recursive=False, write=write)
+        if found is not None:
+            return found
+    for variable in ("KAZMA_ENV_FILE", "KAZMA_DOCUMENT_BROKER_TOKEN_FILE"):
+        named = (os.environ.get(variable) or "").strip()
+        if not named:
+            continue
+        try:
+            target = Path(named).expanduser().resolve()
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if _under(target, base) and target.is_file():
+            return target
+    by_name = SECRET_FILE_NAMES | _ALWAYS_PROTECTED
+    seen = 0
+    skip = {name.lower() for name in _generated_dirs()} | _STRAY_WALK_SKIP
+    for dirpath, dirnames, filenames in os.walk(base):
+        here = Path(dirpath)
+        kept = []
+        for name in dirnames:
+            child = here / name
+            if name.lower() in skip or any(child == f for f in kazma_folders):
+                continue
+            if _links_out(child):
+                continue
+            kept.append(name)
+        dirnames[:] = kept
+        for name in filenames:
+            seen += 1
+            if _strip_sidecar(name) in by_name:
+                return here / name
+        seen += len(dirnames)
+        if seen >= budget:
+            break
+    return None
+
+
+def kazma_files_in(
+    folder: str | Path, *, write: bool = False, budget: int = 20_000, limit: int = 64,
+) -> list[Path]:
+    """Kazma's own files directly in *folder* (stores, secret files; with
+    *write*, configuration too), at most *limit*, looking at *budget* entries."""
+    found: list[Path] = []
+    try:
+        entries = list(os.scandir(folder))
+    except OSError:
+        return found
+    for entry in entries[:budget]:
+        try:
+            if not entry.is_file():
+                continue
+        except OSError:
+            continue
+        if is_kazma_store(entry.path, write=write):
+            found.append(Path(entry.path))
+            if len(found) >= limit:
+                break
+    return found
+
+
+def _generated_dirs() -> frozenset[str]:
+    """The folders every walk of a project skips (read late: import order)."""
+    try:
+        from kazma_core.workspace.project_files import GENERATED_DIRS
+
+        return frozenset(GENERATED_DIRS)
+    except ImportError:
+        return frozenset()
+
+
+def _links_out(folder: Path) -> bool:
+    """A symbolic link or junction: a walk that follows it leaves its tree."""
+    try:
+        from kazma_core.workspace.real_paths import is_linked
+
+        return is_linked(folder)
+    except ImportError:
+        return os.path.islink(folder)
+
+
+def is_kazma_store(path: str | Path, *, write: bool = False) -> bool:
     """True if *path* is one of Kazma's databases (or its WAL/SHM sidecar),
-    or one of its secret files (:func:`is_kazma_secret_file`).
+    or one of its secret files (:func:`is_kazma_secret_file`); with *write*,
+    also one of its configuration files (:func:`is_kazma_config_file`), which
+    every door may read and none may change.
 
     By LOCATION: any SQLite file under the data dir, except the default
     coding sandbox (``data_dir()/workspace``), whose databases are the
@@ -945,12 +1218,18 @@ def is_kazma_store(path: str | Path) -> bool:
     (``memory_state.db.pre_relabel``) and any file that starts with the
     SQLite header count too. By NAME, anywhere: the gate registry and
     the vault — a stray copy of either is still the crown jewels.
+
+    The path is resolved first: a Windows short name (``ENV~1``), a trailing
+    dot or space, an NTFS stream suffix (``.env::$DATA``), a symbolic link
+    or a junction all name the file they open.
     """
     try:
         resolved = Path(path).expanduser().resolve()
     except (OSError, RuntimeError, ValueError):
         return False
     if is_kazma_secret_file(resolved):
+        return True
+    if write and is_kazma_config_file(resolved):
         return True
     name = _strip_sidecar(resolved.name)
     if name in _ALWAYS_PROTECTED:
@@ -1068,6 +1347,13 @@ def store_refusal(path_or_name: str | Path, *, door: str) -> str:
             f"{raw} holds Kazma's own secrets (keys, passwords, tokens); "
             f"{door} may not open it. Nothing in it is meant for you to read; "
             "tell the user what you need instead of looking for another way in."
+        )
+    if is_config_file_name(raw) or is_kazma_config_file(path_or_name):
+        return (
+            f"{raw} is Kazma's own configuration, which the server reads; "
+            f"{door} may not change it. Settings are changed in Settings (or "
+            "with config_save, for the keys it allows); tell the user what "
+            "should change instead of looking for another way in."
         )
     key = store_name_for(path_or_name)
     store = STORES.get(key or "") or STORE_FAMILIES.get(key or "")

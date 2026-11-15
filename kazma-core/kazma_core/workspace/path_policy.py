@@ -70,8 +70,9 @@ def control_plane_db_names() -> frozenset[str]:
     return distinctive_store_names()
 
 
-def _is_control_plane_store(resolved: Path) -> bool:
-    """True if *resolved* is one of Kazma's own databases.
+def _is_control_plane_store(resolved: Path, *, write: bool = False) -> bool:
+    """True if *resolved* is one of Kazma's own databases (with *write*, also
+    one of its configuration files: readable, never writable).
 
     Delegates to :func:`kazma_core.store_registry.is_kazma_store`, the one
     predicate every door shares. The history below is why it sits before
@@ -102,7 +103,7 @@ def _is_control_plane_store(resolved: Path) -> bool:
     """
     from kazma_core.store_registry import is_kazma_store
 
-    return is_kazma_store(resolved)
+    return is_kazma_store(resolved, write=write)
 
 
 def _strip_db_sidecars(name: str) -> str:
@@ -256,11 +257,22 @@ def code_mentions_control_plane(code: str) -> str | None:
         bases.append(Path(resolve_active_root()))
     except (OSError, RuntimeError, ValueError, ImportError):
         logger.debug("[path_policy] no active workspace; cwd only", exc_info=True)
+    from kazma_core.store_registry import is_config_file_name, is_kazma_config_file
+
     for token in re.findall(r"""['"]([^'"]+)['"]""", code):
         token = _sandbox_token_on_host(token, bases[-1]) or token
         absolute = token.startswith(("/", "\\")) or (
             len(token) > 2 and token[1] == ":"
         )
+        if is_config_file_name(Path(token).name) and not remote_path_reason(token):
+            # Kazma's configuration (kazma.local.yaml...): a snippet may write
+            # it, and which call writes cannot be told from the text, so a
+            # snippet naming one where the server reads it is refused. A
+            # relative name is the workspace's: the snippet runs there.
+            place = Path(token) if absolute else bases[-1] / token
+            if is_kazma_config_file(place):
+                return Path(token).name
+            continue
         if absolute:
             hit = control_plane_store_targeted(token)
         elif _is_env_name(token):
@@ -397,13 +409,27 @@ def check_path_access(
     #    Kazma's secret files (.env, restic.pass, the broker token) are
     #    refused here too (is_kazma_store): until 2026-11-02 file_read and
     #    file_search returned the live install's .env and restic.pass.
-    if _is_control_plane_store(resolved):
-        from kazma_core.store_registry import is_kazma_secret_file, store_refusal
+    #    Kazma's configuration files (kazma.yaml, kazma.local.yaml, the
+    #    swarm templates) are read by the server: readable, never writable
+    #    (2026-11 review: an approved file_write of kazma.local.yaml turned
+    #    the approval gate off and added tool hooks).
+    if _is_control_plane_store(resolved, write=need == "write"):
+        from kazma_core.store_registry import (
+            is_kazma_config_file,
+            is_kazma_secret_file,
+            store_refusal,
+        )
 
+        if is_kazma_secret_file(resolved):
+            kind = "Kazma secret file — "
+        elif need == "write" and is_kazma_config_file(resolved):
+            kind = "Kazma configuration file — "
+        else:
+            kind = "Kazma control-plane store — "
         return PathAccessResult(
             allowed=False,
             reason=(
-                ("Kazma secret file — " if is_kazma_secret_file(resolved) else "Kazma control-plane store — ")
+                kind
                 + ("never writable" if need == "write" else "not readable")
                 + " by file tools. "
                 + store_refusal(resolved, door="file tools")
