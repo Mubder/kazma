@@ -38,6 +38,7 @@ def _private_zip(path: Path) -> bool:
     if spec is None or spec.loader is None:
         return False
     module = importlib.util.module_from_spec(spec)
+    sys.modules["kazma_backup_owner_only"] = module  # registered before it runs
     spec.loader.exec_module(module)
     return bool(module.restrict(path))
 

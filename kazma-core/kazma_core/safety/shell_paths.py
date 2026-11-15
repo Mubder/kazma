@@ -820,6 +820,10 @@ def _shell_target_refusal_sync(command: str) -> str | None:
     if not words:
         return None
     binary = program_name(words[0])
+    if binary not in WALKS and binary not in NO_WALK:
+        # Not a program the tool runs at all: its own refusal says so, with
+        # the hint for it (`cd`: commands already run in the workspace).
+        return None
     rest = words[1:]
     try:
         index, sub = split_subcommand(binary, rest)

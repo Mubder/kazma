@@ -2368,6 +2368,7 @@ def _owner_only():
         if spec is None or spec.loader is None:
             raise ImportError(f"cannot load {path}")
         module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module  # registered before it runs (tests/test_load_by_path_registers_module.py)
         spec.loader.exec_module(module)
         _OWNER_ONLY_MODULE = module
     return _OWNER_ONLY_MODULE
