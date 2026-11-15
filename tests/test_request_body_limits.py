@@ -17,14 +17,12 @@ routes both ways.
 
 from __future__ import annotations
 
-import ast
-import inspect
 import json
 import re
-import textwrap
 
 import pytest
 
+from tests._route_reach import reach
 from tests._secured_app import SECRET, call, secured_app
 
 MB = 1024 * 1024
@@ -158,39 +156,9 @@ def _all_routes(routes) -> list:
 
 def _reach(endpoint) -> str:
     """The endpoint's source and the functions of its module it calls, to
-    any depth (a route that streams through a helper streams)."""
-    import sys
-
-    try:
-        source = textwrap.dedent(inspect.getsource(endpoint))
-    except (OSError, TypeError):
-        return ""
-    module = sys.modules.get(getattr(endpoint, "__module__", ""), None)
-    try:
-        tree = ast.parse(inspect.getsource(module)) if module else None
-    except (OSError, TypeError):
-        tree = None
-    defs: dict[str, list[str]] = {}
-    if tree is not None:
-        text = inspect.getsource(module)
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                defs.setdefault(node.name, []).append(ast.get_source_segment(text, node) or "")
-    seen, texts, todo = {endpoint.__name__}, [source], [source]
-    while todo:
-        try:
-            node_tree = ast.parse(textwrap.dedent(todo.pop()))
-        except SyntaxError:
-            continue
-        for node in ast.walk(node_tree):
-            if isinstance(node, ast.Call):
-                fn = node.func
-                name = fn.id if isinstance(fn, ast.Name) else getattr(fn, "attr", None)
-                if name and name not in seen and name in defs:
-                    seen.add(name)
-                    texts.extend(defs[name])
-                    todo.extend(defs[name])
-    return "\n".join(texts)
+    any depth (a route that streams through a helper streams;
+    ``tests/_route_reach.reach``: each module parsed once)."""
+    return reach(endpoint)
 
 
 @pytest.fixture(scope="module")

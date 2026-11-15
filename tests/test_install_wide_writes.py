@@ -21,17 +21,14 @@ the new host (providers too).
 
 from __future__ import annotations
 
-import ast
-import inspect
 import json
 import re
-import sys
-import textwrap
 
 import pytest
 from kazma_core.security import platform_rbac
 from kazma_core.security.web_sessions import SESSION_COOKIE, create_session
 
+from tests._route_reach import reach
 from tests._secured_app import SECRET, call, secured_app
 
 #: (METHOD, route) -> what it changes for the whole install.
@@ -99,35 +96,9 @@ def _all_routes(routes) -> list:
 
 
 def _reach(endpoint) -> str:
-    """The endpoint's source and every function of its module it calls."""
-    try:
-        source = textwrap.dedent(inspect.getsource(endpoint))
-    except (OSError, TypeError):
-        return ""
-    module = sys.modules.get(getattr(endpoint, "__module__", ""), None)
-    defs: dict[str, list[str]] = {}
-    try:
-        text = inspect.getsource(module) if module else ""
-        for node in ast.walk(ast.parse(text)):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                defs.setdefault(node.name, []).append(ast.get_source_segment(text, node) or "")
-    except (OSError, TypeError, SyntaxError):
-        pass
-    seen, texts, todo = {endpoint.__name__}, [source], [source]
-    while todo:
-        try:
-            tree = ast.parse(textwrap.dedent(todo.pop()))
-        except SyntaxError:
-            continue
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call):
-                fn = node.func
-                name = fn.id if isinstance(fn, ast.Name) else getattr(fn, "attr", None)
-                if name and name not in seen and name in defs:
-                    seen.add(name)
-                    texts.extend(defs[name])
-                    todo.extend(defs[name])
-    return "\n".join(texts)
+    """The endpoint's source and every function of its module it calls
+    (``tests/_route_reach.reach``: each module parsed once)."""
+    return reach(endpoint)
 
 
 def _concrete(template: str) -> str:

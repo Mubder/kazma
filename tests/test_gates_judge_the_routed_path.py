@@ -87,7 +87,13 @@ def _raw(app, method: str, path: str, *, headers: dict[str, str] | None = None, 
 
 
 def _url_path(conn):
-    return conn.url.path
+    """``request.url.path`` as the locked Starlette (1.3.1) gives it: the
+    decoded path, cut at its first ``?`` or ``#``. A newer Starlette builds the
+    URL from ``raw_path`` and does not cut it (CI installs the newest allowed
+    version, and there ``conn.url.path`` itself no longer shows the old
+    reading), so the control states the old reading instead of asking the
+    installed Starlette for it."""
+    return re.split(r"[?#]", str(conn.scope.get("path") or ""), maxsplit=1)[0] or "/"
 
 
 def _old_reading(monkeypatch):
