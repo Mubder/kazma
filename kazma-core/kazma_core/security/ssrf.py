@@ -9,7 +9,7 @@ Blocked ranges include:
   - Loopback: 127.0.0.0/8, ::1
   - Link-local / cloud metadata: 169.254.0.0/16 (incl. 169.254.169.254), fe80::/10
   - Reserved / unspecified: 0.0.0.0, ::
-  - IPv6 unique-local: fc00::/7
+  - IPv6 unique-local: fc00::/7, and the deprecated site-local fec0::/10
   - IPv4-mapped IPv6 that resolve to private IPv4
 
 Usage::
@@ -66,6 +66,11 @@ class UnresolvedHostError(SSRFError):
 #: 100.100.100.200. Python counts it neither private nor reserved, so the
 #: checks below let it through (audit 2026-10-26 AUD-088).
 _SHARED_ADDRESS_SPACE = ipaddress.ip_network("100.64.0.0/10")
+
+
+#: The deprecated IPv6 site-local range (RFC 3879): a network's own hosts,
+#: never the internet. Python counts it neither private nor reserved.
+_SITE_LOCAL_V6 = ipaddress.ip_network("fec0::/10")
 
 
 #: Cloud metadata endpoints inside ranges an owner's own network may use:
@@ -148,7 +153,8 @@ def _is_blocked_ip(ip: ipaddress._BaseAddress) -> bool:
     if getattr(ip, "ipv4_mapped", None) is not None:
         return _is_blocked_ip(ip.ipv4_mapped)
     return (
-        ip.is_private
+        ip in _SITE_LOCAL_V6
+        or ip.is_private
         or ip.is_loopback
         or ip.is_link_local
         or ip.is_reserved

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import time
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from kazma_core.mcp.oauth import (
@@ -46,67 +46,58 @@ class TestWwwAuthenticateParsing:
 # ---------------------------------------------------------------------------
 
 
-def _mock_http(routes: dict[str, tuple[int, dict]]) -> MagicMock:
-    """Return a mock AsyncClient whose get() dispatches by URL suffix."""
+def _stand_in(monkeypatch, routes: dict[str, tuple[int, dict]]):
+    """The pinned path with a stand-in resolver and socket (no network):
+    every metadata address on mcp.example / as.example."""
+    from tests._pinned_stand_in import OTHER_PUBLIC_IP, PUBLIC_IP, Answer, install
 
-    async def _get(url: str):
-        resp = MagicMock()
-        for suffix, (status, body) in routes.items():
-            if url.endswith(suffix):
-                resp.status_code = status
-                resp.json = MagicMock(return_value=body)
-                return resp
-        resp.status_code = 404
-        resp.json = MagicMock(return_value={})
-        return resp
-
-    client = MagicMock()
-    client.get = AsyncMock(side_effect=_get)
-    return client
+    table = {}
+    for path, (status, body) in routes.items():
+        table[("mcp.example", path)] = Answer.json(body, status=status)
+    return install(monkeypatch, dns={"mcp.example": [PUBLIC_IP], "as.example": [OTHER_PUBLIC_IP]},
+                   routes=table)
 
 
 class TestDiscovery:
     @pytest.mark.asyncio
-    async def test_full_discovery_chain(self) -> None:
-        client = _mock_http({
+    async def test_full_discovery_chain(self, monkeypatch) -> None:
+        _stand_in(monkeypatch, {
             "/.well-known/oauth-protected-resource/devtools": (200, {
-                "authorization_servers": ["https://mcp.example.com/devtools"],
+                "authorization_servers": ["https://as.example"],
                 "scopes_supported": ["read"],
             }),
             "/.well-known/oauth-authorization-server/devtools": (200, {
-                "authorization_endpoint": "https://as.example.com/authorize",
-                "token_endpoint": "https://as.example.com/token",
-                "registration_endpoint": "https://as.example.com/register",
+                "issuer": "https://as.example",
+                "authorization_endpoint": "https://as.example/authorize",
+                "token_endpoint": "https://as.example/token",
+                "registration_endpoint": "https://as.example/register",
             }),
         })
-        result = await discover_auth_requirements(
-            "https://mcp.example.com/devtools", client=client
-        )
-        assert result["token_endpoint"] == "https://as.example.com/token"
-        assert result["registration_endpoint"] == "https://as.example.com/register"
+        result = await discover_auth_requirements("https://mcp.example/devtools")
+        assert result["token_endpoint"] == "https://as.example/token"
+        assert result["registration_endpoint"] == "https://as.example/register"
 
     @pytest.mark.asyncio
-    async def test_missing_metadata_raises(self) -> None:
-        client = _mock_http({})
+    async def test_missing_metadata_raises(self, monkeypatch) -> None:
+        _stand_in(monkeypatch, {})
         with pytest.raises(MCPOAuthError, match="resource metadata"):
-            await discover_auth_requirements(
-                "https://mcp.example.com/devtools", client=client
-            )
+            await discover_auth_requirements("https://mcp.example/devtools")
 
     @pytest.mark.asyncio
-    async def test_challenge_scopes_win(self) -> None:
-        client = _mock_http({
+    async def test_challenge_scopes_win(self, monkeypatch) -> None:
+        _stand_in(monkeypatch, {
             "/.well-known/oauth-protected-resource/devtools": (200, {
-                "authorization_servers": ["x"], "scopes_supported": ["a"],
+                "authorization_servers": ["https://as.example"], "scopes_supported": ["a"],
             }),
             "/.well-known/oauth-authorization-server/devtools": (200, {
-                "authorization_endpoint": "x", "token_endpoint": "y",
+                "issuer": "https://as.example",
+                "authorization_endpoint": "https://as.example/authorize",
+                "token_endpoint": "https://as.example/token",
             }),
         })
         result = await discover_auth_requirements(
-            "https://mcp.example.com/devtools",
+            "https://mcp.example/devtools",
             www_authenticate='Bearer scope="s1 s2"',
-            client=client,
         )
         assert result["scopes"] == ["s1", "s2"]
 

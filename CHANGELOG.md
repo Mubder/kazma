@@ -9,6 +9,16 @@
   review.
 - A weekly OpenSSF Scorecard check of the repository's security practices
   (`.github/workflows/scorecard.yml`).
+- Chat and voice attachments are downloaded on the pinned path (the address
+  checked is the address reached), and a Slack token, upload or reply goes
+  only to Slack's own hosts.
+- MCP sign-in (OAuth) follows no redirects and asks only public https
+  addresses or the owner's own local server; its token and registration
+  addresses must belong to the server that issued them, and its errors never
+  repeat the server's text.
+- Generated images are downloaded on the pinned path, and a provider's key
+  goes only to its own API host. The public-address check refuses the IPv6
+  site-local range.
 
 - `/long on` never lowers a chat's tool-round limit. Its research preset is
   40 rounds; on an install whose own limit is higher (live: 100), turning long

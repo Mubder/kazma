@@ -82,6 +82,8 @@ class OAuthPending:
     done: asyncio.Event = field(default_factory=asyncio.Event)
     code: str | None = None
     error: str | None = None
+    #: The MCP server this login is for (where the token request may go).
+    place: "_ServerPlace | None" = None
 
 
 # ---------------------------------------------------------------------------
@@ -110,11 +112,163 @@ def parse_www_authenticate(header_value: str) -> dict[str, str]:
     return params
 
 
+# ---------------------------------------------------------------------------
+# Where an OAuth request may go (security audit 2026-11-15)
+# ---------------------------------------------------------------------------
+#
+# Every address below but the MCP server's own is chosen by that server: the
+# metadata URL in its 401 challenge, the endpoints in its metadata. Kazma
+# fetched them with redirects followed and no address check, so a server
+# could make Kazma GET or POST any internal address, and a refresh posted the
+# refresh token to whatever ``token_endpoint`` said. Now:
+#
+# * no request follows a redirect, and none uses an ambient proxy;
+# * an address on the MCP server's own origin, when the owner configured a
+#   server on this machine or their own network, is asked directly;
+# * every other address must be ``https`` and public, and is asked through
+#   the pinned path (``security.pinned_request``);
+# * the token and registration endpoints must be on the origin of the issuer
+#   the authorization-server metadata names;
+# * an answer's body never reaches an error message.
+
+#: The largest metadata or token answer read.
+_MAX_ANSWER_BYTES = 256 * 1024
+
+
+@dataclass(frozen=True)
+class _ServerPlace:
+    """The MCP server the owner configured, and whether it is on their own
+    network (then its own origin may be asked directly)."""
+
+    url: str
+    own_network: bool
+
+
+def _origin(url: str) -> tuple[str, str, int | None] | None:
+    """``(scheme, host, port)`` with the scheme's default port filled in."""
+    try:
+        parts = urlparse(url)
+        port = parts.port
+    except ValueError:
+        return None
+    scheme = (parts.scheme or "").lower()
+    host = (parts.hostname or "").lower()
+    if scheme not in ("http", "https") or not host:
+        return None
+    if port is None:
+        port = 443 if scheme == "https" else 80
+    return scheme, host, port
+
+
+def _same_origin(url: str, other: str) -> bool:
+    mine = _origin(url)
+    return mine is not None and mine == _origin(other)
+
+
+async def _server_place(resource_url: str) -> _ServerPlace:
+    from kazma_core.security.ssrf import resolves_to_own_network
+
+    if _origin(resource_url) is None:
+        raise MCPOAuthError("The MCP server's address is not an http(s) URL")
+    # A DNS lookup: off the loop.
+    own = await asyncio.to_thread(resolves_to_own_network, resource_url)
+    return _ServerPlace(url=resource_url, own_network=own)
+
+
+def _check_address(url: str, place: _ServerPlace, what: str) -> None:
+    """Refuse, before anything is sent, an address this flow may not use."""
+    if _origin(url) is None:
+        raise MCPOAuthError(f"The {what} is not an http(s) address")
+    if place.own_network and _same_origin(url, place.url):
+        return
+    if (urlparse(url).scheme or "").lower() != "https":
+        raise MCPOAuthError(
+            f"The {what} must be an https address (only the MCP server's own "
+            "address on your network may use http)"
+        )
+
+
+async def _oauth_request(
+    method: str,
+    url: str,
+    place: _ServerPlace,
+    what: str,
+    *,
+    data: dict[str, Any] | None = None,
+    json_body: Any = None,
+) -> httpx.Response:
+    """One OAuth request, with no redirect followed (see the rules above)."""
+    from kazma_core.security.pinned_request import AnswerTooLarge, pinned_request
+    from kazma_core.security.ssrf import SSRFError
+    from kazma_core.web_acquire.http import read_response_capped
+    from kazma_core.web_acquire.result import AcquisitionError
+
+    _check_address(url, place, what)
+    headers = {"Accept": "application/json"}
+    try:
+        if place.own_network and _same_origin(url, place.url):
+            # The owner's own server, on their own machine or network: its
+            # private address is the point. Its origin only, never a redirect.
+            async with httpx.AsyncClient(
+                timeout=_HTTP_TIMEOUT_S, follow_redirects=False, trust_env=False,
+                verify=shared_ssl_context(),
+            ) as http:
+                async with http.stream(method, url, headers=headers, data=data, json=json_body) as raw:
+                    answer, _text, truncated = await read_response_capped(raw, _MAX_ANSWER_BYTES)
+            if truncated:
+                raise MCPOAuthError(f"The {what} answered with more than {_MAX_ANSWER_BYTES} bytes")
+            return answer
+        return await pinned_request(
+            method, url, headers=headers, data=data, json_body=json_body,
+            timeout=_HTTP_TIMEOUT_S, max_bytes=_MAX_ANSWER_BYTES,
+        )
+    except MCPOAuthError:
+        raise
+    except AnswerTooLarge as exc:
+        raise MCPOAuthError(f"The {what} answered with more than {_MAX_ANSWER_BYTES} bytes") from exc
+    except (SSRFError, AcquisitionError) as exc:
+        raise MCPOAuthError(
+            f"The {what} is not a public address Kazma may ask ({type(exc).__name__})"
+        ) from exc
+    except (httpx.HTTPError, ValueError, TimeoutError) as exc:
+        raise MCPOAuthError(f"Could not reach the {what} ({type(exc).__name__})") from exc
+
+
+def _json_answer(response: httpx.Response, what: str) -> dict[str, Any]:
+    if response.status_code in (301, 302, 303, 307, 308):
+        raise MCPOAuthError(f"The {what} answered with a redirect, which Kazma does not follow")
+    try:
+        body = response.json()
+    except ValueError as exc:
+        raise MCPOAuthError(f"The {what} did not answer with JSON") from exc
+    if not isinstance(body, dict):
+        raise MCPOAuthError(f"The {what} did not answer with a JSON object")
+    return body
+
+
+def _oauth_error_code(response: httpx.Response) -> str:
+    """The OAuth ``error`` code of a refusal (RFC 6749 §5.2), never its text."""
+    try:
+        body = response.json()
+    except ValueError:
+        return ""
+    code = body.get("error") if isinstance(body, dict) else None
+    if isinstance(code, str) and 0 < len(code) <= 64 and code.replace("_", "").isalnum() and code.isascii():
+        return code
+    return ""
+
+
+def _refused(what: str, response: httpx.Response) -> MCPOAuthError:
+    code = _oauth_error_code(response)
+    return MCPOAuthError(
+        f"{what} failed (HTTP {response.status_code}{', ' + code if code else ''})"
+    )
+
+
 async def discover_auth_requirements(
     resource_url: str,
     *,
     www_authenticate: str = "",
-    client: httpx.AsyncClient | None = None,
 ) -> dict[str, Any]:
     """Resolve OAuth endpoints for an MCP resource URL.
 
@@ -122,72 +276,92 @@ async def discover_auth_requirements(
 
         {
             "resource_metadata_url": str,
+            "issuer": str,
             "authorization_endpoint": str,
             "token_endpoint": str,
             "registration_endpoint": str | None,
             "scopes": list[str],
         }
 
-    Raises :class:`MCPOAuthError` when the resource does not advertise OAuth.
+    Raises :class:`MCPOAuthError` when the resource does not advertise OAuth,
+    or names an address this flow may not use (see the rules above).
     """
-    owns_client = client is None
-    http = client or httpx.AsyncClient(timeout=_HTTP_TIMEOUT_S, follow_redirects=True, verify=shared_ssl_context())
-    try:
-        # 1. Protected-resource metadata (RFC 9728). The challenge tells us
-        #    the exact metadata URL; fall back to the well-known path with the
-        #    resource path appended (what Meta does: /.well-known/oauth-
-        #    protected-resource/devtools).
-        params = parse_www_authenticate(www_authenticate)
-        resource_meta_url = params.get("resource_metadata", "")
-        if not resource_meta_url:
-            parsed = urlparse(resource_url)
-            suffix = parsed.path.rstrip("/")
-            resource_meta_url = urlunparse(
-                (parsed.scheme, parsed.netloc,
-                 f"/.well-known/oauth-protected-resource{suffix}", "", "", "")
-            )
-
-        r = await http.get(resource_meta_url)
-        if r.status_code != 200:
-            raise MCPOAuthError(
-                f"OAuth resource metadata not found at {resource_meta_url} "
-                f"(HTTP {r.status_code})"
-            )
-        meta = r.json()
-        scopes = meta.get("scopes_supported") or []
-        auth_servers = meta.get("authorization_servers") or []
-        if not auth_servers:
-            raise MCPOAuthError("Protected-resource metadata lists no authorization_servers")
-
-        # 2. Authorization-server metadata (RFC 8414). Same host + resource
-        #    path suffix convention as above.
-        parsed = urlparse(resource_url)
-        suffix = parsed.path.rstrip("/")
-        as_meta_url = urlunparse(
+    place = await _server_place(resource_url)
+    # 1. Protected-resource metadata (RFC 9728). The challenge tells us the
+    #    exact metadata URL; fall back to the well-known path with the
+    #    resource path appended (what Meta does: /.well-known/oauth-
+    #    protected-resource/devtools).
+    params = parse_www_authenticate(www_authenticate)
+    resource_meta_url = params.get("resource_metadata", "")
+    parsed = urlparse(resource_url)
+    suffix = parsed.path.rstrip("/")
+    if not resource_meta_url:
+        resource_meta_url = urlunparse(
             (parsed.scheme, parsed.netloc,
-             f"/.well-known/oauth-authorization-server{suffix}", "", "", "")
+             f"/.well-known/oauth-protected-resource{suffix}", "", "", "")
         )
-        r = await http.get(as_meta_url)
-        if r.status_code != 200:
-            raise MCPOAuthError(
-                f"OAuth authorization-server metadata not found at {as_meta_url} "
-                f"(HTTP {r.status_code})"
-            )
-        as_meta = r.json()
 
-        challenge_scopes = (params.get("scope") or "").split()
-        return {
-            "resource_metadata_url": resource_meta_url,
-            "authorization_endpoint": as_meta.get("authorization_endpoint", ""),
-            "token_endpoint": as_meta.get("token_endpoint", ""),
-            "registration_endpoint": as_meta.get("registration_endpoint"),
-            "scopes": challenge_scopes or list(scopes),
-        }
-    except httpx.HTTPError as exc:
-        raise MCPOAuthError(f"OAuth discovery failed: {exc}") from exc
-    finally:
-        if owns_client:
-            await http.aclose()
+    r = await _oauth_request("GET", resource_meta_url, place, "OAuth resource metadata address")
+    if r.status_code != 200:
+        raise MCPOAuthError(
+            f"OAuth resource metadata not found at {resource_meta_url} "
+            f"(HTTP {r.status_code})"
+        )
+    meta = _json_answer(r, "OAuth resource metadata address")
+    scopes = meta.get("scopes_supported") or []
+    auth_servers = meta.get("authorization_servers") or []
+    if not auth_servers:
+        raise MCPOAuthError("Protected-resource metadata lists no authorization_servers")
+
+    # 2. Authorization-server metadata (RFC 8414). Same host + resource path
+    #    suffix convention as above.
+    as_meta_url = urlunparse(
+        (parsed.scheme, parsed.netloc,
+         f"/.well-known/oauth-authorization-server{suffix}", "", "", "")
+    )
+    r = await _oauth_request("GET", as_meta_url, place, "OAuth authorization-server metadata address")
+    if r.status_code != 200:
+        raise MCPOAuthError(
+            f"OAuth authorization-server metadata not found at {as_meta_url} "
+            f"(HTTP {r.status_code})"
+        )
+    as_meta = _json_answer(r, "OAuth authorization-server metadata address")
+
+    # 3. The endpoints Kazma posts to belong to the issuer the metadata names.
+    issuer = as_meta.get("issuer")
+    if not isinstance(issuer, str) or not issuer:
+        raise MCPOAuthError("Authorization-server metadata names no issuer")
+    _check_address(issuer, place, "OAuth issuer")
+    endpoints: dict[str, str | None] = {}
+    for key, required in (
+        ("authorization_endpoint", True),
+        ("token_endpoint", True),
+        ("registration_endpoint", False),
+    ):
+        value = as_meta.get(key)
+        if not value:
+            if required:
+                raise MCPOAuthError(f"Authorization-server metadata names no {key}")
+            endpoints[key] = None
+            continue
+        if not isinstance(value, str):
+            raise MCPOAuthError(f"The {key} is not an address")
+        _check_address(value, place, key.replace("_", " "))
+        if key != "authorization_endpoint" and not _same_origin(value, issuer):
+            raise MCPOAuthError(
+                f"The {key.replace('_', ' ')} is not on the issuer's own address"
+            )
+        endpoints[key] = value
+
+    challenge_scopes = (params.get("scope") or "").split()
+    return {
+        "resource_metadata_url": resource_meta_url,
+        "issuer": issuer,
+        "authorization_endpoint": endpoints["authorization_endpoint"] or "",
+        "token_endpoint": endpoints["token_endpoint"] or "",
+        "registration_endpoint": endpoints["registration_endpoint"],
+        "scopes": challenge_scopes or list(scopes),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -205,7 +379,7 @@ def _generate_pkce() -> tuple[str, str]:
 
 
 async def _register_client(
-    http: httpx.AsyncClient,
+    place: _ServerPlace,
     registration_endpoint: str,
     redirect_uri: str,
 ) -> str:
@@ -217,16 +391,15 @@ async def _register_client(
         "response_types": ["code"],
         "token_endpoint_auth_method": "none",
     }
-    r = await http.post(registration_endpoint, json=payload)
+    r = await _oauth_request(
+        "POST", registration_endpoint, place, "registration endpoint", json_body=payload,
+    )
     if r.status_code not in (200, 201):
-        logger.debug("[mcp-oauth] DCR full error body: %s", r.text)
-        raise MCPOAuthError(
-            f"Dynamic client registration failed (HTTP {r.status_code}): "
-            f"{r.text[:300]}"
-        )
-    body = r.json()
+        # The server's text is never repeated: the OAuth error code at most.
+        raise _refused("Dynamic client registration", r)
+    body = _json_answer(r, "registration endpoint")
     client_id = body.get("client_id")
-    if not client_id:
+    if not client_id or not isinstance(client_id, str):
         raise MCPOAuthError("DCR response missing client_id")
     return client_id
 
@@ -293,6 +466,7 @@ async def start_oauth_flow(
             "aiohttp is required for MCP OAuth login callbacks"
         ) from exc
 
+    place = await _server_place(resource_url)
     endpoints = await discover_auth_requirements(
         resource_url, www_authenticate=www_authenticate
     )
@@ -318,10 +492,9 @@ async def start_oauth_flow(
 
     redirect_uri = f"http://127.0.0.1:{listener_port}{_CALLBACK_PATH}"
 
-    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_S, follow_redirects=True, verify=shared_ssl_context()) as http:
-        client_id = await _register_client(
-            http, endpoints["registration_endpoint"], redirect_uri
-        )
+    client_id = await _register_client(
+        place, endpoints["registration_endpoint"], redirect_uri
+    )
 
     verifier, challenge = _generate_pkce()
     state = secrets.token_urlsafe(16)
@@ -347,6 +520,7 @@ async def start_oauth_flow(
         token_endpoint=endpoints["token_endpoint"],
         scopes=scopes,
         listener_port=listener_port,
+        place=place,
     )
     _pending[server_name] = pending
 
@@ -400,23 +574,22 @@ async def _wait_for_code(server_name: str) -> str:
 
 
 async def _exchange_code(pending: OAuthPending, code: str) -> dict[str, Any]:
-    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_S, follow_redirects=True, verify=shared_ssl_context()) as http:
-        r = await http.post(
-            pending.token_endpoint,
-            data={
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": pending.redirect_uri,
-                "client_id": pending.client_id,
-                "code_verifier": pending.code_verifier,
-            },
-        )
+    if pending.place is None:
+        raise MCPOAuthError("No MCP server recorded for this login")
+    r = await _oauth_request(
+        "POST", pending.token_endpoint, pending.place, "token endpoint",
+        data={
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": pending.redirect_uri,
+            "client_id": pending.client_id,
+            "code_verifier": pending.code_verifier,
+        },
+    )
     if r.status_code != 200:
-        logger.debug("[mcp-oauth] token exchange full error body: %s", r.text)
-        raise MCPOAuthError(
-            f"Token exchange failed (HTTP {r.status_code}): {r.text[:300]}"
-        )
-    body = r.json()
+        # The server's text is never repeated: the OAuth error code at most.
+        raise _refused("Token exchange", r)
+    body = _json_answer(r, "token endpoint")
     if "access_token" not in body:
         raise MCPOAuthError("Token response missing access_token")
     return body
@@ -474,20 +647,23 @@ def _load_tokens(server_name: str) -> dict[str, Any] | None:
 
 
 async def _refresh(pending_record: dict[str, Any]) -> dict[str, Any] | None:
-    endpoints = await discover_auth_requirements(pending_record["resource_url"])
-    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_S, follow_redirects=True, verify=shared_ssl_context()) as http:
-        r = await http.post(
-            endpoints["token_endpoint"],
-            data={
-                "grant_type": "refresh_token",
-                "refresh_token": pending_record["refresh_token"],
-                "client_id": pending_record["client_id"],
-            },
-        )
+    resource_url = pending_record["resource_url"]
+    endpoints = await discover_auth_requirements(resource_url)
+    # The refresh token goes only where discovery allows a token request:
+    # an https public address on the issuer's origin (or the owner's own
+    # server), pinned, never a redirect.
+    r = await _oauth_request(
+        "POST", endpoints["token_endpoint"], await _server_place(resource_url), "token endpoint",
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": pending_record["refresh_token"],
+            "client_id": pending_record["client_id"],
+        },
+    )
     if r.status_code != 200:
         logger.warning("[MCP-OAuth] refresh failed (HTTP %s)", r.status_code)
         return None
-    body = r.json()
+    body = _json_answer(r, "token endpoint")
     if "access_token" not in body:
         return None
     return body

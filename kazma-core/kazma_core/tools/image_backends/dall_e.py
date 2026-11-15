@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import os
 
-from kazma_core.tools.image_backends.base import BackendError
+from kazma_core.tools.image_backends.base import BackendError, fetch_generated_image
 from kazma_core.http_tls import shared_ssl_context
 
 # Map pixel dimensions → the sizes DALL-E 3 accepts. DALL-E 3 supports only
@@ -48,16 +48,16 @@ class DallEBackend:
             )
             resp.raise_for_status()
             data = resp.json()
-            b64 = data["data"][0].get("b64_json")
-            if not b64:
-                # response_format=url fallback — fetch the URL.
-                url = data["data"][0].get("url")
-                if url:
-                    img = await client.get(url)
-                    img.raise_for_status()
-                    return img.content
-                raise BackendError("DALL-E returned no image data")
+        b64 = data["data"][0].get("b64_json")
+        if b64:
             return base64.b64decode(b64)
+        # response_format=url fallback. The image lives on another host than
+        # the API; the key never goes there (the API client sent it to
+        # whatever host the answer named until 2026-11-15).
+        url = data["data"][0].get("url")
+        if url:
+            return await fetch_generated_image(url)
+        raise BackendError("DALL-E returned no image data")
 
     def _resolve_size(self, width: int, height: int) -> str:
         """Snap requested dims to the nearest DALL-E-supported size."""

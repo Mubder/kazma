@@ -15,15 +15,14 @@ logger = logging.getLogger(__name__)
 __all__ = ["send_voice_reply", "transcribe_message"]
 
 
-async def transcribe_message(
-    msg: IncomingMessage,
-    *,
-    http: httpx.AsyncClient | None = None,
-) -> IncomingMessage:
-    """Run the shared deep STT pipeline on a Discord inbound message."""
+async def transcribe_message(msg: IncomingMessage) -> IncomingMessage:
+    """Run the shared deep STT pipeline on a Discord inbound message.
+
+    The audio is downloaded on the pinned path, without the bot's API client
+    (and its token)."""
     from kazma_gateway.adapters.voice_helpers import transcribe_inbound_message
 
-    return await transcribe_inbound_message(msg, http=http)
+    return await transcribe_inbound_message(msg)
 
 
 async def send_voice_reply(

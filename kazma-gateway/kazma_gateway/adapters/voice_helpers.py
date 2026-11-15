@@ -20,10 +20,7 @@ import logging
 import re
 from typing import Any
 
-import httpx
-
 from kazma_gateway.gateway import Attachment, IncomingMessage
-from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -136,11 +133,18 @@ async def download_audio_bytes(
     *,
     data: bytes | None = None,
     url: str | None = None,
-    http: httpx.AsyncClient | None = None,
-    headers: dict[str, str] | None = None,
+    slack_token: str = "",
     max_bytes: int = MAX_VOICE_BYTES,
 ) -> bytes | None:
-    """Load audio bytes from memory or URL with Telegram-style size caps."""
+    """Load audio bytes from memory or URL with Telegram-style size caps.
+
+    A URL is the sender's attachment address, so it is downloaded on the
+    pinned path (``downloads.public_attachment_download``: every hop checked
+    public, the connection pinned to the checked address, the body bounded
+    while it streams). A Slack bot token goes only to Slack's own hosts.
+    Until 2026-11-15 the platform's API client fetched it -- with that
+    client's credentials, to whatever host the address named.
+    """
     if data is not None:
         if len(data) > max_bytes:
             logger.warning(
@@ -150,30 +154,13 @@ async def download_audio_bytes(
         return data
     if not url:
         return None
-    client = http or httpx.AsyncClient(timeout=60.0, verify=shared_ssl_context())
-    own_client = http is None
+    from kazma_gateway.adapters.downloads import public_attachment_download
+
     try:
-        resp = await client.get(url, headers=headers or {}, timeout=60.0)
-        resp.raise_for_status()
-        cl = int(resp.headers.get("content-length") or 0)
-        if cl > max_bytes:
-            logger.warning(
-                "[voice] audio Content-Length too large: %d > %d", cl, max_bytes
-            )
-            return None
-        body = resp.content
-        if len(body) > max_bytes:
-            logger.warning(
-                "[voice] audio download too large: %d > %d", len(body), max_bytes
-            )
-            return None
-        return body
+        return await public_attachment_download(url, slack_token=slack_token, max_bytes=max_bytes)
     except Exception as exc:
         logger.warning("[voice] audio download failed: %s", type(exc).__name__)
         return None
-    finally:
-        if own_client:
-            await client.aclose()
 
 
 async def transcribe_audio(
@@ -268,8 +255,7 @@ async def transcribe_audio(
 async def transcribe_inbound_message(
     msg: IncomingMessage,
     *,
-    http: httpx.AsyncClient | None = None,
-    auth_headers: dict[str, str] | None = None,
+    slack_token: str = "",
     api_key: str | None = None,
 ) -> IncomingMessage:
     """Telegram-depth STT path for Discord/Slack (and any attachment-based platform).
@@ -292,8 +278,7 @@ async def transcribe_inbound_message(
         data = await download_audio_bytes(
             data=audio.data,
             url=audio.url,
-            http=http,
-            headers=auth_headers,
+            slack_token=slack_token,
         )
         if not data:
             return msg

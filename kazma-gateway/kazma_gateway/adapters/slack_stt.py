@@ -20,18 +20,15 @@ _SLACK_API = "https://slack.com/api"
 async def transcribe_message(
     msg: IncomingMessage,
     *,
-    http: httpx.AsyncClient | None = None,
     bot_token: str = "",
 ) -> IncomingMessage:
-    """Run the shared deep STT pipeline (Slack private URLs need bearer auth)."""
+    """Run the shared deep STT pipeline (Slack private URLs need bearer auth).
+
+    The token goes only to Slack's own hosts (``downloads.slack_owned_url``),
+    on the pinned download path."""
     from kazma_gateway.adapters.voice_helpers import transcribe_inbound_message
 
-    headers = None
-    if bot_token:
-        headers = {"Authorization": f"Bearer {bot_token}"}
-    return await transcribe_inbound_message(
-        msg, http=http, auth_headers=headers
-    )
+    return await transcribe_inbound_message(msg, slack_token=bot_token)
 
 
 async def send_voice_reply(
@@ -76,6 +73,11 @@ async def send_voice_reply(
         up = resp.json()
         if not up.get("ok"):
             logger.warning("[Slack] getUploadURLExternal: %s", up.get("error"))
+            return False
+        from kazma_gateway.adapters.downloads import slack_owned_url
+
+        if not slack_owned_url(str(up.get("upload_url") or "")):
+            logger.warning("[Slack] upload address is not Slack's own; voice reply not sent")
             return False
         ul_resp = await http.post(
             up["upload_url"],

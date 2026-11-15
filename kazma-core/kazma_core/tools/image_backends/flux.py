@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 
-from kazma_core.tools.image_backends.base import BackendError
+from kazma_core.tools.image_backends.base import BackendError, fetch_generated_image
 from kazma_core.http_tls import shared_ssl_context
 
 _MODEL = os.getenv("FAL_FLUX_MODEL", "fal-ai/flux/schnell")
@@ -62,11 +62,12 @@ class FluxBackend:
             result = await client.get(f"/{self._model}/requests/{req_id}")
             result.raise_for_status()
             images = (result.json().get("images") or [])
-            if not images:
-                raise BackendError("FAL returned no images")
-            url = images[0].get("url")
-            if not url:
-                raise BackendError("FAL image had no url")
-            img = await client.get(url)
-            img.raise_for_status()
-            return img.content
+        if not images:
+            raise BackendError("FAL returned no images")
+        url = images[0].get("url")
+        if not url:
+            raise BackendError("FAL image had no url")
+        # The image lives on FAL's file host, not the queue API: fetched on
+        # the pinned path, without the key (the API client sent the key to
+        # whatever host the answer named until 2026-11-15).
+        return await fetch_generated_image(url)

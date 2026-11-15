@@ -965,7 +965,7 @@ class DiscordAdapter(SenderGate, BaseAdapter):
         """Telegram-depth STT: size caps, language, provider, metadata tags."""
         from kazma_gateway.adapters.discord_stt import transcribe_message
 
-        return await transcribe_message(msg, http=self._http)
+        return await transcribe_message(msg)
 
     async def _send_attachment(self, channel_id: str, att: Attachment) -> bool:
         """Upload one attachment to a Discord channel via multipart.

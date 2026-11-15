@@ -588,8 +588,16 @@ class SlackAdapter(SenderGate, BaseAdapter):
         headers = {
             "Authorization": f"Bearer {self._bot_token}",
         }
+        from kazma_gateway.adapters.downloads import slack_owned_url
+
         for att in msg.attachments:
             if att.data or not att.url:
+                filled.append(att)
+                continue
+            if not slack_owned_url(att.url):
+                # The bot token goes to Slack's own file host only; any other
+                # address is left to the pinned public download, without it.
+                logger.warning("[Slack] attachment address is not Slack's own; not sent the token")
                 filled.append(att)
                 continue
             try:
@@ -646,9 +654,7 @@ class SlackAdapter(SenderGate, BaseAdapter):
         """Telegram-depth STT: size caps, language, provider, metadata tags."""
         from kazma_gateway.adapters.slack_stt import transcribe_message
 
-        return await transcribe_message(
-            msg, http=self._http, bot_token=self._bot_token or ""
-        )
+        return await transcribe_message(msg, bot_token=self._bot_token or "")
 
     async def _send_voice_reply(
         self, channel_id: str, text: str, thread_ts: str | None = None
@@ -713,6 +719,11 @@ class SlackAdapter(SenderGate, BaseAdapter):
                 return False
             upload_url = up["upload_url"]
             file_id = up["file_id"]
+            from kazma_gateway.adapters.downloads import slack_owned_url
+
+            if not slack_owned_url(upload_url):
+                logger.error("[Slack] upload address is not Slack's own; file not sent")
+                return False
 
             # 2. POST bytes to the upload URL (multipart, NO auth header).
             ul_resp = await self._http.post(
@@ -958,7 +969,12 @@ class SlackAdapter(SenderGate, BaseAdapter):
                                         # use create_task here) (audit finding).
                                         spawn_background(trigger_package_promotion(package_name), name=f"slack-promote:{package_name}")
                                         response_url = payload.get("response_url", "")
-                                        if response_url:
+                                        from kazma_gateway.adapters.slack_commands import safe_response_url
+
+                                        # Slack's own interaction reply address only
+                                        # (hooks.slack.com/actions/...), the rule
+                                        # the native interactions already use.
+                                        if response_url and safe_response_url(response_url, interaction=True):
                                             try:
                                                 if action.kind == "sys_install":
                                                     updated_text = (

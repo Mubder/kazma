@@ -7504,6 +7504,24 @@ context installs its own broker; no global object-id deduplication is allowed.
 Gate: `tests/test_browser_egress_every_context.py`; the real pre-fix redirect
 witness is archived in `docs/audits/evidence/browser_redirect_before_broker_2026_10_10.log`.
 
+**An address someone else chose is fetched on the pinned path** (2026-11-15,
+the defensive check before the independent review). `web_acquire.http.fetch_public`
+fetches a page or file; `security.pinned_request.pinned_request` sends one
+request: https only by default, no redirect followed, no proxy. Chat
+attachments (`agent_handler.attachments._fetch_attachment_url`: a Discord
+attachment or embed image re-resolved its name after the check), voice
+attachments (`voice_helpers.download_audio_bytes` ->
+`downloads.public_attachment_download`, a Slack token only for
+`downloads.slack_owned_url` hosts), generated images
+(`image_backends.base.fetch_generated_image`: no provider key leaves its API
+host) and MCP OAuth (`mcp.oauth._oauth_request`) use it. For MCP OAuth the
+token and registration endpoints must be on the issuer's origin; the owner's
+own local MCP server is asked directly, its origin only; an answer's text
+never reaches an error. `ssrf._is_blocked_ip` refuses fec0::/10. Gate:
+`tests/test_chosen_urls_fetched_pinned.py`: every unpinned request whose URL is
+not fixed in code, and every redirect-following client, is declared with why
+in `UNFIXED_URLS` or `REDIRECTS` (the four old fetches as negative controls).
+
 
 
 ### 33. Ops alerting — three paths, no fourth notifier

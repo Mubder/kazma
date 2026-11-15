@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import urllib.parse
-from kazma_core.http_tls import shared_ssl_context
+
+from kazma_core.tools.image_backends.base import fetch_generated_image
 
 POLLINATIONS_URL = "https://image.pollinations.ai/prompt/"
 
@@ -14,16 +15,8 @@ class PollinationsBackend:
     name = "pollinations"
 
     async def generate(self, prompt: str, width: int, height: int) -> bytes:
-        import httpx
-
         encoded = urllib.parse.quote(prompt, safe="")
         url = f"{POLLINATIONS_URL}{encoded}?width={width}&height={height}"
-        async with httpx.AsyncClient(
-            follow_redirects=True,
-            timeout=60.0,
-            headers={"User-Agent": "KazmaBot/1.0 (image generator)"},
-            verify=shared_ssl_context(),
-        ) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-            return response.content
+        # Pollinations answers with redirects; each hop is checked and pinned
+        # (it followed them unchecked until 2026-11-15).
+        return await fetch_generated_image(url, timeout=60.0)

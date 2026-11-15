@@ -1,7 +1,25 @@
 """Bounded adapter downloads: stop reading before a body exceeds its cap."""
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 import httpx
+
+
+def slack_owned_url(url: str) -> bool:
+    """True for an ``https`` address on Slack's own hosts (``slack.com`` and
+    its subdomains): the only place a Slack credential, or a file bound for
+    Slack, may go. The one rule for the Slack adapter's file downloads and
+    uploads (an interaction's reply address has its own, narrower rule:
+    ``slack_commands.safe_response_url``)."""
+    try:
+        parts = urlsplit(url)
+        host = (parts.hostname or "").lower()
+    except ValueError:
+        return False
+    if parts.scheme != "https" or parts.username is not None or parts.password is not None:
+        return False
+    return host == "slack.com" or host.endswith(".slack.com")
 
 
 async def public_attachment_download(url: str, *, slack_token: str = "", max_bytes: int = 20 * 1024 * 1024) -> bytes:
@@ -14,7 +32,7 @@ async def public_attachment_download(url: str, *, slack_token: str = "", max_byt
     if max_bytes < 1:
         raise ValueError("Download size limit must be positive")
     import asyncio
-    from urllib.parse import urljoin, urlsplit
+    from urllib.parse import urljoin
 
     from kazma_core.security.ssrf import assert_peer_public, validate_url
     from kazma_core.security.ssrf_pin import PinHostAsyncTransport
@@ -34,7 +52,7 @@ async def public_attachment_download(url: str, *, slack_token: str = "", max_byt
             host = (target.hostname or "").lower()
             pins[host] = ips[0]
             headers = {"Accept-Encoding": "identity"}
-            if hop == 0 and slack_token and target.scheme == "https" and (host == "slack.com" or host.endswith(".slack.com")):
+            if hop == 0 and slack_token and slack_owned_url(current):
                 headers["Authorization"] = f"Bearer {slack_token}"
             async with client.stream("GET", current, headers=headers) as response:
                 assert_peer_public(response, url=current, validated_ips=ips)

@@ -24,7 +24,6 @@ import logging
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urljoin
 
 from kazma_core.documents.errors import DocumentParseError
 from kazma_core.documents.registry import get_parser_registry
@@ -127,62 +126,59 @@ MAX_ATTACHMENT_COUNT = 10
 MAX_TOTAL_ATTACHMENT_BYTES = 50 * 1024 * 1024
 
 
-def _fetch_attachment_url(url: str) -> bytes:
-    """Fetch a remote attachment after SSRF-validating every redirect target.
+#: One deadline for the whole download: name lookups, every redirect, the body.
+_ATTACHMENT_FETCH_TIMEOUT_S = 30.0
 
-    Routes through the shared scraping client factory (proxy provider +
-    rotating UA pool when configured) so platform file downloads follow the
-    same egress stack as the rest of Kazma — previously a bare httpx.Client
-    was the one web-egress path outside it.
+
+async def _fetch_attachment(url: str) -> bytes:
+    """Download a remote attachment on the pinned path (AGENTS.md §32).
+
+    The URL is the sender's (a Discord attachment, an embed image -- which can
+    be the ``og:image`` of any page the sender linked), so it goes through
+    ``web_acquire.http.fetch_public``: every hop of the redirect chain checked
+    public, the connection pinned to the address that was checked, the peer
+    checked before the body is read, the body bounded. Until 2026-11-15 a
+    plain client resolved the name again after the check, so a name answering
+    a public address and then an internal one made Kazma read the internal
+    one into the chat.
     """
-    from kazma_core.security.ssrf import validate_url
+    from kazma_core.web_acquire.http import fetch_public
+
+    got = await fetch_public(
+        url,
+        max_bytes=MAX_ATTACHMENT_BYTES,
+        timeout=_ATTACHMENT_FETCH_TIMEOUT_S,
+        max_redirects=_MAX_ATTACHMENT_REDIRECTS,
+    )
+    status = got.response.status_code
+    if status >= 400:
+        raise ValueError(f"attachment download answered HTTP {status}")
+    try:
+        declared = int(got.response.headers.get("content-length", "") or 0)
+    except ValueError:
+        declared = 0
+    if got.truncated or declared > MAX_ATTACHMENT_BYTES:
+        raise ValueError("attachment exceeds remote fetch size limit")
+    return got.response.content
+
+
+def _fetch_attachment_url(url: str) -> bytes:
+    """Blocking :func:`_fetch_attachment`, for :func:`build_user_content`.
+
+    ``build_user_content`` runs in a worker thread (both callers hand it to
+    ``asyncio.to_thread``), where no event loop runs; the download runs on a
+    loop of its own there. Called where a loop runs, it refuses rather than
+    block that loop.
+    """
+    import asyncio
 
     try:
-        from kazma_core.proxy.client import get_scraping_client_sync
-    except Exception:
-        # Proxy module unavailable — degrade to a plain client (SSRF loop
-        # below still applies).
-        import httpx
-
-        _client_factory = lambda: httpx.Client(timeout=30.0, follow_redirects=False)  # noqa: E731
-    else:
-        def _client_factory():
-            return get_scraping_client_sync(
-                follow_redirects=False, timeout=30.0, rotate_ua=True
-            )
-
-    current_url = url
-    with _client_factory() as client:
-        for _ in range(_MAX_ATTACHMENT_REDIRECTS + 1):
-            validate_url(current_url, block_unresolved=True)
-            with client.stream("GET", current_url) as response:
-                if response.status_code in (301, 302, 303, 307, 308):
-                    location = response.headers.get("location")
-                    if not location:
-                        raise ValueError("attachment redirect has no location")
-                    current_url = urljoin(current_url, location)
-                    continue
-
-                response.raise_for_status()
-                declared = response.headers.get("content-length")
-                if declared:
-                    try:
-                        if int(declared) > MAX_ATTACHMENT_BYTES:
-                            raise ValueError("attachment exceeds remote fetch size limit")
-                    except ValueError as exc:
-                        if "exceeds" in str(exc):
-                            raise
-
-                chunks: list[bytes] = []
-                total = 0
-                for chunk in response.iter_bytes():
-                    total += len(chunk)
-                    if total > MAX_ATTACHMENT_BYTES:
-                        raise ValueError("attachment exceeds remote fetch size limit")
-                    chunks.append(chunk)
-                return b"".join(chunks)
-
-    raise ValueError("attachment URL exceeded redirect limit")
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(_fetch_attachment(url))
+    raise RuntimeError(
+        "attachment download blocks: run build_user_content in a worker thread"
+    )
 
 
 def _persist_attachment(attachment: Attachment) -> str:

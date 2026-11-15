@@ -8,11 +8,7 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from kazma_gateway.agent_handler.attachments import (
-    MAX_ATTACHMENT_BYTES,
-    _fetch_attachment_url,
-    build_user_content,
-)
+from kazma_gateway.agent_handler.attachments import build_user_content
 from kazma_gateway.gateway import Attachment
 from kazma_ui import chat_attachments
 from kazma_ui.routes_chat_upload import router as upload_router
@@ -103,74 +99,10 @@ def test_upload_endpoint_returns_only_an_opaque_reference() -> None:
     }
 
 
-def test_attachment_fetch_checks_redirect_destination_before_request() -> None:
-    redirect = MagicMock(status_code=302, headers={"location": "http://127.0.0.1/private"})
-    redirect.__enter__.return_value = redirect
-    client = MagicMock()
-    client.__enter__.return_value = client
-    client.stream.return_value = redirect
-
-    with patch(
-        "kazma_core.security.ssrf.validate_url",
-        side_effect=[None, ValueError("private address")],
-    ) as validate_url, patch(
-        "httpx.Client",
-        return_value=client,
-    ):
-        with pytest.raises(ValueError, match="private address"):
-            _fetch_attachment_url("https://public.example/image.png")
-
-    assert validate_url.call_count == 2
-    client.stream.assert_called_once_with(
-        "GET",
-        "https://public.example/image.png",
-    )
-
-
-def test_attachment_fetch_validates_and_follows_safe_redirect() -> None:
-    redirect = MagicMock(status_code=302, headers={"location": "/image.png"})
-    success = MagicMock(status_code=200, headers={}, content=b"image")
-    redirect.__enter__.return_value = redirect
-    success.__enter__.return_value = success
-    success.raise_for_status = MagicMock()
-    success.iter_bytes.return_value = iter([b"im", b"age"])
-    client = MagicMock()
-    client.__enter__.return_value = client
-    client.stream.side_effect = [redirect, success]
-
-    with patch(
-        "kazma_core.security.ssrf.validate_url",
-    ) as validate_url, patch(
-        "httpx.Client",
-        return_value=client,
-    ):
-        assert _fetch_attachment_url("https://public.example/start") == b"image"
-
-    assert [call.args[0] for call in validate_url.call_args_list] == [
-        "https://public.example/start",
-        "https://public.example/image.png",
-    ]
-    assert all(call.kwargs["block_unresolved"] is True for call in validate_url.call_args_list)
-    assert client.stream.call_count == 2
-
-
-def test_attachment_fetch_rejects_declared_oversize() -> None:
-    response = MagicMock(
-        status_code=200,
-        headers={"content-length": str(MAX_ATTACHMENT_BYTES + 1)},
-    )
-    response.__enter__.return_value = response
-    response.raise_for_status = MagicMock()
-    client = MagicMock()
-    client.__enter__.return_value = client
-    client.stream.return_value = response
-
-    with patch("kazma_core.security.ssrf.validate_url"), patch(
-        "httpx.Client",
-        return_value=client,
-    ):
-        with pytest.raises(ValueError, match="size limit"):
-            _fetch_attachment_url("https://public.example/large.pdf")
+# The remote attachment fetch (redirect checks, size bounds, the pinned
+# connection) is held by tests/test_chat_attachments_fetched_pinned.py,
+# through the real acquisition layer; the httpx.Client mocks that were here
+# tested a fetch that resolved the name again (security audit 2026-11-15).
 
 
 def test_client_attachment_count_is_bounded(monkeypatch) -> None:

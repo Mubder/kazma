@@ -12,11 +12,8 @@ Covers:
 from __future__ import annotations
 
 import urllib.parse
-from unittest.mock import AsyncMock, MagicMock
-
 import pytest
 
-from tests._module_stubs import stub_modules
 from kazma_core.tools.image_gen import (
     MAX_HEIGHT,
     MAX_PROMPT_CHARS,
@@ -33,21 +30,25 @@ from kazma_core.tools.image_gen import (
 
 
 @pytest.fixture
-def mock_httpx():
-    """Mock httpx at the top-level package so the lazy import inside
-    generate_image() picks up the mocked AsyncClient."""
+def fake_fetch(monkeypatch):
+    """Answer the backend's download (the pinned path, ``fetch_public``) with
+    a small PNG and record the URLs it was asked for."""
+    from types import SimpleNamespace
+
+    import kazma_core.web_acquire.http as acquisition_http
+
     fake_png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100  # minimal PNG header + padding
+    urls: list[str] = []
 
-    mock_httpx_mod = MagicMock()
-    mock_client = AsyncMock()
-    mock_response = MagicMock()
-    mock_response.content = fake_png
-    mock_response.raise_for_status = MagicMock()
-    mock_client.__aenter__.return_value.get.return_value = mock_response
-    mock_httpx_mod.AsyncClient.return_value = mock_client
+    async def _fetch_public(url, **kwargs):
+        urls.append(url)
+        return SimpleNamespace(
+            response=SimpleNamespace(status_code=200, content=fake_png, headers={}),
+            text="", url=url, truncated=False,
+        )
 
-    with stub_modules({"httpx": mock_httpx_mod}):
-        yield mock_httpx_mod
+    monkeypatch.setattr(acquisition_http, "fetch_public", _fetch_public)
+    return SimpleNamespace(urls=urls)
 
 
 @pytest.fixture
@@ -114,7 +115,7 @@ class TestGenerateImageBasic:
     """Test 1: Basic generation with mocked HTTP."""
 
     @pytest.mark.asyncio
-    async def test_generates_and_saves_image(self, mock_httpx, temp_image_dir):
+    async def test_generates_and_saves_image(self, fake_fetch, temp_image_dir):
         result = await generate_image("a sunset over mountains", width=512, height=512)
 
         assert "Image generated successfully" in result
@@ -153,7 +154,7 @@ class TestGenerateImageLongPrompt:
         assert str(MAX_PROMPT_CHARS) in result
 
     @pytest.mark.asyncio
-    async def test_at_limit_accepted(self, mock_httpx, temp_image_dir):
+    async def test_at_limit_accepted(self, fake_fetch, temp_image_dir):
         exact_prompt = "x" * MAX_PROMPT_CHARS
         result = await generate_image(exact_prompt, width=64, height=64)
         assert "Image generated successfully" in result
@@ -185,13 +186,12 @@ class TestGenerateImageUrlEncoding:
     """Test 5: Prompt is correctly URL-encoded in the request URL."""
 
     @pytest.mark.asyncio
-    async def test_special_characters_encoded(self, mock_httpx, temp_image_dir):
+    async def test_special_characters_encoded(self, fake_fetch, temp_image_dir):
         result = await generate_image("sunset & moon? #vibe!", width=256, height=256)
 
         assert "Image generated successfully" in result
         # Verify the URL was built with encoded prompt
-        client_instance = mock_httpx.AsyncClient.return_value
-        called_url = client_instance.__aenter__.return_value.get.call_args[0][0]
+        called_url = fake_fetch.urls[-1]
 
         # The prompt should appear encoded, not raw
         assert "sunset" in urllib.parse.unquote(called_url)
@@ -199,12 +199,11 @@ class TestGenerateImageUrlEncoding:
         assert urllib.parse.quote("sunset & moon? #vibe!", safe="") in called_url
 
     @pytest.mark.asyncio
-    async def test_unicode_characters_encoded(self, mock_httpx, temp_image_dir):
+    async def test_unicode_characters_encoded(self, fake_fetch, temp_image_dir):
         result = await generate_image("caf\u00e9 \u4e2d\u6587", width=256, height=256)
 
         assert "Image generated successfully" in result
-        client_instance = mock_httpx.AsyncClient.return_value
-        called_url = client_instance.__aenter__.return_value.get.call_args[0][0]
+        called_url = fake_fetch.urls[-1]
         # Unicode should be percent-encoded
         decoded = urllib.parse.unquote(called_url)
         assert "caf\u00e9 \u4e2d\u6587" in decoded
@@ -214,7 +213,7 @@ class TestGenerateImageFileCreation:
     """Test 6: Generated image is saved to disk with correct naming."""
 
     @pytest.mark.asyncio
-    async def test_file_naming(self, mock_httpx, temp_image_dir):
+    async def test_file_naming(self, fake_fetch, temp_image_dir):
         result = await generate_image("a friendly robot", width=128, height=128)
 
         assert "Image generated successfully" in result
@@ -229,7 +228,7 @@ class TestGenerateImageFileCreation:
         assert "friendly-robot" in parts[1]
 
     @pytest.mark.asyncio
-    async def test_description_parameter(self, mock_httpx, temp_image_dir):
+    async def test_description_parameter(self, fake_fetch, temp_image_dir):
         result = await generate_image(
             "a complex prompt about something",
             width=256,
@@ -239,12 +238,12 @@ class TestGenerateImageFileCreation:
         assert "Description: Minimalist logo design" in result
 
     @pytest.mark.asyncio
-    async def test_description_falls_back_to_prompt(self, mock_httpx, temp_image_dir):
+    async def test_description_falls_back_to_prompt(self, fake_fetch, temp_image_dir):
         result = await generate_image("watercolor landscape painting", width=256, height=256)
         assert "Description: watercolor landscape painting" in result
 
     @pytest.mark.asyncio
-    async def test_multiple_generations_unique_filenames(self, mock_httpx, temp_image_dir):
+    async def test_multiple_generations_unique_filenames(self, fake_fetch, temp_image_dir):
         await generate_image("first image", width=64, height=64)
         # Small delay so timestamp differs
         import asyncio
