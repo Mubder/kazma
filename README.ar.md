@@ -16,6 +16,7 @@
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" alt="رخصة MIT"></a>
     <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.11%20%E2%80%93%203.14-3776AB.svg?style=flat-square&logo=python&logoColor=white" alt="Python من 3.11 إلى 3.14"></a>
     <a href="https://kazma.ai/ar/docs/security/prompt-injection/"><img src="https://img.shields.io/badge/Prompt_injection-measured-EF4444.svg?style=flat-square" alt="حقن التعليمات مقيس"></a>
+    <a href="https://www.bestpractices.dev/projects/16743"><img src="https://img.shields.io/cii/level/16743?style=flat-square&label=OpenSSF%20Best%20Practices" alt="ممارسات OpenSSF الفضلى"></a>
     <a href="https://kazma.ai/ar/"><img src="https://img.shields.io/badge/Website-kazma.ai-06B6D4.svg?style=flat-square" alt="الموقع"></a>
   </p>
 
