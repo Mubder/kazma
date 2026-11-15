@@ -48,7 +48,7 @@ _SENSITIVE_KEY_RE = re.compile(
 #: An environment variable's name ending in ``_KEY`` (``OPENAI_KEY``,
 #: ``NOTION_KEY``): upper case only, so a setting such as ``public_key`` or
 #: ``sort_key`` is not taken for one.
-_ENV_KEY_NAME = re.compile(r"[A-Z][A-Z0-9_]*_KEY")
+_ENV_NAME = re.compile(r"[A-Z][A-Z0-9_]*")
 
 
 def env_name_is_secret(name: str) -> bool:
@@ -59,7 +59,9 @@ def env_name_is_secret(name: str) -> bool:
     ``config_read`` (2026-11-15): neither rule read a bare ``_KEY`` ending.
     ``mcp.secrets`` asks it with the name upper-cased (every name an MCP
     server takes is an environment variable, a header or a flag)."""
-    return bool(_ENV_KEY_NAME.fullmatch(str(name).strip()))
+    text = str(name).strip()
+    # Two plain checks, nothing to backtrack over.
+    return text.endswith("_KEY") and bool(_ENV_NAME.fullmatch(text))
 
 
 def key_is_secret(key: str) -> bool:

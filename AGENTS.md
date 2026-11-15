@@ -11959,7 +11959,12 @@ code it names.
   draw every letter evenly (`newId`, rejection sampling); two address checks
   compare host names exactly (`tests/test_url_host_checks.py`); the test
   servers find a free port on loopback, and the document broker's port probe
-  skips an address with no host.
+  skips an address with no host. Second pass (2026-11-16): a backup's name
+  from a request is rebuilt from its number before a path is made
+  (`universal._backup_dir_name`: the old match let a trailing newline
+  through), and the `*_KEY` env-name rule is two plain checks instead of an
+  overlapping pattern (`tests/test_codeql_followups_2026_11_16.py`, the old
+  check and pattern as controls).
 
 ### 67. Secrets in files, copies and masks (2026-11-15)
 

@@ -184,7 +184,10 @@ def is_sensitive_config_key(key: str) -> bool:
         return False
     # An environment variable's name ending in _KEY (OPENAI_KEY in an MCP
     # server's env): the maskers' rule (config_mask.env_name_is_secret).
-    if re.fullmatch(r"[A-Z][A-Z0-9_]*_KEY", key.rsplit(".", 1)[-1].strip()):
+    # Two plain checks, nothing to backtrack over (CodeQL read the one
+    # pattern [A-Z][A-Z0-9_]*_KEY as polynomial).
+    tail = key.rsplit(".", 1)[-1].strip()
+    if tail.endswith("_KEY") and re.fullmatch(r"[A-Z][A-Z0-9_]*", tail):
         return True
     lowered = key.lower().replace("-", "_")
     last = lowered.rsplit(".", 1)[-1]

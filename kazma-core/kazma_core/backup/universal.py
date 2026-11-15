@@ -1598,12 +1598,24 @@ def latest_universal_backup() -> dict[str, Any] | None:
     return items[0] if items else None
 
 
+def _backup_dir_name(dir_name: str) -> str | None:
+    """A backup's folder name as this module makes it (its epoch, ASCII
+    digits), rebuilt from the number, or None. The old ``^digits$`` match let
+    a trailing newline through, and a path was built from the text the
+    request sent; the name is now the integer's own text."""
+    text = str(dir_name or "")
+    if not (text.isascii() and text.isdigit()) or len(text) > 20:
+        return None
+    return str(int(text))
+
+
 def delete_universal_backup(dir_name: str) -> dict[str, Any]:
     """Delete a universal backup by its directory name (timestamp)."""
-    import re
     # Only allow deleting inside backups/universal/ — reject path traversal.
-    if not re.match(r"^\d+$", dir_name):
+    name = _backup_dir_name(dir_name)
+    if name is None:
         return {"ok": False, "error": "Invalid backup name (must be a timestamp)"}
+    dir_name = name
     target = _universal_dir() / dir_name
     try:
         if target.is_dir():
@@ -1626,10 +1638,11 @@ def delete_universal_backup(dir_name: str) -> dict[str, Any]:
 
 def archive_universal_backup(dir_name: str) -> dict[str, Any]:
     """Archive a universal backup into a single .zip for download/transfer."""
-    import re
     import zipfile
-    if not re.match(r"^\d+$", dir_name):
+    name = _backup_dir_name(dir_name)
+    if name is None:
         return {"ok": False, "error": "Invalid backup name (must be a timestamp)"}
+    dir_name = name
     src = _universal_dir() / dir_name
     if not src.is_dir():
         return {"ok": False, "error": f"Backup '{dir_name}' not found"}
