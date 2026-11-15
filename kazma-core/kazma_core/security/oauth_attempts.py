@@ -17,7 +17,7 @@ every provider takes now:
 * bound to the browser that started it: the start route sets a cookie named
   for the attempt (:func:`binding_cookie_name`) whose value is the state,
   sent to the callback's path only. :func:`take` refuses a state the browser
-  does not hold, compared with :func:`hmac.compare_digest`, before the store
+  does not hold, compared with ``secret_compare.same_secret``, before the store
   is touched;
 * taken once: one compare-and-set (``atomic_update``) takes it out, so a
   second callback with it -- at the same moment or later -- finds nothing.
@@ -30,12 +30,13 @@ a settings-store round trip: call from a thread.
 from __future__ import annotations
 
 import hashlib
-import hmac
 import secrets
 import time
 from collections.abc import Iterable
 from typing import Any
 from urllib.parse import urlsplit
+
+from kazma_core.security.secret_compare import same_secret
 
 __all__ = [
     "MAX_PENDING",
@@ -152,9 +153,7 @@ def take(state: str, *, bound_state: str, providers: Iterable[str]) -> dict[str,
     (and spent). A settings write: call from a thread.
     """
     state = (state or "").strip()
-    if not state or not bound_state or not hmac.compare_digest(
-        bound_state.encode("utf-8"), state.encode("utf-8")
-    ):
+    if not state or not bound_state or not same_secret(state, bound_state):
         raise AttemptRefused("other_browser")
     from kazma_core.config_store import get_config_store
 

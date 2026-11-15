@@ -23,6 +23,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from kazma_core.security.secret_compare import same_secret
+
 __all__ = ["WaInbound", "count_statuses", "inbound_messages", "signature_ok", "wa_digits"]
 
 #: The kinds Kazma reads; anything else is recorded as ``unsupported_type``.
@@ -45,7 +47,8 @@ def signature_ok(app_secret: str, body: bytes, header: str | None) -> bool:
     if scheme.lower() != "sha256" or not given:
         return False
     expected = hmac.new(app_secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, given.strip().lower())
+    # A header with any non-ASCII character is a mismatch, never a TypeError.
+    return same_secret(given.strip().lower(), expected)
 
 
 @dataclass(frozen=True)

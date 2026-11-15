@@ -40,6 +40,11 @@ def test_only_admins_change_kazma_for_everyone():
         # The install's default model (providers stage 3); a chat's own
         # model (/model <x>, a button's /_models_select) is that chat's.
         "/model default deepseek:deepseek-chat",
+        # The shorthand install, open until 2026-11-15.
+        "/skill shadcn/improve",
+        # The owner's X account (2026-11-15): publish, delete, draft, poll.
+        "/x approve s1 r1", "/x deny s1 r1", "/x delete s1 r1", "/x retry s1", "/x poll",
+        "/x roast https://x.com/a/status/1 | hi",
     ):
         assert changes_global_config(text), text
     for text in (
@@ -49,6 +54,7 @@ def test_only_admins_change_kazma_for_everyone():
         "/ide", "/ide repo", "/ide repo list", "/ide ls", "/ide open README.md",
         "/swarm", "/swarm config", "/swarm status", "/kb list",
         "/model", "/model deepseek:deepseek-chat", "/model reset", "/_models_select deepseek:deepseek-chat",
+        "/x", "/x help", "/x list", "/x subjects",
     ):
         assert not changes_global_config(text), text
 

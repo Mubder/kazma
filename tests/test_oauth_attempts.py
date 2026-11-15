@@ -128,9 +128,10 @@ def test_an_attempt_is_taken_once_and_kept_only_as_a_hash() -> None:
 
 def test_another_browser_is_refused_before_anything_is_read(monkeypatch: pytest.MonkeyPatch) -> None:
     state = begin("github", redirect_uri="https://k.test/cb")
-    compared: list[tuple[bytes, bytes]] = []
-    real = oauth_attempts.hmac.compare_digest
-    monkeypatch.setattr(oauth_attempts.hmac, "compare_digest",
+    compared: list[tuple[str, str]] = []
+    # Constant time, as bytes (kazma_core.security.secret_compare).
+    real = oauth_attempts.same_secret
+    monkeypatch.setattr(oauth_attempts, "same_secret",
                         lambda a, b: compared.append((a, b)) or real(a, b))
     for cookie in ("", "x" * len(state), state[:-1] + ("A" if state[-1] != "A" else "B")):
         with pytest.raises(AttemptRefused) as other:

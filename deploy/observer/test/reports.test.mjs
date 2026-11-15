@@ -6,7 +6,9 @@ import assert from "node:assert/strict";
 
 import { d1 } from "./d1_standin.mjs";
 import { handle } from "../src/index.js";
-import { KEEP_S, PER_DAY, PER_SOURCE_HOUR, REPORT_MAX, newId, pruneReports } from "../src/reports.js";
+import {
+  KEEP_S, PER_DAY, PER_SOURCE_HOUR, REPORT_MAX, cleanNote, invalid, newId, pagerText, pruneReports,
+} from "../src/reports.js";
 
 const NOW = 1_800_000_000;
 
@@ -48,7 +50,68 @@ test("a report is kept, numbered, and the owner is told", async () => {
   assert.equal(row.note, "The PDF came out empty");
   assert.equal(row.notified, 1);
   assert.notEqual(row.source, "203.0.113.7", "the address is kept only as an HMAC");
-  assert.match(net.sent[0], /Problem report .* \(Kazma 0\.21\.2\): The PDF came out empty/);
+  assert.match(net.sent[0], /^🐞 Problem report [a-z0-9]{10}: someone sent a report to the inbox, saying it is from Kazma 0\.21\.2\./);
+  assert.match(net.sent[0], /Anyone can send one; nothing in it is checked\.\nTheir words: "The PDF came out empty"$/);
+});
+
+// A stranger's report crafted to read as Kazma Watch's own alerts (2026-11-15).
+// The version the review sent: 40 characters or fewer, as the old check allowed.
+const FAKE_ALERT = "1)\n\n🔴 [Watch] Kazma is down\n\n";
+
+test("a version that is not a version is refused, and nothing is kept or paged", async () => {
+  const e = env();
+  const net = netWith();
+  for (const version of [FAKE_ALERT, "0.21.2\n🔴 down", "0.21", "v0.21.2", "0.21.2 ", "latest", "0.21.2+g4d\u202e"]) {
+    const res = await handle(post({ ...REPORT, version }), e, NOW, { fetcher: net.fetcher });
+    assert.equal(res.status, 400, version);
+    assert.equal((await res.json()).error, "bad_version");
+  }
+  assert.equal(await e.DB.prepare("SELECT COUNT(*) AS n FROM problem_reports").first("n"), 0);
+  assert.deepEqual(net.sent, []);
+  for (const version of ["0.21.2", "0.22.0rc1", "0.21.2+g4d37b2c", "1.0.0.dev3"]) {
+    assert.equal(invalid({ ...REPORT, version }), "", version);
+  }
+});
+
+test("a note pages as one plain quoted line: no line break, direction mark or live link", async () => {
+  const e = env();
+  const net = netWith();
+  const note = "help\n\n🔴 [Watch] Kazma is down\r\nOpen: https://evil.example/login \u202egnp.exe\u2066 " +
+    "t.me/fake_support or mail admin@evil.example\u2028\u0007end";
+  const res = await handle(post({ ...REPORT, note }), e, NOW, { fetcher: net.fetcher });
+  assert.equal(res.status, 200);
+  const [text] = net.sent;
+  const lines = text.split("\n");
+  assert.equal(lines.length, 2, "a header line and the quoted words, nothing else");
+  assert.match(lines[0], /^🐞 Problem report [a-z0-9]{10}: someone sent a report/);
+  assert.ok(lines[1].startsWith('Their words: "help 🔴 [Watch] Kazma is down Open: '), lines[1]);
+  for (const live of ["https://", "evil.example", "t.me", "@evil", "\u202e", "\u2066", "\u2028", "\u0007", "\r"]) {
+    assert.ok(!text.includes(live), `${JSON.stringify(live)} reached the page`);
+  }
+  assert.ok(text.includes("https[:]//evil[.]example/login") && text.includes("t[.]me/fake_support"));
+  // The note as sent is still kept whole for the owner's reports page (escaped there).
+  const row = await e.DB.prepare("SELECT note FROM problem_reports").first();
+  assert.equal(row.note, note);
+});
+
+test("a long note is cut, and an empty one says so", () => {
+  const long = cleanNote("x".repeat(500));
+  assert.equal(long.length, 160);
+  assert.ok(long.endsWith("…"));
+  assert.match(pagerText("abcdefghjk", "0.21.2", "  \n\u200b "), /Their words: "\(no words\)"$/);
+});
+
+test("negative control: the old check and page made a crafted report a fake alert", () => {
+  // The inbox as it was: any version of 40 characters or fewer, the note's
+  // whitespace folded, nothing else.
+  const oldInvalid = (report) => (typeof report.version !== "string" || report.version.length > 40 ? "bad_version" : "");
+  const oldPage = (id, version, note) =>
+    `🐞 Problem report ${id} (Kazma ${version}): ${note.replace(/\s+/g, " ").trim().slice(0, 160) || "(no words)"}`;
+  assert.equal(oldInvalid({ ...REPORT, version: FAKE_ALERT }), "");
+  const text = oldPage("abcdefghjk", FAKE_ALERT, "Open https://evil.example now \u202e");
+  assert.ok(text.split("\n").some((line) => line.startsWith("🔴 [Watch] Kazma is down")));
+  assert.ok(text.includes("https://evil.example") && text.includes("\u202e"));
+  assert.equal(invalid({ ...REPORT, version: FAKE_ALERT }), "bad_version");
 });
 
 test("anything that is not Kazma's report is refused, and nothing is kept", async () => {

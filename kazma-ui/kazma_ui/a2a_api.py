@@ -13,15 +13,22 @@ answer 404. The protocol objects and the limits are
   (``cron_fire_graph(capabilities="read")``): read tools only, so it never
   waits for an approval; the request is labelled as another agent's; nothing
   is written to memory (``persist=False``).
+  Read tools only, and read-only: a read tool that writes when asked
+  (``crawl_site``'s ``save``) runs with the values that keep it from writing
+  (``side_effects.READ_ONLY_ARGUMENTS``, 2026-11-15).
 - At most :data:`MAX_RUNNING` turns at once, each within
   :data:`TURN_BUDGET_S`; ``configuration.blocking: false`` answers at once
   with the task ``working``, for ``tasks/get`` later. Tasks are kept in this
   process for a day (the last :data:`_KEEP_TASKS`).
+- A request body is at most :data:`MAX_BODY_BYTES`: refused unread when it
+  says it is longer, cut off at the limit when it does not say (2026-11-15:
+  the whole body was read into memory first, whatever its size).
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import time
@@ -40,10 +47,13 @@ from kazma_ui.rate_limit import rate_limit
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["MAX_RUNNING", "TURN_BUDGET_S", "create_a2a_router"]
+__all__ = ["MAX_BODY_BYTES", "MAX_RUNNING", "TURN_BUDGET_S", "create_a2a_router"]
 
 TURN_BUDGET_S = 300.0
 MAX_RUNNING = 2
+#: The largest request body: a message of ``a2a_protocol.MAX_TEXT`` characters,
+#: each escaped in JSON, with room for the rest of the call.
+MAX_BODY_BYTES = 256 * 1024
 _KEEP_TASKS = 200
 _TASK_TTL_S = 24 * 3600.0
 _CONTEXT_TURNS = 6
@@ -116,6 +126,22 @@ def _enabled() -> bool:
     return get_config_store().get(ENABLED_KEY, False) is True
 
 
+async def _bounded_body(request: Request) -> bytes | None:
+    """The request's body, or None past :data:`MAX_BODY_BYTES`: refused
+    unread when its length says so, cut off at the limit when it does not."""
+    declared = (request.headers.get("content-length") or "").strip()
+    if declared.isdigit() and int(declared) > MAX_BODY_BYTES:
+        return None
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > MAX_BODY_BYTES:
+            return None
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def _endpoint_url(request: Request) -> str:
     public = (os.environ.get("KAZMA_PUBLIC_URL") or "").strip().rstrip("/")
     base = public or str(request.base_url).rstrip("/")
@@ -179,13 +205,17 @@ def create_a2a_router(agent_getter: Callable[[], Any]) -> APIRouter:
     @router.post("/api/a2a", dependencies=[Depends(rate_limit("a2a", 30))])
     async def a2a(request: Request) -> JSONResponse:
         from kazma_core.a2a_protocol import A2AError, error_response, read_send_params
-        from kazma_ui.json_body import InvalidJsonBody, read_json
 
         if not await asyncio.to_thread(_enabled):
             return JSONResponse({"error": "not_found"}, status_code=404)
+        raw = await _bounded_body(request)
+        if raw is None:
+            return JSONResponse(error_response(None, "invalid_request",
+                                               f"the request is larger than {MAX_BODY_BYTES} bytes"),
+                                status_code=413)
         try:
-            body = await read_json(request)
-        except InvalidJsonBody:
+            body = json.loads(raw)
+        except (ValueError, RecursionError):
             return JSONResponse(error_response(None, "parse_error", "the body is not JSON"))
         if not isinstance(body, dict) or body.get("jsonrpc") != "2.0" or not isinstance(body.get("method"), str):
             return JSONResponse(error_response(body.get("id") if isinstance(body, dict) else None,

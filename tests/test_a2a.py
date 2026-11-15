@@ -134,6 +134,47 @@ def test_what_kazma_refuses_is_a_jsonrpc_error(a2a) -> None:
         .json()["error"]["code"] == JSONRPC_ERRORS["task_not_found"]
 
 
+def test_a_body_past_the_limit_is_refused_unread(a2a, monkeypatch) -> None:
+    """The whole body was read into memory first, whatever its size (2026-11-15)."""
+    big = b'{"jsonrpc": "2.0", "id": 1, "method": "message/send", "pad": "' + b"x" * a2a_api.MAX_BODY_BYTES + b'"}'
+    declared = a2a.client.post("/api/a2a", content=big, headers={"content-type": "application/json"})
+    assert declared.status_code == 413
+    assert declared.json()["error"]["code"] == JSONRPC_ERRORS["invalid_request"]
+
+    def chunks():  # no length said: cut off at the limit as it streams
+        for start in range(0, len(big), 65536):
+            yield big[start:start + 65536]
+
+    streamed = a2a.client.post("/api/a2a", content=chunks(), headers={"content-type": "application/json"})
+    assert streamed.status_code == 413
+    assert a2a.calls["graphs"] == [], "no turn ran"
+    # Control: without the limit the same body is read whole and answered.
+    monkeypatch.setattr(a2a_api, "MAX_BODY_BYTES", 10 * len(big))
+    assert a2a.client.post("/api/a2a", content=big, headers={"content-type": "application/json"}).status_code == 200
+
+
+def test_the_turn_runs_read_only(monkeypatch) -> None:
+    """A2A's graph is the scheduled task's read set, built read-only: a read
+    tool that writes when asked (crawl_site) runs with save off."""
+    from kazma_core.cron import capabilities
+
+    seen: dict[str, Any] = {}
+
+    class _Agent:
+        class tools:  # noqa: N801 - a stand-in registry
+            @staticmethod
+            def get_tool_definitions() -> list[dict[str, Any]]:
+                return [{"type": "function", "function": {"name": "crawl_site", "parameters": {
+                    "type": "object", "properties": {"start_url": {}, "save": {}}}}}]
+
+        def build_child_graph(self, **kw: Any) -> str:
+            seen.update(kw)
+            return "graph"
+
+    assert capabilities.cron_fire_graph(_Agent(), capabilities="read") == "graph"
+    assert seen == {"declared_tools": ["crawl_site"], "read_only": True}
+
+
 def test_more_than_two_at_once_is_busy(a2a) -> None:
     a2a.calls["release"] = asyncio.Event()
     for _ in range(a2a_api.MAX_RUNNING):

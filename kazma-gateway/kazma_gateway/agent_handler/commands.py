@@ -1993,6 +1993,16 @@ async def _try_skill_command(
         # e.g. /skill shadcn/improve
         source = text.split(None, 1)[1].strip() if len(parts) >= 2 else ""
         if source and ("/" in source or source.startswith("http")):
+            # The same install as `/skill install`: admin-only (audit H-8).
+            from kazma_gateway.agent_handler.graph import _sender_is_gateway_admin
+
+            if not await asyncio.to_thread(_sender_is_gateway_admin, msg):  # a settings read (AUD-111)
+                await _send_model_reply(
+                    msg, store, manager, thread_id,
+                    "⛔ Installing skills is admin-only. Set "
+                    "`KAZMA_GATEWAY_ADMINS` or join the platform user allowlist.",
+                )
+                return True
             from kazma_core.agent_skills.tools import install_agent_skill
 
             await _send_model_reply(
@@ -2287,9 +2297,26 @@ async def _try_x_command(
             "`/x subjects` — declared subjects and views\n"
             "`/x poll` — force one mentions poll when the connected account supports it\n\n"
             "No subject is required — emoji picks the tone. Add a subject "
-            "only when you want a declared view on a topic."
+            "only when you want a declared view on a topic.\n\n"
+            "Every command but `list`, `subjects` and help acts on the owner's X "
+            "account, so it is a gateway admin's."
         )
         return True
+
+    # Every word but reading acts on the owner's X account: admin-only, the
+    # rule graph.py asks before every slash command (here too, so no other
+    # caller of this handler can skip it).
+    from kazma_gateway.slash_commands import changes_global_config
+
+    if changes_global_config(text):
+        from kazma_gateway.agent_handler.graph import _sender_is_gateway_admin
+
+        if not await asyncio.to_thread(_sender_is_gateway_admin, msg):  # a settings read (AUD-111)
+            await _send(
+                f"⛔ `/x {sub}` acts on the owner's X account, so it is admin-only. Set "
+                "`KAZMA_GATEWAY_ADMINS` or join the platform user allowlist."
+            )
+            return True
 
     from kazma_core.tenant_context import tenant_scope
 

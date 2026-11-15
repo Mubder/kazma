@@ -15,10 +15,10 @@
                 <textarea id="report-note" class="form-input" rows="4" maxlength="4000"
                           placeholder="{{ t('support.note_placeholder') }}"
                           :value="$store.report.note"
-                          @input="$store.report.note = $event.target.value; $store.report.preview = ''"></textarea>
+                          @input="$store.report.note = $event.target.value; $store.report.preview = ''; $store.report.reportId = ''"></textarea>
                 <label class="report-include" x-show="$store.report.chatSession" x-cloak>
                     <input type="checkbox" id="report-include-chat" x-model="$store.report.includeChat"
-                           @change="$store.report.preview = ''">
+                           @change="$store.report.preview = ''; $store.report.reportId = ''">
                     <span>{{ t('support.include_chat') }}</span>
                 </label>
                 <div class="report-actions">
@@ -44,6 +44,9 @@
                 </template>
                 <template x-if="$store.report.failed">
                     <p class="notice tone-danger" role="alert">{{ t('support.failed') }}</p>
+                </template>
+                <template x-if="$store.report.expired">
+                    <p class="notice tone-warning" role="alert" id="report-expired">{{ t('support.expired') }}</p>
                 </template>
             </div>
         </div>

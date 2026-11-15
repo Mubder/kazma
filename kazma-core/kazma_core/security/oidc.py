@@ -23,7 +23,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
-import hmac
 import logging
 import os
 import secrets
@@ -33,6 +32,7 @@ from urllib.parse import urlencode
 
 import httpx
 from kazma_core.http_tls import shared_ssl_context
+from kazma_core.security.secret_compare import same_secret
 
 __all__ = [
     "BINDING_COOKIE_PATH",
@@ -293,9 +293,7 @@ async def exchange_code(code: str, state: str, *, bound_state: str) -> dict[str,
     cfg = OidcConfig()
     from kazma_core.config_store import get_config_store
 
-    if not state or not bound_state or not hmac.compare_digest(
-        bound_state.encode("utf-8"), state.encode("utf-8")
-    ):
+    if not state or not bound_state or not same_secret(state, bound_state):
         raise PermissionError("OIDC sign-in was not started in this browser")
 
     taken: dict[str, Any] = {}
@@ -352,9 +350,7 @@ async def exchange_code(code: str, state: str, *, bound_state: str) -> dict[str,
     if id_token:
         claims = await _verify_id_token(str(id_token), disc, cfg)
         # A sign-in started before the nonce existed has none recorded.
-        if nonce and not hmac.compare_digest(
-            str(claims.get("nonce") or "").encode("utf-8"), nonce.encode("utf-8")
-        ):
+        if nonce and not same_secret(str(claims.get("nonce") or ""), nonce):
             raise PermissionError("OIDC id_token nonce does not match this sign-in")
     elif tokens.get("access_token") and disc.get("userinfo_endpoint"):
         claims = await _userinfo_claims(

@@ -243,11 +243,14 @@ def _is_danger(tool_name: str, hitl_config: dict[str, Any] | None = None) -> boo
 
 
 def _read_only(tool_name: str) -> bool:
-    """A tool MCP may call read-only: its tier says it reads (never "no tier")."""
+    """A tool MCP may call read-only: its tier says it reads (never "no tier"),
+    and no argument makes it write (``side_effects.READ_ONLY_ARGUMENTS``:
+    ``crawl_site`` saves pages unless asked not to)."""
     try:
         from kazma_core.safety.hitl import get_tool_tier
+        from kazma_core.safety.side_effects import READ_ONLY_ARGUMENTS
 
-        return get_tool_tier(tool_name) in ("read", "safe")
+        return get_tool_tier(tool_name) in ("read", "safe") and tool_name not in READ_ONLY_ARGUMENTS
     except Exception:
         return False
 

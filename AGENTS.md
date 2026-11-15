@@ -4694,7 +4694,11 @@ planted one as the control; Express never fails for want of Docker; the
 quickstart's table equal to `COMPONENTS`).
 
 **A problem report is one report, seen before it is sent** (2026-11-14,
-REMAINING 3.1; `kazma_core/support/problem_report.py`). `collect` gathers the
+REMAINING 3.1; `kazma_core/support/problem_report.py`). **Send sends the
+report shown** (2026-11-15): the web holds the previewed report by id for its
+asker (`problem_report.hold`/`take`, ten minutes, 409 `report_expired`), and a
+chat shows every part of it before `/report send`; both collected again on
+Send before. `collect` gathers the
 note, where it was asked from, version/commit, system, install parts,
 readiness check results, open problems' titles and the last ERROR lines of
 the log; everything passes `redacted` (credentials, the home folder, emails,
@@ -9003,6 +9007,16 @@ code) and Kazma ran with nobody supervising it.
   settings, test page and leave, the install still paired; the verifier
   with v1 accepted as the negative control), `tests/test_observer_heartbeat.py`,
   `tests/test_outside_watch.py`.
+  **A report's page is plainly a report** (2026-11-15): `POST /v1/report`
+  (`deploy/observer/src/reports.js`, open to anyone) pages only a `version`
+  matching `VERSION_RE` and a note through `cleanNote` (control, direction and
+  invisible characters out, one line, links and `@` made inert, 160
+  characters), and the page says someone sent it and nothing in it is
+  checked: a crafted version made fake Watch alerts.
+- **A secret is compared with `secret_compare.same_secret`** (UTF-8 bytes;
+  2026-11-15): `hmac.compare_digest` raised on non-ASCII text, and a webhook
+  answered 500 with a traceback. Nothing else calls `compare_digest` but the
+  standard-library document broker (`tests/test_secret_compare.py`).
 - **Settings' "Restart server" asks the guard.** A server the guard started
   writes the guard's reload request (`supervisor_watch.request_guard_reload`;
   the guard hands the path over in `KAZMA_GUARD_RELOAD_FILE`, an older guard
@@ -9552,6 +9566,13 @@ and the sibling suites):**
   repository's valid bundle and another workflow's identity are refused, an
   older release's bundle is verified; the updater without the check and the
   v0.11.0 cutoff, which refuses v0.21.1, as negative controls).
+  **One reading of a version** (2026-11-15): `release_signature.release_version`
+  (`vMAJOR.MINOR.PATCH`, ASCII digits) serves `parse_version`, `is_newer` and
+  `must_be_signed`; a tag it cannot read is refused before anything
+  downloads, and the wheel's file name and METADATA `Version` must equal the
+  tag. The two readers disagreed, so a tag like `v0+1.99.0` read as newer and
+  as not needing a signature (crafted tags in
+  `tests/test_update_checks_release_signature.py`).
   On a wheel install `--reinstall` fetches its own release (`_get_release`,
   tag `v<version>`) and `--force` with nothing newer reinstalls
   (`do_pip_update(reinstall=True)`: `--force-reinstall --no-deps`, then the
@@ -9648,6 +9669,14 @@ and the sibling suites):**
   names every menu command. A new command needs all three. `/stop` is
   `/abort` on every surface (catalog, gateway, web chat): three "/stop"s
   answered "Unknown command" while a turn ran (live 2026-10-20).
+- **A chat command that acts for everyone is an admin's** (2026-11-15, the
+  defensive check before the independent review: `/x approve` posted to the
+  owner's X account for any allowed sender). Every `/x` word but help,
+  `list` and `subjects` (`slash_commands.X_OPEN_SUBCOMMANDS`, so a new word
+  starts closed) and the `/skill owner/repo` shorthand are admin-only. Gate:
+  `tests/test_chat_command_effects_need_admin.py` reads each `_try_*_command`
+  branch's calls: a branch that acts needs `changes_global_config` or a
+  `DECLARED_OPEN` reason (the old rule and a planted branch as controls).
 
 ### 47. Settings backup and restore keep the owner's keys (`kazma_core/settings_restore.py`, 2026-10-01)
 
@@ -11487,7 +11516,9 @@ SERVICE (a tunnel) reach its published ports, and it is back 19 s after a
   answers `RESTART` and the container steps after it wait (Docker
   Desktop's own path keeps its order). The distro is the dated Ubuntu 24.04
   image, Docker Engine set up by `setup-engine.sh` piped over stdin (LF,
-  idempotent, docker packages held, TLS keys made once, listening on
+  idempotent, docker packages held, Docker's apt key kept only when its
+  fingerprint is the published one, `kazma_trust_docker_key`,
+  `tests/test_engine_docker_key.py`, TLS keys made once, listening on
   127.0.0.1 only with client certificates); Docker's Windows CLI and the
   compose plugin from Docker's own downloads. **Kazma's own CLI, not any
   CLI** (2026-11-14): the check's "cli" is
@@ -11714,6 +11745,13 @@ System; `_strict_bool`, a SETTING) is on; off, both answer 404.
   last turns are kept in this process (`_Store`), a day.
 - Gate: `tests/test_a2a.py` (every call, the read-only graph by name, no
   memory, cancel, busy, a failed turn, refusals as JSON-RPC errors).
+- **A read set never writes** (2026-11-15): `crawl_site` is read tier but
+  saved files by default. `side_effects.READ_ONLY_ARGUMENTS` (`crawl_site`'s
+  `save`) is dropped from the tools a read set offers and forced off by
+  `DeclaredToolExecutor(read_only=True)`, for A2A and a scheduled task's
+  `read` capability alike; an A2A body is at most `MAX_BODY_BYTES` (256 KiB,
+  also declared in `body_limits`). Gate: `tests/test_read_tools_never_write.py`
+  (every read- and safe-tier tool's code read for file writes).
 
 ### 64. WhatsApp (`kazma_gateway/adapters/whatsapp.py`, 2026-11-14)
 

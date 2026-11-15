@@ -32,9 +32,9 @@ from enum import Enum
 from kazma_core.safety.hitl import CANONICAL_DANGER_TOOLS, TOOL_TIERS
 
 __all__ = [
-    "EffectKind", "SecurityTier", "SemanticTier",
+    "EffectKind", "READ_ONLY_ARGUMENTS", "SecurityTier", "SemanticTier",
     "ToolEffectProfile", "get_effect_profile", "classify_mcp_tool_effect",
-    "is_read_only", "requires_semantic_check", "requires_security_approval",
+    "is_read_only", "read_only_arguments", "requires_semantic_check", "requires_security_approval",
 ]
 
 
@@ -74,6 +74,32 @@ class ToolEffectProfile:
     act: str | None = None             # commitment act (plan §3.5) or None for reads
     required_slots: tuple[str, ...] = field(default_factory=tuple)
     registered: bool = True            # False → inferred fail-closed profile
+
+
+#: Read-tier tools that write only when an argument asks them to, and the
+#: values that keep them read-only (2026-11-15). ``crawl_site`` is a read
+#: tool, but saved every page it fetched into the workspace unless ``save``
+#: was false (its default is true), under a folder its caller chose: a
+#: scheduled task with ``read`` tools and an A2A turn wrote files. A read set
+#: runs these tools with these values (:func:`read_only_arguments`, applied by
+#: ``agent_runner.DeclaredToolExecutor``, which also drops the arguments from
+#: the tools it offers), and the MCP server never calls one read-only.
+#: ``tests/test_read_tools_never_write.py`` reads every read-tier tool's code
+#: for what it can write and holds this table to it: each write it finds sits
+#: under a test of one of these arguments.
+READ_ONLY_ARGUMENTS: dict[str, dict[str, object]] = {
+    "crawl_site": {"save": False},
+}
+
+
+def read_only_arguments(tool_name: str, arguments: dict | None) -> dict:
+    """*arguments* for *tool_name* in a read set: the values of
+    :data:`READ_ONLY_ARGUMENTS` over whatever the caller passed."""
+    forced = READ_ONLY_ARGUMENTS.get(tool_name or "")
+    out = dict(arguments or {})
+    if forced:
+        out.update(forced)
+    return out
 
 
 #: Where each tool that sends a message to someone names its recipients

@@ -10,7 +10,9 @@ approval card shows it, and the fire is built with exactly those tools:
   which reads private data and changes nothing (reading email: the tier
   ``side_effects`` and the MCP server already count as read; 2026-11-14, an
   inbox automation could not read the inbox) -- plus the one delivery the
-  scheduler makes itself.
+  scheduler makes itself. Read-only in fact: a read tool that writes when an
+  argument asks (``crawl_site``'s ``save``) is offered without it and run
+  with it off (``side_effects.READ_ONLY_ARGUMENTS``, 2026-11-15).
 * ``read_write``: read- and write-tier tools, declared at booking.
 
 Danger, always-ask, unclassified and MCP tools are never offered to a fire
@@ -96,4 +98,7 @@ def cron_fire_graph(agent: Any, *, capabilities: str = DEFAULT_CAPABILITIES) -> 
     The app's cron graph builder calls this; nothing else builds a fire.
     """
     names = _declared_tool_names(list(agent.tools.get_tool_definitions()), capabilities)
-    return agent.build_child_graph(declared_tools=names)
+    # A read set never writes: a read tool that writes when asked
+    # (crawl_site's save) runs read-only (side_effects.READ_ONLY_ARGUMENTS).
+    return agent.build_child_graph(declared_tools=names,
+                                   read_only=normalize_capabilities(capabilities) == "read")

@@ -35,6 +35,8 @@ def _wheel(tmp: Path, locked: str | None) -> Path:
     path = tmp / "kazma-9.9.9-py3-none-any.whl"
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr("kazma_cli/__init__.py", "")
+        # A wheel says its own version, which the updater holds to the tag's.
+        zf.writestr("kazma-9.9.9.dist-info/METADATA", "Metadata-Version: 2.4\nName: kazma\nVersion: 9.9.9\n\n")
         if locked is not None:
             zf.writestr("kazma_cli/locked_versions.txt", locked)
     return path

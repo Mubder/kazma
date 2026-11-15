@@ -31,6 +31,20 @@
   longer count as this machine unless listed in `KAZMA_AUTOLOGIN_HOSTS`.
 - Sign-in, cross-site and role checks judge the path the server routes; an
   encoded `?` or `#` in a path is refused.
+- In chat apps, `/x` publish, deny, delete, retry, poll and roast, and
+  `/skill owner/repo`, need an admin.
+- A problem report sends exactly the report you were shown, on the web and
+  in chat apps.
+- A read-only scheduled task or A2A turn can no longer write files; an A2A
+  request is at most 256 KiB.
+- A problem report sent to Kazma Watch can no longer look like one of its
+  own alerts.
+- A webhook secret, signature or verify token with a non-ASCII character is
+  refused, no longer a server error.
+- `kazma update` reads every release tag one strict way and checks the
+  wheel's own version against it.
+- Kazma's container engine trusts Docker's package key only by its published
+  fingerprint.
 
 - `/long on` never lowers a chat's tool-round limit. Its research preset is
   40 rounds; on an install whose own limit is higher (live: 100), turning long

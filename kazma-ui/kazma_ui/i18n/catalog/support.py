@@ -34,6 +34,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "The report could not be made. Try again, or run kazma report in a terminal.",
         "ar": "تعذّر إعداد التقرير. حاول مرة أخرى، أو شغّل kazma report في الطرفية.",
     },
+    "support.expired": {
+        "en": "This report is no longer kept for sending. Show it again, then send it.",
+        "ar": "لم يعد هذا التقرير محفوظًا للإرسال. اعرضه مرة أخرى ثم أرسله.",
+    },
     "support.report_this": {"en": "Report this", "ar": "أبلغ عن هذا"},
     "support.include_chat": {
         "en": "Include this chat's last 10 messages (they are shown below before anything is sent)",

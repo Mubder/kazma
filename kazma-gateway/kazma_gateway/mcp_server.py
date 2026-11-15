@@ -47,7 +47,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TextIO
 
-import hmac
+from kazma_core.security.secret_compare import same_secret
 
 logger = logging.getLogger("kazma.mcp.ide_server")
 
@@ -513,7 +513,7 @@ class MCPServer:
         if tool_name not in DISPATCH:
             return make_error(req_id, -32602, f"Unknown tool: {tool_name}")
 
-        # PHASE 1: Strict KAZMA_SECRET enforcement with hmac.compare_digest.
+        # PHASE 1: Strict KAZMA_SECRET enforcement, compared in constant time.
         # Route danger tools (write_file, run_tests) through SafetyMiddleware.check_sync().
         # Activation controlled by env KAZMA_MCP_IDE_ENABLED (maps to mcp.ide_server.enabled).
         mcp_enabled = os.environ.get("KAZMA_MCP_IDE_ENABLED", "true").lower() in ("1", "true", "yes")
@@ -539,7 +539,7 @@ class MCPServer:
                 provided = arguments.pop("_secret", "") or ""
             if not isinstance(provided, str):
                 provided = str(provided)
-            if not hmac.compare_digest(provided.encode("utf-8"), kazma_secret.encode("utf-8")):
+            if not same_secret(provided, kazma_secret):
                 return make_error(req_id, -32603, "Invalid KAZMA_SECRET for danger tool")
 
         # Safety middleware gate (fail-closed bus gate)

@@ -12,6 +12,7 @@ from typing import Any
 import yaml
 
 from kazma_core.config_store import get_kazma_secret
+from kazma_core.security.secret_compare import same_secret
 
 __all__ = ["SkillError", "SkillLoadError", "SkillLoader", "SkillNotFoundError"]
 
@@ -232,7 +233,7 @@ class SkillLoader:
 
                 if stored_hash:
                     # ── Checksum: fail-closed on mismatch ──────────
-                    if not _hmac.compare_digest(stored_hash, actual_hash):
+                    if not same_secret(stored_hash, actual_hash):
                         raise SkillLoadError(
                             f"Checksum mismatch for {file_path.name} in skill {skill_name}. "
                             f"Expected {stored_hash[:16]}..., got {actual_hash[:16]}... "
@@ -253,7 +254,7 @@ class SkillLoader:
                         expected_sig = _hmac.new(
                             secret.encode(), actual_hash.encode(), hashlib.sha256
                         ).hexdigest()
-                        if not _hmac.compare_digest(stored_sig, expected_sig):
+                        if not same_secret(stored_sig, expected_sig):
                             raise SkillLoadError(
                                 f"Signature verification failed for {file_path.name} in "
                                 f"skill {skill_name}. The checksum or signature may be "

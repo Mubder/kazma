@@ -189,7 +189,9 @@ def changes_global_config(text: str) -> bool:
     if head == "/personality":
         return bool(sub) and sub != "list"
     if head == "/skill":
-        return sub in ("install", "add", "uninstall", "remove", "rm")
+        # `/skill owner/repo` (or a URL) installs too, as a shorthand: it was
+        # open to any allowed sender until 2026-11-15.
+        return sub in ("install", "add", "uninstall", "remove", "rm") or "/" in sub or sub.startswith("http")
     if head == "/ide":
         return sub == "repo" and (arg in ("switch", "clone") or "/" in arg)
     if head == "/swarm":
@@ -210,7 +212,18 @@ def changes_global_config(text: str) -> bool:
         return sub in ("add", "ingest", "crawl", "refresh", "delete")
     if head in ("/model", "/models"):
         return sub == "default" and bool(arg)
+    if head == "/x":
+        # The owner's X account (2026-11-15): approve and retry publish,
+        # delete removes a post, deny drops a draft, roast drafts one, poll
+        # spends the account's read quota -- each was open to any allowed
+        # sender. Reading the drafts and the subjects stays open; any other
+        # word is admin-only too, so a subcommand added later starts closed.
+        return sub not in X_OPEN_SUBCOMMANDS
     return False
+
+
+#: The ``/x`` words any allowed sender may use: help and reading.
+X_OPEN_SUBCOMMANDS = frozenset({"", "help", "?", "list", "subjects"})
 
 
 def resolve_slash_command(text: str, context: dict[str, Any] | None = None) -> str | None:

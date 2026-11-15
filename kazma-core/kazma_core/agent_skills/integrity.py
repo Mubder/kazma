@@ -27,6 +27,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from kazma_core.security.secret_compare import same_secret
+
 __all__ = [
     "ALGO",
     "VerifyResult",
@@ -164,7 +166,7 @@ def verify_skill(
         return VerifyResult(ok=True, reason="unsigned (no checksum stored)", signed=False)
 
     actual_checksum = compute_checksum(text)
-    if not _hmac.compare_digest(stored_checksum, actual_checksum):
+    if not same_secret(stored_checksum, actual_checksum):
         say(
             "[AgentSkill] '%s' checksum MISMATCH — possible tampering. Refusing.",
             skill_md_path.parent.name,
@@ -183,7 +185,7 @@ def verify_skill(
                 signed=True,
             )
         expected_sig = compute_signature(actual_checksum, secret)
-        if not _hmac.compare_digest(stored_signature, expected_sig):
+        if not same_secret(stored_signature, expected_sig):
             # The content matches its recorded checksum, so this is a key that
             # differs: KAZMA_SECRET changed since the install, another install
             # signed it (the user-level folder is shared), or someone re-signed

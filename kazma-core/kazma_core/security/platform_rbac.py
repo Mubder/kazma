@@ -15,13 +15,14 @@ Enable with users in ConfigStore key ``platform.users`` or Postgres
 from __future__ import annotations
 
 import hashlib
-import hmac
 import logging
 import os
 import re
 import secrets
 from dataclasses import dataclass
 from typing import Any
+
+from kazma_core.security.secret_compare import same_secret
 
 __all__ = [
     "PlatformRole",
@@ -258,7 +259,7 @@ def _verify_password_spent(password: str, stored: str) -> tuple[bool, int]:
         if not 0 < iterations <= 10_000_000:
             return False, 0
         check = _pbkdf2_hex(password, salt, iterations)
-        return hmac.compare_digest(check, hexdigest), iterations
+        return same_secret(check, hexdigest), iterations
     except Exception:
         return False, 0
 

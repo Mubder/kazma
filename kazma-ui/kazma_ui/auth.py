@@ -3,7 +3,7 @@
 When the ``KAZMA_SECRET`` environment variable is set, all sensitive API
 endpoints (``/api/settings``, ``/api/swarm``, ``/api/mcp``, ``/api/skills``,
 ``/api/models``, ``/api/ollama``) require an ``X-Kazma-Secret`` request header
-whose value matches the env var.  Comparison uses :func:`secrets.compare_digest`
+whose value matches the env var.  Comparison uses ``secret_compare.same_secret``
 for timing safety.
 
 When ``KAZMA_SECRET`` is **not** set, ``get_kazma_secret()`` auto-generates
@@ -24,7 +24,6 @@ Usage (in ``app.py``)::
 from __future__ import annotations
 
 import asyncio
-import hmac
 import logging
 import os
 import socket
@@ -38,6 +37,7 @@ from fastapi.responses import JSONResponse
 # Shorter than this, a KAZMA_SECRET set by hand is guessable at scale: one
 # number for the boot warning below and the security report.
 from kazma_core.security.boot_guard import WEAK_SECRET_CHARS, env_flag
+from kazma_core.security.secret_compare import same_secret
 
 from kazma_ui.documentation import PUBLIC_GUIDE_PATHS
 from kazma_ui.request_path import ambiguous_path_response, judged_path, path_is_ambiguous
@@ -988,13 +988,10 @@ def is_always_open(path: str) -> bool:
 def verify_secret(provided: str, expected: str) -> bool:
     """Timing-safe comparison of *provided* against *expected*.
 
-    Uses :func:`hmac.compare_digest` (alias of :func:`secrets.compare_digest`).
-    Both arguments are coerced to ``str`` before comparison.
+    Compared as UTF-8 bytes (``secret_compare.same_secret``): a header
+    holding any non-ASCII character is a mismatch, never an exception.
     """
-    try:
-        return hmac.compare_digest(str(provided or ""), str(expected or ""))
-    except Exception:
-        return False
+    return same_secret(str(provided or ""), str(expected or ""))
 
 
 #: The role an API token carries when it names none: tokens made before a
@@ -1051,7 +1048,7 @@ def _api_token_entry(provided: str) -> dict[str, Any] | None:
             if not isinstance(entry, dict):
                 continue
             # Constant time, like every other secret compare here.
-            if not hmac.compare_digest(str(entry.get("token_hash") or ""), token_hash):
+            if not same_secret(str(entry.get("token_hash") or ""), token_hash):
                 continue
             expires_days = entry.get("expires_days")
             created = entry.get("created_at") or ""

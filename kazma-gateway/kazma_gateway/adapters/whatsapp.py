@@ -31,7 +31,6 @@ by the chat outbox.
 from __future__ import annotations
 
 import asyncio
-import hmac
 import logging
 import time
 from collections.abc import Callable
@@ -41,6 +40,7 @@ import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
+from kazma_core.security.secret_compare import same_secret
 from kazma_gateway.adapters.whatsapp_api import DEFAULT_API_VERSION, WhatsAppClient, WhatsAppError
 from kazma_gateway.adapters.whatsapp_format import md_to_whatsapp, split_for_whatsapp
 from kazma_gateway.adapters.whatsapp_parse import (
@@ -192,7 +192,8 @@ class WhatsAppAdapter(SenderGate, BaseAdapter):
         """Meta's verification call: the challenge back when *token* is ours."""
         if mode != "subscribe" or not self._verify_token or not token:
             return None
-        if not hmac.compare_digest(token, self._verify_token):
+        # A query value with any non-ASCII character is a mismatch, never a 500.
+        if not same_secret(token, self._verify_token):
             return None
         self._receive.event("webhook_verified")
         logger.info("[whatsapp] the webhook answered a verify call with the saved verify token")

@@ -27,13 +27,49 @@ appendWindowsPath=false
 default=root
 EOF
 
+# Docker's apt signing key is trusted only with the fingerprint Docker
+# publishes (docs.docker.com/engine/install/ubuntu). It was trusted on first
+# download, whatever it was; now a key with any other fingerprint -- or more
+# keys than Docker's one -- is refused before apt ever reads it, and a key a
+# second run finds is checked again.
+DOCKER_KEY_FINGERPRINT=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+DOCKER_KEY_URL=https://download.docker.com/linux/ubuntu/gpg
+
+# The fingerprints of the primary keys in the key file $1, one a line.
+kazma_key_fingerprints() {
+  gpg --batch --show-keys --with-colons "$1" 2>/dev/null \
+    | awk -F: '$1 == "pub" { want = 1; next } want && $1 == "fpr" { print $10; want = 0 }'
+}
+
+# Docker's key at $1/docker.asc, only when it is Docker's; fails otherwise.
+kazma_trust_docker_key() {
+  local keyrings="$1" key="$1/docker.asc" tmp
+  install -m 0755 -d "$keyrings"
+  if [ -f "$key" ] && [ "$(kazma_key_fingerprints "$key")" = "$DOCKER_KEY_FINGERPRINT" ]; then
+    return 0
+  fi
+  tmp="$(mktemp)"
+  if ! curl -fsSL "$DOCKER_KEY_URL" -o "$tmp"; then
+    rm -f "$tmp"
+    echo "KAZMA_ENGINE_ERROR Docker's signing key could not be downloaded" >&2
+    return 1
+  fi
+  if [ "$(kazma_key_fingerprints "$tmp")" != "$DOCKER_KEY_FINGERPRINT" ]; then
+    rm -f "$tmp" "$key"
+    echo "KAZMA_ENGINE_ERROR Docker's signing key is not the one Docker publishes" \
+      "($DOCKER_KEY_FINGERPRINT): not trusted" >&2
+    return 1
+  fi
+  install -m 0644 "$tmp" "$key"
+  rm -f "$tmp"
+}
+
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 apt-get upgrade -y -q
-apt-get install -y -q ca-certificates curl openssl unattended-upgrades
+apt-get install -y -q ca-certificates curl gnupg openssl unattended-upgrades
+kazma_trust_docker_key /etc/apt/keyrings
 if ! command -v dockerd >/dev/null 2>&1; then
-  install -m 0755 -d /etc/apt/keyrings
-  curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
   echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable" \
     > /etc/apt/sources.list.d/docker.list
   apt-get update -q

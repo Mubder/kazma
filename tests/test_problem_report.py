@@ -118,15 +118,20 @@ def test_the_routes_preview_and_send_and_are_an_administrators(monkeypatch) -> N
     from kazma_ui import support_api
 
     monkeypatch.setattr(pr, "collect", lambda note, where="", **k: {**_report(), "note": note, "where": where})
-    monkeypatch.setattr(pr, "send", lambda report, **k: pr.SendResult(sent=True, report_id="abc123defg"))
+    sent: list[dict[str, Any]] = []
+    monkeypatch.setattr(pr, "send", lambda report, **k: sent.append(report) or pr.SendResult(True, "abc123defg"))
     app = FastAPI()
     app.include_router(support_api.create_support_router())
     client = TestClient(app)
     shown = client.post("/api/support/report/preview", json={"note": "broken", "where": "/chat"}).json()
     assert '"note": "broken"' in shown["preview"] and '"where": "/chat"' in shown["preview"]
-    assert client.post("/api/support/report", json={"note": "broken"}).json() == {
+    assert client.post("/api/support/report", json={"report_id": shown["report_id"]}).json() == {
         "sent": True, "id": "abc123defg", "saved": "", "why": ""}
-    assert client.post("/api/support/report", json={"note": "x" * 4001}).status_code == 422
+    assert pr.preview(sent[0]) == shown["preview"], "the report sent is the one shown"
+    again = client.post("/api/support/report", json={"report_id": shown["report_id"]})
+    assert again.status_code == 409 and again.json()["code"] == "report_expired", "sent once"
+    assert client.post("/api/support/report", json={"note": "broken"}).status_code == 422, "an id, never a note"
+    assert client.post("/api/support/report/preview", json={"note": "x" * 4001}).status_code == 422
     assert not role_allows("operator", "/api/support/report", "POST")
     assert not role_allows("viewer", "/api/support/report/preview", "POST")
     assert role_allows("admin", "/api/support/report", "POST")
@@ -173,10 +178,108 @@ def test_report_in_a_chat_shows_then_sends(monkeypatch) -> None:
 
     asyncio.run(run())
     assert "Nothing to send" in replies[0]
-    assert "The PDF was empty" in replies[1] and "/report send" in replies[1]
+    assert "The PDF was empty" in replies[1] and "/report send" in replies[-2]
     assert sent[0]["note"] == "The PDF was empty" and sent[0]["where"] == "chat:telegram"
-    assert "abc123defg" in replies[2]
+    assert "abc123defg" in replies[-1]
     assert changes_global_config("/report it broke") and changes_global_config("/report send")
+
+
+def _shown_blocks(replies: list[str]) -> list[str]:
+    """The report text a chat was shown: each part's code block, in order."""
+    return [reply.split("\n```\n", 1)[1].rsplit("\n```", 1)[0]
+            for reply in replies if reply.startswith("Part ") and "\n```\n" in reply]
+
+
+def test_a_chat_is_shown_every_character_it_sends(monkeypatch, tmp_path) -> None:
+    """A chat app's preview was a summary; ``/report send`` then sent up to 30
+    log lines and every open problem's title the person never saw."""
+    from kazma_gateway.agent_handler.report_command import (
+        CHAT_PART_CHARS,
+        _pending,
+        _report_parts,
+        try_report_command,
+    )
+    from kazma_gateway.gateway import IncomingMessage
+
+    _pending.clear()
+    log = tmp_path / "kazma.log"
+    log.write_text("\n".join(f'{{"level": "ERROR", "message": "fault {n} ```` x" }}' for n in range(30)),
+                   encoding="utf-8")
+    monkeypatch.setattr(pr, "_readiness", lambda port: {"answered": False, "why": "ConnectError"})
+    monkeypatch.setattr(pr, "_problems", lambda: [f"alert: problem {n}" for n in range(20)])
+    real_collect = pr.collect
+    monkeypatch.setattr(pr, "collect", lambda note, **k: real_collect(note, log=log, **k))
+    sent: list[Any] = []
+    monkeypatch.setattr(pr, "send", lambda report, **k: sent.append(report) or pr.SendResult(True, "abc123defg"))
+    replies: list[str] = []
+
+    async def say(text: str) -> None:
+        replies.append(text)
+
+    def msg(text: str) -> IncomingMessage:
+        return IncomingMessage(platform="slack", sender_id="slack:U1", text=text, context_metadata={"channel_id": "C"})
+
+    async def run() -> None:
+        await try_report_command(msg("/report " + "the export broke " * 200), say)
+        await try_report_command(msg("/report send"), say)
+
+    asyncio.run(run())
+    text = pr.preview(sent[0])
+    parts = _report_parts(text)
+    assert "".join(parts) == text and len(parts) > 1 and all(len(p) <= CHAT_PART_CHARS for p in parts)
+    assert _shown_blocks(replies) == [p.rstrip("\n") for p in parts], "the chat saw every part that was sent"
+    assert "fault 29" in text and "problem 19" in text
+    assert "`" not in text, "no backtick can end a part's code block early"
+    assert json.loads(text)["recent_errors"][-1].count("````") == 1, "the same JSON once read"
+
+
+def test_negative_control_the_old_chat_preview_showed_a_summary_only() -> None:
+    """The old preview: counts of the error lines and problems, never their text."""
+    report = {**_report(), "system": {"os": "x", "python": "3"}, "recent_errors": ["fault 29 secret-ish"],
+              "open_problems": ["alert: problem 19"]}
+    old = (f"• Open problems: {len(report['open_problems'])}; recent error lines: "
+           f"{len(report['recent_errors'])}")
+    assert "fault 29" not in old and "fault 29" in pr.preview(report)
+
+
+def test_the_web_sends_the_report_it_showed_not_a_new_one(monkeypatch, tmp_path) -> None:
+    """Send collected the report again: a log line written after the preview
+    left unseen. Now it sends the report it showed, to the person it showed it to."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from kazma_ui import support_api
+
+    log = tmp_path / "kazma.log"
+    log.write_text('{"level": "ERROR", "message": "the error the person saw"}\n', encoding="utf-8")
+    monkeypatch.setattr(pr, "_readiness", lambda port: {})
+    monkeypatch.setattr(pr, "_problems", lambda: [])
+    real_collect = pr.collect
+    collected: list[int] = []
+    monkeypatch.setattr(pr, "collect", lambda note, **k: collected.append(1) or real_collect(note, log=log, **k))
+    sent: list[dict[str, Any]] = []
+    monkeypatch.setattr(pr, "send", lambda report, **k: sent.append(report) or pr.SendResult(True, "abc123defg"))
+    app = FastAPI()
+    app.include_router(support_api.create_support_router())
+    owner = TestClient(app, cookies={"kazma-session": "owner-session"})
+    other = TestClient(app, cookies={"kazma-session": "someone-else"})
+    shown = owner.post("/api/support/report/preview", json={"note": "n"}).json()
+    with log.open("a", encoding="utf-8") as fh:
+        fh.write('{"level": "ERROR", "message": "written after the preview"}\n')
+    assert other.post("/api/support/report", json={"report_id": shown["report_id"]}).status_code == 409
+    assert owner.post("/api/support/report", json={"report_id": shown["report_id"]}).json()["sent"] is True
+    assert collected == [1], "collected once, for the preview"
+    assert pr.preview(sent[0]) == shown["preview"]
+    assert "written after the preview" not in pr.preview(sent[0])
+    # The control: collecting again at Send, as the route did, takes the new line.
+    assert "written after the preview" in pr.preview(real_collect("n", log=log))
+
+
+def test_a_held_report_expires_and_is_kept_bounded() -> None:
+    first = pr.hold(_report(), "a", now=0.0)
+    assert pr.take(first, "a", now=pr.HOLD_S + 1) is None
+    ids = [pr.hold(_report(), "a", now=10.0) for _ in range(pr.MAX_HELD + 5)]
+    assert pr.take(ids[0], "a", now=11.0) is None and pr.take(ids[-1], "a", now=11.0) is not None
 
 
 def test_the_inbox_kazma_sends_to_is_the_worker_route() -> None:

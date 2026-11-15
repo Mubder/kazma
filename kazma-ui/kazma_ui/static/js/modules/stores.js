@@ -479,6 +479,10 @@ export function registerStores() {
             note: '',
             where: '',
             preview: '',
+            // The server keeps the report it showed under this id; Send sends
+            // that very report, never one collected again.
+            reportId: '',
+            expired: false,
             // This chat's id when opened on a chat; its messages go in only when ticked.
             chatSession: '',
             includeChat: false,
@@ -494,39 +498,60 @@ export function registerStores() {
                     ? (window.KazmaChat.currentSessionId() || '') : ''));
                 this.includeChat = false;
                 this.preview = '';
+                this.reportId = '';
+                this.expired = false;
                 this.result = null;
                 this.failed = false;
                 this.shown = true;
             },
             close() { this.shown = false; },
-            async _post(path) {
+            async _post(path, body) {
                 const resp = await fetch(path, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     credentials: 'same-origin',
-                    body: JSON.stringify({ note: this.note.slice(0, 4000), where: this.where.slice(0, 200),
-                        chat_session: this.includeChat ? this.chatSession.slice(0, 200) : '' }),
+                    body: JSON.stringify(body),
                 });
+                if (resp.status === 409) {
+                    const err = new Error('HTTP 409');
+                    err.expired = true;
+                    throw err;
+                }
                 if (!resp.ok) throw new Error('HTTP ' + resp.status);
                 return resp.json();
             },
             async load() {
                 this.loading = true;
                 this.failed = false;
+                this.expired = false;
+                this.reportId = '';
                 try {
-                    this.preview = (await this._post('/api/support/report/preview')).preview || '';
+                    const shown = await this._post('/api/support/report/preview', {
+                        note: this.note.slice(0, 4000), where: this.where.slice(0, 200),
+                        chat_session: this.includeChat ? this.chatSession.slice(0, 200) : '',
+                    });
+                    this.preview = shown.preview || '';
+                    this.reportId = shown.report_id || '';
                 } catch (e) {
                     this.failed = true;
                 }
                 this.loading = false;
             },
             async send() {
+                if (!this.preview || !this.reportId) return;
                 this.sending = true;
                 this.failed = false;
                 try {
-                    this.result = await this._post('/api/support/report');
+                    this.result = await this._post('/api/support/report', { report_id: this.reportId });
                 } catch (e) {
-                    this.failed = true;
+                    if (e && e.expired) {
+                        // Sent already, kept too long, or not this person's: show it again first.
+                        this.expired = true;
+                        this.preview = '';
+                        this.reportId = '';
+                    } else {
+                        this.failed = true;
+                    }
                 }
                 this.sending = false;
             },

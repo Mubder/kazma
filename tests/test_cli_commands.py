@@ -852,16 +852,19 @@ class TestVersionComparison:
 
         assert parse_version("1.12.3") == (1, 12, 3)
 
-    def test_parse_version_with_prerelease(self) -> None:
+    def test_parse_version_refuses_a_prerelease(self) -> None:
         from kazma_cli.update import parse_version
 
-        # Pre-release suffixes are stripped
-        assert parse_version("2.0.0a1") == (2, 0, 0)
+        # A release is MAJOR.MINOR.PATCH and nothing else (2026-11-15:
+        # tests/test_update_checks_release_signature.py, crafted tags).
+        with pytest.raises(ValueError):
+            parse_version("2.0.0a1")
 
-    def test_parse_version_two_parts(self) -> None:
+    def test_parse_version_refuses_two_parts(self) -> None:
         from kazma_cli.update import parse_version
 
-        assert parse_version("1.5") == (1, 5)
+        with pytest.raises(ValueError):
+            parse_version("1.5")
 
     def test_is_newer_true(self) -> None:
         from kazma_cli.update import is_newer

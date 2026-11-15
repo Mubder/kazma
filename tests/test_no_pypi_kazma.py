@@ -399,6 +399,9 @@ def github(monkeypatch):
     # held by tests/test_update_checks_release_signature.py on recorded bundles.
     monkeypatch.setattr(update, "check_bundle", lambda sha256, bundle, verifier=None: (
         "https://github.com/Mubder/kazma/.github/workflows/release.yml@refs/heads/main"))
+    # Nor any METADATA: the wheel's own version is the release's. The check
+    # itself is held by tests/test_update_checks_release_signature.py.
+    monkeypatch.setattr(update, "_wheel_version", lambda wheel: "0.12.0")
 
     def install(fake: FakeGitHub) -> FakeGitHub:
         monkeypatch.setattr(httpx, "Client", fake)

@@ -169,11 +169,18 @@ class DeclaredToolExecutor:
     what runs. A fired scheduled task is offered its declared tools
     (Scheduled audit SCH-S05), and a model that names another tool anyway is
     refused here rather than run by the full registry underneath.
+
+    A *read_only* set (a task booked with ``read`` tools, an A2A turn) runs a
+    read tool that can write when asked with the arguments that keep it
+    read-only (``side_effects.READ_ONLY_ARGUMENTS``: ``crawl_site`` with
+    ``save`` false), whatever the model passed (2026-11-15).
     """
 
-    def __init__(self, inner: Any, *, allowed: list[str] | tuple[str, ...] | frozenset[str]) -> None:
+    def __init__(self, inner: Any, *, allowed: list[str] | tuple[str, ...] | frozenset[str],
+                 read_only: bool = False) -> None:
         self._inner = inner
         self.allowed = frozenset(str(n) for n in allowed)
+        self.read_only = read_only
 
     async def execute(self, name: str, arguments: dict[str, Any] | None = None, *args: Any, **kwargs: Any) -> dict[str, Any]:
         if name not in self.allowed:
@@ -184,10 +191,35 @@ class DeclaredToolExecutor:
                     "tools it was booked with; answer with what those can find."
                 ),
             }
+        if self.read_only:
+            from kazma_core.safety.side_effects import read_only_arguments
+
+            arguments = read_only_arguments(name, arguments)
         return await self._inner.execute(name, arguments, *args, **kwargs)
 
     def __getattr__(self, attr: str) -> Any:
         return getattr(self._inner, attr)
+
+
+def _without_write_arguments(definition: dict[str, Any]) -> dict[str, Any]:
+    """*definition* as a read set offers it: without the arguments that make
+    a read tool write (``side_effects.READ_ONLY_ARGUMENTS``), so the model is
+    not offered what the executor would set aside."""
+    import copy
+
+    from kazma_core.safety.side_effects import READ_ONLY_ARGUMENTS
+
+    fn = definition.get("function", definition)
+    forced = READ_ONLY_ARGUMENTS.get(str(fn.get("name", definition.get("name", "")) or ""))
+    if not forced:
+        return definition
+    out = copy.deepcopy(definition)
+    params = out.get("function", out).get("parameters") or {}
+    for name in forced:
+        (params.get("properties") or {}).pop(name, None)
+        if isinstance(params.get("required"), list) and name in params["required"]:
+            params["required"].remove(name)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -945,6 +977,7 @@ class KazmaAgent:
         hitl_config: dict[str, Any] | None = None,
         checkpointer: Any | None = None,
         declared_tools: list[str] | None = None,
+        read_only: bool = False,
     ) -> Any:
         """Build a one-shot supervisor graph for sub-agents (audit M19).
 
@@ -956,6 +989,10 @@ class KazmaAgent:
                 Scheduled audit SCH-S05): the graph is offered exactly these
                 tools, an empty list meaning none, and its executor refuses
                 any other name the model produces.
+            read_only: With *declared_tools*, a read set: a read tool that
+                writes when asked (``side_effects.READ_ONLY_ARGUMENTS``) is
+                offered without those arguments and always run with the
+                values that keep it read-only.
             hitl_config: Optional HITL config; defaults to the live
                 ``get_hitl_config()``.
             checkpointer: Optional checkpointer. Child graphs default to
@@ -981,7 +1018,9 @@ class KazmaAgent:
                 or str(d.get("name", "")).lower() in allow
             ]
         if declared_tools is not None:
-            executor = DeclaredToolExecutor(self.tools, allowed=declared_tools)
+            executor = DeclaredToolExecutor(self.tools, allowed=declared_tools, read_only=read_only)
+            if read_only:
+                tool_defs = [_without_write_arguments(d) for d in tool_defs]
 
         hitl = hitl_config if hitl_config is not None else get_hitl_config(self.config.raw)
         if isinstance(hitl, dict) and not hitl.get("enabled", True):

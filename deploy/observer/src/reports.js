@@ -11,6 +11,13 @@
 //
 // A sender's address is kept only as an HMAC (the pairing token as key), to
 // count; a report is kept KEEP_S, then deleted by the minute run.
+//
+// The inbox is open, so what it pages is a stranger's text (2026-11-15): a
+// version with line breaks and a note with its own lines, links and
+// direction marks made a page that read like Kazma Watch's own alerts. Now a
+// version must be a version (VERSION_RE), the note is made one plain line
+// (control, direction and invisible characters out, links made inert, cut),
+// and the page says it is a report someone sent (pagerText).
 
 import { checkAccess } from "./access.js";
 import { page } from "./alerts.js";
@@ -23,6 +30,39 @@ export const NOTIFY_PER_DAY = 30;
 export const KEEP_S = 180 * 86400;
 const KIND = "kazma-problem-report";
 const ID_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
+// A version as Kazma writes one: MAJOR.MINOR.PATCH, at most a pre-release tag
+// and a local build mark (0.21.2, 0.22.0rc1, 0.21.2+g4d37b2c).
+export const VERSION_RE = /^\d{1,4}\.\d{1,4}\.\d{1,4}(?:(?:a|b|rc|\.dev|\.post)\d{1,4})?(?:\+[0-9A-Za-z.]{1,40})?$/;
+// How much of a note a page carries.
+export const PAGE_NOTE_CHARS = 160;
+// Control characters (C0, DEL, C1), the Arabic letter mark, zero-width and
+// direction marks, the line and paragraph separators, embeddings and
+// overrides, isolates, the word joiner's block, the byte-order mark.
+const INVISIBLE = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g;
+
+/**
+ * A stranger's note made safe to page: one plain line with no control,
+ * direction or invisible character, every link inert (a scheme's "://" and
+ * each dot between letters or digits bracketed, "@" written out), cut at
+ * ``max`` characters.
+ */
+export function cleanNote(value, max = PAGE_NOTE_CHARS) {
+  const text = String(value ?? "")
+    .replace(INVISIBLE, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .replace(/([a-z][a-z0-9+.-]*):\/\//giu, "$1[:]//")
+    .replace(/([\p{L}\p{N}])\.(?=[\p{L}\p{N}])/gu, "$1[.]")
+    .replace(/@/g, "(at)");
+  return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
+}
+
+/** The page for report *id*: plainly a report someone sent, their words quoted. */
+export function pagerText(id, version, note) {
+  return `🐞 Problem report ${id}: someone sent a report to the inbox, saying it is from Kazma ${version}. ` +
+    "Anyone can send one; nothing in it is checked.\n" +
+    `Their words: "${cleanNote(note) || "(no words)"}"`;
+}
 
 async function readCapped(request, max) {
   const declared = Number(request.headers.get("Content-Length") || "0");
@@ -59,7 +99,9 @@ export function newId(randomBytes = (n) => crypto.getRandomValues(new Uint8Array
 export function invalid(report) {
   if (!report || typeof report !== "object" || Array.isArray(report)) return "not_an_object";
   if (report.kind !== KIND) return "wrong_kind";
-  if (typeof report.version !== "string" || report.version.length > 40) return "bad_version";
+  if (typeof report.version !== "string" || report.version.length > 40 || !VERSION_RE.test(report.version)) {
+    return "bad_version";
+  }
   if (typeof report.note !== "string" || report.note.length > 4000) return "bad_note";
   return "";
 }
@@ -93,8 +135,7 @@ export async function handleReport(request, env, now, deps = {}) {
     "SELECT COUNT(*) AS n FROM problem_reports WHERE notified = 1 AND received_at > ?",
   ).bind(now - 86400).first("n");
   if (Number(notified) < NOTIFY_PER_DAY) {
-    const words = note.replace(/\s+/g, " ").trim().slice(0, 160) || "(no words)";
-    const sent = await page(env, `🐞 Problem report ${id} (Kazma ${report.version}): ${words}`, now,
+    const sent = await page(env, pagerText(id, report.version, note), now,
       { fetcher: deps.fetcher || fetch }).catch(() => false);
     if (sent) await db.prepare("UPDATE problem_reports SET notified = 1 WHERE id = ?").bind(id).run();
   }

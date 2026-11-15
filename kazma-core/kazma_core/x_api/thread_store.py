@@ -12,6 +12,7 @@ from typing import Any
 from kazma_core.x_api.account_binding import credential_revision
 from kazma_core.x_api.ownership import x_tenant_id
 from kazma_core.x_api.publication_store import PublicationConflictError, get_publication_store, payload_hash
+from kazma_core.security.secret_compare import same_secret
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS x_threads (
@@ -118,7 +119,7 @@ def _claim_thread(ident: str, *, revision: int, token: str, cfg: Any, actor: str
     owner = uuid.uuid4().hex
     with store._connection(transaction=True) as conn:
         row = conn.execute("SELECT * FROM x_threads WHERE id = ? AND tenant_id = ?", (ident, tenant)).fetchone()
-        if (not token or row is None or row["revision"] != revision or not secrets.compare_digest(row["token"], token)
+        if (not token or row is None or row["revision"] != revision or not same_secret(token, row["token"])
                 or row["expires_at"] < now or row["state"] in ("published", "cancelled")
                 or row["lease_until"] > now):
             raise PublicationConflictError("Thread approval is stale, expired or already claimed. Reload and review.")
@@ -184,7 +185,7 @@ def cancel_thread(ident: str, *, revision: int, token: str, actor: str = "operat
     store, tenant, now = get_publication_store(), x_tenant_id(), time.time()
     with store._connection(transaction=True) as conn:
         thread = conn.execute("SELECT * FROM x_threads WHERE id = ? AND tenant_id = ?", (ident, tenant)).fetchone()
-        if (not token or thread is None or thread["revision"] != revision or not secrets.compare_digest(thread["token"], token)
+        if (not token or thread is None or thread["revision"] != revision or not same_secret(token, thread["token"])
                 or thread["state"] in ("running", "published", "cancelled")):
             raise PublicationConflictError("Thread changed or is running; reload before cancelling.")
         for item in json.loads(thread["manifest"]):

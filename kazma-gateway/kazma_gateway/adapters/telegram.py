@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any
 
@@ -66,6 +67,10 @@ MAX_VOICE_BYTES = 10 * 1024 * 1024  # 10 MB
 # Generic media (photo/document/video) download cap. Telegram Bot API limits
 # downloads to 20 MB, so we cap just below that.
 MAX_MEDIA_BYTES = 19 * 1024 * 1024  # 19 MB
+
+#: The groups whose join this process announced, newest last: at most this
+#: many are remembered (``_announce_if_added_to_group``).
+GROUP_ANNOUNCED_MAX = 512
 
 # Rate-limit constants
 _SEND_MAX_RETRIES = 3
@@ -315,7 +320,7 @@ class TelegramAdapter(SenderGate, BaseAdapter):
                 self._receive.extra.update(
                     bot_username=self._bot_username or None, bot_user_id=bot_info.get("id")
                 )
-                self._group_announced: set[str] = set()
+                self._group_announced: OrderedDict[str, None] = OrderedDict()
                 logger.info(
                     "[telegram] Connected as @%s (%s)",
                     bot_info.get("username", "unknown"),
@@ -1269,12 +1274,18 @@ class TelegramAdapter(SenderGate, BaseAdapter):
             return
         key = f"tg:group-announced:{chat_id}"
         announced = getattr(self, "_group_announced", None)
-        if announced is None:
-            announced = set()
+        if not isinstance(announced, OrderedDict):
+            announced = OrderedDict()
             self._group_announced = announced
         if key in announced:
+            announced.move_to_end(key)
             return
-        announced.add(key)
+        # Bounded: every group the bot is added to used to stay here for the
+        # life of the process; the oldest is forgotten past the cap (and
+        # announced once more if the bot joins it again).
+        announced[key] = None
+        while len(announced) > GROUP_ANNOUNCED_MAX:
+            announced.popitem(last=False)
         text = (
             f"👋 Kazma here. This group's chat id:\n"
             f"`{chat_id}`\n\n"
@@ -1877,7 +1888,7 @@ def telegram_webhook_router(resolve: Callable[[], TelegramAdapter | None]) -> An
         webhook secret (checked first); the update then goes through the
         adapter's ``_dispatch_update``, as a polled one does.
         """
-        import hmac
+        from kazma_core.security.secret_compare import same_secret
 
         adapter = resolve()
         if adapter is None:
@@ -1899,7 +1910,9 @@ def telegram_webhook_router(resolve: Callable[[], TelegramAdapter | None]) -> An
                 {"error": "Webhook secret not configured"}, status_code=503
             )
         provided = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-        if not provided or not hmac.compare_digest(provided, adapter._webhook_secret):
+        # Bytes, not text: a header with any non-ASCII character is a
+        # mismatch (401), never a TypeError and a 500.
+        if not provided or not same_secret(provided, adapter._webhook_secret):
             _warn_webhook_refused("bad_secret", "[telegram-webhook] Invalid or missing secret token")
             return JSONResponse({"error": "Unauthorized"}, status_code=401)
 

@@ -16,7 +16,12 @@ in a chat:
   (``errors.redact_secrets``), the home folder (written ``~``), email
   addresses, IP addresses;
 * **who sees it first** -- the person: every surface shows :func:`preview`, the
-  exact JSON that would be sent, and sends only on their go-ahead;
+  exact JSON that would be sent, and sends only on their go-ahead -- that very
+  report, never one collected again (2026-11-15: the web's Send collected a
+  new one, with log lines written after the preview, and a chat app's preview
+  showed a summary while Send sent every error line and problem title). The
+  web keeps a shown report for the person who asked for it (:func:`hold`,
+  :func:`take`); a chat app shows the whole text before ``/report send``;
 * **where it goes** -- the setting ``support.report_url`` (Settings ->
   System), by default Kazma's own private inbox
   (``https://status.kazma.ai/v1/report``); empty: reports are only saved here.
@@ -33,15 +38,18 @@ import logging
 import os
 import platform
 import re
+import secrets
+import threading
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["DEFAULT_REPORT_URL", "REPORT_URL_KEY", "SendResult", "collect", "describe", "preview", "redacted", "send"]
+__all__ = ["DEFAULT_REPORT_URL", "HOLD_S", "REPORT_URL_KEY", "SendResult", "collect", "describe", "hold",
+           "preview", "redacted", "send", "take"]
 
 REPORT_URL_KEY = "support.report_url"
 DEFAULT_REPORT_URL = "https://status.kazma.ai/v1/report"
@@ -189,12 +197,55 @@ def collect(note: str, *, where: str = "", port: int | None = None, log: Path | 
     }
     if chat:
         report["chat"] = _chat_excerpt(chat)
+    return _fit(report)
+
+
+def _fit(report: dict[str, Any]) -> dict[str, Any]:
+    """*report* within :data:`_MAX_BYTES`: fewer error lines, decided before
+    it is shown, so what is shown is what is sent."""
+    if len(preview(report).encode("utf-8")) > _MAX_BYTES:
+        report = {**report, "recent_errors": report.get("recent_errors", [])[-5:]}
     return report
 
 
 def preview(report: dict[str, Any]) -> str:
-    """The report exactly as it would be sent."""
-    return json.dumps(report, indent=2, ensure_ascii=False)
+    """The report exactly as it would be sent. A backtick is written as its
+    JSON escape (the same JSON once read): the text can then sit in a chat's
+    code block whole, with nothing in it able to end the block early."""
+    return json.dumps(report, indent=2, ensure_ascii=False).replace("`", "\\u0060")
+
+
+#: A report shown on the web is kept this long for the person who asked for
+#: it to send, unchanged; at most :data:`MAX_HELD` at once.
+HOLD_S = 600.0
+MAX_HELD = 32
+_held: OrderedDict[str, tuple[float, str, dict[str, Any]]] = OrderedDict()
+_held_lock = threading.Lock()
+
+
+def hold(report: dict[str, Any], owner: str, *, now: float | None = None) -> str:
+    """Keep *report*, as shown to *owner*, for :data:`HOLD_S`; its id."""
+    at = time.monotonic() if now is None else now
+    report_id = secrets.token_urlsafe(18)
+    with _held_lock:
+        for key in [k for k, (t, _o, _r) in _held.items() if at - t > HOLD_S]:
+            del _held[key]
+        _held[report_id] = (at, owner, report)
+        while len(_held) > MAX_HELD:
+            _held.popitem(last=False)
+    return report_id
+
+
+def take(report_id: str, owner: str, *, now: float | None = None) -> dict[str, Any] | None:
+    """The report shown to *owner* under *report_id*, once; None when there is
+    none: another person's, past :data:`HOLD_S`, or sent already."""
+    at = time.monotonic() if now is None else now
+    with _held_lock:
+        held = _held.get(str(report_id or ""))
+        if held is None or held[1] != owner:
+            return None
+        del _held[str(report_id)]
+    return held[2] if at - held[0] <= HOLD_S else None
 
 
 @dataclass(frozen=True)
@@ -249,10 +300,9 @@ def send(report: dict[str, Any], *, url: str | None = None, now: float | None = 
 
     from kazma_core.http_tls import shared_ssl_context
 
+    # A collected report already fits (collect); one made elsewhere is cut here.
+    report = _fit(report)
     body = preview(report).encode("utf-8")
-    if len(body) > _MAX_BYTES:
-        report = {**report, "recent_errors": report.get("recent_errors", [])[-5:]}
-        body = preview(report).encode("utf-8")
     target = _report_url() if url is None else url.strip()
     if not target:
         return _save(report, "no inbox is set (support.report_url is empty)")

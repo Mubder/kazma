@@ -44,7 +44,13 @@ from rich.console import Console
 from rich.table import Table
 
 from kazma_cli.banner import _get_version
-from kazma_cli.release_signature import MAX_BUNDLE_BYTES, SignatureRefused, check_bundle, must_be_signed
+from kazma_cli.release_signature import (
+    MAX_BUNDLE_BYTES,
+    SignatureRefused,
+    check_bundle,
+    must_be_signed,
+    release_version,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -414,6 +420,26 @@ def _locked_versions_in_wheel(wheel: Path, folder: Path) -> tuple[Path | None, s
     return out, ""
 
 
+def _wheel_version(wheel: Path) -> str:
+    """The version Kazma's wheel says it is (its ``.dist-info/METADATA``), or
+    "" when it says none: kept to the characters a version has."""
+    try:
+        with zipfile.ZipFile(wheel) as zf:
+            names = [n for n in zf.namelist() if re.fullmatch(rf"{PACKAGE_NAME}-[^/]+\.dist-info/METADATA", n)]
+            if len(names) != 1 or zf.getinfo(names[0]).file_size > 2_000_000:
+                return ""
+            text = zf.read(names[0]).decode("utf-8", "replace")
+    except (zipfile.BadZipFile, OSError, KeyError):
+        return ""
+    for line in text.splitlines():
+        if not line.strip():
+            break  # the headers end at the first blank line
+        if line.startswith("Version:"):
+            version = line.split(":", 1)[1].strip()
+            return version if re.fullmatch(r"[0-9A-Za-z.+!_-]{1,64}", version) else ""
+    return ""
+
+
 def get_latest_release(*, token: str | None = None) -> ReleaseInfo | None:
     """The newest Kazma release on GitHub -- the one channel Kazma ships through.
 
@@ -461,6 +487,18 @@ def _read_release(api_url: str, *, token: str | None = None) -> ReleaseInfo | No
             version = tag[1:] if tag.startswith("v") else tag
             if not version:
                 return None
+            # The tag is vMAJOR.MINOR.PATCH or the release is not installed:
+            # one reading for "newer" and for the signature rule
+            # (release_signature.release_version). The tag is never printed.
+            try:
+                if not tag.startswith("v"):
+                    raise ValueError(tag)
+                release_version(version)
+            except ValueError:
+                return ReleaseInfo(
+                    version="", page=f"https://github.com/{_GITHUB_REPO}/releases",
+                    problem="the release's tag is not a version (vMAJOR.MINOR.PATCH)",
+                )
             page = f"https://github.com/{_GITHUB_REPO}/releases/tag/{tag}"
             assets = [a for a in (data.get("assets") or []) if isinstance(a, dict)]
             wheel = next(
@@ -496,7 +534,9 @@ def _read_release(api_url: str, *, token: str | None = None) -> ReleaseInfo | No
             # release from SIGNED_FROM on without one is not installed.
             bundle = next((a for a in assets if a.get("name") == f"{name}.sigstore.json"), None)
             bundle_url = str((bundle or {}).get("browser_download_url") or "")
-            if not listed:
+            if name != f"{PACKAGE_NAME}-{version}-py3-none-any.whl":
+                problem = f"the wheel is not named for v{version}"
+            elif not listed:
                 problem = "SHA256SUMS does not list the wheel"
             elif github and github != listed:
                 problem = "SHA256SUMS and GitHub disagree about the wheel's SHA-256"
@@ -520,28 +560,30 @@ def _read_release(api_url: str, *, token: str | None = None) -> ReleaseInfo | No
         return None
 
 
-def parse_version(version: str) -> tuple[int, ...]:
-    """Parse a semantic version string into a comparable tuple of ints.
+def parse_version(version: str) -> tuple[int, int, int]:
+    """``(major, minor, patch)`` of a release version ``MAJOR.MINOR.PATCH``
+    (a tag's ``v`` taken off); anything else raises ``ValueError``.
 
-    Handles versions like ``"0.1.0"``, ``"1.2.3"``, ``"2.0.0a1"``.
-    Pre-release suffixes are stripped — only the numeric components are
-    compared.
+    ``release_signature.release_version``, the one reading the signature rule
+    uses too (2026-11-15): this read the leading digits of each dot-separated
+    piece, so ``0.21+9.9`` was ``(0, 21, 9)``, newer than 0.21.2, while the
+    signature rule read it as 0.21.0 and asked no signature.
     """
-    parts: list[int] = []
-    for part in version.split("."):
-        numeric = ""
-        for ch in part:
-            if ch.isdigit():
-                numeric += ch
-            else:
-                break
-        parts.append(int(numeric) if numeric else 0)
-    return tuple(parts)
+    return release_version(version)
 
 
 def is_newer(current: str, latest: str) -> bool:
-    """Return ``True`` if *latest* is strictly newer than *current*."""
-    return parse_version(latest) > parse_version(current)
+    """Whether release *latest* is newer than the installed *current*. A
+    *latest* that is not ``MAJOR.MINOR.PATCH`` is never newer; *current* may
+    carry a local build mark (``0.21.2+g4d37b2c``), and one that is not a
+    version cannot be judged, so nothing is newer than it (``--force`` still
+    installs)."""
+    try:
+        new = parse_version(latest)
+        have = parse_version(str(current).split("+", 1)[0])
+    except ValueError:
+        return False
+    return new > have
 
 
 # ---------------------------------------------------------------------------
@@ -635,6 +677,11 @@ def do_pip_update(
     """
     page = release.page or f"https://github.com/{_GITHUB_REPO}/releases"
     problem = release.problem
+    if not problem:
+        try:
+            release_version(release.version)
+        except ValueError:
+            problem = "the release's version is not MAJOR.MINOR.PATCH"
     if not problem and not (
         release.wheel_url.startswith(_RELEASE_DOWNLOAD_PREFIX)
         and _is_sha256(release.wheel_sha256)
@@ -705,6 +752,14 @@ def do_pip_update(
                 console.print(f"[yellow]v{release.version} is older than Kazma's signed releases: it is "
                               "checked by its SHA-256 only.[/yellow]")
                 checked = "SHA-256 verified"
+            # The wheel's own version is the tag's: an older wheel (signed or
+            # not) never installs under a newer release's tag.
+            own = _wheel_version(wheel)
+            if own != release.version:
+                console.print(f"[red]The wheel is version {own or 'unknown'}, not v{release.version} as its "
+                              "release says; not installing.[/red]")
+                console.print(f"Release: {page}")
+                return False
             # The versions the release was tested with, from inside the
             # verified wheel: installed exactly, as CI ran them.
             locked, locked_problem = _locked_versions_in_wheel(wheel, Path(tmp))
@@ -2578,6 +2633,13 @@ def _run_pip_check_and_update(
         console.print("[red]Could not read the latest release from GitHub.[/red]")
         console.print("If you cloned the repo, run from the monorepo: [cyan]git pull[/cyan]")
         console.print(f"Or check network / GitHub releases: https://github.com/{_GITHUB_REPO}")
+        sys.exit(1)
+
+    if not release.version:
+        # A tag that is not vMAJOR.MINOR.PATCH: nothing to compare or install.
+        console.print()
+        console.print(f"[red]The newest release cannot be installed: {release.problem}.[/red]")
+        console.print(f"Releases: {release.page}")
         sys.exit(1)
 
     latest = release.version

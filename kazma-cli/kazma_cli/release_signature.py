@@ -43,7 +43,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["SIGNED_FROM", "SignatureRefused", "check_bundle", "must_be_signed"]
+__all__ = ["SIGNED_FROM", "SignatureRefused", "check_bundle", "must_be_signed", "release_version"]
 
 #: From this release on a release's wheel must carry a Sigstore bundle: the
 #: first after v0.21.1. The workflow signed v0.11.0, but v0.12.0 to v0.21.1
@@ -68,15 +68,37 @@ class SignatureRefused(Exception):
     """The bundle does not prove the wheel was made by Kazma's release workflow."""
 
 
+#: A release's version: MAJOR.MINOR.PATCH in ASCII digits, no leading zero,
+#: nothing before or after (its tag adds a ``v``).
+_RELEASE_VERSION = re.compile(r"(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})")
+
+
+def release_version(version: str) -> tuple[int, int, int]:
+    """``(major, minor, patch)`` of release *version*, ``MAJOR.MINOR.PATCH``
+    (a tag's ``v`` taken off first); anything else raises ``ValueError``.
+
+    The one reading of a release's version, for the updater's "is it newer"
+    and :func:`must_be_signed` alike (2026-11-15). They read a tag two ways:
+    ``0.21+9.9`` and ``0+1.99.0`` were newer than 0.21.2 to the updater and
+    older than :data:`SIGNED_FROM` to the signature rule, so a release so
+    tagged installed on its checksums alone.
+    """
+    text = version.removeprefix("v") if isinstance(version, str) else ""
+    match = _RELEASE_VERSION.fullmatch(text)
+    if match is None:
+        raise ValueError(f"not a release version (MAJOR.MINOR.PATCH): {version!r}"[:120])
+    major, minor, patch = (int(part) for part in match.groups())
+    return major, minor, patch
+
+
 def must_be_signed(version: str) -> bool:
-    """Whether release *version* must carry a Sigstore bundle for its wheel."""
-    parts: list[int] = []
-    for piece in version.split("+", 1)[0].removeprefix("v").split(".")[:3]:
-        digits = re.match(r"\d*", piece).group(0)
-        parts.append(int(digits) if digits else 0)
-    while len(parts) < 3:
-        parts.append(0)
-    return tuple(parts) >= SIGNED_FROM
+    """Whether release *version* must carry a Sigstore bundle for its wheel.
+    A version :func:`release_version` does not read must (never a way around
+    the signature)."""
+    try:
+        return release_version(version) >= SIGNED_FROM
+    except ValueError:
+        return True
 
 
 class _ReleaseWorkflow:

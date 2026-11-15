@@ -170,13 +170,75 @@ def test_no_sigstore_package_refuses(monkeypatch):
 
 
 @pytest.mark.parametrize("version, signed", [
-    ("0.10.9", False), ("0.11.0", False), ("0.12.0", False), ("v0.21.1", False), ("0.21.1+gabc1234", False),
+    ("0.10.9", False), ("0.11.0", False), ("0.12.0", False), ("v0.21.1", False),
     ("0.21.2", True), ("v0.21.2+gdeadbee", True), ("0.22.0", True), ("1.0", True),
+    # Not MAJOR.MINOR.PATCH: never a way around the signature (2026-11-15).
+    ("0.21.1+gabc1234", True), ("0.21+9.9", True), ("0+1.99.0", True), ("0.21.1rc1", True), ("", True),
+    ("0.21.١", True),
 ])
 def test_which_releases_must_be_signed(version, signed):
     from kazma_cli.release_signature import must_be_signed
 
     assert must_be_signed(version) is signed
+
+
+# ── one reading of a release's version (2026-11-15) ──────────────────────
+
+#: Tags crafted so the updater called them newer than 0.21.2 while the
+#: signature rule called them older than SIGNED_FROM.
+CRAFTED_TAGS = ("0.21+9.9", "0+1.99.0", "0.21+0.30", "0+1.30.0")
+
+
+def _old_parse_version(version: str) -> tuple[int, ...]:
+    """update.parse_version as it was: each dot piece's leading digits."""
+    parts: list[int] = []
+    for part in version.split("."):
+        numeric = ""
+        for ch in part:
+            if ch.isdigit():
+                numeric += ch
+            else:
+                break
+        parts.append(int(numeric) if numeric else 0)
+    return tuple(parts)
+
+
+def _old_must_be_signed(version: str) -> bool:
+    """release_signature.must_be_signed as it was: three pieces, after "+" cut."""
+    import re
+
+    parts: list[int] = []
+    for piece in version.split("+", 1)[0].removeprefix("v").split(".")[:3]:
+        digits = re.match(r"\d*", piece).group(0)
+        parts.append(int(digits) if digits else 0)
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts) >= (0, 21, 2)
+
+
+@pytest.mark.parametrize("tag", CRAFTED_TAGS)
+def test_a_crafted_tag_is_neither_newer_nor_unsigned(tag):
+    from kazma_cli.release_signature import must_be_signed, release_version
+    from kazma_cli.update import is_newer, parse_version
+
+    assert is_newer("0.21.2", tag) is False
+    assert must_be_signed(tag) is True
+    for read in (parse_version, release_version):
+        with pytest.raises(ValueError):
+            read(tag)
+    # The control: the two old readings disagreed about this very tag.
+    assert _old_parse_version(tag) > _old_parse_version("0.21.2") and not _old_must_be_signed(tag)
+
+
+def test_one_reading_of_versions() -> None:
+    from kazma_cli.update import is_newer, parse_version
+
+    assert parse_version("0.21.2") == parse_version("v0.21.2") == (0, 21, 2)
+    assert is_newer("0.21.2+g4d37b2c", "0.22.0") and not is_newer("0.22.0", "0.21.9")
+    assert not is_newer("0.21.2", "0.21.2") and not is_newer("not-a-version", "9.9.9")
+    for bad in ("01.2.3", "1.2", "1.2.3.4", " 1.2.3", "1.2.3\n", "１.2.3"):
+        with pytest.raises(ValueError):
+            parse_version(bad)
 
 
 # ── the updater, end to end, with a stand-in GitHub ──────────────────────
@@ -270,11 +332,32 @@ def updater(monkeypatch):
     monkeypatch.setattr(update, "_run_pip", fake_pip)
     monkeypatch.setattr(update.console, "print", lambda *a, **k: printed.append(" ".join(str(x) for x in a)))
 
-    def serve(fake: SignedRelease) -> tuple[SignedRelease, list[list[str]], list[str]]:
+    real_wheel_version = update._wheel_version
+
+    def serve(fake: SignedRelease, *, stand_in: bool = True) -> tuple[SignedRelease, list[list[str]], list[str]]:
         monkeypatch.setattr(httpx, "Client", fake)
+        if stand_in:
+            # The signed material is v0.11.0's SHA256SUMS standing in for a
+            # wheel: no METADATA to read, so its version is the release's.
+            monkeypatch.setattr(update, "_wheel_version", lambda wheel: fake.version)
+        else:
+            monkeypatch.setattr(update, "_wheel_version", real_wheel_version)
         return fake, installed, printed
 
     return serve
+
+
+def _wheel(version_inside: str) -> bytes:
+    """A wheel's bytes whose METADATA says *version_inside*."""
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(f"kazma-{version_inside}.dist-info/METADATA",
+                    f"Metadata-Version: 2.4\nName: kazma\nVersion: {version_inside}\n\nKazma.\n")
+        zf.writestr("kazma_cli/__init__.py", "")
+    return buf.getvalue()
 
 
 def test_the_updater_installs_a_wheel_its_signature_proves(updater):
@@ -381,6 +464,64 @@ def test_negative_control_the_old_updater_installs_what_the_signature_refuses(up
     _fake, installed, _printed = updater(SignedRelease(bundle=OTHER_BUNDLE.read_bytes()))
     assert update.do_pip_update(update.get_latest_release()) is True
     assert len(installed) == 2
+
+
+@pytest.mark.parametrize("tag", CRAFTED_TAGS)
+def test_a_release_with_a_crafted_tag_is_refused_and_downloads_nothing(updater, tag):
+    from kazma_cli.update import do_pip_update, get_latest_release
+
+    fake, installed, _printed = updater(SignedRelease(version=tag, bundle=None))
+    release = get_latest_release()
+    assert release.version == "" and release.problem == "the release's tag is not a version (vMAJOR.MINOR.PATCH)"
+    fake.seen.clear()
+    assert do_pip_update(release) is False
+    assert installed == [] and fake.seen == []
+
+
+def test_negative_control_the_old_readings_installed_a_crafted_tag_unsigned(updater, monkeypatch):
+    """The updater as it was: no tag check, the old "newer" and the old
+    signature rule. A release tagged v0.21+9.9 with no signature installed."""
+    from kazma_cli import update
+
+    monkeypatch.setattr(update, "release_version", lambda version: (0, 0, 0))
+    monkeypatch.setattr(update, "must_be_signed", _old_must_be_signed)
+    monkeypatch.setattr(update, "parse_version", _old_parse_version)
+    _fake, installed, printed = updater(SignedRelease(version="0.21+9.9", bundle=None))
+    release = update.get_latest_release()
+    assert release.problem == "" and update.is_newer("0.21.2", release.version)
+    assert update.do_pip_update(release) is True and len(installed) == 1
+    assert any("checked by its SHA-256 only" in line for line in printed)
+
+
+def test_the_wheel_must_be_the_version_its_release_says(updater):
+    """An older wheel served under a newer tag (a downgrade): its own METADATA
+    says what it is. v0.21.1 needs no signature, so only the version holds it."""
+    from kazma_cli.update import do_pip_update, get_latest_release
+
+    _fake, installed, printed = updater(SignedRelease(version="0.21.1", bundle=None, payload=_wheel("0.11.0")),
+                                        stand_in=False)
+    assert do_pip_update(get_latest_release()) is False
+    assert installed == [] and any("The wheel is version 0.11.0, not v0.21.1" in line for line in printed)
+    _fake, installed, _printed = updater(SignedRelease(version="0.21.1", bundle=None, payload=_wheel("0.21.1")),
+                                         stand_in=False)
+    assert do_pip_update(get_latest_release()) is True and len(installed) == 1
+
+
+def test_negative_control_without_the_version_check_the_old_wheel_installs(updater, monkeypatch):
+    from kazma_cli import update
+
+    _fake, installed, _printed = updater(SignedRelease(version="0.21.1", bundle=None, payload=_wheel("0.11.0")))
+    # The stand-in reads the release's version, as no check at all would.
+    assert update.do_pip_update(update.get_latest_release()) is True and len(installed) == 1
+
+
+def test_a_wheel_not_named_for_its_tag_is_refused(updater):
+    from kazma_cli.update import get_latest_release
+
+    fake = SignedRelease(version="0.22.0", bundle=None)
+    fake.wheel_name = "kazma-0.11.0-py3-none-any.whl"
+    updater(fake)
+    assert get_latest_release().problem == "the wheel is not named for v0.22.0"
 
 
 def test_the_recorded_bundle_is_the_one_the_release_carries():

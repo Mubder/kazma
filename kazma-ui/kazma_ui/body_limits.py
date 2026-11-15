@@ -69,6 +69,7 @@ def _route_body_limits() -> dict[tuple[str, str], int]:
     from kazma_core.settings_restore import MAX_BACKUP_BYTES
 
     from kazma_ui import upload_limits
+    from kazma_ui.a2a_api import MAX_BODY_BYTES as A2A_BODY_BYTES
     from kazma_ui.history_import_api import MAX_UPLOAD_BYTES as HISTORY_EXPORT_BYTES
 
     ide_file = _IDE_FILE_BODY * MAX_EDITOR_FILE_BYTES
@@ -89,6 +90,8 @@ def _route_body_limits() -> dict[tuple[str, str], int]:
         ("POST", "/api/ide/diff"): ide_file,
         ("POST", "/api/webhooks/telegram"): WEBHOOK_BODY_LIMIT,
         ("POST", "/api/webhooks/whatsapp"): WEBHOOK_BODY_LIMIT,
+        # Reads its own stream under its own, smaller limit (a2a_api).
+        ("POST", "/api/a2a"): A2A_BODY_BYTES,
     })
     return limits
 
