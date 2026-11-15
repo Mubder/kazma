@@ -83,6 +83,31 @@ TYPED_FIELDS: tuple[str, ...] = (
 #: Typed fields that hold a secret: masked or empty means the stored one.
 _SECRET_FIELDS = ("aws_secret_access_key", "aws_session_token")
 
+#: Every field of a stored provider row that holds a secret.
+STORED_SECRET_FIELDS = (
+    "api_key", "api_keys", "secret_headers", "aws_access_key_id", *_SECRET_FIELDS,
+)
+
+
+def address_moved(typed_base_url: str, stored: dict[str, Any] | None) -> bool:
+    """True when a form names another address than the stored row's.
+
+    A stored secret is kept only for the address it was saved with
+    (``url_credentials.same_address``, 2026-11-15): posted masked beside
+    another address, the stored key, headers and extra keys would go to a
+    server someone just typed in. An empty typed address is the stored (or
+    the preset's) one, not a move.
+    """
+    from kazma_core.security.url_credentials import same_address
+
+    typed = str(typed_base_url or "").strip()
+    return bool(stored) and bool(typed) and not same_address(typed, (stored or {}).get("base_url"))
+
+
+MOVED_KEY_MESSAGE = (
+    "Enter the API key again: the saved key is kept only for the address it was saved with."
+)
+
 
 def merge_typed_secrets(typed: dict[str, Any], stored: dict[str, Any] | None) -> dict[str, Any]:
     """*typed* with each masked secret replaced by the stored one: an AWS
@@ -147,6 +172,24 @@ def credentials_problem(registry: Any, entry: dict[str, Any], key: str = "") -> 
     return "api_key_required"
 
 
+def _refuse_credentials(problem: str, registry: Any, pid: str, *, stored: bool, moved: bool) -> None:
+    """Raise the :class:`CandidateRefused` for a credentials *problem*."""
+    if problem == "api_key_required" and moved:
+        raise CandidateRefused("api_key_required", MOVED_KEY_MESSAGE)
+    if problem == "api_key_required" and stored and registry.stored_key_is_undecryptable(pid):
+        raise CandidateRefused(
+            "key_undecryptable",
+            "A key is saved for this provider, but the vault cannot decrypt it: KAZMA_VAULT_KEY is "
+            "missing from this process, or is not the value the key was encrypted with.",
+        )
+    words = {
+        "api_key_required": "This provider needs an API key.",
+        "aws_credentials_required": "Bedrock needs an AWS access key id and secret (or AWS credentials on this computer).",
+        "project_required": "Vertex AI needs a Google Cloud project.",
+    }
+    raise CandidateRefused(problem, words[problem])
+
+
 def candidate_entry(
     registry: Any, name: str, *, base_url: str = "", api_key: str = "",
     typed: dict[str, Any] | None = None,
@@ -171,10 +214,14 @@ def candidate_entry(
         raise CandidateRefused("unknown_provider", f"There is no provider named {pid!r}.")
     base = (base_url.strip() or str((stored or {}).get("base_url") or "")
             or str((preset or {}).get("base_url") or ""))
+    # Another address than the stored row's: nothing stored goes to it.
+    moved = address_moved(base_url, stored)
+    if moved:
+        stored = {k: v for k, v in (stored or {}).items() if k not in STORED_SECRET_FIELDS}
     key = coerce_api_key(api_key)
     if key and _masked(key):
         key = ""
-    if not key and stored is not None:
+    if not key and stored is not None and not moved:
         _resolved_url, resolved = registry.resolve_provider_credentials(pid)
         resolved = coerce_api_key(resolved)
         key = resolved if key_is_usable(resolved) else ""
@@ -190,20 +237,10 @@ def candidate_entry(
     if preset is not None and preset_id != pid.lower():
         entry["preset"] = preset_id
     entry.setdefault("display_name", str((preset or {}).get("name") or pid))
-    problem = credentials_problem(registry, entry, key)
+    # Moved: the stored key is not this address's, so it cannot count.
+    problem = credentials_problem(None if moved else registry, entry, key)
     if problem is not None:
-        if problem == "api_key_required" and stored is not None and registry.stored_key_is_undecryptable(pid):
-            raise CandidateRefused(
-                "key_undecryptable",
-                "A key is saved for this provider, but the vault cannot decrypt it: KAZMA_VAULT_KEY is "
-                "missing from this process, or is not the value the key was encrypted with.",
-            )
-        words = {
-            "api_key_required": "This provider needs an API key.",
-            "aws_credentials_required": "Bedrock needs an AWS access key id and secret (or AWS credentials on this computer).",
-            "project_required": "Vertex AI needs a Google Cloud project.",
-        }
-        raise CandidateRefused(problem, words[problem])
+        _refuse_credentials(problem, registry, pid, stored=stored is not None, moved=moved)
     if entry.get("url_as_typed") and base:
         from kazma_core.url_utils import remember_as_typed
 

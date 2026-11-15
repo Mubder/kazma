@@ -1590,8 +1590,14 @@ class SettingsRouterBuilder:
 
         @router.post("/api/settings/account/tokens")
         def api_create_token(req: dict[str, Any]) -> dict[str, Any]:
-            """Create an API token."""
-            return _get_sm().create_api_token(req.get("name", "unnamed"))
+            """Create an API token with the role it acts with (``role``:
+            viewer, operator -- the default -- or admin)."""
+            try:
+                return _get_sm().create_api_token(
+                    req.get("name", "unnamed"), role=str(req.get("role") or "operator"),
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=validation_error(exc)) from None
 
         @router.delete("/api/settings/account/tokens/{token_id}")
         def api_revoke_token(token_id: str) -> dict[str, Any]:

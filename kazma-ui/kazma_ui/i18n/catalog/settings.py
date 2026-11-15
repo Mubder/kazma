@@ -3582,6 +3582,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "استخدم هذه الرموز لاستدعاء الواجهات المحمية من السكربتات دون لصق <code>KAZMA_SECRET</code>. أرسلها بصيغة <code>Authorization: Bearer …</code> أو <code>X-Api-Token</code>.",
         "en": "Use these tokens to call protected APIs from scripts without pasting <code>KAZMA_SECRET</code>. Send as <code>Authorization: Bearer …</code> or <code>X-Api-Token</code>.",
     },
+    # Settings -> Account -> API tokens: the role a new token acts with.
+    "settings.token_role_hint": {
+        "ar": "يعمل الرمز بالدور المختار هنا، وهو المشغّل افتراضيًا. لا تمنح دور المشرف إلا لبرنامج تأتمنه على الإعدادات وخوادم MCP والرموز الأخرى.",
+        "en": "A token acts with the role chosen here: operator by default. Give admin only to a program you trust with the settings, MCP servers and other tokens.",
+    },
     "settings.graph_budget_auto": {
         "ar": "ميزانية خطوات المخطط (تلقائية): ~{n} (متوافقة مع جولات الأدوات)",
         "en": "Graph step budget (auto): ~{n} (aligned with tool rounds)",

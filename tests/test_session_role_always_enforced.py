@@ -111,8 +111,10 @@ def test_mail_and_calendar_connections_are_the_admins():
 
 
 def test_the_middleware_reads_the_session_credential():
-    """The source names the rule, so a refactor cannot drop it silently."""
+    """The source names the rule, so a refactor cannot drop it silently: every
+    credential but the shared secret is judged by its role (2026-11-15: API
+    tokens too, tests/test_api_token_roles.py)."""
     import inspect
 
     source = inspect.getsource(auth.create_auth_middleware)
-    assert "_multi_user or _session_cred" in source
+    assert "_multi_user or not _is_secret" in source

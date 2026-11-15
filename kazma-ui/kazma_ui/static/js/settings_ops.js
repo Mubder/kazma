@@ -501,17 +501,28 @@
                 const resp = await fetch('/api/settings/account/tokens', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                    body: JSON.stringify({ name: this.tokenName }),
+                    body: JSON.stringify({ name: this.tokenName, role: this.tokenRole || 'operator' }),
                 });
                 const data = await resp.json();
                 const tok = data.token || '';
                 this.tokenName = '';
+                this.tokenRole = 'operator';
                 this.lastCreatedToken = tok;
                 await this.loadAccount();
                 showToast(tok ? _t('settings.token_created_copy', 'Token created — copy it below (shown once)') : _t('settings.token_created', 'Token created'), tok ? 'success' : 'error');
             } catch (e) {
                 showToast(_t('settings.failed_with_reason', 'Failed: {error}', {error: e.message}), 'error');
             }
+        },
+
+        tokenRoleLabel(role) {
+            // A token made before tokens chose a role acts as an operator.
+            const words = {
+                viewer: _t('settings.role_viewer', 'viewer'),
+                operator: _t('settings.role_operator', 'operator'),
+                admin: _t('settings.role_admin', 'admin'),
+            };
+            return words[role || 'operator'] || words.viewer;
         },
 
         async copyLastToken() {

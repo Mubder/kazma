@@ -28,7 +28,9 @@ class IdeEffectRoute(APIRoute):
         original = super().get_route_handler()
 
         async def handler(request: Request):
-            path = request.url.path
+            from kazma_ui.request_path import judged_path
+
+            path = judged_path(request)
             if request.method != "POST" or path in _READ_ONLY_PATHS:
                 return await original(request)
             # Run declared rate admission before claiming an effect. A 429

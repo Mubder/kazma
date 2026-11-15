@@ -26,6 +26,7 @@ from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 
 from kazma_ui.browser_origins import configured_browser_origins, normalize_origin
+from kazma_ui.request_path import judged_path
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +43,12 @@ def create_csrf_middleware() -> Callable[[Request], Awaitable[Response]]:
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
+        # The path the router matches (kazma_ui.request_path): request.url.path
+        # stops at a decoded '?' or '#'.
+        path = judged_path(request)
         if (
             request.method in _SAFE_METHODS
-            or not request.url.path.startswith("/api/")
+            or not path.startswith("/api/")
             or request.headers.get("authorization")
         ):
             return await call_next(request)
@@ -69,7 +73,7 @@ def create_csrf_middleware() -> Callable[[Request], Awaitable[Response]]:
                 logger.warning(
                     "[CSRF] Rejected cross-origin %s %s (origin=%r referer=%r)",
                     request.method,
-                    request.url.path,
+                    path,
                     origin[:100],
                     referer[:100],
                 )

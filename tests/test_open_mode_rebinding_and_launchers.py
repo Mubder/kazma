@@ -145,7 +145,7 @@ def test_a_rebound_domain_is_refused(monkeypatch: pytest.MonkeyPatch, mode: str)
 
 @pytest.mark.parametrize("host", [
     "127.0.0.1:9090", "localhost:9090", "LOCALHOST", "localhost.:9090", "[::1]:9090",
-    "kazma.localhost:9090", "dev.test", "192.168.1.5:9090",
+    "kazma.localhost:9090", "192.168.1.5:9090",
 ])
 def test_this_machine_keeps_working(monkeypatch: pytest.MonkeyPatch, host: str) -> None:
     monkeypatch.setenv("KAZMA_AUTH_DISABLED", "1")
@@ -174,10 +174,12 @@ def test_this_machines_own_name_with_and_without_its_domain(monkeypatch: pytest.
     monkeypatch.setenv("KAZMA_AUTH_DISABLED", "1")
     monkeypatch.setattr(auth.socket, "gethostname", lambda: "Kazma-Box.Corp.Example")
     client = _client()
-    for host in ("kazma-box", "KAZMA-BOX:9090", "kazma-box.corp.example", "Kazma-Box.Corp.Example.",
-                 "kazma-box.local", "kazma-box.lan:9090"):
+    for host in ("kazma-box", "KAZMA-BOX:9090", "kazma-box.corp.example", "Kazma-Box.Corp.Example."):
         assert client.get("/api/settings/probe", headers={"host": host}).status_code == 200, host
     assert client.get("/api/settings/probe", headers={"host": "other-box"}).status_code == 421
+    # mDNS and the LAN's DNS answer these for other machines too (2026-11-15).
+    for host in ("kazma-box.local", "kazma-box.lan:9090", "dev.test"):
+        assert client.get("/api/settings/probe", headers={"host": host}).status_code == 421, host
     monkeypatch.setattr(auth.socket, "gethostname", lambda: "kazma-box")
     assert client.get("/api/settings/probe", headers={"host": "kazma-box:9090"}).status_code == 200
 

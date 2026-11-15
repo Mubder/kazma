@@ -1538,8 +1538,15 @@ class ModelRegistry:
         # value rather than storing garbage.
         incoming_key = str(data.get("api_key", "") or "")
         if incoming_key and ("****" in incoming_key or incoming_key == "***"):
+            from kazma_core.provider_check import address_moved
+
             existing_provider = self.get_provider(name)
-            if existing_provider and existing_provider.get("api_key"):
+            # Kept only for the address it was saved with (2026-11-15): a
+            # masked key beside another address is cleared, never moved.
+            if (
+                existing_provider and existing_provider.get("api_key")
+                and not address_moved(str(data.get("base_url") or ""), existing_provider)
+            ):
                 data["api_key"] = existing_provider["api_key"]
             else:
                 data["api_key"] = ""  # Clear the masked placeholder
@@ -1729,22 +1736,33 @@ class ModelRegistry:
         /api/models/profiles`` restored them in the route, but ``POST
         /api/models/saved`` -- the same store -- wrote the stars verbatim
         over the real key and URL password. The rule now lives here, where
-        every profile write passes (§26D): a masked key keeps the stored one;
-        a masked URL keeps the stored URL only when posted back unchanged
+        every profile write passes (§26D): a masked key keeps the stored one
+        only while the address is the one it was saved with (``same_address``;
+        with another, the stored key would go to that host); a masked URL
+        keeps the stored URL only when posted back unchanged
         (``restore_masked_url``), and stars are never stored as a secret.
         """
         from kazma_core.config_store import is_masked_secret_placeholder
         from kazma_core.security.url_credentials import (
             restore_masked_url,
+            same_address,
             url_password_is_masked,
         )
 
         existing = self.get_model_profile(name) or {}
+        base_url = restore_masked_url(profile.get("base_url"), existing.get("base_url"))
         if is_masked_secret_placeholder(profile.get("api_key")):
             if not existing.get("api_key"):
                 return "api_key: the key is masked. Enter it again."
+            # The stored key is kept only for the address it was saved with:
+            # posted masked beside a changed base_url, it went to that host
+            # (2026-11-15).
+            if not same_address(base_url, existing.get("base_url")):
+                return (
+                    "api_key: the key is masked and the address changed. Enter the key "
+                    "again -- the saved one is kept only for the address it was saved with."
+                )
             profile["api_key"] = existing["api_key"]
-        base_url = restore_masked_url(profile.get("base_url"), existing.get("base_url"))
         if url_password_is_masked(base_url):
             return (
                 "base_url: the password in this URL is masked. Enter it again -- "

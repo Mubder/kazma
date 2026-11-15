@@ -1133,8 +1133,10 @@
                     body: JSON.stringify(data),
                 });
                 const result = await resp.json();
-                if (result.error) {
-                    showToast(result.error, 'error');
+                if (!resp.ok || result.error) {
+                    // A refusal (400) answers in `detail`: a masked key beside a
+                    // changed address, a masked URL password.
+                    showToast(result.error || result.detail || _k('settings.failed', 'Failed'), 'error');
                 } else {
                     this.hubProviderModal = false;
                     await this.loadHubProviders();

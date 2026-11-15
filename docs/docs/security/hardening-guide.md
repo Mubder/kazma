@@ -204,6 +204,11 @@ Both `/ws/chat` and `/ws/dashboard` endpoints validate `X-Kazma-Secret` on conne
 
 API tokens are stored as SHA-256 hashes. The raw token is only returned once at creation.
 
+Each token acts with the role chosen when it was made (viewer, operator or
+admin; operator by default), and that role is enforced on every request
+whether or not the install has platform users. A token made before tokens
+had a role acts as an operator.
+
 ## Password hashing
 
 User passwords use PBKDF2-SHA256 with a 16-byte random salt and timing-safe comparison (`hashlib.compare_digest`).

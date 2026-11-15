@@ -103,7 +103,9 @@ STRUCTURAL_BASELINE = {
     # routes_voice_ws.handle_voice_websocket are now called only inside their
     # modules (the sockets ask websocket_principal / serve_voice_websocket);
     # both names are documented and held by tests, so they keep them.
-    "module_local_public_symbols": 513,
+    # 512 since 2026-11-15: the body layer (body_limits) asks
+    # auth.is_always_open and auth.is_sensitive_path.
+    "module_local_public_symbols": 511,
     "patched_value_imports": 72,
     "sleep_then_assert": 51,
     "bare_module_attr_assignments": 0,

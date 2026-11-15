@@ -19,6 +19,18 @@
 - Generated images are downloaded on the pinned path, and a provider's key
   goes only to its own API host. The public-address check refuses the IPv6
   site-local range.
+- Every request body has a limit, checked before it is read, the sign-in
+  page included.
+- An API token acts with the role chosen when it is made (operator by
+  default; Settings > Account shows each token's role), on every install.
+- Changing the install's GitHub credentials, the active workspace, the chat
+  apps, division requests or model profiles needs an admin, and a saved key
+  is never sent to a newly typed address.
+- The sign-in throttle counts an IPv6 network as one client, and every
+  refused sign-in takes the same time. `.local`, `.lan` and `.test` names no
+  longer count as this machine unless listed in `KAZMA_AUTOLOGIN_HOSTS`.
+- Sign-in, cross-site and role checks judge the path the server routes; an
+  encoded `?` or `#` in a path is refused.
 
 - `/long on` never lowers a chat's tool-round limit. Its research preset is
   40 rounds; on an install whose own limit is higher (live: 100), turning long

@@ -40,6 +40,7 @@ from fastapi.responses import JSONResponse
 from kazma_core.security.boot_guard import WEAK_SECRET_CHARS, env_flag
 
 from kazma_ui.documentation import PUBLIC_GUIDE_PATHS
+from kazma_ui.request_path import ambiguous_path_response, judged_path, path_is_ambiguous
 
 logger = logging.getLogger(__name__)
 
@@ -582,8 +583,11 @@ def _machine_names() -> set[str]:
 
     ``socket.gethostname()`` (no DNS lookup: the loop is not held), compared
     in lower case. A name the OS reports with its domain (``box.corp.example``)
-    also counts as its first label (``box``); a short name also counts with
-    ``.local`` / ``.lan``, which Windows and mDNS answer for it.
+    also counts as its first label (``box``). Not ``<name>.local`` or
+    ``<name>.lan`` (until 2026-11-15 they counted): another machine on the
+    network answers those through mDNS or the LAN's DNS, so a page served
+    under one and rebound to 127.0.0.1 passed as this machine. A name of the
+    owner's own goes in ``KAZMA_AUTOLOGIN_HOSTS``.
     """
     try:
         machine = socket.gethostname().strip().lower().rstrip(".")
@@ -595,14 +599,14 @@ def _machine_names() -> set[str]:
     short = machine.split(".", 1)[0]
     if short:
         names.add(short)
-        for suffix in (".local", ".lan"):
-            names.add(short + suffix)
     return names
 
 
-#: Names no public DNS answers (RFC 6761): a rebinding page cannot be served
-#: under one, so a request naming one is not a rebinding.
-_RESERVED_LOCAL_SUFFIXES = (".localhost", ".test")
+#: Names that resolve only to this machine (RFC 6761: ``localhost`` and its
+#: subdomains), so a page under one is not a rebinding. Not ``.test``: no
+#: public DNS answers it, but a LAN's DNS can, and until 2026-11-15 any
+#: ``*.test`` name passed; one the owner uses goes in KAZMA_AUTOLOGIN_HOSTS.
+_RESERVED_LOCAL_SUFFIXES = (".localhost",)
 
 
 def _host_cannot_be_rebound(request: Request) -> bool:
@@ -612,9 +616,10 @@ def _host_cannot_be_rebound(request: Request) -> bool:
     then resolves to 127.0.0.1; its requests carry that domain as ``Host``.
     So a Host that is a local name (:func:`_host_is_local_name`: ``localhost``,
     this machine's own name with and without its domain, what
-    ``KAZMA_AUTOLOGIN_HOSTS`` names), an IP literal, a reserved name
-    (``*.localhost``, ``*.test``) or the host of a declared browser origin
-    (``KAZMA_PUBLIC_URL`` / ``KAZMA_CORS_ORIGINS``) is not one.
+    ``KAZMA_AUTOLOGIN_HOSTS`` names), an IP literal, a name under
+    ``.localhost`` or the host of a declared browser origin
+    (``KAZMA_PUBLIC_URL`` / ``KAZMA_CORS_ORIGINS``) is not one. A ``*.test``
+    name counts only when ``KAZMA_AUTOLOGIN_HOSTS`` names it.
 
     A single-label name is not taken on its own: until 2026-11-11 any name
     without a dot passed, and a name like ``attacker`` reaches a browser
@@ -728,7 +733,7 @@ def _wants_html_response(request: Request) -> bool:
     if "text/html" in accept:
         return True
     # Top-level page navigations (not /api/*)
-    if request.method == "GET" and not request.url.path.startswith("/api/"):
+    if request.method == "GET" and not judged_path(request).startswith("/api/"):
         return True
     return False
 
@@ -738,7 +743,7 @@ def _unauthorized_response(request: Request) -> Response:
     from fastapi.responses import RedirectResponse
 
     if _wants_html_response(request):
-        nxt = request.url.path
+        nxt = judged_path(request)
         if request.url.query:
             nxt = f"{nxt}?{request.url.query}"
         # Only same-origin relative next
@@ -992,14 +997,34 @@ def verify_secret(provided: str, expected: str) -> bool:
         return False
 
 
+#: The role an API token carries when it names none: tokens made before a
+#: token chose its role (2026-11-15) were always called operators.
+API_TOKEN_DEFAULT_ROLE = "operator"
+
+
+def _api_token_role(entry: dict[str, Any]) -> str:
+    """The role a stored token entry grants: its own, else the default; a
+    value no role has is the least privileged, never the most."""
+    from kazma_core.security.platform_rbac import ROLE_RANK
+
+    role = str(entry.get("role") or API_TOKEN_DEFAULT_ROLE)
+    return role if role in ROLE_RANK else "viewer"
+
+
 def verify_api_token(provided: str) -> bool:
-    """Return True when *provided* is a valid Account API token (``kazma_…``).
+    """Return True when *provided* is a valid Account API token (``kazma_…``)."""
+    return _api_token_entry(provided) is not None
+
+
+def _api_token_entry(provided: str) -> dict[str, Any] | None:
+    """The stored entry of a valid Account API token (``kazma_…``), else None.
 
     Tokens are created in Settings → Account. Only the SHA-256 hash is stored
     (never the raw token). Accepts the raw token string from the create dialog.
+    The entry names the token's role (:func:`_api_token_role`).
     """
     if not provided or not str(provided).startswith("kazma_"):
-        return False
+        return None
     try:
         import hashlib
         import json
@@ -1020,7 +1045,7 @@ def verify_api_token(provided: str) -> bool:
             else:
                 break
         if not isinstance(raw, list):
-            return False
+            return None
         now = datetime.now(UTC)
         for entry in raw:
             if not isinstance(entry, dict):
@@ -1036,7 +1061,7 @@ def verify_api_token(provided: str) -> bool:
                     if created_dt.tzinfo is None:
                         created_dt = created_dt.replace(tzinfo=UTC)
                     if (now - created_dt).days > int(expires_days):
-                        return False
+                        return None
                 except Exception:
                     # Fail CLOSED (audit O3): this used to `pass` and fall
                     # through to `return True`, so a token whose expiry could
@@ -1047,12 +1072,12 @@ def verify_api_token(provided: str) -> bool:
                         "(created_at=%r expires_days=%r) — rejecting",
                         created, expires_days,
                     )
-                    return False
-            return True
-        return False
+                    return None
+            return entry
+        return None
     except Exception:
         logger.debug("[SECURITY] API token verify failed", exc_info=True)
-        return False
+        return None
 
 
 def extract_provided_credential(request: Request) -> str:
@@ -1320,11 +1345,15 @@ def get_request_principal(request: Request) -> dict[str, Any] | None:
             "user_id": "shared-secret",
             "source": "secret",
         }
-    if verify_api_token(provided):
+    entry = _api_token_entry(provided)
+    if entry is not None:
+        # The role the token was made with (Settings -> Account), enforced by
+        # the middleware in every mode and by admin_decision alike.
         return {
             "username": "api-token",
-            "role": "operator",
+            "role": _api_token_role(entry),
             "user_id": "api-token",
+            "token_id": str(entry.get("id") or ""),
             "source": "api_token",
         }
     return None
@@ -1518,7 +1547,12 @@ def create_auth_middleware(
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
-        path = request.url.path
+        # The path the router matches, never request.url.path (which stops at
+        # a decoded '?' or '#'): kazma_ui.request_path. A path holding one is
+        # refused here too, for an app built without AmbiguousPathGuard.
+        if path_is_ambiguous(request):
+            return ambiguous_path_response()
+        path = judged_path(request)
         # A probe passes before any settings read (FA-259): it is always
         # open, and the only thing below it could get is a cookie. The
         # undeclared-proxy detector still sees it (request and environment
@@ -1649,14 +1683,18 @@ def create_auth_middleware(
             # enforced below; nothing here treats the error as "single
             # operator, everything allowed" for a signed-in non-admin.
             logger.warning("[RBAC] multi-user check failed: %s", type(exc).__name__)
-        # A signed-in session carries a role whatever mode the install is in:
-        # an OIDC sign-in mints viewer/operator sessions with no local user
-        # and no KAZMA_MULTI_USER, and a removed last user leaves live
-        # sessions behind. Enforced only under multi-user until 2026-11-10,
-        # such a session reached every admin route -- MCP servers (a command
-        # on the host), settings, API tokens (security audit SEC-05).
-        _session_cred = bool(provided) and str(provided).startswith("session:")
-        if _multi_user or _session_cred:
+        # Every credential but the shared secret carries a role, whatever
+        # mode the install is in. A session: an OIDC sign-in mints
+        # viewer/operator sessions with no local user and no
+        # KAZMA_MULTI_USER, and a removed last user leaves live sessions
+        # behind (enforced only under multi-user until 2026-11-10, SEC-05).
+        # An API token: the role it was made with (operator unless the owner
+        # chose another) -- it reached every admin route outside multi-user
+        # mode until 2026-11-15 while admin_decision called it an operator,
+        # and the docs hand tokens to other agents (A2A). The shared secret
+        # is the owner's own and admin; it needs no role read.
+        _is_secret = bool(provided) and verify_secret(provided, expected)
+        if _multi_user or not _is_secret:
             try:
                 from kazma_core.security.platform_rbac import role_allows
 
@@ -1740,7 +1778,7 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
         # A probe runs in the install's own tenant with no settings read
         # (FA-259): the read below waits for a worker thread, and during a
         # database outage every one is waiting on the pool.
-        if _is_health_probe(request.url.path):
+        if _is_health_probe(judged_path(request)):
             token = set_current_tenant_id("default")
             try:
                 return await call_next(request)

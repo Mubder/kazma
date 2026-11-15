@@ -369,6 +369,8 @@
         sessionsLoaded: false,
         passwordForm: { old_password: '', new_password: '', confirm_password: '' },
         tokenName: '',
+        // The role a new API token acts with; the server's default too.
+        tokenRole: 'operator',
         lastCreatedToken: '',
         // SaaS multi-user
         saasStatus: null,

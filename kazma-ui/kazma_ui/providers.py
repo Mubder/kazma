@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 from kazma_core.config_store import ConfigStore, is_vault_ref
 from kazma_core.env_files import env_credential
 from kazma_core.model_registry import get_model_registry
+from kazma_core.provider_check import MOVED_KEY_MESSAGE, STORED_SECRET_FIELDS, address_moved
 from kazma_core.security.provider_mask import mask_provider_entry
 from kazma_core.security.url_credentials import (
     mask_url_credentials,
@@ -474,9 +475,16 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         data["api_key"] = _sanitize_api_key(str(data.get("api_key") or ""))
 
         existing = registry.get_provider(data["name"]) or {}
+        data["base_url"] = _restore_url("base_url", data.get("base_url"), existing.get("base_url"))
+        # A stored secret is kept only for the address it was saved with: a
+        # key posted masked beside another address is refused, and no stored
+        # header or extra key is carried to it (2026-11-15).
+        if address_moved(str(data.get("base_url") or ""), existing):
+            if _is_masked_placeholder(data.get("api_key", "")) and existing.get("api_key"):
+                raise HTTPException(status_code=400, detail=f"api_key: {MOVED_KEY_MESSAGE}")
+            existing = {k: v for k, v in existing.items() if k not in STORED_SECRET_FIELDS}
         if _is_masked_placeholder(data.get("api_key", "")) and existing.get("api_key"):
             data["api_key"] = existing["api_key"]
-        data["base_url"] = _restore_url("base_url", data.get("base_url"), existing.get("base_url"))
         data = _provider_fields(data, existing)
 
         result = registry.upsert_provider(data)

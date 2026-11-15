@@ -2272,8 +2272,14 @@
             </p>
             <div style="display:flex;gap:8px;margin-bottom:12px">
                 <input type="text" class="form-input" x-model="tokenName" placeholder="{{ t('settings.token_name') }}" style="flex:1">
+                <select class="form-input" x-model="tokenRole" style="width:auto" aria-label="{{ t('settings.role') }}" title="{{ t('settings.role') }}">
+                    <option value="viewer">{{ t('settings.role_viewer') }}</option>
+                    <option value="operator">{{ t('settings.role_operator') }}</option>
+                    <option value="admin">{{ t('settings.role_admin') }}</option>
+                </select>
                 <button class="btn btn-primary" @click="createToken()">{{ t('settings.create_token') }}</button>
             </div>
+            <p style="font-size:0.78rem;color:var(--text-muted);margin:-4px 0 12px 0;line-height:1.45;">{{ t('settings.token_role_hint') }}</p>
             <!-- One-time full token reveal -->
             <div x-show="lastCreatedToken" x-cloak class="notice tone-success" style="margin-bottom:14px;">
               <div style="flex:1;min-width:0;">
@@ -2296,7 +2302,7 @@
               </div>
               <template x-for="tok in apiTokens" :key="tok.id">
                 <div class="account-list-row">
-                  <span class="account-list-name" translate="no" x-text="tok.name" :title="tok.name"></span>
+                  <span class="account-list-name" :title="tok.name"><span translate="no" x-text="tok.name"></span> <span class="badge badge-neutral" x-text="tokenRoleLabel(tok.role)"></span></span>
                   <span class="account-list-mono" x-text="(tok.token_prefix || '***') + '…'"></span>
                   <span class="account-list-meta" x-text="tok.created_at ? String(tok.created_at).slice(0, 19).replace('T',' ') : ''"></span>
                   <span class="account-list-actions">

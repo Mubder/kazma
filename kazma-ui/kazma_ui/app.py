@@ -185,11 +185,17 @@ class KazmaAppBuilder:
         # nosniff refuses a script the OS labels text/plain.
         from kazma_ui.security_headers import SecurityHeadersMiddleware, pin_static_types
 
-        # An upload past its route's limit is refused before Starlette spools
-        # it (FA-134); inside the security headers, so the 413 carries them.
-        from kazma_ui.upload_limits import UploadSizeLimitMiddleware
+        # Every request's body has one limit, refused before it is read (an
+        # upload before Starlette spools it, FA-134; a sign-in before the 401,
+        # 2026-11-15); inside the security headers, so the 413 carries them.
+        from kazma_ui.body_limits import BodySizeLimitMiddleware
 
-        self.app.add_middleware(UploadSizeLimitMiddleware)
+        self.app.add_middleware(BodySizeLimitMiddleware)
+        # A path holding a decoded '?' or '#' reads differently to the gates
+        # and the router: refused before either sees it (request_path).
+        from kazma_ui.request_path import AmbiguousPathGuard
+
+        self.app.add_middleware(AmbiguousPathGuard)
         pin_static_types()
         self.app.add_middleware(SecurityHeadersMiddleware)
         # Added last, so it is the OUTERMOST layer: it records the TCP peer and

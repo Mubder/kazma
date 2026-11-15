@@ -987,14 +987,26 @@ class SettingsManager:
             return []
         return [t for t in tokens if isinstance(t, dict)]
 
-    def create_api_token(self, name: str) -> dict[str, Any]:
-        """Generate a new API token."""
+    def create_api_token(self, name: str, role: str = "operator") -> dict[str, Any]:
+        """Generate a new API token with the role it acts with.
+
+        *role* is ``viewer``, ``operator`` (the default) or ``admin``. The
+        middleware enforces it in every mode (``kazma_ui.auth``): a token
+        handed to another program or agent is an operator unless the owner
+        chose otherwise when making it. ``ValueError`` for any other role.
+        """
+        from kazma_core.security.platform_rbac import ROLE_RANK
+
+        role = (role or "operator").strip().lower()
+        if role not in ROLE_RANK:
+            raise ValueError(f"Invalid role {role!r}; use viewer, operator or admin")
         token = f"kazma_{secrets.token_hex(32)}"
         import hashlib
         token_hash = hashlib.sha256(token.encode()).hexdigest()
         token_entry = {
             "id": secrets.token_hex(8),
             "name": (name or "unnamed").strip() or "unnamed",
+            "role": role,
             "token_prefix": token[:16],
             "token_hash": token_hash,
             "created_at": datetime.now(UTC).isoformat(),
@@ -1004,7 +1016,7 @@ class SettingsManager:
         tokens.append(token_entry)
         # Pass a list — ConfigStore already json.dumps; do NOT double-encode.
         self._cs.set("account.tokens", tokens, category="account")
-        return {"status": "ok", "token": token, "id": token_entry["id"]}
+        return {"status": "ok", "token": token, "id": token_entry["id"], "role": role}
 
     def revoke_api_token(self, token_id: str) -> bool:
         """Revoke an API token by id. Returns True if a token was removed."""

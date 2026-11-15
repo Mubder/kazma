@@ -6239,6 +6239,32 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
   Entries may be CIDR ranges; `auth._is_trusted_proxy` is the ONE answer to
   "is this peer a declared proxy" (every check asks it, never set
   membership), and `*` is dropped so neither layer trusts every peer.
+- **One body limit per request** (`kazma_ui/body_limits.py`, 2026-11-15, the
+  defensive check before the independent review: the login route read a
+  body of any size before sign-in). Outside every gate, a declared length
+  past the route's limit is 413 unread and a chunked body stops at it; 64 KiB
+  before sign-in, 2 MiB signed in, larger limits declared per route
+  (`_route_body_limits`). `upload_limits.UploadSizeLimitMiddleware` is its
+  old name. Gate: `tests/test_request_body_limits.py` (the built app's
+  routes both ways).
+- **Every credential but the shared secret carries a role** (API tokens: the
+  role chosen at creation, operator by default), enforced in every mode, and
+  `admin_decision` gives the same answer. A token handed to another agent
+  for A2A could add an MCP server on a single-operator install
+  (`tests/test_api_token_roles.py`).
+- **Install-wide writes are admin** (`platform_rbac._ADMIN_WRITE_PREFIXES`:
+  GitHub credentials, the active workspace and its folders, the chat apps,
+  division requests, model profiles; `tests/test_install_wide_writes.py`
+  finds every write route whose code reaches a credential, workspace or
+  process sink). A stored key stays with its address: a masked key posted
+  with a changed address is refused for profiles, providers and checks
+  (`url_credentials.same_address`).
+- **Gates judge `request_path.judged_path`**, the path the router serves,
+  never `request.url.path` (a decoded `%3F`/`%23` cut it short); a decoded
+  `?` or `#` in a path is refused (`tests/test_gates_judge_the_routed_path.py`).
+  The login throttle groups IPv6 by /64 and keeps 4,096 keys at most; every
+  refused local sign-in costs one full PBKDF2. `.local`, `.lan` and `.test`
+  names are this machine only when `KAZMA_AUTOLOGIN_HOSTS` lists them.
 
 **B. HITL default-denies.**
 - `requires_approval()` ends on the `TOOL_TIERS` classification, not on a

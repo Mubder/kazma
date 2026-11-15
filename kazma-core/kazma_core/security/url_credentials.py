@@ -24,6 +24,7 @@ __all__ = [
     "mask_url_credentials_deep",
     "mask_urls_in_text",
     "restore_masked_url",
+    "same_address",
     "url_has_credentials",
     "url_password_is_masked",
 ]
@@ -161,6 +162,38 @@ def url_password_is_masked(value: Any) -> bool:
                 return False
             found = True
     return found
+
+
+def _address_key(value: Any) -> tuple[str, str, int | None, str] | None:
+    from urllib.parse import urlsplit
+
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parts = urlsplit(text)
+        port = parts.port
+    except ValueError:
+        return ("", text.rstrip("/").lower(), None, "")
+    scheme = parts.scheme.lower()
+    if port is None:
+        port = {"http": 80, "https": 443}.get(scheme)
+    return (scheme, (parts.hostname or "").lower(), port, parts.path.rstrip("/"))
+
+
+def same_address(posted: Any, stored: Any) -> bool:
+    """Whether *posted* names the server *stored* names: the same scheme,
+    host, port and path (case of the scheme and host, a default port and a
+    trailing slash aside; userinfo and query ignored). Two empty addresses
+    are the same; an empty and a set one are not.
+
+    The rule a masked secret follows (2026-11-15): a form that posts a key
+    back masked keeps the stored key only for the address it was saved with.
+    Posted with another address, the stored key would be sent to a server
+    someone just typed in -- the leak the mask exists to prevent, the same
+    rule :func:`restore_masked_url` applies to a URL's own password.
+    """
+    return _address_key(posted) == _address_key(stored)
 
 
 def restore_masked_url(posted: Any, stored: Any) -> Any:

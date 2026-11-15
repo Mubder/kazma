@@ -93,6 +93,34 @@ _ADMIN_PREFIXES = (
     "/api/setup/check",
 )
 
+# Writes that change the whole install: a credential every chat uses, the
+# active workspace (process-wide, and the file scope of every agent tool) or
+# a process-wide switch. Reading them stays with every signed-in role; any
+# other method needs admin. Until 2026-11-15 an operator session or token
+# could replace the install's GitHub token or App key, switch or add the
+# workspace, add folders outside it, stop the chat apps, decide a division
+# request and save a model profile's key. ``tests/test_install_wide_writes.py``
+# holds every such route of the built app to this rule.
+_ADMIN_WRITE_PREFIXES = (
+    "/api/github/token",
+    "/api/github/app",
+    "/api/github/oauth/start",
+    "/api/github/oauth/revoke",
+    # A clone becomes the active workspace.
+    "/api/github/repos/clone",
+    "/api/workspaces/create",
+    "/api/workspaces/switch",
+    "/api/workspaces/delete",
+    "/api/workspace/select",
+    # Folders outside the workspace every file tool may read and write.
+    "/api/workspace/extra-roots",
+    # The chat apps' start, stop and rebuild: every chat platform at once.
+    "/api/gateway",
+    "/api/divisions",
+    "/api/models/profiles",
+    "/api/models/saved",
+)
+
 # Paths viewer may access (read-ish); everything else needs operator+
 _VIEWER_OK_PREFIXES = (
     "/api/status",
@@ -153,6 +181,10 @@ def role_allows(role: str, path: str, method: str = "GET") -> bool:
     for p in _ADMIN_PREFIXES:
         if path == p or path.startswith(p + "/"):
             return rank >= ROLE_RANK["admin"]
+    if m not in ("GET", "HEAD", "OPTIONS"):
+        for p in _ADMIN_WRITE_PREFIXES:
+            if path == p or path.startswith(p + "/"):
+                return False
     # Mutations need operator+
     if m in ("POST", "PUT", "PATCH", "DELETE"):
         # Approve / chat / ide mutations
@@ -205,6 +237,14 @@ def _is_legacy_password_hash(stored: str) -> bool:
 
 
 def _verify_password(password: str, stored: str) -> bool:
+    return _verify_password_spent(password, stored)[0]
+
+
+def _verify_password_spent(password: str, stored: str) -> tuple[bool, int]:
+    """Whether *password* matches *stored*, and the PBKDF2 iterations spent
+    finding out: 0 for a hash that is empty or malformed, 200,000 for a
+    legacy one. :func:`authenticate_local_user` tops a refusal up to one
+    full verification with it."""
     try:
         parts = stored.split("$")
         if len(parts) == 4 and parts[0] == "pbkdf2_sha256":
@@ -214,13 +254,29 @@ def _verify_password(password: str, stored: str) -> bool:
             iterations = _PBKDF2_LEGACY_ITERATIONS
             salt, hexdigest = parts[1], parts[2]
         else:
-            return False
+            return False, 0
         if not 0 < iterations <= 10_000_000:
-            return False
+            return False, 0
         check = _pbkdf2_hex(password, salt, iterations)
-        return hmac.compare_digest(check, hexdigest)
+        return hmac.compare_digest(check, hexdigest), iterations
     except Exception:
-        return False
+        return False, 0
+
+
+def _spend_the_rest(password: str, spent: int) -> None:
+    """Spend what one full verification costs, less *spent* iterations.
+
+    Every refusal of a local sign-in costs the same work (2026-11-15): an
+    unknown name costs one verification of :data:`_DUMMY_PASSWORD_HASH`
+    (600,000 iterations), while a name whose stored hash is legacy cost
+    200,000 and an empty or malformed one cost nothing -- so the time of a
+    refusal said which names exist, and what their hash looked like. Kazma
+    writes no hash above 600,000 iterations; one that costs more is not
+    evened out.
+    """
+    rest = _PBKDF2_ITERATIONS - max(0, int(spent))
+    if rest > 0:
+        _pbkdf2_hex(password, "kazma-no-such-user", rest)
 
 
 class PlatformUsersUnavailable(RuntimeError):
@@ -370,9 +426,12 @@ _DUMMY_PASSWORD_HASH = (
 def authenticate_local_user(username: str, password: str) -> PlatformUser | None:
     """Validate local credentials; return PlatformUser or None.
 
-    Every refusal costs one PBKDF2 verification: an unknown or a disabled
-    user returned at once while a known one cost 600,000 iterations, so the
-    answer's time said which usernames exist (security audit 2026-11-10).
+    Every refusal costs one full PBKDF2 verification (600,000 iterations):
+    an unknown or a disabled user returned at once while a known one cost
+    600,000 iterations, so the answer's time said which usernames exist
+    (security audit 2026-11-10); a known user with a legacy hash (200,000)
+    or an empty one (none) still differed until 2026-11-15
+    (:func:`_spend_the_rest`).
     """
     for u in _users_for_sign_in():
         if str(u.get("username", "")).lower() != username.lower():
@@ -381,7 +440,8 @@ def authenticate_local_user(username: str, password: str) -> PlatformUser | None
             _verify_password(password, _DUMMY_PASSWORD_HASH)
             return None
         stored = str(u.get("password_hash") or "")
-        if _verify_password(password, stored):
+        matched, spent = _verify_password_spent(password, stored)
+        if matched:
             if _is_legacy_password_hash(stored):
                 # Silent migration: re-hash at the aligned 600k cost.
                 # Best-effort — a failed write leaves the legacy hash in
@@ -416,7 +476,9 @@ def authenticate_local_user(username: str, password: str) -> PlatformUser | None
                 enabled=True,
                 meta=dict(u.get("meta") or {}),
             )
-        # The name matched and the password did not: one verification spent.
+        # The name matched and the password did not: what is left of one
+        # full verification is spent, so this refusal costs what any other does.
+        _spend_the_rest(password, spent)
         return None
     _verify_password(password, _DUMMY_PASSWORD_HASH)
     return None

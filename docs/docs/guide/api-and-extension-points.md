@@ -149,8 +149,10 @@ it on in **Settings → System → Agent-to-agent (A2A)**.
 - **The agent card** is at `/.well-known/agent-card.json` (open, while A2A
   is on). It names the endpoint, `/api/a2a`, and the sign-in: one of your API
   tokens (**Settings → Account → API tokens**) as `Authorization: Bearer`.
-  An agent holding a token acts with your authority: give each its own token
-  and revoke it when you are done.
+  A token acts with the role chosen when it was made: operator by default
+  (chat, approvals, the IDE), never settings, MCP servers, other tokens or
+  the install's credentials unless you made it an admin token. Give each
+  agent its own token and revoke it when you are done.
 - **What it can do:** each request is one agent turn with read tools only --
   web search, the Knowledge Library, memory, reading email -- so it never
   waits for an approval, and it can never send, change, delete or run

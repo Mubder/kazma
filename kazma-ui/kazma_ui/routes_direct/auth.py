@@ -18,7 +18,36 @@ from kazma_ui.json_body import InvalidJsonBody, invalid_json_response, read_json
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["register_auth_routes"]
+__all__ = ["LOGIN_TABLE_MAX", "register_auth_routes"]
+
+#: The most addresses (or username@address pairs) a login failure table
+#: keeps. Past it the entries whose last failure is oldest go first: the
+#: tables were pruned of stale keys only, so fresh keys -- an IPv6 /64 holds
+#: 2**64 addresses -- grew them without bound inside the window.
+LOGIN_TABLE_MAX = 4096
+
+
+def _login_throttle_key(address: str) -> str:
+    """The key a client's login failures are counted under: its IPv4
+    address, or the /64 network of an IPv6 one (2026-11-15).
+
+    One subscriber is handed a whole /64, so keyed by the full address every
+    attempt from one network could come from an address of its own and none
+    reached the limit. An IPv4-mapped IPv6 address counts as its IPv4
+    address; anything that is not an address is its own key.
+    """
+    import ipaddress
+
+    text = str(address or "").strip()
+    try:
+        ip = ipaddress.ip_address(text.split("%", 1)[0])
+    except ValueError:
+        return text or "unknown"
+    if ip.version == 6:
+        if ip.ipv4_mapped is not None:
+            return str(ip.ipv4_mapped)
+        return str(ipaddress.ip_network(f"{ip}/64", strict=False))
+    return str(ip)
 
 
 def register_auth_routes(self: Any) -> None:
@@ -105,12 +134,17 @@ def register_auth_routes(self: Any) -> None:
     _LOGIN_MAX_FAILS = 10
 
     def _recent_failures(table: dict[str, list[float]], key: str, now: float) -> list[float]:
-        """The failures of *key* inside the window (the table stays bounded:
-        unique attacking keys used to stay forever)."""
+        """The failures of *key* inside the window. The table stays bounded:
+        stale keys go first, then -- at :data:`LOGIN_TABLE_MAX` -- the keys
+        whose last failure is oldest (never *key* itself)."""
         if len(table) > 1000:
             for k in list(table):
                 if not any(now - t < _LOGIN_WINDOW_S for t in table[k]):
                     del table[k]
+        if key not in table and len(table) >= LOGIN_TABLE_MAX:
+            by_age = sorted(table, key=lambda k: max(table[k], default=0.0))
+            for k in by_age[: len(table) - LOGIN_TABLE_MAX + 1]:
+                del table[k]
         kept = [t for t in table.get(key, []) if now - t < _LOGIN_WINDOW_S]
         table[key] = kept
         return kept
@@ -139,7 +173,8 @@ def register_auth_routes(self: Any) -> None:
             verify_secret,
         )
 
-        client_ip = client_address(request) or "unknown"
+        # Counted per address, an IPv6 address by its /64 (_login_throttle_key).
+        client_ip = _login_throttle_key(client_address(request) or "unknown")
         now = _time.time()
         recent = _recent_failures(_login_failures, client_ip, now)
         if len(recent) >= _LOGIN_MAX_FAILS:
