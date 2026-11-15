@@ -1,0 +1,607 @@
+# Spaces: several people on one Kazma
+
+Status: DRAFT for the owner's review, 2026-11-15. No product code is written.
+Nothing in this plan starts until the owner has read it and answered
+"Decisions needed" (section 9).
+
+Baseline: commit `07ec06b38`. Every statement about today's code was read
+from that commit, not from memory.
+
+## 1. What this plan is for
+
+Today Kazma is for one person: the owner. `docs/THREAT_MODEL.md` says so in
+its first section, and five parts of Kazma switch themselves off when a
+second login exists (decision D1 of the October audits).
+
+The owner wants friends and family on one Kazma, at home or on a cloud
+server, without one person's data reaching another.
+
+**A space** is a private world: chats, memory, documents, knowledge,
+scheduled tasks, connected accounts (email, X, calendar) and files.
+
+- **Friends** are co-owners of the owner's space. Each has their own login,
+  so every action is recorded under their name.
+- **Family**: each person has their own space. Nobody sees anyone else's.
+- **A shared family space** that several people use together.
+- **Per person**: which tools, a daily spending limit, which model. An
+  approval request goes to the person who asked. Each person's Telegram,
+  Discord, Slack or WhatsApp account is linked to their own Kazma account.
+
+### The owner's decisions (binding)
+
+| # | Decision |
+|---|---|
+| O1 | The admin cannot open members' spaces. The admin can create, reset and delete accounts. |
+| O2 | Members use the owner's model keys, each with a daily limit. Using their own keys is optional. |
+| O3 | Members never get tools that touch the host (the shell, the owner's files, the owner's email). Their code and files stay inside their own sandbox. |
+| O4 | A shared family space: yes. |
+| O5 | Build the foundations for per-space encryption now: one key per space, and every store able to keep a space's data apart. Encrypting a space even against the machine's owner can come later, possibly as a major version. |
+
+### The stages (the owner's order)
+
+1. Spaces across every part of Kazma.
+2. Per-person tools, limits and approvals.
+3. Linking chat-app accounts.
+4. Hardening for the cloud, together with the independent security review.
+
+## 2. Words used in this plan
+
+| Word | Meaning |
+|---|---|
+| Account | One person's login. It has a name, a way to sign in, and its own limits. |
+| Space | A private world of data. It has an id, a name, members and one key. |
+| Member | An account that belongs to a space. |
+| Admin | The account that runs the install: accounts, updates, backups, providers. Being admin gives no entry to a space. |
+| Host space | The one space that may be given tools that touch the machine. It is the owner's space. |
+| Sandboxed space | Every other space. Host tools do not exist there. |
+| Asker | The account whose message started a piece of work. |
+| Install | One running Kazma: the program, its settings and its machine. |
+
+In the code, a space id is what is called `tenant_id` today. The plan keeps
+that column name (it is already in more than twenty stores, in Postgres and
+in backups) and uses "space" in pages, messages and docs.
+
+## 3. Where Kazma is today
+
+### 3.1 Who a request is
+
+| Part | Today | File |
+|---|---|---|
+| Logins | Local users are a list in one settings key (`platform.users`): name, password hash, role, optional tenant. OIDC sign-in exists. | `security/platform_rbac.py`, `security/oidc.py` |
+| Roles | `viewer`, `operator`, `admin`, checked per request against one path table. A role says what a person may do, not whose data they see. | `platform_rbac.role_allows` |
+| Sessions | A session carries name, role, user id and tenant. | `security/web_sessions.py` |
+| The owner's own entry | The shared secret, an API token and local auto-login are an admin with no account behind them. | `kazma_ui/auth.py` |
+| Tenant of a web request | From the session's tenant, else `default`. A local user with no tenant runs as `default`, the same as the owner. | `auth.create_tenant_middleware` |
+| Tenant of a chat-app message | None is bound. Memory picks a tenant from a setting (`shared`, `per_platform`, `per_user`). | `agent_handler/store.py`, `memory/config.py` |
+| No tenant bound | Means `default`, which is the owner's data (`require_tenant_id`). | `tenant_isolation.py` |
+| Who owns a chat | "A chat of my tenant is bound to this thread." People in one tenant own each other's chats. | `kazma_ui/thread_ownership.py` |
+| Chat-app senders | An allowlist per platform. A listed sender acts as the owner. A sender is not an account. | `kazma_gateway/sender_rule.py` |
+
+So there are two half-built ideas: **roles** (what you may do) and
+**tenants** (which rows you see). Neither is a space. Nothing ties a person
+to a tenant by rule, and code with no tenant falls back to the owner's data.
+
+### 3.2 Store by store
+
+The list is `store_registry.STORES`, its families and the folders of
+`DATA_DIR_ENTRIES`. Retired stores are left out.
+
+"Apart" means rows carry a tenant and reads filter by it. "Carries it" means
+the tenant is on the row but not every read asks for it. "Whole" means one
+copy for the install. "Refuses" means the part is off when a second login
+exists (D1). None of this is a defect today: Kazma is one operator per
+install, and the threat model says the tenant columns are not a boundary yet.
+
+| Store | Holds | Today |
+|---|---|---|
+| `chat_sessions.db` (+ Postgres), spool | Chats | Apart by tenant. No person on a chat or a message. |
+| `sessions.db` | Chat-app routing | Carries it (often empty). Keyed by the sender's thread. |
+| `checkpoints.db`, `checkpoints_<tenant>.db` | Conversation state | A file per tenant on SQLite; one shared table on Postgres. Keyed by thread only. |
+| `snapshots.db`, `time_travel_audit.db` | Time Travel steps, its audit | Whole. Routes check thread ownership. |
+| `agent_artifacts.db` | Drafts, scratchpad | Apart: key `(tenant, thread, key)`. |
+| `task_ledgers.db` | A chat's plan | Carries it. Read by thread. |
+| `tool_effects.db` | Tool receipts | Whole. Keyed by thread. |
+| `hitl_gates.db` | Approval decisions | Carries it (often empty). Records who decided, not who asked. |
+| `run_incidents.db`, the run list | Stuck or failed work | Whole. **Refuses.** |
+| `llm_calls.db` | Model calls and cost | Whole. No person, no tenant. The daily limit is for the install. |
+| `answer_quality.db` | Quality flags | Whole. Admin page only. |
+| `memory_state.db`, `memory_ops.db`, forget journal, Postgres mirror, Neo4j copy | Memory | Apart, and the strongest today: every route and tool is tested against another tenant's ids; entities are keyed `(tenant, id)`. The `default` tenant is "the install's view". |
+| `settings.db` (lessons) | The Soul: lessons put in every prompt | Whole. One for the install. |
+| `settings.db` (About me) | The user's own text | Apart by tenant. |
+| `knowledge.db`, `vector_memory/`, `knowledge_provenance/` | Knowledge Library | Carries it. **Refuses.** One 1 GiB quota for the install. |
+| `documents.db` (+ Postgres), `document-store/` | Documents | Apart: tenant plus an access list per document. Content files are stored once per content, whoever uploaded them. Chat and the agent **refuse**; the page acts as each user. |
+| `cron.db` | Scheduled jobs | Carries it, and who booked the job; filtered in production mode. **Refuses.** A fire binds the job's tenant but no person. Reminders go to the address captured at booking. |
+| `swarm_tasks.db` (+ Postgres), `pipeline_logs.db`, worker registry | Swarm | The tenant is inside a task's metadata, not a column; the list filters by it in production mode. **Refuses.** |
+| `research_sessions.db`, report files | Research | Whole. Reports go into the one workspace. |
+| The six X stores | X posts, schedule, replies | Apart by tenant, with an X account and its keys per tenant. The mentions loop runs for `default` only. |
+| Mail and calendar sign-ins | Connected accounts | Whole: stored for the install on purpose (`INSTALL_SCOPED_SECRETS`). |
+| `vault.db` | Secrets | Rows carry a tenant or are global. One key for the whole vault. |
+| `settings.db` | Settings, workspaces | Whole. One active workspace for the install. |
+| `rbac.db`, `audit.db`, `disclosure.db`, `certifications.db` | Control records | Whole. |
+| `file_checkpoints.db`, `code-index/` | IDE undo, code search | Whole, tied to the host's files. |
+| `callbacks.db`, `chat_outbox.db`, `chat_inbox.db` | Chat-app buttons, replies waiting | Whole. Keyed by the chat address. |
+| `attachments/`, `images/`, `exports/`, `documents/`, `workspace/` | Files | Flat folders for the install. A file shared into a web chat is checked against its chat. |
+| Backups, `kazma migrate` | Everything | Whole install only. Memory has an export per tenant. |
+
+Counted: memory, documents, drafts and chats already keep tenants apart.
+About ten stores carry the id without using it everywhere. About twelve are
+whole. Five parts refuse.
+
+### 3.3 Surface by surface
+
+| Surface | Today |
+|---|---|
+| Web pages and `/api` | Signed-in only. Role table per path. Tenant from the session. |
+| Chat (web) | By tenant. Stream attach checks the thread. |
+| Chat apps | One bot per platform for the install. Allowlisted senders act as the owner. No tenant bound. |
+| Memory page and tools | By tenant, tested route by route. |
+| Documents | Page by user; chat and agent refuse with a second login. |
+| Knowledge, Scheduled, Swarm, Running work | Refuse with a second login. |
+| Approvals | A card is shown to whoever owns the thread; on chat apps, in the chat it came from. A web turn's reminders and cards may go to the owner's Telegram. |
+| Settings | Admin only, one set for the install. |
+| Workspace, IDE, shell, MCP servers | The host's files and programs. One for the install. |
+| Alerts, daily digest, weekly report | To the owner's channels. They name chats and work of the whole install. |
+| CLI, terminal app | Act as the owner, on the machine. |
+| Tools the model is offered | One list for the install; switches are for the install. |
+| Model keys, spend limit | The install's. |
+
+### 3.4 What this means
+
+Three things are missing, and they are the heart of the plan:
+
+1. **A person.** Kazma knows a tenant and a role, not "who is this". Chat
+   messages, approvals, jobs and model calls have no person on them.
+2. **A rule with no default.** Code that has no tenant gets the owner's data.
+   With spaces that is the one mistake that must be impossible.
+3. **A whole answer per store.** Each store answers "whose row is this" in
+   its own way, or not at all.
+
+## 4. The design
+
+### 4.1 Six rules
+
+1. **The space is the privacy unit.** Inside a space, members share
+   everything. Between spaces, nothing is shared. (See decision N2.)
+2. **No space, no data.** Code with no space bound is refused. It never
+   falls back to the owner's space. Work that belongs to the install (an
+   update, a backup, a health check) is declared as such and reads no space
+   content.
+3. **Every piece of work has an asker.** A turn, a job, a swarm task, an
+   approval and a model call each name the account that started them.
+4. **One answer, one place.** One function says which space a request is in.
+   One table says how each store keeps spaces apart. One table says which
+   routes are the install's, a space's or a person's.
+5. **The admin runs the install, not the spaces.** No page, route, tool or
+   command lets the admin read a space they are not a member of.
+6. **Host tools exist only in the host space.** In a sandboxed space they are
+   absent in code, not switched off by a setting.
+
+### 4.2 What a space is in the data
+
+**An id on every row, and a folder for every file.**
+
+- Each row of a space's data carries the space id (the `tenant_id` column).
+  Stores that lack the column get it. Every read and write names it.
+- Each space has one folder, `<data dir>/spaces/<space id>/`, for things that
+  are files: its sandbox files, attachments, images, exports, generated
+  documents and fetched Knowledge pages.
+- The owner's space keeps the id `default`. Today's rows are already
+  `default`, so the owner's data does not move (section 7).
+
+Why rows and not a database per space: more than twenty stores and every
+Postgres table already carry the id; the background engines (scheduler,
+swarm, memory worker, document jobs, retention) each run once for the
+install; and Postgres needs the row model anyway. A database per space was
+weighed and is decision N6.
+
+What makes rows safe enough to rely on:
+
+- **Store handles are bound to a space.** A store is asked as
+  `store.for_space(id)`. There is no call that works without one.
+- **A class gate reads every statement** on a space's table and fails one
+  that does not name the space (the pattern memory's entity gate uses today).
+- **A matrix test** drives every route and every tool as one space with
+  another space's ids. Memory has this today; it becomes the rule for all.
+- **On Postgres, row-level security** is a second lock in stage 4: a query
+  that forgets the filter returns nothing.
+
+**The space rule of each store** is declared once, in `store_registry`,
+beside what the store holds and how it migrates:
+
+| Rule | Meaning | Examples |
+|---|---|---|
+| `row` | A space id on every row | chats, memory, jobs, swarm tasks, approvals, model calls |
+| `folder` | Files under the space's folder | attachments, sandbox files, exports |
+| `install` | Belongs to the install; holds no space content. Declared with why. | provider keys, updates, the guard's state |
+| `derived` | Rebuilt from space data, split the same way | vectors, search indexes |
+| `host` | Tied to the machine's files; host space only | IDE undo, code index |
+
+Each `row` store also names its **content columns** (a person's words and
+files) apart from its **index columns** (ids, times, states). Background
+sweeps read index columns only. This is what the encryption work needs later
+(4.9).
+
+### 4.3 The identity store
+
+One new store, on the settings backend (SQLite or Postgres), replaces the
+`platform.users` list:
+
+| Table | Holds |
+|---|---|
+| accounts | id, name, sign-in, enabled, install role (`admin` or `member`), language |
+| spaces | id, name, kind (`host` or `sandboxed`), created by |
+| memberships | account, space, role in the space (`owner` or `member`) |
+| links | platform, platform user id, account (stage 3) |
+| space_keys | space, key id, the wrapped key, how it is wrapped |
+| policies | per account: tools, daily limit, models (stage 2) |
+
+Roles are two short lists. In the install: `admin`, `member`. In a space:
+`owner` (may add and remove members), `member`. Today's `viewer` and
+`operator` map to `member`; a read-only member is decision N12.
+
+### 4.4 How a request finds its space
+
+One function binds two values for the life of a request or a job: the
+**space** and the **asker**.
+
+**Web.** A page is rendered for one space and names that space on every
+call it makes. The server checks the caller is a member, every time. A link
+that cannot carry the name (a download, an image) is resolved from the thing
+itself: the file or chat names its space, and the caller must be a member.
+A space switcher in the header changes space by loading the page again.
+The space is not kept in the session, so two tabs in two spaces cannot mix.
+
+**Chat apps (stage 3).** The sender is looked up in `links`. No link: the
+private notice, with how to link. A linked sender's direct chat runs in
+their own space, or the one they chose with `/space`. A group chat runs in
+the one space a member bound it to.
+
+**Background work.** A scheduled job, a swarm task, a memory task, a
+document job and a resumed turn each carry their space and asker on their
+own row, and bind them before they run. A job with no space does not run.
+
+**Threads.** Every chat thread is recorded once with its space and the
+account that opened it. Every place that runs a turn (web, chat apps,
+scheduler, a resume after a restart, an approval's timeout) binds the scope
+from that record. A turn that paused in one space can only be resumed there.
+
+**CLI and terminal app.** They run on the machine, as the admin, in the
+admin's own spaces. A command that names another space is refused.
+
+### 4.5 Sign-in and accounts
+
+- Every person signs in as an account. Once a second account exists, the
+  shared secret, local auto-login and API tokens are tied to the owner's
+  account or switched off (item S1-04).
+- The admin creates an account, resets its password and deletes it (O1).
+  A reset is never silent: the member is told at their next sign-in and in
+  their linked chat app, and it is in a record the admin cannot edit.
+- Creating an account creates its personal space and that space's key.
+- A member can be in several spaces: their own, and shared ones.
+
+### 4.6 What follows the space, part by part
+
+| Part | With spaces |
+|---|---|
+| Chats | A chat belongs to one space. Each message names who wrote it. Members of the space see the space's chats. |
+| Checkpoints, Time Travel, drafts, plans, receipts | Follow their chat's space. Postgres checkpoints get the space on the thread record. |
+| Memory | The space is the memory tenant, always. The `shared / per_platform / per_user` setting is retired. `default` becomes a space like any other: no "install's view". Facts name the member who said them (4.7). |
+| Lessons (the Soul) | One per space. A lesson learned in one space never enters another's prompt. |
+| Documents | The document's tenant is the space; its owner is the account. The "one operator" stand-in goes. Chat and the agent act as the asker. Content files are kept per space, so one space can be exported or erased alone. |
+| Knowledge | Libraries, their vectors and fetched pages belong to a space. The quota is per space. |
+| Scheduled | A job carries its space and its creator. It fires in that space, with the creator's tools as they are at that moment. Its result goes to the creator. |
+| Swarm | A task carries its space and asker. Workers run inside that scope. Templates stay the install's. |
+| Research | Sessions and reports belong to a space; reports are written in its folder. |
+| Connected accounts | Mail, calendar and X sign-ins belong to the space that connected them. X already works this way; mail and calendar move from the install to the space. The owner's mailbox is the owner's space's. Background refresh and the X mentions loop go space by space. |
+| Secrets | The vault gains a space scope. A space's secrets are sealed with the space's key (4.9). The install's secrets stay the install's. |
+| Files | File tools, uploads and generated files live in the space's folder. `python_exec` mounts that folder and nothing else. |
+| Workspace, IDE, shell, git, MCP servers | Host tools. Host space only (4.8). |
+| Approvals | A gate row carries its space and its asker. Only the asker is shown the card and may answer it (stage 2). |
+| Running work | Listed per space. A stuck or failed run is told to its asker. |
+| Model calls | Each row names the space and the asker. Spend is counted per person. |
+| Settings | Every key is classed `install`, `space` or `account`. The Settings page splits into three: My account, This space, Install (admin). |
+| Notifications | Web Push and the bell are per account. A turn's "done" goes to its asker. |
+| Alerts, digest, weekly report | To the admin: counts and states, never a chat's title or text from a space the admin is not in. |
+| Logs | Name ids, never a member's words. |
+| Backups | The whole install, as today, plus the identity store. Stated plainly: a backup holds every space (N10). |
+| Export and erase | Any member can export their space. Deleting a space erases it in every store, with the same honest limit memory states today: backups already taken. |
+
+### 4.7 Who is "I" in a shared space
+
+Memory assumes one user per tenant: "I live in Kuwait" becomes a fact about
+`user`. With three people in a family space that is wrong.
+
+The plan: in a space with more than one member, each member has their own
+"self" entry, under their name. A fact a person states about themself is
+filed under them. Recall for a turn treats the speaker as "I" and the other
+members as named people. A space with one member works exactly as today.
+
+This is the least settled part of the design. It gets a short study before
+its item is built (risk R3).
+
+### 4.8 Tools: three groups
+
+| Group | What | Who can have it |
+|---|---|---|
+| Host tools | The shell, files outside the space's folder, the IDE, git, workspace switch and clone, MCP servers, package and skill installs, settings and vault tools, computer use, system logs, updates and backups | The host space only. Absent everywhere else, in code. |
+| Space tools | Memory, knowledge, documents, scheduling, swarm, research, files in the space's folder, code in the container, the space's own connected accounts | Members, by their per-person list |
+| Outside tools | Web search and fetch, image generation, voice | Members, by their per-person list |
+
+Code for members runs only in a container (or the cloud microVM). If the
+machine has no container engine, members have no code tool. The local
+fallback is never used for a sandboxed space.
+
+Whether friends in the owner's space get host tools is decision N1.
+
+### 4.9 The encryption foundation (O5)
+
+What is built now:
+
+1. **A key per space.** Made when the space is made, kept in `space_keys`,
+   wrapped by the install's vault key. Each sealed item names its key id, so
+   a key can be changed later.
+2. **A space's secrets are sealed with its own key.** Mail, calendar and X
+   tokens and a member's own model keys. This is the one place content is
+   encrypted per space in this plan, because the vault already encrypts.
+3. **Every store declares how it keeps a space apart** (4.2), with its
+   content columns named.
+4. **Three operations work on every store, from that table:** count a
+   space's data, export one space, erase one space. If every store can hand
+   over exactly one space and remove exactly one space, every store can keep
+   a space apart. A test proves it with a word planted through every writer.
+5. **One sealing format** for a space export, using the space key.
+
+What is not built now, and how the foundation leads to it:
+
+- Wrapping a space's key with something only its members hold (a password
+  and a recovery code), so the machine's owner cannot open it.
+- Sealing the content columns, and keeping each space's search indexes in
+  files that open only while the space is unlocked.
+- Deciding how scheduled jobs and chat apps work while nobody is signed in.
+
+Until that version, this plan promises a boundary **between people who use
+Kazma**. It does not promise a boundary against the person who runs the
+machine: they can read the disk and the backups. The pages and docs will say
+so in plain words.
+
+### 4.10 What the admin can and cannot do
+
+| Can | Cannot |
+|---|---|
+| Create, disable, reset and delete accounts | Open a space they are not a member of, by any page, route, tool or command |
+| Create spaces and set each person's tools, limit and models | Read a member's chats, memory, documents, jobs or files |
+| See each person's spend and counts of work | See titles or text of that work |
+| Run updates, backups and restores of the whole install | Restore or export one member's space into their own view |
+| Set the install's model keys and chat-app bots | Use a member's connected accounts |
+
+## 5. Stages
+
+Each item names what changes, the gate that proves it, and what the owner
+sees. Every gate has a negative control: it is shown failing on the old code
+or on a planted mistake, as `AGENTS.md` asks. Test names are proposals.
+All items are **Planned**.
+
+### Stage 1: spaces across every part of Kazma
+
+Done when two accounts can use every part of Kazma on one install and
+neither can reach the other's data, and the five refusals are gone.
+
+| ID | What changes | Gate, with its negative control | The owner sees |
+|---|---|---|---|
+| S1-01 | The identity store (4.3). `platform.users` moves into it once. | `test_identity_store.py`: accounts, spaces and memberships through the real store on SQLite and Postgres; the move keeps every user. Control: the old list read-modify-write loses a user under two writers. | Settings → People lists accounts and spaces. |
+| S1-02 | One scope: space and asker, bound together, with **no default**. `require_tenant_id`'s fallback to `default` is removed for content. | `test_no_space_no_data.py`: every store's reader called with no scope refuses; a source gate finds no `or "default"` on a content path. Control: the old fallback returns the owner's rows. | Nothing. |
+| S1-03 | Every store, family and data folder declares its space rule and content columns. | `test_store_space_rules.py`: each entry of the registry has a rule; a planted undeclared store fails. | Nothing. |
+| S1-04 | Sign-in is always an account once a second one exists. The shared secret, auto-login and API tokens are tied to the owner's account or off. | `test_sign_in_is_an_account.py`: each old entry, with two accounts, is the owner or refused. Control: the old principal has no account. | The owner signs in by name. A notice explains the change once. |
+| S1-05 | Every route is classed `install`, `space`, `account` or `open`, in one table. | `test_route_scopes.py`: every route of the built app is in the table; a planted route fails. | Nothing. |
+| S1-06 | The web names its space on every call; the server checks membership every time. A space switcher. | `test_web_request_space.py`: a member of A asking as B is refused on every route (enumerated). Browser test, EN and AR, two tabs in two spaces. Control: space kept in the session mixes two tabs. | A space switcher in the header. |
+| S1-07 | A thread record: space and opener. Every place that runs a turn binds the scope from it. | `test_turn_scope_bound.py`: every function that runs a graph binds it (found from the source); a resume in another space is refused. Control: a resume with no record runs as `default`. | Nothing. |
+| S1-08 | Chats, the spool, checkpoints (SQLite and Postgres), Time Travel, drafts, plans and receipts follow the space. Messages name their author. | `test_chat_state_spaces.py`: the matrix over every chat route; real Postgres for checkpoints. Control: the shared Postgres table reads across. | Each message shows who wrote it. |
+| S1-09 | Memory: the space is the tenant, always. The mode setting is retired. `default` loses "the install's view". | The existing tenant matrix with the mode removed; `test_memory_default_is_a_space.py`. Control: the old owner rule answers another space's id. | Settings → Memory loses one option. |
+| S1-10 | Lessons (the Soul) are per space. | `test_lessons_per_space.py`: a lesson learned in A is never in B's prompt, through the real graph. Control: the single Soul. | Nothing. |
+| S1-11 | Shared-space memory: a "self" entry per member (4.7). | `test_memory_speakers.py`: two members state different facts about themselves; each is recalled for the right one. Control: one `user` entry overwrites. | In a shared space Kazma knows who said what. |
+| S1-12 | Documents: the owner is the account; the operator stand-in goes; chat and the agent act as the asker; content files per space. Refusal removed. | The operator-principal test replaced by `test_document_spaces.py`: page, chat and agent see the same documents within a space, none across. Control: the `agent` name. | Documents work for everyone. |
+| S1-13 | Knowledge: libraries, vectors, fetched pages and crawls per space; quota per space. Refusal removed. | `test_knowledge_spaces.py`: search, inject and crawl never cross; real Chroma where installed. Control: a search with no space filter. | Knowledge works for everyone. |
+| S1-14 | Scheduled: a job carries space and creator and fires in that scope. Refusal removed. | `test_cron_spaces.py`: a real fire runs in its space; another space's job id reads as unknown; a job with no space does not fire. Control: the fire with no scope. | Scheduled works for everyone. |
+| S1-15 | Swarm: a task carries space and asker; workers run in that scope. Refusal removed. | `test_swarm_spaces.py`: every swarm route and tool by matrix; a worker's tool call lands in the asker's space. Control: the unscoped dispatch. | Swarm works for everyone. |
+| S1-16 | Research sessions and reports per space. | `test_research_spaces.py`: list, read, download and delete by matrix. Control: the unfiltered list. | Research is per space. |
+| S1-17 | Connected accounts (mail, calendar, X) belong to a space; background refresh goes space by space. | `test_connected_accounts_spaces.py`: two spaces, two mailboxes; a refresh writes only its own; every reader names a space (source gate). Control: the install-scoped names. | Each space connects its own accounts. |
+| S1-18 | The vault gains a space scope; the install list stays. | `test_vault_space_scope.py`: a space's secret is not returned to another space or to code with no space. Control: the `default` rung. | Nothing. |
+| S1-19 | The space folder: file tools, uploads, images, exports and generated documents. `python_exec` mounts only it. | `test_space_files.py`: every tool that takes a path, in a sandboxed space, cannot reach outside its folder; real Docker run where present. Control: the install's workspace mount. | A Files area per space. |
+| S1-20 | Host tools exist only in the host space (4.8). | `test_host_tools_absent.py`: every registered tool is classed host, space or outside (a new tool with no class fails); in a sandboxed space a host tool is neither offered nor callable. Control: a policy that only hides it from the list. | Members have no shell, IDE or Workspace page. |
+| S1-21 | Approvals and running work carry space and asker. Refusal of Running work removed. | `test_gates_and_runs_spaces.py`: pending approvals and runs by matrix. Control: the list with no space. | Each person sees their own work. |
+| S1-22 | Model calls name space and asker. | `test_ledger_names_the_asker.py`: every call of a real turn, a job and a swarm task. Control: a call site with no asker fails the gate. | Spend per person on the admin page. |
+| S1-23 | Settings keys classed `install`, `space`, `account`; the Settings page splits. | The settings class gate extended: a key with no scope fails. Browser test, EN and AR. | Three Settings areas. |
+| S1-24 | Alerts, the digest, the weekly report and logs carry no member content. | `test_admin_signals_hold_no_content.py`: a word planted in a member's turn is in no alert, digest or log line at INFO or above. Control: today's digest names the chat. | The digest shows counts per person. |
+| S1-25 | The admin boundary (4.10). Create, reset, delete. A reset tells the member. | `test_admin_cannot_open_a_space.py`: the admin against every space route by matrix; a reset leaves a record the admin cannot change. Control: a role check alone lets the admin in. | People page: create, reset, delete. |
+| S1-26 | The key per space; a space's secrets sealed with it (4.9). | `test_space_keys.py`: a secret of A does not open with B's key; a new space has a key. Control: the single vault key opens both. | Nothing. |
+| S1-27 | Count, export and erase one space, from the registry. | `test_space_export_erase.py`: one word planted through every writer in A and another in B; A's export holds A's and not B's; after erasing A no column of any store holds A's word and B is whole. Control: yesterday's erase misses a store. | "Export this space" and "Delete this space". |
+| S1-28 | Backups and migration carry the identity store; a restore keeps spaces apart. | `test_backup_restore_spaces.py`: a real backup and restore, then the matrix. Control: a restore without the identity store. | Nothing. |
+| S1-29 | The master matrix: every route and every agent tool, enumerated, as one space against another. | `test_space_matrix.py`: a new route or tool without a case fails. | Nothing. |
+| S1-30 | The docs: the threat model's first section, the safety design, the guide. They say what Spaces promises and what it does not (4.9). | The docs gates; `test_threat_model_accuracy.py` updated. | A "Spaces" guide page, EN and AR. |
+
+### Stage 2: per-person tools, limits and approvals
+
+Done when the admin can set, per person, the tools, the daily limit and the
+models, and every approval reaches only the person who asked.
+
+| ID | What changes | Gate, with its negative control | The owner sees |
+|---|---|---|---|
+| S2-01 | A tool list per person, within what their space may have. Applied when tools are offered and again when one is called. | `test_person_tool_policy.py`: a tool switched off for a person is neither offered nor callable, in chat, a job and a swarm worker. Control: hiding it from the offer only. | Tick boxes per person. |
+| S2-02 | A daily spending limit per person, counted from the ledger. A limit in tokens covers models with no known price. | `test_person_daily_limit.py`: the turn that would pass the limit is refused before any model call; another person is not affected. Control: the install-wide sum. | A limit per person; today's spend beside it. |
+| S2-03 | Models per person: which they may use, and their default. | `test_person_models.py`: a model not allowed is refused in the picker, `/model` and a job. Control: the install's list. | A model list per person. |
+| S2-04 | A member's own model keys (optional). Stored in their space, sealed with its key. Their spend on their own key does not count against the limit. | `test_member_own_keys.py`: a call with the member's key never uses the owner's; the key is not shown to the admin. Control: the install-scoped provider row. | "Use my own key" in My account. |
+| S2-05 | Approvals go to the asker: the web card, the bell, Web Push and the chat app. Nobody else can answer. | `test_approvals_reach_the_asker.py`: another member of the same space is refused; the gate stays pending. Control: the thread-owner rule lets them. | Each person gets their own cards. |
+| S2-06 | Standing approvals ("Allow tool", YOLO windows) belong to the person and the chat. | `test_grants_per_person.py`: a grant by one person does not skip another's card. Control: the per-thread grant. | Nothing. |
+| S2-07 | Background work uses its creator's tools and limit as they are when it runs. A disabled creator pauses their jobs. | `test_background_uses_creator_policy.py`: a job booked before a tool was taken away does not use it. Control: the tools frozen at booking. | A paused job says why. |
+| S2-08 | Limits per space: disk, documents, knowledge, work running at once. | `test_space_quotas.py`: one space at its limit does not slow or stop another. Control: the install-wide quota. | Usage per space on the admin page. |
+| S2-09 | Every action is recorded under the person's name. An activity page per space, for its members. | `test_actions_name_the_person.py`: every route that changes something writes the account (enumerated). Control: a route recording the session label only. | An Activity page in each space. |
+| S2-10 | The People page: tools, limit, models, spaces, last sign-in, sessions. | Browser test, EN and AR, reached by the sidebar. | The page itself. |
+
+### Stage 3: linking chat-app accounts
+
+Done when each person's Telegram, Discord, Slack or WhatsApp account is
+their own Kazma account, and an unlinked sender gets nothing.
+
+| ID | What changes | Gate, with its negative control | The owner sees |
+|---|---|---|---|
+| S3-01 | Linking: a signed-in person gets a short code in My account and sends it to the bot in a direct chat. One use, ten minutes. | `test_chat_link_flow.py`: a real adapter; a used, old or wrong code links nothing; a code typed in a group is refused. Control: a code that can be used twice. | "Link Telegram" in My account. |
+| S3-02 | The sender rule becomes "a linked, enabled account". The allowlists retire. The owner's known ids become the owner's links. | The private-by-default test re-pointed: every accept path asks the link. Control: the allowlist lets a listed stranger act as the owner. | The allowlist fields go; links are listed. |
+| S3-03 | A chat's space: the person's own by default, `/space` to change it, and a group bound to one shared space by one of its members. | `test_chat_space_binding.py`: a message runs in the bound space; a sender who is not a member of it is ignored in the group. Control: the sender's thread with no space. | `/space` in every chat app. |
+| S3-04 | Approvals and results in chat apps go to the asker. In a group only the asker's press counts. | `test_chat_approvals_asker.py`: another person's press answers "not yours" and changes nothing. Control: the gateway-admin rule. | Cards arrive in the asker's own chat. |
+| S3-05 | A web turn's notices go to the asker's linked chat, never the owner's. | `test_web_turn_delivery_target.py`: two people, two targets. Control: the owner's Telegram stamped on every web turn. | Reminders reach the person who set them. |
+| S3-06 | `/sessions`, `/switch`, `/memory`, `/runs` and the rest act as the linked account in the bound space. | The slash-command gates re-pointed; a matrix over every command. Control: the sender-owner pointer. | Nothing new. |
+| S3-07 | Unlinking, and a disabled or deleted account: the sender is refused at once; replies waiting for them are dropped. | `test_unlink_stops_everything.py`: outbox, inbox, callbacks and a pending card. Control: a waiting reply still sent. | "Unlink" in My account. |
+| S3-08 | Chat-app admin (`KAZMA_GATEWAY_ADMINS`) retires: admin commands need a linked admin account. | `test_chat_admin_is_an_account.py`. Control: the environment list. | Nothing. |
+
+### Stage 4: hardening for the cloud, with the independent review
+
+Done when an install reachable from the internet, with people who do not
+all trust each other, has been attacked by someone other than its authors,
+and what they found is fixed.
+
+| ID | What changes | Gate, with its negative control | The owner sees |
+|---|---|---|---|
+| S4-01 | Postgres row-level security on every space table, bound per request. | `test_pg_row_security.py` on real Postgres: a statement with no space filter returns nothing. Control: the same statement without the policy returns both spaces. | Nothing. |
+| S4-02 | Stronger sign-in: a second factor, sign-in limits per account, invitation links that expire, a list of each person's sessions. | `test_sign_in_hardening.py`. Control: a password alone signs in when a second factor is required. | Second factor in My account. |
+| S4-03 | The switches that open an install are refused once a second account exists (sign-in off, the open chat-app switch, demo mode). | `test_open_switches_refused_with_members.py`: each switch, at boot. Control: the boot guard without the rule starts. | A clear refusal at start. |
+| S4-04 | Fairness: limits on turns, jobs, uploads and crawls per person and per space; one space cannot starve another. | `test_space_fairness.py` on the real queues. Control: one queue for all. | Nothing. |
+| S4-05 | Members' code runs only in a container or microVM, with no network unless the admin allows it. | The sandbox tests, per space; a real Docker run. Control: the local fallback. | Nothing. |
+| S4-06 | A space can move: export a sealed space bundle from one install and import it into another. | `test_space_bundle_round_trip.py`: export, import into a fresh install, then the matrix. Control: a bundle carrying another space's row. | "Move this space" for its owner. |
+| S4-07 | Key care: change a space's key; a deleted space's key is destroyed. | `test_space_key_rotation.py`. Control: an old key still opens a new secret. | Nothing. |
+| S4-08 | A cloud profile: the checks a public install must pass at boot (TLS, a declared proxy, sign-in on, a container engine for code, backups set). | `test_cloud_profile.py`: each missing piece refuses or warns as declared. | `kazma doctor` shows the cloud profile. |
+| S4-09 | A soak with many spaces: real turns, jobs, uploads and restarts; every cycle checks nothing crossed. | `scripts/spaces_soak.py` and its harness test with planted crossings. | A report. |
+| S4-10 | The review pack: scope, claims with their tests, setup, what is out of scope. Then the review, by someone outside. Then the fixes, each with a test. | The reviewers' report and the fix list. Never replaced by a self-review. | The report, and what was fixed. |
+| S4-11 | The published threat model and safety design say what was reviewed, by whom, and what still is not a boundary. | The docs gates. | The pages. |
+
+## 6. Order inside stage 1
+
+Stage 1 is large. It is built in this order, and nothing is deployed with a
+second account allowed until the last step:
+
+1. S1-01 to S1-07: identity, the scope with no default, the tables.
+2. S1-29's matrix harness, empty, so each later item adds its cases.
+3. The stores that already keep tenants apart (S1-08, S1-09, S1-12).
+4. The five parts that refuse (S1-13 to S1-15, S1-21), one at a time. Each
+   keeps its refusal until its own matrix passes.
+5. Files and host tools (S1-19, S1-20).
+6. Accounts, secrets and keys (S1-17, S1-18, S1-26).
+7. Export, erase, backups, admin boundary, signals, docs.
+
+Until step 7 is done, an install with one account behaves exactly as today,
+and an install with two keeps today's refusals. The owner's rule "deploy
+only complete phases" holds: single-account behaviour is deployable at each
+step; multi-account is switched on once.
+
+## 7. Moving today's install
+
+The owner's data becomes the owner's space. Nothing is copied or rewritten
+that does not have to be.
+
+1. **The space.** A space with the id `default` is recorded, kind `host`,
+   named by the owner. Rows that already say `default` are already in it.
+2. **The account.** An owner account is made, role `admin`, the only member
+   of `default`. An existing local user with role `admin` becomes it. The
+   shared secret keeps working as that account's sign-in until the owner
+   sets a password.
+3. **Rows with no space.** Stores that gain the column are filled with
+   `default` in one pass per store, through the existing column helper.
+   Empty tenants on approval rows and chat-app rows become `default`. A
+   swarm task's space moves from its metadata into a column.
+4. **Memory tenants.** An install that used `per_platform` or `per_user`
+   memory has tenants such as `telegram`. They are counted first and
+   reported. Nothing is merged without the owner's word (R6). The live
+   install uses `shared`, so it has none.
+5. **Secrets.** Vault rows under tenant `default` stay (the X keys are
+   among them). The mail and calendar sign-ins move from the install's scope
+   to the `default` space. The space key is made, and the space's secrets
+   are sealed again with it.
+6. **Files.** `attachments/`, `images/`, `exports/`, `documents/` and the
+   default workspace are the `default` space's folder by a mapping, not a
+   move. The host space keeps the real workspace, as today.
+7. **Chat apps.** The owner's known ids become links to the owner's account
+   (stage 3). Until then the sender rule is unchanged.
+8. **Jobs.** Existing scheduled jobs and swarm tasks get the owner as their
+   creator.
+
+Rules for the move:
+
+- One command, `kazma spaces migrate`, with `--check` first. It reads only,
+  and says what it would change, store by store.
+- A backup is taken first. Every step is recorded before it is made, and a
+  stopped run continues where it stopped.
+- It can be run twice with no second effect.
+- It is tested on a copy of a store seeded by the product's own writers, and
+  on a copy of the live install's shape, before it runs on live.
+- An install that never adds a second account still gets the move, and sees
+  no difference.
+
+## 8. Risks and open questions
+
+| # | Risk | What the plan does about it |
+|---|---|---|
+| R1 | One missed filter leaks a space. This is the main risk of the row model. | Bound store handles, the statement gate, the matrix over every route and tool, Postgres row security, the soak, the outside review. |
+| R2 | Code with no space quietly acts as the owner. | No default (S1-02). It is the first item because every later one leans on it. |
+| R3 | "Who is I" in a shared space changes how memory files facts. Memory is the most hardened part of Kazma. | A short study first, on the memory benchmark, before S1-11 is built. A space with one member stays exactly as today. |
+| R4 | The owner's own secrets move scope (mail, calendar, X). A mistake here signs the owner out. | The move is checked by reading each secret back after it; the old copy is kept until the first good refresh. |
+| R5 | Size. Stage 1 touches every store and most routes. | The order in section 6; each part keeps its refusal until its own tests pass; nothing multi-account ships early. |
+| R6 | Old memory tenants from the retired modes have no clear owner. | Counted and reported; the owner decides per tenant. |
+| R7 | The machine's owner can still read every space on disk and in backups. | Said plainly in the product and the docs (4.9). The encrypted version is the answer, later. |
+| R8 | A reset by the admin lets the admin sign in as the member. | The member is always told, and it is recorded (N3). The encrypted version closes it properly. |
+| R9 | One bot serves everyone. Messages of all members pass through the admin's bot. | Said plainly; a bot per space is possible later (N7). |
+| R10 | Shared model keys: one person's use can hit the provider's rate limit for all. | Per-person limits (S2-02) and fairness (S4-04). |
+| R11 | Group chats: people who are not members can read what Kazma answers there. | A group is bound to one shared space on purpose, by a member; the bind message says so. |
+| R12 | The prompt cache and the tool list differ per person, so cost per turn may rise. | Measured in stage 2 before and after. |
+| R13 | A scheduled job outlives its creator's rights. | S2-07: rights are read when it runs. |
+| R14 | The review finds design faults late. | The review pack is started in stage 1, and the reviewers may be asked to read this plan before stage 2. |
+
+Open questions that need study, not a decision:
+
+- How Postgres checkpoints carry the space without changing LangGraph's
+  tables (a thread record beside them is the plan).
+- Whether the Neo4j copy of the memory graph is kept per space by a label or
+  by a database.
+- How a shared space's "About me" works: one text per member is the plan.
+
+## 9. Decisions needed
+
+Each has a proposal. The plan is written as if the proposal stands; the
+owner changes any of them before work starts.
+
+| # | Question | Proposal |
+|---|---|---|
+| N1 | Do friends in the owner's space get host tools (the shell, the owner's files, the owner's email)? O3 says members never do; the owner also said friends use everything as the owner does. | Friends see and use the space's data. Host tools are off for a new friend, and the owner can turn them on per person. |
+| N2 | Inside a space, is everything shared, chats included? If friends join the owner's space, they see the owner's past chats, memory and documents. | Yes, a space is one shared world. If the owner wants private chats too, the owner keeps a personal space and makes a second, shared one for friends. |
+| N3 | What does "reset an account" mean? | The admin sets a new one-time password. The member is told, and it is recorded where the admin cannot change it. It never erases data. |
+| N4 | May a space's owner be the one who approves for another member (for example, a child's posts or spending)? | No for now: only the asker answers. It can be added later as a per-person option. |
+| N5 | Who can make a shared space, and who adds people to it? | The admin makes spaces and accounts. A space's owner adds and removes members from existing accounts. |
+| N6 | Rows with a space id, or a database per space? | Rows and a folder per space now (4.2). A database per space is kept open for the encrypted version, for memory and knowledge. |
+| N7 | One bot per platform for everyone, or a bot per space? | One bot now. A member's own bot later if asked. |
+| N8 | The daily limit: in money, in tokens, or both? What happens at the limit? | Both: money where the price is known, tokens always. At the limit the person's turns stop until the next day, and they are told. The admin can raise it. |
+| N9 | Deleting an account: at once, or after a wait? What happens to a shared space when its last member leaves? | A seven-day wait, during which the admin can undo it. A shared space with no members is erased after the same wait. |
+| N10 | Whole-install backups hold every space, and the owner holds the backup passphrase. Is that acceptable until the encrypted version? | Yes, and members are told on their first sign-in. |
+| N11 | What may the admin see about members? | Spend, counts and states per person. Never titles or text. |
+| N12 | Is a read-only member needed (today's `viewer`)? | Not now. Two roles in a space: owner and member. |
+| N13 | Which outside tools do members get by default: web search and fetch, the browser, image generation? | Web search, fetch and image generation on. The browser and computer use off. |
+| N14 | Is a second factor required for every account on a cloud install? | Required on the cloud profile, optional at home. |
+| N15 | After Spaces, does the owner still sign in with the shared secret? | It works until the owner sets a password, then it is retired for the web. The CLI on the machine keeps acting as the owner. |
+| N16 | Who does the independent review, and when do they start? | Chosen at the end of stage 1; they read this plan and the stage 1 code before stage 2 ends, and test the whole in stage 4. |
+| N17 | The name in Arabic. | "مساحة" for a space, "حساب" for an account. |
+
+## 10. Not in this plan
+
+- Encrypting a space against the machine's owner (4.9 builds toward it).
+- Billing, sign-up by strangers, or running Kazma as a public service.
+- A bot per space, and a read-only role.
+- More than one install sharing the same spaces.
+- Changing how a single-account install works.
+
+## 11. Execution rules (when work starts)
+
+- Each fix or feature lands with its behaviour test, its class gate and its
+  negative control.
+- Each part keeps its refusal until its own matrix passes.
+- No deploy to the live install part-way through a stage.
+- The plan's tables are updated with the state and the evidence of each
+  item, as the Documents plan does.
+- The repository is public. A weakness found on the way is fixed with its
+  test before it is written down anywhere in it.

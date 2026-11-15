@@ -176,6 +176,13 @@ def _get_agent_info(agent: Any) -> dict[str, Any]:
                 llm_info["base_url"] = active_url
     except Exception:
         logger.debug("[agents] active profile overlay skipped", exc_info=True)
+    # The address may carry a password (a local server behind basic auth):
+    # the card shows the host, never the password (found 2026-11-15 by
+    # tests/test_no_get_route_answers_a_provider_key.py).
+    if llm_info.get("base_url"):
+        from kazma_core.security.url_credentials import mask_url_credentials
+
+        llm_info = {**llm_info, "base_url": mask_url_credentials(str(llm_info["base_url"]))}
 
     # The agent answers whenever the server serves. The page used to read
     # agent.is_running, a flag set only by its own Start/Stop buttons and

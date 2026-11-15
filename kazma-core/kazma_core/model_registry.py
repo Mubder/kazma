@@ -1784,8 +1784,16 @@ class ModelRegistry:
     # ── Unified options ────────────────────────────────────────────
 
     def list_unified_options(self) -> dict[str, Any]:
-        """Return unified model/provider options with profile metadata."""
-        provider_entries = self.list_providers()
+        """Return unified model/provider options with profile metadata.
+
+        The provider rows go out masked (``security.provider_mask``): these
+        options answer ``GET /api/settings/models/options`` and ``GET
+        /api/swarm/models``, the second open to any signed-in user, and they
+        returned every provider's key in the clear until 2026-11-15.
+        """
+        from kazma_core.security.provider_mask import mask_provider_entry
+
+        provider_entries = [mask_provider_entry(p) for p in self.list_providers()]
         profiles = self.list_model_profiles(mask_api_key=True)
 
         models: set[str] = set()

@@ -443,9 +443,9 @@ def _probe_pg_argv():
 
 
 def _probe_provider_entry():
-    from kazma_ui.providers import _mask_provider_entry
+    from kazma_core.security.provider_mask import mask_provider_entry
 
-    return _mask_provider_entry({"name": "p", "base_url": DSN, "api_key": "k-123456"})
+    return mask_provider_entry({"name": "p", "base_url": DSN, "api_key": "k-123456"})
 
 
 def _probe_connector_entry():
@@ -470,7 +470,7 @@ PROBES = {
     "kazma-core/kazma_core/migration/pg_bridge.py::_redact_cmd": _probe_pg_argv,
     # Masked since 2026-09-26: their saves restore an unchanged masked URL and
     # refuse a changed one (tests/test_url_password_round_trip.py).
-    "kazma-ui/kazma_ui/providers.py::_mask_provider_entry": _probe_provider_entry,
+    "kazma-core/kazma_core/security/provider_mask.py::mask_provider_entry": _probe_provider_entry,
     "kazma-ui/kazma_ui/providers.py::_mask_connector_entry": _probe_connector_entry,
     "kazma-core/kazma_core/model_registry.py::ModelRegistry._mask_profile": _probe_profile,
 }

@@ -6280,6 +6280,15 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
   live API keys in the clear (F-02). Key matching is on `.`/`_` token
   boundaries — a substring test made `pat` match `selected_path`.
 - New API surfaces that echo config must go through `mask_deep`.
+- **A provider row goes out through one masker**
+  (`security/provider_mask.mask_provider_entry`, 2026-11-15): the key, extra
+  keys, headers, AWS credentials and the address's password. The unified
+  model options (`ModelRegistry.list_unified_options`: `GET
+  /api/settings/models/options`, and `GET /api/swarm/models`, open to any
+  signed-in user) returned the rows raw, and the Agents page showed the
+  address with its password. Gate: `tests/test_no_get_route_answers_a_provider_key.py`
+  walks every GET `/api` route with a provider whose every secret is a
+  sentinel (the raw options as the control).
 - **Masking is by key AND by value.** A password inside a URL is a secret
   whatever the key is called (`kazma_core/security/url_credentials.py`, the
   one home): `memory.backends.state.url` held the live Postgres DSN in

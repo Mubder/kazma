@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 from kazma_core.config_store import ConfigStore, is_vault_ref
 from kazma_core.env_files import env_credential
 from kazma_core.model_registry import get_model_registry
+from kazma_core.security.provider_mask import mask_provider_entry
 from kazma_core.security.url_credentials import (
     mask_url_credentials,
     restore_masked_url,
@@ -150,28 +151,10 @@ def _same_address(providers: list[dict[str, Any]], name: str, base_url: str) -> 
 
 
 def _mask_provider_entry(provider: dict[str, Any]) -> dict[str, Any]:
-    """Return a copy of a provider entry with every secret masked: the API
-    key, any password in its base URL (the save restores an unchanged masked
-    URL), each header's value, the AWS secret and token, each extra key
-    (providers stages 2 and 4). The save keeps a masked value as stored."""
-    safe = dict(provider)
-    if safe.get("api_key"):
-        safe["api_key"] = _mask_secret(str(safe["api_key"]))
-    if safe.get("base_url"):
-        safe["base_url"] = mask_url_credentials(safe["base_url"])
-    headers = safe.pop("secret_headers", None)
-    if isinstance(headers, dict):
-        safe["headers"] = {k: _mask_secret(str(v)) for k, v in headers.items()}
-    for field in ("aws_secret_access_key", "aws_session_token"):
-        if safe.get(field):
-            safe[field] = _mask_secret(str(safe[field]))
-    if isinstance(safe.get("api_keys"), list):
-        safe["api_keys"] = [
-            {"id": str(k.get("id") or ""), "label": str(k.get("label") or ""),
-             "api_key": _mask_secret(str(k.get("api_key") or ""))}
-            for k in safe["api_keys"] if isinstance(k, dict)
-        ]
-    return safe
+    """A provider entry with every secret masked, by the one provider masker
+    (``kazma_core.security.provider_mask``): the save restores an unchanged
+    masked URL and keeps a masked value as stored."""
+    return mask_provider_entry(provider)
 
 
 def _provider_fields(data: dict[str, Any], existing: dict[str, Any]) -> dict[str, Any]:

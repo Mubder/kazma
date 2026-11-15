@@ -139,7 +139,7 @@ def test_every_new_secret_is_vaulted_by_its_name():
 
 def test_the_api_masks_every_new_secret_and_a_masked_save_keeps_it():
     from kazma_core.provider_check import merge_typed_secrets
-    from kazma_ui.providers import _mask_provider_entry
+    from kazma_core.security.provider_mask import mask_provider_entry as _mask_provider_entry
 
     stored = {"name": "gw", "secret_headers": {"Authorization": "Bearer real-secret"},
               "aws_secret_access_key": "aws-real", "api_keys": [{"id": "k2", "label": "b", "api_key": "sk-second-real"}]}

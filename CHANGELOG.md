@@ -2,6 +2,14 @@
 
 ## Found testing live (2026-11-15)
 
+- The model options shown by Settings and the Swarm page no longer carry
+  the providers' keys, and the Agents page no longer shows a password in
+  the model's address. One masker now serves every answer that shows a
+  provider. Found by the defensive check before the independent security
+  review.
+- A weekly OpenSSF Scorecard check of the repository's security practices
+  (`.github/workflows/scorecard.yml`).
+
 - `/long on` never lowers a chat's tool-round limit. Its research preset is
   40 rounds; on an install whose own limit is higher (live: 100), turning long
   mode on cut the limit to 40. It now takes the higher of the two.
