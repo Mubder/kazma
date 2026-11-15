@@ -36,10 +36,19 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "IDENTITY_OPENINGS",
     "TURN_NOTE_KINDS",
     "note_kind",
+    "opens_with",
     "strip_turn_notes",
 ]
+
+#: How Kazma's identity notes open: the base prompt (``graph_helpers._BASE_MARKER``),
+#: the personality (``graph_helpers._PERSONALITY_MARKER``) and "About me"
+#: (``memory.profile.ABOUT_MARKER``). Not turn notes; they name the other
+#: notes freely, so nothing that judges a note by a phrase may take them for
+#: one (``tests/test_messages_judged_by_how_they_open.py`` holds the three equal).
+IDENTITY_OPENINGS: tuple[str, ...] = ("[KAZMA_BASE_PROMPT]", "[KAZMA_PERSONALITY]", "[kazma:about-user]")
 
 #: Kind -> the text its producer's note begins with. Order matters only for
 #: readability; no prefix is a prefix of another kind's.
@@ -121,6 +130,23 @@ def note_kind(message: Any) -> str | None:
         if head.startswith(prefixes):
             return kind
     return None
+
+
+def opens_with(message: Any, *openings: str) -> bool:
+    """True when *message* is a system message that BEGINS with one of *openings*.
+
+    The one way code finds a note it replaces or removes: by how the note
+    opens, never by a phrase anywhere in its text. Kazma's base prompt names
+    the other notes ("A LANGUAGE LOCK system message for this turn is
+    absolute"), and the language lock's replace step, which searched the
+    whole text, removed the base prompt from the first model call of every
+    turn -- identity, product knowledge, the date -- until 2026-11-15.
+    ``tests/test_messages_judged_by_how_they_open.py`` holds every filter to
+    it.
+    """
+    if not isinstance(message, dict) or message.get("role") not in ("system", "developer"):
+        return False
+    return bool(openings) and _text(message).lstrip().startswith(openings)
 
 
 def strip_turn_notes(messages: list[Any]) -> list[Any]:

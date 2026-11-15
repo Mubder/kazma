@@ -332,20 +332,11 @@ class KazmaAgent:
         # (graph_helpers.ensure_base_prompt, cultural_context_enrichment.
         # daily_prompt_note): built in here at boot, they kept the boot's date.
 
-        # ── Environment awareness (IDE/workspace/repo) ──────────────
-        # Tell the brain it has an IDE workspace + tools + GitHub. Re-read
-        # per turn in build_env_context() via the streaming path; this base
-        # injection covers the initial system prompt. See env_context.py.
-        try:
-            # Sync constructor context (__init__ cannot await): call the
-            # blocking builder directly (git probes bounded at 2 × 4s).
-            from kazma_core.ide.env_context import _build_env_context_sync
-
-            env_block = _build_env_context_sync()
-            if env_block and env_block not in self.system_prompt:
-                self.system_prompt = self.system_prompt.rstrip() + "\n\n" + env_block
-        except Exception:
-            logger.debug("[agent_runner] env context injection skipped", exc_info=True)
+        # The workspace block (IDE/workspace/repo, env_context.py) is not part
+        # of the base prompt: it is the turn's "environment" note, current on
+        # every surface (the web transport adds it, the supervisor builds it
+        # for a turn that arrives without one). Baked in here at boot it was a
+        # second copy on the web and a stale one after Switch Repo (2026-11-15).
 
         # Agent Skills catalog (agentskills.io progressive disclosure tier 1).
         # Only name+description — full body loads via activate_skill. The catalog

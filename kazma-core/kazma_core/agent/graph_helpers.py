@@ -10,6 +10,7 @@ from contextvars import ContextVar
 from typing import Any
 
 from kazma_core.summarizer import _normalize_msg
+from kazma_core.turn_notes import note_kind, opens_with
 
 logger = logging.getLogger(__name__)
 
@@ -476,7 +477,7 @@ def _ensure_base_prompt(
             return False
         text = str(m.get("content") or "")
         # A copy an older build left unmarked is the same prompt's start.
-        return _BASE_MARKER in text or (bool(head) and text.strip().startswith(head))
+        return text.lstrip().startswith(_BASE_MARKER) or (bool(head) and text.strip().startswith(head))
 
     msgs = [m for m in msgs if not _is_base(m)]
     if not head and not daily_note:
@@ -506,10 +507,10 @@ def _ensure_personality(
     msgs = [_normalize_msg(m) for m in messages]
 
     # Remove any old personality-tagged system message
-    msgs = [m for m in msgs if _PERSONALITY_MARKER not in m.get("content", "")]
+    msgs = [m for m in msgs if not opens_with(m, _PERSONALITY_MARKER)]
 
     # Ensure base system prompt at position 0
-    has_base = any(m.get("role") == "system" and _PERSONALITY_MARKER not in m.get("content", "") for m in msgs)
+    has_base = any(m.get("role") == "system" and not opens_with(m, _PERSONALITY_MARKER) for m in msgs)
     if not has_base:
         msgs.insert(0, {"role": "system", "content": base_system_prompt})
 
@@ -530,15 +531,33 @@ def _ensure_about_user(messages: list[dict[str, Any]], block: str) -> list[dict[
     """
     from kazma_core.memory.profile import ABOUT_MARKER
 
-    msgs = [m for m in messages if ABOUT_MARKER not in str(m.get("content", ""))]
+    msgs = [m for m in messages if not opens_with(m, ABOUT_MARKER)]
     if not block:
         return msgs
     at = 0
     while (
         at < len(msgs)
         and msgs[at].get("role") == "system"
-        and (at == 0 or _PERSONALITY_MARKER in str(msgs[at].get("content", "")))
+        and (at == 0 or opens_with(msgs[at], _PERSONALITY_MARKER))
     ):
+        at += 1
+    msgs.insert(at, {"role": "system", "content": block})
+    return msgs
+
+
+def _ensure_environment_note(messages: list[dict[str, Any]], block: str) -> list[dict[str, Any]]:
+    """Place the turn's workspace block (the ``environment`` turn note) after
+    the identity notes -- the base prompt, the personality, "About me" -- when
+    the call holds none. A call that already holds one keeps it: the web
+    transport adds the turn's current block itself.
+    """
+    from kazma_core.memory.profile import ABOUT_MARKER
+
+    if not block or any(note_kind(m) == "environment" for m in messages):
+        return messages
+    msgs = list(messages)
+    at = 0
+    while at < len(msgs) and opens_with(msgs[at], _BASE_MARKER, _PERSONALITY_MARKER, ABOUT_MARKER):
         at += 1
     msgs.insert(at, {"role": "system", "content": block})
     return msgs

@@ -7,6 +7,18 @@
   mode on cut the limit to 40. It now takes the higher of the two.
 - The Dashboard's Total cost card says "—" (or "at least") when model prices
   are unknown, as "Spent today" beside it does; it said $0.0000.
+- The first model call of every turn has Kazma's base prompt again (its
+  identity, product knowledge, dialect rule and today's date). The language
+  lock's step removed every system message containing the words "LANGUAGE
+  LOCK", and the base prompt contains them, so since 23 October only the
+  later calls of a turn had it, on the web and the chat apps alike. Messages
+  are now recognised by how they begin. Found measuring what a turn sends.
+- The workspace block is sent once per call, as it is now. The base prompt
+  also carried the block from server start: a second copy on the web, and
+  the chat apps' only copy, still naming the old workspace after a Switch
+  Repo.
+- The prompt cache keeps the base prompt in the part a provider caches. It
+  had been filed with the per-turn notes for the same reason.
 
 ## Less left behind on disk (2026-11-14)
 

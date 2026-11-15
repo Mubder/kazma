@@ -22,7 +22,7 @@ import re
 from contextvars import ContextVar, Token
 from typing import Any
 
-from kazma_core.turn_notes import note_kind, strip_turn_notes
+from kazma_core.turn_notes import note_kind, opens_with, strip_turn_notes
 
 __all__ = [
     "build_turn_messages",
@@ -1400,9 +1400,7 @@ def trim_messages_deterministic(
     if estimate_tokens(normalized) <= max_tokens:
         # Still ensure working-memory system block is present when provided.
         if working_memory_block and not any(
-            WORKING_MEMORY_MARKER in str(m.get("content") or "")
-            for m in normalized
-            if m.get("role") == "system"
+            opens_with(m, WORKING_MEMORY_MARKER) for m in normalized
         ):
             normalized.insert(0, {"role": "system", "content": working_memory_block})
         return _drop_orphan_tool_messages(normalized)
@@ -1410,16 +1408,8 @@ def trim_messages_deterministic(
     # Partition
     system_msgs = [m for m in normalized if m.get("role") == "system"]
     # Prefer a single working-memory block (drop older duplicates)
-    wm_msgs = [
-        m
-        for m in system_msgs
-        if WORKING_MEMORY_MARKER in str(m.get("content") or "")
-    ]
-    other_system = [
-        m
-        for m in system_msgs
-        if WORKING_MEMORY_MARKER not in str(m.get("content") or "")
-    ]
+    wm_msgs = [m for m in system_msgs if opens_with(m, WORKING_MEMORY_MARKER)]
+    other_system = [m for m in system_msgs if not opens_with(m, WORKING_MEMORY_MARKER)]
     # Cap non-WM system noise (memory injects grow) — keep first env + last few
     if len(other_system) > 6:
         other_system = other_system[:2] + other_system[-4:]

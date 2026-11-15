@@ -25,7 +25,7 @@ import logging
 import os
 from typing import Any
 
-from kazma_core.turn_notes import note_kind
+from kazma_core.turn_notes import IDENTITY_OPENINGS, note_kind, opens_with
 
 __all__ = [
     "build_anthropic_system",
@@ -76,6 +76,12 @@ def is_dynamic_system(msg: dict[str, Any]) -> bool:
     if not isinstance(msg, dict):
         return False
     if msg.get("role") not in ("system", "developer"):
+        return False
+    # Kazma's identity notes are the same call after call, whatever they say:
+    # the base prompt names the language lock and fences its skills catalog,
+    # and the markers below matched it, so it sat in the per-turn blob instead
+    # of the cached prefix (2026-11-15).
+    if opens_with(msg, *IDENTITY_OPENINGS):
         return False
     blob = _text_of(msg)
     if any(m in blob for m in _DYNAMIC_MARKERS):

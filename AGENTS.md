@@ -919,12 +919,16 @@ workspace. Three new modules; understanding their interaction is essential.
 - `build_env_context()` resolves workspace root, repo slug (from WorkspaceStore
   cache or `git remote`), branch, GitHub auth, and available tools into a
   markdown block.
-- Injected at THREE sites: main agent init (`agent_runner.py` — NOT
-  `graph_builder.py`, which has no env_context reference), per-turn in the SSE
-  chat path (`sse_chat/` package, so workspace switches take effect immediately
-  -- a turn note since 2026-09-29, §43: before that a chat's first block stayed
-  and every later one was dropped), and into every dispatched worker prompt
-  (`worker.py`). The IDE chat's open file is its own turn note
+- It is the turn's `environment` note, current, ONE copy a call: the web
+  transport adds it (`sse_chat/` package, voice), and the supervisor builds it
+  at iteration 0 for a turn that arrives without one -- the chat apps, a
+  scheduled task, a child graph (`graph_supervisor`,
+  `graph_helpers._ensure_environment_note`). Workspace switches take effect at
+  the next turn (a turn note since 2026-09-29, §43). It is never part of the
+  base prompt: `agent_runner.py` baked the block it saw at server start into
+  the base prompt until 2026-11-15 -- a second copy on the web, and the chat
+  apps' only copy, stale after Switch Repo. Every dispatched worker prompt
+  gets its own (`worker.py`). The IDE chat's open file is its own turn note
   (`source="ide_context"`), never glued to the question.
 - `IdeService.send_to_swarm()` attaches the env block to the task `context` —
   never drop this or workers lose workspace awareness. It awaits the
@@ -9226,6 +9230,20 @@ clarify-only lock, a notice to repeat verbatim).
   from old notes. Never gate the base prompt on "no system message", and
   never build a date into the boot-time prompt. Gate:
   `tests/test_base_prompt_every_call.py` (the old rule as control).
+- **A system message is judged by how it opens, never by a phrase in its
+  text** (`turn_notes.opens_with`, 2026-11-15). The language lock's replace
+  step removed every system message holding "LANGUAGE LOCK", and the base
+  prompt holds those words ("A LANGUAGE LOCK system message for this turn is
+  absolute"): from 2026-10-23 the first model call of every turn, on every
+  surface, went without the base prompt (found measuring a turn's tokens;
+  the 10-23 gate's base prompt named no note). Every filter that replaces,
+  removes or looks for a note asks `opens_with`; the prompt cache's packer
+  keeps the identity notes (`turn_notes.IDENTITY_OPENINGS`: base prompt,
+  personality, "About me") in the cached prefix whatever they name. Gate:
+  `tests/test_messages_judged_by_how_they_open.py` (a base prompt naming
+  every note opening and cache marker, through the real graph in English
+  and Arabic with a tool round; no `<phrase> in <message>.get("content")`
+  in product code outside `DECLARED`; the old rule as the control).
 - Gates: `tests/test_turn_notes.py`; `tests/e2e/test_turn_notes_route.py`
   (four turns through the real route, a workspace switch, IDE context; CI
   lifecycle job).

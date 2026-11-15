@@ -16,6 +16,7 @@ from kazma_core.agent.chat_reasoning import chat_reasoning_kwargs
 from kazma_core.agent.graph_helpers import (
     _ensure_about_user,
     _ensure_base_prompt,
+    _ensure_environment_note,
     _ensure_personality,
     _memory_explain_cv,
     _rag_top_k,
@@ -50,6 +51,7 @@ from kazma_core.agent.task_ledger import (
 from kazma_core.llm_provider import LLMProvider
 from kazma_core.llm_stream import invoke_llm_chat
 from kazma_core.summarizer import _normalize_msg
+from kazma_core.turn_notes import note_kind, opens_with
 
 logger = logging.getLogger(__name__)
 
@@ -448,6 +450,22 @@ async def supervisor_node(
         _about = {"about": ""}
     messages = _ensure_about_user(messages, about_block(_about.get("about", "")))
 
+    # ── The workspace this turn runs in (the "environment" turn note) ──
+    # One copy, current, on every surface: the web transport adds it; for a
+    # turn that arrives without one (the chat apps, a scheduled task, a child
+    # graph) it is built here. Until 2026-11-15 the agent baked the block it
+    # saw at server start into the base prompt as well -- a second copy, and
+    # a stale one after Switch Repo -- and the chat apps had only that copy.
+    if iteration == 0 and not any(note_kind(m) == "environment" for m in messages):
+        try:
+            from kazma_core.ide.env_context import build_env_context
+
+            _env_block = await build_env_context()  # git probes, off the loop
+        except Exception:  # noqa: BLE001 -- a call without the block beats no call
+            logger.warning("[Supervisor] workspace block unavailable for this turn", exc_info=True)
+            _env_block = ""
+        messages = _ensure_environment_note(messages, _env_block)
+
     # ── LLM call ──────────────────────────────────────────────────
     # Extract the latest user message (used by both the model router and
     # per-turn memory retrieval below).
@@ -595,10 +613,7 @@ async def supervisor_node(
             _decision is not None
             and _decision.route.value == "constrain"
             and _decision.plan_note
-            and not any(
-                m.get("role") == "system" and "INTENT ENGINE" in str(m.get("content") or "")
-                for m in messages
-            )
+            and not any(opens_with(m, "INTENT ENGINE") for m in messages)
         ):
             messages = list(messages) + [{"role": "system", "content": _decision.plan_note}]
 
@@ -1013,14 +1028,7 @@ async def supervisor_node(
         scratchpad=dict(intent_patch.get("scratchpad") or {}),
     )
     # Replace any prior working-memory system message, then pin at index 0/1.
-    messages = [
-        m
-        for m in messages
-        if not (
-            m.get("role") == "system"
-            and WORKING_MEMORY_MARKER in str(m.get("content") or "")
-        )
-    ]
+    messages = [m for m in messages if not opens_with(m, WORKING_MEMORY_MARKER)]
     _wm_ins = 1 if messages and messages[0].get("role") == "system" else 0
     messages.insert(_wm_ins, {"role": "system", "content": _wm_block})
 
@@ -1325,14 +1333,11 @@ async def supervisor_node(
 
             lock = language_lock_message(last_user_content)
             if lock:
-                messages = [
-                    m
-                    for m in messages
-                    if not (
-                        m.get("role") == "system"
-                        and "LANGUAGE LOCK" in str(m.get("content", ""))
-                    )
-                ]
+                # By how the lock opens: the base prompt names it ("A LANGUAGE
+                # LOCK system message for this turn is absolute"), and a search
+                # of the whole text removed the base prompt from the first call
+                # of every turn (turn_notes.opens_with, 2026-11-15).
+                messages = [m for m in messages if not opens_with(m, "LANGUAGE LOCK")]
                 # Place just before the last user message so it is the nearest
                 # instruction to the model.
                 insert_at = len(messages)
@@ -1481,10 +1486,7 @@ async def supervisor_node(
             "then any user-facing text — never glue the answer onto the ticks "
             "(wrong: ```Saved.). A plan with no tool_calls is not a finished turn."
         )
-        if not any(
-            m.get("role") == "system" and "UI WORKBENCH" in str(m.get("content", ""))
-            for m in messages
-        ):
+        if not any(opens_with(m, "UI WORKBENCH") for m in messages):
             messages.append({"role": "system", "content": _plan_nudge})
 
     # S1-3 proposal nudge (BEST-EFFORT only — the enforced chokepoint is the
@@ -1498,11 +1500,7 @@ async def supervisor_node(
                 last_user_content or "",
                 active_goal=str(intent_patch.get("active_goal") or ""),
             )
-            if _pn and not any(
-                m.get("role") == "system"
-                and "OUTBOUND DRAFTS" in str(m.get("content", ""))
-                for m in messages
-            ):
+            if _pn and not any(opens_with(m, "OUTBOUND DRAFTS") for m in messages):
                 messages.append({"role": "system", "content": _pn})
         except Exception:
             logger.debug("[Supervisor] proposal nudge skipped", exc_info=True)
@@ -1514,21 +1512,14 @@ async def supervisor_node(
         _intent_covers_research = (
             _decision is not None
             and any(a.kind == "research_deep" for a in _decision.acts)
-            and any(
-                m.get("role") == "system" and "INTENT ENGINE" in str(m.get("content", ""))
-                for m in messages
-            )
+            and any(opens_with(m, "INTENT ENGINE") for m in messages)
         )
         if not _intent_covers_research:
             try:
                 from kazma_core.agent.research_policy import deep_research_route_hint
 
                 route = deep_research_route_hint(last_user_content)
-                if route and not any(
-                    m.get("role") == "system"
-                    and "DEEP RESEARCH ROUTE" in str(m.get("content", ""))
-                    for m in messages
-                ):
+                if route and not any(opens_with(m, "DEEP RESEARCH ROUTE") for m in messages):
                     messages.append({"role": "system", "content": route})
             except Exception:
                 logger.debug("[Supervisor] deep research route hint skipped", exc_info=True)
