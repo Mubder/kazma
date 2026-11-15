@@ -17,11 +17,29 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
+
+
+def _private_zip(path: Path) -> bool:
+    """Make *path* an empty file only this account can read (the archive
+    holds the vault, and with --include-env its key). The restriction is
+    kazma_core/security/owner_only.py, loaded by path: this script stays
+    standard library only, like the guard. True when it holds."""
+    import importlib.util
+
+    os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+    source = Path(__file__).resolve().parents[1] / "kazma-core" / "kazma_core" / "security" / "owner_only.py"
+    spec = importlib.util.spec_from_file_location("kazma_backup_owner_only", source)
+    if spec is None or spec.loader is None:
+        return False
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return bool(module.restrict(path))
 
 
 def main() -> int:
@@ -76,7 +94,13 @@ def main() -> int:
         ],
     }
 
-    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+    partial = zip_path.with_name(f".{zip_path.name}.partial")
+    if not _private_zip(partial):
+        partial.unlink(missing_ok=True)
+        print(f"ERROR: {dest_dir} does not let this account make a file only it can read; "
+              "the archive (it holds the vault) was not written", file=sys.stderr)
+        return 1
+    with zipfile.ZipFile(partial, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for path in data_dir.rglob("*"):
             if path.is_file():
                 arc = Path("kazma-data") / path.relative_to(data_dir)
@@ -89,6 +113,7 @@ def main() -> int:
                 manifest["files"].append(".env")
                 manifest["notes"].append("Archive contains .env — treat as secret!")
         zf.writestr("MANIFEST.json", json.dumps(manifest, indent=2))
+    os.replace(partial, zip_path)
 
     size_mb = zip_path.stat().st_size / (1024 * 1024)
     print(f"OK backup written: {zip_path} ({size_mb:.2f} MiB, {len(manifest['files'])} files)")

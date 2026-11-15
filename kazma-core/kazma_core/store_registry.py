@@ -764,6 +764,18 @@ def is_secret_file_name(name: str) -> bool:
     return lowered in SECRET_FILE_NAMES or _is_env_file_name(lowered)
 
 
+def holds_a_secret(name: str) -> bool:
+    """True when a file of this name holds a secret or opens the others: one
+    of Kazma's secret files (:func:`is_secret_file_name`), the vault, or a
+    copy of the vault an import moved aside. Every copy of one in a backup, a
+    restore or a bundle is readable by its owner only
+    (``file_access.restrict_secret_files``)."""
+    lowered = Path(str(name or "")).name.strip().lower()
+    if is_secret_file_name(lowered) or lowered == "vault.db":
+        return True
+    return lowered.startswith(".migrate-vault-backup-") and lowered.endswith(".db")
+
+
 def _install_env_dirs() -> list[Path]:
     """Folders whose env files are Kazma's own: the home and the install."""
     dirs: list[Path] = []

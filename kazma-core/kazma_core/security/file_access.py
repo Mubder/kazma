@@ -14,13 +14,19 @@ Users, Authenticated Users, Guests, or another account.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import subprocess
 import tempfile
 from pathlib import Path
 
-__all__ = ["readable_by_others", "restrict_to_owner"]
+from kazma_core.security import owner_only
+
+logger = logging.getLogger(__name__)
+
+__all__ = ["copy_private", "create_private", "readable_by_others", "restrict_secret_files",
+           "restrict_to_owner", "write_private"]
 
 #: SIDs that may read a secret file: SYSTEM, Administrators, the owner rights
 #: and the creator owner (the account itself is added at runtime).
@@ -33,6 +39,9 @@ _ACE = re.compile(r"\(([^;()]*);([^;()]*);([^;()]*);[^;()]*;[^;()]*;([^;()]+)\)"
 
 
 def _current_user_sid() -> str:
+    sid = owner_only.current_user_sid()
+    if sid:
+        return sid
     try:
         out = subprocess.run(["whoami", "/user", "/fo", "csv", "/nh"], capture_output=True, text=True,
                              encoding="utf-8", errors="replace", timeout=20, check=False).stdout.strip()
@@ -43,30 +52,110 @@ def _current_user_sid() -> str:
 
 
 def restrict_to_owner(path: Path) -> bool:
-    """Only this account may read *path*: no inherited entries, the account
-    alone (POSIX: mode 0600). True when the restriction is in place.
+    """Only this account may read *path* (POSIX: mode 0600). True only when
+    :func:`readable_by_others` then finds no one else.
 
-    The one way Kazma restricts a secret file it writes: the observer's
-    pairing key, the Postgres superuser's password, the env file a first boot
-    writes its generated keys into. Blocking (``icacls`` on Windows).
+    The one way Kazma restricts a secret file: the observer's pairing key, the
+    Postgres superuser's password, every env file (:func:`write_private`, the
+    one writer), the copies of secret files in a backup. Windows: the file's
+    whole access list is replaced (``owner_only.restrict``): an explicit
+    entry for another account is removed too. It ran ``icacls
+    /inheritance:r /grant:r``, which keeps explicit entries -- a file with an
+    explicit ``Users:R`` stayed readable by Users while this answered True
+    (2026-11-15). A folder is restricted the same way, its entry inherited by
+    what is made in it. Blocking.
     """
-    if os.name != "nt":
-        try:
-            os.chmod(path, 0o600)
-            return True
-        except OSError:
-            return False
-    sid = _current_user_sid()
-    if not sid:
-        return False
+    path = Path(path)
     try:
-        result = subprocess.run(  # noqa: S603 -- fixed program, no shell
-            ["icacls", str(path), "/inheritance:r", "/grant:r", f"*{sid}:(F)"],
-            capture_output=True, text=True, timeout=30, check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
+        if not owner_only.restrict(path):
+            return False
+    except OSError:
         return False
-    return result.returncode == 0
+    if path.is_dir():
+        return True  # read back by owner_only; readable_by_others reads files
+    return readable_by_others(path) == []
+
+
+def _private_sibling(path: Path) -> Path:
+    """An empty new file beside *path*, made for this account only (0600)."""
+    fd, name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".private", dir=str(path.parent))
+    os.close(fd)
+    return Path(name)
+
+
+def create_private(path: Path) -> bool:
+    """Make *path* a new EMPTY file only this account may read (it must not
+    exist). True when restricted; the file is left either way, for the caller
+    to fill or remove. For a writer that cannot hand over its bytes at once
+    (a zip being written)."""
+    path = Path(path)
+    os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+    return restrict_to_owner(path)
+
+
+def write_private(path: Path, data: bytes | str, *, mtime_ns: int | None = None) -> bool:
+    """Replace *path* with *data*, readable by this account only: the one way
+    Kazma writes a secret file (an env file, a copy of one in a backup).
+
+    An empty sibling is made and restricted BEFORE the secret is in it, then
+    filled, flushed and renamed over *path* (a rename keeps the file's own
+    access list); *path* is restricted again after. Returns True when the
+    file ends restricted. A restriction that fails is a WARNING and the data
+    is still written: a vault key that is not kept leaves every stored secret
+    unreadable. Raises ``OSError`` when it cannot be written. *mtime_ns*
+    gives the file a modification time (a copy keeps its source's).
+    """
+    path = Path(path)
+    payload = data.encode("utf-8") if isinstance(data, str) else bytes(data)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = _private_sibling(path)
+    renamed = False
+    try:
+        restricted = restrict_to_owner(tmp)
+        with open(tmp, "wb") as fh:
+            fh.write(payload)
+            fh.flush()
+            os.fsync(fh.fileno())
+        if mtime_ns is not None:
+            os.utime(tmp, ns=(mtime_ns, mtime_ns))
+        os.replace(tmp, path)
+        renamed = True
+    finally:
+        if not renamed:
+            tmp.unlink(missing_ok=True)  # never a half-written secret left beside it
+    restricted = restrict_to_owner(path) and restricted
+    if not restricted:
+        logger.warning("[file-access] could not restrict %s to this account; it was written anyway", path)
+    return restricted
+
+
+def restrict_secret_files(root: Path) -> list[str]:
+    """Restrict every file under *root* whose name holds a secret
+    (``store_registry.holds_a_secret``: an env file, ``restic.pass``, the
+    vault...) to this account; the paths (relative to *root*) that could not
+    be. For a backup, a restore or an export staging folder: a copy takes
+    what its new folder grants, and the backups folder let ``Users`` read a
+    backup's ``.env`` and ``vault.db`` (2026-11-15)."""
+    from kazma_core.store_registry import holds_a_secret
+
+    root = Path(root)
+    left: list[str] = []
+    for path in root.rglob("*"):
+        if path.is_file() and holds_a_secret(path.name) and not restrict_to_owner(path):
+            left.append(path.relative_to(root).as_posix())
+    if left:
+        logger.warning("[file-access] %d secret file(s) under %s could not be restricted to this "
+                       "account: %s", len(left), root, ", ".join(left[:10]))
+    return left
+
+
+def copy_private(src: Path, dst: Path) -> bool:
+    """Copy *src* to *dst* readable by this account only (:func:`write_private`,
+    its modification time kept). ``shutil.copy2`` gave the copy what its new
+    folder grants: a backup's ``.env`` -- the vault key -- was readable by
+    every account the backups folder lets in."""
+    src = Path(src)
+    return write_private(dst, src.read_bytes(), mtime_ns=src.stat().st_mtime_ns)
 
 
 def _windows_sddl(path: Path) -> str | None:

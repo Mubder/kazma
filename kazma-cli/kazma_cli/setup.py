@@ -60,26 +60,32 @@ def _env_path() -> Path:
     return get_project_root() / ".env"
 
 
-def _set_env_value(path: Path, key: str, value: str) -> None:
-    """Set ``key=value`` in *path* (added, or replacing the line), restricted
-    to this account."""
-    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
-    out, done = [], False
-    for line in lines:
-        if line.split("=", 1)[0].strip() == key and not line.lstrip().startswith("#"):
-            if not done:
-                out.append(f"{key}={value}")
-                done = True
-            continue
-        out.append(line)
-    if not done:
-        out.append(f"{key}={value}")
-    from kazma_core.atomic_files import atomic_write_text
+def _set_env_value(path: Path, key: str, value: str) -> bool:
+    """Set ``key=value`` in *path* (added, or replacing the line) through
+    ``env_files.set_env_values``: restricted to this account BEFORE the value
+    is in it. It wrote the file first and restricted it after, and never
+    looked at whether the restriction held. True when it holds; said when not."""
+    from kazma_core.env_files import set_env_values
 
-    atomic_write_text(path, "\n".join(out) + "\n")
-    from kazma_core.observability.outside_watch import _restrict_to_owner
+    restricted = set_env_values(path, {key: value})
+    if not restricted:
+        _say(f"   ! {path} could not be made readable by this account only; {key} is kept there anyway.")
+    return restricted
 
-    _restrict_to_owner(path)
+
+def _keep_superuser_password(pass_file: Path, password: str) -> bool:
+    """Keep the Postgres superuser's password in *pass_file*, restricted to
+    this account while still empty and then filled
+    (``file_access.write_private``). It was written first and restricted
+    after, with the result never read. True when the restriction holds; said
+    when not (the password is kept anyway: a repair needs it)."""
+    from kazma_core.security.file_access import write_private
+
+    restricted = write_private(pass_file, password + "\n")
+    if not restricted:
+        _say(f"   ! {pass_file} could not be made readable by this account only; "
+             "the superuser's password is kept there anyway (a repair needs it).")
+    return restricted
 
 
 def _env_file_value(path: Path, key: str) -> str | None:
@@ -1162,12 +1168,8 @@ def _setup_postgres(options, *, run=subprocess.run, hold: _MoveHold | None = Non
         _say("Nothing was done.")
         return 1
 
-    from kazma_core.atomic_files import atomic_write_text
-    from kazma_core.observability.outside_watch import _restrict_to_owner
-
     if stored_superuser != superuser_password:
-        atomic_write_text(pass_file, superuser_password + "\n")
-        _restrict_to_owner(pass_file)
+        _keep_superuser_password(pass_file, superuser_password)
 
     if not _run_setup_steps(steps, platform, service, options.port, hidden, run=run):
         return 1

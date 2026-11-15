@@ -31,6 +31,7 @@ import time
 from kazma_core.agent.turn_input import extract_active_attachments
 from kazma_core.memory import ego_anchor
 from kazma_core.safety import prompt_fence
+from kazma_core.security import token_shapes
 from kazma_core.support import problem_report
 from kazma_core.url_utils import normalize_provider_url
 
@@ -124,6 +125,12 @@ def test_hostile_inputs_finish_at_once():
     for hostile in ("< " + " " * 200000, "<|" + "a" * 200000, "\uff1c\uff0fkazma" * 50000,
                     ("\u2010" * 100 + " END") * 2000, "\u200b" * 200000):
         assert _timed(prompt_fence._sanitize_fence_body, hostile) < 1.0, hostile[:20]
+    # The token table every masker reads (security.token_shapes, 2026-11-15):
+    # each shape starts at a literal or at the start of a run.
+    for hostile in ("1" * 200000, "eyJ" * 70000, "a" * 200000, "sk-" * 70000, "Bearer " * 30000,
+                    "Bearer " + " " * 200000 + "x", "1//0" * 50000, "M" + "a" * 200000 + ".",
+                    "bot1234567:" * 20000, "xapp-" * 40000, "kazma_" * 30000, "A" * 200000):
+        assert _timed(token_shapes.mask_tokens, hostile) < 1.0, hostile[:20]
 
 
 def _grows_faster_than_linear(fn, make, small: int, factor: int = 2) -> bool:
@@ -139,6 +146,15 @@ def _grows_faster_than_linear(fn, make, small: int, factor: int = 2) -> bool:
     t1 = min(_timed(fn, make(small)) for _ in range(3))
     t2 = min(_timed(fn, make(factor * small)) for _ in range(3))
     return t2 > 1.5 * factor * t1
+
+
+def test_control_a_token_shape_without_its_run_start_grows_faster_than_the_input():
+    """Why the JWT shape (and the others not led by a literal) starts at a
+    run's start: without the lookbehind, every "eyJ" inside a run of them
+    scans to the run's end and fails."""
+    unanchored = re.compile(r"eyJ[A-Za-z0-9_\-]{8,}+\.eyJ")
+    assert _grows_faster_than_linear(lambda s: unanchored.sub("x", s), lambda n: "eyJ" * n, 1500, 4)
+    assert not _grows_faster_than_linear(token_shapes.mask_tokens, lambda n: "eyJ" * n, 1500, 4)
 
 
 def test_control_the_old_patterns_grow_faster_than_the_input():

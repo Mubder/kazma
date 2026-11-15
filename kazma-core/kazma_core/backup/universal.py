@@ -397,17 +397,22 @@ def _copy_root_artifacts(dest: Path) -> dict[str, Any]:
     ``research``) names workspace-root dirs/files to include — agent
     deliverables that live outside kazma-data/ and outside git. The .env is
     copied verbatim: it is the recovery key for the encrypted vault inside
-    settings.db, so an encrypted copy keyed BY it would be circular. Protect
-    the offsite copy instead (a cloud provider via cloud_sync).
+    settings.db, so an encrypted copy keyed BY it would be circular. The copy
+    is readable by this account only (``file_access.copy_private``): with
+    ``shutil.copy2`` it took what the backups folder grants, and sat beside
+    ``dbs/vault.db`` readable by Users (2026-11-15). The offsite copy leaves
+    it out (:func:`_offsite_leaves_out`).
     """
+    from kazma_core.security.file_access import copy_private
+
     result: dict[str, Any] = {"env": None, "artifacts": []}
     root = _data_dir().parent
     try:
         env_path = root / ".env"
         if env_path.is_file():
             target = dest / ".env"
-            shutil.copy2(env_path, target)
-            result["env"] = {"path": ".env", "size": target.stat().st_size}
+            restricted = copy_private(env_path, target)
+            result["env"] = {"path": ".env", "size": target.stat().st_size, "restricted": restricted}
         else:
             result["env"] = {"path": ".env", "missing": True}
     except Exception:
@@ -502,6 +507,19 @@ def _offsite_rclone_excludes(dest: Path) -> list[str]:
     return args
 
 
+def _create_private_archive(path: Path) -> None:
+    """Make *path* an empty file readable by this account only, for an
+    archive to be written into; ``OSError`` (and nothing left) when the
+    restriction does not hold. A backup's archive holds the vault, and a
+    downloaded one its ``.env`` too: it was written with what the backups
+    folder grants (readable by Users, 2026-11-15)."""
+    from kazma_core.security.file_access import create_private
+
+    if not create_private(path):
+        path.unlink(missing_ok=True)
+        raise OSError(f"{path.name} could not be made readable by this account only; not written")
+
+
 def _zip_backup_dir(dest: Path) -> Path:
     """Compress the finished backup directory into a single .zip archive.
 
@@ -518,7 +536,11 @@ def _zip_backup_dir(dest: Path) -> Path:
         raise RuntimeError("backup directory is empty — nothing to archive")
     zip_path = dest.parent / f"{dest.name}.zip"
     tmp_path = dest.parent / f".{dest.name}.zip.tmp"
+    tmp_path.unlink(missing_ok=True)
     try:
+        # It holds the (encrypted) vault: readable by this account only from
+        # its first byte, like every archive of a backup.
+        _create_private_archive(tmp_path)
         with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
             for f in files:
                 zf.write(f, f.relative_to(dest).as_posix())
@@ -1412,6 +1434,11 @@ def perform_universal_backup(
     # unrecoverable; research/ & co. are deliverables no other sweep covers.
     _set_progress("assets", detail="Copying .env + root artifacts…")
     root_artifacts = _copy_root_artifacts(dest)
+    # Every copy of a secret file -- the vault, an env file, a passphrase --
+    # readable by this account only, whatever the backups folder grants.
+    from kazma_core.security.file_access import restrict_secret_files
+
+    secrets_open = restrict_secret_files(dest)
 
     # 3. Postgres dump — SKIP (the native_pg_backup task already dumps PG
     # separately into backups/pg/. Running it here was redundant (two pg_dump
@@ -1455,6 +1482,7 @@ def perform_universal_backup(
         "files": {"failed": files_failed, "examples": file_examples},
         "assets": asset_results,
         "root_artifacts": root_artifacts,
+        "secret_files_not_restricted": secrets_open,
         "postgres": pg_result,
         "graph": graph_result,
         "offsite": {"status": "pending", "note": "cloud upload in flight at archive time"},
@@ -1606,15 +1634,25 @@ def archive_universal_backup(dir_name: str) -> dict[str, Any]:
     if not src.is_dir():
         return {"ok": False, "error": f"Backup '{dir_name}' not found"}
     zip_path = _universal_dir() / f"{dir_name}.zip"
+    tmp_path = _universal_dir() / f".{dir_name}.zip.partial"
     try:
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        tmp_path.unlink(missing_ok=True)
+        # The vault and its key in one file: readable by this account only
+        # from its first byte, then renamed into place (a rename keeps it).
+        _create_private_archive(tmp_path)
+        with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zf:
             for file in src.rglob("*"):
                 if file.is_file():
                     zf.write(file, file.relative_to(src.parent))
+        tmp_path.replace(zip_path)
         size_mb = round(zip_path.stat().st_size / (1024 * 1024), 1)
         logger.info("[universal-backup] archived %s → %s (%.1f MB)", dir_name, zip_path.name, size_mb)
         return {"ok": True, "archive": str(zip_path), "size_mb": size_mb}
     except Exception as exc:
         from kazma_core.errors import described_error
 
+        try:
+            tmp_path.unlink(missing_ok=True)  # never a half-written archive left
+        except OSError:
+            pass
         return {"ok": False, "error": described_error("the archive could not be written", exc)}

@@ -61,7 +61,7 @@ logger = logging.getLogger(__name__)
 #: and :meth:`SecretVault.delete` enforce it for EVERY writer, so no caller can
 #: leave a stray per-tenant copy that shadows the install's for callers that
 #: have a tenant (``retrieve`` reads the tenant's copy first). Entries are exact
-#: names, or prefixes ending in ``.``.
+#: names, or prefixes ending in ``.`` or ``:``.
 #:
 #: * Provider keys: the model registry caches one client per provider for all
 #:   callers, and code with no tenant bound builds them. Settings stored the
@@ -126,13 +126,18 @@ INSTALL_SCOPED_SECRETS: tuple[tuple[str, str], ...] = (
     # The pairing token of the Kazma Watch `kazma observer setup` deployed
     # (2026-11-14): read by the CLI, with no tenant bound.
     ("observer.", "global"),
+    # A URL whose password the settings store moved to the vault under a key
+    # that is not a credential's (config_store.URL_SECRET_PREFIX:
+    # ``proxy.url``, ``web.searxng_url``, 2026-11-15): read by the proxy, the
+    # search chain and the backup sync with no tenant bound.
+    ("cfg-url:", "newest"),
 )
 
 
 def _install_scope_rule(name: str) -> str | None:
     """Which copy wins for *name* (``"newest"``/``"global"``), or ``None`` if per-tenant."""
     for entry, authority in INSTALL_SCOPED_SECRETS:
-        if name.startswith(entry) if entry.endswith(".") else name == entry:
+        if name.startswith(entry) if entry.endswith((".", ":")) else name == entry:
             return authority
     return None
 

@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-__all__ = ["MASK", "key_is_secret", "mask_deep"]
+__all__ = ["MASK", "env_name_is_secret", "key_is_secret", "mask_deep"]
 
 
 # Keys whose values are secrets and must be masked in API responses.
@@ -45,12 +45,32 @@ _SENSITIVE_KEY_RE = re.compile(
 )
 
 
+#: An environment variable's name ending in ``_KEY`` (``OPENAI_KEY``,
+#: ``NOTION_KEY``): upper case only, so a setting such as ``public_key`` or
+#: ``sort_key`` is not taken for one.
+_ENV_KEY_NAME = re.compile(r"[A-Z][A-Z0-9_]*_KEY")
+
+
+def env_name_is_secret(name: str) -> bool:
+    """True when *name* is an environment variable's name ending in ``_KEY``.
+
+    ``OPENAI_KEY`` in an MCP server's environment stayed plaintext in
+    kazma.yaml and the settings and was shown unmasked by every MCP list and
+    ``config_read`` (2026-11-15): neither rule read a bare ``_KEY`` ending.
+    ``mcp.secrets`` asks it with the name upper-cased (every name an MCP
+    server takes is an environment variable, a header or a flag)."""
+    return bool(_ENV_KEY_NAME.fullmatch(str(name).strip()))
+
+
 def key_is_secret(key: str) -> bool:
     """True when *key* names a credential, at any nesting depth.
 
     Combines the local fragment list with ``is_sensitive_config_key`` (which
-    also drives vault routing) so both layers agree on what a secret is.
+    also drives vault routing) so both layers agree on what a secret is, and
+    an environment variable's ``*_KEY`` (:func:`env_name_is_secret`).
     """
+    if env_name_is_secret(key):
+        return True
     normalised = str(key).lower().replace("-", "_")
     if _SENSITIVE_KEY_RE.search(normalised):
         return True
@@ -110,7 +130,11 @@ def mask_deep(node: Any, _depth: int = 0) -> Any:
             except (json.JSONDecodeError, TypeError, ValueError):
                 return mask_urls_in_text(node)
             return json.dumps(mask_deep(decoded, _depth + 1))
-        return mask_url_credentials(node)
+        # The whole value a URL (its password masked exactly as a form posts
+        # it back), then any URL password inside text (``curl https://u:pw@h``)
+        # and every token-shaped value (``security.token_shapes``): this
+        # masked a value only when it was itself a URL (2026-11-15).
+        return mask_urls_in_text(mask_url_credentials(node))
 
     return node
 

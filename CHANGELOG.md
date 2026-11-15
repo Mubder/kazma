@@ -65,6 +65,18 @@
   shell out of it.
 - Saved web pages land in the research folder, never under a name other
   programs load.
+- Rewriting an env file (migration import, its rollback, setup, first boot)
+  keeps it readable by its owner only.
+- Backups, restores, downloaded backup archives and migration bundles keep
+  every secret file readable by its owner only; bundles go to
+  `~/kazma-bundles` and say they hold the vault key.
+- A password inside any stored address setting goes to the vault, and
+  `*_KEY` environment names count as secrets.
+- Settings, `config_read` and approval cards hide passwords inside text,
+  token-shaped values and `config_save`'s secret values; one table of token
+  shapes serves every redactor.
+- Restricting a secret file removes every other account's access and checks
+  that it worked; the guard uses the same code.
 
 - `/long on` never lowers a chat's tool-round limit. Its research preset is
   40 rounds; on an install whose own limit is higher (live: 100), turning long

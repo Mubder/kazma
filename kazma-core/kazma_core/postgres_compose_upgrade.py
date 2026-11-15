@@ -144,14 +144,12 @@ def _volume_holds(d: _Docker, volume: str, path: str, image: str) -> bool:
 
 
 def _write_journal(path: Path, entry: dict[str, Any]) -> None:
-    from kazma_core.atomic_files import atomic_write_text
-    from kazma_core.security.file_access import restrict_to_owner
+    from kazma_core.security.file_access import write_private
 
-    if not path.exists():
-        path.write_text("{}", encoding="utf-8")
-        restrict_to_owner(path)          # before it holds the kept definition and its password
-    atomic_write_text(path, json.dumps(entry, indent=2))
-    restrict_to_owner(path)
+    # It holds the kept container definition and its password: restricted
+    # while still empty, then filled (``atomic_write_text`` renamed a new
+    # file over the restricted one, readable until the restriction after).
+    write_private(path, json.dumps(entry, indent=2))
 
 
 def _put_back(d: _Docker, journal: dict[str, Any], *, say: Callable[[str], None]) -> bool:

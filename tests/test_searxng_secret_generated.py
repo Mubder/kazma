@@ -92,7 +92,9 @@ def test_a_new_env_file_is_made_and_restricted_before_the_key_is_in_it(tmp_path,
     monkeypatch.setattr("kazma_core.security.file_access.restrict_to_owner",
                         lambda path: seen.append(Path(path).read_text(encoding="utf-8")) or True)
     assert _ensure(env) is True
-    assert seen == [""] and HEX64.match(_value(env) or "")
+    # Restricted while empty; the one env-file writer (env_files.set_env_values)
+    # restricts the renamed file again after (2026-11-15).
+    assert seen[0] == "" and HEX64.match(_value(env) or "")
 
 
 def test_an_owner_value_is_kept_and_the_placeholder_is_replaced(tmp_path, monkeypatch):

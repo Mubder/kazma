@@ -87,6 +87,10 @@ SCOPE = (
     "kazma-ui/kazma_ui/reply_sink.py",
     "kazma-ui/kazma_ui/turn_runtime.py",
     "kazma-core/kazma_core/swarm/task_store.py",
+    # A secret file restricted to its owner (2026-11-15): the one writer and
+    # the env-file writers built on it answer whether the restriction held.
+    "kazma-core/kazma_core/security/file_access.py",
+    "kazma-core/kazma_core/env_files.py",
 )
 
 #: Functions in scope whose bool is not "it worked": it reports what was
@@ -490,6 +494,18 @@ def _product_sources() -> dict[str, str]:
 #: Callees whose result no caller has to read: the callee reports its own
 #: failure, and a caller has nothing else to do with it.
 REPORTS_ITS_OWN_FAILURE: dict[str, str] = {
+    "security.file_access.write_private": (
+        "False is 'written, but the restriction did not hold': it logs a WARNING naming the "
+        "file, and writes the data anyway (a vault key that is not kept leaves every stored "
+        "secret unreadable); a write that fails raises"
+    ),
+    "security.file_access.copy_private": (
+        "write_private's answer, reported there; a copy that fails raises"
+    ),
+    "env_files.write_env_text": (
+        "write_private's answer, reported there (a WARNING naming the file); a write that "
+        "fails raises"
+    ),
     "update._bring_along": (
         "the follow-up after new packages (Chromium, containers on their pinned images) "
         "prints each thing it could not do with the command that does it, and must never "

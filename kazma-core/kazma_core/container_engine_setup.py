@@ -546,7 +546,7 @@ def _on_user_path(run: Runner, folder: Path) -> None:
 
 def _action_context(run: Runner, log: Callable[[str], None], opener: Any) -> tuple[bool, str]:
     from kazma_core.docker_cli import engine_installed, find_docker_cli
-    from kazma_core.security.file_access import restrict_to_owner
+    from kazma_core.security.file_access import restrict_to_owner, write_private
 
     folder = _client_dir()
     folder.mkdir(parents=True, exist_ok=True)
@@ -557,9 +557,8 @@ def _action_context(run: Runner, log: Callable[[str], None], opener: Any) -> tup
                                 f"/root/kazma-engine-client/{name}"], env=_wsl_env())
         if code != 0 or "BEGIN" not in text:
             return False, f"the engine's client {name} could not be read"
-        target = folder / name
-        target.write_text(text, encoding="utf-8")
-        restrict_to_owner(target)
+        if not write_private(folder / name, text):
+            return False, f"{folder / name} could not be made readable by this account only"
     cli = find_docker_cli()
     if not cli:
         return False, "the docker CLI is not installed"

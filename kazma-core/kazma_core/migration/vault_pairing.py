@@ -160,29 +160,17 @@ def sync_vault_key(
 
 
 def _set_env_key(env_path: Path, key: str, value: str) -> None:
-    """Set one KEY=value in a .env file, creating or updating in place.
+    """Set one KEY=value in a .env file, creating or updating it.
 
-    Preserves other lines and comment formatting. Idempotent.
+    Through ``env_files.set_env_values``, the one env-file writer: the new
+    file is restricted to this account before the key is in it and renamed
+    over the old one (atomic, so a crash never leaves a truncated .env). It
+    wrote ``tmp.write_text`` + ``os.replace`` with no restriction: a
+    restricted ``.env`` came out of ``kazma migrate import`` readable by
+    Users (2026-11-15).
     """
-    env_path = Path(env_path)
-    lines: list[str] = []
-    found = False
-    if env_path.exists():
-        for line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
-            stripped = line.strip()
-            if stripped and not stripped.startswith("#") and "=" in stripped:
-                k, _, _ = stripped.partition("=")
-                if k.strip() == key:
-                    lines.append(f"{key}={value}")
-                    found = True
-                    continue
-            lines.append(line)
-    if not found:
-        lines.append(f"{key}={value}")
-    # Atomic write (temp sibling + os.replace): a crash/power loss mid-
-    # write_text left a truncated .env that could drop KAZMA_VAULT_KEY (or
-    # other lines) — same corruptibility class §11A flags for JSON stores
-    # (audit finding).
-    tmp = env_path.with_suffix(env_path.suffix + ".tmp")
-    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    os.replace(tmp, env_path)
+    from kazma_core.env_files import set_env_values
+
+    if not set_env_values(Path(env_path), {key: value}):
+        logger.warning("[migrate] %s could not be restricted to this account; %s was written",
+                       env_path, key)

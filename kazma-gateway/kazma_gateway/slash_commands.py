@@ -810,18 +810,20 @@ def _config_export() -> str:
         return f"⚠️ Could not export config: {exc}"
 
 
-_REDACT_KEYS = {"api_key", "token", "secret", "password", "stt_api_key", "bot_token", "app_token"}
-
-
 def _redact_secrets(obj: Any) -> Any:
     """Recursively redact sensitive keys in a nested dict/list.
 
-    Leaves keep their value with any URL password masked: a key rule cannot
-    see the password inside a DSN or a token URL.
+    A key is a secret by the Settings masker's rule
+    (``config_mask.key_is_secret``; this kept seven exact names, and
+    ``client_secret``, ``access_token`` or an MCP server's ``OPENAI_KEY``
+    were exported as they were). Leaves keep their value with any URL
+    password and token-shaped value masked: a key rule cannot see those.
     """
+    from kazma_core.security.config_mask import key_is_secret
+
     if isinstance(obj, dict):
         return {
-            k: ("***REDACTED***" if k.lower() in _REDACT_KEYS and v else _redact_secrets(v))
+            k: ("***REDACTED***" if key_is_secret(str(k)) and v else _redact_secrets(v))
             for k, v in obj.items()
         }
     if isinstance(obj, list):

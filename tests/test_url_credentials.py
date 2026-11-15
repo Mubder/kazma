@@ -241,12 +241,19 @@ def test_a_masked_url_posted_back_keeps_the_stored_one(store, vault):
     assert store.get("memory.backends.state.url") == DSN
 
 
-def test_a_credential_url_outside_the_install_scope_is_not_moved(store, vault):
-    """A per-tenant vault copy is invisible to background readers (§38), so a
-    credential URL under a name that is not install-scoped stays put — it is
-    still masked on every way out."""
-    store.set("research.searx.url", "https://u:pw@searx.example/", category="research")
-    assert _raw(store, "research.searx.url") == "https://u:pw@searx.example/"
+def test_a_credential_url_outside_the_install_scope_goes_to_an_install_scoped_name(
+        store, vault, production):
+    """A per-tenant vault copy is invisible to background readers (§38). Until
+    2026-11-15 such a URL stayed plaintext in the settings table (and every
+    dump and bundle); it now goes under ``cfg-url:<key>``, install-scoped, and
+    a reader with no tenant finds it (tests/test_url_passwords_vaulted.py)."""
+    from kazma_core.tenant_context import tenant_scope
+
+    with tenant_scope("default"):
+        store.set("research.searx.url", "https://u:pw@searx.example/", category="research")
+    assert _raw(store, "research.searx.url") == "vault://cfg-url:research.searx.url"
+    with tenant_scope(None):
+        assert store.get("research.searx.url") == "https://u:pw@searx.example/"
 
 
 def test_the_save_log_line_carries_no_password(store, vault, caplog):

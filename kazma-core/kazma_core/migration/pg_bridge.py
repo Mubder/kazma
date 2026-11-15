@@ -461,5 +461,9 @@ def _redact_cmd(cmd: Sequence[str]) -> list[str]:
 
 
 def _redact(s: str) -> str:
-    """Redact a potential secret in a command-line token for log safety."""
-    return s if len(s) <= 4 else s[:2] + "…" if any(c in s for c in ":/@") else s
+    """Redact a potential secret in a command-line token for log safety: an
+    address cut to its start, a token-shaped value (``security.token_shapes``)
+    masked."""
+    from kazma_core.security.token_shapes import mask_tokens
+
+    return s if len(s) <= 4 else s[:2] + "…" if any(c in s for c in ":/@") else mask_tokens(s)

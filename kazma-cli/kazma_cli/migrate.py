@@ -56,6 +56,36 @@ def run(args: list[str]) -> None:
 # ── export ────────────────────────────────────────────────────────────────
 
 
+def _inside_git_checkout(folder: Path) -> Path | None:
+    """The git checkout *folder* is inside (the folder holding ``.git``), or None."""
+    try:
+        here = Path(folder).expanduser().resolve()
+    except (OSError, RuntimeError):
+        return None
+    for candidate in (here, *here.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+def _default_bundle_dir() -> Path:
+    """Where ``kazma migrate export`` writes when ``--out`` is not given:
+    ``<home>/kazma-bundles``, never a git checkout (else the system temp
+    folder's ``kazma-bundles``).
+
+    It wrote ``kazma-bundle-<time>.zip`` into the current folder -- often the
+    install's checkout, where the bundle (the vault and its key) was one
+    ``git add -A`` from a commit.
+    """
+    import tempfile
+
+    for base in (Path.home(), Path(tempfile.gettempdir())):
+        folder = base / "kazma-bundles"
+        if _inside_git_checkout(folder) is None:
+            return folder
+    return Path(tempfile.gettempdir()) / "kazma-bundles"
+
+
 def _cmd_export(args: list[str]) -> None:
     """``kazma migrate export [--out PATH] [--no-assets]``."""
     out_path = _flag_value(args, "--out", default=None)
@@ -65,9 +95,16 @@ def _cmd_export(args: list[str]) -> None:
         from datetime import datetime
 
         ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-        out_path = f"kazma-bundle-{ts}.zip"
+        out_path = str(_default_bundle_dir() / f"kazma-bundle-{ts}.zip")
 
     print(f"\n  Exporting Kazma installation → {out_path}\n")
+    print("  The bundle holds the vault AND its key (KAZMA_VAULT_KEY): whoever has the")
+    print("  file can read every secret Kazma keeps. Only this account can read it; keep")
+    print("  it that way, move it to the target machine yourself, and delete it after.\n")
+    checkout = _inside_git_checkout(Path(out_path).parent)
+    if checkout is not None:
+        print(f"  [WARNING] {Path(out_path).parent} is inside the git checkout {checkout}.")
+        print("            Do not commit the bundle (kazma-bundle-*.zip is git-ignored).\n")
 
     def progress(msg: str) -> None:
         print(f"    {msg}")

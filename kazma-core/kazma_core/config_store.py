@@ -22,6 +22,7 @@ import functools
 import json
 import logging
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -90,6 +91,15 @@ _VETO_BLANKING = _Veto("empty value over a stored secret -- delete() clears one"
 # vault; ConfigStore keeps a ``vault://cfg:<key>`` pointer only.
 _VAULT_REF_PREFIX = "vault://"
 _VAULT_NAME_PREFIX = "cfg:"
+#: The vault names of URLs that carry a password under a key that is not a
+#: credential's (``proxy.url``): install-scoped (``vault.INSTALL_SCOPED_SECRETS``),
+#: so the background readers of the setting find them.
+URL_SECRET_PREFIX = "cfg-url:"
+#: Kazma's own records of pages it read (the acquisition journals, read back
+#: raw with ``get_category``): their URLs are what a page linked to, not an
+#: address someone configured, and a pointer would change the record. A
+#: credential-NAMED field there is still refused (``durable_state.refuse_vaulted``).
+_URL_RECORD_PREFIXES = ("acquisition.",)
 
 # Match last path segment of dotted keys (e.g. llm.api_key → api_key).
 _SENSITIVE_LAST_SEGMENTS = frozenset({
@@ -172,6 +182,10 @@ def is_sensitive_config_key(key: str) -> bool:
     """
     if not key:
         return False
+    # An environment variable's name ending in _KEY (OPENAI_KEY in an MCP
+    # server's env): the maskers' rule (config_mask.env_name_is_secret).
+    if re.fullmatch(r"[A-Z][A-Z0-9_]*_KEY", key.rsplit(".", 1)[-1].strip()):
+        return True
     lowered = key.lower().replace("-", "_")
     last = lowered.rsplit(".", 1)[-1]
     if last in _SENSITIVE_LAST_SEGMENTS:
@@ -234,25 +248,36 @@ def is_masked_secret_placeholder(value: Any) -> bool:
     return url_password_is_masked(value)
 
 
-def _is_sensitive_config_value(key: str, value: Any) -> bool:
-    """True when *value*, stored under *key*, belongs in the vault.
+def _secret_vault_name(key: str, value: Any) -> str | None:
+    """The vault name *value*, stored under *key*, goes to; None when it is
+    not a secret (it stays in the settings table).
 
-    A key named like a credential always does (:func:`is_sensitive_config_key`).
-    So does a URL carrying a password, whatever the key is called --
+    A key named like a credential: ``cfg:<key>`` (:func:`is_sensitive_config_key`).
+    A URL carrying a password, whatever the key is called --
     ``memory.backends.state.url`` held the live Postgres DSN in plaintext
-    (2026-09-25) -- when every reader will find it there: its vault name is
-    install-scoped (``INSTALL_SCOPED_SECRETS``). Under any other name the copy
-    would sit under the saving request's tenant, invisible to background
-    readers (AGENTS §38), so it stays where it is; it is masked on every way
-    out all the same (``security/url_credentials.py``).
+    (2026-09-25) -- goes there too when ``cfg:<key>`` is install-scoped
+    (``INSTALL_SCOPED_SECRETS``), and under ``cfg-url:<key>`` (install-scoped
+    for every key, :data:`URL_SECRET_PREFIX`) otherwise. Until 2026-11-15 a
+    password in any other URL -- ``proxy.url``, ``web.searxng_url``,
+    ``providers.list[].base_url`` -- stayed plaintext in the settings table,
+    every Postgres dump and every bundle: a copy under the saving request's
+    tenant would have been invisible to the background readers that use it
+    (AGENTS §38), and no install-scoped name was free for it.
     """
     if is_sensitive_config_key(key):
-        return True
-    if not url_has_credentials(value):
-        return False
+        return _vault_secret_name(key)
+    if not url_has_credentials(value) or key.startswith(_URL_RECORD_PREFIXES):
+        return None
     from kazma_core.security.vault import is_install_scoped_secret
 
-    return is_install_scoped_secret(_vault_secret_name(key))
+    name = _vault_secret_name(key)
+    return name if is_install_scoped_secret(name) else f"{URL_SECRET_PREFIX}{key}"
+
+
+def _is_sensitive_config_value(key: str, value: Any) -> bool:
+    """True when *value*, stored under *key*, belongs in the vault
+    (:func:`_secret_vault_name`)."""
+    return _secret_vault_name(key, value) is not None
 
 
 def vaulted_paths(key: str, value: Any) -> list[str]:
@@ -278,7 +303,7 @@ def vaulted_paths(key: str, value: Any) -> list[str]:
                     ident = str(child.get("name") or child.get("id") or "").strip()
                 walk(child, f"{path}.{ident or i}")
         elif (isinstance(item, str) and item and not is_vault_ref(item)
-              and not is_masked_secret_placeholder(item) and is_sensitive_config_key(path)):
+              and not is_masked_secret_placeholder(item) and _is_sensitive_config_value(path, item)):
             found.append(path)
 
     walk(value, key)
@@ -1606,7 +1631,7 @@ class ConfigStore(_ChangeNotices):
             vault = _try_get_vault()
             if vault is not None:
                 try:
-                    vname = _vault_secret_name(key)
+                    vname = _secret_vault_name(key, val) or _vault_secret_name(key)
                     # The vault write is skipped when it already holds this exact
                     # value. The ROW is rewritten either way: it holds plaintext,
                     # which is why this branch runs. Writing the pointer only on
@@ -1616,7 +1641,7 @@ class ConfigStore(_ChangeNotices):
                     # the pointer is written, reads resolve it and never come
                     # here again (the old flood loop was this branch re-running).
                     _store_config_secret(vault, vname, val)
-                    self._write_db_value(key, _vault_ref_for_key(key), category="security")
+                    self._write_db_value(key, f"{_VAULT_REF_PREFIX}{vname}", category="security")
                     logger.info("[ConfigStore] Moved sensitive key %s into the vault", key)
                     return val
                 except Exception as exc:
@@ -1635,8 +1660,18 @@ class ConfigStore(_ChangeNotices):
             return [], []
         moved: list[str] = []
         left: list[str] = []
-        for rows in self.get_all().values():
+        for category, rows in self.get_all().items():
             for key, val in rows.items():
+                if isinstance(val, (dict, list)) and vaulted_paths(key, val):
+                    # A secret inside a stored structure -- a password in a
+                    # provider's base_url -- moves when the row is written
+                    # again (the nested walk keeps every existing pointer).
+                    self.set(key, val, category=category or "general")
+                    with self._lock:
+                        self._invalidate_key(key)  # read the row, not a cached copy
+                    still = vaulted_paths(key, self._stored_raw(key))
+                    (left if still else moved).append(key)
+                    continue
                 if not (isinstance(val, str) and val and not val.startswith(_VAULT_REF_PREFIX)
                         and not is_masked_secret_placeholder(val) and _is_sensitive_config_value(key, val)):
                     continue
@@ -1784,15 +1819,18 @@ class ConfigStore(_ChangeNotices):
             return value
         if is_vault_ref(value) or is_masked_secret_placeholder(value):
             return value
-        if not path or not is_sensitive_config_key(path):
+        # A credential-named leaf, or a URL with a password at any path
+        # (``providers.list[].base_url`` with ``user:pw@``).
+        vname = _secret_vault_name(path, value) if path else None
+        if vname is None:
             return value
         vault = _try_get_vault()
         if vault is None:
             self._note_plaintext_fallback(path, vault_off=True)
             return value
         try:
-            _store_config_secret(vault, _vault_secret_name(path), value)
-            return _vault_ref_for_key(path)
+            _store_config_secret(vault, vname, value)
+            return f"{_VAULT_REF_PREFIX}{vname}"
         except Exception as exc:
             self._note_plaintext_fallback(path, vault_off=False, exc=exc)
             return value
@@ -1954,8 +1992,9 @@ class ConfigStore(_ChangeNotices):
             return value  # plaintext fallback when vault disabled
 
         try:
-            _store_config_secret(vault, _vault_secret_name(key), value)
-            return _vault_ref_for_key(key)
+            vname = _secret_vault_name(key, value) or _vault_secret_name(key)
+            _store_config_secret(vault, vname, value)
+            return f"{_VAULT_REF_PREFIX}{vname}"
         except Exception as exc:
             self._note_plaintext_fallback(key, vault_off=False, exc=exc)
             return value
@@ -2679,9 +2718,13 @@ class ConfigStore(_ChangeNotices):
     def delete(self, key: str) -> bool:
         """Delete a setting. Returns True if a row was deleted.
 
-        Also removes the vault copy for sensitive keys when present.
+        Also removes the vault copy for sensitive keys when present, and the
+        one a URL password was kept under (``cfg-url:<key>``).
         """
         refuse_write("config", key)
+        # The row's pointer, to remove the vault copy a URL password was kept
+        # under. A store that cannot be read raises here as the delete would.
+        raw = None if is_sensitive_config_key(key) else self._stored_raw(key)
         deleted = False
         with self._statement_lock(write=True):
             if self._use_postgres():
@@ -2709,13 +2752,19 @@ class ConfigStore(_ChangeNotices):
                 except Exception:
                     conn.execute("ROLLBACK")
                     raise
-        if deleted and is_sensitive_config_key(key):
+        names: list[str] = []
+        if is_sensitive_config_key(key):
+            names.append(_vault_secret_name(key))
+        elif is_vault_ref(raw) and str(raw).startswith(f"{_VAULT_REF_PREFIX}{URL_SECRET_PREFIX}"):
+            names.append(str(raw)[len(_VAULT_REF_PREFIX):])
+        if deleted and names:
             vault = _try_get_vault()
             if vault is not None:
-                try:
-                    vault.delete(_vault_secret_name(key))
-                except Exception as exc:
-                    logger.debug("[ConfigStore] vault delete for %s: %s", key, exc)
+                for name in names:
+                    try:
+                        vault.delete(name)
+                    except Exception as exc:
+                        logger.debug("[ConfigStore] vault delete for %s: %s", key, exc)
         return deleted
 
     def export_yaml(self) -> str:

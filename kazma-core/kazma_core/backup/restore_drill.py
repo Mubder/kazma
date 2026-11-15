@@ -289,17 +289,24 @@ def _check_vault_opens(backup: Path, res: DrillResult) -> None:
     previous = os.environ.get("KAZMA_VAULT_KEY")
     vault = None
     try:
+        from kazma_core.security.file_access import write_private
+
         copy = scratch / "vault.db"
-        shutil.copy2(vault_db, copy)
         # Bring the WAL sidecars along. A SQLite file copied without its -wal
         # loses every write that has not been checkpointed — the copy opens
         # cleanly and reports "no such table", which would read here as a
         # broken vault. Backups written through the online backup API have no
-        # sidecar; one produced any other way might.
-        for suffix in ("-wal", "-shm"):
-            side = vault_db.with_name(vault_db.name + suffix)
-            if side.is_file():
-                shutil.copy2(side, copy.with_name(copy.name + suffix))
+        # sidecar; one produced any other way might. The three are READ
+        # together first, then written (the vault's copy readable by this
+        # account only): restricting takes a moment, and a writer that
+        # checkpoints meanwhile would leave the sidecars gone and the copied
+        # database empty.
+        vault_bytes = vault_db.read_bytes()
+        sides = {suffix: vault_db.with_name(vault_db.name + suffix) for suffix in ("-wal", "-shm")}
+        side_bytes = {suffix: side.read_bytes() for suffix, side in sides.items() if side.is_file()}
+        write_private(copy, vault_bytes)  # a copy of the vault: this account only
+        for suffix, data in side_bytes.items():
+            copy.with_name(copy.name + suffix).write_bytes(data)
         os.environ["KAZMA_VAULT_KEY"] = key
         from kazma_core.security.vault import SecretVault
 

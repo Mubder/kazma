@@ -64,7 +64,9 @@ __all__ = ["ExportRefused", "export_bundle"]
 
 
 class ExportRefused(RuntimeError):
-    """The data folder an export would read holds no Kazma installation."""
+    """The export was not made: the data folder it would read holds no Kazma
+    installation, or the bundle (the vault and its key) could not be made
+    readable by this account only."""
 
 
 def _installation_problem(data_dir: Path, backend: str) -> str | None:
@@ -300,8 +302,11 @@ def export_bundle(
     }
     # From here to the end the staging folder holds the vault key in clear:
     # it is removed whatever happens (audit 2026-11-10: a failed export left
-    # it, and the universal backup copied it offsite).
-    (staging / "meta.env").write_text(render_meta_env(meta), encoding="utf-8")
+    # it, and the universal backup copied it offsite), and readable by this
+    # account only while it is there (the one env-file writer).
+    from kazma_core.env_files import write_env_text
+
+    write_env_text(staging / "meta.env", render_meta_env(meta))
     try:
         _finish_bundle(staging, out_path, manifest, meta, _log)
     finally:
@@ -331,12 +336,29 @@ def _finish_bundle(staging: Path, out_path: Path, manifest: Manifest,
             manifest.file_hashes[rel] = sha256_file(fpath)
     atomic_write_text(staging / "manifest.json", manifest.to_json())
 
-    # 10. Zip the staging dir → final bundle.
+    # 10. Zip the staging dir → final bundle. It holds the vault AND its key
+    #     (meta.env, by design: §18A), so it is readable by this account
+    #     only from its first byte -- an empty file restricted, then filled,
+    #     then renamed into place -- or it is not written at all.
+    from kazma_core.security.file_access import create_private
+
     _log(f"Compressing bundle → {out_path.name}…")
-    with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
-        for fpath in sorted(staging.rglob("*")):
-            if fpath.is_file():
-                zf.write(fpath, fpath.relative_to(staging).as_posix())
+    partial = out_path.with_name(f".{out_path.name}.partial")
+    partial.unlink(missing_ok=True)
+    try:
+        if not create_private(partial):
+            raise ExportRefused(
+                f"The bundle holds the vault key, and {out_path.parent} does not let Kazma make "
+                "a file only this account can read. Export to a folder on a local disk "
+                "(--out). Nothing was written."
+            )
+        with zipfile.ZipFile(partial, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+            for fpath in sorted(staging.rglob("*")):
+                if fpath.is_file():
+                    zf.write(fpath, fpath.relative_to(staging).as_posix())
+        os.replace(partial, out_path)
+    finally:
+        partial.unlink(missing_ok=True)
 
     # Re-hash manifest.json after writing it (it wasn't in file_hashes yet).
     # Append-correction: write manifest hashes inclusively by re-zipping is

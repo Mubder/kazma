@@ -2350,27 +2350,40 @@ def _current_user_sid() -> str:
     return sid if sid.startswith("S-") else ""
 
 
+_OWNER_ONLY_MODULE = None
+
+
+def _owner_only():
+    """kazma_core/security/owner_only.py, loaded by path (standard library
+    only, like process_priority.py): the one implementation the guard and
+    Kazma (``security.file_access.restrict_to_owner``) restrict a secret
+    file with."""
+    global _OWNER_ONLY_MODULE
+    if _OWNER_ONLY_MODULE is None:
+        import importlib.util
+
+        path = REPO_ROOT / "kazma-core" / "kazma_core" / "security" / "owner_only.py"
+        name = "kazma_guard_owner_only"
+        spec = importlib.util.spec_from_file_location(name, path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"cannot load {path}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _OWNER_ONLY_MODULE = module
+    return _OWNER_ONLY_MODULE
+
+
 def _restrict_to_owner(path: Path) -> bool:
     """Only the account that runs the guard (and so Kazma and the broker) may
-    read *path*. True when the restriction was applied."""
-    if os.name != "nt":
-        try:
-            os.chmod(path, 0o600)
-            return True
-        except OSError:
-            return False
-    sid = _current_user_sid()
-    if not sid:
-        return False
+    read *path*. True when the file's permissions, read back, say so.
+
+    ``owner_only.restrict`` replaces the whole access list. This ran ``icacls
+    /inheritance:r /grant:r``, which keeps another account's explicit entry
+    (an explicit ``Users:R`` stayed while this answered True, 2026-11-15)."""
     try:
-        result = subprocess.run(
-            ["icacls", str(path), "/inheritance:r", "/grant:r", f"*{sid}:(F)"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=30, check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
+        return bool(_owner_only().restrict(path))
+    except (ImportError, OSError, AttributeError):
         return False
-    return result.returncode == 0
 
 
 def _file_sha(*paths: Path) -> str:

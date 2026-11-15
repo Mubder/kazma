@@ -155,7 +155,7 @@ kazma migrate export [--out PATH] [--no-assets]
 
 | Flag | Default | Purpose |
 |------|---------|---------|
-| `--out PATH` | `kazma-bundle-<timestamp>.zip` | Output bundle path |
+| `--out PATH` | `~/kazma-bundles/kazma-bundle-<timestamp>.zip` (never inside a git checkout) | Output bundle path. The bundle holds the vault and its key: it is written readable by this account only, and an export refuses a folder where that cannot be done |
 | `--no-assets` | (assets included) | Leave the data dir's files out (a smaller bundle of settings and databases). The swarm's worker registry and templates still travel |
 
 ### `kazma migrate verify`

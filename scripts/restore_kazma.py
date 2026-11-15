@@ -56,8 +56,10 @@ def main() -> int:
     staging.mkdir(parents=True)
 
     with zipfile.ZipFile(archive, "r") as zf:
-        zf.extractall(staging)
         names = zf.namelist()
+        # Never the .env: it holds the vault key, and a staging folder takes
+        # what the working folder grants. Its presence is enough to say.
+        zf.extractall(staging, members=[n for n in names if n.strip("/") != ".env"])
 
     manifest_path = staging / "MANIFEST.json"
     if manifest_path.is_file():
@@ -82,8 +84,7 @@ def main() -> int:
     shutil.copytree(src_data, data_dir)
     print(f"OK restored data to {data_dir}")
 
-    env_src = staging / ".env"
-    if env_src.is_file():
+    if ".env" in names:
         print("NOTE: archive includes .env — merge secrets manually into your live .env")
 
     shutil.rmtree(staging, ignore_errors=True)

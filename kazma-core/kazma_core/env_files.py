@@ -30,7 +30,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 __all__ = ["CHAT_TOKEN_VARIABLES", "env_credential", "env_file_ladder",
-           "load_env_files", "persist_generated_secret"]
+           "load_env_files", "persist_generated_secret", "set_env_values", "write_env_text"]
 
 #: The chat apps' token variables: read only through :func:`env_credential`
 #: (``tests/test_env_placeholders.py``).
@@ -143,38 +143,90 @@ def _install_env_file() -> Path:
     return own[0] if own else Path(user_home()) / ".env"
 
 
+def _line_key(line: str) -> tuple[str, bool]:
+    """The variable a ``.env`` line sets and whether it is a commented example
+    (``# NAME=...``); ``("", False)`` for anything else."""
+    stripped = line.strip()
+    commented = stripped.startswith("#")
+    if commented:
+        stripped = stripped.lstrip("#").strip()
+    stripped = stripped.removeprefix("export ").strip()
+    name, sep, _value = stripped.partition("=")
+    name = name.strip()
+    if not sep or not name or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+        return "", False
+    return name, commented
+
+
+def _env_text_with(text: str, values: dict[str, str]) -> str:
+    """*text* (an env file's) with each ``NAME=value`` of *values* set: the
+    first line naming it -- set, or its commented example -- replaced, any
+    later line that sets it dropped (python-dotenv takes the last), else
+    appended. Every other line is kept as it is."""
+    out: list[str] = []
+    done: set[str] = set()
+    for line in text.splitlines():
+        name, commented = _line_key(line)
+        if name in values:
+            if name not in done:
+                out.append(f"{name}={values[name]}")
+                done.add(name)
+                continue
+            if not commented:
+                continue  # a later line would win over the one just written
+        out.append(line)
+    out.extend(f"{name}={value}" for name, value in values.items() if name not in done)
+    return "\n".join(out) + "\n"
+
+
+def set_env_values(path: Path, values: dict[str, str]) -> bool:
+    """Set each ``NAME=value`` of *values* in the env file *path* (made when
+    missing): THE way Kazma writes an env file.
+
+    The new file is restricted to this account before any value is in it and
+    renamed over the old one (``security.file_access.write_private``), so a
+    rewrite never leaves the vault key where another account can read it.
+    Every writer used to rewrite the file its own way: ``kazma migrate
+    import`` with ``write_text`` and a rename and no restriction (a
+    restricted ``.env`` came out readable by Users, 2026-11-15), setup by
+    writing first and restricting after. Returns True when the file ends
+    restricted (a WARNING says otherwise; the values are kept anyway).
+    Raises ``OSError`` when it cannot be written.
+    ``tests/test_env_files_written_one_way.py``.
+    """
+    path = Path(path)
+    try:
+        before = path.read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        before = ""
+    return write_env_text(path, _env_text_with(before, values))
+
+
+def write_env_text(path: Path, text: str) -> bool:
+    """Replace the env file *path* with *text*, readable by this account
+    only (an import's rollback puts the file it changed back whole). Returns
+    True when the file ends restricted; raises ``OSError`` when it cannot be
+    written."""
+    from kazma_core.security import file_access
+
+    return file_access.write_private(Path(path), text)
+
+
 def persist_generated_secret(name: str, value: str, *, path: Path | None = None) -> Path:
     """Keep ``name=value`` in :func:`_install_env_file` (or *path*); returns the file.
 
-    The file is made empty and restricted to this account
-    (``security.file_access.restrict_to_owner``) BEFORE the value is written;
-    an existing file is restricted first too. A restriction that fails is a
-    WARNING and the value is still written: a vault key that is not kept
-    leaves every stored secret unreadable after a restart. An existing
-    ``name=`` line (or its commented example) is replaced, else one is
-    appended. Raises ``OSError`` when the file cannot be written. *path* is
-    for setup, which keeps a key in the ``.env`` docker compose reads
-    (``security.searxng_secret``).
+    Through :func:`set_env_values`: restricted to this account BEFORE the
+    value is written. A restriction that fails is a WARNING and the value is
+    still written: a vault key that is not kept leaves every stored secret
+    unreadable after a restart. An existing ``name=`` line (or its commented
+    example) is replaced, else one is appended. Raises ``OSError`` when the
+    file cannot be written. *path* is for setup, which keeps a key in the
+    ``.env`` docker compose reads (``security.searxng_secret``).
     """
-    from kazma_core.security.file_access import restrict_to_owner
-
     path = Path(path) if path is not None else _install_env_file()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.exists():
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        os.close(fd)
-    if not restrict_to_owner(path):
+    if not set_env_values(path, {name: value}):
         logger.warning("[env] could not restrict %s to this account; %s is kept there anyway",
                        path, name)
-    lines = path.read_text(encoding="utf-8").splitlines()
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped.startswith((f"{name}=", f"# {name}=")):
-            lines[i] = f"{name}={value}"
-            break
-    else:
-        lines.append(f"{name}={value}")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
 
 

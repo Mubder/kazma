@@ -770,10 +770,12 @@ class SecurityHardeningRunner:
             account = os.environ.get("USERNAME") or "<Kazma's account>"
             accounts = sorted({who for readers in open_to.values() for who in readers})
             if os.name == "nt":
+                # /reset first: /inheritance:r /grant:r keeps another account's
+                # explicit entry (an explicit Users:R stayed, 2026-11-15).
                 fix = ("remove their access where it is granted -- often the install folder, "
                        "whose files inherit it: icacls \"<folder>\" /remove:g \"<account>\" -- "
-                       "or restrict each file: icacls \"<file>\" /inheritance:r /grant:r "
-                       f"\"{account}:F\"")
+                       "or restrict each file: icacls \"<file>\" /reset, then icacls \"<file>\" "
+                       f"/inheritance:r /grant:r \"{account}:F\"")
             else:
                 fix = "chmod 600 each file"
             return HardeningCheck(

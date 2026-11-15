@@ -264,6 +264,8 @@ def restore_files(
         data_dir.mkdir(parents=True, exist_ok=True)
         restored_dbs = _flatten_into_data_dir(root, data_dir)
         moved = ["dbs", "assets"] if restored_dbs or (root / "assets").is_dir() else []
+        from kazma_core.security.file_access import copy_private, restrict_secret_files
+
         for name in ("research", ".env", "kazma.yaml", "manifest.json", "neo4j_graph.jsonl"):
             src = root / name
             if not src.exists():
@@ -271,10 +273,18 @@ def restore_files(
             tgt = dest / name
             if src.is_dir():
                 shutil.copytree(src, tgt, dirs_exist_ok=True)
+            elif name == ".env":
+                copy_private(src, tgt)  # the vault key: this account only
             else:
                 shutil.copy2(src, tgt)
             moved.append(name)
+        # The restored vault (and any other secret file) as the .env: a copy
+        # takes what the target folder grants.
+        open_secrets = restrict_secret_files(dest)
         res.add("assemble", bool(moved), ", ".join(moved) or "nothing found")
+        if open_secrets:
+            res.add("secret files restricted", False,
+                    "restored, but other accounts can read: " + ", ".join(open_secrets[:5]))
     except Exception as exc:  # noqa: BLE001
         res.add("assemble", False, str(exc)[:200])
         return res

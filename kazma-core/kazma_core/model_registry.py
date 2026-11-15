@@ -1778,7 +1778,11 @@ class ModelRegistry:
         for key, value in category.items():
             if not key.startswith("models.saved.") or not isinstance(value, dict):
                 continue
-            profile = dict(value)
+            # The category is read raw: a password in the profile's URL is a
+            # vault pointer there (config_store._secret_vault_name). Read the
+            # profile as get() resolves it, so the mask below sees the URL.
+            resolved = self._config_store.get(key, value)
+            profile = dict(resolved if isinstance(resolved, dict) else value)
             profile["name"] = key[len("models.saved."):]
             profiles.append(self._mask_profile(profile) if mask_api_key else profile)
         profiles.sort(key=lambda p: p.get("name", ""))

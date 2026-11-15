@@ -822,9 +822,11 @@ class _VaultUndo:
             if self.env_before is None:
                 self.env_path.unlink(missing_ok=True)
             else:
-                tmp = self.env_path.with_suffix(self.env_path.suffix + ".tmp")
-                tmp.write_text(self.env_before, encoding="utf-8")
-                os.replace(tmp, self.env_path)
+                # The one env-file writer: restricted before the old key is
+                # back in it (a plain write left it readable by Users).
+                from kazma_core.env_files import write_env_text
+
+                write_env_text(self.env_path, self.env_before)
         except OSError:
             logger.error("[migrate:import] could not restore %s", self.env_path, exc_info=True)
         if self.environ_before is None:

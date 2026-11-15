@@ -94,6 +94,8 @@ docs/build/
 # Runtime data (generated per-installation, never commit)
 kazma-data/
 .kazma/
+# A migration bundle holds the vault and its key (kazma migrate export).
+kazma-bundle-*.zip
 # The worker registry lives in the data dir since 2026-10-01; an older build's
 # copy at the root is renamed .migrated when it is moved there.
 swarm_registry.json

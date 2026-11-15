@@ -67,20 +67,38 @@ _PATH_FRAGMENTS = r"""
         \b[A-Za-z]:[\\/](?![\\/])[^\s'"]*   # Windows absolute paths (not the "s://" of a URL)
       | /(?:home|Users|root|etc|var|opt)/[^\s'"]*   # POSIX absolute paths
 """
+#: Secrets recognised by what surrounds them: a JSON member or ``name=value``
+#: whose name is a credential's, URL userinfo. Credentials recognised by their
+#: own shape (an Authorization header's, ``sk-``, ``xapp-``, ``ya29.``, a
+#: JWT...) are ``security.token_shapes.TOKEN_SHAPES``, the table every masker
+#: reads (2026-11-15: this list knew five of them, the maskers none).
 _SECRET_FRAGMENTS = r"""
         "[^"\s]*(?:password|passwd|secret|token(?!s)|api[_-]?key|private[_-]?key|authorization)[^"\s]*"
           \s*:\s*"[^"]*"                                # a JSON member ("password": "x")
       | (?:password|passwd|secret|token|api[_-]?key)\s*[=:]\s*\S+
-      | \b(?:bearer|basic)\s+(?:(?=[A-Za-z0-9._~+/=-]*\d)[A-Za-z0-9._~+/=-]{16,}|[A-Za-z0-9._~+/=-]{24,})  # an Authorization header's credential: 16+ with a digit, or 24+ ("basic configuration" is prose)
-      | \b(?:sk|xox[baprs]|ghp|gho|ghu|ghs|github_pat)[-_][A-Za-z0-9_-]{8,}
-      | \bAIza[A-Za-z0-9_-]{30,}                        # a Google API key
-      | \b(?:bot)?\d{6,}:[A-Za-z0-9_-]{30,}             # a Telegram bot token (in its API URL too)
       | [a-z][a-z0-9+.-]*://[^/\s:@'"]+:[^@\s/'"]+@  # URL userinfo (a DSN's password)
 """
+_REDACTED = "<redacted>"
 #: Fragments that must never reach a client even in verbose mode.
-_REDACT = re.compile("(" + _PATH_FRAGMENTS + "|" + _SECRET_FRAGMENTS + ")", re.IGNORECASE | re.VERBOSE)
+_REDACT_PATTERN = re.compile("(" + _PATH_FRAGMENTS + "|" + _SECRET_FRAGMENTS + ")", re.IGNORECASE | re.VERBOSE)
 #: The secrets alone, for a message whose path is the answer (below).
 _REDACT_SECRETS = re.compile("(" + _SECRET_FRAGMENTS + ")", re.IGNORECASE | re.VERBOSE)
+
+
+class _Redactor:
+    """``_REDACT.sub(...)``: the paths and context-shaped secrets, then every
+    token shape (``security.token_shapes``)."""
+
+    def __init__(self, pattern: re.Pattern[str]) -> None:
+        self._pattern = pattern
+
+    def sub(self, replacement: str, text: str) -> str:
+        from kazma_core.security.token_shapes import mask_tokens
+
+        return mask_tokens(self._pattern.sub(replacement, str(text)), replacement)
+
+
+_REDACT = _Redactor(_REDACT_PATTERN)
 
 
 def redact_secrets(text: str) -> str:
@@ -89,9 +107,12 @@ def redact_secrets(text: str) -> str:
     For a message the operator reads to fix their own setup -- an MCP server
     that would not start ("No such file: C:\\...\\npx.cmd") -- where
     :func:`validation_error`'s path redaction would remove the answer. A key
-    is still never shown: an HTTP failure quotes its URL, query and all.
+    is still never shown: an HTTP failure quotes its URL, query and all; a
+    token is found by its shape too (``security.token_shapes``).
     """
-    return _REDACT_SECRETS.sub("<redacted>", str(text))
+    from kazma_core.security.token_shapes import mask_tokens
+
+    return mask_tokens(_REDACT_SECRETS.sub(_REDACTED, str(text)), _REDACTED)
 
 _MAX_VERBOSE_CHARS = 300
 

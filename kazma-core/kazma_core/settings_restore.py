@@ -388,7 +388,12 @@ def _mask_backup_secrets(path: str, value: Any) -> Any:
         return json.dumps(_mask_backup_secrets(path, inner), ensure_ascii=False)
     if is_sensitive_config_key(path):
         return _MASK
-    return mask_url_credentials(value)
+    # The whole value a URL (its password masked), then a URL password inside
+    # text and every token-shaped value (security.token_shapes): the file
+    # leaves this machine.
+    from kazma_core.security.url_credentials import mask_urls_in_text
+
+    return mask_urls_in_text(mask_url_credentials(value))
 
 
 def _kazma_version() -> str:

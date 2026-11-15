@@ -34,6 +34,7 @@ from typing import Any
 __all__ = [
     "HIDDEN",
     "SECRET_ARGUMENTS",
+    "SECRET_WHEN_NAMED",
     "arguments_digest",
     "redact_arguments",
     "redact_text",
@@ -47,6 +48,15 @@ HIDDEN = "[hidden]"
 #: Tool -> the arguments that are secrets whatever they are called.
 SECRET_ARGUMENTS: dict[str, frozenset[str]] = {
     "vault_store": frozenset({"value"}),
+}
+
+#: Tool -> (the argument naming a setting, the argument holding its value):
+#: the value is hidden when the setting it names is a secret
+#: (``config_mask.key_is_secret``). ``config_save(key="llm.api_key",
+#: value="sk-...")`` showed the key on every card and stored it in the
+#: approval record (2026-11-15).
+SECRET_WHEN_NAMED: dict[str, tuple[str, str]] = {
+    "config_save": ("key", "value"),
 }
 
 #: Names a card always hid that are not credentials by the Settings rule: a
@@ -77,7 +87,11 @@ def _walk(node: Any, depth: int) -> Any:
 
 def redact_arguments(tool: str, args: Any) -> Any:
     """*args* as an approval card may show them: names kept, secrets hidden."""
-    secret = SECRET_ARGUMENTS.get(str(tool or "").strip(), frozenset())
+    name = str(tool or "").strip()
+    secret = SECRET_ARGUMENTS.get(name, frozenset())
+    named = SECRET_WHEN_NAMED.get(name)
+    if named and isinstance(args, dict) and _is_secret_key(args.get(named[0]) or ""):
+        secret = secret | {named[1]}
     if isinstance(args, dict):
         return {
             k: (HIDDEN if (str(k) in secret or _is_secret_key(k)) else _walk(v, 1))

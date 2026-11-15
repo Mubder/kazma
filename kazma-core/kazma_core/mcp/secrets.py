@@ -22,10 +22,12 @@ started the server.
 * :func:`redacted_argv` / :func:`redacted_url` -- as a log line may print them.
 
 A secret is an ``env`` entry whose name reads as a credential (the rule every
-setting follows, :func:`~kazma_core.config_store.is_sensitive_config_key`) or
-whose value is a URL with a password; ``auth.value`` and ``auth.token``; a
-header whose name reads as one; the value of a command flag whose name reads
-as one; a password in a URL. ``tests/test_mcp_secrets.py``.
+setting follows, :func:`~kazma_core.config_store.is_sensitive_config_key`, and
+any name ending in ``_KEY``) or whose value is a URL with a password;
+``auth.value`` and ``auth.token``; a header whose name reads as one; the value
+of a command flag whose name reads as one; a password in a URL; any env value,
+header value or command argument shaped like a token
+(``security.token_shapes``). ``tests/test_mcp_secrets.py``.
 """
 
 from __future__ import annotations
@@ -65,16 +67,32 @@ class MCPSecretUnavailable(RuntimeError):
 
 
 def _secret_name(name: str) -> bool:
+    """A credential's name: the settings rule, a few names it does not read
+    as one, or any name ending in ``_KEY`` (``OPENAI_KEY``, ``NOTION_KEY``,
+    ``--license-key``): an MCP server's environment, header or flag of that
+    shape holds a key. Until 2026-11-15 those stayed plaintext in kazma.yaml
+    and the settings, and every MCP list showed them."""
     from kazma_core.config_store import is_sensitive_config_key
+    from kazma_core.security.config_mask import env_name_is_secret
 
     lowered = str(name).strip().lower().replace("-", "_")
-    return bool(lowered) and (lowered in _EXTRA_SECRET_NAMES or is_sensitive_config_key(lowered))
+    return bool(lowered) and (lowered in _EXTRA_SECRET_NAMES or is_sensitive_config_key(lowered)
+                              or env_name_is_secret(lowered.upper()))
 
 
 def _url_has_password(value: Any) -> bool:
     from kazma_core.security.url_credentials import url_has_credentials
 
     return url_has_credentials(value)
+
+
+def _holds_token(value: Any) -> bool:
+    """A value shaped like a credential whatever its name
+    (``security.token_shapes``): ``--header "Authorization: Bearer ..."``
+    in a server's command, a ``ghp_`` token in an oddly named env entry."""
+    from kazma_core.security.token_shapes import has_token
+
+    return isinstance(value, str) and has_token(value)
 
 
 def _is_ref(value: Any) -> bool:
@@ -102,7 +120,7 @@ def _command_paths(command: list[Any]) -> list[FieldPath]:
                     paths.append(("command", i, _FLAG_VALUE))
                 else:
                     value_next = True
-        elif _is_ref(arg) or _url_has_password(arg):
+        elif _is_ref(arg) or _url_has_password(arg) or _holds_token(arg):
             paths.append(("command", i))
     return paths
 
@@ -113,7 +131,8 @@ def _secret_paths(server: dict[str, Any]) -> list[FieldPath]:
     env = server.get("env")
     if isinstance(env, dict):
         for key, value in env.items():
-            if isinstance(key, str) and (_secret_name(key) or _url_has_password(value) or _is_ref(value)):
+            if isinstance(key, str) and (_secret_name(key) or _url_has_password(value) or _is_ref(value)
+                                         or _holds_token(value)):
                 paths.append(("env", key))
     auth = server.get("auth")
     if isinstance(auth, dict):
@@ -121,7 +140,7 @@ def _secret_paths(server: dict[str, Any]) -> list[FieldPath]:
     headers = server.get("headers")
     if isinstance(headers, dict):
         for key, value in headers.items():
-            if isinstance(key, str) and (_secret_name(key) or _is_ref(value)):
+            if isinstance(key, str) and (_secret_name(key) or _is_ref(value) or _holds_token(value)):
                 paths.append(("headers", key))
     command = server.get("command")
     if isinstance(command, list):

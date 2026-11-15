@@ -102,15 +102,21 @@ def mask_url_credentials(value: Any) -> Any:
 
 
 def mask_urls_in_text(text: str) -> str:
-    """Mask every URL password inside free text (a ``repr``, a log line)."""
-    if "://" not in text and "password=" not in text.lower():
-        return text
-    text = _EMBEDDED_USERINFO.sub(
-        lambda m: m["head"] + URL_PASSWORD_MASK + m["at"], text
-    )
-    return _QUERY_PASSWORD.sub(
-        lambda q: q["key"] + (URL_PASSWORD_MASK if q["value"] else ""), text
-    )
+    """Mask every URL password inside free text (a ``repr``, a log line),
+    and every token-shaped value (``security.token_shapes``: a ``Bearer``
+    credential in a command, an ``xapp-`` token in a log line). Every masker
+    built on this one -- the log writer, :func:`mask_url_credentials_deep`,
+    the approval cards -- reads the one table of token shapes."""
+    from kazma_core.security.token_shapes import mask_tokens
+
+    if "://" in text or "password=" in text.lower():
+        text = _EMBEDDED_USERINFO.sub(
+            lambda m: m["head"] + URL_PASSWORD_MASK + m["at"], text
+        )
+        text = _QUERY_PASSWORD.sub(
+            lambda q: q["key"] + (URL_PASSWORD_MASK if q["value"] else ""), text
+        )
+    return mask_tokens(text, URL_PASSWORD_MASK)
 
 
 def mask_url_credentials_deep(node: Any, _depth: int = 0) -> Any:
