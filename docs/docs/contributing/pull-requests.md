@@ -28,6 +28,9 @@ test: add integration tests for delegation
 
 ## Review process
 
+0. A change that adds or fixes behaviour comes with a test in the automated
+   suite that fails without the change (a fix covers the whole class of the
+   bug; `AGENTS.md` lists the gates that hold each rule)
 1. Automated CI must pass
 2. At least one maintainer approval
 3. No unresolved conversations

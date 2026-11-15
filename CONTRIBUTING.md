@@ -459,6 +459,13 @@ Enterprise deployments use division-based sandboxing. Each division (e.g., `gas_
 2. For large changes, open an issue first to discuss the approach
 3. Fork the repository and create a feature branch from `main`
 
+### Tests are part of every change
+
+A change that adds or fixes behaviour comes with a test in the automated
+suite that fails without the change, and a fix covers the whole class of the
+bug, not one instance (`AGENTS.md` lists the gates that hold each rule). A
+pull request without its test is not merged.
+
 ### Development Workflow
 
 ```bash
