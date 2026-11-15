@@ -1311,8 +1311,12 @@ swarm works with zero pre-registered workers.
   result has).
 - **`matches_task` uses word-boundary token matching** (not raw substring). When
   adding expertise tags to a template, pick whole words — the tag `code` would
-  not match "barcode" (intentional). Templates are first-match-wins by file order
-  (specialist → general).
+  not match "barcode" (intentional). The template using the most of its words
+  wins (`WorkerTemplate.match_score`, each word once); file order (specialist →
+  general) breaks a tie, then the catch-all (2026-11-15: first-match gave a
+  research task mentioning Python to the coder; `tests/test_swarm_template_choice.py`,
+  the yes/no rule as the control). A language's name is context for
+  `classify_prompt` (`_CODING_CONTEXT`), never coding work alone.
 - **Best-model-per-task** (`models/selection.py`): spawned workers classify their
   prompt (`models/router.py::classify_prompt`) and pick the best available model
   (user `models.defaults.<kind>` → heuristic → active). The selection never

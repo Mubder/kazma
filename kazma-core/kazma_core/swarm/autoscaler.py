@@ -148,19 +148,29 @@ class WorkerTemplate:
         }
 
     def matches_task(self, task_prompt: str, required_expertise: list[str] | None = None) -> bool:
-        """Check if this template's capabilities match a task.
+        """Whether the prompt uses any of this template's words (``match_score`` > 0)."""
+        return self.match_score(task_prompt, required_expertise) > 0
+
+    def match_score(self, task_prompt: str, required_expertise: list[str] | None = None) -> int:
+        """How many of this template's words the prompt uses (each word once).
 
         Matches on role, expertise tags, and model specialty against the prompt
         using **word-boundary token matching** — the prompt is tokenized and a
         tag matches only if it appears as a whole token (or as a contiguous
         multi-word phrase), NOT as a substring. This stops false positives like
         the tag "code" matching "barcode" or "decode".
+
+        The autoscaler ranks templates by it (``maybe_scale``). A yes/no match
+        took the first template in file order with ANY word: live 2026-11-15 a
+        research task ("Find ... facts from the official websites and report
+        them ... Latest stable Python 3 release") went to the coder for the one
+        word "python", over the researcher's "report", "find", "facts".
         """
         import re as _re
 
         prompt = (task_prompt or "").lower()
         if not prompt:
-            return False
+            return 0
         # Tokenize: split on non-alphanumeric. A tag matches if it equals a
         # token, OR appears as a phrase bounded by word boundaries. Multi-word
         # tags (e.g. "pros and cons") use the regex word-boundary form.
@@ -175,27 +185,14 @@ class WorkerTemplate:
                 return bool(_re.search(r"\b" + _re.escape(t) + r"\b", prompt))
             return t in tokens
 
-        # Expertise tag match (only when the caller passes required_expertise).
-        if required_expertise:
-            for tag in required_expertise:
-                if _tag_hits(tag):
-                    return True
-
-        # Capability expertise match
-        for tag in self.capabilities.expertise:
-            if _tag_hits(tag):
-                return True
-
-        # Role match
-        if self.role and _tag_hits(self.role):
-            return True
-
-        # Model specialty match
-        specialty = getattr(self.capabilities, "model_specialty", "")
-        if specialty and _tag_hits(specialty):
-            return True
-
-        return False
+        words: list[str] = [
+            *(required_expertise or []),  # only when the caller passes it
+            *self.capabilities.expertise,
+            self.role or "",
+            getattr(self.capabilities, "model_specialty", "") or "",
+        ]
+        distinct = {w.strip().lower() for w in words if w and w.strip()}
+        return sum(1 for word in distinct if _tag_hits(word))
 
 
 class AutoScaler:
@@ -320,7 +317,8 @@ class AutoScaler:
         """A worker for a task no registered worker matched: an idle instance
         of the matching template, else a new one within its bound.
 
-        Templates whose words the prompt uses come first, then the catch-all
+        Templates whose words the prompt uses come first, the one using the
+        most of its words first (file order breaks a tie), then the catch-all
         ones. Each candidate template's idle instance is reused before a new
         one is spawned (``_take``): the router matches instances by their
         template's words, so a task that matched none of them -- every task
@@ -340,9 +338,13 @@ class AutoScaler:
         # Hold the lock across the capacity-check + spawn so two concurrent
         # maybe_scale calls can't both pass the check and over-scale.
         with self._lock:
-            # Templates whose words the prompt uses first (file order:
-            # specialist to general), then those that take any task.
-            matched = [t for t in self._templates.values() if t.matches_task(task_prompt)]
+            # Templates whose words the prompt uses first, the most words
+            # first (``sorted`` keeps file order -- specialist to general --
+            # for a tie), then those that take any task.
+            scored = [(t.match_score(task_prompt), t) for t in self._templates.values()]
+            matched = [t for score, t in sorted(
+                ((s, t) for s, t in scored if s > 0), key=lambda pair: -pair[0],
+            )]
             fallback = [t for t in self._templates.values() if t.catch_all and t not in matched]
             for template in matched + fallback:
                 worker = self._take(template, detail)

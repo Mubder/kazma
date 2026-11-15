@@ -34,7 +34,10 @@ _CODING_CONTEXT = [
     "script", "parser", "api", "endpoint", "cli", "module", "package",
     "library", "server", "client", "database", "schema", "query",
     "regex", "algorithm", "unit test", "wrapper", "hook", "daemon",
-    "sql", "json", "yaml", "html", "css", "javascript", "typescript",
+    # A language's name is what a task is ABOUT, not that it is code work:
+    # "python" sat in the coding list until 2026-11-15, and "the latest Python
+    # release on python.org" picked the coding model for a fact lookup.
+    "sql", "json", "yaml", "html", "css", "python", "javascript", "typescript",
     "rust", "golang", "java", "bash", "shell", "dockerfile", "makefile",
     "repo", "repository", "branch", "patch", "migration",
 ]
@@ -161,7 +164,7 @@ class ModelRouter:
         # costs a worker the wrong default model, not the user their choice.
         coding_keywords = [
             "code", "function", "bug", "fix", "refactor",
-            "python", "class", "import", "def", "test",
+            "class", "import", "def", "test",
             "error", "traceback", "debug", "commit", "git",
             "implement",
         ]

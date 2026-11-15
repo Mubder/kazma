@@ -195,7 +195,7 @@ class WhatsAppAdapter(SenderGate, BaseAdapter):
         if not hmac.compare_digest(token, self._verify_token):
             return None
         self._receive.event("webhook_verified")
-        logger.info("[whatsapp] Meta verified the webhook")
+        logger.info("[whatsapp] the webhook answered a verify call with the saved verify token")
         return challenge
 
     def accept(self, payload: dict[str, Any]) -> int:

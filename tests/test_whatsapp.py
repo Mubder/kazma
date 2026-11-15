@@ -41,6 +41,7 @@ class FakeMeta:
         self.requests: list[httpx.Request] = []
         self.fail_send: dict[str, Any] | None = None
         self.token_ok = True
+        self.number_unreachable = False
         self.uploads = 0
         self.media = {"m-img": (b"\x89PNG fake image", "image/png"), "m-voice": (b"OggS fake", "audio/ogg; codecs=opus")}
 
@@ -53,6 +54,13 @@ class FakeMeta:
             return httpx.Response(200, content=data, headers={"content-type": mime})
         if not self.token_ok:
             return httpx.Response(401, json={"error": {"code": 190, "message": "Error validating access token"}})
+        if request.method == "GET" and path == f"/v23.0/{PHONE_ID}" and self.number_unreachable:
+            # Meta's answer, word for word, on live 2026-11-15: a valid system-user
+            # token whose system user has no WhatsApp account assigned.
+            return httpx.Response(400, json={"error": {
+                "message": f"Unsupported get request. Object with ID '{PHONE_ID}' does not exist, cannot be loaded "
+                           "due to missing permissions, or does not support this operation.",
+                "type": "GraphMethodException", "code": 100, "error_subcode": 33}})
         if request.method == "GET" and path == f"/v23.0/{PHONE_ID}":
             return httpx.Response(200, json={"display_phone_number": "+965 2222 3333", "verified_name": "Kazma Test",
                                              "quality_rating": "GREEN", "id": PHONE_ID})
@@ -622,6 +630,56 @@ def test_the_test_names_each_problem_with_its_fix() -> None:
     meta.token_ok = True
     empty = {c["key"]: c for c in run(allowed_users=[])["checks"]}["allowed"]
     assert empty["ok"] is False and "Allowed numbers" in empty["detail"]
+
+
+def test_a_number_the_token_cannot_reach_names_the_system_user() -> None:
+    """Live 2026-11-15: "check the Phone number ID" sent the owner to the wrong field.
+
+    Meta's error 100 has many causes; subcode 33 is "this object does not
+    exist or this token may not read it", which a system user with no
+    WhatsApp account assigned gets for a correct ID.
+    """
+    from kazma_gateway.adapters.whatsapp_diagnose import diagnose
+
+    meta = FakeMeta()
+    meta.number_unreachable = True
+    result = asyncio.run(diagnose(
+        "EAAG", phone_number_id=PHONE_ID, app_secret=SECRET, verify_token=VERIFY,
+        public_url="https://my.kazma.example", allowed_users=[OWNER], live={}, client=meta.client()))
+    token = {c["key"]: c for c in result["checks"]}["token"]
+    assert token["ok"] is False
+    assert "system user" in token["detail"] and "Assign assets" in token["detail"]
+    assert "subcode 33" in token["detail"]
+
+    # The control: the same answer read as the parser read it before (no
+    # subcode) does not name the system user. Another refused parameter says
+    # Meta's own sentence, which names the parameter.
+    old = str(WhatsAppError(400, 100, "Unsupported get request."))
+    assert "Assign assets" not in old and "Unsupported get request." in old
+    assert "Invalid parameter: fields" in explain(100, "Invalid parameter: fields", 400)
+
+
+def test_only_a_delivered_message_says_meta_called_the_webhook() -> None:
+    """A verify call proves only that the caller knew the verify token.
+
+    Live 2026-11-15 a check from outside, holding the token, read as "Meta
+    verified the webhook". A delivered message carries Meta's signature.
+    """
+    from kazma_gateway.adapters.whatsapp_diagnose import diagnose
+
+    def webhook(live: dict[str, Any]) -> dict[str, Any]:
+        result = asyncio.run(diagnose(
+            "EAAG", phone_number_id=PHONE_ID, app_secret=SECRET, verify_token=VERIFY,
+            public_url="https://my.kazma.example", allowed_users=[OWNER], live=live, client=FakeMeta().client()))
+        return {c["key"]: c for c in result["checks"]}["webhook"]
+
+    verified = webhook({"events": {"webhook_verified": 1}, "messages": 0})
+    assert verified["ok"] is True and not verified["detail"].startswith("Meta")
+    assert "verify call" in verified["detail"] and "messages field" in verified["detail"]
+    delivered = webhook({"events": {"text": 1}, "messages": 1})
+    assert delivered["ok"] is True and delivered["detail"].startswith("Meta delivered messages")
+    silent = webhook({"events": {}, "messages": 0})
+    assert silent["ok"] is None and "has not called" in silent["detail"]
 
 
 def test_the_connector_route_runs_the_whatsapp_test_with_the_saved_settings(monkeypatch) -> None:

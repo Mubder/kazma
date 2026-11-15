@@ -19,6 +19,14 @@
   Repo.
 - The prompt cache keeps the base prompt in the part a provider caches. It
   had been filed with the per-turn notes for the same reason.
+- A swarm task sent as `auto` goes to the template whose words it uses most.
+  The first template with any word won, so a research task that named Python
+  went to the coder; the model choice read "Python" alone as coding too.
+- WhatsApp's Test names the real cause when Meta cannot reach the number: the
+  token's system user has no WhatsApp account assigned (Meta error 100,
+  subcode 33). It said only "check the Phone number ID". It also no longer
+  says "Meta verified the webhook" for any verify call holding the token;
+  only a delivered message, which Meta signs, says Meta called.
 
 ## Less left behind on disk (2026-11-14)
 

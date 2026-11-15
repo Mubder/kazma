@@ -745,9 +745,12 @@ so the swarm works with zero pre-registered workers.
 - **Templates** live in `swarm_templates.json` (repo root). The shipped defaults
   are `coder` (max 3), `researcher` (max 2), `generalist` (max 5). A template
   matches a task by **word-boundary token matching** on its `capabilities.expertise`
-  tags (the tag `coding` matches the prompt "write some python code" but not
-  "decode this barcode"). Templates are ordered specialist → general
-  (first-match-wins); the generalist is the catch-all.
+  tags (the tag `python` matches the prompt "debug this python script", and a
+  tag `code` would not match "decode this barcode"). The template whose words
+  the prompt uses **most** wins; file order (specialist → general) breaks a
+  tie, and the generalist is the catch-all. A research task that mentions
+  Python ("find the latest Python release and report the source") goes to the
+  `researcher`, not the `coder`.
 - **Spawned instances** are named `<template>-pool-<boot tag>-<n>` (e.g.
   `coder-pool-3f9a-1`: the tag is new at every start, so a shared breaker of
   an earlier run's instance is never inherited), capped per-template by

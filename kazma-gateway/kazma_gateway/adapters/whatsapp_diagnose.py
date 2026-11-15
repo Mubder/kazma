@@ -115,9 +115,16 @@ async def diagnose(
             f"No verify token saved. Make one (any long random text), save it here, then {_META_SETUP}: "
             f"callback URL {address}, the same verify token, Verify and save."
         ))
-    elif events.get("webhook_verified") or live and live.get("messages"):
-        heard = "verified the webhook" if events.get("webhook_verified") else "delivered messages"
-        add("webhook", True, f"Meta {heard} at {address} since Kazma started.")
+    elif live and live.get("messages"):
+        # A delivered message carried Meta's signature: Meta itself.
+        add("webhook", True, f"Meta delivered messages to {address} since Kazma started.")
+    elif events.get("webhook_verified"):
+        # A verify call proves only that the caller knew the verify token
+        # (live 2026-11-15: a check from outside read as "Meta verified").
+        add("webhook", True, (
+            f"{address} answered a verify call with the saved verify token since Kazma started, as it "
+            "does when you press Verify and save in Meta. Messages arrive once the messages field is subscribed."
+        ))
     else:
         add("webhook", None, (
             f"Meta has not called {address} since Kazma started. If WhatsApp is new here, {_META_SETUP}: "

@@ -43,7 +43,7 @@ MAX_DOWNLOAD_BYTES = 19 * 1024 * 1024
 _EXPLAINED: dict[int, str] = {
     190: "the access token is not valid any more (a temporary token lasts 24 hours): make a new one, "
          "or a permanent one from a system user in Meta Business settings",
-    100: "Meta refused a parameter: check the Phone number ID",
+    100: "Meta refused a parameter",
     131030: "this number is not in the test number's list of recipients: add it in the Meta app "
             "under WhatsApp > API Setup",
     131047: "more than 24 hours passed since this person's last message, so WhatsApp allows only an "
@@ -55,6 +55,16 @@ _EXPLAINED: dict[int, str] = {
     80007: "the WhatsApp Business Account's rate limit was reached",
 }
 
+#: Codes whose subcode says which of several causes it was.
+_EXPLAINED_SUBCODE: dict[tuple[int, int], str] = {
+    # Live 2026-11-15: a permanent system-user token whose system user had no
+    # WhatsApp account assigned. "Check the Phone number ID" sent the owner to
+    # the wrong field.
+    (100, 33): "Meta has no number with this Phone number ID that this access token may use: check the ID "
+               "under WhatsApp > API Setup, and that the token's system user is given the WhatsApp account "
+               "(Meta Business settings > System users > Assign assets)",
+}
+
 
 @dataclass
 class WhatsAppError(Exception):
@@ -63,30 +73,46 @@ class WhatsAppError(Exception):
     status: int
     code: int | None
     message: str
+    subcode: int | None = None
 
     def __str__(self) -> str:
-        return explain(self.code, self.message, self.status)
+        return explain(self.code, self.message, self.status, self.subcode)
 
 
-def explain(code: int | None, message: str = "", status: int = 0) -> str:
+def explain(code: int | None, message: str = "", status: int = 0, subcode: int | None = None) -> str:
     """The owner's words for a Meta error."""
+    if code is not None and subcode is not None and (code, subcode) in _EXPLAINED_SUBCODE:
+        return f"{_EXPLAINED_SUBCODE[(code, subcode)]} (Meta error {code}, subcode {subcode})"
+    if code == 100:
+        # A refused parameter is only useful with Meta's own sentence naming it.
+        said = message.strip()
+        return f"{_EXPLAINED[100]}" + (f": {said}" if said else "") + " (Meta error 100)"
     if code in _EXPLAINED:
         return f"{_EXPLAINED[code]} (Meta error {code})"
     said = message.strip() or "no answer"
     return f"Meta answered HTTP {status}: {said}" + (f" (error {code})" if code else "")
 
 
+def _number(value: Any) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _error_of(resp: httpx.Response) -> WhatsAppError:
     code: int | None = None
+    subcode: int | None = None
     message = ""
     try:
         body = resp.json()
         err = body.get("error") or {}
-        code = int(err.get("code")) if err.get("code") is not None else None
+        code = _number(err.get("code"))
+        subcode = _number(err.get("error_subcode"))
         message = str(err.get("error_user_msg") or err.get("message") or "")
     except (ValueError, TypeError, AttributeError):
         message = resp.text[:200]
-    return WhatsAppError(resp.status_code, code, message[:300])
+    return WhatsAppError(resp.status_code, code, message[:300], subcode)
 
 
 def _retry_after(resp: httpx.Response, attempt: int) -> float:

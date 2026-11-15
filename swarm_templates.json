@@ -13,7 +13,7 @@
     "name": "researcher",
     "role": "research",
     "capabilities": {
-      "expertise": ["research", "investigate", "analyze", "summarize", "compare", "evaluate", "study", "report"],
+      "expertise": ["research", "investigate", "analyze", "summarize", "compare", "evaluate", "study", "report", "find", "facts", "sources", "latest", "official", "look up"],
       "tools": ["web_search", "read_url", "read_url_to_file", "crawl_page", "knowledge_search", "memory_search", "read_document", "document_search", "summarize_research_file", "file_read", "file_write", "file_search", "current_datetime", "handoff_to_worker"]
     },
     "max_instances": 2,
