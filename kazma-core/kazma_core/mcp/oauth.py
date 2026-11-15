@@ -265,6 +265,69 @@ def _refused(what: str, response: httpx.Response) -> MCPOAuthError:
     )
 
 
+def _same_resource(named: Any, resource_url: str) -> bool:
+    """Whether the ``resource`` a metadata document names is *resource_url*
+    (its origin and path; a trailing slash aside)."""
+    if not isinstance(named, str):
+        return False
+    try:
+        a, b = urlparse(named), urlparse(resource_url)
+    except ValueError:
+        return False
+    return _same_origin(named, resource_url) and a.path.rstrip("/") == b.path.rstrip("/")
+
+
+def _chosen_issuer(servers: Any, place: _ServerPlace) -> str:
+    """The first authorization server the resource lists that this flow may use."""
+    if not isinstance(servers, list) or not servers:
+        raise MCPOAuthError("Protected-resource metadata lists no authorization_servers")
+    for server in servers:
+        if not isinstance(server, str) or not server:
+            continue
+        parts = urlparse(server)
+        if parts.query or parts.fragment:
+            continue  # an issuer identifier has neither (RFC 8414 §2)
+        try:
+            _check_address(server, place, "OAuth issuer")
+        except MCPOAuthError:
+            continue
+        return server
+    raise MCPOAuthError("No authorization server the MCP server lists is an address Kazma may use")
+
+
+def _metadata_addresses(issuer: str) -> list[str]:
+    """Where an issuer's metadata is, in the order the MCP specification
+    asks: RFC 8414's (``/.well-known/...`` before the issuer's path), then
+    OpenID Connect's two forms. All on the issuer's own origin."""
+    parts = urlparse(issuer)
+    path = parts.path.rstrip("/")
+    origin = f"{parts.scheme}://{parts.netloc}"
+    if not path:
+        return [f"{origin}/.well-known/oauth-authorization-server",
+                f"{origin}/.well-known/openid-configuration"]
+    return [f"{origin}/.well-known/oauth-authorization-server{path}",
+            f"{origin}/.well-known/openid-configuration{path}",
+            f"{origin}{path}/.well-known/openid-configuration"]
+
+
+async def _authorization_server_metadata(issuer: str, place: _ServerPlace) -> dict[str, Any]:
+    """The issuer's metadata: the first of :func:`_metadata_addresses` that answers."""
+    statuses: list[str] = []
+    for address in _metadata_addresses(issuer):
+        r = await _oauth_request("GET", address, place, "OAuth authorization-server metadata address")
+        if r.status_code == 200:
+            return _json_answer(r, "OAuth authorization-server metadata address")
+        if r.status_code in (301, 302, 303, 307, 308):
+            raise MCPOAuthError(
+                "The OAuth authorization-server metadata address answered with a "
+                "redirect, which Kazma does not follow"
+            )
+        statuses.append(str(r.status_code))
+    raise MCPOAuthError(
+        f"OAuth authorization-server metadata not found for {issuer} (HTTP {', '.join(statuses)})"
+    )
+
+
 async def discover_auth_requirements(
     resource_url: str,
     *,
@@ -309,29 +372,30 @@ async def discover_auth_requirements(
         )
     meta = _json_answer(r, "OAuth resource metadata address")
     scopes = meta.get("scopes_supported") or []
-    auth_servers = meta.get("authorization_servers") or []
-    if not auth_servers:
-        raise MCPOAuthError("Protected-resource metadata lists no authorization_servers")
+    # The metadata must be about this server (RFC 9728 §3.3): metadata of
+    # another resource is no answer about this one.
+    named_resource = meta.get("resource")
+    if named_resource is not None and not _same_resource(named_resource, resource_url):
+        raise MCPOAuthError("The OAuth resource metadata is about another resource")
+    issuer = _chosen_issuer(meta.get("authorization_servers"), place)
 
-    # 2. Authorization-server metadata (RFC 8414). Same host + resource path
-    #    suffix convention as above.
-    as_meta_url = urlunparse(
-        (parsed.scheme, parsed.netloc,
-         f"/.well-known/oauth-authorization-server{suffix}", "", "", "")
-    )
-    r = await _oauth_request("GET", as_meta_url, place, "OAuth authorization-server metadata address")
-    if r.status_code != 200:
-        raise MCPOAuthError(
-            f"OAuth authorization-server metadata not found at {as_meta_url} "
-            f"(HTTP {r.status_code})"
-        )
-    as_meta = _json_answer(r, "OAuth authorization-server metadata address")
-
-    # 3. The endpoints Kazma posts to belong to the issuer the metadata names.
-    issuer = as_meta.get("issuer")
-    if not isinstance(issuer, str) or not issuer:
+    # 2. Authorization-server metadata (RFC 8414), read from the
+    #    authorization server the resource names -- never from the resource's
+    #    own host -- and holding that very issuer (RFC 8414 §3.3). Until
+    #    2026-11-16 it was read from the MCP server's host and its issuer was
+    #    taken as written, so a server could name any issuer and Kazma sent
+    #    the sign-in there.
+    as_meta = await _authorization_server_metadata(issuer, place)
+    named_issuer = as_meta.get("issuer")
+    if not isinstance(named_issuer, str) or not named_issuer:
         raise MCPOAuthError("Authorization-server metadata names no issuer")
-    _check_address(issuer, place, "OAuth issuer")
+    if named_issuer.rstrip("/") != issuer.rstrip("/"):
+        raise MCPOAuthError(
+            "The authorization server's metadata names another issuer than the "
+            "one the MCP server lists"
+        )
+
+    # 3. The endpoints Kazma posts to belong to the issuer.
     endpoints: dict[str, str | None] = {}
     for key, required in (
         ("authorization_endpoint", True),

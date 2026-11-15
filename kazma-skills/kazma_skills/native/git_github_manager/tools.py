@@ -16,6 +16,7 @@ from kazma_core.tools.file_write import _get_workspace
 from kazma_skills.native._subprocess import run_off_loop
 from kazma_core.http_tls import shared_ssl_context
 from kazma_core.agent.tool_refusal import RefusedBeforeEffect
+from kazma_core.safety import git_read as _shared_git_read
 
 # Disable interactive terminal credential prompts across all Git sub-processes
 os.environ["GIT_TERMINAL_PROMPT"] = "0"
@@ -57,80 +58,16 @@ _LOG_MAX_COMMITS = 100
 _DIFF_MAX_CHARS = 60_000
 
 
-#: Configuration a read must not take from the repository: each names a
-#: program git would start. The repository is whatever the agent was pointed
-#: at, and these tools run with no approval card (2026-11-10 audit; the
-#: fsmonitor half since AUD-089). ``log.showSignature`` makes log/show run
-#: ``gpg.program``; ``core.hooksPath`` keeps the index-writing hooks out (a
-#: status may refresh the index, which runs post-index-change).
-_READ_CONFIG = (
-    "core.fsmonitor=false",
-    "core.pager=cat",
-    "log.showSignature=false",
-)
-#: Diff options that keep external diff drivers (``diff.external``,
-#: ``diff.<driver>.command``) and textconv drivers from running.
-_NO_DIFF_PROGRAMS = ("--no-ext-diff", "--no-textconv")
-_DIFF_SUBCOMMANDS = frozenset({"diff", "show", "log"})
-#: Environment a parent may set that names a program for git to run.
-_PROGRAM_ENV = ("GIT_EXTERNAL_DIFF", "GIT_PAGER", "PAGER", "GIT_EDITOR", "GIT_SEQUENCE_EDITOR")
-
-_NO_HOOKS_DIR: str | None = None
-
-
-def _no_hooks_dir() -> str:
-    """An empty directory for ``core.hooksPath``: no hook is found in it."""
-    global _NO_HOOKS_DIR
-    if _NO_HOOKS_DIR is None or not os.path.isdir(_NO_HOOKS_DIR):
-        import atexit
-        import tempfile
-
-        _NO_HOOKS_DIR = tempfile.mkdtemp(prefix="kazma-git-no-hooks-")
-        # Removed when the process ends: one was left per server start and
-        # per test process (2026-11-14: 63 in the temp folder).
-        atexit.register(_remove_no_hooks_dir, _NO_HOOKS_DIR)
-    return _NO_HOOKS_DIR
-
-
-def _remove_no_hooks_dir(path: str) -> None:
-    try:
-        os.rmdir(path)  # empty by design; a folder holding anything is kept
-    except OSError:
-        pass
-
-
-def _filter_driver_overrides(listing: str) -> list[str]:
-    """``-c`` overrides that empty every filter driver the configuration
-    defines (``git config --get-regexp`` output).
-
-    A clean filter runs on ``git status`` and ``git diff`` for a modified
-    file the attributes assign it to, and only a driver defined in the
-    configuration can run. Git treats an empty command as no filter.
-    """
-    names: list[str] = []
-    for line in listing.splitlines():
-        key = line.split(" ", 1)[0].strip()
-        if not key.startswith("filter."):
-            continue
-        name = key[len("filter."):].rsplit(".", 1)[0]
-        if name and name not in names:
-            names.append(name)
-    overrides: list[str] = []
-    for name in names:
-        for kind in ("clean=", "smudge=", "process=", "required=false"):
-            overrides += ["-c", f"filter.{name}.{kind}"]
-    return overrides
-
-
-def _git_read_argv(args: list[str], filter_listing: str = "") -> list[str]:
-    """The argv of a read-only git command (see ``_git_read``)."""
-    argv = ["git", "--no-optional-locks"]
-    for setting in (*_READ_CONFIG, f"core.hooksPath={_no_hooks_dir()}"):
-        argv += ["-c", setting]
-    argv += _filter_driver_overrides(filter_listing)
-    if args and args[0] in _DIFF_SUBCOMMANDS:
-        return [*argv, args[0], *_NO_DIFF_PROGRAMS, *args[1:]]
-    return [*argv, *args]
+#: The hardening every read shares lives in ``kazma_core.safety.git_read``
+#: (the repository is whatever the agent was pointed at, and these tools run
+#: with no approval card: 2026-11-10 audit; the fsmonitor half since AUD-089).
+#: These names are kept for the tools and their tests.
+_READ_CONFIG = _shared_git_read.READ_CONFIG
+_NO_DIFF_PROGRAMS = _shared_git_read.NO_DIFF_PROGRAMS
+_PROGRAM_ENV = _shared_git_read.PROGRAM_ENV
+_no_hooks_dir = _shared_git_read.no_hooks_dir
+_filter_driver_overrides = _shared_git_read.filter_driver_overrides
+_git_read_argv = _shared_git_read.read_argv
 
 
 async def _git_read(args: list[str], *, timeout: int = 15) -> tuple[int, str, str]:
@@ -350,6 +287,40 @@ async def git_commit(message: str, files: list[str] | None = None) -> str:
         return f"Error committing changes: {e}"
 
 
+async def _git_token() -> str:
+    """The token a git push or pull authenticates with; refused when none.
+
+    Prefer the GitHub App installation token (ghs_*): it is the credential
+    designed for git HTTPS operations (sent as x-access-token:<token>@) and
+    carries the App's granted permissions. OAuth/PAT tokens resolved via
+    get_github_token() take precedence there (for the REST API), but a stale
+    gho_ OAuth or ghp_ PAT would shadow the working App token here and get
+    rejected by git as "Invalid username or token" — even though the App
+    token works. So: App token first for git, then OAuth/PAT fallback.
+    """
+    token = ""
+    try:
+        from kazma_core.git_identity import get_app_installation_token
+
+        token = (await asyncio.to_thread(get_app_installation_token)) or ""
+    except Exception:
+        token = ""
+    if not token:
+        try:
+            from kazma_gateway.routers.github_client import get_github_token
+
+            # Settings and vault reads, maybe a GitHub App token mint: off the loop.
+            token = await asyncio.to_thread(get_github_token)
+        except Exception:
+            token = os.getenv("GITHUB_TOKEN") or os.getenv("GITHUB_PAT") or ""
+
+    if not token:
+        raise RefusedBeforeEffect("Error: No active GitHub token or App credentials found. Please configure GitHub App or PAT in the Web UI.")
+
+    # Strip token in case of whitespace/newlines from .env or db
+    return token.strip()
+
+
 async def _git_sync(action: str = "pull", branch: str | None = None, remote: str = "origin") -> str:
     """Synchronize local branch changes by executing git pull or git push.
 
@@ -370,35 +341,7 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
     remote = _checked_ref(remote, "remote")
 
     cmd = ["git"]
-    token = ""
-    # ── Token resolution for GIT operations (push/pull) ──
-    # Prefer the GitHub App installation token (ghs_*): it is the credential
-    # designed for git HTTPS operations (sent as x-access-token:<token>@) and
-    # carries the App's granted permissions. OAuth/PAT tokens resolved via
-    # get_github_token() take precedence there (for the REST API), but a stale
-    # gho_ OAuth or ghp_ PAT would shadow the working App token here and get
-    # rejected by git as "Invalid username or token" — even though the App
-    # token works. So: App token first for git, then OAuth/PAT fallback.
-    try:
-        from kazma_core.git_identity import get_app_installation_token
-
-        token = (await asyncio.to_thread(get_app_installation_token)) or ""
-    except Exception:
-        token = ""
-    if not token:
-        try:
-            from kazma_gateway.routers.github_client import get_github_token
-
-            # Settings and vault reads, maybe a GitHub App token mint: off the loop.
-            token = await asyncio.to_thread(get_github_token)
-        except Exception:
-            token = os.getenv("GITHUB_TOKEN") or os.getenv("GITHUB_PAT") or ""
-
-    if not token:
-        raise RefusedBeforeEffect("Error: No active GitHub token or App credentials found. Please configure GitHub App or PAT in the Web UI.")
-
-    # Strip token in case of whitespace/newlines from .env or db
-    token = token.strip()
+    token = await _git_token()
 
     target_branch = branch
     if action == "push":
@@ -441,7 +384,9 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
 
     cmd.extend(["-c", "credential.helper="])
 
-    cmd.append(action)
+    # A pull fetches here; the merge comes after the files it would write are
+    # checked (_merge_upstream).
+    cmd.append(_git_verb(action))
 
     if action == "push":
         # Push the URL directly when resolved (extraheader auth applies to it).
@@ -581,7 +526,7 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
             token = fresh
             env.update(git_auth.clone_auth_env(token))
             new_cmd = ["git", "-c", "credential.helper="]
-            new_cmd.append(action)
+            new_cmd.append(_git_verb(action))
             if action == "push":
                 push_target = remote_url if remote_url else remote
                 if not has_upstream and target_branch:
@@ -679,10 +624,9 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
         if action == "push" and ("fetch first" in output or "non-fast-forward" in output or "remote contains work" in output):
             logger.info("[git_push_pull] Push rejected (remote ahead) — auto-rebasing and retrying push")
 
-            pull_cmd = ["git", "-c", "credential.helper="]
-            pull_cmd.extend(["pull", "--rebase", "--", remote, target_branch or "main"])
-
-            await run_off_loop(pull_cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=30)
+            not_rebased = await _rebase_onto_remote(cwd, token, remote, target_branch or "main")
+            if not_rebased is not None:
+                return output + not_rebased
 
             # Retry push
             rc2, out2 = await _run()
@@ -692,12 +636,104 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
 
             return out2
 
+        if action == "pull":
+            return await _merge_upstream(cwd, output)
         return output
+    except RefusedBeforeEffect:
+        raise
     except Exception as e:
         err_msg = str(e)
         if token:
             err_msg = err_msg.replace(token, "[REDACTED_TOKEN]")
         return f"Error running git {action}: {err_msg}"
+
+
+async def _rebase_onto_remote(cwd: str, token: str, remote: str, branch: str) -> str | None:
+    """Rebase the local branch onto *remote*'s *branch*, for a push the
+    remote refused as behind; None once rebased, else why not (to add to
+    the push's answer).
+
+    Fetched first, and rebased onto exactly the commit whose files were
+    checked: a rebase writes the remote's files and replays the local
+    commits (a branch tracking kazma.local.yaml must not land in an
+    install-folder workspace, ``safety.git_tree_writes``). It ran
+    ``git pull --rebase`` unchecked until 2026-11-16.
+    """
+    from kazma_core.safety.git_tree_writes import switch_refusal
+    from kazma_core.security import git_auth
+    from kazma_core.security.child_env import tool_child_env
+
+    remote = _checked_ref(remote, "remote")
+    branch = _checked_ref(branch, "branch")
+    # As the push's own: no secrets, the token as a header, no helper.
+    env = tool_child_env(git_auth.clone_auth_env(token))
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_CONFIG_SYSTEM"] = os.devnull
+    fetch_cmd = ["git", "-c", "credential.helper=", "fetch", "--", remote, branch]
+    await run_off_loop(fetch_cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=30)
+    fetched = await _fetched_commit(cwd)
+    if not fetched:
+        return ""
+    refused = await asyncio.to_thread(switch_refusal, cwd, fetched, tool="git_push", rebase=True)
+    if refused:
+        return "\n[Kazma] Did not rebase onto the remote: " + refused
+    await run_off_loop(["git", "rebase", fetched], cwd=cwd, env=env, capture_output=True, text=True, timeout=30)
+    return None
+
+
+def _git_verb(action: str) -> str:
+    """The git subcommand an action runs first: a pull fetches, then merges
+    after the files are checked (:func:`_merge_upstream`)."""
+    return "fetch" if action == "pull" else action
+
+
+async def _fetched_commit(cwd: str) -> str:
+    """The commit the last fetch brought (``FETCH_HEAD``), or ``""``."""
+    from kazma_core.safety.git_read import run_read
+
+    code, out, _err = await asyncio.to_thread(
+        run_read, ["rev-parse", "--verify", "--quiet", "FETCH_HEAD^{commit}"], cwd,
+    )
+    return out.strip() if code == 0 else ""
+
+
+async def _merge_upstream(cwd: str, fetch_output: str) -> str:
+    """Merge the current branch's upstream, as ``git pull`` did, once the
+    files the merge would write are checked.
+
+    The commit is read once and merged by its hash, so what is merged is
+    what was checked. A merge that would write one of Kazma's own files
+    (``kazma.local.yaml`` from a branch tracking it, on a workspace that is
+    the install folder) is refused; the fetch has run, nothing is merged.
+    """
+    from kazma_core.agent.tool_refusal import KnownEffectError
+    from kazma_core.safety.git_read import run_read
+    from kazma_core.safety.git_tree_writes import switch_refusal
+    from kazma_core.security.child_env import tool_child_env
+
+    code, sha, _err = await asyncio.to_thread(
+        run_read, ["rev-parse", "--verify", "--quiet", "@{upstream}^{commit}"], cwd,
+    )
+    sha = sha.strip()
+    if code != 0 or not sha:
+        return (fetch_output + "\n" if fetch_output else "") + (
+            "There is no tracking information for the current branch: fetched, "
+            "nothing merged. Set an upstream (git branch --set-upstream-to) first."
+        )
+    _ncode, name, _nerr = await asyncio.to_thread(
+        run_read, ["rev-parse", "--abbrev-ref", "@{upstream}"], cwd,
+    )
+    refused = await asyncio.to_thread(switch_refusal, cwd, sha, tool="git_pull")
+    if refused:
+        raise KnownEffectError(f"Fetched from the remote, but did not merge: {refused}")
+    message = f"Merge remote-tracking branch '{name.strip() or sha[:12]}'"
+    res = await run_off_loop(
+        ["git", "merge", "--no-edit", "-m", message, sha],
+        cwd=cwd, env=tool_child_env(), capture_output=True, text=True, timeout=30,
+    )
+    merged = (res.stdout or "").strip() or (res.stderr or "").strip()
+    return "\n".join(part for part in (fetch_output, merged) if part)
 
 
 async def git_push(branch: str | None = None, remote: str = "origin") -> str:
@@ -774,6 +810,14 @@ async def git_checkout(branch: str, create: bool = False) -> str:
     # refused; "--" ends the arguments, so the name is never taken for a path.
     branch = _checked_ref(branch, "branch")
     cwd = await asyncio.to_thread(_get_workspace)
+    if not create:
+        # The branch's files are written, an ignored one too: never one of
+        # Kazma's own (safety/git_tree_writes). A new branch writes nothing.
+        from kazma_core.safety.git_tree_writes import git_command_refusal
+
+        refused = await asyncio.to_thread(git_command_refusal, ["checkout", branch, "--"], cwd)
+        if refused:
+            raise RefusedBeforeEffect(refused)
     cmd = ["git", "checkout", "-b", branch, "--"] if create else ["git", "checkout", branch, "--"]
     try:
         res = await run_off_loop(cmd, cwd=cwd, capture_output=True, text=True, timeout=10)
@@ -786,6 +830,11 @@ async def git_merge(source_branch: str) -> str:
     """Merge a branch into the currently active local branch."""
     source_branch = _checked_ref(source_branch, "branch")
     cwd = await asyncio.to_thread(_get_workspace)
+    from kazma_core.safety.git_tree_writes import git_command_refusal
+
+    refused = await asyncio.to_thread(git_command_refusal, ["merge", "--", source_branch], cwd)
+    if refused:
+        raise RefusedBeforeEffect(refused)
     try:
         res = await run_off_loop(["git", "merge", "--", source_branch], cwd=cwd, capture_output=True, text=True, timeout=15)
         return res.stdout.strip() or res.stderr.strip()

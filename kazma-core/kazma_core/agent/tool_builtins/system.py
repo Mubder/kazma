@@ -70,6 +70,62 @@ def _dispatch_timeout(value: Any, *, unrestricted: bool = False) -> float:
     return min(max(seconds, _DISPATCH_TIMEOUT_MIN_S), _DISPATCH_TIMEOUT_MAX_S)
 
 
+def _reads_saved_page(
+    binary: str, sub: str, words: list[str], candidates: list[tuple[str, str]],
+    cwd: str, output: str,
+) -> bool:
+    """Whether a ``shell_exec`` command read a page Kazma saved from the web:
+    its output holds a saved page's first line, or a file it names or a
+    folder it walks holds one (``research_files``). Blocking.
+
+    ``cat``, ``grep -r`` and ``head`` of a saved page returned its text raw
+    (only ``file_read`` and ``file_search`` fenced it; the 2026-11-15
+    defensive check)."""
+    from kazma_core.safety.shell_paths import read_paths
+    from kazma_core.tools.research_files import any_saved_from_web, text_names_saved_page
+
+    if text_names_saved_page(output):
+        return True
+    return any_saved_from_web(read_paths(binary, sub, words, candidates, cwd))
+
+
+#: A string literal in a snippet that may name a file (``open("x.md")``).
+_QUOTED = r"""['"]([^'"\n]{1,400})['"]"""
+
+
+def _code_reads_saved_page(code: str, output: str) -> bool:
+    """Whether a ``python_exec`` snippet read a page Kazma saved from the
+    web: its output holds a saved page's first line, or a string it names is
+    a saved page, a folder holding one or a pattern matching one (resolved
+    in the active workspace; ``/workspace/...`` is the workspace as the
+    container sees it). Blocking."""
+    import glob
+    import re
+
+    from kazma_core.tools.research_files import any_saved_from_web, text_names_saved_page
+    from kazma_core.workspace.binding import resolve_active_root
+    from kazma_core.workspace.path_policy import _sandbox_token_on_host
+
+    if text_names_saved_page(output):
+        return True
+    try:
+        root = Path(resolve_active_root())
+    except (OSError, RuntimeError, ValueError):
+        return False
+    paths: list[Path] = []
+    for token in re.findall(_QUOTED, code or ""):
+        token = _sandbox_token_on_host(token, root) or token
+        if token.strip() in ("", ".", "./", ".\\", "..") or not re.search(r"\w", token):
+            continue  # "".join(...), "x".split("."): not a file the snippet reads
+        if any(ch in token for ch in "*?["):
+            pattern = token if Path(token).is_absolute() else str(root / token)
+            paths += [Path(p) for p in glob.glob(pattern, recursive=True)[:500]]
+            continue
+        path = Path(token)
+        paths.append(path if path.is_absolute() else root / path)
+    return any_saved_from_web(paths)
+
+
 def register_system_tools(registry: Any) -> None:
     """Register the system tools onto *registry*."""
 
@@ -520,6 +576,7 @@ def register_system_tools(registry: Any) -> None:
             )
             if _refused:
                 raise RefusedBeforeEffect(_refused)
+            _read_words = list(args[1:])
 
             # Options that run another program, git's subcommand allowlist,
             # tar's remote archive form, uv run: one table
@@ -581,6 +638,15 @@ def register_system_tools(registry: Any) -> None:
                 output += f"\n[stderr]\n{err_output}"
             if result.returncode != 0:
                 output += f"\n[exit code: {result.returncode}]"
+            # A page Kazma saved from the web holds the page's text, whichever
+            # tool reads it back: fenced here as file_read fences it, so the
+            # turn has read outside text (safety.outside_text_fetch).
+            if await asyncio.to_thread(
+                _reads_saved_page, binary, _sub, _read_words, _candidates, cwd_s, output,
+            ):
+                from kazma_core.safety.prompt_fence import fence_untrusted
+
+                return fence_untrusted(output[:10_000], source="shell_exec:saved_web_extract")
             return output[:10_000]  # cap output
         except RefusedBeforeEffect:
             raise
@@ -907,7 +973,14 @@ def register_system_tools(registry: Any) -> None:
     async def python_exec(code: str, timeout: int = 30) -> str:
         from kazma_core.tools.code_exec import python_exec as _exec
 
-        return await _exec(code=code, timeout=timeout)
+        out = await _exec(code=code, timeout=timeout)
+        # A snippet that reads a page Kazma saved from the web hands the
+        # page's text back: fenced, as file_read and shell_exec fence it.
+        if await asyncio.to_thread(_code_reads_saved_page, code, out):
+            from kazma_core.safety.prompt_fence import fence_untrusted
+
+            return fence_untrusted(out, source="python_exec:saved_web_extract")
+        return out
     @registry.register(
         description=(
             "Get fresh verified metrics for the installed Kazma source repository. "

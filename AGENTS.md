@@ -439,7 +439,12 @@ cron column `outside_text` (cleared by a prompt the owner edits on the page).
 address and ran marks the turn read whatever it returned; `READS_OUTSIDE`
 names the readers with no address argument. A file Kazma saved from the web
 (`research_files.SAVED_FROM_WEB_FIRST_LINES`) comes back fenced from
-`file_read` and `file_search`. At iteration 0, after stub and trim, a fenced
+`file_read` and `file_search`, and from `shell_exec` and `python_exec`
+(2026-11-16: `cat`, `grep -r` or a snippet's `open()` returned it raw) when
+the output holds a saved page's first line, or a file the command names or a
+folder it walks (`shell_paths.read_paths`), or a path a snippet's string
+names, is or holds one (`research_files.any_saved_from_web`; gate
+`tests/test_saved_page_fenced_everywhere.py`). At iteration 0, after stub and trim, a fenced
 tool result or user message in the kept history, or the Knowledge block,
 makes the turn read; Kazma's own system notes do not; hosts the kept history
 named stay named. Fence markers in disguise (spaced, fullwidth, zero-width,
@@ -7572,6 +7577,11 @@ attachments (`voice_helpers.download_audio_bytes` ->
 `downloads.slack_owned_url` hosts), generated images
 (`image_backends.base.fetch_generated_image`: no provider key leaves its API
 host) and MCP OAuth (`mcp.oauth._oauth_request`) use it. For MCP OAuth the
+issuer is one the resource's metadata lists (`authorization_servers`, and its
+`resource` must be this server), its metadata is read from that issuer's own
+addresses (RFC 8414, then OpenID Connect's; `_metadata_addresses`), never the
+MCP server's host, and must name that same issuer (2026-11-16; gate
+`tests/test_mcp_oauth_pinned.py`, the old discovery as the control); the
 token and registration endpoints must be on the issuer's origin; the owner's
 own local MCP server is asked directly, its origin only; an answer's text
 never reaches an error. `ssrf._is_blocked_ip` refuses fec0::/10. Gate:
@@ -11287,7 +11297,22 @@ repository is public).
   approval gate off and added a hook command. Gate:
   `tests/test_kazma_config_files_protected.py`. Containment is by real path,
   and walks prune links (`workspace/real_paths.py`; gate
-  `test_no_product_code_asks_isjunction`).
+  `test_no_product_code_asks_isjunction`). **A git command is a write door
+  too** (2026-11-16): `git checkout <branch>` and `git merge` write every
+  file the other commit holds differently, an ignored `kazma.local.yaml`
+  included (git takes an ignored file as expendable), so on an
+  install-folder workspace a branch tracking it replaced the owner's
+  configuration. `safety/git_tree_writes.git_command_refusal` lists the
+  files a tree-changing subcommand writes (checkout, switch, merge,
+  cherry-pick, revert, stash, restore, rm, mv; reads that start nothing the
+  repository chose, `safety/git_read`) and refuses one of Kazma's; asked by
+  `shell_paths.path_refusal` (before the card and where it runs) and by
+  `git_checkout` and `git_merge`. `git_pull` fetches, checks the upstream
+  commit (`switch_refusal`) and merges it by its hash; the push's rebase
+  onto the remote is checked the same way. A list that cannot be read
+  refuses. Gate: `tests/test_git_tree_writes.py` (git overwriting the
+  ignored file, and a plain merge of the upstream, as witnesses; every
+  tree-changing git argv in product code checked or declared).
 - **A workspace's `kazma.yaml` is content, never configuration** (SEC-02).
   The settings store's YAML fallback is the install's own file for the life
   of the store. `ConfigStore.reload_from_root` (boot, every workspace switch

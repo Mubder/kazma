@@ -62,6 +62,7 @@ __all__ = [
     "WALKS",
     "path_candidates",
     "path_refusal",
+    "read_paths",
     "shell_target_refusal",
 ]
 
@@ -785,6 +786,14 @@ def path_refusal(
         refused = _folder_refusal(binary, word, folder, relocates, follows, root, cwd_text)
         if refused:
             return refused
+    if binary == "git":
+        # A checkout or merge writes files it does not name: the other
+        # commit's, an ignored kazma.local.yaml included.
+        from kazma_core.safety.git_tree_writes import git_command_refusal
+
+        refused = git_command_refusal(words, root)
+        if refused:
+            return refused
     created: list[tuple[str, Path]] = []
     if binary in ("cp", "mv"):
         created = _copy_targets(binary, words, root)
@@ -806,6 +815,29 @@ def path_refusal(
                 f"({cwd_text})."
             )
     return None
+
+
+def read_paths(
+    binary: str, sub: str, words: list[str], candidates: list[tuple[str, str]], cwd: str | Path,
+) -> list[Path]:
+    """The files and folders a command's values name and its walks enter,
+    as :func:`path_refusal` reads them (a wildcard expanded, at most 500
+    matches). Blocking. ``shell_exec`` asks it whether the command read a
+    page Kazma saved from the web, to fence what it printed."""
+    import glob
+
+    root = _real(cwd)
+    found: list[Path] = []
+    for _word, value in candidates:
+        for expanded in _expand_braces(value):
+            lexical = Path(expanded) if os.path.isabs(expanded) else root / expanded
+            if any(ch in expanded for ch in "*?["):
+                found += [Path(m) for m in glob.glob(str(lexical))[:500]]
+            else:
+                found.append(lexical)
+    for _word, folder, _relocates, _follows in _walked_folders(binary, sub, words, root):
+        found.append(folder)
+    return found
 
 
 # ── before the approval card ─────────────────────────────────────────────

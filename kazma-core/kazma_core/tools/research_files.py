@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from collections.abc import Iterable
 from pathlib import Path
 
 #: How a file Kazma saved from the web begins: an extract's header
@@ -37,6 +38,53 @@ def saved_from_web(path: Path) -> bool:
     except OSError:
         return False
     return text_saved_from_web(head.decode("utf-8", errors="replace"))
+
+
+#: Files a folder check opens before it stops and answers "yes": a folder
+#: too large to check is read as holding a saved page (the answer only
+#: fences the output, it never refuses).
+_FOLDER_BUDGET = 5_000
+
+
+def text_names_saved_page(text: str) -> bool:
+    """Whether *text* holds a line a saved page begins with (``cat`` of
+    several files prints each one's first line in the middle of its output)."""
+    return any(
+        line.lstrip("﻿").startswith(SAVED_FROM_WEB_FIRST_LINES)
+        for line in (text or "").splitlines()
+    )
+
+
+def any_saved_from_web(paths: Iterable[Path], *, budget: int = _FOLDER_BUDGET) -> bool:
+    """Whether any of *paths*, or any file under one that is a folder, is a
+    file Kazma saved from the web (:func:`saved_from_web`). Blocking.
+
+    Generated and dot folders are skipped (``project_files.GENERATED_DIRS``);
+    past *budget* files the answer is True.
+    """
+    from kazma_core.workspace.project_files import skipped_dir
+
+    opened = 0
+    for path in paths:
+        try:
+            if path.is_file():
+                opened += 1
+                if saved_from_web(path):
+                    return True
+                continue
+            if not path.is_dir():
+                continue
+        except OSError:
+            continue
+        for folder, dirs, files in os.walk(path):
+            dirs[:] = [d for d in dirs if not skipped_dir(d)]
+            for name in files:
+                opened += 1
+                if opened > budget:
+                    return True
+                if saved_from_web(Path(folder) / name):
+                    return True
+    return False
 
 
 def create_extract(target: Path, text: str) -> None:

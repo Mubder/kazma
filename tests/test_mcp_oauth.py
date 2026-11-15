@@ -53,7 +53,9 @@ def _stand_in(monkeypatch, routes: dict[str, tuple[int, dict]]):
 
     table = {}
     for path, (status, body) in routes.items():
-        table[("mcp.example", path)] = Answer.json(body, status=status)
+        # A path alone is on the MCP server; the issuer's metadata on as.example.
+        host = "as.example" if path.startswith("/.well-known/oauth-authorization-server") else "mcp.example"
+        table[(host, path)] = Answer.json(body, status=status)
     return install(monkeypatch, dns={"mcp.example": [PUBLIC_IP], "as.example": [OTHER_PUBLIC_IP]},
                    routes=table)
 
@@ -66,7 +68,7 @@ class TestDiscovery:
                 "authorization_servers": ["https://as.example"],
                 "scopes_supported": ["read"],
             }),
-            "/.well-known/oauth-authorization-server/devtools": (200, {
+            "/.well-known/oauth-authorization-server": (200, {
                 "issuer": "https://as.example",
                 "authorization_endpoint": "https://as.example/authorize",
                 "token_endpoint": "https://as.example/token",
@@ -89,7 +91,7 @@ class TestDiscovery:
             "/.well-known/oauth-protected-resource/devtools": (200, {
                 "authorization_servers": ["https://as.example"], "scopes_supported": ["a"],
             }),
-            "/.well-known/oauth-authorization-server/devtools": (200, {
+            "/.well-known/oauth-authorization-server": (200, {
                 "issuer": "https://as.example",
                 "authorization_endpoint": "https://as.example/authorize",
                 "token_endpoint": "https://as.example/token",

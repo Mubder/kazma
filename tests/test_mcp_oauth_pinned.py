@@ -34,7 +34,10 @@ from tests._pinned_stand_in import OTHER_PUBLIC_IP, PUBLIC_IP, Answer, install
 
 RESOURCE = "https://mcp.example/devtools"
 PRM = "/.well-known/oauth-protected-resource/devtools"
-ASM = "/.well-known/oauth-authorization-server/devtools"
+#: The issuer's metadata, on the issuer the resource names (RFC 8414): never
+#: the MCP server's own host (until 2026-11-16, ``OLD_ASM`` there).
+ASM = "/.well-known/oauth-authorization-server"
+OLD_ASM = "/.well-known/oauth-authorization-server/devtools"
 
 
 def _metadata(**overrides: Any) -> dict[str, Any]:
@@ -52,7 +55,7 @@ def _public_server(monkeypatch, *, as_meta: dict[str, Any] | None = None, extra=
     routes = {
         ("mcp.example", PRM): Answer.json({"authorization_servers": ["https://auth.example"],
                                            "scopes_supported": ["read"]}),
-        ("mcp.example", ASM): Answer.json(as_meta if as_meta is not None else _metadata()),
+        ("auth.example", ASM): Answer.json(as_meta if as_meta is not None else _metadata()),
         ("auth.example", "/token"): Answer.json({"access_token": "new", "expires_in": 3600}),
         ("auth.example", "/register"): Answer.json({"client_id": "cid"}, status=201),
         **(extra or {}),
@@ -71,8 +74,8 @@ async def test_discovery_asks_the_checked_addresses_only(monkeypatch) -> None:
     assert found["token_endpoint"] == "https://auth.example/token"
     assert found["registration_endpoint"] == "https://auth.example/register"
     assert found["issuer"] == "https://auth.example"
-    assert stand_in.connects == [(PUBLIC_IP, 443), (PUBLIC_IP, 443)]
-    assert [(r["host"], r["path"]) for r in stand_in.requests] == [("mcp.example", PRM), ("mcp.example", ASM)]
+    assert stand_in.connects == [(PUBLIC_IP, 443), (OTHER_PUBLIC_IP, 443)]
+    assert [(r["host"], r["path"]) for r in stand_in.requests] == [("mcp.example", PRM), ("auth.example", ASM)]
 
 
 async def test_a_challenge_naming_an_internal_address_is_refused_unasked(monkeypatch) -> None:
@@ -190,7 +193,7 @@ def local_server():
             base = state["base"]
             if self.path == "/.well-known/oauth-protected-resource/mcp":
                 self._answer({"authorization_servers": [base]})
-            elif self.path == "/.well-known/oauth-authorization-server/mcp":
+            elif self.path == "/.well-known/oauth-authorization-server":
                 self._answer(state["as_meta"] or {
                     "issuer": base, "authorization_endpoint": f"{base}/authorize",
                     "token_endpoint": f"{base}/token", "registration_endpoint": f"{base}/register",
@@ -218,7 +221,7 @@ async def test_the_owners_local_server_is_asked_on_its_own_origin(local_server) 
     assert found["token_endpoint"] == f"{base}/token"
     assert local_server["hits"] == [
         ("GET", "/.well-known/oauth-protected-resource/mcp"),
-        ("GET", "/.well-known/oauth-authorization-server/mcp"),
+        ("GET", "/.well-known/oauth-authorization-server"),
     ]
 
 
@@ -227,8 +230,17 @@ async def test_a_local_servers_metadata_cannot_name_another_private_address(loca
         "issuer": "http://10.0.0.5", "authorization_endpoint": "http://10.0.0.5/authorize",
         "token_endpoint": "http://10.0.0.5/token", "registration_endpoint": "http://10.0.0.5/register",
     }
-    with pytest.raises(MCPOAuthError, match="https"):
+    # Refused as another issuer than the one the server lists (2026-11-16);
+    # its address is not an https one either.
+    with pytest.raises(MCPOAuthError, match="another issuer|https"):
         await discover_auth_requirements(f"{local_server['base']}/mcp")
+
+
+async def test_a_listed_issuer_kazma_may_not_use_is_never_asked(local_server) -> None:
+    place = await oauth._server_place(f"{local_server['base']}/mcp")
+    with pytest.raises(MCPOAuthError, match="No authorization server"):
+        oauth._chosen_issuer(["http://10.0.0.5", "https://x.example/?q=1", 7], place)
+    assert oauth._chosen_issuer(["http://10.0.0.5", local_server["base"]], place) == local_server["base"]
 
 
 # ---------------------------------------------------------------------------
@@ -257,7 +269,7 @@ async def test_control_the_old_refresh_posts_the_token_where_the_server_says() -
         sent.append((request.url.host, request.content))
         if request.url.path == PRM:
             return httpx.Response(200, json={"authorization_servers": ["https://auth.example"]})
-        if request.url.path == ASM:
+        if request.url.path == OLD_ASM:
             return httpx.Response(200, json=_metadata(token_endpoint="https://inside.example/steal"))
         return httpx.Response(200, json={"access_token": "x"})
 
@@ -265,3 +277,78 @@ async def test_control_the_old_refresh_posts_the_token_where_the_server_says() -
         endpoints = await _old_discover(RESOURCE, http)
         await http.post(endpoints["token_endpoint"], data={"grant_type": "refresh_token", "refresh_token": "rt-secret"})
     assert ("inside.example", b"grant_type=refresh_token&refresh_token=rt-secret") in sent
+
+
+# ---------------------------------------------------------------------------
+# The issuer the resource names, and only it (2026-11-16)
+# ---------------------------------------------------------------------------
+
+
+async def test_the_resources_own_host_is_never_asked_for_the_issuers_metadata(monkeypatch) -> None:
+    """Metadata the MCP server's host serves for another issuer is not read."""
+    stand_in = _public_server(monkeypatch, extra={
+        ("mcp.example", OLD_ASM): Answer.json(_metadata(
+            issuer="https://mcp.example", token_endpoint="https://mcp.example/token")),
+    })
+    found = await discover_auth_requirements(RESOURCE)
+    assert found["issuer"] == "https://auth.example"
+    assert ("mcp.example", OLD_ASM) not in [(r["host"], r["path"]) for r in stand_in.requests]
+
+
+async def test_metadata_naming_another_issuer_is_refused(monkeypatch) -> None:
+    """RFC 8414 §3.3: the issuer in the metadata is the one asked for."""
+    _public_server(monkeypatch, as_meta=_metadata(
+        issuer="https://elsewhere.example", token_endpoint="https://elsewhere.example/token",
+        authorization_endpoint="https://elsewhere.example/authorize",
+        registration_endpoint="https://elsewhere.example/register"),
+        dns={"elsewhere.example": [PUBLIC_IP]})
+    with pytest.raises(MCPOAuthError, match="another issuer"):
+        await discover_auth_requirements(RESOURCE)
+
+
+async def test_metadata_about_another_resource_is_refused(monkeypatch) -> None:
+    _public_server(monkeypatch, extra={
+        ("mcp.example", PRM): Answer.json({"resource": "https://other.example/mcp",
+                                           "authorization_servers": ["https://auth.example"]}),
+    })
+    with pytest.raises(MCPOAuthError, match="another resource"):
+        await discover_auth_requirements(RESOURCE)
+
+
+async def test_an_issuer_with_a_path_is_asked_where_rfc_8414_says(monkeypatch) -> None:
+    issuer = "https://auth.example/tenant"
+    stand_in = _public_server(monkeypatch, extra={
+        ("mcp.example", PRM): Answer.json({"authorization_servers": [issuer]}),
+        ("auth.example", "/.well-known/oauth-authorization-server/tenant"): Answer.json(_metadata(issuer=issuer)),
+    })
+    found = await discover_auth_requirements(RESOURCE)
+    assert found["issuer"] == issuer
+    assert ("auth.example", "/.well-known/oauth-authorization-server/tenant") in [
+        (r["host"], r["path"]) for r in stand_in.requests]
+
+
+async def test_openid_configuration_is_read_when_the_oauth_document_is_missing(monkeypatch) -> None:
+    stand_in = _public_server(monkeypatch, extra={
+        ("auth.example", ASM): Answer.json({}, status=404),
+        ("auth.example", "/.well-known/openid-configuration"): Answer.json(_metadata()),
+    })
+    found = await discover_auth_requirements(RESOURCE)
+    assert found["token_endpoint"] == "https://auth.example/token"
+    assert [r["path"] for r in stand_in.requests if r["host"] == "auth.example"] == [
+        ASM, "/.well-known/openid-configuration"]
+
+
+async def test_control_the_old_discovery_took_the_resource_hosts_issuer() -> None:
+    """The old discovery read the metadata from the MCP server's host and
+    took its issuer as written: a server listing auth.example sent the
+    sign-in to an issuer of its own choosing."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == PRM:
+            return httpx.Response(200, json={"authorization_servers": ["https://auth.example"]})
+        if request.url.host == "mcp.example" and request.url.path == OLD_ASM:
+            return httpx.Response(200, json=_metadata(token_endpoint="https://mcp.example/token"))
+        return httpx.Response(404, json={})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        endpoints = await _old_discover(RESOURCE, http)
+    assert endpoints["token_endpoint"] == "https://mcp.example/token"
