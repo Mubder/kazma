@@ -7,7 +7,7 @@ from typing import Any
 from kazma_core.swarm.blackboard import BlackboardStore, SwarmDispatchContext
 from kazma_core.swarm.task import SwarmTask, WorkerResult
 
-__all__ = ["NO_DEADLINE_SENTINEL", "WORKER_TYPE_ALIASES", "aggregate_outputs", "build_dispatch_context", "build_handoff_context", "build_result_metadata", "normalize_worker_type", "overall_status", "pattern_dispatch_context", "resolve_max_concurrent", "wait_timeout"]
+__all__ = ["NO_DEADLINE_SENTINEL", "WORKER_TYPE_ALIASES", "aggregate_outputs", "build_dispatch_context", "build_handoff_context", "build_result_metadata", "normalize_worker_type", "overall_status", "pattern_dispatch_context", "resolve_max_concurrent", "wait_timeout", "with_outside_text"]
 
 # Map free-form worker type aliases to canonical WorkerConfig.type values
 WORKER_TYPE_ALIASES: dict[str, str] = {
@@ -118,6 +118,28 @@ def build_handoff_context(
     if blackboard is not None:
         return SwarmDispatchContext(context_text, blackboard=blackboard)
     return context_text
+
+
+def with_outside_text(
+    context: str | SwarmDispatchContext, carried: dict[str, Any] | None,
+) -> str | SwarmDispatchContext:
+    """*context* carrying what a delegating worker had read (``metadata
+    ["outside_text"]``, ``safety.outside_text_fetch.delegation_state``):
+    ``swarm.worker_dispatch`` binds it around the next worker. Nothing to
+    carry: *context* as it is. A plain-text context becomes a dispatch
+    context with that one field."""
+    if not carried:
+        return context
+    if isinstance(context, SwarmDispatchContext):
+        return SwarmDispatchContext(
+            str(context),
+            blackboard=context.blackboard,
+            metadata={**(context.metadata or {}), "outside_text": carried},
+            task_id=context.task_id,
+            task_type=context.task_type,
+            system_prompt=context.system_prompt,
+        )
+    return SwarmDispatchContext(str(context or ""), metadata={"outside_text": carried})
 
 
 def pattern_dispatch_context(

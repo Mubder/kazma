@@ -76,6 +76,11 @@ class HandoffRequest(Exception):  # noqa: N818
         reason:        Why the worker hands off (recorded on the handoff).
         tokens_used:   Tokens the handing-off worker spent before it handed off.
         cost:          What those calls cost, in USD.
+        outside_text:  What the handing-off worker had read, when it had read
+                       outside text: the target's task is that worker's words,
+                       never the user's (``safety.outside_text_fetch``). Taken
+                       where the request is made, inside the source's dispatch;
+                       the engine puts it on the target's context.
     """
 
     def __init__(
@@ -95,6 +100,9 @@ class HandoffRequest(Exception):  # noqa: N818
         self.reason = reason
         self.tokens_used = int(tokens_used or 0)
         self.cost = float(cost or 0.0)
+        from kazma_core.safety.outside_text_fetch import delegation_state
+
+        self.outside_text = delegation_state()
 
 
 def request_handoff(

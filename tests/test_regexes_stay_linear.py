@@ -12,7 +12,10 @@ measured before it was changed:
 * the provider address's version test and its "/v1/v1" trim
   (``url_utils.normalize_provider_url``), the attachment-name scan of a chat
   message (``turn_input.extract_active_attachments``) and the problem report's
-  e-mail scrubber (``problem_report.redacted``) were quadratic.
+  e-mail scrubber (``problem_report.redacted``) were quadratic;
+* the fence sentinel (``prompt_fence._SENTINEL_RE``, 2026-11-15) was
+  quadratic on a run of dashes, and the fence's markers read on a folded copy
+  (``prompt_fence._FOLDED_MARKER_RE``) are held to the same time.
 
 Each new pattern is held to the old one's answers on random inputs, and to a
 time on hostile input that the old one could not meet; the old patterns'
@@ -34,6 +37,7 @@ from kazma_core.url_utils import normalize_provider_url
 OLD_VERSION = re.compile(r"^v?\d+([._]\d+)+([._-]?[a-z0-9]+)*$", re.I)
 OLD_VERSIONED = re.compile(r"/v\d+[a-z0-9]*(?:/|$)")
 OLD_FENCE = re.compile(r"</?kazma:data[^>]*>", re.I)
+OLD_SENTINEL = re.compile(r"-{2,}\s*(BEGIN|END)\s+OBSERVATION\s*-{2,}", re.I)
 OLD_EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 NEW_VERSIONED = re.compile(r"/v\d++[a-z0-9]*+(?:/|$)")
 
@@ -83,6 +87,15 @@ def test_the_fence_filter_leaves_no_fence_tag_and_changes_nothing_else():
     assert prompt_fence._FENCE_TAG_RE.sub("X", 'a</kazma:data>b<kazma:data x="1">c') == "aXbXc"
 
 
+def test_the_sentinel_filter_redacts_what_it_did():
+    """The fence sentinel (2026-11-15): a dash run read from its first dash,
+    whole; ``-{2,}`` tried from every dash of a run and backed off to each
+    length (20,000 dashes took 5.5 s)."""
+    for _ in range(20000):
+        s = _random("- ENDBGIOBSRV", 30)
+        assert prompt_fence._SENTINEL_RE.sub("x", s) == OLD_SENTINEL.sub("x", s), s
+
+
 def test_the_email_scrubber_finds_the_same_addresses():
     for _ in range(5000):
         local = _random("ab.%+-1", 20) or "a"
@@ -106,6 +119,11 @@ def test_hostile_inputs_finish_at_once():
     assert _timed(normalize_provider_url, "https://h.example/v0" + "0" * 200000 + "!") < 1.0
     assert _timed(lambda: extract_active_attachments(None, user_text="[attached\t" + "\t\t" * 100000)) < 1.0
     assert _timed(problem_report._EMAIL.sub, "x", "%" * 200000) < 1.0
+    assert _timed(prompt_fence._SENTINEL_RE.sub, "x", "-" * 200000) < 1.0
+    assert _timed(prompt_fence._sanitize_fence_body, "-" * 200000) < 1.0
+    for hostile in ("< " + " " * 200000, "<|" + "a" * 200000, "\uff1c\uff0fkazma" * 50000,
+                    ("\u2010" * 100 + " END") * 2000, "\u200b" * 200000):
+        assert _timed(prompt_fence._sanitize_fence_body, hostile) < 1.0, hostile[:20]
 
 
 def _grows_faster_than_linear(fn, make, small: int, factor: int = 2) -> bool:
@@ -128,3 +146,4 @@ def test_control_the_old_patterns_grow_faster_than_the_input():
     assert _grows_faster_than_linear(lambda s: OLD_FENCE.sub("x", s), lambda n: "<kazma:data" * n, 1500, 4)
     assert _grows_faster_than_linear(lambda s: OLD_VERSIONED.search(s), lambda n: "/v0" + "0" * n + "!", 3000, 4)
     assert _grows_faster_than_linear(lambda s: OLD_EMAIL.sub("x", s), lambda n: "%" * n, 3000, 4)
+    assert _grows_faster_than_linear(lambda s: OLD_SENTINEL.sub("x", s), lambda n: "-" * n, 1500, 4)

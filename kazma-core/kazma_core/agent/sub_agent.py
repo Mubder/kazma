@@ -105,6 +105,14 @@ class SubAgentManager:
             SubAgentResult with status, summary, and artifacts.
         """
         task_id = f"sub-{uuid.uuid4().hex[:8]}"
+        # The goal is the delegating model's words: after outside text it
+        # never stands for the user's message. The child starts having read
+        # outside text, with the hosts the real user named
+        # (safety.outside_text_fetch.delegation_state). Read here, in the
+        # delegating call's context.
+        from kazma_core.safety.outside_text_fetch import delegation_state
+
+        carried = delegation_state()
 
         async with self._semaphore:
             logger.info("[SubAgent] Spawning %s: %.80s", task_id, goal)
@@ -131,6 +139,8 @@ class SubAgentManager:
                         {"role": "user", "content": goal},
                     ],
                 }
+                if carried is not None:
+                    initial_state["outside_text"] = carried
 
                 # Run with timeout. persist=False: child threads are not
                 # chat sessions; the parent records the summary.

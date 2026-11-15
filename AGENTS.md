@@ -422,6 +422,33 @@ fetching tool is declared in
 (a real graph and scripted model; the graph without the check as the
 control).
 
+**A task a turn starts, a page it saved, a page its history keeps**
+(2026-11-15, the defensive check before the independent review: a sub-agent's
+goal counted as the user's words, so a delegated fetch to an attacker's host
+ran with no card). A task started after outside text carries the turn's state
+(`delegation_state`): a sub-agent's goal, a swarm task's prompt, a handoff's
+task and a scheduled task's stored prompt are the model's words, never the
+user's. The task starts read, and only the real user's hosts
+(`OutsideText.user_hosts`) and the turn's search hosts count as named. The
+chat tool worker binds `turn_scope` (a snapshot from before the step); a swarm
+dispatch binds `outside_text_scope(prompt, inherited=, context_text=)`, and
+the innermost scope wins. Carriers: `SubAgentManager.spawn`, `dispatch_swarm`
+metadata, `HandoffRequest` (via `dispatch_helpers.with_outside_text`), and the
+cron column `outside_text` (cleared by a prompt the owner edits on the page).
+`DELEGATIONS` names every DELEGATE and SCHEDULE tool. A call that fetched an
+address and ran marks the turn read whatever it returned; `READS_OUTSIDE`
+names the readers with no address argument. A file Kazma saved from the web
+(`research_files.SAVED_FROM_WEB_FIRST_LINES`) comes back fenced from
+`file_read` and `file_search`. At iteration 0, after stub and trim, a fenced
+tool result or user message in the kept history, or the Knowledge block,
+makes the turn read; Kazma's own system notes do not; hosts the kept history
+named stay named. Fence markers in disguise (spaced, fullwidth, zero-width,
+Unicode dashes, DeepSeek's tokens) are redacted on a folded copy
+(`_fold_for_markers`, `_FOLDED_MARKER_RE`), `filter_injection` reads it too,
+and `_SENTINEL_RE` is linear. Hosts from search results still count as named
+(the owner's call). Gates: `tests/test_outside_text_delegation.py`,
+`tests/test_fence_marker_variants.py`, `tests/test_regexes_stay_linear.py`.
+
 **A draft is published only after the user has seen it, on a card that says
 it publishes** (2026-10-16, the same incident: "check the metrics" saved a
 draft and asked to post it 2 s later, in that turn, and the card was approved
@@ -9009,7 +9036,7 @@ code) and Kazma ran with nobody supervising it.
   `tests/test_outside_watch.py`.
   **A report's page is plainly a report** (2026-11-15): `POST /v1/report`
   (`deploy/observer/src/reports.js`, open to anyone) pages only a `version`
-  matching `VERSION_RE` and a note through `cleanNote` (control, direction and
+  matching `VERSION_RE` and a note cleaned in `reports.js` (control, direction and
   invisible characters out, one line, links and `@` made inert, 160
   characters), and the page says someone sent it and nothing in it is
   checked: a crafted version made fake Watch alerts.

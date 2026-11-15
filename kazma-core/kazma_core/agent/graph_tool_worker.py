@@ -990,10 +990,13 @@ async def tool_worker_node(
         # A fetch after outside text asks when the user's message and this
         # turn's search results named neither its host
         # (safety.outside_text_fetch). Keyed by call id: the card names it.
-        from kazma_core.safety.outside_text_fetch import OutsideText, fetch_needs_card
+        from kazma_core.safety.outside_text_fetch import OutsideText, fetch_needs_card, turn_scope
 
         _seen = OutsideText.from_state(state.get("outside_text"))
         _user_text = _last_user_text(state)
+        # What this step's calls were written after: a task a call starts
+        # (a sub-agent, a swarm task, a scheduled task) carries it.
+        _turn_seen = _seen.copy()
         _outside_hosts: dict[str, str] = {}
         if _hitl_active:
             from kazma_core.safety.hitl import standing_approval
@@ -1128,8 +1131,11 @@ async def tool_worker_node(
             try:
                 from kazma_core.agent.tool_registry import _graph_hitl_gate_ctx, call_authority
 
+                # A task this call starts (a sub-agent, a swarm task, a
+                # scheduled task) carries what the turn had read
+                # (safety.outside_text_fetch.delegation_state).
                 with (call_authority(_graph_hitl_gate_ctx, tc["name"]) if _hitl_active
-                      else contextlib.nullcontext()):
+                      else contextlib.nullcontext()), turn_scope(_turn_seen, _user_text):
                     if _tool_timeout and _tool_timeout > 0:
                         result = await asyncio.wait_for(
                             execute_effect(tool_executor, state, tc, _args),
@@ -1617,10 +1623,13 @@ async def tool_worker_node(
                     results.append(_denied_result(tc, approval))
 
         # What this step read, before any breaker rewrites the results: the
-        # next step's fetches are judged by it (safety.outside_text_fetch).
+        # next step's fetches are judged by it (safety.outside_text_fetch). A
+        # call that fetched an address read outside text whatever it returned.
+        _args_by_call = {str(tc.get("id") or ""): tc.get("arguments") or {} for tc in pending}
         for _tr in results:
             _seen.record(str(_tr.get("name") or ""), _tr.get("content"),
-                         is_error=bool(_tr.get("is_error")))
+                         is_error=bool(_tr.get("is_error")),
+                         args=_args_by_call.get(str(_tr.get("tool_call_id") or "")))
 
         # S1-3 audit trail: mark the drafts consumed by SUCCESSFUL posts
         # (SQLite read-modify-write under BEGIN IMMEDIATE — off the loop).

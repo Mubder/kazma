@@ -314,6 +314,8 @@ async def supervisor_node(
     # all subsequent turns (state persists in the checkpointer).
     breaker_reset = {}
     if iteration == 0:
+        from kazma_core.safety.outside_text_fetch import outside_text_at_turn_start
+
         if (
             state.get("circuit_breaker_tripped", False)
             or state.get("consecutive_tool_failures", 0) > 0
@@ -326,9 +328,15 @@ async def supervisor_node(
             "consecutive_refusals": 0,
             "refused_signatures": [],
             "tool_argument_rechecks": 0,
-            # What the last turn read from outside is not this turn's
-            # (safety.outside_text_fetch); an approval resume keeps it.
-            "outside_text": {},
+            # What the last turn read from outside is not this turn's; a
+            # delegated task keeps what its delegating turn carried, a
+            # mission's next wave its own; an approval resume keeps it
+            # (safety.outside_text_fetch). The pages the kept history still
+            # holds are counted below, once the call's messages are final.
+            "outside_text": outside_text_at_turn_start(
+                state.get("outside_text"), (),
+                continuing=bool(_mission_patch.get("auto_continue")),
+            ),
         }
         if cost_breaker and hasattr(cost_breaker, "record_user_interaction"):
             cost_breaker.record_user_interaction()
@@ -1381,6 +1389,20 @@ async def supervisor_node(
         working_memory_block=_wm_block,
     )
     messages = sanitize_tool_chains(messages)
+    if iteration == 0 and "outside_text" in breaker_reset:
+        # A turn starts having read outside text when the messages kept for
+        # its call still hold some: an earlier turn's page in a tool result
+        # or a quoted document (a fence), or the Knowledge Library's block of
+        # crawled pages. The flag used to reset each turn while the pages
+        # stayed in the history. The hosts the kept history named (the
+        # user's earlier messages, its searches' results) stand as named
+        # (safety.outside_text_fetch).
+        from kazma_core.safety.outside_text_fetch import outside_text_from_history
+
+        breaker_reset = {**breaker_reset, "outside_text": outside_text_from_history(
+            breaker_reset["outside_text"], messages,
+            knowledge_block=_kb_inject is not None and bool(_kb_inject.block),
+        )}
     # S3-1: surface compaction to the UI. Composed fresh each supervisor hop
     # (stub segments at iteration 0 + dropped turns this hop) so a stale chip
     # from a previous turn clears on the first hop of a new one.

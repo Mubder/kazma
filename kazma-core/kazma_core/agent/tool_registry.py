@@ -783,10 +783,11 @@ class LocalToolRegistry:
                 # Preserve the uncertainty through output hooks. A returned
                 # failure does not prove that a mutator made no changes.
                 payload["effect_uncertain"] = True
-            # What a swarm task has read: its next fetch is judged by it.
+            # What a swarm task has read: its next fetch is judged by it (a
+            # call that fetched an address read outside text, receipt or not).
             from kazma_core.safety.outside_text_fetch import record_registry_result
 
-            record_registry_result(tool_name, payload)
+            record_registry_result(tool_name, payload, arguments)
             return payload
 
         for attempt in range(1, max_attempts + 1):

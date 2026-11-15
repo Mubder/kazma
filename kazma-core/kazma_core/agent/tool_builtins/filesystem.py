@@ -618,7 +618,21 @@ def register_filesystem_tools(registry: Any) -> None:
             return head if text.startswith("No matches") else head + "\n\nLines that contain it:\n" + text
 
         def _search_text() -> str:
+            # Lines from a file Kazma saved from the web are the page's text:
+            # the answer holding one is fenced (safety.outside_text_fetch).
+            from kazma_core.tools.research_files import text_saved_from_web
+
             results: list[str] = []
+            from_web = False
+
+            def _answer() -> str:
+                out = "\n".join(results)
+                if not from_web:
+                    return out
+                from kazma_core.safety.prompt_fence import fence_untrusted
+
+                return fence_untrusted(out, source="file_search:saved_web_extract")
+
             searched = 0
             if root.is_file():
                 candidates: Iterator[Path] = iter([root])
@@ -637,13 +651,15 @@ def register_filesystem_tools(registry: Any) -> None:
                 text = _searchable_text(file_path, base)
                 if text is None:
                     continue
+                web_file = text_saved_from_web(text)
                 for i, line in enumerate(text.splitlines(), 1):
                     if regex.search(line):
                         results.append(f"{file_path}:{i}: {line.strip()}")
+                        from_web = from_web or web_file
                         if len(results) >= cap:
-                            return "\n".join(results)
+                            return _answer()
             if results:
-                return "\n".join(results)
+                return _answer()
             if not searched:
                 # Not the same answer as a miss: the glob selected nothing,
                 # so the text was never looked for.

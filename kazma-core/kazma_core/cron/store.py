@@ -150,6 +150,11 @@ class ScheduledJob:
     created_by: str = ""
     updated_by: str = ""
     source: str = ""
+    #: A task booked (or its prompt rewritten) by a turn that had read outside
+    #: text: that turn's state, as JSON (``safety.outside_text_fetch.
+    #: delegation_state``). The fired turn starts with it: the stored prompt
+    #: is the booking model's words, never the user's. ``""``: none.
+    outside_text: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         """The job for a list, a tool result or the page.
@@ -236,6 +241,7 @@ _ADDED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("created_by", "TEXT NOT NULL DEFAULT ''"),
     ("updated_by", "TEXT NOT NULL DEFAULT ''"),
     ("source", "TEXT NOT NULL DEFAULT ''"),
+    ("outside_text", "TEXT NOT NULL DEFAULT ''"),
 )
 
 _EXTRA_SCHEMA = (
@@ -492,6 +498,7 @@ class SQLiteCronStore:
             delivery_error=str(val("delivery_error", "")), catchup_seconds=int(val("catchup_seconds", 0) or 0),
             series_start=str(val("series_start", "")), created_by=str(val("created_by", "")),
             updated_by=str(val("updated_by", "")), source=str(val("source", "")),
+            outside_text=str(val("outside_text", "")),
         )
 
     async def _jobs(self, sql: str, args: tuple[Any, ...] = ()) -> list[ScheduledJob]:
@@ -585,7 +592,7 @@ class SQLiteCronStore:
                  job.version, job.fire_owner, job.lease_until, job.fire_attempt, job.fire_due,
                  job.pending_edit, job.pending_cancel, job.finished_at, job.last_outcome,
                  job.last_fire_at, job.delivery_state, job.delivery_error, job.catchup_seconds,
-                 job.series_start, job.created_by, job.updated_by, job.source),
+                 job.series_start, job.created_by, job.updated_by, job.source, job.outside_text),
             )
             await self._event(db, job.job_id, "created", actor=job.created_by, source=job.source,
                               detail={"timing": job.timing, "kind": job.kind, "capabilities": job.capabilities})
@@ -662,6 +669,7 @@ class SQLiteCronStore:
         expected_version: int | None = None,
         actor: str = "",
         source: str = "",
+        outside_text: str | None = None,
     ) -> str:
         """Edit a job's timing and/or prompt. Returns one of:
 
@@ -673,9 +681,15 @@ class SQLiteCronStore:
         A timing edit never made a finished job pending again here; it did
         until 2026-10-14, so the chat tool could bring back a reminder the
         user had cancelled (SCH-S07).
+
+        *outside_text* goes with a new prompt: the state of the turn that
+        wrote it (the agent, after outside text), or ``""`` (a person wrote
+        it). None leaves the job's as it is.
         """
         if timing is None and prompt is None:
             return "unchanged"
+        if prompt is None:
+            outside_text = None
         async with self._tx() as db:
             row = await self._row(db, job_id, tenant_id)
             if row is None:
@@ -684,7 +698,8 @@ class SQLiteCronStore:
                 return "conflict"
             status = str(row["status"])
             change = {k: v for k, v in (("timing", timing), ("prompt", prompt), ("next_run", norm_iso(next_run) or None),
-                                         ("series_start", series_start)) if v is not None}
+                                         ("series_start", series_start), ("outside_text", outside_text))
+                      if v is not None}
             if status == "pending":
                 sets = ", ".join(f"{k} = ?" for k in change)
                 await db.execute(
@@ -790,6 +805,7 @@ class SQLiteCronStore:
             cancel = bool(row["pending_cancel"])
             timing = str(edit.get("timing") or row["timing"])
             prompt = str(edit.get("prompt") or row["prompt"])
+            outside_text = str(edit["outside_text"] if "outside_text" in edit else row["outside_text"] or "")
             series_start = str(edit.get("series_start") or row["series_start"] or "")
             due = str(row["fire_due"] or row["next_run"] or "")
             delivery_id: int | None = None
@@ -826,10 +842,12 @@ class SQLiteCronStore:
                 status, finished = "failed", now_iso
             await db.execute(
                 "UPDATE cron_jobs SET status = ?, next_run = ?, timing = ?, prompt = ?, series_start = ?, "
+                "outside_text = ?, "
                 "pending_edit = '', pending_cancel = 0, fire_owner = '', lease_until = 0, fire_due = '', "
                 "last_result = ?, last_outcome = ?, last_fire_at = ?, failure_count = ?, finished_at = ?, "
                 "delivery_state = ?, delivery_error = '' WHERE job_id = ?",
                 (status, norm_iso(nxt) if nxt is not None else row["next_run"], timing, prompt, series_start,
+                 outside_text,
                  (result.result_text or "")[:5000], result.outcome, now_iso, failures, finished,
                  "pending" if delivery_id is not None else ("" if result.success else row["delivery_state"]),
                  job_id))

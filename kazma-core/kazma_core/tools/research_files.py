@@ -6,6 +6,38 @@ import os
 import tempfile
 from pathlib import Path
 
+#: How a file Kazma saved from the web begins: an extract's header
+#: (``read_url_to_file``, a crawl's save, a research source) or an extractive
+#: digest of one. Its text is the page's, whoever reads it back
+#: (``file_read`` fences it; ``safety.outside_text_fetch``).
+SAVED_FROM_WEB_FIRST_LINES: tuple[str, ...] = (
+    "# Source: http://",
+    "# Source: https://",
+    "# Research digest of `",
+)
+#: The bytes read to find the first line.
+_HEAD_BYTES = 1024
+
+
+def text_saved_from_web(text: str) -> bool:
+    """Whether a file's *text* (its start is enough) is one Kazma saved from
+    the web: its first line is one :data:`SAVED_FROM_WEB_FIRST_LINES` names."""
+    body = (text or "")[:_HEAD_BYTES].lstrip("\ufeff")
+    first = body.splitlines()[0] if body else ""
+    return first.startswith(SAVED_FROM_WEB_FIRST_LINES)
+
+
+def saved_from_web(path: Path) -> bool:
+    """Whether *path* is a file Kazma saved from the web
+    (:func:`text_saved_from_web`). Blocking (a file read); False when it
+    cannot be read."""
+    try:
+        with open(path, "rb") as handle:
+            head = handle.read(_HEAD_BYTES)
+    except OSError:
+        return False
+    return text_saved_from_web(head.decode("utf-8", errors="replace"))
+
 
 def create_extract(target: Path, text: str) -> None:
     """Publish complete bytes exactly once; existing paths are never replaced.

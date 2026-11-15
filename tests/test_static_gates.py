@@ -1031,6 +1031,9 @@ _LOOP_STALL_HELPERS = frozenset({
     # X drafting's reference documents (2026-10-26): the workspace lookup,
     # then each file read whole.
     "load_references",
+    # Whether a file is one Kazma saved from the web (2026-11-15): its first
+    # line, read by file_read before it answers.
+    "saved_from_web",
     "get_github_token", "is_oauth_connected", "store_oauth_token", "clear_oauth_token",
     # Chat apps' /cost and /context (2026-10-01): the per-call ledger's
     # totals for a chat (SQLite), and the context report -- the active

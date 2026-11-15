@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 
 __all__ = [
     "OVERRIDE_PHRASE_RE",
@@ -157,7 +158,9 @@ OVERRIDE_PHRASE_RE: re.Pattern[str] = re.compile(
 # heading, and mangling real documents to catch a weak forgery is a bad trade
 # (the `###\s*system` rule below already covers that shape on the store path).
 _ROLE_MARKER_PATTERNS = [
-    r"<\|[A-Za-z0-9_]{1,32}\|>",  # ChatML, Llama 3, Qwen, …
+    # ChatML, Llama 3, Qwen, … and DeepSeek's "<｜begin▁of▁sentence｜>" (its
+    # bars fullwidth, read through the folded copy; "▁" is U+2581).
+    r"<\|[A-Za-z0-9_\u2581]{1,32}\|>",
     r"\[/?INST\]",  # Llama 2, Mistral
     r"<</?SYS>>",  # Llama 2 system block
     r"</?start_of_turn>",  # Gemma
@@ -230,16 +233,114 @@ _FENCE_TAG_RE: re.Pattern[str] = re.compile(
 )
 # The internal "END OBSERVATION" sentinel could also trick a model into thinking
 # the data block ended mid-content; neutralize exact-match sentinels too.
+# A dash run is read from its first dash only (the lookbehind) and whole
+# (possessive): ``-{2,}`` tried from every dash of a run and backed off to
+# each length, and a page of 20,000 dashes took 5.5 s (2026-11-15).
 _SENTINEL_RE: re.Pattern[str] = re.compile(
-    r"-{2,}\s*(BEGIN|END)\s+OBSERVATION\s*-{2,}", re.IGNORECASE
+    r"(?<!-)-{2,}+\s*+(BEGIN|END)\s++OBSERVATION\s*+-{2,}+", re.IGNORECASE
 )
 
+# ── the same markers in disguise ────────────────────────────────────────────
+#
+# A model reads "< /kazma:data>", "＜/kazma:data＞" (fullwidth), "kaz<U+200B>ma"
+# (a zero-width character in the name), "‐‐‐ END OBSERVATION ‐‐‐" (U+2010
+# hyphens) or DeepSeek's "<｜User｜>" (fullwidth bars) as the marker they
+# imitate; the patterns above, read on the raw text, saw none of them. Each is
+# matched on a FOLDED copy -- NFKC, format characters and combining marks
+# removed, dash, angle-bracket and bar look-alikes made the ASCII mark -- and
+# the matching span of the original text is redacted (2026-11-15).
+
+#: Unicode categories dropped from the folded copy: format characters (zero
+#: width, joiners, direction marks, the soft hyphen, the byte-order mark) and
+#: combining marks.
+_FOLD_DROPPED = frozenset({"Cf", "Mn", "Me"})
+#: Look-alikes NFKC leaves as they are, folded to the mark they imitate.
+_FOLD_LOOKALIKES: dict[str, str] = {
+    **dict.fromkeys("\u2010\u2011\u2012\u2013\u2014\u2015\u2043\u2212\u2e3a\u2e3b\ufe58\ufe63\uff0d", "-"),
+    **dict.fromkeys("\u2039\u2329\u27e8\u3008\u02c2\u276e\u2b9c", "<"),
+    **dict.fromkeys("\u203a\u232a\u27e9\u3009\u02c3\u276f\u2b9e", ">"),
+    **dict.fromkeys("\u01c0\u05c0\u2223\u2502\u2758\u23d0\uffe8", "|"),
+}
+#: Code points folded and kept (a bound: a text of more distinct characters
+#: folds the rest each time).
+_FOLD_CACHE_MAX = 32768
+
+
+class _FoldTable(dict):
+    """``str.translate`` table of the fold, filled as characters are met."""
+
+    def __missing__(self, code: int) -> str | None:
+        char = chr(code)
+        if unicodedata.category(char) in _FOLD_DROPPED:
+            value: str | None = None
+        else:
+            value = "".join(_FOLD_LOOKALIKES.get(c, c) for c in unicodedata.normalize("NFKC", char))
+        if len(self) < _FOLD_CACHE_MAX:
+            self[code] = value
+        return value
+
+
+_FOLD_TABLE = _FoldTable()
+
+
+def _fold_for_markers(text: str) -> str:
+    """*text* as the marker patterns read it: each character folded on its own
+    (NFKC; format characters and combining marks dropped; dash, angle-bracket
+    and bar look-alikes made ASCII). Linear."""
+    return (text or "").translate(_FOLD_TABLE)
+
+
+#: The fence's markers read on the folded copy: a fence tag with spaces in it,
+#: a sentinel of any dashes, and the role tokens with spaces or DeepSeek's
+#: "▁". Every repetition is possessive or bounded, every run read from its
+#: start (tests/test_regexes_stay_linear.py).
+_FOLDED_MARKER_RE: re.Pattern[str] = re.compile(
+    r"(?P<tag><\s*+/?\s*+kazma\s*+:\s*+data[^<>]*+>?)"
+    r"|(?P<sentinel>(?<!-)-++\s*+(?:BEGIN|END)\s++OBSERVATION\s*+-++)"
+    r"|(?P<marker><\s*+\|\s*+[A-Za-z0-9_\u2581]{1,40}\s*+\|\s*+>"
+    r"|\[\s*+/?\s*+INST\s*+\]"
+    r"|<\s*+<\s*+/?\s*+SYS\s*+>\s*+>"
+    r"|<\s*+/?\s*+(?:start|end)_of_turn\s*+>)",
+    re.IGNORECASE,
+)
+_FOLDED_LABELS = {"tag": "[redacted-tag]", "sentinel": "[redacted-sentinel]",
+                  "marker": "[redacted-marker]"}
+
+
+def _redact_folded_markers(text: str) -> str:
+    """*text* with every span whose folded copy is a fence marker replaced by
+    its label. The common case -- nothing in disguise -- is two C-speed passes
+    (fold, search); the index map is built only when there is a match."""
+    folded = _fold_for_markers(text)
+    if _FOLDED_MARKER_RE.search(folded) is None:
+        return text
+    index: list[int] = []
+    for i, char in enumerate(text):
+        piece = _FOLD_TABLE[ord(char)]
+        if piece:
+            index.extend([i] * len(piece))
+    out: list[str] = []
+    cursor = 0
+    for match in _FOLDED_MARKER_RE.finditer(folded):
+        if match.end() <= match.start():
+            continue
+        start, end = index[match.start()], index[match.end() - 1] + 1
+        if start < cursor:
+            continue
+        out.append(text[cursor:start])
+        out.append(_FOLDED_LABELS[match.lastgroup or "marker"])
+        cursor = end
+    out.append(text[cursor:])
+    return "".join(out)
+
+
 def _sanitize_fence_body(text: str) -> str:
-    """Neutralize fence-closing tags, sentinels, and foreign role markers."""
+    """Neutralize fence-closing tags, sentinels, and foreign role markers --
+    as written, and in disguise (:func:`_redact_folded_markers`)."""
     text = _FENCE_TAG_RE.sub("[redacted-tag]", text)
     text = _SENTINEL_RE.sub("[redacted-sentinel]", text)
     text = _ROLE_MARKER_RE.sub("[redacted-marker]", text)
-    return text
+    return _redact_folded_markers(text)
 
 
 # Attribute value for source="...". Skill names, MCP URIs, and URLs are
@@ -291,10 +392,14 @@ def filter_injection(text: str) -> str | None:
     if not text or not str(text).strip():
         return None
     body = str(text)
-    if is_override_delta(body):
-        return None
-    if INJECTION_RE.search(body) is not None:
-        return None
+    # Read as written and as folded (_fold_for_markers): a role token with
+    # fullwidth bars (DeepSeek's "<｜User｜>") or a zero-width character
+    # inside a phrase is the same payload.
+    for form in (body, _fold_for_markers(body)):
+        if is_override_delta(form):
+            return None
+        if INJECTION_RE.search(form) is not None:
+            return None
     return body
 
 

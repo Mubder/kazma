@@ -109,6 +109,12 @@ async def schedule_task(timing: str, prompt: str, kind: str = "reminder", tools:
         }))
     platform = delivery_target.split(":", 1)[0] if ":" in delivery_target else "telegram"
     ctx = await asyncio.to_thread(_context)
+    # A task booked after this turn read outside text: its prompt is the
+    # model's words, so the fired turn starts having read outside text, with
+    # the hosts the real user named (safety.outside_text_fetch).
+    from kazma_core.safety.outside_text_fetch import delegation_state
+
+    carried = delegation_state()
     try:
         result = await scheduler.schedule(
             timing=timing,
@@ -126,6 +132,7 @@ async def schedule_task(timing: str, prompt: str, kind: str = "reminder", tools:
             source=ctx["source"],
             zone=ctx["zone"],
             zone_name=ctx["zone_name"],
+            outside_text=carried,
         )
         return _out({"ok": True, **_public(result)})
     except CronLimitError as e:
@@ -220,6 +227,10 @@ async def edit_scheduled(job_id: str, timing: str = "", prompt: str = "") -> str
 
     try:
         ctx = await asyncio.to_thread(_context)
+        # A prompt rewritten after this turn read outside text takes the
+        # turn's state, as a booking does (safety.outside_text_fetch).
+        from kazma_core.safety.outside_text_fetch import delegation_state
+
         result = await scheduler.reschedule(
             job_id,
             timing=(timing or "").strip() or None,
@@ -229,6 +240,7 @@ async def edit_scheduled(job_id: str, timing: str = "", prompt: str = "") -> str
             source=ctx["source"],
             zone=ctx["zone"],
             zone_name=ctx["zone_name"],
+            outside_text=delegation_state(),
         )
         return _out(result)
     except Exception as e:  # noqa: BLE001

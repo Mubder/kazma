@@ -57,6 +57,7 @@ from kazma_core.swarm.dispatch_helpers import (
     normalize_worker_type as _normalize_worker_type,
     overall_status as _overall_status_impl,
     resolve_max_concurrent as _resolve_max_concurrent_impl,
+    with_outside_text as _with_outside_text,
 )
 from kazma_core.swarm.handoff_guards import (
     build_available_workers_list as _build_available_workers_list_impl,
@@ -1696,6 +1697,10 @@ class SwarmEngine:
                 else None
             ),
         )
+        # The target's task is the source worker's words: when the source
+        # had read outside text, the target starts having read it, with the
+        # real user's hosts (safety.outside_text_fetch.delegation_state).
+        handoff_context = _with_outside_text(handoff_context, getattr(handoff_req, "outside_text", None))
 
         # Dispatch to the target worker (recursive, supports multi-hop chaining).
         target_results = await self._dispatch_worker_by_name_all(

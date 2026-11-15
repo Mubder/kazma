@@ -249,6 +249,7 @@ async def dispatch_worker(
 
                 tid = None
                 unrestricted = None
+                carried = None
                 if isinstance(context, SwarmDispatchContext):
                     raw = (context.metadata or {}).get("tenant_id")
                     if raw:
@@ -257,6 +258,10 @@ async def dispatch_worker(
                     # budgets follow it (agent.unrestricted).
                     if "unrestricted" in (context.metadata or {}):
                         unrestricted = bool(context.metadata["unrestricted"])
+                    # Started by a turn (or a worker) that had read outside
+                    # text: the task's prompt is that model's words, not the
+                    # user's (safety.outside_text_fetch.delegation_state).
+                    carried = (context.metadata or {}).get("outside_text")
                 # Settings-saved API keys live under tenant 'default'. A
                 # worker with no ContextVar reads every vault:// pointer as
                 # missing and the registry substitutes a different provider
@@ -265,9 +270,11 @@ async def dispatch_worker(
                     # Both managers no-op when their token is None, so always wrap.
                     async with workspace_scope(_ws_id), swarm_scope(_scope_token):
                         # The task's text is the user's message for its
-                        # fetches after outside text (safety.outside_text_fetch).
+                        # fetches after outside text, unless a turn that had
+                        # read some started it (safety.outside_text_fetch).
                         with track_dispatch_effects(effects), handoff_offer(_offer), \
-                                outside_text_scope(prompt):
+                                outside_text_scope(prompt, inherited=carried,
+                                                   context_text=str(context or "")):
                             return await worker.dispatch(prompt, context=context)
 
             try:

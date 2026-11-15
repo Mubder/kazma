@@ -478,10 +478,12 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
                                 status_code=400)
         try:
             ctx = await asyncio.to_thread(_request_context, request)
+            # A prompt the owner writes here is theirs: whatever the agent's
+            # booking turn had read no longer stands behind it.
             result = await sched.reschedule(
                 job_id, timing=timing, prompt=prompt, tenant_id=ctx["tenant"],
                 expected_version=body.expected_version, actor=ctx["actor"], source="web",
-                zone=ctx["zone"], zone_name=ctx["zone_name"])
+                zone=ctx["zone"], zone_name=ctx["zone_name"], written_by_person=True)
             return _cron_reply(result)
         except Exception as exc:  # noqa: BLE001
             logger.exception("[scheduled] cron edit failed")

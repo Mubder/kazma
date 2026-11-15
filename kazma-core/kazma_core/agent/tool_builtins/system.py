@@ -912,6 +912,13 @@ def register_system_tools(registry: Any) -> None:
         from kazma_core.agent.unrestricted import is_unrestricted
 
         unrestricted = await _asyncio.to_thread(is_unrestricted)
+        # The prompt is this model's words: written after outside text, it
+        # never stands for the user's message. The task carries the turn's
+        # state (safety.outside_text_fetch.delegation_state); the worker's
+        # dispatch binds it (swarm.worker_dispatch).
+        from kazma_core.safety.outside_text_fetch import delegation_state
+
+        _carried = delegation_state()
         task = SwarmTask(
             prompt=prompt,
             workers=workers,
@@ -919,7 +926,8 @@ def register_system_tools(registry: Any) -> None:
             context=context,
             timeout=_dispatch_timeout(timeout_seconds, unrestricted=unrestricted),
             metadata={"source": "chat", "kind": "research", "unrestricted": unrestricted,
-                      **_swarm_origin()},
+                      **_swarm_origin(),
+                      **({"outside_text": _carried} if _carried is not None else {})},
         )
         # Dispatch in the background so the tool returns immediately.
         # Register on engine._task_handles so cancel_task / panel Stop

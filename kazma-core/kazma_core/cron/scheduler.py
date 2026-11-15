@@ -320,6 +320,33 @@ def _accepts(builder: Callable[..., Any], name: str) -> bool:
     return name in params or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
 
 
+def _outside_text_json(carried: dict[str, Any] | None) -> str:
+    """The job's ``outside_text`` column for a booking turn's state."""
+    if not isinstance(carried, dict) or not carried:
+        return ""
+    import json
+
+    return json.dumps(carried, ensure_ascii=False, sort_keys=True)
+
+
+def _outside_text_state(stored: str | None) -> dict[str, Any] | None:
+    """The fired turn's starting ``outside_text``, or None (booked with none).
+    A column that does not read as a state starts the turn having read
+    outside text with no host named by the user: it can only have been
+    written as one."""
+    if not stored:
+        return None
+    import json
+
+    try:
+        value = json.loads(stored)
+    except ValueError:
+        value = None
+    if not isinstance(value, dict):
+        return {"read": True, "hosts": [], "user_hosts": []}
+    return value
+
+
 _STORED_INSTRUCTION_NOTE = (
     "You are running a scheduled task. The next user message is a STORED "
     "instruction the operator booked earlier (job {job_id}, booked {created}); it "
@@ -568,6 +595,7 @@ class CronScheduler:
         zone: tzinfo | None = None,
         zone_name: str | None = None,
         now: datetime | None = None,
+        outside_text: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Book a job. Raises ``ValueError`` (a :class:`TimingError` or
         :class:`CronLimitError`) with the reason when it cannot be booked.
@@ -575,6 +603,9 @@ class CronScheduler:
         *timing* is read by the one time model (future, finite, the operator's
         zone, a typed recurrence). *kind*: ``reminder`` (deliver *prompt* as
         written, no model) or ``task`` (run the agent with *capabilities*).
+        *outside_text*: the booking turn's state when it had read outside
+        text (``safety.outside_text_fetch.delegation_state``); the fired
+        turn starts with it.
         """
         from kazma_core.cron.capabilities import normalize_capabilities, normalize_kind
         from kazma_core.cron.settings import PROMPT_MAX_CHARS, cron_settings
@@ -623,6 +654,7 @@ class CronScheduler:
             created_by=actor,
             updated_by=actor,
             source=source,
+            outside_text=_outside_text_json(outside_text),
         )
         await self._store.insert(job)
         logger.info(
@@ -700,12 +732,18 @@ class CronScheduler:
         source: str = "",
         zone: tzinfo | None = None,
         zone_name: str | None = None,
+        outside_text: dict[str, Any] | None = None,
+        written_by_person: bool = False,
     ) -> dict[str, Any]:
         """Edit a job's timing and/or prompt.
 
         ``status``: ``rescheduled``; ``edit_pending`` (it is firing: applied
         when the fire ends); ``not_found``; ``conflict``; ``not_editable`` (it
         ended -- use :meth:`restore`); ``error`` (a bad timing or prompt).
+
+        A new prompt takes the writer's outside-text state: the agent's turn
+        state (*outside_text*, None when it had read none) or, when a person
+        wrote it (*written_by_person*, the Scheduled page), none.
         """
         from kazma_core.cron.settings import PROMPT_MAX_CHARS
         from kazma_core.cron.timing import TimingError, resolve_timing
@@ -729,9 +767,13 @@ class CronScheduler:
             timing = " ".join(timing.split())
         else:
             timing = None
+        carried: str | None = None
+        if prompt is not None and (written_by_person or outside_text):
+            carried = "" if written_by_person else _outside_text_json(outside_text)
         status = await self._store.update_job(
             job_id, timing=timing, prompt=prompt, next_run=next_run, series_start=series_start,
-            tenant_id=tenant_id, expected_version=expected_version, actor=actor, source=source)
+            tenant_id=tenant_id, expected_version=expected_version, actor=actor, source=source,
+            outside_text=carried)
         logger.info("[CronScheduler] edit %s -> %s (timing=%r prompt_edited=%s) actor=%s source=%s",
                     job_id, status, timing or "(unchanged)", prompt is not None, actor or "-", source or "-")
         return {"status": status, "job_id": job_id, "timing": timing or "", "next_run": next_run or ""}
@@ -995,6 +1037,13 @@ class CronScheduler:
                     {"role": "user", "content": job.prompt},
                 ],
             }
+            # Booked by a turn that had read outside text: the stored prompt
+            # is that model's words, so the fired turn starts having read
+            # outside text, with the hosts the real user named
+            # (safety.outside_text_fetch.delegation_state).
+            carried = _outside_text_state(job.outside_text)
+            if carried is not None:
+                state["outside_text"] = carried
             from kazma_core.agent.turn import run_agent_turn
 
             # The turn runs in this fire's own task: on Python 3.11

@@ -389,6 +389,13 @@ async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
         if isinstance(synced, str):
             return synced
         output_lines, truncated_read = synced
+        # A file Kazma saved from the web (an extract's header, a digest of
+        # one) holds the page's text: it reaches the model fenced, and the
+        # turn has read outside text (safety.outside_text_fetch). Judged by
+        # the file's first line, whatever window was asked for.
+        from kazma_core.tools.research_files import saved_from_web
+
+        from_web = await asyncio.to_thread(saved_from_web, p)
     except FileNotFoundError:
         return _friendly_error(FileNotFoundError(), path)
     except PermissionError:
@@ -411,6 +418,11 @@ async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
     # Cap total chars (unchanged contract)
     if len(result) > MAX_CHARS:
         result = result[:MAX_CHARS] + f"\n[truncated — output exceeded {MAX_CHARS} chars]"
+
+    if from_web:
+        from kazma_core.safety.prompt_fence import fence_untrusted
+
+        result = fence_untrusted(result, source=f"saved_web_extract:{p.name}")
 
     # Store in per-turn dedup cache (LRU-bounded)
     with _cache_lock:

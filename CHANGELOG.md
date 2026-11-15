@@ -45,6 +45,15 @@
   wheel's own version against it.
 - Kazma's container engine trusts Docker's package key only by its published
   fingerprint.
+- A sub-agent, swarm task, handoff or scheduled task started after the chat
+  read outside text no longer counts the model's task text as yours: fetching
+  a site you never named asks first.
+- Saving a web page counts as reading it, and a saved page read back with
+  `file_read` or `file_search` is marked as outside text.
+- A turn starts as having read outside text when its history still holds an
+  earlier page or the Knowledge Library's text.
+- The data fence also catches disguised fence tags and role tokens, and its
+  filter no longer slows down on long runs of dashes.
 
 - `/long on` never lowers a chat's tool-round limit. Its research preset is
   40 rounds; on an install whose own limit is higher (live: 100), turning long
