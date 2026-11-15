@@ -6,7 +6,7 @@ Total cost card beside it said $0.0000 -- the one card AGENTS.md §60 says
 never does. The card reads the in-memory trace store, which counted every
 call's cost as known. The store now counts the calls of unknown price, and the
 card says "—" (none known) or "≥ $x" (some known), on the server
-(``dashboard.cost_text``) and in the page (``dashboard.js`` ``costText``),
+(``dashboard._cost_text``) and in the page (``dashboard.js`` ``costText``),
 held to the same cases.
 """
 
@@ -50,7 +50,7 @@ def test_a_traced_call_carries_whether_its_price_is_known(monkeypatch):
 
 @pytest.mark.parametrize(("cost", "unpriced", "shown"), CASES)
 def test_the_server_says_what_it_knows(cost, unpriced, shown):
-    from kazma_ui.dashboard import cost_text
+    from kazma_ui.dashboard import _cost_text as cost_text
 
     assert cost_text(cost, unpriced) == shown
 

@@ -157,7 +157,7 @@ def _format_uptime(uptime_seconds: float) -> str:
     return f"{days}d {rem_h}h"
 
 
-def cost_text(cost: float, unpriced: int) -> str:
+def _cost_text(cost: float, unpriced: int) -> str:
     """The Total cost card's text: "—" when every call's price is unknown,
     "≥ $x" when some are, else "$x". It showed $0.0000 over calls of a model
     with no known price (live 2026-11-15), the one card AGENTS.md §60 says
@@ -262,7 +262,7 @@ def dashboard(request: Request) -> HTMLResponse:
         "dashboard.html",
         {
             "cost_current": cost_current,
-            "cost_text": cost_text(cost_current, raw_metrics["unpriced_llm_calls"]),
+            "cost_text": _cost_text(cost_current, raw_metrics["unpriced_llm_calls"]),
             "cost_max": cost_max,
             "cost_headroom": cost_headroom,
             "cost_color": cost_color,

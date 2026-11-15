@@ -10866,7 +10866,7 @@ provider list as data with per-type forms, per-model details with
   The Dashboard's Total cost card reads the in-memory trace store, which now
   counts the calls of unknown price (`TraceEntry.priced`,
   `unpriced_llm_calls`): it said `$0.0000` beside "Spent today"'s "—" (live
-  2026-11-15). `dashboard.cost_text` and `dashboard.js` `costText` are one rule
+  2026-11-15). `dashboard._cost_text` and `dashboard.js` `costText` are one rule
   (`tests/test_dashboard_total_cost.py`).
 - **Requests newer models take**: OpenAI's own API gets
   `max_completion_tokens`. A 400 that refuses `max_tokens`, or any

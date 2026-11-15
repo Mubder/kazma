@@ -310,7 +310,7 @@
   }
 
   // The Total cost card's text: "—" when every call's price is unknown,
-  // "≥ $x" when some are (dashboard.py cost_text is the same rule).
+  // "≥ $x" when some are (dashboard.py _cost_text is the same rule).
   function costText(cost, unpriced) {
     if (unpriced && !cost) return '—';
     return (unpriced ? '≥ ' : '') + '$' + cost.toFixed(4);
