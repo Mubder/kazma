@@ -18,6 +18,7 @@ from __future__ import annotations
 import ast
 import json
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -39,6 +40,8 @@ from kazma_core.safety.unasked import (
     note_ran_without_asking,
 )
 from kazma_core.safety.yolo import disable_yolo, enable_yolo
+
+from tests._emitted_lines import emitted_app_lines, product_roots
 
 REPO = Path(__file__).resolve().parents[1]
 THREADS = ("thr-yolo-a", "thr-grant-b", "thr-card-c")
@@ -144,22 +147,29 @@ def test_turning_yolo_off_alone_is_not_a_window(tmp_path, monkeypatch, caplog):
     assert "Ran without asking" not in _digest(tmp_path, monkeypatch, [(60, *off[-1])])
 
 
-def test_lines_from_before_the_change_are_read(tmp_path, monkeypatch):
-    """The swarm bus's own words until 2026-11-01. Its YOLO line also counted
-    the card's call, run as the window opened (live: 0.09 s after it); a call
-    seconds later is a real one."""
+#: The swarm bus's own words until 2026-11-01.
+_RETIRED_WORDS = re.compile(r"YOLO mode active for thread=|\[Safety\] (?:task|tool) grant covers ")
+
+
+def test_the_swarm_bus_words_from_before_2026_11_01_are_retired(tmp_path, monkeypatch):
+    """Re-pointed 2026-11-16 (log_lines). The digest read the swarm bus's own
+    words of before 2026-11-01 ("YOLO mode active for thread=...", "[Safety]
+    tool grant covers ...") anywhere in a message. No build writes them, and
+    the 7-day log retention has dropped every line that did, so the readers
+    are retired: such a line is no call that ran without asking."""
+    emitted = emitted_app_lines(product_roots())
+    assert len(emitted) > 1000, "the source walk found almost nothing"
+    assert not [line for line in emitted if _RETIRED_WORDS.search(line)]
     tid = "96acc835-5d7a-4a40-a105-1224fd060c91"
     records = [
         (3600.0, "WARNING", f"[SECURITY] YOLO ENABLED thread={tid} actor=web:admin:hBLjUeDr ttl=3600s"),
-        (3599.91, "WARNING", f"[Safety] YOLO mode active for thread={tid} — auto-approving: file_write"),
         (3205.0, "WARNING", f"[Safety] YOLO mode active for thread={tid} — auto-approving: send_file"),
         (100.0, "INFO", f"[Safety] tool grant covers python_exec on thread={tid} — already approved "
                         "by the operator"),
     ]
     text = _digest(tmp_path, monkeypatch, records)
-    assert "Ran without asking: 2 calls (times in UTC)" in text
-    assert "    under YOLO: send_file 1\n" in text
-    assert '    under "Allow tool": python_exec 1' in text
+    assert "Ran without asking: 0 calls (times in UTC)" in text
+    assert "    nothing ran without asking" in text
 
 
 def test_an_unreadable_line_of_it_is_reported(tmp_path, monkeypatch):

@@ -161,11 +161,24 @@ def oidc_tenant_from_claims(claims: dict[str, Any], cfg: OidcConfig) -> str | No
 
 
 async def fetch_discovery(issuer: str) -> dict[str, Any]:
+    """The issuer's discovery document, refused unless it names *issuer*.
+
+    OpenID Connect Discovery 1.0 section 4.3: the document's ``issuer`` must
+    be exactly the issuer asked. The id_token was checked against the
+    document's own issuer, so a document naming another issuer moved which
+    tokens Kazma accepted (SonarCloud review, 2026-11-16).
+    """
     url = f"{issuer.rstrip('/')}/.well-known/openid-configuration"
     async with httpx.AsyncClient(timeout=15.0, verify=shared_ssl_context()) as client:
         resp = await client.get(url)
         resp.raise_for_status()
-        return resp.json()
+        doc = resp.json()
+    if not isinstance(doc, dict):
+        raise PermissionError("OIDC discovery document is not an object")
+    named = str(doc.get("issuer") or "").rstrip("/")
+    if named != issuer.rstrip("/"):
+        raise PermissionError("OIDC discovery names another issuer")
+    return doc
 
 
 def _b64url(data: bytes) -> str:
@@ -463,7 +476,8 @@ async def _verify_id_token(
     if alg.lower() == "none" or alg not in (*_ASYM_ALGS, *_HS_ALGS):
         raise PermissionError("OIDC id_token algorithm rejected")
 
-    issuer = str(disc.get("issuer") or cfg.issuer)
+    # The configured issuer (fetch_discovery holds the document to it).
+    issuer = cfg.issuer
     decode_kw: dict[str, Any] = {
         "audience": cfg.client_id,
         "issuer": issuer,
@@ -486,7 +500,8 @@ async def _verify_id_token(
             if not jwks_uri:
                 raise PermissionError("OIDC discovery missing jwks_uri")
             jwks_client = PyJWKClient(str(jwks_uri))
-            signing_key = jwks_client.get_signing_key_from_jwt(token)
+            # The key set is fetched over urllib, blocking: off the loop.
+            signing_key = await asyncio.to_thread(jwks_client.get_signing_key_from_jwt, token)
             claims = _jwt.decode(
                 token,
                 signing_key.key,

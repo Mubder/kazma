@@ -321,6 +321,12 @@ def _recall(
         except Exception:
             do_explain = False
 
+    # Recall reads rows by column name. A caller's connection gets the row
+    # factory for this call and its own back after (a plain connection raised
+    # TypeError, which no handler here expected: SonarCloud review).
+    caller_factory = conn.row_factory
+    if not own_conn and caller_factory is not sqlite3.Row:
+        conn.row_factory = sqlite3.Row
     try:
         if not _memory_schema_present(conn):
             # The schema is created by the first write (an episode after a
@@ -377,6 +383,8 @@ def _recall(
             pass
         return _failed_recall("search_failed")
     finally:
+        if not own_conn:
+            conn.row_factory = caller_factory
         if own_conn and conn is not None:
             try:
                 conn.close()

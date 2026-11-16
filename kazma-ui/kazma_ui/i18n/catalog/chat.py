@@ -1631,4 +1631,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "تستخدم هذه الدردشة الآن {model}. وتحتفظ الدردشات الأخرى بنماذجها.",
         "en": "This chat now uses {model}. Other chats keep theirs.",
     },
+    "chat.message_label": {
+        "ar": "الرسالة",
+        "en": "Message",
+    },
 }

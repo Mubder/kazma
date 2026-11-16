@@ -57,6 +57,7 @@ from kazma_core.safety.shell_arguments import (
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "NEVER_ALLOWED",
     "NO_WALK",
     "READ_ONLY_PROGRAMS",
     "WALKS",
@@ -205,13 +206,31 @@ NO_WALK: dict[str, str] = {
     "whoami": "names no file", "pwd": "names no file", "df": "file systems, not files",
     "free": "names no file", "uptime": "names no file", "uname": "names no file",
     "hostname": "names no file", "sleep": "names no file",
-    "ps": "processes, not files", "pgrep": "processes, not files",
+    "pgrep": "processes, not files",
     "mkdir": "creates the folders named", "touch": "creates the files named",
     "unzip": "writes the archive's members (checked by name)",
     "uv": "reads its project's own files through the build backend",
     "pytest": "imports Python files only", "ruff": "reads Python files only",
     "mypy": "reads Python files only",
-    "kazma": "Kazma's own command line (development installs only)",
+}
+
+#: Programs shell_exec's allowlist may never hold, in any mode, with why.
+#: ``tests/test_shell_exec_kazma_files.py`` reads the allowlist from its source
+#: and fails on any of these.
+NEVER_ALLOWED: dict[str, str] = {
+    "kazma": "Kazma's own command line: `migrate export` writes the vault and its "
+             "key into a bundle, `restore` and `import` replace stores",
+    "ps": "`ps eww` prints another process's environment (the server's vault key)",
+    "env": "prints this process's environment",
+    "printenv": "prints this process's environment",
+    "python": "runs any code (python_exec is the sandboxed way)",
+    "python3": "runs any code",
+    "node": "runs any code",
+    "bash": "a shell runs any command",
+    "sh": "a shell runs any command",
+    "cmd": "a shell runs any command",
+    "powershell": "a shell runs any command",
+    "pwsh": "a shell runs any command",
 }
 
 #: tar's long options that take their value as the next word (so the value
@@ -533,7 +552,7 @@ def _kazma_file_refusal(binary: str, word: str, value: str, real: Path, write: b
 
 def _expand_braces(value: str) -> list[str]:
     """``a{b,c}d`` -> ``abd``, ``acd`` (a program's own globbing may expand braces)."""
-    match = re.search(r"\{([^{}]*,[^{}]*)\}", value)
+    match = re.search(r"\{([^{},]*,[^{}]*)\}", value)  # to the first comma: linear
     if not match:
         return [value]
     out: list[str] = []

@@ -25,7 +25,9 @@ _NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 # stay on _NAME_RE; this one only asks "can this be a directory name?"
 _SAFE_SKILL_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-_]{0,63}$")
 _FRONTMATTER_RE = re.compile(
-    r"\A---\s*\n(.*?)\n---\s*\n?(.*)\Z",
+    # The blank lines after the opening "---" are read once, whole: "\s*\n"
+    # retried every split of them against the rest of the file (quadratic).
+    r"\A---(?:[^\S\n]*+\n)++(.*?)\n---\s*\n?(.*)\Z",
     re.DOTALL,
 )
 

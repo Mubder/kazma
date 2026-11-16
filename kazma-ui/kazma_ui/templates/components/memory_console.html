@@ -401,7 +401,7 @@
               <div id="v2g-stats-line" class="mem-muted" style="font-size:0.7rem;font-family:var(--font-mono);">–</div>
             </div>
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-              <input id="v2g-search" type="search" class="form-input mem-input-sm" placeholder="{{ t('memory.mc.filter') }}" style="min-width:100px;width:140px;">
+              <input id="v2g-search" type="search" class="form-input mem-input-sm" aria-label="{{ t('memory.mc.filter_graph') }}" placeholder="{{ t('memory.mc.filter') }}" style="min-width:100px;width:140px;">
               <button id="v2g-path-query" type="button" class="btn btn-outline btn-xs" title="{{ t('memory.mc.highlight_entities_from_last_probe') }}">{{ t('memory.mc.path_from_query') }}</button>
               <label class="mem-muted" style="font-size:0.68rem;display:inline-flex;align-items:center;gap:4px;cursor:pointer;user-select:none;">
                 <input type="checkbox" id="v2g-episode-overlay" style="accent-color:var(--accent);"> {{ t('dashboard.fts5_db') }}
@@ -489,7 +489,7 @@
         <div class="mem-hairline" style="padding:6px 12px;font-size:0.68rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
           {{ t('memory.mc.known_beliefs') }}
           <span class="mem-muted" style="font-weight:400;text-transform:none;letter-spacing:0;">{{ t('memory.mc.currently_valid_click_to_focus') }}</span>
-          <input id="v2-belief-search" type="text" class="form-input mem-input-sm" placeholder="{{ t('memory.mc.filter_2') }}" style="margin-inline-start:auto;width:140px;text-transform:none;letter-spacing:0;font-weight:400;">
+          <input id="v2-belief-search" type="text" class="form-input mem-input-sm" aria-label="{{ t('memory.mc.filter_beliefs') }}" placeholder="{{ t('memory.mc.filter_2') }}" style="margin-inline-start:auto;width:140px;text-transform:none;letter-spacing:0;font-weight:400;">
         </div>
         <div id="v2-belief-list" style="max-height:220px;overflow-y:auto;font-size:0.78rem;padding:4px 8px;"></div>
         <div id="v2-belief-empty-cta" style="display:none;padding:12px;text-align:center;border-top:1px solid var(--card-hairline);">
@@ -511,13 +511,13 @@
         <!-- Live recall probe + federated search (memory + KB, labeled) -->
         <div class="card-nested" style="margin-bottom:12px;padding:12px;">
           <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
-            <div class="mem-section-label" style="font-size:0.72rem;color:var(--text-secondary);">{{ t('dashboard.memory_search_all') }}</div>
+            <div class="mem-section-label" id="v2-probe-label" style="font-size:0.72rem;color:var(--text-secondary);">{{ t('dashboard.memory_search_all') }}</div>
             <label class="mem-muted" style="font-size:0.72rem;display:flex;align-items:center;gap:6px;cursor:pointer;">
               <input type="checkbox" id="v2-fed-include-kb" checked style="accent-color:var(--accent);"> {{ t('dashboard.memory_include_kb') }}
             </label>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <input id="v2-probe-input" type="text" class="form-input" placeholder="{{ t('memory.mc.what_color_do_i_like') }}" style="flex:1;min-width:180px;font-size:0.8rem;" />
+            <input id="v2-probe-input" type="text" class="form-input" aria-labelledby="v2-probe-label" placeholder="{{ t('memory.mc.what_color_do_i_like') }}" style="flex:1;min-width:180px;font-size:0.8rem;" />
             <button id="v2-probe-btn" type="button" class="btn btn-sm btn-secondary" title="{{ t('memory.mc.memory_only') }}">{{ t('dashboard.memory_probe_memory') }}</button>
             <button id="v2-federated-btn" type="button" class="btn btn-sm btn-primary" title="{{ t('memory.mc.memory_knowledge_library') }}">{{ t('dashboard.memory_probe_federated') }}</button>
           </div>

@@ -4,10 +4,16 @@ Kazma Watch is the Worker in ``deploy/observer``: it watches an install from
 outside the machine (a stopped heartbeat is a powered-off, asleep or cut-off
 machine nothing on it can report). This command puts it on the person's own
 Cloudflare account -- free plan is enough -- with Cloudflare's own tool
-(wrangler, run through ``npx``: Node is a part Kazma installs), then pairs
-this install with it. Each step is said before it runs:
+(wrangler: Node is a part Kazma installs), then pairs this install with it.
+Each step is said before it runs:
 
-1. Node's ``npx`` is there (else: ``kazma setup install --with node``).
+1. Node's ``npm`` and ``npx`` are there (else: ``kazma setup install --with
+   node``), and wrangler is installed in the work folder from the Worker's
+   ``package-lock.json`` (``npm ci``: every package at the version and
+   integrity hash the lock records, no install scripts). ``npx --yes
+   wrangler@X`` pinned wrangler alone, its dependencies resolved fresh, in a
+   tool that runs with the person's Cloudflare login and receives the
+   Worker's secrets (SonarCloud review, 2026-11-16).
 2. Signed in to Cloudflare (``wrangler whoami``; else ``wrangler login``
    opens the browser and the person signs in there: Kazma never sees it).
 3. The watch bot: a Telegram bot the person makes with @BotFather (a bot of
@@ -42,6 +48,7 @@ nothing else on the install changes.
 from __future__ import annotations
 
 import getpass
+import hashlib
 import json
 import logging
 import os
@@ -72,9 +79,12 @@ __all__ = [
     "worker_source",
 ]
 
-#: The wrangler release this setup was tested with (a release of its own: npx
-#: would otherwise run whatever npm serves that day).
+#: The wrangler release this setup was tested with: the one the Worker's
+#: package.json and package-lock.json name (tests/test_watch_setup.py holds
+#: the three equal).
 WRANGLER_VERSION = "4.158.0"
+#: The Worker's npm files the work folder installs from.
+_NPM_FILES = ("package.json", "package-lock.json")
 #: Kazma's vault name for the watch's pairing token (install-scoped: the CLI
 #: reads it with no tenant, ``vault.INSTALL_SCOPED_SECRETS``).
 PAIRING_TOKEN_NAME = "observer.pairing_token"
@@ -224,6 +234,7 @@ class WatchSetup:
     pair: Callable[[str, str], dict[str, str]] | None = None
     work_dir: Path | None = None
     npx: str | None = None
+    npm: str | None = None
     source: Path | None = None
 
     # -- the run --------------------------------------------------------------------
@@ -248,7 +259,8 @@ class WatchSetup:
                 "(it leaves that watch first)")
         vault = self._vault()
         npx = self.npx or shutil.which("npx")
-        if not npx:
+        npm = self.npm or shutil.which("npm")
+        if not npx or not npm:
             raise SetupStopped("Node's npx is not installed (Cloudflare's tool runs on it).",
                                "kazma setup install --with node, then run this again")
         self._npx = npx
@@ -256,6 +268,7 @@ class WatchSetup:
         if source is None:
             raise SetupStopped("This Kazma has no Kazma Watch code.", "update Kazma: kazma update")
         self._work = work
+        self._install_wrangler(source, work, npm)
 
         self.io.say("1/6 Cloudflare: checking you are signed in")
         self._signed_in()
@@ -338,9 +351,42 @@ class WatchSetup:
                                "run this from the folder Kazma is installed in (its .env holds the vault key)")
         return vault
 
+    def _install_wrangler(self, source: Path, work: Path, npm: str) -> None:
+        """Install wrangler in *work* from the Worker's lock (``npm ci``),
+        once per lock: a lock already installed is not installed again."""
+        missing = [n for n in _NPM_FILES if not (source / n).is_file()]
+        if missing:
+            raise SetupStopped(f"This Kazma's Kazma Watch code has no {', '.join(missing)}.",
+                               "update Kazma: kazma update")
+        lock = (source / "package-lock.json").read_bytes()
+        digest = hashlib.sha256(lock).hexdigest()
+        stamp = work / "node_modules" / ".kazma-lock.sha256"
+        try:
+            installed = stamp.read_text(encoding="utf-8").strip() == digest
+        except OSError:
+            installed = False
+        if installed:
+            return
+        for name in _NPM_FILES:
+            shutil.copy2(source / name, work / name)
+        self.io.say(f"   installing Cloudflare's tool (wrangler {WRANGLER_VERSION}) from its lock")
+        try:
+            done = self.run([npm, "ci", "--ignore-scripts", "--no-audit", "--no-fund"], cwd=work,
+                            timeout=900)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise SetupStopped(f"Cloudflare's tool could not be installed ({type(exc).__name__}).") from exc
+        if done.returncode != 0:
+            out = _plain((done.stdout or "") + "\n" + (done.stderr or ""))
+            raise SetupStopped(f"Cloudflare's tool could not be installed: {self._last_lines(out)}",
+                               "check the network, then run this again")
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        stamp.write_text(digest + "\n", encoding="utf-8")
+
     def _wrangler(self, *args: str, what: str, input_text: str | None = None, interactive: bool = False,
                   timeout: float = 900.0, check: bool = True) -> str:
-        argv = [self._npx, "--yes", f"wrangler@{WRANGLER_VERSION}", *args]
+        # The wrangler the work folder installed from the lock; --no-install:
+        # npx never fetches one of its own.
+        argv = [self._npx, "--no-install", "wrangler", *args]
         try:
             done = self.run(argv, cwd=self._work, input_text=input_text, interactive=interactive, timeout=timeout,
                             account_id=self.account_id)

@@ -141,8 +141,8 @@ Rules:
 
 # Filler patterns — turns that match are skipped before any LLM call.
 _FILLER_PATTERNS = [
-    re.compile(r"^\s*(okay|ok|got it|noted|thanks|thank you|sure|yes|no|cool|nice|great)\s*[.!?]*\s*$", re.I),
-    re.compile(r"^\s*(lol|haha|hm+|uh+h*|um+)\s*$", re.I),
+    re.compile(r"^\s*+(okay|ok|got it|noted|thanks|thank you|sure|yes|no|cool|nice|great)\s*+[.!?]*+\s*+$", re.I),
+    re.compile(r"^\s*+(lol|haha|hm+|uh+|um+)\s*+$", re.I),
     re.compile(r"^\s*.{0,12}\s*$"),  # very short turns (≤12 chars)
 ]
 
@@ -259,7 +259,7 @@ async def _llm_extract(
         # Strip markdown fences if the model added them
         if raw.startswith("```"):
             raw = re.sub(r"^```(?:json)?\s*", "", raw)
-            raw = re.sub(r"\s*```$", "", raw)
+            raw = re.sub(r"(?<!\s)\s*+```$", "", raw)  # from a run's start: linear
         data = json.loads(raw)
         if not isinstance(data, dict):
             return None, False

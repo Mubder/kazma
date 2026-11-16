@@ -72,15 +72,15 @@
     <h3 style="margin:0 0 0.75rem 0;font-size:1rem;">{{ t('knowledge.add_title') }}</h3>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin-bottom:8px;">
       <input
-        type="text" class="form-input" placeholder="{{ t('knowledge.id_placeholder') }}"
+        type="text" class="form-input" aria-label="{{ t('knowledge.id_label') }}" placeholder="{{ t('knowledge.id_placeholder') }}"
         x-model="form.id" :disabled="creating"
       >
       <input
-        type="text" class="form-input" placeholder="{{ t('knowledge.name_placeholder') }}"
+        type="text" class="form-input" aria-label="{{ t('knowledge.name_placeholder') }}" placeholder="{{ t('knowledge.name_placeholder') }}"
         x-model="form.name" :disabled="creating"
       >
       <input
-        type="text" class="form-input" placeholder="{{ t('knowledge.seed_placeholder') }}"
+        type="text" class="form-input" aria-label="{{ t('knowledge.seed_url_label') }}" placeholder="{{ t('knowledge.seed_placeholder') }}"
         x-model="form.seed_url" :disabled="creating" @input="previewResult = null"
       >
     </div>
@@ -323,7 +323,7 @@
         <div x-show="lib._search_open" style="margin-top:0.75rem;border-top:1px dashed var(--card-hairline);padding-top:0.6rem;" x-cloak>
           <div style="display:flex;gap:6px;margin-bottom:6px;">
             <input
-              type="text" class="form-input" :placeholder="lib._t_search_placeholder"
+              type="text" class="form-input" :aria-label="lib._t_search_placeholder" :placeholder="lib._t_search_placeholder"
               x-model="lib._query" @keydown.enter="runSearch(lib)"
             >
             <button class="btn btn-primary btn-sm" @click="runSearch(lib)" :disabled="lib._searching" x-text="lib._t_search_btn"></button>

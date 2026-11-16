@@ -122,6 +122,17 @@ _ADMIN_WRITE_PREFIXES = (
     "/api/models/saved",
 )
 
+# Single routes (never their children) only an administrator may call.
+# Model discovery asks the address a request names: with an operator's
+# credential, or a link the signed-in owner opened (a GET carries the
+# cookie, and CSRF checks writes only), it asked any host until 2026-11-16.
+# The address is checked too (security.ssrf.check_model_server_url); only
+# Settings, an admin page, calls it. /api/models/options and the rest stay.
+_ADMIN_EXACT = (
+    "/api/models",
+    "/v1/models",
+)
+
 # Paths viewer may access (read-ish); everything else needs operator+
 _VIEWER_OK_PREFIXES = (
     "/api/status",
@@ -177,6 +188,8 @@ def role_allows(role: str, path: str, method: str = "GET") -> bool:
     # tenant: changing it is guidance for all of them, like the personality,
     # so only an administrator may (Memory audit M11).
     if path.rstrip("/") == "/api/memory/v2/profile" and m in ("PUT", "POST", "PATCH", "DELETE"):
+        return False
+    if path.rstrip("/") in _ADMIN_EXACT:
         return False
     # Admin-only surfaces
     for p in _ADMIN_PREFIXES:

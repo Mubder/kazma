@@ -173,6 +173,7 @@ function memoryPage() {
     beliefsPage: { offset: 0, total: 0, pageSize: 100 },
     mergesPage: { offset: 0, total: 0, pageSize: 50 },
     hygienePreview: {},
+    hygieneFailed: false,
     hygiene: {
       purge_empty_entities: true,
       invalidate_near_dup_noted: false,
@@ -442,9 +443,18 @@ function memoryPage() {
     loadMoreBeliefs() { return this.loadBeliefs(true); },
     loadMoreMerges() { return this.loadMerges(true); },
 
+    // A preview that could not be read is said (memory.html), never shown as
+    // "(0)" beside every action: a network failure rejected here and left the
+    // last counts, an error answer set them to zero (Sonar S9383, 2026-11-16).
     async loadHygiene() {
-      const d = await api("/api/memory/v2/hygiene/preview");
-      this.hygienePreview = d.ok ? d : {};
+      let d;
+      try {
+        d = await api("/api/memory/v2/hygiene/preview");
+      } catch (_) {
+        d = {};
+      }
+      this.hygieneFailed = !(d && d.ok);
+      this.hygienePreview = this.hygieneFailed ? {} : d;
     },
 
     toggleAllBeliefs(on) {

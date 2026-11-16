@@ -74,7 +74,7 @@ _ASSIGNMENT = re.compile(
 #: (YAML, INI, ``.env``); code assigns names, so it is never read this way.
 _BARE_ASSIGNMENT = re.compile(
     r"""(?ix)
-    ^\s*(?:export\s+)?-?\s*
+    ^\s*+(?:export\s++)?-?\s*+
     (?P<name>[a-z0-9_.-]{0,40}?
         (?:api[_.-]?key|apikey|secret|token|passw(?:or)?d|passwd|pwd
           |private[_.-]?key|access[_.-]?key|auth[_.-]?key|credentials?)
@@ -87,7 +87,10 @@ _BARE_ASSIGNMENT = re.compile(
 _PASSWORD_NAME = re.compile(r"(?i)passw(?:or)?d|passwd|pwd")
 #: A line holds none of these, lowercased: no credential name can match.
 _NAME_WORDS = ("key", "secret", "token", "pass", "pwd", "credential")
-_URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s\"'<>`]+")
+# A scheme is read at most 32 characters back from its "://": from every letter
+# of a long run the old pattern read the rest of the run (quadratic). Only the
+# password decides (``_url_password``), and it is the same URL's.
+_URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]{0,31}+://[^\s\"'<>`]+")
 
 #: Words a value holds when it stands in for a credential.
 _PLACEHOLDER_WORDS = (

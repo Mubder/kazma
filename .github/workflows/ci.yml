@@ -101,7 +101,13 @@ jobs:
         # versions with known advisories that pyproject's minimums now refuse.
         run: uv export --locked --no-dev --no-emit-project --format requirements-txt -o "$RUNNER_TEMP/requirements.lock.txt"
       - name: Build the wheel
-        run: uv build --wheel --out-dir dist
+        # As the release builds it: the locked, hash-checked build backend.
+        run: |
+          set -euo pipefail
+          uv export --locked --only-group build --no-emit-project --format requirements-txt \
+            -o "$RUNNER_TEMP/build-constraints.txt"
+          uv build --wheel --build-constraints "$RUNNER_TEMP/build-constraints.txt" --require-hashes \
+            --out-dir dist
       - name: Install that wheel into a clean environment
         run: |
           set -euo pipefail
@@ -879,7 +885,10 @@ jobs:
         run: |
           set -euo pipefail
           uv export --locked --no-dev --no-emit-project --no-hashes --no-header --all-extras             --format requirements-txt -o kazma-cli/kazma_cli/locked_versions.txt
-          uv build --wheel --out-dir "$RUNNER_TEMP/wheel"
+          uv export --locked --only-group build --no-emit-project --format requirements-txt \
+            -o "$RUNNER_TEMP/build-constraints.txt"
+          uv build --wheel --build-constraints "$RUNNER_TEMP/build-constraints.txt" --require-hashes \
+            --out-dir "$RUNNER_TEMP/wheel"
       - name: Upgrade the last release to it (GATE)
         shell: bash
         env:

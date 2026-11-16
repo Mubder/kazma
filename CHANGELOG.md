@@ -1,5 +1,34 @@
 # CHANGELOG
 
+## SonarCloud review (2026-11-16)
+
+Every one of SonarCloud's 1,623 open findings was read against the code;
+448 were real and are fixed, each with a test that fails on the old code.
+
+- A shell command the agent runs can no longer start Kazma's own command
+  line or `ps` on a development install (the default after setup).
+- The model-list route asks only this computer, the owner's network or a
+  public address, never a cloud metadata address, and is the admin's.
+  Settings sends a provider key in a header, never in the address.
+- The release job runs its signing and SBOM tools from the lock (every
+  dependency hash-checked) and builds with hash-checked build tools; its
+  checkout keeps no token. `kazma observer setup` installs Cloudflare's tool
+  from a committed lock.
+- The image leaves out keys, migration bundles, local configuration and
+  memory repair copies; OIDC sign-in holds the provider to its configured
+  issuer and fetches its keys off the event loop.
+- Slow patterns on text from outside (a shell command's safety check took
+  9 s on a 1,200-character command) are fixed, and every pattern in the
+  product is checked against hostile input.
+- A logged value can no longer fake a line the daily digest and the weekly
+  report count, such as a backup that ran.
+- Every control on every page has a name a screen reader can say; labels
+  are tied to their fields, and the import chips work from the keyboard.
+- A cancel reaches the code that asked for it (`kazma ask --acp` stops its
+  turn on Ctrl+C), the CLI memory backfill extracts facts again, and smaller
+  defects: the dialect detector, the settings transaction, the gateway's
+  lifespan, `import *` of two packages.
+
 ## Found testing live (2026-11-15)
 
 - The model options shown by Settings and the Swarm page no longer carry

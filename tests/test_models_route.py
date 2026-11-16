@@ -311,6 +311,16 @@ class TestProviderSwitch:
         return TestClient(app)
 
     @pytest.fixture(autouse=True)
+    def _names_resolve_locally(self, monkeypatch):
+        """The switch checks the address (security.ssrf.check_model_server_url):
+        names are answered here, never by a real lookup. "my-server" is a
+        server on the owner's network."""
+        from kazma_core.security import ssrf
+
+        names = {"my-server": ["192.168.1.20"], "localhost": ["127.0.0.1"]}
+        monkeypatch.setattr(ssrf, "_resolve_host_ips", lambda host: list(names.get(host, [])))
+
+    @pytest.fixture(autouse=True)
     def _hermetic_registry(self, tmp_path):
         """Initialize the process model registry against a tmp ConfigStore.
 

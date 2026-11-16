@@ -113,8 +113,8 @@
           </div>
 
           <!-- Worker Multi-Select with Capability Badges (VAL-UI-002, VAL-ORCH-043) -->
-          <div class="form-group">
-            <label class="form-label">{{ t('swarm.workers_label') }} *</label>
+          <fieldset class="form-group" style="border:0;padding:0;margin-inline:0;min-width:0">
+            <legend class="form-label" style="padding:0;float:inline-start;width:100%">{{ t('swarm.workers_label') }} *</legend>
             <div id="worker-select-container" class="swarm-picker" style="max-height:200px;">
               <!-- Worker checkboxes rendered by JS with capability badges -->
               <div id="worker-checkboxes" style="display:flex;flex-direction:column;gap:4px;">
@@ -142,7 +142,7 @@
               </div>
             </div>
             <span style="font-size:0.7rem;color:var(--text-muted);" id="pattern-hint">{{ t('swarm.pattern_hint_dispatch') }}</span>
-          </div>
+          </fieldset>
 
           <!-- Prompt Textarea (VAL-UI-003) -->
           <div class="form-group">
@@ -338,8 +338,8 @@
           </div>
 
           <!-- Workers Select dropdown -->
-          <div class="form-group">
-            <label class="form-label">{{ t('swarm.workers_label') }} *</label>
+          <fieldset class="form-group" style="border:0;padding:0;margin-inline:0;min-width:0">
+            <legend class="form-label" style="padding:0;float:inline-start;width:100%">{{ t('swarm.workers_label') }} *</legend>
             <div id="play-worker-select-container" class="swarm-picker" style="max-height:150px;">
               <div id="play-worker-checkboxes" style="display:flex;flex-direction:column;gap:4px;">
                 <label style="display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:0.85rem;" class="worker-check-label">
@@ -366,7 +366,7 @@
               </div>
             </div>
             <span style="font-size:0.7rem;color:var(--text-muted);" id="play-pattern-hint">{{ t('swarm.select_worker') }}</span>
-          </div>
+          </fieldset>
 
           <!-- Prompt text area -->
           <div class="form-group">
@@ -803,7 +803,7 @@
   <div class="modal modal-xl" onclick="event.stopPropagation()" role="dialog" aria-modal="true" aria-labelledby="task-detail-title">
     <div class="modal-header">
       <h2 id="task-detail-title">{{ t('swarm.task_detail') }}</h2>
-      <button class="modal-close" onclick="KazmaSwarm.closeTaskDetail()"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
+      <button class="modal-close" onclick="KazmaSwarm.closeTaskDetail()" aria-label="{{ t('common.close') }}"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
     </div>
     <div class="modal-body" id="task-detail-body" style="max-height:70vh;overflow-y:auto;">
       {{ t('common.loading') }}
@@ -813,10 +813,10 @@
 
 <!-- ── Logs Modal ── -->
 <div id="logs-modal" class="modal-overlay" style="display:none;" onclick="KazmaSwarm.closeLogs(event)">
-  <div class="modal modal-lg" onclick="event.stopPropagation()">
+  <div class="modal modal-lg" onclick="event.stopPropagation()" role="dialog" aria-modal="true" aria-labelledby="logs-worker-name">
     <div class="modal-header">
       <h2 id="logs-worker-name">{{ t('swarm.logs') }}</h2>
-      <button class="modal-close" onclick="KazmaSwarm.closeLogs()"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
+      <button class="modal-close" onclick="KazmaSwarm.closeLogs()" aria-label="{{ t('common.close') }}"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
     </div>
     <div id="logs-content" class="modal-body" style="max-height:60vh;overflow-y:auto;font-family:var(--font-mono);font-size:0.8rem;">
       {{ t('swarm.loading_logs') }}
@@ -826,8 +826,8 @@
 
 <!-- ── Edit Worker Modal ── -->
 <div id="edit-worker-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)KazmaSwarm.closeEditWorker()">
-  <div class="modal">
-    <h2 style="display:flex;align-items:center;gap:8px;"><span class="ki" data-icon="edit" aria-hidden="true"></span> {{ t('swarm.edit_worker_modal') }}</h2>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="edit-worker-title">
+    <h2 id="edit-worker-title" style="display:flex;align-items:center;gap:8px;"><span class="ki" data-icon="edit" aria-hidden="true"></span> {{ t('swarm.edit_worker_modal') }}</h2>
     <input type="hidden" id="edit-worker-name">
     <div class="form-group">
       <label for="edit-worker-role" class="form-label">{{ t('swarm.role') }}</label>

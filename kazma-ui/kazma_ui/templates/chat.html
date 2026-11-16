@@ -40,7 +40,7 @@
       <button id="new-session-btn" class="btn btn-sm sessions-new-btn" title="{{ t('chat.new_session') }} (Ctrl+N)">{{ t('chat.new_session') }}</button>
     </div>
     <div class="session-search-wrapper">
-      <input type="text" id="session-search" class="form-input session-search-input" placeholder="{{ t('chat.search_sessions') }}">
+      <input type="text" id="session-search" class="form-input session-search-input" aria-label="{{ t('chat.search_sessions') }}" placeholder="{{ t('chat.search_sessions') }}">
     </div>
     <div id="session-list" class="session-list">
       <div class="session-empty">{{ t('chat.loading_sessions') }}</div>
@@ -121,7 +121,7 @@
           </svg>
         </button>
         {# No accept= filter — any file type (docx, pdf, images, …) is selectable without switching to "All Files" #}
-        <input type="file" id="file-input" class="composer-file-input" multiple>
+        <input type="file" id="file-input" class="composer-file-input" aria-label="{{ t('chat.attach_file') }}" multiple>
         <button id="voice-btn" class="btn-icon composer-icon-btn composer-voice-btn" title="{{ t('chat.record_voice_hint') }}" aria-label="{{ t('chat.record_voice') }}" type="button" onmousedown="KazmaVoice.startRecording()" onmouseup="KazmaVoice.stopRecording()" onmouseleave="KazmaVoice.stopRecording()" ontouchstart="event.preventDefault(); KazmaVoice.startRecording();" ontouchend="KazmaVoice.stopRecording()">
           <svg id="mic-icon" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
             <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
@@ -141,6 +141,7 @@
         <textarea
           id="chat-input"
           class="chat-input"
+          aria-label="{{ t('chat.message_label') }}"
           rows="1"
           dir="auto"
           placeholder="{{ t('chat.placeholder') }}"

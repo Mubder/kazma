@@ -1030,7 +1030,13 @@ _EXEC_DENYLIST = [
         r")",
         _re.IGNORECASE,
     ),
-    _re.compile(r":\s*\(\)\s*\{.*:.*\|.*&.*\}", _re.IGNORECASE),  # fork bomb
+    # Fork bomb. The first ":(){" of a line decides it: a later one's tail is
+    # a suffix of the first one's, so trying each (with ".*" between the four
+    # marks) was about n**4 on a line of them.
+    _re.compile(
+        r"(?m)^(?>[^\n]*?:\s*\(\)\s*\{)[^:\n]*+:[^|\n]*+\|[^&\n]*+&[^}\n]*+\}",
+        _re.IGNORECASE,
+    ),
     # Remote content piped toward an interpreter. Hardened (audit finding):
     # the interpreter used to have to sit IMMEDIATELY after the pipe, so
     # `curl x | sudo bash` and `curl x | tee f && sh f` evaded. Now anything
@@ -1071,7 +1077,7 @@ _EXEC_DENYLIST = [
         r"\b(?:shellexecute|runcmd)\b",
         _re.IGNORECASE,
     ),
-    _re.compile(r"\bdd\b\s+.*of\s*=\s*/dev/", _re.IGNORECASE),  # dd to device
+    _re.compile(r"(?m)^(?>.*?\bdd\b\s+).*of\s*=\s*/dev/", _re.IGNORECASE),  # dd to device (first dd of a line decides)
     _re.compile(r"\bmkfs\b", _re.IGNORECASE),  # format filesystem
     _re.compile(r">\s*/dev/(sd|nvme|hd|disk)", _re.IGNORECASE),  # redirect to raw disk
     _re.compile(

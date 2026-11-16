@@ -143,13 +143,8 @@ def _rule_based_detect(text: str) -> DialectResult:
             scores["ma"] += 2.0
             total_hits += 1
 
-    # Heuristic: if no dialect markers found, lean toward MSA
-    if total_hits == 0:
-        # Short text with no markers — treat as MSA with moderate confidence
-        scores["msa"] = 1.0
-    else:
-        # Give MSA a base score so it isn't zeroed out by dialect markers
-        scores["msa"] = 1.0
+    # MSA gets a base score so dialect markers do not zero it out.
+    scores["msa"] = 1.0
 
     # Additional MSA indicators: formal constructions
     msa_formal = [
@@ -168,9 +163,19 @@ def _rule_based_detect(text: str) -> DialectResult:
         "خلال",
         "بموجب",
     ]
+    formal_hits = 0
     for pattern in msa_formal:
         if pattern in text:
             scores["msa"] += 0.5
+            formal_hits += 1
+
+    # No dialect marker: MSA, as a lean, never a certainty. Both branches set
+    # the same base score, so text with no marker (English included) was MSA
+    # at confidence 1.0 (SonarCloud review, 2026-11-16). Formal MSA phrases
+    # raise it, to at most 0.8.
+    if total_hits == 0:
+        return DialectResult(dialect="msa", confidence=round(min(0.8, 0.5 + 0.1 * formal_hits), 3),
+                             alternatives=[])
 
     # Pick the winner
     best = max(scores, key=lambda d: scores[d])

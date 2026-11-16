@@ -445,3 +445,64 @@ def test_oidc_source_verify_is_not_optional() -> None:
     src = _OIDC_PY.read_text(encoding="utf-8")
     assert "await _verify_id_token(str(id_token), disc, cfg)" in src
     assert "or claims" not in src.split("if id_token:", 1)[-1].split("elif tokens.get", 1)[0]
+
+
+# ── 2026-11-16 (SonarCloud review): the issuer and the key fetch ─────────
+
+
+async def test_the_id_token_is_held_to_the_configured_issuer(oidc_env, rsa_keys, monkeypatch):
+    """A discovery document naming another issuer used to move which tokens
+    were accepted: the token was checked against the document's issuer."""
+    priv, pub = rsa_keys
+    _patch_jwks(monkeypatch, pub)
+    other = "https://elsewhere.example"
+    token = _rs_token(priv, _claims(iss=other))
+    with pytest.raises(PermissionError):
+        await _verify_id_token(token, _disc(issuer=other), oidc_env)
+
+
+async def test_a_discovery_document_naming_another_issuer_is_refused(monkeypatch):
+    import httpx
+
+    async def get(self, url, *a, **k):
+        return httpx.Response(200, json=_disc(issuer="https://elsewhere.example"),
+                              request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", get)
+    with pytest.raises(PermissionError):
+        await oidc_mod.fetch_discovery(ISSUER)
+
+    async def same(self, url, *a, **k):
+        return httpx.Response(200, json=_disc(issuer=ISSUER + "/"),
+                              request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", same)
+    assert (await oidc_mod.fetch_discovery(ISSUER))["issuer"] == ISSUER + "/"
+
+
+async def test_the_key_set_is_fetched_off_the_event_loop(oidc_env, rsa_keys, monkeypatch):
+    """PyJWT's key client reads the JWKS over urllib: a blocking read, on
+    the event loop until 2026-11-16 (a stall per sign-in)."""
+    import asyncio
+    import threading
+
+    priv, pub = rsa_keys
+    loop_thread = threading.get_ident()
+    seen: list[int] = []
+
+    class _Key:
+        key = pub
+
+    class _Client:
+        def __init__(self, uri, *a, **k):
+            pass
+
+        def get_signing_key_from_jwt(self, token):
+            seen.append(threading.get_ident())
+            return _Key()
+
+    monkeypatch.setattr("jwt.PyJWKClient", _Client)
+    claims = await _verify_id_token(_rs_token(priv), _disc(), oidc_env)
+    assert claims["sub"] == "user-1"
+    assert seen and seen[0] != loop_thread
+    assert asyncio.get_running_loop()

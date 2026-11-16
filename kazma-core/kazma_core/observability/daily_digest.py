@@ -26,7 +26,6 @@ Nothing here queries the LLM, a remote database or the network.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
@@ -39,6 +38,7 @@ from pathlib import Path
 from typing import Any
 
 from kazma_core.english_count import count_noun
+from kazma_core.observability.log_lines import opens_with, read_app_line, read_guard_line
 from kazma_core.observability.turn_line import TURN_MARKER, read_turn_line
 
 logger = logging.getLogger(__name__)
@@ -74,7 +74,10 @@ _PAUSE_END = "maintenance.resumed"
 _RELOAD = "guard.operator_reload"
 
 # Application log lines, each read by how its message OPENS: its "[tag] " and
-# the words after it, matched at the start of the message (``re.match``).
+# the words after it, matched at the start of the message (``opens_with``).
+# Every marker of this module is read so (2026-11-16, log_lines): a message
+# quoting one -- a session id, a file name -- counted a turn, a cron outcome
+# or a call that ran without asking (tests/test_log_readers_read_markers_at_the_start.py).
 # A marker matched anywhere in the message also matched text a variable
 # carried: on 2026-11-05 the digest reported five "MCP connection failures"
 # that were the health check quoting Docker's own "failed to connect to the
@@ -102,6 +105,11 @@ _TURN_MARKER = TURN_MARKER
 # The memory changes the operator made (kazma_ui.memory_actions, Memory audit
 # M35): one line each, with the route and the status. The forgets are counted.
 _MEMORY_ACTION = "[memory] operator action="
+#: The whole line (kazma_ui.memory_actions._record): the action (spaces made
+#: "_"), then the status last. A forget is an action ending "/forget".
+_MEMORY_ACTION_LINE = re.compile(
+    r"\[memory\] operator action=(?P<action>\S+) actor=.* status=(?P<status>\d+)$"
+)
 # One line per scheduled fire and per delivery outcome (kazma_core.cron.scheduler,
 # Scheduled audit SCH-E02/E11): a reminder not delivered, missed or failed was a
 # CRITICAL log line and nothing else.
@@ -140,18 +148,11 @@ _YOLO_ON_LINE = re.compile(
 )
 _YOLO_OFF = "[SECURITY] YOLO DISABLED"
 _YOLO_OFF_LINE = re.compile(r"\[SECURITY\] YOLO DISABLED thread=(\S+) actor=(\S+)")
-# Before 2026-11-01 the swarm bus said it in its own words (and counted the
-# card's own call, which ran under the grant the card had just made); the
-# chat graph said nothing for a grant.
-_LEGACY_YOLO = "YOLO mode active for thread="
-_LEGACY_YOLO_LINE = re.compile(r"YOLO mode active for thread=(\S+) \S+ auto-approving: (\S+)")
-#: An old-format YOLO approval this soon after its chat's window opened is
-#: the call on the card that opened it (live: 0.09 s and 0.15 s; the next
-#: call waits for a model reply).
-_LEGACY_CARD_S = 2.0
-_LEGACY_GRANT = " grant covers "
-_LEGACY_GRANT_LINE = re.compile(r"\[Safety\] (task|tool) grant covers (\S+) on thread=(\S+)")
-_UNASKED_NEEDLES = (_UNASKED_MARKER, _YOLO_ON, _YOLO_OFF, _LEGACY_YOLO, _LEGACY_GRANT)
+# The swarm bus's own words from before 2026-11-01 ("YOLO mode active for
+# thread=...", "[Safety] tool grant covers ...") were read too until
+# 2026-11-16: no build writes them, and the 7-day log retention has dropped
+# every line that did.
+_UNASKED_NEEDLES = (_UNASKED_MARKER, _YOLO_ON, _YOLO_OFF)
 _UNASKED_WORDS = {
     "yolo": "under YOLO",
     "tool_grant": 'under "Allow tool"',
@@ -164,13 +165,12 @@ _ONE_LINE_RECORDS = (_TURN_MARKER, _ALERT_MARKER, _UNASKED_MARKER, _YOLO_ON)
 #: "and 1 more (each is in the log)", and a phone holds no log.
 _ALERT_LINES = 12
 
-# The application log's plain line (logging_config's "standard" formatter,
-# local time). The file is JSON when the ``logging.format`` setting says so;
-# a server that set up logging while the settings store could not answer
-# wrote plain lines, and the digest read JSON only: on 2026-10-31 it reported
-# "Turns completed: 0 ... No failures, no restarts, no alerts" over a day of
-# turns and alerts it never read.
-_PLAIN_LINE = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \[(\w+)\] (\S+): (.*)$")
+# The application log is read in both its shapes (``log_lines.read_app_line``):
+# JSON when the ``logging.format`` setting says so, else logging_config's
+# plain "standard" line in local time. A server that set up logging while
+# the settings store could not answer wrote plain lines, and the digest read
+# JSON only: on 2026-10-31 it reported "Turns completed: 0 ... No failures,
+# no restarts, no alerts" over a day of turns and alerts it never read.
 
 # How a question in the approval registry ended, in the digest's words.
 _OUTCOME_WORDS = {
@@ -235,31 +235,18 @@ def _window_files(path: Path, since: float) -> list[Path]:
 
 
 def _app_line(line: str) -> tuple[float, dict] | None:
-    """``(time, record)`` of one application log line, JSON or plain."""
-    if line.startswith("{"):
-        try:
-            rec = json.loads(line)
-            return datetime.fromisoformat(rec["timestamp"]).timestamp(), rec
-        except (ValueError, KeyError, TypeError):
-            return None
-    m = _PLAIN_LINE.match(line.rstrip("\r\n"))
-    if m is None:
+    """``(time, record)`` of one application log line, JSON or plain
+    (``log_lines.read_app_line``)."""
+    record = read_app_line(line)
+    if record is None:
         return None
-    try:
-        # Naive: the formatter writes local time, and .timestamp() reads it so.
-        ts = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S").timestamp()
-    except ValueError:
-        return None
-    return ts, {"level": m.group(2), "logger": m.group(3), "message": m.group(4)}
+    return record.ts, {"level": record.level, "logger": record.logger, "message": record.message}
 
 
 def _guard_line(line: str) -> tuple[float, dict] | None:
-    """``(time, record)`` of one guard log line (always JSON)."""
-    try:
-        rec = json.loads(line)
-        return datetime.fromisoformat(rec["ts"]).timestamp(), rec
-    except (ValueError, KeyError, TypeError):
-        return None
+    """``(time, record)`` of one guard log line (``log_lines.read_guard_line``)."""
+    record = read_guard_line(line)
+    return None if record is None else (record.ts, record.fields)
 
 
 def _records(locate, since: float, parse,
@@ -270,9 +257,9 @@ def _records(locate, since: float, parse,
     *locate* returns the live log's path; *parse* reads one line. A log that
     cannot be found or read is skipped and said; the digest still goes out.
     A turn or alert line *parse* cannot read is counted in *unread* (both are
-    always one line, so they are never a traceback's continuation): a log
-    written in a format the digest does not know is reported, not read as a
-    quiet day.
+    always one line, so they are never a traceback's continuation, which the
+    writer indents): a log written in a format the digest does not know is
+    reported, not read as a quiet day.
     """
     try:
         path = locate()
@@ -287,7 +274,8 @@ def _records(locate, since: float, parse,
                         continue
                     parsed = parse(line)
                     if parsed is None:
-                        if unread is not None and any(n in line for n in _ONE_LINE_RECORDS):
+                        if (unread is not None and not line[:1].isspace()
+                                and any(n in line for n in _ONE_LINE_RECORDS)):
                             unread[log.name] += 1
                         continue
                     if parsed[0] >= since:
@@ -339,28 +327,15 @@ def _unasked_chat(chats: dict[str, dict], thread: str, ts: float) -> dict:
     return chat
 
 
-def _note_unasked(chats: dict[str, dict], ts: float, msg: str) -> bool:
-    """Read one YOLO or ran-without-asking line into *chats*; False when *msg*
-    is none of them."""
-    m = _UNASKED_LINE.search(msg)
+def _note_unasked(chats: dict[str, dict], ts: float, message: str) -> bool:
+    """Read one YOLO or ran-without-asking line into *chats*; False when
+    *message* opens with none of them."""
+    m = opens_with(message, _UNASKED_LINE)
     if m:
         tool, thread, by = m.groups()
         _unasked_chat(chats, thread, ts)["calls"].setdefault(by, Counter())[tool] += 1
         return True
-    m = _LEGACY_YOLO_LINE.search(msg)
-    if m:
-        thread, tool = m.groups()
-        windows = chats.get(thread, {}).get("windows") or []
-        if windows and 0 <= ts - windows[-1]["on"] <= _LEGACY_CARD_S:
-            return True  # the card's own call, run as the window opened
-        _unasked_chat(chats, thread, ts)["calls"].setdefault("yolo", Counter())[tool] += 1
-        return True
-    m = _LEGACY_GRANT_LINE.search(msg)
-    if m:
-        kind, tool, thread = m.groups()
-        _unasked_chat(chats, thread, ts)["calls"].setdefault(f"{kind}_grant", Counter())[tool] += 1
-        return True
-    m = _YOLO_ON_LINE.search(msg)
+    m = opens_with(message, _YOLO_ON_LINE)
     if m:
         thread, actor, ttl, unified = m.groups()
         _unasked_chat(chats, thread, ts)["windows"].append({
@@ -368,7 +343,7 @@ def _note_unasked(chats: dict[str, dict], ts: float, msg: str) -> bool:
             "unified": bool(unified), "off": None,
         })
         return True
-    m = _YOLO_OFF_LINE.search(msg)
+    m = opens_with(message, _YOLO_OFF_LINE)
     if m:
         # Turning off a chat's YOLO is logged whether or not it was on: an
         # "off" ends the window this digest saw open, and is nothing alone.
@@ -403,27 +378,28 @@ def _scan_app_log(
     # matched to its "on" in time order.
     unasked: list[tuple[float, str]] = []
     for ts, rec in _records(_app_log_path, since, _app_line, needles, unread):
-        msg = str(rec.get("message", ""))
-        if any(n in msg for n in _UNASKED_NEEDLES):
-            unasked.append((ts, msg))
+        message = str(rec.get("message", ""))
+        if any(opens_with(message, needle) for needle in _UNASKED_NEEDLES):
+            unasked.append((ts, message))
             continue
-        turn = read_turn_line(msg)
+        turn = read_turn_line(message)
         if turn:
             platform, key, failed = turn
             turns[key] = (platform, failed)
             continue
-        cron = _CRON_LINE.search(msg)
+        cron = opens_with(message, _CRON_LINE)
         if cron:
             label = _CRON_OUTCOMES.get(cron.group(2), (None, False))[0]
             if label:
                 counts[label] += 1
             continue
-        if msg.startswith(_MEMORY_ACTION):
-            if "/forget " in msg and " status=200" in msg:
+        if opens_with(message, _MEMORY_ACTION):
+            action = opens_with(message, _MEMORY_ACTION_LINE)
+            if action and action["action"].endswith("/forget") and action["status"] == "200":
                 counts["memory forgets"] += 1
             continue
-        if msg.startswith(_ALERT_MARKER):
-            key, _sep, title = msg[len(_ALERT_MARKER):].partition(" | ")
+        if opens_with(message, _ALERT_MARKER):
+            key, _sep, title = message[len(_ALERT_MARKER):].partition(" | ")
             held = title.endswith(_THROTTLED)
             if held:
                 title = title[: -len(_THROTTLED)]
@@ -438,11 +414,11 @@ def _scan_app_log(
                 tally["attention"] = True
             continue
         for _needle, pattern, label in _APP_LINES:
-            line = pattern.match(msg)
+            line = opens_with(message, pattern)
             if line:
                 counts[label] += int(line.groupdict().get("n") or 1)
-    for ts, msg in sorted(unasked, key=lambda item: item[0]):
-        _note_unasked(chats, ts, msg)
+    for ts, message in sorted(unasked, key=lambda item: item[0]):
+        _note_unasked(chats, ts, message)
     return counts, turns, alerts, chats
 
 

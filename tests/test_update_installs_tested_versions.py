@@ -236,7 +236,8 @@ def test_the_release_writes_the_locked_versions_before_it_builds_and_checks_the_
 
     workflow = (REPO / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
     write = workflow.index("-o kazma-cli/kazma_cli/locked_versions.txt")
-    build = workflow.index("uv build --out-dir dist")
+    # The build takes hashed build constraints (uv.lock's `build` group).
+    build = workflow.index("uv build --build-constraints")
     assert write < build
     assert "--locked" in workflow[workflow.rfind("uv export", 0, write):write]
     assert f"'{LOCKED_VERSIONS_MEMBER}' in n" in workflow[build:]

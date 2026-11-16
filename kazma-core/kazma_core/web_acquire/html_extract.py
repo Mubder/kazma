@@ -24,7 +24,7 @@ def strip_html_fallback(html: str) -> str:
         .replace("&gt;", ">")
         .replace("&quot;", '"')
     )
-    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"(?<![ \t])[ \t]++\n", "\n", text)  # from a run's start: linear
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = re.sub(r"[ \t]{2,}", " ", text)
     return text.strip()

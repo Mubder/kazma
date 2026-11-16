@@ -44,7 +44,10 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # The job's token (contents: write) stays out of .git/config, where
+          # every later step and tool could read it; only the tag push below
+          # is handed it.
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
@@ -83,13 +86,18 @@ jobs:
         env:
           TAG: ${{ steps.ver.outputs.tag }}
           FULL: ${{ steps.ver.outputs.full }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
             echo "Tag ${TAG} already exists — leave as-is"
           else
             git tag -a "${TAG}" -m "Kazma ${FULL}"
-            git push origin "refs/tags/${TAG}"
+            # The token for this one push, as checkout would have set it.
+            auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+            echo "::add-mask::${auth}"
+            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}" \
+              push origin "refs/tags/${TAG}"
             echo "Created ${TAG}"
           fi
 
@@ -118,7 +126,12 @@ jobs:
       - name: Build wheel + sdist
         run: |
           set -euo pipefail
-          uv build --out-dir dist
+          # Built with the locked, hash-checked build backend (uv.lock's
+          # `build` group), never a hatchling fetched unpinned at release time.
+          uv export --locked --only-group build --no-emit-project --format requirements-txt \
+            -o "$RUNNER_TEMP/build-constraints.txt"
+          uv build --build-constraints "$RUNNER_TEMP/build-constraints.txt" --require-hashes \
+            --out-dir dist
           ls -la dist
           # The wheel must carry its locked versions (kazma update installs them).
           python3 -c "import glob,sys,zipfile; w=glob.glob('dist/kazma-*.whl')[0]; n=zipfile.ZipFile(w).namelist(); sys.exit(0 if 'kazma_cli/locked_versions.txt' in n else 'the wheel carries no locked versions')"
@@ -146,9 +159,9 @@ jobs:
           # dependency, and versions pyproject's minimums now refuse).
           uv export --locked --no-dev --no-emit-project --format requirements-txt \
             -o requirements.lock.txt
-          # An exact version: uvx would otherwise run whatever PyPI serves that
-          # day (tests/test_actions_pinned_by_sha.py).
-          uvx --from cyclonedx-bom==8.0.1 cyclonedx-py requirements requirements.lock.txt \
+          # From uv.lock's `sbom` group, its dependencies hash-checked: uvx
+          # pinned only the tool (tests/test_installs_pinned_by_hash.py).
+          uv run --frozen --only-group sbom cyclonedx-py requirements requirements.lock.txt \
             --of JSON -o "dist/kazma-${BASE}.cdx.json" \
             --sv 1.6 --output-reproducible
           python -c "import json,sys; d=json.load(open(sys.argv[1],encoding='utf-8')); print('SBOM components:', len(d.get('components') or []))" \
@@ -192,7 +205,9 @@ jobs:
           set -euo pipefail
           sha256sum -c build-artifacts.sha256
           (cd dist && sha256sum -c SHA256SUMS)
-          uvx --from sigstore==4.5.1 sigstore sign \
+          # From uv.lock's `sign` group (sigstore and every dependency
+          # hash-checked), in the job that holds the signing identity.
+          uv run --frozen --only-group sign sigstore sign \
             dist/kazma-*.whl dist/kazma-*.tar.gz dist/kazma-*.cdx.json dist/SHA256SUMS
           ls -la dist
 
@@ -202,7 +217,7 @@ jobs:
       - name: Verify the signatures as kazma update does
         run: |
           set -euo pipefail
-          uv run --no-project --with sigstore==4.5.1 python scripts/verify_release_signatures.py dist
+          uv run --frozen --only-group sign python scripts/verify_release_signatures.py dist
           sha256sum -c build-artifacts.sha256
 
       # Every release is tested as an upgrade from the one before (REMAINING

@@ -203,15 +203,14 @@ class HardwareMonitor:
             - asyncio.CancelledError (client disconnect)
             - shutdown signal (server shutdown)
         """
-        from kazma_core.shutdown import is_shutting_down
+        from kazma_core.shutdown import is_shutting_down, sleep_or_shutdown
 
         while not is_shutting_down():
             snapshot = await self.get_stats()
             yield snapshot
-            try:
-                await asyncio.wait_for(asyncio.sleep(interval), timeout=interval + 1.0)
-            except asyncio.CancelledError:
-                break
+            # A cancel goes on to the consumer (it was turned into a normal
+            # end, so the request's cancel was lost: SonarCloud review).
+            await sleep_or_shutdown(interval)
         logger.debug("Telemetry stream exited (shutdown=%s)", is_shutting_down())
 
     # ── CPU & RAM (psutil) ──────────────────────────────────────────

@@ -57,7 +57,7 @@
     </div>
 
     <div style="display:flex;align-items:center;gap:12px;margin:1rem 0;">
-      <input type="text" id="research-search" placeholder="{{ t('research.search_placeholder') }}" class="form-input" style="flex:1;min-width:0;" onkeyup="KazmaResearch.search(event)">
+      <input type="text" id="research-search" aria-label="{{ t('research.search_placeholder') }}" placeholder="{{ t('research.search_placeholder') }}" class="form-input" style="flex:1;min-width:0;" onkeyup="KazmaResearch.search(event)">
       <button class="btn btn-secondary" onclick="KazmaResearch.load()">{{ t('research.refresh') }}</button>
     </div>
     <div id="research-list" style="display:flex;flex-direction:column;gap:8px;max-width:100%;overflow:hidden;"></div>
@@ -91,7 +91,7 @@
   <!-- ══ TAB: Archived ══ -->
   <div class="tab-panel" id="panel-archived" style="display:none;">
     <div style="display:flex;align-items:center;gap:12px;margin:1rem 0;">
-      <input type="text" id="research-archived-search" placeholder="{{ t('research.search_placeholder') }}" class="form-input" style="flex:1;min-width:0;" onkeyup="KazmaResearch.searchArchived(event)">
+      <input type="text" id="research-archived-search" aria-label="{{ t('research.search_archived') }}" placeholder="{{ t('research.search_placeholder') }}" class="form-input" style="flex:1;min-width:0;" onkeyup="KazmaResearch.searchArchived(event)">
       <button class="btn btn-secondary" onclick="KazmaResearch.loadArchived()">{{ t('research.refresh') }}</button>
     </div>
     <div id="research-archived-load-error" role="alert" aria-live="polite" style="display:none;color:var(--danger);padding:12px;"></div>

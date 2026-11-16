@@ -139,7 +139,7 @@ def is_deep_research_intent(text: str) -> bool:
     t = (text or "").strip()
     if not t:
         return False
-    if re.search(r"(?m)^\s*/research(\s+deep)?\b", t, re.I):
+    if re.search(r"(?m)^[^\S\n]*/research(\s+deep)?\b", t, re.I):  # its own line: linear
         return True
     return bool(_DEEP_RE.search(_opening_window(t)))
 

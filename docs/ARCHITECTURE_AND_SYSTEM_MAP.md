@@ -474,7 +474,6 @@ Auth scope: **Open** = always open; **Secret** = KAZMA_SECRET / session / token 
 | `KAZMA_SESSION_TTL_SECONDS` | 14d | No | Session cookie TTL |
 | `KAZMA_TURN_TIMEOUT_SECONDS` | unset (no limit) | No | A turn's wall-clock budget on every surface; wins over `agent.turn_timeout_seconds` (`agent/turn_budget.py`) |
 | `KAZMA_MCP_SAFE_ALLOWLIST` | empty | Optional | MCP tools skip HITL (prod) |
-| `KAZMA_ALLOW_PRIVATE_LLM` | unset | No | Private URL discovery opt-in |
 | `KAZMA_MULTI_USER` | unset | SaaS | Force multi-user mode |
 | `KAZMA_OIDC_*` | unset | SaaS SSO | OIDC issuer/client/secret/redirect/role claim (id_token verified; no unverified fallback) |
 | `KAZMA_PGVECTOR` | auto on Postgres DSN | No | `0` keeps sqlite-vec; unset auto-selects pgvector for dense recall |

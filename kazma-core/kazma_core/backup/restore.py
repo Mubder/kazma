@@ -28,7 +28,9 @@ import logging
 import os
 import re
 import shutil
+import stat
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -391,20 +393,37 @@ def _force_rmtree(path: Path) -> None:
         except Exception:  # noqa: BLE001
             logger.debug("[restore] %s failed", args[0], exc_info=True)
 
-    if os.name == "nt":
+    def _writable_and_again(func: Any, target: str, _exc: Any) -> None:
+        # A read-only file or folder restic restored: clear the flag, retry.
+        try:
+            os.chmod(target, stat.S_IWRITE | stat.S_IREAD)
+            func(target)
+        except OSError:
+            logger.debug("[restore] could not remove %s", target, exc_info=True)
+
+    def _remove() -> None:
+        # Python removes the tree: `cmd /c rmdir /s /q <path>` read an `&`
+        # in the path as a second command (SonarCloud review, 2026-11-16).
+        try:
+            if sys.version_info >= (3, 12):
+                shutil.rmtree(path, onexc=_writable_and_again)
+            else:
+                shutil.rmtree(path, onerror=_writable_and_again)
+        except OSError:
+            logger.debug("[restore] staging cleanup failed", exc_info=True)
+
+    _remove()
+    if path.exists() and os.name == "nt":
+        # What is left carries another owner's rights (restic's parents):
+        # take ownership, grant ourselves full control, remove again.
         user = os.environ.get("USERNAME", "")
         _run(["takeown", "/F", str(path), "/R", "/D", "Y"])
         if user:
             _run(["icacls", str(path), "/grant", f"{user}:(OI)(CI)F",
                   "/T", "/C", "/Q"])
-        _run(["cmd", "/c", "rmdir", "/s", "/q", str(path)])
-        if not path.exists():
-            return
-
-    try:
-        shutil.rmtree(path, ignore_errors=True)
-    except Exception:  # noqa: BLE001
-        logger.debug("[restore] staging cleanup failed", exc_info=True)
+        _remove()
+    if path.exists():
+        logger.warning("[restore] %s could not be removed whole; delete it by hand", path)
 
 
 #: What sits beside a SQLite file while a writer has it open. A raw copy of

@@ -2073,17 +2073,17 @@ def create_sse_chat_router(
         except InvalidJsonBody:
             return invalid_json_response()
 
-        # SSRF validation on user-supplied base_url.
-        # Provider switch is user-initiated configuration of their own LLM
-        # endpoint (often local: Ollama, LM Studio), so we allow private
-        # addresses and normalize scheme-less URLs before validating.
+        # SSRF validation on user-supplied base_url: a server on this computer
+        # or the owner's network (Ollama, LM Studio), else a public address,
+        # never cloud metadata (security.ssrf.check_model_server_url).
         _raw_url = body.get("base_url", "")
         if _raw_url:
             try:
-                from kazma_core.security.ssrf import validate_url
+                from kazma_core.security.ssrf import check_model_server_url
                 from kazma_core.url_utils import normalize_provider_url
 
-                await asyncio.to_thread(validate_url, normalize_provider_url(_raw_url), allow_private=True)
+                await asyncio.to_thread(
+                    check_model_server_url, normalize_provider_url(_raw_url), block_unresolved=False)
             except Exception as exc:
                 # AUD-102: the caller's own URL was refused (validation):
                 # its message, redacted, never the raw exception text.

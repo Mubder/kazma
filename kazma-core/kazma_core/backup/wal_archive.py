@@ -46,6 +46,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 import time
 from pathlib import Path
@@ -128,7 +129,10 @@ def prepare_steps(platform: Any, archive_dir: Path) -> list[Any]:
         grants = ["/grant", "*S-1-5-20:(OI)(CI)M"]          # NETWORK SERVICE: the server
         if user:
             grants += ["/grant", f"{user}:(OI)(CI)M"]       # Kazma's account: read and prune
-        return [Step("Create the WAL archive folder", ("cmd", "/c", "if", "not", "exist", d, "mkdir", d),
+        # Python makes the folder: `cmd /c ... mkdir <d>` read an `&` in the
+        # path as a second command (SonarCloud review, 2026-11-16).
+        return [Step("Create the WAL archive folder",
+                     (sys.executable, "-c", "import os, sys; os.makedirs(sys.argv[1], exist_ok=True)", d),
                      admin=True),
                 Step("", ("icacls", d, "/inheritance:r", *grants, "/grant", "*S-1-5-32-544:(OI)(CI)F"),
                      admin=True)]

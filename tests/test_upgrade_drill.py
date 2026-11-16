@@ -110,7 +110,7 @@ def test_the_release_runs_the_drill_before_it_publishes_and_ci_runs_it_on_both_s
     release = (REPO / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
     drill = release.index("python scripts/upgrade_drill.py --wheel")
     assert drill < release.index("- name: Publish the GitHub Release")
-    assert release.index("uv build --out-dir dist") < drill
+    assert release.index("uv build --build-constraints") < drill
     assert "--any-version" not in release[drill:drill + 200]
     ci = (REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     job = ci[ci.index("  upgrade-drill:"):]

@@ -103,10 +103,12 @@ of its own, the status page behind Access, email, Cloudflare's notifications.
 Everything below runs on the owner's Cloudflare account and needs the
 owner's credentials; Kazma never holds them.
 
-1. **The database.** From this folder:
+1. **The database.** From this folder (`npm ci` installs wrangler and every
+   package it needs at the versions and hashes `package-lock.json` records,
+   with no install scripts; `npx` then runs that copy):
 
    ```bash
-   npm install
+   npm ci --ignore-scripts
    npx wrangler d1 create kazma-observer
    ```
 

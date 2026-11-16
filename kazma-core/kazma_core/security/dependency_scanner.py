@@ -339,8 +339,13 @@ async def audit_installed(*, client: httpx.AsyncClient | None = None) -> Depende
 
 #: A ``command:`` whose program is a shell (``command: bash``,
 #: ``command: ["/bin/sh", ...]``), and the flag that hands it a script.
+# A path's folders are read possessively, and never past another "command:"
+# key: that key is tried on its own and decides the same (its program ends
+# the same run). Read past it, a manifest of back-to-back keys cost each key
+# the rest of the file (4 s at 100,000 characters).
 _SHELL_PROGRAM = re.compile(
-    r"(?im)\bcommand\s*:\s*\[?\s*[\"']?(?:[^\s\"'\],]*[/\\])?(?:sh|bash|zsh|dash|cmd|powershell|pwsh)(?:\.exe)?[\"']?(?=[\s,\]]|$)"
+    r"(?im)\bcommand\s*+:\s*+\[?\s*+[\"']?(?:(?:(?!\bcommand\s*:)[^\s\"'\],/\\])*+[/\\])*+"
+    r"(?:sh|bash|zsh|dash|cmd|powershell|pwsh)(?:\.exe)?[\"']?(?=[\s,\]]|$)"
 )
 _SCRIPT_FLAG = re.compile(r"(?i)(?:^|[\s\"',\[])(?:-c|/c|-command)(?=[\s\"',\]]|$)")
 

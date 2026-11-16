@@ -555,6 +555,47 @@ def test_every_allowlisted_program_says_how_it_walks_folders():
     assert not (set(WALKS) & set(NO_WALK))
 
 
+def test_the_allowlist_never_holds_a_program_that_reaches_kazmas_secrets():
+    """Gate: no mode of shell_exec's allowlist holds a program of
+    shell_paths.NEVER_ALLOWED (2026-11-16: the development allowlist, the
+    default after setup, held `kazma`, whose export writes the vault and its
+    key into a bundle, and `ps`, whose `eww` prints the server's environment)."""
+    from kazma_core.safety.shell_paths import NEVER_ALLOWED
+
+    assert not (_allowlisted_programs() & set(NEVER_ALLOWED))
+
+
+def test_the_never_allowed_gate_sees_the_old_allowlist():
+    """Negative control: the development extras as they were."""
+    from kazma_core.safety.shell_paths import NEVER_ALLOWED
+
+    old = _allowlisted_programs() | {"ps", "pgrep", "kazma"}
+    assert old & set(NEVER_ALLOWED) == {"ps", "kazma"}
+
+
+@pytest.mark.parametrize("command", [
+    "kazma migrate export --out bundle.zip",
+    "kazma --version",
+    "kazma.exe doctor",
+    "ps eww",
+    "ps -E",
+])
+async def test_a_development_install_refuses_kazma_and_ps(shell, monkeypatch, command):
+    """Behaviour: with KAZMA_PRODUCTION unset (the default after setup) the
+    tool refuses Kazma's command line and ps before anything runs."""
+    monkeypatch.delenv("KAZMA_PRODUCTION", raising=False)
+    with pytest.raises(RefusedBeforeEffect):
+        await shell(command)
+    assert shell.ran == []
+
+
+async def test_a_development_install_still_runs_pgrep(shell, monkeypatch):
+    """Positive control: the development extra that stays still runs."""
+    monkeypatch.delenv("KAZMA_PRODUCTION", raising=False)
+    await shell("pgrep python")
+    assert shell.ran and Path(shell.ran[0][0]).name.split(".")[0] == "pgrep"
+
+
 def test_the_gate_sees_a_new_program():
     """Negative control: a planted allowlisted program is unclassified."""
     from kazma_core.safety.shell_paths import NO_WALK, WALKS

@@ -26,8 +26,7 @@ _IMAGE_LINE = re.compile(
     r"(?:[ \t]+(?:\"[^\"\n]*\"|'[^'\n]*'))?[ \t]*\)[ \t]*$"
 )
 _FENCE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
-_ANY_IMAGE = re.compile(r"!\[[^\]\n]*\]\([^)\n]*\)")
-_CODE_SPAN = re.compile(r"(`+)(?:(?!\1).)+?\1")
+_BACKTICKS = re.compile(r"`+")
 _ESCAPE = re.compile(r"\\(.)")
 
 
@@ -89,13 +88,74 @@ def parts(body: str) -> list[str | ImageRef]:
     return result
 
 
+def _without_code_spans(line: str) -> str:
+    """*line* without its code spans: a run of backticks opens one, and the
+    next run of the same length closes it (CommonMark).
+
+    One pass over the runs. The pattern this replaces retried every opener,
+    and every shorter piece of one, over the rest of the line: a line of
+    backticks in a ``generate_pdf`` body took seconds on the event loop
+    (``DocumentImages.in_body``; Sonar S8786, 2026-11-16). It also opened and
+    closed spans on pieces of longer runs, which CommonMark does not.
+    """
+    runs = [match.span() for match in _BACKTICKS.finditer(line)]
+    closer: list[int | None] = [None] * len(runs)
+    latest: dict[int, int] = {}
+    for index in range(len(runs) - 1, -1, -1):
+        width = runs[index][1] - runs[index][0]
+        closer[index] = latest.get(width)
+        latest[width] = index
+    kept: list[str] = []
+    cursor = index = 0
+    while index < len(runs):
+        end = closer[index]
+        if end is None:
+            index += 1
+            continue
+        kept.append(line[cursor:runs[index][0]])
+        cursor = runs[end][1]
+        index = end + 1
+    kept.append(line[cursor:])
+    return "".join(kept)
+
+
+def _images_in(text: str) -> list[str]:
+    """Each ``![alt](address)`` in *text* (alt and address on one line), as
+    the pattern it replaces found them with ``findall``, read once.
+
+    From a "![" the alt ends at the first "]" and the address at the first
+    ")" after it, so every "![" before the same "]" ends the same way: once
+    one fails, the next start worth trying is past that "]". The pattern
+    tried each "![" over the rest of the line (quadratic on a run of them).
+    """
+    found: list[str] = []
+    for line in text.split("\n"):  # nothing in the pattern crosses a newline
+        cursor = 0
+        while True:
+            start = line.find("![", cursor)
+            if start < 0:
+                break
+            close = line.find("]", start + 2)
+            if close < 0:
+                break
+            if not line.startswith("(", close + 1):
+                cursor = close + 1
+                continue
+            end = line.find(")", close + 2)
+            if end < 0:
+                break
+            found.append(line[start:end + 1])
+            cursor = end + 1
+    return found
+
+
 def inline_images(body: str) -> list[str]:
     """Image markup inside a line of text (outside code), which is no figure."""
     found: list[str] = []
     for line, fenced in _lines(body):
         if fenced or _image(line) is not None:
             continue
-        found.extend(_ANY_IMAGE.findall(_CODE_SPAN.sub("", line)))
+        found.extend(_images_in(_without_code_spans(line)))
     return found
 
 

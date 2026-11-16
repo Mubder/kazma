@@ -123,7 +123,7 @@ _RE_IN_N_EN = re.compile(
 )
 # "2 days before", "30 min before", "3 hours after"  (direction separate)
 _RE_N_UNITS_EN = re.compile(
-    r"(\d+)\s+(min(?:ute)?s?|hrs?|hours?|days?|weeks?|months?)",
+    r"(?<!\d)(\d++)\s++(min(?:ute)?s?|hrs?|hours?|days?|weeks?|months?)",  # a number read once, whole
     re.IGNORECASE,
 )
 # bare calendar relatives
@@ -161,7 +161,9 @@ _RE_COMPACT_EN = re.compile(r"\b(\d+)\s*(m|h)\b", re.IGNORECASE)
 # inside a larger word like "الاسبوعية" / "الشهرية".
 _AR_LETTER_CLASS = r"[\u0621-\u063a\u0641-\u064a]"
 _RE_AR_UNIT = re.compile(
-    r"(?P<num>\d+|[٠-٩]+)?\s*"
+    # A number read once, whole, and a whitespace run from its start: from
+    # every position of a long run the old pattern rescanned it (quadratic).
+    r"(?P<num>(?<!\d)\d++|(?<![٠-٩])[٠-٩]++)?(?<!\s)\s*+"
     r"(?<![\u0621-\u063a\u0641-\u064a])(?P<unit>يومين|ساعتين|أسبوعين|اسبوعين|دقيقتين|"
     r"يوم|ايام|أيام|ساعة|ساعات|أسبوع|اسبوع|أسابيع|اسابيع|دقيقة|دقائق|شهر|أشهر|اشهر)"
     r"(?![\u0621-\u063a\u0641-\u064a])"
@@ -170,11 +172,6 @@ _RE_AR_DIR = re.compile(r"(بعد|قبل)")
 # Direction cue (before/after the event) — English
 _RE_BEFORE_EVENT_EN = re.compile(
     r"\b(before|prior\s+to|ahead\s+of)\b", re.IGNORECASE
-)
-# "before the ... reset/ends"
-_RE_BEFORE_THE_EN = re.compile(
-    r"(before|prior\s+to|ahead\s+of)\s+(?:the\s+)?(.+?)(?:reset|ends?|renews?)\b",
-    re.IGNORECASE,
 )
 # Arabic "قبل ... من" (before ... of)
 _RE_AR_BEFORE = re.compile(r"قبل")
@@ -280,12 +277,15 @@ def event_aliases(predicate: str, lang: str = "en") -> list[str]:
 # the numeric core parses; the wall-clock time is what matters for anchoring
 # (incident 2026-08-16: these suffixes made the gate blind to the real reset
 # dates, so a correct fire time was rejected as a "conflict").
+# Each starts at a whitespace run's start and reads it once (possessive): from
+# every position of a long run they rescanned it, 0.5 s per 4,000-character
+# belief during reminder authorization.
 _RE_TZ_QUALIFIER = re.compile(
-    r"\s+(?:kuwait|asia/kuwait|gmt|utc|local|local time)\s*"
-    r"(\((?:utc\s*)?[+-]\d{1,2}(?::\d{2})?\))?$",
+    r"(?<!\s)\s++(?:kuwait|asia/kuwait|gmt|utc|local|local time)\s*+"
+    r"(\((?:utc\s*+)?[+-]\d{1,2}(?::\d{2})?\))?$",
     re.IGNORECASE,
 )
-_RE_TZ_PAREN_ONLY = re.compile(r"\s*\((?:utc\s*)?[+-]\d{1,2}(?::\d{2})?\)\s*$", re.IGNORECASE)
+_RE_TZ_PAREN_ONLY = re.compile(r"(?<!\s)\s*+\((?:utc\s*+)?[+-]\d{1,2}(?::\d{2})?\)\s*+$", re.IGNORECASE)
 
 
 def _strip_tz_qualifier(text: str) -> str:
@@ -308,7 +308,7 @@ def parse_belief_date(obj: str, *, default_year: int | None = None) -> datetime 
     if not raw:
         return None
     # Strip trailing timezone-ish noise / local qualifiers the model appends.
-    raw_clean = re.sub(r"\s+(local|local time|utc|gmt)$", "", raw, flags=re.I)
+    raw_clean = re.sub(r"(?<!\s)\s++(local|local time|utc|gmt)$", "", raw, flags=re.I)
     raw_clean = _strip_tz_qualifier(raw_clean) or raw_clean
 
     # 1. ISO 8601 (with or without time/tz)

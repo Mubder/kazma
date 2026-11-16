@@ -301,7 +301,7 @@ def _parse_output_target_suffix(task: str) -> tuple[str, dict[str, Any] | None]:
     dict shaped like the ConfigStore entry when the suffix is a concrete
     ``platform:chat_id``, or ``None`` when no override was present.
     """
-    match = re.search(r"\s*->\s*(\S+)\s*$", task)
+    match = re.search(r"(?<!\s)\s*+->\s*+(\S+)\s*+$", task)  # from a run's start: linear
     if not match:
         return task, None
 

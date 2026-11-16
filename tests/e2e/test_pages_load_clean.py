@@ -14,7 +14,11 @@ only when it opens -- in its own browser tab, and fails on:
   inside every ``<template>`` (``tests/test_alpine_templates.py`` checks the
   template sources; this checks what the browser actually parsed);
 * on ``/ide``, any mode ``scripts/vendor_codemirror.py`` bundles that
-  ``CodeMirror.modes`` does not have.
+  ``CodeMirror.modes`` does not have;
+* a form control the browser shows with no accessible name, or named only by
+  its placeholder (read from Chromium's own accessibility tree, so it covers
+  controls a script builds, which ``tests/test_controls_have_accessible_names.py``
+  cannot see in the templates).
 """
 
 from __future__ import annotations
@@ -100,6 +104,54 @@ def _settle(pg) -> None:
         pass
 
 
+#: The roles of the controls a person fills in or switches.
+_FORM_ROLES = frozenset({
+    "textbox", "searchbox", "combobox", "listbox", "checkbox", "radio",
+    "switch", "spinbutton", "slider",
+})
+
+
+def _describe_node(cdp, backend_id) -> str:
+    """The control's tag and identifying attributes, for the report."""
+    try:
+        node = cdp.send("DOM.describeNode", {"backendNodeId": backend_id})["node"]
+    except Exception:  # noqa: BLE001 - the report still names the role
+        return "?"
+    attrs = node.get("attributes") or []
+    pairs = dict(zip(attrs[::2], attrs[1::2]))
+    keep = [f'{k}="{pairs[k][:60]}"' for k in ("id", "x-model", "name", "type", "class") if k in pairs]
+    return f"<{node.get('localName', '?')} {' '.join(keep)}>"
+
+
+def name_problems(pg, path: str) -> list[str]:
+    """Each form control in Chromium's accessibility tree with no name, or
+    whose name comes only from its placeholder (which disappears as soon as
+    someone types)."""
+    cdp = pg.context.new_cdp_session(pg)
+    try:
+        cdp.send("Accessibility.enable")
+        nodes = cdp.send("Accessibility.getFullAXTree")["nodes"]
+        found = []
+        for n in nodes:
+            role = (n.get("role") or {}).get("value")
+            if n.get("ignored") or role not in _FORM_ROLES:
+                continue
+            name = n.get("name") or {}
+            text = str(name.get("value") or "").strip()
+            winner = next((s for s in name.get("sources") or []
+                           if "value" in s and not s.get("superseded")), None)
+            if not text:
+                why = "has no accessible name"
+            elif winner and winner.get("type") == "placeholder":
+                why = f"is named only by its placeholder {text[:60]!r}"
+            else:
+                continue
+            found.append(f"{path}: {role} {_describe_node(cdp, n.get('backendDOMNodeId'))} {why}")
+        return found
+    finally:
+        cdp.detach()
+
+
 def page_problems(pg, path: str, errors: list[str]) -> list[str]:
     found = [f"{path}: uncaught {e.splitlines()[0][:200]}" for e in errors]
     found += [
@@ -147,6 +199,7 @@ def test_every_page_loads_clean(harness: Harness) -> None:
                 pg.goto(f"{harness.base}{path}", wait_until="domcontentloaded", timeout=30000)
                 _settle(pg)
                 problems += page_problems(pg, path, errors)
+                problems += name_problems(pg, path)
                 if path == "/ide":
                     modes = pg.evaluate(
                         "() => window.CodeMirror ? Object.keys(window.CodeMirror.modes) : []"
@@ -185,6 +238,35 @@ def test_negative_control_the_instrument_sees_both_kinds() -> None:
     assert any("x-text" in f and "does not compile" in f for f in found), found
     assert len(found) == 2, found  # the template's own binding compiles fine
     assert "rust" in bundled_modes() and "lua" in bundled_modes()
+
+
+def test_negative_control_the_tour_sees_unnamed_controls() -> None:
+    """The accessibility-tree check reports a control named only by its
+    placeholder, an unnamed checkbox and an unnamed select, and passes the
+    shapes that do name a control."""
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            pg = browser.new_page()
+            pg.set_content(
+                """<input id="only-placeholder" placeholder="Search">"""
+                """<input id="bare-box" type="checkbox">"""
+                """<select id="bare-select"><option>one</option></select>"""
+                """<input aria-label="Named" placeholder="x">"""
+                """<label for="tied">Tied</label><input id="tied" placeholder="y">"""
+                """<label><input type="checkbox"> wrapped</label>"""
+                """<span id="cap">Caption</span><input aria-labelledby="cap" placeholder="z">"""
+                """<input type="checkbox" style="display:none">"""
+            )
+            found = name_problems(pg, "/probe")
+        finally:
+            browser.close()
+    assert len(found) == 3, found
+    assert any("only-placeholder" in f and "placeholder 'Search'" in f for f in found), found
+    assert any("bare-box" in f and "no accessible name" in f for f in found), found
+    assert any("bare-select" in f and "no accessible name" in f for f in found), found
 
 
 def test_negative_control_the_tour_sees_a_policy_refusal() -> None:

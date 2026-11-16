@@ -168,7 +168,9 @@ def test_every_uvx_and_npx_package_names_an_exact_version():
         for argv in argvs:
             seen += any(_runner_name(w) in _RUNNERS for w in argv)
             offenders += [f"{path.relative_to(ROOT).as_posix()}: {p}" for p in unpinned_packages(argv)]
-    assert seen >= 3, "the gate found almost no uvx/npx runs; it would be decoration"
+    # The workflows run no uvx since 2026-11-16 (their tools come from uv.lock:
+    # tests/test_installs_pinned_by_hash.py); the scripts' npx remains.
+    assert seen >= 1, "the gate found no uvx/npx run; it would be decoration"
     assert not offenders, (
         "uvx/npx runs whatever the registry serves that day: name one release "
         "(uvx --from name==1.2.3, npx name@1.2.3):\n  " + "\n  ".join(offenders)

@@ -184,7 +184,7 @@ def is_unusable_assistant_content(text: str | None) -> bool:
     )
     if any(m in low for m in leak_markers):
         return True
-    if re.search(r"<\s*\|?\s*dsml", low) or re.search(r"invoke\s+name\s*=", low):
+    if re.search(r"<\s*+\|?\s*+dsml", low) or re.search(r"invoke\s+name\s*=", low):
         return True
     # Mid-task planning with no substance (ends with open colon / "let me")
     if len(s) < 80 and any(

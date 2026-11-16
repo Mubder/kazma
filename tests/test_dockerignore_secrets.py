@@ -101,6 +101,22 @@ def _paths() -> list[str]:
     for name in _names():
         out += [name, f"sub/{name}", f"a/b/{name}", f".kazma/{name}", f"deploy/.kazma/{name}"]
     out += [".kazma/kazma.log", ".kazma/logs/guard.log", "kazma-core/.claude/settings.json", "reports/x.pdf"]
+    out += _also_kept_out_of_git()
+    return out
+
+
+def _also_kept_out_of_git() -> list[str]:
+    """What .gitignore keeps out for a reason the image shares (2026-11-16):
+    keys, a migration bundle (the vault and its key), the owner's local
+    configuration, a data folder below the root, the memory repair copies."""
+    from kazma_core.store_registry import REPAIR_COPY_SUFFIXES
+
+    out = [".keys/github-app.pem", "deploy/.keys/x.pem", "server.pem", "sub/client.p12",
+           "a/cert.pfx", "kazma-bundle-20261116-0900.zip", "sub/kazma-bundle-x.zip",
+           "kazma.local.yaml", "deploy/kazma.local.yaml", "kazma-data/attachments/a.png",
+           "deploy/kazma-data/workspace/notes.txt"]
+    out += [f"kazma-data/memory_state.db{suffix}" for suffix in REPAIR_COPY_SUFFIXES]
+    out += [f"sub/memory_state.db{suffix}" for suffix in REPAIR_COPY_SUFFIXES]
     return out
 
 
@@ -131,3 +147,8 @@ def test_negative_control_the_old_file_leaks() -> None:
     leaked = [p for p in _paths() if not excluded(OLD_DOCKERIGNORE, p)]
     assert ".kazma/restic.pass" in leaked and "sub/.env" in leaked and "a/b/vault.db" in leaked
     assert "observer.key" in leaked
+    # The rules added 2026-11-16, each leaked by the file before them.
+    before = (ROOT / ".dockerignore").read_text(encoding="utf-8").split("# Keys, a migration bundle")[0]
+    still = [p for p in _also_kept_out_of_git() if not excluded(before, p)]
+    assert {".keys/github-app.pem", "kazma-bundle-20261116-0900.zip", "kazma.local.yaml",
+            "deploy/kazma-data/workspace/notes.txt", "sub/memory_state.db.pre_relabel"} <= set(still)

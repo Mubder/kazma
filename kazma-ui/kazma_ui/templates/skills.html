@@ -77,14 +77,14 @@
     <!-- Hub Browse + Agent Skills install -->
     <div x-show="tab === 'hub'" x-cloak>
         <div class="card" style="margin-bottom:1.25rem">
-            <h3 class="card-title">{{ t('skills.install_heading') }}</h3>
+            <h3 class="card-title" id="skills-install-heading">{{ t('skills.install_heading') }}</h3>
             <p class="text-muted" style="margin-bottom:0.75rem">
                 {{ t('skills.install_hint') }}
                 <a href="https://agentskills.io/" target="_blank" rel="noopener" translate="no">Agent Skills</a>
             </p>
             <div class="form-row">
                 <div class="form-group" style="flex:1">
-                    <input type="text" x-model="agentSkillSource" class="form-input"
+                    <input type="text" x-model="agentSkillSource" class="form-input" aria-labelledby="skills-install-heading"
                            placeholder="{{ t('skills.install_ph') }}"
                            @keydown.enter="installAgentSkill()">
                 </div>
@@ -96,7 +96,7 @@
             </div>
         </div>
         <div class="search-bar">
-            <input type="text" x-model="hubQuery" @input.debounce.300ms="searchHub()" placeholder="{{ t('skills.search_ph') }}" class="form-input">
+            <input type="text" x-model="hubQuery" @input.debounce.300ms="searchHub()" aria-label="{{ t('skills.search_ph') }}" placeholder="{{ t('skills.search_ph') }}" class="form-input">
         </div>
         <div class="skills-grid">
             <template x-for="skill in hubResults" :key="skill.id">
@@ -126,7 +126,7 @@
                 <a href="https://agentskills.io/" target="_blank" rel="noopener">agentskills.io</a>
             </p>
             <div class="search-bar">
-                <input type="text" x-model="marketQuery" @input.debounce.400ms="searchMarketplace()"
+                <input type="text" x-model="marketQuery" @input.debounce.400ms="searchMarketplace()" aria-label="{{ t('skills.marketplace_search') }}"
                        :placeholder="t('skills.marketplace_ph')" class="form-input">
             </div>
         </div>
@@ -158,11 +158,11 @@
             <h3 class="card-title">{{ t('skills.validate_heading') }}</h3>
             <div class="form-row">
                 <div class="form-group" style="flex:1">
-                    <label>{{ t('skills.validate_path') }}</label>
-                    <input type="text" x-model="validatePath" class="form-input" placeholder="{{ t('skills.validate_path_ph') }}">
+                    <label for="f-validate-path">{{ t('skills.validate_path') }}</label>
+                    <input id="f-validate-path" type="text" x-model="validatePath" class="form-input" placeholder="{{ t('skills.validate_path_ph') }}">
                 </div>
                 <div class="form-group">
-                    <label>&nbsp;</label>
+                    <div class="form-label" aria-hidden="true" style="margin-bottom:0">&nbsp;</div>
                     <button class="btn btn-primary" @click="validateSkill()">{{ t('skills.validate_btn') }}</button>
                 </div>
             </div>

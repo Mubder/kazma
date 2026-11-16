@@ -17,18 +17,22 @@ with the week before beside it, measured from the logs Kazma already writes
 
 A target with nothing to measure (no observer paired, no turn this week) is
 "unknown", never met.
+
+Each line is read through ``log_lines``: an app line's marker counts only at
+the start of its message, a guard event only in a guard record's ``event``
+-- a message quoting a marker (a session id, a file name) is not a backup, a
+turn or an alert (2026-11-16, tests/test_log_readers_read_markers_at_the_start.py).
 """
 
 from __future__ import annotations
 
-import json
 import re
 import statistics
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any
 
+from kazma_core.observability.log_lines import opens_with, read_app_line, read_guard_line
 from kazma_core.observability.turn_line import read_turn_line
 
 __all__ = ["Target", "measure_targets", "render_targets"]
@@ -36,6 +40,7 @@ __all__ = ["Target", "measure_targets", "render_targets"]
 WEEK_S = 7 * 86400.0
 _BACKUP = "[universal-backup] complete:"
 _OVER_BUDGET = "[shutdown] the stop ran over"
+#: An alert sent, not held back by its cooldown ("... (throttled)").
 _ALERT = re.compile(r"\[ops_alert\] \S+ \|(?!.*\(throttled\))")
 
 
@@ -49,46 +54,28 @@ class Target:
     before: str = ""
 
 
-def _epoch(ts: str) -> float | None:
-    try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
-    except (TypeError, ValueError):
-        return None
-
-
-def _app_line(line: str) -> tuple[float | None, str]:
-    """(time, message) of one app log line (JSON; a plain line is matched whole)."""
-    if line.lstrip().startswith("{"):
-        try:
-            obj = json.loads(line)
-        except ValueError:
-            return None, ""
-        return _epoch(str(obj.get("timestamp") or obj.get("ts") or "")), str(obj.get("message") or "")
-    match = re.match(r"^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})", line)
-    return (_epoch(match.group(1).replace(" ", "T")) if match else None), line
-
-
-def _week(app: list[tuple[float, str]], guard: list[tuple[float, dict]], start: float, end: float,
+def _week(app: list[tuple[float, str]], guard: list[tuple[float, str]], start: float, end: float,
           uptime: float | None) -> dict[str, Any]:
-    msgs = [m for t, m in app if start <= t < end]
+    """The week's values; *app* is (time, message), *guard* (time, event)."""
+    messages = [message for t, message in app if start <= t < end]
     turns: dict[str, bool] = {}
-    for m in msgs:
-        turn = read_turn_line(m)
+    for message in messages:
+        turn = read_turn_line(message)
         if turn is not None:
             _platform, key, failed = turn
             turns[key] = failed
-    events = [(t, e) for t, e in guard if start <= t < end]
-    restarts = [t for t, e in events if e.get("event") == "guard.restarting"]
+    restarts = [t for t, event in guard if start <= t < end and event == "guard.restarting"]
     outages: list[float] = []
     began: float | None = None
-    for t, e in sorted(guard, key=lambda row: row[0]):
-        if e.get("event") == "guard.restarting" and began is None:
+    for t, event in sorted(guard, key=lambda row: row[0]):
+        if event == "guard.restarting" and began is None:
             began = t
-        elif e.get("event") == "guard.supervising" and began is not None:
+        elif event == "guard.supervising" and began is not None:
             if start <= began < end:
                 outages.append(t - began)
             began = None
-    backup_days = {int((t - start) // 86400) for t, m in app if start <= t < end and _BACKUP in m}
+    backup_days = {int((t - start) // 86400) for t, message in app
+                   if start <= t < end and opens_with(message, _BACKUP)}
     return {
         "uptime": uptime,
         "turns": (sum(1 for f in turns.values() if not f) / len(turns) * 100.0) if turns else None,
@@ -96,8 +83,8 @@ def _week(app: list[tuple[float, str]], guard: list[tuple[float, dict]], start: 
         "restarts": len(restarts),
         "recover_s": statistics.median(outages) if outages else (0.0 if not restarts else None),
         "backup_days": len(backup_days),
-        "over_budget": sum(1 for m in msgs if _OVER_BUDGET in m),
-        "alerts": sum(1 for m in msgs if _ALERT.search(m)),
+        "over_budget": sum(1 for message in messages if opens_with(message, _OVER_BUDGET)),
+        "alerts": sum(1 for message in messages if opens_with(message, _ALERT)),
     }
 
 
@@ -134,16 +121,8 @@ def _targets(now: dict[str, Any], before: dict[str, Any]) -> list[Target]:
 def measure_targets(app_lines: Iterable[str], guard_lines: Iterable[str], *, now: float,
                     uptime_now: float | None = None, uptime_before: float | None = None) -> list[Target]:
     """The targets of the week ending at *now*, with the week before's values."""
-    app = [(t, m) for t, m in (_app_line(line) for line in app_lines) if t is not None]
-    guard: list[tuple[float, dict]] = []
-    for line in guard_lines:
-        try:
-            obj = json.loads(line)
-        except ValueError:
-            continue
-        t = _epoch(str(obj.get("ts") or ""))
-        if t is not None and isinstance(obj, dict):
-            guard.append((t, obj))
+    app = [(record.ts, record.message) for record in map(read_app_line, app_lines) if record is not None]
+    guard = [(record.ts, record.event) for record in map(read_guard_line, guard_lines) if record is not None]
     return _targets(_week(app, guard, now - WEEK_S, now, uptime_now),
                     _week(app, guard, now - 2 * WEEK_S, now - WEEK_S, uptime_before))
 

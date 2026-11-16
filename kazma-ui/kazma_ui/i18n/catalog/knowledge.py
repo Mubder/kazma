@@ -932,4 +932,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": 'The server log names the cause.',
         "ar": 'يذكر سجل الخادم السبب.',
     },
+    "knowledge.id_label": {
+        "ar": "معرّف المكتبة",
+        "en": "Library ID",
+    },
+    "knowledge.seed_url_label": {
+        "ar": "رابط البذرة",
+        "en": "Seed URL",
+    },
 }

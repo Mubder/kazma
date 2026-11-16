@@ -94,7 +94,9 @@ def estimate_message_tokens(messages: list[dict[str, Any]] | None) -> int:
 
 # An assistant message with ≥3 enumerated list items is presenting a set of
 # drafts/options — the exact content class the 2026-08-30 incident lost.
-_ENUMERATED_ITEM_RE = re.compile(r"^\s*(?:\d{1,2}[.)]|[-•*])\s+\S", re.MULTILINE)
+# The item's own line's indent: "^\s*" read every following blank line from
+# each line start (quadratic on a run of them); the count is the same.
+_ENUMERATED_ITEM_RE = re.compile(r"^[^\S\n]*(?:\d{1,2}[.)]|[-•*])\s+\S", re.MULTILINE)
 
 
 def _enumerated_items(text: str) -> int:

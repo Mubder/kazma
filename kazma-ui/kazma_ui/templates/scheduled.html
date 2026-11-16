@@ -322,27 +322,27 @@
     <div class="modal sched-modal" role="dialog" aria-modal="true">
       <h3 x-text="cronForm.job_id ? t('scheduled.edit_task') : t('scheduled.new_task')"></h3>
       <div class="form-group" x-show="!cronForm.job_id">
-        <label>{{ t('scheduled.kind_label') }}</label>
-        <select class="form-select" x-model="cronForm.kind">
+        <label for="f-cron-form-kind">{{ t('scheduled.kind_label') }}</label>
+        <select id="f-cron-form-kind" class="form-select" x-model="cronForm.kind">
           <option value="reminder">{{ t('scheduled.kind_opt_reminder') }}</option>
           <option value="task">{{ t('scheduled.kind_opt_task') }}</option>
         </select>
       </div>
       <div class="form-group" x-show="!cronForm.job_id && cronForm.kind === 'task'" x-cloak>
-        <label>{{ t('scheduled.tools_label') }}</label>
-        <select class="form-select" x-model="cronForm.capabilities">
+        <label for="f-cron-form-capabilities">{{ t('scheduled.tools_label') }}</label>
+        <select id="f-cron-form-capabilities" class="form-select" x-model="cronForm.capabilities">
           <option value="read">{{ t('scheduled.tools_read') }}</option>
           <option value="read_write">{{ t('scheduled.tools_read_write') }}</option>
         </select>
         <div class="form-hint">{{ t('scheduled.tools_hint') }}</div>
       </div>
       <div class="form-group">
-        <label>{{ t('scheduled.prompt') }}</label>
-        <textarea class="form-textarea" x-model="cronForm.prompt" maxlength="8000" :placeholder="t('scheduled.prompt_ph')"></textarea>
+        <label for="f-cron-form-prompt">{{ t('scheduled.prompt') }}</label>
+        <textarea id="f-cron-form-prompt" class="form-textarea" x-model="cronForm.prompt" maxlength="8000" :placeholder="t('scheduled.prompt_ph')"></textarea>
       </div>
       <div class="form-group">
-        <label>{{ t('scheduled.timing') }}</label>
-        <input type="text" class="form-input" x-model="cronForm.timing" maxlength="100" :placeholder="t('scheduled.timing_ph')">
+        <label for="f-cron-form-timing">{{ t('scheduled.timing') }}</label>
+        <input id="f-cron-form-timing" type="text" class="form-input" x-model="cronForm.timing" maxlength="100" :placeholder="t('scheduled.timing_ph')">
         <div class="form-hint">{{ t('scheduled.timing_hint') }}</div>
         <div class="form-hint" x-show="cronTz" x-cloak x-text="t('scheduled.zone_hint').replace('{zone}', cronTz)"></div>
       </div>
@@ -359,14 +359,14 @@
       <h3 x-text="xForm.id ? t('scheduled.edit_x') : t('scheduled.new_x')"></h3>
       <template x-if="!xForm.id">
         <div class="form-group">
-          <label>{{ t('scheduled.x_text') }}</label>
-          <textarea class="form-textarea" x-model="xForm.text" :placeholder="t('scheduled.x_text_ph')" maxlength="280"></textarea>
+          <label for="f-x-form-text">{{ t('scheduled.x_text') }}</label>
+          <textarea id="f-x-form-text" class="form-textarea" x-model="xForm.text" :placeholder="t('scheduled.x_text_ph')" maxlength="280"></textarea>
           <div class="form-hint" x-text="(xForm.text || '').length + ' / 280'"></div>
         </div>
       </template>
       <div class="form-group">
-        <label>{{ t('scheduled.timing') }}</label>
-        <input type="text" class="form-input" x-model="xForm.when" maxlength="100" :placeholder="t('scheduled.x_timing_ph')">
+        <label for="f-x-form-when">{{ t('scheduled.timing') }}</label>
+        <input id="f-x-form-when" type="text" class="form-input" x-model="xForm.when" maxlength="100" :placeholder="t('scheduled.x_timing_ph')">
         {# X posts fire once: the cron hint's recurring example was refused
            here after the operator had approved it (SCH-S09). #}
         <div class="form-hint">{{ t('scheduled.x_timing_hint') }} {{ t('scheduled.x_fire_note') }}</div>

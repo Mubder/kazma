@@ -1238,10 +1238,8 @@ class SettingsRouterBuilder:
 
                     log_path = Path(tempfile.gettempdir()) / "kazma-restart.log"
                 log_path.parent.mkdir(parents=True, exist_ok=True)
-                logf = open(log_path, "ab")
                 kwargs = dict(
                     stdin=subprocess.DEVNULL,
-                    stdout=logf,
                     stderr=subprocess.STDOUT,
                     cwd=os.getcwd(),
                     close_fds=True,
@@ -1252,7 +1250,10 @@ class SettingsRouterBuilder:
                     )
                 else:
                     kwargs["start_new_session"] = True
-                subprocess.Popen(args, **kwargs)
+                # The child keeps its own copy of the file; this process
+                # closes its own (it stayed open: SonarCloud review).
+                with open(log_path, "ab") as logf:
+                    subprocess.Popen(args, stdout=logf, **kwargs)
                 _restart_in_flight = True
                 logger.info("[Settings] restart requested — relaunching %s", args)
 

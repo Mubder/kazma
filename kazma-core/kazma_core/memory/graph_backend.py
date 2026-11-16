@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import contextlib
 import logging
 import threading
 import time
@@ -504,27 +505,39 @@ class SqliteGraphBackend:
     def __init__(self, conn: Any | None = None) -> None:
         self._conn = conn
 
-    def _conn_open(self) -> Any:
+    @contextlib.contextmanager
+    def _reading(self) -> Iterator[Any]:
+        """The given connection, or one of the memory database's own, closed
+        after (each read opened one and left it open: SonarCloud review)."""
         if self._conn is not None:
-            return self._conn
+            yield self._conn
+            return
         import sqlite3
 
         from kazma_core.memory.schema_v2 import ensure_primary_schema
         from kazma_core.paths import primary_memory_db
 
         c = sqlite3.connect(primary_memory_db(), check_same_thread=False)
-        c.row_factory = sqlite3.Row
-        ensure_primary_schema(c)
-        return c
+        try:
+            c.row_factory = sqlite3.Row
+            ensure_primary_schema(c)
+            yield c
+        finally:
+            c.close()
 
     @property
     def available(self) -> bool:
+        """True when the beliefs table can be read (an empty one can). It was
+        True whatever happened, an unreadable database included."""
+        import sqlite3
+
         try:
-            c = self._conn_open()
-            c.execute("SELECT 1 FROM beliefs LIMIT 1")
+            with self._reading() as c:
+                c.execute("SELECT 1 FROM beliefs LIMIT 1")
             return True
-        except Exception:
-            return True  # empty table still "available"
+        except sqlite3.Error:
+            logger.warning("[graph] the SQLite graph (beliefs) cannot be read", exc_info=True)
+            return False
 
     def upsert_triple(
         self,
@@ -548,18 +561,18 @@ class SqliteGraphBackend:
         limit: int = 20,
     ) -> list[dict[str, Any]]:
         try:
-            c = self._conn_open()
-            rows = c.execute(
-                """
-                SELECT id, subject, predicate, object, confidence
-                FROM beliefs
-                WHERE tenant_id = ?
-                  AND valid_until IS NULL AND invalidated_at IS NULL
-                  AND (LOWER(subject) = LOWER(?) OR LOWER(object) = LOWER(?))
-                LIMIT ?
-                """,
-                (tenant_id, entity, entity, max(1, min(limit, 100))),
-            ).fetchall()
+            with self._reading() as c:
+                rows = c.execute(
+                    """
+                    SELECT id, subject, predicate, object, confidence
+                    FROM beliefs
+                    WHERE tenant_id = ?
+                      AND valid_until IS NULL AND invalidated_at IS NULL
+                      AND (LOWER(subject) = LOWER(?) OR LOWER(object) = LOWER(?))
+                    LIMIT ?
+                    """,
+                    (tenant_id, entity, entity, max(1, min(limit, 100))),
+                ).fetchall()
             return [dict(r) for r in rows]
         except Exception:
             return []

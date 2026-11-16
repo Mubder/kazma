@@ -28,6 +28,7 @@ from types import SimpleNamespace
 import pytest
 from kazma_core.backup import restic_repo as rr
 from kazma_core.observability import firing_ledger as fl
+from kazma_core.observability.log_lines import read_guard_line
 
 from tests._emitted_lines import REPO as _REPO
 from tests._emitted_lines import emitted_app_lines, guard_events, product_roots, render
@@ -208,38 +209,48 @@ def test_ledger_signatures_match_lines_the_code_emits():
     The first version watched for "[universal-backup] wrote", a string
     that appears nowhere in the codebase; the real line says "complete:".
     """
-    samples = {
+    # Re-pointed 2026-11-16 (log_lines): an app signature is read at the start
+    # of a message, a guard signature against a guard record's event (and
+    # reason) -- the samples are what each reads.
+    messages = {
         "universal backup": "[universal-backup] complete: 25 DBs, 952.9 MB",
-        "guard restart": '{"event": "guard.restarting", "restarts": 2}',
-        "foreign server detection": '{"event": "child.foreign_server_holds_port"}',
-        "health-gated restart": '{"event": "guard.restarting", "reason": "unhealthy (500)"}',
-        "probe miss tolerated": '{"event": "health.recovered", "after_failures": 1}',
         "daily digest": "[digest] daily digest delivered (812 chars)",
         "install restore": "[restore] RESTORED: 9/9 steps, generation 1787",
     }
+    records = {
+        "guard restart": ("guard.restarting", {"restarts": 2}),
+        "foreign server detection": ("child.foreign_server_holds_port", {}),
+        "health-gated restart": ("guard.restarting", {"reason": "unhealthy (500)"}),
+        "probe miss tolerated": ("health.recovered", {"after_failures": 1}),
+    }
     by_name = {s.mechanism: s for s in fl.FIRING_SIGNATURES}
-    for mechanism, line in samples.items():
-        sig = by_name[mechanism]
-        assert re.search(sig.pattern, line, re.IGNORECASE), mechanism
+    for mechanism, line in messages.items():
+        assert by_name[mechanism].in_message(line), mechanism
+    for mechanism, (event, fields) in records.items():
+        assert by_name[mechanism].in_guard_record(event, fields), mechanism
     # A missed probe answered by the next one is not a restart: the ledger
     # reported 430 "health-gated restarts" in a week that had none.
-    blip = '{"event": "health.failed", "detail": "probe error: [WinError 10054]"}'
-    assert not re.search(by_name["health-gated restart"].pattern, blip, re.IGNORECASE)
-    exited = '{"event": "guard.restarting", "reason": "process exited (code 1)"}'
-    assert not re.search(by_name["health-gated restart"].pattern, exited, re.IGNORECASE)
+    gated = by_name["health-gated restart"]
+    assert not gated.in_guard_record("health.failed", {"detail": "probe error: [WinError 10054]"})
+    assert not gated.in_guard_record("guard.restarting", {"reason": "process exited (code 1)"})
+    # A message quoting a guard event is no guard record.
+    assert not gated.in_message('"event": "guard.restarting", "reason": "unhealthy (500)"')
 
 
 # -- every signature is derived from a line the code really emits ---------
 
 def _unmatched_signatures(signatures, app_lines, guard_events) -> list[str]:
+    """Signatures no emitted line starts with (APP), or no guard event is
+    the whole of (GUARD). Tightened 2026-11-16: an app signature that only
+    matched INSIDE an emitted line counted any message quoting it."""
     missing = []
     for sig in signatures:
-        rx = re.compile(sig.pattern, re.IGNORECASE)
-        if '"event":' in sig.pattern:
-            head = sig.pattern.split(".*", 1)[0]  # the event clause
-            if not any(re.search(head, f'"event": "{e}"', re.IGNORECASE) for e in guard_events):
+        if sig.source == fl.GUARD:
+            # The event clause: the reason is a runtime value, checked end to
+            # end below (test_health_gated_signature_matches_...).
+            if not any(re.fullmatch(sig.pattern, e, re.IGNORECASE) for e in guard_events):
                 missing.append(sig.mechanism)
-        elif not any(rx.search(line) for line in app_lines):
+        elif not any(sig.in_message(line) for line in app_lines):
             missing.append(sig.mechanism)
     return missing
 
@@ -252,6 +263,11 @@ def test_every_ledger_signature_matches_a_line_the_code_emits():
     "[restore-drill] FAIL:" (the deep drill says "deep: FAIL:"), and restic
     maintenance, which logged only on failure. The hand-written samples in
     the test above all passed throughout.
+
+    Since 2026-11-16 an app signature must match the START of an emitted
+    line, where the ledger reads it, and a guard signature the whole of an
+    event the guard writes: six signatures matched only inside their lines
+    (the writer's "[tag] " came first), so any message quoting them counted.
     """
     app_lines = emitted_app_lines(product_roots())
     assert len(app_lines) > 1000, "the source walk found almost nothing"
@@ -262,14 +278,20 @@ def test_every_ledger_signature_matches_a_line_the_code_emits():
 def test_the_signature_gate_catches_a_drifted_pattern():
     """Negative control (§28): the pre-fix operator-alerting pattern, and a
     guard event that does not exist."""
-    app_lines = ["[ops_alert] 1 | 1", "[universal-backup] complete: 1"]
+    app_lines = ["[ops_alert] 1 | 1", "[universal-backup] complete: 1",
+                 "[universal-backup] restic 1 snapshot ok: 1"]
     stale = [
         fl.Signature("operator alerting", r"\[ops-alert\]|\[alert\]"),
-        fl.Signature("renamed guard event", r'"event": "guard\.restarted"'),
+        fl.Signature("renamed guard event", r"guard\.restarted", source=fl.GUARD),
         fl.Signature("universal backup", r"\[universal-backup\] complete:"),
+        # Matches the middle of an emitted line, never its start: the
+        # signature before 2026-11-16 ("restic \w+ snapshot ok").
+        fl.Signature("restic snapshot", r"restic \w+ snapshot ok"),
+        # A guard event's prefix is not the event.
+        fl.Signature("a prefix of a guard event", r"guard\.restart", source=fl.GUARD),
     ]
     assert _unmatched_signatures(stale, app_lines, {"guard.restarting"}) == [
-        "operator alerting", "renamed guard event",
+        "operator alerting", "renamed guard event", "restic snapshot", "a prefix of a guard event",
     ]
 
 
@@ -299,7 +321,8 @@ def test_health_gated_signature_matches_the_supervisors_real_reason(tmp_path):
     log("warn", "guard.restarting", reason=unhealthy[0], in_s=5, restarts=1)
     line = (tmp_path / "guard.log").read_text(encoding="utf-8")
     sig = next(s for s in fl.FIRING_SIGNATURES if s.mechanism == "health-gated restart")
-    assert re.search(sig.pattern, line, re.IGNORECASE), line
+    record = read_guard_line(line)
+    assert record is not None and sig.in_guard_record(record.event, record.fields), line
 
 
 def test_clean_restic_maintenance_leaves_the_line_the_ledger_counts(monkeypatch, caplog):
@@ -320,7 +343,7 @@ def test_clean_restic_maintenance_leaves_the_line_the_ledger_counts(monkeypatch,
     with caplog.at_level(logging.INFO):
         assert asyncio.run(wb._handle_restic_maintenance({})) is True
     sig = next(s for s in fl.FIRING_SIGNATURES if s.mechanism == "restic maintenance")
-    hits = [r.getMessage() for r in caplog.records if re.search(sig.pattern, r.getMessage())]
+    hits = [r.getMessage() for r in caplog.records if sig.in_message(r.getMessage())]
     assert hits == ["[restic] maintenance ok: local (forget --prune, check)"]
 
 

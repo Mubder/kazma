@@ -86,3 +86,17 @@ updates:
       # proxy runs the stable one (even minor).
       - dependency-name: "nginx"
         versions: ["1.31.x", "1.33.x", "1.35.x"]
+
+  # Kazma Watch's toolchain (2026-11-16): wrangler and its dependencies are
+  # installed from deploy/observer/package-lock.json (`npm ci`), so a new one
+  # reaches the setup only as a reviewed pull request. watch_setup's
+  # WRANGLER_VERSION must move with it (tests/test_watch_setup.py).
+  - package-ecosystem: "npm"
+    directory: "/deploy/observer"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(watch)"
+      include: "scope"
+    labels:
+      - "dependencies"

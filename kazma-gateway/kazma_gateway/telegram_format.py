@@ -26,7 +26,10 @@ _INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`)([^\n]*?)(?<!`)\1(?!`)")
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*|__(.+?)__")
 _ITALIC_RE = re.compile(r"(?<!\*)\*(?!\*)([^*\n]+?)(?<!\*)\*(?!\*)|(?<!_)_(?!_)([^_\n]+?)(?<!_)_(?!_)")
 _HEADING_MD_RE = re.compile(r"(?m)^(#{1,6})\s+(.+)$")
-_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
+# A label or address holds no "[": the innermost "[x](u)" is the link (as
+# CommonMark), and each "[" reads only to the next one. From every "[" the
+# old pattern read the rest of the reply (quadratic; Sonar S8786, 2026-11-16).
+_LINK_RE = re.compile(r"\[([^\][]+)\]\((https?://[^)\s[]+)\)")
 
 __all__ = [
     "HEADING_RULE",

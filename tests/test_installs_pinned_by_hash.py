@@ -153,3 +153,70 @@ def test_control_the_old_lines_are_unpinned(old):
 def test_the_new_forms_are_pinned(pinned):
     args = _pip_args(shlex.split(pinned))
     assert args is not None and not unpinned(args)
+
+
+# ── Tools a job runs through uv (2026-11-16, SonarCloud S8541/S8544) ─────
+# `uvx --from sigstore==4.5.1` and `uv run --with` pinned the tool alone: its
+# dependencies came fresh from PyPI in the release job, which holds the
+# signing identity. And `uv build` fetched hatchling unpinned. A job runs a
+# tool from uv.lock (`uv run --frozen` or `--locked`, a dependency group for
+# a tool that is not Kazma's) and builds with hash-checked build constraints.
+
+
+def uv_problems(words: list[str]) -> list[str]:
+    """What is unpinned about one uv command, or nothing."""
+    if not words:
+        return []
+    head = words[0].rsplit("/", 1)[-1]
+    if head == "uvx":
+        return ["uvx resolves the tool's dependencies fresh"]
+    if head != "uv" or len(words) < 2:
+        return []
+    sub, rest = words[1], words[2:]
+    problems = []
+    if sub == "tool" and rest[:1] in (["run"], ["install"]):
+        problems.append("uv tool resolves fresh")
+    if sub == "run":
+        if "--frozen" not in rest and "--locked" not in rest:
+            problems.append("uv run without --frozen or --locked")
+        if any(w == "--with" or w.startswith("--with=") or w == "--with-requirements" for w in rest):
+            problems.append("uv run --with resolves fresh")
+    if sub == "build":
+        if not any(w in ("--build-constraints", "-b") or w.startswith("--build-constraints=")
+                   for w in rest):
+            problems.append("uv build without --build-constraints")
+        if "--require-hashes" not in rest:
+            problems.append("uv build without --require-hashes")
+    return problems
+
+
+def test_every_uv_tool_run_and_build_in_ci_is_locked():
+    offenders = [
+        f"{where}: {' '.join(words)} -> {problems}"
+        for where, script in _workflow_scripts()
+        for words in _commands(script)
+        if (problems := uv_problems(words))
+    ]
+    assert not offenders, "\n".join(offenders)
+
+
+@pytest.mark.parametrize("old", [
+    "uvx --from cyclonedx-bom==8.0.1 cyclonedx-py requirements requirements.lock.txt",
+    "uvx --from sigstore==4.5.1 sigstore sign dist/kazma-*.whl",
+    "uv run --no-project --with sigstore==4.5.1 python scripts/verify_release_signatures.py dist",
+    "uvx --from twine==7.0.0 twine check --strict dist/*/*",
+    "uv build --out-dir dist",
+    "uv build --wheel --out-dir dist",
+])
+def test_control_the_old_release_lines_are_unlocked(old):
+    assert uv_problems(shlex.split(old))
+
+
+@pytest.mark.parametrize("new", [
+    "uv run --frozen --only-group sign sigstore sign dist/kazma-*.whl",
+    "uv run --frozen --only-group sbom cyclonedx-py requirements r.txt",
+    "uv run --frozen python scripts/upgrade_drill.py --wheel x.whl",
+    'uv build --build-constraints "$RUNNER_TEMP/b.txt" --require-hashes --out-dir dist',
+])
+def test_the_locked_forms_pass(new):
+    assert uv_problems(shlex.split(new)) == []

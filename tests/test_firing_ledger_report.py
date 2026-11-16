@@ -63,8 +63,8 @@ def test_every_mechanism_is_named_in_the_message(week):
         _app_line("[digest] daily digest dispatched (400 chars)"),
         _app_line("[loop-stall] event loop unresponsive for 15s"),
         _app_line("[Supervisor] Tool LOOP detected"),
-        _app_line("swept orphaned temp dump x"),
-        _app_line("restic local snapshot ok: ab12"),
+        _app_line("[pg_backup] swept orphaned temp dump x (12 MB) -- left by an interrupted backup"),
+        _app_line("[universal-backup] restic local snapshot ok: ab12"),
         _app_line("[restore-drill] PASS: 36/36 checks passed"),
     ], [
         _guard_line("guard.restarting", reason="unhealthy (probe error: timed out)"),
@@ -72,6 +72,10 @@ def test_every_mechanism_is_named_in_the_message(week):
         _guard_line("port.stale_before_spawn"),
     ])
     report = fl.build_report(hours=24)
+    # Re-pointed 2026-11-16 (log_lines): the fixture's sweep and snapshot
+    # lines carry their writers' tags, as the code writes them; a marker
+    # counts only at the start of the message now. Every line above fires.
+    assert len(report.fired) == 13, [e.mechanism for e in report.fired]
     title, body = fl.render(report)
     message = title + " " + body
     for sig in fl.FIRING_SIGNATURES:
@@ -173,7 +177,7 @@ def _live_week(app, guard):
                  + [_app_line("[digest] daily digest dispatched (400 chars)")] * 7
                  + [_app_line(f"[ops_alert] key.{i} | an alert") for i in range(9)]
                  + [_app_line("[ops_alert] backup.pg_dump | The Postgres dump failed.")] * 2
-                 + [_app_line("restic local snapshot ok: ab12")] * 112)
+                 + [_app_line("[universal-backup] restic local snapshot ok: ab12")] * 112)
     guard_lines = [_guard_line("guard.restarting", reason=r) for r in _LIVE_REASONS]
     _write(app, guard, app_lines, guard_lines)
 

@@ -128,10 +128,13 @@ def test_pg_dump_stale_hours_tracks_cadence() -> None:
 
 
 def test_plain_log_unparseable_is_skipped() -> None:
-    """M-13: undated lines must not count as in-window firings."""
-    from kazma_core.observability.firing_ledger import _within
+    """M-13: undated lines must not count as in-window firings. The readers
+    share one line reader since 2026-11-16 (observability.log_lines): a line
+    with no time of its own is no record at all."""
+    from kazma_core.observability.log_lines import read_app_line, read_guard_line
 
-    assert _within("not-a-date", 0.0) is False
+    assert read_app_line("not-a-date [universal-backup] restic local snapshot ok") is None
+    assert read_guard_line('{"event": "guard.restarting"}') is None
 
 
 def test_sensitive_shells_and_telegram_webhook_open() -> None:

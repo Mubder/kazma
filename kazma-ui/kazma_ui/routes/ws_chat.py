@@ -31,6 +31,9 @@ from kazma_ui.session_manager import get_session_manager
 
 logger = logging.getLogger(__name__)
 
+#: How much of an unauthenticated caller's session id the log keeps.
+_LOGGED_ID_CHARS = 80
+
 
 def _ws_recursion_limit(thread_id: str | None = None) -> int:
     """Aligned with gateway / long-task budgets (not a hard-coded 100)."""
@@ -295,7 +298,13 @@ def create_ws_chat_router(
             logger.warning("[WS-Chat] Authentication failed closed", exc_info=True)
             principal = None
         if principal is None:
-            logger.warning("[WS-Chat] Unauthenticated connection attempt for session=%s", session_id)
+            # Anyone can send this id (uvicorn decodes %0A in the path to a
+            # line break): quoted and cut, never written as it came. The log
+            # writer makes every record one line as well (logging_config).
+            logger.warning(
+                "[WS-Chat] Unauthenticated connection attempt for session=%r",
+                session_id[:_LOGGED_ID_CHARS],
+            )
             await websocket.accept()
             await websocket.close(code=4003, reason="Unauthorized")
             return

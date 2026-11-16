@@ -43,6 +43,22 @@ class TokenSaveRequest(BaseModel):
     token: str
 
 
+#: GitHub's own rules: an account is letters, digits and single hyphens (at
+#: most 39); a repository is letters, digits, ``.``, ``-`` and ``_`` (at most
+#: 100), never ``.`` or ``..``. Every ``/repos/{owner}/{repo}`` path the router
+#: builds takes names that passed this (a remote URL a repository wrote, or a
+#: request's ``full_name``): ``..`` reached other API paths with the owner's
+#: token (SonarCloud review, 2026-11-16).
+_GITHUB_OWNER = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}")
+_GITHUB_REPO = re.compile(r"[A-Za-z0-9._-]{1,100}")
+
+
+def github_names_ok(owner: str, repo: str) -> bool:
+    """True when *owner* and *repo* are names GitHub can hold."""
+    return bool(_GITHUB_OWNER.fullmatch(owner or "") and _GITHUB_REPO.fullmatch(repo or "")
+                and repo not in (".", ".."))
+
+
 def parse_github_slug(url: str) -> tuple[str, str] | None:
     """Parse a GitHub remote URL (HTTPS, SSH, or authenticated) into an (owner, repo) tuple."""
     url = url.strip()
@@ -52,7 +68,7 @@ def parse_github_slug(url: str) -> tuple[str, str] | None:
     match = re.search(pattern, url)
     if match:
         owner, repo = match.groups()
-        return owner, repo
+        return (owner, repo) if github_names_ok(owner, repo) else None
     return None
 
 
@@ -1148,7 +1164,8 @@ async def clone_repo(body: CloneRepoRequest) -> JSONResponse:
     from kazma_gateway.routers.github_client import GitHubClient, clone_auth_env
 
     full_name = body.full_name.strip()
-    if not full_name or "/" not in full_name:
+    owner_part, _, repo_part = full_name.partition("/")
+    if not github_names_ok(owner_part, repo_part):
         return JSONResponse({"error": "Invalid full_name (expected 'owner/repo')."}, status_code=422)
 
     # Traversal guard: the slug's last segment becomes a directory under the

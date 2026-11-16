@@ -2640,7 +2640,9 @@ class ConfigStore(_ChangeNotices):
                 conn.execute("COMMIT")
                 self._clear_cache()
                 committed = True
-            except Exception:
+            except BaseException:
+                # A cancel or an interrupt too (it left the transaction open
+                # on the shared connection: SonarCloud review, 2026-11-16).
                 conn.execute("ROLLBACK")
                 raise
         if committed:

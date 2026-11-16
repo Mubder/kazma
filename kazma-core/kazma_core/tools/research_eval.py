@@ -57,7 +57,11 @@ GOLDEN_TOPICS: list[dict[str, str]] = [
 
 
 _URL = re.compile(r"https?://[^\s\)\]\>\"']+")
-_FILE_REF = re.compile(r"\bresearch/[\w./-]+\.md\b")
+# From the start of a path-character run, committed to its first "research/":
+# a later one ends in the same run, so it cites a file only when the first
+# does. Tried from every "research/" of a run, the old pattern read the rest
+# of the run each time (quadratic; Sonar S8786 sweep, 2026-11-16).
+_FILE_REF = re.compile(r"(?<![\w./-])(?>[\w./-]*?\bresearch/)[\w./-]+\.md\b")
 #: A paragraph shorter than this is a caption or a list line, not a claim.
 _SUBSTANTIVE_CHARS = 120
 

@@ -161,7 +161,7 @@
           <div>
             <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:.25rem;">{{ t('documents.convert') }}</div>
             <div class="docs-actions">
-              <select class="mini-input" x-model="convertFormat" translate="no">
+              <select class="mini-input" x-model="convertFormat" translate="no" aria-label="{{ t('documents.convert_to') }}">
                 <option value="pdf">pdf</option>
                 <option value="html">html</option>
                 <option value="docx">docx</option>
@@ -178,8 +178,8 @@
               <button class="btn btn-secondary btn-sm" @click="pdfInfo()"
                       :disabled="acting || !mutatorReady()"
                       :title="mutatorReady() ? '' : t('documents.no_pdf_engine')">{{ t('documents.pdf_info') }}</button>
-              <input class="mini-input" type="number" min="1" style="max-width:60px;" x-model.number="splitStart" placeholder="{{ t('documents.from') }}">
-              <input class="mini-input" type="number" min="0" style="max-width:60px;" x-model.number="splitEnd" placeholder="{{ t('documents.to') }}">
+              <input class="mini-input" type="number" min="1" style="max-width:60px;" x-model.number="splitStart" aria-label="{{ t('documents.split_from') }}" placeholder="{{ t('documents.from') }}">
+              <input class="mini-input" type="number" min="0" style="max-width:60px;" x-model.number="splitEnd" aria-label="{{ t('documents.split_to') }}" placeholder="{{ t('documents.to') }}">
               <button class="btn btn-secondary btn-sm" @click="splitDoc()"
                       :disabled="acting || !mutatorReady()"
                       :title="mutatorReady() ? '' : t('documents.no_pdf_engine')">{{ t('documents.split') }}</button>

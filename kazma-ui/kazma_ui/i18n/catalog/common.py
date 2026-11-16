@@ -2383,4 +2383,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "لا تتراجع الاستعادة عن العالم: تبقى الملفات التي كتبها الوكيل والأوامر التي نفّذها والرسائل والمنشورات التي أرسلها كما هي.",
         "en": "A restore does not undo the world: files the agent wrote, commands it ran, and messages and posts it sent stay done.",
     },
+    "skills.marketplace_search": {
+        "ar": "ابحث في سوق المهارات",
+        "en": "Search the skills marketplace",
+    },
+    "mcp.env_name_label": {
+        "ar": "اسم المتغير",
+        "en": "Variable name",
+    },
+    "mcp.env_value_label": {
+        "ar": "قيمة المتغير",
+        "en": "Variable value",
+    },
 }

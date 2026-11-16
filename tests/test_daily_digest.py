@@ -331,20 +331,22 @@ def test_a_paused_or_stopped_turn_is_not_finished_and_a_failed_one_says_so(
 # -- the lines it reads are lines the code writes --------------------------
 
 
-def _unread(lines, app_lines=None, literals=(), turn_line=None) -> list[str]:
-    """What the digest reads that no line the code writes holds: a literal
-    marker (anywhere in a line), an app line's pattern (at a line's start),
-    the needle of each line its pattern takes (the quick scan drops a line
-    without it) and the turn line."""
+def _unread(lines, app_lines=None, literals=(), turn_line=None, patterns=()) -> list[str]:
+    """What the digest reads that no line the code writes STARTS with: a
+    literal marker, a pattern, an app line's pattern, the needle of each line
+    its pattern takes (the quick scan drops a line without it) and the turn
+    line. Every marker is read at the start of the message since 2026-11-16
+    (log_lines): a literal was checked anywhere in a line, the turn line too."""
     app_lines = daily_digest._APP_LINES if app_lines is None else app_lines
     turn_line = _TURN_PATTERN if turn_line is None else turn_line
-    missing = [m for m in literals if not any(m in line for line in lines)]
+    missing = [m for m in literals if not any(line.startswith(m) for line in lines)]
+    missing += [p.pattern for p in patterns if not any(p.match(line) for line in lines)]
     for needle, pattern, _label in app_lines:
         taken = [line for line in lines if pattern.match(line)]
         if not taken:
             missing.append(pattern.pattern)
         missing.extend(f"{needle!r} not in {line!r}" for line in taken if needle not in line)
-    if not any(turn_line.search(line) for line in lines):
+    if not any(turn_line.match(line) for line in lines):
         missing.append(turn_line.pattern)
     return missing
 
@@ -356,7 +358,12 @@ def test_every_line_the_digest_reads_is_one_the_code_writes():
     (tests/_emitted_lines.py), like the weekly report's signatures."""
     lines = emitted_app_lines(product_roots())
     assert len(lines) > 1000, "the source walk found almost nothing"
-    assert _unread(lines, literals=[daily_digest._ALERT_MARKER]) == []
+    assert _unread(
+        lines,
+        literals=[daily_digest._ALERT_MARKER, daily_digest._MEMORY_ACTION, daily_digest._CRON_MARKER,
+                  daily_digest._YOLO_OFF],
+        patterns=[daily_digest._CRON_LINE, daily_digest._MEMORY_ACTION_LINE, daily_digest._YOLO_OFF_LINE],
+    ) == []
 
 
 def test_the_marker_gate_catches_a_line_no_code_writes():
@@ -372,6 +379,10 @@ def test_the_marker_gate_catches_a_line_no_code_writes():
     wrong_needle = (("Backfilled turn", re.compile(r"\[SSE\] Backfilled unanswered turn"), "y"),)
     assert len(_unread(lines, wrong_needle)) == 1
     assert _unread(["[turn] Turn done: 1"], ()) == [_TURN_PATTERN.pattern]
+    # A marker inside a line, never at its start, is not a line the digest
+    # reads (2026-11-16): quoted by a session id, it counted.
+    inside = ["[WS-Chat] session='[turn] Turn finished: platform=1 key=1 failed=1 [ops_alert] k | t'"]
+    assert _unread(inside, (), literals=["[ops_alert] "]) == ["[ops_alert] ", _TURN_PATTERN.pattern]
 
 
 #: What the health check logged on live while Docker was stopped

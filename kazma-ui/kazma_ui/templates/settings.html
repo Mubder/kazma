@@ -131,6 +131,7 @@
                                     <div class="pc-actions">
                                         <label class="toggle" :title="selectedHubProvider().enabled ? '{{ t('common.disable') }}' : '{{ t('common.enable') }}'">
                                             <input type="checkbox" :checked="selectedHubProvider().enabled"
+                                                   :aria-label="window.t('settings.hub.enable_named', {name: selectedHubProvider().display_name || selectedHubProvider().name})"
                                                    @change="toggleHubProvider(selectedHubProvider().name, $event.target.checked)">
                                             <span class="toggle-slider"></span>
                                         </label>
@@ -235,6 +236,7 @@
                                         </div>
                                         <div class="input-with-icon" style="margin-bottom:6px">
                                             <input type="search" class="form-input"
+                                                   :aria-label="t('settings.hub.search_models')"
                                                    style="font-size:0.75rem;padding:6px 10px;width:100%;box-sizing:border-box"
                                                    :placeholder="kazmaCount('settings.hub.search_models_n', selectedHubProvider().discovered_models.length)"
                                                    :value="selectedHubProvider()._modelQuery || ''"
@@ -609,7 +611,7 @@
                         <span class="badge" :class="adapterRouting.tgToken ? 'badge-success' : 'badge-warning'"
                               x-text="adapterRouting.tgToken ? t('settings.hub.configured') : t('settings.hub.not_configured')"></span>
                         <label class="toggle" title="{{ t('settings.hub.enable_adapter') }}">
-                            <input type="checkbox" :checked="adapterRouting.tgEnabled" @change="adapterRouting.tgEnabled = $event.target.checked">
+                            <input type="checkbox" :checked="adapterRouting.tgEnabled" aria-label="{{ t('settings.hub.enable_named', name=t('settings.hub.tg_main')) }}" @change="adapterRouting.tgEnabled = $event.target.checked">
                             <span class="toggle-slider"></span>
                         </label>
                         <span style="flex:1"></span>
@@ -624,9 +626,9 @@
                     {{ connector_checks('telegram') }}
                     <div class="two-col-grid">
                         <div>
-                            <label class="form-label">{{ t('settings.bot_token') }}</label>
+                            <label for="f-adapter-routing-tg-token" class="form-label">{{ t('settings.bot_token') }}</label>
                             <div class="input-with-toggle">
-                                <input :type="routingShow.tgToken ? 'text' : 'password'" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
+                                <input id="f-adapter-routing-tg-token" :type="routingShow.tgToken ? 'text' : 'password'" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
                                        :value="adapterRouting.tgToken" @input="adapterRouting.tgToken = $event.target.value"
                                        translate="no" placeholder="123456789:AAF… (from @BotFather)">
                                 <button class="btn btn-icon" type="button" @click="routingShow.tgToken = !routingShow.tgToken"
@@ -636,16 +638,16 @@
                             <p class="form-hint">{{ t('settings.hub.masked_hint') }}</p>
                         </div>
                         <div>
-                            <label class="form-label">{{ t('settings.hub.chat_id') }} <span class="text-muted">{{ t('settings.hub.delivery_destination') }}</span></label>
-                            <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
+                            <label for="f-adapter-routing-tg-main-chat" class="form-label">{{ t('settings.hub.chat_id') }} <span class="text-muted">{{ t('settings.hub.delivery_destination') }}</span></label>
+                            <input id="f-adapter-routing-tg-main-chat" type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
                                    :value="adapterRouting.tgMainChat" @input="adapterRouting.tgMainChat = $event.target.value"
                                    placeholder="{{ t('settings.hub.tg_chat_ph') }}">
                             <p class="form-hint">{{ t('settings.hub.tg_chat_hint') }}</p>
                         </div>
                     </div>
                     <div style="margin-top:8px">
-                        <label class="form-label">{{ t('settings.hub.allowed_user_ids') }}</label>
-                        <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
+                        <label for="f-adapter-routing-tg-allowed" class="form-label">{{ t('settings.hub.allowed_user_ids') }}</label>
+                        <input id="f-adapter-routing-tg-allowed" type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
                                :value="adapterRouting.tgAllowed" @input="adapterRouting.tgAllowed = $event.target.value"
                                placeholder="{{ t('settings.hub.tg_allowed_ph') }}">
                     </div>
@@ -659,22 +661,22 @@
                         <span class="badge" :class="adapterRouting.tgGroupEnabled && adapterRouting.tgGroupChat ? 'badge-success' : 'badge-neutral'"
                               x-text="adapterRouting.tgGroupEnabled && adapterRouting.tgGroupChat ? t('settings.hub.active') : t('settings.hub.off')"></span>
                         <label class="toggle" title="{{ t('settings.hub.enable_group') }}">
-                            <input type="checkbox" :checked="adapterRouting.tgGroupEnabled" @change="adapterRouting.tgGroupEnabled = $event.target.checked">
+                            <input type="checkbox" :checked="adapterRouting.tgGroupEnabled" aria-label="{{ t('settings.hub.enable_named', name=t('settings.hub.tg_group')) }}" @change="adapterRouting.tgGroupEnabled = $event.target.checked">
                             <span class="toggle-slider"></span>
                         </label>
                         <span class="text-muted" style="font-size:0.72rem">{{ t('settings.hub.group_hint') }}</span>
                     </div>
                     <div class="two-col-grid">
                         <div>
-                            <label class="form-label">{{ t('settings.hub.group_chat_id') }}</label>
-                            <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
+                            <label for="f-adapter-routing-tg-group-chat" class="form-label">{{ t('settings.hub.group_chat_id') }}</label>
+                            <input id="f-adapter-routing-tg-group-chat" type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
                                    :value="adapterRouting.tgGroupChat" @input="adapterRouting.tgGroupChat = $event.target.value"
                                    placeholder="{{ t('settings.hub.group_chat_ph') }}">
                         </div>
                         <div>
-                            <label class="form-label">{{ t('settings.hub.dedicated_token') }} <span class="text-muted">{{ t('settings.hub.optional') }}</span></label>
+                            <label for="f-adapter-routing-tg-group-token" class="form-label">{{ t('settings.hub.dedicated_token') }} <span class="text-muted">{{ t('settings.hub.optional') }}</span></label>
                             <div class="input-with-toggle">
-                                <input :type="routingShow.tgGroupToken ? 'text' : 'password'" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
+                                <input id="f-adapter-routing-tg-group-token" :type="routingShow.tgGroupToken ? 'text' : 'password'" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
                                        :value="adapterRouting.tgGroupToken" @input="adapterRouting.tgGroupToken = $event.target.value"
                                        placeholder="987654321:AAF…">
                                 <button class="btn btn-icon" type="button" @click="routingShow.tgGroupToken = !routingShow.tgGroupToken"
@@ -693,7 +695,7 @@
                         <span class="badge" :class="adapterRouting.discordToken ? 'badge-success' : 'badge-warning'"
                               x-text="adapterRouting.discordToken ? t('settings.hub.configured') : t('settings.hub.not_configured')"></span>
                         <label class="toggle" title="{{ t('settings.hub.enable_adapter') }}">
-                            <input type="checkbox" :checked="adapterRouting.discordEnabled" @change="adapterRouting.discordEnabled = $event.target.checked">
+                            <input type="checkbox" :checked="adapterRouting.discordEnabled" aria-label="{{ t('settings.hub.enable_named', name='Discord') }}" @change="adapterRouting.discordEnabled = $event.target.checked">
                             <span class="toggle-slider"></span>
                         </label>
                         <span style="flex:1"></span>
@@ -708,9 +710,9 @@
                     {{ connector_checks('discord') }}
                     <div class="two-col-grid">
                         <div>
-                            <label class="form-label">{{ t('settings.bot_token') }}</label>
+                            <label for="f-adapter-routing-discord-token" class="form-label">{{ t('settings.bot_token') }}</label>
                             <div class="input-with-toggle">
-                                <input :type="routingShow.discordToken ? 'text' : 'password'" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
+                                <input id="f-adapter-routing-discord-token" :type="routingShow.discordToken ? 'text' : 'password'" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
                                        :value="adapterRouting.discordToken" @input="adapterRouting.discordToken = $event.target.value"
                                        placeholder="{{ t('settings.hub.discord_token_ph') }}">
                                 <button class="btn btn-icon" type="button" @click="routingShow.discordToken = !routingShow.discordToken"
@@ -719,22 +721,22 @@
                             </div>
                         </div>
                         <div>
-                            <label class="form-label">{{ t('settings.hub.channel_id') }} <span class="text-muted">{{ t('settings.hub.delivery_destination') }}</span></label>
-                            <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
+                            <label for="f-adapter-routing-discord-channel" class="form-label">{{ t('settings.hub.channel_id') }} <span class="text-muted">{{ t('settings.hub.delivery_destination') }}</span></label>
+                            <input id="f-adapter-routing-discord-channel" type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
                                    :value="adapterRouting.discordChannel" @input="adapterRouting.discordChannel = $event.target.value"
                                    placeholder="{{ t('settings.hub.discord_channel_ph') }}">
                         </div>
                     </div>
                     <div class="two-col-grid" style="margin-top:8px">
                         <div>
-                            <label class="form-label">{{ t('settings.guild_id') }}</label>
-                            <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
+                            <label for="f-adapter-routing-discord-guild" class="form-label">{{ t('settings.guild_id') }}</label>
+                            <input id="f-adapter-routing-discord-guild" type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
                                    :value="adapterRouting.discordGuild" @input="adapterRouting.discordGuild = $event.target.value"
                                    placeholder="{{ t('settings.hub.discord_guild_ph') }}">
                         </div>
                         <div>
-                            <label class="form-label">{{ t('settings.hub.allowed_user_ids') }}</label>
-                            <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
+                            <label for="f-adapter-routing-discord-allowed" class="form-label">{{ t('settings.hub.allowed_user_ids') }}</label>
+                            <input id="f-adapter-routing-discord-allowed" type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
                                    :value="adapterRouting.discordAllowed" @input="adapterRouting.discordAllowed = $event.target.value"
                                    placeholder="{{ t('settings.hub.discord_allowed_ph') }}">
                         </div>
@@ -749,7 +751,7 @@
                         <span class="badge" :class="adapterRouting.slackToken ? 'badge-success' : 'badge-warning'"
                               x-text="adapterRouting.slackToken ? t('settings.hub.configured') : t('settings.hub.not_configured')"></span>
                         <label class="toggle" title="{{ t('settings.hub.enable_adapter') }}">
-                            <input type="checkbox" :checked="adapterRouting.slackEnabled" @change="adapterRouting.slackEnabled = $event.target.checked">
+                            <input type="checkbox" :checked="adapterRouting.slackEnabled" aria-label="{{ t('settings.hub.enable_named', name='Slack') }}" @change="adapterRouting.slackEnabled = $event.target.checked">
                             <span class="toggle-slider"></span>
                         </label>
                         <span style="flex:1"></span>
@@ -764,9 +766,9 @@
                     {{ connector_checks('slack') }}
                     <div class="two-col-grid">
                         <div>
-                            <label class="form-label">{{ t('settings.bot_token') }}</label>
+                            <label for="f-adapter-routing-slack-token" class="form-label">{{ t('settings.bot_token') }}</label>
                             <div class="input-with-toggle">
-                                <input :type="routingShow.slackToken ? 'text' : 'password'" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
+                                <input id="f-adapter-routing-slack-token" :type="routingShow.slackToken ? 'text' : 'password'" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
                                        :value="adapterRouting.slackToken" @input="adapterRouting.slackToken = $event.target.value"
                                        placeholder="{{ t('settings.hub.slack_token_ph') }}">
                                 <button class="btn btn-icon" type="button" @click="routingShow.slackToken = !routingShow.slackToken"
@@ -775,9 +777,9 @@
                             </div>
                         </div>
                         <div>
-                            <label class="form-label">{{ t('settings.hub.app_token') }} <span class="text-muted">{{ t('settings.hub.app_token_hint') }}</span></label>
+                            <label for="f-adapter-routing-slack-app-token" class="form-label">{{ t('settings.hub.app_token') }} <span class="text-muted">{{ t('settings.hub.app_token_hint') }}</span></label>
                             <div class="input-with-toggle">
-                                <input :type="routingShow.slackAppToken ? 'text' : 'password'" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
+                                <input id="f-adapter-routing-slack-app-token" :type="routingShow.slackAppToken ? 'text' : 'password'" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
                                        :value="adapterRouting.slackAppToken" @input="adapterRouting.slackAppToken = $event.target.value"
                                        translate="no" placeholder="xapp-…">
                                 <button class="btn btn-icon" type="button" @click="routingShow.slackAppToken = !routingShow.slackAppToken"
@@ -788,21 +790,21 @@
                     </div>
                     <div class="two-col-grid" style="margin-top:8px">
                         <div>
-                            <label class="form-label">{{ t('settings.hub.slack_workspace') }}</label>
-                            <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
+                            <label for="f-adapter-routing-slack-workspace" class="form-label">{{ t('settings.hub.slack_workspace') }}</label>
+                            <input id="f-adapter-routing-slack-workspace" type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
                                    :value="adapterRouting.slackWorkspace" @input="adapterRouting.slackWorkspace = $event.target.value"
                                    placeholder="workspace-name">
                         </div>
                         <div>
-                            <label class="form-label">{{ t('settings.hub.channel_id') }} <span class="text-muted">{{ t('settings.hub.delivery_destination') }}</span></label>
-                            <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
+                            <label for="f-adapter-routing-slack-channel" class="form-label">{{ t('settings.hub.channel_id') }} <span class="text-muted">{{ t('settings.hub.delivery_destination') }}</span></label>
+                            <input id="f-adapter-routing-slack-channel" type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
                                    :value="adapterRouting.slackChannel" @input="adapterRouting.slackChannel = $event.target.value"
                                    placeholder="{{ t('settings.hub.slack_channel_ph') }}">
                         </div>
                     </div>
                     <div style="margin-top:8px">
-                        <label class="form-label">{{ t('settings.hub.allowed_user_ids') }}</label>
-                        <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
+                        <label for="f-adapter-routing-slack-allowed" class="form-label">{{ t('settings.hub.allowed_user_ids') }}</label>
+                        <input id="f-adapter-routing-slack-allowed" type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
                                :value="adapterRouting.slackAllowed" @input="adapterRouting.slackAllowed = $event.target.value"
                                placeholder="{{ t('settings.hub.slack_allowed_ph') }}">
                     </div>
@@ -816,7 +818,7 @@
                         <span class="badge" :class="adapterRouting.waToken && adapterRouting.waPhoneId ? 'badge-success' : 'badge-warning'"
                               x-text="adapterRouting.waToken && adapterRouting.waPhoneId ? t('settings.hub.configured') : t('settings.hub.not_configured')"></span>
                         <label class="toggle" title="{{ t('settings.hub.enable_adapter') }}">
-                            <input type="checkbox" :checked="adapterRouting.waEnabled" @change="adapterRouting.waEnabled = $event.target.checked">
+                            <input type="checkbox" :checked="adapterRouting.waEnabled" aria-label="{{ t('settings.hub.enable_named', name='WhatsApp') }}" @change="adapterRouting.waEnabled = $event.target.checked">
                             <span class="toggle-slider"></span>
                         </label>
                         <span style="flex:1"></span>
@@ -832,7 +834,7 @@
                     {{ connector_checks('whatsapp') }}
                     <div class="two-col-grid">
                         <div>
-                            <label class="form-label">{{ t('settings.hub.whatsapp_token') }} <span class="text-muted">{{ t('settings.hub.whatsapp_token_hint') }}</span></label>
+                            <label for="wa-token" class="form-label">{{ t('settings.hub.whatsapp_token') }} <span class="text-muted">{{ t('settings.hub.whatsapp_token_hint') }}</span></label>
                             <div class="input-with-toggle">
                                 <input id="wa-token" :type="routingShow.waToken ? 'text' : 'password'" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
                                        :value="adapterRouting.waToken" @input="adapterRouting.waToken = $event.target.value" translate="no">
@@ -842,7 +844,7 @@
                             </div>
                         </div>
                         <div>
-                            <label class="form-label">{{ t('settings.hub.whatsapp_phone_id') }} <span class="text-muted">{{ t('settings.hub.whatsapp_phone_id_hint') }}</span></label>
+                            <label for="wa-phone-id" class="form-label">{{ t('settings.hub.whatsapp_phone_id') }} <span class="text-muted">{{ t('settings.hub.whatsapp_phone_id_hint') }}</span></label>
                             <input id="wa-phone-id" type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" translate="no"
                                    :value="adapterRouting.waPhoneId" @input="adapterRouting.waPhoneId = $event.target.value"
                                    placeholder="123456789012345">
@@ -850,7 +852,7 @@
                     </div>
                     <div class="two-col-grid" style="margin-top:8px">
                         <div>
-                            <label class="form-label">{{ t('settings.hub.whatsapp_app_secret') }} <span class="text-muted">{{ t('settings.hub.whatsapp_app_secret_hint') }}</span></label>
+                            <label for="wa-app-secret" class="form-label">{{ t('settings.hub.whatsapp_app_secret') }} <span class="text-muted">{{ t('settings.hub.whatsapp_app_secret_hint') }}</span></label>
                             <div class="input-with-toggle">
                                 <input id="wa-app-secret" :type="routingShow.waAppSecret ? 'text' : 'password'" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
                                        :value="adapterRouting.waAppSecret" @input="adapterRouting.waAppSecret = $event.target.value" translate="no">
@@ -860,7 +862,7 @@
                             </div>
                         </div>
                         <div>
-                            <label class="form-label">{{ t('settings.hub.whatsapp_verify_token') }} <span class="text-muted">{{ t('settings.hub.whatsapp_verify_hint') }}</span></label>
+                            <label for="wa-verify-token" class="form-label">{{ t('settings.hub.whatsapp_verify_token') }} <span class="text-muted">{{ t('settings.hub.whatsapp_verify_hint') }}</span></label>
                             <div class="input-with-toggle">
                                 <input id="wa-verify-token" :type="routingShow.waVerifyToken ? 'text' : 'password'" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
                                        :value="adapterRouting.waVerifyToken" @input="adapterRouting.waVerifyToken = $event.target.value" translate="no">
@@ -872,7 +874,7 @@
                         </div>
                     </div>
                     <div style="margin-top:8px">
-                        <label class="form-label">{{ t('settings.hub.whatsapp_webhook') }}</label>
+                        <label for="wa-webhook" class="form-label">{{ t('settings.hub.whatsapp_webhook') }}</label>
                         <template x-if="adapterRouting.waWebhook">
                             <input id="wa-webhook" type="text" class="form-input" readonly translate="no" dir="ltr" style="font-family:var(--font-mono);font-size:0.8rem"
                                    :value="adapterRouting.waWebhook" @focus="$event.target.select()">
@@ -882,7 +884,7 @@
                         </template>
                     </div>
                     <div style="margin-top:8px">
-                        <label class="form-label">{{ t('settings.hub.whatsapp_allowed') }}</label>
+                        <label for="wa-allowed" class="form-label">{{ t('settings.hub.whatsapp_allowed') }}</label>
                         <input id="wa-allowed" type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" translate="no"
                                :value="adapterRouting.waAllowed" @input="adapterRouting.waAllowed = $event.target.value"
                                placeholder="{{ t('settings.hub.whatsapp_allowed_ph') }}">
@@ -895,8 +897,8 @@
                     <p class="form-hint" style="margin:2px 0 10px">{{ t('settings.hub.routes_blurb') }}</p>
                     <p class="form-hint">{{ t('settings.alerts.moved_hint') }}
                         <a href="/settings?tab=alerts" @click.prevent="onTabChange('alerts')">{{ t('settings.tab_alerts') }}</a></p>
-                    <div>
-                        <label class="form-label">{{ t('settings.hub.swarm_goes_to') }}</label>
+                    <fieldset style="border:0;padding:0;margin:0;min-width:0">
+                        <legend class="form-label" style="padding:0">{{ t('settings.hub.swarm_goes_to') }}</legend>
                         <p class="form-hint" style="margin:0 0 6px">{{ t('settings.hub.swarm_hint') }}</p>
                         <template x-for="r in ['telegram', 'telegram-group', 'discord', 'slack']" :key="'s' + r">
                             <label class="toggle-row" style="margin-bottom:8px">
@@ -908,7 +910,7 @@
                                 <span x-text="({telegram: 'Telegram', 'telegram-group': t('settings.hub.route_tg_group'), discord: 'Discord', slack: 'Slack'})[r] || r"></span>
                             </label>
                         </template>
-                    </div>
+                    </fieldset>
                 </div>
 
                 <!-- Gateway runtime refresh -->
@@ -946,7 +948,7 @@
                             </div>
                             <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
                                 <label class="toggle" :title="c.enabled ? t('common.disable') : t('common.enable')">
-                                    <input type="checkbox" :checked="c.enabled" @change="toggleHubConnector(c.name, $event.target.checked)">
+                                    <input type="checkbox" :checked="c.enabled" :aria-label="window.t('settings.hub.enable_named', {name: tOr('settings.connector_' + c.name, c.name)})" @change="toggleHubConnector(c.name, $event.target.checked)">
                                     <span class="toggle-slider"></span>
                                 </label>
                                 <button class="btn btn-secondary btn-sm" @click="testHubConnector(c.name)" :disabled="hubTestingConnector === c.name" x-text="hubTestingConnector === c.name ? '...' : '{{ t('settings.test') }}'"></button>
@@ -979,8 +981,8 @@
             <div class="modal">
                 <h2 x-text="hubEditingProvider._existing ? '{{ t('settings.edit_provider') }}' : '{{ t('settings.add_provider') }}'"></h2>
                 <div class="form-group" x-show="!hubEditingProvider._existing" style="margin-bottom: 16px;" x-cloak>
-                    <label>{{ t('settings.choose_preset') }}</label>
-                    <select class="form-select" @change="applyHubProviderPreset($event.target.value); $event.target.value = ''">
+                    <label for="f-provider-preset">{{ t('settings.choose_preset') }}</label>
+                    <select id="f-provider-preset" class="form-select" @change="applyHubProviderPreset($event.target.value); $event.target.value = ''">
                         <option value="">{{ t('settings.choose_preset_placeholder') }}</option>
                         <template x-for="preset in providerPresets" :key="preset.key">
                             <option :value="preset.key" x-text="preset.key === 'custom' ? t('settings.hub.custom_endpoint') : preset.name" translate="no"></option>
@@ -989,20 +991,20 @@
                 </div>
                 <div class="form-row">
                     <div class="form-group">
-                        <label>{{ t('settings.name_id') }}</label>
+                        <label for="provider-name">{{ t('settings.name_id') }}</label>
                         <input type="text" class="form-input" id="provider-name" x-model="hubEditingProvider.name" translate="no" placeholder="openai" :disabled="hubEditingProvider._existing">
                     </div>
                     <div class="form-group">
-                        <label>{{ t('settings.display_name') }}</label>
-                        <input type="text" class="form-input" x-model="hubEditingProvider.display_name" translate="no" placeholder="OpenAI">
+                        <label for="f-hub-editing-provider-display-name">{{ t('settings.display_name') }}</label>
+                        <input id="f-hub-editing-provider-display-name" type="text" class="form-input" x-model="hubEditingProvider.display_name" translate="no" placeholder="OpenAI">
                     </div>
                 </div>
                 <!-- Google Specific Settings -->
                 <template x-if="hubEditingProvider.form === 'google'">
                     <div class="card-nested" style="margin-bottom:16px;padding:16px">
                         <div class="form-group" style="margin-bottom: 12px;">
-                            <label style="font-weight: 600; color: var(--accent);">{{ t('settings.hub.google_mode') }}</label>
-                            <select class="form-select" x-model="hubEditingProvider.google_mode" @change="if (hubEditingProvider.google_mode === 'ai_studio') { hubEditingProvider.base_url = 'https://generativelanguage.googleapis.com/v1beta'; } else { hubEditingProvider.base_url = ''; }">
+                            <label for="f-hub-editing-provider-google-mode" style="font-weight: 600; color: var(--accent);">{{ t('settings.hub.google_mode') }}</label>
+                            <select id="f-hub-editing-provider-google-mode" class="form-select" x-model="hubEditingProvider.google_mode" @change="if (hubEditingProvider.google_mode === 'ai_studio') { hubEditingProvider.base_url = 'https://generativelanguage.googleapis.com/v1beta'; } else { hubEditingProvider.base_url = ''; }">
                                 <option value="ai_studio">{{ t('settings.hub.google_ai_studio') }}</option>
                                 <option value="vertex_ai" translate="no">Google Cloud / Vertex AI (ADC / gcloud)</option>
                             </select>
@@ -1011,15 +1013,15 @@
                         <!-- AI Studio Section -->
                         <div x-show="hubEditingProvider.google_mode === 'ai_studio'" x-cloak>
                             <div class="form-group" style="margin-bottom: 12px;">
-                                <label>{{ t('settings.api_key') }}</label>
+                                <label for="f-hub-editing-provider-api-key">{{ t('settings.api_key') }}</label>
                                 <div class="input-with-toggle">
-                                    <input :type="hubShowProviderKey ? 'text' : 'password'" class="form-input" x-model="hubEditingProvider.api_key" @input="hubProviderTested = false" :placeholder="hubEditingProvider._has_stored_key ? t('settings.hub.keep_key') : t('settings.hub.ai_studio_key_ph')" autocomplete="off" spellcheck="false">
+                                    <input id="f-hub-editing-provider-api-key" :type="hubShowProviderKey ? 'text' : 'password'" class="form-input" x-model="hubEditingProvider.api_key" @input="hubProviderTested = false" :placeholder="hubEditingProvider._has_stored_key ? t('settings.hub.keep_key') : t('settings.hub.ai_studio_key_ph')" autocomplete="off" spellcheck="false">
                                     <button class="btn btn-icon" type="button" @click="hubShowProviderKey = !hubShowProviderKey" :title="hubShowProviderKey ? t('settings.hub.hide') : t('settings.hub.show')" x-html="hubShowProviderKey ? KazmaIcons.get('eye-off') : KazmaIcons.get('eye')"></button>
                                 </div>
                             </div>
                             <div class="form-group">
-                                <label>{{ t('settings.hub.base_url_optional') }}</label>
-                                <input type="text" class="form-input" x-model="hubEditingProvider.base_url" @input="hubProviderTested = false" translate="no" placeholder="https://generativelanguage.googleapis.com/v1beta">
+                                <label for="f-hub-editing-provider-base-url">{{ t('settings.hub.base_url_optional') }}</label>
+                                <input id="f-hub-editing-provider-base-url" type="text" class="form-input" x-model="hubEditingProvider.base_url" @input="hubProviderTested = false" translate="no" placeholder="https://generativelanguage.googleapis.com/v1beta">
                             </div>
                         </div>
 
@@ -1027,12 +1029,12 @@
                         <div x-show="hubEditingProvider.google_mode === 'vertex_ai'" x-cloak>
                             <div class="form-row" style="gap: 12px;">
                                 <div class="form-group" style="flex: 1;">
-                                    <label>{{ t('settings.hub.gcp_project') }}</label>
-                                    <input type="text" class="form-input" x-model="hubEditingProvider.project_id" placeholder="my-gcp-project-123">
+                                    <label for="f-hub-editing-provider-project-id">{{ t('settings.hub.gcp_project') }}</label>
+                                    <input id="f-hub-editing-provider-project-id" type="text" class="form-input" x-model="hubEditingProvider.project_id" placeholder="my-gcp-project-123">
                                 </div>
                                 <div class="form-group" style="flex: 1;">
-                                    <label>{{ t('settings.hub.gcp_location') }}</label>
-                                    <input type="text" class="form-input" x-model="hubEditingProvider.location" placeholder="us-central1">
+                                    <label for="f-hub-editing-provider-location">{{ t('settings.hub.gcp_location') }}</label>
+                                    <input id="f-hub-editing-provider-location" type="text" class="form-input" x-model="hubEditingProvider.location" placeholder="us-central1">
                                 </div>
                             </div>
                             <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 8px; line-height: 1.4;">
@@ -1046,22 +1048,22 @@
                 <template x-if="hubEditingProvider.form === 'bedrock'">
                     <div class="provider-form-part">
                         <div class="form-group" style="margin-bottom: 12px;">
-                            <label>{{ t('settings.hub.aws_region') }}</label>
+                            <label for="provider-region">{{ t('settings.hub.aws_region') }}</label>
                             <input type="text" class="form-input" id="provider-region" x-model="hubEditingProvider.region" @input="hubProviderTested = false" translate="no" placeholder="us-east-1">
                         </div>
                         <div class="form-row" style="gap: 12px;">
                             <div class="form-group" style="flex: 1;">
-                                <label>{{ t('settings.hub.aws_access_key_id') }}</label>
+                                <label for="provider-aws-key-id">{{ t('settings.hub.aws_access_key_id') }}</label>
                                 <input type="text" class="form-input" id="provider-aws-key-id" x-model="hubEditingProvider.aws_access_key_id" @input="hubProviderTested = false" translate="no" autocomplete="off" spellcheck="false">
                             </div>
                             <div class="form-group" style="flex: 1;">
-                                <label>{{ t('settings.hub.aws_secret_access_key') }}</label>
+                                <label for="provider-aws-secret">{{ t('settings.hub.aws_secret_access_key') }}</label>
                                 <input type="password" class="form-input" id="provider-aws-secret" x-model="hubEditingProvider.aws_secret_access_key" @input="hubProviderTested = false" autocomplete="off" spellcheck="false">
                             </div>
                         </div>
                         <div class="form-group" style="margin-bottom: 12px;">
-                            <label>{{ t('settings.hub.aws_session_token') }}</label>
-                            <input type="password" class="form-input" x-model="hubEditingProvider.aws_session_token" @input="hubProviderTested = false" autocomplete="off" spellcheck="false">
+                            <label for="f-hub-editing-provider-aws-session-token">{{ t('settings.hub.aws_session_token') }}</label>
+                            <input id="f-hub-editing-provider-aws-session-token" type="password" class="form-input" x-model="hubEditingProvider.aws_session_token" @input="hubProviderTested = false" autocomplete="off" spellcheck="false">
                         </div>
                         <p class="setting-desc">{{ t('settings.hub.bedrock_hint') }}</p>
                     </div>
@@ -1071,18 +1073,18 @@
                 <template x-if="hubEditingProvider.form !== 'google' && hubEditingProvider.form !== 'bedrock'">
                     <div>
                         <div class="form-group" style="margin-bottom: 12px;">
-                            <label x-text="hubEditingProvider.form === 'azure' ? t('settings.hub.azure_endpoint') : t('settings.base_url')"></label>
+                            <label for="provider-base-url" x-text="hubEditingProvider.form === 'azure' ? t('settings.hub.azure_endpoint') : t('settings.base_url')"></label>
                             <input type="text" class="form-input" id="provider-base-url" x-model="hubEditingProvider.base_url" @input="hubProviderTested = false" translate="no" :placeholder="hubEditingProvider.form === 'azure' ? 'https://my-resource.openai.azure.com' : 'https://api.openai.com/v1'">
                             <div class="setting-desc" x-show="hubEditingProvider.url_hint" x-cloak x-text="t('settings.hub.url_hint_account_id')"></div>
                         </div>
                         <div class="form-group" style="margin-bottom: 12px;" x-show="hubEditingProvider.form === 'azure'" x-cloak>
-                            <label>{{ t('settings.hub.api_version') }}</label>
+                            <label for="provider-api-version">{{ t('settings.hub.api_version') }}</label>
                             <input type="text" class="form-input" id="provider-api-version" x-model="hubEditingProvider.api_version" @input="hubProviderTested = false" translate="no" placeholder="2024-10-21">
                         </div>
                         <div class="form-group" style="margin-bottom: 12px;">
-                            <label x-text="hubEditingProvider.form === 'local' ? t('settings.hub.api_key_optional') : t('settings.api_key')"></label>
+                            <label for="f-hub-editing-provider-api-key-2" x-text="hubEditingProvider.form === 'local' ? t('settings.hub.api_key_optional') : t('settings.api_key')"></label>
                             <div class="input-with-toggle">
-                                <input :type="hubShowProviderKey ? 'text' : 'password'" class="form-input" x-model="hubEditingProvider.api_key" @input="hubProviderTested = false" :placeholder="hubEditingProvider._has_stored_key ? t('settings.hub.keep_key') : 'sk-...'" autocomplete="off" spellcheck="false">
+                                <input id="f-hub-editing-provider-api-key-2" :type="hubShowProviderKey ? 'text' : 'password'" class="form-input" x-model="hubEditingProvider.api_key" @input="hubProviderTested = false" :placeholder="hubEditingProvider._has_stored_key ? t('settings.hub.keep_key') : 'sk-...'" autocomplete="off" spellcheck="false">
                                 <button class="btn btn-icon" type="button" @click="hubShowProviderKey = !hubShowProviderKey" :title="hubShowProviderKey ? t('settings.hub.hide') : t('settings.hub.show')" x-html="hubShowProviderKey ? KazmaIcons.get('eye-off') : KazmaIcons.get('eye')"></button>
                             </div>
                             <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">{{ t('settings.masked_placeholder_hint') }}</div>
@@ -1090,7 +1092,7 @@
                     </div>
                 </template>
                 <div class="form-group">
-                    <label x-text="hubEditingProvider.form === 'azure' ? t('settings.hub.azure_deployments') : t('settings.models_comma')"></label>
+                    <label for="provider-models" x-text="hubEditingProvider.form === 'azure' ? t('settings.hub.azure_deployments') : t('settings.models_comma')"></label>
                     <input type="text" class="form-input" id="provider-models" x-model="hubEditingProvider.models" placeholder="gpt-5-mini, gpt-5">
                 </div>
 
@@ -1104,25 +1106,25 @@
                         </label>
                         <div class="setting-desc">{{ t('settings.hub.url_as_typed_hint') }}</div>
                     </div>
-                    <div class="form-group" x-show="hubEditingProvider.form !== 'bedrock'" x-cloak>
-                        <label>{{ t('settings.hub.headers') }}</label>
+                    <div class="form-group" role="group" aria-labelledby="provider-headers-label" x-show="hubEditingProvider.form !== 'bedrock'" x-cloak>
+                        <div class="form-label" id="provider-headers-label" style="margin-bottom:0">{{ t('settings.hub.headers') }}</div>
                         <div class="setting-desc">{{ t('settings.hub.headers_hint') }}</div>
                         <template x-for="(row, i) in hubEditingProvider.headerRows" :key="i">
                             <div class="form-row provider-header-row" style="gap: 8px; margin-top: 6px;">
-                                <input type="text" class="form-input" x-model="row.name" @input="hubProviderTested = false" :placeholder="t('settings.hub.header_name')" translate="no" autocomplete="off">
-                                <input type="password" class="form-input" x-model="row.value" @input="hubProviderTested = false" :placeholder="t('settings.hub.header_value')" autocomplete="off">
+                                <input type="text" class="form-input" x-model="row.name" @input="hubProviderTested = false" :aria-label="t('settings.hub.header_name')" :placeholder="t('settings.hub.header_name')" translate="no" autocomplete="off">
+                                <input type="password" class="form-input" x-model="row.value" @input="hubProviderTested = false" :aria-label="t('settings.hub.header_value')" :placeholder="t('settings.hub.header_value')" autocomplete="off">
                                 <button class="btn btn-icon" type="button" @click="removeProviderHeader(i)" :title="t('settings.hub.remove')" x-html="KazmaIcons.get('x')"></button>
                             </div>
                         </template>
                         <button class="btn btn-secondary btn-sm" type="button" id="provider-add-header" style="margin-top: 6px;" @click="addProviderHeader()">{{ t('settings.hub.add_header') }}</button>
                     </div>
-                    <div class="form-group" x-show="hubEditingProvider.form !== 'google' && hubEditingProvider.form !== 'bedrock' && hubEditingProvider.form !== 'local'" x-cloak>
-                        <label>{{ t('settings.hub.extra_keys') }}</label>
+                    <div class="form-group" x-show="hubEditingProvider.form !== 'google' && hubEditingProvider.form !== 'bedrock' && hubEditingProvider.form !== 'local'" role="group" aria-labelledby="provider-extra-keys-label" x-cloak>
+                        <div class="form-label" id="provider-extra-keys-label" style="margin-bottom:0">{{ t('settings.hub.extra_keys') }}</div>
                         <div class="setting-desc">{{ t('settings.hub.extra_keys_hint') }}</div>
                         <template x-for="(key, i) in hubEditingProvider.extraKeys" :key="i">
                             <div class="form-row provider-key-row" style="gap: 8px; margin-top: 6px;">
-                                <input type="text" class="form-input" x-model="key.label" :placeholder="t('settings.hub.extra_key_label')" autocomplete="off">
-                                <input type="password" class="form-input" x-model="key.api_key" :placeholder="t('settings.api_key')" autocomplete="off" spellcheck="false">
+                                <input type="text" class="form-input" x-model="key.label" :aria-label="t('settings.hub.extra_key_label')" :placeholder="t('settings.hub.extra_key_label')" autocomplete="off">
+                                <input type="password" class="form-input" x-model="key.api_key" :aria-label="t('settings.api_key')" :placeholder="t('settings.api_key')" autocomplete="off" spellcheck="false">
                                 <button class="btn btn-icon" type="button" @click="removeProviderKey(i)" :title="t('settings.hub.remove')" x-html="KazmaIcons.get('x')"></button>
                             </div>
                         </template>
@@ -1139,10 +1141,10 @@
                 <div class="form-group">
                     <label style="display:flex;align-items:center;gap:8px">
                         <span>{{ t('settings.enabled_label') }}</span>
-                        <label class="toggle">
+                        <span class="toggle">
                             <input type="checkbox" x-model="hubEditingProvider.enabled">
                             <span class="toggle-slider"></span>
-                        </label>
+                        </span>
                     </label>
                 </div>
                 <div class="modal-actions" style="flex-wrap:wrap;gap:8px">
@@ -1163,8 +1165,8 @@
             <div class="modal">
                 <h2 x-text="hubEditingConnector.name ? '{{ t('settings.edit_connector') }}' : '{{ t('settings.add_connector') }}'"></h2>
                 <div class="form-group">
-                    <label>{{ t('settings.connector_name') }}</label>
-                    <select class="form-select" x-model="hubEditingConnector.name" :disabled="hubEditingConnector._existing" @change="onHubConnectorPlatformChange()">
+                    <label for="f-hub-editing-connector-name">{{ t('settings.connector_name') }}</label>
+                    <select id="f-hub-editing-connector-name" class="form-select" x-model="hubEditingConnector.name" :disabled="hubEditingConnector._existing" @change="onHubConnectorPlatformChange()">
                         <option value="">{{ t('settings.select_connector') }}</option>
                         <!-- Telegram/Discord/Slack live in Platform Adapters —
                              this dialog only manages the integrations that
@@ -1174,82 +1176,82 @@
                     </select>
                 </div>
                 <div class="form-group">
-                    <label>{{ t('settings.token') }}</label>
+                    <label for="f-hub-editing-connector-token">{{ t('settings.token') }}</label>
                     <div class="input-with-toggle">
-                        <input :type="hubShowConnectorToken ? 'text' : 'password'" class="form-input" x-model="hubEditingConnector.token" placeholder="{{ t('settings.hub.token_ph') }}">
+                        <input id="f-hub-editing-connector-token" :type="hubShowConnectorToken ? 'text' : 'password'" class="form-input" x-model="hubEditingConnector.token" placeholder="{{ t('settings.hub.token_ph') }}">
                         <button class="btn btn-icon" type="button" @click="hubShowConnectorToken = !hubShowConnectorToken" :title="hubShowConnectorToken ? t('settings.hub.hide') : t('settings.hub.show')" x-html="hubShowConnectorToken ? KazmaIcons.get('eye-off') : KazmaIcons.get('eye')"></button>
                     </div>
                     <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">{{ t('settings.masked_placeholder_hint') }}</div>
                 </div>
                 <div class="form-group" x-show="hubEditingConnector.name === 'telegram'" x-cloak>
-                    <label>{{ t('settings.allowed_user_ids') }}</label>
-                    <input type="text" class="form-input" x-model="hubEditingConnector.extras.allowed_users" placeholder="123456789">
+                    <label for="f-hub-editing-connector-extras-allowed-users">{{ t('settings.allowed_user_ids') }}</label>
+                    <input id="f-hub-editing-connector-extras-allowed-users" type="text" class="form-input" x-model="hubEditingConnector.extras.allowed_users" placeholder="123456789">
                 </div>
                 <div class="form-row" x-show="hubEditingConnector.name === 'slack'" x-cloak>
                     <div class="form-group">
-                        <label>{{ t('settings.app_token_xapp') }}</label>
-                        <input type="text" class="form-input" x-model="hubEditingConnector.extras.app_token" translate="no" placeholder="xapp-...">
+                        <label for="f-hub-editing-connector-extras-app-token">{{ t('settings.app_token_xapp') }}</label>
+                        <input id="f-hub-editing-connector-extras-app-token" type="text" class="form-input" x-model="hubEditingConnector.extras.app_token" translate="no" placeholder="xapp-...">
                     </div>
                     <div class="form-group">
-                        <label>{{ t('settings.workspace') }}</label>
-                        <input type="text" class="form-input" x-model="hubEditingConnector.extras.workspace" placeholder="workspace-name">
+                        <label for="f-hub-editing-connector-extras-workspace">{{ t('settings.workspace') }}</label>
+                        <input id="f-hub-editing-connector-extras-workspace" type="text" class="form-input" x-model="hubEditingConnector.extras.workspace" placeholder="workspace-name">
                     </div>
                 </div>
                 <div class="form-group" x-show="hubEditingConnector.name === 'discord'" x-cloak>
-                    <label>{{ t('settings.guild_id') }}</label>
-                    <input type="text" class="form-input" x-model="hubEditingConnector.extras.guild_id" placeholder="{{ t('settings.guild_id') }}">
+                    <label for="f-hub-editing-connector-extras-guild-id">{{ t('settings.guild_id') }}</label>
+                    <input id="f-hub-editing-connector-extras-guild-id" type="text" class="form-input" x-model="hubEditingConnector.extras.guild_id" placeholder="{{ t('settings.guild_id') }}">
                 </div>
                 <div class="form-group" x-show="hubEditingConnector.name === 'discord'" x-cloak>
-                    <label>{{ t('settings.allowed_user_ids') }}</label>
-                    <input type="text" class="form-input" x-model="hubEditingConnector.extras.allowed_users" placeholder="111, 222">
+                    <label for="f-hub-editing-connector-extras-allowed-users-2">{{ t('settings.allowed_user_ids') }}</label>
+                    <input id="f-hub-editing-connector-extras-allowed-users-2" type="text" class="form-input" x-model="hubEditingConnector.extras.allowed_users" placeholder="111, 222">
                 </div>
                 <div class="form-group" x-show="hubEditingConnector.name === 'slack'" x-cloak>
-                    <label>{{ t('settings.allowed_user_ids') }}</label>
-                    <input type="text" class="form-input" x-model="hubEditingConnector.extras.allowed_users" placeholder="U0123ABCD">
+                    <label for="f-hub-editing-connector-extras-allowed-users-3">{{ t('settings.allowed_user_ids') }}</label>
+                    <input id="f-hub-editing-connector-extras-allowed-users-3" type="text" class="form-input" x-model="hubEditingConnector.extras.allowed_users" placeholder="U0123ABCD">
                 </div>
                 <div class="form-row" x-show="hubEditingConnector.name === 'email'" x-cloak>
                     <div class="form-group">
-                        <label>{{ t('settings.smtp_host') }}</label>
-                        <input type="text" class="form-input" x-model="hubEditingConnector.extras.smtp_host" placeholder="smtp.gmail.com">
+                        <label for="f-hub-editing-connector-extras-smtp-host">{{ t('settings.smtp_host') }}</label>
+                        <input id="f-hub-editing-connector-extras-smtp-host" type="text" class="form-input" x-model="hubEditingConnector.extras.smtp_host" placeholder="smtp.gmail.com">
                     </div>
                     <div class="form-group">
-                        <label>{{ t('settings.smtp_port') }}</label>
-                        <input type="number" class="form-input" x-model="hubEditingConnector.extras.smtp_port" placeholder="587">
+                        <label for="f-hub-editing-connector-extras-smtp-port">{{ t('settings.smtp_port') }}</label>
+                        <input id="f-hub-editing-connector-extras-smtp-port" type="number" class="form-input" x-model="hubEditingConnector.extras.smtp_port" placeholder="587">
                     </div>
                 </div>
                 <div class="form-row" x-show="hubEditingConnector.name === 'email'" x-cloak>
                     <div class="form-group">
-                        <label>{{ t('settings.username') }}</label>
-                        <input type="text" class="form-input" x-model="hubEditingConnector.extras.username" placeholder="user@example.com">
+                        <label for="f-hub-editing-connector-extras-username">{{ t('settings.username') }}</label>
+                        <input id="f-hub-editing-connector-extras-username" type="text" class="form-input" x-model="hubEditingConnector.extras.username" placeholder="user@example.com">
                     </div>
                     <div class="form-group">
-                        <label>{{ t('settings.password') }}</label>
-                        <input type="password" class="form-input" x-model="hubEditingConnector.extras.password" placeholder="{{ t('settings.hub.app_password_ph') }}">
+                        <label for="f-hub-editing-connector-extras-password">{{ t('settings.password') }}</label>
+                        <input id="f-hub-editing-connector-extras-password" type="password" class="form-input" x-model="hubEditingConnector.extras.password" placeholder="{{ t('settings.hub.app_password_ph') }}">
                     </div>
                 </div>
                 <div class="form-group" x-show="hubEditingConnector.name === 'email'" x-cloak>
-                    <label>{{ t('settings.imap_host') }}</label>
-                    <input type="text" class="form-input" x-model="hubEditingConnector.extras.imap_host" placeholder="imap.gmail.com">
+                    <label for="f-hub-editing-connector-extras-imap-host">{{ t('settings.imap_host') }}</label>
+                    <input id="f-hub-editing-connector-extras-imap-host" type="text" class="form-input" x-model="hubEditingConnector.extras.imap_host" placeholder="imap.gmail.com">
                 </div>
                 <div class="form-group" x-show="hubEditingConnector.name === 'webhook'" x-cloak>
-                    <label>{{ t('settings.incoming_webhook_url') }}</label>
-                    <input type="text" class="form-input" x-model="hubEditingConnector.extras.incoming_url" placeholder="https://your-domain.com/api/webhooks/incoming">
+                    <label for="f-hub-editing-connector-extras-incoming-url">{{ t('settings.incoming_webhook_url') }}</label>
+                    <input id="f-hub-editing-connector-extras-incoming-url" type="text" class="form-input" x-model="hubEditingConnector.extras.incoming_url" placeholder="https://your-domain.com/api/webhooks/incoming">
                 </div>
                 <div class="form-group" x-show="hubEditingConnector.name === 'webhook'" x-cloak>
-                    <label>{{ t('settings.outgoing_webhook_url') }}</label>
-                    <input type="text" class="form-input" x-model="hubEditingConnector.extras.outgoing_url" placeholder="https://hooks.example.com/...">
+                    <label for="f-hub-editing-connector-extras-outgoing-url">{{ t('settings.outgoing_webhook_url') }}</label>
+                    <input id="f-hub-editing-connector-extras-outgoing-url" type="text" class="form-input" x-model="hubEditingConnector.extras.outgoing_url" placeholder="https://hooks.example.com/...">
                 </div>
                 <div class="form-group" x-show="hubEditingConnector.name === 'webhook'" x-cloak>
-                    <label>{{ t('settings.webhook_secret') }}</label>
-                    <input type="password" class="form-input" x-model="hubEditingConnector.extras.secret" placeholder="{{ t('settings.hub.shared_secret_ph') }}">
+                    <label for="f-hub-editing-connector-extras-secret">{{ t('settings.webhook_secret') }}</label>
+                    <input id="f-hub-editing-connector-extras-secret" type="password" class="form-input" x-model="hubEditingConnector.extras.secret" placeholder="{{ t('settings.hub.shared_secret_ph') }}">
                 </div>
                 <div class="form-group">
                     <label style="display:flex;align-items:center;gap:8px">
                         <span>{{ t('settings.enabled_label') }}</span>
-                        <label class="toggle">
+                        <span class="toggle">
                             <input type="checkbox" x-model="hubEditingConnector.enabled">
                             <span class="toggle-slider"></span>
-                        </label>
+                        </span>
                     </label>
                 </div>
                 <div class="modal-actions" style="flex-wrap:wrap;gap:8px">
@@ -1268,27 +1270,27 @@
             <div class="modal">
                 <h2 x-text="hubEditingProfile._existing ? '{{ t('settings.edit_profile') }}' : '{{ t('settings.save_profile') }}'"></h2>
                 <div class="form-group">
-                    <label>{{ t('settings.profile_name') }}</label>
-                    <input type="text" class="form-input" x-model="hubEditingProfile.name" translate="no" placeholder="my-gpt4o" :disabled="hubEditingProfile._existing">
+                    <label for="f-hub-editing-profile-name">{{ t('settings.profile_name') }}</label>
+                    <input id="f-hub-editing-profile-name" type="text" class="form-input" x-model="hubEditingProfile.name" translate="no" placeholder="my-gpt4o" :disabled="hubEditingProfile._existing">
                 </div>
                 <div class="form-group">
-                    <label>{{ t('settings.provider') }}</label>
-                    <input type="text" class="form-input" x-model="hubEditingProfile.provider" translate="no" placeholder="openai">
+                    <label for="f-hub-editing-profile-provider">{{ t('settings.provider') }}</label>
+                    <input id="f-hub-editing-profile-provider" type="text" class="form-input" x-model="hubEditingProfile.provider" translate="no" placeholder="openai">
                 </div>
                 <div class="form-group">
-                    <label>{{ t('settings.base_url') }}</label>
-                    <input type="text" class="form-input" x-model="hubEditingProfile.base_url" translate="no" placeholder="https://api.openai.com/v1">
+                    <label for="f-hub-editing-profile-base-url">{{ t('settings.base_url') }}</label>
+                    <input id="f-hub-editing-profile-base-url" type="text" class="form-input" x-model="hubEditingProfile.base_url" translate="no" placeholder="https://api.openai.com/v1">
                 </div>
                 <div class="form-group">
-                    <label>{{ t('settings.api_key') }}</label>
+                    <label for="f-hub-editing-profile-api-key">{{ t('settings.api_key') }}</label>
                     <div class="input-with-toggle">
-                        <input :type="hubShowProfileKey ? 'text' : 'password'" class="form-input" x-model="hubEditingProfile.api_key" translate="no" placeholder="sk-...">
+                        <input id="f-hub-editing-profile-api-key" :type="hubShowProfileKey ? 'text' : 'password'" class="form-input" x-model="hubEditingProfile.api_key" translate="no" placeholder="sk-...">
                         <button class="btn btn-icon" type="button" @click="hubShowProfileKey = !hubShowProfileKey" :title="hubShowProfileKey ? t('settings.hub.hide') : t('settings.hub.show')" x-html="hubShowProfileKey ? KazmaIcons.get('eye-off') : KazmaIcons.get('eye')"></button>
                     </div>
                 </div>
                 <div class="form-group">
-                    <label>{{ t('settings.model_name') }}</label>
-                    <input type="text" class="form-input" x-model="hubEditingProfile.model" placeholder="gpt-4o-mini">
+                    <label for="f-hub-editing-profile-model">{{ t('settings.model_name') }}</label>
+                    <input id="f-hub-editing-profile-model" type="text" class="form-input" x-model="hubEditingProfile.model" placeholder="gpt-4o-mini">
                 </div>
                 <div class="modal-actions">
                     <button class="btn btn-secondary" @click="hubProfileModal = false">{{ t('settings.cancel') }}</button>
@@ -1309,9 +1311,9 @@
                 {{ t('settings.cron_tz_hint') }}
             </div>
             <div class="form-group">
-                <label>{{ t('settings.cron_tz_label') }}</label>
+                <label for="f-cron-tz-value">{{ t('settings.cron_tz_label') }}</label>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;">
-                    <select class="form-select" x-model="cronTz.value" @change="cronTzPreview()"
+                    <select id="f-cron-tz-value" class="form-select" x-model="cronTz.value" @change="cronTzPreview()"
                             style="max-width:320px" dir="ltr">
                         <template x-for="g in cronTzGroups" :key="g.label">
                             <optgroup :label="g.label">
@@ -1354,25 +1356,25 @@
             <h3>{{ t('settings.agent_config') }}</h3>
             <div class="form-row">
                 <div class="form-group">
-                    <label>{{ t('settings.agent_name') }}</label>
-                    <input type="text" class="form-input" x-model="agent.name">
+                    <label for="f-agent-name">{{ t('settings.agent_name') }}</label>
+                    <input id="f-agent-name" type="text" class="form-input" x-model="agent.name">
                 </div>
                 <div class="form-group">
-                    <label>{{ t('settings.language') }}</label>
-                    <select class="form-select" x-model="agent.language">
+                    <label for="f-agent-language">{{ t('settings.language') }}</label>
+                    <select id="f-agent-language" class="form-select" x-model="agent.language">
                         <option value="ar">{{ t('settings.arabic') }}</option>
                         <option value="en">{{ t('settings.english') }}</option>
                     </select>
                 </div>
             </div>
             <div class="form-group">
-                <label>{{ t('settings.system_prompt') }}</label>
-                <textarea class="form-textarea" x-model="agent.system_prompt" rows="6" :placeholder="t('settings.system_prompt_placeholder')"></textarea>
+                <label for="f-agent-system-prompt">{{ t('settings.system_prompt') }}</label>
+                <textarea id="f-agent-system-prompt" class="form-textarea" x-model="agent.system_prompt" rows="6" :placeholder="t('settings.system_prompt_placeholder')"></textarea>
             </div>
             <div class="form-group">
-                <label>{{ t('settings.max_tool_rounds') }}</label>
+                <label for="f-agent-max-iterations">{{ t('settings.max_tool_rounds') }}</label>
                 <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-                    <input type="number" class="form-input" x-model.number="agent.max_iterations"
+                    <input id="f-agent-max-iterations" type="number" class="form-input" x-model.number="agent.max_iterations"
                            min="5" max="100" step="1"
                            style="max-width:120px;font-variant-numeric:tabular-nums;">
                     <span style="font-size:0.78rem;color:var(--text-muted);"
@@ -1399,14 +1401,14 @@
                    x-show="agent.recursion_limit"
                    x-text="t('settings.graph_budget_auto').replace('{n}', agent.recursion_limit || 100)" x-cloak></p>
             </div>
-            <div class="form-group" style="margin-top:1rem;">
-                <label>{{ t('settings.long_task_mode') }}</label>
+            <fieldset class="form-group" style="margin-top:1rem;border:0;padding:0;margin-inline:0;min-width:0">
+                <legend class="form-label" style="margin-bottom:0;padding:0;float:inline-start;width:100%">{{ t('settings.long_task_mode') }}</legend>
                 <label class="toggle-row" style="margin-bottom:4px">
                     <span class="toggle"><input type="checkbox" x-model="agent.long_task_default_enabled"><span class="toggle-slider"></span></span>
                     <span x-text="t('settings.long_task_default_on')"></span>
                 </label>
                 <div style="margin-top:8px;max-width:220px;" x-show="agent.long_task_default_enabled" x-cloak>
-                    <select class="form-select" x-model="agent.long_task_default_preset">
+                    <select class="form-select" x-model="agent.long_task_default_preset" aria-label="{{ t('settings.long_task_preset') }}">
                         <option value="deep">{{ t('settings.preset_deep') }} · 30</option>
                         <option value="research">{{ t('settings.preset_research') }} · 40</option>
                         <option value="chat">{{ t('settings.preset_chat') }} · 15</option>
@@ -1415,7 +1417,7 @@
                 <p class="form-help" style="margin-top:6px;font-size:0.78rem;color:var(--text-muted);line-height:1.45;">
                     {{ t('settings.long_task_help') }}
                 </p>
-            </div>
+            </fieldset>
             <button class="btn btn-primary" @click="saveAgent()" :disabled="saving" x-text="saving ? '{{ t('settings.saving') }}' : '{{ t('settings.save_agent') }}'"></button>
         </div>
 
@@ -1439,45 +1441,45 @@
             <div class="form-group">
                 <label style="display:flex;align-items:center;gap:8px">
                     <span>{{ t('settings.enable_hitl') }}</span>
-                    <label class="toggle">
+                    <span class="toggle">
                         <input type="checkbox" x-model="safety.hitl_enabled">
                         <span class="toggle-slider"></span>
-                    </label>
+                    </span>
                 </label>
             </div>
             <div class="form-group" x-show="safety.hitl_enabled" x-cloak>
-                <label>{{ t('settings.tools_requiring_approval') }}</label>
-                <input type="text" class="form-input" :value="(safety.require_approval_for || []).join(', ')" @input="safety.require_approval_for = $event.target.value.split(',').map(s => s.trim()).filter(Boolean)" placeholder="file_write, file_delete, shell_exec">
+                <label for="f-safety-require-approval-for-join">{{ t('settings.tools_requiring_approval') }}</label>
+                <input id="f-safety-require-approval-for-join" type="text" class="form-input" :value="(safety.require_approval_for || []).join(', ')" @input="safety.require_approval_for = $event.target.value.split(',').map(s => s.trim()).filter(Boolean)" placeholder="file_write, file_delete, shell_exec">
             </div>
             <div class="form-row" x-show="safety.hitl_enabled" x-cloak>
                 <div class="form-group">
-                    <label>{{ t('settings.approval_timeout_seconds') }}</label>
-                    <input type="number" class="form-input" x-model.number="safety.approval_timeout" min="10" max="600">
+                    <label for="f-safety-approval-timeout">{{ t('settings.approval_timeout_seconds') }}</label>
+                    <input id="f-safety-approval-timeout" type="number" class="form-input" x-model.number="safety.approval_timeout" min="10" max="600">
                     <p style="font-size:0.75rem;color:var(--text-muted);margin:4px 0 0 0;">{{ t('settings.approval_timeout_hint') }}</p>
                 </div>
                 <div class="form-group">
                     <label style="display:flex;align-items:center;gap:8px">
                         <span>{{ t('settings.auto_deny_on_timeout') }}</span>
-                        <label class="toggle">
+                        <span class="toggle">
                             <input type="checkbox" x-model="safety.auto_deny_on_timeout">
                             <span class="toggle-slider"></span>
-                        </label>
+                        </span>
                     </label>
                 </div>
             </div>
             <div class="form-group" style="margin-top:12px">
                 <label style="display:flex;align-items:center;gap:8px">
                     <span>{{ t('settings.soul_requires_confirm') }}</span>
-                    <label class="toggle">
+                    <span class="toggle">
                         <input type="checkbox" x-model="safety.soul_requires_confirm">
                         <span class="toggle-slider"></span>
-                    </label>
+                    </span>
                 </label>
                 <p style="font-size:0.8rem;color:var(--text-muted);margin:6px 0 0 0;">{{ t('settings.soul_requires_confirm_hint') }}</p>
             </div>
             <div class="form-group" style="margin-top:12px">
-                <label>{{ t('settings.outbound_allowed_targets') }}</label>
-                <input type="text" class="form-input"
+                <label for="f-safety-outbound-allowed-targets-join">{{ t('settings.outbound_allowed_targets') }}</label>
+                <input id="f-safety-outbound-allowed-targets-join" type="text" class="form-input"
                     :value="(safety.outbound_allowed_targets || []).join(', ')"
                     @input="safety.outbound_allowed_targets = $event.target.value.split(',').map(s => s.trim()).filter(Boolean)"
                     translate="no" placeholder="admin@kazma.ai, #ops">
@@ -1485,7 +1487,7 @@
             </div>
             <button class="btn btn-primary" @click="saveSafety()">{{ t('settings.save_safety') }}</button>
             <div class="form-group" style="margin-top:16px" x-show="(soulPending || []).length" x-cloak>
-                <label>{{ t('settings.soul_pending') }}</label>
+                <div class="form-label" style="margin-bottom:0">{{ t('settings.soul_pending') }}</div>
                 <template x-for="row in soulPending" :key="row.commitment_id">
                     <div class="card-nested" style="padding:12px 16px;margin:8px 0;display:flex;gap:8px;align-items:flex-start;justify-content:space-between">
                         <div style="min-width:0">
@@ -1506,8 +1508,8 @@
             <h3>{{ t('settings.context_window') }}</h3>
             <div class="form-row">
                 <div class="form-group">
-                    <label>{{ t('settings.max_context_tokens') }}</label>
-                    <input type="number" class="form-input" x-model.number="context.max_context_tokens" min="1024" max="1000000">
+                    <label for="f-context-max-context-tokens">{{ t('settings.max_context_tokens') }}</label>
+                    <input id="f-context-max-context-tokens" type="number" class="form-input" x-model.number="context.max_context_tokens" min="1024" max="1000000">
                 </div>
             </div>
             <button class="btn btn-primary" @click="saveContext()">{{ t('settings.save_context') }}</button>
@@ -1523,50 +1525,50 @@
                 <div class="form-group">
                     <label style="display:flex;align-items:center;gap:8px">
                         <span>{{ t('settings.nonstop_enabled') }}</span>
-                        <label class="toggle">
+                        <span class="toggle">
                             <input type="checkbox" x-model="nonstop.enabled">
                             <span class="toggle-slider"></span>
-                        </label>
+                        </span>
                     </label>
                 </div>
                 <div class="form-group">
                     <label style="display:flex;align-items:center;gap:8px">
                         <span>{{ t('settings.nonstop_ledger') }}</span>
-                        <label class="toggle">
+                        <span class="toggle">
                             <input type="checkbox" x-model="nonstop.ledger_enabled">
                             <span class="toggle-slider"></span>
-                        </label>
+                        </span>
                     </label>
                 </div>
             </div>
             <!-- Every tool call's bound, Non-Stop on or off (agent.tool_timeout_seconds, FA-125). -->
             <div class="form-row two-col-grid">
                 <div class="form-group">
-                    <label>{{ t('settings.nonstop_tool_timeout') }}</label>
-                    <input type="number" class="form-input" data-setting="agent.tool_timeout_seconds" x-model.number="nonstop.tool_timeout_seconds" min="0" max="3600">
+                    <label for="f-nonstop-tool-timeout-seconds">{{ t('settings.nonstop_tool_timeout') }}</label>
+                    <input id="f-nonstop-tool-timeout-seconds" type="number" class="form-input" data-setting="agent.tool_timeout_seconds" x-model.number="nonstop.tool_timeout_seconds" min="0" max="3600">
                 </div>
             </div>
             <div x-show="nonstop.enabled" x-cloak>
                 <div class="form-row two-col-grid">
                     <div class="form-group">
-                        <label>{{ t('settings.nonstop_stall') }}</label>
-                        <input type="number" class="form-input" x-model.number="nonstop.stall_threshold_seconds" min="10" max="3600">
+                        <label for="f-nonstop-stall-threshold-seconds">{{ t('settings.nonstop_stall') }}</label>
+                        <input id="f-nonstop-stall-threshold-seconds" type="number" class="form-input" x-model.number="nonstop.stall_threshold_seconds" min="10" max="3600">
                     </div>
                 </div>
                 <div class="form-row two-col-grid">
                     <div class="form-group">
-                        <label>{{ t('settings.nonstop_max_recovery') }}</label>
-                        <input type="number" class="form-input" x-model.number="nonstop.max_recovery_attempts" min="0" max="10">
+                        <label for="f-nonstop-max-recovery-attempts">{{ t('settings.nonstop_max_recovery') }}</label>
+                        <input id="f-nonstop-max-recovery-attempts" type="number" class="form-input" x-model.number="nonstop.max_recovery_attempts" min="0" max="10">
                     </div>
                     <div class="form-group">
-                        <label>{{ t('settings.nonstop_backoff_base') }}</label>
-                        <input type="number" class="form-input" x-model.number="nonstop.backoff_base_seconds" min="0.5" max="600" step="0.5">
+                        <label for="f-nonstop-backoff-base-seconds">{{ t('settings.nonstop_backoff_base') }}</label>
+                        <input id="f-nonstop-backoff-base-seconds" type="number" class="form-input" x-model.number="nonstop.backoff_base_seconds" min="0.5" max="600" step="0.5">
                     </div>
                 </div>
                 <div class="form-row two-col-grid">
                     <div class="form-group">
-                        <label>{{ t('settings.nonstop_backoff_max') }}</label>
-                        <input type="number" class="form-input" x-model.number="nonstop.backoff_max_seconds" min="1" max="3600">
+                        <label for="f-nonstop-backoff-max-seconds">{{ t('settings.nonstop_backoff_max') }}</label>
+                        <input id="f-nonstop-backoff-max-seconds" type="number" class="form-input" x-model.number="nonstop.backoff_max_seconds" min="1" max="3600">
                     </div>
                 </div>
             </div>
@@ -1579,17 +1581,17 @@
                 <div class="form-group">
                     <label style="display:flex;align-items:center;gap:8px">
                         <span>{{ t('settings.nonstop_failover_enabled') }}</span>
-                        <label class="toggle">
+                        <span class="toggle">
                             <input type="checkbox" x-model="nonstop.failover_enabled">
                             <span class="toggle-slider"></span>
-                        </label>
+                        </span>
                     </label>
                 </div>
             </div>
             <div x-show="nonstop.failover_enabled" x-cloak>
                 <div class="form-row two-col-grid">
                     <div class="form-group">
-                        <label>{{ t('settings.nonstop_failover_chain') }}</label>
+                        <label for="failover-chain">{{ t('settings.nonstop_failover_chain') }}</label>
                         <input type="text" class="form-input" id="failover-chain" dir="ltr" translate="no" x-model="nonstop.failover_chain" placeholder="gpt-4o, claude-sonnet-4.5, deepseek-chat">
                         {#- Each backup with the provider that would serve it
                             (kazma_core.failover_backup): a backup nothing can
@@ -1612,8 +1614,8 @@
                         </div>
                     </div>
                     <div class="form-group">
-                        <label>{{ t('settings.nonstop_failover_cooldown') }}</label>
-                        <input type="number" class="form-input" x-model.number="nonstop.failover_cooldown_seconds" min="10" max="86400">
+                        <label for="f-nonstop-failover-cooldown-seconds">{{ t('settings.nonstop_failover_cooldown') }}</label>
+                        <input id="f-nonstop-failover-cooldown-seconds" type="number" class="form-input" x-model.number="nonstop.failover_cooldown_seconds" min="10" max="86400">
                     </div>
                 </div>
             </div>
@@ -1640,7 +1642,7 @@
                 {{ t('settings.about_me_hint') }}
             </p>
             <div class="form-group">
-                <textarea class="form-textarea" id="about-me-text" rows="6" dir="auto"
+                <textarea class="form-textarea" id="about-me-text" rows="6" dir="auto" aria-label="{{ t('settings.about_me_title') }}"
                           x-model="aboutMe" :maxlength="aboutMeMax"
                           placeholder="{{ t('settings.about_me_placeholder') }}"></textarea>
                 <p style="font-size:0.72rem;color:var(--text-muted);margin-top:4px;"
@@ -1657,8 +1659,8 @@
         <div class="settings-group mb-6">
             <h3>{{ t('settings.memory_isolation_title') }}</h3>
             <div class="form-group">
-                <label>{{ t('settings.memory_tenant_mode') }}</label>
-                <select class="form-select" x-model="memoryTenantMode" @change="saveTenantMode()">
+                <label for="f-memory-tenant-mode">{{ t('settings.memory_tenant_mode') }}</label>
+                <select id="f-memory-tenant-mode" class="form-select" x-model="memoryTenantMode" @change="saveTenantMode()">
                     <option value="shared">{{ t('settings.memory_tenant_shared') }}</option>
                     <option value="per_platform">{{ t('settings.memory_tenant_platform') }}</option>
                     <option value="per_user">{{ t('settings.memory_tenant_user') }}</option>
@@ -1707,54 +1709,54 @@
               <span style="color:var(--text-muted)" :translate="(memoryBackendsCapability.vector_status === 'full' && memoryBackends.vector.provider === 'sqlite_vec') ? null : 'no'" x-text="' — ' + (memoryBackendsCapability.vector_status === 'full' && memoryBackends.vector.provider === 'sqlite_vec' ? t('settings.cap_vector_local') : (memoryBackendsCapability.vector_status_detail || ''))"></span>
             </div>
             <div class="form-group">
-                <label>{{ t('settings.memory_mode') }}</label>
-                <select class="form-select" x-model="memoryBackends.mode">
+                <label for="f-memory-backends-mode">{{ t('settings.memory_mode') }}</label>
+                <select id="f-memory-backends-mode" class="form-select" x-model="memoryBackends.mode">
                     <option value="local">{{ t('settings.memory_mode_local') }}</option>
                     <option value="hybrid">{{ t('settings.memory_mode_hybrid') }}</option>
                     <option value="remote">{{ t('settings.memory_mode_remote') }}</option>
                 </select>
             </div>
             <div class="form-group">
-                <label>{{ t('settings.embedder_provider') }}</label>
-                <select class="form-select" x-model="memoryBackends.embedder.provider">
+                <label for="f-memory-backends-embedder-provider">{{ t('settings.embedder_provider') }}</label>
+                <select id="f-memory-backends-embedder-provider" class="form-select" x-model="memoryBackends.embedder.provider">
                     <option value="local">{{ t('settings.embedder_provider_local') }}</option>
                     <option value="openai_compat">{{ t('settings.embedder_provider_remote') }}</option>
                 </select>
             </div>
             <div class="form-group">
-                <label>{{ t('settings.embedder_model') }}</label>
-                <input type="text" class="form-input" x-model="memoryBackends.embedder.model" translate="no" placeholder="BAAI/bge-m3">
+                <label for="f-memory-backends-embedder-model">{{ t('settings.embedder_model') }}</label>
+                <input id="f-memory-backends-embedder-model" type="text" class="form-input" x-model="memoryBackends.embedder.model" translate="no" placeholder="BAAI/bge-m3">
             </div>
             <div class="form-group" x-show="memoryBackends.embedder.provider !== 'local'" x-cloak>
-                <label>{{ t('settings.embedder_base_url') }}</label>
-                <input type="text" class="form-input" x-model="memoryBackends.embedder.base_url" translate="no" placeholder="https://…">
+                <label for="f-memory-backends-embedder-base-url">{{ t('settings.embedder_base_url') }}</label>
+                <input id="f-memory-backends-embedder-base-url" type="text" class="form-input" x-model="memoryBackends.embedder.base_url" translate="no" placeholder="https://…">
             </div>
             <div class="form-group" x-show="memoryBackends.embedder.provider !== 'local'" x-cloak>
-                <label>{{ t('chat.setup_api_key') }}</label>
-                <input type="password" class="form-input" x-model="memoryBackends.embedder.api_key" placeholder="{{ t('settings.mem.leave_blank') }}">
+                <label for="f-memory-backends-embedder-api-key">{{ t('chat.setup_api_key') }}</label>
+                <input id="f-memory-backends-embedder-api-key" type="password" class="form-input" x-model="memoryBackends.embedder.api_key" placeholder="{{ t('settings.mem.leave_blank') }}">
             </div>
             <div class="form-group">
-                <label>{{ t('settings.memory_vector_provider') }}</label>
-                <select class="form-select" x-model="memoryBackends.vector.provider">
+                <label for="f-memory-backends-vector-provider">{{ t('settings.memory_vector_provider') }}</label>
+                <select id="f-memory-backends-vector-provider" class="form-select" x-model="memoryBackends.vector.provider">
                     <option value="sqlite_vec">{{ t('settings.mem.opt_sqlite_vec') }}</option>
                     <option value="pgvector" translate="no">pgvector</option>
                     <option value="qdrant" translate="no">Qdrant</option>
                 </select>
             </div>
             <div class="form-group" x-show="memoryBackends.vector.provider !== 'sqlite_vec'" x-cloak>
-                <label>{{ t('settings.mem.vector_url') }}</label>
-                <input type="text" class="form-input" x-model="memoryBackends.vector.url" placeholder="{{ t('settings.mem.vector_url_ph') }}">
+                <label for="f-memory-backends-vector-url">{{ t('settings.mem.vector_url') }}</label>
+                <input id="f-memory-backends-vector-url" type="text" class="form-input" x-model="memoryBackends.vector.url" placeholder="{{ t('settings.mem.vector_url_ph') }}">
             </div>
             <div class="form-group">
-                <label>{{ t('settings.memory_state_provider') }}</label>
-                <select class="form-select" x-model="memoryBackends.state.provider">
+                <label for="f-memory-backends-state-provider">{{ t('settings.memory_state_provider') }}</label>
+                <select id="f-memory-backends-state-provider" class="form-select" x-model="memoryBackends.state.provider">
                     <option value="sqlite">{{ t('settings.mem.opt_sqlite_only') }}</option>
                     <option value="postgres">{{ t('settings.mem.opt_postgres_mirror') }}</option>
                 </select>
             </div>
             <div class="form-group" x-show="memoryBackends.state && memoryBackends.state.provider === 'postgres'" x-cloak>
-                <label>{{ t('settings.mem.postgres_dsn') }}</label>
-                <input type="text" class="form-input" x-model="memoryBackends.state.url" placeholder="postgresql://user:pass@host:5432/kazma">
+                <label for="f-memory-backends-state-url">{{ t('settings.mem.postgres_dsn') }}</label>
+                <input id="f-memory-backends-state-url" type="text" class="form-input" x-model="memoryBackends.state.url" placeholder="postgresql://user:pass@host:5432/kazma">
             </div>
             <div class="form-group" x-show="memoryBackends.state && memoryBackends.state.provider === 'postgres'" style="margin-top:4px;" x-cloak>
                 <p style="font-size:0.72rem;color:var(--text-muted);margin:0 0 8px;">
@@ -1773,23 +1775,23 @@
                     {{ t('settings.memory_neo4j_hint') }}
                 </p>
                 <div class="form-group">
-                    <label>{{ t('settings.memory_graph_provider') }}</label>
-                    <select class="form-select" x-model="memoryBackends.graph.provider">
+                    <label for="f-memory-backends-graph-provider">{{ t('settings.memory_graph_provider') }}</label>
+                    <select id="f-memory-backends-graph-provider" class="form-select" x-model="memoryBackends.graph.provider">
                         <option value="sqlite">{{ t('settings.memory_graph_sqlite') }}</option>
                         <option value="neo4j">{{ t('settings.memory_graph_neo4j') }}</option>
                     </select>
                 </div>
                 <div class="form-group" x-show="(memoryBackends.graph && memoryBackends.graph.provider) === 'neo4j'" x-cloak>
-                    <label>{{ t('settings.memory_neo4j_url') }}</label>
-                    <input type="text" class="form-input" x-model="memoryBackends.graph.url" placeholder="bolt://localhost:7687">
+                    <label for="f-memory-backends-graph-url">{{ t('settings.memory_neo4j_url') }}</label>
+                    <input id="f-memory-backends-graph-url" type="text" class="form-input" x-model="memoryBackends.graph.url" placeholder="bolt://localhost:7687">
                 </div>
                 <div class="form-group" x-show="(memoryBackends.graph && memoryBackends.graph.provider) === 'neo4j'" x-cloak>
-                    <label>{{ t('settings.memory_neo4j_user') }}</label>
-                    <input type="text" class="form-input" x-model="memoryBackends.graph.user" translate="no" placeholder="neo4j">
+                    <label for="f-memory-backends-graph-user">{{ t('settings.memory_neo4j_user') }}</label>
+                    <input id="f-memory-backends-graph-user" type="text" class="form-input" x-model="memoryBackends.graph.user" translate="no" placeholder="neo4j">
                 </div>
                 <div class="form-group" x-show="(memoryBackends.graph && memoryBackends.graph.provider) === 'neo4j'" x-cloak>
-                    <label>{{ t('settings.memory_neo4j_password') }}</label>
-                    <input type="password" class="form-input" x-model="memoryBackends.graph.password" placeholder="{{ t('settings.mem.leave_blank') }}">
+                    <label for="f-memory-backends-graph-password">{{ t('settings.memory_neo4j_password') }}</label>
+                    <input id="f-memory-backends-graph-password" type="password" class="form-input" x-model="memoryBackends.graph.password" placeholder="{{ t('settings.mem.leave_blank') }}">
                 </div>
                 <p translate="no" style="font-size:0.72rem;color:var(--text-muted);margin:0;"
                    :translate="memoryBackendsGraphCap.status === 'local' ? null : 'no'"
@@ -1811,8 +1813,8 @@
             </div>
 
             <div class="form-group" style="margin-top:14px;">
-                <label>{{ t('settings.memory_failover') }}</label>
-                <select class="form-select" x-model="memoryBackends.failover.on_remote_error">
+                <label for="f-memory-backends-failover-on-remote-error">{{ t('settings.memory_failover') }}</label>
+                <select id="f-memory-backends-failover-on-remote-error" class="form-select" x-model="memoryBackends.failover.on_remote_error">
                     <option value="local">{{ t('settings.memory_failover_local') }}</option>
                     <option value="empty">{{ t('settings.memory_failover_empty') }}</option>
                     <option value="raise">{{ t('settings.memory_failover_raise') }}</option>
@@ -1879,16 +1881,16 @@
         <div class="settings-group mb-6">
             <h3>{{ t('settings.embedder_config_title') }}</h3>
             <div class="form-group">
-                <label>{{ t('settings.embedder_provider') }}</label>
-                <select class="form-select" x-model="embedder.provider">
+                <label for="f-embedder-provider">{{ t('settings.embedder_provider') }}</label>
+                <select id="f-embedder-provider" class="form-select" x-model="embedder.provider">
                     <option value="local">{{ t('settings.embedder_provider_local') }}</option>
                     <option value="openai-compatible">{{ t('settings.embedder_provider_remote') }}</option>
                 </select>
                 <div class="form-hint">{{ t('settings.embedder_provider_hint') }}</div>
             </div>
             <div class="form-group">
-                <label>{{ t('settings.embedder_model') }}</label>
-                <select class="form-select" x-model="embedder._preset" @change="applyEmbedderPreset()">
+                <label for="f-embedder-preset">{{ t('settings.embedder_model') }}</label>
+                <select id="f-embedder-preset" class="form-select" x-model="embedder._preset" @change="applyEmbedderPreset()">
                     <template x-for="p in embedderPresets" :key="p.model">
                         <option :value="p.model" x-text="p.model + (p.note ? ' — ' + tOr('settings.mem.emb_' + p.note, p.label) : '')"></option>
                     </template>
@@ -1898,23 +1900,23 @@
             </div>
             <div x-show="embedder._preset === '__custom__'" x-cloak>
                 <div class="form-group">
-                    <label>{{ t('settings.embedder_custom_model') }}</label>
-                    <input type="text" class="form-input" x-model="embedder.model" translate="no" placeholder="BAAI/bge-m3">
+                    <label for="f-embedder-model">{{ t('settings.embedder_custom_model') }}</label>
+                    <input id="f-embedder-model" type="text" class="form-input" x-model="embedder.model" translate="no" placeholder="BAAI/bge-m3">
                 </div>
             </div>
             <div class="form-group">
-                <label>{{ t('settings.embedder_dim') }}</label>
-                <input type="number" class="form-input" x-model.number="embedder.dim" min="1" step="1" style="max-width:200px">
+                <label for="f-embedder-dim">{{ t('settings.embedder_dim') }}</label>
+                <input id="f-embedder-dim" type="number" class="form-input" x-model.number="embedder.dim" min="1" step="1" style="max-width:200px">
                 <div class="form-hint">{{ t('settings.embedder_dim_hint') }}</div>
             </div>
             <div x-show="embedder.provider === 'openai-compatible'" x-cloak>
                 <div class="form-group">
-                    <label>{{ t('settings.embedder_base_url') }}</label>
-                    <input type="text" class="form-input" x-model="embedder.base_url" placeholder="https://integrate.api.nvidia.com/v1">
+                    <label for="f-embedder-base-url">{{ t('settings.embedder_base_url') }}</label>
+                    <input id="f-embedder-base-url" type="text" class="form-input" x-model="embedder.base_url" placeholder="https://integrate.api.nvidia.com/v1">
                 </div>
                 <div class="form-group">
-                    <label>{{ t('settings.embedder_api_key_env') }}</label>
-                    <input type="text" class="form-input" x-model="embedder.api_key_env" placeholder="KAZMA_EMBED_API_KEY">
+                    <label for="f-embedder-api-key-env">{{ t('settings.embedder_api_key_env') }}</label>
+                    <input id="f-embedder-api-key-env" type="text" class="form-input" x-model="embedder.api_key_env" placeholder="KAZMA_EMBED_API_KEY">
                     <div class="form-hint">{{ t('settings.embedder_api_key_env_hint') }}</div>
                 </div>
             </div>
@@ -1931,13 +1933,13 @@
                 {{ t('settings.time_travel_hint') }}
             </div>
             <div class="form-group">
-                <label>{{ t('settings.time_travel_max_snapshots') }}</label>
-                <input type="number" class="form-input" x-model.number="timeTravel.max_snapshots" min="1" max="1000" step="5" style="max-width:200px">
+                <label for="f-time-travel-max-snapshots">{{ t('settings.time_travel_max_snapshots') }}</label>
+                <input id="f-time-travel-max-snapshots" type="number" class="form-input" x-model.number="timeTravel.max_snapshots" min="1" max="1000" step="5" style="max-width:200px">
                 <div class="form-hint">{{ t('settings.time_travel_max_snapshots_hint') }}</div>
             </div>
             <div class="form-group">
-                <label>{{ t('settings.time_travel_retention_days') }}</label>
-                <input type="number" class="form-input" x-model.number="timeTravel.retention_days" min="1" max="3650" step="1" style="max-width:200px">
+                <label for="f-time-travel-retention-days">{{ t('settings.time_travel_retention_days') }}</label>
+                <input id="f-time-travel-retention-days" type="number" class="form-input" x-model.number="timeTravel.retention_days" min="1" max="3650" step="1" style="max-width:200px">
                 <div class="form-hint">{{ t('settings.time_travel_retention_days_hint') }}</div>
             </div>
             <div class="form-group">
@@ -2093,27 +2095,27 @@
             <div class="modal">
                 <h2>{{ t('settings.add_server') }}</h2>
                 <div class="form-group">
-                    <label>{{ t('common.name') }}</label>
-                    <input type="text" class="form-input" x-model="newMcpServer.name" translate="no" placeholder="my-server">
+                    <label for="f-new-mcp-server-name">{{ t('common.name') }}</label>
+                    <input id="f-new-mcp-server-name" type="text" class="form-input" x-model="newMcpServer.name" translate="no" placeholder="my-server">
                 </div>
                 <div class="form-group">
-                    <label>{{ t('settings.transport') }}</label>
-                    <select class="form-select" x-model="newMcpServer.transport">
+                    <label for="f-new-mcp-server-transport">{{ t('settings.transport') }}</label>
+                    <select id="f-new-mcp-server-transport" class="form-select" x-model="newMcpServer.transport">
                         <option value="stdio">{{ t('settings.stdio_local') }}</option>
                         <option value="sse">{{ t('settings.sse_http') }}</option>
                     </select>
                 </div>
                 <div class="form-group" x-show="newMcpServer.transport === 'stdio'" x-cloak>
-                    <label>{{ t('settings.command_space_separated') }}</label>
-                    <input type="text" class="form-input" x-model="newMcpServer.command" translate="no" placeholder="npx -y @modelcontextprotocol/server-filesystem /tmp">
+                    <label for="f-new-mcp-server-command">{{ t('settings.command_space_separated') }}</label>
+                    <input id="f-new-mcp-server-command" type="text" class="form-input" x-model="newMcpServer.command" translate="no" placeholder="npx -y @modelcontextprotocol/server-filesystem /tmp">
                 </div>
                 <div class="form-group" x-show="newMcpServer.transport === 'sse'" x-cloak>
-                    <label>{{ t('settings.url') }}</label>
-                    <input type="text" class="form-input" x-model="newMcpServer.url" placeholder="http://localhost:8080/sse">
+                    <label for="f-new-mcp-server-url">{{ t('settings.url') }}</label>
+                    <input id="f-new-mcp-server-url" type="text" class="form-input" x-model="newMcpServer.url" placeholder="http://localhost:8080/sse">
                 </div>
                 <div class="form-group">
-                    <label>{{ t('settings.env_vars_json') }}</label>
-                    <input type="text" class="form-input" x-model="newMcpServer.env" translate="no" placeholder='{"KEY": "value"}'>
+                    <label for="f-new-mcp-server-env">{{ t('settings.env_vars_json') }}</label>
+                    <input id="f-new-mcp-server-env" type="text" class="form-input" x-model="newMcpServer.env" translate="no" placeholder='{"KEY": "value"}'>
                 </div>
                 <div class="modal-actions">
                     <button class="btn btn-secondary" @click="showMcpModal = false">{{ t('settings.cancel') }}</button>
@@ -2130,7 +2132,7 @@
         <div class="settings-group mb-6">
             <h3>{{ t('settings.installed_skills') }}</h3>
             <div class="search-bar">
-                <input type="text" class="form-input" x-model="skillFilter" placeholder="{{ t('settings.search_skills') }}">
+                <input type="text" class="form-input" x-model="skillFilter" aria-label="{{ t('settings.search_skills') }}" placeholder="{{ t('settings.search_skills') }}">
             </div>
 
             <div class="skills-grid">
@@ -2139,7 +2141,7 @@
                         <div class="skill-header">
                             <h3 translate="no" x-text="skill.name"></h3>
                             <label class="toggle">
-                                <input type="checkbox" :checked="skill.enabled !== false" @change="toggleSkill(skill, $event.target.checked)">
+                                <input type="checkbox" :checked="skill.enabled !== false" :aria-label="window.t('skills.toggle_named', {name: skill.name})" @change="toggleSkill(skill, $event.target.checked)">
                                 <span class="toggle-slider"></span>
                             </label>
                         </div>
@@ -2181,8 +2183,8 @@
         <div class="settings-group mb-6">
             <h3>{{ t('settings.accent_color') }}</h3>
             <div style="display:flex;gap:12px;align-items:center">
-                <input type="color" :value="appearance.accent_color || '#3b82f6'" @input="appearance.accent_color = $event.target.value" style="width:48px;height:36px;border:none;cursor:pointer;background:none">
-                <input type="text" class="form-input" x-model="appearance.accent_color" style="width:120px" placeholder="#3b82f6">
+                <input type="color" :value="appearance.accent_color || '#3b82f6'" aria-label="{{ t('settings.accent_color') }}" @input="appearance.accent_color = $event.target.value" style="width:48px;height:36px;border:none;cursor:pointer;background:none">
+                <input type="text" class="form-input" x-model="appearance.accent_color" style="width:120px" placeholder="#3b82f6" aria-label="{{ t('settings.accent_hex') }}">
                 <div style="display:flex;gap:6px">
                     <template x-for="color in ['#3b82f6', '#60a5fa', '#0969da', '#10b981', '#f85149', '#d29922', '#0ea5e9', '#93c5fd']" :key="color">
                         <div @click="appearance.accent_color = color" style="width:28px;height:28px;border-radius:50%;cursor:pointer;border:2px solid transparent" :style="appearance.accent_color === color ? { borderColor: 'var(--text-primary)' } : {}" :key="color">
@@ -2196,8 +2198,8 @@
         <div class="settings-group mb-6">
             <h3>{{ t('settings.font_size') }}</h3>
             <div class="form-group">
-                <label>{{ t('settings.base_font_size') }} <span x-text="appearance.font_size"></span>px</label>
-                <input type="range" class="form-range" x-model.number="appearance.font_size" min="12" max="18" step="1" @input="applyFontSize(appearance.font_size)">
+                <label for="f-appearance-font-size">{{ t('settings.base_font_size') }} <span x-text="appearance.font_size"></span>px</label>
+                <input id="f-appearance-font-size" type="range" class="form-range" x-model.number="appearance.font_size" min="12" max="18" step="1" @input="applyFontSize(appearance.font_size)">
             </div>
         </div>
 
@@ -2227,9 +2229,10 @@
 
             <template x-for="(keys, action) in shortcuts" :key="action">
                 <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-subtle)">
-                    <span style="flex:1;font-size:0.9rem" x-text="t('settings.kb_action.' + action) || action.replace(/_/g, ' ')"></span>
+                    <span style="flex:1;font-size:0.9rem" :id="'kb-action-' + action" x-text="t('settings.kb_action.' + action) || action.replace(/_/g, ' ')"></span>
                     <input type="text" readonly
                            class="form-input shortcut-capture-input"
+                           :aria-labelledby="'kb-action-' + action"
                            :value="keys"
                            @keydown.prevent="captureShortcut(action, $event)"
                            @blur="clearCaptureHint(action)"
@@ -2248,17 +2251,17 @@
         <div class="settings-group mb-6">
             <h3>{{ t('settings.change_password') }}</h3>
             <div class="form-group">
-                <label>{{ t('settings.current_password') }}</label>
-                <input type="password" class="form-input" x-model="passwordForm.old_password">
+                <label for="f-password-form-old-password">{{ t('settings.current_password') }}</label>
+                <input id="f-password-form-old-password" type="password" class="form-input" x-model="passwordForm.old_password">
             </div>
             <div class="form-row">
                 <div class="form-group">
-                    <label>{{ t('settings.new_password') }}</label>
-                    <input type="password" class="form-input" x-model="passwordForm.new_password" placeholder="{{ t('settings.min_8_chars') }}">
+                    <label for="f-password-form-new-password">{{ t('settings.new_password') }}</label>
+                    <input id="f-password-form-new-password" type="password" class="form-input" x-model="passwordForm.new_password" placeholder="{{ t('settings.min_8_chars') }}">
                 </div>
                 <div class="form-group">
-                    <label>{{ t('settings.confirm_password') }}</label>
-                    <input type="password" class="form-input" x-model="passwordForm.confirm_password">
+                    <label for="f-password-form-confirm-password">{{ t('settings.confirm_password') }}</label>
+                    <input id="f-password-form-confirm-password" type="password" class="form-input" x-model="passwordForm.confirm_password">
                 </div>
             </div>
             <button class="btn btn-primary" @click="changePassword()">{{ t('settings.change_password') }}</button>
@@ -2271,7 +2274,7 @@
               {{ t('settings.api_tokens_hint') | safe }}
             </p>
             <div style="display:flex;gap:8px;margin-bottom:12px">
-                <input type="text" class="form-input" x-model="tokenName" placeholder="{{ t('settings.token_name') }}" style="flex:1">
+                <input type="text" class="form-input" x-model="tokenName" aria-label="{{ t('settings.token_name') }}" placeholder="{{ t('settings.token_name') }}" style="flex:1">
                 <select class="form-input" x-model="tokenRole" style="width:auto" aria-label="{{ t('settings.role') }}" title="{{ t('settings.role') }}">
                     <option value="viewer">{{ t('settings.role_viewer') }}</option>
                     <option value="operator">{{ t('settings.role_operator') }}</option>
@@ -2346,9 +2349,9 @@
               <span x-show="saasStatus?.oidc" x-cloak> · {{ t('settings.oidc_enabled') }}</span>
             </p>
             <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
-                <input type="text" class="form-input" x-model="newUser.username" placeholder="{{ t('settings.username') }}" style="flex:1;min-width:120px">
-                <input type="password" class="form-input" x-model="newUser.password" placeholder="{{ t('settings.password_min8') }}" style="flex:1;min-width:120px">
-                <select class="form-select" x-model="newUser.role" style="width:auto">
+                <input type="text" class="form-input" x-model="newUser.username" aria-label="{{ t('settings.username') }}" placeholder="{{ t('settings.username') }}" style="flex:1;min-width:120px">
+                <input type="password" class="form-input" x-model="newUser.password" aria-label="{{ t('settings.password') }}" placeholder="{{ t('settings.password_min8') }}" style="flex:1;min-width:120px">
+                <select class="form-select" x-model="newUser.role" style="width:auto" aria-label="{{ t('settings.role') }}">
                   <option value="viewer">{{ t('settings.role_viewer') }}</option>
                   <option value="operator" selected>{{ t('settings.role_operator') }}</option>
                   <option value="admin">{{ t('settings.role_admin') }}</option>
@@ -2367,6 +2370,7 @@
                   <span translate="no" class="account-list-name" x-text="u.username"></span>
                   <span>
                     <select class="form-select" style="width:auto"
+                            :aria-label="window.t('settings.role_of', {name: u.username})"
                             :value="u.role"
                             @change="patchPlatformUser(u.username, { role: $event.target.value })">
                       <option value="viewer">{{ t('settings.role_viewer') }}</option>
@@ -2390,8 +2394,8 @@
 
             <h3 style="margin-top:24px">{{ t('settings.tenants') }}</h3>
             <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
-                <input type="text" class="form-input" x-model="newTenant.id" placeholder="{{ t('settings.tenant_id') }}" style="flex:1;min-width:100px">
-                <input type="text" class="form-input" x-model="newTenant.name" placeholder="{{ t('settings.display_name_tenant') }}" style="flex:1;min-width:100px">
+                <input type="text" class="form-input" x-model="newTenant.id" aria-label="{{ t('settings.tenant_id_label') }}" placeholder="{{ t('settings.tenant_id') }}" style="flex:1;min-width:100px">
+                <input type="text" class="form-input" x-model="newTenant.name" aria-label="{{ t('settings.display_name_tenant') }}" placeholder="{{ t('settings.display_name_tenant') }}" style="flex:1;min-width:100px">
                 <button class="btn btn-primary" type="button" @click="createTenant()">{{ t('settings.add_tenant') }}</button>
             </div>
             <ul style="margin:0;padding-inline-start:18px;color:var(--text-secondary);font-size:0.85rem;">
@@ -2434,8 +2438,8 @@
                             </div>
                             <div style="display:flex;gap:8px;align-items:end">
                                 <div class="form-group" style="flex:1;margin-bottom:0">
-                                    <label>{{ t('settings.test_arguments_json') }}</label>
-                                    <input type="text" class="form-input" x-model="toolTestArgs" aria-label="{{ t('settings.test_arguments_json') }}" placeholder='{}' style="font-family:var(--font-mono)">
+                                    <label :for="'tool-test-args-' + tool.name">{{ t('settings.test_arguments_json') }}</label>
+                                    <input type="text" class="form-input" :id="'tool-test-args-' + tool.name" x-model="toolTestArgs" placeholder='{}' style="font-family:var(--font-mono)">
                                 </div>
                                 <button class="btn btn-secondary btn-sm" @click.stop="testTool(tool.name)" style="height:36px">{{ t('settings.test') }}</button>
                             </div>
@@ -2830,8 +2834,8 @@
         <div class="settings-group mb-6">
             <h3>{{ t('settings.logging_title') }}</h3>
             <div class="form-group">
-                <label>{{ t('settings.logging_level') }}</label>
-                <select class="form-select" x-model="logging.level">
+                <label for="f-logging-level">{{ t('settings.logging_level') }}</label>
+                <select id="f-logging-level" class="form-select" x-model="logging.level">
                     <option value="DEBUG">DEBUG</option>
                     <option value="INFO">INFO</option>
                     <option value="WARNING">WARNING</option>
@@ -2840,15 +2844,15 @@
                 <div class="form-hint">{{ t('settings.logging_level_hint') }}</div>
             </div>
             <div class="form-group">
-                <label>{{ t('settings.logging_format') }}</label>
-                <select class="form-select" x-model="logging.format">
+                <label for="f-logging-format">{{ t('settings.logging_format') }}</label>
+                <select id="f-logging-format" class="form-select" x-model="logging.format">
                     <option value="text">{{ t('settings.logging_format_text') }}</option>
                     <option value="json">{{ t('settings.logging_format_json') }}</option>
                 </select>
             </div>
             <div class="form-group">
-                <label>{{ t('settings.logging_retention') }}</label>
-                <input type="number" class="form-input" x-model.number="logging.retention_days" min="1" max="365" step="1">
+                <label for="f-logging-retention-days">{{ t('settings.logging_retention') }}</label>
+                <input id="f-logging-retention-days" type="number" class="form-input" x-model.number="logging.retention_days" min="1" max="365" step="1">
                 <div class="form-hint">{{ t('settings.logging_retention_hint') }}</div>
             </div>
             <div class="notice tone-warning" style="margin:8px 0 12px;">
@@ -2862,8 +2866,8 @@
         <div class="settings-group mb-6">
             <h3>{{ t('settings.swarm_retention_title') }}</h3>
             <div class="form-group">
-                <label>{{ t('settings.swarm_retention_days') }}</label>
-                <input type="number" class="form-input" x-model.number="swarmRetention.days" min="0" :max="swarmRetention.max" step="1" style="max-width:200px">
+                <label for="f-swarm-retention-days">{{ t('settings.swarm_retention_days') }}</label>
+                <input id="f-swarm-retention-days" type="number" class="form-input" x-model.number="swarmRetention.days" min="0" :max="swarmRetention.max" step="1" style="max-width:200px">
                 <div class="form-hint">{{ t('settings.swarm_retention_hint') }}</div>
             </div>
             <button class="btn btn-primary" @click="saveSwarmRetention()" :disabled="swarmRetentionSaving">{{ t('settings.save_swarm_retention') }}</button>
@@ -2873,8 +2877,8 @@
         <div class="settings-group mb-6" id="checkpoint-retention-section">
             <h3>{{ t('settings.checkpoint_retention_title') }}</h3>
             <div class="form-group">
-                <label>{{ t('settings.checkpoint_retention_days') }}</label>
-                <input type="number" class="form-input" x-model.number="checkpointRetention.days" min="0" :max="checkpointRetention.max" step="1" style="max-width:200px" :disabled="checkpointRetention.source === 'env'">
+                <label for="f-checkpoint-retention-days">{{ t('settings.checkpoint_retention_days') }}</label>
+                <input id="f-checkpoint-retention-days" type="number" class="form-input" x-model.number="checkpointRetention.days" min="0" :max="checkpointRetention.max" step="1" style="max-width:200px" :disabled="checkpointRetention.source === 'env'">
                 <div class="form-hint">{{ t('settings.checkpoint_retention_hint') }}</div>
                 <div class="form-hint" x-show="checkpointRetention.source === 'env'" x-cloak>{{ t('settings.checkpoint_retention_env') }}</div>
             </div>
@@ -2984,8 +2988,8 @@
                 <span x-show="proxyPolicy && !proxyPolicy.proxy_allowed" x-cloak>{{ t('settings.proxy_policy_off') }}</span>
             </div>
             <div class="form-group">
-                <label>{{ t('settings.proxy_provider') }}</label>
-                <select class="form-select" x-model="proxy.provider">
+                <label for="f-proxy-provider">{{ t('settings.proxy_provider') }}</label>
+                <select id="f-proxy-provider" class="form-select" x-model="proxy.provider">
                     <option value="none">{{ t('settings.proxy_none') }}</option>
                     <option value="anyip">anyIP.io</option>
                     <option value="brightdata" translate="no">Bright Data</option>
@@ -2995,42 +2999,42 @@
             <div x-show="proxy.provider !== 'none'" class="ic-col" style="gap:12px;" x-cloak>
                 <div style="display:flex;gap:12px;">
                     <div class="form-group" style="flex:2;">
-                        <label>{{ t('settings.proxy_host') }}</label>
-                        <input type="text" class="form-input" x-model="proxy.host">
+                        <label for="f-proxy-host">{{ t('settings.proxy_host') }}</label>
+                        <input id="f-proxy-host" type="text" class="form-input" x-model="proxy.host">
                     </div>
                     <div class="form-group" style="flex:1;">
-                        <label>{{ t('settings.proxy_port') }}</label>
-                        <input type="text" class="form-input" x-model="proxy.port">
+                        <label for="f-proxy-port">{{ t('settings.proxy_port') }}</label>
+                        <input id="f-proxy-port" type="text" class="form-input" x-model="proxy.port">
                     </div>
                 </div>
                 <div class="form-group">
-                    <label>{{ t('settings.proxy_username') }}</label>
-                    <input type="text" class="form-input" x-model="proxy.username" autocomplete="off">
+                    <label for="f-proxy-username">{{ t('settings.proxy_username') }}</label>
+                    <input id="f-proxy-username" type="text" class="form-input" x-model="proxy.username" autocomplete="off">
                 </div>
                 <div class="form-group">
-                    <label>{{ t('settings.proxy_password') }}</label>
-                    <input type="password" class="form-input" x-model="proxy.password" autocomplete="new-password">
+                    <label for="f-proxy-password">{{ t('settings.proxy_password') }}</label>
+                    <input id="f-proxy-password" type="password" class="form-input" x-model="proxy.password" autocomplete="new-password">
                 </div>
                 <div style="display:flex;gap:12px;">
                     <div class="form-group" style="flex:1;">
-                        <label>{{ t('settings.proxy_network') }}</label>
-                        <select class="form-select" x-model="proxy.network">
+                        <label for="f-proxy-network">{{ t('settings.proxy_network') }}</label>
+                        <select id="f-proxy-network" class="form-select" x-model="proxy.network">
                             <option value="mixed">{{ t('settings.proxy_network_mixed') }}</option>
                             <option value="residential">{{ t('settings.proxy_network_residential') }}</option>
                             <option value="mobile">{{ t('settings.proxy_network_mobile') }}</option>
                         </select>
                     </div>
                     <div class="form-group" style="flex:1;">
-                        <label>{{ t('settings.proxy_country') }}</label>
-                        <input type="text" class="form-input" x-model="proxy.country" placeholder="US" maxlength="3">
+                        <label for="f-proxy-country">{{ t('settings.proxy_country') }}</label>
+                        <input id="f-proxy-country" type="text" class="form-input" x-model="proxy.country" placeholder="US" maxlength="3">
                     </div>
                 </div>
                 <label style="display:flex;align-items:center;gap:8px;">
                     <span>{{ t('settings.proxy_sticky') }}</span>
-                    <label class="toggle">
+                    <span class="toggle">
                         <input type="checkbox" x-model="proxy.session_sticky">
                         <span class="toggle-slider"></span>
-                    </label>
+                    </span>
                 </label>
             </div>
             <div x-show="proxyTestResult" class="notice" style="margin-bottom:12px;" :class="proxyTestResult?.success ? 'tone-success' : 'tone-danger'" x-cloak><span style="display:inline-flex;align-items:center;gap:6px"><span class="ki" :data-icon="proxyTestResult?.success ? 'check-circle' : 'x'" x-html="KazmaIcons.get(proxyTestResult?.success ? 'check-circle' : 'x')" aria-hidden="true"></span><span translate="no" x-text="proxyTestResult?.success ? ((window.t('settings.proxy_exit_ip') || 'Exit IP') + ': ' + proxyTestResult.exit_ip) : (proxyTestResult?.error === 'proxy_not_allowed' ? t('settings.proxy_policy_off') : (proxyTestResult?.message || proxyTestResult?.error || t('settings.sys.proxy_test_failed')))"></span></span></div>
@@ -3045,7 +3049,7 @@
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
                 <h3>{{ t('settings.system_logs') }}</h3>
                 <div style="display:flex;gap:8px">
-                    <select class="form-select" x-model.number="logLines" style="width:100px" @change="loadLogs()">
+                    <select class="form-select" x-model.number="logLines" aria-label="{{ t('settings.log_lines') }}" style="width:100px" @change="loadLogs()">
                         <option value="50">50 {{ t('settings.lines') }}</option>
                         <option value="100">100 {{ t('settings.lines') }}</option>
                         <option value="200">200 {{ t('settings.lines') }}</option>
@@ -3231,7 +3235,7 @@
                 <span class="pkg-muted" x-text="'(' + pkgCore.length + ')'"></span>
             </div>
             <div class="pkg-search-wrap">
-                <input type="text" class="form-input" :placeholder="t('packages.search_ph')" x-model="pkgSearch">
+                <input type="text" class="form-input" :aria-label="t('packages.search_ph')" :placeholder="t('packages.search_ph')" x-model="pkgSearch">
             </div>
             <div class="pkg-table-wrap">
                 <table class="pkg-table">
@@ -3285,7 +3289,7 @@
             <h3>{{ t('settings.export_config') }}</h3>
             <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:12px">{{ t('settings.download_complete_config') }}</p>
             <div style="display:flex;gap:8px;align-items:center">
-                <select class="form-select" x-model="exportFormat" style="width:120px">
+                <select class="form-select" x-model="exportFormat" aria-label="{{ t('settings.export_format') }}" style="width:120px">
                     <option value="yaml">YAML</option>
                     <option value="json">JSON</option>
                 </select>
@@ -3298,8 +3302,8 @@
             <h3>{{ t('settings.import_config') }}</h3>
             <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:12px">{{ t('settings.upload_or_paste') }}</p>
             <div class="form-group">
-                <label>{{ t('settings.config_data') }}</label>
-                <textarea class="form-textarea" x-model="importData" rows="8" style="font-family:var(--font-mono)" placeholder="{{ t('settings.paste_yaml_json') }}"></textarea>
+                <label for="f-import-data">{{ t('settings.config_data') }}</label>
+                <textarea id="f-import-data" class="form-textarea" x-model="importData" rows="8" style="font-family:var(--font-mono)" placeholder="{{ t('settings.paste_yaml_json') }}"></textarea>
             </div>
             <div style="display:flex;gap:12px;margin-bottom:12px">
                 <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem">
@@ -3310,23 +3314,23 @@
             <div class="form-group">
                 <label style="display:flex;align-items:center;gap:8px">
                     <span>{{ t('settings.selective_import') }}</span>
-                    <label class="toggle">
+                    <span class="toggle">
                         <input type="checkbox" x-model="importSelective">
                         <span class="toggle-slider"></span>
-                    </label>
+                    </span>
                 </label>
             </div>
-            <div x-show="importSelective" class="form-group" x-cloak>
-                <label>{{ t('settings.select_sections') }}</label>
+            <fieldset x-show="importSelective" class="form-group" style="border:0;padding:0;margin-inline:0;min-width:0" x-cloak>
+                <legend class="form-label" style="margin-bottom:0;padding:0;float:inline-start;width:100%">{{ t('settings.select_sections') }}</legend>
                 <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">
                     <template x-for="section in availableSections" :key="section">
-                        <label style="display:flex;align-items:center;gap:4px;font-size:0.85rem;padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-pill);cursor:pointer" :style="importSections.includes(section) ? { borderColor: 'var(--accent)', background: 'var(--accent-subtle)', color: 'var(--accent-light)' } : {}">
-                            <input type="checkbox" :value="section" x-model="importSections" style="display:none">
+                        <label x-data="{ keyFocus: false }" @focusin="keyFocus = $event.target.matches(':focus-visible')" @focusout="keyFocus = false" style="position:relative;display:flex;align-items:center;gap:4px;font-size:0.85rem;padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-pill);cursor:pointer" :style="Object.assign({}, importSections.includes(section) ? { borderColor: 'var(--accent)', background: 'var(--accent-subtle)', color: 'var(--accent-light)' } : {}, keyFocus ? { outline: '2px solid var(--accent)', outlineOffset: '2px' } : {})">
+                            <input type="checkbox" class="sr-only" :value="section" x-model="importSections">
                             <span translate="no" x-text="section"></span>
                         </label>
                     </template>
                 </div>
-            </div>
+            </fieldset>
             <button class="btn btn-primary" @click="importConfig()" :disabled="restoring"><span x-show="!restoring" x-cloak>{{ t('settings.import_configuration') }}</span><span x-show="restoring" x-cloak>{{ t('settings.restoring') }}</span></button>
         </div>
     </div>
@@ -3377,33 +3381,33 @@
                 <label class="toggle-row"><span class="toggle"><input type="checkbox" x-model="documents.default_authoritative"><span class="toggle-slider"></span></span><span>{{ t('settings.docs.default_authoritative') }}</span></label>
             </div>
             <div class="form-group">
-                <label>{{ t('settings.docs.mode_live') }}</label>
+                <div class="form-label" style="margin-bottom:0">{{ t('settings.docs.mode_live') }}</div>
                 <div class="form-hint" x-text="documents.mode ? tOr('settings.docs.mode_' + documents.mode, documents.mode) : '—'"></div>
             </div>
             <div class="two-col-grid">
                 <div class="form-group">
-                    <label>{{ t('settings.docs.max_file_bytes') }}</label>
-                    <input type="number" class="form-input" x-model.number="documents.intake_max_bytes" min="1024">
+                    <label for="f-documents-intake-max-bytes">{{ t('settings.docs.max_file_bytes') }}</label>
+                    <input id="f-documents-intake-max-bytes" type="number" class="form-input" x-model.number="documents.intake_max_bytes" min="1024">
                 </div>
                 <div class="form-group">
-                    <label>{{ t('settings.docs.max_files_request') }}</label>
-                    <input type="number" class="form-input" x-model.number="documents.intake_max_files" min="1" max="100">
+                    <label for="f-documents-intake-max-files">{{ t('settings.docs.max_files_request') }}</label>
+                    <input id="f-documents-intake-max-files" type="number" class="form-input" x-model.number="documents.intake_max_files" min="1" max="100">
                 </div>
                 <div class="form-group">
-                    <label>{{ t('settings.docs.worker_timeout_s') }}</label>
-                    <input type="number" class="form-input" x-model.number="documents.worker_timeout_seconds" min="5">
+                    <label for="f-documents-worker-timeout-seconds">{{ t('settings.docs.worker_timeout_s') }}</label>
+                    <input id="f-documents-worker-timeout-seconds" type="number" class="form-input" x-model.number="documents.worker_timeout_seconds" min="5">
                 </div>
                 <div class="form-group">
-                    <label>{{ t('settings.docs.worker_memory_mb') }}</label>
-                    <input type="number" class="form-input" x-model.number="documents.worker_memory_mb" min="64">
+                    <label for="f-documents-worker-memory-mb">{{ t('settings.docs.worker_memory_mb') }}</label>
+                    <input id="f-documents-worker-memory-mb" type="number" class="form-input" x-model.number="documents.worker_memory_mb" min="64">
                 </div>
                 <div class="form-group">
-                    <label>{{ t('settings.docs.storage_free_floor_bytes') }}</label>
-                    <input type="number" class="form-input" x-model.number="documents.capacity_storage_free_floor_bytes" min="0">
+                    <label for="f-documents-capacity-storage-free-floor-bytes">{{ t('settings.docs.storage_free_floor_bytes') }}</label>
+                    <input id="f-documents-capacity-storage-free-floor-bytes" type="number" class="form-input" x-model.number="documents.capacity_storage_free_floor_bytes" min="0">
                 </div>
                 <div class="form-group">
-                    <label>{{ t('settings.docs.malware_scan') }}</label>
-                    <select class="form-select" x-model="documents.security_malware_scan">
+                    <label for="f-documents-security-malware-scan">{{ t('settings.docs.malware_scan') }}</label>
+                    <select id="f-documents-security-malware-scan" class="form-select" x-model="documents.security_malware_scan">
                         <option value="auto">{{ t('settings.docs.opt_auto') }}</option>
                         <option value="on">{{ t('settings.docs.opt_on') }}</option>
                         <option value="off">{{ t('settings.docs.opt_off') }}</option>
@@ -3420,8 +3424,8 @@
                 <label class="toggle-row"><span class="toggle"><input type="checkbox" x-model="documents.ocr_tables"><span class="toggle-slider"></span></span><span>{{ t('settings.docs.ocr_tables') }}</span></label>
             </div>
             <div class="form-group">
-                <label>{{ t('settings.docs.ocr_engine') }}</label>
-                <select class="form-select" x-model="documents.ocr_engine">
+                <label for="f-documents-ocr-engine">{{ t('settings.docs.ocr_engine') }}</label>
+                <select id="f-documents-ocr-engine" class="form-select" x-model="documents.ocr_engine">
                     <option value="auto">{{ t('settings.docs.ocr_engine_auto') }}</option>
                     <option value="neural">{{ t('settings.docs.ocr_engine_neural') }}</option>
                     <option value="tesseract">{{ t('settings.docs.ocr_engine_tesseract') }}</option>
@@ -3504,12 +3508,12 @@
                                   x-text="emailStatus.gmail_oauth_client_set ? t('settings.email_gmail_oauth_client_ready') : t('settings.email_gmail_oauth_client_missing')"></span>
                         </p>
                         <div class="form-group" style="margin-bottom:8px;">
-                            <label>{{ t('settings.email_gmail_oauth_client_id') }}</label>
-                            <input type="text" class="form-input" x-model="emailGmailOAuth.client_id" placeholder="….apps.googleusercontent.com" autocomplete="off">
+                            <label for="f-email-gmail-oauth-client-id">{{ t('settings.email_gmail_oauth_client_id') }}</label>
+                            <input id="f-email-gmail-oauth-client-id" type="text" class="form-input" x-model="emailGmailOAuth.client_id" placeholder="….apps.googleusercontent.com" autocomplete="off">
                         </div>
                         <div class="form-group" style="margin-bottom:12px;">
-                            <label>{{ t('settings.email_gmail_oauth_client_secret') }}</label>
-                            <input type="password" class="form-input" x-model="emailGmailOAuth.client_secret" placeholder="{{ t('settings.email_client_secret_ph') }}" autocomplete="new-password">
+                            <label for="f-email-gmail-oauth-client-secret">{{ t('settings.email_gmail_oauth_client_secret') }}</label>
+                            <input id="f-email-gmail-oauth-client-secret" type="password" class="form-input" x-model="emailGmailOAuth.client_secret" placeholder="{{ t('settings.email_client_secret_ph') }}" autocomplete="new-password">
                             <p class="form-help" style="margin-top:4px;">{{ t('settings.email_gmail_oauth_help') }}</p>
                         </div>
                         <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -3523,12 +3527,12 @@
                         <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 8px 0;">{{ t('settings.email_gmail_imap_desc') }}</p>
                         <p style="font-size:0.75rem;color:var(--text-tertiary);margin:0 0 12px 0;font-family:var(--font-mono);">imap.gmail.com:993 · smtp.gmail.com:587</p>
                         <div class="form-group" style="margin-bottom:8px;">
-                            <label>{{ t('settings.email_gmail_address') }}</label>
-                            <input type="email" class="form-input" x-model="emailGmail.address" placeholder="you@gmail.com" autocomplete="username">
+                            <label for="f-email-gmail-address">{{ t('settings.email_gmail_address') }}</label>
+                            <input id="f-email-gmail-address" type="email" class="form-input" x-model="emailGmail.address" placeholder="you@gmail.com" autocomplete="username">
                         </div>
                         <div class="form-group" style="margin-bottom:12px;">
-                            <label>{{ t('settings.email_gmail_app_password') }}</label>
-                            <input type="password" class="form-input" x-model="emailGmail.app_password" translate="no" placeholder="xxxx xxxx xxxx xxxx" autocomplete="new-password">
+                            <label for="f-email-gmail-app-password">{{ t('settings.email_gmail_app_password') }}</label>
+                            <input id="f-email-gmail-app-password" type="password" class="form-input" x-model="emailGmail.app_password" translate="no" placeholder="xxxx xxxx xxxx xxxx" autocomplete="new-password">
                             <p class="form-help" style="margin-top:4px;">{{ t('settings.email_gmail_app_password_help') }}</p>
                         </div>
                         <button class="btn btn-primary btn-sm" @click="saveGmailProtocol('imap')" :disabled="emailSaving"
@@ -3540,12 +3544,12 @@
                         <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 8px 0;">{{ t('settings.email_gmail_pop_desc') }}</p>
                         <p style="font-size:0.75rem;color:var(--text-tertiary);margin:0 0 12px 0;font-family:var(--font-mono);">pop.gmail.com:995 · smtp.gmail.com:587</p>
                         <div class="form-group" style="margin-bottom:8px;">
-                            <label>{{ t('settings.email_gmail_address') }}</label>
-                            <input type="email" class="form-input" x-model="emailGmail.address" placeholder="you@gmail.com" autocomplete="username">
+                            <label for="f-email-gmail-address-2">{{ t('settings.email_gmail_address') }}</label>
+                            <input id="f-email-gmail-address-2" type="email" class="form-input" x-model="emailGmail.address" placeholder="you@gmail.com" autocomplete="username">
                         </div>
                         <div class="form-group" style="margin-bottom:12px;">
-                            <label>{{ t('settings.email_gmail_app_password') }}</label>
-                            <input type="password" class="form-input" x-model="emailGmail.app_password" translate="no" placeholder="xxxx xxxx xxxx xxxx" autocomplete="new-password">
+                            <label for="f-email-gmail-app-password-2">{{ t('settings.email_gmail_app_password') }}</label>
+                            <input id="f-email-gmail-app-password-2" type="password" class="form-input" x-model="emailGmail.app_password" translate="no" placeholder="xxxx xxxx xxxx xxxx" autocomplete="new-password">
                         </div>
                         <button class="btn btn-primary btn-sm" @click="saveGmailProtocol('pop')" :disabled="emailSaving"
                                 x-text="emailSaving ? '…' : t('settings.email_save_pop')"></button>
@@ -3579,16 +3583,16 @@
                     <div x-show="emailMsMode === 'oauth'" x-cloak>
                         <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 12px 0;">{{ t('settings.email_ms_oauth_desc') }}</p>
                         <div class="form-group" style="margin-bottom:8px;">
-                            <label>{{ t('settings.email_ms_client_id') }}</label>
-                            <input type="text" class="form-input" x-model="emailMs.client_id" placeholder="{{ t('settings.email_azure_client_id_ph') }}" autocomplete="off">
+                            <label for="f-email-ms-client-id">{{ t('settings.email_ms_client_id') }}</label>
+                            <input id="f-email-ms-client-id" type="text" class="form-input" x-model="emailMs.client_id" placeholder="{{ t('settings.email_azure_client_id_ph') }}" autocomplete="off">
                         </div>
                         <div class="form-group" style="margin-bottom:8px;">
-                            <label>{{ t('settings.email_ms_client_secret') }}</label>
-                            <input type="password" class="form-input" x-model="emailMs.client_secret" placeholder="{{ t('settings.email_public_client_ph') }}" autocomplete="new-password">
+                            <label for="f-email-ms-client-secret">{{ t('settings.email_ms_client_secret') }}</label>
+                            <input id="f-email-ms-client-secret" type="password" class="form-input" x-model="emailMs.client_secret" placeholder="{{ t('settings.email_public_client_ph') }}" autocomplete="new-password">
                         </div>
                         <div class="form-group" style="margin-bottom:12px;">
-                            <label>{{ t('settings.email_ms_tenant') }}</label>
-                            <input type="text" class="form-input" x-model="emailMs.tenant_id" translate="no" placeholder="common">
+                            <label for="f-email-ms-tenant-id">{{ t('settings.email_ms_tenant') }}</label>
+                            <input id="f-email-ms-tenant-id" type="text" class="form-input" x-model="emailMs.tenant_id" translate="no" placeholder="common">
                             <p class="form-help" style="margin-top:4px;">{{ t('settings.email_ms_redirect_help') }}</p>
                         </div>
                         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
@@ -3619,12 +3623,12 @@
                         <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 8px 0;">{{ t('settings.email_ms_imap_desc') }}</p>
                         <p style="font-size:0.75rem;color:var(--text-tertiary);margin:0 0 12px 0;font-family:var(--font-mono);">outlook.office365.com:993 · smtp.office365.com:587</p>
                         <div class="form-group" style="margin-bottom:8px;">
-                            <label>{{ t('settings.email_ms_address') }}</label>
-                            <input type="email" class="form-input" x-model="emailMsProtocol.address" placeholder="you@contoso.com" autocomplete="username">
+                            <label for="f-email-ms-protocol-address">{{ t('settings.email_ms_address') }}</label>
+                            <input id="f-email-ms-protocol-address" type="email" class="form-input" x-model="emailMsProtocol.address" placeholder="you@contoso.com" autocomplete="username">
                         </div>
                         <div class="form-group" style="margin-bottom:12px;">
-                            <label>{{ t('settings.email_ms_password') }}</label>
-                            <input type="password" class="form-input" x-model="emailMsProtocol.password" placeholder="{{ t('settings.email_ms_password') }}" autocomplete="new-password">
+                            <label for="f-email-ms-protocol-password">{{ t('settings.email_ms_password') }}</label>
+                            <input id="f-email-ms-protocol-password" type="password" class="form-input" x-model="emailMsProtocol.password" placeholder="{{ t('settings.email_ms_password') }}" autocomplete="new-password">
                         </div>
                         <button class="btn btn-primary btn-sm" @click="saveMsProtocol('imap')" :disabled="emailSaving"
                                 x-text="emailSaving ? '…' : t('settings.email_save_imap')"></button>
@@ -3635,12 +3639,12 @@
                         <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 8px 0;">{{ t('settings.email_ms_pop_desc') }}</p>
                         <p style="font-size:0.75rem;color:var(--text-tertiary);margin:0 0 12px 0;font-family:var(--font-mono);">outlook.office365.com:995 · smtp.office365.com:587</p>
                         <div class="form-group" style="margin-bottom:8px;">
-                            <label>{{ t('settings.email_ms_address') }}</label>
-                            <input type="email" class="form-input" x-model="emailMsProtocol.address" placeholder="you@contoso.com" autocomplete="username">
+                            <label for="f-email-ms-protocol-address-2">{{ t('settings.email_ms_address') }}</label>
+                            <input id="f-email-ms-protocol-address-2" type="email" class="form-input" x-model="emailMsProtocol.address" placeholder="you@contoso.com" autocomplete="username">
                         </div>
                         <div class="form-group" style="margin-bottom:12px;">
-                            <label>{{ t('settings.email_ms_password') }}</label>
-                            <input type="password" class="form-input" x-model="emailMsProtocol.password" placeholder="{{ t('settings.email_ms_password') }}" autocomplete="new-password">
+                            <label for="f-email-ms-protocol-password-2">{{ t('settings.email_ms_password') }}</label>
+                            <input id="f-email-ms-protocol-password-2" type="password" class="form-input" x-model="emailMsProtocol.password" placeholder="{{ t('settings.email_ms_password') }}" autocomplete="new-password">
                         </div>
                         <button class="btn btn-primary btn-sm" @click="saveMsProtocol('pop')" :disabled="emailSaving"
                                 x-text="emailSaving ? '…' : t('settings.email_save_pop')"></button>
@@ -4464,8 +4468,8 @@
                             </select>
                         </div>
                         <div class="form-group">
-                            <label>{{ t('settings.xt.force_subject') }}</label>
-                            <select class="form-input" x-model="xReplyPreview.subject_id">
+                            <label for="f-x-reply-preview-subject-id">{{ t('settings.xt.force_subject') }}</label>
+                            <select id="f-x-reply-preview-subject-id" class="form-input" x-model="xReplyPreview.subject_id">
                                 <option value="">{{ t('settings.xt.auto_detect') }}</option>
                                 <template x-for="s in xReply.subjects" :key="s.id">
                                     <option :value="s.id" translate="no" x-text="s.id"></option>
@@ -4578,7 +4582,7 @@
                     </p>
                 </div>
                 <label class="toggle" style="scale: 1.2;" title="{{ t('voice.title') }}">
-                    <input type="checkbox" x-model="voiceForm.enabled" @change="saveVoiceSettings()">
+                    <input type="checkbox" x-model="voiceForm.enabled" aria-label="{{ t('voice.title') }}" @change="saveVoiceSettings()">
                     <span class="toggle-slider"></span>
                 </label>
             </div>
@@ -4597,7 +4601,7 @@
                         </p>
                     </div>
                     <label class="toggle" style="flex-shrink:0; scale: 1.1;" title="{{ t('voice.tts_reply_title') }}">
-                        <input type="checkbox" x-model="voiceForm.tts_reply" @change="saveVoiceSettings()">
+                        <input type="checkbox" x-model="voiceForm.tts_reply" aria-label="{{ t('voice.tts_reply_title') }}" @change="saveVoiceSettings()">
                         <span class="toggle-slider"></span>
                     </label>
                 </div>
@@ -4611,8 +4615,8 @@
                         </h4>
                         
                         <div class="form-group">
-                            <label>{{ t('voice.stt_provider') }}</label>
-                            <select class="form-select" x-model="voiceForm.stt_provider" @change="saveVoiceSettings(); loadSttModels()">
+                            <label for="f-voice-form-stt-provider">{{ t('voice.stt_provider') }}</label>
+                            <select id="f-voice-form-stt-provider" class="form-select" x-model="voiceForm.stt_provider" @change="saveVoiceSettings(); loadSttModels()">
                                 <template x-for="provider in voiceProviders.stt" :key="provider">
                                     <option :value="provider" x-text="provider"></option>
                                 </template>
@@ -4620,8 +4624,8 @@
                         </div>
 
                         <div class="form-group">
-                            <label>{{ t('voice.stt_model') }} <span x-show="sttModelsLoading" style="color:var(--text-muted);font-weight:400" x-cloak>{{ t('voice.stt_model_loading') }}</span></label>
-                            <select class="form-select" x-model="sttModelType" @change="onSttModelTypeChange()">
+                            <label for="f-stt-model-type">{{ t('voice.stt_model') }} <span x-show="sttModelsLoading" style="color:var(--text-muted);font-weight:400" x-cloak>{{ t('voice.stt_model_loading') }}</span></label>
+                            <select id="f-stt-model-type" class="form-select" x-model="sttModelType" @change="onSttModelTypeChange()">
                                 <template x-for="model in sttModelOptions" :key="model.id">
                                     <option :value="model.id" x-text="model.label"></option>
                                 </template>
@@ -4636,8 +4640,8 @@
                         </div>
 
                         <div class="form-group" x-show="sttModelType === 'custom'" style="margin-top:8px;" x-cloak>
-                            <label>{{ t('voice.stt_custom_id') }}</label>
-                            <input type="text" class="form-input" x-model="voiceForm.stt_model" placeholder="e.g. openai/whisper-large-v3" @change="saveVoiceSettings()">
+                            <label for="f-voice-form-stt-model">{{ t('voice.stt_custom_id') }}</label>
+                            <input id="f-voice-form-stt-model" type="text" class="form-input" x-model="voiceForm.stt_model" placeholder="e.g. openai/whisper-large-v3" @change="saveVoiceSettings()">
                             <p class="form-help" style="margin-top:4px;">{{ t('voice.stt_custom_help') }}</p>
                         </div>
 
@@ -4646,8 +4650,8 @@
                            install had one pointed at 127.0.0.1:9000 with no way to see or
                            change it here. #}
                         <div class="form-group" x-show="voiceForm.stt_provider !== 'openai' || voiceForm.stt_base_url" style="margin-top:8px;" x-cloak>
-                            <label>{{ t('voice.stt_base_url') }}</label>
-                            <input type="text" class="form-input" x-model="voiceForm.stt_base_url"
+                            <label for="f-voice-form-stt-base-url">{{ t('voice.stt_base_url') }}</label>
+                            <input id="f-voice-form-stt-base-url" type="text" class="form-input" x-model="voiceForm.stt_base_url"
                                    placeholder="http://127.0.0.1:9000/v1"
                                    @change="saveVoiceSettings()">
                             <p class="form-help" style="margin-top:4px;">
@@ -4660,8 +4664,8 @@
                            could not configure was the credential. Sent masked, and a save
                            that echoes the mask leaves the stored secret untouched. #}
                         <div class="form-group">
-                            <label>{{ t('settings.stt_api_key') }}</label>
-                            <input type="password" class="form-input" x-model="voiceForm.stt_api_key"
+                            <label for="f-voice-form-stt-api-key">{{ t('settings.stt_api_key') }}</label>
+                            <input id="f-voice-form-stt-api-key" type="password" class="form-input" x-model="voiceForm.stt_api_key"
                                    placeholder="{{ t('settings.keep_stored_key') }}"
                                    autocomplete="new-password"
                                    @change="saveVoiceSettings()">
@@ -4671,8 +4675,8 @@
                         </div>
 
                         <div class="form-group">
-                            <label>{{ t('voice.stt_language') }}</label>
-                            <select class="form-select" x-model="sttLanguageType" @change="onSttLanguageTypeChange()">
+                            <label for="f-stt-language-type">{{ t('voice.stt_language') }}</label>
+                            <select id="f-stt-language-type" class="form-select" x-model="sttLanguageType" @change="onSttLanguageTypeChange()">
                                 <option value="auto">{{ t('voice.lang_auto') }}</option>
                                 <option value="ar" translate="no">العربية (ar)</option>
                                 <option value="en" translate="no">English (en)</option>
@@ -4697,8 +4701,8 @@
                             <p class="form-help" style="margin-top:4px;">{{ t('voice.stt_language_help') }}</p>
                         </div>
                         <div class="form-group" x-show="sttLanguageType === 'custom'" style="margin-top:8px;" x-cloak>
-                            <label>{{ t('voice.stt_language_code') }}</label>
-                            <input type="text" class="form-input" x-model="voiceForm.stt_language" translate="no" placeholder="ISO-639-1, e.g. ar" @change="saveVoiceSettings()">
+                            <label for="f-voice-form-stt-language">{{ t('voice.stt_language_code') }}</label>
+                            <input id="f-voice-form-stt-language" type="text" class="form-input" x-model="voiceForm.stt_language" translate="no" placeholder="ISO-639-1, e.g. ar" @change="saveVoiceSettings()">
                         </div>
                     </div>
 
@@ -4710,8 +4714,8 @@
                         </h4>
 
                         <div class="form-group">
-                            <label>{{ t('voice.tts_provider') }}</label>
-                            <select class="form-select" x-model="voiceForm.tts_provider" @change="saveVoiceSettings(); loadVoiceModels()">
+                            <label for="f-voice-form-tts-provider">{{ t('voice.tts_provider') }}</label>
+                            <select id="f-voice-form-tts-provider" class="form-select" x-model="voiceForm.tts_provider" @change="saveVoiceSettings(); loadVoiceModels()">
                                 <template x-for="provider in voiceProviders.tts" :key="provider">
                                     <option :value="provider" x-text="provider"></option>
                                 </template>
@@ -4719,8 +4723,8 @@
                         </div>
 
                         <div class="form-group">
-                            <label>{{ t('voice.tts_voice') }}</label>
-                            <select class="form-select" x-model="ttsVoiceType" @change="onTtsVoiceTypeChange()">
+                            <label for="f-tts-voice-type">{{ t('voice.tts_voice') }}</label>
+                            <select id="f-tts-voice-type" class="form-select" x-model="ttsVoiceType" @change="onTtsVoiceTypeChange()">
                                 <option value="auto">{{ t('settings.tts_voice_auto') }}</option>
                                 <template x-for="model in voiceModels" :key="model">
                                     <option :value="model" x-text="model"></option>
@@ -4737,8 +4741,8 @@
                            bilingual install — that is what read English replies aloud in Arabic. #}
                         <div x-show="ttsVoiceType === 'auto'" x-cloak>
                             <div class="form-group">
-                                <label>{{ t('settings.english_voice') }}</label>
-                                <select class="form-select" x-model="voiceForm.tts_voice_en" @change="saveVoiceSettings()">
+                                <label for="f-voice-form-tts-voice-en">{{ t('settings.english_voice') }}</label>
+                                <select id="f-voice-form-tts-voice-en" class="form-select" x-model="voiceForm.tts_voice_en" @change="saveVoiceSettings()">
                                     <option value="">{{ t('settings.voice_default', voice='en-US-AriaNeural') }}</option>
                                     <template x-for="model in latinVoices()" :key="'en-' + model">
                                         <option :value="model" x-text="model"></option>
@@ -4746,8 +4750,8 @@
                                 </select>
                             </div>
                             <div class="form-group">
-                                <label>{{ t('settings.arabic_voice') }}</label>
-                                <select class="form-select" x-model="voiceForm.tts_voice_ar" @change="saveVoiceSettings()">
+                                <label for="f-voice-form-tts-voice-ar">{{ t('settings.arabic_voice') }}</label>
+                                <select id="f-voice-form-tts-voice-ar" class="form-select" x-model="voiceForm.tts_voice_ar" @change="saveVoiceSettings()">
                                     <option value="">{{ t('settings.voice_default', voice='ar-SA-HamedNeural') }}</option>
                                     <template x-for="model in arabicVoices()" :key="'ar-' + model">
                                         <option :value="model" x-text="model"></option>
@@ -4760,15 +4764,15 @@
                         </div>
 
                         <div class="form-group" x-show="ttsVoiceType === 'custom'" style="margin-top:8px;" x-cloak>
-                            <label>{{ t('voice.tts_custom_id') }}</label>
-                            <input type="text" class="form-input" x-model="voiceForm.tts_voice" placeholder="{{ t('settings.custom_voice_placeholder') }}" @change="saveVoiceSettings()">
+                            <label for="f-voice-form-tts-voice">{{ t('voice.tts_custom_id') }}</label>
+                            <input id="f-voice-form-tts-voice" type="text" class="form-input" x-model="voiceForm.tts_voice" placeholder="{{ t('settings.custom_voice_placeholder') }}" @change="saveVoiceSettings()">
                             <p class="form-help" style="margin-top:4px;">{{ t('voice.tts_custom_help') }}</p>
                         </div>
 
 
                         <div class="form-group">
-                            <label>{{ t('voice.audio_format') }}</label>
-                            <select class="form-select" x-model="voiceForm.tts_output_format" @change="saveVoiceSettings()">
+                            <label for="f-voice-form-tts-output-format">{{ t('voice.audio_format') }}</label>
+                            <select id="f-voice-form-tts-output-format" class="form-select" x-model="voiceForm.tts_output_format" @change="saveVoiceSettings()">
                                 <option value="mp3">{{ t('voice.format_mp3') }}</option>
                                 <option value="wav">{{ t('voice.format_wav') }}</option>
                                 <option value="opus">{{ t('voice.format_opus') }}</option>
@@ -4785,21 +4789,21 @@
                             {{ t('settings.livekit_hint') }}
                         </p>
                         <div class="form-group">
-                            <label>{{ t('settings.livekit_url') }}</label>
-                            <input type="text" class="form-input" x-model="voiceForm.livekit_url"
+                            <label for="f-voice-form-livekit-url">{{ t('settings.livekit_url') }}</label>
+                            <input id="f-voice-form-livekit-url" type="text" class="form-input" x-model="voiceForm.livekit_url"
                                    placeholder="wss://your-project.livekit.cloud"
                                    @change="saveVoiceSettings()">
                         </div>
                         <div class="form-group">
-                            <label>{{ t('settings.livekit_api_key') }}</label>
-                            <input type="password" class="form-input" x-model="voiceForm.livekit_api_key"
+                            <label for="f-voice-form-livekit-api-key">{{ t('settings.livekit_api_key') }}</label>
+                            <input id="f-voice-form-livekit-api-key" type="password" class="form-input" x-model="voiceForm.livekit_api_key"
                                    placeholder="{{ t('settings.keep_stored_key') }}"
                                    autocomplete="new-password"
                                    @change="saveVoiceSettings()">
                         </div>
                         <div class="form-group">
-                            <label>{{ t('settings.livekit_api_secret') }}</label>
-                            <input type="password" class="form-input" x-model="voiceForm.livekit_api_secret"
+                            <label for="f-voice-form-livekit-api-secret">{{ t('settings.livekit_api_secret') }}</label>
+                            <input id="f-voice-form-livekit-api-secret" type="password" class="form-input" x-model="voiceForm.livekit_api_secret"
                                    placeholder="{{ t('settings.keep_stored_secret') }}"
                                    autocomplete="new-password"
                                    @change="saveVoiceSettings()">
@@ -4819,8 +4823,8 @@
             <h3>{{ t('settings.backup_heading') }}</h3>
             <p class="text-muted" style="margin-bottom:1rem">{{ t('settings.backup_desc') }}</p>
             <div style="display:flex;gap:10px;align-items:center;margin-bottom:1rem">
-                <label style="font-size:0.85rem">{{ t('settings.backup_retention') }}</label>
-                <input type="number" class="form-input" x-model.number="backupRetention" min="1" max="3650" step="1" style="max-width:110px">
+                <label for="f-backup-retention" style="font-size:0.85rem">{{ t('settings.backup_retention') }}</label>
+                <input id="f-backup-retention" type="number" class="form-input" x-model.number="backupRetention" min="1" max="3650" step="1" style="max-width:110px">
                 <button class="btn btn-secondary btn-sm" @click="saveBackupRetention()">{{ t('settings.save') }}</button>
             </div>
             <div class="form-hint" style="margin:-0.5rem 0 1rem 0">{{ t('settings.backup_retention_hint') }}</div>
@@ -4915,9 +4919,9 @@
                      :style="offsiteProvider === 'google_drive' ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' } : {}"
                      @click="selectOffsiteProvider('google_drive')">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="google_drive" @click.stop style="accent-color:var(--accent)">
+                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="google_drive" aria-labelledby="offsite-name-google-drive" @click.stop style="accent-color:var(--accent)">
                         <span class="icon-tile icon-tile-sm" aria-hidden="true"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('folder')"></span></span>
-                        <strong translate="no">Google Drive</strong>
+                        <strong translate="no" id="offsite-name-google-drive">Google Drive</strong>
                         <span x-show="offsiteProviderStatus('google_drive')?.connected && offsiteProviderStatus('google_drive')?.drive_ok !== false" class="text-success" style="font-size:0.8rem" x-cloak>✓</span>
                         <span x-show="offsiteProviderStatus('google_drive')?.connected && offsiteProviderStatus('google_drive')?.drive_ok === false"
                               style="font-size:0.8rem;color:var(--warning)"
@@ -4943,9 +4947,9 @@
                      :style="offsiteProvider === 'onedrive' ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' } : {}"
                      @click="selectOffsiteProvider('onedrive')">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="onedrive" @click.stop style="accent-color:var(--accent)">
+                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="onedrive" aria-labelledby="offsite-name-onedrive" @click.stop style="accent-color:var(--accent)">
                         <span class="icon-tile icon-tile-sm" aria-hidden="true"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('cloud')"></span></span>
-                        <strong translate="no">OneDrive</strong>
+                        <strong translate="no" id="offsite-name-onedrive">OneDrive</strong>
                         <span x-show="offsiteProviderStatus('onedrive')?.connected" class="text-success" style="font-size:0.8rem" x-cloak>✓</span>
                         <span x-show="offsiteConfig?.provider === 'onedrive'" class="badge badge-accent" style="margin-inline-start:auto" x-cloak>{{ t('settings.bk.active') }}</span>
                     </div>
@@ -4963,16 +4967,16 @@
                      :style="offsiteProvider === 'webdav' ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' } : {}"
                      @click="selectOffsiteProvider('webdav')">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="webdav" @click.stop style="accent-color:var(--accent)">
+                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="webdav" aria-labelledby="offsite-name-webdav" @click.stop style="accent-color:var(--accent)">
                         <span class="icon-tile icon-tile-sm" aria-hidden="true"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('home')"></span></span>
-                        <strong translate="no">WD MyCloud / NAS</strong>
+                        <strong translate="no" id="offsite-name-webdav">WD MyCloud / NAS</strong>
                         <span x-show="offsiteProviderStatus('webdav')?.connected" class="text-success" style="font-size:0.8rem" x-cloak>✓</span>
                         <span x-show="offsiteConfig?.provider === 'webdav'" class="badge badge-accent" style="margin-inline-start:auto" x-cloak>{{ t('settings.bk.active') }}</span>
                     </div>
                     <div x-show="offsiteProvider === 'webdav'" x-cloak style="margin-top:6px" @click.stop>
-                        <input type="text" class="form-input" x-model="offsiteWebdavUrl" translate="no" placeholder="https://nas:5005 / DavWWWRoot" style="width:100%;font-size:0.8rem;margin-bottom:6px">
-                        <input type="text" class="form-input" x-model="offsiteWebdavUser" placeholder="{{ t('login.username') }}" style="width:100%;font-size:0.8rem;margin-bottom:6px">
-                        <input type="password" class="form-input" x-model="offsiteWebdavPass" placeholder="{{ t('login.password') }}" style="width:100%;font-size:0.8rem">
+                        <input type="text" class="form-input" x-model="offsiteWebdavUrl" translate="no" aria-label="{{ t('settings.bk.webdav_url') }}" placeholder="https://nas:5005 / DavWWWRoot" style="width:100%;font-size:0.8rem;margin-bottom:6px">
+                        <input type="text" class="form-input" x-model="offsiteWebdavUser" aria-label="{{ t('login.username') }}" placeholder="{{ t('login.username') }}" style="width:100%;font-size:0.8rem;margin-bottom:6px">
+                        <input type="password" class="form-input" x-model="offsiteWebdavPass" aria-label="{{ t('login.password') }}" placeholder="{{ t('login.password') }}" style="width:100%;font-size:0.8rem">
                     </div>
                     <p x-show="offsiteProvider !== 'webdav'" style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px 0" x-cloak>
                         {{ t('settings.bk.webdav_hint') }}
@@ -4984,20 +4988,20 @@
                      :style="offsiteProvider === 'ftp' ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' } : {}"
                      @click="selectOffsiteProvider('ftp')">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="ftp" @click.stop style="accent-color:var(--accent)">
+                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="ftp" aria-labelledby="offsite-name-ftp" @click.stop style="accent-color:var(--accent)">
                         <span class="icon-tile icon-tile-sm" aria-hidden="true"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('server')"></span></span>
-                        <strong translate="no">FTP / NAS</strong>
+                        <strong translate="no" id="offsite-name-ftp">FTP / NAS</strong>
                         <span x-show="offsiteProviderStatus('ftp')?.connected" class="text-success" style="font-size:0.8rem" x-cloak>✓</span>
                         <span x-show="offsiteConfig?.provider === 'ftp'" class="badge badge-accent" style="margin-inline-start:auto" x-cloak>{{ t('settings.bk.active') }}</span>
                     </div>
                     <div x-show="offsiteProvider === 'ftp'" x-cloak style="margin-top:6px" @click.stop>
                         <div style="display:flex;gap:6px;margin-bottom:6px">
-                            <input type="text" class="form-input" x-model="offsiteFtpHost" placeholder="192.168.50.45" style="flex:1;font-size:0.8rem">
-                            <input type="text" class="form-input" x-model="offsiteFtpPort" placeholder="21" style="width:64px;font-size:0.8rem">
+                            <input type="text" class="form-input" x-model="offsiteFtpHost" aria-label="{{ t('settings.bk.ftp_host') }}" placeholder="192.168.50.45" style="flex:1;font-size:0.8rem">
+                            <input type="text" class="form-input" x-model="offsiteFtpPort" aria-label="{{ t('settings.proxy_port') }}" placeholder="21" style="width:64px;font-size:0.8rem">
                         </div>
-                        <input type="text" class="form-input" x-model="offsiteFtpUser" placeholder="{{ t('login.username') }}" style="width:100%;font-size:0.8rem;margin-bottom:6px">
-                        <input type="password" class="form-input" x-model="offsiteFtpPass" placeholder="{{ t('login.password') }}" style="width:100%;font-size:0.8rem;margin-bottom:6px">
-                        <input type="text" class="form-input" x-model="offsiteFtpPath" placeholder="{{ t('settings.bk.ftp_path_ph') }}" style="width:100%;font-size:0.8rem">
+                        <input type="text" class="form-input" x-model="offsiteFtpUser" aria-label="{{ t('login.username') }}" placeholder="{{ t('login.username') }}" style="width:100%;font-size:0.8rem;margin-bottom:6px">
+                        <input type="password" class="form-input" x-model="offsiteFtpPass" aria-label="{{ t('login.password') }}" placeholder="{{ t('login.password') }}" style="width:100%;font-size:0.8rem;margin-bottom:6px">
+                        <input type="text" class="form-input" x-model="offsiteFtpPath" aria-label="{{ t('settings.bk.ftp_path_ph') }}" placeholder="{{ t('settings.bk.ftp_path_ph') }}" style="width:100%;font-size:0.8rem">
                     </div>
                     <p x-show="offsiteProvider !== 'ftp'" style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px 0" x-cloak>
                         {{ t('settings.bk.ftp_hint') }}
@@ -5009,17 +5013,17 @@
                      :style="offsiteProvider === 's3' ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' } : {}"
                      @click="selectOffsiteProvider('s3')">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="s3" @click.stop style="accent-color:var(--accent)">
+                        <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="s3" aria-labelledby="offsite-name-s3" @click.stop style="accent-color:var(--accent)">
                         <span class="icon-tile icon-tile-sm" aria-hidden="true"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('database')"></span></span>
-                        <strong translate="no">S3 / Backblaze B2</strong>
+                        <strong translate="no" id="offsite-name-s3">S3 / Backblaze B2</strong>
                         <span x-show="offsiteProviderStatus('s3')?.connected" class="text-success" style="font-size:0.8rem" x-cloak>✓</span>
                         <span x-show="offsiteConfig?.provider === 's3'" class="badge badge-accent" style="margin-inline-start:auto" x-cloak>{{ t('settings.bk.active') }}</span>
                     </div>
                     <div x-show="offsiteProvider === 's3'" x-cloak style="margin-top:6px" @click.stop>
-                        <input type="text" class="form-input" x-model="offsiteS3Key" placeholder="{{ t('settings.bk.s3_key_ph') }}" style="width:100%;font-size:0.8rem;margin-bottom:6px">
-                        <input type="password" class="form-input" x-model="offsiteS3Secret" placeholder="{{ t('settings.bk.s3_secret_ph') }}" style="width:100%;font-size:0.8rem;margin-bottom:6px">
-                        <input type="text" class="form-input" x-model="offsiteS3Bucket" placeholder="{{ t('settings.bk.s3_bucket_ph') }}" style="width:100%;font-size:0.8rem;margin-bottom:6px">
-                        <input type="text" class="form-input" x-model="offsiteS3Endpoint" placeholder="{{ t('settings.bk.s3_endpoint_ph') }}" style="width:100%;font-size:0.8rem">
+                        <input type="text" class="form-input" x-model="offsiteS3Key" aria-label="{{ t('settings.bk.s3_key_ph') }}" placeholder="{{ t('settings.bk.s3_key_ph') }}" style="width:100%;font-size:0.8rem;margin-bottom:6px">
+                        <input type="password" class="form-input" x-model="offsiteS3Secret" aria-label="{{ t('settings.bk.s3_secret_ph') }}" placeholder="{{ t('settings.bk.s3_secret_ph') }}" style="width:100%;font-size:0.8rem;margin-bottom:6px">
+                        <input type="text" class="form-input" x-model="offsiteS3Bucket" aria-label="{{ t('settings.bk.s3_bucket_ph') }}" placeholder="{{ t('settings.bk.s3_bucket_ph') }}" style="width:100%;font-size:0.8rem;margin-bottom:6px">
+                        <input type="text" class="form-input" x-model="offsiteS3Endpoint" aria-label="{{ t('settings.bk.s3_endpoint_ph') }}" placeholder="{{ t('settings.bk.s3_endpoint_ph') }}" style="width:100%;font-size:0.8rem">
                     </div>
                     <p x-show="offsiteProvider !== 's3'" style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px 0" x-cloak>
                         {{ t('settings.bk.s3_hint') }}

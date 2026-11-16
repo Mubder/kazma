@@ -47,6 +47,9 @@ DECLARED: dict[str, str] = {
         "Settings -> Alerts' recent alerts list Kazma Watch's past recovery notes "
         "(watch.recovered) from its /v1/summary; it sends nothing, and the incidents "
         "live in the observer's D1",
+    "kazma-core/kazma_core/observability/firing_ledger.py":
+        "the weekly report counts the guard's `health.recovered` events (a probe "
+        "miss ridden out) from guard.log; it sends nothing",
 }
 
 

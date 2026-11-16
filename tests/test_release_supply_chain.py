@@ -117,11 +117,32 @@ def test_release_signs_artifacts_with_sigstore(steps: list[dict[str, Any]]) -> N
     repository refuses (every action pinned to a full commit SHA), and GitHub
     stopped the 0.21.2 release at "Set up job" (2026-11-11)."""
     assert not any(u.startswith("sigstore/gh-action-sigstore-python@") for u in _uses(steps))
-    version = _locked_version("sigstore")
     sign = [c for c in _commands(str(_sign_step(steps)["run"])) if " sigstore sign " in f" {c} "]
-    assert sign and all(f"--from sigstore=={version} " in c for c in sign), (
-        f"sign with sigstore {version} (uv.lock's), the version the updater verifies with: {sign}"
+    assert sign and all(_from_the_sign_group(c) for c in sign), (
+        f"sign from uv.lock's `sign` group (sigstore and every dependency hash-checked): {sign}"
     )
+    _sign_group_is_the_locked_sigstore()
+
+
+def _from_the_sign_group(command: str) -> bool:
+    """`uv run --frozen --only-group sign ...`: sigstore from uv.lock, every
+    dependency hash-checked. `uvx --from sigstore==X` pinned sigstore alone,
+    its dependencies resolved fresh in the job holding the signing identity
+    (2026-11-16, SonarCloud S8541)."""
+    words = command.split()
+    return (words[:2] == ["uv", "run"] and ("--frozen" in words or "--locked" in words)
+            and "--only-group" in words and words[words.index("--only-group") + 1:][:1] == ["sign"]
+            and not any(w.startswith("--with") for w in words))
+
+
+def _sign_group_is_the_locked_sigstore() -> None:
+    """The `sign` group pins the sigstore uv.lock holds, the version the
+    updater verifies with."""
+    import tomllib
+
+    version = _locked_version("sigstore")
+    groups = tomllib.loads((_ROOT / "pyproject.toml").read_text(encoding="utf-8"))["dependency-groups"]
+    assert groups.get("sign") == [f"sigstore=={version}"], groups.get("sign")
 
 
 def test_signing_covers_every_published_artifact(steps: list[dict[str, Any]]) -> None:
@@ -146,6 +167,10 @@ def test_negative_control_the_old_signing_step_fails() -> None:
     unpinned_sign = [{"name": "Sign", "run": "uvx --from sigstore sigstore sign dist/kazma-*.whl"}]
     with pytest.raises(AssertionError):
         test_release_signs_artifacts_with_sigstore(unpinned_sign)
+    # The form until 2026-11-16: sigstore pinned, its dependencies not.
+    tool_only = [{"name": "Sign", "run": "uvx --from sigstore==4.5.1 sigstore sign dist/kazma-*.whl"}]
+    with pytest.raises(AssertionError):
+        test_release_signs_artifacts_with_sigstore(tool_only)
     with pytest.raises(AssertionError):
         test_the_bundles_pass_the_updaters_rule_before_anything_is_published(unpinned_sign + old[1:])
 
@@ -162,8 +187,7 @@ def test_the_bundles_pass_the_updaters_rule_before_anything_is_published(
         c for r in runs[sign + 1:publish] for c in _commands(r)
         if "scripts/verify_release_signatures.py dist" in c
     ]
-    version = _locked_version("sigstore")
-    assert checks and all(f"--with sigstore=={version} " in c for c in checks), checks
+    assert checks and all(_from_the_sign_group(c) for c in checks), checks
 
 
 def _publish_problems(run: str) -> list[str]:

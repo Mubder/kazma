@@ -143,7 +143,7 @@ class Runner:
                                       encoding="utf-8", errors="replace",
                                       timeout=timeout)
         else:
-            proc = subprocess.run(cmd + [str(dump)], env=self.env,
+            proc = subprocess.run(cmd + ["--", str(dump)], env=self.env,  # a file, never an option
                                   capture_output=True, text=True,
                                   encoding="utf-8", errors="replace",
                                   timeout=timeout)

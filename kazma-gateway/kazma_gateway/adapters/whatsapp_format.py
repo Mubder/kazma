@@ -43,15 +43,21 @@ def md_to_whatsapp(text: str) -> str:
     out = _hold(text, _FENCE, held)
     out = _hold(out, _INLINE, held)
     # Images and links: the words, then the address.
-    out = re.sub(r"!\[([^\]]*)\]\(([^)\s]+)\)", lambda m: f"{m.group(1) or 'image'} ({m.group(2)})", out)
-    out = re.sub(r"\[([^\]]+)\]\(([^)\s]+)\)", r"\1 (\2)", out)
+    # Neither holds a "[" (the innermost "[x](u)" is the link, as CommonMark):
+    # from every "[" the old patterns read the rest of the reply (quadratic).
+    out = re.sub(r"!\[([^\][]*)\]\(([^)\s[]+)\)", lambda m: f"{m.group(1) or 'image'} ({m.group(2)})", out)
+    out = re.sub(r"\[([^\][]+)\]\(([^)\s[]+)\)", r"\1 (\2)", out)
     # Headings: the line in bold.
-    out = re.sub(r"(?m)^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$", lambda m: "\x01" + m.group(1).strip() + "\x01", out)
+    # The end is read once, possessively, on the heading's own line: "\s*#*\s*$"
+    # retried every split of a whitespace run (cubic), and crossed the newline,
+    # eating the blank line after a heading.
+    out = re.sub(r"(?m)^\s{0,3}#{1,6}\s++(.+?)(?<!\s)[^\S\n]*+#*+[^\S\n]*+$",
+                 lambda m: "\x01" + m.group(1).strip() + "\x01", out)
     # Bold (** or __) first, held as \x01 so the italic pass leaves it.
     out = re.sub(r"\*\*(?=\S)(.+?)(?<=\S)\*\*", lambda m: "\x01" + m.group(1) + "\x01", out)
     out = re.sub(r"__(?=\S)(.+?)(?<=\S)__", lambda m: "\x01" + m.group(1) + "\x01", out)
     # A Markdown list item written "* item" keeps its bullet as "- ".
-    out = re.sub(r"(?m)^(\s*)\*\s+", r"\1- ", out)
+    out = re.sub(r"(?m)^([^\S\n]*)\*\s+", r"\1- ", out)  # its own line's indent: linear
     # Markdown italics: *x* -> _x_ (a single asterisk pair inside a line).
     out = re.sub(r"(?<![\w*])\*(?=\S)([^*\n]+?)(?<=\S)\*(?![\w*])", r"_\1_", out)
     out = re.sub(r"~~(?=\S)(.+?)(?<=\S)~~", r"~\1~", out)

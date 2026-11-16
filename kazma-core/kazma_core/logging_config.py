@@ -21,12 +21,27 @@ This module wires up a proper two-handler setup:
     older than the window, so the log always holds the last N days with no
     line lost. UTF-8. Retention is configurable via the Settings UI
     (``logging.retention_days`` in ConfigStore) or ``KAZMA_LOG_RETENTION_DAYS``.
-  - **StreamHandler** → stdout at INFO — preserves the current "logs in the
-    terminal" behaviour during interactive development.
+  - **StreamHandler** → stdout at the same level — preserves the "logs in
+    the terminal" behaviour during interactive development.
 
-Optional JSON mode (``KAZMA_LOG_FORMAT=json``) replaces the stdout formatter
-with :class:`StructuredJSONFormatter` for log shippers (Loki, Datadog, ...).
-File output stays human-readable regardless.
+The FILE's format is the ``logging.format`` setting (``text`` or ``json``;
+``KAZMA_LOG_FORMAT=json`` when the setting says nothing): JSON writes each
+record with :class:`StructuredJSONFormatter` for log shippers (Loki,
+Datadog, ...) and for Kazma's own readers (the daily digest, the weekly
+report). The console is always plain text, whatever the setting.
+
+One record, one line
+~~~~~~~~~~~~~~~~~~~~
+A message often carries text Kazma did not write: a session id from a URL,
+a file name, a tool's error, a page title. Every record is made one line
+where it is handed over (``_LogQueueHandler.prepare``): a line break, a
+carriage return, any other control character, DEL, U+0085 and U+2028/U+2029
+in its message are written as visible escapes (``\\n``, ``\\x1b``,
+``\\u2028``), and every line of a traceback after its first is indented. A
+message cannot end its own line and start one that reads as a record of its
+own -- an ``[ERROR]`` or an ``[ops_alert]`` the daily digest and the weekly
+report would count -- and the console receives no terminal escape. Gate:
+tests/test_log_lines_cannot_be_forged.py (SonarCloud S5145, 2026-11-16).
 
 Levels
 ~~~~~~
@@ -63,6 +78,7 @@ import logging.config
 import logging.handlers
 import os
 import queue
+import re
 import sys
 import threading
 import time as _time
@@ -142,9 +158,9 @@ class SafeTimedRotatingFileHandler(logging.handlers.TimedRotatingFileHandler):
 class StructuredJSONFormatter(logging.Formatter):
     """Zero-dependency JSON formatter for absolute portability.
 
-    Used for the **stdout** handler when ``KAZMA_LOG_FORMAT=json`` is set
-    (e.g. when shipping to Loki/Datadog). The file handler always stays
-    human-readable.
+    Used for the **file** handler when the ``logging.format`` setting (or
+    ``KAZMA_LOG_FORMAT``) is ``json``, e.g. when shipping to Loki/Datadog.
+    The console handler always writes plain text.
     """
 
     def format(self, record: logging.LogRecord) -> str:
@@ -299,6 +315,24 @@ def _console_never_raises() -> None:
         pass  # a stream that cannot change keeps its rule
 
 
+#: The three formats a record is written in: the file's plain "standard"
+#: line (what the daily digest and the weekly report read when the file is
+#: not JSON), the console's, and the file's JSON.
+FORMATTERS: dict[str, dict[str, str]] = {
+    "standard": {
+        "format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        "datefmt": "%Y-%m-%d %H:%M:%S",
+    },
+    "console": {
+        "format": "%(asctime)s %(levelname)s %(name)s: %(message)s",
+        "datefmt": "%H:%M:%S",
+    },
+    "json": {
+        "()": "kazma_core.logging_config.StructuredJSONFormatter",
+    },
+}
+
+
 def setup_logging(level: str | None = None) -> str:
     """Configure root + library logging. Idempotent.
 
@@ -350,11 +384,10 @@ def setup_logging(level: str | None = None) -> str:
         # Cap at WARNING; never let NOISY_LIBS go below WARNING even in DEBUG.
         loggers_config[name] = {"level": "WARNING", "propagate": True}
 
-    # The `format` setting governs the DURABLE FILE output (for log shippers like
-    # Loki/Datadog that want JSON). The live TERMINAL console stays human-readable
-    # text by default — it's what you watch interactively, so JSON noise there is
-    # counterproductive. Opt into a JSON console explicitly via KAZMA_LOG_FORMAT=json
-    # (env only), restoring the original behaviour where the terminal was always text.
+    # The `format` setting (KAZMA_LOG_FORMAT when the setting says nothing)
+    # governs the DURABLE FILE output (for log shippers like Loki/Datadog,
+    # and Kazma's own log readers). The live TERMINAL console is always
+    # human-readable text -- it's what you watch interactively.
     file_formatter = "standard"
     use_json_file = resolve_log_format(None) == "json"
     if use_json_file:
@@ -365,19 +398,8 @@ def setup_logging(level: str | None = None) -> str:
     config: dict[str, Any] = {
         "version": 1,
         "disable_existing_loggers": False,
-        "formatters": {
-            "standard": {
-                "format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-                "datefmt": "%Y-%m-%d %H:%M:%S",
-            },
-            "console": {
-                "format": "%(asctime)s %(levelname)s %(name)s: %(message)s",
-                "datefmt": "%H:%M:%S",
-            },
-            "json": {
-                "()": "kazma_core.logging_config.StructuredJSONFormatter",
-            },
-        },
+        # A copy: dictConfig takes the "()" key out of the json entry.
+        "formatters": copy.deepcopy(FORMATTERS),
         "handlers": {
             "file": {
                 # Daily rotation at local midnight with a rolling retention window.
@@ -420,8 +442,12 @@ def setup_logging(level: str | None = None) -> str:
         # (FA-135).
         _write_behind_a_queue()
     except Exception:
-        # Last-resort fallback: basic config so we at least get stderr.
+        # Last-resort fallback: basic config so we at least get stderr --
+        # its records one line each, like the queue handler's.
         logging.basicConfig(level=effective)
+        for handler in logging.getLogger().handlers:
+            if not any(isinstance(f, _OneLineFilter) for f in handler.filters):
+                handler.addFilter(_OneLineFilter())
 
     # uvicorn's handlers fight with root (it installs its own); force
     # propagation so our handlers see the records.
@@ -461,6 +487,62 @@ _listener: _LogWriter | None = None
 _written_handlers: tuple[logging.Handler, ...] = ()
 _EXC_FORMATTER = logging.Formatter()
 
+#: What a log line may not carry raw: the C0 controls but the tab (the line
+#: breaks among them), DEL, the C1 controls (U+0085 among them) and the line
+#: and paragraph separators. ``str.splitlines`` -- which the system-log
+#: reader uses -- breaks a line at every one of those it knows.
+_UNSAFE_IN_A_LINE = re.compile("[\x00-\x08\x0a-\x1f\x7f-\x9f\u2028\u2029]")
+_NAMED_ESCAPES = {"\n": "\\n", "\r": "\\r"}
+#: Each line of a traceback after its first starts this far in: no line of
+#: an exception's own message can start at column 0 and read as a record.
+_CONTINUATION = "    "
+
+
+def _escaped(match: re.Match[str]) -> str:
+    char = match.group(0)
+    named = _NAMED_ESCAPES.get(char)
+    if named:
+        return named
+    code = ord(char)
+    return f"\\x{code:02x}" if code <= 0xFF else f"\\u{code:04x}"
+
+
+def _one_line(text: str) -> str:
+    """*text* with every character that could end or hide a log line escaped."""
+    return _UNSAFE_IN_A_LINE.sub(_escaped, text)
+
+
+def _indented(text: str) -> str:
+    """A traceback or stack: each line escaped, every line after the first
+    indented by :data:`_CONTINUATION`."""
+    first, *rest = text.split("\n")
+    return "\n".join([_one_line(first), *(_CONTINUATION + _one_line(line) for line in rest)])
+
+
+def _one_record(record: logging.LogRecord) -> None:
+    """Render *record*'s message and traceback, URL passwords masked, each
+    record one line (its traceback's lines indented). In place."""
+    record.message = _one_line(mask_urls_in_text(record.getMessage()))
+    record.msg = record.message
+    record.args = None
+    if record.exc_info:
+        if not record.exc_text:
+            record.exc_text = _EXC_FORMATTER.formatException(record.exc_info)
+        record.exc_info = None
+    if record.exc_text:
+        record.exc_text = _indented(mask_urls_in_text(record.exc_text))
+    if record.stack_info:
+        record.stack_info = _indented(mask_urls_in_text(record.stack_info))
+
+
+class _OneLineFilter(logging.Filter):
+    """The same rendering for a handler that is not behind the queue (the
+    ``basicConfig`` fallback when ``dictConfig`` fails)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        _one_record(record)
+        return True
+
 
 class _LogQueueHandler(logging.handlers.QueueHandler):
     """The root logger's one handler (FA-135): it hands the record to the
@@ -474,7 +556,13 @@ class _LogQueueHandler(logging.handlers.QueueHandler):
     user and password, and model discovery, the model registry and others
     logged it as it was (2026-11-14, CodeQL
     py/clear-text-logging-sensitive-data). Gate:
-    tests/test_logs_never_carry_url_passwords.py."""
+    tests/test_logs_never_carry_url_passwords.py.
+
+    And every record is one line (``_one_record``): a session id from a URL
+    decoded to a line break wrote a second "record" -- an ``[ERROR]``
+    ``[ops_alert]`` line the daily digest counted -- in the plain format
+    (2026-11-16, SonarCloud S5145). Gate:
+    tests/test_log_lines_cannot_be_forged.py."""
 
     def __init__(self, target: queue.Queue) -> None:
         super().__init__(target)
@@ -486,15 +574,7 @@ class _LogQueueHandler(logging.handlers.QueueHandler):
         # was made; each formatter downstream still formats the record its
         # own way (the default prepare() formatted it once for everyone).
         record = copy.copy(record)
-        record.message = mask_urls_in_text(record.getMessage())
-        record.msg = record.message
-        record.args = None
-        if record.exc_info:
-            if not record.exc_text:
-                record.exc_text = _EXC_FORMATTER.formatException(record.exc_info)
-            record.exc_info = None
-        if record.exc_text:
-            record.exc_text = mask_urls_in_text(record.exc_text)
+        _one_record(record)
         return record
 
     def enqueue(self, record: logging.LogRecord) -> None:

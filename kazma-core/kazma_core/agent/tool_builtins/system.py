@@ -447,11 +447,15 @@ def register_system_tools(registry: Any) -> None:
             _SAFE_BINARIES |= {
                 "tar", "gzip", "gunzip", "zip", "unzip",
             }
-        # Dev-only extras when not in production
+        # Dev-only extras when not in production. Never `kazma` (its export
+        # writes the vault and its key into a bundle; its restore and import
+        # replace stores) nor `ps` (`ps eww` prints another process's
+        # environment, the server's KAZMA_VAULT_KEY included): see
+        # shell_paths.NEVER_ALLOWED.
         from kazma_core.security.boot_guard import env_flag as _env_flag
 
         if not _env_flag("KAZMA_PRODUCTION"):
-            _SAFE_BINARIES = set(_SAFE_BINARIES) | {"ps", "pgrep", "kazma"}
+            _SAFE_BINARIES = set(_SAFE_BINARIES) | {"pgrep"}
         import os
 
         p = Path(args[0])

@@ -1150,8 +1150,12 @@ class GatewayManager:
             app = FastAPI(lifespan=gateway.lifespan)
         """
         await self.start()
-        yield
-        await self.stop()
+        try:
+            yield
+        finally:
+            # Also when the app ends with an error: the adapters and the
+            # consumer stopped only on a clean exit (SonarCloud review).
+            await self.stop()
 
     @property
     def stats(self) -> dict[str, Any]:

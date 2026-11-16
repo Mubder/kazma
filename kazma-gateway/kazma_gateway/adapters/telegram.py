@@ -1171,8 +1171,10 @@ class TelegramAdapter(SenderGate, BaseAdapter):
             clean = re.sub(r"`[^`]*`", "", text)  # inline code
             clean = re.sub(r"```.*?```", "", clean, flags=re.DOTALL)  # code blocks
             clean = re.sub(r"[*_~]+", "", clean)  # bold/italic/strike
-            clean = re.sub(r"<[^>]+>", "", clean)  # HTML tags
-            clean = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", clean)  # links → text
+            # Neither a tag nor a link holds its own opener: from every "<" or
+            # "[" the old patterns read the rest of the reply (quadratic).
+            clean = re.sub(r"<[^<>]+>", "", clean)  # HTML tags
+            clean = re.sub(r"\[([^\][]+)\]\([^)[]+\)", r"\1", clean)  # links → text
             clean = clean.strip()
             if not clean or len(clean) < 5:
                 return

@@ -2901,7 +2901,10 @@ class KazmaAppBuilder:
                         if exc is not None:
                             raise exc
                 except asyncio.CancelledError:
-                    logger.info("[app] Shutdown completed (task was cancelled during teardown)")
+                    # The shielded teardown may still be running: say so, not
+                    # "completed" (SonarCloud review, 2026-11-16).
+                    logger.info("[app] Lifespan cancelled during teardown; the shielded shutdown "
+                                "finishes on its own, bounded by the stop budget")
                 except BaseException as e:  # pragma: no cover - last-resort
                     logger.warning("[app] Error during lifespan shutdown: %s", e)
                 finally:

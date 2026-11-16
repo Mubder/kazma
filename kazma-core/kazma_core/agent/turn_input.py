@@ -918,7 +918,7 @@ def extract_active_attachments(
     ):
         raw = m.group(1).strip()
         # Strip trailing " — use file_read…" clauses
-        name = re.split(r"\s+[—\-]\s+", raw, maxsplit=1)[0].strip()
+        name = re.split(r"(?<!\s)\s++[—\-]\s+", raw, maxsplit=1)[0].strip()  # from a run's start
         if name:
             _add({"kind": "file", "filename": name, "path": name})
             stub_spans.append(m.span())
@@ -931,7 +931,9 @@ def extract_active_attachments(
         m.span() for m in re.finditer(r"\b(?:https?|ftp|file)://\S+", blob or "", re.IGNORECASE)
     ]
     for m in re.finditer(
-        r"(?<![\w.:/\\-])((?:[A-Za-z]:)?[~\w./\\-]+\.(?:docx|pdf|pptx|xlsx|doc|txt|md|html))(?!\w|\.\w)",
+        # Never from inside a run of "~": each "~" of a long run read the rest
+        # of the run (quadratic on the event loop).
+        r"(?<![~\w.:/\\-])((?:[A-Za-z]:)?[~\w./\\-]+\.(?:docx|pdf|pptx|xlsx|doc|txt|md|html))(?!\w|\.\w)",
         blob or "",
         flags=re.IGNORECASE,
     ):

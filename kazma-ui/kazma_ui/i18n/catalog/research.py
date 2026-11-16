@@ -618,4 +618,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "research.monitor.save_failed": {"en": "Alert settings could not be saved; check values and retry.", "ar": "تعذّر حفظ إعدادات التنبيهات؛ راجع القيم وأعد المحاولة."},
     "research.monitor.last_checked": {"en": "Last local monitor check", "ar": "آخر فحص محلي للمراقب"},
     "research.monitor.not_observed": {"en": "No monitor check recorded yet.", "ar": "لم يُسجل فحص للمراقب بعد."},
+    "research.search_archived": {
+        "ar": "ابحث في الأبحاث المؤرشفة",
+        "en": "Search archived research",
+    },
 }

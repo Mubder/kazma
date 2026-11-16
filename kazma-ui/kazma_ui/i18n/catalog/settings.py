@@ -6873,4 +6873,44 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": 'نافذة الـ 24 ساعة',
         "en": '24-hour window',
     },
+    "settings.hub.enable_named": {
+        "ar": "تفعيل {name}",
+        "en": "Enable {name}",
+    },
+    "settings.hub.search_models": {
+        "ar": "ابحث في النماذج",
+        "en": "Search models",
+    },
+    "settings.long_task_preset": {
+        "ar": "الإعداد المسبق الافتراضي للمهام الطويلة",
+        "en": "Default long-task preset",
+    },
+    "settings.accent_hex": {
+        "ar": "رمز لون التمييز",
+        "en": "Accent color code",
+    },
+    "settings.role_of": {
+        "ar": "دور {name}",
+        "en": "Role of {name}",
+    },
+    "settings.tenant_id_label": {
+        "ar": "معرّف المستأجر",
+        "en": "Tenant ID",
+    },
+    "settings.log_lines": {
+        "ar": "عدد الأسطر المعروضة",
+        "en": "Lines to show",
+    },
+    "settings.export_format": {
+        "ar": "صيغة التصدير",
+        "en": "Export format",
+    },
+    "settings.bk.webdav_url": {
+        "ar": "عنوان WebDAV",
+        "en": "WebDAV address",
+    },
+    "settings.bk.ftp_host": {
+        "ar": "خادم FTP",
+        "en": "FTP server",
+    },
 }

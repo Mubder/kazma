@@ -483,7 +483,9 @@ def _fill(template: str) -> str:
 
 
 def _commit(ref: str) -> str:
-    return subprocess.run(["git", "-C", str(ROOT), "rev-parse", ref], capture_output=True, text=True,
+    # --end-of-options: a ref is never read as an option.
+    return subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}"],
+                          capture_output=True, text=True,
                           check=True).stdout.strip()
 
 

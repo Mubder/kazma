@@ -41,14 +41,18 @@ every six hours that ran eleven times in a week did not run on schedule.
 from __future__ import annotations
 
 import asyncio
-import json
+import functools
 import logging
 import re
 import time
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from kazma_core.observability.log_lines import opens_with, read_app_line, read_guard_line
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +69,17 @@ ROUTINE = "routine"
 #: The pager itself: every alert that was sent.
 ALERTING = "alerting"
 
+#: A trace in the application log: ``pattern`` read from the START of a
+#: record's message.
+APP = "app"
+#: A trace in the guard's log: ``pattern`` the whole of a record's ``event``.
+GUARD = "guard"
+
+
+@functools.cache
+def _rx(pattern: str) -> re.Pattern[str]:
+    return re.compile(pattern, re.IGNORECASE)
+
 
 @dataclass(frozen=True)
 class Signature:
@@ -76,14 +91,50 @@ class Signature:
     kind: str = RECOVERY
     #: Runs a week its schedule makes (ROUTINE only; 0 = no fixed schedule).
     per_week: float = 0.0
-    #: A regex with a group named ``k``: each firing is tallied under that
-    #: value -- the alert key, the restart reason.
+    #: APP: a regex with a group named ``k``, read from the start of the
+    #: message: each firing is tallied under that value -- the alert key.
     group: str = ""
+    #: Where the trace is left: :data:`APP` or :data:`GUARD`.
+    source: str = APP
+    #: GUARD: a regex the record's ``reason`` must start with ("" = any).
+    reason: str = ""
+    #: GUARD: the record field each firing is tallied under -- the restart
+    #: reason.
+    tally_field: str = ""
+
+    def in_message(self, message: str) -> re.Match[str] | None:
+        """APP: this signature at the start of an app record's *message*."""
+        if self.source != APP:
+            return None
+        return opens_with(message, _rx(self.pattern))
+
+    def in_guard_record(self, event: str, fields: Mapping[str, Any]) -> bool:
+        """GUARD: this signature is the guard record's *event* (and reason)."""
+        if self.source != GUARD or _rx(self.pattern).fullmatch(event or "") is None:
+            return False
+        return not self.reason or opens_with(str(fields.get("reason") or ""), _rx(self.reason)) is not None
+
+    def tally_key(self, message: str = "", fields: Mapping[str, Any] | None = None) -> str | None:
+        """What a firing is tallied under, or None when it is not tallied."""
+        if self.source == GUARD:
+            if not self.tally_field:
+                return None
+            return str((fields or {}).get(self.tally_field) or "(unnamed)")
+        if not self.group:
+            return None
+        match = opens_with(message, _rx(self.group))
+        return match.group("k") if match else "(unnamed)"
 
 
-# Patterns are matched against the rendered log message. They are written
-# against lines the code actually emits -- each was verified present in a
-# real log or in the emitting source, not guessed from the mechanism name.
+# An APP pattern is matched at the START of the rendered log message, where
+# its writer puts it; a GUARD pattern is the whole of a guard record's
+# ``event`` field. Both were matched anywhere in the message and the raw
+# line, so a message quoting a marker -- a session id, a file name, a tool's
+# error -- was counted as the mechanism firing: a backup, a restart (2026-11-16,
+# log_lines; tests/test_log_readers_read_markers_at_the_start.py). They are
+# written against lines the code actually emits -- each checked against the
+# emitting source (tests/test_backup_silent_failures.py), not guessed from the
+# mechanism name.
 FIRING_SIGNATURES: tuple[Signature, ...] = (
     Signature("MCP reconnect", r"\[MCP-reconnect\] '.+' (re)?connected",
               "a server came back without a restart"),
@@ -102,7 +153,8 @@ FIRING_SIGNATURES: tuple[Signature, ...] = (
     Signature("graph memory backup", r"\[neo4j-backup\] exported \d+ nodes",
               kind=ROUTINE, per_week=28),
     Signature("restic snapshot",
-              r"pg dump snapshotted to|restic \w+ snapshot ok", kind=ROUTINE),
+              r"\[universal-backup\] restic \w+ snapshot ok|\[memory_worker\] pg dump snapshotted to",
+              kind=ROUTINE),
     # The success line. Maintenance used to log only on failure, so this
     # matched failures and could not tell "ran fine" from "never ran".
     Signature("restic maintenance", r"\[restic\] maintenance ok", kind=ROUTINE),
@@ -135,32 +187,33 @@ FIRING_SIGNATURES: tuple[Signature, ...] = (
     Signature("repetition loop breaker", r"\[Supervisor\] Tool LOOP detected",
               "never observed in production as of 2026-08-29"),
     Signature("iteration budget divert", r"\[Supervisor\] Iteration \d+ == max_iterations"),
-    Signature("detached-pump watchdog", r"Reaping stalled detached pump"),
-    Signature("stale turn reap", r"Reaping stale detached turn"),
-    Signature("guard restart", r'"event": "guard.restarting"', kind=SYMPTOM,
-              group=r'"event": "guard\.restarting".*?"reason": "(?P<k>[^"]+)"'),
+    Signature("detached-pump watchdog", r"\[SSE\] Reaping stalled detached pump"),
+    Signature("stale turn reap", r"\[(?:SSE|voice)\] Reaping stale detached turn"),
+    Signature("guard restart", r"guard\.restarting", kind=SYMPTOM, source=GUARD,
+              tally_field="reason"),
     # A health-gated restart is a restart whose reason is "unhealthy (...)"
     # -- FAILURES_TO_KILL consecutive failed probes. This used to count every
     # health.failed/recovered event, and reported 430 restarts in a week that
     # had none: each was one missed probe answered by the next.
-    Signature("health-gated restart",
-              r'"event": "guard\.restarting".*"reason": "unhealthy',
+    Signature("health-gated restart", r"guard\.restarting",
               "the guard only restarts on consecutive failed health probes",
-              kind=SYMPTOM),
-    Signature("probe miss tolerated", r'"event": "health\.recovered"',
-              "a failed health probe the guard rode out without restarting"),
+              kind=SYMPTOM, source=GUARD, reason="unhealthy"),
+    Signature("probe miss tolerated", r"health\.recovered",
+              "a failed health probe the guard rode out without restarting", source=GUARD),
     # Kazma answered "not ready" (its database away) and the guard paged
     # instead of restarting -- restarts on 2026-09-28 were this case.
-    Signature("dependency outage ridden out", r'"event": "health\.dependency_down"',
+    Signature("dependency outage ridden out", r"health\.dependency_down",
               "Kazma answered but a dependency (the database) was down; no restart",
-              kind=SYMPTOM),
-    Signature("probe unrunnable (machine out of ports)", r'"event": "health\.probe_unrunnable"',
+              kind=SYMPTOM, source=GUARD),
+    Signature("probe unrunnable (machine out of ports)", r"health\.probe_unrunnable",
               "Windows had no free local port; the guard did not count it as Kazma failing",
-              kind=SYMPTOM),
-    Signature("crash-loop refusal", r'"event": "guard\.(crash_loop|refused_to_start)"',
-              "restarting forever is worse than stopping and saying so", kind=SYMPTOM),
-    Signature("orphan reap", r'"event": "(orphan|port)\.(reaping|reaped|reaping_holder|holder_reaped)"'),
-    Signature("maintenance pause", r'"event": "maintenance\.(active|resumed)"'),
+              kind=SYMPTOM, source=GUARD),
+    Signature("crash-loop refusal", r"guard\.(crash_loop|refused_to_start)",
+              "restarting forever is worse than stopping and saying so", kind=SYMPTOM,
+              source=GUARD),
+    Signature("orphan reap", r"(orphan|port)\.(reaping|reaped|reaping_holder|holder_reaped)",
+              source=GUARD),
+    Signature("maintenance pause", r"maintenance\.(active|resumed)", source=GUARD),
     # "dispatched" is the line before 2026-10-03, when the digest was handed
     # off and never confirmed; it keeps the week of the change counted.
     Signature("daily digest", r"\[digest\] daily digest (?:delivered|dispatched)",
@@ -170,11 +223,16 @@ FIRING_SIGNATURES: tuple[Signature, ...] = (
     Signature("time travel maintenance", r"\[TimeTravel\] maintenance: deleted=",
               "the Time Travel steps' retention prune (TT-11)", kind=ROUTINE, per_week=7),
     Signature("install restore", r"\[restore\] (RESTORED|FAILED):"),
-    Signature("foreign server detection", r'"event": "child.foreign_server_holds_port"'),
-    Signature("pre-spawn port clearance", r'"event": "port.stale_before_spawn"'),
-    Signature("orphaned temp sweep", r"swept orphaned (temp dump|archive)"),
-    Signature("offsite fallback", r"offsite sync failed.*trying rclone", kind=SYMPTOM),
-    Signature("connector health warning", r"connector\.google_(expired|expiring)",
+    Signature("foreign server detection", r"child\.foreign_server_holds_port", source=GUARD),
+    Signature("pre-spawn port clearance", r"port\.stale_before_spawn", source=GUARD),
+    Signature("orphaned temp sweep",
+              r"\[(?:universal-backup|pg_backup)\] swept orphaned (temp dump|archive)"),
+    # The native offsite copy failed, or raised, and rclone takes over.
+    Signature("offsite fallback",
+              r"\[universal-backup\] (?:native )?offsite sync (?:failed|error):.*trying rclone",
+              kind=SYMPTOM),
+    # connector_health's ops alerts ("[ops_alert] <key> | <title>").
+    Signature("connector health warning", r"\[ops_alert\] connector\.google_(expired|expiring) \|",
               kind=SYMPTOM),
     Signature("chaos injection", r"\[Chaos\] Injecting"),
     # Not a recovery -- a symptom, and the report is where a chronic one gets
@@ -317,48 +375,51 @@ def _log_paths() -> list[Path]:
     return found
 
 
-def _scan_one(log: Path, compiled, counts: dict, last: dict,
+def _is_guard_log(log: Path) -> bool:
+    """The guard's own log (``guard.log`` and its rotated siblings)."""
+    return log.name.startswith("guard.log")
+
+
+def _scan_one(log: Path, counts: dict, last: dict,
               cutoff: float, report: LedgerReport,
               tallies: dict[str, Counter] | None = None) -> None:
-    """Count matches in one file, in place."""
+    """Count firings in one file, in place.
+
+    A guard log is read as guard records, each signature of the guard's
+    against its ``event``; any other log as application records, each
+    signature of the app's at the start of the message. A line that is no
+    record -- a traceback's continuation, an undated trace -- counts nothing
+    (audit M-13: months-old undated traces inflated "fired recently").
+    """
+    guard = _is_guard_log(log)
+    signatures = [s for s in FIRING_SIGNATURES if s.source == (GUARD if guard else APP)]
     with log.open("r", encoding="utf-8", errors="replace") as fh:
         for line in fh:
             report.scanned_lines += 1
-            ts = ""
-            text = line
-            # Structured lines carry the message in a field; plain ones are
-            # matched whole, so a format change degrades to fewer matches
-            # rather than to a crash.
-            if line.lstrip().startswith("{"):
-                try:
-                    obj = json.loads(line)
-                    text = str(obj.get("message") or "") + " " + line
-                    ts = str(obj.get("timestamp") or obj.get("ts") or "")
-                except Exception:  # noqa: BLE001
-                    pass
+            if guard:
+                record = read_guard_line(line)
+                if record is None or record.ts < cutoff:
+                    continue
+                ts, message, fields = record.ts, "", record.fields
+                fired = [s for s in signatures if s.in_guard_record(record.event, fields)]
             else:
-                # Plain log line: copy the file formatter's datefmt
-                # (``%Y-%m-%d %H:%M:%S``). Unparseable lines are skipped
-                # from the count so months-old undated traces cannot inflate
-                # "fired recently" (audit M-13).
-                m = _PLAIN_TS.match(line)
-                if m:
-                    ts = m.group(1)
-            if not ts or not _within(ts, cutoff):
-                continue
-            if _THROTTLED.search(text):
-                report.suppressed_alerts += 1
-            for sig, rx, grp in compiled:
-                if rx.search(text):
-                    counts[sig.mechanism] += 1
-                    if grp is not None and tallies is not None:
-                        g = grp.search(text)
-                        tallies[sig.mechanism][g.group("k") if g else "(unnamed)"] += 1
-                    # Newest wins: rotated files are read after the live one,
-                    # and a plain overwrite reported yesterday as "last seen".
-                    stamp = ts[:19].replace(" ", "T")
-                    if stamp > last.get(sig.mechanism, ""):
-                        last[sig.mechanism] = stamp
+                app = read_app_line(line)
+                if app is None or app.ts < cutoff:
+                    continue
+                ts, message, fields = app.ts, app.message, None
+                if opens_with(message, _THROTTLED):
+                    report.suppressed_alerts += 1
+                fired = [s for s in signatures if s.in_message(message)]
+            # Newest wins: rotated files are read after the live one, and a
+            # plain overwrite reported yesterday as "last seen". UTC.
+            stamp = datetime.fromtimestamp(ts, UTC).strftime("%Y-%m-%dT%H:%M:%S")
+            for sig in fired:
+                counts[sig.mechanism] += 1
+                key = sig.tally_key(message, fields)
+                if key is not None and tallies is not None:
+                    tallies[sig.mechanism][key] += 1
+                if stamp > last.get(sig.mechanism, ""):
+                    last[sig.mechanism] = stamp
 
 
 def scan_log(hours: float = 168.0, path: str | Path | None = None) -> LedgerReport:
@@ -382,11 +443,6 @@ def scan_log(hours: float = 168.0, path: str | Path | None = None) -> LedgerRepo
                           for s in FIRING_SIGNATURES]
         return report
 
-    compiled = [
-        (s, re.compile(s.pattern, re.IGNORECASE),
-         re.compile(s.group, re.IGNORECASE) if s.group else None)
-        for s in FIRING_SIGNATURES
-    ]
     counts: dict[str, int] = {s.mechanism: 0 for s in FIRING_SIGNATURES}
     tallies: dict[str, Counter] = {s.mechanism: Counter() for s in FIRING_SIGNATURES}
     last: dict[str, str] = {}
@@ -396,7 +452,7 @@ def scan_log(hours: float = 168.0, path: str | Path | None = None) -> LedgerRepo
         try:
             if log.stat().st_mtime < cutoff:
                 continue  # a rotated file last written before the window
-            _scan_one(log, compiled, counts, last, cutoff, report, tallies)
+            _scan_one(log, counts, last, cutoff, report, tallies)
         except Exception as exc:  # noqa: BLE001
             report.error = f"{log.name}: {str(exc)[:150]}"
 
@@ -412,7 +468,6 @@ def scan_log(hours: float = 168.0, path: str | Path | None = None) -> LedgerRepo
     return report
 
 
-_PLAIN_TS = re.compile(r"^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})")
 _LAST_RUN_KEY = "observability.firing_ledger.last_run"
 
 # Frames below the caller that put the work on the loop: the dump's news is
@@ -494,16 +549,6 @@ def stall_blockers(cutoff: float) -> dict[str, int]:
     return dict(tally.most_common())
 
 
-def _within(ts: str, cutoff: float) -> bool:
-    try:
-        import datetime
-
-        stamp = ts.replace(" ", "T", 1) if " " in ts[:19] and "T" not in ts[:19] else ts
-        return datetime.datetime.fromisoformat(stamp).timestamp() >= cutoff
-    except Exception:  # noqa: BLE001
-        return False  # unparseable → skip from counts (audit M-13)
-
-
 def _last_run_epoch() -> float | None:
     try:
         from kazma_core.config_store import get_config_store
@@ -544,7 +589,7 @@ def _week_targets(now: float | None = None) -> list[Any]:
         try:
             if log.stat().st_mtime < cutoff:
                 continue
-            is_guard = log.name.startswith("guard.log")
+            is_guard = _is_guard_log(log)
             marks = _TARGET_GUARD_MARKS if is_guard else _TARGET_APP_MARKS
             with log.open("r", encoding="utf-8", errors="replace") as fh:
                 # Only the lines a target reads: two weeks of log are not held.

@@ -61,11 +61,14 @@ COPY . .
 # Every file from uv.lock, checked against its hash (2026-11-16; it was
 # `pip install -e ".[...]"`, whatever PyPI served at build time). uv comes
 # from its own image, pinned by digest like the base image.
+# --only-binary: wheels only (every locked package has one for this image's
+# Python); a package that stops shipping one fails the build, never runs
+# its setup.py here (SonarCloud review, 2026-11-16).
 COPY --from=ghcr.io/astral-sh/uv:0.13.6@sha256:af22a52f5eafef3d78e551599d405c02df61919d18028f0cea8eda93bc9986d0 /uv /usr/local/bin/uv
 RUN uv export --locked --no-emit-project --format requirements-txt \
         --extra rag --extra postgres --extra document-platform --group build \
         -o /tmp/kazma-requirements.txt \
-    && pip install --no-cache-dir --require-hashes -r /tmp/kazma-requirements.txt \
+    && pip install --no-cache-dir --require-hashes --only-binary :all: -r /tmp/kazma-requirements.txt \
     && pip install --no-cache-dir --no-deps --no-build-isolation -e . \
     && rm /tmp/kazma-requirements.txt
 

@@ -11,7 +11,7 @@ description: Every KAZMA_* variable the code reads, where, and its default. Gene
 > `python scripts/generate_env_reference.py` after adding or removing a variable;
 > `tests/test_env_reference.py` fails while this page is stale.
 
-**294** variables are read by the product code; **294** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
+**293** variables are read by the product code; **293** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
 the undocumented count is on a ratchet that may only go down.
 
 | Variable | Default in code | Read in | Described |
@@ -19,7 +19,6 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_ACQUISITION_MAX_COST_USD` | (none) | `kazma_core.web_acquire.accounting`, `kazma_core.web_acquire.research_pipeline_job` | yes |
 | `KAZMA_ACQUISITION_MODE` | `"local_only"` | `kazma_core.web_acquire.policy` | yes |
 | `KAZMA_ACQUISITION_REMOTE_PROVIDERS` | `""` | `kazma_core.web_acquire.policy` | yes |
-| `KAZMA_ALLOW_PRIVATE_LLM` | (none) | `kazma_core.models.discovery` | yes |
 | `KAZMA_ALLOW_YOLO` | (none) | `kazma_core.safety.yolo` | yes |
 | `KAZMA_API_KEY` | `""` | `kazma_core.llm_provider`, `kazma_core.model_registry`, `kazma_ui.app` | yes |
 | `KAZMA_ARTIFACTS_DB` | (none) | `kazma_core.agent.artifacts` | yes |

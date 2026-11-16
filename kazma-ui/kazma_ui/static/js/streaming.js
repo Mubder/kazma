@@ -482,7 +482,8 @@ var KazmaStream = (function() {
 
     function isTableAlignRow(line) {
       // | --- | :---: | ---: |
-      return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+      // Trimmed first: "^\s*\|?\s*" split a leading run every way (quadratic).
+      return /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(String(line).trim());
     }
 
     function isTableRow(line) {
@@ -742,7 +743,9 @@ var KazmaStream = (function() {
         // injection put in it -- to that host; a same-origin path check that
         // accepted "//host/..." let it out too (audit 2026-09-30, AUD-018).
         // An image elsewhere is shown as a link the reader chooses to open.
-        html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function(_, alt, url) {
+        // No "[" inside the alt or the address (as links below): from every
+        // "![" the old pattern read the rest of the paragraph (quadratic).
+        html = html.replace(/!\[([^\][]*)\]\(([^)[]+)\)/g, function(_, alt, url) {
           var decodedUrl = url.replace(/&amp;/g, '&');
           if (!oneToken(decodedUrl)) return esc(alt || '');
           if (isSameOriginPath(decodedUrl)) {
@@ -764,7 +767,10 @@ var KazmaStream = (function() {
         // Single * italic only (underscore italic breaks snake_case / model ids)
         html = html.replace(/(^|[^\*])\*([^\*\n]+?)\*(?!\*)/g, '$1<em>$2</em>');
         html = html.replace(/~~(.+?)~~/g, '<del>$1</del>');
-        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(_, text, url) {
+        // A label or address holds no "[": the innermost "[x](u)" is the link
+        // (as CommonMark), and each "[" reads only to the next one -- the old
+        // pattern read the rest of the paragraph from every "[" (quadratic).
+        html = html.replace(/\[([^\][]+)\]\(([^)[]+)\)/g, function(_, text, url) {
           var decodedUrl = url.replace(/&amp;/g, '&');
           if (oneToken(decodedUrl) && /^(https?:|mailto:)/i.test(decodedUrl)) {
             return stash('<a href="' + esc(decodedUrl) + '" target="_blank" rel="noopener noreferrer" dir="ltr">') +

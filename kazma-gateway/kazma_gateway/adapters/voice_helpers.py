@@ -323,8 +323,10 @@ def prepare_tts_text(text: str) -> str:
     clean = re.sub(r"```.*?```", "", text, flags=re.DOTALL)  # code blocks
     clean = re.sub(r"`[^`]*`", "", clean)  # inline code
     clean = re.sub(r"[*_~]+", "", clean)  # bold/italic/strike
-    clean = re.sub(r"<[^>]+>", "", clean)  # HTML tags
-    clean = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", clean)  # markdown links
+    # Neither a tag nor a link holds its own opener: from every "<" or "[" the
+    # old patterns read the rest of the reply (quadratic; Sonar S8786, 2026-11-16).
+    clean = re.sub(r"<[^<>]+>", "", clean)  # HTML tags
+    clean = re.sub(r"\[([^\][]+)\]\([^)[]+\)", r"\1", clean)  # markdown links
     clean = re.sub(r"\s+", " ", clean).strip()
     # Cap spoken length for UX
     if len(clean) > 2500:

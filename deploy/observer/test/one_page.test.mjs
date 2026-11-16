@@ -272,13 +272,13 @@ test("known notifications map to the catalog, anything else is the generic card"
 test("an unknown notification is paged with its own text, cut short and cleaned", async () => {
   const e = env();
   const net = new Net();
-  const text = `Attack on kazma.ai‮\u0007 ${"x".repeat(600)}`;
+  const text = `Attack on kazma.ai\u202e\u0007 ${"x".repeat(600)}`;
   const res = await notify(e, net, { name: "DDoS", text, ts: T, alert_type: "advanced_ddos_attack_l7_alert" }, T);
   assert.equal(res.status, 200);
   assert.equal(net.messages.length, 1);
   const card = net.messages[0];
   assert.match(card, /^🟡 \[Cloudflare\] A Cloudflare notification\nDDoS: Attack on kazma\.ai/);
-  assert.ok(!card.includes("‮") && !card.includes("\u0007"));
+  assert.ok(!card.includes("\u202e") && !card.includes("\u0007"));
   assert.ok(card.split("\n")[1].length <= 300);
   assert.equal(cut("a\u0000b"), "a b");
 });

@@ -51,6 +51,7 @@
             <div class="modal-body" x-show="$store.modal.input" style="padding-top:0;" x-cloak>
                 <input type="text"
                        class="form-input modal-input"
+                       aria-labelledby="modal-title"
                        x-model="$store.modal.inputValue"
                        :type="$store.modal.inputType"
                        :placeholder="$store.modal.input"

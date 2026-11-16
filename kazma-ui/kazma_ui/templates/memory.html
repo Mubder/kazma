@@ -254,7 +254,7 @@
     {# BELIEFS #}
     <div x-show="tab === 'beliefs'" x-cloak>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:0.75rem;">
-        <input type="search" class="form-input" style="flex:1;min-width:180px;" :placeholder="S.search || 'Search…'" x-model="beliefQ" @keydown.enter="loadBeliefs()">
+        <input type="search" class="form-input" style="flex:1;min-width:180px;" aria-label="{{ t('memory.pg.search_beliefs') }}" :placeholder="S.search || 'Search…'" x-model="beliefQ" @keydown.enter="loadBeliefs()">
         <button class="btn btn-secondary btn-sm" @click="loadBeliefs()" x-text="S.search || 'Search'"></button>
         <button class="btn btn-danger btn-sm" @click="invalidateSelected()" :disabled="!selectedBeliefs.length" x-text="(S.invalidate || 'Invalidate') + ' (' + selectedBeliefs.length + ')'"></button>
       </div>
@@ -281,7 +281,7 @@
                 @click="focusBelief(b)"
                 :title="t('memory.pg.show_on_graph') + ': ' + b.subject + ' → ' + b.object"
               >
-                <td @click.stop><input type="checkbox" :value="b.id" x-model="selectedBeliefs"></td>
+                <td @click.stop><input type="checkbox" :value="b.id" :aria-label="window.t('memory.pg.select_belief', {name: b.subject + ' → ' + b.object})" x-model="selectedBeliefs"></td>
                 <td><code x-text="b.subject"></code></td>
                 <td><code x-text="b.predicate"></code></td>
                 <td translate="no" style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" :title="b.object" x-text="b.object"></td>
@@ -310,7 +310,7 @@
     {# ENTITIES #}
     <div x-show="tab === 'entities'" x-cloak>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:0.75rem;align-items:center;">
-        <input type="search" class="form-input" style="flex:1;min-width:160px;" :placeholder="S.search || 'Search…'" x-model="entityQ" @keydown.enter="loadEntities()">
+        <input type="search" class="form-input" style="flex:1;min-width:160px;" aria-label="{{ t('memory.pg.search_entities') }}" :placeholder="S.search || 'Search…'" x-model="entityQ" @keydown.enter="loadEntities()">
         <label style="font-size:0.8rem;display:flex;gap:4px;align-items:center;">
           <input type="checkbox" x-model="emptyOnly" @change="loadEntities()">
           <span x-text="S.empty_only || 'Empty only'"></span>
@@ -433,21 +433,22 @@
     {# HYGIENE #}
     <div x-show="tab === 'hygiene'" x-cloak>
       <div class="card" style="padding:1rem 1.25rem;margin-bottom:0.75rem;">
+        <div x-show="hygieneFailed" role="alert" style="margin-bottom:0.75rem;color:var(--danger);font-size:0.85rem;">{{ t('memory.console.load_failed') }}</div>
         <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:0.75rem;">
           <label style="display:flex;gap:6px;align-items:center;font-size:0.85rem;">
             <input type="checkbox" x-model="hygiene.purge_empty_entities">
             <span x-text="S.purge_empty || 'Purge empty'"></span>
-            <span style="color:var(--text-muted);" x-text="'(' + (hygienePreview.empty_entities || []).length + ')'"></span>
+            <span x-show="!hygieneFailed" style="color:var(--text-muted);" x-text="'(' + (hygienePreview.empty_entities || []).length + ')'"></span>
           </label>
           <label style="display:flex;gap:6px;align-items:center;font-size:0.85rem;">
             <input type="checkbox" x-model="hygiene.invalidate_near_dup_noted">
             <span x-text="S.dedupe_noted || 'Dedupe noted'"></span>
-            <span style="color:var(--text-muted);" x-text="'(' + (hygienePreview.near_dup_noted || []).length + ')'"></span>
+            <span x-show="!hygieneFailed" style="color:var(--text-muted);" x-text="'(' + (hygienePreview.near_dup_noted || []).length + ')'"></span>
           </label>
           <label style="display:flex;gap:6px;align-items:center;font-size:0.85rem;">
             <input type="checkbox" x-model="hygiene.archive_invalidated">
             <span x-text="S.archive_dead || 'Archive dead'"></span>
-            <span style="color:var(--text-muted);" x-text="'(' + (hygienePreview.invalidated_belief_count || 0) + ')'"></span>
+            <span x-show="!hygieneFailed" style="color:var(--text-muted);" x-text="'(' + (hygienePreview.invalidated_belief_count || 0) + ')'"></span>
           </label>
         </div>
         <button class="btn btn-primary btn-sm" @click="runHygiene()" :disabled="hygieneRunning" x-text="S.run_hygiene || 'Run hygiene'"></button>

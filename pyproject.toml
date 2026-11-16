@@ -258,6 +258,11 @@ ci-light = [
 # builds with a locked hatchling instead of one fetched unpinned.
 # hatchling builds an editable install through `editables`.
 build = ["hatchling>=1.27.0", "editables>=0.5", "setuptools>=83.0.0"]
+# The release job's tools, run from the lock (`uv run --frozen --only-group`):
+# uvx and `uv run --with` pinned only the tool, and resolved its dependencies
+# fresh from PyPI in the job that holds the signing identity.
+sign = ["sigstore==4.5.1"]
+sbom = ["cyclonedx-bom==8.0.1"]
 lint = ["ruff==0.17.5"]
 scan = ["bandit==1.9.4"]
 # Coverage-guided fuzzing of the parsers of outside text (fuzz/). Atheris has
@@ -286,6 +291,8 @@ artifacts = ["kazma-cli/kazma_cli/locked_versions.txt"]
 "deploy/observer/src" = "kazma_core/observability/watch_worker/src"
 "deploy/observer/schema.sql" = "kazma_core/observability/watch_worker/schema.sql"
 "deploy/observer/wrangler.jsonc" = "kazma_core/observability/watch_worker/wrangler.jsonc"
+"deploy/observer/package.json" = "kazma_core/observability/watch_worker/package.json"
+"deploy/observer/package-lock.json" = "kazma_core/observability/watch_worker/package-lock.json"
 
 [tool.pytest.ini_options]
 # Package suites + root regression corpus. TUI uses kazma_tui_tests to avoid

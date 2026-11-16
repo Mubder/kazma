@@ -19,14 +19,18 @@ class Symbol:
     signature: str = ""
 
 
-_PY_DEF = re.compile(r"^(\s*)(async\s+)?def\s+(\w+)\s*\(([^)]*)\)", re.M)
-_PY_CLASS = re.compile(r"^(\s*)class\s+(\w+)", re.M)
+# A definition's indent is its own line's ("[^\S\n]*"). "^(\s*)" started at
+# the first blank line before it: the line reported was that blank line's,
+# four blank lines made a top-level def a "method", and each line start of a
+# run of blank lines read the rest of the run (quadratic).
+_PY_DEF = re.compile(r"^([^\S\n]*)(async\s+)?def\s+(\w+)\s*\(([^)]*)\)", re.M)
+_PY_CLASS = re.compile(r"^([^\S\n]*)class\s+(\w+)", re.M)
 _JS_FN = re.compile(
-    r"^(\s*)(export\s+)?(async\s+)?function\s+(\w+)\s*\(", re.M
+    r"^([^\S\n]*)(export\s+)?(async\s+)?function\s+(\w+)\s*\(", re.M
 )
-_JS_CLASS = re.compile(r"^(\s*)(export\s+)?class\s+(\w+)", re.M)
+_JS_CLASS = re.compile(r"^([^\S\n]*)(export\s+)?class\s+(\w+)", re.M)
 _JS_ARROW = re.compile(
-    r"^(\s*)(export\s+)?(const|let|var)\s+(\w+)\s*=\s*(async\s*)?\(", re.M
+    r"^([^\S\n]*)(export\s+)?(const|let|var)\s+(\w+)\s*=\s*(async\s*)?\(", re.M
 )
 _GO_FN = re.compile(r"^func\s+(?:\([^)]+\)\s+)?(\w+)\s*\(", re.M)
 _RS_FN = re.compile(r"^(?:pub\s+)?(?:async\s+)?fn\s+(\w+)", re.M)

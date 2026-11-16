@@ -885,6 +885,9 @@ def test_dns_gate_catches_the_redirect_hop_shape():
 # names one; a call in an async body must go through asyncio.to_thread.
 
 _LOOP_STALL_HELPERS = frozenset({
+    # PyJWT's key client fetches the issuer's JWKS over urllib, blocking: an
+    # OIDC sign-in ran it in an async route (SonarCloud review, 2026-11-16).
+    "get_signing_key_from_jwt", "get_signing_keys", "fetch_data",
     # The outside watch (observability/outside_watch.py): the pairing file,
     # the guard's state file and a signed request to the observer.
     "outside_status", "_observer_summary", "outside_digest_line", "pair_with_observer",
@@ -2847,7 +2850,7 @@ SECURITY_ENV_NAMES = (
     "KAZMA_ACQUISITION_MODE", "KAZMA_ACQUISITION_REMOTE_PROVIDERS", "KAZMA_TRANSLATION_REMOTE",
     "KAZMA_WS_ORIGIN_CHECK", "KAZMA_WS_EXTRA_ORIGINS", "KAZMA_OPAQUE_SESSIONS",
     "KAZMA_RATE_LIMIT_ENABLED", "KAZMA_TENANT_FILTER", "KAZMA_SESSION_OPEN_TAKEOVER",
-    "KAZMA_MCP_INHERIT_ENV", "KAZMA_ALLOW_PRIVATE_LLM",
+    "KAZMA_MCP_INHERIT_ENV",
     "KAZMA_CLONE_HOSTS", "KAZMA_UPDATE_REMOTE_ALLOWLIST",
     "KAZMA_HITL_GRANT_TTL_SECONDS", "KAZMA_UNRESTRICTED_TTL_SECONDS", "KAZMA_SHELL_STRICT",
     "KAZMA_SHELL_ALLOW_ARCHIVE", "KAZMA_GATE_REGISTRY", "KAZMA_COMMITMENT_ENABLED",

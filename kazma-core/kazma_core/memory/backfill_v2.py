@@ -158,6 +158,26 @@ def _extract_pred_from_text(text: str) -> tuple[str, str] | None:
     return None
 
 
+def _backfill_client() -> Any:
+    """The model client belief extraction uses.
+
+    The server initializes the model registry at boot; the CLI (``kazma
+    memory backfill``) has none, so the registry is made here from the
+    settings store. Until 2026-11-16 this called ``initialize_model_registry()``
+    with no store: a TypeError, logged at DEBUG, and every CLI backfill
+    skipped belief extraction (SonarCloud review).
+    """
+    from kazma_core.model_registry import get_model_registry, initialize_model_registry
+
+    try:
+        registry = get_model_registry()
+    except RuntimeError:
+        from kazma_core.config_store import get_config_store
+
+        registry = initialize_model_registry(get_config_store())
+    return registry.get_client()
+
+
 def _llm_extract_beliefs_from_memories(
     primary: sqlite3.Connection,
     legacy: sqlite3.Connection,
@@ -215,20 +235,10 @@ def _llm_extract_beliefs_from_memories(
         ops = None
 
     try:
-        from kazma_core.model_registry import (
-            get_model_registry,
-            initialize_model_registry,
-        )
-
-        # The registry needs initialization (normally done at server boot).
-        # When running from CLI, do it here.
-        mr = get_model_registry()
-        client = mr.get_client()
-        if client is None:
-            initialize_model_registry()
-            client = get_model_registry().get_client()
+        client = _backfill_client()
     except Exception:
-        logger.debug("[backfill] model registry init failed", exc_info=True)
+        # Said, never at DEBUG: the backfill then skips belief extraction.
+        logger.warning("[backfill] the model registry could not give a client", exc_info=True)
         client = None
 
     if client is None:

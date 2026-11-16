@@ -33,10 +33,20 @@ class Wrangler:
         self.secrets: dict[str, str] = {}
         self.calls: list[dict[str, Any]] = []
         self.deploy_error = ""
+        self.installs: list[dict[str, Any]] = []
 
     def __call__(self, argv: list[str], *, cwd: Path, input_text: str | None = None, interactive: bool = False,
                  timeout: float = 0, account_id: str = "") -> subprocess.CompletedProcess[str]:
-        assert argv[1:3] == ["--yes", f"wrangler@{watch_setup.WRANGLER_VERSION}"], argv
+        if argv[1:2] == ["ci"]:
+            # npm ci in the work folder, from the lock the setup copied there.
+            assert argv[2:] == ["--ignore-scripts", "--no-audit", "--no-fund"], argv
+            assert (cwd / "package-lock.json").is_file() and (cwd / "package.json").is_file()
+            self.installs.append({"cwd": cwd})
+            return subprocess.CompletedProcess(argv, 0, "added 34 packages", "")
+        # The wrangler the lock installed, never one npx fetches.
+        assert argv[1:3] == ["--no-install", "wrangler"], argv
+        assert self.installs or (cwd / "node_modules" / ".kazma-lock.sha256").is_file(), (
+            "wrangler runs only after the lock is installed")
         args = argv[3:]
         self.calls.append({"args": args, "input": input_text, "interactive": interactive, "cwd": cwd,
                            "account": account_id})
@@ -146,7 +156,7 @@ def _run(env, wrangler: Wrangler, world: World, *, answers=("",), secrets=(BOT,)
     io = SetupIo(say=said.append, ask=lambda _p: asks.pop(0) if asks else "",
                  ask_secret=lambda _p: hidden.pop(0), sleep=lambda _s: None)
     run = WatchSetup(io=io, run=wrangler, http=httpx.Client(transport=httpx.MockTransport(world.handler)),
-                     pair=env["pair"], work_dir=env["work"], npx="npx", **kw)
+                     pair=env["pair"], work_dir=env["work"], npx="npx", npm="npm", **kw)
     return run.setup(), said
 
 
@@ -300,3 +310,51 @@ def test_the_command_says_why_it_stopped(capsys, monkeypatch) -> None:
     assert observer.run(["setup", "-y"]) == 1
     out = capsys.readouterr().out
     assert "Stopped: Node's npx is not installed." in out and "What to do: kazma setup install --with node" in out
+
+
+# ── 2026-11-16 (SonarCloud review): wrangler from the Worker's lock ───────
+
+
+def test_wrangler_is_installed_once_per_lock(setup_env) -> None:
+    """`npm ci` from the Worker's package-lock.json, once: a second run on the
+    same lock installs nothing, a changed lock installs again."""
+    wrangler = Wrangler()
+    _run(setup_env, wrangler, World(), answers=("-",))
+    assert len(wrangler.installs) == 1
+    again = Wrangler()
+    again.logged_in = True
+    _run(setup_env, again, World(), answers=("-",), update=True)
+    assert again.installs == []
+    (setup_env["work"] / "node_modules" / ".kazma-lock.sha256").write_text("old\n", encoding="utf-8")
+    third = Wrangler()
+    third.logged_in = True
+    _run(setup_env, third, World(), answers=("-",), update=True)
+    assert len(third.installs) == 1
+
+
+def test_the_versions_and_the_lock_agree() -> None:
+    """WRANGLER_VERSION, the Worker's package.json and its package-lock.json
+    name one wrangler, and the lock records an integrity hash for every
+    package (npm ci checks each)."""
+    observer = ROOT / "deploy" / "observer"
+    package = json.loads((observer / "package.json").read_text(encoding="utf-8"))
+    lock = json.loads((observer / "package-lock.json").read_text(encoding="utf-8"))
+    assert package["devDependencies"]["wrangler"] == watch_setup.WRANGLER_VERSION
+    assert lock["packages"]["node_modules/wrangler"]["version"] == watch_setup.WRANGLER_VERSION
+    missing = [name for name, entry in lock["packages"].items()
+               if name and not entry.get("link") and not entry.get("integrity")]
+    assert missing == [], missing
+
+
+def test_the_wheel_carries_the_lock() -> None:
+    """A wheel install sets the watch up from its own copy of the lock."""
+    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    for name in ("package.json", "package-lock.json"):
+        assert (f'"deploy/observer/{name}" = '
+                f'"kazma_core/observability/watch_worker/{name}"') in text
+
+
+def test_control_npx_fetching_wrangler_is_refused_by_the_stand_in() -> None:
+    """Negative control: the old command (npx --yes wrangler@X) fails here."""
+    with pytest.raises(AssertionError):
+        Wrangler()(["npx", "--yes", f"wrangler@{watch_setup.WRANGLER_VERSION}", "whoami"], cwd=ROOT)

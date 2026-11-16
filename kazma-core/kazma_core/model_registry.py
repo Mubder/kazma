@@ -1051,7 +1051,7 @@ class ModelRegistry:
         # instead of answering (2026-10-02).
         from urllib.parse import urlparse
 
-        from kazma_core.security.ssrf import SSRFError, resolves_to_own_network, validate_url
+        from kazma_core.security.ssrf import SSRFError, check_model_server_url
 
         try:
             _host = (urlparse(url).hostname or "").lower()
@@ -1059,10 +1059,9 @@ class ModelRegistry:
             # A server on the owner's own network (providers stage 1): every
             # address its host resolves to is loopback, private or Tailscale's
             # -- never link-local (cloud metadata). Anything else is checked as
-            # a public address, as before.
-            _own = _loopback or await asyncio.to_thread(resolves_to_own_network, url)
-            if not _own:
-                await asyncio.to_thread(validate_url, url, block_unresolved=True)
+            # a public address. One rule: security.ssrf.check_model_server_url.
+            if not _loopback:
+                await asyncio.to_thread(check_model_server_url, url)
         except SSRFError as exc:
             logger.warning("discover_models: SSRF blocked %r for %r: %s", url, clean_name, exc)
             return failed("blocked_url", "Kazma does not send requests to that address.")

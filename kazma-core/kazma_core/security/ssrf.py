@@ -129,6 +129,31 @@ def resolves_to_own_network(url: str) -> bool:
     return bool(ips) and all(own_network_ip(ip) for ip in ips)
 
 
+def check_model_server_url(url: str, *, block_unresolved: bool = True) -> None:
+    """Raise :class:`SSRFError` unless *url* may be asked as a model server.
+
+    The one rule for an address someone gives Kazma for a model server (the
+    model-list route, a provider switch, model discovery): a host on this
+    computer or the owner's own network (:func:`resolves_to_own_network`:
+    loopback, private, Tailscale's space -- never link-local or a cloud
+    metadata address), else a public address (:func:`validate_url`). Before
+    2026-11-16 these callers passed ``allow_private=True``, which returns
+    before every check, and ``GET /api/models?base_url=`` fetched the cloud
+    metadata address. *block_unresolved* False lets a name that does not
+    resolve yet through (a provider the admin is saving whose server is not
+    up): the request made later still meets the connection's own checks.
+    Blocking (DNS): async callers use ``asyncio.to_thread``.
+    """
+    if not url or not url.strip():
+        raise SSRFError("No address was given.")
+    parsed = urlparse(url.strip())
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise SSRFError("Only an http or https address with a host can be asked.")
+    if resolves_to_own_network(url):
+        return
+    validate_url(url, block_unresolved=block_unresolved)
+
+
 def _is_blocked_ip(ip: ipaddress._BaseAddress) -> bool:
     """Return *True* if *ip* is private, loopback, link-local, reserved, or unspecified.
 
@@ -432,6 +457,7 @@ async def resolve_redirects(
 
 __all__: list[str] = [
     "SSRFError",
+    "check_model_server_url",
     "UnresolvedHostError",
     "validate_url",
     "is_url_safe",

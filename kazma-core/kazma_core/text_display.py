@@ -17,7 +17,10 @@ _ARABIC_RE = re.compile(
     r"[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]"
 )
 _LATIN_RE = re.compile(r"[A-Za-z]")
-_CLOSED_QUOTE_RE = re.compile(r'["“]([^"”]{4,})["”]')
+# A quote holds no opening mark of its own (the innermost pair is the quote):
+# from every opener with no closer after it the old pattern read the rest of
+# the text (quadratic; Sonar S8786 sweep, 2026-11-16).
+_CLOSED_QUOTE_RE = re.compile(r'["“]([^"“”]{4,})["”]')
 _UNCLOSED_QUOTE_RE = re.compile(r':\s*["“]([^"”]{4,})\s*$')
 _BLOCKQUOTE_RE = re.compile(r">\s*(.+)$")
 _BATCH_RE = re.compile(r"batch\s+job\s+(\d+\s*/\s*\d+)", re.IGNORECASE)

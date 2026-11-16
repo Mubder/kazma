@@ -63,8 +63,12 @@ PLAN_EXECUTE_FINAL = (
 
 # Closed fence: ```plan … ```  (closing ticks may be glued to following prose).
 # ``\b`` keeps ```plantuml / ```planning blocks out of the plan split.
+# The opening line is read once: the body after its newline up to the first
+# fence, else (no fence after the newline) an empty body closed by the line's
+# last fence -- what "[^\n]*\n?(.*?)```" found by backing off one character
+# at a time, rescanning the rest each time (quadratic on a line of spaces).
 _CLOSED_FENCE_RE = re.compile(
-    r"```plan\b[^\n]*\n?(.*?)```",
+    r"```plan\b(?:[^\n]*+\n|[^\n]*(?=```))(.*?)```",
     re.IGNORECASE | re.DOTALL,
 )
 # Unclosed fence: ```plan … (EOF, no closing ticks).

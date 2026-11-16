@@ -170,7 +170,9 @@ _RESET_LINE = re.compile(
     r"(?:\s+(?:weekly|pool|quota))?"
     r"(?:\s+next)?\s+reset"
     r"(?:\s*(?:time|at|is|:))?\s*"
-    r"(?P<val>.+?)(?=(?:\.?\s*(?:and|my)\s+(?:grok|zcode|claude|cursor))|$)",
+    # The next service is looked for once per whitespace run, never from inside
+    # one (each position of a run rescanned it: quadratic).
+    r"(?P<val>.+?)(?=(?:(?<!\s)|(?!\s))\.?\s*+(?:and|my)\s++(?:grok|zcode|claude|cursor)|$)",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -207,7 +209,7 @@ def parse_current_facts(
         slug = normalize_service_slug(m.group("svc"))
         val = (m.group("val") or "").strip().rstrip(".,;")
         # Trim trailing "And my ZCode…" leakage
-        val = re.split(r"\s+And\s+my\s+", val, maxsplit=1, flags=re.I)[0].strip()
+        val = re.split(r"(?<!\s)\s++And\s+my\s+", val, maxsplit=1, flags=re.I)[0].strip()
         val = re.sub(r"\s+", " ", val)[:500]
         if slug and val and len(val) >= 4:
             found.append(_fact(f"{slug}_next_reset", val))

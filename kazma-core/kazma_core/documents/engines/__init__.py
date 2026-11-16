@@ -10,4 +10,6 @@ engine never re-derives the Word BiDi rules (or any other gotcha) itself.
 
 from __future__ import annotations
 
-__all__ = ["DocxEngine"]
+# Import an engine from its module (``engines.docx``...). The package listed
+# ``DocxEngine`` without defining it, so ``import *`` raised.
+__all__: list[str] = []

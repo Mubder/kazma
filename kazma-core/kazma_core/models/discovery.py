@@ -103,10 +103,11 @@ async def discover_ollama_models(base_url: str | None = None) -> ProviderInfo:
         base_url=f"{base}/v1",
     )
 
-    # SSRF guard — allow private addresses for user-configured local providers
+    # SSRF guard: this computer or the owner's network, else a public address
+    # (security.ssrf.check_model_server_url); never cloud metadata.
     try:
-        from kazma_core.security.ssrf import SSRFError, validate_url
-        await asyncio.to_thread(validate_url, tags_url, block_unresolved=True, allow_private=True)
+        from kazma_core.security.ssrf import SSRFError, check_model_server_url
+        await asyncio.to_thread(check_model_server_url, tags_url)
     except SSRFError as exc:
         logger.warning("discover_ollama_models: SSRF blocked %r: %s", tags_url, exc)
         info.error = f"SSRF blocked: {exc}"
@@ -185,10 +186,11 @@ async def discover_lm_studio_models(
     # Build the models endpoint: /v1/models
     models_url = f"{url}/models"
 
-    # SSRF guard — allow private addresses for user-configured local providers
+    # SSRF guard: this computer or the owner's network, else a public address
+    # (security.ssrf.check_model_server_url); never cloud metadata.
     try:
-        from kazma_core.security.ssrf import SSRFError, validate_url
-        await asyncio.to_thread(validate_url, models_url, block_unresolved=True, allow_private=True)
+        from kazma_core.security.ssrf import SSRFError, check_model_server_url
+        await asyncio.to_thread(check_model_server_url, models_url)
     except SSRFError as exc:
         logger.warning("discover_lm_studio_models: SSRF blocked %r: %s", models_url, exc)
         return info
@@ -243,10 +245,11 @@ async def discover_custom_models(base_url: str) -> ProviderInfo:
 
     models_url = f"{url}/models"
 
-    # SSRF guard — allow private addresses for user-configured providers
+    # SSRF guard: this computer or the owner's network, else a public address
+    # (security.ssrf.check_model_server_url); never cloud metadata.
     try:
-        from kazma_core.security.ssrf import SSRFError, validate_url
-        await asyncio.to_thread(validate_url, models_url, block_unresolved=True, allow_private=True)
+        from kazma_core.security.ssrf import SSRFError, check_model_server_url
+        await asyncio.to_thread(check_model_server_url, models_url)
     except SSRFError as exc:
         logger.warning("discover_custom_models: SSRF blocked %r: %s", models_url, exc)
         return info
@@ -319,19 +322,16 @@ async def discover_models(
 
 async def _discover_openai_compatible(base_url: str, api_key: str | None, provider: str) -> ProviderInfo:
     """Discover models from any OpenAI-compatible /v1/models endpoint."""
-    import os
-
     import httpx
 
     url = f"{base_url.rstrip('/')}/models"
-    # Audit H2: SSRF guard — private URLs only with explicit opt-in
-    from kazma_core.security.ssrf import SSRFError, validate_url
+    # SSRF guard: this computer or the owner's network, else a public address
+    # (security.ssrf.check_model_server_url); never cloud metadata. The old
+    # private-address opt-in let every address through, metadata too.
+    from kazma_core.security.ssrf import SSRFError, check_model_server_url
 
-    allow_priv = (os.environ.get("KAZMA_ALLOW_PRIVATE_LLM") or "").strip().lower() in (
-        "1", "true", "on", "yes",
-    )
     try:
-        await asyncio.to_thread(validate_url, url, block_unresolved=True, allow_private=allow_priv)
+        await asyncio.to_thread(check_model_server_url, url)
     except (SSRFError, ValueError) as exc:
         return ProviderInfo(
             name=provider, label=provider.title(), base_url=base_url, error=str(exc),

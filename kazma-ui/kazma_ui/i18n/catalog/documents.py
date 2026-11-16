@@ -760,4 +760,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "The document broker Kazma is set to use does not answer or is not attested: check it and its log.",
         "ar": "وسيط المستندات الذي تستخدمه Kazma لا يستجيب أو لم يُثبت سلامة حاوياته: افحصه وسجلّه.",
     },
+    "documents.convert_to": {
+        "ar": "تحويل إلى",
+        "en": "Convert to",
+    },
+    "documents.split_from": {
+        "ar": "التقسيم من الصفحة",
+        "en": "Split from page",
+    },
+    "documents.split_to": {
+        "ar": "التقسيم حتى الصفحة",
+        "en": "Split to page",
+    },
 }

@@ -177,6 +177,11 @@
         if (modal && modal.style.display !== 'none') {
           closeTaskDetail();
         }
+        // The logs and edit-worker dialogs close on Escape too.
+        var logs = $('logs-modal');
+        if (logs && logs.style.display !== 'none') closeLogs();
+        var edit = $('edit-worker-modal');
+        if (edit && edit.style.display !== 'none') closeEditWorker();
       }
     }, once);
   }

@@ -82,8 +82,8 @@
                Fetches GET /api/mcp/presets on modal open; selecting a preset
                auto-fills name, transport, command, and env fields below. #}
             <div class="form-group">
-                <label>{{ t('mcp.preset_label') }}</label>
-                <select x-model="selectedPreset" @change="applyPreset()" class="form-select">
+                <label for="f-selected-preset">{{ t('mcp.preset_label') }}</label>
+                <select id="f-selected-preset" x-model="selectedPreset" @change="applyPreset()" class="form-select">
                     <option value="">{{ t('mcp.preset_none') }}</option>
                     <template x-for="cat in presetCategories" :key="cat.name">
                         <optgroup :label="tOr('mcp.cat_' + cat.name, cat.name)">
@@ -95,12 +95,12 @@
                 </select>
             </div>
             <div class="form-group">
-                <label>{{ t('mcp.field_name') }}</label>
-                <input type="text" x-model="newServer.name" class="form-input" translate="no" placeholder="my-server">
+                <label for="f-new-server-name">{{ t('mcp.field_name') }}</label>
+                <input id="f-new-server-name" type="text" x-model="newServer.name" class="form-input" translate="no" placeholder="my-server">
             </div>
             <div class="form-group">
-                <label>{{ t('mcp.field_transport') }}</label>
-                <select x-model="newServer.transport" class="form-select">
+                <label for="f-new-server-transport">{{ t('mcp.field_transport') }}</label>
+                <select id="f-new-server-transport" x-model="newServer.transport" class="form-select">
                     <option value="stdio">{{ t('mcp.transport_stdio') }}</option>
                     <option value="sse">{{ t('mcp.transport_sse') }}</option>
                     <option value="streamable_http">{{ t('mcp.transport_streamable_http') }}</option>
@@ -109,8 +109,8 @@
             <template x-if="newServer.transport === 'stdio'">
                 <div>
                     <div class="form-group">
-                        <label>{{ t('mcp.field_command') }}</label>
-                        <input type="text" x-model="newServer.commandStr" @input="onCommandInput()" class="form-input" translate="no" placeholder="npx -y @modelcontextprotocol/server-filesystem /tmp">
+                        <label for="f-new-server-command-str">{{ t('mcp.field_command') }}</label>
+                        <input id="f-new-server-command-str" type="text" x-model="newServer.commandStr" @input="onCommandInput()" class="form-input" translate="no" placeholder="npx -y @modelcontextprotocol/server-filesystem /tmp">
                         <p style="font-size:0.78rem;color:var(--text-secondary);margin:4px 0 0 0;">
                             {{ t('mcp.command_hint') | safe }}
                         </p>
@@ -119,41 +119,41 @@
                         <div class="notice tone-info" style="margin:6px 0;font-size:0.82rem;"><span class="ki" aria-hidden="true" x-html="KazmaIcons.get('info')"></span><span x-text="rewriteNotice"></span></div>
                     </template>
                     <div class="form-group">
-                        <label>{{ t('mcp.field_working_dir') }}</label>
-                        <input type="text" x-model="newServer.working_dir" class="form-input" placeholder="/home/user">
+                        <label for="f-new-server-working-dir">{{ t('mcp.field_working_dir') }}</label>
+                        <input id="f-new-server-working-dir" type="text" x-model="newServer.working_dir" class="form-input" placeholder="/home/user">
                     </div>
                 </div>
             </template>
             <template x-if="newServer.transport === 'sse'">
                 <div>
                     <div class="form-group">
-                        <label>{{ t('mcp.field_sse_url') }}</label>
-                        <input type="text" x-model="newServer.url" class="form-input" placeholder="http://localhost:8080/sse">
+                        <label for="f-new-server-url">{{ t('mcp.field_sse_url') }}</label>
+                        <input id="f-new-server-url" type="text" x-model="newServer.url" class="form-input" placeholder="http://localhost:8080/sse">
                     </div>
                     <div class="form-group">
-                        <label>{{ t('mcp.field_auth_token') }}</label>
-                        <input type="password" x-model="newServer.authToken" class="form-input" placeholder="{{ t('mcp.bearer_placeholder') }}">
+                        <label for="f-new-server-auth-token">{{ t('mcp.field_auth_token') }}</label>
+                        <input id="f-new-server-auth-token" type="password" x-model="newServer.authToken" class="form-input" placeholder="{{ t('mcp.bearer_placeholder') }}">
                     </div>
                 </div>
             </template>
             <template x-if="newServer.transport === 'streamable_http'">
                 <div>
                     <div class="form-group">
-                        <label>{{ t('mcp.field_url') }}</label>
-                        <input type="text" x-model="newServer.url" class="form-input" placeholder="https://mcp.example.com/devtools">
+                        <label for="f-new-server-url-2">{{ t('mcp.field_url') }}</label>
+                        <input id="f-new-server-url-2" type="text" x-model="newServer.url" class="form-input" placeholder="https://mcp.example.com/devtools">
                     </div>
                     <div class="form-group">
-                        <label>{{ t('mcp.field_auth_token') }}</label>
-                        <input type="password" x-model="newServer.authToken" class="form-input" placeholder="{{ t('mcp.bearer_placeholder') }}">
+                        <label for="f-new-server-auth-token-2">{{ t('mcp.field_auth_token') }}</label>
+                        <input id="f-new-server-auth-token-2" type="password" x-model="newServer.authToken" class="form-input" placeholder="{{ t('mcp.bearer_placeholder') }}">
                     </div>
                 </div>
             </template>
-            <div class="form-group">
-                <label>{{ t('mcp.field_env') }}</label>
+            <div class="form-group" role="group" aria-labelledby="mcp-env-label">
+                <div class="form-label" id="mcp-env-label" style="margin-bottom:0">{{ t('mcp.field_env') }}</div>
                 <template x-for="(row, idx) in (newServer._envRows || [])" :key="idx">
                     <div style="display:flex;gap:6px;margin-bottom:4px;">
-                        <input type="text" x-model="row.key" class="form-input" translate="no" placeholder="API_KEY" style="flex:1;">
-                        <input type="text" x-model="row.value" class="form-input" placeholder="{{ t('mcp.env_value_placeholder') }}" style="flex:2;">
+                        <input type="text" x-model="row.key" class="form-input" translate="no" aria-label="{{ t('mcp.env_name_label') }}" placeholder="API_KEY" style="flex:1;">
+                        <input type="text" x-model="row.value" class="form-input" aria-label="{{ t('mcp.env_value_label') }}" placeholder="{{ t('mcp.env_value_placeholder') }}" style="flex:2;">
                         <button class="btn btn-secondary btn-sm" @click="removeEnvRow(idx)" title="{{ t('common.remove') }}">×</button>
                     </div>
                 </template>
@@ -163,8 +163,8 @@
                 </p>
             </div>
             <div class="form-group">
-                <label>{{ t('mcp.field_trust') }}</label>
-                <select x-model="newServer.trust" class="form-select">
+                <label for="f-new-server-trust">{{ t('mcp.field_trust') }}</label>
+                <select id="f-new-server-trust" x-model="newServer.trust" class="form-select">
                     <option value="approval_required">{{ t('mcp.trust_approval') }}</option>
                     <option value="trusted">{{ t('mcp.trust_trusted') }}</option>
                 </select>

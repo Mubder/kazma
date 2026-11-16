@@ -2860,4 +2860,24 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "لم يعد {id} محميًا.",
         "en": "{id} is no longer protected.",
     },
+    "memory.pg.search_beliefs": {
+        "ar": "البحث في المعتقدات",
+        "en": "Search beliefs",
+    },
+    "memory.pg.search_entities": {
+        "ar": "البحث في الكيانات",
+        "en": "Search entities",
+    },
+    "memory.pg.select_belief": {
+        "ar": "تحديد المعتقد {name}",
+        "en": "Select belief {name}",
+    },
+    "memory.mc.filter_graph": {
+        "ar": "تصفية مخطط المعتقدات",
+        "en": "Filter the belief graph",
+    },
+    "memory.mc.filter_beliefs": {
+        "ar": "تصفية المعتقدات المعروفة",
+        "en": "Filter known beliefs",
+    },
 }

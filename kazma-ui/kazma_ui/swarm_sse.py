@@ -380,8 +380,8 @@ async def _stream_events(
                     yield ": keepalive\n\n"
                     last_sent = time.monotonic()
                 continue
-            except asyncio.CancelledError:
-                return
+            # A cancel goes on to the response (the finally unsubscribes):
+            # returning turned it into a normal end (SonarCloud review).
 
             if last_event_id is not None and int(entry.get("id") or 0) <= last_event_id:
                 continue  # already delivered before the reconnect

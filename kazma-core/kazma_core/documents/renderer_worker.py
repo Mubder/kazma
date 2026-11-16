@@ -409,7 +409,7 @@ _PRESENTATION_ATTRS = frozenset({
     "cellpadding", "cellspacing", "align", "valign", "background",
 })
 _BREAK_DECLARATION = re.compile(r"(?:page-)?break-(?:before|after|inside)\s*:\s*[^;{}]+", re.IGNORECASE)
-_CSS_RULE = re.compile(r"([^{}]+)\{([^{}]*)\}")
+_CSS_RULE = re.compile(r"(?<![^{}])([^{}]+)\{([^{}]*)\}")  # a rule starts after a brace: linear
 
 
 def _house_style_html(text: str) -> str:

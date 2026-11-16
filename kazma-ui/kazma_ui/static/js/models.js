@@ -18,9 +18,11 @@ var ModelsManager = window.ModelsManager = {
     async discover(provider = 'all', base_url = '', api_key = '') {
         let url = `/api/models?provider=${encodeURIComponent(provider)}`;
         if (base_url) url += `&base_url=${encodeURIComponent(base_url)}`;
-        if (api_key) url += `&api_key=${encodeURIComponent(api_key)}`;
+        // The key goes in the header the route reads, never the address
+        // (an address is logged and kept in history; the route ignored it).
+        const headers = api_key ? { 'X-Api-Key': api_key } : {};
         try {
-            const resp = await fetch(url);
+            const resp = await fetch(url, { headers });
             const data = await resp.json();
             this._cache = data.models || [];
             return data;

@@ -19,8 +19,13 @@ from kazma_core.llm_stream import invoke_llm_chat
 logger = logging.getLogger(__name__)
 _RETRY_TIMEOUT_SECONDS = 15
 
-_QUOTED = re.compile(r'`+[^`]*`+|"[^"]*"|“[^”]*”|«[^»]*»|‘[^’]*’|(?<!\w)\'[^\']*\'(?!\w)')
-_FENCED = re.compile(r"(?ms)^\s{0,3}(`{3,}|~{3,})[^\n]*\n.*?(?:^\s{0,3}\1[^\n]*(?:\n|$)|\Z)")
+# A curly or angle quote holds no opener of its own (the innermost pair is the
+# quote): from every opener with no closer after it the old pattern read the
+# rest of the message (quadratic, on the event loop; Sonar S8786 sweep).
+_QUOTED = re.compile(r'`+[^`]*`+|"[^"]*"|“[^“”]*”|«[^«»]*»|‘[^‘’]*’|(?<!\w)\'[^\']*\'(?!\w)')
+# The opener's run is possessive: a line of backticks with no newline after it
+# was quadratic (each shorter piece of the run retried the line).
+_FENCED = re.compile(r"(?ms)^\s{0,3}(`{3,}+|~{3,}+)[^\n]*\n.*?(?:^\s{0,3}\1[^\n]*(?:\n|$)|\Z)")
 _BREAK = re.compile(r"(?:\r?\n[ \t]*){2,}|\u2029")
 _HEADING = re.compile(r"(?m)^ {0,3}#{1,6}[ \t]+")
 _BLOCK = re.compile(
@@ -63,7 +68,8 @@ def _requests_one_paragraph(text: str) -> bool:
                    if not ("\u064b" <= c <= "\u065f" or c == "\u0640"))
     if _CONFLICT.search(text):
         return False
-    if re.fullmatch(r"\s*(?:one paragraph(?: only)?|single paragraph|فقرة واحدة(?: فقط)?)\s*[.!؟]?\s*", text, re.I):
+    if re.fullmatch(r"\s*+(?:one paragraph(?: only)?|single paragraph|فقرة واحدة(?: فقط)?)\s*+[.!؟]?\s*+",
+                    text, re.I):  # possessive: two adjacent \s* split a run every way
         return True
     for match in list(_EN_REQUEST.finditer(text)) + list(_AR_REQUEST.finditer(text)):
         clause = re.split(r"[.!?؟؛;,،\n]", text[:match.start()])[-1]

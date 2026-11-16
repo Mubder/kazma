@@ -163,7 +163,7 @@
                 <input type="text" x-model="$store.search.query"
                        @input.debounce.200ms="$store.search.doSearch()"
                        @keydown.escape.stop="$store.search.close()"
-                       placeholder="{{ t('search.placeholder') }}" autocomplete="off">
+                       placeholder="{{ t('search.placeholder') }}" aria-label="{{ t('search.placeholder') }}" autocomplete="off">
                 <button type="button" class="search-cancel" @click="$store.search.close()">{{ t('search.cancel') }}</button>
             </div>
             <div class="search-hint">{{ t('search.prompt') }}</div>

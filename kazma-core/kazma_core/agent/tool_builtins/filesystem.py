@@ -53,7 +53,7 @@ def _expand_braces(pattern: str) -> list[str]:
     todo = [pattern]
     while todo:
         pat = todo.pop(0)
-        m = re.search(r"\{([^{}]*,[^{}]*)\}", pat)
+        m = re.search(r"\{([^{},]*,[^{}]*)\}", pat)  # to the first comma: linear
         if m is None:
             if pat not in out:
                 out.append(pat)

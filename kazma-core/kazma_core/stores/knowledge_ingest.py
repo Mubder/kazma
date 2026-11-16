@@ -1115,8 +1115,10 @@ def _extract_links_from_text(text: str, base_url: str) -> list[str]:
         return []
     # HTML hrefs
     hrefs = re.findall(r'''(?:href|data-href)\s*=\s*["']([^"']+)["']''', text, flags=re.I)
-    # Markdown links: [label](url)
-    hrefs.extend(re.findall(r"\[[^\]]*\]\(([^)\s]+)\)", text))
+    # Markdown links: [label](url). Neither holds a "[" (the innermost link is
+    # the link, as CommonMark): from every "[" the old pattern read the rest of
+    # the page, quadratic on a run of them (Sonar S8786 sweep, 2026-11-16).
+    hrefs.extend(re.findall(r"\[[^\][]*\]\(([^)\s[]+)\)", text))
     # Bare absolute URLs (same host preferred later via scope filter)
     try:
         host = (urlparse(base_url).hostname or "").removeprefix("www.")

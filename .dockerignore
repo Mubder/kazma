@@ -43,6 +43,23 @@ secrets/
 **/*.key
 **/*.token
 **/meta.env
+# Keys, a migration bundle (the vault and its key), the owner's local
+# configuration, a data folder at any depth and the memory repair copies
+# (store_registry.REPAIR_COPY_SUFFIXES): .gitignore keeps each out of git,
+# and `COPY . .` would have put them in the image (SonarCloud review,
+# 2026-11-16).
+.keys/
+**/.keys/
+**/*.pem
+**/*.p12
+**/*.pfx
+**/kazma-bundle-*.zip
+**/*.local.yaml
+**/kazma-data/
+**/*.pre_entity_key
+**/*.pre_relabel
+**/*.pre_reopen
+**/*.pre_reembed
 
 # Local tooling and generated reports.
 .claude/

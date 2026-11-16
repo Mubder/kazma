@@ -33,6 +33,7 @@ After splitting, a post-pass backfills ``total_chunks`` and ``content_hash``
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import re
 from dataclasses import dataclass, field
@@ -54,13 +55,39 @@ _PROSE_SEPARATORS: tuple[str, ...] = ("\n\n", "\n", "·", " ", "")
 _HEADER_RE = re.compile(r"^(#{1,4})\s+(.*)$", re.MULTILINE)
 
 # A fenced code block.  Supports ``` and ~~~ fences with optional language.
-# The closing fence must sit on its own line (``$`` under MULTILINE).  We do
-# NOT use a named-backreference ``(?P=fence)`` because that pattern fails to
-# match in CPython's ``re`` when combined with DOTALL — verified empirically.
-_FENCE_RE = re.compile(
-    r"(?:```|~~~)[^\n]*\n.*?\n(?:```|~~~)[ \t]*$",
-    re.DOTALL | re.MULTILINE,
-)
+# The closing fence must sit on its own line.  We do NOT use a
+# named-backreference ``(?P=fence)`` because that pattern fails to match in
+# CPython's ``re`` when combined with DOTALL — verified empirically.
+#
+# The blocks are found in one pass (``_fence_spans``), exactly where the
+# pattern "(?:```|~~~)[^\n]*\n.*?\n(?:```|~~~)[ \t]*$" (DOTALL, MULTILINE)
+# found them with ``finditer``. That pattern read the rest of the page from
+# every opener: a crawled page with a long line of backticks, or many openers
+# and no closing fence, was quadratic (Sonar S8786 sweep, 2026-11-16).
+_FENCE_OPENER = re.compile(r"```|~~~")
+_FENCE_CLOSER = re.compile(r"\n(?:```|~~~)[ \t]*+(?=\n|\Z)")
+
+
+def _fence_spans(text: str) -> list[tuple[int, int]]:
+    """Each fenced block of *text*: from an opener, past the end of its line,
+    to the first closing fence line after that line."""
+    closers = [match.span() for match in _FENCE_CLOSER.finditer(text)]
+    closer_starts = [start for start, _ in closers]
+    spans: list[tuple[int, int]] = []
+    pos = 0
+    while True:
+        opener = _FENCE_OPENER.search(text, pos)
+        if opener is None:
+            break
+        newline = text.find("\n", opener.end())
+        if newline < 0:  # no later opener has a line end after it either
+            break
+        index = bisect.bisect_left(closer_starts, newline + 1)
+        if index == len(closers):  # no closing fence after this line, nor after any later one
+            break
+        spans.append((opener.start(), closers[index][1]))
+        pos = closers[index][1]
+    return spans
 
 
 @dataclass(slots=True)
@@ -99,8 +126,7 @@ def _split_into_segments(markdown: str) -> list[_Segment]:
     """
     segments: list[_Segment] = []
     pos = 0
-    for m in _FENCE_RE.finditer(markdown):
-        start, end = m.span()
+    for start, end in _fence_spans(markdown):
         if start > pos:
             segments.append(_Segment("prose", markdown[pos:start], ""))
         segments.append(_Segment("code", markdown[start:end], ""))

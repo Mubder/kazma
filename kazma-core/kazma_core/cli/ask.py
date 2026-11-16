@@ -24,7 +24,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, TextIO
 
-from kazma_core.bounded_cancel import cancel_and_wait, wait_then_cancel
+from kazma_core.bounded_cancel import cancel_all_and_wait, cancel_and_wait, wait_then_cancel
 
 logger = logging.getLogger(__name__)
 
@@ -984,11 +984,16 @@ async def run_acp_stdio(
                         yolo=yolo, workspace=workspace,
                     )
                 except asyncio.CancelledError:
+                    # The server itself is cancelled (Ctrl+C: a session's own
+                    # cancel is answered inside _acp_run_prompt). Tell the
+                    # editor, then stop: it kept serving, and the turn kept
+                    # running tools after "cancelled" (SonarCloud review).
                     rpc.reply({
                         "jsonrpc": "2.0",
                         "id": msg_id,
                         "result": {"stopReason": "cancelled"},
                     })
+                    raise
                 except Exception as exc:
                     logger.error("[acp] session/prompt failed: %s", exc, exc_info=True)
                     rpc.reply({
@@ -1126,9 +1131,14 @@ async def _acp_run_prompt(
         name=f"acp-ask-{sid[:8]}",
     )
     cancel_task = asyncio.create_task(cancel_ev.wait(), name=f"acp-cancel-{sid[:8]}")
-    done, pending = await asyncio.wait(
-        {ask_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED,
-    )
+    try:
+        done, pending = await asyncio.wait(
+            {ask_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED,
+        )
+    except asyncio.CancelledError:
+        # asyncio.wait does not cancel what it waits for: the turn ran on.
+        await cancel_all_and_wait([ask_task, cancel_task], what="ACP prompt")
+        raise
     for t in pending:
         await cancel_and_wait(t, what="ACP prompt task")
     if cancel_task in done and not ask_task.done():
