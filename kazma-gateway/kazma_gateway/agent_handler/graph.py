@@ -119,7 +119,36 @@ def _is_internal_prompt_inject(content: str) -> bool:
     return False
 
 
-_FENCED_BLOCK = re.compile(r"<kazma:data\b[^>]*>.*?</kazma:data>", re.DOTALL | re.IGNORECASE)
+_FENCE_OPEN = re.compile(r"<kazma:data\b")
+_FENCE_CLOSE = "</kazma:data>"
+
+
+def _without_fenced_blocks(text: str) -> str:
+    """*text* without its ``<kazma:data ...>...</kazma:data>`` blocks, in one
+    pass. The pattern it replaces (``<kazma:data\\b[^>]*>.*?</kazma:data>``)
+    read to the end of the text from every opener, so a message of repeated
+    openers cost its length squared (the regex sweep, 2026-11-16). Each
+    block ends at the first ``>`` after its opener and the first closer after
+    that, as the pattern's did; with no ``>`` or no closer left, no later
+    opener can close either.
+    """
+    low = text.lower()
+    out: list[str] = []
+    pos = 0
+    while True:
+        opener = _FENCE_OPEN.search(low, pos)
+        if opener is None:
+            break
+        tag_end = low.find(">", opener.end())
+        if tag_end < 0:
+            break
+        close = low.find(_FENCE_CLOSE, tag_end + 1)
+        if close < 0:
+            break
+        out.append(text[pos:opener.start()])
+        pos = close + len(_FENCE_CLOSE)
+    out.append(text[pos:])
+    return "".join(out)
 
 
 def _convert_messages_to_dicts(langgraph_messages) -> list[dict[str, Any]]:
@@ -163,7 +192,7 @@ def _convert_messages_to_dicts(langgraph_messages) -> list[dict[str, Any]]:
             )
         text = str(content or "").strip()
         if role == "user" and "<kazma:data" in text:
-            text = _FENCED_BLOCK.sub("", text).strip()
+            text = _without_fenced_blocks(text).strip()
         if not text:
             continue
         # Never put system/tool injects in the human-readable transcript

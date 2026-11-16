@@ -773,3 +773,32 @@ def test_control_the_old_patterns_grow_faster_than_the_input():
     ]
     for fn, make, small in cases:
         assert _grows_faster_than_linear(fn, make, small), make(3)
+
+
+# ── the gateway's fenced-block strip (found by the sweep on Linux CI) ─────
+
+OLD_GATEWAY_FENCE = re.compile(r"<kazma:data\b[^>]*>.*?</kazma:data>", re.DOTALL | re.IGNORECASE)
+
+
+def test_the_gateway_fence_strip_answers_as_the_pattern_did():
+    from kazma_gateway.agent_handler.graph import _without_fenced_blocks
+
+    words = ["<kazma:data", "<KAZMA:DATA", "</kazma:data>", "</KAZMA:Data>", ">", "<", " ",
+             "x", "a=1", "\n", "<kazma:datax", "data"]
+    for _ in range(30000):
+        s = _words(words, 10)
+        assert _without_fenced_blocks(s) == OLD_GATEWAY_FENCE.sub("", s), s
+    sample = 'see <kazma:data source="file">secret</kazma:data> after'
+    assert _without_fenced_blocks(sample) == "see  after"
+
+
+def test_the_gateway_fence_strip_is_linear():
+    from kazma_gateway.agent_handler.graph import _without_fenced_blocks
+
+    hostile = "<kazma:data" * 20000
+    assert _timed(_without_fenced_blocks, hostile) < 0.5
+    assert _timed(_without_fenced_blocks, "<kazma:data>" + "x" * 200000) < 0.5
+    small, big = "<kazma:data" * 2000, "<kazma:data" * 8000
+    old_small = _timed(OLD_GATEWAY_FENCE.sub, "", small)
+    old_big = _timed(OLD_GATEWAY_FENCE.sub, "", big)
+    assert old_big > 6 * old_small, "control: the old pattern grows with the square"
