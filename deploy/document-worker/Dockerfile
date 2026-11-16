@@ -21,7 +21,7 @@
 # final image: no PyTorch, no network at run time (the worker has none).
 FROM python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f AS ocr-models
 COPY deploy/document-worker/ocr-models.txt /tmp/ocr-models.txt
-RUN pip install --no-cache-dir --require-hashes -r /tmp/ocr-models.txt
+RUN pip install --no-cache-dir --require-hashes --only-binary :all: -r /tmp/ocr-models.txt
 COPY kazma-core/kazma_core/documents/ocr/neural_models.py /src/kazma-core/kazma_core/documents/ocr/neural_models.py
 COPY scripts/ocr_models.py /src/scripts/ocr_models.py
 RUN python -I /src/scripts/ocr_models.py install --dir /models
@@ -47,7 +47,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY deploy/document-worker/requirements.txt /tmp/worker-requirements.txt
-RUN pip install --no-cache-dir --require-hashes -r /tmp/worker-requirements.txt \
+RUN pip install --no-cache-dir --require-hashes --only-binary :all: -r /tmp/worker-requirements.txt \
     && rm /tmp/worker-requirements.txt
 
 # Writable locations exist only in the job's tmpfs; the entry point creates
