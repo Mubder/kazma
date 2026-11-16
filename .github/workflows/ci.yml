@@ -269,7 +269,7 @@ jobs:
     # mode, all untested (audit 2026-09-16 F-7).
     services:
       postgres:
-        image: postgres:16
+        image: postgres:18
         env:
           POSTGRES_USER: kazma
           POSTGRES_PASSWORD: kazma
@@ -381,7 +381,7 @@ jobs:
       - name: Start a throwaway Postgres the drill may stop
         run: |
           docker run -d --name kazma-drill-pg -e POSTGRES_USER=kazma -e POSTGRES_PASSWORD=kazma \
-            -e POSTGRES_DB=kazma_drill -p 5433:5432 postgres:16
+            -e POSTGRES_DB=kazma_drill -p 5433:5432 postgres:18
           for i in $(seq 1 30); do docker exec kazma-drill-pg pg_isready -U kazma && break; sleep 2; done
       - name: Backup and restore drills (GATE, no skips)
         run: |

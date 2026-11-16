@@ -233,11 +233,32 @@ def restricted_child_env(*, cwd: str) -> dict[str, str]:
     return {k: v for k, v in env.items() if v}
 
 
+def _root_owned(target: Path) -> bool:
+    """True when *target* and every folder above it belong to root and no one
+    else may write them (POSIX): a program only the system could have put
+    there. Ubuntu 26.04 links every coreutils program from /usr/bin into
+    /usr/lib/cargo/bin/coreutils/, outside the tool path's folders."""
+    if os.name == "nt":
+        return False
+    try:
+        for path in (target, *target.parents):
+            st = path.stat()
+            if st.st_uid != 0 or st.st_mode & 0o022:
+                return False
+    except OSError:
+        return False
+    return True
+
+
 def resolve_shell_binary(argv0: str, *, restricted_path: str) -> str | None:
     """Resolve *argv0* to an executable under *restricted_path*.
 
     Absolute paths are only accepted if their basename is allowlisted *and*
-    the file resolves under a restricted PATH directory (no /tmp/evil/git).
+    the file resolves under a restricted PATH directory, or (POSIX) into a
+    root-owned folder no one else may write (no /tmp/evil/git). On Ubuntu
+    26.04 every coreutils program is a link from /usr/bin into
+    /usr/lib/cargo/bin/coreutils/: refused, shell_exec ran no `ls`, `cat` or
+    `sleep` there (CI's runner moved to 26.04 on 2026-11-16).
     """
     name = Path(argv0).name
     if os.name == "nt" and name.lower().endswith(".exe"):
@@ -254,7 +275,8 @@ def resolve_shell_binary(argv0: str, *, restricted_path: str) -> str | None:
             root = Path(directory).resolve()
             for suffix in suffixes:
                 candidate = (root / (name + suffix)).resolve()
-                if candidate.is_relative_to(root) and candidate.is_file() and os.access(candidate, os.X_OK):
+                if (candidate.is_file() and os.access(candidate, os.X_OK)
+                        and (candidate.is_relative_to(root) or _root_owned(candidate))):
                     return str(candidate)
         except (OSError, RuntimeError):
             continue

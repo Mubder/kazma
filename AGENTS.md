@@ -12225,6 +12225,14 @@ with a test that fails on the old code and a gate for its class:
   as controls) and the accessibility-tree check of the page tour
   (`tests/e2e/test_pages_load_clean.py`, every page and Settings tab, its own
   negative control).
+- **A system program linked out of the tool path still runs** (found the same day: GitHub's
+  `ubuntu-latest` became Ubuntu 26.04, where every coreutils program in `/usr/bin` links
+  into `/usr/lib/cargo/bin/coreutils/`). `post_hitl.resolve_shell_binary` refused any
+  program resolving outside a tool-path folder, so shell_exec ran no `ls`, `cat` or `sleep`
+  there; it now also takes a target root owns and no one else may write, all the way up
+  (`_root_owned`; a link to a file another user could change is still refused). Gate:
+  `tests/test_shell_binary_resolution.py` (POSIX). CI's Postgres is 18 (26.04's `pg_dump`
+  writes `SET transaction_timeout`, which 16 refuses; live runs 18).
 - **The report says what is product code**: `.sonarcloud.properties` marks
   the suites, the fuzz targets and the Worker's tests as test code and leaves
   out vendored libraries, examples and the audits' evidence scripts. Marking
