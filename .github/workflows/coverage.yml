@@ -1,0 +1,89 @@
+# Test coverage, published to Codecov (app.codecov.io/gh/Mubder/kazma).
+#
+# The whole suite runs once under coverage.py: scripts/fast_test.py's chunks
+# are separate Python processes, measured through coverage's subprocess patch
+# (`patch = subprocess`), each writing its own data file, combined at the end.
+# This workflow measures and never gates: CI's Tests job is the gate, and a
+# few tests that check a child process's exact environment see coverage's own
+# variable here.
+#
+# The upload proves the run with GitHub's OIDC token (`use_oidc`): no Codecov
+# token is stored anywhere.
+name: Coverage
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: coverage-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    name: Test coverage (Codecov)
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.11"
+      - uses: ./.github/actions/install-locked
+        with:
+          extras: test
+          groups: ci-light
+      - name: Install the system programs the tests use
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libreoffice-writer fonts-noto-core fontconfig \
+            tesseract-ocr tesseract-ocr-ara tesseract-ocr-eng ripgrep
+      - name: Configure coverage
+        run: |
+          mkdir -p "$RUNNER_TEMP/coverage"
+          cat > "$RUNNER_TEMP/coveragerc" <<EOF
+          [run]
+          branch = True
+          parallel = True
+          patch = subprocess
+          data_file = $RUNNER_TEMP/coverage/.coverage
+          source =
+              kazma-core/kazma_core
+              kazma-gateway/kazma_gateway
+              kazma-ui/kazma_ui
+              kazma-cli/kazma_cli
+              kazma-tui/kazma_tui
+              kazma-skills/kazma_skills
+          omit = */tests/*
+          EOF
+          echo "COVERAGE_RCFILE=$RUNNER_TEMP/coveragerc" >> "$GITHUB_ENV"
+      - name: Run the suite under coverage
+        # Measures; CI's Tests job gates (see the top of this file).
+        continue-on-error: true
+        env:
+          KAZMA_DB_BACKEND: sqlite
+        run: python -m coverage run scripts/fast_test.py --chunks 4
+      - name: Combine the data files and write the report
+        if: always()
+        run: |
+          python -m coverage combine
+          python -m coverage xml -i -o coverage.xml
+          python -m coverage report -i --format=total
+      - name: Upload to Codecov
+        if: always()
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          use_oidc: true
+          files: coverage.xml
+          disable_search: true
+          fail_ci_if_error: false

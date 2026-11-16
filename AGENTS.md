@@ -12079,6 +12079,12 @@ both READMEs). Each check Kazma can meet is now met and held by a gate:
   the docs site's build-only ones, each with the version the lock holds.
   Gate: `tests/test_osv_scanner_ignores.py` (a planted ignore and a stale
   version as controls). Remove an entry when its package moves past it.
+- **Coverage** (Codecov, 2026-11-16): `.github/workflows/coverage.yml` runs the suite once
+  under coverage.py (`patch = subprocess` measures `fast_test.py`'s chunk processes, each
+  writing its own data file, combined at the end) and uploads `coverage.xml` with GitHub's
+  OIDC token (`use_oidc`; no Codecov token is stored). It measures and never gates: CI's
+  Tests job is the gate, and tests that check a child's exact environment see coverage's
+  variable there.
 - **Not met, on purpose or not yet**: Code-Review, CI-Tests and
   Branch-Protection count pull requests and their reviews (the owner pushes
   to `main`); Signed-Releases rises as `release.yml` signs new releases;

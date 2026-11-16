@@ -38,6 +38,8 @@ WRITES: dict[tuple[str, str, str], str] = {
         "uploads CodeQL's results to GitHub's code scanning",
     ("scorecard.yml", "analysis", "security-events"):
         "uploads the Scorecard results to GitHub's code scanning",
+    ("coverage.yml", "coverage", "id-token"):
+        "the Codecov upload proves the run with an OIDC token; no Codecov token is stored",
     ("scorecard.yml", "analysis", "id-token"):
         "publishing to the OpenSSF Scorecard API proves the run with an OIDC token",
 }
