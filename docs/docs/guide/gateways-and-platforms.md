@@ -156,7 +156,11 @@ Kazma talks on WhatsApp through Meta's **WhatsApp Cloud API**, with a business p
 4. Under **App settings → Basic**, copy the **App secret**.
 5. In Kazma, **Settings → Providers & Connectors → Platform Connectors → WhatsApp**: paste the access token, the Phone number ID and the app secret; press **Make one** for a webhook verify token (it is copied for the next step); put your number in **Allowed numbers**; **Save**. The card shows the webhook address to give Meta.
 6. Back in Meta, **WhatsApp → Configuration → Webhook → Edit**: the callback URL is the address the card shows, the verify token is the one you made. **Verify and save**, then subscribe the **messages** field.
-7. Send the number a WhatsApp message from your phone, then press **Test** on the card.
+7. **Subscribe your WhatsApp account to the app.** Meta sends a number's messages only to the apps its WhatsApp Business Account is subscribed to, whatever the webhook says: with none, nothing reaches Kazma (Meta's own webhook test still does). Adding your own number in the app's API Setup does not always do it. Check in the Graph API Explorer with your token: `GET <WhatsApp Business Account ID>/subscribed_apps` must list your app; if not, run `POST <WhatsApp Business Account ID>/subscribed_apps`. The account ID is under **WhatsApp accounts** in Meta Business settings.
+8. **Publish the app** once you use a real number: an unpublished app may only receive messages from people with a role on it. Under **App settings → Basic** give a privacy policy URL, terms of service URL, category and icon, then **Publish**.
+9. Send the number a WhatsApp message from your phone, then press **Test** on the card.
+
+A number whose account is subscribed to several apps sends each message to all of them, and each one answers: stop the other app, or unsubscribe it, before Kazma takes the number over.
 
 **The Test** asks Meta about the number and joins its answer with what the webhook received: the access token and number, the app secret, the webhook (the address and whether Meta has called it since Kazma started), the last message a person sent and what became of it, the 24-hour window, the allowed numbers and the connection. The code is `kazma_gateway/adapters/whatsapp.py`, `whatsapp_api.py`, `whatsapp_parse.py`, `whatsapp_format.py` and `whatsapp_diagnose.py`.
 
