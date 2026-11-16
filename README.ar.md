@@ -18,6 +18,7 @@
     <a href="https://kazma.ai/ar/docs/security/prompt-injection/"><img src="https://img.shields.io/badge/Prompt_injection-measured-EF4444.svg?style=flat-square" alt="حقن التعليمات مقيس"></a>
     <a href="https://www.bestpractices.dev/projects/16743"><img src="https://img.shields.io/cii/level/16743?style=flat-square&label=OpenSSF%20Best%20Practices" alt="ممارسات OpenSSF الفضلى"></a>
     <a href="https://scorecard.dev/viewer/?uri=github.com/Mubder/kazma"><img src="https://img.shields.io/ossf-scorecard/github.com/Mubder/kazma?style=flat-square&label=OpenSSF%20Scorecard" alt="بطاقة تقييم OpenSSF"></a>
+    <a href="https://app.codecov.io/gh/Mubder/kazma"><img src="https://img.shields.io/codecov/c/github/Mubder/kazma?style=flat-square&label=Coverage&logo=codecov&logoColor=white" alt="تغطية الاختبارات"></a>
     <a href="https://kazma.ai/ar/"><img src="https://img.shields.io/badge/Website-kazma.ai-06B6D4.svg?style=flat-square" alt="الموقع"></a>
   </p>
 

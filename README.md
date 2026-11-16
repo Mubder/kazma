@@ -20,6 +20,7 @@
     <a href="https://kazma.ai/docs/security/prompt-injection/"><img src="https://img.shields.io/badge/Prompt_injection-measured-EF4444.svg?style=flat-square" alt="Prompt injection measured"></a>
     <a href="https://www.bestpractices.dev/projects/16743"><img src="https://img.shields.io/cii/level/16743?style=flat-square&label=OpenSSF%20Best%20Practices" alt="OpenSSF Best Practices"></a>
     <a href="https://scorecard.dev/viewer/?uri=github.com/Mubder/kazma"><img src="https://img.shields.io/ossf-scorecard/github.com/Mubder/kazma?style=flat-square&label=OpenSSF%20Scorecard" alt="OpenSSF Scorecard"></a>
+    <a href="https://app.codecov.io/gh/Mubder/kazma"><img src="https://img.shields.io/codecov/c/github/Mubder/kazma?style=flat-square&label=Coverage&logo=codecov&logoColor=white" alt="Test coverage"></a>
     <a href="https://kazma.ai"><img src="https://img.shields.io/badge/Website-kazma.ai-06B6D4.svg?style=flat-square" alt="Website"></a>
   </p>
 
@@ -38,7 +39,7 @@
 <!-- Metrics auto-verified from METRICS.md -->
 | Codebase | Test suite | History | Talk to it from |
 |---|---|---|---|
-| **~881K LOC** (698K Python code + 48K JS) | **23,080 tests** (1,743 test files) | **5,480+ commits** across 6 packages | Web · TUI · CLI · Telegram · Discord · Slack |
+| **~881K LOC** (698K Python code + 48K JS) | **23,080 tests** (1,743 test files) | **5,481+ commits** across 6 packages | Web · TUI · CLI · Telegram · Discord · Slack |
 
 ---
 
