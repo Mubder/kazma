@@ -506,6 +506,9 @@ def _panel_to_top(pg: Any, element_id: str) -> None:
     )
 
 
+# The memory seed embeds with the local model, so the memory probe shows real
+# recall (scripts/site_screenshots.py sets KAZMA_TEST_REAL_MODEL=1).
+@pytest.mark.real_model
 def test_site_shots(monkeypatch: pytest.MonkeyPatch) -> None:
     from playwright.sync_api import sync_playwright
 

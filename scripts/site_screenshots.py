@@ -33,6 +33,8 @@ def _capture(shots_dir: str, lang: str, theme: str) -> int:
         OMP_NUM_THREADS="2",
         MKL_NUM_THREADS="2",
         PYTHONIOENCODING="utf-8",
+        # The memory seed embeds with the local model (the test is real_model).
+        KAZMA_TEST_REAL_MODEL="1",
     )
     run = subprocess.run(
         [sys.executable, "-m", "pytest", "tests/site/test_site_screenshots.py",
