@@ -50,7 +50,9 @@ def _uses(steps: list[dict[str, Any]]) -> list[str]:
 def test_release_has_required_permission(
     workflow: dict[str, Any], permission: str, why: str
 ) -> None:
-    perms = workflow.get("permissions") or {}
+    # The release job's own grant: the workflow itself is read-only
+    # (tests/test_workflow_permissions.py, 2026-11-16).
+    perms = workflow["jobs"]["release"].get("permissions") or {}
     assert perms.get(permission) == "write", f"{permission}: write is required — {why}"
 
 

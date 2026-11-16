@@ -19,20 +19,25 @@ on:
         default: ""
         type: string
 
+# Read-only for the workflow; the one job that writes says what it writes
+# (OpenSSF Scorecard's Token-Permissions: a write granted to the whole
+# workflow reaches every job added to it later).
 permissions:
-  contents: write
-  # Keyless Sigstore signing and SLSA provenance both mint an OIDC token for
-  # this workflow run — that identity is what a verifier checks against, and
-  # it is why there is no private key to leak or rotate.
-  id-token: write
-  attestations: write
-  # actions/attest v4 writes an artifact storage record beside the provenance.
-  artifact-metadata: write
+  contents: read
 
 jobs:
   release:
     name: Tag + GitHub Release (no version bump)
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      # Keyless Sigstore signing and SLSA provenance both mint an OIDC token
+      # for this workflow run — that identity is what a verifier checks
+      # against, and it is why there is no private key to leak or rotate.
+      id-token: write
+      attestations: write
+      # actions/attest v4 writes an artifact storage record beside the provenance.
+      artifact-metadata: write
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

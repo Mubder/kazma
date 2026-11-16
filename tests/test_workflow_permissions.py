@@ -6,7 +6,10 @@ requests: the CI workflow, which only reads the code and runs it, held a
 token that could push. Three of six workflows declared nothing. Each one now
 declares its own, so the repository's default can be read-only without
 breaking a workflow, and a token that can write is on a short list with its
-reason. Planted workflows are the negative controls.
+reason. A write is granted to the job that needs it, never to the whole
+workflow (2026-11-16, OpenSSF Scorecard's Token-Permissions: release.yml
+granted its writes at the top, where every job added later inherits them).
+Planted workflows are the negative controls.
 """
 
 from __future__ import annotations
@@ -21,13 +24,13 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 
 # (workflow file, "workflow" or the job's id, permission) -> why it writes.
 WRITES: dict[tuple[str, str, str], str] = {
-    ("release.yml", "workflow", "contents"):
+    ("release.yml", "release", "contents"):
         "creates the version tag and the release, and uploads its files",
-    ("release.yml", "workflow", "id-token"):
+    ("release.yml", "release", "id-token"):
         "Sigstore signing and SLSA provenance mint an OIDC token for the run",
-    ("release.yml", "workflow", "attestations"):
+    ("release.yml", "release", "attestations"):
         "build provenance is written to the attestations store",
-    ("release.yml", "workflow", "artifact-metadata"):
+    ("release.yml", "release", "artifact-metadata"):
         "actions/attest v4 records the attested files in the artifact storage record",
     ("pypi-reserve.yml", "publish", "id-token"):
         "PyPI Trusted Publishing mints an OIDC token; no PyPI token exists",
@@ -53,6 +56,11 @@ def _grants(name: str, text: str) -> tuple[list[str], set[tuple[str, str, str]]]
         for permission, level in (value or {}).items():
             if level == "write":
                 writes.add((name, scope, str(permission)))
+                if scope == "workflow":
+                    problems.append(
+                        f"{name}: '{permission}: write' is granted to the whole workflow; "
+                        "grant it to the job that needs it"
+                    )
 
     if "permissions" not in doc:
         problems.append(f"{name}: no top-level permissions, so it takes the repository's default token")
@@ -111,3 +119,13 @@ def test_negative_control_write_all_and_an_undeclared_write_are_found():
     assert not problems
     assert writes == {("planted.yml", "a", "contents")}
     assert not writes <= set(WRITES)
+
+
+def test_negative_control_a_write_granted_to_the_whole_workflow_is_found():
+    """release.yml as it was until 2026-11-16."""
+    top_level = (
+        "name: X\npermissions:\n  contents: write\n  id-token: write\njobs:\n  a:\n"
+        "    runs-on: ubuntu-latest\n    steps: []\n"
+    )
+    problems, _ = _grants("planted.yml", top_level)
+    assert any("granted to the whole workflow" in p for p in problems)
