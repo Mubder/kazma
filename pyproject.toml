@@ -237,6 +237,33 @@ all = [
     "kazma[rag,dev,tui,observability,web,postgres,document,database,ocr,convert,document-platform,sandbox,durable,index,docling,neo4j]",
 ]
 
+# What CI and the images install beyond an extra, locked in uv.lock with every
+# file's hash (2026-11-16, OpenSSF Scorecard's Pinned-Dependencies). Each job
+# exports its set from the lock and installs it with --require-hashes
+# (.github/actions/install-locked); `pip install <name>` took whatever PyPI
+# served that day. Never installed by `uv sync` (not a default group), never
+# part of the published package.
+[dependency-groups]
+# The light pure-wheel packages the Tests job adds so their tests run rather
+# than skip (each also in an extra: rag, observability, ocr, document-platform).
+ci-light = [
+    "pillow>=13.0.0",
+    "pymupdf>=1.24.0,<2",
+    "sqlite-vec>=0.1.6",
+    "pypdfium2>=5.15.2",
+    "numpy>=2.0.0",
+    "prometheus-client>=0.26.0",
+]
+# Kazma's build backend, so `pip install --no-deps --no-build-isolation -e .`
+# builds with a locked hatchling instead of one fetched unpinned.
+# hatchling builds an editable install through `editables`.
+build = ["hatchling>=1.27.0", "editables>=0.5", "setuptools>=83.0.0"]
+lint = ["ruff==0.17.5"]
+scan = ["bandit==1.9.4"]
+# Coverage-guided fuzzing of the parsers of outside text (fuzz/). Atheris has
+# Linux wheels for Python 3.12 and later only.
+fuzz = ["atheris==3.1.0; sys_platform == 'linux' and python_version >= '3.12'"]
+
 [project.scripts]
 kazma = "kazma_cli.main:main"
 kazma-tui = "kazma_tui.app:main"

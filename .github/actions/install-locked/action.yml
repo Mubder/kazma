@@ -1,0 +1,53 @@
+# Install Kazma and what a job needs, every file checked against uv.lock.
+#
+# Each job exports its set from the lock (uv export: exact versions, every
+# file's SHA-256) and installs it with --require-hashes; Kazma itself goes in
+# editable with --no-deps and the locked build backend (--no-build-isolation).
+# Nothing comes from PyPI unpinned. Until 2026-11-16 the jobs ran
+# `pip install -e ".[test]"` and `pip install ruff`: whatever PyPI served
+# that day (OpenSSF Scorecard's Pinned-Dependencies). A new version reaches CI
+# through uv.lock -- Dependabot's uv updates, each tested by this CI.
+# Gate: tests/test_installs_pinned_by_hash.py.
+name: Install from uv.lock
+description: Install Kazma's locked dependencies, hash-checked, and Kazma editable.
+inputs:
+  extras:
+    description: Kazma extras to install, separated by spaces (test postgres ...).
+    required: false
+    default: ""
+  groups:
+    description: Dependency groups to add (ci-light, fuzz ...); build is always added.
+    required: false
+    default: ""
+  only-groups:
+    description: Install only these groups (lint, scan), without Kazma or its dependencies.
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        # The release setup.ps1 and setup.sh install (their $UvVersion).
+        version: "0.13.6"
+    - name: Export the locked set and install it
+      shell: bash
+      env:
+        EXTRAS: ${{ inputs.extras }}
+        GROUPS: ${{ inputs.groups }}
+        ONLY_GROUPS: ${{ inputs.only-groups }}
+      run: |
+        set -euo pipefail
+        args=()
+        if [ -n "$ONLY_GROUPS" ]; then
+          for group in $ONLY_GROUPS; do args+=(--only-group "$group"); done
+        else
+          for extra in $EXTRAS; do args+=(--extra "$extra"); done
+          for group in build $GROUPS; do args+=(--group "$group"); done
+        fi
+        requirements="$RUNNER_TEMP/kazma-locked-requirements.txt"
+        uv export --locked --no-emit-project --format requirements-txt "${args[@]}" -o "$requirements"
+        python -m pip install --require-hashes -r "$requirements"
+        if [ -z "$ONLY_GROUPS" ]; then
+          python -m pip install --no-deps --no-build-isolation -e .
+        fi

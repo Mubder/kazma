@@ -34,6 +34,8 @@ WRITES: dict[tuple[str, str, str], str] = {
         "actions/attest v4 records the attested files in the artifact storage record",
     ("pypi-reserve.yml", "publish", "id-token"):
         "PyPI Trusted Publishing mints an OIDC token; no PyPI token exists",
+    ("codeql.yml", "analyze", "security-events"):
+        "uploads CodeQL's results to GitHub's code scanning",
     ("scorecard.yml", "analysis", "security-events"):
         "uploads the Scorecard results to GitHub's code scanning",
     ("scorecard.yml", "analysis", "id-token"):

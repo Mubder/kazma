@@ -277,7 +277,9 @@ _FTS_LAYOUT = "rowid-1"
 #: different -- Arabic keyword search then misses silently (KB-E11).
 #: ``tests/test_knowledge_store_hardening.py`` holds the fold's output on a
 #: fixed sample to this number: change one, change the other.
-KB_FOLD_VERSION = 1
+#: 2 (2026-11-16): the fold runs to a fixed point (a mark after a removed
+#: tatweel composed only on a second fold).
+KB_FOLD_VERSION = 2
 
 _SCHEMA += _FTS_SCHEMA
 

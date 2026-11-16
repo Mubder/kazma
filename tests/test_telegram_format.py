@@ -104,3 +104,29 @@ async def test_gateway_html_reaches_sender_without_plaintext_fallback():
     payload = http.post.call_args.kwargs["json"]
     assert payload["parse_mode"] == "HTML"
     assert payload["text"] == "السياج ``` ثم <code>_protected</code> و <code>_join_prose_paragraphs</code>."
+
+
+# ── Bold and italic that overlap (found by fuzz/fuzz_telegram_format.py) ──
+
+
+@pytest.mark.parametrize(("source", "expected"), [
+    ("***x***", "<b><i>x</i></b>"),
+    ("**a _b** c_", "<b>a <i>b</i></b><i> c</i>"),
+    ("_a **b_ c**", "<i>a <b>b</b></i><b> c</b>"),
+    ("**bold** _it_", "<b>bold</b> <i>it</i>"),
+])
+def test_bold_and_italic_that_overlap_are_nested(source, expected):
+    """``***x***`` became ``<b><i>x</b></i>``: misnested, refused by Telegram,
+    and the reply arrived as plain text."""
+    assert md_to_tg_html(source) == expected
+
+
+def test_markers_around_nothing_keep_the_text():
+    assert md_to_tg_html("******") == "******"
+
+
+def test_control_without_the_balancing_the_tags_misnest(monkeypatch):
+    from kazma_gateway import telegram_format
+
+    monkeypatch.setattr(telegram_format, "_balance_style_tags", lambda s: s)
+    assert md_to_tg_html("***x***") == "<b><i>x</b></i>"

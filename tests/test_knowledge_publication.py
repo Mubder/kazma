@@ -684,11 +684,17 @@ _FOLD_SAMPLE = (
     "١٢٣ ۴۵۶ 2026",
     "كــتاب",
     "ﻻ ﺍ",
+    # A mark after a removed tatweel composes only on a second pass: the fold
+    # runs to a fixed point since version 2 (fuzz/fuzz_arabic_text.py).
+    "aـ́b",
 )
 #: KB_FOLD_VERSION -> the fold's output on the sample. A change to
 #: ``fold_for_search`` fails here until KB_FOLD_VERSION is raised (which
 #: rebuilds every index's folded column) and the new fingerprint recorded.
-_FOLD_FINGERPRINTS = {1: "3437d99abc2540105e1d138f7c4ed55b9cdfcd225c9ea0ed6bb8743f4035f038"}
+_FOLD_FINGERPRINTS = {
+    1: "3437d99abc2540105e1d138f7c4ed55b9cdfcd225c9ea0ed6bb8743f4035f038",
+    2: "e19ec2dab66e9b65d0051de2e1b35b1107ef0e87caa6ef584969be5f9f9589c2",
+}
 
 
 def _fingerprint(fold) -> str:

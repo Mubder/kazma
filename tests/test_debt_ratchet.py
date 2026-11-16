@@ -105,7 +105,7 @@ STRUCTURAL_BASELINE = {
     # both names are documented and held by tests, so they keep them.
     # 512 since 2026-11-15: the body layer (body_limits) asks
     # auth.is_always_open and auth.is_sensitive_path.
-    "module_local_public_symbols": 511,
+    "module_local_public_symbols": 510,
     "patched_value_imports": 72,
     "sleep_then_assert": 51,
     "bare_module_attr_assignments": 0,

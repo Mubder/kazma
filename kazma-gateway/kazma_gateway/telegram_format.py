@@ -43,6 +43,55 @@ def tg_escape(text: str) -> str:
     return html.escape(str(text), quote=False)
 
 
+#: The tags the bold and italic passes write (the text was escaped first, so
+#: every raw tag in it at that point is one of these).
+_STYLE_TAG_RE = re.compile(r"<(/?)(b|i)>")
+_EMPTY_STYLE_RE = re.compile(r"<(b|i)></\1>")
+
+
+def _balance_style_tags(s: str) -> str:
+    """Re-nest the ``<b>``/``<i>`` tags the bold and italic passes wrote.
+
+    The passes match independently, so ``***x***`` became
+    ``<b><i>x</b></i>`` (and ``**a _b** c_`` likewise): misnested tags
+    Telegram refuses, and the reply then arrived as plain text. A close that
+    is not the innermost open tag closes the ones inside it and opens them
+    again after; a close with no open tag is dropped; what is still open at
+    the end is closed. Found by ``fuzz/fuzz_telegram_format.py`` (2026-11-16).
+    """
+    out: list[str] = []
+    stack: list[str] = []
+    pos = 0
+    for match in _STYLE_TAG_RE.finditer(s):
+        out.append(s[pos:match.start()])
+        pos = match.end()
+        closing, name = match.group(1), match.group(2)
+        if not closing:
+            stack.append(name)
+            out.append(f"<{name}>")
+            continue
+        if name not in stack:
+            continue
+        reopen: list[str] = []
+        while stack[-1] != name:
+            inner = stack.pop()
+            out.append(f"</{inner}>")
+            reopen.append(inner)
+        stack.pop()
+        out.append(f"</{name}>")
+        for inner in reversed(reopen):
+            stack.append(inner)
+            out.append(f"<{inner}>")
+    out.append(s[pos:])
+    out.extend(f"</{name}>" for name in reversed(stack))
+    balanced = "".join(out)
+    while True:
+        tidied = _EMPTY_STYLE_RE.sub("", balanced)
+        if tidied == balanced:
+            return balanced
+        balanced = tidied
+
+
 def md_to_tg_html(text: str) -> str:
     """Convert common Markdown in worker/aggregated output to Telegram HTML.
 
@@ -91,11 +140,16 @@ def md_to_tg_html(text: str) -> str:
     # Bold then italic
     s = _BOLD_RE.sub(lambda m: f"<b>{m.group(1) or m.group(2)}</b>", s)
     s = _ITALIC_RE.sub(lambda m: f"<i>{m.group(1) or m.group(2)}</i>", s)
+    s = _balance_style_tags(s)
 
     # Restore stashed code/link segments
     for i, snippet in enumerate(placeholders):
         s = s.replace(f"\x00PH{i}\x00", snippet)
 
+    if not s.strip():
+        # Only markers around nothing ("******"): Telegram refuses an empty
+        # message, so the text goes as it was written.
+        return tg_escape(text)
     return s
 
 

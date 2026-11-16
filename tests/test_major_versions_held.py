@@ -15,9 +15,12 @@ installs a major version nobody tested the day it is published:
   corpus certification failed. The lock held 1.28.2, so no developer machine
   saw it.
 
-Every requirement on a held package in pyproject.toml, and every package a
-workflow installs by name, must exclude the held major version. Negative
-control: the old requirement and the old workflow line admit it.
+Every requirement on a held package in pyproject.toml (its dependency groups
+too), and every package a workflow installs by name, must exclude the held
+major version. Since 2026-11-16 CI installs from uv.lock
+(.github/actions/install-locked), so the lock's version of each held package
+is below its held major too. Negative control: the old requirement and the old
+workflow line admit it.
 """
 
 from __future__ import annotations
@@ -49,7 +52,14 @@ def _pyproject_requirements() -> list[str]:
     found = list(project.get("dependencies", []))
     for extra in project.get("optional-dependencies", {}).values():
         found.extend(extra)
+    for group in data.get("dependency-groups", {}).values():
+        found.extend(item for item in group if isinstance(item, str))
     return found
+
+
+def _locked_versions() -> dict[str, str]:
+    lock = tomllib.loads((REPO / "uv.lock").read_text(encoding="utf-8"))
+    return {pkg["name"].lower(): pkg["version"] for pkg in lock.get("package", []) if "version" in pkg}
 
 
 _PIP_LINE = re.compile(r"pip install[^\n]*")
@@ -87,10 +97,15 @@ def test_pyproject_holds_each_major_version_back():
 
 
 def test_every_workflow_install_holds_it_back_too():
-    installs = _workflow_installs()
-    assert any(spec.startswith("pymupdf") for _, spec in installs), "the workflows install PyMuPDF by name"
-    bad = _violations(installs)
+    bad = _violations(_workflow_installs())
     assert not bad, "\n".join(bad)
+
+
+def test_the_lock_ci_installs_from_holds_it_back():
+    locked = _locked_versions()
+    for name, (held, why) in HELD.items():
+        assert name in locked, f"{name} is not in uv.lock"
+        assert Version(locked[name]).major < int(held), f"uv.lock has {name} {locked[name]} ({why})"
 
 
 def test_each_held_package_is_required_somewhere():

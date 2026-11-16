@@ -23,7 +23,9 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install Kazma
-        run: pip install -e ".[test]"
+        uses: ./.github/actions/install-locked
+        with:
+          extras: test
       - name: Validate skills and a negative fixture
         run: |
           python -c "
@@ -74,9 +76,9 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install dependencies
-        run: |
-          pip install -e ".[test]"
-          pip install pytest pytest-cov
+        uses: ./.github/actions/install-locked
+        with:
+          extras: test
       - name: Run Skill Tests
         run: >-
           python -m pytest tests/test_agent_skills.py tests/test_agent_skill_integrity.py
@@ -95,9 +97,9 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade "setuptools>=83.0.0"
-          pip install -e ".[test]"
+        uses: ./.github/actions/install-locked
+        with:
+          extras: test
       - name: Check Dependency Vulnerabilities
         run: |
           python - <<'PY'

@@ -1,0 +1,10 @@
+# Advisories on the docs website's build packages (docs/package-lock.json)
+# that have no fixed release and that the build cannot reach, read for
+# OSV-Scanner (which OpenSSF Scorecard's Vulnerabilities check runs). These
+# packages build the static site; none ships with Kazma.
+# tests/test_osv_scanner_ignores.py fails when an entry's package moves to
+# another version (the ignore is then stale) or the lock no longer holds it.
+
+[[IgnoredVulns]]
+id = "GHSA-gcqx-w48m-w2h4"
+reason = "deepmerge 4.3.1 (no fixed release): prototype poisoning in mergeObject() when a merge source is attacker-controlled. Only @svgr/plugin-svgo uses it, at build time, to merge the site's own SVG settings; nothing outside the repository reaches it"

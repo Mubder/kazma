@@ -25,7 +25,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Install core deps
-        run: pip install -e .
+        uses: ./.github/actions/install-locked
       - name: Compile all Python files
         run: |
           python -c "
@@ -55,7 +55,10 @@ jobs:
       - name: Install deps
         # The Tests job's set: tests/test_imports.py imports every module
         # with exactly these installed.
-        run: pip install -e ".[test]" pillow "pymupdf>=1.24.0,<2" sqlite-vec pypdfium2 numpy prometheus-client
+        uses: ./.github/actions/install-locked
+        with:
+          extras: test
+          groups: ci-light
       - name: Import each product module in a fresh interpreter (GATE)
         # tests/test_imports.py imports every module in ONE process, where each
         # finds the earlier ones loaded, so an import cycle that only works when
@@ -73,7 +76,9 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - run: pip install ruff
+      - uses: ./.github/actions/install-locked
+        with:
+          only-groups: lint
       # F841 (unused local) and B033 (duplicate set item) joined the gate on
       # 2026-09-23 after the product was cleaned to zero: several unused
       # locals were hiding bugs (a JSON skill manifest parsed and ignored,
@@ -101,7 +106,10 @@ jobs:
         run: |
           set -euo pipefail
           uv venv "$RUNNER_TEMP/wheel-venv"
-          uv pip install --python "$RUNNER_TEMP/wheel-venv/bin/python" dist/*.whl
+          # The locked dependencies, hash-checked, then the wheel alone: what an
+          # update installs (the wheel's own locked versions, AGENTS.md §50).
+          uv pip install --python "$RUNNER_TEMP/wheel-venv/bin/python" --require-hashes -r "$RUNNER_TEMP/requirements.lock.txt"
+          uv pip install --python "$RUNNER_TEMP/wheel-venv/bin/python" --no-deps dist/*.whl
           "$RUNNER_TEMP/wheel-venv/bin/python" -c "import kazma_core, kazma_gateway, kazma_ui, kazma_cli, kazma_tui, kazma_skills; print('wheel imports ok')"
           "$RUNNER_TEMP/wheel-venv/bin/kazma" --help
 
@@ -133,7 +141,10 @@ jobs:
         # without it that test ERRORED rather than skipped. It is a tiny pure
         # wheel and installing it exercises the metrics path instead of
         # hiding it — the same reasoning as the extras above.
-        run: pip install -e ".[test]" pillow "pymupdf>=1.24.0,<2" sqlite-vec pypdfium2 numpy prometheus-client
+        uses: ./.github/actions/install-locked
+        with:
+          extras: test
+          groups: ci-light
       - name: Install Arabic rendering system deps
         # The visual RTL tests (tests/test_docx_rtl_visual.py) render DOCX
         # through LibreOffice and measure where glyphs land on the page. They
@@ -210,7 +221,10 @@ jobs:
       - name: Install deps
         # pymupdf: the neural OCR test draws its Arabic page with it in the
         # test process (a skip fails this job, below).
-        run: pip install -e ".[test]" "pymupdf>=1.24.0,<2"
+        uses: ./.github/actions/install-locked
+        with:
+          extras: test
+          groups: ci-light
       - name: Build the worker and broker images
         run: |
           docker version --format 'engine {{.Server.Version}} {{.Server.Os}}/{{.Server.Arch}}'
@@ -266,7 +280,9 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Install deps
-        run: pip install -e ".[test,postgres]"
+        uses: ./.github/actions/install-locked
+        with:
+          extras: test postgres
       - name: Run the Postgres-marked tests against a real Postgres
         # Marked tests rather than a broad `-k`: a keyword sweep drags in
         # SQLite-shaped tests that fail for reasons that are not the backend,
@@ -346,13 +362,16 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - name: Install deps, restic and Tesseract
+      - name: Install restic and Tesseract
         run: |
           sudo apt-get update
           sudo apt-get install -y restic tesseract-ocr tesseract-ocr-eng
           restic version
           tesseract --version
-          pip install -e ".[test,postgres,document,ocr,document-platform]"
+      - name: Install deps
+        uses: ./.github/actions/install-locked
+        with:
+          extras: test postgres document ocr document-platform
       - name: Start a throwaway Postgres the drill may stop
         run: |
           docker run -d --name kazma-drill-pg -e POSTGRES_USER=kazma -e POSTGRES_PASSWORD=kazma \
@@ -444,7 +463,9 @@ jobs:
         with:
           node-version: "24"
       - name: Install app
-        run: pip install -e ".[test,web]"
+        uses: ./.github/actions/install-locked
+        with:
+          extras: test web
       - name: Record the build under test
         # Written before anything runs, so a failed job still says which
         # build failed. Lands in the uploaded directory (plan §13).
@@ -616,10 +637,12 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - name: Install app + Playwright
-        run: |
-          pip install -e ".[test,web]"
-          python -m playwright install chromium --with-deps
+      - name: Install app
+        uses: ./.github/actions/install-locked
+        with:
+          extras: test web
+      - name: Install Playwright's Chromium
+        run: python -m playwright install chromium --with-deps
       - name: Health + composer smoke
         run: python -m pytest tests/e2e/test_smoke.py -q --timeout=180
         env:
@@ -872,7 +895,9 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Install test deps
-        run: pip install -e ".[test]"
+        uses: ./.github/actions/install-locked
+        with:
+          extras: test
       - name: Compile-check + selector-loop regressions
         run: |
           python -c "import py_compile, pathlib; [py_compile.compile(str(p), doraise=True) for p in pathlib.Path('kazma-core/kazma_core').rglob('*.py')]"
@@ -888,7 +913,9 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - run: pip install -e ".[test,durable]"
+      - uses: ./.github/actions/install-locked
+        with:
+          extras: test durable
       # The durable swarm path qualified on Temporal's time-skipping test
       # server (Swarm tracker SQ03; downloaded by the SDK on first use): runs,
       # deadlines, cancels, a resume, lost acknowledgements and a worker
@@ -920,7 +947,9 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Install runtime and Temporal SDK
-        run: pip install -e ".[test,durable]"
+        uses: ./.github/actions/install-locked
+        with:
+          extras: test durable
       - name: Verify the durable SDK is exercised
         run: python -c "from temporalio.common import RetryPolicy, WorkflowIDReusePolicy; from kazma_core.swarm.durable_temporal import workflow; assert workflow is not None; assert RetryPolicy(maximum_attempts=1).maximum_attempts == 1"
       - name: Run recovery, isolation, approval and review regressions
@@ -990,7 +1019,9 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - run: pip install bandit
+      - uses: ./.github/actions/install-locked
+        with:
+          only-groups: scan
       - name: Bandit report (artifact only)
         # The JSON dump is for humans; it must not decide the build. It covers
         # MORE than the gate on purpose — visibility is free, a red gate is not.

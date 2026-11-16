@@ -1,0 +1,55 @@
+# Coverage-guided fuzzing of the code that reads outside text: the data fence,
+# the secret maskers, the Telegram converter, shell_exec's command reading,
+# the Arabic search fold, the MCP sign-in challenge (fuzz/fuzz_*.py, Atheris).
+# Each target states an invariant; a crash or a broken invariant fails the run
+# and the input that broke it is kept as an artifact. The same invariants run
+# in the ordinary test suite on every platform (tests/test_fuzz_targets.py).
+# Its first findings (2026-11-16): the Arabic fold was not a fixed point, and
+# overlapping bold and italic misnested Telegram's tags.
+name: Fuzzing
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Weekly, longer: new paths are found by time, not by commits.
+    - cron: "41 3 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  atheris:
+    name: Atheris fuzz targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          # Atheris has wheels for Python 3.12 and later only.
+          python-version: "3.12"
+      - uses: ./.github/actions/install-locked
+        with:
+          groups: fuzz
+      - name: Fuzz each target
+        env:
+          SECONDS_EACH: ${{ github.event_name == 'schedule' && '300' || '45' }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/fuzz-findings"
+          for target in fuzz/fuzz_*.py; do
+            name="$(basename "$target" .py)"
+            echo "::group::$name"
+            python "$target" -max_total_time="$SECONDS_EACH" -rss_limit_mb=3072 \
+              -print_final_stats=1 -artifact_prefix="$RUNNER_TEMP/fuzz-findings/$name-"
+            echo "::endgroup::"
+          done
+      - name: Keep the inputs that broke a target
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: fuzz-findings
+          path: ${{ runner.temp }}/fuzz-findings
+          if-no-files-found: ignore

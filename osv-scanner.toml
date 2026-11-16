@@ -1,0 +1,48 @@
+# Advisories on packages in uv.lock that have no fixed release and that
+# Kazma's use of the package cannot reach, read for OSV-Scanner (which OpenSSF
+# Scorecard's Vulnerabilities check runs). The one review is
+# kazma_core.security.dependency_scanner.REVIEWED_ADVISORIES: its reason and
+# what code would make the advisory reachable (tests/test_dependency_scanner.py
+# fails when that code appears). Each advisory is listed under its PyPI id and
+# its GitHub id; tests/test_osv_scanner_ignores.py holds this file to that
+# list, both ways. Remove an entry when its package is updated past it.
+
+[[IgnoredVulns]]
+id = "GHSA-f4j7-r4q5-qw2c"
+reason = "chromadb: pre-authentication code injection through a Chroma server's collection API; Kazma embeds Chroma in its own process and runs no Chroma server"
+
+[[IgnoredVulns]]
+id = "PYSEC-2026-311"
+reason = "GHSA-f4j7-r4q5-qw2c (the same advisory): no Chroma server runs"
+
+[[IgnoredVulns]]
+id = "GHSA-2wm9-hf6c-p5cr"
+reason = "chromadb: a Chroma server's tenant authorization; no Chroma server runs"
+
+[[IgnoredVulns]]
+id = "PYSEC-2026-3813"
+reason = "GHSA-2wm9-hf6c-p5cr (the same advisory): no Chroma server runs"
+
+[[IgnoredVulns]]
+id = "GHSA-36p7-vc44-83pf"
+reason = "chromadb: code injection through a Chroma server's collection API; Kazma embeds Chroma in its own process and runs no Chroma server"
+
+[[IgnoredVulns]]
+id = "PYSEC-2026-3814"
+reason = "GHSA-36p7-vc44-83pf (the same advisory): no Chroma server runs"
+
+[[IgnoredVulns]]
+id = "GHSA-xph7-9rjv-w5fr"
+reason = "chromadb: a Chroma server's SimpleRBACAuthorizationProvider; no Chroma server runs"
+
+[[IgnoredVulns]]
+id = "PYSEC-2026-3815"
+reason = "GHSA-xph7-9rjv-w5fr (the same advisory): no Chroma server runs"
+
+[[IgnoredVulns]]
+id = "GHSA-4j2p-28q2-5m79"
+reason = "accelerate: loading a sharded checkpoint whose index names other paths; Kazma never calls load_checkpoint_in_model or load_checkpoint_and_dispatch"
+
+[[IgnoredVulns]]
+id = "PYSEC-2026-3804"
+reason = "GHSA-4j2p-28q2-5m79 (the same advisory): Kazma never loads a sharded checkpoint"

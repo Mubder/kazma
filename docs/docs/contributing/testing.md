@@ -76,6 +76,26 @@ mask, `shell_exec`, the HITL gate, or tenant scoping, run it:
 pytest tests/test_audit_2026_08_29_regressions.py -q
 ```
 
+## Fuzzing
+
+`fuzz/fuzz_*.py` are [Atheris](https://github.com/google/atheris) fuzz
+targets for the code that reads text from outside: the data fence around
+fetched pages, the secret maskers, the Telegram converter, `shell_exec`'s
+command reading, the Arabic search fold and the MCP sign-in challenge. Each
+target states its invariant in a `check(data)` function. The `Fuzzing`
+workflow runs every target on each push to `main` and for longer once a week.
+`tests/test_fuzz_targets.py` runs every `check` in the ordinary suite, on
+every platform.
+
+To fuzz one target yourself (Linux, Python 3.12 or later):
+
+```bash
+uv sync --inexact --group fuzz
+python fuzz/fuzz_prompt_fence.py -max_total_time=60
+```
+
+A new parser of outside text gets a target.
+
 ## Testing modules that became packages
 
 Several former god modules are now packages behind unchanged facades

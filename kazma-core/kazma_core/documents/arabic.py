@@ -372,6 +372,21 @@ def fold_for_search(text: str) -> str:
     """
     if not text:
         return ""
+    folded = _fold_once(text)
+    # Folded until stable: a fold of a fold is the fold. Removing a mark can
+    # leave two characters NFKC then composes, so one pass was not a fixed
+    # point -- "a" + tatweel + combining acute folded to "á", and again
+    # to "á" -- and the index and the query fold separately (found by
+    # fuzz/fuzz_arabic_text.py, 2026-11-16).
+    for _ in range(4):
+        again = _fold_once(folded)
+        if again == folded:
+            break
+        folded = again
+    return folded
+
+
+def _fold_once(text: str) -> str:
     folded = unicodedata.normalize("NFKC", text)
     folded = _HARAKAT_RE.sub("", folded)
     folded = folded.translate(_SEARCH_TRANSLATE)

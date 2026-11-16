@@ -58,7 +58,16 @@ COPY . .
 # Install with RAG + Postgres extras (one runtime owner)
 # document-platform brings pymupdf + pypdfium2, without which convert and
 # redact return 503 in a container that otherwise reports healthy.
-RUN pip install --no-cache-dir -e ".[rag,postgres,document-platform]"
+# Every file from uv.lock, checked against its hash (2026-11-16; it was
+# `pip install -e ".[...]"`, whatever PyPI served at build time). uv comes
+# from its own image, pinned by digest like the base image.
+COPY --from=ghcr.io/astral-sh/uv:0.13.6@sha256:af22a52f5eafef3d78e551599d405c02df61919d18028f0cea8eda93bc9986d0 /uv /usr/local/bin/uv
+RUN uv export --locked --no-emit-project --format requirements-txt \
+        --extra rag --extra postgres --extra document-platform --group build \
+        -o /tmp/kazma-requirements.txt \
+    && pip install --no-cache-dir --require-hashes -r /tmp/kazma-requirements.txt \
+    && pip install --no-cache-dir --no-deps --no-build-isolation -e . \
+    && rm /tmp/kazma-requirements.txt
 
 # Create non-root user for security (least-privilege)
 RUN groupadd -g 10001 kazma \
