@@ -1048,7 +1048,7 @@ class Neo4jGraphBackend:
                     if not ent or ent in nodes:
                         continue
                     etype = ent_types.get(ent) or (
-                        "person" if ent == "user" else ("concept" if is_obj else "concept")
+                        "person" if ent == "user" else "concept"
                     )
                     long_obj = is_obj and len(str(ent)) > 80
                     nodes[ent] = {

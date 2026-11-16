@@ -663,7 +663,7 @@ function xStudioPage() {
       const counts = {};
       this.queue.forEach((item) => {
         const parsed = item.when ? new Date(item.when) : null;
-        if (!parsed || isNaN(parsed.getTime())) return;
+        if (!parsed || Number.isNaN(parsed.getTime())) return;
         const key = this._localKey(parsed);
         counts[key] = (counts[key] || 0) + 1;
       });
@@ -697,7 +697,7 @@ function xStudioPage() {
     toLocalInput(iso) {
       if (!iso) return '';
       const d = new Date(iso);
-      if (isNaN(d.getTime())) return '';
+      if (Number.isNaN(d.getTime())) return '';
       const shifted = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
       return shifted.toISOString().slice(0, 16);
     },

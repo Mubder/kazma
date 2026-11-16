@@ -178,8 +178,7 @@ var KazmaIcons = (function () {
     '⏹': 'square', '⏹️': 'square',
     '↻': 'refresh', '↺': 'refresh',
     '←': 'chevron-left', '→': 'chevron-right',
-    '▲': 'chevron-up', '▼': 'chevron-down',
-    '➜': 'chevron-right',
+    '▲': 'chevron-up',
   };
 
   // Expose every icon as a direct property (KazmaIcons.save(), KazmaIcons.folder(), …)

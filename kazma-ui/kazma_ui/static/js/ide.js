@@ -1324,8 +1324,8 @@ function ideApp() {
       var layout = document.querySelector('.ide-layout');
       if (!layout) return;
       var startX = e.clientX;
-      var startTree = parseInt(getComputedStyle(layout).getPropertyValue('--ide-tree-w') || '260');
-      var startChat = parseInt(getComputedStyle(layout).getPropertyValue('--ide-chat-w') || '380');
+      var startTree = Number.parseInt(getComputedStyle(layout).getPropertyValue('--ide-tree-w') || '260');
+      var startChat = Number.parseInt(getComputedStyle(layout).getPropertyValue('--ide-chat-w') || '380');
 
       document.body.style.cursor = 'col-resize';
       document.body.style.userSelect = 'none';

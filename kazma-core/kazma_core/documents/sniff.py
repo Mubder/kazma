@@ -219,7 +219,8 @@ def preflight_ooxml(path: Path, config: DocumentConfig) -> str:
                 raise DocumentFormatError(
                     "OOXML archive member could not be decompressed"
                 ) from exc
-            except (EOFError, NotImplementedError, OSError, zipfile.BadZipFile) as exc:
+            # NotImplementedError is a RuntimeError: the clause above has it.
+            except (EOFError, OSError, zipfile.BadZipFile) as exc:
                 raise DocumentFormatError(
                     "OOXML archive member failed integrity validation"
                 ) from exc

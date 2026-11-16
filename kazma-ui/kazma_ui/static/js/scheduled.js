@@ -137,7 +137,7 @@ function scheduledPage() {
             const raw = task && task.when;
             if (!raw) return null;
             const d = new Date(raw);
-            return isNaN(d.getTime()) ? null : d;
+            return Number.isNaN(d.getTime()) ? null : d;
         },
 
         /* Absolute time in the VIEWER's zone, with the zone named

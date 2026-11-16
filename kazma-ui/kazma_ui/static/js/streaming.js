@@ -539,7 +539,7 @@ var KazmaStream = (function() {
           indent: ol[1].length,
           ordered: true,
           task: false,
-          start: parseInt(ol[2], 10) || 1,
+          start: Number.parseInt(ol[2], 10) || 1,
           text: ol[3],
         };
       }

@@ -86,7 +86,7 @@ function _hex(rgb) {
 export function accentVariants(hex) {
     if (typeof hex !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(hex.trim())) return null;
     const v = hex.trim().toLowerCase();
-    const base = [parseInt(v.slice(1, 3), 16), parseInt(v.slice(3, 5), 16), parseInt(v.slice(5, 7), 16)];
+    const base = [Number.parseInt(v.slice(1, 3), 16), Number.parseInt(v.slice(3, 5), 16), Number.parseInt(v.slice(5, 7), 16)];
     let dark = base;
     for (let step = 1; step <= 20; step++) {
         if (_contrast(dark, _DARK_WALL) >= 3.0 &&

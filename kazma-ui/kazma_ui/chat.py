@@ -84,6 +84,3 @@ def create_chat_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRout
     # Both routers use the same SessionManager singleton anyway.
 
     return r
-
-
-    return r

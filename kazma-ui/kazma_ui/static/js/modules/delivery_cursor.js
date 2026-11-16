@@ -14,8 +14,8 @@ window.KazmaDeliveryCursor = (function() {
     try {
       var raw = window.localStorage.getItem(LS_PREFIX + sessionKey);
       if (raw == null) return 0;
-      var n = parseInt(raw, 10);
-      return isNaN(n) || n < 0 ? 0 : n;
+      var n = Number.parseInt(raw, 10);
+      return Number.isNaN(n) || n < 0 ? 0 : n;
     } catch (e) { return 0; }
   }
 
@@ -38,8 +38,8 @@ window.KazmaDeliveryCursor = (function() {
     return {
       observeSeq: function(seq) {
         if (seq == null) return 'dupe';
-        var n = parseInt(seq, 10);
-        if (isNaN(n) || n < 0) return 'dupe';
+        var n = Number.parseInt(seq, 10);
+        if (Number.isNaN(n) || n < 0) return 'dupe';
         if (last === null) {
           // First frame of a connection. If the server replayed from our
           // persisted cursor this is contiguous; a fresh page simply starts
@@ -63,8 +63,8 @@ window.KazmaDeliveryCursor = (function() {
        * skips as gaps. Live frames after head still detect real gaps.
        */
       seed: function(seq) {
-        var n = parseInt(seq, 10);
-        if (isNaN(n) || n < 0) return;
+        var n = Number.parseInt(seq, 10);
+        if (Number.isNaN(n) || n < 0) return;
         if (last === null || n > last) {
           last = n;
         }
@@ -84,8 +84,8 @@ window.KazmaDeliveryCursor = (function() {
    * spent, a running turn shown dead, a refresh no help (2026-10-16).
    */
   function adoptHead(sessionKey, head, tracker) {
-    var n = parseInt(head, 10);
-    if (isNaN(n) || n < 0) n = 0;
+    var n = Number.parseInt(head, 10);
+    if (Number.isNaN(n) || n < 0) n = 0;
     if (sessionKey) persist(sessionKey, n);
     if (tracker) {
       if (typeof tracker.reset === 'function') tracker.reset();

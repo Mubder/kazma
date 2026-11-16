@@ -161,7 +161,7 @@ jobs:
             -o requirements.lock.txt
           # From uv.lock's `sbom` group, its dependencies hash-checked: uvx
           # pinned only the tool (tests/test_installs_pinned_by_hash.py).
-          uv run --frozen --only-group sbom cyclonedx-py requirements requirements.lock.txt \
+          uv run --frozen --no-build --only-group sbom cyclonedx-py requirements requirements.lock.txt \
             --of JSON -o "dist/kazma-${BASE}.cdx.json" \
             --sv 1.6 --output-reproducible
           python -c "import json,sys; d=json.load(open(sys.argv[1],encoding='utf-8')); print('SBOM components:', len(d.get('components') or []))" \
@@ -207,7 +207,7 @@ jobs:
           (cd dist && sha256sum -c SHA256SUMS)
           # From uv.lock's `sign` group (sigstore and every dependency
           # hash-checked), in the job that holds the signing identity.
-          uv run --frozen --only-group sign sigstore sign \
+          uv run --frozen --no-build --only-group sign sigstore sign \
             dist/kazma-*.whl dist/kazma-*.tar.gz dist/kazma-*.cdx.json dist/SHA256SUMS
           ls -la dist
 
@@ -217,7 +217,7 @@ jobs:
       - name: Verify the signatures as kazma update does
         run: |
           set -euo pipefail
-          uv run --frozen --only-group sign python scripts/verify_release_signatures.py dist
+          uv run --frozen --no-build --only-group sign python scripts/verify_release_signatures.py dist
           sha256sum -c build-artifacts.sha256
 
       # Every release is tested as an upgrade from the one before (REMAINING

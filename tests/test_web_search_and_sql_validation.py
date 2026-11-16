@@ -73,14 +73,15 @@ async def test_sqlite_query_with_comments():
 
 
 
+@pytest.mark.network
 @pytest.mark.asyncio
 async def test_web_search_bing_fallback():
-    # Test that web_search works and fallback parsing works correctly on Bing search.
-    # Note: This executes actual HTTP requests to Bing. If network is completely offline, it will fail gracefully.
-    try:
-        results = await web_search("kazma agent framework")
-        print("Web Search Result Header:\n", results[:200])
-        assert "Search results for:" in results
-        assert "kazma" in results.lower() or "framework" in results.lower()
-    except Exception as exc:
-        pytest.skip(f"Network / Search test skipped due to external network error: {exc}")
+    """A real search through the chain (KAZMA_TEST_NETWORK=1 runs it).
+
+    Its asserts sat inside ``try/except Exception -> skip``: a failed assert
+    became a skip, so it could never fail (SonarCloud review, 2026-11-16). The
+    offline parsing is tests/test_web_search_unrelated.py's.
+    """
+    results = await web_search("kazma agent framework")
+    assert "Search results for:" in results
+    assert "kazma" in results.lower() or "framework" in results.lower()
