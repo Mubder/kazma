@@ -1,0 +1,27 @@
+# Combine a measured job's data files and send them to Codecov under a flag.
+#
+# The upload proves the run with GitHub's OIDC token (`use_oidc`): the job
+# needs `id-token: write`, and no Codecov token is stored anywhere.
+name: Coverage upload
+description: Combine the coverage data and upload it to Codecov.
+inputs:
+  flag:
+    description: The Codecov flag naming what this job measured (unit, postgres, browser...).
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Combine the data files and write the report
+      shell: bash
+      run: |
+        python -m coverage combine
+        python -m coverage xml -i -o coverage.xml
+        python -m coverage report -i --format=total
+    - name: Upload to Codecov
+      uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+      with:
+        use_oidc: true
+        files: coverage.xml
+        flags: ${{ inputs.flag }}
+        disable_search: true
+        fail_ci_if_error: false

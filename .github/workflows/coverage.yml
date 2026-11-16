@@ -1,14 +1,17 @@
 # Test coverage, published to Codecov (app.codecov.io/gh/Mubder/kazma).
 #
-# The whole suite runs once under coverage.py: scripts/fast_test.py's chunks
-# are separate Python processes, measured through coverage's subprocess patch
-# (`patch = subprocess`), each writing its own data file, combined at the end.
-# This workflow measures and never gates: CI's Tests job is the gate, and a
-# few tests that check a child process's exact environment see coverage's own
-# variable here.
+# Each job runs one of CI's suites again under coverage.py, and uploads it to
+# Codecov under its own flag, which Codecov merges into one report: the unit
+# suite (scripts/fast_test.py), the Postgres-marked tests on a real Postgres,
+# the browser suites, the recovery drills, the document worker's container
+# profile and the durable (Temporal) path. Every Python process a job starts
+# is measured through coverage's subprocess patch (.github/actions/
+# coverage-setup), each writing its own data file, combined at the end.
 #
-# The upload proves the run with GitHub's OIDC token (`use_oidc`): no Codecov
-# token is stored anywhere.
+# These jobs measure and never gate: CI's jobs are the gates, and a few tests
+# that check a child process's exact environment see coverage's own variable
+# here. The upload proves the run with GitHub's OIDC token (`use_oidc`): no
+# Codecov token is stored anywhere.
 name: Coverage
 
 on:
@@ -25,7 +28,7 @@ concurrency:
 
 jobs:
   coverage:
-    name: Test coverage (Codecov)
+    name: "Coverage: unit suite"
     runs-on: ubuntu-latest
     timeout-minutes: 150
     permissions:
@@ -42,48 +45,217 @@ jobs:
         with:
           extras: test
           groups: ci-light
+      - uses: ./.github/actions/coverage-setup
       - name: Install the system programs the tests use
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libreoffice-writer fonts-noto-core fontconfig \
             tesseract-ocr tesseract-ocr-ara tesseract-ocr-eng ripgrep
-      - name: Configure coverage
-        run: |
-          mkdir -p "$RUNNER_TEMP/coverage"
-          cat > "$RUNNER_TEMP/coveragerc" <<EOF
-          [run]
-          branch = True
-          parallel = True
-          patch = subprocess
-          data_file = $RUNNER_TEMP/coverage/.coverage
-          source =
-              kazma-core/kazma_core
-              kazma-gateway/kazma_gateway
-              kazma-ui/kazma_ui
-              kazma-cli/kazma_cli
-              kazma-tui/kazma_tui
-              kazma-skills/kazma_skills
-          omit = */tests/*
-          EOF
-          echo "COVERAGE_RCFILE=$RUNNER_TEMP/coveragerc" >> "$GITHUB_ENV"
       - name: Run the suite under coverage
-        # Measures; CI's Tests job gates (see the top of this file).
         continue-on-error: true
         env:
           KAZMA_DB_BACKEND: sqlite
         run: python -m coverage run scripts/fast_test.py --chunks 4
-      - name: Combine the data files and write the report
+      - uses: ./.github/actions/coverage-upload
         if: always()
-        run: |
-          python -m coverage combine
-          python -m coverage xml -i -o coverage.xml
-          python -m coverage report -i --format=total
-      - name: Upload to Codecov
-        if: always()
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
-          use_oidc: true
-          files: coverage.xml
-          disable_search: true
-          fail_ci_if_error: false
+          flag: unit
+
+  postgres:
+    name: "Coverage: Postgres"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: kazma
+          POSTGRES_PASSWORD: kazma
+          POSTGRES_DB: kazma_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U kazma"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.11"
+      - uses: ./.github/actions/install-locked
+        with:
+          extras: test postgres
+      - uses: ./.github/actions/coverage-setup
+      - name: Run the Postgres-marked tests under coverage
+        continue-on-error: true
+        env:
+          KAZMA_DB_BACKEND: postgres
+          KAZMA_DATABASE_URL: postgresql://kazma:kazma@localhost:5432/kazma_test
+          KAZMA_TEST_ALLOW_REAL_DB: '1'
+        run: python -m coverage run scripts/postgres_suite.py
+      - uses: ./.github/actions/coverage-upload
+        if: always()
+        with:
+          flag: postgres
+
+  browser:
+    name: "Coverage: browser suites"
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.11"
+      - uses: ./.github/actions/install-locked
+        with:
+          extras: test web
+      - uses: ./.github/actions/coverage-setup
+      - name: Install Chromium
+        run: python -m playwright install chromium --with-deps
+      - name: Run every browser suite under coverage
+        continue-on-error: true
+        env:
+          KAZMA_DB_BACKEND: sqlite
+        run: python -m coverage run -m pytest tests/e2e -q --timeout=1200 -p no:cacheprovider
+      - uses: ./.github/actions/coverage-upload
+        if: always()
+        with:
+          flag: browser
+
+  drills:
+    name: "Coverage: recovery drills"
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.11"
+      - uses: ./.github/actions/install-locked
+        with:
+          extras: test postgres document ocr document-platform
+      - uses: ./.github/actions/coverage-setup
+      - name: Install restic and Tesseract
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y restic tesseract-ocr tesseract-ocr-eng
+      - name: Start a throwaway Postgres the drill may stop
+        run: |
+          docker run -d --name kazma-drill-pg -e POSTGRES_USER=kazma -e POSTGRES_PASSWORD=kazma \
+            -e POSTGRES_DB=kazma_drill -p 5433:5432 postgres:18
+          for i in $(seq 1 30); do docker exec kazma-drill-pg pg_isready -U kazma && break; sleep 2; done
+      - name: Backup and restore drills
+        continue-on-error: true
+        run: |
+          python -m coverage run -m pytest tests/test_drill_restic_restore_recall.py \
+            tests/test_drill_restic_lock_handling.py tests/test_restic_repo.py -q --timeout=600 -p no:cacheprovider
+      - name: A database outage is ridden out
+        continue-on-error: true
+        env:
+          KAZMA_DB_BACKEND: postgres
+          KAZMA_DATABASE_URL: postgresql://kazma:kazma@localhost:5433/kazma_drill
+          KAZMA_TEST_ALLOW_REAL_DB: '1'
+          KAZMA_DB_CONTAINER: kazma-drill-pg
+          KAZMA_TEST_PG_OUTAGE_CONTAINER: kazma-drill-pg
+        run: python -m coverage run -m pytest "tests/test_pg_outage_ridden_out.py::test_a_real_postgres_outage_is_ridden_out" -q --timeout=300 -p no:cacheprovider
+      - name: Memory restore drill on Postgres
+        continue-on-error: true
+        env:
+          KAZMA_DB_BACKEND: postgres
+          KAZMA_DATABASE_URL: postgresql://kazma:kazma@localhost:5433/kazma_drill
+          KAZMA_TEST_ALLOW_REAL_DB: '1'
+          KAZMA_DB_CONTAINER: kazma-drill-pg
+        run: python -m coverage run -m pytest tests/test_memory_restore_drill_pg.py -q --timeout=600 -p no:cacheprovider
+      - name: A graceful reload with a turn and an OCR job running
+        continue-on-error: true
+        env:
+          KAZMA_TEST_RELOAD_DRILL: '1'
+        run: python -m coverage run -m pytest tests/test_drill_graceful_reload.py -q --timeout=900 -p no:cacheprovider
+      - name: Remove the throwaway Postgres
+        if: always()
+        run: docker rm -f kazma-drill-pg || true
+      - uses: ./.github/actions/coverage-upload
+        if: always()
+        with:
+          flag: drills
+
+  container:
+    name: "Coverage: document worker container"
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.11"
+      - uses: ./.github/actions/install-locked
+        with:
+          extras: test
+          groups: ci-light
+      - uses: ./.github/actions/coverage-setup
+      - name: Build the worker image
+        run: docker build -f deploy/document-worker/Dockerfile -t kazma-document-worker:ci .
+      - name: Run the container-profile suite under coverage
+        continue-on-error: true
+        env:
+          KAZMA_TEST_DOCUMENT_WORKER_IMAGE: kazma-document-worker:ci
+        run: |
+          python -m coverage run -m pytest tests/test_document_worker_container_docker.py \
+            tests/test_document_worker_container.py tests/test_weasyprint_renderer.py -q --timeout=300 -p no:cacheprovider
+      - uses: ./.github/actions/coverage-upload
+        if: always()
+        with:
+          flag: container
+
+  durable:
+    name: "Coverage: durable swarm (Temporal)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.11"
+      - uses: ./.github/actions/install-locked
+        with:
+          extras: test durable
+      - uses: ./.github/actions/coverage-setup
+      - name: Run the Temporal suites under coverage
+        continue-on-error: true
+        env:
+          KAZMA_TEST_TEMPORAL_REQUIRED: '1'
+        run: |
+          python -m coverage run -m pytest tests/test_swarm_temporal_durable.py \
+            tests/test_temporal_execution_recovery.py tests/test_e2b_temporal.py -q --timeout=300 -p no:cacheprovider
+      - uses: ./.github/actions/coverage-upload
+        if: always()
+        with:
+          flag: durable

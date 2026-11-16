@@ -38,8 +38,11 @@ WRITES: dict[tuple[str, str, str], str] = {
         "uploads CodeQL's results to GitHub's code scanning",
     ("scorecard.yml", "analysis", "security-events"):
         "uploads the Scorecard results to GitHub's code scanning",
-    ("coverage.yml", "coverage", "id-token"):
-        "the Codecov upload proves the run with an OIDC token; no Codecov token is stored",
+    **{
+        ("coverage.yml", job, "id-token"):
+            "the Codecov upload proves the run with an OIDC token; no Codecov token is stored"
+        for job in ("coverage", "postgres", "browser", "drills", "container", "durable")
+    },
     ("scorecard.yml", "analysis", "id-token"):
         "publishing to the OpenSSF Scorecard API proves the run with an OIDC token",
 }

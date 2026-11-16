@@ -1,0 +1,33 @@
+# Measure every Python process a coverage job starts.
+#
+# Writes the coverage settings into $RUNNER_TEMP and points COVERAGE_RCFILE at
+# them, so `python -m coverage run ...` and every Python child it starts
+# (`patch = subprocess`: pytest's own children, a server a test starts, the
+# guard's child) write their own data file, combined by coverage-upload.
+name: Coverage setup
+description: Write the coverage settings for a measured job.
+runs:
+  using: composite
+  steps:
+    - name: Configure coverage
+      shell: bash
+      run: |
+        mkdir -p "$RUNNER_TEMP/coverage"
+        cat > "$RUNNER_TEMP/coveragerc" <<EOF
+        [run]
+        branch = True
+        parallel = True
+        patch = subprocess
+        # Absolute: a child may run in another folder (the reload drill's install).
+        data_file = $RUNNER_TEMP/coverage/.coverage
+        source =
+            $GITHUB_WORKSPACE/kazma-core/kazma_core
+            $GITHUB_WORKSPACE/kazma-gateway/kazma_gateway
+            $GITHUB_WORKSPACE/kazma-ui/kazma_ui
+            $GITHUB_WORKSPACE/kazma-cli/kazma_cli
+            $GITHUB_WORKSPACE/kazma-tui/kazma_tui
+            $GITHUB_WORKSPACE/kazma-skills/kazma_skills
+        omit = */tests/*
+        relative_files = True
+        EOF
+        echo "COVERAGE_RCFILE=$RUNNER_TEMP/coveragerc" >> "$GITHUB_ENV"
