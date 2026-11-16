@@ -333,6 +333,24 @@ def _reset_database_availability(monkeypatch):
     availability.reset()
 
 
+# ── A turn's memory write ends inside its test (2026-11-16) ─────────────────
+# A finished turn hands its memory write to a daemon thread
+# ("kazma-v2-extract"). When it ran after the test, monkeypatch had already
+# undone the test's stand-ins, and it embedded the turn with the real model:
+# CI failed at random on whichever test it overlapped. This fixture asks for
+# `monkeypatch`, so it is torn down BEFORE monkeypatch undoes anything; it
+# waits for those threads there. KAZMA_TEST_TURN_MEMORY_GUARD=0 turns it off
+# (the negative control in tests/test_turn_memory_ends_in_its_test.py).
+@_pytest.fixture(autouse=True)
+def _turn_memory_ends_in_its_test(monkeypatch):
+    yield
+    if os.environ.get("KAZMA_TEST_TURN_MEMORY_GUARD") == "0":
+        return
+    from tests._no_models import finish_turn_memory
+
+    finish_turn_memory()
+
+
 # ── Global shutdown-event reset ─────────────────────────────────────────────
 # Tests that call create_app() + uvicorn (e2e, pipeline_sandbox, …) fire the
 # app's lifespan shutdown → signal_shutdown(), setting the GLOBAL event for

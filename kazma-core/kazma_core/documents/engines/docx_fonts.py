@@ -66,6 +66,25 @@ def _obfuscate(font: bytes, guid: str) -> bytes:
 deobfuscate = _obfuscate
 
 
+def _settings_opening_end(xml: str) -> int | None:
+    """Where the first ``<w:settings ...>`` opening tag ends, in one pass.
+
+    The pattern ``<w:settings\\b[^>]*>`` rescanned the rest of the text from
+    every ``<w:settings`` start: quadratic on hostile input
+    (tests/test_regex_sweep.py, 2026-11-16).
+    """
+    start = 0
+    while True:
+        at = xml.find("<w:settings", start)
+        if at < 0:
+            return None
+        after = at + len("<w:settings")
+        if after >= len(xml) or not (xml[after].isalnum() or xml[after] == "_"):
+            close = xml.find(">", after)
+            return None if close < 0 else close + 1
+        start = after
+
+
 def _add_settings_flag(xml: str) -> str:
     if "<w:embedTrueTypeFonts" in xml:
         return xml
@@ -75,10 +94,9 @@ def _add_settings_flag(xml: str) -> str:
         for match in re.finditer(rf"<w:{name}\b[^>]*?(/>|>.*?</w:{name}>)", xml, flags=re.S):
             last_end = max(last_end or 0, match.end())
     if last_end is None:
-        opening = re.search(r"<w:settings\b[^>]*>", xml)
-        if opening is None:
+        last_end = _settings_opening_end(xml)
+        if last_end is None:
             raise ValueError("settings.xml has no w:settings element")
-        last_end = opening.end()
     return xml[:last_end] + flag + xml[last_end:]
 
 

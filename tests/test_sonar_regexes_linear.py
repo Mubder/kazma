@@ -802,3 +802,29 @@ def test_the_gateway_fence_strip_is_linear():
     old_small = _timed(OLD_GATEWAY_FENCE.sub, "", small)
     old_big = _timed(OLD_GATEWAY_FENCE.sub, "", big)
     assert old_big > 6 * old_small, "control: the old pattern grows with the square"
+
+
+# -- docx_fonts: the w:settings opening tag (the regex sweep, CI 2026-11-16) --
+
+OLD_SETTINGS_OPENING = re.compile(r"<w:settings\b[^>]*>")
+
+
+def test_the_settings_opening_answers_as_the_old_pattern():
+    from kazma_core.documents.engines.docx_fonts import _settings_opening_end
+
+    words = ["<w:settings", "<w:settingsX", "<w:settings_", ">", " ", "x", "<", "w:", "\n", "a=1", "/"]
+    for _ in range(30000):
+        s = _words(words, 10)
+        m = OLD_SETTINGS_OPENING.search(s)
+        assert _settings_opening_end(s) == (m.end() if m else None), s
+
+
+def test_the_settings_opening_is_linear():
+    from kazma_core.documents.engines.docx_fonts import _settings_opening_end
+
+    hostile = "<w:settings" * 20000
+    assert _timed(_settings_opening_end, hostile) < 0.5
+    small, big = "<w:settings" * 2000, "<w:settings" * 8000
+    old_small = _timed(OLD_SETTINGS_OPENING.search, small)
+    old_big = _timed(OLD_SETTINGS_OPENING.search, big)
+    assert old_big > 6 * old_small, "control: the old pattern grows with the square"
