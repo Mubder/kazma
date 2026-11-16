@@ -275,7 +275,7 @@ MCP. والانتقال إلى نموذج بديل يُعلَن دائمًا.
 
 | العربية | English |
 |---|---|
-| ![المحادثة بالعربية](docs/screenshots/chat-ar.png) | ![طلب موافقة في المحادثة](docs/screenshots/approval-en.png) |
+| ![المحادثة بالعربية](docs/screenshots/chat-ar.png) | ![طلب موافقة في المحادثة](docs/screenshots/approval-ar.png) |
 
 </div>
 

@@ -9,7 +9,8 @@ scripted model at the provider boundary) with a small demo repository
 product's own writers and test connector values (never sent anywhere: no
 adapter starts under pytest), then drives real turns through the browser and
 saves 1440x900 captures at 2x: chat-answer, chat-approval, ide, connectors
-and memory. Never from a live install.
+and memory. Never from a live install. ``SHOT_WIDTH`` / ``SHOT_HEIGHT``
+change the window (the README's are taller, so the whole menu shows).
 
 One language and one theme per process (``SHOT_LANG`` en|ar, ``SHOT_THEME``
 dark|light): a harness per process, so no singleton carries one run's data
@@ -43,6 +44,9 @@ from tests.e2e._unified_turn_harness import Step, unified_turn_server  # noqa: E
 SHOT_DIR = Path(os.environ["KAZMA_SITE_SHOTS_DIR"])
 LANG = os.environ.get("SHOT_LANG", "en")
 THEME = os.environ.get("SHOT_THEME", "dark")
+# The window: the website's 1440x900, or taller for the README (the whole menu).
+WIDTH = int(os.environ.get("SHOT_WIDTH", "1440"))
+HEIGHT = int(os.environ.get("SHOT_HEIGHT", "900"))
 SUFFIX = "" if THEME == "dark" else "-" + THEME
 AR = LANG == "ar"
 MODEL = "deepseek-chat"
@@ -541,7 +545,7 @@ def test_site_shots(monkeypatch: pytest.MonkeyPatch) -> None:
 
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
-            ctx = browser.new_context(viewport={"width": 1440, "height": 900}, device_scale_factor=2, color_scheme=THEME)
+            ctx = browser.new_context(viewport={"width": WIDTH, "height": HEIGHT}, device_scale_factor=2, color_scheme=THEME)
             ctx.add_init_script(f"try {{ localStorage.setItem('kazma-lang', '{LANG}'); }} catch (e) {{}}")
             ctx.add_cookies([{"name": "kazma-lang", "value": LANG, "url": h.base}])
             pg = ctx.new_page()
