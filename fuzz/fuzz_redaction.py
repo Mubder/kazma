@@ -36,17 +36,22 @@ def check(data: bytes) -> None:
     from kazma_core.errors import redact_secrets
     from kazma_core.security.url_credentials import mask_urls_in_text
 
+    import hashlib
+
     text = data.decode("utf-8", errors="replace")
     secret = PLANTED[data[0] % len(PLANTED)] if data else PLANTED[0]
-    password = (data.hex() + "0123456789abcdef")[:16]
+    password = "Pw" + hashlib.sha256(data).hexdigest()[:14]
     half = len(text) // 2
     planted = (
         f"{text[:half]}\n{secret}\n"
         f"https://kazma:{password}@db.example/x\n{text[half:]}"
     )
     for masked in (redact_secrets(planted), mask_urls_in_text(planted)):
-        assert secret not in masked, (secret, masked)
-        assert password not in masked, (password, masked)
+        # The planted copies are masked: no more copies come back than the
+        # fuzzed text itself held (it may hold the same characters; the first
+        # Atheris run's "333..." text held its own "password").
+        assert masked.count(secret) <= text.count(secret), (secret, masked)
+        assert masked.count(password) <= text.count(password), (password, masked)
 
 
 def main() -> None:

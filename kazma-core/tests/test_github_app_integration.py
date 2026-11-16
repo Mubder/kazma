@@ -171,10 +171,14 @@ async def test_git_push_delegates_to_push_path():
 
 @pytest.mark.asyncio
 async def test_git_pull_delegates_to_pull_path():
-    """git_pull() runs the PULL path (never push)."""
+    """git_pull() runs the PULL path (never push): since 2026-11-16 it fetches,
+    then merges the upstream once the files it would write are checked
+    (``_merge_upstream``, tests/test_git_tree_writes.py)."""
     from kazma_skills.native.git_github_manager.tools import git_pull
 
     with patch("kazma_skills.native.git_github_manager.tools.run_off_loop", new_callable=AsyncMock) as mock_run, \
+         patch("kazma_skills.native.git_github_manager.tools._merge_upstream",
+               new_callable=AsyncMock, return_value="Already up to date.") as merge, \
          patch("kazma_skills.native.git_github_manager.tools._get_workspace", return_value="/tmp/test"), \
          patch("kazma_core.git_identity.get_app_installation_token", return_value=""), \
          patch("kazma_gateway.routers.github_client.get_github_token", return_value="ghp_test_token"):
@@ -182,14 +186,15 @@ async def test_git_pull_delegates_to_pull_path():
         # pull has no upstream/branch checks — single subprocess.run (remote-url
         # lookup is skipped for pull since target_branch logic is push-only).
         mock_url = MagicMock(returncode=0, stdout="https://github.com/owner/repo.git\n")
-        mock_pull = MagicMock(returncode=0, stdout="Already up to date.", stderr="")
+        mock_fetch = MagicMock(returncode=0, stdout="", stderr="")
 
-        mock_run.side_effect = _scripted_run(mock_url, mock_pull)
+        mock_run.side_effect = _scripted_run(mock_url, mock_fetch)
 
         res = await git_pull()
 
-        pull_cmd = mock_run.call_args_list[1][0][0]
-        assert "pull" in pull_cmd, f"expected pull in git command, got: {pull_cmd}"
+        fetch_cmd = mock_run.call_args_list[1][0][0]
+        assert "fetch" in fetch_cmd and "push" not in fetch_cmd, f"expected a fetch, got: {fetch_cmd}"
+        merge.assert_awaited_once()
         assert "Already up to date" in res
 
 

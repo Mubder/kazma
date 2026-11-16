@@ -276,9 +276,15 @@ def _steps(workflow: dict) -> list[dict]:
 
 
 def _install_line(workflow: dict, job: str | None = None) -> str:
+    """What the job's "Install deps" step installs: its command, or since
+    2026-11-16 the locked install action and what it is asked for."""
     jobs = workflow.get("jobs") or {}
     steps = jobs[job]["steps"] if job else _steps(workflow)
-    return next(str(s.get("run", "")).strip() for s in steps if s.get("name") == "Install deps")
+    step = next(s for s in steps if s.get("name") == "Install deps")
+    if step.get("uses"):
+        asked = sorted((str(k), str(v)) for k, v in (step.get("with") or {}).items())
+        return f"{step['uses']} {asked}"
+    return str(step.get("run", "")).strip()
 
 
 def workflow_problems(sync_text: str, ci_text: str) -> list[str]:
@@ -335,7 +341,8 @@ def secret_isolation_problems(sync_text: str) -> list[str]:
     for job in (wf.get("jobs") or {}).values():
         for step in job.get("steps") or []:
             uses = str(step.get("uses") or "")
-            if uses and not re.search(r"@[0-9a-f]{40}\b", uses):
+            # A local action ("./.github/actions/...") is this commit's own file.
+            if uses and not uses.startswith("./") and not re.search(r"@[0-9a-f]{40}\b", uses):
                 problems.append(f"{uses} is not pinned by commit SHA")
     return problems
 
@@ -364,7 +371,7 @@ jobs:
     [
         (("  workflow_dispatch:", "  workflow_dispatch:\n  push:\n    branches: [main]"), "runs on"),
         (("  contents: read", "  contents: write"), "may write"),
-        (("numpy prometheus-client", "numpy"), "installs something else"),
+        (("groups: ci-light", "groups: lint"), "installs something else"),
         (('"$RUNNER_TEMP/site-metrics" --require-collected', '"$RUNNER_TEMP/site-metrics"'), "--require-collected"),
         (("python3 -I scripts/sync_site_metrics.py", "gh pr view \"$B\" ; python3 -I scripts/sync_site_metrics.py"), "gh pr view"),
     ],
