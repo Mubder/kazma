@@ -98,7 +98,7 @@ dev = [
     "filelock>=4.2.10",
 ]
 test = [
-    "sqlglot==30.30.0",
+    "sqlglot==30.31.0",
     "pytest>=9.2.0",
     "pytest-asyncio>=1.4.1.post1",
     "pytest-cov>=5.0.0",
@@ -123,7 +123,7 @@ rag = [
     # The local (Rust) store the Knowledge Library's fixes of 2026-10-15
     # were measured on (KB-Q01: collection configuration, close, modify).
     "chromadb>=1.5.9",
-    "sentence-transformers>=6.2.0",
+    "sentence-transformers>=6.3.0",
     "sqlite-vec>=0.1.6",  # L4 local vector layer (UnifiedMemoryAdapter)
     # Security floors for what these bring in (see the base list).
     "torch>=2.13.0",
@@ -225,10 +225,10 @@ neo4j = [
 ]
 # Database drivers beyond SQLite (database_client skill)
 database = [
-    "sqlglot==30.30.0",
+    "sqlglot==30.31.0",
     "psycopg[binary]>=3.3.9",
     "pymysql>=1.2.4",
-    "pymongo>=4.18.3",
+    "pymongo>=4.20.0",
     "dnspython>=2.9.2",  # security floor (see the base list): pymongo brings it
 ]
 # Convenience meta-extra — installs everything at once.
