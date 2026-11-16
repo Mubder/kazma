@@ -68,3 +68,44 @@ def test_the_settings_log_masks_a_lists_nested_key():
 
 def test_control_the_old_settings_log_showed_it():
     assert "sk-live" in repr([{"name": "p", "api_key": "sk-live-abcdef123456"}])[:77]
+
+
+# -- a secret in a request's query string (2026-11-16) -------------------------
+# uvicorn logs a request as (client, method, path with its query, version,
+# status). WhatsApp's verification call carries the webhook's verify token in
+# its query, and an OAuth callback its sign-in code and state: both went into
+# kazma.log as they were.
+
+VERIFY = "5320f6b6a55482e8129028913ad64759"
+
+
+def _access(path: str) -> logging.LogRecord:
+    return logging.LogRecord("uvicorn.access", logging.INFO, __file__, 1,
+                             '%s - "%s %s HTTP/%s" %d', ("2a03:2880::1:0", "GET", path, "1.1", 200), None)
+
+
+def test_the_request_log_masks_a_verify_token_and_a_sign_in_code():
+    handler = logging_config._LogQueueHandler(queue.Queue())
+    whatsapp = handler.prepare(_access(
+        f"/api/webhooks/whatsapp?hub.mode=subscribe&hub.challenge=219&hub.verify_token={VERIFY}"
+        f"&hub_verify_token={VERIFY}"))
+    oauth = handler.prepare(_access("/api/email/oauth/gmail/callback?code=4/0AbcSecret&state=st8te&scope=mail"))
+    assert VERIFY not in whatsapp.getMessage()
+    assert "hub.challenge=219" in whatsapp.getMessage()  # the rest still says what it was
+    assert "0AbcSecret" not in oauth.getMessage() and "st8te" not in oauth.getMessage()
+    assert "scope=mail" in oauth.getMessage()
+
+
+def test_a_parameter_that_only_contains_a_secret_word_is_kept():
+    from kazma_core.security.url_credentials import mask_urls_in_text
+
+    path = "/search?monkey=1&q=key&keyboard=3&tokens_used=5"
+    assert mask_urls_in_text(path) == path
+
+
+def test_control_the_old_masker_left_the_verify_token():
+    import re
+
+    old = re.compile(r"(?P<key>[?&](?:password|passwd|pwd)=)(?P<value>[^&#\s'\"]*)", re.IGNORECASE)
+    line = f"GET /api/webhooks/whatsapp?hub.verify_token={VERIFY}"
+    assert VERIFY in old.sub(lambda q: q["key"] + "****", line)

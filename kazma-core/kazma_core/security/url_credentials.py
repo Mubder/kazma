@@ -44,8 +44,16 @@ _URL = re.compile(
 )
 
 #: A password passed as a query parameter (libpq accepts ``?password=``).
+#: A secret carried in a query parameter: a password, and a webhook's verify
+#: token or an access token in an address (WhatsApp's verification call put
+#: its ``hub.verify_token`` into the request log, 2026-11-16). Both spellings
+#: Meta sends (``hub.verify_token`` and ``hub_verify_token``) end in a name
+#: this matches.
 _QUERY_PASSWORD = re.compile(
-    r"(?P<key>[?&](?:password|passwd|pwd)=)(?P<value>[^&#\s'\"]*)", re.IGNORECASE
+    r"(?P<key>[?&](?:[A-Za-z0-9]{1,40}[._-])?"
+    r"(?:password|passwd|pwd|verify_token|access_token|token|secret|client_secret|api_key|apikey|key|code|state)=)"
+    r"(?P<value>[^&#\s'\"]*)",
+    re.IGNORECASE,
 )
 
 #: URL userinfo anywhere inside free text: a ``repr``, a JSON blob, a log line.
@@ -109,10 +117,12 @@ def mask_urls_in_text(text: str) -> str:
     the approval cards -- reads the one table of token shapes."""
     from kazma_core.security.token_shapes import mask_tokens
 
-    if "://" in text or "password=" in text.lower():
+    if "://" in text:
         text = _EMBEDDED_USERINFO.sub(
             lambda m: m["head"] + URL_PASSWORD_MASK + m["at"], text
         )
+    if "=" in text:
+        # A path with its query, as a request log line writes it, has no "://".
         text = _QUERY_PASSWORD.sub(
             lambda q: q["key"] + (URL_PASSWORD_MASK if q["value"] else ""), text
         )
