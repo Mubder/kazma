@@ -1,7 +1,7 @@
 # Spaces: several people on one Kazma
 
-Status: DRAFT of 2026-11-15, revised with the owner on 2026-11-17. All
-twenty decisions of section 9 are answered. No product code is written.
+Status: DRAFT of 2026-11-15, revised with the owner on 2026-11-17. Decisions
+N1 to N20 are answered; N21 to N24, from a review on 2026-11-17, are open. No product code is written.
 Work starts when the owner says so.
 
 Baseline: commit `07ec06b38`. Every statement about today's code was read
@@ -372,7 +372,7 @@ person, and one switch covers all of those parts.
 | Browser | Browser automation | Outside |
 | Images and voice | Image generation, speech | Outside |
 | Chat apps | Linking Telegram, Discord, Slack or WhatsApp (stage 3) | Space |
-| Development | The shell, the IDE and Workspace pages, git, MCP servers, files of the machine's project | Host: the workspace only (4.11) |
+| Development | The shell, the IDE and Workspace pages, git, MCP servers, files of the machine's project | Host: the workspace, by grant; the admin's own personal space always (4.11) |
 
 Rules:
 
@@ -472,8 +472,18 @@ Rules:
 - **Host features in the workspace.** Helping with development needs the
   shell, the IDE, git and the workspace's files. These are the feature
   "Development", off for everyone until the admin turns it on for a person.
-  O3 still holds everywhere else: no personal space and no family space
-  ever has host tools.
+  O3 still holds for every member: no member's personal space and no
+  family space ever has host tools.
+- **The admin's personal space is the one personal space with host tools.**
+  It is today's install with today's data (N19), and the admin already holds
+  full trust. So the owner keeps the shell, the IDE and git in private
+  chats. The workspace is a new, empty space.
+- **The workspace has its own project folder,** chosen by the admin when it
+  is made. It is never Kazma's install folder, so a friend's file write
+  cannot change Kazma's own code.
+- **The admin approves what a Development holder's always-ask actions and
+  folder grants ask for** (proposal N21). It uses the "approver" setting of
+  N4, set to the admin for anyone holding Development.
 - **Said plainly on the grant:** a person with Development can run commands
   on the machine. Until the encrypted version (4.9), that is the same trust
   as the admin. The People page says so when the switch is turned on.
@@ -535,6 +545,9 @@ neither can reach the other's data, and the five refusals are gone.
 | S1-28 | Backups and migration carry the identity store; a restore keeps spaces apart. | `test_backup_restore_spaces.py`: a real backup and restore, then the matrix. Control: a restore without the identity store. | Nothing. |
 | S1-29 | The master matrix: every route and every agent tool, enumerated, as one space against another. | `test_space_matrix.py`: a new route or tool without a case fails. | Nothing. |
 | S1-30 | The docs: the threat model's first section, the safety design, the guide. They say what Spaces promises and what it does not (4.9). | The docs gates; `test_threat_model_accuracy.py` updated. | A "Spaces" guide page, EN and AR. |
+| S1-31 | The turn's environment note is the space's own: its folder and its connected accounts. A sandboxed space's note never names the install's folder, repository or GitHub login. | `test_environment_note_per_space.py`: a real turn in a sandboxed space; the note holds none of the install's paths or names. Control: today's note. | Nothing. |
+| S1-32 | The bell, the Dashboard's open problems and the Running work card are per person. A research topic or chat title is shown only to members of its space. | `test_bell_and_problems_per_person.py`: a word planted in one person's research topic and chat title is in no other account's bell, problems list or runs card. Control: today's install-wide list. | Each person sees their own notices. |
+| S1-33 | Before a second account can be switched on: per-person daily limits (S2-02) and feature grants (S2-11) pass their tests, the copy that leaves the machine is the encrypted kind (N10), and the deploy check and live tests sign in with an owner API token instead of the shared secret (N15). `kazma spaces migrate --check` names any of these that is missing. | `test_second_account_preconditions.py`: with any one missing, creating a second account is refused and says which. Control: the switch with no check. | A clear list of what is left before inviting anyone. |
 
 ### Stage 2: per-person tools, limits and approvals
 
@@ -605,6 +618,11 @@ second account allowed until the last step:
 5. Files and host tools (S1-19, S1-20).
 6. Accounts, secrets and keys (S1-17, S1-18, S1-26).
 7. Export, erase, backups, admin boundary, signals, docs.
+8. Per-person daily limits and feature grants (S2-02, S2-11), brought
+   forward from stage 2: no friend ever uses the owner's model keys without
+   a limit and a grant. Then the preconditions check (S1-33).
+9. The workspace (S2-12) comes first in stage 2, because friends working in
+   the owner's workspace is what the owner wants most.
 
 Until step 7 is done, an install with one account behaves exactly as today,
 and an install with two keeps today's refusals. The owner's rule "deploy
@@ -641,6 +659,10 @@ that does not have to be.
    (stage 3). Until then the sender rule is unchanged.
 8. **Jobs.** Existing scheduled jobs and swarm tasks get the owner as their
    creator.
+9. **The workspace.** It is not made by the move. The admin makes it when
+   inviting the first friend: a new, empty space with its own project
+   folder. Sharing the X account with it moves that account out of the
+   owner's personal space, because a connected account belongs to one space.
 
 Rules for the move:
 
@@ -683,8 +705,8 @@ Open questions that need study, not a decision:
 
 ## 9. Decisions needed
 
-All twenty were answered by the owner on 2026-11-17. Each row gives the
-question and what was decided.
+N1 to N20 were answered by the owner on 2026-11-17. N21 to N24 came from
+a review the same day and carry a proposal each.
 
 | # | Question | Proposal |
 |---|---|---|
@@ -708,6 +730,10 @@ question and what was decided.
 | N18 | Feature grants (4.8, S2-11). What does a new member start with? Are grants per person or per space? May a space's owner grant features to its members, or only the admin? | **Decided by the owner, 2026-11-17.** A new member starts with chat (with its memory), documents, knowledge, web (search, fetch, crawl), research, image generation and voice; everything else is off until the admin turns it on. Grants are per person, also inside a shared space. Only the admin grants, never a space's owner. |
 | N19 | When the workspace is made, where does today's data go? Today everything is the owner's alone. | **Decided by the owner, 2026-11-17.** It stays in the owner's personal space, private. The workspace starts empty. The owner then picks what to share: chats, documents, knowledge libraries, the X account, and memory by topic (for example everything about Kazma's development). Nothing becomes shared by default. |
 | N20 | May a private chat read the workspace's memory (one way), so a friend can ask about the work from their private chat? | **Decided by the owner, 2026-11-17.** No at first: each chat reads only its own space. It can be added later as a per-person option. |
+| N21 | (From the review of 2026-11-17.) Who approves for a person holding Development? Only the asker answers their own cards (N4), so a Development holder would approve their own file writes and folder grants. | The admin approves a Development holder's always-ask actions and folder grants, from day one. Other cards stay with the asker. |
+| N22 | (Review.) The key per space protects nothing until members hold it, and sealing the owner's live secrets again is risk R4. Build it in stage 1 or stage 4? | Stage 1 makes the key and seals new spaces' secrets with it (O5 stands). The owner's existing secrets are not sealed again until stage 4, with key rotation. R4 then covers only moving mail and calendar to the space scope. |
+| N23 | (Review.) Mention-only replies in groups (N7) would change how the owner's groups behave today. | Mention-only applies to a group bound to a shared space. The owner's existing groups keep today's behaviour until the owner changes each one. |
+| N24 | (Review.) With the read-only role gone (N12), what do OIDC sign-ins with role "viewer" or "operator" become? | Both become members with the starting features. An OIDC "admin" claim never makes an admin: there is one admin, the owner's account. |
 
 ## 10. Not in this plan
 
