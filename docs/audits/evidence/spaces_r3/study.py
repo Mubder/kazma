@@ -30,6 +30,12 @@ with every turn tagged with a speaker.
 ``record`` embeds the texts no recorded file holds with the real model, at
 below-normal CPU priority and four threads at most (the live install shares
 this machine), and saves them to ``vectors.npz`` beside this file.
+
+The deep pass (the model's extraction) is replayed from ``deep_replies.json``:
+the extraction prompt with the speaker lines of the study's section 2.1, for
+the extraction benchmark's turns and for this study's speaker turns, and
+today's prompt for the speaker turns. :func:`record_deep` made it, given a
+model client; it costs one model call a reply and is not a command here.
 """
 
 from __future__ import annotations
@@ -52,6 +58,9 @@ ROOT = HERE.parents[3]
 CASES = HERE / "speakers.json"
 VECTORS = HERE / "vectors.npz"
 RESULTS = HERE / "results.json"
+DEEP = HERE / "deep_replies.json"
+#: The most model calls one deep-pass recording may make.
+MAX_DEEP_CALLS = 60
 V5_VECTORS = ROOT / "tests" / "fixtures" / "memory_bench" / "vectors.npz"
 THRESHOLDS = ROOT / "tests" / "fixtures" / "memory_bench" / "thresholds.json"
 LLM_REPLIES = ROOT / "tests" / "fixtures" / "memory_bench" / "extraction_llm.json"
@@ -553,6 +562,201 @@ def run_extraction(cases: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+# ── The deep pass, told who speaks ─────────────────────────────────────────
+
+
+def speaker_lines(speaker: dict[str, Any], others: list[dict[str, Any]]) -> str:
+    """What the extraction message gains in a shared space (study 2.1): who
+    wrote it, and who else is in the space. The system prompt is unchanged."""
+    def called(member: dict[str, Any]) -> str:
+        also = ", ".join(member.get("aliases") or [])
+        return f"{member['name']} ({also})" if also else member["name"]
+
+    return (
+        f"\n\nSpeaker: {speaker['name']} (the \"user\" of this message).\n"
+        f"Other members of this space: {', '.join(called(m) for m in others)}. "
+        "A fact about another member takes that member's name as its subject."
+    )
+
+
+def _people_for(turn: dict[str, Any], index: int, members: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """``(speaker, other members)`` of an extraction turn. A turn of this
+    study names its speaker. A turn of the extraction benchmark that states
+    its writer's name is spoken by a member of that name (a speaker line
+    naming someone else would contradict the message); the others rotate."""
+    if turn.get("by"):
+        key = turn["by"]
+        return members[key], [m for k, m in members.items() if k != key]
+    stated = next(
+        (alt["object"] for alts in turn["facts"] for alt in alts
+         if alt["subject"] == "user" and {"name", "name_is"} & set(alt["predicates"])), None)
+    if stated:
+        speaker = {"account": f"uheld{index:02d}", "name": stated, "aliases": []}
+        return speaker, [m for m in members.values() if _folded_words(m["name"]) != _folded_words(stated)]
+    keys = list(members)
+    key = keys[index % len(keys)]
+    return members[key], [m for k, m in members.items() if k != key]
+
+
+def deep_jobs(cases: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every deep-pass message of the study: the 30 turns of the extraction
+    benchmark with the speaker lines, and the speaker turns with and without."""
+    from kazma_core.memory.benchmark import EXTRACTION_PATH, _llm_blob
+
+    members = cases["members"]
+    jobs: list[dict[str, Any]] = []
+    v1 = json.loads(EXTRACTION_PATH.read_text(encoding="utf-8"))["turns"]
+    for i, turn in enumerate(v1):
+        speaker, others = _people_for(turn, i, members)
+        jobs.append({"set": "v1_lines", "turn": turn, "speaker": speaker, "others": others,
+                     "blob": _llm_blob(turn["user"]) + speaker_lines(speaker, others)})
+    for i, turn in enumerate(cases["extraction"]):
+        speaker, others = _people_for(turn, i, members)
+        jobs.append({"set": "speaker_plain", "turn": turn, "speaker": speaker, "others": others,
+                     "blob": _llm_blob(turn["user"])})
+        jobs.append({"set": "speaker_lines", "turn": turn, "speaker": speaker, "others": others,
+                     "blob": _llm_blob(turn["user"]) + speaker_lines(speaker, others)})
+    return jobs
+
+
+async def record_deep(client: Any, cases: dict[str, Any], *, limit: int = MAX_DEEP_CALLS) -> dict[str, Any]:
+    """Ask *client* the extraction prompt for every deep-pass message not yet
+    recorded, at most *limit* calls, and keep the raw replies in
+    ``deep_replies.json`` (saved after every reply: a reply paid for is never
+    lost). A call that fails stops the recording; nothing is retried."""
+    from kazma_core.memory.belief_extractor import _EXTRACT_SYSTEM
+    from kazma_core.memory.benchmark import _text_key
+
+    kept = json.loads(DEEP.read_text(encoding="utf-8")) if DEEP.exists() else {
+        "model": "", "calls": 0, "prompt_tokens": 0, "completion_tokens": 0,
+        "cost_usd": 0.0, "cost_known": True, "replies": {}}
+    made = 0
+    for job in deep_jobs(cases):
+        key = _text_key(job["blob"])
+        if key in kept["replies"]:
+            continue
+        if made >= limit:
+            raise RuntimeError(f"the deep-pass recording stopped at its limit of {limit} calls")
+        made += 1
+        raw = await client.chat([{"role": "system", "content": _EXTRACT_SYSTEM},
+                                 {"role": "user", "content": job["blob"]}])
+        usage = getattr(raw, "usage", None) or {}
+        kept["replies"][key] = raw.content if hasattr(raw, "content") else str(raw or "")
+        kept["model"] = str(getattr(raw, "model", "") or kept["model"])
+        kept["calls"] += 1
+        kept["prompt_tokens"] += int(usage.get("prompt_tokens") or 0)
+        kept["completion_tokens"] += int(usage.get("completion_tokens") or 0)
+        kept["cost_usd"] = round(kept["cost_usd"] + float(getattr(raw, "cost_usd", 0.0) or 0.0), 6)
+        kept["cost_known"] = bool(kept["cost_known"] and getattr(raw, "cost_known", False))
+        DEEP.write_text(json.dumps(kept, ensure_ascii=False, indent=1) + "\n", encoding="utf-8", newline="\n")
+    return {"made": made, **{k: v for k, v in kept.items() if k != "replies"}}
+
+
+class _OneReply:
+    """A model client that answers with one recorded reply."""
+
+    def __init__(self, reply: str) -> None:
+        self._reply = reply
+
+    async def chat(self, messages: list[dict[str, Any]], **_kw: Any) -> str:
+        return self._reply
+
+
+def _filed_among(beliefs: list[dict[str, Any]], speaker: dict[str, Any],
+                 others: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Where the deep pass's facts are filed in a shared space: ``user`` is
+    the speaker's entry, and a subject that is a member's name, or a name
+    they are called by, is that member's entry (the alias match)."""
+    out = []
+    for belief in beliefs:
+        subject = str(belief.get("subject") or "")
+        if subject == "user":
+            subject = self_id("name", speaker)
+        else:
+            words = _folded_words(subject.replace("_", " "))
+            for member in (speaker, *others):
+                if any(words == _folded_words(name) for name in (member["name"], *member.get("aliases", []))):
+                    subject = self_id("name", member)
+                    break
+        out.append({**belief, "subject": subject})
+    return out
+
+
+def run_deep(cases: dict[str, Any]) -> dict[str, Any]:
+    """Replay ``deep_replies.json`` through the product's own reply parser
+    and sanitizer, file the facts, and score them."""
+    import asyncio
+
+    from kazma_core.memory.belief_extractor import _llm_extract, _sanitize_belief
+    from kazma_core.memory.benchmark import _folded, _score_extraction, _text_key, extraction_scores
+    from kazma_core.memory.entity_resolution import slug
+
+    if not DEEP.exists():
+        return {"recorded": False}
+    kept = json.loads(DEEP.read_text(encoding="utf-8"))
+    members = cases["members"]
+
+    async def parsed(reply: str, user_text: str) -> list[dict[str, Any]]:
+        registry = type("_Registry", (), {"get_client": lambda self: _OneReply(reply)})()
+        with mock.patch("kazma_core.model_registry.get_model_registry", lambda: registry):
+            beliefs, _down = await _llm_extract(user_text, "")
+        return [b for b in (_sanitize_belief(x) for x in beliefs or []) if b]
+
+    got: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    gold: dict[str, list[dict[str, Any]]] = {}
+    raw_subjects: dict[str, dict[str, int]] = {}
+    for job in deep_jobs(cases):
+        reply = kept["replies"].get(_text_key(job["blob"]))
+        if reply is None:
+            raise KeyError(f"no recorded deep-pass reply for {job['set']} {job['turn']['id']}")
+        beliefs = asyncio.run(parsed(reply, job["turn"]["user"]))
+        counts = raw_subjects.setdefault(job["set"], {"user": 0, "a_members_name": 0, "other": 0})
+        for belief in beliefs:
+            filed = _filed_among([belief], job["speaker"], job["others"])[0]["subject"]
+            counts["user" if belief["subject"] == "user"
+                   else "a_members_name" if filed != belief["subject"] else "other"] += 1
+        got.setdefault(job["set"], {})[job["turn"]["id"]] = _filed_among(beliefs, job["speaker"], job["others"])
+        me = self_id("name", job["speaker"])
+        if job["set"] != "v1_lines":  # this study's turns name whom a fact is about
+            facts = [[{"subject": self_id("name", members[alt["about"][1:]]) if alt["about"].startswith("@")
+                       else slug(alt["about"]), "predicates": alt["predicates"], "object": alt["object"]}
+                      for alt in alts] for alts in job["turn"]["facts"]]
+        else:
+            facts = [[{**alt, "subject": me if alt["subject"] == "user" else alt["subject"]} for alt in alts]
+                     for alts in job["turn"]["facts"]]
+        gold.setdefault(job["set"], []).append({**job["turn"], "facts": facts, "_speaker": me})
+
+    def misfiled(name: str) -> list[str]:
+        """Turns about someone else where a gold fact's value was filed under the speaker."""
+        out = []
+        for turn in gold[name]:
+            if turn.get("own", True):
+                continue
+            values = [_folded(alt["object"]) for alts in turn["facts"] for alt in alts]
+            for belief in got[name][turn["id"]]:
+                value = _folded(belief["object"])
+                if belief["subject"] == turn["_speaker"] and any(v and (v in value or value in v) for v in values):
+                    out.append(turn["id"])
+                    break
+        return out
+
+    report: dict[str, Any] = {
+        "recorded": True, "model": kept["model"], "calls": kept["calls"],
+        "prompt_tokens": kept["prompt_tokens"], "completion_tokens": kept["completion_tokens"],
+        "cost_usd": kept["cost_usd"] if kept["cost_known"] else None,
+        "v1_lines": extraction_scores({"llm": _score_extraction(gold["v1_lines"], got["v1_lines"])}),
+        "subjects_as_written": raw_subjects,
+    }
+    for name in ("speaker_plain", "speaker_lines"):
+        report[name] = {
+            "scores": _score_extraction(gold[name], got[name]),
+            "misfiled_under_the_speaker": misfiled(name),
+            "kept": {tid: [f"{b['subject']} {b['predicate']} {b['object']}" for b in facts]
+                     for tid, facts in got[name].items()},
+        }
+    return report
+
+
 # ── The correction rule, through the real trust gate ───────────────────────
 
 
@@ -639,6 +843,7 @@ def main(argv: list[str]) -> int:
         report["v5_one_member"] = v5
         vectors.as_user = ()
         report["extraction"] = run_extraction(cases)
+        report["deep_pass"] = run_deep(cases)
         report["correction_rule"] = run_correction_rule(cases)
     if command == "record":
         print(f"{VECTORS.name}: {_save_merged(vectors.new, vectors.model)} vectors "
@@ -680,6 +885,15 @@ def _print(report: dict[str, Any]) -> None:
     print("  speaker turns (quick):", json.dumps(e["speaker_turns"]["quick"], ensure_ascii=False))
     print("  filed under the wrong member:", e["speaker_turns"]["filed_under_the_wrong_member"])
     print("correction rule:", json.dumps(report["correction_rule"], ensure_ascii=False))
+    deep = report["deep_pass"]
+    if deep.get("recorded"):
+        locked = e["deep_untagged"]
+        print(f"deep pass told who speaks ({deep['model']}, {deep['calls']} calls)")
+        print("  extraction set, lines vs locked:",
+              {k: [locked[k], v] for k, v in deep["v1_lines"].items() if abs(v - locked[k]) > 1e-9} or "equal")
+        for name in ("speaker_plain", "speaker_lines"):
+            rows = {lang: (row["recall"], row["precision"], row["quiet"]) for lang, row in deep[name]["scores"].items()}
+            print(f"  {name}: {rows}  misfiled {deep[name]['misfiled_under_the_speaker']}")
 
 
 if __name__ == "__main__":

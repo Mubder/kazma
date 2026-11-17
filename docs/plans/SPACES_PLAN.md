@@ -1,8 +1,9 @@
 # Spaces: several people on one Kazma
 
-Status: DRAFT of 2026-11-15, revised with the owner on 2026-11-17. All 29
-decisions of section 9 are answered. No product code is written. Work
-starts when the owner says so.
+Status: DRAFT of 2026-11-15, revised with the owner on 2026-11-17. All 36
+decisions of section 9 are answered (N30 to N36 on 2026-11-18, from the R3
+study). The foundation of stage 1 is built (the state of the items, in
+section 5); every other item waits for its own step.
 
 Baseline: commit `0cb307cde` (2026-11-17). The plan was first read from
 `07ec06b38`; sections 3 and 4 were corrected for the 24 product commits
@@ -344,8 +345,21 @@ The plan: in a space with more than one member, each member has their own
 filed under them. Recall for a turn treats the speaker as "I" and the other
 members as named people. A space with one member works exactly as today.
 
-This is the least settled part of the design. It gets a short study before
-its item is built (risk R3).
+This was the least settled part of the design, so it got a study before its
+item is built (risk R3): `docs/plans/SPACES_R3_MEMORY_STUDY.md`, 2026-11-18.
+What the study chose, and the owner's answers N30 to N36:
+
+- **An entry per member, filed when the fact is written**, keyed by the
+  account. A personal space keeps the one `user` entry and changes in
+  nothing. A shared space files by member from its first turn (N30).
+- The asker's own facts are shown as today; another member's are shown
+  under that member's name, and so are their messages.
+- A statement about another member is kept as "said by", and never replaces
+  what that member said about themself (N34).
+- Memory in a shared space is shared, and the space says so where people
+  type (N35).
+- When a member leaves or is removed, the facts filed under their own entry
+  are forgotten; their messages stay as the conversation's history (N36).
 
 ### 4.8 Tools: three groups
 
@@ -593,7 +607,7 @@ neither can reach the other's data, and the five refusals are gone.
 | S1-08 | Chats, the spool, checkpoints (SQLite and Postgres), Time Travel, drafts, plans and receipts follow the space. Messages name their author. | `test_chat_state_spaces.py`: the matrix over every chat route; real Postgres for checkpoints. Control: the shared Postgres table reads across. | Each message shows who wrote it. |
 | S1-09 | Memory: the space is the tenant, always. The mode setting is retired. `default` loses "the install's view". | The existing tenant matrix with the mode removed; `test_memory_default_is_a_space.py`. Control: the old owner rule answers another space's id. | Settings → Memory loses one option. |
 | S1-10 | Lessons (the Soul) are per space. | `test_lessons_per_space.py`: a lesson learned in A is never in B's prompt, through the real graph. Control: the single Soul. | Nothing. |
-| S1-11 | Shared-space memory: a "self" entry per member (4.7). | `test_memory_speakers.py`: two members state different facts about themselves; each is recalled for the right one. Control: one `user` entry overwrites. | In a shared space Kazma knows who said what. |
+| S1-11 | Shared-space memory: a "self" entry per member (4.7), as the R3 study specifies (`docs/plans/SPACES_R3_MEMORY_STUDY.md`, section 5) and N30 to N36 decide. An entry keyed by the account, filed when the fact is written, its vectors made from `user <predicate> <object>`; the source label `member_stated` (N34); who may forget what, with the honest wording (N32, N33); About me per member per space, with "Copy from my personal space" (N31); the shared-memory notice (N35); the step "forget every fact under an entry", which the leave and remove flow calls (N36, S2-12). | `test_memory_speakers.py`: two members state different facts about themselves; each is recalled for the right one. Control: one `user` entry overwrites. The gates of the study's section 5.2. The held-out questions (Gulf Arabic above all, where "I" is a prefix or a suffix) are written by a different session than the one that builds S1-11, before the builder sees them. | In a shared space Kazma knows who said what, and says that memory there is shared. |
 | S1-12 | Documents: the owner is the account; the operator stand-in goes; chat and the agent act as the asker; content files per space. Refusal removed. | The operator-principal test replaced by `test_document_spaces.py`: page, chat and agent see the same documents within a space, none across. Control: the `agent` name. | Documents work for everyone. |
 | S1-13 | Knowledge: libraries, vectors, fetched pages and crawls per space; quota per space. Refusal removed. | `test_knowledge_spaces.py`: search, inject and crawl never cross; real Chroma where installed. Control: a search with no space filter. | Knowledge works for everyone. |
 | S1-14 | Scheduled: a job carries space and creator and fires in that scope. Refusal removed. | `test_cron_spaces.py`: a real fire runs in its space; another space's job id reads as unknown; a job with no space does not fire. Control: the fire with no scope. | Scheduled works for everyone. |
@@ -641,7 +655,7 @@ belong to this subject.
 | S2-09 | Every action is recorded under the person's name. An activity page per space, for its members. | `test_actions_name_the_person.py`: every route that changes something writes the account (enumerated). Control: a route recording the session label only. | An Activity page in each space. |
 | S2-10 | The People page: features, tools, limit, models, spaces, last sign-in, sessions. | Browser test, EN and AR, reached by the sidebar. | The page itself. |
 | S2-11 | (Built in stage 1.) Features per person (4.8). One table names each feature's pages, routes, tools, chat commands, background work and connected accounts. A feature off for a person is refused at every one of them, and the check is made again when the work runs. | `test_feature_grants.py`: every page, route, tool, command and background loop belongs to a feature or is declared always on (a new one with neither fails). With X Studio on for Y and off for G: G has no menu entry, every X route refuses, no X tool is offered or callable in chat, a job or a swarm worker, `/x` refuses, and the mentions loop skips G; Y works. Control: a grant that only hides the menu entry. Browser test, EN and AR. | A switch per feature for each person. A person sees only what they were given. |
-| S2-12 | Shared spaces (4.11), in two kinds: a plain one (sandboxed, no project folder, the default) and one with a project folder (host, admin only). The create-space screen and the People page say which kind. A plain shared space never offers Development or GitHub, to anyone. For the host kind: a space the admin invites people into; the Development feature, granted per person; the space shown in the header; "New private chat"; moving one's own chat, document or file between one's personal space and the workspace. | `test_workspace_and_personal.py`: two members and the admin. A workspace chat, fact and document are seen and recalled by all three; a thing in one member's personal space is found by nobody else, by any route, tool, search or recall, from the workspace or from another personal space. A member without Development has no shell, IDE or git, offered or callable; with it, they do. A moved chat is in exactly one space after the move, in every store. Control: a "private" mark on a workspace row, which recall and search still return. Browser test, EN and AR. | The space name in the header; "New private chat"; "Share with the workspace". |
+| S2-12 | Shared spaces (4.11), in two kinds: a plain one (sandboxed, no project folder, the default) and one with a project folder (host, admin only). The create-space screen and the People page say which kind. A plain shared space never offers Development or GitHub, to anyone. For the host kind: a space the admin invites people into; the Development feature, granted per person; the space shown in the header; "New private chat"; moving one's own chat, document or file between one's personal space and the workspace; leaving a shared space, and a member's removal by its owner or the admin: the facts under the member's own memory entry are forgotten through S1-11's step, the leave screen says so first, their messages stay (N36). | `test_workspace_and_personal.py`: two members and the admin. A member who leaves, and one who is removed: no fact under their entry is recalled afterwards, by anyone, and their messages are still in the chat (control: the entry left in place). A workspace chat, fact and document are seen and recalled by all three; a thing in one member's personal space is found by nobody else, by any route, tool, search or recall, from the workspace or from another personal space. A member without Development has no shell, IDE or git, offered or callable; with it, they do. A moved chat is in exactly one space after the move, in every store. Control: a "private" mark on a workspace row, which recall and search still return. Browser test, EN and AR. | The space name in the header; "New private chat"; "Share with the workspace". |
 
 ### Stage 3: linking chat-app accounts
 
@@ -756,7 +770,7 @@ Rules for the move:
 |---|---|---|
 | R1 | One missed filter leaks a space. This is the main risk of the row model. | Bound store handles, the statement gate, the matrix over every route and tool, Postgres row security, the soak, the outside review. |
 | R2 | Code with no space quietly acts as the owner. | No default (S1-02). It is the first item because every later one leans on it. |
-| R3 | "Who is I" in a shared space changes how memory files facts. Memory is the most hardened part of Kazma. | A short study first, on the memory benchmark, before S1-11 is built. A space with one member stays exactly as today. **The study is done (2026-11-18): `docs/plans/SPACES_R3_MEMORY_STUDY.md`.** It chooses an entry per member, filed when the fact is written, and measures it against today's single entry; S1-11 waits for the owner's answers to its decisions D1 to D7. |
+| R3 | "Who is I" in a shared space changes how memory files facts. Memory is the most hardened part of Kazma. | A short study first, on the memory benchmark, before S1-11 is built. A space with one member stays exactly as today. **The study is done (2026-11-18): `docs/plans/SPACES_R3_MEMORY_STUDY.md`.** It chooses an entry per member, filed when the fact is written, and measures it against today's single entry; The owner answered its seven questions on 2026-11-18 (N30 to N36). |
 | R4 | The owner's own secrets move scope (mail, calendar, X). A mistake here signs the owner out. | The move is checked by reading each secret back after it; the old copy is kept until the first good refresh. |
 | R5 | Size. Stage 1 touches every store and most routes. | The order in section 6; each part keeps its refusal until its own tests pass; nothing multi-account ships early. |
 | R6 | Old memory tenants from the retired modes have no clear owner. | Counted and reported; the owner decides per tenant. |
@@ -775,12 +789,15 @@ Open questions that need study, not a decision:
   tables (a thread record beside them is the plan).
 - Whether the Neo4j copy of the memory graph is kept per space by a label or
   by a database.
-- How a shared space's "About me" works: one text per member is the plan.
+- How a shared space's "About me" works: answered by the R3 study and N31
+  (one text per member per space).
 
 ## 9. Decisions needed
 
-All 29 were answered by the owner on 2026-11-17. N21 to N29 came from
-three reviews the same day. Each row gives the question and what was
+N1 to N29 were answered by the owner on 2026-11-17. N21 to N29 came from
+three reviews the same day. N30 to N36 are the seven questions of the R3
+study (`docs/plans/SPACES_R3_MEMORY_STUDY.md`, section 6, where they were
+D1 to D7), answered on 2026-11-18. Each row gives the question and what was
 decided.
 
 | # | Question | Proposal |
@@ -814,6 +831,13 @@ decided.
 | N27 | (Second review.) The filesystem MCP server is bound to one folder. Which host space does it serve? | **Decided by the owner, 2026-11-17.** The admin's personal space, as today. It refuses in the workspace until each space can have its own instance; Kazma's own file tools work there. |
 | N28 | (Third review.) Must the admin always carry the Development tools? An owner who never codes has no use for the shell, IDE, git and GitHub tools. | **Decided by the owner, 2026-11-17.** Development is a per-person switch for the admin too. It starts on, and the admin can turn it off for themself. The admin tools stay either way. |
 | N29 | (Third review.) Is every shared space a development workspace? | **Decided by the owner, 2026-11-17.** No. Two kinds: a plain shared space (sandboxed, the default) and a shared space with a project folder (host, admin only). An install can have only plain ones. |
+| N30 | (R3 study, D1.) Which spaces file memory's facts by member? | **Decided by the owner, 2026-11-18.** Every shared space, from its first turn, also while it has one member. A personal space never does: it keeps the one `user` entry. Nothing is re-filed when a second member joins. |
+| N31 | (R3 study, D2.) "About me" in a shared space. | **Decided by the owner, 2026-11-18.** One text per member per space, shown only in that member's own turns; each member edits their own. Plus an action "Copy from my personal space", so nobody retypes it. It copies once; the two texts are independent after that. |
+| N32 | (R3 study, D3.) Who may forget another member's turn in a shared space, or keep a shared chat out of memory? | **Decided by the owner, 2026-11-18.** The turn's author and the space's owner. Everyone can always forget their own turns. |
+| N33 | (R3 study, D4.) A member forgets a fact about themself that another member stated. Does the other member's message go too? | **Decided by the owner, 2026-11-18.** The fact goes and is not learned again from that message. The message stays. Forget says so plainly: the other member's message still holds the words and can still be recalled, and its author or the space's owner can forget it. |
+| N34 | (R3 study, D5.) May a member state facts about another member? | **Decided by the owner, 2026-11-18.** Yes. It is kept as "said by" (the source label `member_stated`) and never replaces what the member said about themself. A member's own words always win. |
+| N35 | (R3 study, D6.) What does recall show a member about the others in a shared space? | **Decided by the owner, 2026-11-18.** Everything in the shared space, under the member's name. And the space says so before anyone types something private: a visible notice, "Memory here is shared with Sara and Omar" (the members' names, English and Arabic), near the composer and on the Memory page. |
+| N36 | (R3 study, D7.) A member leaves a shared space, or is removed. | **Decided by the owner, 2026-11-18** (changed from the study's proposal, which kept them). Every fact filed under the member's own entry is forgotten: what they said about themself, and what others said about them. Their messages in shared chats stay, as the conversation's history. Facts about shared things (a trip, a project) are not under their entry, so the space keeps them. The leave screen says this before they leave. An admin's or owner's removal applies the same rule, so a removed member's facts do not linger without their say. Built by S2-12 (the leave and remove flow of a shared space); deleting an account (S1-25, N9) runs the same step for every shared space the account was in. S1-11 provides the step: forget every fact under an entry, through the existing forget path, so the ledger, the mirror and the graph copy follow. |
 
 ## 10. Not in this plan
 

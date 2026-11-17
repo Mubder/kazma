@@ -11,7 +11,7 @@ named people. A space with one member must stay as it is today.
 
 Contents: 1. how "I" is filed today; 2. the designs and the one chosen;
 3. the rules per member; 4. the measurement; 5. what S1-11 should be;
-6. the decisions the owner is asked for.
+6. the owner's decisions.
 
 ## 1. How "I" is filed today
 
@@ -114,8 +114,16 @@ The prompt keeps `Use "user" for the user themselves`, and the writer maps
 `user` to the speaker's entry. So the recorded replies, and the one-member
 prompt, are byte for byte what they are today. In a shared space the prompt
 gains two lines (the speaker's name, the other members' names) so that
-"Omar" in Sara's message is written as the member Omar. Those two lines are
-not measured here: they cost a model call a turn to record (section 4.5).
+"Omar" in Sara's message is written as the member Omar. The lines are
+written (`speaker_lines` in the study's `study.py`):
+
+```
+Speaker: Layla (the "user" of this message).
+Other members of this space: Sara (سارة, ساره), Omar (عمر). A fact about another member takes that member's name as its subject.
+```
+
+Their effect is not measured yet: it takes a model call a message
+(section 4.5).
 
 ### 2.2 What the entry's id is
 
@@ -168,7 +176,7 @@ Section 4.3 measures both halves. A personal space run through the
 prototype gives exactly the locked scores. A lone member of a shared space,
 filed under their own entry, also gets exactly the locked scores, provided
 the entry's vectors are made as in 2.2. So the kind of space can decide, and
-a lone member loses nothing by it. It is still the owner's call (D1).
+a lone member loses nothing by it. The owner decided it so (N30).
 
 ### 2.4 What the read side does
 
@@ -191,22 +199,23 @@ For a turn in a shared space, recall is told the asker.
 
 ## 3. The rules per member
 
-A rule is what S1-11 builds. A decision is the owner's (section 6).
+A rule is what S1-11 builds. Where the owner decided, the row names the
+decision (N30 to N36 in section 9 of the plan; section 6 here).
 
 | Question | Answer |
 |---|---|
 | Whose words are `user_explicit` and `user_stated`? | **Rule.** The words of the member who is the turn's asker. For a fact under a member's own entry, only that member's own words carry those labels. |
-| May one member state a fact about another? | **Rule, with decision D5.** Yes, and it is kept as "said by Sara about Omar" under a new source label (`member_stated`), which never replaces Omar's own statements. Without this rule the trust gate lets it through: measured in 4.6. |
+| May one member state a fact about another? | **Rule (N34).** Yes, and it is kept as "said by Sara about Omar" under a new source label (`member_stated`), which never replaces Omar's own statements. Without this rule the trust gate lets it through: measured in 4.6. |
 | Who may correct a fact that is not about a member (a project, a trip)? | **Rule.** Any member. Their own words are the user's words for the space; the newest statement wins, and the fact names who said it (`said_by`). |
 | A member forgets their own turn. | **Rule.** As today: the turn, the facts it produced and its place in summaries go, for everyone in the space. The ledger needs no new column; the trail records the account. |
-| A member forgets another member's turn, or keeps a shared chat out of memory. | **Decision D3.** |
-| A member forgets a fact about themself that someone else stated. | **Rule, with decision D4.** They may always forget a fact filed under their own entry. Whether the other member's turn goes too is D4. |
+| A member forgets another member's turn, or keeps a shared chat out of memory. | **Rule (N32).** Only the turn's author and the space's owner may. Everyone can always forget their own turns. |
+| A member forgets a fact about themself that someone else stated. | **Rule (N33).** They may always forget a fact filed under their own entry, and it is not learned again from that message. The other member's message stays, and Forget says so plainly: it still holds the words and can still be recalled, and its author or the space's owner can forget it. |
 | Rewind (`/undo`, `/edit`, a restore) in a shared chat. | **Not this item.** It follows the chat, so S1-08 decides who may take back another member's turn; memory then forgets what was taken back, as today. |
 | Weekly summaries. | **Rule.** In a shared space the turns are shown to the model with their author's name, and the prompt says the week is the members' conversations and to name who decided or asked for what. A personal space's prompt is unchanged. One summary per topic for the space, as today. |
 | The text recall shows for a turn. | **Rule.** `User:` for the asker's own turn, the member's name for another's (2.4). |
-| About me. | **Decision D2.** Proposed: one text per member per space, shown only in that member's own turns; each member edits their own. |
-| What recall shows the asker about other members. | **Decision D6.** Proposed: everything in the shared space, under the member's name. A shared space has one memory (plan 4.8); what a member does not want shared belongs in their personal space. |
-| A member leaves the space. | **Decision D7.** |
+| About me. | **Rule (N31).** One text per member per space, shown only in that member's own turns; each member edits their own. "Copy from my personal space" copies it once; the two texts are independent after that. |
+| What recall shows the asker about other members. | **Rule (N35).** Everything in the shared space, under the member's name. A shared space has one memory (plan 4.8); what a member does not want shared belongs in their personal space. The space says so before anyone types something private: a notice, "Memory here is shared with Sara and Omar" (the members' names, English and Arabic), near the composer and on the Memory page. |
+| A member leaves the space, or is removed. | **Rule (N36).** Every fact filed under the member's own entry is forgotten: what they said about themself, and what others said about them. Their messages in shared chats stay, as the conversation's history. Facts about shared things (a trip, a project) are not under their entry, so the space keeps them. The leave screen says this first, and a removal by the space's owner or the admin applies the same rule. S2-12 builds the flow; S1-11 provides the step (5.1). |
 | Memory shared from a personal space into the workspace (N19, "memory by topic"). | **Rule.** A copied fact about `user` is filed under the sharer's entry in the workspace, with the sharer as `said_by`. |
 | A first-person fact whose speaker is not known (an old message with no author, a turn replayed by an older build). | **Rule.** In a shared space it is not filed. The turn is still remembered. Nothing is ever filed under a guessed member. |
 | The `user` entry in a shared space. | **Rule.** It stays as the space's own centre for the graph and for the anchors (`user related_to <subject>`), named after the space. No first-person fact is ever filed under it. |
@@ -355,8 +364,17 @@ only "I". Those statements are the deep pass's to keep.
 ### 4.5 What was not measured
 
 - **The deep pass told who speaks** (the two prompt lines of 2.1), and the
-  deep pass on the twelve speaker turns. It needs about 45 model calls to
-  record. None was made: the live install's keys are not for this.
+  deep pass on the twelve speaker turns. The owner approved the recording
+  on 2026-11-18: 54 model calls (the 30 turns of the extraction set with
+  the speaker lines, and the 12 speaker turns with and without them), 60 at
+  most. The recorder is built (`record_deep` and `run_deep` in `study.py`)
+  and was run end to end with a stand-in client: 54 messages, nothing asked
+  twice, the limit refuses a 61st call, and the replies are scored through
+  the product's own parser. **It has not been run against a model.** The
+  session that wrote this study was refused access to the live install's
+  provider key by its own permission rules, which a message from another
+  session cannot change. Until `deep_replies.json` exists, `study.py run`
+  reports the deep pass as not recorded.
 - **Weekly summaries** with authors' names: a model writes them.
 - **The first-person reading** behind "self first" was right on 35 of 35
   questions, but it was written while looking at these questions. That is
@@ -404,8 +422,9 @@ how is an entry shown to this asker. Everything else asks it.
 | `memory/self_hub.py`, `entity_protection.py`, `ego_anchor.py` | Members' entries are made when first needed, named from the account, and protected like `user`. Anchors are unchanged. |
 | `agent/tool_builtins/memory.py` | `memory_store` and `memory_link_entities` file under the asker; `memory_search` passes the asker. |
 | `memory/topic_summaries.py` | Authors' names in the turn lines and the shared-space prompt. |
-| `memory/profile.py`, the schema, the Memory page | If D2 is yes: About me keyed by tenant and account; each member edits their own. |
-| `memory/forget.py`, `kazma_ui/memory_api.py` | The rule the owner chooses in D3 and D4, asked in one place. |
+| `memory/profile.py`, the schema, the Memory page | About me keyed by tenant and account; each member edits their own; "Copy from my personal space", which copies once (N31). |
+| `memory/forget.py`, `kazma_ui/memory_api.py` | Who may forget what (N32), asked in one place. The wording of N33. One new step, **forget every fact under an entry**: each fact through the existing forget path (journaled first; the ledger, the mirror, the graph copy and the vectors follow), then the entry itself. The leave and remove flow (S2-12) and account deletion (S1-25) call it (N36). |
+| The chat page, the Memory page, the catalog | The notice of N35, "Memory here is shared with ...", near the composer and on the Memory page, in English and Arabic. |
 | `agent/graph_supervisor.py` | Passes the asker to recall and to About me. |
 
 Depends on: S1-08 (messages name their author), S1-09 (the space is the
@@ -436,6 +455,21 @@ called by (S1-33's account page, or a field added here).
 - **Rules:** `member_stated` never replaces a member's own statement (4.6,
   with today's label as the negative control); a first-person fact with no
   speaker is not filed.
+- **Forget by entry (N36):** after the step, no fact under the entry is
+  recalled by any member, in the store, the mirror or the graph copy; the
+  member's messages are still recalled; facts about shared things stay; a
+  restore of an older backup does not bring the facts back (the forget
+  journal). **Negative control:** the entry left in place.
+- **Who may forget (N32, N33):** another member's turn is refused to a
+  member who is neither its author nor the space's owner; forgetting a fact
+  about oneself leaves the other member's message, and the answer says so.
+- **The notice (N35):** a browser test, English and Arabic, reached by the
+  sidebar: the names shown are the space's members; a personal space shows
+  none.
+- **Held-out questions.** The questions that judge "self first" and "named
+  first" (Gulf Arabic above all, where "I" is a prefix or a suffix) are
+  written by a different session than the one that builds S1-11, before the
+  builder sees them. The builder's own questions tune; these decide.
 
 ### 5.3 What it costs
 
@@ -444,23 +478,28 @@ called by (S1-33's account page, or a field added here).
   `belief_extractor.py`, `provenance.py`), recall's shown lines and "self
   first", and the vector text.
 - No change to the keys or rules of `belief_mutation`, to the forget
-  ledger, the mirror or the graph copy. One schema change, only if D2 is
-  yes (About me's key).
-- A recording of the deep pass for the shared-space prompt: one model call
-  a turn, about 45 calls for the extraction set and the speaker turns. It
-  must not use the live install's keys.
+  ledger, the mirror or the graph copy. One schema change: About me's key
+  (N31).
+- A recording of the deep pass for the shared-space prompt: 54 model calls
+  (4.5). The recorder exists; the owner approved the calls. Whoever runs it
+  must write nothing to the install whose provider it borrows.
 - New vectors for the promoted set are already recorded here.
 - Not in S1-11: who may rewind a shared chat (S1-08), member names on the
   account (S1-33), sharing memory by topic (N19).
 
-## 6. Decisions for the owner
+## 6. The owner's decisions
 
-| | Question | Proposed |
-|---|---|---|
-| D1 | Which spaces file facts by member? | Every shared space, from its first turn. A personal space never does. Measured: a lone member of a shared space gets the same scores as today (4.3). The other choice (start when the second member joins) needs every `user` fact re-filed on the day someone joins, for no measured gain. |
-| D2 | About me in a shared space. | One text per member per space, shown only in that member's turns; each member edits their own. (Today: one per tenant, admin-only.) |
-| D3 | Who may forget another member's turn in a shared space, or keep a shared chat out of memory? | The turn's author and the space's owner. Not every member. |
-| D4 | A member forgets a fact about themself that another member stated. Does the other member's turn go too? | The fact goes and is not learned again from that turn. The turn itself stays unless its author or the space's owner forgets it. |
-| D5 | May a member state facts about another member? | Yes, kept as "said by", and never replacing what the member said about themself. The member's own words always win. |
-| D6 | What does recall show a member about the others in a shared space? | Everything, under the member's name. A question about the asker shows the asker's own facts; a question that names a member shows that member's. What someone wants private belongs in their personal space. |
-| D7 | A member leaves a shared space. | Their entry and facts stay, under their name: they are the space's memory. They can forget their own before leaving; deleting the account is the erase path. |
+Answered on 2026-11-18. They are recorded as **N30 to N36** in section 9 of
+`docs/plans/SPACES_PLAN.md`, which is where to read them. The names D1 to D7
+were this study's own and are not used elsewhere: older decisions already
+carry those names.
+
+| Here | Plan | Question | Proposed by the study | Decided |
+|---|---|---|---|---|
+| D1 | N30 | Which spaces file facts by member? | Every shared space, from its first turn. A personal space never does. | As proposed. |
+| D2 | N31 | About me in a shared space. | One text per member per space, shown only in that member's turns; each member edits their own. | As proposed, plus "Copy from my personal space". It copies once; the two texts are independent after that. |
+| D3 | N32 | Who may forget another member's turn, or keep a shared chat out of memory? | The turn's author and the space's owner. | As proposed. Everyone can always forget their own turns. |
+| D4 | N33 | A member forgets a fact about themself that another member stated. Does the other member's message go too? | The fact goes and is not learned again from it. The message stays. | As proposed, plus honest wording: Forget says the other member's message still holds the words and can still be recalled, and that its author or the space's owner can forget it. |
+| D5 | N34 | May a member state facts about another member? | Yes, kept as "said by", never replacing what the member said about themself. | As proposed. |
+| D6 | N35 | What does recall show a member about the others? | Everything in the shared space, under the member's name. | As proposed, plus a visible notice, "Memory here is shared with Sara and Omar", near the composer and on the Memory page. |
+| D7 | N36 | A member leaves a shared space, or is removed. | Their entry and facts stay. | **Changed.** Every fact under the member's own entry is forgotten, whoever said it. Their messages stay. Facts about shared things stay. The leave screen says so first; a removal applies the same rule. |
