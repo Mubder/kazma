@@ -1,7 +1,7 @@
 # Spaces: several people on one Kazma
 
 Status: DRAFT of 2026-11-15, revised with the owner on 2026-11-17. Decisions
-N1 to N20 are answered; N21 to N27, from two reviews on 2026-11-17, are open. No product code is written.
+N1 to N20 are answered; N21 to N29, from three reviews on 2026-11-17, are open. No product code is written.
 Work starts when the owner says so.
 
 Baseline: commit `07ec06b38`. Every statement about today's code was read
@@ -372,7 +372,7 @@ person, and one switch covers all of those parts.
 | Browser | Browser automation | Outside |
 | Images and voice | Image generation, speech | Outside |
 | Chat apps | Linking Telegram, Discord, Slack or WhatsApp (stage 3) | Space |
-| Development | The shell, the IDE and Workspace pages, git, the workspace's project files, and using the MCP servers the admin set up | Host: the workspace, by grant; the admin's own personal space always (4.11) |
+| Development | The shell, the IDE and Workspace pages, git, the GitHub tools, the project's files, and using the MCP servers the admin set up | Host: a shared space with a project folder, by grant; the admin's own personal space, on at first and the admin can turn it off (4.11, N28) |
 
 Rules:
 
@@ -439,6 +439,19 @@ What the owner asked for: "one admin shared space, many users, with shared
 data across every user except data the user won't share ... they also have
 their own private space."
 
+**Two kinds of shared space.** The screen for making a shared space offers
+both, and the People page says which kind each space is (proposal N29):
+
+| Kind | What it is | Who makes it |
+|---|---|---|
+| A plain shared space (the default) | Sandboxed. Its own space folder, no project folder, no Development, no GitHub. For family and friends who do not code: shared chats, memory, documents, schedules, X Studio and the rest. | The admin |
+| A shared space with a project folder | The host kind, for development. Only this kind ever asks about Development or GitHub; N26 and N27 apply only to it. | The admin only |
+
+An install can have plain shared spaces and no development space at all.
+In the rest of this section, "the workspace" is a shared space of either
+kind. The rules about Development, the project folder, roots, MCP and
+GitHub apply only to the second kind.
+
 **How it is built.** No new kind of privacy is needed. It is two spaces per
 person:
 
@@ -478,6 +491,15 @@ Rules:
   It is today's install with today's data (N19), and the admin already holds
   full trust. So the owner keeps the shell, the IDE and git in private
   chats. The workspace is a new, empty space.
+- **Development is a switch for the admin too** (proposal N28). It starts
+  on, as today. An admin who never codes can turn it off for themself: the
+  shell, the IDE, git, the GitHub tools and the machine's project files are
+  then absent from the admin's personal space too. The space stays a host
+  space; only the Development tools follow the switch.
+- **Admin tools are not Development.** Settings and vault tools, package
+  and skill installs, updates and backups, system logs, and adding,
+  changing or removing MCP servers stay with the admin whatever the
+  switch says.
 - **The workspace has its own project folder,** chosen by the admin when it
   is made. It is never Kazma's install folder, so a friend's file write
   cannot change Kazma's own code.
@@ -553,7 +575,7 @@ neither can reach the other's data, and the five refusals are gone.
 | S1-17 | Connected accounts (mail, calendar, X, GitHub) belong to a space; background refresh goes space by space. The git and GitHub tools use the space's own GitHub connection, or none. | `test_connected_accounts_spaces.py`: two spaces, two mailboxes; a refresh writes only its own; every reader names a space (source gate). A git push and every GitHub tool call in the workspace never use the owner's token. Control: the install-scoped names, and today's install-wide GitHub client. | Each space connects its own accounts. |
 | S1-18 | The vault gains a space scope; the install list stays. | `test_vault_space_scope.py`: a space's secret is not returned to another space or to code with no space. Control: the `default` rung. | Nothing. |
 | S1-19 | The space folder: file tools, uploads, images, exports and generated documents. `python_exec` mounts only it. | `test_space_files.py`: every tool that takes a path, in a sandboxed space, cannot reach outside its folder; real Docker run where present. Control: the install's workspace mount. | A Files area per space. |
-| S1-20 | Host tools exist only in a host space (4.8). In the workspace only Development's tools exist; the admin-only host tools (4.11) are absent there too. | `test_host_tools_absent.py`: every registered tool is classed host, space or outside (a new tool with no class fails); in a sandboxed space a host tool is neither offered nor callable. Control: a policy that only hides it from the list. | Members have no shell, IDE or Workspace page. |
+| S1-20 | Host tools exist only in a host space (4.8). In the workspace only Development's tools exist; the admin-only host tools (4.11) are absent there too. With the admin's own Development off, none of its tools is offered or callable in the admin's personal space, and the admin tools still are (control: today's "always"). | `test_host_tools_absent.py`: every registered tool is classed host, space or outside (a new tool with no class fails); in a sandboxed space a host tool is neither offered nor callable. Control: a policy that only hides it from the list. | Members have no shell, IDE or Workspace page. |
 | S1-21 | Approvals and running work carry space and asker. Refusal of Running work removed. | `test_gates_and_runs_spaces.py`: pending approvals and runs by matrix. Control: the list with no space. | Each person sees their own work. |
 | S1-22 | Model calls name space and asker. | `test_ledger_names_the_asker.py`: every call of a real turn, a job and a swarm task. Control: a call site with no asker fails the gate. | Spend per person on the admin page. |
 | S1-23 | Settings keys classed `install`, `space`, `account`; the Settings page splits. | The settings class gate extended: a key with no scope fails. Browser test, EN and AR. | Three Settings areas. |
@@ -592,7 +614,7 @@ belong to this subject.
 | S2-09 | Every action is recorded under the person's name. An activity page per space, for its members. | `test_actions_name_the_person.py`: every route that changes something writes the account (enumerated). Control: a route recording the session label only. | An Activity page in each space. |
 | S2-10 | The People page: features, tools, limit, models, spaces, last sign-in, sessions. | Browser test, EN and AR, reached by the sidebar. | The page itself. |
 | S2-11 | (Built in stage 1.) Features per person (4.8). One table names each feature's pages, routes, tools, chat commands, background work and connected accounts. A feature off for a person is refused at every one of them, and the check is made again when the work runs. | `test_feature_grants.py`: every page, route, tool, command and background loop belongs to a feature or is declared always on (a new one with neither fails). With X Studio on for Y and off for G: G has no menu entry, every X route refuses, no X tool is offered or callable in chat, a job or a swarm worker, `/x` refuses, and the mentions loop skips G; Y works. Control: a grant that only hides the menu entry. Browser test, EN and AR. | A switch per feature for each person. A person sees only what they were given. |
-| S2-12 | The workspace (4.11): a host space the admin invites people into; the Development feature, granted per person; the space shown in the header; "New private chat"; moving one's own chat, document or file between one's personal space and the workspace. | `test_workspace_and_personal.py`: two members and the admin. A workspace chat, fact and document are seen and recalled by all three; a thing in one member's personal space is found by nobody else, by any route, tool, search or recall, from the workspace or from another personal space. A member without Development has no shell, IDE or git, offered or callable; with it, they do. A moved chat is in exactly one space after the move, in every store. Control: a "private" mark on a workspace row, which recall and search still return. Browser test, EN and AR. | The space name in the header; "New private chat"; "Share with the workspace". |
+| S2-12 | Shared spaces (4.11), in two kinds: a plain one (sandboxed, no project folder, the default) and one with a project folder (host, admin only). The create-space screen and the People page say which kind. A plain shared space never offers Development or GitHub, to anyone. For the host kind: a space the admin invites people into; the Development feature, granted per person; the space shown in the header; "New private chat"; moving one's own chat, document or file between one's personal space and the workspace. | `test_workspace_and_personal.py`: two members and the admin. A workspace chat, fact and document are seen and recalled by all three; a thing in one member's personal space is found by nobody else, by any route, tool, search or recall, from the workspace or from another personal space. A member without Development has no shell, IDE or git, offered or callable; with it, they do. A moved chat is in exactly one space after the move, in every store. Control: a "private" mark on a workspace row, which recall and search still return. Browser test, EN and AR. | The space name in the header; "New private chat"; "Share with the workspace". |
 
 ### Stage 3: linking chat-app accounts
 
@@ -728,8 +750,8 @@ Open questions that need study, not a decision:
 
 ## 9. Decisions needed
 
-N1 to N20 were answered by the owner on 2026-11-17. N21 to N27 came from
-two reviews the same day and carry a proposal each.
+N1 to N20 were answered by the owner on 2026-11-17. N21 to N29 came from
+three reviews the same day and carry a proposal each.
 
 | # | Question | Proposal |
 |---|---|---|
@@ -746,7 +768,7 @@ two reviews the same day and carry a proposal each.
 | N11 | What may the admin see about members? | **Decided by the owner, 2026-11-17.** Spend, counts and states per person. Never titles or text of a space the admin is not in: other people's personal spaces and a shared space the admin did not join. |
 | N12 | Is a read-only member needed (today's `viewer`)? | **Decided by the owner, 2026-11-17.** Not now. Two roles in a space: owner and member. |
 | N13 | Which outside tools do members get by default: web search and fetch, the browser, image generation? | **Decided by the owner, 2026-11-17.** Web (search, fetch, crawl), research, image generation and voice on. The browser and computer use off until the admin grants them. |
-| N14 | Is a second factor required for every account on a cloud install? | **Decided by the owner, 2026-11-17.** Required on the cloud profile, optional at home. Required everywhere for anyone who holds Development. What follows: the admin's personal space always has host tools, so the owner needs a second factor too from the day a second account exists (N25). |
+| N14 | Is a second factor required for every account on a cloud install? | **Decided by the owner, 2026-11-17.** Required on the cloud profile, optional at home. Required everywhere for anyone who holds Development. What follows: the admin's personal space always has host tools, and being the admin of an install with other people is the larger reason: the admin needs a second factor from the day a second account exists (N25). |
 | N15 | After Spaces, does the owner still sign in with the shared secret? | **Decided by the owner, 2026-11-17.** It works until the owner sets a password, then it is retired for the web. The CLI on the machine keeps acting as the owner. |
 | N16 | Who does the independent review, and when do they start? | **Decided by the owner, 2026-11-17.** Chosen at the end of stage 1; they read this plan and the stage 1 code before stage 2 ends, and test the whole in stage 4. |
 | N17 | The name in Arabic. | **Decided by the owner, 2026-11-17.** "مساحة" for a space, "حساب" for an account. |
@@ -757,9 +779,11 @@ two reviews the same day and carry a proposal each.
 | N22 | (Review.) The key per space protects nothing until members hold it, and sealing the owner's live secrets again is risk R4. Build it in stage 1 or stage 4? | Stage 1 makes the key and seals new spaces' secrets with it (O5 stands). The owner's existing secrets are not sealed again until stage 4, with key rotation. R4 then covers only moving mail and calendar to the space scope. |
 | N23 | (Review.) Mention-only replies in groups (N7) would change how the owner's groups behave today. | Mention-only applies to a group bound to a shared space. The owner's existing groups keep today's behaviour until the owner changes each one. |
 | N24 | (Review.) With the read-only role gone (N12), what do OIDC sign-ins with role "viewer" or "operator" become? | Both become members with the starting features. An OIDC "admin" claim never makes an admin: there is one admin, the owner's account. |
-| N25 | (Second review.) N14 requires a second factor for anyone with Development. The admin always has host tools. Does the owner need a second factor too? | Yes, from the day a second account exists. S1-33 refuses a second account until the owner has one. |
+| N25 | (Second and third review.) Does the admin need a second sign-in factor? An admin can make accounts, reset a member's password and sign in as them (N3), and run the admin tools, with or without Development. | Yes, from the day a second account exists, because they are the admin. S1-33 refuses a second account until the admin has one. N14's rule for Development stays for members who are granted it. |
 | N26 | (Second review.) Which GitHub account does the workspace use? Today's sign-in is the owner's, and the owner can push to `main` of the public repository. | The workspace connects its own GitHub account or token, with no right to bypass the rules on `main`. Until one is connected, git push and the GitHub tools refuse there. The owner's sign-in stays in the owner's personal space. |
 | N27 | (Second review.) The filesystem MCP server is bound to one folder. Which host space does it serve? | The admin's personal space, as today. It refuses in the workspace until each space can have its own instance; Kazma's own file tools work there. |
+| N28 | (Third review.) Must the admin always carry the Development tools? An owner who never codes has no use for the shell, IDE, git and GitHub tools. | Development is a per-person switch for the admin too. It starts on, and the admin can turn it off for themself. The admin tools stay either way. |
+| N29 | (Third review.) Is every shared space a development workspace? | No. Two kinds: a plain shared space (sandboxed, the default) and a shared space with a project folder (host, admin only). An install can have only plain ones. |
 
 ## 10. Not in this plan
 
