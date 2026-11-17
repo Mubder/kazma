@@ -19,6 +19,11 @@ Usage:
     python scripts/fast_test.py --chunks 8      # explicit chunk count
     python scripts/fast_test.py --chunk-timeout 900
     python scripts/fast_test.py --foreground    # normal priority (default: lowered)
+    python scripts/fast_test.py --cores 8       # use at most 8 CPU cores (0: all)
+
+A schedule of quiet hours can be kept beside the checkout, in
+``.kazma/fast_test.json`` (git ignores ``.kazma/``), so it applies to that
+machine only; see :func:`scheduled_cores`.
 
 Output: per-chunk summaries, aggregated totals, all FAILED test ids, and a
 POISON list. Exit code: 0 only if zero failures and zero poison files.
@@ -179,6 +184,98 @@ BACKGROUND = True
 #: (2026-09-29). A cap the caller set in the environment wins.
 THREADS_PER_PROCESS: int | None = None
 _THREAD_VARS = ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS")
+
+
+# ── Quiet hours: how many CPU cores a run may use ───────────────────────────
+#
+# 2026-11-17, the owner: "My pc is whining because of the test suite". A run
+# at lowered priority still takes every core, and the fans answer. The run
+# can be held to fewer cores (``--cores``, or a schedule kept beside the
+# checkout); the cap is the runner's own CPU affinity, which every process it
+# starts inherits (pytest, a test's subprocesses, their children). Fewer
+# cores take longer, so the chunks' time budget grows with it.
+
+#: The machine's own schedule (git ignores ``.kazma/``), for example
+#: ``{"time_zone": "Asia/Kuwait", "quiet": {"from": "01:00", "to": "13:00", "cores": 8}}``:
+#: at most 8 cores from 01:00 to 13:00 Kuwait time, all cores the rest of the day.
+LOCAL_SCHEDULE = REPO / ".kazma" / "fast_test.json"
+
+#: How much longer a chunk may take than its default budget (``main`` sets it
+#: when the run is held to fewer cores than the machine has).
+BUDGET_FACTOR = 1.0
+
+
+def _minutes(text: str) -> int:
+    hours, minutes = str(text).split(":")
+    value = int(hours) * 60 + int(minutes)
+    if not 0 <= value <= 24 * 60:
+        raise ValueError(f"not a time of day: {text!r}")
+    return value % (24 * 60)
+
+
+def scheduled_cores(schedule: dict | None, cpus: int, now=None) -> tuple[int, str]:
+    """``(cores, why)``: how many cores a run may use now under *schedule*.
+
+    *schedule* is ``{"time_zone": ..., "quiet": {"from": "HH:MM", "to":
+    "HH:MM", "cores": N}}``; the quiet window may cross midnight (``from``
+    after ``to``). No schedule, or one that cannot be read, is every core
+    (the reason says why)."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    if not schedule:
+        return cpus, ""
+    try:
+        quiet = schedule["quiet"]
+        zone = ZoneInfo(str(schedule.get("time_zone") or "UTC"))
+        start, end = _minutes(quiet["from"]), _minutes(quiet["to"])
+        cores = int(quiet["cores"])
+    except (KeyError, TypeError, ValueError) as exc:
+        return cpus, f"the schedule in {LOCAL_SCHEDULE.name} cannot be read ({exc}): every core"
+    local = (now or datetime.now(tz=zone)).astimezone(zone)
+    minute = local.hour * 60 + local.minute
+    inside = start <= minute < end if start < end else (minute >= start or minute < end)
+    if not inside or cores <= 0 or cores >= cpus:
+        return cpus, ""
+    return cores, (f"quiet hours {quiet['from']}-{quiet['to']} {zone.key} "
+                   f"({LOCAL_SCHEDULE.relative_to(REPO).as_posix()}; --cores 0 for every core)")
+
+
+def read_schedule() -> dict | None:
+    """The machine's schedule, or ``None`` when there is none."""
+    import json
+
+    try:
+        data = json.loads(LOCAL_SCHEDULE.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):
+        return {"quiet": None}  # read as broken: every core, said
+    return data if isinstance(data, dict) else {"quiet": None}
+
+
+def limit_to_cores(cores: int) -> bool:
+    """Hold this process -- and so every process it starts -- to its first
+    *cores* CPUs. ``False`` when the system refused."""
+    cpus = os.cpu_count() or 1
+    if cores <= 0 or cores >= cpus:
+        return True
+    if hasattr(os, "sched_setaffinity"):
+        try:
+            os.sched_setaffinity(0, set(range(cores)))
+            return True
+        except OSError:
+            return False
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        k = ctypes.WinDLL("kernel32", use_last_error=True)
+        k.GetCurrentProcess.restype = wintypes.HANDLE
+        k.SetProcessAffinityMask.argtypes = [wintypes.HANDLE, ctypes.c_size_t]
+        k.SetProcessAffinityMask.restype = wintypes.BOOL
+        return bool(k.SetProcessAffinityMask(k.GetCurrentProcess(), (1 << cores) - 1))
+    return False
 
 
 def pytest_command(args: list[str], *, background: bool | None = None) -> list[str]:
@@ -613,7 +710,7 @@ def chunk_timeout_for(n_files: int, explicit: float | None) -> float:
     """The timeout of a chunk of ``n_files`` files; an explicit value wins."""
     if explicit is not None:
         return float(explicit)
-    return max(_MIN_CHUNK_TIMEOUT, _SECONDS_PER_FILE * n_files)
+    return max(_MIN_CHUNK_TIMEOUT, _SECONDS_PER_FILE * n_files) * BUDGET_FACTOR
 
 
 def file_timeout_for(explicit_file: float | None, explicit_chunk: float | None) -> float:
@@ -651,7 +748,12 @@ def split_for_retry(files: list[Path], parallelism: int) -> list[list[Path]]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--chunks", type=int, default=default_chunk_count(os.cpu_count()))
+    ap.add_argument("--chunks", type=int, default=None,
+                    help="independent pytest processes (default: one per core in use, at most %d)"
+                         % DEFAULT_MAX_CHUNKS)
+    ap.add_argument("--cores", type=int, default=None,
+                    help="use at most this many CPU cores, 0 for all (default: the machine's "
+                         "schedule in .kazma/fast_test.json, else all)")
     ap.add_argument("--chunk-timeout", type=float, default=None,
                     help="seconds per chunk (default: %.0f s per file, at least %.0f s)"
                          % (_SECONDS_PER_FILE, _MIN_CHUNK_TIMEOUT))
@@ -662,9 +764,25 @@ def main() -> int:
                     help="run pytest at normal priority (default: below a normal program, "
                          "so a run never starves a Kazma server on the same machine)")
     args = ap.parse_args()
-    global BACKGROUND, THREADS_PER_PROCESS
+    global BACKGROUND, THREADS_PER_PROCESS, BUDGET_FACTOR
     BACKGROUND = not args.foreground
-    THREADS_PER_PROCESS = max(1, (os.cpu_count() or 4) // max(1, args.chunks))
+    cpus = os.cpu_count() or 4
+    if args.cores is not None:
+        cores, why = (args.cores if 0 < args.cores < cpus else cpus), "--cores"
+    else:
+        cores, why = scheduled_cores(read_schedule(), cpus)
+    if cores < cpus:
+        if limit_to_cores(cores):
+            BUDGET_FACTOR = min(4.0, cpus / cores) ** 0.5
+            print(f"[fast-test] using {cores} of {cpus} cores: {why}")
+        else:
+            print(f"[fast-test] could not hold the run to {cores} cores; using all {cpus}")
+            cores = cpus
+    elif why:
+        print(f"[fast-test] {why}")
+    if args.chunks is None:
+        args.chunks = default_chunk_count(cores)
+    THREADS_PER_PROCESS = max(1, cores // max(1, args.chunks))
 
     removed = remove_ended_run_folders()
     if removed:

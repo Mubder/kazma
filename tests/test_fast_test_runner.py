@@ -19,6 +19,7 @@ import importlib.util
 import os
 import re
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -693,3 +694,99 @@ def test_the_digest_names_the_test_a_leaked_thread_came_after() -> None:
     assert "first appeared after tests/test_x.py::test_y" in digest
     # Negative control: the FAILURES/ERRORS banners alone never held it.
     assert not re.search(r"=+\s*(FAILURES|ERRORS)\s*=+", log)
+
+
+# ── Quiet hours (2026-11-17) ─────────────────────────────────────────────
+# The owner: "My pc is whining because of the test suite". A schedule kept
+# beside the checkout holds a run to fewer cores at the hours it names; every
+# process the run starts inherits the cap.
+
+_KUWAIT = {"time_zone": "Asia/Kuwait", "quiet": {"from": "01:00", "to": "13:00", "cores": 8}}
+
+
+def _at(hour: int, minute: int = 0):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    return datetime(2026, 11, 17, hour, minute, tzinfo=ZoneInfo("Asia/Kuwait"))
+
+
+@pytest.mark.parametrize(("hour", "minute", "expected"), [
+    (0, 59, 32), (1, 0, 8), (9, 30, 8), (12, 59, 8), (13, 0, 32), (18, 0, 32), (23, 59, 32),
+])
+def test_quiet_hours_hold_the_run_to_its_cores(hour, minute, expected) -> None:
+    runner = _runner()
+    cores, why = runner.scheduled_cores(_KUWAIT, 32, now=_at(hour, minute))
+    assert cores == expected
+    assert ("quiet hours 01:00-13:00 Asia/Kuwait" in why) == (expected == 8)
+
+
+def test_a_quiet_window_across_midnight() -> None:
+    runner = _runner()
+    night = {"time_zone": "Asia/Kuwait", "quiet": {"from": "22:00", "to": "06:00", "cores": 4}}
+    assert [runner.scheduled_cores(night, 32, now=_at(h))[0] for h in (21, 22, 2, 5, 6, 12)] == [32, 4, 4, 4, 32, 32]
+
+
+def test_the_window_is_read_in_its_own_zone() -> None:
+    from datetime import datetime, timezone
+
+    runner = _runner()
+    # 22:30 UTC is 01:30 in Kuwait: inside the quiet hours.
+    assert runner.scheduled_cores(_KUWAIT, 32, now=datetime(2026, 11, 16, 22, 30, tzinfo=timezone.utc))[0] == 8
+
+
+@pytest.mark.parametrize("schedule", [None, {}, {"quiet": None}, {"quiet": {"from": "1am", "to": "13:00", "cores": 8}},
+                                      {"time_zone": "Mars/Base", "quiet": {"from": "01:00", "to": "13:00", "cores": 8}}])
+def test_no_schedule_or_an_unreadable_one_uses_every_core(schedule) -> None:
+    runner = _runner()
+    cores, why = runner.scheduled_cores(schedule, 32, now=_at(9))
+    assert cores == 32
+    assert bool(why) == bool(schedule)  # an unreadable schedule says so
+
+
+def test_a_schedule_file_is_read_from_beside_the_checkout(tmp_path, monkeypatch) -> None:
+    import json
+
+    runner = _runner()
+    monkeypatch.setattr(runner, "LOCAL_SCHEDULE", tmp_path / "fast_test.json")
+    assert runner.read_schedule() is None
+    (tmp_path / "fast_test.json").write_text(json.dumps(_KUWAIT), encoding="utf-8")
+    assert runner.read_schedule() == _KUWAIT
+    (tmp_path / "fast_test.json").write_text("{not json", encoding="utf-8")
+    assert runner.scheduled_cores(runner.read_schedule(), 32, now=_at(9))[0] == 32
+
+
+def test_a_held_run_gets_a_longer_chunk_budget(monkeypatch) -> None:
+    runner = _runner()
+    plain = runner.chunk_timeout_for(200, None)
+    monkeypatch.setattr(runner, "BUDGET_FACTOR", 2.0)
+    assert runner.chunk_timeout_for(200, None) == plain * 2
+    assert runner.chunk_timeout_for(200, 300.0) == 300.0  # an explicit budget wins
+
+
+_REPORT_CHILD_CORES = r"""
+import importlib.util, json, os, subprocess, sys
+spec = importlib.util.spec_from_file_location("ft", sys.argv[1])
+ft = importlib.util.module_from_spec(spec); spec.loader.exec_module(ft)
+if sys.argv[2] != "0":
+    assert ft.limit_to_cores(int(sys.argv[2]))
+probe = "import psutil; print(len(psutil.Process().cpu_affinity()))"
+print(subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, check=True).stdout.strip())
+"""
+
+
+def test_the_cap_reaches_every_process_the_run_starts() -> None:
+    psutil = pytest.importorskip("psutil")
+    own = len(psutil.Process().cpu_affinity())  # this run may itself be held
+    if own < 4:
+        pytest.skip("needs four cores to hold a run to two")
+
+    def grandchild_cores(cap: int) -> int:
+        out = subprocess.run([sys.executable, "-c", _REPORT_CHILD_CORES, str(REPO / "scripts" / "fast_test.py"),
+                              str(cap)], capture_output=True, text=True, timeout=120, check=True)
+        return int(out.stdout.strip().splitlines()[-1])
+
+    assert grandchild_cores(2) == 2
+    # The control: without the cap (the runner before quiet hours), a process
+    # the run starts sees every core this one has.
+    assert grandchild_cores(0) == own

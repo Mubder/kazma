@@ -13043,6 +13043,15 @@ sent. Gate: `tests/test_answer_quality_monitor.py`.
   pytest-xdist here — worker segfaults (native lib) make
   it silently drop ~half the suite. The serial monolithic run intermittently
   segfaults and takes 20+ min.
+  **Quiet hours** (2026-11-17, the owner: "My pc is whining because of the
+  test suite"): `--cores N` holds a run to N cores (0: all), and a schedule
+  kept beside the checkout, `.kazma/fast_test.json` (git ignores it), holds
+  every run to its cores at the hours it names, in its own time zone
+  (`scheduled_cores`); the owner's: 8 cores from 01:00 to 13:00 Kuwait time,
+  all cores the rest of the day. The cap is the runner's CPU affinity, which
+  every process it starts inherits; a held run's chunk budget grows with it.
+  Gates in `tests/test_fast_test_runner.py` (a real grandchild's cores, the
+  uncapped run as the control).
 - **Manual verification:** reload through the guard (Server Management
   above — never a hand restart), then test via Telegram and the Web UI
 

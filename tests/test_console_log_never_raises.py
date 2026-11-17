@@ -30,7 +30,10 @@ def _run(tmp_path, mode: str) -> tuple[str, str, str]:
     out = tmp_path / f"{mode}.out"
     log = tmp_path / f"{mode}.log"
     env = {k: v for k, v in os.environ.items() if k not in ("PYTHONUTF8",)}
-    env.update({"PYTHONIOENCODING": "cp1252", "KAZMA_LOG_FILE": str(log), "KAZMA_LOG_FORMAT": "text"})
+    # Its own data folder: the suite's shared settings may hold another
+    # test's log format (JSON writes the Arabic escaped, 2026-11-17).
+    env.update({"PYTHONIOENCODING": "cp1252", "KAZMA_LOG_FILE": str(log), "KAZMA_LOG_FORMAT": "text",
+                "KAZMA_DATA_DIR": str(tmp_path / f"{mode}-data")})
     with out.open("wb") as stdout:
         done = subprocess.run([sys.executable, "-c", _CHILD, mode], stdout=stdout, stderr=subprocess.PIPE,
                               env=env, cwd=str(tmp_path), timeout=120)
@@ -43,7 +46,20 @@ def test_a_cp1252_console_escapes_and_never_raises(tmp_path):
     console, stderr, logfile = _run(tmp_path, "new")
     assert "Logging error" not in stderr, stderr[-1500:]
     assert "\\u2192 drill-model" in console, console[-500:]
-    assert "→ drill-model مرحبا" in logfile
+    assert "→ drill-model مرحبا" in _messages(logfile)
+
+
+def _messages(logfile: str) -> str:
+    """The log file's messages, whichever format it is written in."""
+    import json
+
+    out = []
+    for line in logfile.splitlines():
+        try:
+            out.append(json.loads(line).get("message", ""))
+        except ValueError:
+            out.append(line)
+    return "\n".join(out)
 
 
 def test_negative_control_the_old_console_raised_per_line(tmp_path):
