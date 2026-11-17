@@ -12455,7 +12455,9 @@ with a test that fails on the old code and a gate for its class:
   with a hairline on its inner edge; menu items are 45px pills, hover takes
   the accent ink and moves 4px along the reading direction, the active item
   is a filled accent pill with the `--on-accent` ink; the header is
-  transparent over the wall, with round 40px icon buttons, a search field
+  chrome (the wall) with a hairline along its bottom edge that meets the
+  menu's (transparent with no border, it ran into the page once the page
+  darkened), with round 40px icon buttons, a search field
   that opens the Ctrl+K palette, and menus (the bell, the account) that are
   the overlay surface with the overlay shadow, rows leading with an icon tile. The
   shared classes a page uses and never redefines (nor `kazma.v5.css`, which

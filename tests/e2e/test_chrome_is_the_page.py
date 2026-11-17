@@ -1,4 +1,5 @@
-"""Only a card is the card colour: chrome columns and bands are the page's.
+"""Only a card is the card colour: chrome columns and bands are the page's,
+and the header is set off from the page by a line along its bottom edge.
 
 Since 2026-11-17 a card is one step above the page (AGENTS.md, "One colour
 system"). The chat page's session list still read ``--bg-panel`` -- the card
@@ -62,8 +63,27 @@ _SCAN_JS = r"""() => {
 }"""
 
 
+#: The header's bottom edge: a visible line, or why not ('' when it has one).
+_HEADER_EDGE_JS = r"""() => {
+  const h = document.querySelector('.page-header');
+  if (!h || getComputedStyle(h).display === 'none' || !h.getBoundingClientRect().height) return '';
+  const cs = getComputedStyle(h);
+  const width = parseFloat(cs.borderBottomWidth) || 0;
+  const color = cs.borderBottomColor;
+  const clear = /rgba\([^)]*,\s*0\)$/.test(color) || color === 'transparent';
+  if (width < 1 || cs.borderBottomStyle === 'none' || clear || color === cs.backgroundColor) {
+    return `width ${cs.borderBottomWidth}, style ${cs.borderBottomStyle}, colour ${color}`;
+  }
+  return '';
+}"""
+
+
 def chrome_problems(pg, label: str) -> list[str]:
-    return [f"{label}: {el} is the card colour but no card" for el in pg.evaluate(_SCAN_JS)]
+    found = [f"{label}: {el} is the card colour but no card" for el in pg.evaluate(_SCAN_JS)]
+    edge = pg.evaluate(_HEADER_EDGE_JS)
+    if edge:
+        found.append(f"{label}: the header has no line along its bottom edge ({edge})")
+    return found
 
 
 @pytest.fixture(scope="module")
@@ -171,6 +191,26 @@ def test_phone_drawers_are_above_the_composer(harness: Harness) -> None:
             for drawer, _ in _DRAWERS:
                 assert any(x.startswith(f"{drawer}: covered") and "chat-input-area" in x for x in old), old
             ctx.close()
+        finally:
+            browser.close()
+
+
+def test_negative_control_a_header_with_no_edge_is_caught(harness: Harness) -> None:
+    """The header as it was: transparent, with no border, running into the page."""
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            pg = browser.new_page(viewport={"width": 1280, "height": 900})
+            pg.goto(f"{harness.base}/dashboard", wait_until="domcontentloaded", timeout=30000)
+            _settle(pg)
+            assert not chrome_problems(pg, "fixed")
+            pg.add_style_tag(content=".page-header { background: transparent; border-bottom: 0; }")
+            pg.wait_for_function(
+                "() => getComputedStyle(document.querySelector('.page-header')).borderBottomStyle === 'none'",
+                timeout=10000)
+            assert any("the header has no line" in x for x in chrome_problems(pg, "old"))
         finally:
             browser.close()
 

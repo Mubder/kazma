@@ -760,8 +760,12 @@ button { cursor: pointer; font-family: inherit; }
   gap: var(--sp-4);
   padding: 0 var(--sp-6);
   padding-top: env(safe-area-inset-top, 0px);
-  background: transparent;
-  border-bottom: 0;
+  /* Chrome, like the menu: the page's colour and a hairline along its
+     bottom edge, which meets the menu's own on its inner edge. It was
+     transparent with no border, and on the darker page (2026-11-17) the
+     header ran into the content with nothing between them. */
+  background: var(--surface-chrome);
+  border-bottom: 1px solid var(--card-hairline);
   min-height: var(--header-height);
   flex-shrink: 0;
   /* The header is its own stacking context (isolation; it used to be the

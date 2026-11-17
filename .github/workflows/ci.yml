@@ -670,6 +670,14 @@ jobs:
         run: python -m pytest tests/e2e/test_pages_load_clean.py -q --timeout=600
         env:
           KAZMA_DB_BACKEND: sqlite
+      - name: Only a card is the card colour; the header has its line (2026-11-17)
+        # Every page and Settings tab, desktop and phone, both themes: no
+        # column or band in the card colour that is not a card (the chat
+        # session list was), the header set off by a line, and on a phone
+        # both drawers above the chat composer.
+        run: python -m pytest tests/e2e/test_chrome_is_the_page.py -q --timeout=600
+        env:
+          KAZMA_DB_BACKEND: sqlite
       - name: X Studio bilingual composer and review
         # X composer/review acceptance has its own isolated app fixture.
         # It must run here because the chunked unit suite excludes e2e.
