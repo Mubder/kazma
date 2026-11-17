@@ -33,8 +33,8 @@ and that list differ, the list is right.
 |:---|:---|
 | What is it? | A personal AI agent you host yourself. It has a web app, a terminal app, a command line and bots for chat apps |
 | Who is it for? | One operator per install: you run it, you control all of it, and you answer for what its agent does |
-| Which models? | 20 provider presets (OpenAI, Anthropic, Google Gemini, Azure OpenAI, AWS Bedrock, DeepSeek, Mistral, xAI, OpenRouter and more) and any OpenAI-compatible endpoint. Local models run through Ollama and LM Studio |
-| Where do I talk to it? | Web chat, Telegram, Discord, Slack, the terminal UI and `kazma ask`. Editors connect through `kazma acp`, and other agents through `kazma mcp` |
+| Which models? | 35 providers in one list (OpenAI, Anthropic, Google Gemini, Azure OpenAI, AWS Bedrock, DeepSeek, Mistral, xAI, OpenRouter and more) and any OpenAI-compatible endpoint. Local models run through Ollama, LM Studio, vLLM, llama.cpp and other local servers |
+| Where do I talk to it? | Web chat, Telegram, Discord, Slack, WhatsApp (opt-in), the terminal UI and `kazma ask`. Editors connect through `kazma acp`, and other agents through `kazma mcp` |
 | Which languages? | English and Arabic interfaces, with a full right-to-left layout. Memory, documents and scanned-page reading work in both languages |
 | Where does it keep data? | In SQLite with no setup, or in Postgres for settings, chats, tasks and checkpoints |
 | What does it run on? | Windows, Linux, macOS and WSL, with Python 3.11 to 3.14 |
@@ -57,7 +57,7 @@ a key again.
 
 Dangerous actions wait for your approval: shell commands, file writes and
 deletes, email, messages to chat apps and posts to X. The approval comes in
-the web chat or as buttons in Telegram, Discord or Slack. The same rule holds
+the web chat or as buttons in Telegram, Discord, Slack or WhatsApp. The same rule holds
 for multi-agent work and pipelines, and a tool nobody has classified is gated
 by default.
 
@@ -115,6 +115,9 @@ quiet, then stops Kazma, installs the update and starts it again.
   each platform. Each chat app's Test checks the token, the delivery chat, and
   what happened to the last message a person sent. Tables in an answer arrive
   as lines, so they read on a phone.
+- **WhatsApp** (opt-in): the same, through Meta's WhatsApp Cloud API with your
+  own Meta app and number. Meta lets a business reply only within 24 hours of
+  your last message.
 - **Terminal and editors**: a terminal UI with a file editor, one-shot
   questions with `kazma ask`, and the Agent Client Protocol for editors with
   `kazma acp`. With `kazma mcp`, other agents can use Kazma's tools, behind the
@@ -184,8 +187,8 @@ quiet, then stops Kazma, installs the update and starts it again.
 
 ### Choose your models
 
-- 20 provider presets, any OpenAI-compatible endpoint, and local models
-  through Ollama and LM Studio. A provider's Test sends a real completion,
+- 35 providers in one list, any OpenAI-compatible endpoint, and local models
+  through Ollama, LM Studio and other local servers. A provider's Test sends a real completion,
   not just a ping.
 - Multi-agent workers get the best model for each task, and image questions
   go to a model that can see.
@@ -233,7 +236,7 @@ quiet, then stops Kazma, installs the update and starts it again.
   for deep wells of memory and one gateway to many channels.
 - **In one sentence:** Kazma is a self-hosted, open-source (MIT) AI agent
   that asks before it acts: one assistant across the web, the terminal,
-  editors, Telegram, Discord and Slack, in English and Arabic.
+  editors, Telegram, Discord, Slack and WhatsApp, in English and Arabic.
 - **Status words** carry meaning. **Shipped** works out of the box or one
   setting away, **Opt-in** needs a named extra or setting, **Partial** works
   with a stated limit, and **Not built** is not there. Do not present an

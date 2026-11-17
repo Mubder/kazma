@@ -2,7 +2,7 @@
 
 Written from the code on **2026-09-29** for the website: every line was
 checked against the source, and each names where to look. It says what exists,
-not what is planned. The changes below were checked again on **2026-10-12**, the document lines on **2026-10-15** and **2026-10-21**, and the additions of **2026-11-14** that day. Disclosures about bounded bilingual review and deployment qualification are in [Known gaps](KNOWN_GAPS.md).
+not what is planned. The changes below were checked again on **2026-10-12**, the document lines on **2026-10-15** and **2026-10-21**, the additions of **2026-11-14** that day, and those of **2026-11-17** that day. Disclosures about bounded bilingual review and deployment qualification are in [Known gaps](KNOWN_GAPS.md).
 
 **Status words.** **Shipped**: works out of the box or one setting away.
 **Opt-in**: works once you install or configure the named extra.
@@ -22,7 +22,7 @@ Every line below describes that setup.
 |---|---|---|
 | Web chat with streaming answers, a step-by-step activity view per answer, and approvals inline | Shipped | `/chat` |
 | Telegram, Discord and Slack: text, photos and documents, voice notes transcribed, approve/deny buttons, per-platform allowed-user lists | Shipped | `kazma-gateway/` |
-| WhatsApp, through Meta's WhatsApp Cloud API: text, photos, documents, voice notes, approve/deny buttons, allowed numbers; Meta's signature checked on every call | Opt-in — your own Meta app, number and token; Meta allows a reply only within 24 hours of your last message; tested against a stand-in for Meta, not yet against Meta's own servers | Settings → Providers & Connectors → Platform Connectors → WhatsApp |
+| WhatsApp, through Meta's WhatsApp Cloud API: text, photos, documents, voice notes, approve/deny buttons, allowed numbers; Meta's signature checked on every call | Opt-in — your own Meta app, number and token; Meta allows a reply only within 24 hours of your last message; live on a real business number since 2026-11-16 | Settings → Providers & Connectors → Platform Connectors → WhatsApp |
 | Native Telegram command menus and Discord/Slack `/kazma` commands | Opt-in — external application registration is required; private continuation credentials expire on restart | [Documentation](docs/ops/native-slash-commands.md) |
 | Each chat app's Test diagnoses the connection: the token, the chat or channel Kazma delivers to, direct messages, allowed users, and what became of the last message a person sent | Shipped | Settings → Providers & Connectors → Platform Connectors |
 | Finalized chat replies delivered without gateway tone rewriting, with one terminal persistence owner | Shipped | [Documentation](docs/guide/recent-features.md) |
@@ -100,12 +100,12 @@ Every line below describes that setup.
 | PDFs on the web (theses, articles, reports) read as their text layer by the sandboxed document worker, in chat and in research | Shipped — up to 20 MB, no OCR on a web read (a scan is refused); Knowledge crawls leave PDFs out | [Web research](docs/guide/web-research.md#pdf-sources) |
 | Web search through SearXNG (self-hosted metasearch, installed with Express on Windows and Linux) | Shipped | `tools/web_search.py` |
 | Search falls back to Bing, then Wikipedia's full-text search, when an engine answers with nothing or with results not about the query | Shipped — an answer counts only when at least half its results hold a word of the query | [Web research](docs/guide/web-research.md#stronger-search-searxng) |
-| Local HTTP extraction with optional local Chromium; hosted Firecrawl/Jina recovery requires explicit consent | Partial — local-only default; strict Chromium needs Linux network/cgroup controls; Windows strict rendering refuses launch and compatibility endurance is unqualified | [Web research](docs/guide/web-research.md) |
-| Durable research and crawl journals with explicit recovery after interruption | Shipped — finite job/history/report allowances; uncertain effects are not automatically replayed | [Web research](docs/guide/web-research.md) |
-| Persistent research/crawl completion alerts linking to saved results, with stall, recovery and distinct terminal-outcome warnings | Shipped — monitoring and completion alerts default on; external delivery requires configured ops routes | Settings → System → Web acquisition |
-| Saved acquisition errors, reported usage, request reservations and cached provider balances in Web, chat, CLI and TUI | Partial — unsupported balances and charges stay unknown; balance refresh is explicit and permitted by policy | [Web research](docs/guide/web-research.md) |
-| Automated crawl/KB/research robots checks and shared origin limits/cooldowns | Shipped — failed checks refuse crawling; explicit robots opt-out is visible | [Web research](docs/guide/web-research.md) |
-| Scraping through a rotating residential proxy | Opt-in — acquisition mode + proxy allowlist permission + Settings | Settings → System → Proxy |
+| Web pages are read on your own machine: fetched directly, or rendered in a local browser when they need JavaScript; hosted reading services (Firecrawl, Jina) are used only if you allow them | Partial — the fully network-isolated browser needs Linux; on Windows the browser runs in a less isolated mode, not yet qualified for very long runs | [Web research](docs/guide/web-research.md) |
+| Research and crawls survive a restart: every step is recorded, and an interrupted run continues where it stopped | Shipped — the storage for runs and reports is capped; a step whose outcome is unknown is never repeated by itself | [Web research](docs/guide/web-research.md) |
+| An alert when research or a crawl finishes, linking to its saved results, and a warning when one stalls, recovers or ends early | Shipped — on by default; alerts reach your chat apps once an alert route is set | Settings → System → Web acquisition |
+| What each paid web service used, its errors and its balance, in the web page, chat, command line and terminal app | Partial — a balance or charge a service does not report is shown as unknown; a balance is refreshed only when you ask | [Web research](docs/guide/web-research.md) |
+| Crawls and research respect each site's robots.txt and pace their requests to every site | Shipped — a site whose robots.txt cannot be read is not crawled; switching the check off is shown | [Web research](docs/guide/web-research.md) |
+| Scraping through a rotating residential proxy | Opt-in — allowed by name in the web acquisition settings, then set up in Settings | Settings → System → Proxy |
 | Image generation (Pollinations with no key; DALL-E, Stability, Flux with keys) and image understanding | Shipped | `tools/image_gen.py` |
 
 ## Work on code
@@ -165,6 +165,7 @@ Every line below describes that setup.
 | Postgres for settings, chats, tasks and checkpoints; SQLite with no setup | Shipped | [Postgres](docs/ops/postgres-and-saas.md) |
 | Admin answer-quality signals without storing answer text in the signal record | Shipped | [Documentation](docs/guide/api-and-extension-points.md) |
 | Prometheus metrics; OpenTelemetry and Langfuse traces | Shipped / Opt-in | `/metrics`, [OpenTelemetry](docs/ops/opentelemetry.md) |
+| A Windows installer: no git and no terminal; it installs a release and runs the same setup, and `kazma update` keeps it current from each release's signed source | Partial — from the release after 0.21.2; Windows shows a SmartScreen warning until the installer is signed | [Quickstart](docs/guide/quickstart.md#windows-installer) |
 | Updates in one command: on a supervised install it waits for the chats to go quiet, stops Kazma, installs and starts it again | Shipped | [`kazma update`](docs/ops/kazma-update.md) |
 | Updates install the package versions Kazma was tested with, and every release is tested as an upgrade from the one before | Shipped | [`kazma update`](docs/ops/kazma-update.md) |
 | Uninstall: takes off what setup put on; your data is kept unless you ask, and then moved aside (Kazma's database backed up first) | Shipped | `kazma uninstall`, [CLI reference](docs/guide/cli-reference.md) |
@@ -172,9 +173,19 @@ Every line below describes that setup.
 | Active-passive recovery preparation with one active runtime owner, fencing and paired backups | Partial — target-cluster drills are required; shared Postgres alone does not qualify concurrent runtimes | [Documentation](docs/ops/multi-region.md) |
 | Fault injection to test retries and failover: slow or failing model calls, tool calls and reply saves (other targets have no injection point yet); off unless enabled | Opt-in | `KAZMA_CHAOS_ENABLED`, [Chaos testing](docs/ops/chaos-testing.md) |
 
+## Trust you can check
+
+| Feature | Status | Where |
+|---|---|---|
+| Every release signed with Sigstore, with build provenance (SLSA) and a list of everything inside it (SBOM); `kazma update` installs only a release whose signature holds | Shipped — from 0.21.2 on | [Supply chain](SUPPLY_CHAIN.md) |
+| Installs and updates use the exact package versions Kazma was tested with, each checked by its hash | Shipped | [`kazma update`](docs/ops/kazma-update.md) |
+| Checked on every change: CodeQL and SonarCloud code scanning, fuzzing of the code that reads outside text, and the test suite's coverage published on Codecov | Shipped | the README's badges |
+| OpenSSF Best Practices passing badge (100%) and an OpenSSF Scorecard published weekly | Shipped | [bestpractices.dev](https://www.bestpractices.dev/projects/16743), the README's badges |
+| A defensive security review of the whole code base, every gap it found fixed with a test | Shipped — 2026-11-15; the independent outside review is still to come | [Safety design](docs/docs/security/safety-design.md) |
+
 ## Not built
 
 - A paid bug bounty (responsible disclosure only — [SECURITY.md](../SECURITY.md)).
 - Cryptographic trust tiers for skills beyond HMAC verification, and signed delegation between agents.
-- A hardening check that runs at startup: `kazma-security.yaml` is read by no code; the hardening report runs on demand.
+- A security self-check at every start: the hardening report runs only when you ask for it.
 - A security audit of multi-tenant, internet-facing deployments. Kazma is built for one trusted operator; what that means is written down in [THREAT_MODEL.md](THREAT_MODEL.md#who-kazma-is-for-one-operator-per-install).
