@@ -9343,7 +9343,320 @@
   }
  },
  "deep_pass": {
-  "recorded": false
+  "recorded": true,
+  "model": "deepseek-flash",
+  "calls": 60,
+  "prompt_tokens": 50954,
+  "completion_tokens": 13550,
+  "cost_usd": null,
+  "v1_lines": {
+   "llm.ar.precision": 0.6364,
+   "llm.ar.quiet": 1.0,
+   "llm.ar.recall": 0.6364,
+   "llm.en.precision": 0.7143,
+   "llm.en.quiet": 1.0,
+   "llm.en.recall": 0.6923,
+   "llm.mixed.precision": 0.8,
+   "llm.mixed.quiet": 1.0,
+   "llm.mixed.recall": 0.8
+  },
+  "subjects_as_written": {
+   "v1_lines": {
+    "user": 29,
+    "a_members_name": 0,
+    "other": 6
+   },
+   "v1_again": {
+    "user": 6,
+    "a_members_name": 0,
+    "other": 5
+   },
+   "speaker_plain": {
+    "user": 12,
+    "a_members_name": 4,
+    "other": 1
+   },
+   "speaker_lines": {
+    "user": 10,
+    "a_members_name": 5,
+    "other": 2
+   }
+  },
+  "same_message_asked_again": {
+   "e07": {
+    "gold": 2,
+    "found_first_asking": 2,
+    "found_asked_again": 2,
+    "found_with_speaker_lines": 1,
+    "first_asking": [
+     "hana occupation pilot",
+     "hana works_at klm",
+     "sara has_sister hana"
+    ],
+    "asked_again": [
+     "sara has_sister hana",
+     "hana works_at klm",
+     "hana occupation_is pilot"
+    ],
+    "with_speaker_lines": [
+     "hana works_at klm",
+     "hana occupation pilot",
+     "hana sibling_of sara"
+    ]
+   },
+   "a04": {
+    "gold": 1,
+    "found_first_asking": 1,
+    "found_asked_again": 0,
+    "found_with_speaker_lines": 0,
+    "first_asking": [
+     "sara allergic_to الفول السوداني"
+    ],
+    "asked_again": [
+     "sara has_allergy الفول السوداني"
+    ],
+    "with_speaker_lines": [
+     "sara has_allergy الفول السوداني"
+    ]
+   },
+   "a06": {
+    "gold": 2,
+    "found_first_asking": 2,
+    "found_asked_again": 0,
+    "found_with_speaker_lines": 0,
+    "first_asking": [
+     "نورة profession_is طبيبة أسنان",
+     "layla has_sister نورة"
+    ],
+    "asked_again": [
+     "نورة works_as طبيبة أسنان",
+     "نورة relation_to_user أخت"
+    ],
+    "with_speaker_lines": [
+     "نورة works_as طبيبة أسنان",
+     "نورة relation_to_user أخت"
+    ]
+   },
+   "m05": {
+    "gold": 2,
+    "found_first_asking": 1,
+    "found_asked_again": 2,
+    "found_with_speaker_lines": 2,
+    "first_asking": [
+     "lulwa child_of user",
+     "lulwa studies_at bayan_school"
+    ],
+    "asked_again": [
+     "lulwa studies_at Bayan School",
+     "layla has_daughter lulwa"
+    ],
+    "with_speaker_lines": [
+     "lulwa studies_at Bayan School",
+     "layla has_daughter lulwa"
+    ]
+   },
+   "m07": {
+    "gold": 1,
+    "found_first_asking": 1,
+    "found_asked_again": 1,
+    "found_with_speaker_lines": 1,
+    "first_asking": [
+     "omar works_at Zain",
+     "omar previously_worked_at Ooredoo"
+    ],
+    "asked_again": [
+     "omar works_at Zain",
+     "omar former_employer Ooredoo"
+    ],
+    "with_speaker_lines": [
+     "omar works_at Zain"
+    ]
+   },
+   "m08": {
+    "gold": 1,
+    "found_first_asking": 1,
+    "found_asked_again": 1,
+    "found_with_speaker_lines": 1,
+    "first_asking": [
+     "abu_faisal name_is abu_faisal",
+     "assistant name_is kazma"
+    ],
+    "asked_again": [
+     "abu_faisal name_is Abu Faisal"
+    ],
+    "with_speaker_lines": [
+     "abu_faisal name_is Abu Faisal"
+    ]
+   }
+  },
+  "speaker_plain": {
+   "scores": {
+    "ar": {
+     "turns": 4,
+     "gold": 5,
+     "found": 5,
+     "kept": 6,
+     "right": 5,
+     "quiet_turns": 0,
+     "quiet_kept_nothing": 0,
+     "recall": 1.0,
+     "precision": 0.8333,
+     "quiet": 1.0
+    },
+    "en": {
+     "turns": 5,
+     "gold": 5,
+     "found": 5,
+     "kept": 7,
+     "right": 5,
+     "quiet_turns": 1,
+     "quiet_kept_nothing": 0,
+     "recall": 1.0,
+     "precision": 0.7143,
+     "quiet": 0.0
+    },
+    "mixed": {
+     "turns": 3,
+     "gold": 4,
+     "found": 4,
+     "kept": 4,
+     "right": 4,
+     "quiet_turns": 0,
+     "quiet_kept_nothing": 0,
+     "recall": 1.0,
+     "precision": 1.0,
+     "quiet": 1.0
+    }
+   },
+   "misfiled_under_the_speaker": [],
+   "kept": {
+    "x01": [
+     "omar lives_in lusail"
+    ],
+    "x02": [
+     "omar lives_in lusail"
+    ],
+    "x03": [
+     "layla lives_in Muscat"
+    ],
+    "x04": [
+     "omar works_at qatar_rail",
+     "sara spouse_is omar"
+    ],
+    "x05": [
+     "omar name_is omar",
+     "omar works_at qatar_rail"
+    ],
+    "x06": [
+     "sara name_is سارة",
+     "sara lives_in الكويت"
+    ],
+    "x07": [
+     "منصور lives_in دبي",
+     "omar has_brother منصور"
+    ],
+    "x08": [
+     "omar lives_in لوسيل"
+    ],
+    "x09": [
+     "sara works_at بنك الخليج"
+    ],
+    "x10": [
+     "omar lives_in Lusail"
+    ],
+    "x11": [
+     "sara works_at gulf_bank"
+    ],
+    "x12": [
+     "sara name_is Sara",
+     "sara works_at Gulf Bank"
+    ]
+   }
+  },
+  "speaker_lines": {
+   "scores": {
+    "ar": {
+     "turns": 4,
+     "gold": 5,
+     "found": 5,
+     "kept": 6,
+     "right": 5,
+     "quiet_turns": 0,
+     "quiet_kept_nothing": 0,
+     "recall": 1.0,
+     "precision": 0.8333,
+     "quiet": 1.0
+    },
+    "en": {
+     "turns": 5,
+     "gold": 5,
+     "found": 5,
+     "kept": 7,
+     "right": 5,
+     "quiet_turns": 1,
+     "quiet_kept_nothing": 0,
+     "recall": 1.0,
+     "precision": 0.7143,
+     "quiet": 0.0
+    },
+    "mixed": {
+     "turns": 3,
+     "gold": 4,
+     "found": 4,
+     "kept": 4,
+     "right": 4,
+     "quiet_turns": 0,
+     "quiet_kept_nothing": 0,
+     "recall": 1.0,
+     "precision": 1.0,
+     "quiet": 1.0
+    }
+   },
+   "misfiled_under_the_speaker": [],
+   "kept": {
+    "x01": [
+     "omar lives_in Lusail"
+    ],
+    "x02": [
+     "omar lives_in lusail"
+    ],
+    "x03": [
+     "layla lives_in Muscat"
+    ],
+    "x04": [
+     "omar works_at qatar_rail",
+     "omar spouse_of user"
+    ],
+    "x05": [
+     "omar name_is omar",
+     "omar works_at qatar_rail"
+    ],
+    "x06": [
+     "sara name_is سارة",
+     "sara lives_in الكويت"
+    ],
+    "x07": [
+     "منصور lives_in دبي",
+     "منصور sibling_of عمر"
+    ],
+    "x08": [
+     "omar lives_in لوسيل"
+    ],
+    "x09": [
+     "sara works_at بنك الخليج"
+    ],
+    "x10": [
+     "omar lives_in Lusail"
+    ],
+    "x11": [
+     "sara works_at Gulf Bank"
+    ],
+    "x12": [
+     "sara name_is Sara",
+     "sara works_at Gulf Bank"
+    ]
+   }
+  }
  },
  "correction_rule": {
   "control": {

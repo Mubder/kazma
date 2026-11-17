@@ -33,9 +33,11 @@ this machine), and saves them to ``vectors.npz`` beside this file.
 
 The deep pass (the model's extraction) is replayed from ``deep_replies.json``:
 the extraction prompt with the speaker lines of the study's section 2.1, for
-the extraction benchmark's turns and for this study's speaker turns, and
-today's prompt for the speaker turns. :func:`record_deep` made it, given a
-model client; it costs one model call a reply and is not a command here.
+the extraction benchmark's turns and for this study's speaker turns; today's
+prompt for the speaker turns; and six turns asked once more with today's
+prompt. :func:`record_deep` made it, given a model client (60 calls to
+deepseek-flash on 2026-11-18); it costs one model call a reply and is not a
+command here.
 """
 
 from __future__ import annotations
@@ -61,6 +63,11 @@ RESULTS = HERE / "results.json"
 DEEP = HERE / "deep_replies.json"
 #: The most model calls one deep-pass recording may make.
 MAX_DEEP_CALLS = 60
+#: The extraction turns whose result with the speaker lines differed from the
+#: existing recording. They were asked once more with today's message, to see
+#: how much one and the same message varies from one asking to the next. They
+#: were chosen after seeing the first replies.
+ASKED_AGAIN = ("e07", "a04", "a06", "m05", "m07", "m08")
 V5_VECTORS = ROOT / "tests" / "fixtures" / "memory_bench" / "vectors.npz"
 THRESHOLDS = ROOT / "tests" / "fixtures" / "memory_bench" / "thresholds.json"
 LLM_REPLIES = ROOT / "tests" / "fixtures" / "memory_bench" / "extraction_llm.json"
@@ -610,6 +617,11 @@ def deep_jobs(cases: dict[str, Any]) -> list[dict[str, Any]]:
         speaker, others = _people_for(turn, i, members)
         jobs.append({"set": "v1_lines", "turn": turn, "speaker": speaker, "others": others,
                      "blob": _llm_blob(turn["user"]) + speaker_lines(speaker, others)})
+    for i, turn in enumerate(v1):
+        if turn["id"] in ASKED_AGAIN:
+            speaker, others = _people_for(turn, i, members)
+            jobs.append({"set": "v1_again", "turn": turn, "speaker": speaker, "others": others,
+                         "blob": _llm_blob(turn["user"])})
     for i, turn in enumerate(cases["extraction"]):
         speaker, others = _people_for(turn, i, members)
         jobs.append({"set": "speaker_plain", "turn": turn, "speaker": speaker, "others": others,
@@ -670,16 +682,22 @@ def _filed_among(beliefs: list[dict[str, Any]], speaker: dict[str, Any],
     out = []
     for belief in beliefs:
         subject = str(belief.get("subject") or "")
+        named = _member_named(subject, (speaker, *others))
         if subject == "user":
             subject = self_id("name", speaker)
-        else:
-            words = _folded_words(subject.replace("_", " "))
-            for member in (speaker, *others):
-                if any(words == _folded_words(name) for name in (member["name"], *member.get("aliases", []))):
-                    subject = self_id("name", member)
-                    break
+        elif named is not None:
+            subject = self_id("name", named)
         out.append({**belief, "subject": subject})
     return out
+
+
+def _member_named(subject: str, people: tuple[dict[str, Any], ...]) -> dict[str, Any] | None:
+    """The member whose name, or a name they are called by, *subject* is."""
+    words = _folded_words(subject.replace("_", " "))
+    for member in people:
+        if any(words == _folded_words(name) for name in (member["name"], *member.get("aliases", []))):
+            return member
+    return None
 
 
 def run_deep(cases: dict[str, Any]) -> dict[str, Any]:
@@ -712,12 +730,11 @@ def run_deep(cases: dict[str, Any]) -> dict[str, Any]:
         beliefs = asyncio.run(parsed(reply, job["turn"]["user"]))
         counts = raw_subjects.setdefault(job["set"], {"user": 0, "a_members_name": 0, "other": 0})
         for belief in beliefs:
-            filed = _filed_among([belief], job["speaker"], job["others"])[0]["subject"]
-            counts["user" if belief["subject"] == "user"
-                   else "a_members_name" if filed != belief["subject"] else "other"] += 1
+            named = _member_named(str(belief["subject"]), (job["speaker"], *job["others"]))
+            counts["user" if belief["subject"] == "user" else "a_members_name" if named else "other"] += 1
         got.setdefault(job["set"], {})[job["turn"]["id"]] = _filed_among(beliefs, job["speaker"], job["others"])
         me = self_id("name", job["speaker"])
-        if job["set"] != "v1_lines":  # this study's turns name whom a fact is about
+        if not job["set"].startswith("v1_"):  # this study's turns name whom a fact is about
             facts = [[{"subject": self_id("name", members[alt["about"][1:]]) if alt["about"].startswith("@")
                        else slug(alt["about"]), "predicates": alt["predicates"], "object": alt["object"]}
                       for alt in alts] for alts in job["turn"]["facts"]]
@@ -747,6 +764,31 @@ def run_deep(cases: dict[str, Any]) -> dict[str, Any]:
         "v1_lines": extraction_scores({"llm": _score_extraction(gold["v1_lines"], got["v1_lines"])}),
         "subjects_as_written": raw_subjects,
     }
+    # The same message asked twice: the existing recording, and once more.
+    from kazma_core.memory.benchmark import _fact_matches, _llm_blob
+
+    first = json.loads(LLM_REPLIES.read_text(encoding="utf-8"))["replies"]
+    again: dict[str, Any] = {}
+    for turn in gold.get("v1_again", []):
+        speaker = next(j["speaker"] for j in deep_jobs(cases) if j["set"] == "v1_again" and j["turn"]["id"] == turn["id"])
+        others = next(j["others"] for j in deep_jobs(cases) if j["set"] == "v1_again" and j["turn"]["id"] == turn["id"])
+        before = _filed_among(asyncio.run(parsed(first[_text_key(_llm_blob(turn["user"]))], turn["user"])),
+                              speaker, others)
+
+        def found(beliefs: list[dict[str, Any]], facts: list[Any] = turn["facts"]) -> int:
+            return sum(1 for alts in facts if any(_fact_matches(alts, b) for b in beliefs))
+
+        def shown(beliefs: list[dict[str, Any]]) -> list[str]:
+            return [f"{b['subject']} {b['predicate']} {b['object']}" for b in beliefs]
+
+        again[turn["id"]] = {
+            "gold": len(turn["facts"]),
+            "found_first_asking": found(before), "found_asked_again": found(got["v1_again"][turn["id"]]),
+            "found_with_speaker_lines": found(got["v1_lines"][turn["id"]]),
+            "first_asking": shown(before), "asked_again": shown(got["v1_again"][turn["id"]]),
+            "with_speaker_lines": shown(got["v1_lines"][turn["id"]]),
+        }
+    report["same_message_asked_again"] = again
     for name in ("speaker_plain", "speaker_lines"):
         report[name] = {
             "scores": _score_extraction(gold[name], got[name]),
@@ -894,6 +936,9 @@ def _print(report: dict[str, Any]) -> None:
         for name in ("speaker_plain", "speaker_lines"):
             rows = {lang: (row["recall"], row["precision"], row["quiet"]) for lang, row in deep[name]["scores"].items()}
             print(f"  {name}: {rows}  misfiled {deep[name]['misfiled_under_the_speaker']}")
+        for tid, row in deep["same_message_asked_again"].items():
+            print(f"  {tid}: gold {row['gold']}  first asking {row['found_first_asking']}  asked again "
+                  f"{row['found_asked_again']}  with lines {row['found_with_speaker_lines']}")
 
 
 if __name__ == "__main__":

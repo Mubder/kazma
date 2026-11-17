@@ -109,21 +109,19 @@ the queue run minutes or days after the turn, some in another process. A
 fact filed under the speaker at write time is right forever; a fact that
 waits for recall to decide needs the speaker at every later read.
 
-**The deep pass is told who speaks, but the mapping does not depend on it.**
-The prompt keeps `Use "user" for the user themselves`, and the writer maps
-`user` to the speaker's entry. So the recorded replies, and the one-member
-prompt, are byte for byte what they are today. In a shared space the prompt
-gains two lines (the speaker's name, the other members' names) so that
-"Omar" in Sara's message is written as the member Omar. The lines are
-written (`speaker_lines` in the study's `study.py`):
+**The deep pass is not told who speaks.** Its message stays exactly today's,
+in every kind of space. The prompt keeps `Use "user" for the user
+themselves`, and the writer maps `user` to the speaker's entry. A member
+named in a message ("Omar", "عمر") is written by the model under that name,
+and the alias match files it under the member's entry.
 
-```
-Speaker: Layla (the "user" of this message).
-Other members of this space: Sara (سارة, ساره), Omar (عمر). A fact about another member takes that member's name as its subject.
-```
-
-Their effect is not measured yet: it takes a model call a message
-(section 4.5).
+The study first proposed two more lines for a shared space, naming the
+speaker and the other members, and then measured them (4.4). They gained
+nothing on the speaker turns, where today's message already found every
+fact; and on the extraction set they changed nothing that can be told apart
+from how the model's answer varies from one asking to the next. They are
+not adopted. S1-11 needs no second prompt and no second recording, and the
+recorded replies stay byte for byte what they are today.
 
 ### 2.2 What the entry's id is
 
@@ -226,8 +224,10 @@ decision (N30 to N36 in section 9 of the plan; section 6 here).
 
 Everything is in `docs/audits/evidence/spaces_r3/`: the case set
 (`speakers.json`), the prototype and runner (`study.py`), the vectors it
-recorded (`vectors.npz`) and its output (`results.json`). `study.py run`
-repeats every number here from the recorded vectors, with no model.
+recorded (`vectors.npz`), the model's replies it recorded
+(`deep_replies.json`) and its output (`results.json`). `study.py run`
+repeats every number here from the recorded vectors and replies, with no
+model.
 
 - **The case set**, version 1: three members of one shared space (Sara,
   Omar, Layla), 30 turns in 29 chats (one chat has two authors), 32 facts,
@@ -260,8 +260,15 @@ repeats every number here from the recorded vectors, with no model.
   also runs the live install, in two runs (239, then 2), at below-normal
   CPU priority, four threads at most, normal I/O priority, from the
   machine's model cache with the network off, in a data folder of the
-  study's own. Nothing of the live install was read or written. The deep
-  pass was not recorded again: no model call was made.
+  study's own. Nothing of the live install was read or written for it.
+- **The deep pass** was recorded on 2026-11-18, with the owner's approval,
+  through the live install's DeepSeek provider: 60 calls to
+  `deepseek-flash`, the limit set for it (50,954 prompt tokens and 13,550
+  completion tokens; the cost is unknown, because Kazma holds no price for
+  that model). The live install was only read: its `.env` in memory, its
+  provider list by two SELECTs in a Postgres session the server held
+  read-only, its key from the vault file opened immutable. Nothing was
+  written to it, and the replies hold no key.
 
 ### 4.2 Several members in one space
 
@@ -361,20 +368,65 @@ someone else ("Omar lives in Lusail now.", "أخوي منصور ساكن في د
 "We live in Muscat.") the quick pass kept nothing, which is right: it reads
 only "I". Those statements are the deep pass's to keep.
 
+**The deep pass on the same twelve turns**, with today's message:
+
+| | gold facts | found | recall | kept | right | precision |
+|---|---|---|---|---|---|---|
+| English | 5 | 5 | 1.00 | 7 | 5 | 0.71 |
+| Arabic | 5 | 5 | 1.00 | 6 | 5 | 0.83 |
+| Mixed | 4 | 4 | 1.00 | 4 | 4 | 1.00 |
+
+- It keeps what the quick pass cannot: "Omar lives in Lusail now." is
+  written `omar lives_in lusail`, "عمر ساكن في لوسيل." is written under
+  `عمر`, and both are filed under the member Omar by the alias match.
+- No fact about someone else was filed under the speaker.
+- The three facts beyond the gold are two relations
+  (`sara spouse_is omar`, `omar has_brother منصور`) and "We live in
+  Muscat.", which the model writes as `user lives_in Muscat`. Filed under
+  the speaker, that is a fair reading: the speaker is one of "we".
+
+**The deep pass told who speaks** (the two lines of 2.1, since dropped):
+
+| | Result |
+|---|---|
+| The twelve speaker turns | The same as without the lines in every number: recall 1.00, precision 0.71 / 0.83 / 1.00, nothing filed under the wrong member. |
+| The 30 turns of the extraction set, against the locked scores | English recall 0.769 to 0.692, precision 0.786 to 0.714. Arabic recall 0.909 to 0.636, precision 0.909 to 0.636. Mixed recall 0.70 to 0.80, precision 0.583 to 0.80. Six turns of 30 changed. |
+| What the model wrote | `user` for 29 of its 35 facts, and never the speaker's name as a subject. |
+
+Those six turns were then asked once more with today's message, no lines,
+to see how much one and the same message varies:
+
+| Turn | Gold | First asking (the locked recording) | Asked again, same message | With the lines |
+|---|---|---|---|---|
+| e07 | 2 | 2 | 2 | 1 |
+| a04 | 1 | 1 | 0 | 0 |
+| a06 | 2 | 2 | 0 | 0 |
+| m05 | 2 | 1 | 2 | 2 |
+| m07 | 1 | 1 | 1 | 1 |
+| m08 | 1 | 1 | 1 | 1 |
+
+Three of the four turns whose score moved with the lines moved the same
+way with no lines at all: the model wrote `has_allergy` where it had
+written `allergic_to`, and a relation from the sister's side where it had
+written it from the user's. Only e07 moved with the lines alone. So the
+lines' effect on the extraction set cannot be told apart from the model's
+own variation, and they bring no gain where a gain was expected. They are
+dropped (2.1).
+
+One thing the lines did show: named the speaker, the model sometimes
+writes a relation toward them, as `omar spouse_of user` or
+`منصور sibling_of عمر`. It can do so with today's message too. So in a
+shared space `user` as a fact's object is the speaker's entry, as it is as
+a subject (5.1).
+
 ### 4.5 What was not measured
 
-- **The deep pass told who speaks** (the two prompt lines of 2.1), and the
-  deep pass on the twelve speaker turns. The owner approved the recording
-  on 2026-11-18: 54 model calls (the 30 turns of the extraction set with
-  the speaker lines, and the 12 speaker turns with and without them), 60 at
-  most. The recorder is built (`record_deep` and `run_deep` in `study.py`)
-  and was run end to end with a stand-in client: 54 messages, nothing asked
-  twice, the limit refuses a 61st call, and the replies are scored through
-  the product's own parser. **It has not been run against a model.** The
-  session that wrote this study was refused access to the live install's
-  provider key by its own permission rules, which a message from another
-  session cannot change. Until `deep_replies.json` exists, `study.py run`
-  reports the deep pass as not recorded.
+- **How much the deep pass varies.** Each message was asked once, six of
+  them twice. One and the same message gave a different score on three of
+  those six (4.4). A difference of one or two facts between two askings is
+  therefore not a finding, and the locked extraction scores rest on one
+  asking a turn too. That is a matter for the extraction benchmark, not
+  for S1-11.
 - **Weekly summaries** with authors' names: a model writes them.
 - **The first-person reading** behind "self first" was right on 35 of 35
   questions, but it was written while looking at these questions. That is
@@ -413,7 +465,7 @@ how is an entry shown to this asker. Everything else asks it.
 | `agent/graph_respond.py` | The memory record takes the asker from the bound scope. |
 | `memory/consolidator.py` | The speaker travels with session, turn, tenant and time: the thread, the queued payload, the episode writer, the quick pass. |
 | `memory/dual_write.py` | The episode's metadata keeps `said_by` (the account id). No column is added; the mirror already carries the metadata. |
-| `memory/belief_extractor.py` | `_apply_beliefs_to_v2` maps `user` to the speaker's entry, in one line, and treats a member's entry as it treats `user`. The sanitizer refuses a model's subject of the reserved shape. In a shared space the deep pass's message gains the speaker's and the members' names. |
+| `memory/belief_extractor.py` | `_apply_beliefs_to_v2` maps `user` to the speaker's entry, in one line, and treats a member's entry as it treats `user`. The sanitizer refuses a model's subject of the reserved shape. The deep pass's message is unchanged (2.1). `user` written as a fact's object (`omar spouse_of user`) is the speaker's entry too. |
 | `memory/belief_mutation.py` | `mutate_belief` takes `said_by` and keeps it in the fact's metadata. Its keys and rules do not change. |
 | `memory/provenance.py` | The label `member_stated`, and one function that gives a write its label from the method, the subject's owner and the speaker. `_trust_weight` learns the label. |
 | `memory/worker_bootstrap.py`, `turn_reconcile.py` | The deep pass reads the speaker from the episode; reconcile reads the message's author (S1-08). No author in a shared space: the turn is remembered, no first-person fact is filed. |
@@ -480,9 +532,8 @@ called by (S1-33's account page, or a field added here).
 - No change to the keys or rules of `belief_mutation`, to the forget
   ledger, the mirror or the graph copy. One schema change: About me's key
   (N31).
-- A recording of the deep pass for the shared-space prompt: 54 model calls
-  (4.5). The recorder exists; the owner approved the calls. Whoever runs it
-  must write nothing to the install whose provider it borrows.
+- No new prompt and no new recording of the deep pass: its message is
+  unchanged (2.1, 4.4).
 - New vectors for the promoted set are already recorded here.
 - Not in S1-11: who may rewind a shared chat (S1-08), member names on the
   account (S1-33), sharing memory by topic (N19).
