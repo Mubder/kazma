@@ -127,9 +127,8 @@ The chosen form is the account id. Reasons:
 
 - An account's name can change, and two accounts could one day share a
   display name. A memory key must not move when a name does.
-- A reserved shape cannot be the id of a concept or of a third person with
-  the same name ("my friend Sara" is not the member Sara), and the extractor
-  can never write it: the sanitizer refuses a subject of that shape from a
+- A reserved shape cannot be the id of a concept, and the extractor can
+  never write it: the sanitizer refuses a subject of that shape from a
   model.
 - Code can tell a member's entry from its id alone, with no lookup: the
   writers treat it as they treat `user` today (never resolved against other
@@ -141,7 +140,9 @@ The chosen form is the account id. Reasons:
 The member's name and the names they are called by (Latin and Arabic) are
 the entry's display name and aliases. Recall, keyword search and the graph
 walk read those; a statement by another member that names them resolves onto
-the entry through the alias match that exists today.
+the entry through the alias match that exists today. One limit no id form
+removes: a third person who shares a member's name ("my friend Sara") is
+read as the member. In a shared space that is the likelier meaning.
 
 **The entry's vectors are made from `user <predicate> <object>`**, the text
 a fact about `user` is embedded from today, not from the entry's id. This is
@@ -195,7 +196,7 @@ A rule is what S1-11 builds. A decision is the owner's (section 6).
 | Question | Answer |
 |---|---|
 | Whose words are `user_explicit` and `user_stated`? | **Rule.** The words of the member who is the turn's asker. For a fact under a member's own entry, only that member's own words carry those labels. |
-| May one member state a fact about another? | **Rule, with decision D5.** Yes, and it is kept as "said by Sara about Omar" under a new source label (`member_stated`), which never replaces what Omar said about himself. Without this rule the trust gate lets it through: measured in 4.6. |
+| May one member state a fact about another? | **Rule, with decision D5.** Yes, and it is kept as "said by Sara about Omar" under a new source label (`member_stated`), which never replaces Omar's own statements. Without this rule the trust gate lets it through: measured in 4.6. |
 | Who may correct a fact that is not about a member (a project, a trip)? | **Rule.** Any member. Their own words are the user's words for the space; the newest statement wins, and the fact names who said it (`said_by`). |
 | A member forgets their own turn. | **Rule.** As today: the turn, the facts it produced and its place in summaries go, for everyone in the space. The ledger needs no new column; the trail records the account. |
 | A member forgets another member's turn, or keeps a shared chat out of memory. | **Decision D3.** |
@@ -287,9 +288,9 @@ show nothing as the asker's (0 of 3); another member by name, hit 1.000
 What today's single entry does, in the run's own lines:
 
 - Sara asks "Where do I live?" and is shown `user lives in Lusail` first.
-  Lusail is where Omar moved. Her own "Kuwait City" is no longer a current
-  fact: Omar's and Layla's statements replaced it, each in turn.
-- Layla, who stated no allergy, asks what she is allergic to and is shown
+  Lusail is where Omar moved. Sara's own "Kuwait City" is no longer a
+  current fact: Omar's and Layla's statements replaced it, each in turn.
+- Layla, who stated no allergy, asks "What am I allergic to?" and is shown
   `user allergic to shellfish` and `user allergic to peanuts`.
 - 13 of the 32 facts are gone, every one overwritten by another member's
   statement of the same kind.
