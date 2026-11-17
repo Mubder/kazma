@@ -12431,7 +12431,14 @@ with a test that fails on the old code and a gate for its class:
   and the card shape (`--card-radius` 14px, `--card-padding`, a layered
   `--card-shadow` per theme with a top highlight, `--card-hairline`). One
   grouped card rule paints `.card` and every card family with the card
-  surface and shadow, and no family paints itself. The dark accent is
+  surface and shadow, and no family paints itself. Only a card is the card
+  colour: a column or band of chrome (the chat page's session list, a
+  drawer) is `--surface-chrome` with a hairline -- the session list read
+  `--bg-panel` and showed as a lighter column; on a phone both drawers and
+  their backdrop sit above the sticky chat composer (it covered the session
+  list's footer). Gate: `tests/e2e/test_chrome_is_the_page.py` (every page
+  and Settings tab, desktop and phone, both themes; the old session-list
+  rule and the old stacking as controls). The dark accent is
   measured against the card (`accent_colors.DARK_CARD`): it must stand 3:1
   off the brightest dark surface it sits on. The accent is six `--accent-chosen-*`
   seeds (a dark and a light variant, each with its own readable ink,

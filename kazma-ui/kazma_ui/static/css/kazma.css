@@ -2208,9 +2208,12 @@ tbody tr:last-child td {
   background-color: var(--bg);
 }
 .chat-sidebar {
+  /* The session list is chrome, like the main menu: the page's colour, and
+     a hairline on the edge facing the chat (the menu side already has the
+     menu's own). It was the card colour, a lighter column in the page. */
   width: 240px;
-  background: var(--bg-panel);
-  border-left: 1px solid var(--border-subtle);
+  background: var(--surface-chrome);
+  border-inline-end: 1px solid var(--card-hairline);
   padding: var(--sp-3);
   display: flex;
   flex-direction: column;
@@ -4942,9 +4945,7 @@ details.kazma-working > summary {
   /* natural RTL flow: sessions (first) at right, chat (second) to its left */
 }
 [dir="rtl"] .chat-sidebar {
-  border-left: none;
-  border-right: 1px solid var(--border-subtle); /* separator facing chat */
-  order: 0;
+  order: 0; /* its hairline faces the chat by border-inline-end */
 }
 [dir="rtl"] .chat-main {
   order: 0;
@@ -5342,9 +5343,13 @@ details.kazma-working > summary {
      is separate and still shown. */
   .sidebar-toggle { display: none; }     /* desktop collapse button hidden */
 
+  /* The drawers and their backdrop sit above everything a page keeps on
+     screen: the bottom nav (200) and the chat composer (260, sticky). At 200
+     the composer covered the session drawer's lower part and its footer,
+     and stayed usable over the dimmed page. */
   .sidebar {
     display: flex;                        /* override previous display:none */
-    z-index: 200;
+    z-index: 270;
     transform: translateX(100%);          /* off-screen right (RTL default) */
     transition: transform 0.25s ease;
     box-shadow: var(--drawer-shadow);
@@ -5363,7 +5368,7 @@ details.kazma-working > summary {
     position: fixed;
     inset: 0;
     background: var(--scrim);
-    z-index: 199;                          /* below the drawer (200), above content */
+    z-index: 265;                          /* below the drawers (270), above the composer (260) */
   }
 
   .main-content { margin-left: 0 !important; margin-right: 0 !important; }
@@ -5376,7 +5381,7 @@ details.kazma-working > summary {
     bottom: 0;
     width: 280px;
     max-width: 85vw;
-    z-index: 200;
+    z-index: 270;
     transform: translateX(100%);           /* off-screen right (RTL default) */
     transition: transform 0.25s ease;
     box-shadow: var(--drawer-shadow);
