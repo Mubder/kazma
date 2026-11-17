@@ -121,13 +121,16 @@ install, and the threat model says the tenant columns are not a boundary yet.
 | `answer_quality.db` | Quality flags | Whole. Admin page only. |
 | `memory_state.db`, `memory_ops.db`, forget journal, Postgres mirror, Neo4j copy | Memory | Apart, and the strongest today: every route and tool is tested against another tenant's ids; entities are keyed `(tenant, id)`. The `default` tenant is "the install's view". |
 | `settings.db` (lessons) | The Soul: lessons put in every prompt | Whole. One for the install. |
-| `settings.db` (About me) | The user's own text | Apart by tenant. |
-| `knowledge.db`, `vector_memory/`, `knowledge_provenance/` | Knowledge Library | Carries it. **Refuses.** One 1 GiB quota for the install. |
+| `memory_state.db` (About me) | The user's own text (`memory_profile`) | Apart by tenant. |
+| `knowledge.db`, `vector_memory/`, `knowledge_provenance/` | Knowledge Library | Carries it, on the library only: chunks, the keyword index and the pages reach it through their library. **Refuses.** One 1 GiB quota for the install. |
 | `documents.db` (+ Postgres), `document-store/` | Documents | Apart: tenant plus an access list per document. Content files are stored once per content, whoever uploaded them. Chat and the agent **refuse**; the page acts as each user. |
 | `cron.db` | Scheduled jobs | Carries it, and who booked the job; filtered in production mode. **Refuses.** A fire binds the job's tenant but no person. Reminders go to the address captured at booking. |
 | `swarm_tasks.db` (+ Postgres), `pipeline_logs.db`, worker registry | Swarm | The tenant is inside a task's metadata, not a column; the list filters by it in production mode. **Refuses.** |
 | `research_sessions.db`, report files | Research | Whole. Reports go into the one workspace. |
-| The six X stores | X posts, schedule, replies | Apart by tenant, with an X account and its keys per tenant. The mentions loop runs for `default` only. |
+| The six X stores | X posts, schedule, replies | Apart by tenant, with an X account and its keys per tenant. Two tables are not: the closed-threads table has no tenant, and the mentions cursor keeps it inside its key. The mentions loop runs for `default` only. |
+| `memory_ops.db` (task queue, commitments) | Memory's queued work; the commitment layer's records | Carries it: a queued task's tenant is inside its payload. |
+| `sandbox_emails.db` | The practice mailbox | Whole. No tenant. |
+| `swarm_registry.json` | Registered swarm workers, each with its learned prompt | Whole. One for the install. |
 | X sign-ins (settings and vault) | The OAuth 1.0a keys, the app's Bearer token, the OAuth 2.0 client and the Sign in with X tokens | Apart: each key is the tenant's (`tenant.<id>.` before the key for any tenant but `default`). A sign-in in progress is kept for the install, bound to the browser that started it. |
 | Mail and calendar sign-ins | Connected accounts | Whole: stored for the install on purpose (`INSTALL_SCOPED_SECRETS`). |
 | `vault.db` | Secrets | Rows carry a tenant or are global. One key for the whole vault. A URL's password under any setting is kept for the install. |
@@ -555,7 +558,23 @@ becomes shared without the owner choosing it.
 Each item names what changes, the gate that proves it, and what the owner
 sees. Every gate has a negative control: it is shown failing on the old code
 or on a planted mistake, as `AGENTS.md` asks. Test names are proposals.
-All items are **Planned**.
+All items are **Planned**, except where the table below says otherwise.
+
+### State of the items
+
+Updated as work lands (section 11). "Done" means the item's gate passes with
+its negative control; the evidence names the test files.
+
+| ID | State | Evidence and notes |
+|---|---|---|
+| S1-01 | Done, 2026-11-17 | `kazma_core/spaces/identity.py`: accounts, spaces and memberships in one document on the settings backend, changed only by `update_registry` (one atomic step). The older mode's users are accounts; `platform_rbac` reads and writes them through it, and its three read-change-save sites are atomic now. The old list moves in once, at start. `tests/test_identity_store.py` (15 tests; the old whole-list save loses a user as the control). Not done here: a People page, and a real Postgres run of this test (the store uses the settings store's own `atomic_update`, which has its Postgres tests). |
+| S1-02 | In progress | The mechanism is done: `kazma_core/spaces/scope.py` (a scope is space and asker, bound together; `install_work` has no space; with Spaces enforced, unbound work raises `NoSpaceBound`). `require_tenant_id` asks it and no longer swallows errors. Enforcement is one stored switch kept in memory; nothing in the product can turn it on yet, so an install behaves as before. `tests/test_no_space_no_data.py` (25 tests; the old fallback as the control). Left: the tenant fallbacks still written out in product code. A ratchet in the same test counts them (299) and may only go down; each store's item (S1-08 onward) removes its own and adds its `for_space` handle. |
+| S1-03 | Done, 2026-11-17 | `store_registry.SPACE_RULES`: every store, family and data-folder entry (94) declares `row`, `folder`, `install`, `derived` or `host`, what it does today, and its content columns. `tests/test_store_space_rules.py` (16 tests; declared columns are checked against each store's own `CREATE TABLE`; planted entries as controls). |
+| S1-04 | Done for the foundation, 2026-11-17 | `kazma_ui/space_binding.account_of`: the shared secret, an API token, the loopback auto-login and a secret sign-in's session are the owner's account; a local user's session is that user's; a sign-in with no account (OIDC, today) is none, and is refused once Spaces is enforced. The tenant middleware binds the asker. `tests/test_sign_in_is_an_account.py` (27 tests). Left for S1-33: retiring the shared secret for the web (N15), and accounts for OIDC sign-ins (N24). |
+| S1-05 | Done, 2026-11-17 | `kazma_ui/route_scopes.py`: all 632 routes of the built app classed (space 329, install 253, account 21, open 29). `tests/test_route_scopes.py` (21 tests; a planted route, a stale rule and a wrong `open` as controls). |
+| S1-06 | Done for the foundation, 2026-11-17 | The page names its space on every call (`static/js/space_scope.js`: the `X-Kazma-Space` header on fetch, a `space` value on event streams, sockets and links; the space is the tab's, kept in `sessionStorage`). The tenant middleware checks membership every time, before the handler. `GET /api/account/spaces` and a header switcher, shown only when Spaces is enforced and the person has more than one space. `tests/test_web_request_space.py` (22 tests: every `space` rule of the route table driven as a member of another space; a session-kept space mixes two tabs as the control), `tests/js/test_space_scope.js` (37 checks). Left: the browser test with two real tabs, in English and Arabic, which needs two spaces a person can reach (after S1-33); WebSocket handshakes read the `space` value but are not bound yet (with S1-08). |
+| S1-07 | Done, 2026-11-17 | `kazma_core/spaces/threads.py` (`thread_scopes.db`): a thread is recorded once with its space and opener. `turn_segment_budget`, which every graph run sits in, binds the turn's scope from the record. Enforced, a turn asked for in another space is refused. `tests/test_turn_scope_bound.py` (16 tests; a gate finds every graph run outside the block; a resume with no record ran as `default` as the control). Left for S1-08: removing a thread's record when its chat is deleted. |
+| S1-29 | Done (empty harness), 2026-11-17 | `tests/_space_matrix.py`, `tests/test_space_matrix.py` (20 tests): every `space` route (329) and every agent tool (175) has a case, or names the item that will add it, or says why it holds nothing of a space. 500 are pending today; the number may only go down. |
 
 ### Stage 1: spaces across every part of Kazma
 

@@ -51,7 +51,7 @@ import fnmatch
 import logging
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 __all__ = [
@@ -61,15 +61,20 @@ __all__ = [
     "DYNAMIC_NAME_SITES",
     "MIGRATION_DISPOSITIONS",
     "NOT_BACKED_UP",
+    "SPACE_RULES",
+    "SPACE_RULE_KINDS",
+    "SPACE_TODAY_STATES",
     "STORES",
     "STORE_FAMILIES",
     "TOOL_WRITES",
     "DataDirEntry",
+    "SpaceRule",
     "Store",
     "Write",
     "bundle_family_patterns",
     "bundle_store_names",
     "carried_in_bundle",
+    "content_columns",
     "distinctive_store_names",
     "is_config_file_name",
     "is_kazma_config_file",
@@ -79,6 +84,7 @@ __all__ = [
     "kazma_file_under",
     "kazma_files_in",
     "readers_for_store",
+    "space_rule",
     "store_name_for",
     "store_refusal",
 ]
@@ -161,6 +167,9 @@ STORES: dict[str, Store] = {
         "approval decisions (the gate registry)", "bundle"),
     "run_incidents.db": Store(
         "stuck or failed runs: what the owner was told and what they decided", "bundle"),
+    "thread_scopes.db": Store(
+        "which space each chat thread belongs to and which account opened it "
+        "(kazma_core.spaces.threads)", "bundle"),
     "vault.db": Store("encrypted secrets", "bundle"),
     "settings.db": Store(
         "settings, workspaces and bookmarks", "settings",
@@ -313,6 +322,8 @@ RETENTION: dict[str, str] = {
     "x_publications.db": "ended operations after 90 days, by the publication fire cycle (hourly)",
     "hitl_gates.db": "the gate retention sweep: decided gates after 90 days; a live one is kept",
     "run_incidents.db": "the run incident retention sweep",
+    "thread_scopes.db": "kept: one small row of ids per chat thread (no title, no text). "
+                        "Nothing removes a row yet; the chat delete takes it with Spaces S1-08",
     "chat_outbox.db": "the chat outbox retention sweep: settled rows (their text already emptied) "
                       "after 7 days",
     "chat_inbox.db": "the next normal start: a message handed on keeps no text, and rows a week "
@@ -513,6 +524,356 @@ DATA_DIR_ENTRIES: dict[str, DataDirEntry] = {
 #: ``tests/test_repair_copies_stay_home.py`` reads each suffix product code
 #: and the repair scripts write and fails on one missing here.
 REPAIR_COPY_SUFFIXES: tuple[str, ...] = (".pre_entity_key", ".pre_relabel", ".pre_reopen", ".pre_reembed")
+
+# ── how each store keeps a space apart ───────────────────────────────────
+#
+# Spaces (docs/plans/SPACES_PLAN.md 4.2, item S1-03): several people on one
+# install, each in a space of their own. Every store answered "whose row is
+# this" in its own way, or not at all. Here each store, family and data-folder
+# entry says how it keeps a space apart, and a ``row`` store names the columns
+# that hold a person's words. A declaration only: no store reads it yet.
+# ``tests/test_store_space_rules.py`` fails on an entry without a rule, and
+# checks the named tables and columns against each store's own schema.
+
+#: How a store keeps a space apart.
+#:
+#: ``row``      a space id on every row (the ``tenant_id`` column)
+#: ``folder``   files under the space's folder, ``<data dir>/spaces/<id>/``
+#: ``install``  belongs to the install and holds no space content; says why
+#: ``derived``  rebuilt from space data, and split the same way
+#: ``host``     tied to the machine's files; a host space only
+SPACE_RULE_KINDS = ("row", "folder", "install", "derived", "host")
+
+#: What a store does today, before spaces.
+#:
+#: ``apart``    rows carry a tenant and reads filter by it
+#: ``carries``  the tenant is on the row, but not every read asks for it
+#: ``whole``    one copy for the install
+#: ``refuses``  the part is off once a second login exists
+SPACE_TODAY_STATES = ("apart", "carries", "whole", "refuses")
+
+
+@dataclass(frozen=True)
+class SpaceRule:
+    """How one store, family or data-folder entry keeps a space apart."""
+
+    kind: str
+    #: Required for ``install`` and ``host``; for a ``row`` store with no
+    #: content columns it says why there are none.
+    why: str = ""
+    #: ``row`` stores: table -> the columns that hold a person's words or
+    #: files (text they wrote or Kazma wrote for them, titles, prompts,
+    #: arguments). Ids, times and states are index columns and are not named.
+    content: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    #: One of :data:`SPACE_TODAY_STATES`.
+    today: str = ""
+
+
+_RETIRED = "retired; holds nothing new"
+
+_CHAT_CONTENT: dict[str, tuple[str, ...]] = {"sessions": ("messages", "title")}
+
+#: LangGraph's saver makes these tables, not Kazma.
+_CHECKPOINT_CONTENT: dict[str, tuple[str, ...]] = {
+    "checkpoints": ("checkpoint", "metadata"),
+    "writes": ("value",),
+}
+
+#: memory_state.db. The vectors (``embedding`` columns) are made from these
+#: columns and follow their row.
+_MEMORY_STATE_CONTENT: dict[str, tuple[str, ...]] = {
+    "entities": ("name", "aliases_json", "metadata_json"),
+    "entity_merges": ("metadata_json",),
+    "entity_merges_archive": ("metadata_json",),
+    "beliefs": ("subject", "predicate", "object", "metadata_json"),
+    "beliefs_archive": ("original_belief_json",),
+    "episodes": ("user_text", "assistant_text", "summary_text", "metadata_json"),
+    "memory_profile": ("about",),
+    "memory_summaries": ("title", "summary_text", "metadata_json"),
+    "graph_associations": ("group_root", "member", "label", "metadata_json"),
+    "procedural_dags": (
+        "name", "description", "preconditions_json", "dag_steps_json", "postconditions_json",
+        "metadata_json",
+    ),
+    "episodes_fts": ("user_text", "assistant_text", "summary_text"),
+    "beliefs_fts": ("subject", "predicate", "object"),
+    "entities_fts": ("name", "aliases_json"),
+}
+
+_MEMORY_COPY = SpaceRule(
+    "row",
+    why="a repair's copy of the memory database: its rows carry the space id as memory_state.db's do",
+    content=_MEMORY_STATE_CONTENT,
+    today="apart",
+)
+
+
+def _retired() -> SpaceRule:
+    return SpaceRule("install", why=_RETIRED, today="whole")
+
+
+def _install(why: str, today: str = "whole") -> SpaceRule:
+    return SpaceRule("install", why=why, today=today)
+
+
+#: The space rule of every key of :data:`STORES`, :data:`STORE_FAMILIES` and
+#: :data:`DATA_DIR_ENTRIES`.
+SPACE_RULES: dict[str, SpaceRule] = {
+    # ── the agent's own working state ──────────────────────────────────
+    "agent_artifacts.db": SpaceRule(
+        "row", content={"agent_artifacts": ("value",)}, today="apart"),
+    "task_ledgers.db": SpaceRule(
+        "row",
+        content={"task_ledgers": ("goal", "next_action", "steps", "findings", "open_questions")},
+        today="carries"),
+    "tool_effects.db": SpaceRule(
+        "row", content={"tool_effects": ("result_json",)}, today="whole"),
+    "memory_state.db": SpaceRule("row", content=_MEMORY_STATE_CONTENT, today="apart"),
+    "memory_ops.db": SpaceRule(
+        "row",
+        why="a queued task names its tenant inside its payload; the audit log and the "
+            "commitments carry it as a column",
+        content={
+            "memory_task_queue": ("payload_json", "error_log"),
+            "memory_audit_log": ("reason", "state_before_json", "state_after_json"),
+            "commitments": ("goal_text", "slots_json", "evidence_json", "conflicts_json", "result_json"),
+            "commitment_events": ("payload_json",),
+        },
+        today="carries"),
+    "memory_forget_journal.db": SpaceRule(
+        "row", why="ids and hashes of what was forgotten, never text", today="apart"),
+    "knowledge_graph.db": _install(
+        "written by nothing since the V1 to V2 move; what it holds is from before spaces and "
+        "was read once into the owner's memory"),
+    "checkpoints.db": SpaceRule("row", content=_CHECKPOINT_CONTENT, today="whole"),
+    "snapshots.db": SpaceRule("row", content={"snapshots": ("state_json",)}, today="whole"),
+    "time_travel_audit.db": SpaceRule(
+        "row", why="ids, counts and outcomes of restores, forks and clears; no chat text",
+        today="whole"),
+    # ── conversations and sessions ─────────────────────────────────────
+    "chat_sessions.db": SpaceRule("row", content=_CHAT_CONTENT, today="apart"),
+    "chat_sessions_spool.db": SpaceRule("row", content={"spool": ("payload",)}, today="apart"),
+    "sessions.db": SpaceRule("row", content={"sessions": ("context",)}, today="carries"),
+    # ── scheduling, tasks, research ────────────────────────────────────
+    "cron.db": SpaceRule(
+        "row",
+        content={
+            "cron_jobs": ("prompt", "last_result", "pending_edit", "outside_text"),
+            "cron_deliveries": ("body",),
+            "cron_events": ("detail",),
+            "cron_alerts": ("title", "detail"),
+        },
+        today="refuses"),
+    "swarm_tasks.db": SpaceRule(
+        "row",
+        why="the tenant is inside a task's metadata today, not a column",
+        content={"swarm_tasks": ("prompt", "result", "context", "metadata")},
+        today="refuses"),
+    "pipeline_logs.db": SpaceRule(
+        "row", content={"pipeline_logs": ("message", "metadata", "raw_output")}, today="refuses"),
+    "research_sessions.db": SpaceRule(
+        "row",
+        content={"research_sessions": (
+            "topic", "message", "log_json", "report_path", "summary", "error", "meta_json")},
+        today="whole"),
+    # ── X ──────────────────────────────────────────────────────────────
+    "x_posts.db": SpaceRule("row", content={"x_posts": ("text_preview",)}, today="apart"),
+    "x_scheduled.db": SpaceRule("row", content={"x_scheduled_posts": ("text",)}, today="apart"),
+    "x_replies.db": SpaceRule(
+        "row",
+        content={
+            "x_replies": ("parent_text", "summon_text", "draft_text", "reason", "decision_json"),
+            "x_reply_history": ("record_json",),
+            "x_notification_outbox": ("message",),
+        },
+        today="apart"),
+    "x_datasets.db": SpaceRule(
+        "row", why="the space id column is named tenant in these tables",
+        content={"x_datasets": ("document",)}, today="apart"),
+    "x_audit.db": SpaceRule(
+        "row", content={"x_audit_log": ("request_body", "response_body")}, today="apart"),
+    "x_publications.db": SpaceRule(
+        "row",
+        content={
+            "x_operations": ("text", "reason", "metadata"),
+            "x_operation_events": ("detail",),
+            "x_decisions": ("record",),
+            "x_composers": ("content",),
+            "x_composer_history": ("content",),
+            "x_threads": ("manifest",),
+            "x_notification_outbox": ("message",),
+        },
+        today="apart"),
+    # ── control plane: decisions, secrets, permissions, evidence ───────
+    "hitl_gates.db": SpaceRule(
+        "row", content={"hitl_gates": ("args_json", "message", "payload_json")}, today="carries"),
+    "thread_scopes.db": SpaceRule(
+        "row",
+        why="ids only: a thread id, its space and the account that opened it; no content",
+        today="apart"),
+    "run_incidents.db": SpaceRule(
+        "row",
+        content={"run_incidents": (
+            "title", "detail", "notify_detail", "outcome_message", "diagnosis")},
+        today="refuses"),
+    "vault.db": SpaceRule(
+        "row",
+        why="a space's secrets carry its id; the install's secrets (provider keys, the chat "
+            "apps' tokens) have none and stay the install's",
+        content={"secrets": ("encrypted_value", "metadata")},
+        today="carries"),
+    "settings.db": SpaceRule(
+        "row",
+        why="every key is classed install, space or account; install keys (providers, models, "
+            "the guard) stay the install's, and the workspaces table names the host's folders",
+        content={"settings": ("value",), "bookmarks": ("name", "target")},
+        today="whole"),
+    "knowledge.db": SpaceRule(
+        "row",
+        why="a chunk belongs to its library, and the library carries the space id",
+        content={
+            "knowledge_libraries": ("name", "description", "seed_url"),
+            "knowledge_chunks": (
+                "source_url", "document_title", "section_header", "content", "metadata_json"),
+            "knowledge_chunks_fts": ("content", "folded", "source_url"),
+            "knowledge_pages_gone": ("source_url",),
+        },
+        today="refuses"),
+    "rbac.db": _install("who may do what in the install: names of users, divisions and roles"),
+    "audit.db": _install(
+        "the install's access record: who asked for which resource and what was decided; "
+        "names, not their content"),
+    "security_audit.db": _retired(),
+    "disclosure.db": _install("security reports about Kazma itself, for the admin"),
+    "certifications.db": _install("skill certifications; skills are the install's"),
+    "llm_calls.db": SpaceRule(
+        "row", why="tokens, cost, ids and model names; no words", today="whole"),
+    "answer_quality.db": SpaceRule(
+        "row", why="flags and turn ids; no answer text", today="whole"),
+    # ── documents and mail ─────────────────────────────────────────────
+    "documents.db": SpaceRule(
+        "row",
+        content={
+            "documents": ("title", "metadata_json"),
+            "document_versions": ("original_filename", "metadata_json"),
+            "document_artifacts": ("metadata_json",),
+            "document_tombstones": ("reason",),
+            "document_chunks": ("source_url", "provenance_json", "metadata_json"),
+            "document_audit_events": ("detail_json",),
+            "document_jobs": ("error_message",),
+            "document_job_events": ("error_message",),
+        },
+        today="apart"),
+    "documents-jobs-fallback.db": SpaceRule(
+        "row",
+        content={
+            "document_jobs": ("error_message",),
+            "document_job_events": ("error_message",),
+        },
+        today="apart"),
+    "sandbox_emails.db": SpaceRule(
+        "row",
+        content={"messages": (
+            "subject", "from_addr", "to_addrs", "cc_addrs", "body", "snippet", "labels")},
+        today="whole"),
+    # ── caches and per-machine state ───────────────────────────────────
+    "semantic_cache.db": _retired(),
+    "security_scan.db": _retired(),
+    "file_checkpoints.db": SpaceRule(
+        "host", why="undo copies of the host's files, by absolute path", today="whole"),
+    "callbacks.db": SpaceRule(
+        "row",
+        why="button tokens and the ids they stand for, no words; a button belongs to its chat, "
+            "so to that chat's space",
+        today="whole"),
+    "chat_inbox.db": SpaceRule("row", content={"inbox": ("text", "context")}, today="whole"),
+    "chat_outbox.db": SpaceRule("row", content={"outbox": ("payload",)}, today="whole"),
+    "registry.db": _install("the skills hub's user-level state, outside the data dir; skills are the install's"),
+    "vector.db": SpaceRule(
+        "derived", why="an index over memory, split as memory is", today="whole"),
+    "chroma.sqlite3": SpaceRule(
+        "derived", why="one collection per Knowledge library, split as the libraries are",
+        today="refuses"),
+    "workspaces.db": SpaceRule(
+        "host", why="a bundle's copy of the workspaces table: the host's folders", today="whole"),
+    # ── retired ────────────────────────────────────────────────────────
+    "memory.db": _retired(),
+    "kazma.db": _retired(),
+    "ops.db": _retired(),
+    "config.db": _retired(),
+    "chat_sessions_test.db": SpaceRule(
+        "row", why="test mode's transcript store, with chat_sessions.db's table",
+        content=_CHAT_CONTENT, today="apart"),
+    # ── families ───────────────────────────────────────────────────────
+    "checkpoints_*.db": SpaceRule(
+        "row", why="a file per tenant today", content=_CHECKPOINT_CONTENT, today="apart"),
+    "code-index/*.db": SpaceRule(
+        "host", why="an index of a host workspace's files", today="whole"),
+    "chat_sessions_test_*.db": SpaceRule(
+        "row", why="test mode's transcript stores, with chat_sessions.db's table",
+        content=_CHAT_CONTENT, today="apart"),
+    # ── the data folder ────────────────────────────────────────────────
+    ".runtime-state-id": _install("the state volume's identity"),
+    ".runtime-writer.lock": _install("the server process's writer fence"),
+    "swarm_registry.json": _install("the install's swarm workers, set by the admin", today="refuses"),
+    "swarm_templates.json": _install("worker templates stay the install's", today="refuses"),
+    "attachments": SpaceRule("folder", today="whole"),
+    "documents": SpaceRule("folder", today="whole"),
+    "exports": SpaceRule("folder", today="whole"),
+    "problem_reports": _install("a report describes the install, for the admin"),
+    "history_import": SpaceRule("folder", today="refuses"),
+    "kazma-watch": _install("the install's own Kazma Watch code and configuration"),
+    "images": SpaceRule("folder", today="whole"),
+    "workspace": SpaceRule("folder", today="whole"),
+    "document-store": SpaceRule("folder", today="whole"),
+    "vector_memory": SpaceRule(
+        "derived", why="the Knowledge Library's vectors, split as the libraries are",
+        today="refuses"),
+    "knowledge_provenance": SpaceRule("folder", today="refuses"),
+    "canary": _install("the daily crawl check's private store: one public page"),
+    "code-index": SpaceRule(
+        "host", why="indexes of the host's workspaces", today="whole"),
+    "models": _install("downloaded OCR models: programs, not anyone's data"),
+    "vuln_cache.json": _retired(),
+    "backups": _install("a backup is of the whole install, and holds every space"),
+    "settings_snapshot.yaml": _install("the install's settings, for a start without the database"),
+    "setup_record.json": _install("what setup installed on this machine"),
+    "install_id": _install("the install's identity"),
+    "outage_pages.json": _install("the install's own outage pages"),
+    "pg_tables_seen.json": _install("the install's own Postgres tables"),
+    "kazma.log": _install("the install's log: ids, never a member's words"),
+    "restart.log": _install("the log of a restart"),
+    "update-state.json": _install("the state of the install's update"),
+    ".migrate-*": _install("a migration moves the whole install; these are its working folders"),
+    "*.tmp": _install("a half-written file is never read"),
+    "agent_evolution.json": _retired(),
+    "pending_evolution.json": _retired(),
+    "*.migrated": _retired(),
+    "*.pre_entity_key": _MEMORY_COPY,
+    "*.pre_relabel": _MEMORY_COPY,
+    "*.pre_reopen": _MEMORY_COPY,
+    "*.pre_reembed": _MEMORY_COPY,
+}
+
+
+def space_rule(name: str) -> SpaceRule:
+    """The space rule of a store, family or data-folder entry, by its key.
+
+    Raises ``KeyError`` naming the entry when it declares none.
+    """
+    try:
+        return SPACE_RULES[name]
+    except KeyError:
+        raise KeyError(f"{name!r} declares no space rule (store_registry.SPACE_RULES)") from None
+
+
+def content_columns(name: str) -> dict[str, tuple[str, ...]]:
+    """Table -> the columns of *name* that hold a person's words or files.
+
+    Empty for an entry that is not a ``row`` store, or holds no content.
+    """
+    return dict(space_rule(name).content)
+
 
 #: The names a wrong read or write must never reach, wherever the file sits:
 #: the record of what the operator approved, and the secrets.

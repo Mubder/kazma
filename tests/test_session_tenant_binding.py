@@ -71,12 +71,19 @@ def test_the_middleware_runs_the_request_under_the_session_tenant(monkeypatch):
         assert client.get("/whoami").json() == {"tenant": "acme"}
 
 
-def test_a_local_user_keeps_its_tenant_through_login(monkeypatch):
-    import kazma_core.security.platform_rbac as rbac
+@pytest.fixture
+def _clean_identity_store():
+    """The real identity store (Spaces S1-01), left as it was found."""
+    from kazma_core.config_store import get_config_store
+    from kazma_core.spaces import identity
 
-    store: dict[str, list] = {"users": []}
-    monkeypatch.setattr(rbac, "_load_users_from_store", lambda: [dict(u) for u in store["users"]])
-    monkeypatch.setattr(rbac, "_save_users_to_store", lambda users: store.update(users=users))
+    get_config_store().delete(identity.REGISTRY_KEY)
+    yield
+    get_config_store().delete(identity.REGISTRY_KEY)
+
+
+def test_a_local_user_keeps_its_tenant_through_login(_clean_identity_store):
+    import kazma_core.security.platform_rbac as rbac
 
     created = rbac.create_local_user("ana", "correct horse battery", role="operator", tenant_id="acme")
     assert created.tenant_id == "acme"

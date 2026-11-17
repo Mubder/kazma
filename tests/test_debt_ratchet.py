@@ -88,9 +88,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 #: Lower these whenever the counts drop. Never raise them casually.
 BASELINE = {
     # except Exception / except BaseException / bare except, any body
-    "blind_except": 3352,
+    "blind_except": 3350,
     # ...whose body is only `pass` (or a docstring): the error vanishes
-    "silent_except": 381,
+    "silent_except": 379,
 }
 
 #: Structural debt, 2026-09-25 (see the module docstring). Same rules.
@@ -105,7 +105,15 @@ STRUCTURAL_BASELINE = {
     # both names are documented and held by tests, so they keep them.
     # 512 since 2026-11-15: the body layer (body_limits) asks
     # auth.is_always_open and auth.is_sensitive_path.
-    "module_local_public_symbols": 510,
+    # 524 since 2026-11-17, the one deliberate rise: the Spaces foundation
+    # (plan S1-01 to S1-07) lands its API before the stores that call it.
+    # Fourteen names, each held by its own test and taken up by S1-08 onward:
+    # identity.read_registry / update_registry / create_space / remove_member,
+    # threads.record_of / record_thread / thread_scopes_db /
+    # ThreadInAnotherSpace, store_registry.space_rule / content_columns, and
+    # route_scopes.compile_rules / deciding_rule / unclassed / sample_requests.
+    # Lower it as each gains a caller.
+    "module_local_public_symbols": 524,
     "patched_value_imports": 72,
     "sleep_then_assert": 51,
     "bare_module_attr_assignments": 0,

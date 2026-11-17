@@ -68,16 +68,18 @@ def require_opaque_sessions() -> bool:
 
 
 def require_tenant_id() -> str:
-    """Return active tenant id or ``default`` (never None for storage scopes)."""
-    try:
-        from kazma_core.tenant_context import get_current_tenant_id
+    """The id of the space this work is in: the storage key of every store.
 
-        tid = get_current_tenant_id()
-        if tid and str(tid).strip():
-            return str(tid).strip()
-    except Exception:
-        pass
-    return "default"
+    The answer is ``kazma_core.spaces.scope.require_space_id`` (Spaces
+    S1-02). A bound tenant or scope is that space. With nothing bound, the
+    owner's space while the install does not enforce Spaces (one operator, as
+    before), and :class:`~kazma_core.spaces.scope.NoSpaceBound` once it does:
+    it used to answer ``default`` -- the owner's data -- whatever the install
+    was, and swallowed every error on the way.
+    """
+    from kazma_core.spaces.scope import require_space_id
+
+    return require_space_id()
 
 
 def tenant_key(base: str, *, tenant_id: str | None = None) -> str:

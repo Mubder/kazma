@@ -360,15 +360,24 @@ async def turn_segment_budget(
     """
     cfg = dict(config or {})
     tid = str(thread_id or _thread_of(cfg))
+    # The turn's space and asker, from the thread's record (Spaces S1-07):
+    # every graph run sits in this block, so every place that runs a turn
+    # binds its scope here. A thread of another space is refused before the
+    # graph starts.
+    from kazma_core.spaces import threads as _threads
+
+    turn_scope = await asyncio.to_thread(_threads.scope_for_turn, tid)
     budget = await asyncio.to_thread(resolve_turn_budget, tid) if enforce else None
     segment = TurnSegment(budget=budget)
     if budget is None:
-        yield segment
+        with _threads.bound(turn_scope):
+            yield segment
         return
     window = asyncio.timeout(budget.seconds)
     try:
         async with window:
-            yield segment
+            with _threads.bound(turn_scope):
+                yield segment
     except TimeoutError:
         if not window.expired():
             raise

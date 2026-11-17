@@ -9,6 +9,9 @@ from __future__ import annotations
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
     "common.send": {"en": "Send", "ar": "إرسال"},
+    # The header's space switcher (space_scope.js, Spaces S1-06).
+    "spaces.switcher": {"en": "Space", "ar": "المساحة"},
+    "spaces.personal": {"en": "My space", "ar": "مساحتي"},
     # OAuth sign-ins (GitHub, Google, Microsoft): auth-guard.js kazmaSignInProblem
     # and kazmaSignInFailed word what the start and the callback answer.
     "oauth.sign_in_from": {

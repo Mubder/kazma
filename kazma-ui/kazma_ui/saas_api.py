@@ -139,22 +139,26 @@ def create_saas_router() -> APIRouter:
             return denied
         from kazma_core.security.platform_rbac import (
             PlatformUsersUnavailable,
-            _load_users_from_store,
-            _save_users_to_store,
+            _update_users,
         )
 
-        # Strict read: an unreadable list is not "no users" (audit 2026-10-26
-        # AUD-123); read as empty, this answered 404 over a user who exists.
+        gone: list[dict[str, Any]] = []
+
+        def _drop(users: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            gone[:] = [u for u in users if str(u.get("username", "")).lower() == username.lower()]
+            return [u for u in users if str(u.get("username", "")).lower() != username.lower()]
+
+        # One atomic step (Spaces S1-01): a user someone else saved between a
+        # read and a save is kept. An unreadable list is not "no users" (audit
+        # 2026-10-26 AUD-123); read as empty, this answered 404 over a user
+        # who exists.
         try:
-            users = _load_users_from_store()
+            _update_users(_drop)
         except PlatformUsersUnavailable:
             logger.warning("[saas] delete user: platform users unreadable", exc_info=True)
             return JSONResponse({"error": "users_unavailable"}, status_code=503)
-        gone = [u for u in users if str(u.get("username", "")).lower() == username.lower()]
-        new_users = [u for u in users if str(u.get("username", "")).lower() != username.lower()]
         if not gone:
             return JSONResponse({"error": "User not found"}, status_code=404)
-        _save_users_to_store(new_users)
         # A deleted user's sessions end with them, the asking admin's too
         # when they delete themselves (security audit 2026-11-10).
         ended = _end_sessions(gone[0], keep=None)
@@ -205,21 +209,44 @@ def create_saas_router() -> APIRouter:
         from kazma_core.security.platform_rbac import (
             PlatformUsersUnavailable,
             _hash_password,
-            _load_users_from_store,
-            _save_users_to_store,
+            _update_users,
         )
 
-        # Strict read (audit 2026-10-26 AUD-123), as for delete.
+        # What the request asks is checked first; the change itself is one
+        # atomic step (Spaces S1-01), so a save made meanwhile is kept.
+        if "role" in body and str(body["role"]).lower() not in ("viewer", "operator", "admin"):
+            return JSONResponse({"error": "invalid role"}, status_code=400)
+        if body.get("password") and len(str(body["password"])) < 8:
+            return JSONResponse({"error": "password min 8 chars"}, status_code=400)
+        new_hash = _hash_password(str(body["password"])) if body.get("password") else ""
+        state: dict[str, Any] = {}
+
+        def _apply(users: list[dict[str, Any]]) -> None:
+            for u in users:
+                if str(u.get("username", "")).lower() != username.lower():
+                    continue
+                state["found"] = u
+                if "role" in body:
+                    role = str(body["role"]).lower()
+                    state["role_changed"] = role != str(u.get("role") or "operator").lower()
+                    u["role"] = role
+                if "enabled" in body:
+                    state["disabled"] = (
+                        not bool(body["enabled"]) and u.get("enabled", True) is not False
+                    )
+                    u["enabled"] = bool(body["enabled"])
+                if new_hash:
+                    u["password_hash"] = new_hash
+                    state["password_reset"] = True
+                return
+
+        # Strict (audit 2026-10-26 AUD-123), as for delete.
         try:
-            users = _load_users_from_store()
+            _update_users(_apply)
         except PlatformUsersUnavailable:
             logger.warning("[saas] update user: platform users unreadable", exc_info=True)
             return JSONResponse({"error": "users_unavailable"}, status_code=503)
-        found = None
-        for u in users:
-            if str(u.get("username", "")).lower() == username.lower():
-                found = u
-                break
+        found = state.get("found")
         if not found:
             return JSONResponse({"error": "User not found"}, status_code=404)
         # A session carries the role it was minted with, so a role change, a
@@ -227,23 +254,9 @@ def create_saas_router() -> APIRouter:
         # (security audit 2026-11-10: they kept working). Only a password
         # reset keeps the asking admin's own session; a changed role or a
         # disabled account would otherwise live on in it.
-        role_changed = disabled = password_reset = False
-        if "role" in body:
-            role = str(body["role"]).lower()
-            if role not in ("viewer", "operator", "admin"):
-                return JSONResponse({"error": "invalid role"}, status_code=400)
-            role_changed = role != str(found.get("role") or "operator").lower()
-            found["role"] = role
-        if "enabled" in body:
-            disabled = not bool(body["enabled"]) and found.get("enabled", True) is not False
-            found["enabled"] = bool(body["enabled"])
-        if body.get("password"):
-            pw = str(body["password"])
-            if len(pw) < 8:
-                return JSONResponse({"error": "password min 8 chars"}, status_code=400)
-            found["password_hash"] = _hash_password(pw)
-            password_reset = True
-        _save_users_to_store(users)
+        role_changed = bool(state.get("role_changed"))
+        disabled = bool(state.get("disabled"))
+        password_reset = bool(state.get("password_reset"))
         ended = 0
         if role_changed or disabled or password_reset:
             keep_mine = keep if (password_reset and not role_changed and not disabled) else None

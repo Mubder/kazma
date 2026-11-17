@@ -1320,6 +1320,9 @@ def get_request_principal(request: Request) -> dict[str, Any] | None:
                 # closed while this reader still failed open).
                 "role": payload.get("role") or "viewer",
                 "user_id": payload.get("user_id") or "",
+                # Who minted the session ("login", "oidc", "auto-cookie"):
+                # space_binding.account_of reads it to find the account.
+                "actor": payload.get("actor") or "",
                 # A tenant the session was minted with (a local user's
                 # meta.tenant_id, or the OIDC tenant claim). The tenant
                 # middleware scopes the request by it. create_session stores
@@ -1762,11 +1765,16 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
     and cookies are **ignored** unless a verified JWT / opaque principal is
     present (audit H11 + SaaS residual). Single-tenant default is ``default``.
     """
+    from kazma_core.spaces.identity import IdentityUnavailable
+    from kazma_core.spaces.scope import reset_scope, set_scope, spaces_enforced, valid_space_id
     from kazma_core.tenant_context import reset_current_tenant_id, set_current_tenant_id
     from kazma_core.tenant_isolation import (
         client_tenant_spoof_allowed,
         principal_tenant_id,
     )
+
+    from kazma_ui import space_binding
+    from kazma_ui.route_scopes import scope_of
 
     async def tenant_middleware(
         request: Request,
@@ -1809,15 +1817,18 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
                         explicit_tenant = True
                         break
 
-        # Opaque session / principal may carry tenant (multi-user)
+        # Opaque session / principal may carry tenant (multi-user). The
+        # principal is read for every request: the space binding below asks
+        # which account it is.
+        principal: dict[str, Any] | None = None
+        try:
+            principal = await asyncio.to_thread(get_request_principal, request)
+        except Exception:
+            principal = None
         if not tenant_id:
-            try:
-                principal = await asyncio.to_thread(get_request_principal, request)
-                tenant_id = principal_tenant_id(principal)
-                if tenant_id:
-                    explicit_tenant = True
-            except Exception:
-                pass
+            tenant_id = principal_tenant_id(principal)
+            if tenant_id:
+                explicit_tenant = True
 
         # Spoofable header/cookie only in single-tenant non-prod labs
         if not tenant_id and allow_spoof:
@@ -1840,7 +1851,47 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
         if tenant_id:
             logger.debug("[TENANT] Inbound request scoped to tenant_id: %s", tenant_id)
 
-        token = set_current_tenant_id(tenant_id)
+        # The space and the asker (Spaces S1-04, S1-06): the page names its
+        # space on every call and membership is checked every time. A request
+        # that names none, on an install that does not enforce Spaces, runs
+        # in the tenant worked out above, as before.
+        named = space_binding.named_space(request.headers, request.query_params)
+        asker: str | None = None
+        if principal is not None or named is not None:
+            try:
+                binding = await asyncio.to_thread(
+                    space_binding.space_for_request,
+                    principal,
+                    named,
+                    legacy_tenant=tenant_id,
+                    needs_space=scope_of(request.method, judged_path(request)) == "space",
+                )
+                tenant_id, asker = binding.space_id, binding.asker
+            except space_binding.SpaceRefused as refused:
+                return JSONResponse(
+                    {"ok": False, "error": refused.message, "code": refused.code},
+                    status_code=refused.status,
+                )
+            except IdentityUnavailable:
+                if named is not None or spaces_enforced():
+                    # Membership cannot be checked: never guessed.
+                    return JSONResponse(
+                        {"ok": False, "error": "Accounts cannot be read right now. Try again.",
+                         "code": "identity_unavailable"},
+                        status_code=503,
+                        headers={"Retry-After": "5"},
+                    )
+                logger.warning(
+                    "[TENANT] the identity store is unreadable; the request runs "
+                    "with no asker bound"
+                )
+
+        scope_tokens = None
+        token = None
+        if asker is not None and valid_space_id(tenant_id):
+            scope_tokens = set_scope(tenant_id, asker)
+        else:
+            token = set_current_tenant_id(tenant_id)
         try:
             response = await call_next(request)
             if explicit_tenant and tenant_id and allow_spoof:
@@ -1855,7 +1906,10 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
                     )
             return response
         finally:
-            reset_current_tenant_id(token)
+            if scope_tokens is not None:
+                reset_scope(scope_tokens)
+            else:
+                reset_current_tenant_id(token)
 
     return tenant_middleware
 

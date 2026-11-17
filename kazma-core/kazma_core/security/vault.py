@@ -126,6 +126,10 @@ INSTALL_SCOPED_SECRETS: tuple[tuple[str, str], ...] = (
     # The pairing token of the Kazma Watch `kazma observer setup` deployed
     # (2026-11-14): read by the CLI, with no tenant bound.
     ("observer.", "global"),
+    # Password hashes inside the identity store's registry (Spaces S1-01):
+    # written in an admin's request, read by sign-in before any tenant is
+    # bound.
+    ("cfg:identity.", "newest"),
     # A URL whose password the settings store moved to the vault under a key
     # that is not a credential's (config_store.URL_SECRET_PREFIX:
     # ``proxy.url``, ``web.searxng_url``, 2026-11-15): read by the proxy, the

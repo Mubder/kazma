@@ -391,6 +391,22 @@ class KazmaAppBuilder:
                 e,
             )
 
+        # The identity store (Spaces S1-01, S1-02): the old platform user
+        # list moves into it once, and this process follows the Spaces
+        # switch. Neither may stop a start: sign-in reads the store itself.
+        try:
+            from kazma_core.spaces import identity
+
+            identity.move_platform_users()
+            identity.watch_enforcement()
+        except (identity.IdentityUnavailable, identity.IdentityError, OSError,
+                RuntimeError, ValueError, _sqlite3.Error) as e:
+            logger.warning(
+                "[identity] the identity store was not prepared at start (%s: %s); "
+                "it is read again at the next sign-in",
+                type(e).__name__, e,
+            )
+
         # Before the first client too: a substitution an earlier process
         # announced is still owed its "resolved" note (outage_pages).
         try:
@@ -841,6 +857,28 @@ class KazmaAppBuilder:
             return str(get_build_info().get("commit") or "")
 
         self.templates.env.globals["build_commit"] = _build_commit
+
+        def _kazma_space() -> str:
+            # The space the request being rendered is bound to
+            # (<meta name="kazma-space">, Spaces S1-06). Read from the
+            # request's own context: no I/O. Empty when none is bound (the
+            # login page), and the page then names none.
+            from kazma_core.spaces.scope import current_scope
+            from kazma_core.tenant_context import get_current_tenant_id
+
+            bound = current_scope()
+            return bound.space_id if bound is not None else (get_current_tenant_id() or "")
+
+        self.templates.env.globals["kazma_space"] = _kazma_space
+
+        def _spaces_enforced() -> bool:
+            # Read from memory (scope.spaces_enforced): the page asks for the
+            # person's spaces, to offer the switcher, only when this is on.
+            from kazma_core.spaces.scope import spaces_enforced
+
+            return spaces_enforced()
+
+        self.templates.env.globals["spaces_enforced"] = _spaces_enforced
 
         # NOTE: no browser WS token is injected anymore. The per-session WS
         # token was embedded as a <meta> tag + ?token= query param, which
@@ -1326,7 +1364,10 @@ class KazmaAppBuilder:
             logger.warning("[setup] router not available: %s", exc)
         self.app.include_router(settings_router)
         try:
+            from kazma_ui.account_spaces_api import create_account_spaces_router
             from kazma_ui.saas_api import create_saas_router
+
+            self.app.include_router(create_account_spaces_router())
 
             self.app.include_router(create_saas_router())
             logger.info("[SaaS] multi-user / tenant API mounted at /api/saas")

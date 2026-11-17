@@ -65,6 +65,12 @@
             <span class="lang-toggle-mark" x-text="lang === 'ar' ? 'EN' : 'ع'"></span>
         </button>
 
+        {# The space this tab is in (Spaces S1-06). space_scope.js fills and
+           shows it only when the person is in more than one space. #}
+        <select id="space-switcher" class="form-select header-space-switcher" hidden
+                title="{{ t('spaces.switcher') }}" aria-label="{{ t('spaces.switcher') }}"
+                data-personal-label="{{ t('spaces.personal') }}" translate="no"></select>
+
         {# Report a problem (REMAINING 3.1): the report is shown whole before it is sent. #}
         <button class="header-btn" id="report-problem" type="button" @click="window.kazmaReportProblem({})"
                 title="{{ t('support.report_title') }}" aria-label="{{ t('support.report_title') }}">

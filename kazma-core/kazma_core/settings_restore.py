@@ -194,6 +194,10 @@ KEY_RULES: tuple[KeyRule, ...] = (
     KeyRule("web_session.", CREDENTIAL, "signed-in browsers: a restore must never bring back "
             "a session that was signed out"),
     KeyRule("platform.users", CREDENTIAL, "who may use this install, and their roles"),
+    KeyRule("identity.registry", CREDENTIAL, "the identity store: accounts, spaces and who is "
+            "in which; an older backup must not bring back a removed account"),
+    KeyRule("identity.enforced", CREDENTIAL, "whether this install enforces Spaces; a restore "
+            "never switches it off"),
     KeyRule("notifications.push.vapid_private_key", CREDENTIAL, "the key push messages are signed with"),
     KeyRule("notifications.push.vapid_public_key", CREDENTIAL, "the browsers' half of that key"),
     KeyRule("notifications.push.subscriptions", CREDENTIAL, "the browsers' push addresses, bound to "

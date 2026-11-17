@@ -313,19 +313,14 @@ def _load_users_from_store() -> list[dict[str, Any]]:
     Only a sign-in or a listing, where an empty list fails closed, takes
     :func:`_users_for_sign_in` instead.
     """
-    from kazma_core.config_store import get_config_store
+    # The users are accounts of the identity store since Spaces S1-01
+    # (kazma_core.spaces.identity); this is their old shape.
+    from kazma_core.spaces import identity
 
     try:
-        raw = get_config_store().get("platform.users", [])
-    except Exception as exc:
-        raise PlatformUsersUnavailable(f"platform.users unreadable: {type(exc).__name__}") from exc
-    if raw is None:
-        return []
-    if not isinstance(raw, list):
-        raise PlatformUsersUnavailable(
-            f"platform.users holds {type(raw).__name__}, not a list"
-        )
-    return [u for u in raw if isinstance(u, dict)]
+        return identity.local_users()
+    except identity.IdentityUnavailable as exc:
+        raise PlatformUsersUnavailable(f"the platform users are unreadable: {exc}") from exc
 
 
 def _users_for_sign_in() -> list[dict[str, Any]]:
@@ -348,9 +343,28 @@ def _users_for_sign_in() -> list[dict[str, Any]]:
 
 
 def _save_users_to_store(users: list[dict[str, Any]]) -> None:
-    from kazma_core.config_store import get_config_store
+    """Replace the user list with *users*. A caller that read the list first
+    and saves a changed copy can lose another writer's change between the
+    two: use :func:`_update_users` for that."""
+    from kazma_core.spaces import identity
 
-    get_config_store().set("platform.users", users, category="auth")
+    identity.update_local_users(lambda _current: list(users))
+
+
+def _update_users(change: Any) -> list[dict[str, Any]]:
+    """Read, change and save the user list as ONE atomic step (Spaces S1-01).
+
+    *change* edits the list it is given in place, or returns a new one. The
+    list was read, changed and saved back whole until 2026-11: two saves at
+    once and one of them was lost -- a user created while another's password
+    was being set was gone.
+    """
+    from kazma_core.spaces import identity
+
+    try:
+        return identity.update_local_users(change)
+    except identity.IdentityUnavailable as exc:
+        raise PlatformUsersUnavailable(f"the platform users are unreadable: {exc}") from exc
 
 
 def list_users() -> list[PlatformUser]:
@@ -393,31 +407,31 @@ def create_local_user(
         raise ValueError(f"Invalid role {role!r}; use viewer|operator|admin")
     if tenant_id is not None and not valid_tenant_id(tenant_id):
         raise ValueError(f"Invalid tenant_id {tenant_id!r}")
-    # Strict: read as empty, an unreadable list was saved back as just this
-    # user, every other user gone (audit 2026-10-26 AUD-123).
-    users = _load_users_from_store()
-    uid = user_id or secrets.token_hex(8)
+    # One atomic step: an unreadable list raises (read as empty, it was saved
+    # back as just this user, every other user gone: audit 2026-10-26
+    # AUD-123), and a user saved by someone else meanwhile is kept.
+    new_uid = user_id or secrets.token_hex(8)
     ph = _hash_password(password)
-    meta: dict[str, Any] = {}
-    found = False
-    for u in users:
-        if str(u.get("username", "")).lower() == username.lower():
-            u["password_hash"] = ph
-            u["role"] = role
-            u["enabled"] = True
-            meta = dict(u.get("meta") or {})
-            if tenant_id is not None:
-                meta["tenant_id"] = tenant_id
-            u["meta"] = meta
-            uid = str(u.get("user_id") or uid)
-            found = True
-            break
-    if not found:
+    outcome: dict[str, Any] = {"uid": new_uid, "meta": {}}
+
+    def _upsert(users: list[dict[str, Any]]) -> None:
+        meta: dict[str, Any] = {}
+        for u in users:
+            if str(u.get("username", "")).lower() == username.lower():
+                u["password_hash"] = ph
+                u["role"] = role
+                u["enabled"] = True
+                meta = dict(u.get("meta") or {})
+                if tenant_id is not None:
+                    meta["tenant_id"] = tenant_id
+                u["meta"] = meta
+                outcome.update(uid=str(u.get("user_id") or new_uid), meta=meta)
+                return
         if tenant_id is not None:
             meta["tenant_id"] = tenant_id
         users.append(
             {
-                "user_id": uid,
+                "user_id": new_uid,
                 "username": username,
                 "password_hash": ph,
                 "role": role,
@@ -425,7 +439,11 @@ def create_local_user(
                 "meta": meta,
             }
         )
-    _save_users_to_store(users)
+        outcome.update(uid=new_uid, meta=meta)
+
+    _update_users(_upsert)
+    uid = str(outcome["uid"])
+    meta = dict(outcome["meta"])
     logger.warning(
         "[platform_rbac] user upsert username=%s role=%s tenant=%s",
         username, role, meta.get("tenant_id") or "-",
@@ -465,23 +483,28 @@ def authenticate_local_user(username: str, password: str) -> PlatformUser | None
                 # Best-effort — a failed write leaves the legacy hash in
                 # place (still verifiable) rather than locking the user out.
                 try:
-                    users = _load_users_from_store()
-                    for candidate in users:
-                        if (
-                            str(candidate.get("user_id") or "")
-                            == str(u.get("user_id") or "")
-                            and str(candidate.get("username", "")).lower()
-                            == username.lower()
-                        ):
-                            candidate["password_hash"] = _hash_password(password)
-                            _save_users_to_store(users)
-                            logger.info(
-                                "[platform_rbac] upgraded password hash to "
-                                "%d iterations for username=%s",
-                                _PBKDF2_ITERATIONS,
-                                username,
-                            )
-                            break
+                    upgraded = _hash_password(password)
+
+                    def _upgrade(users: list[dict[str, Any]]) -> None:
+                        for candidate in users:
+                            if (
+                                str(candidate.get("user_id") or "")
+                                == str(u.get("user_id") or "")
+                                and str(candidate.get("username", "")).lower()
+                                == username.lower()
+                                # Still the hash that was just verified: a
+                                # password changed meanwhile is kept.
+                                and str(candidate.get("password_hash") or "") == stored
+                            ):
+                                candidate["password_hash"] = upgraded
+
+                    _update_users(_upgrade)
+                    logger.info(
+                        "[platform_rbac] upgraded password hash to "
+                        "%d iterations for username=%s",
+                        _PBKDF2_ITERATIONS,
+                        username,
+                    )
                 except Exception:
                     logger.debug(
                         "[platform_rbac] password hash upgrade skipped",
@@ -512,13 +535,20 @@ def set_local_password(username: str, password: str) -> bool:
     password first (:func:`authenticate_local_user`)."""
     if len(password or "") < 8:
         raise ValueError("Password must be at least 8 characters")
-    users = _load_users_from_store()
-    for u in users:
-        if str(u.get("username", "")).lower() == (username or "").lower():
-            u["password_hash"] = _hash_password(password)
-            _save_users_to_store(users)
-            logger.warning("[platform_rbac] password changed username=%s", username)
-            return True
+    new_hash = _hash_password(password)
+    changed: list[bool] = []
+
+    def _set(users: list[dict[str, Any]]) -> None:
+        for u in users:
+            if str(u.get("username", "")).lower() == (username or "").lower():
+                u["password_hash"] = new_hash
+                changed.append(True)
+                return
+
+    _update_users(_set)
+    if changed:
+        logger.warning("[platform_rbac] password changed username=%s", username)
+        return True
     return False
 
 

@@ -44,6 +44,7 @@ const GLOBAL_LIB_PATHS = [
     '/static/js/htmx.min.js',
     '/static/js/alpine.min.js',
     '/static/js/icons.js',
+    '/static/js/space_scope.js',
     '/static/js/auth-guard.js',
     '/static/js/locale_format.js',
     '/static/js/bidi.js',

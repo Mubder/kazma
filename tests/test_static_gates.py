@@ -885,6 +885,18 @@ def test_dns_gate_catches_the_redirect_hop_shape():
 # names one; a call in an async body must go through asyncio.to_thread.
 
 _LOOP_STALL_HELPERS = frozenset({
+    # The identity store (kazma_core/spaces/identity.py, Spaces S1-01): every
+    # one reads or writes the settings store, and the registry holds vault
+    # pointers a read resolves.
+    "read_registry", "update_registry", "move_platform_users", "prime_enforcement",
+    "watch_enforcement", "enforcement_enabled", "local_users",
+    "update_local_users", "list_accounts", "spaces_of",
+    "is_member", "create_space", "add_member", "remove_member", "_update_users",
+    # The thread record (kazma_core/spaces/threads.py, S1-07) and the web's
+    # space binding (kazma_ui/space_binding.py, S1-04/S1-06): a SQLite file
+    # and the identity store.
+    "scope_for_turn", "record_of", "record_thread",
+    "account_of", "space_for_request", "spaces_for_account",
     # PyJWT's key client fetches the issuer's JWKS over urllib, blocking: an
     # OIDC sign-in ran it in an async route (SonarCloud review, 2026-11-16).
     "get_signing_key_from_jwt", "get_signing_keys", "fetch_data",
