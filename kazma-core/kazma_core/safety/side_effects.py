@@ -216,6 +216,17 @@ _PROF: dict[str, tuple[EffectKind, SemanticTier, str | None, tuple[str, ...]]] =
     "x_cancel_scheduled_post": (EffectKind.OUTBOUND, SemanticTier.CRITICAL,
                                 "send_outbound", ("post_id",)),
     "x_list_scheduled": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    # The whole X API (2026-11-17). A write of any shape -- like, follow,
+    # block, a direct message, a list -- always asks on a card that shows the
+    # whole call (ALWAYS_HITL_TOOLS); its recipients are path or body values
+    # of many shapes, so the outbound allowlist does not judge it (act None).
+    # CRITICAL keeps it out of every swarm worker (default_worker_scope).
+    "x_api_operations": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    "x_api_read": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    "x_api_act": (EffectKind.OUTBOUND, SemanticTier.CRITICAL, None, ("operation",)),
+    # Uploads a workspace file to X: nothing is published until a post (which
+    # asks) carries its media id; X drops an upload no post uses.
+    "x_upload_media": (EffectKind.OUTBOUND, SemanticTier.HIGH, None, ()),
     # git / github
     "git_commit": (EffectKind.WRITE_FS, SemanticTier.HIGH, "mutate_fs", ()),
     "git_push_pull": (EffectKind.WRITE_FS, SemanticTier.HIGH, "mutate_fs", ()),

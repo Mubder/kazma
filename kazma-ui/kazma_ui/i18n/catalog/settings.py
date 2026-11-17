@@ -5046,6 +5046,166 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "فشل {protocol} في {provider}: {error}",
         "en": "{provider} {protocol} failed: {error}",
     },
+    "settings.xapi.title": {
+        "ar": "واجهة X كاملة",
+        "en": "The whole X API",
+    },
+    "settings.xapi.intro": {
+        "ar": "إلى جانب النشر، يستطيع كاظمه القراءة والتنفيذ عبر كل عمليات واجهة X الرسمية: الإعجابات والمتابعة والقوائم والإشارات المرجعية والرسائل الخاصة والمساحات وغيرها. كل إجراء على X يسألك أولاً ببطاقة تسمّيه. بعض العمليات تحتاج رمز Bearer الخاص بالتطبيق أو تسجيل الدخول بحساب X بدل المفاتيح الأربعة أعلاه.",
+        "en": "Besides posting, Kazma can read and act through every operation of X's own API: likes, follows, lists, bookmarks, direct messages, Spaces and more. Every action on X asks you first, on a card that names it. Some operations take the app's Bearer token or Sign in with X instead of the four keys above.",
+    },
+    "settings.xapi.callable": {
+        "ar": "عمليات واجهة X التي يستطيع كاظمه استدعاءها الآن:",
+        "en": "X API operations Kazma can call now:",
+    },
+    "settings.xapi.auth_user": {
+        "ar": "مفاتيح X ‏(OAuth 1.0a)",
+        "en": "X keys (OAuth 1.0a)",
+    },
+    "settings.xapi.auth_oauth2": {
+        "ar": "تسجيل الدخول بحساب X ‏(OAuth 2.0)",
+        "en": "Sign in with X (OAuth 2.0)",
+    },
+    "settings.xapi.auth_app": {
+        "ar": "رمز Bearer للتطبيق",
+        "en": "App Bearer token",
+    },
+    "settings.xapi.have": {
+        "ar": "مضبوط",
+        "en": "set",
+    },
+    "settings.xapi.missing": {
+        "ar": "غير مضبوط",
+        "en": "not set",
+    },
+    "settings.xapi.bearer_label": {
+        "ar": "رمز Bearer للتطبيق",
+        "en": "App Bearer token",
+    },
+    "settings.xapi.bearer_hint": {
+        "ar": "من لوحة مطوّري X: تطبيقك، ثم Keys and tokens، ثم Bearer token. يقرأ ما يراه الجميع (أعداد المنشورات والمساحات والرائج والاستخدام) وبثوث X.",
+        "en": "From the X developer console: your app, Keys and tokens, Bearer token. It reads what anyone can see (post counts, Spaces, trends, usage) and X's streams.",
+    },
+    "settings.xapi.bearer_env": {
+        "ar": "المتغير X_BEARER_TOKEN مضبوط في البيئة، وله الأولوية على هذا الحقل.",
+        "en": "X_BEARER_TOKEN is set in the environment; it wins over this field.",
+    },
+    "settings.xapi.save": {
+        "ar": "حفظ",
+        "en": "Save",
+    },
+    "settings.xapi.saved": {
+        "ar": "تم الحفظ.",
+        "en": "Saved.",
+    },
+    "settings.xapi.save_failed": {
+        "ar": "تعذّر الحفظ: {error}",
+        "en": "Could not save: {error}",
+    },
+    "settings.xapi.remove": {
+        "ar": "إزالة",
+        "en": "Remove",
+    },
+    "settings.xapi.remove_bearer": {
+        "ar": "إزالة رمز Bearer",
+        "en": "Remove the Bearer token",
+    },
+    "settings.xapi.client_id": {
+        "ar": "معرّف عميل OAuth 2.0",
+        "en": "OAuth 2.0 client ID",
+    },
+    "settings.xapi.client_secret": {
+        "ar": "سرّ عميل OAuth 2.0",
+        "en": "OAuth 2.0 client secret",
+    },
+    "settings.xapi.client_hint": {
+        "ar": "من لوحة مطوّري X: تطبيقك، ثم User authentication settings (فعّل OAuth 2.0 واختر Web App)، ثم Keys and tokens. السرّ للعميل السرّي فقط.",
+        "en": "From the X developer console: your app, User authentication settings (OAuth 2.0 on, type Web App), then Keys and tokens. The secret is only for a confidential client.",
+    },
+    "settings.xapi.callback": {
+        "ar": "عنوان الرجوع الذي تسجّله في تطبيق X:",
+        "en": "Callback URI to register in your X app:",
+    },
+    "settings.xapi.every_scope": {
+        "ar": "اطلب كل الأذونات التي يذكرها X (الأحدث منها قد يحتاج موافقة X على تطبيقك)",
+        "en": "Ask for every permission X lists (the newer ones can need your app approved by X)",
+    },
+    "settings.xapi.save_client": {
+        "ar": "حفظ العميل",
+        "en": "Save client",
+    },
+    "settings.xapi.sign_in": {
+        "ar": "تسجيل الدخول بحساب X",
+        "en": "Sign in with X",
+    },
+    "settings.xapi.sign_out": {
+        "ar": "تسجيل الخروج من X",
+        "en": "Sign out of X",
+    },
+    "settings.xapi.signed_out": {
+        "ar": "تم تسجيل الخروج من X ‏(OAuth 2.0).",
+        "en": "Signed out of X (OAuth 2.0).",
+    },
+    "settings.xapi.remove_client": {
+        "ar": "إزالة عميل OAuth 2.0",
+        "en": "Remove the OAuth 2.0 client",
+    },
+    "settings.xapi.remove_client_confirm": {
+        "ar": "إزالة معرّف العميل وسرّه وتسجيل الخروج من X ‏(OAuth 2.0)؟",
+        "en": "Remove the client ID and secret, and sign out of X (OAuth 2.0)?",
+    },
+    "settings.xapi.signed_in_as": {
+        "ar": "مسجّل الدخول بحساب X باسم",
+        "en": "Signed in with X as",
+    },
+    "settings.xapi.not_signed_in": {
+        "ar": "لم يُسجَّل الدخول بحساب X.",
+        "en": "Not signed in with X.",
+    },
+    "settings.xapi.scopes": {
+        "ar": "الأذونات الممنوحة:",
+        "en": "Permissions granted:",
+    },
+    "settings.xapi.signed_in": {
+        "ar": "تم تسجيل الدخول بحساب X{who}.",
+        "en": "Signed in with X{who}.",
+    },
+    "settings.xapi.sign_in_failed": {
+        "ar": "فشل تسجيل الدخول بحساب X: {error}",
+        "en": "Sign in with X failed: {error}",
+    },
+    "settings.xapi.err.access_denied": {
+        "ar": "رفضتَ الإذن على X",
+        "en": "you declined on X",
+    },
+    "settings.xapi.err.invalid_scope": {
+        "ar": "رفض X إذناً لا يملكه تطبيقك؛ سجّل الدخول دون طلب كل الأذونات",
+        "en": "X refused a permission your app does not have; sign in without every permission",
+    },
+    "settings.xapi.err.invalid_request": {
+        "ar": "رفض X الطلب؛ تحقّق من معرّف العميل وعنوان الرجوع في تطبيق X",
+        "en": "X refused the request; check the client ID and the callback URI in your X app",
+    },
+    "settings.xapi.err.no_client": {
+        "ar": "احفظ معرّف عميل OAuth 2.0 أولاً",
+        "en": "save the OAuth 2.0 client ID first",
+    },
+    "settings.xapi.err.no_secret": {
+        "ar": "المتغير KAZMA_SECRET غير مضبوط",
+        "en": "KAZMA_SECRET is not set",
+    },
+    "settings.xapi.err.refused": {
+        "ar": "رفض X تسجيل الدخول؛ تحقّق من معرّف العميل وسرّه وعنوان الرجوع",
+        "en": "X refused the sign-in; check the client ID, its secret and the callback URI",
+    },
+    "settings.xapi.err.unreachable": {
+        "ar": "تعذّر الوصول إلى X",
+        "en": "X could not be reached",
+    },
+    "settings.xapi.err.missing_code": {
+        "ar": "لم يُرجع X أي رد",
+        "en": "X sent no answer back",
+    },
     "settings.int.x_api_ok": {
         "ar": "تم التحقق من حساب X{who}. تحقق من إذن الكتابة في لوحة مطوّري X.",
         "en": "X account verified{who}. Confirm Write permission in the X developer console.",

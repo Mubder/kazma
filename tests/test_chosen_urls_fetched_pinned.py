@@ -159,6 +159,8 @@ UNFIXED_URLS: dict[str, str] = {
     "kazma-ui/kazma_ui/setup_api.py::_network_server.fetch": "a server the owner names in the setup guide, asked only after resolves_to_own_network says it is on their own network",
     # A provider's own API, at its fixed base.
     "kazma-core/kazma_core/x_api/client.py::XClient._request": "api.x.com (API_HOST) and a path Kazma's own methods build, each starting with '/'",
+    "kazma-core/kazma_core/x_api/client.py::XClient.stream_operation": (
+        "api.x.com (API_HOST) and a path x_api.api_call.prepare built from X's spec, its values checked"),
     "kazma-skills/kazma_skills/native/calendar/backends/google_calendar.py::GoogleCalendarBackend._request": "callers pass Google Calendar API URLs built on the module's _API base",
     "kazma-skills/kazma_skills/native/calendar/backends/outlook_calendar.py::OutlookCalendarBackend._request": "callers pass Microsoft Graph URLs built on the module's _GRAPH base",
     "kazma-skills/kazma_skills/native/email_manager/backends/microsoft_graph.py::MicrosoftGraphBackend._request": "callers pass Microsoft Graph paths and the @odata.nextLink pages Graph's own answer names",

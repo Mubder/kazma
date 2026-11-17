@@ -475,6 +475,8 @@ DECLARED = {
     "kazma-core/kazma_core/agent/tool_builtins/system.py::register_system_tools.check_swarm_task":
         _ONE_REQUEST,
     "kazma-core/kazma_core/documents/worker.py::DocumentWorker._heartbeat": _ONE_REQUEST,
+    # One upload's wait while X processes a video (bounded by wait_s).
+    "kazma-core/kazma_core/x_api/client.py::XClient.upload_media": _ONE_REQUEST,
     "kazma-core/kazma_core/lifecycle_notifier.py::_settled": _ONE_REQUEST,
     # The stream's retry loop moved under the key switch (providers stage 4).
     "kazma-core/kazma_core/llm_provider.py::LLMProvider._chat_stream_once": _ONE_REQUEST,

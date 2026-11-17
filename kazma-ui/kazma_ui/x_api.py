@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from kazma_core.errors import described_error, validation_error
 from pydantic import BaseModel, Field
 
@@ -572,13 +573,214 @@ def x_disconnect() -> JSONResponse:
         cs = get_config_store()
         from kazma_core.x_api.ownership import x_config_key
 
-        cs.batch_set([(x_config_key(key), "", "connectors") for key in CREDENTIAL_KEYS]
-                     + [(x_config_key("connectors.x.enabled"), False, "connectors")])
+        # Each key is deleted: the store refuses an empty write over a stored
+        # secret, so "" left all four keys in place behind "disconnected"
+        # (found 2026-11-17).
+        cs.batch_set([(x_config_key("connectors.x.enabled"), False, "connectors")])
+        for key in CREDENTIAL_KEYS:
+            cs.delete(x_config_key(key))
         payload = _status_payload()
         payload["disconnected"] = True
         return JSONResponse(payload)
     except Exception as exc:
         return _safe_error(exc)
+
+
+# ── The whole X API: the app's Bearer token and Sign in with X ─────────────
+# x_api.operations names, for each of X's API operations, which of the three
+# authentications it takes; these routes keep the two besides the OAuth 1.0a
+# keys above (x_api.auth_tokens) and run the OAuth 2.0 sign-in.
+
+#: A Bearer token or an OAuth 2.0 client id/secret as X issues them: URL-safe
+#: characters only, never a space or a control character.
+_X_TOKEN_TEXT = re.compile(r"[A-Za-z0-9%._~+/=:-]{8,2048}")
+
+
+class _XApiAccessBody(BaseModel):
+    bearer_token: str = Field(default="", max_length=2048)
+    client_id: str = Field(default="", max_length=256)
+    client_secret: str = Field(default="", max_length=512)
+    remove_bearer: bool = Field(default=False)
+    remove_client: bool = Field(default=False)
+
+
+class _XSignInBody(BaseModel):
+    every_scope: bool = Field(default=False)
+
+
+def _own_base(request: Request) -> str:
+    """The install's own address (KAZMA_PUBLIC_URL, else its host and port),
+    never one a request's Host header names (email_api._request_base)."""
+    from kazma_ui.email_api import _request_base
+
+    return _request_base(request).rstrip("/")
+
+
+def _api_access_payload(base: str) -> dict[str, Any]:
+    """What Settings -> X shows about the whole X API: which authentications
+    are there, who signed in with X, and how many operations Kazma can call
+    now. Never a token."""
+    import os
+
+    from kazma_core.x_api import auth_tokens
+    from kazma_core.x_api import operations as ops
+    from kazma_core.x_api.oauth2_sign_in import redirect_uri
+
+    have = auth_tokens.available_auth()
+    client_id, client_secret = auth_tokens.oauth2_client()
+    account = auth_tokens.oauth2_account()
+    every = ops.all_operations()
+    callable_now = [o for o in every if o.kind != "refused" and any(have.get(a) for a in o.auth)]
+    return {
+        "ok": True,
+        "spec_version": ops.spec_version(),
+        "available_auth": have,
+        "bearer_set": bool(auth_tokens.bearer_token()),
+        "bearer_from_env": bool(os.environ.get("X_BEARER_TOKEN", "").strip()),
+        "client_id": client_id,
+        "client_secret_set": bool(client_secret),
+        "signed_in": bool(have.get("oauth2")),
+        "account": {k: account.get(k) for k in ("username", "name", "id") if account.get(k)},
+        "scopes": sorted(str(s) for s in (account.get("scopes") or [])),
+        "callback_url": redirect_uri(base),
+        "operations": {
+            "total": len(every),
+            "callable": len(callable_now),
+            "refused": sum(1 for o in every if o.kind == "refused"),
+        },
+    }
+
+
+@router.get("/api-access")
+def x_api_access(request: Request) -> JSONResponse:
+    return JSONResponse(_api_access_payload(_own_base(request)))
+
+
+def _token_text(value: str, what: str) -> str:
+    text = value.strip()
+    if not _X_TOKEN_TEXT.fullmatch(text):
+        raise ValueError(f"That does not look like an X {what}: paste it as X shows it.")
+    return text
+
+
+@protected_router.post("/api-access", dependencies=[Depends(_verify_same_origin)])
+def x_api_access_save(request: Request, body: _XApiAccessBody) -> JSONResponse:
+    """Keep (or remove) the app's Bearer token and the OAuth 2.0 client; a
+    field left empty or masked keeps what is stored. Removing the client also
+    signs out of X (its tokens are useless without it)."""
+    from kazma_core.config_store import get_config_store
+    from kazma_core.x_api import auth_tokens
+    from kazma_core.x_api.ownership import x_config_key
+
+    items: list[tuple[str, Any, str]] = []
+    # A secret is cleared by deleting it: the store refuses to write one
+    # empty (that is what an unreadable vault pointer looks like).
+    removed: list[str] = []
+    try:
+        if body.remove_bearer:
+            removed.append(auth_tokens.BEARER_KEY)
+        elif not _placeholder(body.bearer_token):
+            items.append((auth_tokens.BEARER_KEY, _token_text(body.bearer_token, "Bearer token"), "connectors"))
+        if body.remove_client:
+            removed += [auth_tokens.CLIENT_ID_KEY, auth_tokens.CLIENT_SECRET_KEY]
+        else:
+            if not _placeholder(body.client_id):
+                items.append((auth_tokens.CLIENT_ID_KEY, _token_text(body.client_id, "client ID"), "connectors"))
+            if not _placeholder(body.client_secret):
+                items.append((auth_tokens.CLIENT_SECRET_KEY,
+                              _token_text(body.client_secret, "client secret"), "connectors"))
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": "invalid_value", "detail": validation_error(exc)},
+                            status_code=400)
+    store = get_config_store()
+    if items:
+        store.batch_set([(x_config_key(k), v, c) for k, v, c in items])
+    for key in removed:
+        store.delete(x_config_key(key))
+    if body.remove_client:
+        auth_tokens.forget_oauth2()
+    payload = _api_access_payload(_own_base(request))
+    payload["saved"] = bool(items or removed)
+    return JSONResponse(payload)
+
+
+@protected_router.post("/oauth2/start", dependencies=[Depends(_verify_same_origin)])
+async def x_oauth2_start(request: Request, body: _XSignInBody | None = None) -> JSONResponse:
+    """Start Sign in with X from Kazma's own page: the answer is X's consent
+    page (opened in this tab) and the binding cookie (kazma_ui.oauth_sign_in)."""
+    from kazma_core.x_api import oauth2_sign_in
+
+    from kazma_ui.oauth_sign_in import answer_start
+
+    base = _own_base(request)
+    every = bool(body.every_scope) if body else False
+    return await answer_start(
+        request,
+        callback_url=oauth2_sign_in.redirect_uri(base),
+        start=lambda: oauth2_sign_in.start(base, every_scope=every),
+    )
+
+
+@router.get("/oauth2/callback")
+async def x_oauth2_callback(
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+) -> RedirectResponse:
+    """X sends the browser back here: take the attempt, trade the code for
+    X's tokens, keep them, read who signed in, and go back to Settings -> X."""
+    from urllib.parse import quote
+
+    from kazma_core.security.oauth_attempts import AttemptRefused
+    from kazma_core.x_api import auth_tokens, oauth2_sign_in
+    from kazma_core.x_api.client import XApiError, XClient
+    from kazma_core.x_api.config import get_x_config
+
+    from kazma_ui.oauth_sign_in import forget_binding, take_attempt
+
+    back = _own_base(request) + "/settings?tab=x"
+    if error or not code or not state:
+        # X's own words for a refusal are a short code (access_denied ...).
+        why = re.sub(r"[^a-z_]", "", (error or "missing_code").lower())[:40] or "failed"
+        return RedirectResponse(f"{back}&x_oauth=error&msg={quote(why)}", status_code=302)
+    try:
+        attempt = await take_attempt(request, state, providers=("x",))
+    except AttemptRefused as exc:
+        logger.warning("[x.oauth2] callback refused: %s", exc.reason)
+        return forget_binding(RedirectResponse(f"{back}&x_oauth=error&reason={quote(exc.reason)}",
+                                               status_code=302), request, state)
+    try:
+        answer = await asyncio.to_thread(oauth2_sign_in.exchange, code, state, attempt)
+    except oauth2_sign_in.SignInFailed as exc:
+        return forget_binding(RedirectResponse(f"{back}&x_oauth=error&msg={quote(exc.code)}", status_code=302),
+                              request, state, attempt)
+    await asyncio.to_thread(auth_tokens.save_oauth2_tokens, answer, account={})
+    username = ""
+    try:
+        creds = await asyncio.to_thread(lambda: get_x_config().credentials)
+        me = await XClient(creds).get_account(auth="oauth2")
+        username = str(me.get("username") or "")
+        await asyncio.to_thread(auth_tokens.save_oauth2_tokens, answer,
+                                account={"username": username, "name": str(me.get("name") or ""),
+                                         "id": str(me.get("id") or "")})
+    except XApiError as exc:
+        # Signed in: only the account's name could not be read now.
+        logger.warning("[x.oauth2] signed in; the account could not be read: %s", type(exc).__name__)
+    logger.info("[x.oauth2] signed in with X%s", f" as @{username}" if username else "")
+    return forget_binding(RedirectResponse(f"{back}&x_oauth=ok&username={quote(username)}", status_code=302),
+                          request, state, attempt)
+
+
+@protected_router.post("/oauth2/sign-out", dependencies=[Depends(_verify_same_origin)])
+def x_oauth2_sign_out(request: Request) -> JSONResponse:
+    """Forget the Sign in with X tokens and account (the client id stays)."""
+    from kazma_core.x_api import auth_tokens
+
+    auth_tokens.forget_oauth2()
+    payload = _api_access_payload(_own_base(request))
+    payload["signed_out"] = True
+    return JSONResponse(payload)
 
 
 @router.get("/threads")

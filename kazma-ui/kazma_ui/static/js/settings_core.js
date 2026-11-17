@@ -558,6 +558,17 @@
         xForm: { api_key: '', api_key_secret: '', access_token: '', access_token_secret: '', handle: '', enabled: true, max_posts_per_day: 8, max_posts_per_month: 80 },
         xLoading: false,
         xSaving: false,
+        // The whole X API (/api/x/api-access): the app's Bearer token and
+        // Sign in with X. Never a token: the page only says which are set.
+        xApi: {
+            available_auth: { user: false, oauth2: false, app: false },
+            operations: { total: 0, callable: 0, refused: 0 },
+            bearer_set: false, bearer_from_env: false, client_id: '', client_secret_set: false,
+            signed_in: false, account: {}, scopes: [], callback_url: '',
+        },
+        xApiForm: { bearer_token: '', client_id: '', client_secret: '' },
+        xApiEveryScope: false,
+        xApiSaving: false,
         // X audit log (append-only x_audit.db; loaded on demand)
         xShowKeys: false,
 

@@ -105,6 +105,62 @@ tools:
     category: social
     prompt_chain:
       - "نزّل الفيديو من هالتغريدة وأرسله لي"
+  x_upload_media:
+    arabic_name: "رفع وسائط إلى إكس"
+    description: >
+      Upload a photo, GIF or video from the workspace to X through the
+      official X API and answer its media_id; nothing is posted. Pass the id
+      in media_ids to x_post or x_schedule_post (up to four). Args: file_path
+      (jpg, png, webp, gif, mp4, mov, webm; srt or vtt subtitles), alt_text
+      (set it for every photo), for_dm (true for a direct message).
+    category: social
+    prompt_chain:
+      - "ارفع هالصورة لإكس وأرفقها بالمنشور"
+  x_api_operations:
+    arabic_name: "عمليات واجهة إكس"
+    description: >
+      Find any operation of the X API -- every one of X's own spec: posts,
+      users, follows, likes, reposts, bookmarks, lists, blocks, mutes, direct
+      messages, X Chat, spaces, media, trends, news, communities, community
+      notes, broadcasts, calls, streams, usage -- with what it takes and
+      whether Kazma can call it now (it says which sign-in an operation
+      lacks). Args: search (words), area (an X API group), kind (read, write,
+      stream, refused). Call it before x_api_read or x_api_act when unsure of
+      an operation's id or its values.
+    category: social
+    prompt_chain:
+      - "وش العمليات المتاحة في واجهة إكس للقوائم؟"
+  x_api_read:
+    arabic_name: "قراءة من واجهة إكس"
+    description: >
+      Call any read of the X API through the official API (one read from the
+      X read budget) and get X's own JSON, fenced as outside text: search
+      posts, a user's posts, followers and following, likes, quotes,
+      reposts, bookmarks, lists, direct messages, spaces, trends, news,
+      usage, and more; a stream is read for a bounded time. Args: operation
+      (its id from x_api_operations, or "GET /2/..."), path (the path's
+      values by name), query (query values by name), max_events and seconds
+      (a stream). Never the browser or read_url for X: x.com answers with a
+      sign-in page.
+    category: social
+    prompt_chain:
+      - "ابحث في إكس عن آخر المنشورات عن كاظمه"
+  x_api_act:
+    arabic_name: "إجراء عبر واجهة إكس"
+    description: >
+      Do anything the X API can do with the account -- like, repost,
+      follow, block, mute, bookmark, manage lists, send a direct message,
+      hide a reply, community notes, X Chat, broadcasts -- through the
+      official API. ALWAYS asks the operator first, one call at a time, on a
+      card that names the operation; standing approvals and YOLO never skip
+      it. Posting and deleting a post are x_post and x_delete_post, and a
+      file goes up with x_upload_media. Args: operation (its id from
+      x_api_operations, or "POST /2/..."), path, query, body (the JSON
+      body's fields by name). For most account actions path.id is the
+      account's own user id (x_account gives it).
+    category: social
+    prompt_chain:
+      - "تابع هذا الحساب على إكس (يحتاج موافقتي)"
   x_draft_posts:
     arabic_name: "صياغة منشورات إكس"
     description: >

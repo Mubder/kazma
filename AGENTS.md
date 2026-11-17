@@ -504,6 +504,35 @@ never get the argument). A refused switch is retried once without it. A
 verifier reply cut off at its limit is `_VerifierCutOff`, never "invalid
 JSON". Gate: `tests/test_x_reasoning_off.py`.
 
+**The whole X API, from X's own spec** (2026-11-17; live, asked on WhatsApp
+for new followers, the agent opened x.com in the browser).
+`x_api/x_api_operations.json` is X's OpenAPI spec reduced
+(`scripts/x_api_catalog.py --write`, one operation a line);
+`x_api/operations.py` is the one answer to what each is: `read`, `stream` (read at
+most 60 s / 100 events), `write`, or `refused` with the reason (posting and
+deleting a post go through `x_post` / `x_delete_post` and their drafts and
+gate; media upload is `x_upload_media`; an answer that is a credential, a
+file body). `x_api/api_call.prepare` checks every call before it is sent:
+path values against X's pattern and `_PATH_BREAKERS`, declared query values
+only (type, enum, range), declared body fields only, required ones, 64 KiB.
+Tools: `x_api_operations` and `x_api_read` (read tier; one read from the X
+read budget, the answer fenced), `x_api_act` (danger, `ALWAYS_HITL_TOOLS`, a
+public action "Act on X with your account", CRITICAL so no swarm worker
+runs it; a refusal from X is `KnownEffectError`, an unknown outcome says so),
+`x_upload_media` (chunked, alt text; `media_ids` on `x_post` /
+`x_schedule_post`). Three sign-ins (`x_api/auth_tokens.py`, chosen in
+`operations.AUTH_ORDER`): the OAuth 1.0a keys, Sign in with X (OAuth 2.0 PKCE,
+`x_api/oauth2_sign_in.py`, `/api/x/oauth2/*`; the verifier rebuilt from the
+state with `KAZMA_SECRET`, never stored; used only with the scopes the
+operation lists; refreshed before its two hours end; its tokens are
+`CREDENTIAL` in `settings_restore`) and the app's Bearer token. Settings → X
+→ The whole X API. A secret setting is cleared with `delete`, never an empty
+write (the store refuses it: X's Disconnect left the four keys in place until
+this day). Gate: `tests/test_x_api_operations.py` (every operation
+classified, the shipped catalog equal to the script's rendering, hostile path
+values, the sign-in end to end with another browser refused, the old
+Disconnect's empty write as the control).
+
 **Danger tool list SoT (must stay one list):**
 - **Canonical:** `kazma_core.safety.hitl.CANONICAL_DANGER_TOOLS`
 - **YAML:** `kazma.yaml` `safety.hitl.require_approval_for` (parity-tested by

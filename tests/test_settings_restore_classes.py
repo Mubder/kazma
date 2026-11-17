@@ -63,6 +63,14 @@ DYNAMIC_WRITES: dict[str, tuple[str, ...] | str] = {
         "acquisition.crawl.", "acquisition.crawls", "acquisition.crawls_revision"),
     "kazma-core/kazma_core/x_api/ai_budget.py::reserve_daily": ("connectors.x.ai_usage", "connectors.x.read_usage"),
     "kazma-core/kazma_core/x_api/account_binding.py::record_account": ("connectors.x.",),
+    # The whole X API's sign-ins (2026-11-17): the tokens are credentials,
+    # the client a setting (settings_restore's connectors.x.oauth2.* rules).
+    "kazma-core/kazma_core/x_api/auth_tokens.py::save_oauth2_tokens": (
+        "connectors.x.oauth2.access_token", "connectors.x.oauth2.refresh_token",
+        "connectors.x.oauth2.expires_at", "connectors.x.oauth2.account"),
+    "kazma-core/kazma_core/x_api/auth_tokens.py::forget_oauth2": (
+        "connectors.x.oauth2.access_token", "connectors.x.oauth2.refresh_token",
+        "connectors.x.oauth2.expires_at", "connectors.x.oauth2.account"),
     "kazma-core/kazma_core/x_api/qualification.py::install_report": ("connectors.x.reply.qualification",),
     "kazma-core/kazma_core/agent/tool_builtins/system.py::config_save": (
         "the agent's config_save writes the key it is handed; "
@@ -110,6 +118,8 @@ DYNAMIC_WRITES: dict[str, tuple[str, ...] | str] = {
     ),
     "kazma-ui/kazma_ui/x_api.py::x_disconnect": ("connectors.x.",),
     "kazma-ui/kazma_ui/x_api.py::x_save_credentials": ("connectors.x.",),
+    "kazma-ui/kazma_ui/x_api.py::x_api_access_save": (
+        "connectors.x.bearer_token", "connectors.x.oauth2.client_id", "connectors.x.oauth2.client_secret"),
 }
 
 

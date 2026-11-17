@@ -1126,6 +1126,111 @@
             } finally {
                 this.xLoading = false;
             }
+            await this.loadXApiAccess();
+        },
+
+        // ── The whole X API: Bearer token and Sign in with X ─────────
+        _xApiTake(data) {
+            Object.assign(this.xApi, data);
+            this.xApiForm.client_id = data.client_id || '';
+            this.xApiForm.client_secret = '';
+            this.xApiForm.bearer_token = '';
+        },
+
+        /* The sign-in's answer comes back on the address (?x_oauth=ok|error):
+           a full page load from X's redirect, worded here in the page's
+           language, then taken off the address. */
+        _xSignInResult() {
+            let url;
+            try { url = new URL(window.location.href); } catch (e) { return; }
+            const result = url.searchParams.get('x_oauth');
+            if (!result) return;
+            if (result === 'ok') {
+                const who = url.searchParams.get('username');
+                showToast(_k('settings.xapi.signed_in', 'Signed in with X{who}.', { who: who ? ' (@' + who + ')' : '' }), 'success');
+            } else {
+                const code = url.searchParams.get('msg') || '';
+                const why = window.kazmaSignInFailed(url.searchParams.get('reason'),
+                    _k('settings.xapi.err.' + code, code || _k('settings.xapi.err.refused', 'X refused the sign-in')));
+                showToast(_k('settings.xapi.sign_in_failed', 'Sign in with X failed: {error}', { error: why }), 'error');
+            }
+            ['x_oauth', 'username', 'msg', 'reason'].forEach(function (k) { url.searchParams.delete(k); });
+            history.replaceState(null, '', url.pathname + url.search + url.hash);
+        },
+
+        async loadXApiAccess() {
+            this._xSignInResult();
+            const data = await window.kazmaGetJson('/api/x/api-access');
+            if (data && data.ok) this._xApiTake(data);
+        },
+
+        async saveXApiAccess(body) {
+            this.xApiSaving = true;
+            try {
+                const resp = await fetch('/api/x/api-access', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(body || {}),
+                });
+                const data = await resp.json().catch(function () { return {}; });
+                if (!resp.ok || data.ok === false) {
+                    showToast(_k('settings.xapi.save_failed', 'Could not save: {error}', { error: data.detail || data.error || ('HTTP ' + resp.status) }), 'error');
+                    return;
+                }
+                this._xApiTake(data);
+                showToast(_k('settings.xapi.saved', 'Saved.'), 'success');
+            } catch (e) {
+                showToast(_k('settings.xapi.save_failed', 'Could not save: {error}', { error: e.message }), 'error');
+            } finally {
+                this.xApiSaving = false;
+            }
+        },
+
+        async signInWithX() {
+            this.xApiSaving = true;
+            try {
+                const data = await window.kazmaStartSignIn('/api/x/oauth2/start', { every_scope: !!this.xApiEveryScope });
+                if (data.ok) return;  // on the way to X
+                const code = data.code || '';
+                const why = window.kazmaSignInProblem(data, _k('settings.xapi.err.' + code, data.error || ('HTTP ' + data.status)));
+                showToast(_k('settings.xapi.sign_in_failed', 'Sign in with X failed: {error}', { error: why }), 'error');
+            } catch (e) {
+                showToast(_k('settings.xapi.sign_in_failed', 'Sign in with X failed: {error}', { error: e.message }), 'error');
+            }
+            this.xApiSaving = false;
+        },
+
+        async signOutOfX() {
+            this.xApiSaving = true;
+            try {
+                const resp = await fetch('/api/x/oauth2/sign-out', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    credentials: 'same-origin',
+                });
+                const data = await resp.json().catch(function () { return {}; });
+                if (!resp.ok || data.ok === false) {
+                    showToast(_k('settings.xapi.save_failed', 'Could not save: {error}', { error: data.error || ('HTTP ' + resp.status) }), 'error');
+                    return;
+                }
+                this._xApiTake(data);
+                showToast(_k('settings.xapi.signed_out', 'Signed out of X (OAuth 2.0).'), 'success');
+            } catch (e) {
+                showToast(_k('settings.xapi.save_failed', 'Could not save: {error}', { error: e.message }), 'error');
+            } finally {
+                this.xApiSaving = false;
+            }
+        },
+
+        async removeXClient() {
+            if (!(await window.kazmaConfirm({
+                title: _k('settings.xapi.remove_client', 'Remove the OAuth 2.0 client'),
+                message: _k('settings.xapi.remove_client_confirm', 'Remove the client ID and secret, and sign out of X (OAuth 2.0)?'),
+                confirmText: _k('settings.xapi.remove', 'Remove'),
+                danger: true,
+            }))) return;
+            await this.saveXApiAccess({ remove_client: true });
         },
 
         async saveXCredentials() {

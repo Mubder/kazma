@@ -60,7 +60,7 @@ TTL_S = 600
 MAX_PENDING = 32
 
 #: The sign-ins that keep an attempt here. A callback names the ones it takes.
-PROVIDERS = ("github", "gmail", "google_calendar", "microsoft")
+PROVIDERS = ("github", "gmail", "google_calendar", "microsoft", "x")
 
 #: Why :func:`take` refused, as a code the pages word.
 REFUSAL_REASONS = ("other_browser", "unknown", "expired", "other_provider")

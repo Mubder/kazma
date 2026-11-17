@@ -403,8 +403,24 @@ async def _send(client: Any, row: dict[str, Any]) -> str:
         if row["kind"] == "delete":
             await client.delete_tweet(row["reply_to_id"])
             return row["reply_to_id"]
-        tweet = await client.create_tweet(row["text"], reply_to_id=row["reply_to_id"])
+        media = _media_ids(row)
+        if media:
+            tweet = await client.create_tweet(row["text"], reply_to_id=row["reply_to_id"], media_ids=media)
+        else:
+            tweet = await client.create_tweet(row["text"], reply_to_id=row["reply_to_id"])
         return str(tweet.get("id") or "")
+
+
+def _media_ids(row: dict[str, Any]) -> list[str]:
+    """The media ids a post carries (x_upload_media's), from its row."""
+    meta = row.get("metadata")
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except ValueError:
+            meta = {}
+    ids = (meta or {}).get("media_ids") if isinstance(meta, dict) else None
+    return [str(i) for i in ids if str(i).isascii() and str(i).isdigit()][:4] if isinstance(ids, list) else []
 
 
 def _result(row: dict[str, Any], *, repair_needed: bool = False) -> tuple[bool, dict[str, Any]]:

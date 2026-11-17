@@ -1403,6 +1403,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "ألغِ المنشور المجدول",
         "en": "Cancel scheduled post",
     },
+    "chat.hitl_public_x_api_act": {
+        "ar": "إجراء على X بحسابك — قد يراه الآخرون",
+        "en": "Act on X with your account — others may see it",
+    },
+    "chat.hitl_public_x_api_act_btn": {
+        "ar": "نفّذ على X",
+        "en": "Run on X",
+    },
     "chat.hitl_public_note": {
         "ar": "هذا إجراء عام يُطلب له تأكيدك في كل مرة. اقرأ النص أعلاه قبل أن تجيب.",
         "en": "This is a public action and asks you every time. Read the text above before you answer.",

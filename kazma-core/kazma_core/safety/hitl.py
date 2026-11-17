@@ -194,6 +194,10 @@ TOOL_TIERS: dict[str, str] = {
     "x_status": "read",
     "x_account": "read",         # the account's counts (and newest followers) from X
     "x_download_media": "write",   # one X read + files saved in the workspace
+    "x_upload_media": "write",     # a workspace file uploaded to X; nothing published
+    "x_api_operations": "read",    # X's own API catalog, offline
+    "x_api_read": "read",          # any read of the X API (one from the read budget)
+    "x_api_act": "danger",         # any other write of the X API: always asks
     "download_image": "write",     # one GET + a picture saved in the workspace
     "x_draft_posts": "write",      # X model calls + a saved draft; never sent to X
     # ── Audit F-04: tiers for every remaining registered tool ─────────────
@@ -418,6 +422,7 @@ CANONICAL_DANGER_TOOLS: tuple[str, ...] = (
     "x_delete_post",
     "x_schedule_post",
     "x_cancel_scheduled_post",
+    "x_api_act",
 )
 
 # Tools that ask every time: no YOLO window, grant or disabled gate skips
@@ -432,11 +437,14 @@ CANONICAL_DANGER_TOOLS: tuple[str, ...] = (
 # credential into the model's context in clear, a store or delete changes one;
 # under a YOLO window or a grant, text the agent had just read could do either
 # with no card.
+# Every other X API write (x_api_act, 2026-11-17): a like, a follow, a direct
+# message, a list -- done with the owner's account, often in public.
 ALWAYS_HITL_TOOLS: frozenset[str] = frozenset({
     "x_post",
     "x_delete_post",
     "x_schedule_post",
     "x_cancel_scheduled_post",
+    "x_api_act",
     "request_path_access",
     "vault_retrieve",
     "vault_store",

@@ -199,6 +199,11 @@ KEY_RULES: tuple[KeyRule, ...] = (
     KeyRule("notifications.push.subscriptions", CREDENTIAL, "the browsers' push addresses, bound to "
             "this install's signing key; a browser subscribes again by itself"),
     KeyRule("mcp.oauth.", CREDENTIAL, "MCP servers' sign-ins: a disconnected server stays disconnected"),
+    KeyRule("connectors.x.oauth2.access_token", CREDENTIAL, "the Sign in with X token: an X "
+            "sign-in the owner signed out of stays signed out"),
+    KeyRule("connectors.x.oauth2.refresh_token", CREDENTIAL, "what renews the Sign in with X token"),
+    KeyRule("connectors.x.oauth2.expires_at", CREDENTIAL, "when the Sign in with X token runs out"),
+    KeyRule("connectors.x.oauth2.account", CREDENTIAL, "who signed in with X and what they granted"),
     # ── Learned: restored only where the install has none ────────────────
     KeyRule("self_improvement.agent_evolution", LEARNED, "the Soul Kazma learned"),
     # ── Settings product code writes (named so the class gate sees them) ──

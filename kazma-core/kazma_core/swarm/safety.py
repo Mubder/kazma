@@ -103,6 +103,7 @@ _ALWAYS_HITL_FALLBACK: frozenset[str] = frozenset({
     "x_delete_post",
     "x_schedule_post",
     "x_cancel_scheduled_post",
+    "x_api_act",
     "request_path_access",
     "vault_retrieve",
     "vault_store",

@@ -135,6 +135,7 @@ Every line below describes that setup.
 | Reminders and scheduled tasks, delivered to the chat you asked from | Shipped | `/scheduled` |
 | Ready-made automations in one click: a morning briefing, inbox triage, a weekly report, a news digest; each only reads | Shipped | `/scheduled` |
 | X (Twitter): drafts, schedule, post through the official API, reply to mentions | Shipped | `/x` |
+| The whole X API through the official API: every operation of X's own spec found, read or done (search, followers, likes, lists, bookmarks, direct messages, Spaces, streams...), each write asked on a card that names it; photos, GIFs and videos on posts; the app's Bearer token and Sign in with X (OAuth 2.0) besides the four keys | Shipped | Settings → X; `x_api_operations`, `x_api_read`, `x_api_act`, `x_upload_media` |
 | X subject setup, scoped Support/Against, reply language and optional profanity; previews and model compatibility tests | Shipped | Settings → X; `/x` Conversations |
 | X posts drafted from your brief and up to three reference documents you name (for example the page describing Kazma), in X Studio or by asking in chat; each draft is fact-checked against them and saved for review, never sent; posts have their own length setting | Shipped | Settings → X → Reference documents and Post length; `/x` Composer; `x_draft_posts` |
 | Email (Gmail, Outlook) and calendar (Google, Microsoft) | Shipped | Settings → Email |

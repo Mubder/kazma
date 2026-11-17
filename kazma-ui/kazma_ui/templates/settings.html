@@ -3907,6 +3907,75 @@
 
             </details>
 
+            <!-- ── The whole X API (2026-11-17) ───────────────────────
+                 Besides the four OAuth 1.0a keys, part of X's API takes the
+                 app's Bearer token or a Sign in with X (OAuth 2.0) token
+                 (kazma_core.x_api.auth_tokens). /api/x/api-access. -->
+            <section class="card-nested" style="padding:16px;margin-top:16px;" id="xr-api-section" aria-labelledby="xr-api-title">
+                <h4 style="margin:0;" id="xr-api-title">{{ t('settings.xapi.title') }}</h4>
+                <p style="margin:6px 0 12px;font-size:0.85rem;color:var(--text-secondary);">{{ t('settings.xapi.intro') }}</p>
+                <p style="margin:0 0 8px;font-size:0.85rem;">
+                    <span>{{ t('settings.xapi.callable') }}</span>
+                    <strong x-text="(xApi.operations.callable || 0) + ' / ' + (xApi.operations.total || 0)"></strong>
+                </p>
+                <ul style="list-style:none;padding:0;margin:0 0 12px;display:flex;gap:12px;flex-wrap:wrap;font-size:0.82rem;">
+                    <li><span x-text="xApi.available_auth.user ? '✓' : '—'" aria-hidden="true"></span> {{ t('settings.xapi.auth_user') }}
+                        <span class="sr-only" x-text="xApi.available_auth.user ? t('settings.xapi.have') : t('settings.xapi.missing')"></span></li>
+                    <li><span x-text="xApi.available_auth.oauth2 ? '✓' : '—'" aria-hidden="true"></span> {{ t('settings.xapi.auth_oauth2') }}
+                        <span class="sr-only" x-text="xApi.available_auth.oauth2 ? t('settings.xapi.have') : t('settings.xapi.missing')"></span></li>
+                    <li><span x-text="xApi.available_auth.app ? '✓' : '—'" aria-hidden="true"></span> {{ t('settings.xapi.auth_app') }}
+                        <span class="sr-only" x-text="xApi.available_auth.app ? t('settings.xapi.have') : t('settings.xapi.missing')"></span></li>
+                </ul>
+
+                <div class="form-group">
+                    <label for="x-api-bearer">{{ t('settings.xapi.bearer_label') }}</label>
+                    <input id="x-api-bearer" type="password" class="form-input" x-model="xApiForm.bearer_token" :placeholder="xApi.bearer_set ? '********' : ''" autocomplete="off">
+                    <p class="form-hint">{{ t('settings.xapi.bearer_hint') }}</p>
+                    <p class="form-hint" x-show="xApi.bearer_from_env" x-cloak>{{ t('settings.xapi.bearer_env') }}</p>
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+                    <button class="btn btn-sm btn-primary" type="button" @click="saveXApiAccess({ bearer_token: xApiForm.bearer_token })" :disabled="xApiSaving || !xApiForm.bearer_token">{{ t('settings.xapi.save') }}</button>
+                    <button class="btn btn-sm btn-secondary" type="button" @click="saveXApiAccess({ remove_bearer: true })" :disabled="xApiSaving || !xApi.bearer_set || xApi.bearer_from_env">{{ t('settings.xapi.remove_bearer') }}</button>
+                </div>
+
+                <div class="form-row two-col-grid">
+                    <div class="form-group">
+                        <label for="x-api-client-id">{{ t('settings.xapi.client_id') }}</label>
+                        <input id="x-api-client-id" type="text" class="form-input" x-model="xApiForm.client_id" autocomplete="off" translate="no">
+                    </div>
+                    <div class="form-group">
+                        <label for="x-api-client-secret">{{ t('settings.xapi.client_secret') }}</label>
+                        <input id="x-api-client-secret" type="password" class="form-input" x-model="xApiForm.client_secret" :placeholder="xApi.client_secret_set ? '********' : ''" autocomplete="off">
+                    </div>
+                </div>
+                <p class="form-hint">{{ t('settings.xapi.client_hint') }}</p>
+                <p style="font-size:0.82rem;margin:8px 0;">
+                    <span>{{ t('settings.xapi.callback') }}</span>
+                    <code dir="ltr" translate="no" x-text="xApi.callback_url"></code>
+                </p>
+                <label class="toggle-row">
+                    <span class="toggle">
+                        <input type="checkbox" x-model="xApiEveryScope">
+                        <span class="toggle-slider"></span>
+                    </span>
+                    <span>{{ t('settings.xapi.every_scope') }}</span>
+                </label>
+                <p style="font-size:0.85rem;margin:8px 0;">
+                    <span x-show="xApi.signed_in" x-cloak>{{ t('settings.xapi.signed_in_as') }} <strong translate="no" x-text="xApi.account.username ? '@' + xApi.account.username : ''"></strong></span>
+                    <span x-show="!xApi.signed_in" x-cloak>{{ t('settings.xapi.not_signed_in') }}</span>
+                </p>
+                <p x-show="xApi.signed_in && xApi.scopes.length" x-cloak style="font-size:0.78rem;color:var(--text-tertiary);margin:0 0 8px;">
+                    <span>{{ t('settings.xapi.scopes') }}</span>
+                    <span translate="no" dir="ltr" x-text="xApi.scopes.join(', ')"></span>
+                </p>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <button class="btn btn-sm btn-secondary" type="button" @click="saveXApiAccess({ client_id: xApiForm.client_id, client_secret: xApiForm.client_secret })" :disabled="xApiSaving || (!xApiForm.client_id && !xApiForm.client_secret)">{{ t('settings.xapi.save_client') }}</button>
+                    <button class="btn btn-sm btn-primary" type="button" @click="signInWithX()" :disabled="xApiSaving || !xApi.client_id">{{ t('settings.xapi.sign_in') }}</button>
+                    <button class="btn btn-sm btn-secondary" type="button" @click="signOutOfX()" :disabled="xApiSaving || !xApi.signed_in">{{ t('settings.xapi.sign_out') }}</button>
+                    <button class="btn btn-sm btn-danger" type="button" @click="removeXClient()" :disabled="xApiSaving || !xApi.client_id">{{ t('settings.xapi.remove_client') }}</button>
+                </div>
+            </section>
+
             <!-- ── Auto-reply ─────────────────────────────────────
                  Subjects and the views Kazma argues from. Separate
                  from the credentials above because the failure modes

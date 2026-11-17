@@ -196,6 +196,7 @@ safety:
     - vault_delete
     - vault_retrieve
     - vault_store
+    - x_api_act
     - x_cancel_scheduled_post
     - x_delete_post
     - x_post

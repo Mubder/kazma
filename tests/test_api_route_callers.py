@@ -70,6 +70,7 @@ NOT_CALLED_BY_A_PAGE: dict[str, str] = {
     ),
     "/api/email/oauth/gmail/callback": "Google's OAuth redirect lands here",
     "/api/email/oauth/microsoft/callback": "Microsoft's OAuth redirect lands here",
+    "/api/x/oauth2/callback": "X's OAuth 2.0 redirect (Sign in with X) lands here",
     "/api/github/oauth/callback": "GitHub's OAuth redirect lands here",
     "/api/auth/oidc/callback": "the OIDC identity provider's sign-in redirect lands here",
     "/api/chat/files/{file_id}": (

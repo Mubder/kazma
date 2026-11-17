@@ -24,6 +24,7 @@ PUBLIC_ACTIONS: dict[str, tuple[str, str]] = {
     "x_schedule_post": ("Schedule a public post on X", "Schedule post"),
     "x_delete_post": ("Delete a post from X — can't be undone", "Delete post"),
     "x_cancel_scheduled_post": ("Cancel a scheduled X post", "Cancel scheduled post"),
+    "x_api_act": ("Act on X with your account — others may see it", "Run on X"),
 }
 
 

@@ -60,7 +60,7 @@ human boundary, not a technical one.**
 ## 1. HITL approval — consent, not containment
 
 Every danger-tier tool routes through `LocalToolRegistry.execute()` →
-`SafetyMiddleware.check()`. 59 tools are in `CANONICAL_DANGER_TOOLS`. The gate
+`SafetyMiddleware.check()`. 60 tools are in `CANONICAL_DANGER_TOOLS`. The gate
 posts an approval request and waits for a human.
 
 **What it genuinely gives you.** Nothing dangerous happens while you are not
@@ -76,7 +76,8 @@ job and you still ran the command.
 
 **`KAZMA_ALLOW_YOLO=1`** turns the gate off per-thread for canonical danger
 tools. It cannot bypass `ALWAYS_HITL_TOOLS` (`x_post`, `x_delete_post`,
-`x_schedule_post`, `x_cancel_scheduled_post`, `request_path_access`, which
+`x_schedule_post`, `x_cancel_scheduled_post`, `x_api_act` -- any other write of
+the X API --, `request_path_access`, which
 widens what the file tools may read or write, and the vault's `vault_retrieve`,
 `vault_store` and `vault_delete`) or git write commands, which
 still show their card under YOLO. But for everything else, YOLO means the

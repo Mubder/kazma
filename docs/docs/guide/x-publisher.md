@@ -7,7 +7,7 @@ description: Post to X through the official API v2 with OAuth 1.0a, vaulted keys
 
 > This page is published at [kazma.ai/docs/x-publisher/](https://kazma.ai/docs/x-publisher/) ([Arabic](https://kazma.ai/ar/docs/x-publisher/)).
 
-Kazma tweets **only** through the [official X API v2](https://docs.x.com/x-api/posts/manage-tweets/introduction) using **OAuth 1.0a user context**. There is no scrape path, no Playwright/computer-use poster, and no app-only Bearer posting. X also supports OAuth 2.0 user tokens; this connector uses its four OAuth 1.0a credentials.
+Kazma tweets **only** through the [official X API v2](https://docs.x.com/x-api/posts/manage-tweets/introduction) using **OAuth 1.0a user context**. There is no scrape path, no Playwright/computer-use poster, and no app-only Bearer posting. Beyond posting, every other operation of X's API -- likes, follows, lists, bookmarks, direct messages, Spaces, search, streams and the rest -- is reachable through the official API too ([The whole X API](#the-whole-x-api)), with the app's Bearer token or Sign in with X (OAuth 2.0) where an operation needs them.
 
 ## Posting fresh Kazma repository metrics
 
@@ -104,10 +104,10 @@ These are Kazma caps **on top of** X's own quota. They fail closed.
 
 | Guard | Default | Why |
 |-------|---------|-----|
-| Always-HITL (`ALWAYS_HITL_TOOLS`) | `x_post`, `x_delete_post`, `x_schedule_post`, `x_cancel_scheduled_post` | Chat/agent tools: human sees the exact text. YOLO / grants / HITL-off cannot skip. Web Studio does not call these tools — the operator click *is* the approval. |
+| Always-HITL (`ALWAYS_HITL_TOOLS`) | `x_post`, `x_delete_post`, `x_schedule_post`, `x_cancel_scheduled_post`, `x_api_act` | Chat/agent tools: human sees the exact text, or the whole call. YOLO / grants / HITL-off cannot skip. Web Studio does not call these tools — the operator click *is* the approval. |
 | Drafted, shown, then posted | `x_post`, `x_schedule_post`, `book_x_post` | A draft the agent saves (`save_proposal`) is never published in the same turn: the agent shows it and stops, and you ask to post it in a later message. Then the card says what it does — "Publish to X — public, can't be undone", the post shown whole, a **Post now** button (the other X cards say "Schedule post", "Delete post" or "Cancel scheduled post") — on the web and in Telegram, Discord and Slack. It offers no "Allow tool", YOLO or "Approve for task": those answers are refused and approve nothing. (2026-10-16: "check the metrics" ended in a post approved as part of the reading.) |
 | Official API only | `POST /2/tweets` | Automation must use the API, not the website. |
-| No extra verbs | no like / follow / DM / search | Stays inside posting. |
+| Every other write asks | `x_api_act`: like, follow, block, a DM, a list... | One card per call, "Act on X with your account — others may see it", the operation and its values shown; **Run on X** approves that call only. No swarm worker may call it. |
 | No write retry | network drop ≠ second POST | Avoids double-posts. |
 | Length | 280 weighted characters | Kazma's conservative text limit; URLs and emoji use the server parser. |
 | @mentions | max 2 (excluding your handle) | Unsolicited mention spam. |
@@ -117,7 +117,7 @@ These are Kazma caps **on top of** X's own quota. They fail closed.
 | Volume | 8/day, 80/30d | Local rolling-window defaults, independent of X endpoint limits and billing. Raise only after checking your account's permissions and budget. |
 | User-Agent | `Kazma/<ver> (self-hosted; official X API v2)` | X requires a UA. |
 
-Media, polls, quote posts and campaign analytics remain disabled pending individual capability verification. A post's public counts are read only on request, by `x_status` with `metrics=true`. X's [create-post reference](https://docs.x.com/x-api/posts/create-post) currently restricts quote posts to Enterprise; the [pricing guide](https://docs.x.com/x-api/getting-started/pricing) describes usage credits. Check the Developer Console for your own access and budget before enabling a richer-content increment. Any such increment must retain the same approval and durable publication contracts.
+A post carries photos, a GIF or a video when `x_upload_media` uploaded them first and `x_post` / `x_schedule_post` name their `media_ids` (up to four). Polls and quote posts stay off: `POST /2/tweets` is reached only through `x_post`, which sends text, a reply target and media. A post's public counts are read only on request, by `x_status` with `metrics=true`. X's [create-post reference](https://docs.x.com/x-api/posts/create-post) currently restricts quote posts to Enterprise; the [pricing guide](https://docs.x.com/x-api/getting-started/pricing) describes usage credits. Check the Developer Console for your own access and budget before enabling a richer-content increment. Any such increment must retain the same approval and durable publication contracts.
 
 ## Tools
 
@@ -131,8 +131,67 @@ Media, polls, quote posts and campaign analytics remain disabled pending individ
 | `x_draft_posts` | no | `brief` + `count` (1–3). Writes X posts the way X Studio's Generate does -- the X model, the reference documents set in Settings → X, the four checks -- and saves them to X Studio's **Drafts** under the running turn, so they are never published in the turn that wrote them. Answers with each draft's id, text, X length and check verdicts. The model is told to use it for any X post it is asked to write; `save_proposal` is for text the user gave word for word. Nothing is sent to X. |
 | `x_download_media` | no | `post` (an x.com / twitter.com link, or the post id). Downloads the video, GIF or photos attached to a public post through the official X API (one read from the X read budget) into the workspace's `downloads/x` folder -- a video at the highest quality under 50 MB, the most a chat can be sent -- and answers with the paths for `send_file`. Only X's media hosts are fetched. |
 | `x_cancel_scheduled_post` | **always** | Cancel a scheduled post before it fires (releases reserved quota). |
+| `x_account` | no | The account's followers, following, posts and lists, how each changed since it was last asked, and its user id; `followers=true` also lists the newest followers. |
+| `x_upload_media` | no | `file_path` (a workspace photo, GIF or video; srt or vtt subtitles), `alt_text`, `for_dm`. Uploads it in 1 MB pieces, waits while X processes a video, sets the alt text, and answers the `media_id`. Nothing is posted: an upload no post uses expires on X. |
+| `x_api_operations` | no | `search`, `area`, `kind`. Finds any operation of X's own API spec, with the values it takes and whether Kazma can call it now (and which sign-in it lacks). Offline: it reads Kazma's copy of the spec. |
+| `x_api_read` | no | `operation`, `path`, `query` (a stream also `max_events`, `seconds`). Any read of the X API, one read from the X read budget; X's answer comes back fenced as outside text. |
+| `x_api_act` | **always** | `operation`, `path`, `query`, `body`. Any other write of the X API, one approved call at a time. |
 
 These tools are the **chat** path. X Studio posts through `publish_x_post` / `book_x_post` / `delete_x_post` directly. Swarm workers stay capped by the commitment swarm-scope (outbound CRITICAL denied by default). A `proposal_id` is required on chat `x_post` / `x_schedule_post` — the commitment resolver rewrites `text` to the stored draft.
+
+## The whole X API
+
+Kazma keeps a copy of X's own [OpenAPI spec](https://api.x.com/2/openapi.json)
+(`kazma_core/x_api/x_api_operations.json`, rebuilt with
+`python scripts/x_api_catalog.py --write`; without `--write` it says what X
+added or removed). Every operation in it -- 268 in spec 2.175 -- is one of:
+
+- a **read** (`x_api_read`): search posts, a user's posts, followers and
+  following, likes, reposts, quotes, bookmarks, lists, direct messages,
+  Spaces, trends, news, communities, usage...;
+- a **stream** (`x_api_read` too): read for at most 60 seconds or 100 events,
+  then closed;
+- a **write** (`x_api_act`): asks every time;
+- **refused**, with the reason: posting and deleting a post are `x_post` /
+  `x_delete_post` (drafts, caps, the duplicate rule, the proposal check); a
+  media upload is `x_upload_media`; an operation whose answer is a credential
+  (a stream key, a bot token) is not called; one whose body is a file is not
+  sent.
+
+Before anything is sent, the call is checked against the spec: each path value
+against its pattern (a separator, `..` or a space is refused), only the query
+values the operation declares, each against its type, allowed values and
+range, and only the body fields it takes, the required ones present, 64 KiB at
+most. Every call writes the X audit log; every read takes one read from the X
+read budget; a write is never retried.
+
+X accepts three kinds of sign-in, and each operation names which:
+
+| Sign-in | Where | What it adds |
+|---------|-------|--------------|
+| The four OAuth 1.0a keys | Settings → X (above) | Most of the API, as the account. |
+| **Sign in with X** (OAuth 2.0 with PKCE) | Settings → X → The whole X API | The operations X answers only to it (adding and removing bookmarks, joining a call, a Space's buyers, a DM's media, the developer account), with permissions you choose on X's consent page. |
+| The app's **Bearer token** | Settings → X → The whole X API | App-only reads (usage, compliance jobs, post counts, trends by place) and the streams. |
+
+Kazma uses the OAuth 1.0a keys when X accepts them, then the OAuth 2.0
+sign-in (only when it was granted the permissions the operation lists), then
+the Bearer token.
+
+**Sign in with X:** in the X developer console, turn on OAuth 2.0 for the app
+(User authentication settings, type Web App), register the callback address
+Settings → X shows (`<your Kazma address>/api/x/oauth2/callback`), and copy the
+OAuth 2.0 client ID (and its secret, for a confidential client) into Settings
+→ X. **Sign in with X** opens X's consent page in the same tab and comes back
+to Settings. Kazma asks for X's long-standing permissions (posts, users,
+follows, likes, lists, blocks, mutes, bookmarks, media, direct messages,
+Spaces, and `offline.access` so the sign-in renews itself); **Ask for every
+permission X lists** adds the newer ones, which X can refuse for an app it has
+not approved for them. The access token lasts two hours and is renewed before
+it runs out. The tokens are kept in the vault, never shown, and never restored
+from a settings backup; **Sign out of X** forgets them.
+
+Every operation costs what X charges for it under your X API plan; the X read
+budget (Settings → X) bounds Kazma's reads.
 
 ## Scheduled posts
 
@@ -223,7 +282,8 @@ blocks the call. Inspect with any SQLite browser or
 
 - Your X Developer Console is the source of truth for account access, usage credits and spend; Kazma's local caps do not establish an X allowance.
 - An Automated label is **your** action in X settings; Kazma cannot flip it.
-- If keys leak, regenerate them in the dashboard, then Settings → X → Disconnect and save the new four.
+- If keys leak, regenerate them in the dashboard, then Settings → X → Disconnect and save the new four. (Until 2026-11-17 Disconnect wrote empty values, which the settings store refuses over a stored secret, so the four keys stayed; it deletes them now.)
+- Some operations need an X plan above the basic one (the firehose streams, full-archive search); X answers those with its own refusal, which Kazma shows as it is.
 
 ## Replying to other people's posts
 

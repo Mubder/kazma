@@ -92,6 +92,7 @@ def book_x_post(
     delivery_target: str = "",
     idempotency_key: str = "",
     proposal_id: str = "",
+    media_ids: list[str] | None = None,
 ) -> tuple[bool, dict[str, Any]]:
     """Validate + store a scheduled X post. Returns ``(ok, payload)``.
 
@@ -114,7 +115,8 @@ def book_x_post(
     _zone, zone_name = resolve_cron_zone()
     return schedule(text=text, fire_at=fire_at, reply_to_id=reply_to_id or "", idempotency_key=idempotency_key,
                     metadata={"thread_id": thread_id, "delivery_target": delivery_target,
-                              "tz": zone_name, "proposal_id": proposal_id})
+                              "tz": zone_name, "proposal_id": proposal_id,
+                              **({"media_ids": list(media_ids)} if media_ids else {})})
 
 
 async def publish_x_post(

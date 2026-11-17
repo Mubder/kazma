@@ -212,6 +212,7 @@ async def x_account(followers: bool = False) -> str:
     answer: dict = {
         "ok": True,
         "handle": account.get("username") or cfg.handle or "",
+        "id": str(account.get("id") or ""),  # the user id x_api_read/x_api_act take as path id
         "name": account.get("name") or "",
         "followers": counts.get("followers_count"),
         "following": counts.get("following_count"),
@@ -268,7 +269,21 @@ async def x_account(followers: bool = False) -> str:
     return _json(answer)
 
 
-async def x_post(text: str, reply_to_id: str = "", proposal_id: str = "") -> str:
+def _checked_media_ids(media_ids: object) -> list[str]:
+    """At most four media ids from x_upload_media, or a refusal."""
+    if not media_ids:
+        return []
+    ids = media_ids if isinstance(media_ids, (list, tuple)) else str(media_ids).split(",")
+    clean = [str(i).strip() for i in ids if str(i).strip()]
+    if len(clean) > 4 or any(not (i.isascii() and i.isdigit()) for i in clean):
+        raise RefusedBeforeEffect(_json({
+            "ok": False, "error": "media_ids takes up to four media ids from x_upload_media.",
+        }))
+    return clean
+
+
+async def x_post(text: str, reply_to_id: str = "", proposal_id: str = "",
+                 media_ids: list[str] | None = None) -> str:
     """Post one tweet via official X API v2. HITL is mandatory outside this function.
 
     ``proposal_id`` is REQUIRED by the commitment gate (S1-3): the text
@@ -276,10 +291,18 @@ async def x_post(text: str, reply_to_id: str = "", proposal_id: str = "") -> str
     a durable id — not the model's memory. Workflow: (1) persist drafts with
     ``save_proposal(kind, items)``, (2) call this ONCE PER ITEM with that
     item's proposal_id. One call must not fan out to multiple drafts.
+
+    Args:
+        text: The post's text (rewritten from the saved draft).
+        reply_to_id: A post id to reply to, for a thread.
+        proposal_id: The saved draft's item id (from save_proposal).
+        media_ids: Up to four media ids from x_upload_media: the photos,
+            a GIF or a video the post carries.
     """
+    media = _checked_media_ids(media_ids)
     ok, payload = await publish_x_post(text=text, reply_to_id=reply_to_id or "",
                                      idempotency_key="proposal:" + proposal_id if proposal_id else "",
-                                     metadata={"proposal_id": proposal_id})
+                                     metadata={"proposal_id": proposal_id, **({"media_ids": media} if media else {})})
     payload["ok"] = ok
     if proposal_id:
         payload["proposal_id"] = proposal_id
@@ -327,6 +350,7 @@ async def x_schedule_post(
     when: str,
     reply_to_id: str = "",
     proposal_id: str = "",
+    media_ids: list[str] | None = None,
 ) -> str:
     """Schedule a tweet to be posted automatically at a future time.
 
@@ -346,12 +370,14 @@ async def x_schedule_post(
             refused (book a recurring task instead).
         reply_to_id: Optional tweet id to reply to (thread).
         proposal_id: The saved proposal item id (from save_proposal).
+        media_ids: Up to four media ids from x_upload_media, posted with it.
 
     Returns:
         JSON with the scheduled post id, text and the STORED fire time and
         state. ``ok`` is false unless the booking is scheduled; rebooking a
         draft already booked at another time is a conflict.
     """
+    media = _checked_media_ids(media_ids)
     try:
         from kazma_core.x_api.booking import book_x_post
 
@@ -360,7 +386,7 @@ async def x_schedule_post(
         ok, payload = await asyncio.to_thread(book_x_post, text=text, when=when,
             reply_to_id=reply_to_id or "", tenant_id=tenant_id, thread_id=thread_id,
             delivery_target=delivery_target, idempotency_key="proposal:" + proposal_id if proposal_id else "",
-            proposal_id=proposal_id)
+            proposal_id=proposal_id, media_ids=media)
         if ok:
             payload = dict(payload)
             payload["ok"] = True
@@ -657,3 +683,257 @@ async def x_draft_posts(brief: str, count: int = 1) -> str:
                  "before posting. A draft is never published in the turn that wrote it; post one with "
                  "x_post(proposal_id=<item id>) after the user answers.")
     return "\n".join(lines)
+
+
+#: What X takes, by file extension: the MIME type and the post category.
+_MEDIA_TYPES = {
+    ".jpg": ("image/jpeg", "tweet_image"), ".jpeg": ("image/jpeg", "tweet_image"),
+    ".png": ("image/png", "tweet_image"), ".webp": ("image/webp", "tweet_image"),
+    ".bmp": ("image/bmp", "tweet_image"), ".tif": ("image/tiff", "tweet_image"),
+    ".tiff": ("image/tiff", "tweet_image"), ".gif": ("image/gif", "tweet_gif"),
+    ".mp4": ("video/mp4", "tweet_video"), ".mov": ("video/quicktime", "tweet_video"),
+    ".webm": ("video/webm", "tweet_video"), ".srt": ("text/srt", "subtitles"),
+    ".vtt": ("text/vtt", "subtitles"),
+}
+_MAX_UPLOAD_BYTES = 512 * 1024 * 1024
+
+
+async def x_upload_media(file_path: str, alt_text: str = "", for_dm: bool = False) -> str:
+    """Upload a photo, GIF or video from the workspace to X, through the
+    official X API, and answer its media id: pass it in media_ids to x_post
+    or x_schedule_post (or a direct message's attachments). Nothing is
+    posted: an uploaded file no post uses expires on X.
+
+    Args:
+        file_path: The file in the workspace (jpg, png, webp, gif, mp4, mov,
+            webm; srt or vtt subtitles).
+        alt_text: The description people with screen readers hear (up to
+            1,000 characters); set it for every photo.
+        for_dm: Upload it for a direct message instead of a post.
+    """
+    from pathlib import Path as _Path
+
+    from kazma_core.agent.tool_refusal import KnownEffectError
+    from kazma_core.agent.tool_scope import resolve_in_scope
+    from kazma_core.x_api.client import XApiError, XClient
+
+    path, refusal = await resolve_in_scope(file_path, "reads")
+    if refusal:
+        raise RefusedBeforeEffect(refusal)
+    kind = _MEDIA_TYPES.get(_Path(path).suffix.lower())
+    if kind is None:
+        raise RefusedBeforeEffect(_json({"ok": False, "error": "X takes jpg, png, webp, gif, mp4, mov or webm here (srt or vtt subtitles)."}))
+    media_type, category = kind
+    if for_dm and category.startswith("tweet_"):
+        category = category.replace("tweet_", "dm_")
+    cfg = await asyncio.to_thread(get_x_config)
+    if not cfg.credentials.complete():
+        raise RefusedBeforeEffect(_json({"ok": False, "error": "X is not configured: the operator saves the X keys in Settings → X."}))
+
+    def _read() -> bytes:
+        size = _Path(path).stat().st_size
+        if size > _MAX_UPLOAD_BYTES:
+            raise ValueError("The file is larger than X takes (512 MB).")
+        return _Path(path).read_bytes()
+
+    try:
+        data = await asyncio.to_thread(_read)
+    except (OSError, ValueError) as exc:
+        raise RefusedBeforeEffect(_json({"ok": False, "error": f"The file could not be read: {exc}"})) from exc
+    try:
+        uploaded = await XClient(cfg.credentials).upload_media(
+            data, media_type=media_type, category=category, alt_text=alt_text)
+    except XApiError as exc:
+        # An upload that failed posts nothing; another try uploads afresh.
+        raise KnownEffectError(_json({"ok": False, "error": f"X did not take the upload: {exc}"})) from exc
+    return _json({"ok": True, **uploaded,
+                  "next": "Pass media_id in media_ids to x_post or x_schedule_post."})
+
+
+# ── The whole X API (2026-11-17) ───────────────────────────────────────────
+# x_api_operations finds an operation in X's own spec (x_api/operations.py),
+# x_api_read calls any read, x_api_act any write -- the write always behind a
+# one-time approval card that names the operation. Posting and deleting a
+# post stay x_post / x_delete_post.
+
+_MAX_READ_CHARS = 24_000
+
+
+def _needs(op, have: dict) -> str:
+    """Why *op* cannot be called with the authentications this install has."""
+    if op.refused:
+        return op.refused
+    wanted = [a for a in op.auth]
+    if not wanted:
+        return "X lists no authentication for it."
+    if any(have.get(a) for a in wanted):
+        return ""
+    words = {
+        "user": "the X keys in Settings → X",
+        "oauth2": "Sign in with X (OAuth 2.0) in Settings → X",
+        "app": "the app's Bearer token in Settings → X",
+    }
+    return "Needs " + " or ".join(words[a] for a in wanted if a in words) + "."
+
+
+def _auth_for(op, have: dict) -> str:
+    for a in op.auth:
+        if have.get(a):
+            if a == "oauth2" and getattr(op, "scopes", ()):
+                from kazma_core.x_api.auth_tokens import oauth2_account
+
+                granted = set(oauth2_account().get("scopes") or ())
+                if granted and not set(op.scopes) <= granted:
+                    continue
+            return a
+    return ""
+
+
+async def x_api_operations(search: str = "", area: str = "", kind: str = "") -> str:
+    """Find an X API operation: every operation of X's own API spec, with
+    what it takes and whether Kazma can call it now.
+
+    Args:
+        search: Words the operation's name, path or summary holds
+            ("followers", "bookmarks", "dm events", "list members").
+        area: An X API group: Posts, Users, Lists, Direct Messages, Spaces,
+            Media, Trends, Usage, Communities, Community Notes, News,
+            Articles, Chat, Broadcasts, Calls, Bots, Stream, Webhooks,
+            Activity, Account Activity, Compliance, Connections, Account.
+        kind: read, write, stream or refused.
+    """
+    from kazma_core.x_api import operations as ops
+    from kazma_core.x_api.auth_tokens import available_auth
+
+    have = await asyncio.to_thread(available_auth)
+    if not (search or area or kind):
+        return _json({
+            "spec_version": ops.spec_version(),
+            "areas": ops.areas(),
+            "available_auth": have,
+            "next": "Call again with search, area or kind to list the operations.",
+        })
+    found = ops.find(search, area=area, kind=kind, limit=40)
+    rows = []
+    for op in found:
+        row = op.describe()
+        why = _needs(op, have)
+        row["available"] = not why
+        if why:
+            row["why_not"] = why
+        rows.append(row)
+    return _json({
+        "spec_version": ops.spec_version(),
+        "available_auth": have,
+        "operations": rows,
+        "how": "Read with x_api_read(operation, path, query); write with x_api_act(operation, path, query, body).",
+    })
+
+
+def _fenced(payload: dict) -> str:
+    from kazma_core.safety.prompt_fence import fence_untrusted
+
+    text = json.dumps(payload, ensure_ascii=False, indent=1)
+    cut = len(text) > _MAX_READ_CHARS
+    if cut:
+        text = text[:_MAX_READ_CHARS]
+    note = "\n(cut: the answer was longer; ask for fewer fields or a smaller max_results)" if cut else ""
+    return fence_untrusted(text, source="x_api") + note
+
+
+async def _prepared(operation: str, path, query, body, *, kinds: tuple[str, ...]):
+    from kazma_core.x_api import operations as ops
+    from kazma_core.x_api.api_call import CallRefused, prepare
+    from kazma_core.x_api.auth_tokens import available_auth
+
+    op = ops.operation(operation)
+    if op is None:
+        raise RefusedBeforeEffect(_json({
+            "ok": False,
+            "error": f"No X API operation {operation!r}. Find it with x_api_operations(search=...).",
+        }))
+    if op.kind not in kinds:
+        hint = {
+            "read": "It is a read: call x_api_read.",
+            "stream": "It is a stream: call x_api_read (it reads for a bounded time).",
+            "write": "It changes something: call x_api_act.",
+            "refused": op.refused,
+        }[op.kind]
+        raise RefusedBeforeEffect(_json({"ok": False, "operation": op.id, "error": hint}))
+    have = await asyncio.to_thread(available_auth)
+    auth = await asyncio.to_thread(_auth_for, op, have)
+    if not auth:
+        raise RefusedBeforeEffect(_json({"ok": False, "operation": op.id, "error": _needs(op, have)
+                                         or "The X sign-in lacks a permission this operation needs; sign in with X again."}))
+    try:
+        call = prepare(op, path, query, body)
+    except CallRefused as exc:
+        raise RefusedBeforeEffect(_json({"ok": False, "operation": op.id, "error": str(exc),
+                                         "takes": op.describe()})) from None
+    return op, call, auth
+
+
+async def x_api_read(operation: str, path: dict | None = None, query: dict | None = None,
+                     max_events: int = 10, seconds: int = 20) -> str:
+    """Call any read of the X API (one read from the X read budget); the
+    answer is X's own JSON, fenced as outside text.
+
+    Args:
+        operation: The operation's id from x_api_operations (getUsersFollowers,
+            searchPostsRecent, getDmEvents...) or "GET /2/...".
+        path: The path's values by name, for each {name} in its path
+            (id: a user or post id; username: a handle without @).
+        query: Query values by name, as x_api_operations lists them
+            (max_results: a number; user.fields: a list or "a,b"; query: the search).
+        max_events: For a stream: stop after this many events (1-100).
+        seconds: For a stream: stop after this many seconds (1-60).
+    """
+    from kazma_core.x_api.client import XApiError, XClient
+
+    op, call, auth = await _prepared(operation, path, query, None, kinds=("read", "stream"))
+    cfg = await asyncio.to_thread(get_x_config)
+    client = XClient(cfg.credentials)
+    try:
+        if op.kind == "stream":
+            answer = await client.stream_operation(
+                call, auth=auth, max_events=max(1, min(int(max_events or 10), 100)),
+                seconds=max(1, min(int(seconds or 20), 60)))
+        else:
+            answer = await client.request_operation(call, auth=auth)
+    except XApiError as exc:
+        return _json({"ok": False, "operation": op.id, "status": exc.status, "error": str(exc)})
+    return _fenced({"ok": True, "operation": op.id, "auth": auth, "answer": answer})
+
+
+async def x_api_act(operation: str, path: dict | None = None, query: dict | None = None,
+                    body: dict | None = None) -> str:
+    """Do anything the X API can do with the account -- like, repost,
+    follow, block, mute, lists, bookmarks, direct messages, X Chat, notes,
+    spaces, broadcasts -- after the operator approves this one call on a
+    card that names it. Posting and deleting a post are x_post and
+    x_delete_post.
+
+    Args:
+        operation: The operation's id from x_api_operations (likePost,
+            followUser, createDirectMessagesByParticipantId...) or "POST /2/...".
+        path: The path's values by name, for each {name} in its path
+            (id: the account's own user id for most user actions).
+        query: Query values by name, when the operation takes any.
+        body: The JSON body's fields by name, as x_api_operations lists
+            them (tweet_id: the post to like; text: a message's text).
+    """
+    from kazma_core.agent.tool_refusal import KnownEffectError
+    from kazma_core.x_api.client import XApiError, XClient
+
+    op, call, auth = await _prepared(operation, path, query, body, kinds=("write",))
+    cfg = await asyncio.to_thread(get_x_config)
+    try:
+        answer = await XClient(cfg.credentials).request_operation(call, auth=auth)
+    except XApiError as exc:
+        if exc.outcome in ("rejected", "not_sent"):
+            # X refused it, or it never left: nothing changed on X.
+            raise KnownEffectError(_json({"ok": False, "operation": op.id, "status": exc.status,
+                                          "error": str(exc)})) from exc
+        return _json({"ok": False, "operation": op.id, "outcome": "unknown", "error": str(exc),
+                      "note": "It may have taken effect on X: check before doing it again."})
+    return _fenced({"ok": True, "operation": op.id, "answer": answer})

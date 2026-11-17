@@ -240,6 +240,10 @@ These modules implement or support tools (some registered at startup, some via s
 | `x_delete_post` | x-publisher | social | **danger** | Delete a tweet the connector posted (DELETE /2/tweets/:id). HITL always required. Args: tweet_id. |
 | `x_schedule_post` | x-publisher | social | **danger** | Schedule a tweet to be posted automatically at a future time. CONTRACT: persist drafts with save_proposal FIRST, then call this ONCE PER ITEM with proposal_id=&lt;that item's id&gt; — the commitment gate refuses without it and rewrites text from the stored proposal. HITL is ALWAYS required at booking — t… |
 | `x_download_media` | x-publisher | social | safe/read | Download the video, GIF or photos attached to a public X post, through the official X API (one read from the X read budget) -- no browser, shell or yt-dlp needed. Args: post (the x.com / twitter.com link, or the post id). Saves each file in the workspace's downloads/x folder (a video at the highest… |
+| `x_upload_media` | x-publisher | social | safe/read | Upload a photo, GIF or video from the workspace to X through the official X API and answer its media_id; nothing is posted. Pass the id in media_ids to x_post or x_schedule_post (up to four). Args: file_path (jpg, png, webp, gif, mp4, mov, webm; srt or vtt subtitles), alt_text (set it for every pho… |
+| `x_api_operations` | x-publisher | social | safe/read | Find any operation of the X API -- every one of X's own spec: posts, users, follows, likes, reposts, bookmarks, lists, blocks, mutes, direct messages, X Chat, spaces, media, trends, news, communities, community notes, broadcasts, calls, streams, usage -- with what it takes and whether Kazma can cal… |
+| `x_api_read` | x-publisher | social | safe/read | Call any read of the X API through the official API (one read from the X read budget) and get X's own JSON, fenced as outside text: search posts, a user's posts, followers and following, likes, quotes, reposts, bookmarks, lists, direct messages, spaces, trends, news, usage, and more; a stream is re… |
+| `x_api_act` | x-publisher | social | **danger** | Do anything the X API can do with the account -- like, repost, follow, block, mute, bookmark, manage lists, send a direct message, hide a reply, community notes, X Chat, broadcasts -- through the official API. ALWAYS asks the operator first, one call at a time, on a card that names the operation; s… |
 | `x_draft_posts` | x-publisher | social | safe/read | Write X posts the way X Studio's Generate does, and save them to X Studio's drafts for the user to review: the X model writes 1-3 alternatives from the brief and the operator's reference documents (Settings -&gt; X; for posts about Kazma, the page describing Kazma), and each is fact-checked against th… |
 | `x_list_scheduled` | x-publisher | social | safe/read | List scheduled X posts with their status (managed -- booked and waiting to publish --, held for review, sending, outcome_unknown, fired, cancelled, failed, expired), text and fire time, plus each booking's publication operation and its state. Read-only. Saved drafts that were never posted or booked… |
 | `x_cancel_scheduled_post` | x-publisher | social | **danger** | Cancel a scheduled X post before it fires (releases its reserved quota). HITL always required. Args: post_id (the scheduled post id). |
@@ -319,6 +323,7 @@ From `kazma_core/safety/hitl.py`: `CANONICAL_DANGER_TOOLS` plus every `danger` t
 - `vault_delete`
 - `vault_retrieve`
 - `vault_store`
+- `x_api_act`
 - `x_cancel_scheduled_post`
 - `x_delete_post`
 - `x_post`

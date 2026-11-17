@@ -182,7 +182,11 @@ def role_allows(role: str, path: str, method: str = "GET") -> bool:
     # Credentials and publication policy grant continuing authority. Operators
     # can review individual drafts, but only administrators can change that grant.
     if ((path.rstrip("/") in ("/api/x/reply", "/api/x/reply/qualification") and m == "PUT")
-            or path.rstrip("/") in ("/api/x/credentials", "/api/x/disconnect", "/api/x/resume")):
+            or path.rstrip("/") in ("/api/x/credentials", "/api/x/disconnect", "/api/x/resume")
+            # The whole X API's credentials: the app's Bearer token, the OAuth
+            # 2.0 client and Sign in with X (2026-11-17).
+            or path.rstrip("/") in ("/api/x/oauth2/start", "/api/x/oauth2/sign-out")
+            or (path.rstrip("/") == "/api/x/api-access" and m not in ("GET", "HEAD", "OPTIONS"))):
         return False
     # "About me" is shown to the model on every call, for every user of the
     # tenant: changing it is guidance for all of them, like the personality,

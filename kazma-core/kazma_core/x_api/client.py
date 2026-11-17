@@ -39,6 +39,8 @@ API_HOST = "https://api.x.com"
 _MAX_WRITE_RESPONSE_BYTES = 8192
 _MAX_READ_RESPONSE_BYTES = 512 * 1024
 _MAX_RESPONSE_BYTES = _MAX_WRITE_RESPONSE_BYTES  # back-compat alias
+#: One appended segment of a media upload (base64 in a JSON body: about 1.4 MB a request).
+_MEDIA_CHUNK_BYTES = 1024 * 1024
 
 
 def _bounded_response(resp: httpx.Response, limit: int = _MAX_RESPONSE_BYTES) -> tuple[Any, str, bool]:
@@ -139,9 +141,79 @@ class XApiError(Exception):
         self.outcome = outcome or ("rejected" if 400 <= status < 500 else "unknown")
 
 
+#: An answer from X's OAuth 2.0 token endpoint is a few hundred bytes.
+_MAX_TOKEN_ANSWER = 64 * 1024
+
+
+def oauth2_token_request(data: dict[str, str], *, client_id: str, client_secret: str = "") -> dict[str, Any]:
+    """POST *data* to X's OAuth 2.0 token endpoint (a sign-in's code, or a
+    refresh token) and answer X's JSON. Basic auth for a confidential client.
+    Raises ``XApiError``: ``not_sent`` when X could not be reached,
+    ``rejected`` for a refusal or an answer that is not a token. Blocking:
+    call from a thread. The x_api package talks to the network only here and
+    in :class:`XClient` (tests/test_x_mentions_no_fetch.py)."""
+    from kazma_core.x_api.operations import TOKEN_URL
+
+    auth = (client_id, client_secret) if client_secret else None
+    try:
+        with httpx.Client(timeout=20.0, follow_redirects=False) as http:
+            resp = http.post(TOKEN_URL, data=data, auth=auth, headers={"User-Agent": user_agent()})
+    except httpx.HTTPError as exc:
+        raise XApiError(f"X could not be reached ({type(exc).__name__}).", outcome="not_sent") from exc
+    if resp.status_code != 200 or len(resp.content) > _MAX_TOKEN_ANSWER:
+        raise XApiError(f"X refused the token request (HTTP {resp.status_code}).",
+                        status=resp.status_code or 400, outcome="rejected")
+    try:
+        answer = resp.json()
+    except ValueError as exc:
+        raise XApiError("X answered the token request with something that is not JSON.",
+                        outcome="rejected") from exc
+    if not isinstance(answer, dict) or not answer.get("access_token"):
+        raise XApiError("X answered the token request without an access token.", outcome="rejected")
+    return answer
+
+
+async def _reserve_read(*, action: str, method: str, path: str) -> None:
+    """Take one read from the X read budget, or refuse before anything is sent."""
+    from kazma_core.x_api.ai_budget import reserve_read
+
+    try:
+        await asyncio.to_thread(reserve_read)
+    except Exception as exc:
+        await _audit(action=action, method=method, endpoint=path, status="budget_hold",
+                     response_body={"error": "read_budget_unavailable"}, duration_ms=0)
+        raise XApiError("X read budget is exhausted or unavailable. No request was sent; review X usage settings.",
+                        outcome="not_sent") from exc
+
+
 class XClient:
     def __init__(self, credentials: XCredentials | None = None) -> None:
         self._creds = credentials or _config.get_x_config().credentials
+
+    async def _auth_headers(self, method: str, url: str, auth: str) -> dict[str, str]:
+        """The request's headers for *auth*: ``user`` signs it with the OAuth
+        1.0a keys, ``oauth2`` sends the signed-in user's token (refreshed when
+        near its end), ``app`` the app's Bearer token (x_api.auth_tokens)."""
+        if auth == "user":
+            return self._headers(method, url)
+        from kazma_core.x_api import auth_tokens
+
+        if auth == "oauth2":
+            try:
+                token = await asyncio.to_thread(auth_tokens.oauth2_access_token)
+            except XApiError as exc:
+                # The renewal failed: this call was never sent.
+                raise XApiError(f"The Sign in with X could not be renewed ({exc}); sign in with X again "
+                                "(Settings -> X).", outcome="not_sent") from exc
+            missing = "Nobody signed in with X (OAuth 2.0): Settings -> X."
+        elif auth == "app":
+            token = await asyncio.to_thread(auth_tokens.bearer_token)
+            missing = "The X app's Bearer token is not set: Settings -> X."
+        else:
+            raise XApiError(f"Unknown X authentication {auth!r}.", outcome="not_sent")
+        if not token:
+            raise XApiError(missing, outcome="not_sent")
+        return {"Authorization": f"Bearer {token}", "User-Agent": user_agent(), "Accept": "application/json"}
 
     def _headers(self, method: str, url: str) -> dict[str, str]:
         c = self._creds
@@ -168,6 +240,8 @@ class XClient:
         timeout: float = 20.0,
         audit_action: str = "",
         audit_tweet_id: str | None = None,
+        auth: str = "user",
+        max_response: int | None = None,
     ) -> dict[str, Any]:
         from kazma_core.x_api.shadow import shadow_transport_blocked
 
@@ -180,21 +254,13 @@ class XClient:
         action = audit_action or _default_audit_action(method, path)
         started = time.monotonic()
         if method.upper() == "GET":
-            from kazma_core.x_api.ai_budget import reserve_read
-
-            try:
-                await asyncio.to_thread(reserve_read)
-            except Exception as exc:
-                await _audit(action=action, method=method, endpoint=path, status="budget_hold",
-                             response_body={"error": "read_budget_unavailable"}, duration_ms=0)
-                raise XApiError("X read budget is exhausted or unavailable. No request was sent; review X usage settings.",
-                                outcome="not_sent") from exc
+            await _reserve_read(action=action, method=method, path=path)
         url = f"{API_HOST}{path}"
         # user_agent() reads installed-package metadata on its first call
         # (then it is cached): stall-20260923-041456 caught that on the loop
         # for 45.6s. Warm it in a worker; later calls are a cache hit.
         await asyncio.to_thread(user_agent)
-        headers = self._headers(method, url)
+        headers = await self._auth_headers(method, url, auth)
         if json_body is not None:
             headers["Content-Type"] = "application/json; charset=utf-8"
         try:
@@ -232,14 +298,23 @@ class XClient:
 
         duration_ms = int((time.monotonic() - started) * 1000)
 
-        limit = (
+        limit = max_response or (
             _MAX_WRITE_RESPONSE_BYTES
             if method.upper() in ("POST", "PUT", "PATCH", "DELETE")
             else _MAX_READ_RESPONSE_BYTES
         )
         parsed, body_text, truncated = _bounded_response(resp, limit=limit)
 
-        if resp.status_code in (200, 201):
+        if resp.status_code in (202, 204) and not body_text.strip():
+            # Accepted, or done with nothing to say (a webhook's check, some
+            # DELETEs): success with an empty answer.
+            await _audit(
+                action=action, method=method, endpoint=path, status="success",
+                http_status=resp.status_code, tweet_id=audit_tweet_id,
+                request_body=json_body, response_body={}, duration_ms=duration_ms,
+            )
+            return {}
+        if resp.status_code in (200, 201, 202):
             if not isinstance(parsed, dict):
                 await _audit(
                     action=action, method=method, endpoint=path, status="error",
@@ -332,17 +407,134 @@ class XClient:
         )
         return data.get("data") or data
 
-    async def get_account(self) -> dict[str, Any]:
+    async def request_operation(self, call: Any, *, auth: str) -> dict[str, Any]:
+        """Send one prepared X API call (``x_api.api_call.prepare``) with
+        *auth*. A GET takes one read from the X read budget; a write is never
+        retried (it may have taken effect)."""
+        op = call.operation
+        return await self._request(
+            op.method, call.path, json_body=call.body, auth=auth,
+            audit_action=f"api:{op.id}", max_response=_MAX_READ_RESPONSE_BYTES,
+            timeout=30.0,
+        )
+
+    async def stream_operation(self, call: Any, *, auth: str, max_events: int = 10,
+                               seconds: float = 20.0) -> dict[str, Any]:
+        """Read a streaming X API operation for a bounded time: at most
+        *max_events* events or *seconds*, then close the connection. One read
+        from the X read budget."""
+        from kazma_core.x_api.shadow import shadow_transport_blocked
+
+        op = call.operation
+        if shadow_transport_blocked():
+            raise XApiError("X network requests are blocked in isolated shadow evaluation.", outcome="not_sent")
+        await _reserve_read(action=f"api:{op.id}", method="GET", path=call.path)
+        url = f"{API_HOST}{call.path}"
+        headers = await self._auth_headers("GET", url, auth)
+        events: list[Any] = []
+        stopped = "time"
+        started = time.monotonic()
+        from kazma_core.llm_provider import _shared_ssl_context
+
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(seconds + 10, connect=10.0),
+                                         follow_redirects=False, verify=await _shared_ssl_context()) as client:
+                async with asyncio.timeout(seconds):
+                    async with client.stream("GET", url, headers=headers) as resp:
+                        if resp.status_code != 200:
+                            body = (await resp.aread())[:2000].decode("utf-8", "replace")
+                            await _audit(action=f"api:{op.id}", method="GET", endpoint=call.path,
+                                         status="error", http_status=resp.status_code,
+                                         response_body={"body": body}, duration_ms=0)
+                            raise XApiError(f"X API HTTP {resp.status_code}: {body[:400]}", status=resp.status_code)
+                        size = 0
+                        async for line in resp.aiter_lines():
+                            size += len(line)
+                            if not line.strip():
+                                continue  # X's keep-alive
+                            try:
+                                events.append(json.loads(line))
+                            except ValueError:
+                                events.append({"raw": line[:2000]})
+                            if len(events) >= max_events:
+                                stopped = "events"
+                                break
+                            if size > _MAX_READ_RESPONSE_BYTES:
+                                stopped = "size"
+                                break
+        except TimeoutError:
+            stopped = "time"
+        except httpx.HTTPError as exc:
+            raise XApiError(f"X API network error: {type(exc).__name__}.", transient=True,
+                            outcome="not_sent" if not events else "unknown") from exc
+        await _audit(action=f"api:{op.id}", method="GET", endpoint=call.path, status="success",
+                     http_status=200, response_body={"events": len(events), "stopped": stopped},
+                     duration_ms=int((time.monotonic() - started) * 1000))
+        return {"events": events, "count": len(events), "stopped": stopped}
+
+    async def upload_media(self, data: bytes, *, media_type: str, category: str,
+                           alt_text: str = "", wait_s: float = 120.0) -> dict[str, Any]:
+        """Upload a file to X in chunks (initialize, append, finalize), wait
+        while X processes a video, and set its alt text: the media id a post
+        attaches. Each step is one write, never retried."""
+        if not data:
+            raise XApiError("The file is empty.", outcome="not_sent")
+        started = await self._request(
+            "POST", "/2/media/upload/initialize",
+            json_body={"media_type": media_type, "total_bytes": len(data), "media_category": category},
+            audit_action="media_initialize", max_response=_MAX_READ_RESPONSE_BYTES,
+        )
+        media = started.get("data") or {}
+        media_id = str(media.get("id") or "")
+        if not media_id.isascii() or not media_id.isdigit():
+            raise XApiError("X did not give the upload an id.", outcome="unknown")
+        import base64
+
+        chunk = _MEDIA_CHUNK_BYTES
+        for index, start in enumerate(range(0, len(data), chunk)):
+            await self._request(
+                "POST", f"/2/media/upload/{media_id}/append",
+                json_body={"media": base64.b64encode(data[start:start + chunk]).decode("ascii"),
+                           "segment_index": index},
+                audit_action="media_append", max_response=_MAX_READ_RESPONSE_BYTES, timeout=120.0,
+            )
+        done = await self._request(
+            "POST", f"/2/media/upload/{media_id}/finalize",
+            audit_action="media_finalize", max_response=_MAX_READ_RESPONSE_BYTES,
+        )
+        info = (done.get("data") or {}).get("processing_info") or {}
+        deadline = time.monotonic() + wait_s
+        while info and info.get("state") in ("pending", "in_progress"):
+            if time.monotonic() > deadline:
+                raise XApiError("X is still processing the upload; try again in a minute.", outcome="unknown")
+            await asyncio.sleep(max(1.0, min(float(info.get("check_after_secs") or 2), 10.0)))
+            status = await self._request(
+                "GET", f"/2/media/upload?media_id={media_id}&command=STATUS",
+                audit_action="media_status",
+            )
+            info = (status.get("data") or {}).get("processing_info") or {}
+        if info.get("state") == "failed":
+            error = (info.get("error") or {}).get("message") or "X could not process the file."
+            raise XApiError(f"X could not process the upload: {error}", outcome="rejected")
+        if alt_text.strip():
+            await self._request(
+                "POST", "/2/media/metadata",
+                json_body={"id": media_id, "metadata": {"alt_text": {"text": alt_text.strip()[:1000]}}},
+                audit_action="media_alt_text", max_response=_MAX_READ_RESPONSE_BYTES,
+            )
+        return {"media_id": media_id, "media_key": media.get("media_key"), "category": category}
+
+    async def get_account(self, *, auth: str = "user") -> dict[str, Any]:
         """``GET /2/users/me`` with ``public_metrics``: the account's id,
         handle, name and its counts (followers, following, posts, lists).
         One read from the X read budget. Live 2026-11-17: asked on WhatsApp
         whether the account had new followers, the agent had no read for
         them and opened x.com in the browser, which X answers with a
-        sign-in page."""
+        sign-in page. ``auth="oauth2"`` asks who signed in with X."""
         data = await self._request(
             "GET",
             "/2/users/me?user.fields=username,name,public_metrics",
-            audit_action="read_account",
+            audit_action="read_account", auth=auth,
         )
         user = data.get("data") or data
         return user if isinstance(user, dict) else {}
@@ -363,10 +555,13 @@ class XClient:
         people = data.get("data") or []
         return [p for p in (people if isinstance(people, list) else [people]) if isinstance(p, dict)]
 
-    async def create_tweet(self, text: str, *, reply_to_id: str = "") -> dict[str, Any]:
+    async def create_tweet(self, text: str, *, reply_to_id: str = "",
+                           media_ids: list[str] | None = None) -> dict[str, Any]:
         body: dict[str, Any] = {"text": text}
         if reply_to_id:
             body["reply"] = {"in_reply_to_tweet_id": str(reply_to_id).strip()}
+        if media_ids:
+            body["media"] = {"media_ids": [str(m) for m in media_ids]}
         data = await self._request(
             "POST", "/2/tweets", json_body=body,
             audit_action="reply" if reply_to_id else "post",

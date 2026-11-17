@@ -3634,6 +3634,7 @@
     x_schedule_post: [['hitl_public_x_schedule_post', 'Schedule a public post on X'], ['hitl_public_x_schedule_post_btn', 'Schedule post']],
     x_delete_post: [['hitl_public_x_delete_post', 'Delete a post from X — can’t be undone'], ['hitl_public_x_delete_post_btn', 'Delete post']],
     x_cancel_scheduled_post: [['hitl_public_x_cancel_scheduled_post', 'Cancel a scheduled X post'], ['hitl_public_x_cancel_scheduled_post_btn', 'Cancel scheduled post']],
+    x_api_act: [['hitl_public_x_api_act', 'Act on X with your account — others may see it'], ['hitl_public_x_api_act_btn', 'Run on X']],
   };
 
   // The public action a card asks about: its labels, or null.
