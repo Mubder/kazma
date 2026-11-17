@@ -20,8 +20,13 @@ Two questions, each with one answer:
 
 While the install does not enforce Spaces (one operator, or the older
 multi-user mode), a request that names no space resolves exactly as before:
-the tenant the older middleware worked out. Naming a space is honoured in
-both modes, and so is the membership check.
+the tenant the older middleware worked out. So does a request that names
+exactly that tenant: a page is rendered for the tenant its request ran in,
+and a page that names it back asks for nothing it would not get anyway. The
+older mode's users and OIDC sign-ins are members of no space, so checking
+membership there refused every call a page made after it loaded. Naming any
+other space needs membership in both modes; once Spaces is enforced, every
+named space does.
 
 Everything here reads the identity store: call it off the event loop.
 """
@@ -156,8 +161,12 @@ def space_for_request(
     says the route reads a space's data (``route_scopes``): only such a route
     is refused for naming none.
     """
-    account = account_of(principal)
     enforced = spaces_enforced()
+    legacy = legacy_tenant or OWNER_SPACE_ID
+    if named is not None and not enforced and named == legacy:
+        # The space the request would run in anyway: as if it named none.
+        named = None
+    account = account_of(principal)
     if account is None:
         if principal is not None and enforced:
             raise SpaceRefused(
@@ -167,7 +176,7 @@ def space_for_request(
         if named is not None and principal is not None:
             # A sign-in with no account is a member of nothing.
             raise SpaceRefused("not_a_member", 403, "You are not a member of that space.")
-        return Binding(space_id=legacy_tenant or OWNER_SPACE_ID, asker=None)
+        return Binding(space_id=legacy, asker=None)
     if named is not None:
         # One answer for a space that does not exist and one the caller is
         # not in: the refusal never says which.
@@ -175,7 +184,7 @@ def space_for_request(
             raise SpaceRefused("not_a_member", 403, "You are not a member of that space.")
         return Binding(space_id=named, asker=account)
     if not enforced:
-        return Binding(space_id=legacy_tenant or OWNER_SPACE_ID, asker=account)
+        return Binding(space_id=legacy, asker=account)
     own = identity.spaces_of(account)
     if len(own) == 1:
         return Binding(space_id=own[0]["id"], asker=account)

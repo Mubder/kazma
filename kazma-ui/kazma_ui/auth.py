@@ -1873,7 +1873,7 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
                     status_code=refused.status,
                 )
             except IdentityUnavailable:
-                if named is not None or spaces_enforced():
+                if spaces_enforced() or (named is not None and named != tenant_id):
                     # Membership cannot be checked: never guessed.
                     return JSONResponse(
                         {"ok": False, "error": "Accounts cannot be read right now. Try again.",

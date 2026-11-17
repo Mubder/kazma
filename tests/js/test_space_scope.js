@@ -7,6 +7,11 @@
  * space is the tab's (the page's meta tag, remembered in sessionStorage),
  * never the session's. The negative control keeps the space in one shared
  * place, as a session would: two tabs then send the same space.
+ *
+ * Only on an install that enforces Spaces. On any other install the page
+ * names nothing and reloads nothing: an older multi-user install's users and
+ * OIDC sign-ins are members of no space, and a page that named the space it
+ * was rendered for had every call after its load refused.
  */
 "use strict";
 
@@ -26,8 +31,10 @@ function assert(name, cond, detail) {
   }
 }
 
-/** A window with one tab's page: its meta space, its own sessionStorage. */
-function makeTab(pageSpace, href, sharedStorage) {
+/** A window with one tab's page: its meta space, its own sessionStorage.
+ *  `enforced` is what the page says about the install (default: enforced). */
+function makeTab(pageSpace, href, sharedStorage, enforced) {
+  const pageEnforces = enforced === undefined ? true : enforced;
   const sent = [];
   const store = sharedStorage || {};
   const win = {
@@ -42,9 +49,13 @@ function makeTab(pageSpace, href, sharedStorage) {
     },
     document: {
       querySelector(sel) {
+        if (sel === 'meta[name="kazma-spaces-enforced"]') {
+          return { getAttribute: () => (pageEnforces ? "1" : "") };
+        }
         if (sel !== 'meta[name="kazma-space"]') return null;
         return { getAttribute: () => pageSpace };
       },
+      getElementById: () => null,
     },
     sessionStorage: {
       getItem: (k) => (k in store ? store[k] : null),
@@ -152,6 +163,48 @@ function makeTab(pageSpace, href, sharedStorage) {
   third.win.location.assigned = null;
   third.win.kazmaSpace.switchTo("Bad Id");
   assert("a malformed space is not switched to", third.win.location.assigned === null);
+}
+
+// ── An install that does not enforce Spaces: the page is as it was ──────
+{
+  const { win, sent, store } = makeTab("default", ORIGIN + "/chat", {}, false);
+  win.fetch("/api/chat/sessions");
+  win.fetch("/api/chat/stream", { method: "POST", body: "{}" });
+  assert("not enforced: a fetch names no space",
+    sent.every((s) => s.space === null), sent.map((s) => s.space));
+  const es = new win.EventSource("/api/swarm/tasks/t1/stream");
+  assert("not enforced: an event stream's address is unchanged",
+    es.url === "/api/swarm/tasks/t1/stream", es.url);
+  const ws = new win.WebSocket("wss://kazma.example/ws/chat/abc");
+  assert("not enforced: a socket's address is unchanged",
+    ws.url === "wss://kazma.example/ws/chat/abc", ws.url);
+  assert("not enforced: a link is unchanged",
+    win.kazmaSpace.url("/api/chat/files/f1") === "/api/chat/files/f1");
+  assert("not enforced: the page still knows the space it was drawn for",
+    win.kazmaSpace.id === "default");
+  assert("not enforced: nothing is remembered for the tab", !("kazma.space" in store), store);
+  win.kazmaSpace.switchTo("family");
+  assert("not enforced: there is nothing to switch to", win.location.assigned === null);
+
+  // The tab was used by a user of tenant "acme"; now another sign-in's page
+  // loads in it, drawn for "default". The page stays where the server put it.
+  const stale = { "kazma.space": "acme" };
+  const next = makeTab("default", ORIGIN + "/memory", stale, false);
+  assert("not enforced: a space remembered from another sign-in reloads nothing",
+    next.win.location.replaced === null, next.win.location.replaced);
+  next.win.fetch("/api/memory/v2/health");
+  assert("not enforced: and its calls name no space", next.sent[0].space === null, next.sent[0]);
+
+  // Control: the same tab on a page that names its space whatever the
+  // install is (the script as first written) is sent to the old space, and
+  // names the drawn one on every call: what an older install then refused.
+  const control = makeTab("default", ORIGIN + "/memory", { "kazma.space": "acme" }, true);
+  assert("control: naming regardless of the install sends the tab to the old space",
+    control.win.location.replaced === ORIGIN + "/memory?space=acme", control.win.location.replaced);
+  const naming = makeTab("default", ORIGIN + "/chat", {}, true);
+  naming.win.fetch("/api/chat/sessions");
+  assert("control: naming regardless of the install names the drawn space",
+    naming.sent[0].space === "default", naming.sent[0]);
 }
 
 // ── Negative control: a space kept where every tab reads it mixes them ───

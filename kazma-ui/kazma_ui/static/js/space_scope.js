@@ -12,6 +12,12 @@
  * sessionStorage (per tab), so a reload or a link with no `space` value
  * stays where it was.
  *
+ * All of this happens only on an install that enforces Spaces (the page
+ * says so in <meta name="kazma-spaces-enforced">). On any other install the
+ * page names no space, reloads nothing and offers no switcher: its requests
+ * are exactly what they were before Spaces, and the server runs them in the
+ * tenant it always did.
+ *
  * Loaded once by the page shell, before any script that makes a request.
  */
 (function () {
@@ -125,10 +131,16 @@
         return true;
     }
 
+    /** True when the page says this install enforces Spaces. */
+    function pageEnforces(doc) {
+        var flag = doc && doc.querySelector
+            ? doc.querySelector('meta[name="kazma-spaces-enforced"]') : null;
+        return !!flag && flag.getAttribute('content') === '1';
+    }
+
     function offerSwitcher(win, currentId) {
         var doc = win.document;
-        var flag = doc.querySelector ? doc.querySelector('meta[name="kazma-spaces-enforced"]') : null;
-        if (!flag || flag.getAttribute('content') !== '1') return;
+        if (!pageEnforces(doc)) return;
         function load() {
             var select = doc.getElementById ? doc.getElementById('space-switcher') : null;
             if (!select) return;
@@ -154,9 +166,12 @@
         var doc = win.document;
         var origin = win.location.origin;
         var pageSpace = metaSpace(doc);
+        var enforced = pageEnforces(doc);
         var storage = null;
         try { storage = win.sessionStorage; } catch (e) { storage = null; }
-        var tabSpace = remembered(storage);
+        // Not enforced: the tab has no space of its own. A space remembered
+        // from another sign-in in this tab must not send the page anywhere.
+        var tabSpace = enforced ? remembered(storage) : '';
 
         // The tab was in another space than the one this page was rendered
         // for (a reload, or a link with no space): load the page for the
@@ -167,10 +182,11 @@
             win.location.replace(current.toString());
             return;
         }
-        if (pageSpace) remember(storage, pageSpace);
+        if (enforced && pageSpace) remember(storage, pageSpace);
 
         var state = { id: pageSpace };
-        function getId() { return state.id; }
+        // The space to name on a request: none unless Spaces is enforced.
+        function getId() { return enforced ? state.id : ''; }
 
         if (typeof win.fetch === 'function') win.fetch = wrapFetch(win.fetch, getId, origin);
         if (typeof win.EventSource === 'function') {
@@ -205,10 +221,10 @@
             /** The id of the space this tab is in. */
             get id() { return state.id; },
             /** `url` with this tab's space, for a link or a download. */
-            url: function (url) { return withSpace(url, state.id, origin); },
+            url: function (url) { return withSpace(url, getId(), origin); },
             /** Switch this tab to another space: the page loads again for it. */
             switchTo: function (id) {
-                if (!validId(id) || id === state.id) return;
+                if (!enforced || !validId(id) || id === state.id) return;
                 remember(storage, id);
                 var next = new URL(win.location.href);
                 next.searchParams.set(QUERY, id);

@@ -12362,7 +12362,16 @@ product can turn it on, so an install with one account behaves as before.
   middleware checks membership every time, before the handler
   (`space_binding.space_for_request`; 403 `not_a_member`, one answer for a
   space that does not exist and one the caller is not in). The space is the
-  tab's, never the session's.
+  tab's, never the session's. **Only on an install that enforces Spaces**:
+  elsewhere the page names nothing, reloads nothing and remembers nothing
+  (it reads `<meta name="kazma-spaces-enforced">`), and the server runs a
+  request that names exactly the tenant it would run in anyway as before
+  Spaces; any other named space still needs membership. The older
+  multi-user mode's users and OIDC sign-ins are members of no space: as
+  first written, a page named the space it was rendered for and every call
+  after its load was refused (found in review, before any merge). A test of
+  a request rule drives the page's own flow: page load, then a call naming
+  the rendered space.
 - **A turn runs in its thread's space** (`spaces/threads.py`,
   `thread_scopes.db`): a thread is recorded once with its space and opener,
   and `turn_segment_budget` binds the turn's scope from the record. Every
