@@ -383,15 +383,27 @@ def test_negative_control_a_dark_only_colour_is_caught(tables):
 
 
 def surface_problems(themes: dict[str, dict[str, str]]) -> list[str]:
+    """The scale in each theme: the well below the wall, the wall (and the
+    chrome) as the page, a card one step above the wall (2026-11-17: it was
+    the wall's own colour), menus at least the card."""
     problems = []
     for name, table in themes.items():
         wall = colour(table, "--surface-wall")
         if wall[3] < 1:
             problems.append(f"{name}: the wall is not opaque")
-        for token in ("--surface-card", "--surface-overlay", "--surface-chrome", "--bg", "--bg-panel",
-                      "--bg-surface", "--bg-elevated", "--bg-card", "--bg-primary"):
+        for token in ("--surface-chrome", "--bg"):
             if not _same(colour(table, token), wall):
-                problems.append(f"{name}: {token} is not the wall (cards are set apart by shadow, not fill)")
+                problems.append(f"{name}: {token} is not the wall (the page and its chrome)")
+        card = colour(table, "--surface-card")
+        if card[3] < 1 or luminance(card) <= luminance(wall):
+            problems.append(f"{name}: --surface-card is not raised above the wall (a card is one step above the page)")
+        for token in ("--bg-panel", "--bg-card", "--bg-primary", "--card-bg"):
+            if not _same(colour(table, token), card):
+                problems.append(f"{name}: {token} is not the card")
+        for token in ("--surface-overlay", "--bg-surface", "--bg-elevated"):
+            c = colour(table, token)
+            if c[3] < 1 or luminance(c) < luminance(card):
+                problems.append(f"{name}: {token} sits below the card (a menu sits over a card)")
         sunken = colour(table, "--surface-sunken")
         if sunken[3] < 1 or luminance(sunken) >= luminance(wall):
             problems.append(f"{name}: --surface-sunken is not below the wall")
@@ -411,14 +423,23 @@ def test_surface_order_in_each_theme(tables):
 
 
 def test_negative_control_the_old_inverted_scale_is_caught(tables):
-    """The old light table: --bg-elevated below the wall, cards white on ice blue."""
+    """The old light table (--bg-elevated below the wall and the card), and a
+    well above the dark wall."""
     dark, light, _ = tables
-    old_light = dict(light, **{"--surface-wall": "#f0f4fa", "--bg-elevated": "#e6edf7", "--surface-card": "#ffffff"})
+    old_light = dict(light, **{"--surface-wall": "#f0f4fa", "--bg-elevated": "#e6edf7"})
     problems = surface_problems(_themes(dark, old_light))
-    assert any("light: --surface-card" in p for p in problems)
     assert any("light: --bg-elevated" in p for p in problems)
     old_dark = dict(dark, **{"--surface-sunken": "#121b2e"})  # above the dark wall
     assert any("dark: --surface-sunken" in p for p in surface_problems(_themes(old_dark, light)))
+
+
+def test_negative_control_a_flat_card_is_caught(tables):
+    """The scale of 2026-11-09: a card the wall's own colour, in each theme."""
+    dark, light, _ = tables
+    for name, table, other in (("dark", dark, light), ("light", light, dark)):
+        flat = dict(table, **{"--surface-card": "var(--surface-wall)"})
+        themes = _themes(flat, other) if name == "dark" else _themes(other, flat)
+        assert any(f"{name}: --surface-card is not raised" in p for p in surface_problems(themes)), name
 
 
 # ── 4. The one card rule ────────────────────────────────────────────

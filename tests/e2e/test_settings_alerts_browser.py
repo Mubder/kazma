@@ -132,17 +132,17 @@ def _open_alerts(page, base: str, tab_label: str) -> None:
                            timeout=20000)
 
 
-def _cards_are_the_wall(page) -> list[str]:
-    """Each section card whose fill is not the wall's (none, per the design)."""
+def _cards_are_the_card(page) -> list[str]:
+    """Each section card whose fill is not the card surface (none, per the design)."""
     return page.evaluate("""() => {
         const probe = document.createElement('div');
-        probe.style.background = 'var(--surface-wall)';
+        probe.style.background = 'var(--surface-card)';
         document.body.appendChild(probe);
-        const wall = getComputedStyle(probe).backgroundColor;
+        const card = getComputedStyle(probe).backgroundColor;
         probe.remove();
         return [...document.querySelectorAll('#alerts-tab .card-nested')]
-            .filter(c => getComputedStyle(c).backgroundColor !== wall)
-            .map(c => c.id + ': ' + getComputedStyle(c).backgroundColor + ' vs ' + wall);
+            .filter(c => getComputedStyle(c).backgroundColor !== card)
+            .map(c => c.id + ': ' + getComputedStyle(c).backgroundColor + ' vs ' + card);
     }""")
 
 
@@ -189,7 +189,7 @@ def test_the_alerts_tab_in_a_browser(setup) -> None:
             for section in ("#alerts-routes", "#alerts-status", "#alerts-guard", "#alerts-watch",
                             "#alerts-notices", "#alerts-recent"):
                 assert pg.locator(section).is_visible(), section
-            assert _cards_are_the_wall(pg) == []
+            assert _cards_are_the_card(pg) == []
             _shot(pg, "en-light-not-paired")
 
             # The guard's pager: the test page, answered by the guard.
@@ -215,7 +215,7 @@ def test_the_alerts_tab_in_a_browser(setup) -> None:
 
             # Dark: the cards are still the wall.
             pg.evaluate("document.documentElement.setAttribute('data-theme', 'dark')")
-            assert _cards_are_the_wall(pg) == []
+            assert _cards_are_the_card(pg) == []
             _shot(pg, "en-dark")
 
             # Arabic, right to left, by the sidebar too.

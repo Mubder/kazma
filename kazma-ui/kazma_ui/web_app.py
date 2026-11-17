@@ -31,7 +31,7 @@ ICONS: tuple[tuple[str, int, str], ...] = (
     ("/static/img/app-icon-maskable-512.png", 512, "maskable"),
 )
 
-_GROUND = "#0e1626"
+_GROUND = "#080d18"
 
 
 def manifest(lang: str) -> dict[str, Any]:

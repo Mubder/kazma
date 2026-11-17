@@ -98,8 +98,8 @@
       "--accent-chosen-light-on": "#ffffff"
     },
     "#1E3A8A": {
-      "--accent-chosen-dark": "#4b61a1",
-      "--accent-chosen-dark-rgb": "75, 97, 161",
+      "--accent-chosen-dark": "#566ba7",
+      "--accent-chosen-dark-rgb": "86, 107, 167",
       "--accent-chosen-dark-on": "#ffffff",
       "--accent-chosen-light": "#1e3a8a",
       "--accent-chosen-light-rgb": "30, 58, 138",

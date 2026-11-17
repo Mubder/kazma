@@ -7,7 +7,7 @@
 // iOS Safari paints its UA canvas from these metas (not from CSS html
 // background). Listing both schemes, or leaving color-scheme: dark on
 // :root, is what made Light theme show a dark-gray page on a phone.
-const _THEME_COLOR = { light: '#ffffff', dark: '#0e1626' };
+const _THEME_COLOR = { light: '#f4f7fd', dark: '#080d18' };
 
 export function syncDocumentColorScheme(theme) {
     const scheme = theme === 'dark' ? 'dark' : 'light';
@@ -50,7 +50,7 @@ function _setMeta(name, content) {
  * variables on <html>, so a chosen accent paints on the first frame); the
  * two are held equal by tests/fixtures/accent_variants.json:
  *   dark  - the colour, lightened toward white in 5% steps until it stands
- *           3:1 off the dark wall and white or near-black ink reads 4.5:1
+ *           3:1 off the dark card and white or near-black ink reads 4.5:1
  *           on it; ink: the one that reads better.
  *   light - the colour, darkened toward navy in 5% steps until white ink
  *           on it reaches 4.5:1; ink: white. */
@@ -60,7 +60,7 @@ const _ACCENT_PROPS = [
 ];
 // Written by builds before 2026-11-09; cleared so they never pin a colour.
 const _LEGACY_ACCENT_PROPS = ['--accent', '--accent-rgb', '--accent-subtle', '--accent-glow'];
-const _DARK_WALL = [0x0e, 0x16, 0x26];
+const _DARK_CARD = [0x10, 0x1a, 0x2e]; // --surface-card, dark theme (kazma.css)
 const _NAVY = [0x0c, 0x15, 0x26];
 const _WHITE = [255, 255, 255];
 const _DARK_INK = [0x04, 0x08, 0x15];
@@ -89,7 +89,7 @@ export function accentVariants(hex) {
     const base = [Number.parseInt(v.slice(1, 3), 16), Number.parseInt(v.slice(3, 5), 16), Number.parseInt(v.slice(5, 7), 16)];
     let dark = base;
     for (let step = 1; step <= 20; step++) {
-        if (_contrast(dark, _DARK_WALL) >= 3.0 &&
+        if (_contrast(dark, _DARK_CARD) >= 3.0 &&
             Math.max(_contrast(dark, _WHITE), _contrast(dark, _DARK_INK)) >= 4.5) break;
         dark = _mix(base, _WHITE, step / 20);
     }

@@ -7858,7 +7858,7 @@ answering a request), `deploy/observer/test/watch_settings.test.mjs`
 cards with an untold install's UTC as the control, test-page channels and
 rate, leave), `tests/e2e/test_settings_alerts_browser.py` (by the sidebar,
 English and Arabic: the guard's test page, pair, test, unpair; cards the
-wall's colour in light and dark). The tab's cards flow down at most three
+card surface in light and dark). The tab's cards flow down at most three
 columns of 320px or more (`.alerts-grid`: CSS columns, each card whole),
 never a grid: a grid row is as tall as its tallest card, and the page was
 empty under the short cards (2026-11-11). Gate:
@@ -12416,17 +12416,24 @@ with a test that fails on the old code and a gate for its class:
   scan the asset files on `/health/live`: it is the guard's probe, on the
   loop. Gates: `tests/js/test_build_watch.js`, `tests/e2e/test_update_notice.py`
   (EN/AR, after a sidebar navigation, Refresh reloads).
-- **One colour system: a card is the colour of the wall** (2026-11-09, the
-  owner's refresh, `docs/plans/UI_DESIGN_REFRESH.md`). Every colour is a token
-  in `kazma.css` (dark in `:root`, light in `[data-theme="light"]`): the
-  surface scale (card, overlay and chrome equal the wall -- white in light,
-  `#0e1626` in dark; `--surface-sunken` is the one surface below it, for
-  wells, code and table heads; inputs are transparent), status colours with
+- **One colour system: a card is one step above the wall** (2026-11-09, the
+  owner's refresh, `docs/plans/UI_DESIGN_REFRESH.md`; raised 2026-11-17 to
+  the look kazma.ai took the day before). Every colour is a token in
+  `kazma.css` (dark in `:root`, light in `[data-theme="light"]`): the surface
+  scale -- the wall is the page (`#080d18` dark, `#f4f7fd` light) and the
+  chrome (sidebar, header) is the wall; `--surface-card` is one step above it
+  (`#101a2e`, white), and `--bg-panel` / `--bg-card` / `--bg-primary` /
+  `--card-bg` are the card; overlays (menus, popovers, toasts) are the card's
+  surface with a deeper shadow; `--surface-sunken`, the well (code, table
+  heads, an inset block), is below the wall in both themes; inputs are
+  transparent, so they take the surface they sit on -- status colours with
   `-subtle` and `-border` variants and `--on-*` inks for fills, `--cat-1..6`,
-  and the card shape (`--card-radius` 12px, `--card-padding`, `--card-shadow`,
-  `--card-hairline`). A card stands apart by the hairline and the soft shadow,
-  never by its own fill: one grouped card rule paints `.card` and every card
-  family, and no family paints itself. The accent is six `--accent-chosen-*`
+  and the card shape (`--card-radius` 14px, `--card-padding`, a layered
+  `--card-shadow` per theme with a top highlight, `--card-hairline`). One
+  grouped card rule paints `.card` and every card family with the card
+  surface and shadow, and no family paints itself. The dark accent is
+  measured against the card (`accent_colors.DARK_CARD`): it must stand 3:1
+  off the brightest dark surface it sits on. The accent is six `--accent-chosen-*`
   seeds (a dark and a light variant, each with its own readable ink,
   `kazma_ui/accent_colors.py` and `components.js` share
   `tests/fixtures/accent_variants.json`), rendered on `<html>` by the server;
@@ -12443,7 +12450,7 @@ with a test that fails on the old code and a gate for its class:
   is a filled accent pill with the `--on-accent` ink; the header is
   transparent over the wall, with round 40px icon buttons, a search field
   that opens the Ctrl+K palette, and menus (the bell, the account) that are
-  the wall with the overlay shadow, rows leading with an icon tile. The
+  the overlay surface with the overlay shadow, rows leading with an icon tile. The
   shared classes a page uses and never redefines (nor `kazma.v5.css`, which
   loads last): `.btn` with `.btn-primary` (filled), `.btn-secondary` /
   `-success` / `-warning` / `-danger` (soft: the colour's 12% tint and its
@@ -12456,8 +12463,9 @@ with a test that fails on the old code and a gate for its class:
   pills; `.segmented`; `.data-table`; `.dropdown`; `.empty-state`;
   `.progress` (the track) with `.progress-bar` (the fill). A soft button or
   a badge on another tinted surface (an approval card, a notice, the page
-  banner, a stat tile) lays its wash over the wall's colour, never over the
-  surface's: two washes stacked put its ink under 4.5:1. A card does not
+  banner, a stat tile) lays its wash over the card's colour
+  (`--surface-card`), never over the tinted surface's: two washes stacked put
+  its ink under 4.5:1. A card does not
   lift on hover, and titles and numbers are plain ink. Every
   `--accent-chosen-*` seed falls back to the theme's accent (an install
   with no chosen accent has no seeds). Logical properties only: the shell mirrors in Arabic with no

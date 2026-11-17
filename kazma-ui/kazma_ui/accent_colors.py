@@ -13,8 +13,8 @@ are held equal by ``tests/fixtures/accent_variants.json``
 The rules:
 
 - dark: the chosen colour, lightened toward white in 5% steps until it
-  stands 3:1 off the dark wall (it is a fill, a ring and the base of the
-  text shade ``--accent-light``) and white or the near-black ink reads
+  stands 3:1 off the dark card, the brightest dark surface it sits on (it
+  is a fill, a ring and the base of the text shade ``--accent-light``) and white or the near-black ink reads
   4.5:1 on it (a mid grey reads 4.48:1 with either); its ink is the one
   that reads better.
 - light: the chosen colour, darkened toward Kazma's navy in 5% steps until
@@ -33,7 +33,7 @@ import re
 __all__ = ["accent_style"]
 
 _HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
-DARK_WALL = (0x0E, 0x16, 0x26)
+DARK_CARD = (0x10, 0x1A, 0x2E)  # --surface-card, dark theme (kazma.css)
 NAVY = (0x0C, 0x15, 0x26)
 WHITE = (255, 255, 255)
 DARK_INK = "#040815"
@@ -83,7 +83,7 @@ def _variants(hex_value: object) -> dict[str, str] | None:
 
     dark = base
     for step in range(1, 21):
-        if _contrast(dark, DARK_WALL) >= 3.0 and _best_ink(dark) >= 4.5:
+        if _contrast(dark, DARK_CARD) >= 3.0 and _best_ink(dark) >= 4.5:
             break
         dark = _mix(base, WHITE, step / 20)
     dark_on = LIGHT_INK if _contrast(dark, WHITE) >= _contrast(dark, _DARK_INK_RGB) else DARK_INK

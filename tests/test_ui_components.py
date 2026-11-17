@@ -413,7 +413,7 @@ class TestCSSDesignSystem:
     def test_has_dark_background(self, css):
         # The dark wall is the surface scale's (2026-11-09); the older spellings
         # are kept so an earlier stylesheet still passes.
-        assert any(c in css for c in ("--surface-wall: #0e1626", "#02040a", "#0a0f1a", "var(--bg-primary)")), (
+        assert any(c in css for c in ("--surface-wall: #080d18", "--surface-wall: #0e1626", "#02040a", "#0a0f1a", "var(--bg-primary)")), (
             "Dark background color not found"
         )
 
