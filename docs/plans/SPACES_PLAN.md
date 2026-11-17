@@ -1,7 +1,7 @@
 # Spaces: several people on one Kazma
 
 Status: DRAFT of 2026-11-15, revised with the owner on 2026-11-17. Decisions
-N1 to N20 are answered; N21 to N24, from a review on 2026-11-17, are open. No product code is written.
+N1 to N20 are answered; N21 to N27, from two reviews on 2026-11-17, are open. No product code is written.
 Work starts when the owner says so.
 
 Baseline: commit `07ec06b38`. Every statement about today's code was read
@@ -312,7 +312,7 @@ admin's own spaces. A command that names another space is refused.
 | Connected accounts | Mail, calendar and X sign-ins belong to the space that connected them. X already works this way; mail and calendar move from the install to the space. The owner's mailbox is the owner's space's. Background refresh and the X mentions loop go space by space. |
 | Secrets | The vault gains a space scope. A space's secrets are sealed with the space's key (4.9). The install's secrets stay the install's. |
 | Files | File tools, uploads and generated files live in the space's folder. `python_exec` mounts that folder and nothing else. |
-| Workspace, IDE, shell, git, MCP servers | Host tools. Host space only (4.8). |
+| Workspace, IDE, shell, git, MCP servers | Host tools. Host spaces only (4.8). Each host space has its own root folder, IDE root, code index and IDE undo; a switch or clone in one never moves the other (4.11, S1-34). |
 | Approvals | A gate row carries its space and its asker. Only the asker is shown the card and may answer it (stage 2). |
 | Running work | Listed per space. A stuck or failed run is told to its asker. |
 | Model calls | Each row names the space and the asker. Spend is counted per person. |
@@ -372,7 +372,7 @@ person, and one switch covers all of those parts.
 | Browser | Browser automation | Outside |
 | Images and voice | Image generation, speech | Outside |
 | Chat apps | Linking Telegram, Discord, Slack or WhatsApp (stage 3) | Space |
-| Development | The shell, the IDE and Workspace pages, git, MCP servers, files of the machine's project | Host: the workspace, by grant; the admin's own personal space always (4.11) |
+| Development | The shell, the IDE and Workspace pages, git, the workspace's project files, and using the MCP servers the admin set up | Host: the workspace, by grant; the admin's own personal space always (4.11) |
 
 Rules:
 
@@ -484,6 +484,25 @@ Rules:
 - **The admin approves what a Development holder's always-ask actions and
   folder grants ask for** (proposal N21). It uses the "approver" setting of
   N4, set to the admin for anyone holding Development.
+- **What Development does not include.** Settings and vault tools, package
+  and skill installs, updates and backups, system logs, computer use, and
+  adding, changing or removing MCP servers. An MCP server is a command
+  Kazma runs as itself at every start, for every space. All of these stay
+  in the admin's personal space only, never in the workspace.
+- **Each host space has its own root.** Today one active folder serves the
+  whole install: the workspace switch and clone, the IDE, the code index
+  and IDE undo all follow it. With two host spaces each gets its own
+  binding, carried per task, never through the one install-wide row. A
+  friend switching or cloning in the workspace never moves the admin's
+  folder (S1-34).
+- **The filesystem MCP server serves one host space.** It is bound to one
+  folder for the whole process. Until each space can have its own instance,
+  it serves the admin's personal space and refuses in the workspace, where
+  Kazma's own file tools do the work (proposal N27).
+- **GitHub is a connected account of a space.** Today the git and GitHub
+  tools use the install's one GitHub sign-in, which is the owner's. In the
+  workspace they use the workspace's own GitHub connection, or none. A
+  friend's push never acts as the owner (S1-17, proposal N26).
 - **Said plainly on the grant:** a person with Development can run commands
   on the machine. Until the encrypted version (4.9), that is the same trust
   as the admin. The People page says so when the switch is turned on.
@@ -531,10 +550,10 @@ neither can reach the other's data, and the five refusals are gone.
 | S1-14 | Scheduled: a job carries space and creator and fires in that scope. Refusal removed. | `test_cron_spaces.py`: a real fire runs in its space; another space's job id reads as unknown; a job with no space does not fire. Control: the fire with no scope. | Scheduled works for everyone. |
 | S1-15 | Swarm: a task carries space and asker; workers run in that scope. Refusal removed. | `test_swarm_spaces.py`: every swarm route and tool by matrix; a worker's tool call lands in the asker's space. Control: the unscoped dispatch. | Swarm works for everyone. |
 | S1-16 | Research sessions and reports per space. | `test_research_spaces.py`: list, read, download and delete by matrix. Control: the unfiltered list. | Research is per space. |
-| S1-17 | Connected accounts (mail, calendar, X) belong to a space; background refresh goes space by space. | `test_connected_accounts_spaces.py`: two spaces, two mailboxes; a refresh writes only its own; every reader names a space (source gate). Control: the install-scoped names. | Each space connects its own accounts. |
+| S1-17 | Connected accounts (mail, calendar, X, GitHub) belong to a space; background refresh goes space by space. The git and GitHub tools use the space's own GitHub connection, or none. | `test_connected_accounts_spaces.py`: two spaces, two mailboxes; a refresh writes only its own; every reader names a space (source gate). A git push and every GitHub tool call in the workspace never use the owner's token. Control: the install-scoped names, and today's install-wide GitHub client. | Each space connects its own accounts. |
 | S1-18 | The vault gains a space scope; the install list stays. | `test_vault_space_scope.py`: a space's secret is not returned to another space or to code with no space. Control: the `default` rung. | Nothing. |
 | S1-19 | The space folder: file tools, uploads, images, exports and generated documents. `python_exec` mounts only it. | `test_space_files.py`: every tool that takes a path, in a sandboxed space, cannot reach outside its folder; real Docker run where present. Control: the install's workspace mount. | A Files area per space. |
-| S1-20 | Host tools exist only in the host space (4.8). | `test_host_tools_absent.py`: every registered tool is classed host, space or outside (a new tool with no class fails); in a sandboxed space a host tool is neither offered nor callable. Control: a policy that only hides it from the list. | Members have no shell, IDE or Workspace page. |
+| S1-20 | Host tools exist only in a host space (4.8). In the workspace only Development's tools exist; the admin-only host tools (4.11) are absent there too. | `test_host_tools_absent.py`: every registered tool is classed host, space or outside (a new tool with no class fails); in a sandboxed space a host tool is neither offered nor callable. Control: a policy that only hides it from the list. | Members have no shell, IDE or Workspace page. |
 | S1-21 | Approvals and running work carry space and asker. Refusal of Running work removed. | `test_gates_and_runs_spaces.py`: pending approvals and runs by matrix. Control: the list with no space. | Each person sees their own work. |
 | S1-22 | Model calls name space and asker. | `test_ledger_names_the_asker.py`: every call of a real turn, a job and a swarm task. Control: a call site with no asker fails the gate. | Spend per person on the admin page. |
 | S1-23 | Settings keys classed `install`, `space`, `account`; the Settings page splits. | The settings class gate extended: a key with no scope fails. Browser test, EN and AR. | Three Settings areas. |
@@ -548,16 +567,22 @@ neither can reach the other's data, and the five refusals are gone.
 | S1-31 | The turn's environment note is the space's own: its folder and its connected accounts. A sandboxed space's note never names the install's folder, repository or GitHub login. | `test_environment_note_per_space.py`: a real turn in a sandboxed space; the note holds none of the install's paths or names. Control: today's note. | Nothing. |
 | S1-32 | The bell, the Dashboard's open problems and the Running work card are per person. A research topic or chat title is shown only to members of its space. | `test_bell_and_problems_per_person.py`: a word planted in one person's research topic and chat title is in no other account's bell, problems list or runs card. Control: today's install-wide list. | Each person sees their own notices. |
 | S1-33 | Before a second account can be switched on: per-person daily limits (S2-02) and feature grants (S2-11) pass their tests, the copy that leaves the machine is the encrypted kind (N10), and the deploy check and live tests sign in with an owner API token instead of the shared secret (N15). `kazma spaces migrate --check` names any of these that is missing. | `test_second_account_preconditions.py`: with any one missing, creating a second account is refused and says which. Control: the switch with no check. | A clear list of what is left before inviting anyone. |
+| S1-34 | Each host space has its own root: the workspace switch and clone, the IDE service, the code index, IDE undo and the MCP binding follow the space of the task, not one install-wide row. | `test_host_space_roots.py`: a switch and a clone in the workspace leave the admin's personal space's root, IDE root, code index and MCP binding unchanged, and the other way round; a filesystem MCP call in the space it does not serve is refused. Control: today's one active row moves both. | Nothing. |
 
 ### Stage 2: per-person tools, limits and approvals
 
 Done when the admin can set, per person, the features, the tools, the daily
 limit and the models, and every approval reaches only the person who asked.
 
+Order: the workspace (S2-12) is built first, because friends working in
+the owner's workspace is what the owner wants most. S2-02 and S2-11 are
+built in stage 1 (section 6, step 8); they are listed here because they
+belong to this subject.
+
 | ID | What changes | Gate, with its negative control | The owner sees |
 |---|---|---|---|
 | S2-01 | A tool list per person, within what their space may have. Applied when tools are offered and again when one is called. | `test_person_tool_policy.py`: a tool switched off for a person is neither offered nor callable, in chat, a job and a swarm worker. Control: hiding it from the offer only. | Tick boxes per person. |
-| S2-02 | A daily spending limit per person, counted from the ledger. A limit in tokens covers models with no known price. | `test_person_daily_limit.py`: the turn that would pass the limit is refused before any model call; another person is not affected. Control: the install-wide sum. | A limit per person; today's spend beside it. |
+| S2-02 | (Built in stage 1.) A daily spending limit per person, counted from the ledger. A limit in tokens covers models with no known price. | `test_person_daily_limit.py`: the turn that would pass the limit is refused before any model call; another person is not affected. Control: the install-wide sum. | A limit per person; today's spend beside it. |
 | S2-03 | Models per person: which they may use, and their default. | `test_person_models.py`: a model not allowed is refused in the picker, `/model` and a job. Control: the install's list. | A model list per person. |
 | S2-04 | A member's own model keys (optional). Stored in their space, sealed with its key. Their spend on their own key does not count against the limit. | `test_member_own_keys.py`: a call with the member's key never uses the owner's; the key is not shown to the admin. Control: the install-scoped provider row. | "Use my own key" in My account. |
 | S2-05 | Approvals go to the asker: the web card, the bell, Web Push and the chat app. Nobody else can answer. The one rule that decides who may answer also reads an "approver" set on the asker's account (N4): empty for everyone, so it changes nothing yet. | `test_approvals_reach_the_asker.py`: another member of the same space is refused; the gate stays pending. Control: the thread-owner rule lets them. | Each person gets their own cards. |
@@ -566,7 +591,7 @@ limit and the models, and every approval reaches only the person who asked.
 | S2-08 | Limits per space: disk, documents, knowledge, work running at once. | `test_space_quotas.py`: one space at its limit does not slow or stop another. Control: the install-wide quota. | Usage per space on the admin page. |
 | S2-09 | Every action is recorded under the person's name. An activity page per space, for its members. | `test_actions_name_the_person.py`: every route that changes something writes the account (enumerated). Control: a route recording the session label only. | An Activity page in each space. |
 | S2-10 | The People page: features, tools, limit, models, spaces, last sign-in, sessions. | Browser test, EN and AR, reached by the sidebar. | The page itself. |
-| S2-11 | Features per person (4.8). One table names each feature's pages, routes, tools, chat commands, background work and connected accounts. A feature off for a person is refused at every one of them, and the check is made again when the work runs. | `test_feature_grants.py`: every page, route, tool, command and background loop belongs to a feature or is declared always on (a new one with neither fails). With X Studio on for Y and off for G: G has no menu entry, every X route refuses, no X tool is offered or callable in chat, a job or a swarm worker, `/x` refuses, and the mentions loop skips G; Y works. Control: a grant that only hides the menu entry. Browser test, EN and AR. | A switch per feature for each person. A person sees only what they were given. |
+| S2-11 | (Built in stage 1.) Features per person (4.8). One table names each feature's pages, routes, tools, chat commands, background work and connected accounts. A feature off for a person is refused at every one of them, and the check is made again when the work runs. | `test_feature_grants.py`: every page, route, tool, command and background loop belongs to a feature or is declared always on (a new one with neither fails). With X Studio on for Y and off for G: G has no menu entry, every X route refuses, no X tool is offered or callable in chat, a job or a swarm worker, `/x` refuses, and the mentions loop skips G; Y works. Control: a grant that only hides the menu entry. Browser test, EN and AR. | A switch per feature for each person. A person sees only what they were given. |
 | S2-12 | The workspace (4.11): a host space the admin invites people into; the Development feature, granted per person; the space shown in the header; "New private chat"; moving one's own chat, document or file between one's personal space and the workspace. | `test_workspace_and_personal.py`: two members and the admin. A workspace chat, fact and document are seen and recalled by all three; a thing in one member's personal space is found by nobody else, by any route, tool, search or recall, from the workspace or from another personal space. A member without Development has no shell, IDE or git, offered or callable; with it, they do. A moved chat is in exactly one space after the move, in every store. Control: a "private" mark on a workspace row, which recall and search still return. Browser test, EN and AR. | The space name in the header; "New private chat"; "Share with the workspace". |
 
 ### Stage 3: linking chat-app accounts
@@ -621,13 +646,11 @@ second account allowed until the last step:
 8. Per-person daily limits and feature grants (S2-02, S2-11), brought
    forward from stage 2: no friend ever uses the owner's model keys without
    a limit and a grant. Then the preconditions check (S1-33).
-9. The workspace (S2-12) comes first in stage 2, because friends working in
-   the owner's workspace is what the owner wants most.
 
-Until step 7 is done, an install with one account behaves exactly as today,
-and an install with two keeps today's refusals. The owner's rule "deploy
-only complete phases" holds: single-account behaviour is deployable at each
-step; multi-account is switched on once.
+Until step 8 is done and S1-33 passes, an install with one account behaves
+exactly as today, and an install with two keeps today's refusals. The
+owner's rule "deploy only complete phases" holds: single-account behaviour
+is deployable at each step; multi-account is switched on once.
 
 ## 7. Moving today's install
 
@@ -705,8 +728,8 @@ Open questions that need study, not a decision:
 
 ## 9. Decisions needed
 
-N1 to N20 were answered by the owner on 2026-11-17. N21 to N24 came from
-a review the same day and carry a proposal each.
+N1 to N20 were answered by the owner on 2026-11-17. N21 to N27 came from
+two reviews the same day and carry a proposal each.
 
 | # | Question | Proposal |
 |---|---|---|
@@ -723,7 +746,7 @@ a review the same day and carry a proposal each.
 | N11 | What may the admin see about members? | **Decided by the owner, 2026-11-17.** Spend, counts and states per person. Never titles or text of a space the admin is not in: other people's personal spaces and a shared space the admin did not join. |
 | N12 | Is a read-only member needed (today's `viewer`)? | **Decided by the owner, 2026-11-17.** Not now. Two roles in a space: owner and member. |
 | N13 | Which outside tools do members get by default: web search and fetch, the browser, image generation? | **Decided by the owner, 2026-11-17.** Web (search, fetch, crawl), research, image generation and voice on. The browser and computer use off until the admin grants them. |
-| N14 | Is a second factor required for every account on a cloud install? | **Decided by the owner, 2026-11-17.** Required on the cloud profile, optional at home. Required everywhere for anyone who holds Development. |
+| N14 | Is a second factor required for every account on a cloud install? | **Decided by the owner, 2026-11-17.** Required on the cloud profile, optional at home. Required everywhere for anyone who holds Development. What follows: the admin's personal space always has host tools, so the owner needs a second factor too from the day a second account exists (N25). |
 | N15 | After Spaces, does the owner still sign in with the shared secret? | **Decided by the owner, 2026-11-17.** It works until the owner sets a password, then it is retired for the web. The CLI on the machine keeps acting as the owner. |
 | N16 | Who does the independent review, and when do they start? | **Decided by the owner, 2026-11-17.** Chosen at the end of stage 1; they read this plan and the stage 1 code before stage 2 ends, and test the whole in stage 4. |
 | N17 | The name in Arabic. | **Decided by the owner, 2026-11-17.** "مساحة" for a space, "حساب" for an account. |
@@ -734,6 +757,9 @@ a review the same day and carry a proposal each.
 | N22 | (Review.) The key per space protects nothing until members hold it, and sealing the owner's live secrets again is risk R4. Build it in stage 1 or stage 4? | Stage 1 makes the key and seals new spaces' secrets with it (O5 stands). The owner's existing secrets are not sealed again until stage 4, with key rotation. R4 then covers only moving mail and calendar to the space scope. |
 | N23 | (Review.) Mention-only replies in groups (N7) would change how the owner's groups behave today. | Mention-only applies to a group bound to a shared space. The owner's existing groups keep today's behaviour until the owner changes each one. |
 | N24 | (Review.) With the read-only role gone (N12), what do OIDC sign-ins with role "viewer" or "operator" become? | Both become members with the starting features. An OIDC "admin" claim never makes an admin: there is one admin, the owner's account. |
+| N25 | (Second review.) N14 requires a second factor for anyone with Development. The admin always has host tools. Does the owner need a second factor too? | Yes, from the day a second account exists. S1-33 refuses a second account until the owner has one. |
+| N26 | (Second review.) Which GitHub account does the workspace use? Today's sign-in is the owner's, and the owner can push to `main` of the public repository. | The workspace connects its own GitHub account or token, with no right to bypass the rules on `main`. Until one is connected, git push and the GitHub tools refuse there. The owner's sign-in stays in the owner's personal space. |
+| N27 | (Second review.) The filesystem MCP server is bound to one folder. Which host space does it serve? | The admin's personal space, as today. It refuses in the workspace until each space can have its own instance; Kazma's own file tools work there. |
 
 ## 10. Not in this plan
 
