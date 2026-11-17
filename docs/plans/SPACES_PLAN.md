@@ -1,8 +1,8 @@
 # Spaces: several people on one Kazma
 
-Status: DRAFT for the owner's review, 2026-11-15. No product code is written.
-Nothing in this plan starts until the owner has read it and answered
-"Decisions needed" (section 9).
+Status: DRAFT of 2026-11-15, revised with the owner on 2026-11-17. All
+twenty decisions of section 9 are answered. No product code is written.
+Work starts when the owner says so.
 
 Baseline: commit `07ec06b38`. Every statement about today's code was read
 from that commit, not from memory.
@@ -19,10 +19,19 @@ server, without one person's data reaching another.
 **A space** is a private world: chats, memory, documents, knowledge,
 scheduled tasks, connected accounts (email, X, calendar) and files.
 
-- **Friends** are co-owners of the owner's space. Each has their own login,
-  so every action is recorded under their name.
-- **Family**: each person has their own space. Nobody sees anyone else's.
-- **A shared family space** that several people use together.
+The plan has two parts (the owner, 2026-11-17):
+
+- **Part 1, Spaces.** Each person has their own private space. Nobody sees
+  anyone else's. A family can also have a shared family space.
+- **Part 2, the shared workspace.** The owner invites friends into one
+  working space: Kazma's development, schedules, the Kazma X account and so
+  on. Its chats, memory, documents and files are shared by everyone in it,
+  so the work is remembered as one. Each friend keeps their own private
+  space beside it for what they do not share. Section 4.11.
+
+Both parts are built from the same pieces: a person can be a member of
+several spaces, and privacy is decided by which space a thing is in.
+
 - **Per person**: which tools, a daily spending limit, which model. An
   approval request goes to the person who asked. Each person's Telegram,
   Discord, Slack or WhatsApp account is linked to their own Kazma account.
@@ -54,6 +63,8 @@ scheduled tasks, connected accounts (email, X, calendar) and files.
 | Admin | The account that runs the install: accounts, updates, backups, providers. Being admin gives no entry to a space. |
 | Host space | The one space that may be given tools that touch the machine. It is the owner's space. |
 | Sandboxed space | Every other space. Host tools do not exist there. |
+| Personal space | The space made with an account. Only that person is in it. |
+| Workspace | The shared working space of Part 2 (4.11). The admin owns it and invites people into it. |
 | Asker | The account whose message started a piece of work. |
 | Install | One running Kazma: the program, its settings and its machine. |
 
@@ -173,8 +184,9 @@ Three things are missing, and they are the heart of the plan:
    routes are the install's, a space's or a person's.
 5. **The admin runs the install, not the spaces.** No page, route, tool or
    command lets the admin read a space they are not a member of.
-6. **Host tools exist only in the host space.** In a sandboxed space they are
-   absent in code, not switched off by a setting.
+6. **Host tools exist only in a host space.** In a sandboxed space they are
+   absent in code, not switched off by a setting. Only the admin's personal
+   space and the workspace can be host spaces (4.11).
 
 ### 4.2 What a space is in the data
 
@@ -278,6 +290,11 @@ admin's own spaces. A command that names another space is refused.
   their linked chat app, and it is in a record the admin cannot edit.
 - Creating an account creates its personal space and that space's key.
 - A member can be in several spaces: their own, and shared ones.
+- A personal space has one member forever. Nobody can be added to it, the
+  admin included.
+- Adding anyone to a shared space is never silent: every member of it is
+  told who was added and by whom, and it is in a record the admin cannot
+  edit.
 
 ### 4.6 What follows the space, part by part
 
@@ -333,6 +350,48 @@ fallback is never used for a sandboxed space.
 
 Whether friends in the owner's space get host tools is decision N1.
 
+**Features: what the admin grants to each person.** The owner asked for
+this on 2026-11-17: "give User Y the X Studio, but not User G". A tool list
+alone does not do that, because a feature is more than its tools. So Kazma
+gets one table of features. Each feature names everything that belongs to
+it: its pages, its routes, its tools, its chat commands, its background
+work and its connected accounts. The admin turns a feature on or off per
+person, and one switch covers all of those parts.
+
+| Feature | What it covers (examples) | Group |
+|---|---|---|
+| X Studio | The X pages and routes, the X tools, `/x`, the mentions loop, the X account | Space |
+| Email and calendar | The mail and calendar tools, their sign-ins and cards | Space |
+| Documents | The Documents page, routes and tools | Space |
+| Knowledge | Libraries, crawls, `/kb` | Space |
+| Research | The Research page and deep research | Space |
+| Swarm | The Swarm page and `dispatch_swarm` | Space |
+| Scheduled | Reminders, tasks, automations | Space |
+| Code | `python_exec` in the container | Space |
+| Web | Search, fetch, crawl | Outside |
+| Browser | Browser automation | Outside |
+| Images and voice | Image generation, speech | Outside |
+| Chat apps | Linking Telegram, Discord, Slack or WhatsApp (stage 3) | Space |
+| Development | The shell, the IDE and Workspace pages, git, MCP servers, files of the machine's project | Host: the workspace only (4.11) |
+
+Rules:
+
+- A feature that is off for a person is gone for them: no menu entry, the
+  page and its routes refuse, the tools are neither offered nor callable,
+  the chat command refuses, and their background work of that feature
+  stops. Hiding the menu entry alone is never enough.
+- A grant never passes the group rule above. No grant gives a member a host
+  tool (O3), except where N1 allows it for a friend in the owner's space.
+- Every page, route, tool, command and background loop belongs to a feature
+  or is declared "always on" with why (chat, memory, My account). A new one
+  with neither fails the build, so nothing is left ungrantable by accident.
+- Inside a feature the admin can still switch single tools (S2-01). For
+  example: X Studio on, but posting off, so the person can draft and read.
+- A feature that is off keeps the person's data. Turning it on again brings
+  it back.
+- The switch is per person. In a shared space each member has their own
+  set (decision N18).
+
 ### 4.9 The encryption foundation (O5)
 
 What is built now:
@@ -369,10 +428,68 @@ so in plain words.
 | Can | Cannot |
 |---|---|
 | Create, disable, reset and delete accounts | Open a space they are not a member of, by any page, route, tool or command |
-| Create spaces and set each person's tools, limit and models | Read a member's chats, memory, documents, jobs or files |
+| Create spaces and set each person's features, tools, limit and models | Read a member's chats, memory, documents, jobs or files |
 | See each person's spend and counts of work | See titles or text of that work |
 | Run updates, backups and restores of the whole install | Restore or export one member's space into their own view |
 | Set the install's model keys and chat-app bots | Use a member's connected accounts |
+
+### 4.11 Part 2: the shared workspace
+
+What the owner asked for: "one admin shared space, many users, with shared
+data across every user except data the user won't share ... they also have
+their own private space."
+
+**How it is built.** No new kind of privacy is needed. It is two spaces per
+person:
+
+| Space | Who is in it | What is in it |
+|---|---|---|
+| The workspace | The admin and everyone the admin invites | The shared work: chats, memory, documents, knowledge, schedules, files, the work's connected accounts (for example the Kazma X account) |
+| A personal space each | That one person | Whatever they do not share: private chats, their own memory, documents, files and accounts |
+
+Rules:
+
+- **One memory for the work.** Everything said and learned in the workspace
+  is remembered there, for every member. Each fact still names who said it
+  (4.7), so "I prefer mornings" is filed under the person who said it.
+- **Private means "in my personal space".** There is no "private" mark on
+  single items inside the workspace. A mark per item would have to be
+  honoured by every store, search, summary and background job, and one miss
+  would show a private thing to everyone. A whole space is one boundary that
+  the gates of Part 1 already hold.
+- **Choosing is one click.** The header shows which space the page is in.
+  "New private chat" opens a chat in the personal space. A person can move
+  their own chat, document or file from their personal space into the
+  workspace ("Share with the workspace"). Moving the other way takes a
+  thing out of the workspace, so it is allowed only for the person who made
+  it, and the workspace keeps a line saying it was taken out.
+- **A private chat does not read the workspace's memory, and the workspace
+  never reads a personal space.** (Decided, N20; it can be added
+  later as a per-person option.)
+- **What each person may do is the admin's grant** (4.8, S2-11), per
+  person: one friend gets X Studio, another gets Scheduled, another gets
+  Development.
+- **Host features in the workspace.** Helping with development needs the
+  shell, the IDE, git and the workspace's files. These are the feature
+  "Development", off for everyone until the admin turns it on for a person.
+  O3 still holds everywhere else: no personal space and no family space
+  ever has host tools.
+- **Said plainly on the grant:** a person with Development can run commands
+  on the machine. Until the encrypted version (4.9), that is the same trust
+  as the admin. The People page says so when the switch is turned on.
+- **Everything is under a name.** Each action in the workspace is recorded
+  under the person who did it (S2-09). An approval card goes to the person
+  who asked (S2-05).
+- **Chat apps (stage 3).** A linked person's direct chat with the bot runs
+  in the space they chose with `/space` (their personal one at first). A
+  group chat can be bound to the workspace, so the team works with Kazma in
+  one group.
+- **Leaving.** When the admin removes a person from the workspace, what
+  they put there stays (it is the work's). Their personal space is theirs
+  until their account is deleted.
+
+Where today's data goes is decision N19: nothing the owner has today
+becomes shared without the owner choosing it.
 
 ## 5. Stages
 
@@ -421,8 +538,8 @@ neither can reach the other's data, and the five refusals are gone.
 
 ### Stage 2: per-person tools, limits and approvals
 
-Done when the admin can set, per person, the tools, the daily limit and the
-models, and every approval reaches only the person who asked.
+Done when the admin can set, per person, the features, the tools, the daily
+limit and the models, and every approval reaches only the person who asked.
 
 | ID | What changes | Gate, with its negative control | The owner sees |
 |---|---|---|---|
@@ -430,12 +547,14 @@ models, and every approval reaches only the person who asked.
 | S2-02 | A daily spending limit per person, counted from the ledger. A limit in tokens covers models with no known price. | `test_person_daily_limit.py`: the turn that would pass the limit is refused before any model call; another person is not affected. Control: the install-wide sum. | A limit per person; today's spend beside it. |
 | S2-03 | Models per person: which they may use, and their default. | `test_person_models.py`: a model not allowed is refused in the picker, `/model` and a job. Control: the install's list. | A model list per person. |
 | S2-04 | A member's own model keys (optional). Stored in their space, sealed with its key. Their spend on their own key does not count against the limit. | `test_member_own_keys.py`: a call with the member's key never uses the owner's; the key is not shown to the admin. Control: the install-scoped provider row. | "Use my own key" in My account. |
-| S2-05 | Approvals go to the asker: the web card, the bell, Web Push and the chat app. Nobody else can answer. | `test_approvals_reach_the_asker.py`: another member of the same space is refused; the gate stays pending. Control: the thread-owner rule lets them. | Each person gets their own cards. |
+| S2-05 | Approvals go to the asker: the web card, the bell, Web Push and the chat app. Nobody else can answer. The one rule that decides who may answer also reads an "approver" set on the asker's account (N4): empty for everyone, so it changes nothing yet. | `test_approvals_reach_the_asker.py`: another member of the same space is refused; the gate stays pending. Control: the thread-owner rule lets them. | Each person gets their own cards. |
 | S2-06 | Standing approvals ("Allow tool", YOLO windows) belong to the person and the chat. | `test_grants_per_person.py`: a grant by one person does not skip another's card. Control: the per-thread grant. | Nothing. |
 | S2-07 | Background work uses its creator's tools and limit as they are when it runs. A disabled creator pauses their jobs. | `test_background_uses_creator_policy.py`: a job booked before a tool was taken away does not use it. Control: the tools frozen at booking. | A paused job says why. |
 | S2-08 | Limits per space: disk, documents, knowledge, work running at once. | `test_space_quotas.py`: one space at its limit does not slow or stop another. Control: the install-wide quota. | Usage per space on the admin page. |
 | S2-09 | Every action is recorded under the person's name. An activity page per space, for its members. | `test_actions_name_the_person.py`: every route that changes something writes the account (enumerated). Control: a route recording the session label only. | An Activity page in each space. |
-| S2-10 | The People page: tools, limit, models, spaces, last sign-in, sessions. | Browser test, EN and AR, reached by the sidebar. | The page itself. |
+| S2-10 | The People page: features, tools, limit, models, spaces, last sign-in, sessions. | Browser test, EN and AR, reached by the sidebar. | The page itself. |
+| S2-11 | Features per person (4.8). One table names each feature's pages, routes, tools, chat commands, background work and connected accounts. A feature off for a person is refused at every one of them, and the check is made again when the work runs. | `test_feature_grants.py`: every page, route, tool, command and background loop belongs to a feature or is declared always on (a new one with neither fails). With X Studio on for Y and off for G: G has no menu entry, every X route refuses, no X tool is offered or callable in chat, a job or a swarm worker, `/x` refuses, and the mentions loop skips G; Y works. Control: a grant that only hides the menu entry. Browser test, EN and AR. | A switch per feature for each person. A person sees only what they were given. |
+| S2-12 | The workspace (4.11): a host space the admin invites people into; the Development feature, granted per person; the space shown in the header; "New private chat"; moving one's own chat, document or file between one's personal space and the workspace. | `test_workspace_and_personal.py`: two members and the admin. A workspace chat, fact and document are seen and recalled by all three; a thing in one member's personal space is found by nobody else, by any route, tool, search or recall, from the workspace or from another personal space. A member without Development has no shell, IDE or git, offered or callable; with it, they do. A moved chat is in exactly one space after the move, in every store. Control: a "private" mark on a workspace row, which recall and search still return. Browser test, EN and AR. | The space name in the header; "New private chat"; "Share with the workspace". |
 
 ### Stage 3: linking chat-app accounts
 
@@ -564,28 +683,31 @@ Open questions that need study, not a decision:
 
 ## 9. Decisions needed
 
-Each has a proposal. The plan is written as if the proposal stands; the
-owner changes any of them before work starts.
+All twenty were answered by the owner on 2026-11-17. Each row gives the
+question and what was decided.
 
 | # | Question | Proposal |
 |---|---|---|
-| N1 | Do friends in the owner's space get host tools (the shell, the owner's files, the owner's email)? O3 says members never do; the owner also said friends use everything as the owner does. | Friends see and use the space's data. Host tools are off for a new friend, and the owner can turn them on per person. |
-| N2 | Inside a space, is everything shared, chats included? If friends join the owner's space, they see the owner's past chats, memory and documents. | Yes, a space is one shared world. If the owner wants private chats too, the owner keeps a personal space and makes a second, shared one for friends. |
-| N3 | What does "reset an account" mean? | The admin sets a new one-time password. The member is told, and it is recorded where the admin cannot change it. It never erases data. |
-| N4 | May a space's owner be the one who approves for another member (for example, a child's posts or spending)? | No for now: only the asker answers. It can be added later as a per-person option. |
-| N5 | Who can make a shared space, and who adds people to it? | The admin makes spaces and accounts. A space's owner adds and removes members from existing accounts. |
-| N6 | Rows with a space id, or a database per space? | Rows and a folder per space now (4.2). A database per space is kept open for the encrypted version, for memory and knowledge. |
-| N7 | One bot per platform for everyone, or a bot per space? | One bot now. A member's own bot later if asked. |
-| N8 | The daily limit: in money, in tokens, or both? What happens at the limit? | Both: money where the price is known, tokens always. At the limit the person's turns stop until the next day, and they are told. The admin can raise it. |
-| N9 | Deleting an account: at once, or after a wait? What happens to a shared space when its last member leaves? | A seven-day wait, during which the admin can undo it. A shared space with no members is erased after the same wait. |
-| N10 | Whole-install backups hold every space, and the owner holds the backup passphrase. Is that acceptable until the encrypted version? | Yes, and members are told on their first sign-in. |
-| N11 | What may the admin see about members? | Spend, counts and states per person. Never titles or text. |
-| N12 | Is a read-only member needed (today's `viewer`)? | Not now. Two roles in a space: owner and member. |
-| N13 | Which outside tools do members get by default: web search and fetch, the browser, image generation? | Web search, fetch and image generation on. The browser and computer use off. |
-| N14 | Is a second factor required for every account on a cloud install? | Required on the cloud profile, optional at home. |
-| N15 | After Spaces, does the owner still sign in with the shared secret? | It works until the owner sets a password, then it is retired for the web. The CLI on the machine keeps acting as the owner. |
-| N16 | Who does the independent review, and when do they start? | Chosen at the end of stage 1; they read this plan and the stage 1 code before stage 2 ends, and test the whole in stage 4. |
-| N17 | The name in Arabic. | "مساحة" for a space, "حساب" for an account. |
+| N1 | Do friends in the owner's space get host tools (the shell, the owner's files, the owner's email)? O3 says members never do; the owner also said friends use everything as the owner does. | **Decided by the owner, 2026-11-17 (4.11).** Friends work in the shared workspace. Host tools are the feature "Development": off for a new friend, turned on per person by the admin. Never in a personal or family space. |
+| N2 | Inside a space, is everything shared, chats included? If friends join the owner's space, they see the owner's past chats, memory and documents. | **Decided by the owner, 2026-11-17 (4.11).** The workspace is one shared world with one memory. Everyone, the owner included, also has a personal space for what they do not share. |
+| N3 | What does "reset an account" mean? | **Decided by the owner, 2026-11-17.** The admin sets a new one-time password. The member is told, and it is recorded where the admin cannot change it. It never erases data. |
+| N4 | May a space's owner be the one who approves for another member (for example, a child's posts or spending)? | **Decided by the owner, 2026-11-17.** Only the asker answers, for now. The code is built for more: each account has an "approver" setting, empty by default, and the gate reads it (S2-05). No page sets it until the owner turns the option on. |
+| N5 | Who can make a shared space, and who adds people to it? | **Decided by the owner, 2026-11-17: two roles.** The admin makes spaces and accounts and grants what each person may use. A space's owner adds and removes members from existing accounts. Two guards: a personal space has one member forever, and adding anyone to a shared space is never silent. |
+| N6 | Rows with a space id, or a database per space? | **Decided by the owner, 2026-11-17.** Rows and a folder per space now (4.2). A database per space is kept open for the encrypted version, for memory and knowledge. |
+| N7 | One bot per platform for everyone, or a bot per space? | **Decided by the owner, 2026-11-17.** One bot. A direct chat with it is private and runs in the person's own space. In a group, Kazma answers only when it is mentioned, and only from the one shared space the group is bound to, never from a personal space. A member's own bot later if asked. |
+| N8 | The daily limit: in money, in tokens, or both? What happens at the limit? | **Decided by the owner, 2026-11-17.** Both: money where the price is known, tokens always. At the limit the person's turns stop until the next day, and they are told. The admin can raise it. |
+| N9 | Deleting an account: at once, or after a wait? What happens to a shared space when its last member leaves? | **Decided by the owner, 2026-11-17.** A seven-day wait, during which the admin can undo it. A shared space with no members is erased after the same wait. |
+| N10 | Whole-install backups hold every space, and the owner holds the backup passphrase. Is that acceptable until the encrypted version? | **Decided by the owner, 2026-11-17.** Yes, with encryption in two steps. **Now (this plan):** every copy that leaves the machine is encrypted (restic); the plain zip copy is refused once a second account exists. On an install with more than one account, the security report checks that the machine's disk is encrypted (BitLocker, FileVault, LUKS) and says so if not. A member's own export of their space is sealed with a password they choose (S1-27). Members are told on first sign-in what this does and does not cover. This protects against a stolen disk, drive or cloud account. **Later (the encrypted version, 4.9):** a space's key is held by its members, so the backup and the live data cannot be read by the machine's owner either. Encrypting only the backup against the owner, while the live data on the same machine is readable, would promise more than it gives. |
+| N11 | What may the admin see about members? | **Decided by the owner, 2026-11-17.** Spend, counts and states per person. Never titles or text of a space the admin is not in: other people's personal spaces and a shared space the admin did not join. |
+| N12 | Is a read-only member needed (today's `viewer`)? | **Decided by the owner, 2026-11-17.** Not now. Two roles in a space: owner and member. |
+| N13 | Which outside tools do members get by default: web search and fetch, the browser, image generation? | **Decided by the owner, 2026-11-17.** Web (search, fetch, crawl), research, image generation and voice on. The browser and computer use off until the admin grants them. |
+| N14 | Is a second factor required for every account on a cloud install? | **Decided by the owner, 2026-11-17.** Required on the cloud profile, optional at home. Required everywhere for anyone who holds Development. |
+| N15 | After Spaces, does the owner still sign in with the shared secret? | **Decided by the owner, 2026-11-17.** It works until the owner sets a password, then it is retired for the web. The CLI on the machine keeps acting as the owner. |
+| N16 | Who does the independent review, and when do they start? | **Decided by the owner, 2026-11-17.** Chosen at the end of stage 1; they read this plan and the stage 1 code before stage 2 ends, and test the whole in stage 4. |
+| N17 | The name in Arabic. | **Decided by the owner, 2026-11-17.** "مساحة" for a space, "حساب" for an account. |
+| N18 | Feature grants (4.8, S2-11). What does a new member start with? Are grants per person or per space? May a space's owner grant features to its members, or only the admin? | **Decided by the owner, 2026-11-17.** A new member starts with chat (with its memory), documents, knowledge, web (search, fetch, crawl), research, image generation and voice; everything else is off until the admin turns it on. Grants are per person, also inside a shared space. Only the admin grants, never a space's owner. |
+| N19 | When the workspace is made, where does today's data go? Today everything is the owner's alone. | **Decided by the owner, 2026-11-17.** It stays in the owner's personal space, private. The workspace starts empty. The owner then picks what to share: chats, documents, knowledge libraries, the X account, and memory by topic (for example everything about Kazma's development). Nothing becomes shared by default. |
+| N20 | May a private chat read the workspace's memory (one way), so a friend can ask about the work from their private chat? | **Decided by the owner, 2026-11-17.** No at first: each chat reads only its own space. It can be added later as a per-person option. |
 
 ## 10. Not in this plan
 
