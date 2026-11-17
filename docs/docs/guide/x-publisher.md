@@ -2,7 +2,7 @@
 id: x-publisher
 title: X publisher (official API)
 sidebar_label: X publisher
-description: Post to X through the official API v2 with OAuth 1.0a, vaulted keys, X Studio, always-on chat HITL, and ToU fail-safes.
+description: Post to X and use the rest of X's API through the official API v2 -- X Studio, every operation of X's own spec, media, Sign in with X, vaulted keys and an approval card for every action.
 ---
 
 > This page is published at [kazma.ai/docs/x-publisher/](https://kazma.ai/docs/x-publisher/) ([Arabic](https://kazma.ai/ar/docs/x-publisher/)).

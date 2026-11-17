@@ -39,7 +39,7 @@
 <!-- Metrics auto-verified from METRICS.md -->
 | Codebase | Test suite | History | Talk to it from |
 |---|---|---|---|
-| **~886K LOC** (702K Python code + 49K JS) | **23,183 tests** (1,751 test files) | **5,495+ commits** across 6 packages | Web · TUI · CLI · Telegram · Discord · Slack |
+| **~886K LOC** (702K Python code + 49K JS) | **23,183 tests** (1,751 test files) | **5,496+ commits** across 6 packages | Web · TUI · CLI · Telegram · Discord · Slack |
 
 ---
 
@@ -262,8 +262,12 @@ completion links, stall warnings and recovery notices. AI planning and writing
 use your configured model; local-only acquisition alone does not make them offline.
 → [Knowledge Base](https://kazma.ai/docs/knowledge-base-and-rag/) · [Deep Research](https://kazma.ai/docs/web-research/)
 
-**X Studio.** Compose, schedule and manage X posts through the official API;
-a post the agent writes waits for your approval before it goes out.
+**X, through the official API.** Compose, schedule and manage posts in X
+Studio, with photos, GIFs and videos. Kazma also reaches every other operation
+of X's API: search, followers, likes, lists, bookmarks, direct messages,
+Spaces and X's live feeds. A post the agent writes waits for your approval,
+and so does every other action it takes on X, one card per action. Besides the
+four X keys it can use the app's Bearer token and Sign in with X (OAuth 2.0).
 → [X publisher](https://kazma.ai/docs/x-publisher/)
 
 **Swarm orchestration.** Six dispatch patterns (dispatch, broadcast,
