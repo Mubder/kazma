@@ -1,8 +1,8 @@
 # Spaces: several people on one Kazma
 
-Status: DRAFT of 2026-11-15, revised with the owner on 2026-11-17. Decisions
-N1 to N20 are answered; N21 to N29, from three reviews on 2026-11-17, are open. No product code is written.
-Work starts when the owner says so.
+Status: DRAFT of 2026-11-15, revised with the owner on 2026-11-17. All 29
+decisions of section 9 are answered. No product code is written. Work
+starts when the owner says so.
 
 Baseline: commit `07ec06b38`. Every statement about today's code was read
 from that commit, not from memory.
@@ -440,7 +440,7 @@ data across every user except data the user won't share ... they also have
 their own private space."
 
 **Two kinds of shared space.** The screen for making a shared space offers
-both, and the People page says which kind each space is (proposal N29):
+both, and the People page says which kind each space is (N29):
 
 | Kind | What it is | Who makes it |
 |---|---|---|
@@ -491,7 +491,7 @@ Rules:
   It is today's install with today's data (N19), and the admin already holds
   full trust. So the owner keeps the shell, the IDE and git in private
   chats. The workspace is a new, empty space.
-- **Development is a switch for the admin too** (proposal N28). It starts
+- **Development is a switch for the admin too** (N28). It starts
   on, as today. An admin who never codes can turn it off for themself: the
   shell, the IDE, git, the GitHub tools and the machine's project files are
   then absent from the admin's personal space too. The space stays a host
@@ -504,7 +504,7 @@ Rules:
   is made. It is never Kazma's install folder, so a friend's file write
   cannot change Kazma's own code.
 - **The admin approves what a Development holder's always-ask actions and
-  folder grants ask for** (proposal N21). It uses the "approver" setting of
+  folder grants ask for** (N21). It uses the "approver" setting of
   N4, set to the admin for anyone holding Development.
 - **What Development does not include.** Settings and vault tools, package
   and skill installs, updates and backups, system logs, computer use, and
@@ -520,11 +520,11 @@ Rules:
 - **The filesystem MCP server serves one host space.** It is bound to one
   folder for the whole process. Until each space can have its own instance,
   it serves the admin's personal space and refuses in the workspace, where
-  Kazma's own file tools do the work (proposal N27).
+  Kazma's own file tools do the work (N27).
 - **GitHub is a connected account of a space.** Today the git and GitHub
   tools use the install's one GitHub sign-in, which is the owner's. In the
   workspace they use the workspace's own GitHub connection, or none. A
-  friend's push never acts as the owner (S1-17, proposal N26).
+  friend's push never acts as the owner (S1-17, N26).
 - **Said plainly on the grant:** a person with Development can run commands
   on the machine. Until the encrypted version (4.9), that is the same trust
   as the admin. The People page says so when the switch is turned on.
@@ -662,9 +662,11 @@ second account allowed until the last step:
 3. The stores that already keep tenants apart (S1-08, S1-09, S1-12).
 4. The five parts that refuse (S1-13 to S1-15, S1-21), one at a time. Each
    keeps its refusal until its own matrix passes.
-5. Files and host tools (S1-19, S1-20).
+5. Files and host tools (S1-19, S1-20), the environment note per space
+   (S1-31) and a root per host space (S1-34).
 6. Accounts, secrets and keys (S1-17, S1-18, S1-26).
-7. Export, erase, backups, admin boundary, signals, docs.
+7. Export, erase, backups, admin boundary, signals (with the bell,
+   problems and runs per person, S1-32), docs.
 8. Per-person daily limits and feature grants (S2-02, S2-11), brought
    forward from stage 2: no friend ever uses the owner's model keys without
    a limit and a grant. Then the preconditions check (S1-33).
@@ -750,8 +752,9 @@ Open questions that need study, not a decision:
 
 ## 9. Decisions needed
 
-N1 to N20 were answered by the owner on 2026-11-17. N21 to N29 came from
-three reviews the same day and carry a proposal each.
+All 29 were answered by the owner on 2026-11-17. N21 to N29 came from
+three reviews the same day. Each row gives the question and what was
+decided.
 
 | # | Question | Proposal |
 |---|---|---|
@@ -775,15 +778,15 @@ three reviews the same day and carry a proposal each.
 | N18 | Feature grants (4.8, S2-11). What does a new member start with? Are grants per person or per space? May a space's owner grant features to its members, or only the admin? | **Decided by the owner, 2026-11-17.** A new member starts with chat (with its memory), documents, knowledge, web (search, fetch, crawl), research, image generation and voice; everything else is off until the admin turns it on. Grants are per person, also inside a shared space. Only the admin grants, never a space's owner. |
 | N19 | When the workspace is made, where does today's data go? Today everything is the owner's alone. | **Decided by the owner, 2026-11-17.** It stays in the owner's personal space, private. The workspace starts empty. The owner then picks what to share: chats, documents, knowledge libraries, the X account, and memory by topic (for example everything about Kazma's development). Nothing becomes shared by default. |
 | N20 | May a private chat read the workspace's memory (one way), so a friend can ask about the work from their private chat? | **Decided by the owner, 2026-11-17.** No at first: each chat reads only its own space. It can be added later as a per-person option. |
-| N21 | (From the review of 2026-11-17.) Who approves for a person holding Development? Only the asker answers their own cards (N4), so a Development holder would approve their own file writes and folder grants. | The admin approves a Development holder's always-ask actions and folder grants, from day one. Other cards stay with the asker. |
-| N22 | (Review.) The key per space protects nothing until members hold it, and sealing the owner's live secrets again is risk R4. Build it in stage 1 or stage 4? | Stage 1 makes the key and seals new spaces' secrets with it (O5 stands). The owner's existing secrets are not sealed again until stage 4, with key rotation. R4 then covers only moving mail and calendar to the space scope. |
-| N23 | (Review.) Mention-only replies in groups (N7) would change how the owner's groups behave today. | Mention-only applies to a group bound to a shared space. The owner's existing groups keep today's behaviour until the owner changes each one. |
-| N24 | (Review.) With the read-only role gone (N12), what do OIDC sign-ins with role "viewer" or "operator" become? | Both become members with the starting features. An OIDC "admin" claim never makes an admin: there is one admin, the owner's account. |
-| N25 | (Second and third review.) Does the admin need a second sign-in factor? An admin can make accounts, reset a member's password and sign in as them (N3), and run the admin tools, with or without Development. | Yes, from the day a second account exists, because they are the admin. S1-33 refuses a second account until the admin has one. N14's rule for Development stays for members who are granted it. |
-| N26 | (Second review.) Which GitHub account does the workspace use? Today's sign-in is the owner's, and the owner can push to `main` of the public repository. | The workspace connects its own GitHub account or token, with no right to bypass the rules on `main`. Until one is connected, git push and the GitHub tools refuse there. The owner's sign-in stays in the owner's personal space. |
-| N27 | (Second review.) The filesystem MCP server is bound to one folder. Which host space does it serve? | The admin's personal space, as today. It refuses in the workspace until each space can have its own instance; Kazma's own file tools work there. |
-| N28 | (Third review.) Must the admin always carry the Development tools? An owner who never codes has no use for the shell, IDE, git and GitHub tools. | Development is a per-person switch for the admin too. It starts on, and the admin can turn it off for themself. The admin tools stay either way. |
-| N29 | (Third review.) Is every shared space a development workspace? | No. Two kinds: a plain shared space (sandboxed, the default) and a shared space with a project folder (host, admin only). An install can have only plain ones. |
+| N21 | (From the review of 2026-11-17.) Who approves for a person holding Development? Only the asker answers their own cards (N4), so a Development holder would approve their own file writes and folder grants. | **Decided by the owner, 2026-11-17.** The admin approves a Development holder's always-ask actions and folder grants, from day one. Other cards stay with the asker. |
+| N22 | (Review.) The key per space protects nothing until members hold it, and sealing the owner's live secrets again is risk R4. Build it in stage 1 or stage 4? | **Decided by the owner, 2026-11-17.** Stage 1 makes the key and seals new spaces' secrets with it (O5 stands). The owner's existing secrets are not sealed again until stage 4, with key rotation. R4 then covers only moving mail and calendar to the space scope. |
+| N23 | (Review.) Mention-only replies in groups (N7) would change how the owner's groups behave today. | **Decided by the owner, 2026-11-17.** Mention-only applies to a group bound to a shared space. The owner's existing groups keep today's behaviour until the owner changes each one. |
+| N24 | (Review.) With the read-only role gone (N12), what do OIDC sign-ins with role "viewer" or "operator" become? | **Decided by the owner, 2026-11-17.** Both become members with the starting features. An OIDC "admin" claim never makes an admin: there is one admin, the owner's account. |
+| N25 | (Second and third review.) Does the admin need a second sign-in factor? An admin can make accounts, reset a member's password and sign in as them (N3), and run the admin tools, with or without Development. | **Decided by the owner, 2026-11-17.** Yes, from the day a second account exists, because they are the admin. S1-33 refuses a second account until the admin has one. N14's rule for Development stays for members who are granted it. |
+| N26 | (Second review.) Which GitHub account does the workspace use? Today's sign-in is the owner's, and the owner can push to `main` of the public repository. | **Decided by the owner, 2026-11-17.** The workspace connects its own GitHub account or token, with no right to bypass the rules on `main`. Until one is connected, git push and the GitHub tools refuse there. The owner's sign-in stays in the owner's personal space. |
+| N27 | (Second review.) The filesystem MCP server is bound to one folder. Which host space does it serve? | **Decided by the owner, 2026-11-17.** The admin's personal space, as today. It refuses in the workspace until each space can have its own instance; Kazma's own file tools work there. |
+| N28 | (Third review.) Must the admin always carry the Development tools? An owner who never codes has no use for the shell, IDE, git and GitHub tools. | **Decided by the owner, 2026-11-17.** Development is a per-person switch for the admin too. It starts on, and the admin can turn it off for themself. The admin tools stay either way. |
+| N29 | (Third review.) Is every shared space a development workspace? | **Decided by the owner, 2026-11-17.** No. Two kinds: a plain shared space (sandboxed, the default) and a shared space with a project folder (host, admin only). An install can have only plain ones. |
 
 ## 10. Not in this plan
 
