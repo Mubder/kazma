@@ -192,6 +192,7 @@ TOOL_TIERS: dict[str, str] = {
     "x_cancel_scheduled_post": "danger",
     "x_list_scheduled": "read",
     "x_status": "read",
+    "x_account": "read",         # the account's counts (and newest followers) from X
     "x_download_media": "write",   # one X read + files saved in the workspace
     "download_image": "write",     # one GET + a picture saved in the workspace
     "x_draft_posts": "write",      # X model calls + a saved draft; never sent to X

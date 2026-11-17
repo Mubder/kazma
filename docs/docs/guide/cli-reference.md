@@ -34,6 +34,7 @@ kazma
 ├── version | --version | -V  # print Kazma's version
 ├── acquisition status     # cached crawler errors, usage and credit evidence
 ├── serve [port]           # launch Web UI (uvicorn)
+├── open                   # open Kazma's page in the browser
 ├── ask [options] <prompt> # in-process agent (no uvicorn)
 ├── acp                    # ACP JSON-RPC on stdio (Zed / JetBrains)
 ├── mcp                    # MCP server on stdio — the whole tool registry, behind the HITL gate
@@ -96,6 +97,13 @@ KAZMA_SECRET=xxx kazma serve   # 0.0.0.0:8000 (approval endpoints protected)
 ```
 
 > **Security:** Never run `kazma serve` on `0.0.0.0` without `KAZMA_SECRET`. The HITL approval endpoint would otherwise be unauthenticated.
+
+### `kazma open` {#kazma-open}
+
+Opens Kazma's page in your browser, at `http://127.0.0.1:<port>/` on this
+install's port (`KAZMA_PORT`, else the install's `.env`, else 9090: `kazma setup
+port` shows it). It starts nothing: Kazma must already be running. The Windows
+installer's **Kazma** Start-menu shortcut runs it.
 
 ### 2.4 `kazma wizard`
 

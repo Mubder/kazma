@@ -205,6 +205,7 @@ _PROF: dict[str, tuple[EffectKind, SemanticTier, str | None, tuple[str, ...]]] =
     "x_delete_post": (EffectKind.OUTBOUND, SemanticTier.CRITICAL, "send_outbound",
                       ("tweet_id",)),
     "x_status": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    "x_account": (EffectKind.READ, SemanticTier.NONE, None, ()),
     # Reads a post's media from X and saves it in the workspace (downloads/x).
     "x_download_media": (EffectKind.WRITE_FS, SemanticTier.HIGH, "mutate_fs", ()),
     "download_image": (EffectKind.WRITE_FS, SemanticTier.HIGH, "mutate_fs", ()),

@@ -213,6 +213,7 @@ def main() -> None:
         print("  restore    Restore the database to a point in time (restore postgres --to TIME)")
         print("  maintenance  An update window: begin (pause the guard when idle), end (resume and check)")
         print("  serve      Start the WebUI server (on KAZMA_PORT; kazma setup port shows it)")
+        print("  open       Open Kazma's page in the browser (this install's port)")
         print("  wizard     Start interactive skill installation wizard")
         print("  hub        Kazma Hub commands (search, install, list, etc.)")
         print("  agent-skills  Agent Skills (sign, list, verify)")

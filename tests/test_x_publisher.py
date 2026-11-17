@@ -11,7 +11,8 @@ from kazma_core.safety.hitl import (
     requires_approval,
 )
 from kazma_core.x_api.ledger import XPostLedger
-from kazma_core.x_api.oauth1 import oauth1_authorization_header, percent_encode, sign_request
+from kazma_core.x_api.oauth1 import _percent_encode as percent_encode
+from kazma_core.x_api.oauth1 import oauth1_authorization_header, sign_request
 from kazma_core.x_api.policy import evaluate_post
 
 

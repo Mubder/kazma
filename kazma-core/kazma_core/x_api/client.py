@@ -1,7 +1,8 @@
 """Official X API v2 client (OAuth 1.0a user context).
 
-Only ``POST /2/tweets``, ``DELETE /2/tweets/:id``, and ``GET /2/users/me``.
-No scrape, no like/follow/DM, no Bearer posting, no Playwright.
+Posts and deletes, and the reads Kazma's X features need (the account, its
+followers, mentions, posts and their counts, media), each GET from the X
+read budget. No scrape, no like/follow/DM, no Bearer posting, no Playwright.
 Writes are **not** retried (a retry after a dropped 201 would double-post).
 """
 
@@ -330,6 +331,37 @@ class XClient:
             audit_action="verify_credentials",
         )
         return data.get("data") or data
+
+    async def get_account(self) -> dict[str, Any]:
+        """``GET /2/users/me`` with ``public_metrics``: the account's id,
+        handle, name and its counts (followers, following, posts, lists).
+        One read from the X read budget. Live 2026-11-17: asked on WhatsApp
+        whether the account had new followers, the agent had no read for
+        them and opened x.com in the browser, which X answers with a
+        sign-in page."""
+        data = await self._request(
+            "GET",
+            "/2/users/me?user.fields=username,name,public_metrics",
+            audit_action="read_account",
+        )
+        user = data.get("data") or data
+        return user if isinstance(user, dict) else {}
+
+    async def get_followers(self, user_id: str, *, max_results: int = 20) -> list[dict[str, Any]]:
+        """``GET /2/users/:id/followers``: the newest followers first, up to
+        *max_results* (one read). X refuses it on API access that does not
+        include follows lookup; the caller says so."""
+        uid = str(user_id).strip()
+        if not uid.isascii() or not uid.isdigit():
+            raise XApiError("X did not give this account's id; the followers were not read.", outcome="not_sent")
+        n = max(1, min(int(max_results), 100))
+        data = await self._request(
+            "GET",
+            f"/2/users/{uid}/followers?max_results={n}&user.fields=username,name,created_at,public_metrics",
+            audit_action="read_followers",
+        )
+        people = data.get("data") or []
+        return [p for p in (people if isinstance(people, list) else [people]) if isinstance(p, dict)]
 
     async def create_tweet(self, text: str, *, reply_to_id: str = "") -> dict[str, Any]:
         body: dict[str, Any] = {"text": text}

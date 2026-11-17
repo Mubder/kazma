@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
@@ -89,7 +90,7 @@ def _run_detached(vm: Vm, exe: str, args: str, tag: str) -> dict:
         time.sleep(60)
         try:
             got = vm.ssh(f"if (Test-Path {_ps_quote(done)}) {{ Get-Content {_ps_quote(done)} -Raw }}", timeout=60)
-        except Exception:  # noqa: BLE001 - the VM may be busy; ask again
+        except (subprocess.SubprocessError, OSError):  # the VM may be busy; ask again
             continue
         text = got.stdout.strip().lstrip("\ufeff")
         if text.startswith("{"):
@@ -214,7 +215,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         install(vm, report, already_ran=args.cont)
         check(vm, report)
-    except Exception as exc:  # noqa: BLE001 - recorded in the report
+    except (subprocess.SubprocessError, OSError, RuntimeError, ValueError, KeyError) as exc:  # recorded in the report
         report.checks.append(Check("the drill ran to its end", False, f"{type(exc).__name__}: {exc}"))
     data = {"started": report.started, "installer": report.installer, "checkpoint": report.checkpoint,
             "passed": report.passed, "rounds": report.rounds,

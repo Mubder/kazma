@@ -17,13 +17,12 @@ from collections.abc import Mapping
 from urllib.parse import parse_qsl, quote, urlparse, urlunparse
 
 __all__ = [
-    "percent_encode",
     "oauth1_authorization_header",
     "sign_request",
 ]
 
 
-def percent_encode(value: str) -> str:
+def _percent_encode(value: str) -> str:
     """RFC 3986 percent-encoding (unreserved: ALPHA / DIGIT / '-' / '.' / '_' / '~')."""
     return quote(str(value), safe="-._~")
 
@@ -72,18 +71,18 @@ def sign_request(
         "oauth_version": "1.0",
     }
     params = _collect_params(url, oauth)
-    params.sort(key=lambda kv: (percent_encode(kv[0]), percent_encode(kv[1])))
+    params.sort(key=lambda kv: (_percent_encode(kv[0]), _percent_encode(kv[1])))
     param_str = "&".join(
-        f"{percent_encode(k)}={percent_encode(v)}" for k, v in params
+        f"{_percent_encode(k)}={_percent_encode(v)}" for k, v in params
     )
     base = "&".join(
         [
             method.upper(),
-            percent_encode(_normalized_url(url)),
-            percent_encode(param_str),
+            _percent_encode(_normalized_url(url)),
+            _percent_encode(param_str),
         ]
     )
-    key = f"{percent_encode(consumer_secret)}&{percent_encode(token_secret)}"
+    key = f"{_percent_encode(consumer_secret)}&{_percent_encode(token_secret)}"
     digest = hmac.new(key.encode("utf-8"), base.encode("utf-8"), hashlib.sha1).digest()
     oauth["oauth_signature"] = base64.b64encode(digest).decode("ascii")
     return oauth
@@ -94,6 +93,6 @@ def oauth1_authorization_header(oauth_params: Mapping[str, str]) -> str:
     parts = []
     for name in sorted(oauth_params):
         parts.append(
-            f'{percent_encode(name)}="{percent_encode(oauth_params[name])}"'
+            f'{_percent_encode(name)}="{_percent_encode(oauth_params[name])}"'
         )
     return "OAuth " + ", ".join(parts)

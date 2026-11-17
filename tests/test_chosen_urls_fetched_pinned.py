@@ -108,6 +108,7 @@ UNFIXED_URLS: dict[str, str] = {
     # Kazma's own release and skill downloads (fixed hosts).
     "kazma-cli/kazma_cli/update.py::_read_release": "api.github.com's release API for Kazma's own repository (_GITHUB_REPO), built in the module",
     "kazma-cli/kazma_cli/update.py::do_pip_update": "the release's wheel and bundle URLs, refused unless they start with _RELEASE_DOWNLOAD_PREFIX (Kazma's own GitHub release downloads); the file is then checked against SHA256SUMS and its Sigstore signature",
+    "kazma-cli/kazma_cli/update.py::_download_source": "a release install's source archive and its bundle, refused by _source_archive unless they start with _RELEASE_DOWNLOAD_PREFIX (Kazma's own GitHub release downloads); the archive is then checked against SHA256SUMS, GitHub's digest and its Sigstore signature",
     "kazma-core/kazma_core/agent_skills/installer.py::_download_github_zip": "codeload.github.com / api.github.com zipball URLs the function builds (fixed hosts, the owner's approved owner/repo in the path)",
     "kazma-core/kazma_core/http_tls.py::open_download": "setup's pinned downloads (system_deps, container_engine_setup, embedder tables): every URL is written in those tables and the file is kept only when its size and SHA-256 match",
     # The owner's own settings: backups, memory stores, model servers, voice, tracing.
@@ -176,6 +177,7 @@ UNFIXED_URLS: dict[str, str] = {
 REDIRECTS: dict[str, str] = {
     "kazma-cli/kazma_cli/update.py::_read_release": "api.github.com, Kazma's own repository; httpx drops the Authorization header on a redirect to another origin",
     "kazma-cli/kazma_cli/update.py::do_pip_update": "GitHub's release download redirects to its own object store; the file is checked against SHA256SUMS and its Sigstore signature before it is installed",
+    "kazma-cli/kazma_cli/update.py::_download_source": "GitHub's release download redirects to its own object store; the source archive is checked against SHA256SUMS, GitHub's digest and its Sigstore signature before it is laid down",
     "kazma-core/kazma_core/agent_skills/installer.py::_download_github_zip": "api.github.com's zipball redirects to codeload.github.com; no credential is sent",
     "kazma-core/kazma_core/settings_manager.py::SettingsManager.check_updates": "api.github.com's release API for Kazma's own repository; no credential is sent",
 }

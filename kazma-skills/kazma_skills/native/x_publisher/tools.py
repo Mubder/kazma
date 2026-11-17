@@ -150,6 +150,124 @@ async def x_status(recent: int = 5, offset: int = 0, metrics: bool = False) -> s
         return f"Error reading X status: {exc}"
 
 
+#: The account's last counts and followers seen, for "since the last check".
+#: Kazma's own state (``system.``): never in a settings backup.
+_ACCOUNT_KEY = "system.x.account_counts"
+_COUNTS = ("followers_count", "following_count", "tweet_count", "listed_count")
+_KEEP_FOLLOWER_IDS = 1000
+
+
+def _account_snapshot() -> dict:
+    from kazma_core.config_store import get_config_store
+
+    found = get_config_store().get(_ACCOUNT_KEY, None)
+    return found if isinstance(found, dict) else {}
+
+
+def _save_account_snapshot(snapshot: dict) -> None:
+    from kazma_core.config_store import get_config_store
+
+    get_config_store().set(_ACCOUNT_KEY, snapshot)
+
+
+async def x_account(followers: bool = False) -> str:
+    """The X account's own numbers, read through the official X API.
+
+    Followers, following, posts and lists, and how each changed since the
+    last time this was asked (one read from the X read budget). Use it for
+    any question about the account's followers or following: x.com in a
+    browser answers with a sign-in page, and X's terms forbid scraping it.
+
+    Args:
+        followers: Also list the newest followers (one more read), each
+            marked new when it was not among the followers seen last time.
+            X lists followers only on API access that includes follows
+            lookup; without it the answer says so and keeps the counts.
+    """
+    import sqlite3
+
+    from kazma_core.cron.scheduler import resolve_cron_zone
+    from kazma_core.x_api.client import XApiError, XClient
+
+    cfg = await asyncio.to_thread(get_x_config)
+    if not cfg.credentials.complete():
+        return _json({
+            "ok": False,
+            "error": "X is not configured: the operator saves the X keys in Settings → X (never in chat).",
+        })
+    client = XClient(cfg.credentials)
+    try:
+        account = await client.get_account()
+    except XApiError as exc:
+        return _json({"ok": False, "error": f"X did not return the account: {exc}"})
+    counts = dict(account.get("public_metrics") or {})
+    if not counts:
+        return _json({"ok": False, "error": "X returned the account without its counts."})
+
+    import time
+
+    before, (zone, zone_name) = await asyncio.to_thread(
+        lambda: (_account_snapshot(), resolve_cron_zone()))
+    now = time.time()
+    answer: dict = {
+        "ok": True,
+        "handle": account.get("username") or cfg.handle or "",
+        "name": account.get("name") or "",
+        "followers": counts.get("followers_count"),
+        "following": counts.get("following_count"),
+        "posts": counts.get("tweet_count"),
+        "listed": counts.get("listed_count"),
+        "read_at": _when(now, zone),
+        "time_zone": zone_name or "UTC",
+    }
+    if before.get("at"):
+        answer["since"] = _when(before.get("at"), zone)
+        answer["changes"] = {
+            name.replace("_count", "").replace("tweet", "posts"): counts[name] - before[name]
+            for name in _COUNTS
+            if isinstance(counts.get(name), int) and isinstance(before.get(name), int)
+        }
+    else:
+        answer["first_check"] = True
+        answer["note"] = "No earlier reading to compare with; the next check will show the change."
+
+    snapshot = {"at": now, **{n: counts[n] for n in _COUNTS if isinstance(counts.get(n), int)}}
+    seen_before = [str(i) for i in (before.get("follower_ids") or []) if str(i).isdigit()]
+    snapshot["follower_ids"] = seen_before
+    if followers:
+        try:
+            people = await client.get_followers(str(account.get("id") or ""))
+        except XApiError as exc:
+            if exc.status in (401, 403):
+                answer["followers_error"] = (
+                    "X refused to list the followers (HTTP %s): this account's X API access does not "
+                    "include follows lookup. The counts above are X's own." % exc.status)
+            else:
+                answer["followers_error"] = f"X did not list the followers: {exc}"
+        else:
+            known = set(seen_before)
+            answer["newest_followers"] = [
+                {
+                    "handle": p.get("username"),
+                    "name": p.get("name"),
+                    "followers": (p.get("public_metrics") or {}).get("followers_count"),
+                    "new": bool(known) and str(p.get("id")) not in known,
+                }
+                for p in people
+            ]
+            if not known:
+                answer["followers_note"] = "First list read: none is marked new; the next list is compared with this one."
+            ids = [str(p.get("id")) for p in people if str(p.get("id") or "").isdigit()]
+            snapshot["follower_ids"] = (ids + [i for i in seen_before if i not in ids])[:_KEEP_FOLLOWER_IDS]
+    try:
+        await asyncio.to_thread(_save_account_snapshot, snapshot)
+    except (RuntimeError, OSError, ValueError, sqlite3.Error):
+        # The reading stands; only the next comparison is lost, and said.
+        logger.warning("x_account: the reading could not be kept for the next comparison", exc_info=True)
+        answer["note_saved"] = "This reading could not be kept, so the next check cannot compare with it."
+    return _json(answer)
+
+
 async def x_post(text: str, reply_to_id: str = "", proposal_id: str = "") -> str:
     """Post one tweet via official X API v2. HITL is mandatory outside this function.
 

@@ -111,7 +111,7 @@ def shipped_files(archive: Path, version: str) -> list[str]:
         with tarfile.open(archive, "r:gz") as tar:
             for count, member in enumerate(tar, start=1):
                 if count > MAX_MEMBERS:
-                    raise ArchiveRefused(f"more than {MAX_MEMBERS} members")
+                    raise ArchiveRefused(f"more entries than the limit ({MAX_MEMBERS})")
                 name = member.name
                 path = PurePosixPath(name)
                 if path.is_absolute() or ".." in path.parts or "\\" in name or ":" in name:
@@ -180,6 +180,7 @@ def apply_archive(root: Path, archive: Path, version: str) -> Applied:
 
     applied = Applied(root=root, backup=backup, old_version=old_version, new_version=version)
     new_set = set(new_files)
+    laid_down = False
     try:
         backup.mkdir(parents=True)
         for rel in new_files:
@@ -202,10 +203,12 @@ def apply_archive(root: Path, archive: Path, version: str) -> Applied:
             shutil.copy2(root / MARKER, backup / MARKER)
         _write_journal(applied)
         write_marker(root, version, new_files)
-    except BaseException:
-        rollback(applied)
-        raise
+        laid_down = True
     finally:
+        # Anything that stopped it half way -- an error, Ctrl+C -- puts the
+        # tree back before the error goes on.
+        if not laid_down:
+            rollback(applied)
         shutil.rmtree(staging, ignore_errors=True)
     return applied
 

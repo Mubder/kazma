@@ -29,6 +29,22 @@ tools:
     category: social
     prompt_chain:
       - "ما حالة نشر إكس؟"
+  x_account:
+    arabic_name: "حساب إكس"
+    description: >
+      The X account's own numbers through the official X API: followers,
+      following, posts and lists, and how each changed since the last check
+      (one read from the X read budget). Use this for ANY question about the
+      account's followers, new followers or following -- never the browser or
+      read_url: x.com answers them with a sign-in page, and X's terms forbid
+      scraping it. followers=true also lists the newest followers (one more
+      read), each marked new when it was not among those seen last time; X
+      lists them only on API access that includes follows lookup, and
+      followers_error says when it refused. first_check means there was no
+      earlier reading to compare with.
+    category: social
+    prompt_chain:
+      - "هل عندنا متابعين جدد على إكس؟"
   x_post:
     arabic_name: "تغريدة"
     description: >
