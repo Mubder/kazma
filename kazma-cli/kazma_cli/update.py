@@ -266,6 +266,10 @@ def detect_install_type() -> str:
     root is found (typical developer install), ``"pip"`` for wheel installs
     without a local git tree.  Uses ``pip show`` for the editable marker.
     """
+    # A release install (the Windows installer's): its marker says so. It is
+    # installed editable like a checkout, but has no .git to pull.
+    if _find_release_root() is not None:
+        return "release"
     # Prefer git when the monorepo is present (Kazma is not on PyPI at all).
     if _find_git_root() is not None:
         try:
@@ -300,8 +304,8 @@ def get_current_version() -> str:
     For git/monorepo installs prefer ``pyproject.toml`` (source of truth
     after ``git pull``). Otherwise use importlib / pip metadata.
     """
-    # Git checkout: always trust repo pyproject so version matches HEAD
-    if _find_git_root() is not None:
+    # A checkout or a release install: its pyproject is the version on disk
+    if _install_root() is not None:
         ver = _get_version()
         if ver and ver != "0.0.0":
             return ver
@@ -340,6 +344,16 @@ class ReleaseInfo:
     #: The wheel's Sigstore bundle (``<wheel>.sigstore.json``), when the
     #: release carries one. Required from ``release_signature.SIGNED_FROM`` on.
     bundle_url: str = ""
+    #: The source archive (``kazma-<version>.tar.gz``) a release install
+    #: (``kazma_cli.release_tree``) is updated from, under the wheel's rules:
+    #: named for the version, listed in SHA256SUMS (equal to GitHub's digest),
+    #: signed from SIGNED_FROM on. ``source_problem`` says why it may not be
+    #: used; the wheel's own fields are unaffected by it.
+    source_name: str = ""
+    source_url: str = ""
+    source_sha256: str = ""
+    source_bundle_url: str = ""
+    source_problem: str = ""
 
 
 def _is_sha256(value: str) -> bool:
@@ -520,12 +534,15 @@ def _read_release(api_url: str, *, token: str | None = None) -> ReleaseInfo | No
                     problem=f"the wheel is not served from {_RELEASE_DOWNLOAD_PREFIX}",
                 )
             listed = ""
+            all_listed: dict[str, str] = {}
             sums = next((a for a in assets if a.get("name") == "SHA256SUMS"), None)
             sums_url = str((sums or {}).get("browser_download_url") or "")
             if sums_url.startswith(_RELEASE_DOWNLOAD_PREFIX):
                 sums_resp = client.get(sums_url)
                 if sums_resp.status_code == 200:
-                    listed = _parse_sha256sums(sums_resp.text).get(name, "")
+                    all_listed = _parse_sha256sums(sums_resp.text)
+                    listed = all_listed.get(name, "")
+            source = _source_archive(assets, version, all_listed)
             digest = str(wheel.get("digest") or "").lower()
             github = digest[len("sha256:"):] if digest.startswith("sha256:") else ""
             if not _is_sha256(github):
@@ -554,10 +571,38 @@ def _read_release(api_url: str, *, token: str | None = None) -> ReleaseInfo | No
                 page=page,
                 problem=problem,
                 bundle_url=bundle_url if not problem else "",
+                **source,
             )
     except Exception as exc:
         logger.warning("Failed to fetch the latest Kazma release: %s", exc)
         return None
+
+
+def _source_archive(assets: list[dict], version: str, listed: dict[str, str]) -> dict[str, str]:
+    """The release's source archive, judged as the wheel is (see :class:`ReleaseInfo`)."""
+    name = f"{PACKAGE_NAME}-{version}.tar.gz"
+    asset = next((a for a in assets if a.get("name") == name), None)
+    if asset is None:
+        return {"source_problem": "the release has no source archive"}
+    url = str(asset.get("browser_download_url") or "")
+    digest = str(asset.get("digest") or "").lower()
+    github = digest[len("sha256:"):] if digest.startswith("sha256:") else ""
+    sha = listed.get(name, "")
+    bundle = next((a for a in assets if a.get("name") == f"{name}.sigstore.json"), None)
+    bundle_url = str((bundle or {}).get("browser_download_url") or "")
+    if not url.startswith(_RELEASE_DOWNLOAD_PREFIX):
+        problem = f"the source archive is not served from {_RELEASE_DOWNLOAD_PREFIX}"
+    elif not _is_sha256(sha):
+        problem = "SHA256SUMS does not list the source archive"
+    elif _is_sha256(github) and github != sha:
+        problem = "SHA256SUMS and GitHub disagree about the source archive's SHA-256"
+    elif bundle_url and not bundle_url.startswith(_RELEASE_DOWNLOAD_PREFIX):
+        problem = f"the source archive's signature is not served from {_RELEASE_DOWNLOAD_PREFIX}"
+    elif not bundle_url and must_be_signed(version):
+        problem = "the release carries no Sigstore signature for its source archive"
+    else:
+        return {"source_name": name, "source_url": url, "source_sha256": sha, "source_bundle_url": bundle_url}
+    return {"source_problem": problem}
 
 
 def parse_version(version: str) -> tuple[int, int, int]:
@@ -598,6 +643,23 @@ def _find_git_root() -> Path | None:
             return current
         current = current.parent
     return None
+
+
+def _find_release_root() -> Path | None:
+    """The release install this file is in (``kazma_cli.release_tree``): a
+    source tree the Windows installer laid down, with no ``.git``. None in a
+    checkout (a git checkout is updated by git) and in a wheel install."""
+    if _find_git_root() is not None:
+        return None
+    from kazma_cli.release_tree import find_release_root
+
+    return find_release_root(Path(__file__).resolve().parent)
+
+
+def _install_root() -> Path | None:
+    """This install's folder: a git checkout's or a release install's; None
+    for a wheel install (it has no folder of its own)."""
+    return _find_git_root() or _find_release_root()
 
 
 def check_git_behind() -> tuple[int, list[str]]:
@@ -973,7 +1035,7 @@ def detect_active_extras(cwd: str | None = None) -> list[str]:
         # Any marker present counts (partial install still means user wanted it)
         if any(_module_available(m) for m in markers):
             extras.add(extra)
-    root = cwd or str(_find_git_root() or Path.cwd())
+    root = cwd or str(_install_root() or Path.cwd())
     if _vector_memory_data_present(root):
         extras.add("rag")
     return _normalize_extras(extras)
@@ -1069,7 +1131,7 @@ def _update_command(*flags: str) -> str:
     same form everywhere, so one instruction fits every install.
     """
     tail = " ".join(f for f in flags if f)
-    return f"{_install_python(_find_git_root())} -m kazma_cli update {tail}".rstrip()
+    return f"{_install_python(_install_root())} -m kazma_cli update {tail}".rstrip()
 
 
 def _launcher_refusal(command: str) -> str | None:
@@ -1165,7 +1227,7 @@ def _verify_cli_importable() -> bool:
 
 def _update_log() -> Path:
     """``.kazma/update.log`` of this install: every package step's whole output."""
-    root = _find_git_root() or Path.cwd()
+    root = _install_root() or Path.cwd()
     return root / ".kazma" / "update.log"
 
 
@@ -1410,7 +1472,7 @@ def _reinstall_via_subprocess(cwd: str) -> bool:
 
 def needs_extras_repair(cwd: str | None = None) -> bool:
     """True when recorded/needed extras are missing from the active venv."""
-    root = cwd or str(_find_git_root() or Path.cwd())
+    root = cwd or str(_install_root() or Path.cwd())
     # Vector DB on disk but packages gone (the common post-uv-sync failure)
     if _vector_memory_data_present(root):
         if not (
@@ -1849,7 +1911,7 @@ _GUARD_API = ("maintenance_preview", "stop_for_maintenance", "resume_after_maint
 def _guard_command() -> str:
     """This install's guard, as typed in the install folder."""
     script = os.path.join("scripts", "service", "kazma_guard.py")
-    return f"{_install_python(_find_git_root())} {script}"
+    return f"{_install_python(_install_root())} {script}"
 
 
 def _load_guard(root: Path | None) -> ModuleType | None:
@@ -1909,7 +1971,7 @@ class _ServerHold:
     def __init__(self, command: str) -> None:
         self.command = command
         self.port = _resolve_server_port()
-        self.guard = _load_guard(_find_git_root())
+        self.guard = _load_guard(_install_root())
         self.held = False
 
     def _plan(self) -> str:
@@ -2153,7 +2215,7 @@ def _bring_chromium_along() -> bool:
         return False
     if _last_line(probe.stdout) != "missing":
         return True
-    command = f"{_install_python(_find_git_root())} -m playwright install chromium"
+    command = f"{_install_python(_install_root())} -m playwright install chromium"
     console.print("Downloading the Chromium build the new Playwright launches…")
     try:
         done = subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], capture_output=True,
@@ -2804,6 +2866,159 @@ def _run_git_check_and_update(
 
 
 # ---------------------------------------------------------------------------
+# A release install (kazma_cli.release_tree): updated from the source archive
+# ---------------------------------------------------------------------------
+
+#: A Kazma source archive is about 32 MB; nothing larger is downloaded.
+_MAX_SOURCE_BYTES = 256 * 1024 * 1024
+
+
+def _download_source(release: ReleaseInfo, folder: Path) -> Path | None:
+    """*release*'s source archive in *folder*, once its SHA-256 matches the
+    release's and its Sigstore bundle holds (required from SIGNED_FROM on);
+    None, with the reason printed, otherwise. The rules of :func:`do_pip_update`."""
+    import httpx
+
+    page = release.page or f"https://github.com/{_GITHUB_REPO}/releases"
+    path = folder / release.source_name
+    sha = hashlib.sha256()
+    size = 0
+    bundle = b""
+    with httpx.Client(timeout=_INSTALL_TIMEOUT, follow_redirects=True) as client:
+        with client.stream("GET", release.source_url) as resp:
+            resp.raise_for_status()
+            with path.open("wb") as fh:
+                for chunk in resp.iter_bytes():
+                    size += len(chunk)
+                    if size > _MAX_SOURCE_BYTES:
+                        console.print("[red]The download is larger than any Kazma source archive; "
+                                      "not installing.[/red]")
+                        return None
+                    sha.update(chunk)
+                    fh.write(chunk)
+        if release.source_bundle_url:
+            with client.stream("GET", release.source_bundle_url) as resp:
+                resp.raise_for_status()
+                for chunk in resp.iter_bytes():
+                    bundle += chunk
+                    if len(bundle) > MAX_BUNDLE_BYTES:
+                        console.print("[red]The signature download is larger than any Sigstore "
+                                      "bundle; not installing.[/red]")
+                        return None
+    if sha.hexdigest() != release.source_sha256:
+        console.print("[red]The downloaded source archive does not match the release's SHA-256; "
+                      "not installing.[/red]")
+        console.print(f"Release: {page}")
+        return None
+    if release.source_bundle_url:
+        try:
+            signer = check_bundle(sha.digest(), bundle)
+        except SignatureRefused as exc:
+            console.print(f"[red]The source archive's Sigstore signature does not hold ({exc}); "
+                          "not installing.[/red]")
+            console.print(f"Release: {page}")
+            return None
+        console.print(f"[cyan]Signature verified: made by {signer}[/cyan]")
+    else:
+        console.print(f"[yellow]v{release.version} is older than Kazma's signed releases: its source "
+                      "archive is checked by its SHA-256 only.[/yellow]")
+    return path
+
+
+def do_release_update(release: ReleaseInfo, root: Path, command: str) -> bool:
+    """Update the release install at *root* to *release*: its verified source
+    archive laid over the tree (:func:`kazma_cli.release_tree.apply_archive`),
+    then the locked packages installed with Kazma held stopped, as after a git
+    pull (:func:`_reinstall_via_subprocess`). An install that is refused or
+    fails puts the tree back and its packages with it. Returns ``True`` on
+    success; the newest backup is kept to roll back by hand."""
+    from kazma_cli import release_tree
+
+    if release.source_problem or not release.source_url:
+        console.print(f"[red]Not updating to v{release.version}: "
+                      f"{release.source_problem or 'the release has no source archive'}.[/red]")
+        console.print(f"Release: {release.page}")
+        return False
+    with tempfile.TemporaryDirectory(prefix="kazma-update-") as tmp:
+        archive = _download_source(release, Path(tmp))
+        if archive is None:
+            return False
+        try:
+            applied = release_tree.apply_archive(root, archive, release.version)
+        except release_tree.ArchiveRefused as exc:
+            console.print(f"[red]Not updating to v{release.version}: its source archive is refused ({exc}).[/red]")
+            return False
+        except OSError as exc:
+            console.print(f"[red]Could not lay down v{release.version}'s files ({exc}); "
+                          "nothing was changed.[/red]")
+            return False
+    console.print(f"[cyan]v{release.version}'s files are in place ({len(applied.replaced)} replaced, "
+                  f"{len(applied.added)} added, {len(applied.removed)} removed).[/cyan]")
+    outcome = _install_held(command, lambda: _reinstall_via_subprocess(str(root)))
+    if outcome in ("done", "not_back"):
+        release_tree.prune_backups(root, keep=applied.backup)
+        return outcome == "done"
+    console.print("[yellow]Putting back the previous release's files...[/yellow]")
+    release_tree.rollback(applied)
+    if outcome == "failed":
+        # The new packages may be half installed: the old tree's, again.
+        again = _install_held(command, lambda: _reinstall_via_subprocess(str(root)))
+        if again != "done":
+            console.print(f"[red]v{applied.old_version}'s packages are not back either. Run "
+                          f"{_update_command('--reinstall', '-y')} to repair them.[/red]", soft_wrap=True)
+    console.print(f"[red]Kazma stays at v{applied.old_version or 'its previous release'}.[/red]")
+    return False
+
+
+def _run_release_check_and_update(
+    current_version: str, check_only: bool, force: bool, skip_confirm: bool
+) -> None:
+    """``kazma update`` on a release install: the newest release's source archive."""
+    root = _find_release_root()
+    if root is None:
+        console.print("[red]This is not a release install.[/red]")
+        sys.exit(1)
+    release = get_latest_release()
+    if release is None:
+        console.print()
+        console.print("[red]Could not read the latest release from GitHub.[/red]")
+        console.print(f"Check network / GitHub releases: https://github.com/{_GITHUB_REPO}/releases")
+        sys.exit(1)
+    if not release.version:
+        console.print()
+        console.print(f"[red]The newest release cannot be installed: {release.problem}.[/red]")
+        console.print(f"Releases: {release.page}")
+        sys.exit(1)
+    latest = release.version
+    console.print(f"  Latest:       [cyan]v{latest}[/cyan] (GitHub release)")
+    console.print()
+    _print_version_table("release", current_version, latest_version=latest)
+    if is_newer(current_version, latest):
+        console.print()
+        console.print(f"[green]Update available![/green] v{current_version} -> v{latest}")
+    elif force:
+        console.print()
+        console.print("[yellow]Forcing update (--force)[/yellow]")
+    else:
+        console.print()
+        console.print("[green]Already up to date.[/green]")
+        return
+    if check_only:
+        console.print()
+        console.print("[yellow]--check mode: not installing.[/yellow]")
+        return
+    command = _update_command("--force" if force else "", "-y")
+    note = _refuse_or_note(command)
+    if not skip_confirm and not _confirm(f"Update kazma from v{current_version} to v{latest}?{note} [y/N] "):
+        console.print("Update cancelled.")
+        return
+    if not do_release_update(release, root, command):
+        sys.exit(1)
+    console.print()
+    console.print(f"[green]Update complete![/green] Now at v{latest}")
+
+
+# ---------------------------------------------------------------------------
 # Sync entry point
 # ---------------------------------------------------------------------------
 
@@ -2870,7 +3085,7 @@ def run(args: list[str]) -> None:
     if reinstall_only:
         command = _update_command("--reinstall", "-y")
         note = _refuse_or_note(command)
-        git_root = _find_git_root()
+        git_root = _install_root()  # a checkout's or a release install's folder
         if git_root is None:
             # A release-wheel install has no checkout to reinstall from: it
             # reinstalls its own release's wheel. Until 2026-09-30 this took
@@ -2905,7 +3120,9 @@ def run(args: list[str]) -> None:
             console.print("[red]Reinstall failed.[/red]")
         sys.exit(1)
 
-    if install_type == "git":
+    if install_type == "release":
+        _run_release_check_and_update(current_version, check_only, force, skip_confirm)
+    elif install_type == "git":
         _run_git_check_and_update(
             current_version,
             check_only,

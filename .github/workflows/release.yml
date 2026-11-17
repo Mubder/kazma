@@ -26,18 +26,21 @@ permissions:
   contents: read
 
 jobs:
-  release:
-    name: Tag + GitHub Release (no version bump)
+  # Three jobs, in order: the wheel and the source archive are built (Linux),
+  # the Windows installer is built from that same archive (a Windows runner:
+  # Inno Setup is a Windows program), then everything is checksummed,
+  # attested, Sigstore-signed, checked and published (Linux). The build's
+  # checksums travel with the files and are checked again in each job.
+  build:
+    name: Build the wheel and the source archive
     runs-on: ubuntu-latest
     permissions:
+      # The release tag is pushed here.
       contents: write
-      # Keyless Sigstore signing and SLSA provenance both mint an OIDC token
-      # for this workflow run — that identity is what a verifier checks
-      # against, and it is why there is no private key to leak or rotate.
-      id-token: write
-      attestations: write
-      # actions/attest v4 writes an artifact storage record beside the provenance.
-      artifact-metadata: write
+    outputs:
+      base: ${{ steps.ver.outputs.base }}
+      full: ${{ steps.ver.outputs.full }}
+      tag: ${{ steps.ver.outputs.tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -143,9 +146,153 @@ jobs:
           sha256sum dist/kazma-*.whl dist/kazma-*.tar.gz > build-artifacts.sha256
           cat build-artifacts.sha256
 
+      - name: Hand the built files to the next jobs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: kazma-dist
+          path: |
+            dist/
+            build-artifacts.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  # The Windows installer (scripts/windows_installer, REMAINING 2.7), from the
+  # source archive the build job made: build.py reads it with the updater's
+  # own rules and lays it out with the release-install marker. Signed here
+  # with Microsoft's Artifact Signing once the repository variable
+  # KAZMA_WINDOWS_SIGNING is "artifact-signing" (docs/SUPPLY_CHAIN.md says
+  # what to configure); until then it is published unsigned, and says so.
+  windows-installer:
+    name: Build the Windows installer
+    runs-on: windows-latest
+    needs: build
+    permissions:
+      contents: read
+      # Signing signs in to Azure with the run's OIDC token: no secret is stored.
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.11"
+
+      - name: Take the built files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: kazma-dist
+
+      - name: Build the installer from the source archive
+        shell: bash
+        env:
+          BASE: ${{ needs.build.outputs.base }}
+        run: |
+          set -euo pipefail
+          # The archive is the one the build job made, unchanged.
+          sha256sum -c build-artifacts.sha256
+          python scripts/windows_installer/build.py --source "dist/kazma-${BASE}.tar.gz" \
+            --out installer --install-inno
+
+      - name: Sign in to Azure for signing
+        if: ${{ vars.KAZMA_WINDOWS_SIGNING == 'artifact-signing' }}
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_SIGNING_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_SIGNING_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SIGNING_SUBSCRIPTION_ID }}
+
+      - name: Sign the installer (Artifact Signing)
+        if: ${{ vars.KAZMA_WINDOWS_SIGNING == 'artifact-signing' }}
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\installer
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: Kazma setup
+          description-url: https://kazma.ai
+
+      - name: Check the installer's signature
+        shell: pwsh
+        env:
+          SIGNING: ${{ vars.KAZMA_WINDOWS_SIGNING }}
+        run: |
+          $exe = Get-ChildItem installer -Filter 'kazma-*-windows-setup.exe' | Select-Object -First 1
+          if (-not $exe) { Write-Error 'no installer was built'; exit 1 }
+          $sig = Get-AuthenticodeSignature -LiteralPath $exe.FullName
+          if ($env:SIGNING -eq 'artifact-signing') {
+            if ($sig.Status -ne 'Valid') { Write-Error "the installer's signature is $($sig.Status)"; exit 1 }
+            Write-Host "Signed by $($sig.SignerCertificate.Subject)"
+          } else {
+            Write-Host "::notice::The installer is unsigned: no signing account is configured (KAZMA_WINDOWS_SIGNING)."
+          }
+
+      - name: Hand the installer to the release job
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: kazma-installer
+          path: installer/kazma-*-windows-setup.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Tag + GitHub Release (no version bump)
+    runs-on: ubuntu-latest
+    needs: [build, windows-installer]
+    permissions:
+      contents: write
+      # Keyless Sigstore signing and SLSA provenance both mint an OIDC token
+      # for this workflow run — that identity is what a verifier checks
+      # against, and it is why there is no private key to leak or rotate.
+      id-token: write
+      attestations: write
+      # actions/attest v4 writes an artifact storage record beside the provenance.
+      artifact-metadata: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+
+      - name: Take the built files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: kazma-dist
+
+      - name: Take the installer
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: kazma-installer
+          path: dist
+
+      - name: Check the built files and add the installer
+        run: |
+          set -euo pipefail
+          # Unchanged since the build job checksummed them.
+          sha256sum -c build-artifacts.sha256
+          # The installer joins the list from here on: every later step checks it too.
+          sha256sum dist/kazma-*-windows-setup.exe >> build-artifacts.sha256
+          ls -la dist
+
       - name: Generate CycloneDX SBOM
         env:
-          BASE: ${{ steps.ver.outputs.base }}
+          BASE: ${{ needs.build.outputs.base }}
         run: |
           set -euo pipefail
           # From the lockfile, not the build environment: the lock is the exact
@@ -177,7 +324,7 @@ jobs:
           set -euo pipefail
           sha256sum -c build-artifacts.sha256
           cd dist
-          sha256sum kazma-*.whl kazma-*.tar.gz kazma-*.cdx.json > SHA256SUMS
+          sha256sum kazma-*.whl kazma-*.tar.gz kazma-*.cdx.json kazma-*-windows-setup.exe > SHA256SUMS
           cat SHA256SUMS
 
       - name: Verify the built files before attesting
@@ -191,7 +338,7 @@ jobs:
       - name: Attest build provenance (SLSA)
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: "dist/kazma-*.whl,dist/kazma-*.tar.gz,dist/kazma-*.cdx.json"
+          subject-path: "dist/kazma-*.whl,dist/kazma-*.tar.gz,dist/kazma-*.cdx.json,dist/kazma-*-windows-setup.exe"
 
       # Keyless signature bundles (<file>.sigstore.json) beside each file,
       # made by sigstore-python itself. The action that wrapped it
@@ -208,7 +355,8 @@ jobs:
           # From uv.lock's `sign` group (sigstore and every dependency
           # hash-checked), in the job that holds the signing identity.
           uv run --frozen --no-build --only-group sign sigstore sign \
-            dist/kazma-*.whl dist/kazma-*.tar.gz dist/kazma-*.cdx.json dist/SHA256SUMS
+            dist/kazma-*.whl dist/kazma-*.tar.gz dist/kazma-*.cdx.json dist/kazma-*-windows-setup.exe \
+            dist/SHA256SUMS
           ls -la dist
 
       # Every bundle passes the rule the updater applies (issuer, this
@@ -236,10 +384,10 @@ jobs:
       - name: Publish the GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.ver.outputs.tag }}
-          FULL: ${{ steps.ver.outputs.full }}
+          TAG: ${{ needs.build.outputs.tag }}
+          FULL: ${{ needs.build.outputs.full }}
           NOTES_IN: ${{ inputs.notes }}
-          BASE: ${{ steps.ver.outputs.base }}
+          BASE: ${{ needs.build.outputs.base }}
         run: |
           set -euo pipefail
           # Nothing between the build and here may have changed a file.
@@ -263,7 +411,12 @@ jobs:
           sha256sum -c SHA256SUMS
           \`\`\`
 
-          \`kazma-${BASE}.cdx.json\` is a CycloneDX 1.6 SBOM of the locked dependency set."
+          \`kazma-${BASE}.cdx.json\` is a CycloneDX 1.6 SBOM of the locked dependency set.
+
+          ### Windows
+
+          \`kazma-${BASE}-windows-setup.exe\` installs Kazma with no git and no terminal, then
+          \`kazma update\` keeps it current from each release's signed source archive."
           fi
           # A draft first, every file attached, published last. A published
           # release's files are never replaced: with GitHub's immutable

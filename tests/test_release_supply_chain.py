@@ -30,9 +30,19 @@ def workflow() -> dict[str, Any]:
     return yaml.safe_load(_RELEASE_YML.read_text(encoding="utf-8"))
 
 
+#: The release's jobs, in the order they run (each `needs` the one before):
+#: the build, the Windows installer from its source archive, then checksums,
+#: provenance, signing and publishing. Their steps are read as one sequence.
+RELEASE_JOBS = ("build", "windows-installer", "release")
+
+
 @pytest.fixture(scope="module")
 def steps(workflow: dict[str, Any]) -> list[dict[str, Any]]:
-    return workflow["jobs"]["release"]["steps"]
+    jobs = workflow["jobs"]
+    assert tuple(jobs) == RELEASE_JOBS, list(jobs)
+    assert jobs["windows-installer"].get("needs") == "build"
+    assert set(jobs["release"].get("needs") or []) == {"build", "windows-installer"}
+    return [step for name in RELEASE_JOBS for step in jobs[name]["steps"]]
 
 
 def _uses(steps: list[dict[str, Any]]) -> list[str]:
@@ -152,7 +162,8 @@ def test_signing_covers_every_published_artifact(steps: list[dict[str, Any]]) ->
     alongside the artifacts it describes, which makes it worth nothing.
     """
     sign = " ".join(c for c in _commands(str(_sign_step(steps)["run"])) if " sigstore sign " in f" {c} ")
-    for expected in ("dist/kazma-*.whl", "dist/kazma-*.tar.gz", "dist/kazma-*.cdx.json", "dist/SHA256SUMS"):
+    for expected in ("dist/kazma-*.whl", "dist/kazma-*.tar.gz", "dist/kazma-*.cdx.json",
+                     "dist/kazma-*-windows-setup.exe", "dist/SHA256SUMS"):
         assert expected in sign, f"{expected} is published but never signed"
 
 

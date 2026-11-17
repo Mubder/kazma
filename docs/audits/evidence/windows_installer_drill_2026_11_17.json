@@ -1,0 +1,73 @@
+{
+ "started": "2026-11-17T00:45:56+00:00",
+ "installer": "kazma-0.21.2-windows-setup.exe",
+ "checkpoint": "clean Windows + SSH + nested virtualization (2026-11-12)",
+ "passed": true,
+ "rounds": [
+  {
+   "step": "installer",
+   "seconds": 1457,
+   "restart": true,
+   "exit": 0
+  },
+  {
+   "step": "setup after restart",
+   "seconds": 440,
+   "restart": true,
+   "exit": 0
+  },
+  {
+   "step": "uninstall",
+   "seconds": 29,
+   "restart": true,
+   "exit": 0
+  }
+ ],
+ "checks": [
+  {
+   "name": "a release install (its marker names the version)",
+   "ok": true,
+   "detail": "0.21.2"
+  },
+  {
+   "name": "Kazma answers /health/live on port 9090",
+   "ok": true,
+   "detail": "200"
+  },
+  {
+   "name": "kazma update calls it a release install",
+   "ok": true,
+   "detail": "Kazma Update\n  Install type: release\n  Current:      v0.21.2\n  Latest:       v0.21.2 (GitHub release)\n\n     Kazma Version Info      \n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502 Field           \u2502 Value   \u2502\n\u251c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524\n\u2502 Install type    \u2502 release \u2502\n\u2502 Current version \u2502 v0.21.2 \u2502\n\u2502 Latest version  \u2502 v0.21.2 \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n\nAlready up to date."
+  },
+  {
+   "name": "the Start-menu shortcuts are there",
+   "ok": true,
+   "detail": "Finish or repair Kazma setup.lnk Kazma documentation.url Kazma.lnk Update Kazma.lnk"
+  },
+  {
+   "name": "Apps lists Kazma",
+   "ok": true,
+   "detail": "0.21.2"
+  },
+  {
+   "name": "the uninstaller removed the service task",
+   "ok": true,
+   "detail": "g\n+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : NotSpecified: (ERROR: The syst...file specified.:String) [], Remote \n   Exception\n    + FullyQualifiedErrorId : NativeCommandError"
+  },
+  {
+   "name": "the port is closed after uninstalling",
+   "ok": true,
+   "detail": "closed"
+  },
+  {
+   "name": "the data folder and .env are kept",
+   "ok": true,
+   "detail": "True True"
+  },
+  {
+   "name": "Apps no longer lists Kazma",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

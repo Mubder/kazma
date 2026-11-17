@@ -29,6 +29,21 @@ description: Kazma Quickstart — code-audited reference (unified docs, v0.9+)
 
 Choose one path. All of them produce the same console scripts: `kazma`, `kazma-tui`, `kazma-web`.
 
+### Windows installer (no git, no terminal) {#windows-installer}
+
+From the release after 0.21.2 on, each [release](https://github.com/Mubder/kazma/releases)
+carries `kazma-<version>-windows-setup.exe`. Run it, pick **Express** or
+**Full**, and it does the rest: it lays down that release's files in
+`%LOCALAPPDATA%\Programs\Kazma` and runs the same `setup.cmd` Path A runs, in
+a window that shows each step. When Windows must restart for WSL, setup goes
+on by itself at the next sign-in. The Start menu then has **Kazma** (opens its
+page), **Update Kazma**, **Finish or repair Kazma setup** and the
+documentation. **Settings → Apps** uninstalls it with `kazma uninstall`, which
+keeps your data (`kazma-data`, `.env`). An installer that is not yet signed
+makes Windows show a SmartScreen warning: **More info → Run anyway**. Updating
+is `kazma update`, from the next release's signed source archive
+([Kazma Update](../ops/kazma-update.md#release-install)).
+
 > **Repo README** has a short Windows-friendly Quick Start (ports, `ERR_CONNECTION_RESET`). Prefer this guide for depth.
 
 ### Path A — Bootstrap script (recommended)

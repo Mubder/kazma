@@ -101,6 +101,29 @@ A release that fails it is not published. CI runs the same drill on every
 push, on Linux and Windows, from the newest release to a wheel built from that
 commit. Nothing of an install on the machine running it is read or written.
 
+## What it does (release install) {#release-install}
+
+An install made by the Windows installer
+([Quickstart](../guide/quickstart.md#windows-installer)) is a release install:
+the files of a release's source archive, with no `.git`, and a marker,
+`.kazma-release.json`, naming the release and the files it shipped
+(`kazma_cli/release_tree.py`). `kazma update` there:
+
+1. Reads the newest release and downloads its source archive,
+   `kazma-<version>.tar.gz`, checked as a wheel is: its SHA-256 against the
+   release's `SHA256SUMS` (and GitHub's digest), and its Sigstore signature
+   (made by Kazma's release workflow).
+2. Refuses an archive with anything but files under `kazma-<version>/`: no
+   links, no path outside it, nothing where your own files live.
+3. Replaces the files the new release ships and removes those it no longer
+   ships. Your `.env`, `kazma-data`, `.venv`, `.kazma`, `kazma.local.yaml` and
+   any file you added are never touched. Every file replaced or removed is
+   moved into `.kazma\update\backup-<old version>-<time>` first.
+4. Installs the release's locked package versions with Kazma held stopped, as
+   after a git pull, and starts it again.
+5. If that install is refused or fails, puts the previous files back, and
+   their packages with them. The newest backup is kept; older ones are removed.
+
 ## What it does (git install)
 
 1. **Preflight** — git available, no `.git/index.lock`, branch is `main`/`master`

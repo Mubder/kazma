@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RULE = ROOT / "kazma-cli" / "kazma_cli" / "release_signature.py"
 
 #: What the release workflow publishes, each with a bundle.
-PUBLISHED = ("kazma-*.whl", "kazma-*.tar.gz", "kazma-*.cdx.json", "SHA256SUMS")
+PUBLISHED = ("kazma-*.whl", "kazma-*.tar.gz", "kazma-*.cdx.json", "kazma-*-windows-setup.exe", "SHA256SUMS")
 BUNDLE_SUFFIX = ".sigstore.json"
 
 

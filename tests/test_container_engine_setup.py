@@ -200,6 +200,36 @@ def test_wsl_with_no_distro_yet_is_wsl_installed(machine):
     assert ces.run_action("engine:wsl", run=machine) == (True, "WSL is here")
 
 
+def test_the_distro_waits_while_wsls_features_wait_for_a_restart(machine, monkeypatch, tmp_path):
+    """Setup run again before Windows restarted after WSL's install (the
+    installer's VM drill, 2026-11-17): the distro step answers "restart first"
+    and never tries the import."""
+    machine.distros = []
+    machine.answers[("powershell.exe",)] = (0, "EnablePending\nEnabled\n")
+    monkeypatch.setattr(ces, "_fetch", lambda *a, **k: tmp_path / "image.tar.gz")
+    assert ces.run_action("engine:distro", run=machine) == (True, ces.RESTART)
+    assert not any(a[:2] == ["wsl.exe", "--import"] for a in machine.ran)
+
+
+def test_an_import_refused_for_want_of_the_vm_service_is_a_restart(machine, monkeypatch, tmp_path):
+    machine.distros = []
+    machine.answers[("wsl.exe", "--import")] = (
+        1, "Wsl/Service/RegisterDistro/CreateVm/HCS/HCS_E_SERVICE_NOT_AVAILABLE")
+    monkeypatch.setattr(ces, "_fetch", lambda *a, **k: tmp_path / "image.tar.gz")
+    assert ces.run_action("engine:distro", run=machine) == (True, ces.RESTART)
+
+
+def test_control_the_old_distro_step_failed_before_the_restart(machine, monkeypatch, tmp_path):
+    machine.distros = []
+    machine.answers[("wsl.exe", "--import")] = (
+        1, "Wsl/Service/RegisterDistro/CreateVm/HCS/HCS_E_SERVICE_NOT_AVAILABLE")
+    monkeypatch.setattr(ces, "_fetch", lambda *a, **k: tmp_path / "image.tar.gz")
+    monkeypatch.setattr(ces, "_features_pending", lambda run: False)
+    monkeypatch.setattr(ces, "_NO_VM_SERVICE", "something WSL never says")
+    ok, detail = ces.run_action("engine:distro", run=machine)
+    assert not ok and "HCS_E_SERVICE_NOT_AVAILABLE" in detail
+
+
 def test_control_the_list_alone_takes_an_empty_wsl_for_none(machine, monkeypatch):
     machine.distros = []
 

@@ -471,18 +471,51 @@ def _action_wsl(run: Runner, log: Callable[[str], None], opener: Any) -> tuple[b
     return True, "WSL installed"
 
 
+#: Windows' features WSL 2 runs on; turned on by ``engine:wsl``, working only
+#: after Windows restarts.
+WSL_FEATURES = ("VirtualMachinePlatform", "Microsoft-Windows-Subsystem-Linux")
+
+#: What WSL answers when the virtual machine service has not started: its
+#: features were turned on and Windows has not restarted since.
+_NO_VM_SERVICE = "HCS_E_SERVICE_NOT_AVAILABLE"
+
+
+def _features_pending(run: Runner) -> bool:
+    """Whether a feature WSL needs waits for Windows to restart (state
+    ``EnablePending``, read as the enum's name: the same in every language)."""
+    names = ",".join(WSL_FEATURES)
+    code, text = _out(run, ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                            f"(Get-WindowsOptionalFeature -Online -FeatureName {names}).State | "
+                            "ForEach-Object { \"$_\" }"], timeout=120)
+    return code == 0 and "EnablePending" in text
+
+
 def _action_distro(run: Runner, log: Callable[[str], None], opener: Any) -> tuple[bool, str]:
+    """The distro, imported from the pinned image. While WSL's features wait
+    for Windows to restart, it answers :data:`RESTART` as the WSL step does:
+    setup run a second time before that restart tried ``wsl --import`` and
+    failed with ``HCS_E_SERVICE_NOT_AVAILABLE`` (the installer's VM drill,
+    2026-11-17), leaving the container parts "not installed" instead of
+    "after Windows restarts"."""
     distros = _distros(run)
     if distros is None:
-        return False, RESTART
+        return True, RESTART
     if DISTRO in distros:
         return True, "the distro is here"
+    if _features_pending(run):
+        log("WSL's features wait for Windows to restart")
+        return True, RESTART
     image = _fetch(DOWNLOADS["ubuntu"], _engine_dir() / "downloads", opener=opener)
     target = _engine_dir() / DISTRO
     target.mkdir(parents=True, exist_ok=True)
     code, text = _out(run, ["wsl.exe", "--import", DISTRO, str(target), str(image), "--version", "2"],
                       timeout=900, env=_wsl_env())
-    return (True, "created") if code == 0 else (False, f"wsl --import failed: {text.strip()[-300:]}")
+    if code == 0:
+        return True, "created"
+    if _NO_VM_SERVICE in text:
+        log("WSL's virtual machine service is not running yet: Windows must restart")
+        return True, RESTART
+    return False, f"wsl --import failed: {text.strip()[-300:]}"
 
 
 def _action_docker(run: Runner, log: Callable[[str], None], opener: Any) -> tuple[bool, str]:

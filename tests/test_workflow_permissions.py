@@ -28,6 +28,10 @@ WRITES: dict[tuple[str, str, str], str] = {
         "creates the version tag and the release, and uploads its files",
     ("release.yml", "release", "id-token"):
         "Sigstore signing and SLSA provenance mint an OIDC token for the run",
+    ("release.yml", "build", "contents"):
+        "the release tag is pushed",
+    ("release.yml", "windows-installer", "id-token"):
+        "signing the Windows installer signs in to Azure with the run's OIDC token; no secret is stored",
     ("release.yml", "release", "attestations"):
         "build provenance is written to the attestations store",
     ("release.yml", "release", "artifact-metadata"):

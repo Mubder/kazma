@@ -149,6 +149,15 @@ def main() -> None:
 
         sys.exit(_run_report(sys.argv[2:]))
 
+    elif cmd == "open":
+        # Kazma's page in the browser, on this install's port (the Windows
+        # installer's Start-menu shortcut runs it with pythonw: no window).
+        import webbrowser
+
+        from kazma_core.server_port import server_port
+
+        webbrowser.open(f"http://127.0.0.1:{server_port()}/")
+
     elif cmd == "serve":
         from kazma_core.server_port import server_port
 

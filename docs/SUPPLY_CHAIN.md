@@ -20,7 +20,8 @@ an account, a vendor, or a paid service.
 | `kazma-<version>-py3-none-any.whl` | The wheel |
 | `kazma-<version>.tar.gz` | The source distribution |
 | `kazma-<version>.cdx.json` | CycloneDX 1.6 SBOM of the locked dependency set |
-| `SHA256SUMS` | Checksums for the three files above |
+| `kazma-<version>-windows-setup.exe` | The Windows installer (from the release after 0.21.2), built from the source archive above |
+| `SHA256SUMS` | Checksums for the files above |
 | `*.sigstore.json` | A Sigstore bundle per artifact — the signature |
 
 Provenance attestations are not files in the release; GitHub stores them and
@@ -222,6 +223,33 @@ any page script does, and the pages' Content-Security-Policy refuses a script
 from another host in the browser.
 
 ---
+
+## The Windows installer's signature {#windows-signing}
+
+The installer is built in the release workflow's `windows-installer` job from
+the source archive the `build` job made (`scripts/windows_installer/build.py`
+reads it with the updater's own rules), then checksummed, attested and
+Sigstore-signed with the other files. Windows itself checks a different
+signature (Authenticode). The job adds it with Microsoft's Artifact Signing
+(formerly Trusted Signing) once it is configured, and publishes the installer
+unsigned until then (the run says so). To switch it on, once the Artifact
+Signing account and its identity validation are done:
+
+1. In Azure: an **Artifact Signing account** and a **certificate profile**
+   (Public Trust), and an **app registration** given the role *Artifact
+   Signing Certificate Profile Signer* on that profile.
+2. On the app registration, a **federated credential** for GitHub Actions:
+   organization `Mubder`, repository `kazma`, entity *Branch*, branch `main`
+   (the release workflow is dispatched from `main`). No client secret.
+3. In the repository's settings, **Secrets**: `AZURE_SIGNING_CLIENT_ID`,
+   `AZURE_SIGNING_TENANT_ID`, `AZURE_SIGNING_SUBSCRIPTION_ID`. **Variables**:
+   `AZURE_SIGNING_ENDPOINT` (the account's region endpoint, for example
+   `https://weu.codesigning.azure.net`), `AZURE_SIGNING_ACCOUNT`,
+   `AZURE_SIGNING_PROFILE`, and `KAZMA_WINDOWS_SIGNING` = `artifact-signing`.
+
+From then on the job signs the installer, timestamps it, and fails unless
+Windows reads the signature as valid. Kazma's updates do not depend on it:
+`kazma update` checks each release by its Sigstore signature.
 
 ## What this does not prove
 
