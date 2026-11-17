@@ -4,8 +4,10 @@ Status: DRAFT of 2026-11-15, revised with the owner on 2026-11-17. All 29
 decisions of section 9 are answered. No product code is written. Work
 starts when the owner says so.
 
-Baseline: commit `07ec06b38`. Every statement about today's code was read
-from that commit, not from memory.
+Baseline: commit `0cb307cde` (2026-11-17). The plan was first read from
+`07ec06b38`; sections 3 and 4 were corrected for the 24 product commits
+between the two. Every statement about today's code was read from the
+code, not from memory.
 
 ## 1. What this plan is for
 
@@ -79,9 +81,10 @@ in backups) and uses "space" in pages, messages and docs.
 | Part | Today | File |
 |---|---|---|
 | Logins | Local users are a list in one settings key (`platform.users`): name, password hash, role, optional tenant. OIDC sign-in exists. | `security/platform_rbac.py`, `security/oidc.py` |
-| Roles | `viewer`, `operator`, `admin`, checked per request against one path table. A role says what a person may do, not whose data they see. | `platform_rbac.role_allows` |
+| Roles | `viewer`, `operator`, `admin`, checked per request against one path table, in every mode, on the path the router serves. Writes that change the whole install (GitHub credentials, the active workspace, the chat apps, model profiles, X credentials) are admin only. A role says what a person may do, not whose data they see. | `platform_rbac.role_allows`, `kazma_ui/request_path.py` |
 | Sessions | A session carries name, role, user id and tenant. | `security/web_sessions.py` |
-| The owner's own entry | The shared secret, an API token and local auto-login are an admin with no account behind them. | `kazma_ui/auth.py` |
+| The owner's own entry | The shared secret and local auto-login are an admin with no account behind them. An API token carries the role chosen when it was made (operator unless said), also with no account. | `kazma_ui/auth.py` |
+| Other agents (A2A) | Off by default. With it on, an agent holding an API token runs one read-only turn with no memory; its tasks are kept in the process, for the install. | `kazma_ui/a2a_api.py` |
 | Tenant of a web request | From the session's tenant, else `default`. A local user with no tenant runs as `default`, the same as the owner. | `auth.create_tenant_middleware` |
 | Tenant of a chat-app message | None is bound. Memory picks a tenant from a setting (`shared`, `per_platform`, `per_user`). | `agent_handler/store.py`, `memory/config.py` |
 | No tenant bound | Means `default`, which is the owner's data (`require_tenant_id`). | `tenant_isolation.py` |
@@ -125,8 +128,11 @@ install, and the threat model says the tenant columns are not a boundary yet.
 | `swarm_tasks.db` (+ Postgres), `pipeline_logs.db`, worker registry | Swarm | The tenant is inside a task's metadata, not a column; the list filters by it in production mode. **Refuses.** |
 | `research_sessions.db`, report files | Research | Whole. Reports go into the one workspace. |
 | The six X stores | X posts, schedule, replies | Apart by tenant, with an X account and its keys per tenant. The mentions loop runs for `default` only. |
+| X sign-ins (settings and vault) | The OAuth 1.0a keys, the app's Bearer token, the OAuth 2.0 client and the Sign in with X tokens | Apart: each key is the tenant's (`tenant.<id>.` before the key for any tenant but `default`). A sign-in in progress is kept for the install, bound to the browser that started it. |
 | Mail and calendar sign-ins | Connected accounts | Whole: stored for the install on purpose (`INSTALL_SCOPED_SECRETS`). |
-| `vault.db` | Secrets | Rows carry a tenant or are global. One key for the whole vault. |
+| `vault.db` | Secrets | Rows carry a tenant or are global. One key for the whole vault. A URL's password under any setting is kept for the install. |
+| `kazma.yaml`, `kazma.local.yaml`, the permissions file | Kazma's configuration | Whole. Readable; no tool can write them. |
+| `problem_reports/` | Problem reports that could not be sent | Whole. Admin only. |
 | `settings.db` | Settings, workspaces | Whole. One active workspace for the install. |
 | `rbac.db`, `audit.db`, `disclosure.db`, `certifications.db` | Control records | Whole. |
 | `file_checkpoints.db`, `code-index/` | IDE undo, code search | Whole, tied to the host's files. |
@@ -150,6 +156,8 @@ whole. Five parts refuse.
 | Knowledge, Scheduled, Swarm, Running work | Refuse with a second login. |
 | Approvals | A card is shown to whoever owns the thread; on chat apps, in the chat it came from. A web turn's reminders and cards may go to the owner's Telegram. |
 | Settings | Admin only, one set for the install. |
+| X Studio and the X tools | By tenant. Reading the whole X API is a read tool; acting on X and posting always ask. Connecting and signing out are admin only. |
+| Other agents (A2A), problem reports | For the install. A2A runs read-only turns for a token holder; a problem report is the admin's. |
 | Workspace, IDE, shell, MCP servers | The host's files and programs. One for the install. |
 | Alerts, daily digest, weekly report | To the owner's channels. They name chats and work of the whole install. |
 | CLI, terminal app | Act as the owner, on the machine. |
@@ -309,7 +317,7 @@ admin's own spaces. A command that names another space is refused.
 | Scheduled | A job carries its space and its creator. It fires in that space, with the creator's tools as they are at that moment. Its result goes to the creator. |
 | Swarm | A task carries its space and asker. Workers run inside that scope. Templates stay the install's. |
 | Research | Sessions and reports belong to a space; reports are written in its folder. |
-| Connected accounts | Mail, calendar and X sign-ins belong to the space that connected them. X already works this way; mail and calendar move from the install to the space. The owner's mailbox is the owner's space's. Background refresh and the X mentions loop go space by space. |
+| Connected accounts | Mail, calendar, X and GitHub sign-ins belong to the space that connected them. X already works this way, with all of its sign-ins: the OAuth 1.0a keys, the app's Bearer token and Sign in with X. Mail, calendar and GitHub move from the install to the space. A sign-in in progress names the space it was started in. The owner's mailbox is the owner's space's. Background refresh and the X mentions loop go space by space. |
 | Secrets | The vault gains a space scope. A space's secrets are sealed with the space's key (4.9). The install's secrets stay the install's. |
 | Files | File tools, uploads and generated files live in the space's folder. `python_exec` mounts that folder and nothing else. |
 | Workspace, IDE, shell, git, MCP servers | Host tools. Host spaces only (4.8). Each host space has its own root folder, IDE root, code index and IDE undo; a switch or clone in one never moves the other (4.11, S1-34). |
@@ -360,7 +368,7 @@ person, and one switch covers all of those parts.
 
 | Feature | What it covers (examples) | Group |
 |---|---|---|
-| X Studio | The X pages and routes, the X tools, `/x`, the mentions loop, the X account | Space |
+| X Studio | The X pages and routes (the `/api/x/oauth2/*` sign-in among them), the X tools (`x_api_read`, `x_api_act`, `x_upload_media` too), `/x`, the mentions loop, the X account and its sign-ins | Space |
 | Email and calendar | The mail and calendar tools, their sign-ins and cards | Space |
 | Documents | The Documents page, routes and tools | Space |
 | Knowledge | Libraries, crawls, `/kb` | Space |
@@ -560,7 +568,7 @@ neither can reach the other's data, and the five refusals are gone.
 | S1-02 | One scope: space and asker, bound together, with **no default**. `require_tenant_id`'s fallback to `default` is removed for content. | `test_no_space_no_data.py`: every store's reader called with no scope refuses; a source gate finds no `or "default"` on a content path. Control: the old fallback returns the owner's rows. | Nothing. |
 | S1-03 | Every store, family and data folder declares its space rule and content columns. | `test_store_space_rules.py`: each entry of the registry has a rule; a planted undeclared store fails. | Nothing. |
 | S1-04 | Sign-in is always an account once a second one exists. The shared secret, auto-login and API tokens are tied to the owner's account or off. | `test_sign_in_is_an_account.py`: each old entry, with two accounts, is the owner or refused. Control: the old principal has no account. | The owner signs in by name. A notice explains the change once. |
-| S1-05 | Every route is classed `install`, `space`, `account` or `open`, in one table. | `test_route_scopes.py`: every route of the built app is in the table; a planted route fails. | Nothing. |
+| S1-05 | Every route is classed `install`, `space`, `account` or `open`, in one table. The routes added since the first draft are in it like the rest: `/api/x/oauth2/*`, `/api/x/api-access`, `/api/a2a`, `/api/support/*`. | `test_route_scopes.py`: every route of the built app is in the table; a planted route fails. | Nothing. |
 | S1-06 | The web names its space on every call; the server checks membership every time. A space switcher. | `test_web_request_space.py`: a member of A asking as B is refused on every route (enumerated). Browser test, EN and AR, two tabs in two spaces. Control: space kept in the session mixes two tabs. | A space switcher in the header. |
 | S1-07 | A thread record: space and opener. Every place that runs a turn binds the scope from it. | `test_turn_scope_bound.py`: every function that runs a graph binds it (found from the source); a resume in another space is refused. Control: a resume with no record runs as `default`. | Nothing. |
 | S1-08 | Chats, the spool, checkpoints (SQLite and Postgres), Time Travel, drafts, plans and receipts follow the space. Messages name their author. | `test_chat_state_spaces.py`: the matrix over every chat route; real Postgres for checkpoints. Control: the shared Postgres table reads across. | Each message shows who wrote it. |
@@ -572,7 +580,7 @@ neither can reach the other's data, and the five refusals are gone.
 | S1-14 | Scheduled: a job carries space and creator and fires in that scope. Refusal removed. | `test_cron_spaces.py`: a real fire runs in its space; another space's job id reads as unknown; a job with no space does not fire. Control: the fire with no scope. | Scheduled works for everyone. |
 | S1-15 | Swarm: a task carries space and asker; workers run in that scope. Refusal removed. | `test_swarm_spaces.py`: every swarm route and tool by matrix; a worker's tool call lands in the asker's space. Control: the unscoped dispatch. | Swarm works for everyone. |
 | S1-16 | Research sessions and reports per space. | `test_research_spaces.py`: list, read, download and delete by matrix. Control: the unfiltered list. | Research is per space. |
-| S1-17 | Connected accounts (mail, calendar, X, GitHub) belong to a space; background refresh goes space by space. The git and GitHub tools use the space's own GitHub connection, or none. | `test_connected_accounts_spaces.py`: two spaces, two mailboxes; a refresh writes only its own; every reader names a space (source gate). A git push and every GitHub tool call in the workspace never use the owner's token. Control: the install-scoped names, and today's install-wide GitHub client. | Each space connects its own accounts. |
+| S1-17 | Connected accounts (mail, calendar, GitHub, and X with every one of its sign-ins: the OAuth 1.0a keys, the Bearer token, Sign in with X) belong to a space; background refresh goes space by space. The git and GitHub tools use the space's own GitHub connection, or none. | `test_connected_accounts_spaces.py`: two spaces, two mailboxes; a refresh writes only its own; every reader names a space (source gate). A git push and every GitHub tool call in the workspace never use the owner's token. Control: the install-scoped names, and today's install-wide GitHub client. | Each space connects its own accounts. |
 | S1-18 | The vault gains a space scope; the install list stays. | `test_vault_space_scope.py`: a space's secret is not returned to another space or to code with no space. Control: the `default` rung. | Nothing. |
 | S1-19 | The space folder: file tools, uploads, images, exports and generated documents. `python_exec` mounts only it. | `test_space_files.py`: every tool that takes a path, in a sandboxed space, cannot reach outside its folder; real Docker run where present. Control: the install's workspace mount. | A Files area per space. |
 | S1-20 | Host tools exist only in a host space (4.8). In the workspace only Development's tools exist; the admin-only host tools (4.11) are absent there too. With the admin's own Development off, none of its tools is offered or callable in the admin's personal space, and the admin tools still are (control: today's "always"). | `test_host_tools_absent.py`: every registered tool is classed host, space or outside (a new tool with no class fails); in a sandboxed space a host tool is neither offered nor callable. Control: a policy that only hides it from the list. | Members have no shell, IDE or Workspace page. |
