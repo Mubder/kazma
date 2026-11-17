@@ -756,7 +756,7 @@ Rules for the move:
 |---|---|---|
 | R1 | One missed filter leaks a space. This is the main risk of the row model. | Bound store handles, the statement gate, the matrix over every route and tool, Postgres row security, the soak, the outside review. |
 | R2 | Code with no space quietly acts as the owner. | No default (S1-02). It is the first item because every later one leans on it. |
-| R3 | "Who is I" in a shared space changes how memory files facts. Memory is the most hardened part of Kazma. | A short study first, on the memory benchmark, before S1-11 is built. A space with one member stays exactly as today. |
+| R3 | "Who is I" in a shared space changes how memory files facts. Memory is the most hardened part of Kazma. | A short study first, on the memory benchmark, before S1-11 is built. A space with one member stays exactly as today. **The study is done (2026-11-18): `docs/plans/SPACES_R3_MEMORY_STUDY.md`.** It chooses an entry per member, filed when the fact is written, and measures it against today's single entry; S1-11 waits for the owner's answers to its decisions D1 to D7. |
 | R4 | The owner's own secrets move scope (mail, calendar, X). A mistake here signs the owner out. | The move is checked by reading each secret back after it; the old copy is kept until the first good refresh. |
 | R5 | Size. Stage 1 touches every store and most routes. | The order in section 6; each part keeps its refusal until its own tests pass; nothing multi-account ships early. |
 | R6 | Old memory tenants from the retired modes have no clear owner. | Counted and reported; the owner decides per tenant. |
