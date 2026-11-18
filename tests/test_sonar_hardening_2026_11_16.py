@@ -111,7 +111,14 @@ def test_the_restore_cleanup_removes_a_read_only_tree(tmp_path):
 
 # ── no raw direction-control characters in source ─────────────────────────
 
-_BIDI = re.compile("[\u202a-\u202e\u2066-\u2069]")
+#: Every character bandit's B613 (trojansource) fails CI's Security Scan on:
+#: the embeddings and overrides, the isolates, and the right-to-left mark
+#: (U+200F). Until 2026-11-18 this gate left out U+200F, so a raw mark in an
+#: Arabic catalog string passed it and failed the Security Scan on main.
+#: ``test_the_gate_covers_every_character_bandit_flags`` holds this set to
+#: bandit's own list where bandit is installed.
+_BIDI_CHARACTERS = frozenset("\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069\u200f")
+_BIDI = re.compile("[" + "".join(sorted(_BIDI_CHARACTERS)) + "]")
 #: Vendored files, as their makers ship them.
 BIDI_DECLARED = {"kazma-ui/kazma_ui/static/js/mermaid.min.js"}
 _SOURCE_SUFFIXES = (".py", ".js", ".mjs", ".ts", ".html", ".sh", ".ps1", ".yml", ".yaml", ".toml", ".css")
@@ -135,6 +142,18 @@ def test_no_source_file_holds_a_raw_direction_character():
 
 def test_the_bidi_gate_sees_a_raw_override():
     assert _BIDI.search("x = '\u202e'") and not _BIDI.search("x = '\\u202e'")
+
+
+def test_the_bidi_gate_sees_a_raw_right_to_left_mark():
+    # The 2026-11-18 Security Scan failure: an Arabic label with a raw RLM.
+    assert _BIDI.search('"ar": "\u0645\u0641\u0627\u062a\u064a\u062d X \u200f(OAuth 1.0a)"')
+    assert not _BIDI.search('"ar": "\u0645\u0641\u0627\u062a\u064a\u062d X \\u200f(OAuth 1.0a)"')
+
+
+def test_the_gate_covers_every_character_bandit_flags():
+    trojansource = pytest.importorskip("bandit.plugins.trojansource")
+    missing = set(trojansource.BIDI_CHARACTERS) - _BIDI_CHARACTERS
+    assert not missing, sorted(f"U+{ord(c):04X}" for c in missing)
 
 
 # ── GitHub names ──────────────────────────────────────────────────────────
