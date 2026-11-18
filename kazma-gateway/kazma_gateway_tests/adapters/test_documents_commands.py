@@ -13,7 +13,8 @@ import pytest
 
 
 def _fake_message(text: str, platform: str = "slack") -> types.SimpleNamespace:
-    return types.SimpleNamespace(text=text, platform=platform, context_metadata={})
+    # A real message names its sender: Documents act as the asker (Spaces S1-12).
+    return types.SimpleNamespace(text=text, platform=platform, sender_id="u1", context_metadata={})
 
 
 class _FakeManager:
