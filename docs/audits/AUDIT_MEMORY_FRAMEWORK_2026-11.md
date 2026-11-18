@@ -480,17 +480,30 @@ Size: 1.
 
 ### F9. Recall weakens where a person talks most, and cannot follow a follow-up
 
-**Read**. The dense-topic effect on turns is **not measured** (it needs the
-embedder; queued for after the quiet hours, section 8).
+**Measured** for the background (2026-11-18, 08:05 to 08:07 +0300, bge-m3,
+`evidence/memory_framework_2026_11/dense_topic.py`, results in
+`dense_topic.json`); **read** for the rest.
 
 - **The "is this about the question" test uses a window of ranks.** A turn's
   evidence is its similarity above the "background", and the background is
   the mean of meaning ranks 4 to 15 (`recall.py:1324`), with fixed floors.
-  When twenty turns are on one topic, ranks 4 to 15 are all on that topic,
-  the background rises to meet the best match, and the lift falls under the
-  floor. Kazma already met this with weekly summaries (at 97 live summaries,
-  "list me all my subscription resets" found none of ten) and moved
-  summaries to a median. Turns and facts still use the window.
+  The expected failure was a dense topic: when many turns are on one subject,
+  ranks 4 to 15 fill with that subject and the background rises to meet the
+  best match. **Measured, that is not what happens with distinct turns.**
+  Forty different renovation turns among 134 unrelated ones: 10 of 10
+  questions were answered at 10, 20 and 40 turns on the subject. The
+  background rose only from 0.47 to 0.50, while the answer sat near 0.64.
+  Near-identical log lines on one subject ("week 4 of the plan") did lose:
+  10 of 10 at 10 and 20 turns, 9 of 10 at 40 and 80. **What the measurement
+  found instead is a language gap.** Arabic paraphrase questions about one
+  wedding found 5 of 8 at 8, 16 and 30 turns on the subject. The three
+  misses had a similarity of 0.36 to 0.44 to their answer, under the rank
+  window's background of about 0.40 to 0.42; the median of every turn was
+  about 0.31, and against it all three would clear the floor. Kazma already
+  met the same shape with weekly summaries (at 97 live summaries, "list me
+  all my subscription resets" found none of ten) and moved summaries to a
+  median. Turns and facts still use the window, and the measured cost of it
+  is Arabic paraphrase, not topic density.
 - **A follow-up is searched as it is typed.** "And her sister?" is the
   recall query (`agent/graph_supervisor.py:492`). A turn's vector is made
   from its question alone (`episode_text.py:88`), so a turn whose question
@@ -501,15 +514,18 @@ embedder; queued for after the quiet hours, section 8).
   or to list all. Questions that need counting or a full list ("how many
   times", "all my subscriptions") cannot be answered from it.
 - **The chat's own turns get a boost of 0.35** on an evidence scale of 0.04
-  to 0.5 (`recall.py:1259`), so the block tends to fill with the chat the
-  model is already reading.
+  to 0.5 (`recall.py:1259`). **Measured** with the same store, it reorders
+  rather than hides: 8 of 8 answers from older chats were shown with and
+  without it, and two moved from first to second place. A turn still inside
+  the context window, boosted into the block, is still wasted space.
 - **The turn is never told recall was incomplete.** The supervisor reads
   only "empty or not" (`graph_supervisor.py:1188`); a degraded or failed
   recall looks like "nothing known". **Reported**: on the Postgres-primary
   path errors become an empty list.
 
 Fix: a median or fixed-quantile background for turns and facts, swept again
-on the benchmark with a dense-topic category; a one-line standalone gist per
+on the benchmark with a dense-topic category and Arabic paraphrase
+questions (the measured loss); a one-line standalone gist per
 turn written by the deep pass (the column and the embedding rule already
 exist); two read tools, "open this memory" and "list by subject, name or
 dates", with ids in the block; no boost for turns still inside the context
@@ -1085,16 +1101,12 @@ cores for 31 minutes, from 04:21 to 04:52.
 | 05:12 | Probe 4 with the real embedder (`probes_real_embedder.json`, taken from that run's own output). | bge-m3 loaded once; a handful of texts. |
 | 05:19, 05:26, 05:30 | The probes with no embedder (`probes.json`), three runs. | Under one second each, below-normal priority. |
 | 05:38 to 06:10 | This audit's commits: the commit gates twice, and one metrics regeneration (`pytest --collect-only`). | One process each, a few minutes, below-normal priority. |
+| 08:05 to 08:07 | The dense-topic measurement and the boost's effect (`dense_topic.py`, results in `dense_topic.json`), then probe 4 with the real embedder again (`probes_real_embedder.json`, replacing the 05:12 file; the same result). | One process at a time, below-normal priority; bge-m3 loaded once per run. The owner had lifted the quiet hours. |
 
-After the rule arrived, only the last two rows' runs from 05:26 on were
-made; the rest was reading and writing.
-
-Queued for after 10:00, to be run when the review continues:
-
-1. The dense-topic measurement behind F9 (twenty to a hundred turns on one
-   subject, the real embedder, through `recall()`).
-2. The effect of the 0.35 boost for the chat's own turns (F9).
-3. Probe 4 with the real embedder again, from the final script.
+After the rule arrived, only the rows from 05:26 on were run; the rest was
+reading and writing. The three measurements queued then (the dense topic,
+the boost, probe 4 again) ran at 08:05 to 08:07, after the owner lifted the
+quiet hours; F9 carries their numbers.
 
 ## 9. What was not measured
 
@@ -1103,9 +1115,9 @@ Queued for after 10:00, to be run when the review continues:
 - **Any model behaviour beyond the recordings.** No model was called. The
   deep pass's behaviour is read from the one recording of 2026-10-15 and the
   R3 study's recordings.
-- **F9's dense-topic effect on turns and facts**, the session boost, and the
-  claim that the graph walk cannot change a ranking past forty facts. These
-  are read from the code or reported.
+- **F9 on facts**, and the claim that the graph walk cannot change a
+  ranking past forty facts: read from the code or reported. F9 on turns and
+  the session boost were measured (section 8).
 - **Latency and scale.** No number here is mine. The 8 ms and the 8 seconds
   at 170,000 memories are Kazma's own published figures.
 - **The Postgres-primary path, the mirror with two installs, and a real
@@ -1206,5 +1218,7 @@ folders and both variables pointing at empty folders:
 It calls no model, loads no embedder, writes only to private temporary
 databases and the folder named, and takes under a second. With `--real` it
 runs probe 4 alone with bge-m3 from the local cache (not in quiet hours).
-The benchmark audit's four scripts are described in that audit's last
-section.
+`dense_topic.py`, beside it, is run the same way: it loads bge-m3 from the
+local cache, about four minutes, and `--fake` checks that it runs with a
+toy embedder whose numbers mean nothing. The benchmark audit's four scripts
+are described in that audit's last section.
