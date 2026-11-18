@@ -797,7 +797,11 @@ Kazma ("استخدم البحث"), a question, someone else ("أخوي ساكن 
 is Noura who moved) or a field of work ("أشتغل في المبيعات", like "I work in
 sales"). Once a message names someone else, a statement with no "أنا" after it
 is read as about them: the quick pass would rather miss a fact than file
-another person's under you. What it misses --
+another person's under you. It reads only your own words: not an attached
+document, a quote, what someone else said ("my sister said: ...") or a text
+you asked Kazma to work on ("Translate to French: My name is Pierre" does not
+make your name Pierre). "Correct: my name is Ahmad" is your own words and
+counts. What it misses --
 relatives, jobs, dates -- is the model's deep pass to find. That pass is scored from the configured model's recorded
 replies (`scripts/memory_extraction_record.py --out <fixture>`, run with an
 install's own Python, one model call per turn); a turn with no recorded reply

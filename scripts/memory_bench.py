@@ -938,7 +938,8 @@ def build_extraction() -> dict[str, Any]:
 #: words), ``kept_as_said`` (the deep pass of the same turn leaves the user's
 #: words and trust as they were), ``short`` (short statements are read, small
 #: talk is not), ``someone_else`` (a fact about another person never becomes
-#: the user's).
+#: the user's), ``quoted`` (text the user quoted, attached or asked Kazma to
+#: work on is never the user's own statement).
 def _said(subject: str, predicate: str, kind: str, obj: str) -> dict[str, Any]:
     return {"subject": subject, "predicate": predicate, "predicate_type": kind, "object": obj, "confidence": 0.9}
 
@@ -950,6 +951,18 @@ def _now(subject: str, obj: str, trust: str | None = None, *, exact: bool = Fals
     if exact:
         out["exact"] = True
     return out
+
+
+def _attached(message: str, filename: str, mime: str, document: str) -> str:
+    """A message with an attached document, in the shape the chat apps and
+    the web chat give the model (``agent_handler/attachments.build_user_content``:
+    the parsed text inside a data fence). tests/test_memory_own_words.py holds
+    the shape to the real builder."""
+    from kazma_core.safety.prompt_fence import format_untrusted_block
+
+    fenced = format_untrusted_block(document, source="document_attachment")
+    return (f"{message}\n[Attached: {filename} ({mime}) \u2014 parsed contents:\n{fenced}]\n"
+            f"[Full document at: kazma-data/attachments/{filename} \u2014 use read_document for complete content]")
 
 
 WRITE_SCENARIOS: list[dict[str, Any]] = [
@@ -978,6 +991,16 @@ WRITE_SCENARIOS: list[dict[str, Any]] = [
         ("My name is Omar وساكن في Kuwait City.", ("recorded", "m01")),
         ("We moved to Rotterdam last month.", ("recorded", "e06"))],
      "current": [_now("user", "Rotterdam", "user")], "not_current": [_now("user", "Kuwait City")]},
+    # A word that also introduces a text to work on, said with no text named:
+    # the user's own correction, kept as theirs.
+    {"id": "update-en-correction", "category": "update", "lang": "en", "turns": [
+        ("My name is Ahmed.", ("written", [_said("user", "name_is", "functional", "Ahmed")])),
+        ("Correct: my name is Ahmad.", ("written", [_said("user", "name_is", "functional", "Ahmad")]))],
+     "current": [_now("user", "Ahmad", "user")], "not_current": [_now("user", "Ahmed")]},
+    {"id": "update-ar-correction", "category": "update", "lang": "ar", "turns": [
+        ("اسمي أحمد.", ("written", [_said("user", "name_is", "functional", "أحمد")])),
+        ("صحح: اسمي محمد.", ("written", [_said("user", "name_is", "functional", "محمد")]))],
+     "current": [_now("user", "محمد", "user")], "not_current": [_now("user", "أحمد")]},
     # ── kept as said: the deep pass of the same turn keeps the user's words ─
     {"id": "kept-en-name-and-city", "category": "kept_as_said", "lang": "en", "turns": [
         ("My name is Layla and I live in Lisbon now.", ("recorded", "e01"))],
@@ -1030,10 +1053,52 @@ WRITE_SCENARIOS: list[dict[str, Any]] = [
         ("أشتغل في شركة زين.", ("written", [_said("user", "works_at", "functional", "شركة زين")])),
         ("أختي تشتغل at Gulf Bank.", ("written", [_said("user", "works_at", "functional", "Gulf Bank")]))],
      "current": [_now("user", "زين", "user")], "not_current": [_now("user", "Gulf Bank")]},
+    # ── quoted: text the user quoted, attached or asked Kazma to work on ───
+    # The model's reply here files the quoted facts under the user, as a
+    # careless model would: what the quick pass reads decides the outcome.
+    {"id": "quoted-en-translate", "category": "quoted", "lang": "en", "turns": [
+        ("My name is Layla.", ("written", [_said("user", "name_is", "functional", "Layla")])),
+        ("Translate to French: My name is Pierre and I live in Lyon.",
+         ("written", [_said("user", "name_is", "functional", "Pierre"),
+                      _said("user", "lives_in", "functional", "Lyon")]))],
+     "current": [_now("user", "Layla", "user")],
+     "not_current": [_now("user", "Pierre"), _now("user", "Lyon", "user")]},
+    {"id": "quoted-ar-translate", "category": "quoted", "lang": "ar", "turns": [
+        ("اسمي ليلى.", ("written", [_said("user", "name_is", "functional", "ليلى")])),
+        ("ترجم للإنجليزي: اسمي سارة وساكنة في جدة.",
+         ("written", [_said("user", "name_is", "functional", "سارة"),
+                      _said("user", "lives_in", "functional", "جدة")]))],
+     "current": [_now("user", "ليلى", "user")],
+     "not_current": [_now("user", "سارة"), _now("user", "جدة", "user")]},
+    {"id": "quoted-en-attached", "category": "quoted", "lang": "en", "turns": [
+        ("I work at Google.", ("written", [_said("user", "works_at", "functional", "Google")])),
+        (_attached("Please file this.", "letter.pdf", "application/pdf",
+                   "Dear team, my name is Sara Lee and I work at Acme Corp."),
+         ("written", [_said("user", "works_at", "functional", "Acme Corp")]))],
+     "current": [_now("user", "Google", "user")],
+     "not_current": [_now("user", "Acme Corp"), _now("user", "Sara Lee", "user")]},
+    {"id": "quoted-ar-attached", "category": "quoted", "lang": "ar", "turns": [
+        ("أشتغل في شركة زين.", ("written", [_said("user", "works_at", "functional", "شركة زين")])),
+        (_attached("خل هذا الملف عندك.", "خطاب.pdf", "application/pdf",
+                   "أشتغل في شركة الاتصالات وساكن في الدمام."),
+         ("written", [_said("user", "works_at", "functional", "شركة الاتصالات")]))],
+     "current": [_now("user", "زين", "user")],
+     "not_current": [_now("user", "شركة الاتصالات"), _now("user", "الدمام", "user")]},
+    {"id": "quoted-mixed-fix", "category": "quoted", "lang": "mixed", "turns": [
+        ("My name is Omar.", ("written", [_said("user", "name_is", "functional", "Omar")])),
+        ("Fix the grammar: اسمي سالم and I work at Gulf Bank.",
+         ("written", [_said("user", "works_at", "functional", "Gulf Bank")]))],
+     "current": [_now("user", "Omar", "user")],
+     "not_current": [_now("user", "سالم"), _now("user", "Gulf Bank", "user")]},
+    {"id": "quoted-en-reported", "category": "quoted", "lang": "en", "turns": [
+        ("I live in Paris.", ("written", [_said("user", "lives_in", "functional", "Paris")])),
+        ("My sister said: I live in Lyon now.",
+         ("written", [_said("sister", "lives_in", "functional", "Lyon")]))],
+     "current": [_now("user", "Paris", "user")], "not_current": [_now("user", "Lyon")]},
 ]
 
 #: The write scenarios' version.
-WRITES_VERSION = 1
+WRITES_VERSION = 2
 
 
 def build_writes() -> dict[str, Any]:

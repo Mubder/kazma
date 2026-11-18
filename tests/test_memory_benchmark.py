@@ -601,7 +601,7 @@ def test_every_write_category_is_asked_in_english_and_arabic():
     langs: dict[str, set[str]] = {}
     for scenario in data["scenarios"]:
         langs.setdefault(scenario["category"], set()).add(scenario["lang"])
-    assert set(langs) == {"update", "kept_as_said", "short", "someone_else"}
+    assert set(langs) == {"update", "kept_as_said", "short", "someone_else", "quoted"}
     assert all({"en", "ar"} <= found for found in langs.values()), langs
 
 

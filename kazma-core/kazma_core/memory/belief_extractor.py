@@ -25,6 +25,8 @@ import re
 import sqlite3
 from typing import Any
 
+from kazma_core.memory.own_words import own_words
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -336,7 +338,10 @@ def extract_beliefs_heuristic(user_text: str) -> list[dict[str, Any]]:
     kept nothing). Returns beliefs typed as 'functional' for
     name/location/employer/favorite, 'set' for preferences and allergies.
     """
-    text = (user_text or "").strip()
+    # The user's own words only: never an attached document, a quote, someone
+    # else's words or a text the user asked Kazma to translate or fix
+    # ("Translate to French: My name is Pierre" is not the user's name).
+    text = own_words(user_text)
     if not text:
         return []
     beliefs: list[dict[str, Any]] = []
@@ -353,7 +358,8 @@ def extract_beliefs_heuristic(user_text: str) -> list[dict[str, Any]]:
         # "I work in X" names a place or a field -- too ambiguous to store.
         (re.compile(r"\b[Ii] work (?:at|for)\s+([A-Z][a-zA-Z0-9&]+(?:\s+[A-Z][a-zA-Z0-9&]+){0,2})(?:\s+(?:now|too|also|currently)\b|[.,!]|\s+and\s|\s+[Ii]\s|\s+(?=[\u0621-\u064a])|$)"), "employer"),
         (re.compile(r"\b[Mm]y (?:favorite|favourite)\s+(\w+)\s+is\s+([a-z][a-zA-Z]+(?:\s+[a-z][a-zA-Z]+){0,2})", re.IGNORECASE), "favorite"),
-        (re.compile(r"\b[Ii] (?:prefer|like|love|use|need)\s+([a-z][a-zA-Z]+(?:\s+[a-z][a-zA-Z]+){0,2}"
+        # Not "need": "I need to finish this report" is no preference.
+        (re.compile(r"\b[Ii] (?:prefer|like|love|use)\s+([a-z][a-zA-Z]+(?:\s+[a-z][a-zA-Z]+){0,2}"
                     r"|[\u0621-\u064a\u0671-\u06d3]+(?:\s+[\u0621-\u064a\u0671-\u06d3]+){0,2})", re.IGNORECASE), "prefers"),
         (re.compile(r"\b[Ii](?:'m| am) allergic to\s+([a-z][a-zA-Z]+(?:\s+[a-z][a-zA-Z]+){0,2})", re.IGNORECASE), "allergy"),
     ]

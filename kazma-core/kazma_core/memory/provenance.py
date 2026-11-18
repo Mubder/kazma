@@ -34,6 +34,8 @@ are screened for injection first (:func:`screen_agent_text`).
 
 from __future__ import annotations
 
+from kazma_core.memory.own_words import own_words
+
 __all__ = [
     "AGENT_ASSERTED",
     "LLM_INFERRED",
@@ -100,10 +102,11 @@ def agent_write_source(text: str, latest_user_message: str | None) -> str:
     subject and predicate the model named it with (FA-228: the model names a
     fact in English, ``audit_2611_test_codeword``, so an Arabic "remember
     this" never held those words and the user's own fact was stored as the
-    model's)."""
+    model's). Both are judged on the user's own words (``memory.own_words``):
+    a value held only by an attached document or a quote is the agent's."""
     from kazma_core.memory.remember_request import is_remember_request
 
-    message = latest_user_message or ""
+    message = own_words(latest_user_message)
     if is_remember_request(message) and _holds(message, text):
         return USER_EXPLICIT
     return AGENT_ASSERTED

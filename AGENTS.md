@@ -2016,6 +2016,28 @@ four injected were noise.
   one as control; every unmarked trigger after a sentence about someone
   else; the old trigger list and the rule switched off as negative
   controls), and the write scenario `other-ar-sister-moved`.
+- **Only the user's own words are the user's statement** (2026-11, the
+  audit's F3, `memory/own_words.py`). `own_words` is the message without
+  data fences (an attached document's text: `build_user_content` puts it in
+  the user's message), "[Attached: ...]" lines, fenced code, "> " lines, a
+  quoted sentence in the first person, someone else's words after a colon
+  ("my sister said:", "قالت أختي:", to the end of that line), and the text an
+  instruction works on ("Translate to French:", "ترجم:", "Fix the grammar:",
+  to the end of the message). A verb that also means something else ("fix",
+  "correct", "صحح") is an instruction only when it names the text ("Fix the
+  grammar:"), so "Correct: my name is Ahmad" stays the user's own. Heads
+  are read in an 80-character window at the start of the message, a line or
+  a sentence: linear time. The quick pass (`extract_beliefs_heuristic`),
+  `is_remember_request` and `provenance.agent_write_source` read through
+  it; the turn keeps the whole message and the deep pass reads all of it at
+  an inference's trust. "Translate to French: My name is Pierre" stored the
+  user's name as Pierre at `user_stated`, and a document beside a "remember
+  this" could earn `user_explicit`. The quick pass no longer reads "I need
+  X" as a preference. Gate: `tests/test_memory_own_words.py` (one sentence
+  per quick-pass pattern, EN/AR, in twelve forms and a real
+  `build_user_content` attachment; the user's own corrections kept; the
+  quoted write scenarios pass and fail with the raw message; the raw message
+  as the negative control for the quick pass and the trust gate).
 - The heuristic reads "I work at/for X" as `works_at` (it shared a pattern
   with "I live in" and stored the employer as `lives_in`), and the local
   embedder remembers short texts (<= 256 characters, 4,096 of them): each

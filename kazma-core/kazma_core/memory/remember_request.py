@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import re
 
+from kazma_core.memory.own_words import own_words
+
 __all__ = ["is_remember_request"]
 
 #: English, as whole words (Memory audit M26: as substrings "Can you denote
@@ -53,7 +55,10 @@ _ARABIC_RE = re.compile(
 
 
 def is_remember_request(text: str | None) -> bool:
-    """True when *text* asks Kazma to remember something."""
+    """True when the user's own words in *text* ask Kazma to remember
+    something: never a "remember" inside an attached document, a quote or a
+    text the user asked Kazma to translate (``memory.own_words``)."""
+    text = own_words(text)
     if not text:
         return False
     lowered = " ".join(text.strip().lower().replace("\u2019", "'").split())

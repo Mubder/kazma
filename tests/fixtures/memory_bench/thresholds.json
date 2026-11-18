@@ -125,7 +125,7 @@
   "recordings": []
  },
  "writes": {
-  "version": 1,
+  "version": 2,
   "recording": {
    "sha256": "89c1b101b6ddbede2743d37b1ea2f2040f1ff1497cad515c2d035614f8f89157",
    "turns": 30,
@@ -139,14 +139,17 @@
    "kept_as_said.ar.passed": 1.0,
    "kept_as_said.en.passed": 0.0,
    "kept_as_said.mixed.passed": 0.0,
-   "overall.passed": 0.45,
+   "overall.passed": 0.6071,
+   "quoted.ar.passed": 1.0,
+   "quoted.en.passed": 1.0,
+   "quoted.mixed.passed": 1.0,
    "short.ar.passed": 0.5,
    "short.en.passed": 0.2,
    "someone_else.ar.passed": 1.0,
    "someone_else.en.passed": 1.0,
    "someone_else.mixed.passed": 1.0,
-   "update.ar.passed": 0.5,
-   "update.en.passed": 0.3333,
+   "update.ar.passed": 0.6667,
+   "update.en.passed": 0.5,
    "update.mixed.passed": 0.0
   },
   "failing": [
