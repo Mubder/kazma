@@ -132,6 +132,23 @@ def _flatten_swarm_task(task: Any) -> dict[str, Any]:
     }
 
 
+async def _reported(swarm_task: Any, step: Callable[[], Awaitable[Any]], *,
+                    tell: Callable[[str], Awaitable[Any]]) -> Any:
+    """Run *step*; a failure is logged and its safe message *tell*ed,
+    then raised again. The chat gets a safe message; the exception's text
+    (paths, hosts, internals) stays in the log (SW-S15). One handler for
+    the dispatch and the routing, which ran in one ``try`` until the
+    hand-over moved out of the request (S1-17 follow-up review)."""
+    try:
+        return await step()
+    except Exception as exc:
+        logger.exception("[Swarm] Task execution failed under auto-routing wrapper")
+        from kazma_core.exceptions import sanitize_error
+
+        await tell(f"Swarm task '{getattr(swarm_task, 'id', '')}' failed. {sanitize_error(exc)}")
+        raise
+
+
 async def _hand_over_result(deliver: Callable[[], Awaitable[None]], *, label: str, later: bool) -> None:
     """Run a finished task's hand-over (*deliver*) now, or -- *later*, once
     Spaces is enforced -- in a background task of its own, so the request
@@ -347,28 +364,29 @@ def register_tasks_routes(
         completion. *deliver_later*: the hand-over to the output target runs
         in the background (a foreground dispatch answers once the task is
         done, never after whose it is could be read -- S1-17 follow-up)."""
-        try:
-            # One path for every task type, broadcasts included: dispatch()
-            # admits, records RUNNING, tenant-stamps and finalizes (Swarm
-            # audit SW-S06: the broadcast route called engine.broadcast and
-            # skipped all four). ``is_broadcast`` is the task's own type.
-            result = await engine.dispatch(swarm_task)
-        except Exception as exc:
-            logger.exception("[Swarm] Task execution failed under auto-routing wrapper")
-            # The chat gets a safe message; the exception's text (paths,
-            # hosts, internals) stays in the log (SW-S15).
-            from kazma_core.exceptions import sanitize_error
-
-            error_msg = f"Swarm task '{getattr(swarm_task, 'id', '')}' failed. {sanitize_error(exc)}"
-            await _hand_over(swarm_task, lambda: _maybe_send_to_output_target_fallback(error_msg),
-                             later=deliver_later)
-            raise exc
+        # One path for every task type, broadcasts included: dispatch()
+        # admits, records RUNNING, tenant-stamps and finalizes (Swarm audit
+        # SW-S06: the broadcast route called engine.broadcast and skipped all
+        # four). ``is_broadcast`` is the task's own type. A failure's safe
+        # message is handed over like a result: to the owner's chat only.
+        result = await _reported(
+            swarm_task, lambda: engine.dispatch(swarm_task),
+            tell=lambda message: _hand_over(
+                swarm_task, lambda: _maybe_send_to_output_target_fallback(message), later=deliver_later),
+        )
         # The result goes to the output target -- the one route swarm
         # results take. The separate swarm-bot notifier (a fourth notifier
         # beside AGENTS §33's three, reporting a send Telegram refused as
         # sent) was removed (Swarm audit SW-S15). The target is the owner's
-        # chat: someone else's result stays in its space.
-        await _hand_over(swarm_task, lambda: _route_task_result(result), later=deliver_later)
+        # chat: someone else's result stays in its space. A routing that
+        # fails sends the failure's message instead (the hand-over has
+        # already found the task the owner's).
+        await _hand_over(
+            swarm_task,
+            lambda: _reported(swarm_task, lambda: _route_task_result(result),
+                              tell=_maybe_send_to_output_target_fallback),
+            later=deliver_later,
+        )
         return result
 
     async def _hand_over(swarm_task: Any, send: Callable[[], Awaitable[bool]], *, later: bool) -> None:

@@ -1094,6 +1094,60 @@ def test_a_foreground_dispatch_answers_while_its_result_is_held(matrix, monkeypa
     assert _foreground_dispatch_while_held(matrix, monkeypatch) == ["answered", "hand-over decided"]
 
 
+def _routing_breaks(monkeypatch) -> tuple[int, list[str]]:
+    """One account, a foreground dispatch whose result cannot be formatted:
+    the page's status and what the output target was told."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    import kazma_gateway.agent_handler as agent_handler
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from kazma_core.swarm import TaskResult, WorkerResult
+    from kazma_ui.services import SwarmService
+    from kazma_ui.swarm_panel import create_swarm_router, routes_tasks
+
+    told: list[str] = []
+
+    async def output_target(manager: Any, text: str, *, is_html: bool = False) -> bool:
+        told.append(text)
+        return True
+
+    def broken(*args: Any, **kwargs: Any) -> str:
+        raise RuntimeError("the result could not be formatted")
+
+    engine = MagicMock()
+    engine.get_worker.return_value = MagicMock()
+    engine.dispatch = AsyncMock(return_value=TaskResult(
+        task_id="t1", status="success", aggregated_output="done",
+        worker_results=[WorkerResult(worker="w1", task_id="t1", status="success", output="done")]))
+    monkeypatch.setattr(agent_handler, "_maybe_send_to_output_target", output_target)
+    monkeypatch.setattr(routes_tasks, "tg_quote", broken)
+    monkeypatch.setattr(SwarmService, "resolve_engine", lambda self, swarm_manager=None: engine)
+    app = FastAPI()
+    app.include_router(create_swarm_router(templates=None))
+    with TestClient(app, raise_server_exceptions=False) as client:
+        answer = client.post("/api/swarm/dispatch", json={"workers": ["w1"], "task": "t", "background": False})
+    return answer.status_code, told
+
+
+def test_a_result_that_cannot_be_routed_sends_the_failure_message(monkeypatch) -> None:
+    status, told = _routing_breaks(monkeypatch)
+    assert status == 500 and len(told) == 1 and "failed" in told[0], (status, told)
+
+
+def test_control_routing_outside_the_handler_tells_no_one(monkeypatch) -> None:
+    """The routing as the follow-up first moved it (74ddd48b7): out of the
+    try, an exception there sent no message."""
+    from kazma_ui.swarm_panel import routes_tasks
+
+    async def untold(swarm_task: Any, step: Any, *, tell: Any) -> Any:
+        return await step()
+
+    monkeypatch.setattr(routes_tasks, "_reported", untold)
+    status, told = _routing_breaks(monkeypatch)
+    assert status == 500 and told == []
+
+
 def test_control_a_hand_over_awaited_in_the_request_holds_the_page(matrix, monkeypatch) -> None:
     """The route as before: the page's answer waited for the hand-over."""
     from kazma_ui.swarm_panel import routes_tasks

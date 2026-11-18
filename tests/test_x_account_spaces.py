@@ -7,9 +7,10 @@ tenant (``x_api.ownership.x_config_key``), and a space is a tenant. Enforced:
 * the tenant X work is under is the bound space, and work bound to no space
   reads no X account -- it read the owner's;
 * the owner's environment and the legacy vault names (``x_api_key`` ...) are
-  the owner's space's only: a space's vault read falls back to a global row,
-  so a stray global copy would lend the owner's account to every space, and
-  ``X_BEARER_TOKEN`` would spend the owner's X API budget;
+  the owner's space's only: the legacy names are the same in every space and
+  the vault's read still falls back from a space to a global row, so a global
+  copy would lend the owner's account to every space (a space's own names
+  stay its own), and ``X_BEARER_TOKEN`` would spend the owner's X API budget;
 * background X work -- a booked post, a receipt, a projection repair, the
   legacy schedule, the mention poller -- runs in the whole scope of the space
   whose row it is (the space and the account its own work acts for, as every
@@ -255,6 +256,41 @@ def test_a_booked_post_of_no_space_is_held_and_never_sent(matrix, enforced, monk
     assert ran == [] and held == [("op1", "no-such-space")]
 
 
+def test_a_tenant_whose_work_did_not_run_is_said_again_after_it_ran(matrix, enforced, monkeypatch) -> None:
+    """Said once while it does not run, forgotten once it runs, at most
+    ``_SAID_NOT_RUN_MAX`` remembered (the review: the set only grew)."""
+    import kazma_core.x_api.publication_service as service
+    from kazma_core.spaces import identity
+
+    said: set[str] = set()
+    monkeypatch.setattr(service, "_SAID_NOT_RUN", said)
+    assert asyncio.run(service._work_scope("matrix-late")) == service._NO_SPACE
+    assert said == {"matrix-late"}
+    identity.create_space("Late", created_by=matrix.account_a, space_id="matrix-late")
+    assert callable(asyncio.run(service._work_scope("matrix-late")))
+    assert said == set()
+    monkeypatch.setattr(service, "_SAID_NOT_RUN_MAX", 2)
+    for tenant in ("gone-1", "gone-2", "gone-3"):
+        asyncio.run(service._work_scope(tenant))
+    assert len(said) <= 2
+
+
+def test_control_a_set_that_only_grows(matrix, enforced, monkeypatch) -> None:
+    import kazma_core.x_api.publication_service as service
+    from kazma_core.spaces import identity
+
+    class _NeverForgets(set):
+        def discard(self, item: Any) -> None:
+            return None
+
+    said = _NeverForgets()
+    monkeypatch.setattr(service, "_SAID_NOT_RUN", said)
+    asyncio.run(service._work_scope("matrix-late"))
+    identity.create_space("Late", created_by=matrix.account_a, space_id="matrix-late")
+    asyncio.run(service._work_scope("matrix-late"))
+    assert "matrix-late" in said
+
+
 async def _tenant_alone(tenant: str) -> Any:
     """The binding as before part b: the tenant alone."""
     from kazma_core.tenant_context import tenant_scope
@@ -449,11 +485,59 @@ def test_another_spaces_x_notice_stays_off_the_owners_channels(enforced, private
 
 
 def test_control_every_spaces_notice_reached_the_owners_channels(enforced, private, monkeypatch) -> None:
-    import kazma_core.x_api.notifications as notifications
+    import kazma_core.x_api.ownership as ownership
 
-    monkeypatch.setattr(notifications, "_kept_in_its_space", lambda tenant: False)
+    monkeypatch.setattr(ownership, "kept_in_its_space", lambda tenant: False)
     sent, _outcome = _notices_delivered(monkeypatch, (OWNER_SPACE_ID, Matrix.SPACE_A))
     assert len(sent) == 2
+
+
+def _schedule_notices(monkeypatch, tenant: str) -> list[str]:
+    """A booked post of the old schedule, of *tenant*, reports its outcome
+    twice -- once to the address its booking captured, once fanned out to
+    every chat app: what the owner's channels took."""
+    from types import SimpleNamespace
+
+    import kazma_core.swarm.bus as bus_mod
+    import kazma_core.tools.send_message as send_message
+    import kazma_core.x_api.scheduled_fire as scheduled_fire
+
+    sent: list[str] = []
+
+    async def send(target: str, text: str, **_kwargs: Any) -> str:
+        sent.append(f"{target}: {text}")
+        return f"sent:{target}"
+
+    class _Adapter:
+        async def send(self, message: Any) -> bool:
+            sent.append(f"bus: {message.content}")
+            return True
+
+    monkeypatch.setattr(send_message, "send_message", send)
+    monkeypatch.setattr(bus_mod, "get_message_bus", lambda: SimpleNamespace(adapter=_Adapter()))
+    post = SimpleNamespace(id="p1", tenant_id=tenant, text=f"words of {tenant}", delivery_target="telegram:777")
+    asyncio.run(scheduled_fire._notify_success(post, "123"))
+    post.delivery_target = ""
+    asyncio.run(scheduled_fire._notify_failure(post, "refused"))
+    return sent
+
+
+def test_another_spaces_scheduled_post_notice_stays_off_the_owners_channels(enforced, monkeypatch) -> None:
+    assert _schedule_notices(monkeypatch, Matrix.SPACE_A) == []
+    owners = _schedule_notices(monkeypatch, OWNER_SPACE_ID)
+    assert len(owners) == 2 and all(f"words of {OWNER_SPACE_ID}" in card for card in owners)
+
+
+def test_control_the_old_schedule_told_the_owner_another_spaces_words(enforced, monkeypatch) -> None:
+    import kazma_core.x_api.ownership as ownership
+
+    monkeypatch.setattr(ownership, "kept_in_its_space", lambda tenant: False)
+    leaked = _schedule_notices(monkeypatch, Matrix.SPACE_A)
+    assert len(leaked) == 2 and all(f"words of {Matrix.SPACE_A}" in card for card in leaked)
+
+
+def test_not_enforced_the_old_schedule_tells_as_before(monkeypatch) -> None:
+    assert len(_schedule_notices(monkeypatch, "someone")) == 2
 
 
 def test_not_enforced_every_notice_is_delivered_as_before(private, monkeypatch) -> None:
@@ -522,64 +606,95 @@ def test_control_a_callback_that_binds_no_space_keeps_it_in_the_wrong_space(matr
 
 
 # ── the source gate: the owner's environment is read in two places ───────
+#
+# Every product module of X -- under the X folders at any depth, or named
+# for X (the X pages' routes, the run supervisor's X adapter, ...) -- reads
+# the environment only where it keeps it the owner's space's; and no product
+# module at all reads an ``X_`` variable elsewhere.
+# ``kazma_ui/x_api.py`` read ``X_BEARER_TOKEN`` itself until part b (the
+# review: the gate read only the X folders' top-level files).
 
+_PACKAGES = ("kazma-core/kazma_core", "kazma-gateway/kazma_gateway", "kazma-ui/kazma_ui",
+             "kazma-skills/kazma_skills", "kazma-cli/kazma_cli", "kazma-tui/kazma_tui")
 _X_ROOTS = ("kazma-core/kazma_core/x_api", "kazma-skills/kazma_skills/native/x_publisher")
 #: Where X code may read the environment: the two readers that keep it the
 #: owner's space's, and Kazma's own switches (a ``KAZMA_`` name, or a
 #: variable the function names one).
 _ENV_READERS = {
-    "config.py::_load_credentials": "the OAuth 1.0a keys, the owner's space's only",
-    "auth_tokens.py::bearer_from_env": "X_BEARER_TOKEN, the owner's space's only",
-    "config.py::_env_flag": "Kazma's own switches (KAZMA_X_POST ...)",
-    "stance.py::_killed": "Kazma's own switches (KAZMA_X_REPLY ...)",
+    "kazma-core/kazma_core/x_api/config.py::_load_credentials": "the OAuth 1.0a keys, the owner's space's only",
+    "kazma-core/kazma_core/x_api/auth_tokens.py::bearer_from_env": "X_BEARER_TOKEN, the owner's space's only",
+    "kazma-core/kazma_core/x_api/config.py::_env_flag": "Kazma's own switches (KAZMA_X_POST ...)",
+    "kazma-core/kazma_core/x_api/stance.py::_killed": "Kazma's own switches (KAZMA_X_REPLY ...)",
 }
 
 
-def _env_reads(path: Path, source: str) -> list[str]:
-    """``file::function`` of every environment read whose name is not a
-    literal ``KAZMA_`` name."""
+def _env_reads(rel: str, source: str, *, x_module: bool) -> list[str]:
+    """``path::function`` of every environment read that is not Kazma's own
+    switch, in a module that touches X; anywhere, of an ``X_`` name."""
     import ast
 
     found: list[str] = []
 
     def walk(node: Any, where: str) -> None:
         for child in ast.iter_child_nodes(node):
-            here = f"{path.name}::{child.name}" if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) \
-                else where
+            here = f"{rel}::{child.name}" if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) else where
             text = ast.unparse(child) if isinstance(child, (ast.Call, ast.Subscript)) else ""
-            if text.startswith(("os.environ.get(", "os.getenv(", "os.environ[")):
+            if text.startswith(("os.environ.get(", "os.getenv(", "os.environ[", "environ.get(", "getenv(")):
                 arg = child.args[0] if isinstance(child, ast.Call) and child.args else getattr(child, "slice", None)
-                if not (isinstance(arg, ast.Constant) and str(arg.value).startswith("KAZMA_")):
+                name = str(arg.value) if isinstance(arg, ast.Constant) else None
+                if name is not None and name.startswith("X_"):
+                    found.append(here)
+                elif x_module and not (name or "").startswith("KAZMA_"):
                     found.append(here)
             walk(child, here)
 
-    walk(ast.parse(source), f"{path.name}::<module>")
+    walk(ast.parse(source), f"{rel}::<module>")
     return found
 
 
-def _env_findings(extra: dict[str, str] | None = None) -> list[str]:
+def _touches_x(rel: str, source: str) -> bool:
+    """X code: under the X folders at any depth, or a module named for X
+    (``kazma_ui/x_api.py``, ``x_reply_api.py``, ``runs/adapters/x_posts.py``)."""
+    return rel.startswith(_X_ROOTS) or rel.rsplit("/", 1)[-1].startswith("x_")
+
+
+def _product_sources() -> dict[str, str]:
     root = Path(__file__).resolve().parents[1]
+    return {str(p.relative_to(root)).replace("\\", "/"): p.read_text(encoding="utf-8")
+            for package in _PACKAGES for p in sorted((root / package).rglob("*.py"))}
+
+
+def _all_env_reads(sources: dict[str, str]) -> list[str]:
     reads: list[str] = []
-    for folder in _X_ROOTS:
-        for path in sorted((root / folder).glob("*.py")):
-            reads += _env_reads(path, path.read_text(encoding="utf-8"))
-    for name, source in (extra or {}).items():
-        reads += _env_reads(Path(name), source)
-    return sorted({where for where in reads if where.split("::")[0] + "::" + where.split("::")[1]
-                   not in _ENV_READERS})
+    for rel, source in sources.items():
+        reads += _env_reads(rel, source, x_module=_touches_x(rel, source))
+    return reads
+
+
+def _env_findings(extra: dict[str, str] | None = None) -> list[str]:
+    sources = _product_sources()
+    sources.update(extra or {})
+    return sorted({where for where in _all_env_reads(sources) if where not in _ENV_READERS})
 
 
 def test_x_code_reads_the_owners_environment_only_where_it_keeps_it_the_owners() -> None:
     assert _env_findings() == []
-    assert set(_ENV_READERS) <= {w for f in _X_ROOTS
-                                  for p in (Path(__file__).resolve().parents[1] / f).glob("*.py")
-                                  for w in _env_reads(p, p.read_text(encoding="utf-8"))}, \
+    assert set(_ENV_READERS) <= set(_all_env_reads(_product_sources())), \
         "a declared reader no longer reads the environment"
+
+
+def test_the_gate_reads_every_module_that_touches_x() -> None:
+    touching = {rel for rel, source in _product_sources().items() if _touches_x(rel, source)}
+    assert {"kazma-ui/kazma_ui/x_api.py", "kazma-ui/kazma_ui/x_reply_api.py",
+            "kazma-core/kazma_core/runs/adapters/x_posts.py"} <= touching, sorted(touching)[:20]
 
 
 def test_control_a_planted_environment_read_fails_the_gate() -> None:
     planted = "import os\ndef read_key():\n    return os.environ.get('X_API_KEY')\n"
-    assert _env_findings({"planted.py": planted}) == ["planted.py::read_key"]
+    elsewhere = "import os\ndef read_bearer():\n    return os.getenv('X_BEARER_TOKEN')\n"
+    found = _env_findings({"kazma-ui/kazma_ui/x_api.py": planted,
+                           "kazma-core/kazma_core/not_x.py": elsewhere})
+    assert found == ["kazma-core/kazma_core/not_x.py::read_bearer", "kazma-ui/kazma_ui/x_api.py::read_key"]
 
 
 # ── the matrix cases see each guard taken out ────────────────────────────

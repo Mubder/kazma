@@ -12818,7 +12818,9 @@ product can turn it on, so an install with one account behaves as before.
     answers once its task is done and hands the result over in the
     background (`routes_tasks._hand_over_result`, S1-17 follow-up: the
     page's request hung through an outage); not enforced, the hand-over
-    stays in the request, as before.
+    stays in the request, as before. A failure of the dispatch or of the
+    result's routing sends its safe message either way
+    (`routes_tasks._reported`, one handler for both).
   - **The swarm's writes stay the admin's in every mode** (dispatch, a
     task's actions, an approval's decision) until feature grants give the
     swarm to others (S2-11); the install's swarm, read -- workers' totals and
@@ -12921,8 +12923,11 @@ product can turn it on, so an install with one account behaves as before.
     account (`NoSpaceBound`) -- it read the owner's.
   - **The owner's environment and legacy names are the owner's space's**:
     the OAuth 1.0a keys from the environment, the legacy vault names
-    (`x_api_key` ...; a space's vault read falls back to a global row, so a
-    stray global copy lent the owner's account to every space) and
+    (`x_api_key` ...: the same names in every space, and the vault's read
+    still falls back from a space to a global row, for any name -- so a
+    global copy of one answered every space; read now for the owner's space
+    only. A space's own names, `tenant.<space>.connectors.x.*`, are its
+    alone: a global row under one could only come from its own write) and
     `X_BEARER_TOKEN` (`auth_tokens.bearer_from_env`: another space spent the
     owner's X API budget). Source gate: no other X code reads the
     environment but Kazma's own switches.
@@ -12944,8 +12949,12 @@ product can turn it on, so an install with one account behaves as before.
     refused for anyone in two spaces), and `x_draft_posts` saves under the
     X account's space.
   - **Another space's X notice stays off the owner's channels** (O1,
-    `notifications._kept_in_its_space`: held undelivered,
-    `KEPT_IN_ITS_SPACE`; delivering it to its space's people is S2-05's).
+    `ownership.kept_in_its_space`, the one rule): a health or publication
+    notice is held undelivered (`KEPT_IN_ITS_SPACE`), and the old
+    schedule's outcome notice -- carrying the post's text -- goes neither to
+    the address its booking captured nor to the chat apps
+    (`scheduled_fire._deliver`). Delivering it to its space's people is
+    S2-05's.
   - Gates: `tests/_x_space_cases.py` (every X route, the X page, the
     Scheduled page's X booking and the 13 X tools: two spaces each with
     their own X account and its rows; X and the X model stood in for, every

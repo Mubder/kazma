@@ -421,6 +421,44 @@ async def test_a_mailbox_from_before_spaces_is_the_owners(matrix, enforced, tmp_
     assert rows == [(OWNER_SPACE_ID, "old-1")] and keyed == {"tenant_id", "id"} and seeded
 
 
+def _made_ready(tmp_path, monkeypatch) -> list[str]:
+    """Four practice mailboxes opened on one file, three of one space: whose
+    schema step ran after the first."""
+    from kazma_skills.native.email_manager.backends import sandbox
+
+    db = tmp_path / "sandbox_emails.db"
+    sandbox.SandboxBackend(db_path=db, space=OWNER_SPACE_ID)
+    ran: list[str] = []
+    real = sandbox.SandboxBackend._init_db
+
+    def counted(self: Any) -> None:
+        ran.append(self.space)
+        real(self)
+
+    monkeypatch.setattr(sandbox.SandboxBackend, "_init_db", counted)
+    for _ in range(3):
+        sandbox.SandboxBackend(db_path=db, space=OWNER_SPACE_ID)
+    sandbox.SandboxBackend(db_path=db, space="matrix-another")
+    return ran
+
+
+def test_the_practice_mailbox_is_made_ready_once_per_process(tmp_path, monkeypatch) -> None:
+    """The router makes a backend for every call: its write transaction ran
+    every time (the S1-17 follow-up review)."""
+    assert _made_ready(tmp_path, monkeypatch) == ["matrix-another"]
+
+
+def test_control_a_mailbox_made_ready_at_every_construction(tmp_path, monkeypatch) -> None:
+    from kazma_skills.native.email_manager.backends import sandbox
+
+    class _Forgets(set):
+        def add(self, item: Any) -> None:
+            return None
+
+    monkeypatch.setattr(sandbox, "_READY", _Forgets())
+    assert _made_ready(tmp_path, monkeypatch) == [OWNER_SPACE_ID] * 3 + ["matrix-another"]
+
+
 def test_one_account_reads_the_one_mailbox_as_before(tmp_path) -> None:
     """Not enforced: whatever tenant is bound, the owner's mailbox."""
     from kazma_core.tenant_context import tenant_scope

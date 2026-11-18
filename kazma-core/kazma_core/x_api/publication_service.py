@@ -722,8 +722,10 @@ async def fire_legacy_schedule(post: Any, cfg: XConfig) -> tuple[bool, dict[str,
     return False, {"outcome": "not_sent", "error": "Legacy account binding unavailable; verify the connected account and review this booking."}
 
 
-#: Tenants whose X work does not run, each said once.
+#: Tenants whose X work does not run, each said once until its work runs
+#: again; at most :data:`_SAID_NOT_RUN_MAX` (then said again: a log line).
 _SAID_NOT_RUN: set[str] = set()
+_SAID_NOT_RUN_MAX = 256
 
 #: ``_work_scope``'s answer when whose work it is cannot be read for now.
 _WAIT = object()
@@ -744,7 +746,7 @@ async def _work_scope(tenant: str) -> Any:
     from kazma_core.x_api.ownership import identity_failure_passes, x_work_scope
 
     try:
-        return await asyncio.to_thread(x_work_scope, tenant)
+        scope = await asyncio.to_thread(x_work_scope, tenant)
     except NoSpaceBound:
         why = _NO_SPACE
     except IdentityUnavailable as exc:
@@ -753,7 +755,12 @@ async def _work_scope(tenant: str) -> Any:
                         tenant, type(exc).__name__)
             return _WAIT
         why = _UNREADABLE
+    else:
+        _SAID_NOT_RUN.discard(tenant)  # it runs: said again if it stops again
+        return scope
     if tenant not in _SAID_NOT_RUN:
+        if len(_SAID_NOT_RUN) >= _SAID_NOT_RUN_MAX:
+            _SAID_NOT_RUN.clear()
         _SAID_NOT_RUN.add(tenant)
         logger.warning("[x-publication] X work of %r does not run: %s", tenant, why)
     return why

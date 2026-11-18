@@ -65,6 +65,17 @@ def x_work_scope(tenant: str) -> Callable[[], AbstractContextManager[object]]:
     return functools.partial(bind_scope, *found)
 
 
+def kept_in_its_space(tenant: str) -> bool:
+    """Whether an X notice of *tenant* -- a booked post's outcome, a health
+    notice -- stays off the owner's channels (O1, Spaces S1-17 part b): once
+    Spaces is enforced, every space's but the owner's. Until people link
+    their own chat apps (stage 3) every ops channel, and every address a
+    booking captured, is the owner's. No I/O."""
+    from kazma_core.spaces.scope import OWNER_SPACE_ID, spaces_enforced
+
+    return spaces_enforced() and (str(tenant or "") or OWNER_SPACE_ID) != OWNER_SPACE_ID
+
+
 def identity_failure_passes(exc: BaseException) -> bool:
     """Whether an identity store that could not say whose X work it is
     (``IdentityUnavailable``) will answer again by itself: the database away

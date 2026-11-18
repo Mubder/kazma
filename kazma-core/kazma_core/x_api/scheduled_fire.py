@@ -257,7 +257,17 @@ async def _deliver(post: ScheduledXPost, text: str) -> None:
     (captured at booking); otherwise fan out through the SwarmMessageBus
     to every configured platform — the same route the lifecycle notifier
     uses (§17A). A post booked from a context with no target used to fire
-    completely silently, success AND failure (2026-09-03)."""
+    completely silently, success AND failure (2026-09-03).
+
+    Another space's notice stays off the owner's channels (O1, Spaces S1-17):
+    before people link their own chat apps (stage 3), the address a booking
+    captured and every chat app are the owner's -- and the notice carries the
+    post's text. Delivering it to its space's people is S2-05's."""
+    from kazma_core.x_api.ownership import kept_in_its_space
+
+    if kept_in_its_space(post.tenant_id):
+        logger.info("[x-schedule] post %s: its notice stays in its space (not the owner's channels)", post.id)
+        return
     target = post.delivery_target or ""
     if target and ":" in target:
         try:

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 import uuid
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime
@@ -76,6 +77,13 @@ def _mailbox_space() -> str:
     return connected_space()
 
 
+#: The mailboxes this process has made ready, by file and space: the schema
+#: step (a write transaction) runs once each, not at every construction --
+#: the router makes a backend for every call.
+_READY: set[tuple[str, str]] = set()
+_READY_LOCK = threading.Lock()
+
+
 class SandboxBackend:
     name = "sandbox"
 
@@ -83,7 +91,13 @@ class SandboxBackend:
         self.space = space if space is not None else _mailbox_space()
         self.db_path = Path(db_path) if db_path else _default_db_path()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        ready = (str(self.db_path.resolve()), self.space)
+        with _READY_LOCK:
+            if ready in _READY:
+                return
         self._init_db()
+        with _READY_LOCK:
+            _READY.add(ready)
 
     def _connect(self) -> AbstractContextManager[sqlite3.Connection]:
         """One short-lived connection that commits AND closes on exit."""

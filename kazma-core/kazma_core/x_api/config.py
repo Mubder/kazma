@@ -143,10 +143,12 @@ def _load_credentials() -> XCredentials:
             if isinstance(got, str) and got.strip() and not got.startswith("vault://"):
                 values[i] = got.strip()
     # The legacy vault names (x_api_key ...) are the owner's, like the
-    # environment: once Spaces is enforced another space never reads them,
-    # and a vault read under a space falls back to a global row of the same
-    # name -- a stray global copy would lend it the owner's account (S1-17
-    # part b). A space's own keys are its x_config_key settings.
+    # environment: once Spaces is enforced another space never reads them.
+    # They are the same names in every space, and the vault's read still
+    # falls back from a space to a global row (for any name), so a global
+    # copy would lend the owner's account (S1-17 part b). A space's own keys
+    # are its x_config_key settings: a global row under one of those names
+    # could only come from that space's own write.
     if not all(values) and (owners or not spaces_enforced()):
         for i, name in enumerate(_VAULT_NAMES):
             if values[i]:

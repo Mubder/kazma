@@ -471,6 +471,12 @@ class Matrix:
 
     def __exit__(self, *_exc: object) -> None:
         get_config_store().delete(identity.REGISTRY_KEY)
+        # Its people made the install multi-user, and the vault caches that
+        # (sticky for the process: its default rung stays closed). A test
+        # after this one sees an install of one again.
+        from kazma_core.security.vault import reset_posture_cache
+
+        reset_posture_cache()
 
     @staticmethod
     def _person(name: str) -> dict[str, Any]:

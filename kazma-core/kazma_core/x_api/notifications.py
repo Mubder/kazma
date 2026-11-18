@@ -79,16 +79,6 @@ def finish(conn: sqlite3.Connection, row: dict[str, Any], *, owner: str, deliver
                  (now if delivered else None, now + delay, why, row["id"], owner))
 
 
-def _kept_in_its_space(tenant: str) -> bool:
-    """Whether a notice of *tenant* stays off the owner's channels: once
-    Spaces is enforced, every space's but the owner's (O1, Spaces S1-17
-    part b). Until people link their own chat apps (stage 3) every ops
-    channel is the owner's. No I/O."""
-    from kazma_core.spaces.scope import OWNER_SPACE_ID, spaces_enforced
-
-    return spaces_enforced() and (str(tenant or "") or OWNER_SPACE_ID) != OWNER_SPACE_ID
-
-
 async def _drain_store(store: Any, *, limit: int = 20) -> int:
     """Offload database work and acknowledge actual delivery, not dispatch intent."""
     from kazma_core.observability.ops_alerts import deliver_acknowledged
@@ -104,7 +94,9 @@ async def _drain_store(store: Any, *, limit: int = 20) -> int:
         if not current:
             await asyncio.to_thread(store.finish_notification, row, owner=owner, delivered=False, superseded=True)
             continue
-        if _kept_in_its_space(row["tenant_id"]):
+        from kazma_core.x_api.ownership import kept_in_its_space
+
+        if kept_in_its_space(row["tenant_id"]):
             await asyncio.to_thread(store.finish_notification, row, owner=owner, delivered=False, kept=True)
             continue
         with tenant_scope(row["tenant_id"]):
