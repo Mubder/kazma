@@ -33,6 +33,8 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from typing import Any
 
+from kazma_core.spaces.scope import OWNER_SPACE_ID
+
 __all__ = [
     "ArtifactStore",
     "get_artifact_store",
@@ -44,6 +46,18 @@ __all__ = [
 PublishEvidence = Callable[[str, str], "tuple[str, float, str] | None"]
 
 logger = logging.getLogger(__name__)
+
+
+def _space(tenant_id: str | None) -> str:
+    """The space a draft or a note is kept in: the one the caller names, else
+    the one this work is bound to (``spaces.scope.require_space_id``: the
+    owner's while the install does not enforce Spaces, a refusal once it
+    does). A draft is never filed for "whoever" (Spaces S1-08)."""
+    if tenant_id:
+        return str(tenant_id)
+    from kazma_core.spaces.scope import require_space_id
+
+    return require_space_id()
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS agent_artifacts (
@@ -122,7 +136,7 @@ class ArtifactStore:
                     content_hash = excluded.content_hash
                 """,
                 (
-                    tenant_id or "default",
+                    _space(tenant_id),
                     thread_id or "_default",
                     str(key),
                     str(value),
@@ -142,7 +156,7 @@ class ArtifactStore:
         self._put(tenant_id, thread_id, f"scratchpad:{key[:80]}", value, "finding")
 
     def list_scratchpad(
-        self, thread_id: str, *, tenant_id: str = "default"
+        self, thread_id: str, *, tenant_id: str | None = None
     ) -> dict[str, str]:
         """Read-through for the working-memory anchor: key → value."""
         with self._connect() as conn:
@@ -153,7 +167,7 @@ class ArtifactStore:
                   AND kind = 'finding' AND key LIKE 'scratchpad:%'
                 ORDER BY updated_at ASC
                 """,
-                (tenant_id or "default", thread_id or "_default"),
+                (_space(tenant_id), thread_id or "_default"),
             ).fetchall()
         out: dict[str, str] = {}
         for k, v in rows:
@@ -254,7 +268,7 @@ class ArtifactStore:
         return payload
 
     def resolve_proposal(
-        self, ref: str, *, tenant_id: str = "default"
+        self, ref: str, *, tenant_id: str | None = None
     ) -> dict[str, Any] | None:
         """Resolve a proposal id, a single item id, or the id + '#N' form.
 
@@ -266,7 +280,7 @@ class ArtifactStore:
         if parsed is None:
             return None
         key, item_no = parsed
-        tenant = tenant_id or "default"
+        tenant = _space(tenant_id)
         with self._connect() as conn:
             row = conn.execute(
                 """
@@ -297,7 +311,7 @@ class ArtifactStore:
         }
 
     def stored_text_for(
-        self, ref: str, *, tenant_id: str = "default"
+        self, ref: str, *, tenant_id: str | None = None
     ) -> str | None:
         """Exact stored text when *ref* names exactly ONE draft, else None.
 
@@ -327,7 +341,7 @@ class ArtifactStore:
                 ORDER BY updated_at DESC
                 LIMIT ?
                 """,
-                (tenant_id or "default", *kinds, limit_rows),
+                (_space(tenant_id), *kinds, limit_rows),
             ).fetchall()
         out: list[tuple[dict[str, Any], str, str, float]] = []
         for value, kind, thread_id, updated_at in rows:
@@ -350,7 +364,7 @@ class ArtifactStore:
     def list_proposals(
         self,
         *,
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         limit: int = 50,
         include_posted: bool = False,
         only_discarded: bool = False,
@@ -442,7 +456,7 @@ class ArtifactStore:
     def list_proposal_sets(
         self,
         *,
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         include_used: bool = False,
         limit_sets: int = 50,
     ) -> list[dict[str, Any]]:
@@ -482,7 +496,7 @@ class ArtifactStore:
         return sets
 
     def proposal_set(
-        self, ref: str, *, tenant_id: str = "default"
+        self, ref: str, *, tenant_id: str | None = None
     ) -> dict[str, Any] | None:
         """One set shaped like :meth:`list_proposal_sets` entries, or None.
 
@@ -500,7 +514,7 @@ class ArtifactStore:
                 WHERE key = ? AND tenant_id = ?
                 ORDER BY updated_at DESC LIMIT 1
                 """,
-                (key, tenant_id or "default"),
+                (key, _space(tenant_id)),
             ).fetchone()
         if row is None:
             return None
@@ -531,7 +545,7 @@ class ArtifactStore:
         self,
         ref: str,
         *,
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         via: str = "",
         used_ref: str = "",
     ) -> int:
@@ -546,7 +560,7 @@ class ArtifactStore:
         if parsed is None:
             return 0
         key, item_no = parsed
-        tenant = tenant_id or "default"
+        tenant = _space(tenant_id)
         now = time.time()
         with self._lock, self._connect() as conn:
             # One writer at a time for the read-modify-write below: two
@@ -600,7 +614,7 @@ class ArtifactStore:
         self,
         ref: str,
         *,
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         restore: bool = False,
     ) -> dict[str, int]:
         """Retire the unused draft(s) *ref* names — or bring discarded ones back.
@@ -618,7 +632,7 @@ class ArtifactStore:
         if parsed is None:
             return {"changed": 0, "skipped_used": 0}
         key, item_no = parsed
-        tenant = tenant_id or "default"
+        tenant = _space(tenant_id)
         now = time.time()
         report = {"changed": 0, "skipped_used": 0}
         with self._lock, self._connect() as conn:
@@ -921,7 +935,7 @@ def _x_publish_evidence() -> PublishEvidence | None:
             hit = ledger.first_post_for(text)
             if hit:
                 return ("x_post", float(hit.get("created_at") or 0), str(hit.get("tweet_id") or ""))
-        slot = booked.get((tenant_id or "default", normalize_text(text)))
+        slot = booked.get((tenant_id or OWNER_SPACE_ID, normalize_text(text)))
         if slot:
             return ("x_schedule_post", slot[0], slot[1])
         return None

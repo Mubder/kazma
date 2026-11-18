@@ -286,6 +286,7 @@ async def rewind_thread(
     rec = recorder if recorder is not None else await asyncio.to_thread(process_recorder)
     audit = {"actor": actor, "surface": surface, "thread_id": thread_id, "snapshot_id": snapshot_id}
     async with _outcome("restore", audit):
+        await asyncio.to_thread(_in_this_space, thread_id)
         record = await _load(rec, thread_id, snapshot_id)
         if thread_busy(thread_id):
             raise RewindRefused("turn_running", "A turn is running in this chat. Restore it when it ends.")
@@ -362,6 +363,19 @@ def _projected_transcript(messages: list[Any]) -> list[dict[str, Any]]:
     return out
 
 
+def _in_this_space(thread_id: str, new_thread_id: str | None = None) -> None:
+    """Refuse a restore or a fork of a chat that belongs to another space, as
+    a chat that is not there; and record a fork's new thread in this space
+    before anything is written under it (Spaces S1-08). Blocking: the thread
+    record store."""
+    from kazma_core.spaces import threads
+
+    if threads.thread_refusal(thread_id):
+        raise RewindRefused("not_found", "That chat was not found.", status=404)
+    if new_thread_id:
+        threads.record_new_thread(new_thread_id)
+
+
 def _save_fork_chat(session_id: str, title: str, messages: list[dict[str, Any]], tenant_id: str | None = None) -> None:
     """The fork's chat row, so it shows in the sidebar (blocking: a chat-store write)."""
     from kazma_ui.session_manager import ChatSession, get_session_manager
@@ -414,9 +428,11 @@ async def fork_thread(
     audit = {"actor": actor, "surface": surface, "thread_id": thread_id, "snapshot_id": snapshot_id,
              "target_thread_id": new_id}
     async with _outcome("fork", audit):
+        await asyncio.to_thread(_in_this_space, thread_id)
         record = await _load(rec, thread_id, snapshot_id)
         if thread_busy(thread_id):
             raise RewindRefused("turn_running", "A turn is running in this chat. Fork it when it ends.")
+        await asyncio.to_thread(_in_this_space, thread_id, new_id)
         if owner:
             from kazma_core.sessions.directory import record_thread_owner
 

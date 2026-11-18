@@ -45,6 +45,7 @@ __all__ = [
     "NoSpaceBound",
     "Scope",
     "bind_scope",
+    "bound_asker",
     "current_scope",
     "install_work",
     "require_scope",
@@ -53,6 +54,7 @@ __all__ = [
     "reset_scope_only",
     "set_enforced",
     "set_scope",
+    "space_of_state",
     "set_scope_only",
     "spaces_enforced",
     "valid_account_id",
@@ -212,6 +214,34 @@ def current_scope() -> Scope | None:
     """The bound scope, or None. Never falls back; for code that must tell
     "bound" from "not bound"."""
     return _scope.get()
+
+
+def space_of_state(state: object) -> str:
+    """The space a step of a turn runs in, given the graph's state.
+
+    While the install does not enforce Spaces: the state's own ``tenant_id``,
+    else the owner's space, exactly as the graph read it before Spaces (a
+    receipt's identity is made from this value, so it must not move). Once
+    it does: the bound scope's space -- every graph run sits in
+    ``turn_segment_budget``, which binds it from the thread's record -- and,
+    for a step run outside one, the state's tenant or a refusal.
+    """
+    getter = getattr(state, "get", None)
+    tenant = str((getter("tenant_id") if getter else "") or "").strip()
+    if not _enforced:
+        return tenant or OWNER_SPACE_ID
+    scope = _scope.get()
+    if scope is not None:
+        return scope.space_id
+    return tenant or require_space_id()
+
+
+def bound_asker() -> str | None:
+    """The account this work is for, when a scope is bound; else None. For
+    a record that names who did something (a message's author): it is never
+    guessed, so work that bound no scope names nobody."""
+    scope = _scope.get()
+    return scope.asker if scope is not None else None
 
 
 # ── Asking ──────────────────────────────────────────────────────────────

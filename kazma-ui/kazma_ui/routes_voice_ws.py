@@ -100,9 +100,7 @@ async def serve_voice_websocket(
     single operator -- the secret, an admin session, this machine -- is
     admitted exactly as before.
     """
-    from kazma_core.tenant_context import tenant_scope
-    from kazma_core.tenant_isolation import principal_tenant_id
-
+    from kazma_ui import space_binding
     from kazma_ui.auth import principal_allows, websocket_principal
 
     # The session lookup is a store read (audit 2026-10-26 AUD-111).
@@ -117,7 +115,14 @@ async def serve_voice_websocket(
     if not principal_allows(principal, "/api/chat/stream", "POST"):
         await websocket.close(code=4403, reason="Forbidden for your role")
         return
-    with tenant_scope(principal_tenant_id(principal) or "default"):
+    # The space the socket is for, checked at the handshake like every
+    # request (Spaces S1-08).
+    try:
+        binding = await asyncio.to_thread(space_binding.space_for_socket, principal, websocket)
+    except space_binding.SpaceRefused as refused:
+        await websocket.close(code=4003, reason=refused.code)
+        return
+    with space_binding.bound_to(binding):
         await handle_voice_websocket(
             websocket, graph_getter=graph_getter, agent_getter=agent_getter
         )

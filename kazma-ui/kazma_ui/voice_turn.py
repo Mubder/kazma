@@ -213,7 +213,9 @@ async def run_voice_user_turn(
 
     # Persist the user line immediately (journal/sidebar truth).
     ts = datetime.now(UTC).isoformat()
-    session.messages.append({"role": "user", "content": user_text, "ts": ts})
+    from kazma_ui.reply_sink import authored
+
+    session.messages.append(authored({"role": "user", "content": user_text, "ts": ts}))
     try:
         get_session_manager().put(session)
     except Exception:

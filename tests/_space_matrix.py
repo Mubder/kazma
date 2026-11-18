@@ -119,7 +119,7 @@ CASES: dict[str, Case] = {}
 
 #: The modules that register cases, as import names (``tests._chat_space_cases``).
 #: An item adds its module here; :func:`load_cases` imports each.
-CASE_MODULES: tuple[str, ...] = ()
+CASE_MODULES: tuple[str, ...] = ("tests._chat_space_cases",)
 
 
 def case(target: str, item: str) -> Callable[[Callable[[Matrix], None]], Callable[[Matrix], None]]:
@@ -157,18 +157,8 @@ PENDING_ROUTE_RULES: tuple[tuple[Pattern, str], ...] = (
     # A chat's upload and a file shared into a chat are files of the space.
     ("/api/chat/upload$", "S1-19"),
     ("/api/chat/files", "S1-19"),
-    # ── S1-08: chats, checkpoints, Time Travel, drafts ────────────────────
-    ("/chat$", "S1-08"),
-    ("/api/chat", "S1-08"),
-    ("/ws/chat", "S1-08"),
-    ("/replay$", "S1-08"),
-    ("/api/replay", "S1-08"),
-    ("/api/sessions", "S1-08"),
-    # No item names speech or A2A. Speech is the words of a chat's turn and
-    # an A2A request runs one turn, so chat state is the closest item.
-    ("/api/voice", "S1-08"),
-    ("/ws/voice$", "S1-08"),
-    ("/api/a2a$", "S1-08"),
+    # (S1-08 -- chats, checkpoints, Time Travel, drafts, speech and A2A --
+    # wrote its cases: tests/_chat_space_cases.py.)
     # ── S1-09: memory ─────────────────────────────────────────────────────
     ("/memory$", "S1-09"),
     ("/api/memory", "S1-09"),
@@ -226,12 +216,8 @@ PENDING_ROUTE_RULES: tuple[tuple[Pattern, str], ...] = (
 
 #: The plan item, then the tools whose cases it will write.
 _PENDING_TOOLS_BY_ITEM: dict[str, tuple[str, ...]] = {
-    # Chat state: drafts, the task ledger, the scratchpad, the chat itself.
-    "S1-08": (
-        "save_proposal", "list_proposals", "discard_proposal",
-        "task_ledger_update", "update_scratchpad",
-        "export_session", "context_info",
-    ),
+    # (S1-08 -- drafts, the task ledger, the scratchpad, the chat itself --
+    # wrote its cases: tests/_chat_space_cases.py.)
     "S1-09": (
         "memory_search", "memory_store", "memory_admin",
         "memory_list_beliefs", "memory_list_entities", "memory_link_entities",

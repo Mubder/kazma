@@ -34,6 +34,8 @@ Everything here reads the identity store: call it off the event loop.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
@@ -41,6 +43,7 @@ from kazma_core.spaces import identity
 from kazma_core.spaces.scope import (
     OWNER_ACCOUNT_ID,
     OWNER_SPACE_ID,
+    bind_scope,
     spaces_enforced,
     valid_space_id,
 )
@@ -51,8 +54,10 @@ __all__ = [
     "Binding",
     "SpaceRefused",
     "account_of",
+    "bound_to",
     "named_space",
     "space_for_request",
+    "space_for_socket",
     "spaces_for_account",
 ]
 
@@ -129,6 +134,58 @@ def named_space(headers: Any, query_params: Any) -> str | None:
     serves a download, an image or an event stream."""
     raw = (headers.get(SPACE_HEADER) or "").strip() or (query_params.get(SPACE_QUERY) or "").strip()
     return raw or None
+
+
+def space_for_socket(principal: dict[str, Any] | None, websocket: Any) -> Binding:
+    """The space and asker of a WebSocket handshake, or :class:`SpaceRefused`.
+
+    A socket is a request for a space's data like any other (Spaces S1-08):
+    the page names its space in the address (``?space=``), membership is
+    checked at the handshake, and the socket then stays in that space. On an
+    install that does not enforce Spaces a socket that names none runs in the
+    sign-in's own tenant, as before. Blocking: the identity store.
+    """
+    from kazma_core.tenant_isolation import principal_tenant_id
+
+    legacy = principal_tenant_id(principal) or OWNER_SPACE_ID
+    named = named_space(websocket.headers, websocket.query_params)
+    try:
+        return space_for_request(principal, named, legacy_tenant=legacy, needs_space=True)
+    except identity.IdentityUnavailable:
+        if spaces_enforced() or (named is not None and named != legacy):
+            # Membership cannot be checked: never guessed.
+            raise SpaceRefused(
+                "identity_unavailable", 503, "Accounts cannot be read right now. Try again."
+            ) from None
+        logger.warning("[spaces] the identity store is unreadable; the socket runs with no asker bound")
+        return Binding(space_id=legacy, asker=None)
+
+
+@contextmanager
+def bound_to(binding: Binding) -> Iterator[None]:
+    """Run the block in *binding*'s space, as its asker when it has one."""
+    from kazma_core.tenant_context import tenant_scope
+
+    if binding.asker is not None and valid_space_id(binding.space_id):
+        with bind_scope(binding.space_id, binding.asker):
+            yield
+    else:
+        with tenant_scope(binding.space_id):
+            yield
+
+
+def other_authors(authors: Iterable[str], viewer: str | None) -> dict[str, str]:
+    """``account id -> name`` for the authors of a chat's messages who are
+    not *viewer*: what the page shows beside another member's message
+    (Spaces S1-08). Empty on an install that does not enforce Spaces, and
+    for a chat only the viewer wrote in, so one person's chat shows no
+    names. Reads the identity store: off the loop."""
+    wanted = {str(a) for a in authors if a and a != viewer}
+    if not wanted or not spaces_enforced():
+        return {}
+    names = {a["id"]: str(a.get("display_name") or a.get("name") or a["id"])
+             for a in identity.list_accounts()}
+    return {a: names.get(a, a) for a in wanted}
 
 
 def spaces_for_account(account_id: str) -> list[dict[str, Any]]:

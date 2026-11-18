@@ -895,7 +895,9 @@ _LOOP_STALL_HELPERS = frozenset({
     # The thread record (kazma_core/spaces/threads.py, S1-07) and the web's
     # space binding (kazma_ui/space_binding.py, S1-04/S1-06): a SQLite file
     # and the identity store.
-    "scope_for_turn", "record_of", "record_thread",
+    "scope_for_turn", "record_of", "record_thread", "thread_home",
+    "forget_thread", "thread_refusal", "require_thread",
+    "record_new_thread", "_in_this_space",
     "account_of", "space_for_request", "spaces_for_account",
     # PyJWT's key client fetches the issuer's JWKS over urllib, blocking: an
     # OIDC sign-in ran it in an async route (SonarCloud review, 2026-11-16).

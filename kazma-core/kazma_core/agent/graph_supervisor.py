@@ -23,6 +23,7 @@ from kazma_core.agent.graph_helpers import (
     is_unusable_assistant_content,
     sanitize_tool_chains,
 )
+from kazma_core.spaces.scope import space_of_state
 from kazma_core.agent.plan_fence import (
     AUTO_CONTINUE_PROMPT,
     PLAN_EXECUTE_CONTINUE,
@@ -918,7 +919,7 @@ async def supervisor_node(
         from kazma_core.agent.artifacts import get_artifact_store
 
         _pad_thread = str(state.get("thread_id") or "")
-        _pad_tenant = str(state.get("tenant_id") or "default")
+        _pad_tenant = space_of_state(state)
         # SQLite (and, on the first call, the store's schema + legacy repair)
         # off the loop: every SSE/WS stream waits on this node.
         _store_pad = await asyncio.to_thread(

@@ -4882,6 +4882,21 @@
     if (parts.length) metaEl.setAttribute('dir', 'auto');
   }
 
+  // Who wrote a message (Spaces). The server names an author only on an
+  // install with Spaces; the page shows the name for another member, and a
+  // message of the person looking keeps "You".
+  function _otherAuthorName(data, mine) {
+    var name = data && data.author_name ? String(data.author_name) : '';
+    return (name && String((data && data.author) || '') !== String(mine || '')) ? name : '';
+  }
+  function _memberAvatarHtml(name) {
+    return '<div class="message-avatar message-avatar-user message-avatar-member" translate="no" title="' +
+      escapeHtml(name) + '">' + escapeHtml(String(name).trim().charAt(0).toUpperCase()) + '</div>';
+  }
+  function _authorMetaHtml(name) {
+    return name ? '<bdi class="message-author" translate="no">' + escapeHtml(name) + '</bdi> \u00B7 ' : '';
+  }
+
   function appendMessage(role, content, attachmentName, ts, opts) {
     var wrapper = document.createElement('div');
     wrapper.className = 'message message-' + role;
@@ -4896,8 +4911,14 @@
     } catch (e) {
       iso = new Date().toISOString();
     }
+    // Another member's message carries their name (Spaces): it stands
+    // beside the message, and the avatar shows its first letter. A message
+    // of the person looking keeps "You".
+    var authorName = (role === 'user' && opts && opts.author_name) ? String(opts.author_name) : '';
     var avatarHtml = role === 'user'
-      ? '<div class="message-avatar message-avatar-user">' + escapeHtml(ti('you_avatar', 'You')) + '</div>'
+      ? (authorName
+          ? _memberAvatarHtml(authorName)
+          : '<div class="message-avatar message-avatar-user">' + escapeHtml(ti('you_avatar', 'You')) + '</div>')
       : '<div class="message-avatar message-avatar-agent" title="Kazma">' +
           '<img src="/static/img/kazma-icon.png" alt="Kazma" class="message-avatar-img" ' +
           'onerror="this.style.display=\'none\';this.parentNode.textContent=\'K\';" />' +
@@ -4920,6 +4941,7 @@
           (role === 'user' ? renderUserContentHtml(content) : KS.markdown(_scrubDsml(stripPlanFenceForDisplay(content)))) +
         '</div>' +
         '<div class="message-meta" data-ts="' + escapeHtml(iso) + '">' +
+          _authorMetaHtml(authorName) +
           (attachmentName ? '\uD83D\uDCCE ' + escapeHtml(attachmentName) + ' \u00B7 ' : '') +
           '<time datetime="' + escapeHtml(iso) + '">' + escapeHtml(when) + '</time>' +
         '</div>' +
@@ -7192,6 +7214,7 @@
                 : msg.activity,
               parts: msg.parts,
               model: msg.model || '',
+              author_name: msg.author_name || '',
               turn_id: msg.turn_id || '',
               usage: { tokens: msg.tokens, cost: _savedCost(msg).cost, cost_known: _savedCost(msg).known,
                        duration_ms: msg.duration_ms },
@@ -8887,7 +8910,15 @@
     var tid = String(data.turn_id || '');
     var TVo = _turnView();
     if (tid && TVo && TVo.elFor(tid)) return false; // that turn is already on screen
-    appendMessage('user', text);
+    // Another member's turn names its author; another tab of the person
+    // looking keeps "You" (the page's account is in <meta name="kazma-account">).
+    var mine = '';
+    try {
+      var accountMeta = document.querySelector('meta[name="kazma-account"]');
+      mine = accountMeta ? String(accountMeta.getAttribute('content') || '') : '';
+    } catch (e) { mine = ''; }
+    var theirName = _otherAuthorName(data, mine);
+    appendMessage('user', text, null, null, theirName ? { author_name: theirName } : null);
     scrollToBottom();
     currentMsgEl = null;
     _liveRenderEl = null;

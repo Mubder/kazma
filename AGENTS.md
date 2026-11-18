@@ -12385,6 +12385,54 @@ product can turn it on, so an install with one account behaves as before.
   `tests/test_sign_in_is_an_account.py`, `tests/test_web_request_space.py`,
   `tests/test_turn_scope_bound.py`, `tests/js/test_space_scope.js`, each
   with the old behaviour as its negative control.
+- **Chat state follows the space (S1-08, 2026-11-18).** A guard refuses
+  only where Spaces is enforced; a stamp (a row's space, a message's author)
+  is always written. Never refuse, or move a stored value, on an install
+  that does not enforce Spaces.
+  - **The thread's record decides for everything kept by thread**
+    (`spaces/threads.py`): `thread_home` is the record's space, and the
+    owner's for a thread from before Spaces (N19); `thread_refusal` and
+    `require_thread` refuse work bound to another space. Work that bound
+    nothing (a sweep, the start pass) acts for the thread and is not
+    refused. A new store or reader keyed by thread asks them.
+  - **Checkpoints** (`kazma_gateway/stores/checkpoint.py`, `_open`): once
+    enforced the saver is the THREAD's, whoever asks: a read of another
+    space's thread is "no checkpoints", a write raises
+    `ThreadInAnotherSpace`. On Postgres every space then uses the one
+    table, and a listing or a clear goes thread by thread
+    (`_filters_by_thread`). Not enforced: the bound tenant's saver, as
+    before.
+  - **Time Travel** steps are kept by id alone. Restore and fork ask
+    `thread_rewind._in_this_space`, and a fork's thread is recorded
+    (`threads.record_new_thread`) before anything is written under it. A
+    chat delete of an id the space's store does not hold deletes nothing
+    more (`_not_this_spaces_chat` in `sse_chat`). A deleted chat's record is
+    removed last, and only when nothing of the chat is left
+    (`threads.forget_thread`).
+  - **A step's space** is `scope.space_of_state(state)`: the state's own
+    tenant while Spaces is not enforced (a receipt's identity is hashed
+    from it, so it must not move), the bound scope's once it is. Drafts,
+    the scratchpad and receipts use it; a plan (`task_ledger.py`) is read
+    and made only through a thread of its own space.
+  - **Sockets** name their space like any request:
+    `space_binding.space_for_socket` checks membership at the handshake of
+    `/ws/chat/{session_id}` and `/ws/voice` (close 4003 with the refusal's
+    code) and `space_binding.bound_to` binds it. A live-voice room is its
+    space's (`routes_voice._livekit_room`: the owner's keeps its name), and
+    so is an A2A task or conversation (`a2a_api.py`).
+  - **Messages name their author.** `reply_sink.authored` stamps `author`
+    (the bound account) on a user's row; history and the `user_message`
+    frame add `author_name` for another member only where Spaces is
+    enforced (`space_binding.other_authors`, off the loop), and the page
+    shows it (`_otherAuthorName` in chat.js; the page's own account is
+    `<meta name="kazma-account">`).
+  - Gates: `tests/_chat_space_cases.py` (the matrix cases: the product's
+    routers behind the real tenant middleware), `tests/test_chat_state_spaces.py`
+    (each guard taken out must fail its case; the checkpoint store on one
+    shared table, "the shared table reads across" as the control, and on
+    real Postgres), `tests/js/test_message_author.js`,
+    `tests/e2e/test_two_tabs_two_spaces.py` (two tabs in two spaces, by the
+    sidebar, EN and AR).
 
 ## UI Conventions (Web)
 

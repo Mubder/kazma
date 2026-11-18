@@ -23,6 +23,8 @@ import aiosqlite
 from langchain_core.runnables import RunnableConfig
 from kazma_core.checkpoint_serde import kazma_checkpoint_serde
 from kazma_core.config_store import apply_sqlite_pragmas_async
+from kazma_core.spaces import threads as _threads
+from kazma_core.spaces.scope import OWNER_SPACE_ID, current_scope, spaces_enforced
 from kazma_core.tenant_context import get_current_tenant_id
 from langgraph.checkpoint.base import (
     BaseCheckpointSaver,
@@ -90,14 +92,66 @@ class CheckpointManager(BaseCheckpointSaver):
         self._shared_db_path: str | None = None
 
     async def _get_saver(self) -> AsyncSqliteSaver:
-        """Resolve the appropriate AsyncSqliteSaver for the current tenant.
+        """The saver of the space this work is bound to, as before Spaces:
+        the owner's file for the owner's space and for work that bound
+        nothing, else the space's own ``checkpoints_{space}.db``."""
+        return await self._saver_of(get_current_tenant_id() or OWNER_SPACE_ID)
 
-        If the tenant is "default" (or None), we use the default self._saver.
-        Otherwise, we dynamically load or create an AsyncSqliteSaver for
-        the tenant's own database checkpoints_{tenant_id}.db.
+    def _shared_table(self) -> bool:
+        """True on Postgres: one table holds every thread's checkpoints."""
+        return "Postgres" in type(self._saver).__name__
+
+    @staticmethod
+    def _asked_space() -> str | None:
+        """The space this work is bound to, or None when it bound nothing."""
+        scope = current_scope()
+        if scope is not None:
+            return scope.space_id
+        return (get_current_tenant_id() or "").strip() or None
+
+    @staticmethod
+    async def _home(thread_id: str) -> str:
+        """The space a thread belongs to (``spaces.threads.thread_home``),
+        from memory when the record is known, else read in a thread."""
+        known = _threads.known_space(thread_id)
+        if known is not None:
+            return known
+        return await asyncio.to_thread(_threads.thread_home, thread_id)
+
+    async def _open(self, thread_id: str | None, *, write: bool = False) -> Any | None:
+        """The saver *thread_id* is read or written in; None for a read this
+        work may not make (the thread is another space's: it reads as a
+        thread with no checkpoints). A refused write raises.
+
+        An install that does not enforce Spaces takes the bound tenant's
+        saver, exactly as before. One that does follows the THREAD (Spaces
+        S1-08): its checkpoints live in its own space, whoever asks, and a
+        request bound to another space is refused. On Postgres the table is
+        shared and keyed by thread only, so the thread's record is what keeps
+        two spaces apart; on SQLite each space also has its own file.
         """
-        tenant_id = get_current_tenant_id() or "default"
-        if tenant_id == "default":
+        if not spaces_enforced():
+            return await self._get_saver()
+        asked = self._asked_space()
+        if not thread_id:
+            # A listing or a clear names no thread: the bound space's saver,
+            # and the owner's for install work that bound nothing.
+            return await self._saver_of(asked or OWNER_SPACE_ID)
+        home = await self._home(str(thread_id))
+        if asked is not None and asked != home:
+            if write:
+                raise _threads.ThreadInAnotherSpace(
+                    "this chat belongs to another space: its state can only be changed there"
+                )
+            logger.warning("[Checkpoint] a read of thread %s was refused: it is another space's",
+                           str(thread_id)[:12])
+            return None
+        return await self._saver_of(home)
+
+    async def _saver_of(self, tenant_id: str) -> AsyncSqliteSaver:
+        """The saver of one space: the shared table on Postgres (once Spaces
+        is enforced), the owner's file, or the space's own file."""
+        if tenant_id == OWNER_SPACE_ID or (self._shared_table() and spaces_enforced()):
             return self._saver
 
         # Sanitize the tenant id for use as a FILENAME (audit M-G3): raw
@@ -187,7 +241,7 @@ class CheckpointManager(BaseCheckpointSaver):
         lock = self._get_lock(thread_id)
 
         async with lock:
-            saver = await self._get_saver()
+            saver = await self._open(self._thread_of(config), write=True)
             return await saver.aput(config, checkpoint, metadata, new_versions)
 
     async def aput_writes(
@@ -202,18 +256,24 @@ class CheckpointManager(BaseCheckpointSaver):
         lock = self._get_lock(thread_id)
 
         async with lock:
-            saver = await self._get_saver()
+            saver = await self._open(self._thread_of(config), write=True)
             await saver.aput_writes(config, writes, task_id, task_path)
+
+    @staticmethod
+    def _thread_of(config: Any) -> str | None:
+        """The thread a config names, or None (the lock's ``"default"`` is not one)."""
+        thread_id = ((config or {}).get("configurable") or {}).get("thread_id")
+        return str(thread_id) if thread_id else None
 
     async def aget(self, config: dict[str, Any]) -> Any:
         """Retrieve a checkpoint (read-only, no lock needed)."""
-        saver = await self._get_saver()
-        return await saver.aget(config)
+        saver = await self._open(self._thread_of(config))
+        return await saver.aget(config) if saver is not None else None
 
     async def aget_tuple(self, config: dict[str, Any]) -> Any:
         """Retrieve a checkpoint tuple."""
-        saver = await self._get_saver()
-        return await saver.aget_tuple(config)
+        saver = await self._open(self._thread_of(config))
+        return await saver.aget_tuple(config) if saver is not None else None
 
     async def alist(
         self,
@@ -228,17 +288,48 @@ class CheckpointManager(BaseCheckpointSaver):
         start-up pass that continues turns a restart cut off
         (``kazma_ui.turn_resume``) failed on every boot of the live server
         (2026-11-06), which hands it this manager, not the saver."""
-        saver = await self._get_saver()
+        named = self._thread_of(config)
+        saver = await self._open(named)
+        if saver is None:
+            return
+        # A listing over every thread of a shared table shows a bound space
+        # its own threads only.
+        only = self._asked_space() if (named is None and self._filters_by_thread()) else None
         async for item in saver.alist(config, filter=filter, before=before, limit=limit):
+            if only is not None:
+                listed = self._thread_of(getattr(item, "config", None))
+                if listed is None or await self._home(listed) != only:
+                    continue
             yield item
+
+    def _filters_by_thread(self) -> bool:
+        """True when one table holds several spaces' threads and Spaces is
+        enforced: a listing or a clear must then go thread by thread."""
+        return spaces_enforced() and self._shared_table()
 
     async def adelete_thread(self, thread_id: str) -> None:
         """Delete all checkpoints for a thread."""
         lock = self._get_lock(thread_id)
         async with lock:
-            saver = await self._get_saver()
+            saver = await self._open(str(thread_id) if thread_id else None, write=True)
             if hasattr(saver, "adelete_thread"):
                 await saver.adelete_thread(thread_id)
+
+    @staticmethod
+    async def _thread_ids(saver: Any) -> list[str]:
+        """Every thread that has a checkpoint in *saver*'s table."""
+        query = "SELECT DISTINCT thread_id FROM checkpoints"
+        conn = getattr(saver, "conn", None)
+        if conn is None:
+            return []
+        if "Postgres" in type(saver).__name__:
+            async with conn.connection() as held:  # type: ignore[union-attr]
+                async with held.cursor() as cur:  # type: ignore[union-attr]
+                    await cur.execute(query)
+                    return [str(r["thread_id"] if isinstance(r, dict) else r[0])
+                            for r in await cur.fetchall()]
+        cursor = await conn.execute(query)
+        return [str(row[0]) for row in await cursor.fetchall()]
 
     async def adelete_all_threads(self) -> int:
         """Delete every checkpoint thread. Returns how many threads were removed.
@@ -247,8 +338,17 @@ class CheckpointManager(BaseCheckpointSaver):
         A raw ``DELETE … ?`` against the Postgres pool is what made the
         dashboard clear-all route return 500 on a Postgres install.
         """
-        saver = await self._get_saver()
+        saver = await self._open(None, write=True)
         tables = ("checkpoint_writes", "checkpoint_blobs", "checkpoints")
+        if self._filters_by_thread():
+            # One table, several spaces: only the bound space's threads go.
+            from kazma_core.spaces.scope import require_space_id
+
+            only = require_space_id()
+            mine = [t for t in await self._thread_ids(saver) if t and await self._home(t) == only]
+            for thread_id in mine:
+                await saver.adelete_thread(thread_id)
+            return len(mine)
         if "Postgres" in type(saver).__name__:
             pool = getattr(saver, "conn", None)
             if pool is None:
@@ -288,8 +388,8 @@ class CheckpointManager(BaseCheckpointSaver):
     @property
     def conn(self) -> Any:
         """Expose the underlying connection."""
-        tenant_id = get_current_tenant_id() or "default"
-        if tenant_id == "default":
+        tenant_id = get_current_tenant_id() or OWNER_SPACE_ID
+        if tenant_id == OWNER_SPACE_ID:
             return self._saver.conn if hasattr(self._saver, "conn") else None
         saver = self._tenant_savers.get(tenant_id)
         return saver.conn if saver and hasattr(saver, "conn") else None
@@ -335,11 +435,15 @@ class CheckpointManager(BaseCheckpointSaver):
 
         Only the root graph's checkpoints count (``checkpoint_ns = ''``).
         """
-        saver = await self._get_saver()
+        saver = await self._open(None)
         saver_type = type(saver).__name__
 
         # ── Postgres backend ──────────────────────────────────────────
         if "Postgres" in saver_type:
+            if self._filters_by_thread() and (only := self._asked_space()) is not None:
+                # One table, several spaces: the bound space's threads only.
+                rows = await self._list_checkpoints_postgres(saver, limit * 5)
+                return [r for r in rows if await self._home(str(r.get("thread_id") or "")) == only][:limit]
             return await self._list_checkpoints_postgres(saver, limit)
 
         # ── SQLite backend (default) ──────────────────────────────────
@@ -350,9 +454,16 @@ class CheckpointManager(BaseCheckpointSaver):
                 saver_type,
             )
             return []
+        # One table, several spaces (never a SQLite install's own layout,
+        # where each space has its file; kept so the rule is one rule).
+        only = self._asked_space() if self._filters_by_thread() else None
         try:
-            cursor = await conn.execute(_NEWEST_PER_THREAD_SQLITE, (limit,))
+            cursor = await conn.execute(
+                _NEWEST_PER_THREAD_SQLITE, (limit * 5 if only is not None else limit,)
+            )
             rows = await cursor.fetchall()
+            if only is not None:
+                rows = [row for row in rows if await self._home(str(row[0])) == only][:limit]
             results: list[dict[str, Any]] = []
             for thread_id, checkpoint_id, steps in rows:
                 checkpoint: dict[str, Any] | None = None

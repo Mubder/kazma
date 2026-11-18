@@ -113,8 +113,8 @@ STRUCTURAL_BASELINE = {
     # ThreadInAnotherSpace, store_registry.space_rule / content_columns, and
     # route_scopes.compile_rules / deciding_rule / unclassed / sample_requests.
     # Lower it as each gains a caller.
-    "module_local_public_symbols": 524,
-    "patched_value_imports": 72,
+    "module_local_public_symbols": 523,
+    "patched_value_imports": 71,
     "sleep_then_assert": 51,
     "bare_module_attr_assignments": 0,
     "shared_temp_names": 0,

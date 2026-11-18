@@ -308,13 +308,13 @@ def register_external_tools(registry: Any) -> None:
 
             from kazma_core.agent.artifacts import get_artifact_store as _gas
             from kazma_core.safety.hitl import (
-                get_current_tenant_id as _tenant,
                 get_current_thread_id as _thread,
             )
 
             from kazma_core.safety.commitment.proposals import current_turn as _turn
+            from kazma_core.spaces.scope import require_space_id as _space
 
-            tenant, thread, turn = _tenant() or "default", _thread() or "", _turn()
+            tenant, thread, turn = _space(), _thread() or "", _turn()
             try:
                 payload = await asyncio.to_thread(
                     lambda: _gas().save_proposal(tenant, thread, kind, items, saved_turn=turn)
@@ -392,10 +392,10 @@ def register_external_tools(registry: Any) -> None:
                 describe_proposals,
                 get_artifact_store as _gas,
             )
-            from kazma_core.safety.hitl import get_current_tenant_id as _tenant
+            from kazma_core.spaces.scope import require_space_id as _space
             from kazma_core.safety.prompt_fence import fence_untrusted
 
-            tenant = _tenant() or "default"
+            tenant = _space()
             ref = str(proposal_id or "").strip()
             if ref:
                 one = await asyncio.to_thread(
@@ -456,12 +456,12 @@ def register_external_tools(registry: Any) -> None:
             import asyncio
 
             from kazma_core.agent.artifacts import get_artifact_store as _gas
-            from kazma_core.safety.hitl import get_current_tenant_id as _tenant
+            from kazma_core.spaces.scope import require_space_id as _space
 
             ref = str(proposal_id or "").strip()
             if not ref:
                 return "Error: proposal_id is required (a set id or one draft's item id)."
-            tenant = _tenant() or "default"
+            tenant = _space()
             report = await asyncio.to_thread(
                 lambda: _gas().discard_proposal(ref, tenant_id=tenant, restore=bool(restore))
             )
@@ -503,6 +503,7 @@ def register_external_tools(registry: Any) -> None:
     # model maintain goal/findings/steps deliberately (2026-08-27 design).
     try:
         from kazma_core.agent.task_ledger import get_ledger_store
+        from kazma_core.spaces.threads import ThreadInAnotherSpace
 
         async def task_ledger_update(
             goal: str = "",
@@ -536,7 +537,14 @@ def register_external_tools(registry: Any) -> None:
             if not tid:
                 return "Error: no active thread for the task ledger"
             store = get_ledger_store()
-            led = store.get_or_create(tid)
+            try:
+                led = store.get_or_create(tid)
+            except ThreadInAnotherSpace:
+                from kazma_core.agent.tool_refusal import RefusedBeforeEffect
+
+                raise RefusedBeforeEffect(
+                    "Error: this chat belongs to another space; its task ledger was not changed"
+                ) from None
             changed: list[str] = []
             if goal.strip():
                 led.goal = goal.strip()[:240]

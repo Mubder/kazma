@@ -1359,7 +1359,7 @@ def _resolve_proposal_backed_post(profile, tool_name, args, *, audit, thread_id,
         from kazma_core.agent.artifacts import get_artifact_store
 
         info = get_artifact_store().resolve_proposal(
-            ref, tenant_id=tenant_id or "default"
+            ref, tenant_id=tenant_id or None
         )
     except Exception as exc:
         logger.warning(
