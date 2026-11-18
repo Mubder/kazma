@@ -111,6 +111,41 @@ _ALWAYS_HITL_FALLBACK: frozenset[str] = frozenset({
 })
 
 
+
+def _asking_space() -> str:
+    """The space the asking work runs in, for the request's record (Spaces
+    S1-15): the bound scope's, else the bound tenant, else ``""``. A
+    ContextVar read: no I/O."""
+    from kazma_core.spaces.scope import current_scope
+    from kazma_core.tenant_context import get_current_tenant_id
+
+    bound = current_scope()
+    return bound.space_id if bound is not None else (get_current_tenant_id() or "")
+
+
+def _asking_account() -> str:
+    """The person the asking work runs as (Spaces S1-15 review), else ``""``."""
+    from kazma_core.spaces.scope import bound_asker
+
+    return bound_asker() or ""
+
+
+def _kept_in_its_space() -> bool:
+    """Whether this request stays off the install's chat apps: once Spaces is
+    enforced, a request that does not act for the owner (decision O1). The
+    chat apps' cards are the owner's until people link their own (stage 3),
+    and only the asker answers (N4): such a request waits in its own space,
+    answered there. An identity store that cannot say keeps it there too.
+    Blocking (the identity store)."""
+    from kazma_core.spaces.identity import IdentityUnavailable
+    from kazma_core.swarm.single_operator import for_the_owner
+
+    try:
+        return not for_the_owner(_asking_space(), _asking_account() or None)
+    except IdentityUnavailable:
+        logger.warning("[Safety] whose request this is cannot be read: it stays in its space")
+        return True
+
 class SafetyViolationError(Exception):
     """Raised when a tool call is blocked by the safety middleware."""
 
@@ -264,6 +299,19 @@ class SafetyMiddleware:
         self._blocked_count += 1
 
         from kazma_core.swarm.bus import NullBusAdapter, get_message_bus
+
+        if await asyncio.to_thread(_kept_in_its_space):
+            # Someone else's request (Spaces enforced): no card on the
+            # owner's chat apps or dashboard; it is answered in its space.
+            approved = await self._ask_the_bus(None, tool_name, tool_args, tid, task_id, worker_name,
+                                               timeout, card_notes=card_notes)
+            if approved:
+                self._approved_count += 1
+                logger.info("[Safety] Danger tool APPROVED in its space: %s (task=%s)", tool_name, task_id)
+            else:
+                self._rejected_count += 1
+                logger.warning("[Safety] Danger tool REJECTED in its space: %s (task=%s)", tool_name, task_id)
+            return approved
 
         bus = get_message_bus()
         # Fail-closed when no real adapter is wired (mirror check_sync).
@@ -476,6 +524,9 @@ class SafetyMiddleware:
           actor of a decision (SW-S15).
         * The card shows every argument name (SW-S03); a call whose arguments
           cannot be shown on a chat card is refused.
+        * With *bus* None no card is posted: the request is someone else's
+          than the owner's (Spaces enforced, :func:`_kept_in_its_space`) and
+          waits for its decision in its own space.
         """
         import asyncio as _aio
 
@@ -513,6 +564,7 @@ class SafetyMiddleware:
                     # built from the masked view: a text redactor cannot know
                     # a tool's own secret arguments (vault_store's value).
                     GateRow(gate_id=gate_id, thread_id=thread, tool=tool_name,
+                            tenant_id=_asking_space(),
                             mechanism="swarm_bus", args_json=tool_args or "",
                             message=(redacted_arguments_json(tool_name, tool_args or "") or "")[:500]),
                     ttl_seconds=timeout,
@@ -521,10 +573,11 @@ class SafetyMiddleware:
             logger.warning("[Safety] gate register failed for %s", tool_name, exc_info=True)
             gate_id = ""
         approval_id = gate_id or ("swarm-" + uuid.uuid4().hex)
-        platforms = len(getattr(bus.adapter, "adapters", None) or [bus.adapter])
+        platforms = 1 if bus is None else len(getattr(bus.adapter, "adapters", None) or [bus.adapter])
         await _aio.to_thread(
             shared_approvals.open_request, approval_id, tool=tool_name, args=tool_args,
-            deadline=time.time() + timeout, platforms=platforms,
+            deadline=time.time() + timeout, platforms=platforms, space=_asking_space(),
+            asker=_asking_account(),
         )
         row: dict[str, Any] = {"status": "cancelled"}
         # The card's notes, in the task's language (safety.card_notes).
@@ -538,15 +591,18 @@ class SafetyMiddleware:
         if len(_noted) > 500:
             _noted = _noted[:499] + "…\n"
         try:
-            await bus.request_approval(
-                worker_name=worker_name,
-                task_description=f"Tool: {tool_name}",
-                proposed_output=f"{card.text}\n{_noted}request: {approval_id}",
-                task_id=approval_id,
-                timeout=timeout,
-                # The whole call and the same decision on the Web dashboard.
-                web_link=web_link(approval_id),
-            )
+            if bus is None:
+                await shared_approvals.wait_for_outcome(approval_id)
+            else:
+                await bus.request_approval(
+                    worker_name=worker_name,
+                    task_description=f"Tool: {tool_name}",
+                    proposed_output=f"{card.text}\n{_noted}request: {approval_id}",
+                    task_id=approval_id,
+                    timeout=timeout,
+                    # The whole call and the same decision on the Web dashboard.
+                    web_link=web_link(approval_id),
+                )
         finally:
             # Read the outcome, record it, then close the request -- also when
             # this wait was cancelled (the task stopped while asking).

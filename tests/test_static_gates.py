@@ -1603,6 +1603,12 @@ _OFF_THE_LOOP_WHEN_ON_IT: dict[str, str] = {
         "tests/test_hitl_gate_swarm_pipeline.py::"
         "test_closing_a_checkpoint_on_the_loop_settles_its_gates_in_a_thread"
     ),
+    "kazma_core.swarm.shared_approvals:resolve_from_callback": (
+        "on a running loop it decides in a background to_thread task (whose request "
+        "it is, then the decision); only with no loop in the thread does it decide "
+        "inline -- tests/test_swarm_spaces.py::"
+        "test_a_chat_button_pressed_on_the_loop_reads_whose_request_off_it"
+    ),
 }
 
 

@@ -95,6 +95,10 @@ def _find_task(task_id: str) -> tuple[Any, Any]:
                 task = engine.get_task(task_id) or engine.get_active_task(task_id)
         except Exception:
             logger.debug("[research] engine task lookup failed", exc_info=True)
+    from kazma_core.swarm.single_operator import task_of_this_space
+
+    if task is not None and not task_of_this_space(task):
+        task = None  # another space's: as an unknown one (Spaces S1-16)
     return store, task
 
 
@@ -341,7 +345,9 @@ def create_research_router() -> APIRouter:
 
     @router.post("/api/research/sessions/{session_id}/resume", dependencies=[Depends(rate_limit("research", 10))])
     async def resume_research_session(session_id: str) -> JSONResponse:
-        from kazma_core.tools.research_session import start_deep_research, ResearchSessionBusyError
+        from kazma_core.tools.research_session import ResearchSessionBusyError, session_here, start_deep_research
+        if await asyncio.to_thread(session_here, session_id) is None:
+            return JSONResponse({'ok': False, 'error': 'not found'}, status_code=404)
         try:
             session = await start_deep_research('', resume_session_id=session_id)
             return JSONResponse({'ok': True, 'session': session.to_dict()})
@@ -386,7 +392,8 @@ def create_research_router() -> APIRouter:
     def archive_research_session(session_id: str) -> JSONResponse:
         """Soft-hide a session from the main Research list."""
         try:
-            from kazma_core.tools.research_session import archive_session, get_session
+            from kazma_core.tools.research_session import archive_session
+            from kazma_core.tools.research_session import session_here as get_session
 
             if get_session(session_id) is None:
                 return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
@@ -400,7 +407,8 @@ def create_research_router() -> APIRouter:
     def unarchive_research_session(session_id: str) -> JSONResponse:
         """Restore an archived session to the main Research list."""
         try:
-            from kazma_core.tools.research_session import archive_session, get_session
+            from kazma_core.tools.research_session import archive_session
+            from kazma_core.tools.research_session import session_here as get_session
 
             if get_session(session_id) is None:
                 return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
@@ -414,9 +422,10 @@ def create_research_router() -> APIRouter:
     def delete_research_session(session_id: str) -> JSONResponse:
         """Delete settled history; retain active cancellation for inspection."""
         try:
-            from kazma_core.tools.research_session import delete_session, ResearchSessionBusyError
+            from kazma_core.tools.research_session import ResearchSessionBusyError, delete_session, session_here
 
-            deleted = delete_session(session_id)
+            # Another space's session answers as an unknown one (S1-16).
+            deleted = session_here(session_id) is not None and delete_session(session_id)
             if not deleted:
                 return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
             return JSONResponse({"ok": True, "deleted": session_id})
@@ -431,7 +440,7 @@ def create_research_router() -> APIRouter:
     def get_research_session(session_id: str) -> JSONResponse:
         """Get one research session (status, log, report path)."""
         try:
-            from kazma_core.tools.research_session import get_session
+            from kazma_core.tools.research_session import session_here as get_session
 
             sess = get_session(session_id)
             if sess is None:
@@ -445,7 +454,8 @@ def create_research_router() -> APIRouter:
     def cancel_research_session(session_id: str) -> JSONResponse:
         """Cancel a running deep-research session (best-effort)."""
         try:
-            from kazma_core.tools.research_session import cancel_session, get_session, ResearchSessionBusyError
+            from kazma_core.tools.research_session import cancel_session, ResearchSessionBusyError
+            from kazma_core.tools.research_session import session_here as get_session
 
             if get_session(session_id) is None:
                 return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
@@ -472,7 +482,7 @@ def create_research_router() -> APIRouter:
         """
         fmt = str((body or {}).get("format") or "markdown").strip().lower()
         try:
-            from kazma_core.tools.research_session import get_session
+            from kazma_core.tools.research_session import session_here as get_session
 
             sess = await asyncio.to_thread(get_session, session_id)
         except Exception as exc:
@@ -514,7 +524,7 @@ def create_research_router() -> APIRouter:
             report_path = (path or "").strip()
             stored = False
             if session_id and not report_path:
-                from kazma_core.tools.research_session import get_session
+                from kazma_core.tools.research_session import session_here as get_session
 
                 sess = get_session(session_id)
                 if not sess:
@@ -549,10 +559,10 @@ def create_research_router() -> APIRouter:
         ``done`` / ``error``. Heartbeats every 15s while the run is live.
         """
         from kazma_core.tools.research_session import (
-            get_session,
             subscribe_progress,
             unsubscribe_progress,
         )
+        from kazma_core.tools.research_session import session_here as get_session
 
         sess = await asyncio.to_thread(get_session, session_id)
         if sess is None:
@@ -721,8 +731,8 @@ def create_research_router() -> APIRouter:
         b_id = body.get("b", "")
         if not a_id or not b_id:
             return JSONResponse({"error": "a and b task IDs required"}, status_code=400)
-        task_a = store.get_task(a_id)
-        task_b = store.get_task(b_id)
+        _store_a, task_a = _find_task(a_id)
+        _store_b, task_b = _find_task(b_id)
         if task_a is None or task_b is None:
             return JSONResponse({"error": "one or both tasks not found"}, status_code=404)
         if task_a.result is None or task_b.result is None:
@@ -837,7 +847,10 @@ def create_research_router() -> APIRouter:
             return JSONResponse({"error": "store unavailable"}, status_code=503)
         try:
             # Idempotent: an id already gone is the state the caller wanted.
-            store.delete_task(task_id)
+            # Another space's task answers the same, and is not touched.
+            _store, task = _find_task(task_id)
+            if task is not None:
+                store.delete_task(task_id)
             return JSONResponse({"ok": True, "deleted": task_id})
         except Exception as exc:
             logger.exception("[research] delete failed")

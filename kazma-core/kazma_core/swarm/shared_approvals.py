@@ -60,6 +60,8 @@ __all__ = [
     "resolve",
     "resolve_from_callback",
     "settle",
+    "wait_for_outcome",
+    "whose",
 ]
 
 logger = logging.getLogger(__name__)
@@ -155,6 +157,7 @@ def describe(approval_id: str) -> dict[str, Any] | None:
         digest = gate.args_digest or arguments_digest(args)
     return {
         "id": approval_id,
+        "space": str((row or {}).get("space") or (gate.tenant_id if gate else "") or ""),
         "tool": tool,
         "status": status,
         "arguments": redacted_arguments_json(tool, args),
@@ -165,6 +168,30 @@ def describe(approval_id: str) -> dict[str, Any] | None:
         "decided_on": str((row or {}).get("platform") or ""),
         "decided_at": (row or {}).get("decided_at") or (gate.settled_at if gate else None),
     }
+
+
+def whose(approval_id: str) -> tuple[str, str]:
+    """(the space that asked, the person it asked as) for a request: from its
+    open row, else the gate record's space and no person. Blocking."""
+    row = get(approval_id) or {}
+    if row.get("status") not in (None, "closed"):
+        return str(row.get("space") or ""), str(row.get("asker") or "")
+    gate = None
+    try:
+        from kazma_core.safety.hitl_gates import gate_for, gate_registry_enabled
+
+        if gate_registry_enabled():
+            gate = gate_for(approval_id)
+    except (sqlite3.Error, OSError):
+        logger.warning("[shared_approvals] could not read the gate record of %s", approval_id, exc_info=True)
+    return (str(gate.tenant_id or "") if gate is not None else ""), ""
+
+
+async def wait_for_outcome(approval_id: str) -> dict[str, Any]:
+    """Wait for the request's outcome with no card posted anywhere: the work
+    of someone other than the owner, answered in its own space (Spaces S1-15
+    review). The same wait every card's adapter makes (:func:`_wait_outcome`)."""
+    return await _wait_outcome(approval_id)
 
 
 def _transition(approval_id: str, mutate) -> tuple[dict[str, Any] | None, bool]:
@@ -207,9 +234,14 @@ def open_request(
     args: str | None,
     deadline: float,
     platforms: int = 1,
+    space: str = "",
+    asker: str = "",
 ) -> dict[str, Any]:
     """Open the row for a new request. An id is opened once: a row already
-    there (a reused id) raises, so no request ever inherits a decision."""
+    there (a reused id) raises, so no request ever inherits a decision.
+    *space* is the space the asking worker runs in and *asker* the person it
+    runs as (Spaces S1-15, always stamped): the Web page shows it only in
+    that space, and only that person answers it (decision N4)."""
     if not approval_id:
         raise ValueError("an approval request needs an id")
     row = {
@@ -219,6 +251,8 @@ def open_request(
         "opened_at": time.time(),
         "deadline_at": float(deadline),
         "platforms": max(1, int(platforms or 1)),
+        "space": str(space or ""),
+        "asker": str(asker or ""),
     }
     created = [False]
 
@@ -433,6 +467,13 @@ def _resolve_reported(approval_id: str, approved: bool, *, actor: str, platform:
     request stayed pending and timed out, and nothing said why). None when it
     could not be recorded."""
     try:
+        if platform != "web" and not _a_chat_button_may_decide(approval_id):
+            # The chat apps' cards are the owner's (stage 1): a button on
+            # one never answers someone else's request (decision N4).
+            logger.warning("[SwarmApproval] %s's %s on request %s (%s) refused: the request is not "
+                           "the owner's to answer", actor or "someone", "Approve" if approved else "Deny",
+                           approval_id, platform or "?")
+            return False
         return resolve(approval_id, approved, actor=actor, platform=platform)
     except Exception:
         logger.warning(
@@ -445,6 +486,19 @@ def _resolve_reported(approval_id: str, approved: bool, *, actor: str, platform:
 
         record_swarm_failure("approval_resolve")
         return None
+
+
+def _a_chat_button_may_decide(approval_id: str) -> bool:
+    """Whether a chat app's button may decide this request: always while
+    Spaces is not enforced; once it is, only a request that acts for the
+    owner, whose chat apps they are. Blocking."""
+    from kazma_core.spaces.scope import spaces_enforced
+    from kazma_core.swarm.single_operator import for_the_owner
+
+    if not spaces_enforced():
+        return True
+    space, asker = whose(approval_id)
+    return for_the_owner(space, asker or None)
 
 
 #: A swarm card's button data: the decision and the request's id.

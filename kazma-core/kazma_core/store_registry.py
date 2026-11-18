@@ -681,16 +681,20 @@ SPACE_RULES: dict[str, SpaceRule] = {
         today="apart"),
     "swarm_tasks.db": SpaceRule(
         "row",
-        why="the tenant is inside a task's metadata today, not a column",
+        why="the tenant is inside a task's metadata, not a column; once Spaces is enforced every read "
+            "filters by it (S1-15)",
         content={"swarm_tasks": ("prompt", "result", "context", "metadata")},
-        today="refuses"),
+        today="apart"),
     "pipeline_logs.db": SpaceRule(
-        "row", content={"pipeline_logs": ("message", "metadata", "raw_output")}, today="refuses"),
+        "row",
+        why="no tenant column; nothing reads it but its retention sweep (its query helpers have no "
+            "caller), so it shows no space anything",
+        content={"pipeline_logs": ("message", "metadata", "raw_output")}, today="whole"),
     "research_sessions.db": SpaceRule(
         "row",
         content={"research_sessions": (
             "topic", "message", "log_json", "report_path", "summary", "error", "meta_json")},
-        today="whole"),
+        today="apart"),
     # ── X ──────────────────────────────────────────────────────────────
     "x_posts.db": SpaceRule("row", content={"x_posts": ("text_preview",)}, today="apart"),
     "x_scheduled.db": SpaceRule("row", content={"x_scheduled_posts": ("text",)}, today="apart"),

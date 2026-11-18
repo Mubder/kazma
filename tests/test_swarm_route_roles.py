@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from kazma_ui.swarm_panel.route_roles import ADMIN, SWARM_ROUTE_ROLES, USER
+from kazma_ui.swarm_panel.route_roles import ADMIN, INSTALL_READ, SWARM_ROUTE_ROLES, USER, role_for
 
 
 def _routes() -> set[tuple[str, str]]:
@@ -40,7 +40,7 @@ def test_every_swarm_route_is_in_the_role_table() -> None:
     assert not missing, f"swarm routes with no role: {missing}"
     stale = sorted(set(SWARM_ROUTE_ROLES) - routes)
     assert not stale, f"roles for routes that no longer exist: {stale}"
-    assert set(SWARM_ROUTE_ROLES.values()) <= {USER, ADMIN}
+    assert set(SWARM_ROUTE_ROLES.values()) <= {USER, ADMIN, INSTALL_READ}
 
 
 def test_every_swarm_route_asks_the_table() -> None:
@@ -72,9 +72,33 @@ def test_every_swarm_route_asks_the_table() -> None:
     assert not isinstance(bare.routes[0], RoleCheckedRoute)
 
 
-def test_reading_is_for_users_and_changing_is_for_the_operator() -> None:
+#: The install's swarm, read: its workers' totals and breakers count every
+#: space's work, and the output target is the owner's chat.
+_INSTALL_READS = {
+    ("GET", "/api/swarm/circuit-breakers"), ("GET", "/api/swarm/output-target"),
+    ("GET", "/api/swarm/workers/metrics/all"), ("GET", "/api/swarm/workers/{name}/circuit-breaker"),
+    ("GET", "/api/swarm/workers/{name}/metrics"),
+}
+
+
+@pytest.mark.parametrize("enforced", (False, True))
+def test_reading_is_for_users_and_changing_is_for_the_operator(enforced, monkeypatch) -> None:
+    """Every change is the operator's in every mode -- a dispatch and a
+    task's actions too, until feature grants give the swarm to others (S2-11;
+    Spaces S1-15 review). The install's swarm, read, is any signed-in user's
+    while Spaces is not enforced, as before, and the admin's once it is."""
+    from kazma_core.spaces import scope
+
+    monkeypatch.setattr(scope, "_enforced", enforced)
+    assert {k for k, v in SWARM_ROUTE_ROLES.items() if v == INSTALL_READ} == _INSTALL_READS
     for (method, path), role in SWARM_ROUTE_ROLES.items():
-        assert role == (USER if method == "GET" else ADMIN), (method, path, role)
+        if method != "GET":
+            expected = ADMIN
+        elif (method, path) in _INSTALL_READS:
+            expected = ADMIN if enforced else USER
+        else:
+            expected = USER
+        assert role_for(method, path) == expected, (method, path, enforced)
 
 
 @pytest.fixture
@@ -110,6 +134,36 @@ def test_reading_routes_stay_open_to_users(forbidden_client, method: str, path: 
         pytest.skip("a stream for a task that does not exist: 404 before any role (covered elsewhere)")
     r = forbidden_client.request(method, _url(path))
     assert r.status_code != 403, (method, path, r.text[:200])
+
+
+@pytest.mark.parametrize("method,path", sorted(_INSTALL_READS))
+def test_the_installs_swarm_is_the_admins_to_read_once_enforced(forbidden_client, monkeypatch,
+                                                                method: str, path: str) -> None:
+    import kazma_core.swarm.single_operator as single_operator
+    from kazma_core.spaces import scope
+
+    monkeypatch.setattr(single_operator, "swarm_refusal", lambda: None)  # bound to a space
+    monkeypatch.setattr(scope, "_enforced", False)
+    assert forbidden_client.request(method, _url(path)).status_code != 403, (method, path)
+    monkeypatch.setattr(scope, "_enforced", True)
+    refused = forbidden_client.request(method, _url(path))
+    assert refused.status_code == 403 and refused.json()["code"] == "admin_required", (method, path)
+
+
+@pytest.mark.parametrize("path", ("/api/swarm/dispatch", "/api/swarm/tasks/{task_id}/approve",
+                                  "/api/swarm/tasks/{task_id}/cancel", "/api/swarm/approvals/{approval_id}/decide"))
+def test_a_spaces_swarm_write_stays_the_admins_once_enforced(forbidden_client, monkeypatch, path: str) -> None:
+    """A member's dispatch or a task's action is refused for want of the
+    admin, Spaces enforced or not (the S1-15 review reverted ``SPACE``)."""
+    import kazma_core.swarm.single_operator as single_operator
+    from kazma_core.spaces import scope
+
+    monkeypatch.setattr(single_operator, "swarm_refusal", lambda: None)  # bound to a space
+    for enforced in (False, True):
+        monkeypatch.setattr(scope, "_enforced", enforced)
+        refused = forbidden_client.request("POST", _url(path), json={"task": "t", "workers": ["probe"],
+                                                                     "decision": "approve"})
+        assert refused.status_code == 403 and refused.json()["code"] == "admin_required", (path, enforced)
 
 
 def test_a_worker_post_as_an_operator_is_refused(monkeypatch) -> None:

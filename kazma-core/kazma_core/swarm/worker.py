@@ -72,6 +72,29 @@ def worker_iteration_budget(thread_id: str | None = None) -> int:
         return 20
 
 
+def _prompt_in_this_space(worker_name: str, prompt: str) -> str:
+    """A worker's prompt as the space it runs in may see it (Spaces S1-15).
+
+    Once Spaces is enforced: the prompt's own text; the lessons kept in the
+    prompt itself (learned before Spaces was enforced: the owner's work) only
+    in the owner's space; and the lessons this worker learned in this space
+    (``self_improvement.worker_lessons``). With no space bound, no lessons.
+    The caller fences every lesson. Blocking (the settings store).
+    """
+    from kazma_core.skills.self_improvement import worker_lessons
+    from kazma_core.spaces.scope import OWNER_SPACE_ID, NoSpaceBound, require_space_id
+
+    marker = "[SelfImprovement]"
+    base, found, kept = prompt.partition(marker)
+    try:
+        here = require_space_id()
+    except NoSpaceBound:
+        return base.rstrip()
+    lessons = [b.strip() for b in kept.split(marker) if b.strip()] if found and here == OWNER_SPACE_ID else []
+    lessons += worker_lessons(worker_name, space=here)
+    return base.rstrip() + "".join(f"\n\n{marker} {lesson}" for lesson in lessons)
+
+
 def _utc_now_iso() -> str:
     """Return the current UTC time in ISO-8601 format."""
     return datetime.now(UTC).isoformat()
@@ -118,6 +141,11 @@ class SwarmWorker(ABC):
     last_task: str | None = field(default=None, init=False)
     last_heartbeat: str | None = field(default=None, init=False)
     logs: list[str] = field(default_factory=list, init=False)
+    #: The space of each line of :attr:`logs` ("" for none), and of
+    #: :attr:`last_task` (Spaces S1-15): a worker serves every space, and a
+    #: line quoting one space's task is shown in that space only.
+    log_spaces: list[str] = field(default_factory=list, init=False)
+    last_task_space: str = field(default="", init=False)
     _running: bool = field(default=False, init=False, repr=False)
 
     @abstractmethod
@@ -165,24 +193,37 @@ class SwarmWorker(ABC):
         """Return the UI-facing worker type label."""
         return "worker"
 
-    def mark_dispatched(self, task: str) -> None:
-        """Record dispatch metadata for status and logs."""
+    def mark_dispatched(self, task: str, *, space: str = "") -> None:
+        """Record dispatch metadata for status and logs; *space* is the
+        task's (Spaces S1-15)."""
         self.in_flight += 1
         self.busy = True
         self.last_task = task
+        self.last_task_space = str(space or "")
         self.last_heartbeat = _utc_now_iso()
-        self.logs.append(f"[{self.last_heartbeat}] Task dispatched: {task[:80]}")
-        if len(self.logs) > 100:
-            del self.logs[:len(self.logs) - 100]
+        self._log(f"[{self.last_heartbeat}] Task dispatched: {task[:80]}", space)
 
-    def mark_completed(self, status: str) -> None:
+    def mark_completed(self, status: str, *, space: str = "") -> None:
         """Record completion metadata for status and logs."""
         self.in_flight = max(0, self.in_flight - 1)
         self.busy = self.in_flight > 0
         self.last_heartbeat = _utc_now_iso()
-        self.logs.append(f"[{self.last_heartbeat}] Task completed with status={status}")
+        self._log(f"[{self.last_heartbeat}] Task completed with status={status}", space)
+
+    def _log(self, line: str, space: str = "") -> None:
+        # The two lists stay the same length: a line and its space.
+        while len(self.log_spaces) < len(self.logs):
+            self.log_spaces.insert(0, "")
+        self.logs.append(line)
+        self.log_spaces.append(str(space or ""))
         if len(self.logs) > 100:
             del self.logs[:len(self.logs) - 100]
+            del self.log_spaces[:len(self.log_spaces) - 100]
+
+    def logs_for(self, space: str) -> list[str]:
+        """The log lines of *space* and those of no space (Spaces S1-15)."""
+        spaces = [""] * (len(self.logs) - len(self.log_spaces)) + list(self.log_spaces)
+        return [line for line, of in zip(self.logs, spaces, strict=True) if of in ("", space)]
 
 
 # ---------------------------------------------------------------------------
@@ -442,6 +483,13 @@ class InProcessWorker(SwarmWorker):
 
             if not system_prompt and self.system_prompt:
                 system_prompt = self.system_prompt
+
+            from kazma_core.spaces.scope import spaces_enforced
+
+            if spaces_enforced():
+                # A worker serves every space: its lessons are the space's
+                # it runs in, never another's (Spaces S1-15).
+                system_prompt = await asyncio.to_thread(_prompt_in_this_space, self.name, system_prompt or "")
 
             if system_prompt:
                 # The worker Soul may carry accumulated [SelfImprovement] deltas
