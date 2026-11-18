@@ -13255,18 +13255,23 @@ product can turn it on, so an install with one account behaves as before.
     (CREDENTIAL in `settings_restore`: S1-28 carries it) for the others. The
     mail presets and the two app-registration routes are `install` routes.
   - **A member connects their space's own accounts** (the review of
-    S1-17c, N26): once Spaces is enforced, the mail and calendar routes and
-    GitHub's token, sign-in and disconnect need membership, not admin
-    (`platform_rbac._connects_a_spaces_own_account`, checked before the admin
-    prefixes; a member is an operator); the install's pieces stay the
-    admin's -- the mail presets and app registrations (held equal to
-    `route_scopes`' `install` routes), the GitHub App and a clone. Not
-    enforced, every one is the admin's, as before. The matrix's mail and
-    GitHub cases put the auth middleware's role check (`auth._role_refusal`,
+    S1-17c, N26): once Spaces is enforced, the mail and calendar routes,
+    GitHub's token, sign-in and disconnect, and X's credentials (the OAuth
+    1.0a keys, the app's Bearer token and OAuth 2.0 client), Sign in with X
+    and Disconnect (the owner, 2026-11-18: "Yes, per space") need membership,
+    not admin (`platform_rbac._connects_a_spaces_own_account`, checked before
+    the X rule and the admin prefixes; a member is an operator); the
+    install's pieces stay the admin's -- the mail presets and app
+    registrations (held equal to `route_scopes`' `install` routes), the
+    GitHub App and a clone -- and so do X's reply bot policy and resuming X
+    after a stop (continuing authority). What publishes on X is unchanged:
+    the always-ask card, N4, O1, a draft seen before it is published. Not
+    enforced, every one is the admin's, as before. The matrix's mail, GitHub
+    and X cases put the auth middleware's role check (`auth._role_refusal`,
     the one rule the middleware applies; `Matrix.role_checked`) in front of
     the routers: they mounted the tenant middleware only, and no case met an
     admin-only route a member could not reach. The page a member connects
-    mail and calendar from is S1-23's (Settings is the admin's today).
+    mail, calendar and X from is S1-23's (Settings is the admin's today).
   - **A sign-in finishes in the space it started in**: `oauth_attempts.begin`
     records the bound space and person, and a callback binds them back
     (`kazma_ui.oauth_sign_in.attempt_scope`); an attempt of no space, or of a

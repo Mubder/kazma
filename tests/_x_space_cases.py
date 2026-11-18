@@ -3,8 +3,15 @@
 Every case runs with Spaces enforced, as person A in ``matrix-a`` against
 person B's ``matrix-b``, through the product's own X routers (X Studio, the
 whole X API, the auto-reply, the datasets, the Scheduled page's X booking and
-the X Studio page) behind the real tenant middleware, or through the product's
-own tools, on a private data folder and a real vault of the case's own.
+the X Studio page) behind the real tenant middleware and the auth middleware's
+role check, or through the product's own tools, on a private data folder and a
+real vault of the case's own.
+
+A and B are members, so operators: connecting and disconnecting their space's
+own X account -- the credentials, Sign in with X, Disconnect -- is theirs (the
+owner's decision, 2026-11-18: "Yes, per space"); the reply bot's policy and
+resuming X after a stop stay the admin's, so those cases expect A refused by
+role. Each space's own account is planted as an admin of it would set it up.
 
 Both spaces connect their own X account and use it the way X Studio does, each
 through its own requests and the stores' own writers: the four OAuth 1.0a keys
@@ -67,11 +74,14 @@ class _PageData:
 class World:
     """The X routers in one app, with two signed-in people."""
 
-    def __init__(self, matrix: Matrix, client: TestClient, marks: Any, x_calls: list[Any]) -> None:
+    def __init__(self, matrix: Matrix, client: TestClient, marks: Any, x_calls: list[Any],
+                 role_refused: list[tuple[str, str]]) -> None:
         self.matrix = matrix
         self.client = client
         self.marks = marks
         self.x_calls = x_calls
+        #: The requests the role check refused (``Matrix.role_checked``).
+        self.role_refused = role_refused
         #: Each space's planted ids: {"a": {...}, "b": {...}}.
         self.ids: dict[str, dict[str, Any]] = {"a": {}, "b": {}}
 
@@ -244,6 +254,7 @@ def world(matrix: Matrix) -> Iterator[World]:
         keep_models_out(patch)
         app = FastAPI()
         app.middleware("http")(auth.create_tenant_middleware())
+        role_refused = Matrix.role_checked(app)
         for router in (x_api.router, x_api.protected_router, x_reply_api.router, x_reply_api.protected_router,
                        x_dataset_api.router):
             app.include_router(router)
@@ -255,9 +266,11 @@ def world(matrix: Matrix) -> Iterator[World]:
         register_misc_routes(SimpleNamespace(app=app, templates=_PageData(), agent=_Agent()))
         try:
             with TestClient(app, base_url=_ORIGIN) as client:
-                made = World(matrix, client, matrix.plant("x"), x_calls)
-                _plant(made, "b", made.marks.b)
-                _plant(made, "a", made.marks.a)
+                made = World(matrix, client, matrix.plant("x"), x_calls, role_refused)
+                with _as_admins(patch, people):
+                    _plant(made, "b", made.marks.b)
+                    _plant(made, "a", made.marks.a)
+                assert role_refused == [], role_refused
                 made.x_calls.clear()
                 yield made
         finally:
@@ -265,6 +278,21 @@ def world(matrix: Matrix) -> Iterator[World]:
             _forget_x_settings()
             for name in _X_ENV:
                 os.environ.pop(name, None)
+
+
+@contextmanager
+def _as_admins(patch: Any, people: dict[str, dict[str, Any]]) -> Iterator[None]:
+    """The setup of each space's X account -- the reply bot's policy
+    included, which only an admin sets -- as an admin of that space would
+    make it; the cases then run as the operators A and B are."""
+    roles = {who: principal["role"] for who, principal in people.items()}
+    for principal in people.values():
+        principal["role"] = "admin"
+    try:
+        yield
+    finally:
+        for who, role in roles.items():
+            people[who]["role"] = role
 
 
 def _in_world(run: Callable[[World], None]) -> Callable[[Matrix], None]:
@@ -292,16 +320,21 @@ def _fill(w: World, text: str) -> str:
             .replace("{action}", "cancel"))
 
 
-def _route(target: str, body: Any = None, *, check: Callable[[World, Any], None] | None = None) -> None:
+def _route(target: str, body: Any = None, *, check: Callable[[World, Any], None] | None = None,
+           the_admins: bool = False) -> None:
     """A case for *target*: as A -- naming B's ids where it takes one -- B's
     space shows itself as before and B's marker is never shown; *check* the
-    positive for A."""
+    positive for A. A member reaches it, unless it is *the_admins*: then the
+    role check refuses A."""
     method, path = target.split(" ", 1)
 
     def run(w: World) -> None:
         before = w.views("b")
         payload = json.loads(_fill(w, json.dumps(body))) if body is not None else None
-        answer = w.call("a", method, _fill(w, path), **({"json": payload} if payload is not None else {}))
+        concrete = _fill(w, path)
+        w.role_refused.clear()
+        answer = w.call("a", method, concrete, **({"json": payload} if payload is not None else {}))
+        assert w.role_refused == ([(method, concrete)] if the_admins else []), w.role_refused
         assert answer.status_code < 500, answer.text[:300]
         assert w.marks.b not in answer.text, answer.text[:300]
         assert w.views("b") == before, "A's request changed what B's space shows itself"
@@ -352,7 +385,7 @@ _route("GET /api/x/operations/{operation_id}", check=_not_found)
 _route("POST /api/x/operations/{operation_id}/check", {"expected_version": 1}, check=_not_found)
 _route("POST /api/x/queue/{operation_id}/{action}", {"expected_version": 1}, check=_not_found)
 _route("POST /api/x/preview", {"text": "a preview"})
-_route("POST /api/x/resume")
+_route("POST /api/x/resume", the_admins=True)
 _route("PUT /api/x/composer", {"expected_revision": 1, "text": "A's new words"})
 _route("POST /api/x/generate", {"brief": "a brief"})
 _route("POST /api/x/drafts/discard", {"id": "{draft}"})
@@ -388,8 +421,8 @@ _route("GET /api/x/reply/recent", check=_shows_mine)
 _route("GET /api/x/reply/conversations", check=_shows_mine)
 _route("GET /api/x/reply/history/{summon_id}", check=_not_found)
 _route("GET /api/x/reply/qualification")
-_route("PUT /api/x/reply", {"trigger": "a-trigger"})
-_route("PUT /api/x/reply/qualification", {"report": {}})
+_route("PUT /api/x/reply", {"trigger": "a-trigger"}, the_admins=True)
+_route("PUT /api/x/reply/qualification", {"report": {}}, the_admins=True)
 _route("POST /api/x/reply/policy/validate", {"subjects": []})
 _route("POST /api/x/reply/poll")
 _route("POST /api/x/reply/preview", {"parent_text": "a post", "parent_handle": "someone"})

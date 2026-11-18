@@ -709,3 +709,54 @@ def test_control_with_another_spaces_tenant_the_cases_fail(target, matrix, monke
 
     monkeypatch.setattr(ownership, "x_tenant_id", lambda: Matrix.SPACE_B)
     _fails(target, matrix)
+
+
+# ── a member connects their space's own X account (the owner, "Yes, per space") ──
+
+#: What connects or disconnects a space's own X account: once Spaces is
+#: enforced, a member's (an operator's); otherwise the admin's, as before.
+_X_ACCOUNT_ROUTES = (("POST", "/api/x/credentials"), ("POST", "/api/x/api-access"),
+                     ("POST", "/api/x/oauth2/start"), ("POST", "/api/x/oauth2/sign-out"),
+                     ("POST", "/api/x/disconnect"))
+#: What stays the admin's in every mode: the reply bot's policy and resuming
+#: X after a stop (continuing authority).
+_X_ADMINS = (("PUT", "/api/x/reply"), ("PUT", "/api/x/reply/qualification"), ("POST", "/api/x/resume"))
+
+
+@pytest.mark.parametrize(("method", "path"), _X_ACCOUNT_ROUTES)
+def test_a_member_connects_their_spaces_own_x_account_once_enforced(method, path, monkeypatch) -> None:
+    from kazma_core.security.platform_rbac import role_allows
+
+    assert not role_allows("operator", path, method)  # not enforced: the admin's, as before
+    monkeypatch.setattr(scope, "_enforced", True)
+    assert role_allows("operator", path, method)
+    assert not role_allows("viewer", path, method)
+
+
+@pytest.mark.parametrize(("method", "path"), _X_ADMINS)
+def test_the_reply_policy_and_resume_stay_the_admins(method, path, monkeypatch) -> None:
+    from kazma_core.security.platform_rbac import role_allows
+
+    for enforced in (False, True):
+        monkeypatch.setattr(scope, "_enforced", enforced)
+        assert not role_allows("operator", path, method), (path, enforced)
+        assert role_allows("admin", path, method)
+
+
+def test_the_x_cases_cover_every_x_account_route() -> None:
+    """The matrix has a case for each, run as A through the role check."""
+    for method, path in _X_ACCOUNT_ROUTES + _X_ADMINS:
+        assert f"{method} {path}" in CASES, (method, path)
+
+
+@pytest.mark.parametrize("target", [f"{m} {p}" for m, p in _X_ACCOUNT_ROUTES])
+def test_control_with_the_admin_only_rule_a_member_cannot_connect_x(target, matrix, monkeypatch) -> None:
+    """The X rule as before the owner's decision: every one the admin's, and
+    a member is an operator -- the cases, which check the role as the auth
+    middleware does, fail."""
+    from kazma_core.security import platform_rbac
+
+    real = platform_rbac._connects_a_spaces_own_account
+    monkeypatch.setattr(platform_rbac, "_connects_a_spaces_own_account",
+                        lambda path: False if path.startswith("/api/x/") else real(path))
+    _fails(target, matrix)
