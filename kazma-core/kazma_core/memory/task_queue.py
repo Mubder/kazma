@@ -17,12 +17,15 @@ started lazily on first enqueue (or explicitly via :func:`start_worker`).
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import dataclasses
 import json
 import logging
 import sqlite3
 import threading
 import time
 import uuid
+from collections.abc import Iterator
 from typing import Any, Awaitable, Callable
 
 logger = logging.getLogger(__name__)
@@ -107,6 +110,110 @@ def _report_dead_letters(task_types: list[str], error: str | None) -> None:
 # Handler registry: task_type → async callable(payload) -> bool (success)
 TaskHandler = Callable[[dict[str, Any]], Awaitable[bool]]
 _HANDLERS: dict[str, TaskHandler] = {}
+
+
+#: How each queued task finds its space (Spaces S1-09). Every task type a
+#: handler is registered for is in exactly one of these
+#: (``tests/test_memory_spaces.py``):
+#:
+#: * it names its tenant (``tenant_id`` in the payload);
+TENANT_TASKS = frozenset({
+    "macro_sleep", "entity_merge", "global_reconsolidation", "post_turn_memory",
+    "topic_summaries", "nightly_export",
+})
+#: * it names the row it works on, and that row's tenant is its space
+#:   (task type -> the table and the payload key of the row's id);
+ROW_NAMED_TASKS: dict[str, tuple[str, str]] = {
+    "micro_consolidation": ("episodes", "episode_id"),
+    "topic_summary_rebuild": ("memory_summaries", "summary_id"),
+}
+#: * it is the install's own work: whole stores, no space's content.
+INSTALL_TASKS = frozenset({
+    "native_backup", "native_pg_backup", "native_pg_offsite", "restic_maintenance",
+    "connector_health", "universal_backup",
+})
+
+
+@dataclasses.dataclass(frozen=True)
+class TaskBinding:
+    """What a queued task runs as: its space and the account it acts for,
+    or the install's own work (``install`` set, no space)."""
+
+    space: str | None = None
+    asker: str | None = None
+    install: str | None = None
+
+
+def _task_binding(task_type: str, payload: Any) -> TaskBinding:
+    """How the task *task_type* with *payload* runs. Blocking (the memory
+    database for a row-named task, the identity store when Spaces is
+    enforced): the worker calls it in a thread.
+
+    The worker has no request, so a handler that asks for "the" space (the
+    chat store, a writer given no tenant) has to be told. While Spaces is
+    not enforced a task of another tenant binds that tenant and the owner's
+    own tasks bind nothing, exactly as before S1-09. Once it is enforced
+    every task is bound whole -- a space and the account it acts for (the
+    space's own person, or its maker; the admin for a tenant no space
+    holds, R6) -- or runs as the install's work: a space with no asker is
+    half a scope, and ``require_scope`` refused every queued deep pass.
+    """
+    from kazma_core.spaces.scope import OWNER_SPACE_ID, spaces_enforced
+
+    data = payload if isinstance(payload, dict) else {}
+    tenant = str(data.get("tenant_id") or "").strip()
+    if not spaces_enforced():
+        if tenant and tenant != OWNER_SPACE_ID:
+            return TaskBinding(space=tenant)
+        return TaskBinding()
+    if task_type in INSTALL_TASKS:
+        return TaskBinding(install=f"the memory task {task_type}")
+    if not tenant and task_type in ROW_NAMED_TASKS:
+        tenant = _row_tenant(*ROW_NAMED_TASKS[task_type], data) or ""
+    if not tenant:
+        # A row that is gone, or a task type no table above names: nothing
+        # of a space is read (a handler that asks is refused, and retried).
+        return TaskBinding(install=f"the memory task {task_type}, which names no space")
+    from kazma_core.spaces.identity import acting_account
+
+    return TaskBinding(space=tenant, asker=acting_account(tenant))
+
+
+def _row_tenant(table: str, key: str, payload: dict[str, Any]) -> str | None:
+    """The tenant of the row a row-named task works on, or None."""
+    from kazma_core.paths import primary_memory_db
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    row_id = str(payload.get(key) or "")
+    if not row_id:
+        return None
+    conn = sqlite3.connect(primary_memory_db(), timeout=5.0)
+    try:
+        row = conn.execute(f"SELECT tenant_id FROM {table} WHERE id = ?", (row_id,)).fetchone()  # nosec B608 - a fixed table
+    except sqlite3.OperationalError:
+        return None  # no such table yet: nothing to work on
+    finally:
+        conn.close()
+    return str(row[0] or OWNER_SPACE_ID) if row else None
+
+
+@contextlib.contextmanager
+def _task_space(binding: TaskBinding) -> Iterator[None]:
+    """Run a task's handler as *binding* (:func:`_task_binding`)."""
+    from kazma_core.spaces.scope import bind_scope, install_work
+    from kazma_core.tenant_context import tenant_scope
+
+    if binding.install:
+        with install_work(binding.install):
+            yield
+    elif binding.space and binding.asker:
+        with bind_scope(binding.space, binding.asker):
+            yield
+    elif binding.space:
+        with tenant_scope(binding.space):
+            yield
+    else:
+        yield
 
 
 def register_handler(task_type: str, handler: TaskHandler) -> None:
@@ -432,7 +539,9 @@ class _MemoryWorker:
                     payload = json.loads(task["payload_json"] or "{}")
                 except Exception:
                     payload = {}
-                success = await handler(payload)
+                binding = await asyncio.to_thread(_task_binding, task_type, payload)
+                with _task_space(binding):
+                    success = await handler(payload)
                 await asyncio.to_thread(
                     self._ack, task,
                     success=bool(success),

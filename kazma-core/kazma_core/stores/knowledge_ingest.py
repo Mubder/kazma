@@ -1353,11 +1353,13 @@ def _provenance_dir(library_id: str) -> Path:
     knowledge_provenance/<library>``. They used to go into the ACTIVE
     WORKSPACE (``research/kb/<library>``) -- after a Switch Repo, the
     operator's own repository -- and stayed there after the library was
-    deleted (Knowledge audit KB-E08)."""
+    deleted (Knowledge audit KB-E08). The folder's name keeps the space
+    mark (``knowledge.library_name_part``): two spaces' libraries never share
+    one, and a delete removes only its own library's pages."""
     from kazma_core.paths import data_dir
+    from kazma_core.stores.knowledge import library_name_part
 
-    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in library_id)[:80] or "library"
-    return data_dir() / "knowledge_provenance" / safe
+    return data_dir() / "knowledge_provenance" / library_name_part(library_id)
 
 
 def _provenance_file(library_id: str, url: str) -> Path:

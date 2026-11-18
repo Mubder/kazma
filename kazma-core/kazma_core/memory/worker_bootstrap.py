@@ -661,37 +661,73 @@ _MACRO_SLEEP_CADENCE_KEY = "system.cadence.macro_sleep"
 _RECONSOLIDATION_CADENCE_KEY = "system.cadence.reconsolidation"
 
 
+#: The memory tables whose rows name a tenant that maintenance must visit:
+#: a tenant with facts, a summary or About me and no turn was never swept.
+_TENANT_TABLES = ("episodes", "beliefs", "entities", "memory_summaries", "memory_profile")
+
+
+def memory_tenants() -> list[str]:
+    """Every tenant memory maintenance visits: each tenant that holds a row
+    of memory, each space of this install, and the owner's (first).
+
+    Blocking (the memory database, the settings store). **Raises** when the
+    database or the spaces cannot be read: a sweep that cannot list its
+    tenants has failed, and its runner says so. Until Spaces S1-09 the list
+    came from turns alone and any error became ``["default"]`` at DEBUG, so
+    a broken database swept the owner's tenant and called it done.
+    """
+    import sqlite3
+
+    from kazma_core.paths import primary_memory_db
+    from kazma_core.spaces import identity
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    found: list[str] = [OWNER_SPACE_ID]
+    conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+    try:
+        tables = {str(r[0]) for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        for table in _TENANT_TABLES:
+            if table in tables:
+                found += [str(r[0]) for r in conn.execute(
+                    f"SELECT DISTINCT tenant_id FROM {table}") if r[0]]  # nosec B608 - a fixed table name
+    finally:
+        conn.close()
+    found += list(identity.read_registry().get("spaces") or {})
+    return list(dict.fromkeys(found))
+
+
 def _distinct_tenants() -> list[str]:
-    """Return all tenant IDs that have episodes in memory_state.db.
+    """:func:`memory_tenants`, for the schedulers."""
+    return memory_tenants()
 
-    Used by the schedulers to fan maintenance tasks over every active
-    tenant instead of only ``"default"``. In the common single-user case
-    (``tenant_mode="shared"``) this returns ``["default"]`` and behavior
-    is unchanged from the old hardcoded-default path.
 
-    Best-effort: on any error returns ``["default"]`` so maintenance
-    continues even if the query fails.
+#: How long a cadence waits after it could not list the memory tenants before
+#: it tries again. Its stamp is not written, so it is still due; asked again
+#: at once, a broken memory database would be said every minute.
+_FANOUT_RETRY_S = 900
+
+
+async def _queue_per_tenant(label: str, task_type: str, payload: dict[str, Any]) -> bool:
+    """Queue *task_type* once for every memory tenant (:func:`memory_tenants`,
+    off the loop). The one fan-out of the three cadences that visit every
+    tenant: macro sleep, reconsolidation and the nightly export.
+
+    False, with a WARNING naming *label*, when the tenants could not be
+    listed: the cadence queued nothing, so it ran nothing, and it does not
+    write its stamp (it is still due). A task the queue refuses is said by
+    :func:`_enqueue_checked` (a WARNING and an ops alert) and does not stop
+    the others. Until Spaces S1-09's review the reconsolidation cadence said
+    a failed listing at DEBUG and was never seen.
     """
     try:
-        import sqlite3
-
-        from kazma_core.paths import primary_memory_db
-
-        conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
-        try:
-            rows = conn.execute(
-                "SELECT DISTINCT tenant_id FROM episodes"
-            ).fetchall()
-            tenants = [r[0] for r in rows if r[0]]
-            # Always include "default" even if it has no episodes yet (fresh install).
-            if "default" not in tenants:
-                tenants.insert(0, "default")
-            return tenants
-        finally:
-            conn.close()
-    except Exception:
-        logger.debug("[memory_worker] _distinct_tenants failed — using ['default']", exc_info=True)
-        return ["default"]
+        tenants = await asyncio.to_thread(_distinct_tenants)
+    except Exception:  # noqa: BLE001 - said here; the cadence tries again
+        logger.warning("[memory_worker] %s was not queued: the memory tenants could not be listed",
+                       label, exc_info=True)
+        return False
+    for tenant in tenants:
+        await asyncio.to_thread(_enqueue_checked, task_type, {**payload, "tenant_id": tenant})
+    return True
 
 
 def _start_macro_sleep_scheduler() -> None:
@@ -721,16 +757,13 @@ def _start_macro_sleep_scheduler() -> None:
                 return
             if await availability.wait_while_away():
                 return
-            try:
-                # Fan out over all active tenants so decay/promotion/archival
-                # runs for every tenant, not just "default". The tenant list
-                # is a database read: off the loop (FA-150).
-                for tenant in await asyncio.to_thread(_distinct_tenants):
-                    await asyncio.to_thread(_enqueue_checked, "macro_sleep", {"tenant_id": tenant, "live_config": True})
+            # Fan out over every memory tenant, so decay/promotion/archival
+            # runs for each, not just "default" (off the loop: FA-150).
+            if await _queue_per_tenant("macro_sleep", "macro_sleep", {"live_config": True}):
                 await asyncio.to_thread(stamp_run, _MACRO_SLEEP_CADENCE_KEY)
                 logger.debug("[memory_worker] enqueued periodic macro_sleep")
-            except Exception:
-                logger.debug("[memory_worker] macro_sleep enqueue failed", exc_info=True)
+            elif await sleep_or_shutdown(_FANOUT_RETRY_S):
+                return
 
     try:
         _t = loop.create_task(_loop())
@@ -833,12 +866,12 @@ def _start_backup_export_scheduler() -> None:
                 # useful check is the one that warns a day early.
                 await asyncio.to_thread(_enqueue_checked, "connector_health", {})
                 # Export per-tenant so each tenant's beliefs/graph land in
-                # their own file (not overwritten by "default").
-                for tenant in await asyncio.to_thread(_distinct_tenants):
-                    await asyncio.to_thread(_enqueue_checked, "nightly_export", {"tenant_id": tenant})
-                logger.debug("[memory_worker] enqueued nightly backup + export")
+                # their own file (not overwritten by "default"). A failed
+                # tenant listing is said there; the backups above are queued.
+                if await _queue_per_tenant("the nightly export", "nightly_export", {}):
+                    logger.debug("[memory_worker] enqueued nightly backup + export")
             except Exception:
-                logger.debug("[memory_worker] backup/export enqueue failed", exc_info=True)
+                logger.warning("[memory_worker] the backup and export were not queued", exc_info=True)
             if await sleep_or_shutdown(_BACKUP_EXPORT_INTERVAL_HOURS * 3600):
                 return
 
@@ -1491,20 +1524,13 @@ def _start_reconsolidation_scheduler() -> None:
                 return
             if await availability.wait_while_away():
                 return
-            try:
-                # Fan dedup/re-embed over all active tenants (off the loop: FA-150).
-                for tenant in await asyncio.to_thread(_distinct_tenants):
-                    await asyncio.to_thread(
-                        _enqueue_checked,
-                        "global_reconsolidation",
-                        {"tenant_id": tenant, "max_merges": 50, "reembed_limit": 100},
-                    )
+            # Fan dedup/re-embed over every memory tenant (off the loop: FA-150).
+            if await _queue_per_tenant("reconsolidation", "global_reconsolidation",
+                                       {"max_merges": 50, "reembed_limit": 100}):
                 await asyncio.to_thread(stamp_run, _RECONSOLIDATION_CADENCE_KEY)
                 logger.debug("[memory_worker] enqueued global_reconsolidation")
-            except Exception:
-                logger.debug(
-                    "[memory_worker] reconsolidation enqueue failed", exc_info=True
-                )
+            elif await sleep_or_shutdown(_FANOUT_RETRY_S):
+                return
 
     try:
         _t = loop.create_task(_loop())

@@ -17,12 +17,14 @@ from kazma_core.agent.graph_helpers import (
     _ensure_about_user,
     _ensure_base_prompt,
     _ensure_environment_note,
+    _ensure_space_lessons,
     _ensure_personality,
     _memory_explain_cv,
     _rag_top_k,
     is_unusable_assistant_content,
     sanitize_tool_chains,
 )
+from kazma_core.spaces.scope import space_of_state
 from kazma_core.agent.plan_fence import (
     AUTO_CONTINUE_PROMPT,
     PLAN_EXECUTE_CONTINUE,
@@ -439,6 +441,12 @@ async def supervisor_node(
     except RuntimeError:  # the thread pool is shut down: a call without the date beats none
         logger.debug("[Supervisor] daily note skipped", exc_info=True)
         _daily = ""
+    # The lessons are never part of the base prompt: one built by an older
+    # Kazma with a Soul baked in has it cut here (the turn's current lessons
+    # are added below).
+    from kazma_core.skills.self_improvement import without_baked_soul
+
+    system_prompt = without_baked_soul(system_prompt)
     messages = _ensure_base_prompt(messages, system_prompt, daily_note=_daily)
     if personality_prompt:
         messages = _ensure_personality(messages, system_prompt, personality_prompt)
@@ -452,11 +460,34 @@ async def supervisor_node(
     from kazma_core.memory.profile import about_block, about_for_turn
 
     try:
-        _about = await asyncio.to_thread(about_for_turn, str(state.get("tenant_id") or "default"))
+        _about = await asyncio.to_thread(about_for_turn, space_of_state(state))
     except sqlite3.Error:
         logger.warning("[Supervisor] About me unreadable; this call goes without it", exc_info=True)
         _about = {"about": ""}
     messages = _ensure_about_user(messages, about_block(_about.get("about", "")))
+
+    # ── The lessons of the turn's space (Spaces S1-10) ──
+    # The supervisor is the one place a turn's lessons are added, on every
+    # surface and every install: one current, fenced copy, read at the start
+    # of the turn (it stays in the turn's messages). Any other copy the call
+    # holds is dropped. On an install that does not enforce Spaces it is the
+    # one Soul; enforced, the step's space's, and a turn with no space reads
+    # none. (The transports and the agent's base prompt each added one, so
+    # the model saw it twice, the base prompt's copy stale.)
+    if iteration == 0:
+        from kazma_core.db.pg_helpers import store_errors
+        from kazma_core.skills.self_improvement import space_lessons_note
+        from kazma_core.spaces.scope import NoSpaceBound
+
+        try:
+            _lessons_note = await asyncio.to_thread(space_lessons_note, space_of_state(state))
+        except NoSpaceBound:
+            logger.warning("[Supervisor] no space is bound to this turn: it reads no lessons")
+            _lessons_note = ""
+        except store_errors():  # the settings store away, or the thread pool shut down
+            logger.warning("[Supervisor] lessons unreadable; this turn goes without them", exc_info=True)
+            _lessons_note = ""
+        messages = _ensure_space_lessons(messages, _lessons_note)
 
     # ── The workspace this turn runs in (the "environment" turn note) ──
     # One copy, current, on every surface: the web transport adds it; for a
@@ -918,7 +949,7 @@ async def supervisor_node(
         from kazma_core.agent.artifacts import get_artifact_store
 
         _pad_thread = str(state.get("thread_id") or "")
-        _pad_tenant = str(state.get("tenant_id") or "default")
+        _pad_tenant = space_of_state(state)
         # SQLite (and, on the first call, the store's schema + legacy repair)
         # off the loop: every SSE/WS stream waits on this node.
         _store_pad = await asyncio.to_thread(
@@ -1182,7 +1213,7 @@ async def supervisor_node(
                     _recall_query or last_user_content,
                     limit=_top_k,
                     session_id=_recall_session_id,
-                    tenant_id=state.get("tenant_id", "default"),
+                    tenant_id=space_of_state(state),
                     explain=_explain,
                 )
                 if not result.empty:
@@ -1213,7 +1244,7 @@ async def supervisor_node(
                                 search_transcripts,
                                 _recall_query or last_user_content,
                                 exclude_session_id=_recall_session_id,
-                                tenant_id=str(state.get("tenant_id", "default")),
+                                tenant_id=space_of_state(state),
                             )
                             if _tx_hits:
                                 _tx_block = format_transcript_block(_tx_hits)
@@ -1285,7 +1316,7 @@ async def supervisor_node(
                             return list(match_procedural_dags(
                                 pconn,
                                 last_user_content,
-                                tenant_id=state.get("tenant_id", "default"),
+                                tenant_id=space_of_state(state),
                                 limit=3,
                             ))
                         finally:

@@ -120,6 +120,8 @@ CASES: dict[str, Case] = {}
 #: The modules that register cases, as import names (``tests._chat_space_cases``).
 #: An item adds its module here; :func:`load_cases` imports each.
 CASE_MODULES: tuple[str, ...] = (
+    "tests._chat_space_cases", "tests._memory_space_cases", "tests._lesson_space_cases",
+    "tests._knowledge_space_cases", "tests._scheduled_space_cases",
     "tests._document_space_cases",  # S1-12
 )
 
@@ -159,38 +161,23 @@ PENDING_ROUTE_RULES: tuple[tuple[Pattern, str], ...] = (
     # A chat's upload and a file shared into a chat are files of the space.
     ("/api/chat/upload$", "S1-19"),
     ("/api/chat/files", "S1-19"),
-    # ── S1-08: chats, checkpoints, Time Travel, drafts ────────────────────
-    ("/chat$", "S1-08"),
-    ("/api/chat", "S1-08"),
-    ("/ws/chat", "S1-08"),
-    ("/replay$", "S1-08"),
-    ("/api/replay", "S1-08"),
-    ("/api/sessions", "S1-08"),
-    # No item names speech or A2A. Speech is the words of a chat's turn and
-    # an A2A request runs one turn, so chat state is the closest item.
-    ("/api/voice", "S1-08"),
-    ("/ws/voice$", "S1-08"),
-    ("/api/a2a$", "S1-08"),
-    # ── S1-09: memory ─────────────────────────────────────────────────────
-    ("/memory$", "S1-09"),
-    ("/api/memory", "S1-09"),
-    # An imported chat history becomes memories.
-    ("/api/import/history", "S1-09"),
-    # ── S1-10: lessons ────────────────────────────────────────────────────
-    ("/api/commitment", "S1-10"),
+    # (S1-08 -- chats, checkpoints, Time Travel, drafts, speech and A2A --
+    # wrote its cases: tests/_chat_space_cases.py.)
+    # (S1-09 -- memory, and a history brought in -- wrote its cases:
+    # tests/_memory_space_cases.py.)
+    # (S1-10, lessons: written. Its cases are in tests/_lesson_space_cases.py.)
     # ── S1-12: documents (their cases: tests/_document_space_cases.py) ─────
     # Indexing a document into a Knowledge library, taking it out and
-    # searching a library read and write Knowledge libraries, which become
-    # per space with Knowledge's own item.
-    ("/api/documents/{document_id}/index$", "S1-13"),
-    ("/api/documents/{document_id}/unindex$", "S1-13"),
-    ("/api/documents/search$", "S1-13"),
-    # ── S1-13: knowledge ──────────────────────────────────────────────────
-    ("/knowledge$", "S1-13"),
-    ("/api/kb", "S1-13"),
-    # ── S1-14: scheduled ──────────────────────────────────────────────────
-    ("/scheduled$", "S1-14"),
-    ("/api/scheduled", "S1-14"),
+    # searching a library: written once Knowledge is per space (S1-13).
+    ("/api/documents/{document_id}/index$", "S1-12"),
+    ("/api/documents/{document_id}/unindex$", "S1-12"),
+    ("/api/documents/search$", "S1-12"),
+    # (S1-13, the Knowledge Library: written. Its cases are in
+    # tests/_knowledge_space_cases.py.)
+    # (S1-14, Scheduled: written. Its cases are in
+    # tests/_scheduled_space_cases.py; an X post booked from the page is the
+    # X account's, S1-17.)
+    ("/api/scheduled/x$", "S1-17"),
     # ── S1-15: swarm (its tasks, their approvals, a worker's log) ─────────
     ("/swarm$", "S1-15"),
     ("/api/swarm", "S1-15"),
@@ -232,29 +219,14 @@ PENDING_ROUTE_RULES: tuple[tuple[Pattern, str], ...] = (
 
 #: The plan item, then the tools whose cases it will write.
 _PENDING_TOOLS_BY_ITEM: dict[str, tuple[str, ...]] = {
-    # Chat state: drafts, the task ledger, the scratchpad, the chat itself.
-    "S1-08": (
-        "save_proposal", "list_proposals", "discard_proposal",
-        "task_ledger_update", "update_scratchpad",
-        "export_session", "context_info",
-    ),
-    "S1-09": (
-        "memory_search", "memory_store", "memory_admin",
-        "memory_list_beliefs", "memory_list_entities", "memory_link_entities",
-        "memory_invalidate", "memory_forget_mentions", "memory_delete_entity",
-        "memory_merge_entities", "memory_purge_empty_entities",
-    ),
+    # (S1-08 -- drafts, the task ledger, the scratchpad, the chat itself --
+    # wrote its cases: tests/_chat_space_cases.py.)
+    # (S1-09 -- the memory tools -- wrote its cases: tests/_memory_space_cases.py.)
     # S1-12's document tools have their cases (tests/_document_space_cases.py),
     # but for the two that read and write Knowledge libraries.
-    "S1-13": (
-        "document_search", "document_index",
-        "knowledge_search", "knowledge_list_libraries",
-        "knowledge_create_library", "knowledge_ingest_url",
-        "knowledge_ingest_site",
-    ),
-    "S1-14": (
-        "schedule_task", "list_scheduled", "edit_scheduled", "cancel_scheduled",
-    ),
+    "S1-12": ("document_search", "document_index"),
+    # (S1-14 -- the scheduling tools -- wrote its cases:
+    # tests/_scheduled_space_cases.py.)
     # Swarm tasks, and the worker's own hand-off tool (never in the registry).
     # No item names sub-agents: like a swarm worker, a sub-agent's tool calls
     # must land in the asker's space, so they stand here.

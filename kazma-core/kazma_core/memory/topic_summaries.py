@@ -71,6 +71,8 @@ from typing import Any
 
 from kazma_core.memory.legacy_tables import LEGACY_SESSION_PREFIX, LEGACY_TURN
 
+from kazma_core.memory.tenant_view import narrowed_to, sees_every_tenant
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -1044,7 +1046,7 @@ def forget_summary(
             "SELECT tenant_id, status, metadata_json FROM memory_summaries WHERE id = ?", (summary_id,)
         ).fetchone()
         caller = tenant_id or "default"
-        if row is None or (caller != "default" and str(row["tenant_id"]) != caller):
+        if row is None or (not sees_every_tenant(caller) and str(row["tenant_id"]) != caller):
             return {"ok": False, "error": "not_found"}
         if row["status"] == "forgotten":
             forget_journal.mark_applied(conn, seq)
@@ -1074,7 +1076,7 @@ def forget_summary(
 
 def _summary_filter(tenant_id: str, include_hidden: bool) -> tuple[str, list[Any]]:
     where, params = ["1 = 1"], []
-    if (tenant_id or "default") != "default":
+    if not sees_every_tenant(tenant_id or "default"):
         where.append("tenant_id = ?")
         params.append(tenant_id)
     if not include_hidden:
@@ -1085,8 +1087,9 @@ def _summary_filter(tenant_id: str, include_hidden: bool) -> tuple[str, list[Any
 def list_summaries(
     conn: sqlite3.Connection, *, tenant_id: str, limit: int = 30, include_hidden: bool = False, offset: int = 0,
 ) -> list[dict[str, Any]]:
-    """The tenant's summaries, newest week first (``"default"`` is the
-    install's view: every tenant), from *offset*. Forgotten and retired ones
+    """The tenant's summaries, newest week first (the owner's tenant sees
+    every tenant's while the install does not enforce Spaces:
+    ``memory/tenant_view``), from *offset*. Forgotten and retired ones
     only with *include_hidden*; they hold no text."""
     where, params = _summary_filter(tenant_id, include_hidden)
     rows = conn.execute(
@@ -1105,9 +1108,11 @@ def count_summaries(conn: sqlite3.Connection, *, tenant_id: str, include_hidden:
     return int(conn.execute(f"SELECT COUNT(*) FROM memory_summaries WHERE {where}", params).fetchone()[0])
 
 
-def summary_health(conn: sqlite3.Connection, *, tenant_id: str = "default") -> dict[str, int]:
-    """Summaries by state and weeks by state, for memory health."""
-    scope, params = ("", ()) if (tenant_id or "default") == "default" else (" WHERE tenant_id = ?", (tenant_id,))
+def summary_health(conn: sqlite3.Connection, *, tenant_id: str | None = None) -> dict[str, int]:
+    """Summaries by state and weeks by state, for memory health (``None``:
+    every tenant's, Kazma's own count)."""
+    only = narrowed_to(tenant_id)
+    scope, params = ("", ()) if only is None else (" WHERE tenant_id = ?", (only,))
     by_status = dict(conn.execute(
         f"SELECT status, COUNT(*) FROM memory_summaries{scope} GROUP BY status", params).fetchall())
     weeks = dict(conn.execute(

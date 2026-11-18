@@ -493,6 +493,12 @@ def _drive_main(runner, monkeypatch, code_for) -> list[int]:
     monkeypatch.setattr(runner, "run_chunk", fake_run_chunk)
     monkeypatch.setattr(runner, "MIN_EXPECTED_PASSED", 1)
     monkeypatch.setattr(runner.sys, "argv", ["fast_test.py", "--chunks", "2"])
+    # The machine's own quiet-hours schedule (.kazma/fast_test.json) must not
+    # reach a test of main(): inside its hours it doubled every budget (a run
+    # at 08:00 Kuwait time failed the budget test, 2026-11-18) and held the
+    # test process itself to fewer cores.
+    monkeypatch.setattr(runner, "read_schedule", lambda: None)
+    monkeypatch.setattr(runner, "limit_to_cores", lambda cores: False)
     return sizes
 
 

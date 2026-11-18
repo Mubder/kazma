@@ -322,8 +322,8 @@ RETENTION: dict[str, str] = {
     "x_publications.db": "ended operations after 90 days, by the publication fire cycle (hourly)",
     "hitl_gates.db": "the gate retention sweep: decided gates after 90 days; a live one is kept",
     "run_incidents.db": "the run incident retention sweep",
-    "thread_scopes.db": "kept: one small row of ids per chat thread (no title, no text). "
-                        "Nothing removes a row yet; the chat delete takes it with Spaces S1-08",
+    "thread_scopes.db": "kept while its chat is: one small row of ids per chat thread (no title, "
+                        "no text). The chat delete removes it once nothing of the chat is left",
     "chat_outbox.db": "the chat outbox retention sweep: settled rows (their text already emptied) "
                       "after 7 days",
     "chat_inbox.db": "the next normal start: a message handed on keeps no text, and rows a week "
@@ -624,10 +624,15 @@ SPACE_RULES: dict[str, SpaceRule] = {
         "row", content={"agent_artifacts": ("value",)}, today="apart"),
     "task_ledgers.db": SpaceRule(
         "row",
+        why="a plan is its chat's: it is read and made through its thread, whose record "
+            "(thread_scopes.db) is its space",
         content={"task_ledgers": ("goal", "next_action", "steps", "findings", "open_questions")},
-        today="carries"),
+        today="apart"),
     "tool_effects.db": SpaceRule(
-        "row", content={"tool_effects": ("result_json",)}, today="whole"),
+        "row",
+        why="a receipt is found by its identity, which is made from the space, the thread, "
+            "the turn and the call; nothing reads the store by space",
+        content={"tool_effects": ("result_json",)}, today="carries"),
     "memory_state.db": SpaceRule("row", content=_MEMORY_STATE_CONTENT, today="apart"),
     "memory_ops.db": SpaceRule(
         "row",
@@ -645,8 +650,17 @@ SPACE_RULES: dict[str, SpaceRule] = {
     "knowledge_graph.db": _install(
         "written by nothing since the V1 to V2 move; what it holds is from before spaces and "
         "was read once into the owner's memory"),
-    "checkpoints.db": SpaceRule("row", content=_CHECKPOINT_CONTENT, today="whole"),
-    "snapshots.db": SpaceRule("row", content={"snapshots": ("state_json",)}, today="whole"),
+    "checkpoints.db": SpaceRule(
+        "row",
+        why="kept by thread, with no space column: the thread's record (thread_scopes.db) is "
+            "its space, and the checkpoint manager asks it on every read and write once "
+            "Spaces is enforced",
+        content=_CHECKPOINT_CONTENT, today="apart"),
+    "snapshots.db": SpaceRule(
+        "row",
+        why="kept by thread, with no space column: a step is reached only through a thread "
+            "the asker's space holds (the routes' ownership check, the restore and fork guard)",
+        content={"snapshots": ("state_json",)}, today="apart"),
     "time_travel_audit.db": SpaceRule(
         "row", why="ids, counts and outcomes of restores, forks and clears; no chat text",
         today="whole"),
@@ -663,7 +677,7 @@ SPACE_RULES: dict[str, SpaceRule] = {
             "cron_events": ("detail",),
             "cron_alerts": ("title", "detail"),
         },
-        today="refuses"),
+        today="apart"),
     "swarm_tasks.db": SpaceRule(
         "row",
         why="the tenant is inside a task's metadata today, not a column",
@@ -738,7 +752,7 @@ SPACE_RULES: dict[str, SpaceRule] = {
             "knowledge_chunks_fts": ("content", "folded", "source_url"),
             "knowledge_pages_gone": ("source_url",),
         },
-        today="refuses"),
+        today="apart"),
     "rbac.db": _install("who may do what in the install: names of users, divisions and roles"),
     "audit.db": _install(
         "the install's access record: who asked for which resource and what was decided; "
@@ -832,8 +846,11 @@ SPACE_RULES: dict[str, SpaceRule] = {
     "document-store": SpaceRule("folder", today="whole"),
     "vector_memory": SpaceRule(
         "derived", why="the Knowledge Library's vectors, split as the libraries are",
-        today="refuses"),
-    "knowledge_provenance": SpaceRule("folder", today="refuses"),
+        today="apart"),
+    "knowledge_provenance": SpaceRule(
+        "derived", why=("a library's fetched pages, in a folder named by the library's id, "
+                        "which keeps the id's space mark (knowledge.library_name_part)"),
+        today="apart"),
     "canary": _install("the daily crawl check's private store: one public page"),
     "code-index": SpaceRule(
         "host", why="indexes of the host's workspaces", today="whole"),

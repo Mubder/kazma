@@ -22,6 +22,7 @@ from kazma_core.agent.state import (
     SupervisorState,
     ToolResult,
 )
+from kazma_core.spaces.scope import require_space_id, space_of_state
 from kazma_core.summarizer import _normalize_msg
 
 logger = logging.getLogger(__name__)
@@ -286,7 +287,7 @@ def _commitment_resolve_gate(
                 if _is_semantic(str(_probe.get("name") or "")):
                     _sem.append(_probe)
             if _sem:
-                _tenant = state.get("tenant_id") or "default"
+                _tenant = space_of_state(state)
                 _req_at = _dt.now(_tz.utc)
                 try:
                     _beliefs = _load_beliefs(_tenant) if _load_beliefs else []
@@ -588,7 +589,7 @@ def _confirmed_publish_ref(result: dict[str, Any]) -> str | None:
 def mark_proposals_posted(
     tool_calls: list[Any],
     results: list[Any],
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
 ) -> int:
     """S1-3 audit trail: mark the drafts consumed by SUCCESSFUL posting calls.
 
@@ -623,7 +624,7 @@ def mark_proposals_posted(
             if ref:
                 marked += store.proposal_posted(
                     ref,
-                    tenant_id=tenant_id or "default",
+                    tenant_id=tenant_id or None,
                     via=str(tc.get("name") or ""),
                     used_ref=used_ref,
                 )
@@ -852,7 +853,6 @@ async def tool_worker_node(
     # the durable identity used when enabling YOLO/tool grants — without
     # this fallback, YOLO Session behaves like Approve once forever.
     from kazma_core.safety.hitl import (
-        get_current_tenant_id,
         get_current_thread_id,
         reset_current_thread_id,
         reset_current_tenant_id,
@@ -868,7 +868,7 @@ async def tool_worker_node(
 
     # Bind tenant_id into the ContextVar so stateless memory tools
     # (memory_search / memory_store) can read it without a state handle.
-    _state_tenant_token = set_current_tenant_id(str(state.get("tenant_id", "default")))
+    _state_tenant_token = set_current_tenant_id(space_of_state(state))
 
     # ── Bind delivery target from the _gateway routing block ───────
     # Authoritative node-level bind (the reliable layer — see the note above
@@ -1389,7 +1389,7 @@ async def tool_worker_node(
             try:
                 from kazma_core.agent.artifacts import get_artifact_store as _gas
 
-                _tenant = get_current_tenant_id() or "default"
+                _tenant = require_space_id()
                 for _tcd in tools_payload:
                     _ref = str((_tcd.get("args") or {}).get("proposal_id") or "").strip()
                     if not _ref:
@@ -1637,7 +1637,7 @@ async def tool_worker_node(
             mark_proposals_posted,
             safe_tools + danger_tools,
             results,
-            str(state.get("tenant_id") or "default"),
+            space_of_state(state),
         )
 
         # ── Tool-loop breaker (typed outcomes, per-round credit) ─────

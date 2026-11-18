@@ -11,7 +11,7 @@ from typing import Any
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import VerticalScroll, Container
-from textual.widgets import SelectionList, Static, Button, Label, Input, Select
+from textual.widgets import SelectionList, Static, Button, Label, Input
 
 from kazma_tui.themes.theme_manager import ThemeManager
 from kazma_tui.acquisition_status import AcquisitionStatus
@@ -274,36 +274,6 @@ class SettingsPanel(VerticalScroll):
             # Hidden status line for V2 health
             yield Label("", id="v2-health-line", markup=False)
 
-        # Memory Isolation (tenant mode)
-        with Container(classes="settings-section"):
-            yield Static("Memory isolation · tenant mode", classes="settings-title")
-            yield Static(
-                "[dim]shared = all platforms share one pool (single-user). "
-                "per_platform = each platform isolates. "
-                "per_user = each sender/session fully isolated.[/]",
-                classes="settings-hint",
-            )
-            _cur_mode = "shared"
-            live = self._live_map()
-            if "memory.tenant_mode" in live:
-                _cur_mode = str(live.get("memory.tenant_mode") or "shared")
-            else:
-                try:
-                    from kazma_core.config_store import get_config_store
-
-                    _cur_mode = get_config_store().get("memory.tenant_mode", "shared") or "shared"
-                except Exception:
-                    _cur_mode = "shared"
-            yield Select(
-                options=[
-                    ("Share everything (single-user)", "shared"),
-                    ("Per platform (platform isolation)", "per_platform"),
-                    ("Per user (full multi-tenant)", "per_user"),
-                ],
-                value=_cur_mode if _cur_mode in ("shared", "per_platform", "per_user") else "shared",
-                id="tenant-mode-select",
-            )
-
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
         pass
@@ -355,18 +325,6 @@ class SettingsPanel(VerticalScroll):
             self.notify(f"Saved {key} = {val} ({where})", severity="information")
         except Exception as e:
             self.notify(f"Failed to save {key}: {e}", severity="error")
-
-    def on_select_changed(self, event: Select.Changed) -> None:
-        """Handle the tenant-mode dropdown change."""
-        if event.select.id != "tenant-mode-select":
-            return
-        try:
-            val = event.value if event.value else "shared"
-            via = self._persist_setting("memory.tenant_mode", val, "memory")
-            where = "live server" if via == "server" else "this TUI process"
-            self.notify(f"Memory isolation: {val} on {where} (next turn)")
-        except Exception as e:
-            self.notify(f"Failed to save tenant mode: {e}", severity="error")
 
     def _confirm_hitl_disable(self, sel: SelectionList) -> None:
         """Ask for explicit confirmation before disabling HITL approval."""

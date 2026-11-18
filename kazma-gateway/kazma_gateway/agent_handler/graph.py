@@ -43,6 +43,8 @@ from .commands import (
 from .session_commands import try_session_command
 from kazma_core.sessions.ttl import SESSION_TTL_SECONDS as _session_ttl_seconds
 
+from kazma_core.spaces.scope import space_of_state
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -1466,8 +1468,8 @@ def create_graph_handler(
                     # A turn aborted before its answer leaves memory too (M09).
                     from kazma_core.memory.forget import rewind_memory
 
-                    await rewind_memory(thread_id, _before, _msgs, tenant_id=str(
-                        (_snap.values if _snap and _snap.values else {}).get("tenant_id") or "default"))
+                    await rewind_memory(thread_id, _before, _msgs, tenant_id=space_of_state(
+                        _snap.values if _snap and _snap.values else {}))
                 from kazma_ui.turn_runtime import close_aborted_turn
 
                 await close_aborted_turn(thread_id)  # never raises
@@ -1780,33 +1782,8 @@ def create_graph_handler(
                     _skill_exc,
                 )
 
-            # ── Self-improvement Soul (Kazma-wide) ─────────────────
-            # Deltas are wrapped in an untrusted data fence — treat as
-            # observation context only, never instructions (prompt-injection
-            # defense, audit C1).
-            try:
-                from kazma_core.safety.prompt_fence import format_untrusted_block
-                from kazma_core.skills.self_improvement import get_agent_evolution_block
-
-                evo = await asyncio.to_thread(get_agent_evolution_block, "supervisor")  # audit 2026-10-26 AUD-111
-                if evo:
-                    msgs = list(state.get("messages") or [])
-                    evo_sys = {
-                        "role": "system",
-                        "content": format_untrusted_block(evo, source="self_improvement"),
-                    }
-                    insert_at = 0
-                    for i, m in enumerate(msgs):
-                        if isinstance(m, dict) and m.get("role") == "user":
-                            insert_at = i
-                            break
-                    msgs.insert(insert_at, evo_sys)
-                    state = {**state, "messages": msgs}
-            except Exception:
-                logger.debug(
-                    "[agent-handler] agent evolution inject skipped",
-                    exc_info=True,
-                )
+            # The self-improvement lessons are the supervisor's, fenced,
+            # once per turn (S1-10 review: this handler added a second copy).
 
             # The Knowledge Library block is the supervisor's, once per
             # turn (Knowledge audit KB-S08: this handler injected the same
@@ -2280,7 +2257,7 @@ def create_graph_handler(
                 from kazma_core.memory.forget import rewind_memory
 
                 memory = await rewind_memory(thread_id, before, messages,
-                                             tenant_id=str(snap.values.get("tenant_id") or "default"))
+                                             tenant_id=space_of_state(snap.values))
             return (
                 "✅ Removed last assistant response" + _rewind_memory_note(memory, "it")
                 + " You can continue the conversation."
@@ -2342,7 +2319,7 @@ def create_graph_handler(
 
                 memory = await rewind_memory(
                     thread_id, before, messages,
-                    tenant_id=str(snap.values.get("tenant_id") or "default"),
+                    tenant_id=space_of_state(snap.values),
                     from_turn=max(1, user_turn_index(messages[: edited + 1])))
             logger.info("[agent-handler] /edit thread=%s len=%d", thread_id, len(corrected_text))
             return (
@@ -2398,6 +2375,11 @@ def create_graph_handler(
             "⚠️ What this chat keeps out of memory could not be copied to the fork, "
             "so nothing was forked."
         ),
+        "thread_record_unavailable": (
+            "⚠️ Where this chat lives could not be read or recorded, so nothing was changed "
+            "(the server log says why)."
+        ),
+        "no_space": "⚠️ This chat is not tied to a space yet, so nothing was forked.",
     }
 
     def _refusal_text(refused: Any) -> str:

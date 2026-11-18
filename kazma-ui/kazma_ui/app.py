@@ -871,6 +871,17 @@ class KazmaAppBuilder:
 
         self.templates.env.globals["kazma_space"] = _kazma_space
 
+        def _kazma_account() -> str:
+            # The account the request being rendered is for
+            # (<meta name="kazma-account">, Spaces S1-08): the chat page shows
+            # another member's name beside their message, and "You" beside
+            # its own. Empty unless the install enforces Spaces. No I/O.
+            from kazma_core.spaces.scope import bound_asker, spaces_enforced
+
+            return (bound_asker() or "") if spaces_enforced() else ""
+
+        self.templates.env.globals["kazma_account"] = _kazma_account
+
         def _spaces_enforced() -> bool:
             # Read from memory (scope.spaces_enforced): the page asks for the
             # person's spaces, to offer the switcher, only when this is on.

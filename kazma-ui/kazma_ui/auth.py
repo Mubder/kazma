@@ -1864,7 +1864,10 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
                     principal,
                     named,
                     legacy_tenant=tenant_id,
-                    needs_space=scope_of(request.method, judged_path(request)) == "space",
+                    needs_space=space_binding.must_name_its_space(
+                        request.method, judged_path(request),
+                        scope_of(request.method, judged_path(request)),
+                    ),
                 )
                 tenant_id, asker = binding.space_id, binding.asker
             except space_binding.SpaceRefused as refused:
@@ -1888,6 +1891,10 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
 
         scope_tokens = None
         token = None
+        # The space this request acts in, for a layer outside this one that
+        # records what was done (the memory operator trail): the context
+        # bound below is not visible out there, the ASGI scope is.
+        request.scope["kazma_space"] = tenant_id
         if asker is not None and valid_space_id(tenant_id):
             scope_tokens = set_scope(tenant_id, asker)
         else:

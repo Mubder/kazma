@@ -65,7 +65,7 @@ ROOT_SAMPLES: dict[str, tuple[str, ...]] = {
 #: text and list work, Kazma's own pure helpers.
 LOCAL_CALLS = frozenset({
     "_send", "_reply", "reply", "_send_model_reply", "_send_swarm_reply", "manager.send", "OutboundMessage",
-    "_build_target_id", "TelegramAdapter.build_model_keyboard", "count_noun", "slugify_library_id",
+    "_build_target_id", "TelegramAdapter.build_model_keyboard", "count_noun", "_slugify_library_id",
     "_find_worker_prompt_split", "parse_tweet_url", "safe_repo_dir_name", "tool_child_env", "clone_auth_env",
     "render_instruction", "store_errors", "_unresolved", "resolve", "_kb_acquisition_status", "_extract_swarm_task",
     "_sender_is_gateway_admin", "changes_global_config", "tenant_scope", "type", "format_ref",
@@ -82,7 +82,8 @@ _DATA_METHODS = frozenset({"join", "split", "strip", "get", "append", "lower", "
 #: Calls that read and change nothing.
 READS = frozenset({
     "engine.get_worker", "ide.list_path", "ide.read_file", "ide.search", "list_coding_skills", "get_ide_service",
-    "kb_store.list_libraries", "kb_store.get_library", "kb_index.search", "_kb_status_job",
+    "kb_store.list_libraries", "kb_store.get_library", "kb_store.library_id_for", "kb_index.search",
+    "_kb_status_job",
     "get_knowledge_index", "get_knowledge_store", "kb_refusal",
     "svc.list_documents", "svc.job_status", "svc.jobs_for_document", "svc.get_content", "svc.pdf_info_document",
     "svc.search_library", "svc.health", "get_ingestion_service", "surface_scope", "_chat_document_scope",

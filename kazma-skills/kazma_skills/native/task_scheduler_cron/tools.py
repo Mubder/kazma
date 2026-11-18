@@ -211,7 +211,8 @@ async def edit_scheduled(job_id: str, timing: str = "", prompt: str = "") -> str
 
     Returns:
         JSON with the outcome: rescheduled, edit_pending, not_found,
-        not_editable or error.
+        not_editable, not_yours (a new prompt for a job that acts for
+        someone else) or error.
     """
     refused = await _refused()
     if refused:

@@ -545,6 +545,27 @@ def _ensure_about_user(messages: list[dict[str, Any]], block: str) -> list[dict[
     return msgs
 
 
+def _ensure_space_lessons(messages: list[dict[str, Any]], note: str) -> list[dict[str, Any]]:
+    """Make the turn's lessons note (the ``self_improvement`` turn note) the
+    one given: every copy the call holds is dropped, and *note* (when there is
+    one) placed after the identity notes.
+
+    The supervisor decides which Soul a turn reads, on every surface and
+    every install (S1-10 and its review): the one Soul, or once Spaces is
+    enforced its own space's; whatever another copy the call holds.
+    """
+    from kazma_core.memory.profile import ABOUT_MARKER
+
+    msgs = [m for m in messages if note_kind(m) != "self_improvement"]
+    if not note:
+        return msgs
+    at = 0
+    while at < len(msgs) and opens_with(msgs[at], _BASE_MARKER, _PERSONALITY_MARKER, ABOUT_MARKER):
+        at += 1
+    msgs.insert(at, {"role": "system", "content": note})
+    return msgs
+
+
 def _ensure_environment_note(messages: list[dict[str, Any]], block: str) -> list[dict[str, Any]]:
     """Place the turn's workspace block (the ``environment`` turn note) after
     the identity notes -- the base prompt, the personality, "About me" -- when

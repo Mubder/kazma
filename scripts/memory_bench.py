@@ -5,8 +5,10 @@
   python scripts/memory_bench.py run [--real]      # score recall(); --real loads the model
   python scripts/memory_bench.py lock              # raise the CI ratchet to today's scores
   python scripts/memory_bench.py lock --trade "why"  # a reviewed trade (see TRADE_RULE)
+  python scripts/memory_bench.py lock --new-recording "why"  # lock a new recording of the model's pass
   python scripts/memory_bench.py extraction           # extraction scores from the recorded replies
                                                     # (recorded by scripts/memory_extraction_record.py)
+  python scripts/memory_bench.py writes               # the write scenarios: what passes, what does not
 
 The dataset is a persona's life told across dated chat sessions -- facts the
 user states, facts only the assistant said, facts that change, codes and
@@ -37,6 +39,7 @@ DATASET = REPO / "kazma-core" / "kazma_core" / "memory" / "benchmark_data" / "da
 VECTORS = REPO / "tests" / "fixtures" / "memory_bench" / "vectors.npz"
 THRESHOLDS = REPO / "tests" / "fixtures" / "memory_bench" / "thresholds.json"
 EXTRACTION = DATASET.with_name("extraction.json")
+WRITES = DATASET.with_name("writes.json")
 LLM_REPLIES = REPO / "tests" / "fixtures" / "memory_bench" / "extraction_llm.json"
 
 SEED = 20260926
@@ -876,14 +879,188 @@ EXTRACTION_TURNS: list[tuple[str, str, str, list[list[tuple[str, list[str], str]
 ]
 
 
+#: True facts a turn holds that its gold list does not ask for: a pass that
+#: keeps one is not wrong (dataset v2).
+EXTRACTION_EXTRAS: dict[str, list[list[tuple[str, list[str], str]]]] = {
+    "m07": [[("user", ["previously_worked_at", "former_employer", "worked_at"], "Ooredoo")]],
+}
+
+#: Facts a turn must not give, whatever else it keeps (dataset v2): the
+#: assistant's name filed as a fact, and someone else's job, employer or
+#: school filed as the user's own (the user is never "a pilot" because their
+#: sister is). ``None`` for the names: under any name.
+_JOB = ["job", "job_title", "occupation", "role", "profession", "works_as"]
+EXTRACTION_AVOID: dict[str, list[tuple[str, list[str] | None, str]]] = {
+    "e07": [("user", _JOB, "pilot"), ("user", ["works_at", "employer", "company"], "KLM")],
+    "a06": [("user", _JOB, "طبيبة أسنان")],
+    "m05": [("user", ["school", "studies_at", "attends"], "Bayan School")],
+    "m08": [("assistant", None, "Kazma"), ("kazma", None, "Abu Faisal")],
+}
+
+#: The extraction dataset's version: v2 added ``extras`` and ``avoid`` and
+#: the scores read the value (benchmark audit F1).
+EXTRACTION_VERSION = 2
+
+
 def build_extraction() -> dict[str, Any]:
     turns = []
+
+    def facts_of(rows: list[list[tuple[str, list[str], str]]]) -> list[list[dict[str, Any]]]:
+        return [[{"subject": a, "predicates": b, "object": c} for a, b, c in alts] for alts in rows]
+
     for tid, lang, text, facts in EXTRACTION_TURNS:
-        turns.append({"id": tid, "lang": lang, "user": text,
-                      "facts": [[{"subject": a, "predicates": b, "object": c} for a, b, c in alts] for alts in facts]})
-    if len({t["id"] for t in turns}) != len(turns):
+        turn: dict[str, Any] = {"id": tid, "lang": lang, "user": text, "facts": facts_of(facts)}
+        if tid in EXTRACTION_EXTRAS:
+            turn["extras"] = facts_of(EXTRACTION_EXTRAS[tid])
+        if tid in EXTRACTION_AVOID:
+            turn["avoid"] = [{"subject": a, **({"predicates": b} if b else {}), "object": c}
+                             for a, b, c in EXTRACTION_AVOID[tid]]
+        turns.append(turn)
+    ids = [t["id"] for t in turns]
+    if len(set(ids)) != len(ids):
         raise ValueError("duplicate extraction turn id")
-    return {"version": 1, "turns": turns}
+    unknown = (set(EXTRACTION_EXTRAS) | set(EXTRACTION_AVOID)) - set(ids)
+    if unknown:
+        raise ValueError(f"extras or avoid for no turn: {sorted(unknown)}")
+    return {"version": EXTRACTION_VERSION, "turns": turns}
+
+
+#: Write scenarios (2026-11, the memory framework audit's F1, F8): a few turns
+#: of one chat through the write path -- the quick pass, then the model's deep
+#: pass -- and the facts that must be current, and must not, afterwards. The
+#: model's reply to a turn is either its recorded reply to an extraction turn
+#: of the same text (``("recorded", "e06")``) or written here in the shape the
+#: model returns (``("written", [...])``): a scenario tests Kazma's rules
+#: around the model, never the model. Scored by
+#: ``benchmark.run_write_scenarios``.
+#:
+#: Categories: ``update`` (a fact stated, then corrected in the user's own
+#: words), ``kept_as_said`` (the deep pass of the same turn leaves the user's
+#: words and trust as they were), ``short`` (short statements are read, small
+#: talk is not), ``someone_else`` (a fact about another person never becomes
+#: the user's).
+def _said(subject: str, predicate: str, kind: str, obj: str) -> dict[str, Any]:
+    return {"subject": subject, "predicate": predicate, "predicate_type": kind, "object": obj, "confidence": 0.9}
+
+
+def _now(subject: str, obj: str, trust: str | None = None, *, exact: bool = False) -> dict[str, Any]:
+    out: dict[str, Any] = {"subject": subject, "object": obj}
+    if trust:
+        out["trust"] = trust
+    if exact:
+        out["exact"] = True
+    return out
+
+
+WRITE_SCENARIOS: list[dict[str, Any]] = [
+    # ── update: stated, then corrected in the user's own words ──────────────
+    {"id": "update-en-moved", "category": "update", "lang": "en", "turns": [
+        ("I live in Paris.", ("written", [_said("user", "lives_in", "functional", "Paris")])),
+        ("We moved to Rotterdam last month.", ("recorded", "e06"))],
+     "current": [_now("user", "Rotterdam", "user")], "not_current": [_now("user", "Paris")]},
+    {"id": "update-en-new-job", "category": "update", "lang": "en", "turns": [
+        ("I work at Google.", ("written", [_said("user", "works_at", "functional", "Google")])),
+        ("I left Google, I am at Meta now.", ("written", [_said("user", "works_at", "functional", "Meta")]))],
+     "current": [_now("user", "Meta", "user")], "not_current": [_now("user", "Google")]},
+    {"id": "update-en-said-again", "category": "update", "lang": "en", "turns": [
+        ("I live in Paris.", ("written", [_said("user", "lives_in", "functional", "Paris")])),
+        ("I live in Rotterdam now.", ("written", [_said("user", "lives_in", "functional", "Rotterdam")]))],
+     "current": [_now("user", "Rotterdam", "user")], "not_current": [_now("user", "Paris")]},
+    {"id": "update-ar-moved", "category": "update", "lang": "ar", "turns": [
+        ("ساكن في الكويت.", ("written", [_said("user", "lives_in", "functional", "الكويت")])),
+        ("انتقلنا إلى الرياض الشهر الماضي.", ("recorded", "a05"))],
+     "current": [_now("user", "الرياض", "user")], "not_current": [_now("user", "الكويت")]},
+    {"id": "update-ar-new-job", "category": "update", "lang": "ar", "turns": [
+        ("أشتغل في شركة زين.", ("written", [_said("user", "works_at", "functional", "شركة زين")])),
+        ("تركت زين، أشتغل الحين في أريدُو.", ("written", [_said("user", "works_at", "functional", "أريدو")]))],
+     "current": [_now("user", "أريدو", "user")], "not_current": [_now("user", "زين")]},
+    {"id": "update-mixed-moved", "category": "update", "lang": "mixed", "turns": [
+        ("My name is Omar وساكن في Kuwait City.", ("recorded", "m01")),
+        ("We moved to Rotterdam last month.", ("recorded", "e06"))],
+     "current": [_now("user", "Rotterdam", "user")], "not_current": [_now("user", "Kuwait City")]},
+    # ── kept as said: the deep pass of the same turn keeps the user's words ─
+    {"id": "kept-en-name-and-city", "category": "kept_as_said", "lang": "en", "turns": [
+        ("My name is Layla and I live in Lisbon now.", ("recorded", "e01"))],
+     "current": [_now("user", "Layla", "user", exact=True), _now("user", "Lisbon", "user", exact=True)],
+     "not_current": []},
+    {"id": "kept-mixed-employer", "category": "kept_as_said", "lang": "mixed", "turns": [
+        ("أشتغل at Gulf Bank as a teller.", ("recorded", "m02"))],
+     "current": [_now("user", "Gulf Bank", "user", exact=True)], "not_current": []},
+    {"id": "kept-ar-name-and-city", "category": "kept_as_said", "lang": "ar", "turns": [
+        ("اسمي ليلى وساكنة في دبي.", ("recorded", "a01"))],
+     "current": [_now("user", "ليلى", "user", exact=True), _now("user", "دبي", "user", exact=True)],
+     "not_current": []},
+    # ── short statements are read; small talk is not ──────────────────────
+    {"id": "short-en-condition", "category": "short", "lang": "en", "turns": [
+        ("I'm diabetic", ("written", [_said("user", "has_condition", "set", "diabetes")]))],
+     "current": [_now("user", "diabetes")], "not_current": []},
+    {"id": "short-en-call-me", "category": "short", "lang": "en", "turns": [
+        ("Call me Sam", ("written", [_said("user", "preferred_name", "functional", "Sam")]))],
+     "current": [_now("user", "Sam")], "not_current": []},
+    {"id": "short-en-diet", "category": "short", "lang": "en", "turns": [
+        ("I'm vegan", ("written", [_said("user", "diet", "functional", "vegan")]))],
+     "current": [_now("user", "vegan")], "not_current": []},
+    {"id": "short-en-no-city", "category": "short", "lang": "en", "turns": [
+        ("I live in Paris.", ("written", [_said("user", "lives_in", "functional", "Paris")])),
+        ("No, Lisbon", ("written", [_said("user", "lives_in", "functional", "Lisbon")]))],
+     "current": [_now("user", "Lisbon")], "not_current": [_now("user", "Paris")]},
+    {"id": "short-en-thanks", "category": "short", "lang": "en", "turns": [
+        ("Thanks!", ("written", [_said("user", "mood", "state", "grateful")]))],
+     "current": [], "not_current": [_now("user", "grateful")]},
+    {"id": "short-ar-condition", "category": "short", "lang": "ar", "turns": [
+        ("عندي سكري", ("written", [_said("user", "has_condition", "set", "السكري")]))],
+     "current": [_now("user", "السكري")], "not_current": []},
+    {"id": "short-ar-thanks", "category": "short", "lang": "ar", "turns": [
+        ("شكراً", ("written", [_said("user", "mood", "state", "ممتن")]))],
+     "current": [], "not_current": [_now("user", "ممتن")]},
+    # ── someone else: a fact about another person never becomes the user's ─
+    {"id": "other-en-sister-moved", "category": "someone_else", "lang": "en", "turns": [
+        ("I live in Paris.", ("written", [_said("user", "lives_in", "functional", "Paris")])),
+        ("My sister moved to Rotterdam last month.", ("written", [_said("user", "lives_in", "functional", "Rotterdam")]))],
+     "current": [_now("user", "Paris", "user")], "not_current": [_now("user", "Rotterdam")]},
+    {"id": "other-en-manager-job", "category": "someone_else", "lang": "en", "turns": [
+        ("I work at Google.", ("written", [_said("user", "works_at", "functional", "Google")])),
+        ("My manager works at Meta now.", ("written", [_said("user", "works_at", "functional", "Meta")]))],
+     "current": [_now("user", "Google", "user")], "not_current": [_now("user", "Meta")]},
+    {"id": "other-ar-sister-moved", "category": "someone_else", "lang": "ar", "turns": [
+        ("ساكن في الكويت.", ("written", [_said("user", "lives_in", "functional", "الكويت")])),
+        ("أختي انتقلت إلى روتردام.", ("written", [_said("أختي", "lives_in", "functional", "روتردام")]))],
+     "current": [_now("user", "الكويت", "user")], "not_current": [_now("user", "روتردام")]},
+    {"id": "other-mixed-sister-job", "category": "someone_else", "lang": "mixed", "turns": [
+        ("أشتغل في شركة زين.", ("written", [_said("user", "works_at", "functional", "شركة زين")])),
+        ("أختي تشتغل at Gulf Bank.", ("written", [_said("user", "works_at", "functional", "Gulf Bank")]))],
+     "current": [_now("user", "زين", "user")], "not_current": [_now("user", "Gulf Bank")]},
+]
+
+#: The write scenarios' version.
+WRITES_VERSION = 1
+
+
+def build_writes() -> dict[str, Any]:
+    """The write scenarios, checked: every recorded reply names an extraction
+    turn of the same text, every written reply is in the model's shape."""
+    by_id = {tid: text for tid, _lang, text, _facts in EXTRACTION_TURNS}
+    scenarios = []
+    for sc in WRITE_SCENARIOS:
+        turns = []
+        for text, (kind, reply) in sc["turns"]:
+            if kind == "recorded":
+                if by_id.get(reply) != text:
+                    raise ValueError(f"{sc['id']}: no extraction turn {reply!r} says {text!r}")
+                turns.append({"user": text, "recorded": reply})
+            elif kind == "written":
+                for fact in reply:
+                    if not all(fact.get(k) for k in ("subject", "predicate", "predicate_type", "object")):
+                        raise ValueError(f"{sc['id']}: a written reply needs subject, predicate, type and object")
+                turns.append({"user": text, "written": reply})
+            else:
+                raise ValueError(f"{sc['id']}: a turn's reply is recorded or written, not {kind!r}")
+        scenarios.append({"id": sc["id"], "category": sc["category"], "lang": sc["lang"], "turns": turns,
+                          "current": sc["current"], "not_current": sc["not_current"]})
+    ids = [s["id"] for s in scenarios]
+    if len(set(ids)) != len(ids):
+        raise ValueError("duplicate write scenario id")
+    return {"version": WRITES_VERSION, "scenarios": scenarios}
 
 
 def _cmd_build() -> int:
@@ -891,6 +1068,7 @@ def _cmd_build() -> int:
 
     data = build()
     EXTRACTION.write_text(json.dumps(build_extraction(), ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    WRITES.write_text(json.dumps(build_writes(), ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     before = load_dataset() if DATASET.is_file() else None
     DATASET.parent.mkdir(parents=True, exist_ok=True)
     DATASET.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
@@ -1017,13 +1195,15 @@ def trade_problems(old: dict[str, float], new: dict[str, float]) -> list[str]:
     return problems
 
 
-def _cmd_lock(rebaseline: bool, trade: str | None = None) -> int:
+def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | None = None) -> int:
     """Write the replayed scores as the ratchet; refuse to lower any of them.
 
-    The ratchet names the dataset version it was measured on. A new dataset
-    is a new instrument: its first scores are written with ``--rebaseline``,
-    which is refused while the version is unchanged -- so it can never be
-    used to lower the gate on the same data.
+    The ratchet names the dataset versions it was measured on (the recall
+    dataset and the extraction dataset). A new dataset is a new instrument:
+    its first scores are written with ``--rebaseline``, which resets only the
+    part whose dataset changed and is refused while neither changed -- so it
+    can never be used to lower the gate on the same data. The model's
+    extraction pass follows its own rules (:func:`_extraction_lock`).
     """
     from kazma_core.memory.benchmark import (
         ReplayEmbedder,
@@ -1033,22 +1213,34 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None) -> int:
     )
 
     version = load_dataset()["version"]
+    extraction_version = json.loads(EXTRACTION.read_text(encoding="utf-8"))["version"]
+    writes_version = json.loads(WRITES.read_text(encoding="utf-8"))["version"]
+    old = json.loads(THRESHOLDS.read_text(encoding="utf-8")) if THRESHOLDS.is_file() else {}
+    recall_new = old.get("dataset_version") != version
+    extraction_new = (old.get("extraction") or {}).get("version") != extraction_version
+    writes_new = (old.get("writes") or {}).get("version") != writes_version
+    if rebaseline and not (recall_new or extraction_new or writes_new):
+        print(f"the ratchet already measures recall dataset v{version}, extraction dataset "
+              f"v{extraction_version} and write scenarios v{writes_version}: nothing to rebaseline",
+              file=sys.stderr)
+        return 1
+    if writes_new and not rebaseline:
+        print(f"the ratchet measures write scenarios v{(old.get('writes') or {}).get('version')}, the "
+              f"scenarios are v{writes_version}: lock --rebaseline", file=sys.stderr)
+        return 1
+    if (recall_new or extraction_new) and not rebaseline:
+        if recall_new:
+            print(f"the ratchet measures recall dataset v{old.get('dataset_version')}, the dataset is "
+                  f"v{version}: record its vectors, then lock --rebaseline", file=sys.stderr)
+        if extraction_new:
+            print(f"the ratchet measures extraction dataset v{(old.get('extraction') or {}).get('version')}, "
+                  f"the dataset is v{extraction_version}: lock --rebaseline", file=sys.stderr)
+        return 1
     replay = ReplayEmbedder(VECTORS)
     a, b = _patched(replay, replay.model)
     with a, b:
         scores = gated_scores(run_benchmark())
-    old = json.loads(THRESHOLDS.read_text(encoding="utf-8")) if THRESHOLDS.is_file() else {}
-    old_scores = old.get("scores", {})
-    if rebaseline:
-        if old.get("dataset_version") == version:
-            print(f"the ratchet already measures dataset v{version}: nothing to rebaseline",
-                  file=sys.stderr)
-            return 1
-        old_scores = {}
-    elif old.get("dataset_version") != version:
-        print(f"the ratchet measures dataset v{old.get('dataset_version')}, the dataset is "
-              f"v{version}: record its vectors, then lock --rebaseline", file=sys.stderr)
-        return 1
+    old_scores = {} if recall_new else old.get("scores", {})
     lower = {k: (v, scores.get(k)) for k, v in old_scores.items() if scores.get(k, -1.0) < v}
     trades = list(old.get("trades", []))
     if lower and trade:
@@ -1072,12 +1264,26 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None) -> int:
         print("refusing to lower the ratchet: fix the regression, or propose a reviewed "
               "trade with --trade \"why\"", file=sys.stderr)
         return 1
+    from kazma_core.memory.benchmark import StaleRecordingError
+
+    try:
+        extraction, problems = _extraction_lock(old.get("extraction") or {}, fresh=extraction_new,
+                                                new_recording=new_recording)
+        writes, more = _writes_lock(old.get("writes") or {}, fresh=writes_new, new_recording=new_recording)
+        problems += more
+    except (StaleRecordingError, KeyError) as exc:
+        problems = [str(exc)]
+    if problems:
+        for line in problems:
+            print(f"  {line}", file=sys.stderr)
+        print("refusing to lock the extraction scores", file=sys.stderr)
+        return 1
     THRESHOLDS.write_text(
         json.dumps({"dataset_version": version, "scores": scores, "targets": TARGETS,
-                    "trades": trades, "extraction": _extraction_floor(old),
+                    "trades": trades, "extraction": extraction, "writes": writes,
                     # The opt-in Postgres-primary run's floors
                     # (tests/test_memory_benchmark_pg.py), on the same dataset only.
-                    "postgres_primary": {} if rebaseline else old.get("postgres_primary", {})},
+                    "postgres_primary": {} if recall_new else old.get("postgres_primary", {})},
                    indent=1, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
@@ -1088,17 +1294,120 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None) -> int:
     return 0
 
 
-def _extraction_floor(old: dict[str, Any]) -> dict[str, Any]:
-    """The extraction scores, raised to today's (never lowered: refused above
-    for the recall scores; here the old value is kept where today's is lower,
-    and the gate test reports the drop)."""
-    from kazma_core.memory.benchmark import extraction_scores, run_extraction_benchmark
+def _extraction_lock(
+    old: dict[str, Any], *, fresh: bool = False, new_recording: str | None = None,
+) -> tuple[dict[str, Any], list[str]]:
+    """The extraction part of the lock, and why it is refused (empty: it is not).
+
+    *old* is the locked extraction part; *fresh* says the extraction dataset
+    is new (``--rebaseline``), so today's scores are its first lock.
+
+    * The quick pass is Kazma's own code: a ratchet, never lowered.
+    * The model's pass is scored from one recording (benchmark audit F3). On
+      the same recording its scores are compared exactly: only a change in
+      the parser or the scorer moves them, and a drop is refused. A different
+      recording is locked only on purpose (``--new-recording "why"``), and
+      its scores replace the old ones exactly: one asking a turn has no
+      spread to compare against, and the higher of two recordings, score by
+      score, is a floor no recording reaches. The change is written down.
+    * No recording, a prompt it did not answer, or a locked score missing
+      from today's run: refused, never a shorter lock.
+    """
+    import datetime as _dt
+
+    from kazma_core.memory.benchmark import RECORD_AGAIN, extraction_scores, run_extraction_benchmark
+
+    if not LLM_REPLIES.is_file():
+        return {}, [f"no recording of the model's pass ({LLM_REPLIES.name}): it cannot be locked without "
+                    f"one; {RECORD_AGAIN}"]
+    report = run_extraction_benchmark(llm_replies=json.loads(LLM_REPLIES.read_text(encoding="utf-8")))
+    now = extraction_scores(report)
+    identity = report["llm_recording"]
+    was = {} if fresh else (old.get("scores") or {})
+    history = list(old.get("recordings") or [])
+    problems = [f"{k}: locked, and missing from today's run" for k in was if k not in now]
+    problems += [f"{k}: {now[k]} < {v}" for k, v in sorted(was.items())
+                 if k.startswith("heuristic.") and k in now and now[k] < v]
+    locked = old.get("recording") or {}
+    same = locked.get("sha256") == identity["sha256"]
+    if same and locked.get("prompt_sha256") != identity["prompt_sha256"]:
+        # The replies are the ones locked, and the file now says they answer
+        # another prompt: a relabelled recording, never a new one.
+        problems.append("the recording now says it answered another prompt than the one locked: a recording "
+                        f"is not relabelled; {RECORD_AGAIN}")
+    if fresh:
+        if old.get("recording") and not same:
+            history.append({"date": _dt.date.today().isoformat(),
+                            "reason": f"a new extraction dataset (v{report['version']})",
+                            "replaced": {"recording": old.get("recording"),
+                                         "scores": {k: v for k, v in sorted((old.get("scores") or {}).items())
+                                                    if k.startswith("llm.")}}})
+    elif same:
+        if new_recording:
+            problems.append("--new-recording: the recording is the one already locked")
+        problems += [f"{k}: {now[k]} < {v} on the same recording" for k, v in sorted(was.items())
+                     if k.startswith("llm.") and k in now and now[k] < v]
+    elif not new_recording:
+        problems.append("the recording of the model's pass changed: a new recording is locked only on purpose, "
+                        "with lock --new-recording \"why\" (its scores replace the old ones)")
+    else:
+        history.append({
+            "date": _dt.date.today().isoformat(), "reason": new_recording,
+            "replaced": {"recording": old.get("recording"),
+                         "scores": {k: v for k, v in sorted(was.items()) if k.startswith("llm.")}},
+        })
+    return {"version": report["version"], "recording": identity, "scores": now, "recordings": history}, problems
+
+
+def _writes_lock(
+    old: dict[str, Any], *, fresh: bool = False, new_recording: str | None = None,
+) -> tuple[dict[str, Any], list[str]]:
+    """The write scenarios' part of the lock, and why it is refused.
+
+    The scenarios replay the extraction recording, so they follow its rules:
+    on the same recording a ratchet (a scenario that passed must pass, and the
+    list of those that fail is written down, so a pass traded for a failure
+    shows); a new recording only with ``--new-recording``, its results
+    replacing the old ones; a new version of the scenarios with
+    ``--rebaseline``.
+    """
+    from kazma_core.memory.benchmark import run_write_scenarios, write_scores
+
+    if not LLM_REPLIES.is_file():
+        return {}, ["no recording of the model's pass: the write scenarios replay it"]
+    report = run_write_scenarios(llm_replies=json.loads(LLM_REPLIES.read_text(encoding="utf-8")))
+    now = write_scores(report)
+    identity = report["llm_recording"]
+    was = {} if fresh else (old.get("scores") or {})
+    locked = old.get("recording") or {}
+    same = locked.get("sha256") == identity["sha256"]
+    problems = [f"writes {k}: locked, and missing from today's run" for k in was if k not in now]
+    if same and locked.get("prompt_sha256") != identity["prompt_sha256"]:
+        problems.append("writes: the recording now says it answered another prompt than the one locked")
+    if fresh or (not same and new_recording):
+        pass
+    elif not same:
+        problems.append("the recording changed: the write scenarios follow it (lock --new-recording \"why\")")
+    else:
+        problems += [f"writes {k}: {now[k]} < {v}" for k, v in sorted(was.items()) if k in now and now[k] < v]
+        newly = sorted(set(report["failing"]) - set(old.get("failing") or []))
+        if newly:
+            problems.append(f"writes: scenarios that passed now fail: {newly}")
+    return {"version": report["version"], "recording": identity, "scores": now,
+            "failing": report["failing"]}, problems
+
+
+def _cmd_writes() -> int:
+    from kazma_core.memory.benchmark import run_write_scenarios
 
     replies = json.loads(LLM_REPLIES.read_text(encoding="utf-8")) if LLM_REPLIES.is_file() else None
-    now = extraction_scores(run_extraction_benchmark(llm_replies=replies))
-    was = (old.get("extraction") or {}).get("scores", {})
-    return {"version": json.loads(EXTRACTION.read_text(encoding="utf-8"))["version"],
-            "scores": {k: max(v, was.get(k, -1.0)) for k, v in sorted(now.items())}}
+    report = run_write_scenarios(llm_replies=replies)
+    for r in report["results"]:
+        print(("pass  " if r["passed"] else "FAIL  ") + r["id"])
+        for line in r["problems"]:
+            print(f"        {line}")
+    print(json.dumps(report["groups"], ensure_ascii=True, indent=1))
+    return 0
 
 
 def _cmd_extraction() -> int:
@@ -1121,7 +1430,10 @@ def main(argv: list[str] | None = None) -> int:
                       help="a new dataset version: its first scores become the ratchet")
     lock.add_argument("--trade", metavar="REASON",
                       help="lower some scores for a larger gain elsewhere, under TRADE_RULE; recorded")
+    lock.add_argument("--new-recording", metavar="REASON",
+                      help="lock a new recording of the model's extraction pass; its scores replace the old")
     sub.add_parser("extraction")
+    sub.add_parser("writes")
     run = sub.add_parser("run")
     run.add_argument("--real", action="store_true", help="load the real embedder")
     run.add_argument("--json", action="store_true")
@@ -1132,9 +1444,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "vectors":
         return _cmd_vectors()
     if args.cmd == "lock":
-        return _cmd_lock(args.rebaseline, args.trade)
+        return _cmd_lock(args.rebaseline, args.trade, args.new_recording)
     if args.cmd == "extraction":
         return _cmd_extraction()
+    if args.cmd == "writes":
+        return _cmd_writes()
     return _cmd_run(args.real, args.json, args.details)
 
 

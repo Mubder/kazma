@@ -55,6 +55,8 @@ async def _ledger_synthesis_call(
         priced=bool(getattr(resp, "cost_known", True)),
     )
 
+from kazma_core.spaces.scope import space_of_state
+
 logger = logging.getLogger(__name__)
 
 
@@ -424,7 +426,9 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
         "_post_turn_memory": {
             "session_id": state.get("thread_id"),
             "turn": user_turn_index(messages),
-            "tenant_id": state.get("tenant_id", "default"),
+            # The turn's space (the bound scope's once Spaces is enforced:
+            # a checkpoint from before may hold another value).
+            "tenant_id": space_of_state(state),
         },
     }
 

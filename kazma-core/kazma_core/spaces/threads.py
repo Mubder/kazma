@@ -19,7 +19,15 @@ nothing is recorded as the owner's and runs as it did before: the tenant
 ContextVar is left as the entry point left it.
 
 The record holds ids only: no title, no text. It is one small row per
-thread, kept while its chat exists.
+thread, kept while its chat exists (:func:`forget_thread` when it is deleted).
+
+**Everything kept by thread follows the record** (S1-08): the checkpoints,
+the Time Travel steps, the plan, the receipts. :func:`thread_refusal` is the one
+answer to "may this work touch this thread", asked by the checkpoint saver
+and by the routes and tools that take a thread id. It refuses only on an
+install that enforces Spaces; elsewhere a thread is reached as it was before.
+A thread with no record on such an install is from before Spaces, and those
+stay the owner's (decision N19).
 """
 
 from __future__ import annotations
@@ -27,11 +35,11 @@ from __future__ import annotations
 import logging
 import sqlite3
 import threading
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Iterator
 
 from kazma_core.spaces import scope as _scope
 from kazma_core.spaces.scope import NoSpaceBound, Scope, valid_account_id, valid_space_id
@@ -40,8 +48,13 @@ __all__ = [
     "ThreadInAnotherSpace",
     "ThreadRecord",
     "bound",
+    "forget_thread",
+    "record_new_thread",
     "record_of",
     "record_thread",
+    "space_threads",
+    "thread_refusal",
+    "require_thread",
     "scope_for_turn",
     "thread_scopes_db",
 ]
@@ -114,13 +127,19 @@ def record_of(thread_id: str) -> ThreadRecord | None:
     if not thread_id:
         return None
     with _connection() as conn:
-        return _row(
+        found = _row(
             conn.execute(
                 "SELECT thread_id, space_id, opener, created_at FROM thread_scopes "
                 "WHERE thread_id = ?",
                 (str(thread_id),),
             ).fetchone()
         )
+    if found is not None:
+        # A record never changes: remember its space, so the guards a turn's
+        # own code asks afterwards (``thread_refusal``, often on the event
+        # loop) answer from memory. ``scope_for_turn`` reads it for every turn.
+        _remember(found)
+    return found
 
 
 def record_thread(thread_id: str, space_id: str, opener: str) -> ThreadRecord:
@@ -144,7 +163,132 @@ def record_thread(thread_id: str, space_id: str, opener: str) -> ThreadRecord:
             ).fetchone()
         )
     assert stands is not None
+    _remember(stands)
     return stands
+
+
+# ── The thread's space, for everything kept by thread (S1-08) ────────────
+
+#: thread id -> its recorded space. A record never changes once written, so a
+#: hit is safe to keep; a thread with no record is asked again every time (it
+#: may be recorded a moment later). Bounded; :func:`forget_thread` removes.
+_spaces: dict[str, str] = {}
+_spaces_lock = threading.Lock()
+_SPACES_MAX = 4096
+
+
+def _remember(record: ThreadRecord) -> None:
+    with _spaces_lock:
+        if len(_spaces) >= _SPACES_MAX:
+            _spaces.clear()
+        _spaces[record.thread_id] = record.space_id
+
+
+def _thread_space(thread_id: str) -> str | None:
+    """The space a thread is recorded in, or None when it has no record.
+    A recorded thread is answered from memory; the first asking reads the
+    store, so async code calls it in a thread."""
+    tid = str(thread_id or "")
+    if not tid:
+        return None
+    with _spaces_lock:
+        known = _spaces.get(tid)
+    if known is not None:
+        return known
+    record = record_of(tid)  # remembers a record it finds
+    return record.space_id if record is not None else None
+
+
+def known_space(thread_id: str) -> str | None:
+    """A recorded thread's space from memory alone: None when the store must be asked."""
+    with _spaces_lock:
+        return _spaces.get(str(thread_id or ""))
+
+
+def forget_thread(thread_id: str) -> bool:
+    """Remove a thread's record: its chat was deleted. True when one was removed."""
+    tid = str(thread_id or "")
+    if not tid:
+        return False
+    with _connection() as conn:
+        removed = conn.execute("DELETE FROM thread_scopes WHERE thread_id = ?", (tid,)).rowcount
+    with _spaces_lock:
+        _spaces.pop(tid, None)
+    return bool(removed)
+
+
+def space_threads(space_id: str) -> tuple[bool, list[str]]:
+    """The threads of one space, for a statement over a table that holds
+    every space's threads: ``(True, ids)`` names the space's threads;
+    ``(False, ids)`` names the threads that are NOT its own.
+
+    The owner's space is answered the second way: a thread with no record is
+    from before Spaces and is the owner's (N19), so its threads are every
+    thread no other space recorded. One read of the record store, whatever
+    the number of threads: a listing asks this once, never thread by thread.
+    """
+    with _connection() as conn:
+        if space_id == _scope.OWNER_SPACE_ID:
+            rows = conn.execute(
+                "SELECT thread_id FROM thread_scopes WHERE space_id <> ?", (space_id,)
+            ).fetchall()
+            return False, [str(r[0]) for r in rows]
+        rows = conn.execute(
+            "SELECT thread_id FROM thread_scopes WHERE space_id = ?", (space_id,)
+        ).fetchall()
+        return True, [str(r[0]) for r in rows]
+
+
+def thread_home(thread_id: str) -> str:
+    """The space a thread belongs to: its record's, and the owner's for a
+    thread from before Spaces (N19)."""
+    return _thread_space(thread_id) or _scope.OWNER_SPACE_ID
+
+
+def thread_refusal(thread_id: str, *, space_id: str | None = None) -> str | None:
+    """Why this work may not touch *thread_id*, or None when it may.
+
+    Only an install that enforces Spaces refuses. The work's space is
+    *space_id*, else the one bound (``require_space_id``); work that bound
+    nothing -- a watchdog, a resume at start -- acts for the thread itself
+    and is not refused here. Reads the record store on a first asking.
+    """
+    if not _scope.spaces_enforced() or not thread_id:
+        return None
+    asked = space_id
+    if asked is None:
+        bound_scope = _scope.current_scope()
+        if bound_scope is not None:
+            asked = bound_scope.space_id
+        else:
+            from kazma_core.tenant_context import get_current_tenant_id
+
+            asked = (get_current_tenant_id() or "").strip() or None
+    if asked is None:
+        return None
+    if thread_home(thread_id) != asked:
+        return "this chat belongs to another space"
+    return None
+
+
+def record_new_thread(thread_id: str) -> ThreadRecord | None:
+    """Record a thread this work is about to make (a fork) in the space, and
+    for the account, it is bound to. On an install that does not enforce
+    Spaces, work that bound nothing records nothing: the thread is recorded
+    on its first turn, as before. Enforced, such work is refused."""
+    bound_scope = _scope.current_scope()
+    if bound_scope is None:
+        if not _scope.spaces_enforced():
+            return None
+        bound_scope = _scope.require_scope()
+    return record_thread(thread_id, bound_scope.space_id, bound_scope.asker)
+
+
+def require_thread(thread_id: str, *, space_id: str | None = None) -> None:
+    """Raise :class:`ThreadInAnotherSpace` when :func:`thread_refusal` refuses."""
+    why = thread_refusal(thread_id, space_id=space_id)
+    if why:
+        raise ThreadInAnotherSpace(why)
 
 
 @dataclass(frozen=True)

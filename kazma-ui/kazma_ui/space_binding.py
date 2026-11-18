@@ -34,6 +34,8 @@ Everything here reads the identity store: call it off the event loop.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
@@ -41,6 +43,7 @@ from kazma_core.spaces import identity
 from kazma_core.spaces.scope import (
     OWNER_ACCOUNT_ID,
     OWNER_SPACE_ID,
+    bind_scope,
     spaces_enforced,
     valid_space_id,
 )
@@ -51,8 +54,11 @@ __all__ = [
     "Binding",
     "SpaceRefused",
     "account_of",
+    "bound_to",
+    "must_name_its_space",
     "named_space",
     "space_for_request",
+    "space_for_socket",
     "spaces_for_account",
 ]
 
@@ -131,6 +137,58 @@ def named_space(headers: Any, query_params: Any) -> str | None:
     return raw or None
 
 
+def space_for_socket(principal: dict[str, Any] | None, websocket: Any) -> Binding:
+    """The space and asker of a WebSocket handshake, or :class:`SpaceRefused`.
+
+    A socket is a request for a space's data like any other (Spaces S1-08):
+    the page names its space in the address (``?space=``), membership is
+    checked at the handshake, and the socket then stays in that space. On an
+    install that does not enforce Spaces a socket that names none runs in the
+    sign-in's own tenant, as before. Blocking: the identity store.
+    """
+    from kazma_core.tenant_isolation import principal_tenant_id
+
+    legacy = principal_tenant_id(principal) or OWNER_SPACE_ID
+    named = named_space(websocket.headers, websocket.query_params)
+    try:
+        return space_for_request(principal, named, legacy_tenant=legacy, needs_space=True)
+    except identity.IdentityUnavailable:
+        if spaces_enforced() or (named is not None and named != legacy):
+            # Membership cannot be checked: never guessed.
+            raise SpaceRefused(
+                "identity_unavailable", 503, "Accounts cannot be read right now. Try again."
+            ) from None
+        logger.warning("[spaces] the identity store is unreadable; the socket runs with no asker bound")
+        return Binding(space_id=legacy, asker=None)
+
+
+@contextmanager
+def bound_to(binding: Binding) -> Iterator[None]:
+    """Run the block in *binding*'s space, as its asker when it has one."""
+    from kazma_core.tenant_context import tenant_scope
+
+    if binding.asker is not None and valid_space_id(binding.space_id):
+        with bind_scope(binding.space_id, binding.asker):
+            yield
+    else:
+        with tenant_scope(binding.space_id):
+            yield
+
+
+def other_authors(authors: Iterable[str], viewer: str | None) -> dict[str, str]:
+    """``account id -> name`` for the authors of a chat's messages who are
+    not *viewer*: what the page shows beside another member's message
+    (Spaces S1-08). Empty on an install that does not enforce Spaces, and
+    for a chat only the viewer wrote in, so one person's chat shows no
+    names. Reads the identity store: off the loop."""
+    wanted = {str(a) for a in authors if a and a != viewer}
+    if not wanted or not spaces_enforced():
+        return {}
+    names = {a["id"]: str(a.get("display_name") or a.get("name") or a["id"])
+             for a in identity.list_accounts()}
+    return {a: names.get(a, a) for a in wanted}
+
+
 def spaces_for_account(account_id: str) -> list[dict[str, Any]]:
     """The spaces an account may switch between, for the header's switcher:
     id, name, kind, whether it is the account's personal space, its role."""
@@ -144,6 +202,22 @@ def spaces_for_account(account_id: str) -> list[dict[str, Any]]:
         }
         for space in identity.spaces_of(account_id)
     ]
+
+
+def must_name_its_space(method: str, path: str, route_scope: str | None) -> bool:
+    """Whether a request of *route_scope* must name its space (Spaces S1-06).
+
+    A ``space`` route must, except a page: a GET outside ``/api/`` and the
+    sockets. A page that names none (a reload after the sidebar moved the
+    tab, a bookmark) is drawn for the person's own first space, and the
+    page's script (``space_scope.js``) loads it again for the space the tab
+    remembers. Refused, the browser showed an error and the tab could never
+    get back to its space.
+    """
+    if route_scope != "space":
+        return False
+    page = method.upper() in ("GET", "HEAD") and not path.startswith(("/api/", "/ws/"))
+    return not page
 
 
 def space_for_request(
@@ -175,6 +249,11 @@ def space_for_request(
             )
         if named is not None and principal is not None:
             # A sign-in with no account is a member of nothing.
+            raise SpaceRefused("not_a_member", 403, "You are not a member of that space.")
+        if enforced and needs_space and named is not None and named != legacy:
+            # No sign-in at all (sign-in switched off) cannot be checked
+            # against a space: a space route that names another one is
+            # refused, never answered from the space it would run in.
             raise SpaceRefused("not_a_member", 403, "You are not a member of that space.")
         return Binding(space_id=legacy, asker=None)
     if named is not None:

@@ -1495,6 +1495,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "SQLite محلي (افتراضي — طوبولوجيا V2)",
         "en": "Local SQLite (default — V2 Belief Topology)",
     },
+    "settings.memory_legacy_mode_button": {
+        "ar": "استخدم ذاكرة واحدة",
+        "en": "Use one memory",
+    },
+    "settings.memory_legacy_mode_notice": {
+        "ar": "ما زال هذا التثبيت يحفظ الذاكرة لكل منصة أو لكل مستخدم، وهو إعداد قديم لم يعد متاحًا. تُحفظ الذاكرة الآن لكل مساحة. إذا أنهيته فستقرأ الأدوار ذاكرة واحدة من الدور التالي، وما حُفظ تحت الإعداد القديم يبقى في مكانه ويظهر عدده في صحة الذاكرة. لا يمكن اختيار الإعداد القديم مرة أخرى.",
+        "en": "This install still keeps memory per platform or per user, an older setting that is no longer offered. Memory is kept per space now. If you end it, turns read one memory from the next turn; what was kept under the old setting stays where it is and is counted in memory health. The old setting cannot be chosen again.",
+    },
     "settings.memory_isolation_title": {
         "ar": "عزل الذاكرة",
         "en": "Memory Isolation",
@@ -1602,26 +1610,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.memory_sync_postgres": {
         "ar": "مزامنة المعتقدات + الحلقات → Postgres",
         "en": "Sync beliefs + episodes → Postgres",
-    },
-    "settings.memory_tenant_hint": {
-        "ar": "يتحكم بمشاركة أو عزل الذكريات على تثبيت لمستخدم واحد. مع عدة مستخدمين أو في الإنتاج تكون ذاكرة كل مستأجر له وحده تلقائيًا، ولا يتاح هنا إلا «مشاركة الكل». يسري من الدور التالي.",
-        "en": "Controls whether memories are shared or isolated on a single-user install. With several users or in production each tenant's memory is already its own, and only Share everything is available here. Takes effect next turn.",
-    },
-    "settings.memory_tenant_mode": {
-        "ar": "وضع المستأجر",
-        "en": "Tenant Mode",
-    },
-    "settings.memory_tenant_platform": {
-        "ar": "لكل منصة — عزل كل منصة (تيليجرام ≠ الويب)",
-        "en": "Per platform — each platform isolates (Telegram ≠ Web)",
-    },
-    "settings.memory_tenant_shared": {
-        "ar": "مشاركة الكل (مستخدم واحد) — كل المنصات تشترك في ذاكرة واحدة",
-        "en": "Share everything (single-user) — all platforms share one memory pool",
-    },
-    "settings.memory_tenant_user": {
-        "ar": "لكل مستخدم — ذاكرة معزولة لكل مرسل/جلسة",
-        "en": "Per user — each sender/session gets fully isolated memory",
     },
     "settings.memory_test_embed": {
         "ar": "اختبار التضمين",
@@ -5059,11 +5047,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "X API operations Kazma can call now:",
     },
     "settings.xapi.auth_user": {
-        "ar": "مفاتيح X ‏(OAuth 1.0a)",
+        "ar": "مفاتيح X \u200f(OAuth 1.0a)",
         "en": "X keys (OAuth 1.0a)",
     },
     "settings.xapi.auth_oauth2": {
-        "ar": "تسجيل الدخول بحساب X ‏(OAuth 2.0)",
+        "ar": "تسجيل الدخول بحساب X \u200f(OAuth 2.0)",
         "en": "Sign in with X (OAuth 2.0)",
     },
     "settings.xapi.auth_app": {
@@ -5143,7 +5131,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Sign out of X",
     },
     "settings.xapi.signed_out": {
-        "ar": "تم تسجيل الخروج من X ‏(OAuth 2.0).",
+        "ar": "تم تسجيل الخروج من X \u200f(OAuth 2.0).",
         "en": "Signed out of X (OAuth 2.0).",
     },
     "settings.xapi.remove_client": {
@@ -5151,7 +5139,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Remove the OAuth 2.0 client",
     },
     "settings.xapi.remove_client_confirm": {
-        "ar": "إزالة معرّف العميل وسرّه وتسجيل الخروج من X ‏(OAuth 2.0)؟",
+        "ar": "إزالة معرّف العميل وسرّه وتسجيل الخروج من X \u200f(OAuth 2.0)؟",
         "en": "Remove the client ID and secret, and sign out of X (OAuth 2.0)?",
     },
     "settings.xapi.signed_in_as": {
@@ -5813,9 +5801,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "فشل الحفظ",
         "en": "Save failed",
     },
-    "settings.agentjs.memory_isolation_mode_saved_takes": {
-        "ar": "حُفظ وضع عزل الذاكرة — يسري من الدور التالي",
-        "en": "Memory isolation mode saved — takes effect next turn",
+    "settings.agentjs.memory_one_memory_saved": {
+        "ar": "حُفظ. يحفظ كازما ذاكرة واحدة من الدور التالي.",
+        "en": "Saved. Kazma keeps one memory from the next turn.",
     },
     "settings.agentjs.memory_knowledge_settings_saved": {
         "ar": "حُفظت إعدادات الذاكرة / المعرفة",

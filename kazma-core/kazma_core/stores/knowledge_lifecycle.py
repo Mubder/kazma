@@ -32,6 +32,7 @@ from typing import Any
 
 __all__ = [
     "MULTI_USER_REFUSAL",
+    "NO_SPACE_REFUSAL",
     "KnowledgeDocumentsUnavailable",
     "KnowledgeLibraryBusy",
     "delete_library",
@@ -44,6 +45,13 @@ MULTI_USER_REFUSAL = (
     "The Knowledge Library works on a single-operator install. This install has "
     "platform users, and libraries are not separated per user yet, so the Knowledge "
     "Library is off here."
+)
+
+
+#: Spaces enforced and the work tied to no space (a chat app's ``/kb`` before
+#: its chats are bound to one, stage 3): a library would belong to no one.
+NO_SPACE_REFUSAL = (
+    "The Knowledge Library works inside a space, and this chat is not tied to one yet."
 )
 
 
@@ -62,10 +70,19 @@ class KnowledgeDocumentsUnavailable(RuntimeError):
 
 
 def kb_refusal() -> str | None:
-    """:data:`MULTI_USER_REFUSAL` when the Knowledge Library must refuse,
-    else None -- the shared single-operator rule
-    (``security.single_operator``; a check that cannot answer refuses).
-    Blocking: async callers use ``asyncio.to_thread``."""
+    """Why the Knowledge Library refuses this work, or None.
+
+    Once Spaces is enforced, libraries, their chunks, vectors, fetched pages
+    and crawls belong to a space (S1-13): work bound to a space is served
+    there, and work bound to none is refused (:data:`NO_SPACE_REFUSAL`).
+    Otherwise the older multi-user mode keeps its refusal
+    (:data:`MULTI_USER_REFUSAL`, the shared single-operator rule; a check
+    that cannot answer refuses). Blocking: async callers use
+    ``asyncio.to_thread``."""
+    from kazma_core.spaces.scope import current_scope, spaces_enforced
+
+    if spaces_enforced():
+        return None if current_scope() is not None else NO_SPACE_REFUSAL
     from kazma_core.security.single_operator import single_operator_refusal
 
     return single_operator_refusal(MULTI_USER_REFUSAL)

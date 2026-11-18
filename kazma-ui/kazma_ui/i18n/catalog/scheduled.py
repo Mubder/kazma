@@ -392,6 +392,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "نص المهمة أطول من 8000 حرف.",
         "en": "The task prompt is longer than 8000 characters.",
     },
+    "scheduled.err_no_own_address": {
+        "ar": "يرسل Kazma الرسائل المجدولة إلى تطبيق محادثة المالك فقط حاليًا، لذلك يحجزها المالك وحده. الإرسال إلى تطبيق محادثتك يأتي لاحقًا.",
+        "en": "Kazma can only send a scheduled message to the owner's chat app for now, so only the owner can book one. Sending to your own chat app comes later.",
+    },
+    "scheduled.err_not_yours": {
+        "ar": "وحده الشخص الذي تعمل المهمة باسمه يمكنه تغيير ما تقوله أو تشغيلها مرة أخرى.",
+        "en": "Only the person this task acts for can change what it says or run it again.",
+    },
+    "scheduled.err_identity_unavailable": {
+        "ar": "لا يمكن قراءة الحسابات الآن. حاول مرة أخرى.",
+        "en": "Accounts cannot be read right now. Try again.",
+    },
     "scheduled.err_no_delivery_address": {
         "ar": "لا يوجد عنوان للإرسال. اضبط محادثة تيليجرام في الإعدادات.",
         "en": "No delivery address. Set a Telegram chat in Settings.",

@@ -266,8 +266,10 @@ def _session_of(source: str, chat: _Chat, index: int) -> str:
     return f"import-{source}-{chat.chat_id or f'n{index}'}"
 
 
-def _existing(ids: list[str]) -> set[str]:
-    """Which of *ids* memory already holds (read-only; none when no database yet)."""
+def _existing(ids: list[str], tenant_id: str) -> set[str]:
+    """Which of *ids* *tenant_id*'s memory already holds (read-only; none
+    when no database yet). Asked for one tenant: it told one space what
+    another holds."""
     from kazma_core.paths import primary_memory_db
 
     db = Path(primary_memory_db())
@@ -278,7 +280,9 @@ def _existing(ids: list[str]) -> set[str]:
         held: set[str] = set()
         for start in range(0, len(ids), 500):
             chunk = ids[start:start + 500]
-            rows = conn.execute(f"SELECT id FROM episodes WHERE id IN ({','.join('?' for _ in chunk)})", chunk)
+            rows = conn.execute(
+                f"SELECT id FROM episodes WHERE id IN ({','.join('?' for _ in chunk)}) "  # nosec B608 - placeholders
+                "AND tenant_id = ?", (*chunk, tenant_id))
             held.update(r[0] for r in rows)
         return held
     except sqlite3.Error:
@@ -287,29 +291,33 @@ def _existing(ids: list[str]) -> set[str]:
         conn.close()
 
 
-def import_history(history: History, *, tenant_id: str = "default",
+def import_history(history: History, *, tenant_id: str | None = None,
                    progress: Callable[[int, int], None] | None = None,
                    should_stop: Callable[[], bool] | None = None) -> ImportReport:
     """Write every turn of *history* into memory; returns what happened.
     *progress* hears (turns done, turns in all); *should_stop* ends the run
-    between turns (what was written stays)."""
+    between turns (what was written stays). The memories are *tenant_id*'s:
+    the space named, else the one this work is bound to (the owner's on an
+    install that does not enforce Spaces)."""
     from kazma_core.memory.dual_write import episode_row, write_episode
+    from kazma_core.spaces.scope import require_space_id
 
+    tenant_id = tenant_id or require_space_id()
     report = ImportReport()
     total, done = history.turn_count, 0
     for index, chat in enumerate(history.chats, 1):
         session = _session_of(history.source, chat, index)
         meta = {"imported_from": history.source, "chat_title": chat.title}
         rows = [episode_row(session_id=session, turn_number=n, user_text=t.user, assistant_text=t.assistant,
-                            source=SOURCE, created_at=t.at or None, metadata=meta)
+                            tenant_id=tenant_id, source=SOURCE, created_at=t.at or None, metadata=meta)
                 for n, t in enumerate(chat.turns, 1)]
-        held = _existing([r["id"] for r in rows])
+        held = _existing([i for r in rows for i in r["ids"]], tenant_id)
         for n, (turn, row) in enumerate(zip(chat.turns, rows), 1):
             if should_stop is not None and should_stop():
                 report.stopped = True
                 logger.info("[history_import] stopped after %d of %d turns", done, total)
                 return report
-            if row["id"] in held:
+            if held.intersection(row["ids"]):
                 report.already += 1
             else:
                 status, _eid = write_episode(session_id=session, turn_number=n, user_text=turn.user,

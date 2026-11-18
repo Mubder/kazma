@@ -19,11 +19,11 @@ import sqlite3
 from types import SimpleNamespace
 
 import pytest
-
 from kazma_core.memory import belief_mutation
 from kazma_core.memory.belief_mutation import mutate_belief
 from kazma_core.memory.list_reopen import find_closed_entries, reopen_entries
 from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
+
 from tests._tool_answer import answer as tool_answer
 from tests.test_memory_forget import _chat, _live_turn
 from tests.test_memory_routes_tenant_scope import _as_tenant, _memory_tools
@@ -344,6 +344,7 @@ def test_forget_mentions_refuses_before_doing_anything(mem, text):
 def test_forget_mentions_removes_the_lessons_that_quote_it(mem, monkeypatch):
     """Live 2026-10-19: two self-improvement lessons quoted the codeword --
     one the user's own message -- and joined every later prompt."""
+    from kazma_core.config_store import get_config_store
     from kazma_core.skills import self_improvement as si
 
     store = {"agents": {"supervisor": {
@@ -351,13 +352,20 @@ def test_forget_mentions_removes_the_lessons_that_quote_it(mem, monkeypatch):
                 "'Remember this: my test codeword is BLUE-HERON-42.'\n\n[SelfImprovement] Cite sources.",
         "history": [{"ts": "t1", "delta": "as done here with blue-heron-42"}, {"ts": "t2", "delta": "Cite sources."}],
     }}}
-    monkeypatch.setattr(si, "_load_agent_evolution", lambda: store)
-    monkeypatch.setattr(si, "_save_agent_evolution", lambda data: store.update(data))
+    settings = get_config_store()
+    previous = settings.get(si._AGENT_EVO_KEY)
+    settings.set(si._AGENT_EVO_KEY, store)
     monkeypatch.setattr(si, "_migrate_legacy_evolution_if_present", lambda: None)
-    tool = _memory_tools()["memory_forget_mentions"]
-    out = json.loads(_as_tenant("default", lambda: tool_answer(tool("BLUE-HERON-42"))))
+    try:
+        tool = _memory_tools()["memory_forget_mentions"]
+        out = json.loads(_as_tenant("default", lambda: tool_answer(tool("BLUE-HERON-42"))))
+        entry = settings.get(si._AGENT_EVO_KEY)["agents"]["supervisor"]
+    finally:
+        if previous is None:
+            settings.delete(si._AGENT_EVO_KEY)
+        else:
+            settings.set(si._AGENT_EVO_KEY, previous)
     assert out["lessons_removed"] == 2
-    entry = store["agents"]["supervisor"]
     assert "HERON" not in entry["soul"] and "Cite sources." in entry["soul"]
     assert entry["soul"].startswith("You are Kazma.")
     assert [h["ts"] for h in entry["history"]] == ["t2"]

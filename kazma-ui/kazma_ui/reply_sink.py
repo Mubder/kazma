@@ -115,6 +115,8 @@ CLIENT_ROW_FIELDS: tuple[str, ...] = (
     # The model the chat runs with (providers stage 3): the chat's picker
     # shows it when the chat is opened; ``model`` is the one that answered.
     "run_model",
+    # The account that wrote a user row (Spaces S1-08, :func:`authored`).
+    "author",
 )
 
 #: Row fields kept for the server alone, and why.
@@ -122,6 +124,18 @@ SERVER_ROW_FIELDS: dict[str, str] = {
     _LIFECYCLE: "the client reads the legacy `open` flag written beside it",
     "kind": "an instant turn's origin (a capacity reply); no client reads it",
 }
+
+def authored(row: dict[str, Any]) -> dict[str, Any]:
+    """*row* (a user's message) naming its author: the account the bound
+    scope is for (Spaces S1-08, "messages name their author"). Work that
+    bound no scope names nobody: an author is recorded, never guessed."""
+    from kazma_core.spaces.scope import bound_asker
+
+    author = bound_asker()
+    if author:
+        row["author"] = author
+    return row
+
 
 #: A turn's lifecycle is a JOIN-SEMILATTICE, not a field: it only ever moves
 #: forward, and `closed` absorbs.
@@ -654,7 +668,7 @@ def record_instant_turn(
                     last["kind"] = kind
                 return existing
             if not same_user:
-                rows.append({"role": "user", "content": user_text, "ts": _now()})
+                rows.append(authored({"role": "user", "content": user_text, "ts": _now()}))
                 sess.messages = rows
             elif isinstance(last, dict) and last.get("turn_id"):
                 # User row already stored for this command (retried POST);

@@ -15,6 +15,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
+from kazma_core.memory.tenant_view import narrowed_to, sees_every_tenant
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["_install_view", "_mem_tid", "_tenant_clause", "open_memory_db", "memory_db"]
@@ -40,7 +42,9 @@ def _mem_tid() -> str:
         logger.error(
             "[tenant] resolution failed — scoping query to nothing", exc_info=True
         )
-        return "__unscoped__"
+        from kazma_core.memory.schema_v2 import NO_TENANT
+
+        return NO_TENANT
 
 
 def _install_view(request: Any, tid: str) -> bool:
@@ -52,7 +56,7 @@ def _install_view(request: Any, tid: str) -> bool:
     queue, engine errors, the database path. Blocking (the admin decision
     reads the session store): call it from a plain ``def`` route or a thread.
     """
-    if tid in ("", "default"):
+    if sees_every_tenant(tid):
         return True
     from kazma_ui.auth import admin_decision
 
@@ -60,15 +64,18 @@ def _install_view(request: Any, tid: str) -> bool:
 
 
 def _tenant_clause(tid: str, col: str = "tenant_id") -> tuple[str, list]:
-    """(sql, params) tenant predicate; empty for the shared default tenant.
+    """(sql, params) tenant predicate; empty for a caller that sees every
+    tenant's rows: the owner's tenant, while the install does not enforce
+    Spaces (``kazma_core.memory.tenant_view``).
 
     Any unrecognized tenant id is treated as unscoped and matches nothing —
-    "no predicate" must be requested explicitly via the shared default and can
+    "no predicate" must be requested explicitly via the owner's tenant and can
     never be produced by a fallback (audit F-05).
     """
-    if tid in ("", "default"):
+    only = narrowed_to(tid)
+    if only is None:
         return "", []
-    return f" AND {col} = ?", [tid]
+    return f" AND {col} = ?", [only]
 
 
 # ── Connection factory (audit O4) ────────────────────────────────────────

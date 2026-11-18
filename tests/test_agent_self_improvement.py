@@ -28,13 +28,13 @@ def evo_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def test_apply_and_get_agent_evolution(evo_dir: Path) -> None:
     from kazma_core.skills import self_improvement as si
 
-    assert si.get_agent_evolution_block() == ""
+    assert si._agent_evolution_block() == ""
     ok = si.apply_agent_mutation(
         "supervisor",
         "\n\n[SelfImprovement] Prefer citing tool results.",
     )
     assert ok is True
-    block = si.get_agent_evolution_block("supervisor")
+    block = si._agent_evolution_block("supervisor")
     assert "[SelfImprovement]" in block
     assert "Prefer citing" in block
     # Storage is now ConfigStore-backed, not agent_evolution.json
@@ -51,7 +51,7 @@ def test_disabled_env(evo_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     si.apply_agent_mutation("supervisor", "[SelfImprovement] keep me")
     monkeypatch.setenv("KAZMA_SELF_IMPROVEMENT", "0")
     assert si.self_improvement_enabled() is False
-    assert si.get_agent_evolution_block() == ""
+    assert si._agent_evolution_block() == ""
 
 
 @pytest.mark.asyncio
@@ -75,7 +75,7 @@ async def test_analyze_chat_turn_mutates(evo_dir: Path) -> None:
         )
     assert r.get("action") == "mutate"
     assert r.get("applied") is True
-    assert "[SelfImprovement]" in si.get_agent_evolution_block()
+    assert "[SelfImprovement]" in si._agent_evolution_block()
 
 
 @pytest.mark.asyncio
@@ -104,7 +104,7 @@ async def test_delta_with_injection_is_rejected(evo_dir: Path) -> None:
 
     ok = si.apply_agent_mutation("supervisor", f"\n\n[SelfImprovement] {injected}")
     assert ok is False  # defense-in-depth apply-time check rejects it
-    assert si.get_agent_evolution_block() == ""
+    assert si._agent_evolution_block() == ""
 
 
 def test_clean_delta_is_kept(evo_dir: Path) -> None:
@@ -138,7 +138,7 @@ def test_injection_block_fence_present(evo_dir: Path) -> None:
     from kazma_core.skills import self_improvement as si
 
     si.apply_agent_mutation("supervisor", "\n\n[SelfImprovement] Be concise.")
-    evo = si.get_agent_evolution_block("supervisor")
+    evo = si._agent_evolution_block("supervisor")
     fenced = format_untrusted_block(evo, source="self_improvement")
     assert "<kazma:data" in fenced
     assert 'untrusted="true"' in fenced
@@ -172,7 +172,7 @@ def test_concurrent_agent_mutations_no_lost_update(evo_dir: Path) -> None:
     with ThreadPoolExecutor(max_workers=8) as pool:
         list(pool.map(apply_one, range(n)))
 
-    block = si.get_agent_evolution_block("supervisor")
+    block = si._agent_evolution_block("supervisor")
     # Every delta must survive — a lost update (torn read-modify-write) would
     # drop one. If the store were non-atomic we'd see fewer than n blocks or
     # a corrupted/empty block.
@@ -198,7 +198,7 @@ def test_migrate_legacy_agent_evolution_json(evo_dir: Path) -> None:
     (evo_dir / "agent_evolution.json").write_text(json.dumps(legacy), encoding="utf-8")
 
     # Trigger migration + load
-    block = si.get_agent_evolution_block("supervisor")
+    block = si._agent_evolution_block("supervisor")
     assert "[SelfImprovement]" in block
     assert "be terse" in block
 
@@ -217,7 +217,7 @@ def test_corrupt_legacy_json_does_not_crash(evo_dir: Path) -> None:
 
     (evo_dir / "agent_evolution.json").write_text("{not valid json", encoding="utf-8")
     # Must not raise; returns empty (migration failed non-fatally)
-    assert si.get_agent_evolution_block() == ""
+    assert si._agent_evolution_block() == ""
 
 
 # ── Audit H3: background task retention ────────────────────────────────

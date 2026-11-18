@@ -288,8 +288,7 @@ def create_ws_chat_router(
     @router.websocket("/ws/chat/{session_id}")
     async def chat_websocket(websocket: WebSocket, session_id: str) -> None:
         """WebSocket connection handler for session-bound agent telemetry."""
-        from kazma_core.tenant_context import tenant_scope
-        from kazma_core.tenant_isolation import principal_tenant_id
+        from kazma_ui import space_binding
         from kazma_ui.auth import get_websocket_principal
 
         try:
@@ -309,7 +308,15 @@ def create_ws_chat_router(
             await websocket.close(code=4003, reason="Unauthorized")
             return
 
-        with tenant_scope(principal_tenant_id(principal) or "default"):
+        # The space the socket is for, checked at the handshake like every
+        # request (Spaces S1-08).
+        try:
+            binding = await asyncio.to_thread(space_binding.space_for_socket, principal, websocket)
+        except space_binding.SpaceRefused as refused:
+            await websocket.accept()
+            await websocket.close(code=4003, reason=refused.code)
+            return
+        with space_binding.bound_to(binding):
             await _observe_session(websocket, session_id)
 
     async def _observe_session(websocket: WebSocket, session_id: str) -> None:

@@ -155,6 +155,11 @@ class ScheduledJob:
     #: delegation_state``). The fired turn starts with it: the stored prompt
     #: is the booking model's words, never the user's. ``""``: none.
     outside_text: str = ""
+    #: The account that booked the job (Spaces S1-14), or ``""`` for a job
+    #: booked with no person bound (before Spaces, or Kazma's own). Once
+    #: Spaces is enforced the job fires as this account, in its space.
+    #: ``created_by`` stays the actor's label for the trail.
+    creator: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         """The job for a list, a tool result or the page.
@@ -242,6 +247,7 @@ _ADDED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("updated_by", "TEXT NOT NULL DEFAULT ''"),
     ("source", "TEXT NOT NULL DEFAULT ''"),
     ("outside_text", "TEXT NOT NULL DEFAULT ''"),
+    ("creator", "TEXT NOT NULL DEFAULT ''"),
 )
 
 _EXTRA_SCHEMA = (
@@ -498,7 +504,7 @@ class SQLiteCronStore:
             delivery_error=str(val("delivery_error", "")), catchup_seconds=int(val("catchup_seconds", 0) or 0),
             series_start=str(val("series_start", "")), created_by=str(val("created_by", "")),
             updated_by=str(val("updated_by", "")), source=str(val("source", "")),
-            outside_text=str(val("outside_text", "")),
+            outside_text=str(val("outside_text", "")), creator=str(val("creator", "")),
         )
 
     async def _jobs(self, sql: str, args: tuple[Any, ...] = ()) -> list[ScheduledJob]:
@@ -548,8 +554,10 @@ class SQLiteCronStore:
             f"SELECT COUNT(*) AS n FROM cron_jobs WHERE {' AND '.join(where)}", tuple(args))
         return int(rows[0]["n"]) if rows else 0
 
-    async def sibling_delivery_target(self, thread_id: str) -> str:
-        """A VALID delivery_target from any other job on the same thread.
+    async def sibling_delivery_target(self, thread_id: str, tenant_id: str) -> str:
+        """A VALID delivery_target from any other job on the same thread, of
+        the same tenant (Spaces S1-14: a job never takes another space's
+        address).
 
         The repair chain: rescheduled/legacy rows born with an empty or
         malformed target adopt a sibling's routing -- the whole batch shares
@@ -560,9 +568,9 @@ class SQLiteCronStore:
         try:
             rows = await self._conn().execute_fetchall(
                 "SELECT delivery_target FROM cron_jobs "
-                "WHERE thread_id = ? AND delivery_target LIKE '%:%' "
+                "WHERE thread_id = ? AND tenant_id = ? AND delivery_target LIKE '%:%' "
                 "ORDER BY created_at DESC LIMIT 1",
-                (str(thread_id),),
+                (str(thread_id), str(tenant_id)),
             )
         except aiosqlite.Error:
             logger.warning("[CronStore] sibling target lookup failed", exc_info=True)
@@ -592,7 +600,8 @@ class SQLiteCronStore:
                  job.version, job.fire_owner, job.lease_until, job.fire_attempt, job.fire_due,
                  job.pending_edit, job.pending_cancel, job.finished_at, job.last_outcome,
                  job.last_fire_at, job.delivery_state, job.delivery_error, job.catchup_seconds,
-                 job.series_start, job.created_by, job.updated_by, job.source, job.outside_text),
+                 job.series_start, job.created_by, job.updated_by, job.source, job.outside_text,
+                 job.creator),
             )
             await self._event(db, job.job_id, "created", actor=job.created_by, source=job.source,
                               detail={"timing": job.timing, "kind": job.kind, "capabilities": job.capabilities})
@@ -868,12 +877,15 @@ class SQLiteCronStore:
     async def mark_missed(
         self, job_id: str, *, expected_next_run: str, notice: str, target: str,
         advance: Callable[[str, datetime, str], datetime | None], now: datetime | None = None,
+        refused: str = "",
     ) -> dict[str, Any] | None:
         """Record an occurrence missed while Kazma was down: one notice, never "done".
 
         A one-off ends ``missed``; a recurring job moves to its next occurrence
         after *now*. None when the job changed meanwhile (compare-and-swap on
-        status and ``next_run``).
+        status and ``next_run``). *refused*: the job would not fire (a key of
+        the scheduler's fire refusals, Spaces S1-14): it is recorded missed
+        and no notice is queued.
         """
         now = now or self.clock.now()
         async with self._tx() as db:
@@ -881,11 +893,14 @@ class SQLiteCronStore:
             if row is None or str(row["status"]) != "pending" or str(row["next_run"]) != expected_next_run:
                 return None
             due = str(row["next_run"])
-            cur = await db.execute(
-                "INSERT OR IGNORE INTO cron_deliveries (job_id, tenant_id, fire_key, purpose, target, body, "
-                "due_at, created_at) VALUES (?, ?, ?, 'missed', ?, ?, ?, ?)",
-                (job_id, row["tenant_id"], f"{job_id}:{due}:missed", target, notice[:4000], due, self.clock.time()))
-            delivery_id = cur.lastrowid if cur.rowcount else None
+            delivery_id = None
+            if not refused:
+                cur = await db.execute(
+                    "INSERT OR IGNORE INTO cron_deliveries (job_id, tenant_id, fire_key, purpose, target, body, "
+                    "due_at, created_at) VALUES (?, ?, ?, 'missed', ?, ?, ?, ?)",
+                    (job_id, row["tenant_id"], f"{job_id}:{due}:missed", target, notice[:4000], due,
+                     self.clock.time()))
+                delivery_id = cur.lastrowid if cur.rowcount else None
             nxt = advance(str(row["timing"]), now, str(row["series_start"] or ""))
             if nxt is not None:
                 await db.execute(
@@ -899,7 +914,8 @@ class SQLiteCronStore:
                     (norm_iso(now), f"Missed: due {due} while Kazma was not running.", job_id))
                 status = "missed"
             await self._event(db, job_id, "missed", source="scheduler",
-                              detail={"due": due, "delivery_id": delivery_id, "status": status})
+                              detail={"due": due, "delivery_id": delivery_id, "status": status,
+                                      **({"notice_withheld": refused} if refused else {})})
             return {"status": status, "delivery_id": delivery_id, "due": due, "next_run": norm_iso(nxt) if nxt else ""}
 
     # ── the delivery outbox ──────────────────────────────────────────────
