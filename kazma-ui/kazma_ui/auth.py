@@ -1864,7 +1864,10 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
                     principal,
                     named,
                     legacy_tenant=tenant_id,
-                    needs_space=scope_of(request.method, judged_path(request)) == "space",
+                    needs_space=space_binding.must_name_its_space(
+                        request.method, judged_path(request),
+                        scope_of(request.method, judged_path(request)),
+                    ),
                 )
                 tenant_id, asker = binding.space_id, binding.asker
             except space_binding.SpaceRefused as refused:

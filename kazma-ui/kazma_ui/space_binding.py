@@ -55,6 +55,7 @@ __all__ = [
     "SpaceRefused",
     "account_of",
     "bound_to",
+    "must_name_its_space",
     "named_space",
     "space_for_request",
     "space_for_socket",
@@ -203,6 +204,22 @@ def spaces_for_account(account_id: str) -> list[dict[str, Any]]:
     ]
 
 
+def must_name_its_space(method: str, path: str, route_scope: str | None) -> bool:
+    """Whether a request of *route_scope* must name its space (Spaces S1-06).
+
+    A ``space`` route must, except a page: a GET outside ``/api/`` and the
+    sockets. A page that names none (a reload after the sidebar moved the
+    tab, a bookmark) is drawn for the person's own first space, and the
+    page's script (``space_scope.js``) loads it again for the space the tab
+    remembers. Refused, the browser showed an error and the tab could never
+    get back to its space.
+    """
+    if route_scope != "space":
+        return False
+    page = method.upper() in ("GET", "HEAD") and not path.startswith(("/api/", "/ws/"))
+    return not page
+
+
 def space_for_request(
     principal: dict[str, Any] | None,
     named: str | None,
@@ -232,6 +249,11 @@ def space_for_request(
             )
         if named is not None and principal is not None:
             # A sign-in with no account is a member of nothing.
+            raise SpaceRefused("not_a_member", 403, "You are not a member of that space.")
+        if enforced and needs_space and named is not None and named != legacy:
+            # No sign-in at all (sign-in switched off) cannot be checked
+            # against a space: a space route that names another one is
+            # refused, never answered from the space it would run in.
             raise SpaceRefused("not_a_member", 403, "You are not a member of that space.")
         return Binding(space_id=legacy, asker=None)
     if named is not None:

@@ -47,6 +47,9 @@ def _soft_nav(pg, href: str) -> None:
 
 
 def _open_chat_by_sidebar(pg, base: str, space: str) -> None:
+    # The first page a loopback browser opens mints its sign-in cookie; an
+    # admin page asked for with none goes to the sign-in page instead.
+    pg.goto(f"{base}/chat?space={space}", wait_until="domcontentloaded")
     pg.goto(f"{base}/memory?space={space}", wait_until="domcontentloaded")
     pg.wait_for_function("() => !!window.kazmaSpace", timeout=20000)
     _soft_nav(pg, "/chat")
@@ -62,10 +65,19 @@ def _ask(pg, text: str) -> None:
 
 
 def _two_spaces():
-    """The owner in two spaces, and Spaces enforced for this process."""
+    """The owner in two spaces, and Spaces enforced for this process.
+
+    Sign-in on: the harness runs with it off, and with no sign-in there is
+    no account to check a space against (such a request naming another
+    space is refused). With a secret set, the browser's first page gets the
+    loopback auto-login, which is the owner's account. The harness puts the
+    variable back when it stops."""
+    import os
+
     from kazma_core.spaces import identity, scope
     from kazma_core.spaces.scope import OWNER_ACCOUNT_ID
 
+    os.environ["KAZMA_SECRET"] = "two-tabs-test-secret-" + "x" * 24
     identity.create_space("Two tabs team", created_by=OWNER_ACCOUNT_ID, space_id=TEAM)
     scope.set_enforced(True)
 

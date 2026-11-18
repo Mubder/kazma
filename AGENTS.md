@@ -12392,7 +12392,18 @@ product can turn it on, so an install with one account behaves as before.
   first written, a page named the space it was rendered for and every call
   after its load was refused (found in review, before any merge). A test of
   a request rule drives the page's own flow: page load, then a call naming
-  the rendered space.
+  the rendered space. **A page that names no space is drawn, an API call
+  is not** (`space_binding.must_name_its_space`, 2026-11-18, the first run
+  of the two-tab browser test): a GET outside `/api/` and the sockets is
+  drawn for the person's own first space, and `space_scope.js` loads it
+  again for the space the tab remembers. The sidebar's soft navigation
+  drops `?space=` from the address, so a reload refused with 400 left the
+  tab unable to get back to its space. **With no sign-in at all** (sign-in
+  off) there is no account to check: once enforced, a space route that
+  names another space is refused, never answered from the owner's space
+  (S4-03 refuses sign-in off at boot once a second account exists). Gates:
+  `tests/test_web_request_space.py` (the middleware, and `create_app()`'s
+  `/chat`; the old rules as controls).
 - **A turn runs in its thread's space** (`spaces/threads.py`,
   `thread_scopes.db`): a thread is recorded once with its space and opener,
   and `turn_segment_budget` binds the turn's scope from the record. Every

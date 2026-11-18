@@ -214,7 +214,10 @@ def world(matrix: Matrix) -> Iterator[World]:
             return {"found": await held["manager"].aget_tuple(_config(thread_id)) is not None}
 
         try:
-            with TestClient(app) as client:
+            # The server's own loop kind (kazma_core.eventloop): psycopg's
+            # async pool refuses Windows' Proactor loop, and the checkpoint
+            # manager would quietly fall back to SQLite on a real Postgres.
+            with TestClient(app, backend_options={"loop_factory": asyncio.SelectorEventLoop}) as client:
                 yield World(matrix, client, recorder, held)
         finally:
             close = getattr(recorder, "close", None)
