@@ -351,8 +351,8 @@ def test_forget_mentions_removes_the_lessons_that_quote_it(mem, monkeypatch):
                 "'Remember this: my test codeword is BLUE-HERON-42.'\n\n[SelfImprovement] Cite sources.",
         "history": [{"ts": "t1", "delta": "as done here with blue-heron-42"}, {"ts": "t2", "delta": "Cite sources."}],
     }}}
-    monkeypatch.setattr(si, "_load_agent_evolution", lambda: store)
-    monkeypatch.setattr(si, "_save_agent_evolution", lambda data: store.update(data))
+    monkeypatch.setattr(si, "_load_agent_evolution", lambda space=None: store)
+    monkeypatch.setattr(si, "_save_agent_evolution", lambda data, space=None: store.update(data))
     monkeypatch.setattr(si, "_migrate_legacy_evolution_if_present", lambda: None)
     tool = _memory_tools()["memory_forget_mentions"]
     out = json.loads(_as_tenant("default", lambda: tool_answer(tool("BLUE-HERON-42"))))

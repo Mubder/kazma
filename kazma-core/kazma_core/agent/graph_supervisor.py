@@ -17,13 +17,14 @@ from kazma_core.agent.graph_helpers import (
     _ensure_about_user,
     _ensure_base_prompt,
     _ensure_environment_note,
+    _ensure_space_lessons,
     _ensure_personality,
     _memory_explain_cv,
     _rag_top_k,
     is_unusable_assistant_content,
     sanitize_tool_chains,
 )
-from kazma_core.spaces.scope import space_of_state
+from kazma_core.spaces.scope import space_of_state, spaces_enforced
 from kazma_core.agent.plan_fence import (
     AUTO_CONTINUE_PROMPT,
     PLAN_EXECUTE_CONTINUE,
@@ -440,6 +441,14 @@ async def supervisor_node(
     except RuntimeError:  # the thread pool is shut down: a call without the date beats none
         logger.debug("[Supervisor] daily note skipped", exc_info=True)
         _daily = ""
+    # Spaces S1-10: the base prompt is every space's once Spaces is enforced,
+    # so a Soul the agent baked into it at build time is cut here; the turn's
+    # own space's lessons are added below.
+    _spaces_on = spaces_enforced()
+    if _spaces_on:
+        from kazma_core.skills.self_improvement import without_baked_soul
+
+        system_prompt = without_baked_soul(system_prompt)
     messages = _ensure_base_prompt(messages, system_prompt, daily_note=_daily)
     if personality_prompt:
         messages = _ensure_personality(messages, system_prompt, personality_prompt)
@@ -458,6 +467,27 @@ async def supervisor_node(
         logger.warning("[Supervisor] About me unreadable; this call goes without it", exc_info=True)
         _about = {"about": ""}
     messages = _ensure_about_user(messages, about_block(_about.get("about", "")))
+
+    # ── The lessons of the turn's space (Spaces S1-10) ──
+    # Enforced only: the supervisor is then the one place a turn's lessons
+    # are chosen, on every surface. A transport's own copy (read for the
+    # request's space) is replaced by the step's space's; a turn with no
+    # space reads none. Not enforced, the transports add the one Soul as
+    # before and nothing changes here.
+    if _spaces_on and iteration == 0:
+        from kazma_core.db.pg_helpers import store_errors
+        from kazma_core.skills.self_improvement import space_lessons_note
+        from kazma_core.spaces.scope import NoSpaceBound
+
+        try:
+            _lessons_note = await asyncio.to_thread(space_lessons_note, space_of_state(state))
+        except NoSpaceBound:
+            logger.warning("[Supervisor] no space is bound to this turn: it reads no lessons")
+            _lessons_note = ""
+        except store_errors():  # the settings store away, or the thread pool shut down
+            logger.warning("[Supervisor] lessons unreadable; this turn goes without them", exc_info=True)
+            _lessons_note = ""
+        messages = _ensure_space_lessons(messages, _lessons_note)
 
     # ── The workspace this turn runs in (the "environment" turn note) ──
     # One copy, current, on every surface: the web transport adds it; for a

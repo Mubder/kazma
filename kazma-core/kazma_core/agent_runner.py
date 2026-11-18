@@ -406,7 +406,12 @@ class KazmaAgent:
             from kazma_core.safety.prompt_fence import format_untrusted_block
             from kazma_core.skills.self_improvement import get_agent_evolution_block
 
-            evo = get_agent_evolution_block("supervisor")
+            from kazma_core.spaces.scope import spaces_enforced
+
+            # The base prompt is every space's once Spaces is enforced: no
+            # Soul is baked in (the supervisor adds the turn's space's own,
+            # Spaces S1-10). An install with one Soul keeps it here.
+            evo = "" if spaces_enforced() else get_agent_evolution_block("supervisor")
             fenced = format_untrusted_block(evo, source="self_improvement")
             if fenced and fenced not in self.system_prompt:
                 self.system_prompt = (

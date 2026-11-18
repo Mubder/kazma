@@ -119,7 +119,9 @@ CASES: dict[str, Case] = {}
 
 #: The modules that register cases, as import names (``tests._chat_space_cases``).
 #: An item adds its module here; :func:`load_cases` imports each.
-CASE_MODULES: tuple[str, ...] = ("tests._chat_space_cases", "tests._memory_space_cases")
+CASE_MODULES: tuple[str, ...] = (
+    "tests._chat_space_cases", "tests._memory_space_cases", "tests._lesson_space_cases",
+)
 
 
 def case(target: str, item: str) -> Callable[[Callable[[Matrix], None]], Callable[[Matrix], None]]:
@@ -161,8 +163,7 @@ PENDING_ROUTE_RULES: tuple[tuple[Pattern, str], ...] = (
     # wrote its cases: tests/_chat_space_cases.py.)
     # (S1-09 -- memory, and a history brought in -- wrote its cases:
     # tests/_memory_space_cases.py.)
-    # ── S1-10: lessons ────────────────────────────────────────────────────
-    ("/api/commitment", "S1-10"),
+    # (S1-10, lessons: written. Its cases are in tests/_lesson_space_cases.py.)
     # ── S1-12: documents ──────────────────────────────────────────────────
     ("/documents$", "S1-12"),
     ("/api/documents", "S1-12"),

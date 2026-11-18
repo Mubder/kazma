@@ -210,6 +210,7 @@ KEY_RULES: tuple[KeyRule, ...] = (
     KeyRule("connectors.x.oauth2.account", CREDENTIAL, "who signed in with X and what they granted"),
     # ── Learned: restored only where the install has none ────────────────
     KeyRule("self_improvement.agent_evolution", LEARNED, "the Soul Kazma learned"),
+    KeyRule("self_improvement.space_evolution", LEARNED, "the Soul of each space but the owner's"),
     # ── Settings product code writes (named so the class gate sees them) ──
     KeyRule("acquisition.canary_settings", SETTING, "the daily crawl check: on or off, the page it crawls "
             "and the words it must find"),

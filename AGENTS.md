@@ -12483,6 +12483,34 @@ product can turn it on, so an install with one account behaves as before.
   - Gates: `tests/_memory_space_cases.py` (the matrix cases),
     `tests/test_memory_default_is_a_space.py`, `tests/test_memory_spaces.py`
     (each rule with the old behaviour as its control).
+- **Lessons (the Soul) are per space (S1-10, 2026-11-18).**
+  - `self_improvement.soul_space(space)` is the one answer to "whose Soul":
+    the owner's, always, on an install that does not enforce Spaces (one
+    Soul, whatever tenant a turn runs for); enforced, the space named or
+    bound, and `NoSpaceBound` when there is none (nothing is read or learned
+    for no one). The owner's space keeps `self_improvement.agent_evolution`;
+    every other space's Soul is inside `self_improvement.space_evolution`
+    (`{"spaces": {id: {"agents": ...}}}`, saved with `atomic_update` under
+    `_agent_evo_lock`). Every reader and writer of a Soul takes `space`.
+  - **Learning**: `learn_from_finished_turn` passes the turn's tenant
+    (`_post_turn_memory.tenant_id`, which `respond_node` sets from
+    `space_of_state`) down to `apply_agent_mutation(space=)`; the background
+    task runs bound to that tenant.
+  - **Reading**: once enforced, the supervisor chooses a turn's lessons at
+    its first step (`graph_helpers._ensure_space_lessons`: every
+    `self_improvement` turn note the call holds is dropped, the note of
+    `space_of_state(state)` added) and cuts a Soul baked into the base
+    prompt (`self_improvement.without_baked_soul`); `agent_runner` bakes
+    none once Spaces is enforced. Not enforced, the transports add the one
+    Soul as before (§11) and the supervisor changes nothing.
+  - **Forgetting**: `forget_text` and `forget_lessons_from` take the
+    tenant; with none (Kazma's own replay) they read every Soul.
+  - **A held lesson** (`mint_soul_commitment(space=)`) is a commitment of
+    its space; the confirm queue's routes act only on a `soul_delta`
+    commitment of the request's space (`commitment_api._held_here`).
+  - Gates: `tests/test_lessons_per_space.py` (the real hand-off and the
+    real supervisor graph; the single Soul as each control),
+    `tests/_lesson_space_cases.py`.
 
 ## UI Conventions (Web)
 

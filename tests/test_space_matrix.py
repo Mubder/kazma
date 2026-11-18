@@ -64,7 +64,7 @@ PLAN = REPO / "docs" / "plans" / "SPACES_PLAN.md"
 #: item of stage 1 writes the cases of its part and takes them out of the
 #: pending tables; this number may only go down, and lowering it means
 #: lowering the baseline in the same change.
-PENDING_BASELINE = 395
+PENDING_BASELINE = 392
 
 
 # ── what exists ──────────────────────────────────────────────────────────
@@ -485,14 +485,17 @@ def test_a_stale_route_rule_is_reported(routes, tools, live) -> None:
     done = replace(
         live,
         cases={
-            target: _planted_case(target, "S1-10")
-            for target in routes
-            if live.pending_item(target) == "S1-10"
+            **live.cases,
+            **{
+                target: _planted_case(target, "S1-32")
+                for target in routes
+                if live.pending_item(target) == "S1-32"
+            },
         },
     )
-    assert done.cases, "the lessons routes were not found"
+    assert len(done.cases) > len(live.cases), "the Dashboard page's route was not found"
     assert stale(routes, tools, done) == [
-        "pending route rule decides no space route without a case: '/api/commitment' -> S1-10"
+        "pending route rule decides no space route without a case: '/dashboard$' -> S1-32"
     ]
 
 

@@ -419,7 +419,7 @@ def _forget_turn(
     # run again by the next pass.
     from kazma_core.skills.self_improvement import forget_lessons_from
 
-    lessons = forget_lessons_from(keys, turn)
+    lessons = forget_lessons_from(keys, turn, tenant_id=owner)
     # Applied only once EVERY step ran: a step that raises after the commit
     # above leaves the entry pending, and the next pass runs them all again.
     forget_journal.mark_applied(conn, seq)
@@ -1191,7 +1191,7 @@ def forget_mentions(text: str, *, tenant_id: str) -> dict[str, Any]:
         conn.close()
     from kazma_core.skills.self_improvement import forget_text
 
-    lessons = forget_text(needle)
+    lessons = forget_text(needle, tenant_id=caller)
     if not episodes and not facts and not lessons:
         return {"ok": False, "error": "nothing_holds_it"}
     from kazma_core.memory.hygiene import invalidate_belief
@@ -1296,7 +1296,7 @@ def forget_chat(
         # included (roadmap theme 5); before the entry is marked applied.
         from kazma_core.skills.self_improvement import forget_lessons_from
 
-        lessons += forget_lessons_from(keys, None)
+        lessons += forget_lessons_from(keys, None, tenant_id=owner)
         from kazma_core.memory import forget_journal
 
         forget_journal.mark_applied(conn, seq)

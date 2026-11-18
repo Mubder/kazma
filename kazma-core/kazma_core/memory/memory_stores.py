@@ -327,8 +327,10 @@ def _external_space_rules() -> dict[str, Any]:
         "time-travel snapshots (snapshots.db)": ("snapshots.db",),
         "self-improvement lessons (settings self_improvement.agent_evolution)": SpaceRule(
             "row",
-            why="one settings document for the install today; Spaces S1-10 keeps a Soul per space",
-            today="whole"),
+            why="the owner's Soul under its own settings key, every other space's inside one "
+                "document keyed by space (self_improvement.space_evolution); one Soul for an "
+                "install that does not enforce Spaces",
+            today="apart"),
         "chat store and checkpoints": ("chat_sessions.db", "checkpoints.db"),
     }
 

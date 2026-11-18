@@ -666,23 +666,91 @@ def _migrate_legacy_evolution_if_present() -> None:
         logger.warning("[SelfImprovement] Legacy migration failed (non-fatal): %s", exc)
 
 
-def _load_agent_evolution() -> dict[str, Any]:
-    """Load the agent evolution doc from ConfigStore (atomic, WAL-backed)."""
-    data = get_config_store().get(_AGENT_EVO_KEY)
+#: The Souls of every space but the owner's (Spaces S1-10), one document:
+#: ``{"spaces": {<space id>: {"agents": {<agent id>: {soul, history}}}}}``.
+#: The owner's space keeps :data:`_AGENT_EVO_KEY`, so an install with one
+#: account stores what it always stored.
+_SPACE_EVO_KEY = "self_improvement.space_evolution"
+
+
+def _owner_space() -> str:
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    return OWNER_SPACE_ID
+
+
+def soul_space(space: str | None = None) -> str:
+    """The space whose Soul a caller reads or teaches (Spaces S1-10).
+
+    An install that does not enforce Spaces has ONE Soul, the owner's,
+    whatever tenant a turn runs for: exactly as before. Once Spaces is
+    enforced it is the space named, else the one this work is bound to;
+    ``NoSpaceBound`` when there is none (no lesson is read or learned for
+    no one).
+    """
+    from kazma_core.spaces.scope import require_space_id, spaces_enforced
+
+    if not spaces_enforced():
+        return _owner_space()
+    return str(space or "").strip() or require_space_id()
+
+
+def _load_agent_evolution(space: str | None = None) -> dict[str, Any]:
+    """The Soul document of *space* (the owner's when None): ``{"agents":
+    {...}}``. From ConfigStore (atomic, WAL-backed)."""
+    space = space or _owner_space()
+    if space == _owner_space():
+        data = get_config_store().get(_AGENT_EVO_KEY)
+    else:
+        every = get_config_store().get(_SPACE_EVO_KEY)
+        data = ((every or {}).get("spaces") or {}).get(space) if isinstance(every, dict) else None
     if not isinstance(data, dict):
         return {"agents": {}}
     data.setdefault("agents", {})
     return data
 
 
-def _save_agent_evolution(data: dict[str, Any]) -> None:
-    """Persist the agent evolution doc via ConfigStore (atomic single-key set)."""
-    get_config_store().set(_AGENT_EVO_KEY, data)
+def _save_agent_evolution(data: dict[str, Any], space: str | None = None) -> None:
+    """Persist the Soul document of *space* (the owner's when None). Called
+    under ``_agent_evo_lock``; the spaces' document is changed in one atomic
+    step, so two processes teaching two spaces lose neither lesson."""
+    space = space or _owner_space()
+    if space == _owner_space():
+        get_config_store().set(_AGENT_EVO_KEY, data)
+        return
+
+    def put(every: Any) -> dict[str, Any]:
+        every = dict(every) if isinstance(every, dict) else {}
+        spaces = dict(every.get("spaces") or {})
+        spaces[space] = data
+        every["spaces"] = spaces
+        return every
+
+    get_config_store().atomic_update(_SPACE_EVO_KEY, put)
 
 
-def forget_text(text: str) -> int:
+def _soul_spaces(tenant_id: str | None) -> list[str]:
+    """The spaces whose Souls a forget of *tenant_id* reaches.
+
+    Not enforced: the one Soul. Enforced: the tenant's own; with no tenant
+    named (Kazma's own work), every Soul there is.
+    """
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if not spaces_enforced():
+        return [_owner_space()]
+    if tenant_id:
+        return [str(tenant_id)]
+    every = get_config_store().get(_SPACE_EVO_KEY)
+    held = list(((every or {}).get("spaces") or {})) if isinstance(every, dict) else []
+    return [_owner_space(), *held]
+
+
+def forget_text(text: str, tenant_id: str | None = None) -> int:
     """Remove every main-agent lesson that holds *text* (any case), from the
     Soul injected into every prompt and from its history. Returns how many.
+    The Soul is *tenant_id*'s space's (:func:`_soul_spaces`): a forget in one
+    space never edits another's lessons.
 
     The user's "forget everything that mentions X" (``memory.forget.
     forget_mentions``): a lesson quoted the user's message and its own
@@ -696,29 +764,34 @@ def forget_text(text: str) -> int:
     removed = 0
     with _agent_evo_lock:
         _migrate_legacy_evolution_if_present()
-        data = _load_agent_evolution()
-        for entry in (data.get("agents") or {}).values():
-            base, lessons = _lessons(str(entry.get("soul") or ""))
-            kept = [b for b in lessons if needle not in b.casefold()]
-            hist = list(entry.get("history") or [])
-            kept_hist = [h for h in hist if needle not in str(h.get("delta") or "").casefold()]
-            if len(kept) == len(lessons) and len(kept_hist) == len(hist):
-                continue
-            removed += (len(lessons) - len(kept)) + (len(hist) - len(kept_hist))
-            entry["soul"] = _render(base, kept)
-            entry["history"] = kept_hist
-        if removed:
-            _save_agent_evolution(data)
+        for space in _soul_spaces(tenant_id):
+            data = _load_agent_evolution(space)
+            here = 0
+            for entry in (data.get("agents") or {}).values():
+                base, lessons = _lessons(str(entry.get("soul") or ""))
+                kept = [b for b in lessons if needle not in b.casefold()]
+                hist = list(entry.get("history") or [])
+                kept_hist = [h for h in hist if needle not in str(h.get("delta") or "").casefold()]
+                if len(kept) == len(lessons) and len(kept_hist) == len(hist):
+                    continue
+                here += (len(lessons) - len(kept)) + (len(hist) - len(kept_hist))
+                entry["soul"] = _render(base, kept)
+                entry["history"] = kept_hist
+            if here:
+                _save_agent_evolution(data, space)
+            removed += here
     if removed:
         logger.info("[SelfImprovement] forgot %d lesson(s) holding the text the user forgot", removed)
     return removed
 
 
-def forget_lessons_from(chat_keys: Any, turn: int | None = None) -> int:
+def forget_lessons_from(chat_keys: Any, turn: int | None = None, tenant_id: str | None = None) -> int:
     """Take back every main-agent lesson learned from the chat (any of its
     *chat_keys*) -- from one *turn*, or the whole chat when *turn* is None --
     from the Soul injected into every prompt and from its history. Returns
-    how many lessons left the Soul.
+    how many lessons left the Soul. The Soul is *tenant_id*'s space's
+    (:func:`_soul_spaces`): a chat of the same key in another space keeps
+    what it taught there.
 
     Roadmap theme 5 (2026-11): a lesson records the chat and turn it came from
     (``apply_agent_mutation``'s ``source``), and nothing read it back, so a
@@ -743,37 +816,38 @@ def forget_lessons_from(chat_keys: Any, turn: int | None = None) -> int:
             return False
 
     removed = 0
-    changed = False
     with _agent_evo_lock:
         _migrate_legacy_evolution_if_present()
-        data = _load_agent_evolution()
-        for entry in (data.get("agents") or {}).values():
-            hist = list(entry.get("history") or [])
-            gone = [h for h in hist if came_from_it(h)]
-            if not gone:
-                continue
-            kept_hist = [h for h in hist if not came_from_it(h)]
-            base, lessons = _lessons(str(entry.get("soul") or ""))
-            # One copy per forgotten source, never below what the remaining
-            # sources taught: the Soul holds a lesson two turns taught twice.
-            remaining = Counter(str(h.get("delta") or "") for h in kept_hist)
-            in_soul = Counter(lessons)
-            to_drop = Counter({
-                text: min(n, max(0, in_soul[text] - remaining[text]))
-                for text, n in Counter(str(h.get("delta") or "") for h in gone).items()
-            })
-            kept = []
-            for lesson in lessons:  # the oldest copies go first
-                if to_drop[lesson] > 0:
-                    to_drop[lesson] -= 1
+        for space in _soul_spaces(tenant_id):
+            data = _load_agent_evolution(space)
+            changed = False
+            for entry in (data.get("agents") or {}).values():
+                hist = list(entry.get("history") or [])
+                gone = [h for h in hist if came_from_it(h)]
+                if not gone:
                     continue
-                kept.append(lesson)
-            removed += len(lessons) - len(kept)
-            entry["soul"] = _render(base, kept)
-            entry["history"] = kept_hist
-            changed = True
-        if changed:
-            _save_agent_evolution(data)
+                kept_hist = [h for h in hist if not came_from_it(h)]
+                base, lessons = _lessons(str(entry.get("soul") or ""))
+                # One copy per forgotten source, never below what the remaining
+                # sources taught: the Soul holds a lesson two turns taught twice.
+                remaining = Counter(str(h.get("delta") or "") for h in kept_hist)
+                in_soul = Counter(lessons)
+                to_drop = Counter({
+                    text: min(n, max(0, in_soul[text] - remaining[text]))
+                    for text, n in Counter(str(h.get("delta") or "") for h in gone).items()
+                })
+                kept = []
+                for lesson in lessons:  # the oldest copies go first
+                    if to_drop[lesson] > 0:
+                        to_drop[lesson] -= 1
+                        continue
+                    kept.append(lesson)
+                removed += len(lessons) - len(kept)
+                entry["soul"] = _render(base, kept)
+                entry["history"] = kept_hist
+                changed = True
+            if changed:
+                _save_agent_evolution(data, space)
     if removed:
         logger.info("[SelfImprovement] took back %d lesson(s) learned from a forgotten %s",
                     removed, "chat" if turn is None else "turn")
@@ -788,21 +862,69 @@ def self_improvement_enabled() -> bool:
     return raw not in ("0", "false", "no", "off", "disabled")
 
 
-def get_agent_evolution_block(agent_id: str = _DEFAULT_AGENT_ID) -> str:
+def get_agent_evolution_block(agent_id: str = _DEFAULT_AGENT_ID, *, space: str | None = None) -> str:
     """Return the cumulative [SelfImprovement] Soul block for the main agent.
 
     Empty when none applied or SI disabled. Safe to append as a system message
-    every chat turn (Web SSE / gateway).
+    every chat turn (Web SSE / gateway). The Soul is the turn's space's
+    (:func:`soul_space`): a lesson learned in one space never enters another's
+    prompt. With Spaces enforced and no space bound, there is no Soul to show.
     """
     if not self_improvement_enabled():
         return ""
+    from kazma_core.spaces.scope import NoSpaceBound
+
+    try:
+        space = soul_space(space)
+    except NoSpaceBound:
+        logger.info("[SelfImprovement] no space is bound to this prompt: no lessons are added")
+        return ""
     with _agent_evo_lock:
         _migrate_legacy_evolution_if_present()
-        data = _load_agent_evolution()
+        data = _load_agent_evolution(space)
         entry = (data.get("agents") or {}).get(agent_id) or {}
         # Read through the parser: a Soul written before 2026-11 carries the
         # template lines and runs of blank lines (FA-212).
         return _render(*_lessons(str(entry.get("soul") or ""))).strip()
+
+
+_SOUL_FENCE_OPEN = '<kazma:data source="self_improvement"'
+_SOUL_FENCE_CLOSE = "</kazma:data>"
+
+
+def without_baked_soul(prompt: str) -> str:
+    """*prompt* without any fenced Soul block inside it.
+
+    The agent adds the Soul it reads at build time to its base prompt
+    (``agent_runner``): on an install with one Soul that is the Soul. Once
+    Spaces is enforced the base prompt is every space's, so the supervisor
+    cuts that copy and adds the turn's own space's lessons instead
+    (:func:`space_lessons_note`). One pass, no pattern.
+    """
+    text = prompt or ""
+    out: list[str] = []
+    at = 0
+    while True:
+        start = text.find(_SOUL_FENCE_OPEN, at)
+        if start < 0:
+            out.append(text[at:])
+            break
+        end = text.find(_SOUL_FENCE_CLOSE, start)
+        if end < 0:  # an opener with no end: everything from it on is the block
+            out.append(text[at:start])
+            break
+        out.append(text[at:start])
+        at = end + len(_SOUL_FENCE_CLOSE)
+    return "".join(part.rstrip() if i < len(out) - 1 else part for i, part in enumerate(out)).rstrip()
+
+
+def space_lessons_note(space: str) -> str:
+    """The fenced lessons of *space*, as a turn's system note ("" when it has
+    none, or self-improvement is off). Blocking: a settings read."""
+    from kazma_core.safety.prompt_fence import format_untrusted_block
+
+    block = get_agent_evolution_block(space=space)
+    return format_untrusted_block(block, source="self_improvement") if block else ""
 
 
 def _soul_requires_confirm() -> bool:
@@ -851,12 +973,15 @@ def confirm_soul_delta(commitment_id: str) -> bool:
 
 
 def mint_soul_commitment(delta: str, *, agent_id: str | None = None,
-                         worker_name: str | None = None, thread_id: str | None = None) -> str | None:
+                         worker_name: str | None = None, thread_id: str | None = None,
+                         space: str | None = None) -> str | None:
     """Mint a needs_confirm commitment for a soul delta (Phase 7).
 
     Returns the commitment_id, or None if minting is off/failed. Called at the
     apply-site callers when soul_requires_confirm is ON so the delta can later
     be confirmed + re-applied. act='soul_delta' (critical retention tier).
+    The commitment is its space's (:func:`soul_space`): it is listed,
+    confirmed and applied there.
     """
     if not _soul_requires_confirm():
         return None
@@ -866,7 +991,7 @@ def mint_soul_commitment(delta: str, *, agent_id: str | None = None,
         c = Commitment(
             thread_id=thread_id or "", act="soul_delta",
             goal_text=(delta or "")[:200], tool_name="self_improvement",
-            args_digest="", tenant_id="default",
+            args_digest="", tenant_id=soul_space(space),
             slots={"delta": (delta or "")[:500],
                    "agent_id": agent_id, "worker_name": worker_name},
         )
@@ -880,13 +1005,22 @@ def mint_soul_commitment(delta: str, *, agent_id: str | None = None,
 
 def apply_agent_mutation(
     agent_id: str, delta: str, *, commitment_id: str | None = None,
-    source: dict[str, Any] | None = None,
+    source: dict[str, Any] | None = None, space: str | None = None,
 ) -> bool:
-    """Cap and persist a Soul delta for the main (or named) agent.
+    """Cap and persist a Soul delta for the main (or named) agent, in the
+    Soul of *space* (:func:`soul_space`: the one Soul of an install that does
+    not enforce Spaces; else the space named or bound).
 
     *source* names the chat turn the lesson came from (``chat``, ``turn``),
     kept in its history entry."""
     if not delta or not self_improvement_enabled():
+        return False
+    from kazma_core.spaces.scope import NoSpaceBound
+
+    try:
+        space = soul_space(space)
+    except NoSpaceBound:
+        logger.warning("[SelfImprovement] Agent '%s' delta not applied: no space is bound", agent_id)
         return False
     # Defense-in-depth injection guard (audit C1): the creation-time check in
     # _analyze_* already rejects injected deltas, but re-check here in case a
@@ -909,7 +1043,7 @@ def apply_agent_mutation(
     # (no loophole via a legacy caller).
     if _soul_requires_confirm():
         if not commitment_id:
-            commitment_id = mint_soul_commitment(delta, agent_id=agent_id)
+            commitment_id = mint_soul_commitment(delta, agent_id=agent_id, space=space)
         if not commitment_id or not _soul_commitment_confirmed(commitment_id):
             logger.info(
                 "[SelfImprovement] agent '%s' soul delta held — commitment %s not confirmed",
@@ -924,7 +1058,7 @@ def apply_agent_mutation(
     # doc and clobber each other (lost update).
     with _agent_evo_lock:
         _migrate_legacy_evolution_if_present()
-        data = _load_agent_evolution()
+        data = _load_agent_evolution(space)
         agents = data.setdefault("agents", {})
         entry = agents.get(agent_id) or {"soul": "", "history": []}
         old = str(entry.get("soul") or "")
@@ -941,7 +1075,7 @@ def apply_agent_mutation(
         )
         entry["history"] = hist[-40:]
         agents[agent_id] = entry
-        _save_agent_evolution(data)
+        _save_agent_evolution(data, space)
     logger.info(
         "[SelfImprovement] Agent '%s' Soul updated (%d → %d chars)",
         agent_id,
@@ -959,8 +1093,10 @@ async def analyze_and_apply_chat_turn(
     output_snippet: str = "",
     agent_id: str = _DEFAULT_AGENT_ID,
     source: dict[str, Any] | None = None,
+    space: str | None = None,
 ) -> dict[str, Any]:
-    """Run Meta-Refiner for a main-agent chat turn and persist Soul delta.
+    """Run Meta-Refiner for a main-agent chat turn and persist Soul delta
+    in the Soul of *space* (:func:`soul_space`).
 
     Reached through :func:`learn_from_finished_turn`. A turn that failed
     teaches nothing (FA-212): its "lesson" was the failure's own text -- a
@@ -1004,9 +1140,9 @@ async def analyze_and_apply_chat_turn(
     # confirmed via the HITL bus (when soul_requires_confirm is on). No-op
     # (returns None) when the flag is off → apply_agent_mutation ignores it.
     # Both write the settings store (a database on Postgres): off the loop.
-    cid = await asyncio.to_thread(mint_soul_commitment, delta, agent_id=agent_id)
+    cid = await asyncio.to_thread(mint_soul_commitment, delta, agent_id=agent_id, space=space)
     ok = await asyncio.to_thread(apply_agent_mutation, agent_id, delta, commitment_id=cid,
-                                 source=source)
+                                 source=source, space=space)
     analysis["applied"] = ok
     analysis["agent_id"] = agent_id
     return analysis
@@ -1083,10 +1219,22 @@ async def _learn_from_turn(
     if await asyncio.to_thread(turn_kept_out, session, turn, question, tenant_id=tenant_id):
         logger.info("[SelfImprovement] no lesson from %s turn %d: kept out of memory", session[:12], turn)
         return {"action": "skip", "reason": "kept out of memory"}
-    return await analyze_and_apply_chat_turn(
-        user_message=question, success=True, output_snippet=answer[:600],
-        source={"chat": session, "turn": turn},
-    )
+    # The lesson is the turn's space's (Spaces S1-10), named here: this is a
+    # background task, and what its context holds is not the turn's word.
+    # The refiner's own memory search runs for that tenant too.
+    from kazma_core.spaces.scope import spaces_enforced
+    from kazma_core.tenant_context import tenant_scope
+
+    async def learn() -> dict[str, Any]:
+        return await analyze_and_apply_chat_turn(
+            user_message=question, success=True, output_snippet=answer[:600],
+            source={"chat": session, "turn": turn}, space=tenant_id,
+        )
+
+    if tenant_id != _owner_space() or spaces_enforced():
+        with tenant_scope(tenant_id):
+            return await learn()
+    return await learn()
 
 
 def get_self_improvement() -> SelfImprovementSkill:
