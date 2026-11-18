@@ -1898,16 +1898,21 @@ four injected were noise.
   stays env-free) -- it costs a call a turn; a turn with no recording is an
   error, never "the model was down"). **Scored by value since 2026-11**
   (dataset v2, benchmark audit R1): per pass and language `found` (a gold
-  fact's value under its subject, or the relation from the other side, under
-  any name), `named` (of those, under a listed name), `right` (kept facts
-  not unwanted: a turn's `extras` are true, its `avoid` entries are never
-  right and find nothing) and `quiet`; the old strict reading stays in each
-  row as `recall`/`precision`, ungated. **A recording says what it is**
-  (`recording_identity`: its replies' hash, model, provider, date, askings,
-  the system prompt's hash) and a recording of another prompt is refused
-  (`StaleRecordingError`, also at replay time). The lock (`_extraction_lock`):
-  the quick pass is a ratchet; the model's pass compares exactly on the
-  same recording, a new recording is locked only with
+  fact's whole value -- equal, or whole words of it -- under its subject, or
+  the relation from the other side, under any name that does not turn it
+  around: a negative or past name finds only a negative or past fact),
+  `named` (of those, under a listed name), `right` (kept facts not unwanted:
+  a turn's `extras` are true, its `avoid` entries are never right and find
+  nothing; the name is scored apart) and `quiet`; the old strict reading
+  stays in each row as `recall`/`precision`, ungated. **A recording says
+  what it is** (`recording_identity`: its replies' hash, model, provider,
+  date, askings, the system prompt's hash) and a recording of another prompt
+  is refused (`StaleRecordingError`, also at replay time); a message the
+  recording holds no reply for is its own failure, never "the model is
+  down". The gate and the lock compare the locked prompt hash too: the same
+  replies relabelled as another prompt's are refused, flag or not. The lock
+  (`_extraction_lock`): the quick pass is a ratchet; the model's pass
+  compares exactly on the same recording, a new recording is locked only with
   `lock --new-recording "why"` and replaces the old scores exactly (written
   in `recordings`), no recording is a failure, and `lock --rebaseline`
   resets the extraction part when its dataset version changes. Gates in

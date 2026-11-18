@@ -769,13 +769,16 @@ ones, on both paths (vectors replayed from bge-m3):
 
 Extraction (`python scripts/memory_bench.py extraction`): 30 single turns
 in English, Arabic and both, scored on what a reader would keep from each.
-A fact counts as **found** when its value is kept about the right person,
-whatever the pass called it; **same name** is the share of those kept under
-a name on the list (a fact under two names is two facts to Kazma, so the
-name matters too); **right** is the share of kept facts that are true and
-about the right person ("my sister is a pilot" never makes the user a
-pilot). Until 2026-11 a fact counted only under a listed name, so a fact
-kept under another name was counted "not found" and "wrong" at once.
+A fact counts as **found** when its whole value is kept about the right
+person, whatever the pass called it, unless the name turns it around
+("dislikes", "former"); **same name** is the share of those kept under a
+name on the list (a fact under two names is two facts to Kazma, so the name
+matters too); **right** is the share of kept facts that hold a value the
+turn gives, about the right person, and are not on the turn's list of what
+must not be kept ("my sister is a pilot" never makes the user a pilot). The
+name is scored apart, so "right" does not say the name fits. Until 2026-11 a
+fact counted only under a listed name, so a fact kept under another name was
+counted "not found" and "wrong" at once.
 
 | Heuristic pass | Found | Same name | Right | Turns with nothing to keep that kept nothing |
 |---|---|---|---|---|

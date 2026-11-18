@@ -1328,7 +1328,13 @@ def _extraction_lock(
     problems = [f"{k}: locked, and missing from today's run" for k in was if k not in now]
     problems += [f"{k}: {now[k]} < {v}" for k, v in sorted(was.items())
                  if k.startswith("heuristic.") and k in now and now[k] < v]
-    same = (old.get("recording") or {}).get("sha256") == identity["sha256"]
+    locked = old.get("recording") or {}
+    same = locked.get("sha256") == identity["sha256"]
+    if same and locked.get("prompt_sha256") != identity["prompt_sha256"]:
+        # The replies are the ones locked, and the file now says they answer
+        # another prompt: a relabelled recording, never a new one.
+        problems.append("the recording now says it answered another prompt than the one locked: a recording "
+                        f"is not relabelled; {RECORD_AGAIN}")
     if fresh:
         if old.get("recording") and not same:
             history.append({"date": _dt.date.today().isoformat(),
@@ -1373,8 +1379,11 @@ def _writes_lock(
     now = write_scores(report)
     identity = report["llm_recording"]
     was = {} if fresh else (old.get("scores") or {})
-    same = (old.get("recording") or {}).get("sha256") == identity["sha256"]
+    locked = old.get("recording") or {}
+    same = locked.get("sha256") == identity["sha256"]
     problems = [f"writes {k}: locked, and missing from today's run" for k in was if k not in now]
+    if same and locked.get("prompt_sha256") != identity["prompt_sha256"]:
+        problems.append("writes: the recording now says it answered another prompt than the one locked")
     if fresh or (not same and new_recording):
         pass
     elif not same:

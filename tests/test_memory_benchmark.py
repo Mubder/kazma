@@ -241,13 +241,26 @@ def test_the_extraction_dataset_is_what_the_builder_builds():
         json.dumps(built, ensure_ascii=False))
 
 
+def _recording_problems(report: dict, locked: dict) -> list[str]:
+    """Why the run's recording is not the locked one: other replies, or the
+    same replies saying they answered another prompt (a relabelled file)."""
+    ran, held = report["llm_recording"], locked["recording"]
+    problems = []
+    if ran["sha256"] != held["sha256"]:
+        problems.append("the recording of the model's pass changed: python scripts/memory_bench.py "
+                        "lock --new-recording \"why\"")
+    if ran["prompt_sha256"] != held["prompt_sha256"]:
+        problems.append("the recording says it answered another prompt than the one locked: record again")
+    return problems
+
+
 def test_extraction_only_improves():
     locked = _locked_extraction()
     report = benchmark.run_extraction_benchmark(llm_replies=_recording())
     assert report["version"] == locked["version"], (
         "the extraction dataset changed: python scripts/memory_bench.py lock --rebaseline")
-    assert report["llm_recording"]["sha256"] == locked["recording"]["sha256"], (
-        "the recording of the model's pass changed: python scripts/memory_bench.py lock --new-recording \"why\"")
+    problems = _recording_problems(report, locked)
+    assert not problems, "\n".join(problems)
     dropped, rose = _compare(benchmark.extraction_scores(report), locked["scores"])
     assert not dropped, "Extraction got worse:\n  " + "\n  ".join(dropped)
     assert not rose, "Extraction improved -- lock it in: python scripts/memory_bench.py lock\n  " + "\n  ".join(rose)
@@ -267,26 +280,114 @@ def test_the_extraction_gate_sees_an_extractor_that_keeps_nothing(monkeypatch):
     assert any(d.startswith("llm.") for d in dropped), dropped
 
 
+def test_a_relabelled_recording_is_not_the_locked_one(tmp_path, monkeypatch):
+    """The reviewer's experiment on piece 1: the prompt replaced by "Keep
+    nothing." and the recording's ``prompt_sha256`` edited to match. Its
+    replies are the locked ones, so a check of the replies alone passed, the
+    scores stayed, and ``lock`` asked for nothing. Both the gate and the lock
+    now compare the prompt the recording says it answered."""
+    import hashlib
+
+    relabelled = _recording()
+    monkeypatch.setattr("kazma_core.memory.belief_extractor._EXTRACT_SYSTEM", "Keep nothing.")
+    relabelled["prompt_sha256"] = hashlib.sha256(b"Keep nothing.").hexdigest()
+    locked = _locked_extraction()
+    report = benchmark.run_extraction_benchmark(llm_replies=relabelled)
+    # Control: the replies are the locked ones, and so are the scores.
+    assert report["llm_recording"]["sha256"] == locked["recording"]["sha256"]
+    assert benchmark.extraction_scores(report) == locked["scores"]
+    assert any("another prompt" in p for p in _recording_problems(report, locked))
+
+    script = _build_script()
+    path = tmp_path / "extraction_llm.json"
+    path.write_text(json.dumps(relabelled, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(script, "LLM_REPLIES", path)
+    _part, problems = script._extraction_lock(locked)
+    assert any("another prompt" in p for p in problems), problems
+    _part, problems = script._extraction_lock(locked, new_recording="relabelled")
+    assert any("another prompt" in p for p in problems), problems
+
+
+def _probe_turns() -> list[dict]:
+    return [
+        {"id": "p1", "lang": "en", "user": "My name is Layla and I live in Lisbon.",
+         "facts": [[{"subject": "user", "predicates": ["name_is"], "object": "Layla"}],
+                   [{"subject": "user", "predicates": ["lives_in"], "object": "Lisbon"}]]},
+        {"id": "p2", "lang": "en", "user": "I work at Gulf Bank.",
+         "facts": [[{"subject": "user", "predicates": ["works_at"], "object": "Gulf Bank"}]]},
+        {"id": "p3", "lang": "en", "user": "I love hiking.",
+         "facts": [[{"subject": "user", "predicates": ["prefers"], "object": "hiking"}]]},
+    ]
+
+
 def test_found_reads_the_value_and_named_reads_the_name():
-    """An extractor that renames every predicate keeps ``found`` and loses
-    ``named``; one that drops every third fact loses ``found``. The reading
-    before 2026-11 (``recall``, a fact counts only under a listed name) falls
-    in both cases, so it could not tell a lost fact from a renamed one."""
-    turns = _turns()
-    kept = benchmark.replayed_extraction(turns, _recording())
+    """On cases made for it: an extractor that renames every predicate keeps
+    ``found`` and loses ``named``; one that drops a fact loses ``found``. The
+    reading before 2026-11 (``recall``, a fact counts only under a listed
+    name) falls in both cases, so it could not tell a lost fact from a renamed
+    one."""
+    turns = _probe_turns()
+    kept = {"p1": [{"subject": "user", "predicate": "name_is", "object": "layla"},
+                   {"subject": "user", "predicate": "lives_in", "object": "lisbon"}],
+            "p2": [{"subject": "user", "predicate": "works_at", "object": "gulf_bank"}],
+            "p3": [{"subject": "user", "predicate": "prefers", "object": "hiking"}]}
     renamed = {tid: [{**f, "predicate": "zz_" + f["predicate"]} for f in facts] for tid, facts in kept.items()}
-    seen = iter(range(10_000))
-    dropped = {tid: [f for f in facts if next(seen) % 3 != 2] for tid, facts in kept.items()}
-    base = benchmark._score_extraction(turns, kept)
-    after_rename = benchmark._score_extraction(turns, renamed)
-    after_drop = benchmark._score_extraction(turns, dropped)
-    for lang in ("en", "ar", "mixed"):
-        assert after_rename[lang]["found"] == base[lang]["found"] == 1.0, lang
-        assert after_rename[lang]["named"] < base[lang]["named"], lang
-        # The control: the old reading falls under a rename as it does under a loss.
-        assert after_rename[lang]["recall"] < base[lang]["recall"], lang
-    assert any(after_drop[lang]["found"] < base[lang]["found"] for lang in ("en", "ar", "mixed"))
-    assert any(after_drop[lang]["recall"] < base[lang]["recall"] for lang in ("en", "ar", "mixed"))
+    dropped = {**kept, "p1": kept["p1"][:1]}
+    base = benchmark._score_extraction(turns, kept)["en"]
+    after_rename = benchmark._score_extraction(turns, renamed)["en"]
+    after_drop = benchmark._score_extraction(turns, dropped)["en"]
+    assert base["found"] == base["named"] == base["right"] == 1.0
+    assert after_rename["found"] == 1.0 and after_rename["named"] == 0.0
+    assert after_drop["found"] == 0.75 and after_drop["named"] == 1.0
+    # The control: the old reading falls under a rename as it does under a loss.
+    assert after_rename["recall"] < base["recall"] and after_drop["recall"] < base["recall"]
+
+
+def test_a_value_counts_only_whole_and_never_turned_around():
+    """Piece 1's review: by value alone "user dislikes Lisbon" found "user
+    lives_in Lisbon", and a value cut down to "l" passed every score."""
+    turns = _probe_turns()[:1]
+
+    def found(*facts: dict) -> float:
+        return benchmark._score_extraction(turns, {"p1": list(facts)})["en"]["found"]
+
+    lisbon = {"subject": "user", "predicate": "lives_in", "object": "lisbon"}
+    layla = {"subject": "user", "predicate": "name_is", "object": "layla"}
+    assert found(layla, lisbon) == 1.0
+    assert found(layla, {**lisbon, "predicate": "dislikes"}) == 0.5
+    assert found(layla, {**lisbon, "predicate": "former_home"}) == 0.5
+    assert found(layla, {**lisbon, "object": "l"}) == 0.5
+    assert found(layla, {**lisbon, "object": "lis"}) == 0.5
+    # Whole words still count: the city's name inside a longer value.
+    assert found(layla, {**lisbon, "object": "lisbon_portugal"}) == 1.0
+    # A past relation finds a past fact: the turn's extras say so.
+    m07 = next(t for t in _turns() if t["id"] == "m07")
+    row = benchmark._score_extraction([m07], {"m07": [
+        {"subject": "user", "predicate": "works_at", "object": "zain"},
+        {"subject": "user", "predicate": "previously_worked_at", "object": "ooredoo"}]})["mixed"]
+    assert row["found"] == 1.0 and row["right"] == 1.0
+    # Control: the rule before (contained either way, any name) counts the opposite as found.
+    from kazma_core.memory.benchmark import _folded
+
+    def old_holds(gold: str, value: str) -> bool:
+        return bool(gold and value) and (gold in value or value in gold)
+
+    assert old_holds(_folded("Lisbon"), _folded("l"))
+
+
+def test_a_reply_the_recording_does_not_hold_is_its_own_failure(monkeypatch):
+    """A message the extractor sends in another form than the recording was
+    asked in used to read as "the model is down", and so as "extraction got
+    worse". It is a stale recording, and says so."""
+    turn = next(t for t in _turns() if t["id"] == "a01")
+    reply = json.dumps({"beliefs": []})
+    # The benchmark's own idea of the message, which the precheck uses: here
+    # it differs from what the extractor really sends.
+    monkeypatch.setattr(benchmark, "_llm_blob", lambda text: f"User: {text}\nDate: 2026-11-18\nAssistant: ")
+    replies = {"model": "stand-in", "prompt_sha256": benchmark.extraction_prompt_sha256(),
+               "replies": {benchmark._text_key(benchmark._llm_blob(turn["user"])): reply}}
+    with pytest.raises(benchmark.StaleRecordingError, match="no recorded reply for the message"):
+        benchmark.run_extraction_benchmark({"version": 2, "turns": [turn]}, llm_replies=replies)
 
 
 def test_a_relation_stated_from_the_other_side_is_found():

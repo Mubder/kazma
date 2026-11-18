@@ -498,13 +498,38 @@ def _folded(text: str) -> str:
 
 
 def _holds(gold: str, value: str) -> bool:
-    return bool(gold and value) and (gold in value or value in gold)
+    """The same value, both folded: equal, or one is whole words of the other
+    ("kuwait" in "kuwait city", "hiking" in "hiking and"); never a few letters
+    of it (a value cut down to "l" does not hold "lisbon")."""
+    if not gold or not value:
+        return False
+    if gold == value:
+        return True
+    short, long_ = sorted((gold.split(), value.split()), key=len)
+    return any(long_[i:i + len(short)] == short for i in range(len(long_) - len(short) + 1))
+
+
+#: Words that make a predicate say the opposite, or the past, of a plain one:
+#: "user dislikes Lisbon" or "user former_employer Google" keeps the value of
+#: "user lives_in Lisbon" or "user works_at Google" and says something else.
+_TURNED_WORDS = frozenset({"not", "no", "never", "dislike", "dislikes", "disliked", "hate", "hates", "hated",
+                           "avoid", "avoids", "avoided", "dont", "doesnt", "didnt", "stopped", "quit", "left",
+                           "former", "formerly", "previously", "ex", "used"})
+
+
+def _turned(predicate: str) -> bool:
+    import re
+
+    return any(w in _TURNED_WORDS for w in re.split(r"[_\s'-]+", str(predicate or "").lower().replace("n't", "nt")))
 
 
 def _value_matches(alt: dict[str, Any], got: dict[str, Any]) -> bool:
-    """*got* keeps *alt*'s value under its subject, under any name -- or
-    states the same relation from the other side (subject and value
-    swapped)."""
+    """*got* keeps *alt*'s value under its subject -- or states the same
+    relation from the other side (subject and value swapped) -- under any
+    name that does not turn it around (:func:`_turned`: a negative or past
+    name finds only a negative or past fact)."""
+    if _turned(got.get("predicate") or "") != any(_turned(p) for p in alt["predicates"]):
+        return False
     gold = _folded(alt["object"])
     subject = _slug(alt["subject"])
     if _slug(got.get("subject")) == subject and _holds(gold, _folded(got.get("object"))):
@@ -603,17 +628,20 @@ class _ReplayClient:
         self._replies = replies
         self._prompt = prompt_sha256
         self.stale = False
+        self.unrecorded: list[str] = []
 
     async def chat(self, messages: list[dict[str, Any]], **_kw: Any) -> str:
+        # Each problem is recorded and raised after the run: the extractor
+        # reads any failed call as "the model is down", and a prompt that
+        # drifted would read as "extraction got worse".
         system = next((m["content"] for m in messages if m.get("role") == "system"), "")
         if _sha256(system) != self._prompt:
-            # Raised after the run: the extractor reads any failed call as
-            # "the model is down".
             self.stale = True
             return ""
         key = _text_key(messages[-1]["content"])
         if key not in self._replies:
-            raise KeyError(f"no recorded reply for this turn: {RECORD_AGAIN}")
+            self.unrecorded.append(str(messages[-1]["content"])[:80])
+            return ""
         return self._replies[key]
 
 
@@ -645,6 +673,9 @@ def replayed_extraction(turns: list[dict[str, Any]], llm_replies: dict[str, Any]
         extracted = asyncio.run(ask_all())
     if client.stale:
         raise StaleRecordingError(f"the extractor sent another system prompt than the recording answered: {RECORD_AGAIN}")
+    if client.unrecorded:
+        raise StaleRecordingError(f"no recorded reply for the message the extractor sent "
+                                  f"({client.unrecorded[0]!r}): {RECORD_AGAIN}")
     return extracted
 
 

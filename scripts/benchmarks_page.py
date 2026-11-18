@@ -109,10 +109,12 @@ def _memory(data: dict) -> list[str]:
             "",
             "Turns in English, Arabic and both, with the facts a person would expect remembered. **Quick pass**: "
             "Kazma's own rules, on every turn. **Model pass**: the model reading the turn afterwards (recorded "
-            "replies). **Found**: the facts kept, whatever the model called them. **Same name**: of those, the "
-            "share kept under a name on the list (a fact kept under two names is two facts to Kazma). **Right**: "
-            "the facts kept that are true and about the right person. **Quiet**: turns with nothing to learn that "
-            "taught nothing.",
+            "replies). **Found**: the facts expected, kept with their whole value about the right person, whatever "
+            "the model called them (a name that turns the fact around, such as \"dislikes\" or \"former\", does "
+            "not count). **Same name**: of those, the share kept under a name on the list (a fact kept under two "
+            "names is two facts to Kazma). **Right**: the facts kept that hold a value the turn gives, about the "
+            "right person, and are not on the turn's list of what must not be kept; the name is scored apart. "
+            "**Quiet**: turns with nothing to learn that taught nothing.",
             "",
             "| Pass | Language | Found | Same name | Right | Quiet |",
             "|---|---|---|---|---|---|",
