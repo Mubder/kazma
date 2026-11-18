@@ -1,5 +1,5 @@
 {
- "version": 3,
+ "version": 4,
  "scenarios": [
   {
    "id": "update-en-moved",
@@ -945,7 +945,13 @@
      "exact": true
     }
    ],
-   "not_current": []
+   "not_current": [],
+   "pending": [
+    {
+     "subject": "user",
+     "object": "teller"
+    }
+   ]
   },
   {
    "id": "kept-ar-name-and-city",
@@ -1023,7 +1029,13 @@
      "object": "Sam"
     }
    ],
-   "not_current": []
+   "not_current": [],
+   "pending": [
+    {
+     "subject": "user",
+     "object": "Sam"
+    }
+   ]
   },
   {
    "id": "short-en-diet",

@@ -179,20 +179,33 @@ def test_no_injection_becomes_a_user_fact_or_outlasts_the_users_word(mem):
 # ── The model pass and its own turn ───────────────────────────────────────
 
 
-def test_the_model_pass_may_correct_its_own_turns_reading_and_no_other(mem):
+def _model_reads_after_the_user(mem, *, same_turn: bool) -> dict:
     from kazma_core.memory.belief_mutation import mutate_belief
 
     kw = dict(ops_conn=mem.ops, predicate_type="functional", source_session=THREAD)
-    mutate_belief(mem.db, "user", "favorite_color", "teal", extraction_method="user_stated",
-                  source_turn=1, now=1000.0, **kw)
-    other = mutate_belief(mem.db, "user", "favorite_color", "red", extraction_method="llm_inferred",
-                          source_turn=2, now=2000.0, **kw)
-    assert other.get("blocked") == "lower_trust_source"  # another turn's inference
-    assert _current(mem.db)["favorite_color"] == ("teal", "user_stated")
-    same = mutate_belief(mem.db, "user", "favorite_color", "navy", extraction_method="llm_inferred",
-                         source_turn=1, now=1000.0, **kw)
-    assert same["action"] == "supersede"  # the model reading the same turn better
-    assert _current(mem.db)["favorite_color"] == ("navy", "llm_inferred")
+    mutate_belief(mem.db, "user", "name_is", "Sam", extraction_method="user_stated", source_turn=1, now=1000.0, **kw)
+    return mutate_belief(mem.db, "user", "name_is", "Dana", extraction_method="llm_inferred",
+                         source_turn=1 if same_turn else 2, now=1000.0 if same_turn else 2000.0, **kw)
+
+
+@pytest.mark.parametrize("same_turn", [False, True])
+def test_the_model_pass_never_replaces_the_users_fact_even_in_its_own_turn(mem, same_turn):
+    """"My name is Sam. I met Dana yesterday.": a careless reading of the
+    same turn made the user Dana (the second security review of F1,
+    2026-11-18). The model pass corrected the quick pass of its own turn."""
+    assert _model_reads_after_the_user(mem, same_turn=same_turn).get("blocked") == "lower_trust_source"
+    assert _current(mem.db)["name_is"] == ("Sam", "user_stated")
+
+
+def test_control_with_the_same_turn_exception_the_user_became_dana(mem, monkeypatch):
+    from kazma_core.memory import provenance
+
+    real = provenance.may_overrule
+    monkeypatch.setattr(provenance, "may_overrule",
+                        lambda existing, incoming: real(existing, incoming)
+                        or (existing == "user_stated" and incoming == "llm_inferred"))
+    assert _model_reads_after_the_user(mem, same_turn=True)["action"] == "supersede"
+    assert _current(mem.db)["name_is"] == ("Dana", "llm_inferred")
 
 
 def test_the_old_rule_lets_the_agent_block_the_user(mem, monkeypatch):

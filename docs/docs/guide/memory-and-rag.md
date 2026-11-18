@@ -480,6 +480,11 @@ Kazma** lists them:
   everything as it was. A message about someone else ("My sister moved to
   Rotterdam"), a denial ("I never lived in Paris") or a question ("Should I
   move to Rotterdam?") asks nothing.
+- **Is this about you? Kazma read it from your message.** The first time
+  only the model reads one of your facts (your home, your name, the name you
+  go by, your employer, your role), Kazma keeps it as its own reading and
+  asks: **Yes, that's right** makes it yours, **No** takes it out, and
+  Kazma does not ask about that value again.
 
 Kazma also tells you, once, in its next reply in the chat the change came
 from: what it changed, or the question it is waiting on. It cannot apply a
@@ -844,13 +849,16 @@ Oslo""). "Correct: my name is Ahmad" is your own words and counts, and so is
 what you add after the text you asked about ("Summarize https://x.y and my
 name is Sam", "Can you review my text?" then "Also my name is Sam" on a line
 of its own). Only the first 2,000 characters of a message are read this way,
-up to their last blank line; the deep pass reads all of it. A fact the
-model's deep pass reads counts as your own word too when you say it of
-yourself and have given none under that name: "We moved to Rotterdam last
-month" becomes your home when you never gave one. Beside a home you gave, it
-waits for your answer (below). "My sister moved to Rotterdam" never counts,
-whoever the model files it under, and a reading that names no one ("Moved to
-Rotterdam") stays the model's inference. What it misses --
+up to their last blank line; the deep pass reads all of it. A fact only
+the model's deep pass reads is never your own word by itself: whether the
+model's name fits your words ("I'm visiting Dubai next week" read as your
+home) only you can say. When it is about one of your facts and in your own
+words ("We moved to Rotterdam last month"), Kazma asks you (below): beside a
+home you gave, and when you never gave one too. Until you say yes it is the
+model's inference, and a fact you state yourself always wins over it. Another
+name for the same fact ("home city", "resides in") counts as the same fact.
+"My sister moved to Rotterdam" is never asked about, whoever the model files
+it under. What it misses --
 relatives, jobs, dates -- is the model's deep pass to find. That pass is scored from the configured model's recorded
 replies (`scripts/memory_extraction_record.py --out <fixture>`, run with an
 install's own Python, one model call per turn); a turn with no recorded reply

@@ -19,20 +19,21 @@ The ladder, from the top:
     words being stored (:func:`agent_write_source`).
 ``user_stated``
     The user's literal statement, read from their own message by the
-    heuristic pass ("my name is", "I live in", "I work at"), or a fact the
-    model's pass read that the user says of themself in their own words
-    (``clause_subject.speaks_of_self``: "We moved to Rotterdam"; never "My
-    sister moved to Rotterdam").
+    heuristic pass ("my name is", "I live in", "I work at"). Never a fact
+    the model's pass read: whether the model's name fits the words ("I'm
+    visiting Dubai" as a home) only the user can say, so such a reading is
+    put to them as a pending change (``memory/changes.py``; the second
+    security review of F1, 2026-11-18).
 ``system_tool`` / ``agent_asserted`` / ``llm_inferred``
     A migration, an agent tool call the user did not ask for, the extractor's
     model pass.
 
 A fact from the user (``user_explicit`` or ``user_stated``) is replaced only by
-the user's own words (:func:`may_overrule`); the one exception is the model
-pass correcting the heuristic reading of the SAME turn (both carry the turn's
-time, AGENTS.md section 15H). An agent write that would replace a user fact is
-refused, and the tool says so: the user corrects their own facts. Agent writes
-are screened for injection first (:func:`screen_agent_text`).
+the user's own words (:func:`may_overrule`), in its own turn too: the model
+pass may no longer correct the heuristic reading of the same turn. An agent
+write that would replace a user fact is refused, and the tool says so: the
+user corrects their own facts. Agent writes are screened for injection first
+(:func:`screen_agent_text`).
 """
 
 from __future__ import annotations
@@ -66,14 +67,16 @@ USER_SOURCES = frozenset({USER_EXPLICIT, USER_STATED})
 _HELD_SHARE = 0.8
 
 
-def may_overrule(existing: str | None, incoming: str, *, same_turn: bool = False) -> bool:
-    """Whether a statement from *incoming* may replace a fact from *existing*."""
+def may_overrule(existing: str | None, incoming: str) -> bool:
+    """Whether a statement from *incoming* may replace a fact from
+    *existing*: a fact the user stated yields only to the user's own words.
+    Not to the model's reading of the same turn either: it let a careless
+    reading of "My name is Sam. I met Dana yesterday." make the user Dana
+    (the second security review of F1, 2026-11-18). A reading the user may
+    mean is put to them (``memory/changes.py``)."""
     if existing not in USER_SOURCES:
         return True
-    if incoming in USER_SOURCES:
-        return True
-    # The model pass may still correct the heuristic reading of its own turn.
-    return existing == USER_STATED and incoming == LLM_INFERRED and same_turn
+    return incoming in USER_SOURCES
 
 
 def _holds(message: str, text: str) -> bool:

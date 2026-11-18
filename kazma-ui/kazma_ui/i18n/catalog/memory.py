@@ -1617,6 +1617,30 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "تعذّر إجراء هذا التغيير",
         "en": "That change could not be made",
     },
+    "memory.console.change_first_title": {
+        "ar": "هل هذا عنك؟ قرأه Kazma من رسالتك",
+        "en": "Is this about you? Kazma read it from your message",
+    },
+    "memory.console.change_read": {
+        "ar": "قرأ Kazma: {value}",
+        "en": "Kazma read: {value}",
+    },
+    "memory.console.change_first_confirm": {
+        "ar": "نعم، صحيح",
+        "en": "Yes, that's right",
+    },
+    "memory.console.change_first_dismiss": {
+        "ar": "لا",
+        "en": "No",
+    },
+    "memory.console.change_first_confirmed": {
+        "ar": "حُفظت على أنها منك",
+        "en": "Kept as yours",
+    },
+    "memory.console.change_first_dismissed": {
+        "ar": "أُزيلت",
+        "en": "Taken out",
+    },
     "memory.console.no_changes": {
         "ar": "لم يتغيّر شيء في المعلومات التي أخبرت بها Kazma، ولا شيء ينتظر ردّك.",
         "en": "Nothing has changed in the facts you told Kazma, and nothing is waiting for your answer.",

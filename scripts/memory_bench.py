@@ -1080,9 +1080,12 @@ WRITE_SCENARIOS: list[dict[str, Any]] = [
         ("My name is Layla and I live in Lisbon now.", ("recorded", "e01"))],
      "current": [_now("user", "Layla", "user", exact=True), _now("user", "Lisbon", "user", exact=True)],
      "not_current": []},
+    # The quick pass reads the employer; the role only the model reads is
+    # its first reading of the user's role, put to the user.
     {"id": "kept-mixed-employer", "category": "kept_as_said", "lang": "mixed", "turns": [
         ("أشتغل at Gulf Bank as a teller.", ("recorded", "m02"))],
-     "current": [_now("user", "Gulf Bank", "user", exact=True)], "not_current": []},
+     "current": [_now("user", "Gulf Bank", "user", exact=True)], "not_current": [],
+     "pending": [_now("user", "teller")]},
     {"id": "kept-ar-name-and-city", "category": "kept_as_said", "lang": "ar", "turns": [
         ("اسمي ليلى وساكنة في دبي.", ("recorded", "a01"))],
      "current": [_now("user", "ليلى", "user", exact=True), _now("user", "دبي", "user", exact=True)],
@@ -1093,7 +1096,7 @@ WRITE_SCENARIOS: list[dict[str, Any]] = [
      "current": [_now("user", "diabetes")], "not_current": []},
     {"id": "short-en-call-me", "category": "short", "lang": "en", "turns": [
         ("Call me Sam", ("written", [_said("user", "preferred_name", "functional", "Sam")]))],
-     "current": [_now("user", "Sam")], "not_current": []},
+     "current": [_now("user", "Sam")], "not_current": [], "pending": [_now("user", "Sam")]},
     {"id": "short-en-diet", "category": "short", "lang": "en", "turns": [
         ("I'm vegan", ("written", [_said("user", "diet", "functional", "vegan")]))],
      "current": [_now("user", "vegan")], "not_current": []},
@@ -1175,8 +1178,10 @@ WRITE_SCENARIOS: list[dict[str, Any]] = [
 
 #: The write scenarios' version. 3: a correction only the model reads waits
 #: for the user (``pending``, ``answer`` turns), and the ``model_read``
-#: category (2026-11-18).
-WRITES_VERSION = 3
+#: category (2026-11-18). 4: a model's reading never gets the user's trust by
+#: itself; its first reading of one of the user's facts is asked about too
+#: (rule A of the second security review, 2026-11-18).
+WRITES_VERSION = 4
 
 
 def build_writes() -> dict[str, Any]:

@@ -30,7 +30,8 @@ English and the two mixed:
   is;
 * with no one named, each caller decides: the Arabic quick pass reads a
   participle or a past verb with no subject of its own as the speaker's
-  ("ساكن في دبي"); the strict reading (:func:`speaks_of_self`) does not.
+  ("ساكن في دبي"); a pending change (:func:`names_no_one_else`) accepts it
+  too, and the user answers.
 
 The rule leans one way where it must choose. A word is someone else's on a
 wide list and the speaker's on a narrow one: keeping nothing loses a fact the
@@ -48,7 +49,7 @@ from collections.abc import Sequence
 from functools import lru_cache
 from typing import NamedTuple
 
-__all__ = ["OTHER", "SPEAKER", "names_no_one_else", "speaks_of_self", "subjects"]
+__all__ = ["OTHER", "SPEAKER", "names_no_one_else", "subjects"]
 
 SPEAKER = "speaker"
 OTHER = "other"
@@ -264,7 +265,7 @@ def subjects(words: Sequence[str]) -> list[str | None]:
     return out
 
 
-# ── the strict reading: does the user say this of themself? ──────────────
+# ── does the user say this, with no one else named? ──────────────────────
 
 #: A word, a punctuation mark of its own, or a line break.
 _TOKEN_RE = re.compile(r"[^\s.,!?،؛؟:;()\"«»“”]++|[.,!?،؛؟:;()]|\n")
@@ -303,30 +304,17 @@ def _third_person_pronoun(token: str) -> bool:
     return folded.replace("’", "'").split("'", 1)[0] in _EN_PRONOUNS or bare in _AR_PRONOUNS
 
 
-def speaks_of_self(message: str | None, value: str | None) -> str | None:
-    """The user's own spelling of *value* when the user says it of
-    themself in *message*, else None.
-
-    The value's words must stand in the user's own words (``own_words``:
-    never a quote, an attached document or a text to translate), the nearest
-    word before them that names a person must name the speaker in their own
-    sentence (:func:`subjects`) -- "I", "we", "my", "أنا", "اسمي", a
-    first-person verb ("أشتغل", "انتقلنا") -- and no third-person pronoun
-    may follow them in that sentence ("I think Rotterdam is where she
-    lives"). Stricter than the quick pass, where no one named is the
-    speaker: "Moved to Rotterdam last month" names no one and is None. A fact
-    the model read is the user's own statement only when this answers.
-    """
-    return _said(message, value, (SPEAKER,))
-
-
 def names_no_one_else(message: str | None, value: str | None) -> str | None:
     """The user's own spelling of *value* when it stands in the user's own
-    words of *message* with no one but the speaker named before it in its
-    sentence and no third-person pronoun after it, else None: "Moved to
-    Rotterdam last month" (no one named) and "We moved to Rotterdam" answer,
-    "My sister moved to Rotterdam" does not. A refused correction is put to
-    the user only when this answers (``memory/changes.py``)."""
+    words of *message* (``own_words``: never a quote, an attached document
+    or a text to translate) with no one but the speaker named before it in
+    its sentence (:func:`subjects`) and no third-person pronoun after it
+    ("I think Rotterdam is where she lives"), in a sentence that states it,
+    else None: "Moved to Rotterdam last month" (no one named) and "We moved
+    to Rotterdam" answer, "My sister moved to Rotterdam" does not. The
+    model's reading of the user's fact is put to the user only when this
+    answers (``memory/changes.py``); it never gives the user's trust by
+    itself (the second security review of F1, 2026-11-18)."""
     return _said(message, value, (SPEAKER, None))
 
 

@@ -116,6 +116,74 @@ def _decide_on_the_page(harness: Harness, lang: str) -> dict:
             browser.close()
 
 
+def _seed_first_reading() -> None:
+    """The model's first reading of the user's home (no fact of theirs),
+    written as its inference and asked about (rule A, 2026-11-18)."""
+    from kazma_core.memory import changes
+    from kazma_core.memory.belief_mutation import mutate_belief
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+    from kazma_core.paths import primary_memory_db
+
+    c = sqlite3.connect(primary_memory_db())
+    try:
+        ensure_primary_schema(c)
+        written = mutate_belief(c, "user", "lives_in", "rotterdam", predicate_type="functional",
+                                extraction_method="llm_inferred", source_session="chat-a", source_turn=4)
+        assert changes.record_first_reading(c, tenant_id="default", written=written, predicate="lives_in",
+                                            new_value="rotterdam", user_text="We moved to Rotterdam last month.",
+                                            session="chat-a", turn=4)
+    finally:
+        c.close()
+
+
+def _answer_a_first_reading(harness: Harness, lang: str, decision: str) -> dict:
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        host = harness.base.split("//", 1)[1].split(":", 1)[0]
+        context = browser.new_context(viewport={"width": 1400, "height": 1000}, locale="en-US")
+        context.add_cookies([{"name": "kazma-lang", "value": lang, "domain": host, "path": "/"}])
+        try:
+            pg = context.new_page()
+            errors: list[str] = []
+            pg.on("pageerror", lambda e: errors.append(str(e)))
+            pg.goto(f"{harness.base}/", wait_until="domcontentloaded", timeout=30000)
+            pg.locator("a.nav-link[href='/memory']").first.click()
+            pg.wait_for_function("location.pathname === '/memory'", timeout=15000)
+            pg.wait_for_function("() => document.querySelectorAll('#v2-changes-list .v2-change').length === 1",
+                                 timeout=30000)
+            card = pg.locator("#v2-changes-list .v2-change[data-kind='pending']")
+            shown = {"card": card.inner_text(),
+                     "yes": card.locator("[data-decision='confirm']").inner_text(),
+                     "no": card.locator("[data-decision='dismiss']").inner_text()}
+            card.locator(f"[data-decision='{decision}']").click()
+            pg.wait_for_function(
+                "() => !document.querySelector(\"#v2-changes-list .v2-change[data-kind='pending']\")", timeout=15000)
+            return {**shown, "after": _current("lives_in"), "errors": errors}
+        finally:
+            context.close()
+            browser.close()
+
+
+@pytest.mark.parametrize(("lang", "decision", "after"), [
+    ("en", "dismiss", []),
+    ("ar", "confirm", [("Rotterdam", "user_explicit")]),
+])
+def test_the_user_answers_a_first_reading(harness: Harness, lang: str, decision: str, after: list) -> None:
+    _seed_first_reading()
+    assert _current("lives_in") == [("rotterdam", "llm_inferred")]
+    out = _answer_a_first_reading(harness, lang, decision)
+    assert out["errors"] == []
+    assert out["after"] == after
+    if lang == "en":
+        assert "Is this about you?" in out["card"] and "Kazma read: Rotterdam" in out["card"]
+        assert (out["yes"], out["no"]) == ("Yes, that's right", "No")
+    else:
+        assert "هل هذا عنك؟" in out["card"] and "Rotterdam" in out["card"]
+        assert (out["yes"], out["no"]) == ("نعم، صحيح", "لا")
+
+
 @pytest.mark.parametrize("lang", ["en", "ar"])
 def test_the_user_undoes_an_update_and_confirms_a_correction(harness: Harness, lang: str) -> None:
     _seed()

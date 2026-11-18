@@ -482,6 +482,9 @@ def _memory_changes(sub: str, parts: list[str], tenant: str) -> str:
             if change["kind"] == "update":
                 lines.append(f"• {what}: was {change['old_value']}, now {change['new_value']}. "
                              f"Undo it: `/memory undo {ref}`")
+            elif change.get("first"):
+                lines.append(f"• {what}: Kazma read {change['new_value']} in your message. "
+                             f"`/memory confirm {ref}` makes it yours, `/memory dismiss {ref}` takes it out.")
             else:
                 lines.append(f"• {what}: Kazma kept {change['old_value']}; you may have said "
                              f"{change['new_value']}. `/memory confirm {ref}` changes it, "
@@ -498,9 +501,14 @@ def _memory_changes(sub: str, parts: list[str], tenant: str) -> str:
     what = str(change["predicate"]).replace("_", " ")
     if sub == "undo":
         return f"↩️ Undone: {what} is {change['old_value']} again."
+    first = changes.is_first_reading(change)
     if sub == "confirm":
+        if first:
+            return f"✅ Kept as yours: {what} is {change['new_value']}."
         again = f" `/memory undo {out['update_ref']}` takes it back." if out.get("update_ref") else ""
         return f"✅ Changed: {what} is now {change['new_value']}.{again}"
+    if first:
+        return f"👍 Taken out: Kazma no longer reads {what} as {change['new_value']}."
     return f"👍 Nothing changed: {what} is still {change['old_value']}."
 
 

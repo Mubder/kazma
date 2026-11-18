@@ -1,19 +1,18 @@
 """A fact the user stated changes only in ways the user can see and take back
 (2026-11, the memory framework audit's F1, second half: the store).
 
-The first half made a correction the user says of themself replace their
-fact ("We moved to Rotterdam" over "I live in Paris"). Two cases were left:
-
-* the replacement was silent: nothing showed what changed, and nothing could
-  take it back;
-* a correction the strict reading could not credit to the user ("Moved to
-  Rotterdam last month": no subject) was refused, silently, for good.
+Two things were silent: a replacement of the user's fact (nothing showed
+what changed, and nothing could take it back), and a correction only the
+model read ("Moved to Rotterdam last month"), refused for good.
 
 ``memory/changes.py`` records each: an update (undoable) in the same
-transaction as the replacement, a pending change (confirm or dismiss) where
-the trust gate refused and no one else is named. "My sister moved to
-Rotterdam" records nothing. Forget takes a change with its fact or its turn.
-Through the worker's own deep-pass path, as the first half's tests are.
+transaction as the replacement, and a pending change (confirm or dismiss)
+for a reading of the user's fact in their own words with no one else named.
+A model's reading never gets the user's trust by itself (rule A of the
+second security review, 2026-11-18), so its first reading of a fact is
+asked about too, and a "no" takes it out. "My sister moved to Rotterdam"
+records nothing. Forget takes a change with its fact or its turn. Through
+the worker's own deep-pass path.
 """
 
 from __future__ import annotations
@@ -235,6 +234,48 @@ def test_the_users_own_words_answer_a_pending_change(mem, monkeypatch):
     assert ("pending", "superseded") in states and ("update", "open") in states
 
 
+# ── a first reading (rule A of the second security review, 2026-11-18) ────
+
+
+def test_a_first_reading_is_put_to_the_user(mem, monkeypatch):
+    """No fact of the user's: the model's reading is written as its own
+    inference and asked about, never the user's until they say so."""
+    _turn(mem, monkeypatch, first="", then="We moved to Rotterdam last month.",
+          model=[_fact("lives_in", "rotterdam")])
+    assert _current(mem) == [("rotterdam", "llm_inferred")]
+    [change] = _changes(mem, "open")
+    assert (change["kind"], change["old_value"], change["new_value"], change["first"]) == (
+        "pending", "", "Rotterdam", True)
+
+
+def test_a_first_reading_replaced_since_cannot_be_confirmed(mem, monkeypatch):
+    _turn(mem, monkeypatch, first="", then="We moved to Rotterdam last month.",
+          model=[_fact("lives_in", "rotterdam")])
+    [first] = _changes(mem, "open")
+    _turn(mem, monkeypatch, first="", then="We moved to Lisbon this week.", model=[_fact("lives_in", "lisbon")],
+          turn=3)
+    with pytest.raises(changes.ChangeRefusedError) as refused:
+        changes.confirm(mem.db, first["id"], tenant_id="default")
+    assert refused.value.code == "replaced_since"
+    assert _current(mem) == [("lisbon", "llm_inferred")]
+
+
+def test_a_first_reading_the_user_said_no_to_is_not_asked_again(mem, monkeypatch):
+    _turn(mem, monkeypatch, first="", then="I'm visiting Dubai next week.", model=[_fact("lives_in", "dubai")])
+    [change] = _changes(mem, "open")
+    changes.dismiss(mem.db, change["id"], tenant_id="default")
+    _turn(mem, monkeypatch, first="", then="I'm in Dubai again.", model=[_fact("lives_in", "dubai")], turn=3)
+    assert _changes(mem, "open") == []
+
+
+def test_the_note_says_a_first_reading_is_not_yet_the_users():
+    note = changes.format_changes_note([{"id": "mc_0123456789abcdef", "kind": "pending", "predicate": "lives_in",
+                                         "old_belief_id": None, "new_belief_id": "b_1", "old_value": "",
+                                         "new_value": "Rotterdam"}])
+    assert "read from the user's message, not yet theirs: lives in: \"Rotterdam\"" in note
+    assert "/memory dismiss" in note
+
+
 # ── forget, bounds ────────────────────────────────────────────────────────
 
 
@@ -332,6 +373,20 @@ def test_the_routes_list_confirm_and_undo_with_real_statuses(mem, monkeypatch):
     assert c.get("/api/memory/v2/changes?state=everything").status_code == 422
 
 
+def test_the_routes_mark_a_first_reading_and_dismissing_it_takes_it_out(mem, monkeypatch):
+    _turn(mem, monkeypatch, first="", then="We moved to Rotterdam last month.",
+          model=[_fact("lives_in", "rotterdam")])
+    c = _client(mem, monkeypatch)
+    [pending] = c.get("/api/memory/v2/changes").json()["changes"]
+    assert pending["first"] is True
+    r = c.post(f"/api/memory/v2/changes/{pending['id']}/dismiss")
+    assert r.status_code == 200 and r.json()["taken_out"], r.text
+    assert _current(mem) == []
+    ops = sqlite3.connect(str(mem.dir / "memory_ops.db"))
+    assert ops.execute("SELECT COUNT(*) FROM memory_audit_log WHERE event_type='dismiss_reading'").fetchone()[0] == 1
+    ops.close()
+
+
 def test_the_dismiss_route_leaves_the_fact(mem, monkeypatch):
     _turn(mem, monkeypatch, first="جدة", then="انتقلت إلى الرياض الشهر الماضي.",
           model=[_fact("lives_in", "الرياض")])
@@ -372,6 +427,22 @@ def test_the_chat_command_lists_confirms_and_undoes(mem, monkeypatch):
     assert _current(mem) == [("Paris", "user_stated")]
     assert _memory_command(mem, monkeypatch, f"/memory undo {again}") == "🔁 That change was already decided."
     assert "nothing is waiting" in _memory_command(mem, monkeypatch, "/memory changes")
+
+
+@pytest.mark.parametrize(("decision", "said", "current"), [
+    ("confirm", "✅ Kept as yours: lives in is Rotterdam.", [("Rotterdam", "user_explicit")]),
+    ("dismiss", "👍 Taken out: Kazma no longer reads lives in as Rotterdam.", []),
+])
+def test_the_chat_command_asks_about_a_first_reading(mem, monkeypatch, decision, said, current):
+    import re
+
+    _turn(mem, monkeypatch, first="", then="We moved to Rotterdam last month.",
+          model=[_fact("lives_in", "rotterdam")])
+    listed = _memory_command(mem, monkeypatch, "/memory changes")
+    assert "lives in: Kazma read Rotterdam in your message." in listed
+    ref = re.search(rf"/memory {decision} (mc_[0-9a-f]+)", listed).group(1)
+    assert _memory_command(mem, monkeypatch, f"/memory {decision} {ref}") == said
+    assert _current(mem) == current
 
 
 def test_the_chat_command_refuses_a_short_or_unknown_id(mem, monkeypatch):

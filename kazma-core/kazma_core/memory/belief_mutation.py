@@ -156,7 +156,11 @@ def _names_a_list(predicate: str) -> bool:
 
     key = _predicate_key(predicate)
     named = _kazma_names().get(key) if key else None
-    return named is not None and _plural_of(predicate, named)
+    if named is not None and _plural_of(predicate, named):
+        return True
+    from kazma_core.memory.fact_names import plural_of_a_kind
+
+    return plural_of_a_kind(predicate)  # "homes", "employers": a model's names in the plural
 
 
 def _is_favorite(predicate: str) -> bool:
@@ -313,57 +317,6 @@ def _established_kind(
     return ptype
 
 
-def _user_holds_another(
-    conn: sqlite3.Connection, *, tenant_id: str, subject: str, predicate: str, obj: str,
-    extraction_method: str, session: str | None, turn: int | None,
-) -> bool:
-    """Whether the user holds a current fact of their own (``user_*``) under
-    *predicate* with another value, from another turn -- the case where a
-    credited reading must not replace it (``mutate_belief(adds_only=)``). The
-    same turn's quick-pass reading is not the user's other fact: the model
-    pass may correct it (§15H). A store that cannot answer holds one: the
-    reading is then written at the model's trust."""
-    from kazma_core.memory.provenance import USER_SOURCES
-
-    if extraction_method not in USER_SOURCES:
-        return False
-    sources = sorted(USER_SOURCES)
-    where_source = " OR ".join("extraction_method = ?" for _ in sources)
-    sql = f"SELECT object, source_session, source_turn FROM beliefs WHERE ({where_source}) "  # nosec B608 - placeholders only
-    try:
-        rows = conn.execute(
-            sql + "AND tenant_id = ? AND subject = ? AND predicate = ? AND valid_until IS NULL "
-            "AND invalidated_at IS NULL",
-            (*sources, tenant_id, subject, predicate),
-        ).fetchall()
-    except sqlite3.Error:
-        logger.warning("[belief_mutate] could not read the user's %s %s; the reading keeps the model's trust",
-                       subject, predicate)
-        return True
-    for row in rows:
-        held, held_session, held_turn = (str(row[0] or ""), row[1], row[2])
-        if session is not None and held_session == session and held_turn == turn:
-            continue
-        if not _same_value(held, obj):
-            return True
-    return False
-
-
-def _credit_kept(
-    conn: sqlite3.Connection, *, adds_only: bool, tenant_id: str, subject: str, predicate: str, obj: str,
-    extraction_method: str, trust: float, session: str | None, turn: int | None, cfg: dict[str, Any] | None,
-) -> tuple[str, float, bool]:
-    """``(extraction_method, trust, withheld)`` for this write: a credited
-    reading (*adds_only*) the user holds another value against is written
-    at the model's trust (:func:`_user_holds_another`); anything else as it
-    came."""
-    if adds_only and _user_holds_another(conn, tenant_id=tenant_id, subject=subject, predicate=predicate,
-                                         obj=obj, extraction_method=extraction_method, session=session,
-                                         turn=turn):
-        return "llm_inferred", _trust_weight("llm_inferred", cfg), True
-    return extraction_method, trust, False
-
-
 def _trust_weight(extraction_method: str, cfg: dict[str, Any] | None) -> float:
     """The ladder of ``memory.provenance``, as a weight."""
     v2 = (cfg or {}).get("v2") or {}
@@ -454,23 +407,12 @@ def mutate_belief(
     now: float | None = None,
     private: bool = False,
     confirms_change: tuple[str, str] | None = None,
-    adds_only: bool = False,
 ) -> dict[str, Any]:
     """Apply a belief mutation per the predicate-type rules.
 
     *confirms_change* is ``(change id, actor)`` of the pending change this
     write answers (``changes.confirm``): marked confirmed in the write's own
     transaction, never superseded by it.
-
-    *adds_only*: the model read this fact and it was credited to the user
-    (``belief_extractor._apply_beliefs_to_v2``). It may add the user's fact
-    where the user holds none of their own under the name, never replace
-    one: when the user holds another value from another turn, it is written
-    at ``llm_inferred`` instead -- the trust gate refuses a replacement and
-    the change waits for the user (``memory/changes.py``). Kazma cannot tell
-    without a model whether the name fits the words ("I'm visiting Dubai
-    next week" read as ``lives_in``); the user can (the review of the
-    memory framework audit's F1, 2026-11-18).
 
     *now* is when the fact was stated (default: this moment): the valid
     time (``valid_from`` / ``valid_until``). Something that records a fact
@@ -575,7 +517,6 @@ def mutate_belief(
     now = recorded if now is None else float(now)
 
     result: dict[str, Any] | None = None
-    downgraded = False
     try:
         with _mutation_lock:
             # W6: the name the subject already uses for the same words and
@@ -593,11 +534,6 @@ def mutate_belief(
                 logger.debug("[belief_mutate] predicate names unreadable; keeping %r", pred)
             ptype = _established_kind(primary_conn, tenant_id=tenant_id, subject=sub,
                                       predicate=pred, ptype=ptype)
-            extraction_method, trust, downgraded = _credit_kept(
-                primary_conn, adds_only=adds_only, tenant_id=tenant_id, subject=sub, predicate=pred, obj=obj,
-                extraction_method=extraction_method, trust=trust, session=source_session, turn=source_turn,
-                cfg=cfg,
-            )
             if ptype == "functional":
                 result = _mutate_functional(
                     primary_conn, ops_conn, sub, pred, obj,
@@ -625,10 +561,6 @@ def mutate_belief(
                     mem_class=mem_class, now=now, recorded=recorded, cfg=cfg,
                     private=private,
                 )
-        if downgraded:
-            # The user's own fact stands; the reading was written at the
-            # model's trust (a refusal of it waits for the user).
-            result["credit_withheld"] = "user_fact_stands"
         # Phase 0 instrumentation (Commitment Layer): surface every functional
         # supersede so ``belief.supersede_without_user_assert`` (plan §8.1) is
         # observable. The signal of interest is a supersede whose incoming
@@ -1031,8 +963,13 @@ def _mutate_functional_locked(
         # mark) is no change, and the stored spelling -- the user's -- stays:
         # compared letter for letter, the model's respelling replaced the
         # user's own fact in its own turn and took the user's trust with it
-        # (2026-11, the memory framework audit's F1).
-        if _same_value(old_obj, obj):
+        # (2026-11, the memory framework audit's F1). Except the user's own
+        # word for what the model read: the fact is then the user's, at the
+        # user's trust (a confirmed first reading, memory/changes.py).
+        from kazma_core.memory.provenance import USER_SOURCES as _USER_SOURCES
+
+        raises_trust = kw["extraction_method"] in _USER_SOURCES and existing_method not in _USER_SOURCES
+        if _same_value(old_obj, obj) and not raises_trust:
             # Release the BEGIN IMMEDIATE lock we acquired (no writes to
             # commit). Only roll back if WE started the txn — if the caller
             # already had one open, leave it to the caller (audit finding:
@@ -1061,7 +998,7 @@ def _mutate_functional_locked(
             and _col(existing, "source_turn", 5) == kw.get("source_turn")
         )
         if (bool(gate_cfg.get("functional_supersede_requires_user_assert", True))
-                and not may_overrule(existing_method, kw["extraction_method"], same_turn=same_turn)):
+                and not may_overrule(existing_method, kw["extraction_method"])):
             logger.info(
                 "[belief_mutate] blocked_supersede predicate=%s subject=%s "
                 "existing_source=%s incoming_source=%s — user fact stands",
@@ -1084,8 +1021,7 @@ def _mutate_functional_locked(
                     "superseded_id": None, "blocked": "lower_trust_source"}
         state_before = {"id": superseded_id, "object": old_obj}
         # A fact the user stated, replaced from another turn: an update the
-        # user sees and can undo (memory/changes.py, F1). Within one turn the
-        # deep pass refines the quick pass's reading: no update.
+        # user sees and can undo (memory/changes.py, F1).
         from kazma_core.memory.provenance import USER_SOURCES
 
         users_fact_replaced = (audit_event_type == "supersede" and existing_method in USER_SOURCES
@@ -1126,22 +1062,8 @@ def _mutate_functional_locked(
             "blocked": "insert_ignored",
         }
     bid = str(state_after.get("id") or bid)
-    if users_fact_replaced:
-        from kazma_core.memory import changes
-
-        try:
-            changes.record_update(
-                conn, tenant_id=tenant_id, subject=sub, predicate=pred, old_belief_id=str(superseded_id),
-                old_value=str(state_before["object"] if state_before else ""), new_belief_id=bid,
-                new_value=obj, session=kw.get("source_session"), turn=kw.get("source_turn"), now=now,
-                confirms=kw.get("confirms_change"),
-            )
-        except sqlite3.OperationalError as exc:
-            if "memory_changes" not in str(exc):
-                raise
-            # A store opened without the current schema: the replacement
-            # stands, unrecorded (ensure_primary_schema creates the table).
-            logger.warning("[belief_mutate] no change log in this store; %s %s replaced unrecorded", sub, pred)
+    _note_in_change_log(conn, kw, tenant_id=tenant_id, sub=sub, pred=pred, obj=obj, bid=bid, now=now,
+                        replaced=(str(superseded_id), state_before) if users_fact_replaced else None)
     conn.commit()
     _write_audit(
         ops_conn, tenant_id=tenant_id, event_type=audit_event_type,
@@ -1151,6 +1073,39 @@ def _mutate_functional_locked(
     )
     return {"action": "supersede", "belief_id": bid, "superseded_id": superseded_id,
             "superseded_object": str(state_before["object"] or "") if state_before else None}
+
+
+def _note_in_change_log(
+    conn: sqlite3.Connection, kw: dict[str, Any], *, tenant_id: str, sub: str, pred: str, obj: str, bid: str,
+    now: float, replaced: tuple[str, dict[str, Any] | None] | None,
+) -> None:
+    """In the write's own transaction (``memory/changes.py``): the user's fact
+    *replaced* (``(old id, state before)``) is an update the user can undo;
+    any other fact of the user's own answers the changes waiting on it. A
+    write that is not the user's records nothing."""
+    from kazma_core.memory import changes
+    from kazma_core.memory.provenance import USER_SOURCES
+
+    if replaced is None and kw["extraction_method"] not in USER_SOURCES:
+        return
+    try:
+        if replaced is not None:
+            old_id, before = replaced
+            changes.record_update(
+                conn, tenant_id=tenant_id, subject=sub, predicate=pred, old_belief_id=old_id,
+                old_value=str(before["object"] if before else ""), new_belief_id=bid, new_value=obj,
+                session=kw.get("source_session"), turn=kw.get("source_turn"), now=now,
+                confirms=kw.get("confirms_change"),
+            )
+        else:
+            changes.answer_pending(conn, tenant_id=tenant_id, subject=sub, predicate=pred, now=now,
+                                   confirms=kw.get("confirms_change"))
+    except sqlite3.OperationalError as exc:
+        if "memory_changes" not in str(exc):
+            raise
+        # A store opened without the current schema: the write stands,
+        # unrecorded (ensure_primary_schema creates the table).
+        logger.warning("[belief_mutate] no change log in this store; %s %s written unrecorded", sub, pred)
 
 
 def _col(row: Any, name: str, index: int) -> Any:
@@ -1212,15 +1167,9 @@ def _record_earlier_statement(
     from kazma_core.memory.provenance import may_overrule
 
     gate_cfg = ((kw.get("cfg") or {}).get("v2") or {})
-    same_turn = prev is not None and (
-        kw.get("source_session") is not None
-        and _col(prev, "source_session", 5) == kw.get("source_session")
-        and _col(prev, "source_turn", 6) == kw.get("source_turn")
-    )
     if (prev is not None
             and bool(gate_cfg.get("functional_supersede_requires_user_assert", True))
-            and not may_overrule(_col(prev, "extraction_method", 2), kw["extraction_method"],
-                                 same_turn=same_turn)):
+            and not may_overrule(_col(prev, "extraction_method", 2), kw["extraction_method"])):
         logger.info(
             "[belief_mutate] blocked_history predicate=%s subject=%s -- a %s statement "
             "cannot cut short a %s one", pred, sub, kw["extraction_method"],

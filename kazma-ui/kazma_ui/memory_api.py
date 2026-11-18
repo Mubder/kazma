@@ -2606,10 +2606,10 @@ def _decide_change(change_id: str, decision: str) -> dict[str, Any]:
     try:
         if decision == "confirm":
             return changes.confirm(conn, change_id, tenant_id=tid, actor="memory_page")
-        if decision == "dismiss":
-            return changes.dismiss(conn, change_id, tenant_id=tid, actor="memory_page")
         ops = sqlite3.connect(memory_ops_db(), check_same_thread=False)
         ensure_ops_schema(ops)
+        if decision == "dismiss":
+            return changes.dismiss(conn, change_id, tenant_id=tid, actor="memory_page", ops_conn=ops)
         return changes.undo(conn, change_id, tenant_id=tid, actor="memory_page", ops_conn=ops)
     except changes.ChangeRefusedError as refused:
         return {"ok": False, "error": refused.code}

@@ -473,13 +473,13 @@ def test_every_scanner_reads_a_long_message_in_bounded_time(shape):
     Read at most ``_SCAN_MAX`` characters: four times the text costs no more
     than the cap's."""
     from kazma_core.memory.belief_extractor import extract_beliefs_heuristic as quick
-    from kazma_core.memory.clause_subject import speaks_of_self
+    from kazma_core.memory.clause_subject import names_no_one_else
 
     def took(text: str) -> float:
         started = time.perf_counter()
         own_words(text)
         quick(text)
-        speaks_of_self(text, "Lyon")
+        names_no_one_else(text, "Lyon")
         return time.perf_counter() - started
 
     small = shape * (100_000 // len(shape))

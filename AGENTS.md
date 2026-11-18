@@ -2050,9 +2050,10 @@ four injected were noise.
   post-turn scheduler stamps `at` when the turn closes; the durable queue
   carries it (`post_turn_memory` payload `at`); the episode, the heuristic
   facts and the LLM deep pass (`micro_consolidation`, from the episode's
-  `created_at`) all use it; turn reconcile uses the turn's. Same time for the
-  heuristic and the deep pass means the deep pass may still correct its own
-  turn. Gate: `tests/test_memory_event_time.py::test_every_late_writer_passes_the_turn_time`
+  `created_at`) all use it; turn reconcile uses the turn's. (The deep pass
+  no longer corrects its own turn's quick pass: a model's reading never
+  gets the user's trust by itself, below.) Gate:
+  `tests/test_memory_event_time.py::test_every_late_writer_passes_the_turn_time`
   (every call in the late-writer modules names its time).
 - The quick (heuristic) pass reads Arabic and mixed text too
   (`memory/arabic_facts.py`, 2026-10-14: the extraction benchmark measured
@@ -2158,62 +2159,68 @@ four injected were noise.
   (the real route EN/AR, the old page message as the negative control, no
   page script builds a stub, every product function writing one declared
   with how the file's text is fenced), `tests/e2e/test_attached_text_browser.py`.
-- **Trust follows who is speaking about themself, not which pass read the
-  fact** (2026-11, the audit's F1, first half). `_apply_beliefs_to_v2`
-  takes the turn's `user_text`; a fact the model read about `user` is
-  `user_stated`, in the user's own spelling, when
-  `clause_subject.speaks_of_self` answers: the value's words stand in
-  `own_words`, and in their sentence the nearest word before them that
-  names a person names the speaker ("I", "we", "my", "أنا", "اسمي", a
-  first-person verb written with its hamza or a "we" form), with no
-  third-person pronoun after them, in a sentence that states it
-  (`clause_subject._asserted`: no denial before it -- "I never lived in
-  Paris", "أنا ما أسكن في دبي" --, no question, no request to act on a
-  text). Stricter than the quick pass: no one named is an inference ("Moved
-  to Rotterdam", "No, Lisbon"). **Credited so, a reading may ADD the user's
-  fact where the user holds none of their own under the name, never
-  REPLACE one** (`mutate_belief(adds_only=True)`, `_user_holds_another`;
-  the review of this half, 2026-11-18): Kazma cannot tell without a model
-  whether the model's name fits the words -- "I'm visiting Dubai next
-  week" as lives_in, "I met Dana" as name_is, "I read that Initech is
-  hiring" as works_at all replaced the user's fact -- so the reading is
-  written at the model's trust, the gate refuses it, and it waits for the
-  user (F1's second half, below). A replacement comes from the quick
-  pass's exact shapes or the user's answer; the same turn's quick-pass
-  reading may still be corrected. Every product call
-  that applies extracted facts names `user_text` (the two forwarders aside).
-  And "the same value" is compared folded (`belief_mutation._same_value`:
-  case, underscores, spacing, Arabic forms and marks): the model's
-  respelling ("lisbon", "gulf_bank") replaced the user's fact in its own
-  turn and took the user's trust with it. Gate:
-  `tests/test_memory_own_statements.py` (EN/AR/mixed readings; the worker's
-  own micro_consolidation with a correction, a new job in Arabic, and the
-  sister and the manager filed under the user by the model; the review's
-  eight readings and a summarised page through the worker's deep pass, the
-  first half's rule as their negative control; every applier
-  call names its message, a planted one as control; the grading switched off
-  and the letter-for-letter comparison as negative controls), and the write
-  scenarios' `model_read` category (v3).
+- **A model's reading never gets the user's trust by itself** (2026-11,
+  the audit's F1; rule A of its second security review, 2026-11-18). The
+  first half credited a deep-pass reading the user said of themself
+  (`user_stated`); the reviews found the tail endless -- "I'm visiting Dubai
+  next week" as lives_in, "I met Dana" as name_is, the same turn's reading
+  replacing the quick pass's fact ("My name is Sam. I met Dana yesterday."),
+  another name for the same fact standing beside the user's, a wrong first
+  reading taking the user's trust and blocking the real one. Whether the
+  model's name fits the words only the user can say. So
+  `_apply_beliefs_to_v2` writes every deep-pass fact as the model's
+  (`llm_inferred`), as before F1, and the trust gate
+  (`provenance.may_overrule`) lets a fact the user stated yield only to the
+  user's own words -- in its own turn too: the exception that let the model
+  pass correct the quick pass of its turn is gone. A reading of one of the
+  user's facts in their own words with no one else named is put to them as
+  a pending change (below): over the fact they stated, or as the first of
+  its kind. The user's facts go by Kazma's names before the write
+  (`memory/fact_names.py`, `canonical_for_user`: "home_city", "located_in",
+  "resides_in" -> "lives_in"; employer, role, name, preferred name; subject
+  `user` only; a plural is a list -- the first layer of F4's table, which
+  grows to forty names after the owner's review). The user's own word for a
+  value the model read raises it to the user's trust
+  (`belief_mutation`'s same-value branch). Every product call that applies
+  extracted facts names `user_text` (the two forwarders aside). "The same
+  value" is compared folded (`belief_mutation._same_value`: case,
+  underscores, spacing, Arabic forms and marks): the model's respelling
+  ("lisbon", "gulf_bank") is no change. Gates:
+  `tests/test_memory_own_statements.py` (the worker's own
+  micro_consolidation: corrections, first readings, aliases, the same turn,
+  the review's readings, a summarised page, the sister and the manager;
+  every reading at the user's trust, no name table and no first reading as
+  negative controls; every applier call names its message),
+  `tests/test_memory_provenance.py` (the same-turn exception as the
+  control), and the write scenarios (v4).
 - **A fact the user stated changes only in ways the user can see and take
   back** (2026-11, the audit's F1, second half; `memory/changes.py`, table
   `memory_changes` in `memory_state.db`). An **update**: a `user_*` fact
   replaced from another turn (`belief_mutation._mutate_functional_locked`,
-  `users_fact_replaced`; within one turn the deep pass refines the quick
-  pass and records nothing) is recorded by `changes.record_update` in the
+  `users_fact_replaced`) is recorded by `changes.record_update` in the
   replacement's own transaction; `changes.undo` reopens the old fact and
   closes the new one under the mutation lock, audited (`undo_update`), and
   refuses with a code (`ChangeRefusedError`: `replaced_since`, `forgotten`).
-  A **pending change**: the trust gate refused the model's reading of a
-  user fact -- the one way a reading only the model made can change it --
-  and the value stands in the turn's own words, in a sentence that states
-  it, with no one but the speaker named before it
-  (`clause_subject.names_no_one_else`, the user's spelling: "We moved to
-  Rotterdam", "Moved to Rotterdam last month", "No, Lisbon") --
-  `changes.record_pending`, from `_apply_beliefs_to_v2`; "My sister moved
-  to Rotterdam" records nothing. The user confirms it (`changes.confirm`:
-  written `user_explicit`, the change marked confirmed in that write's
-  transaction, `mutate_belief(confirms_change=)`) or dismisses it. One open
-  pending change per value; an update supersedes them; one open 30 days
+  A **pending change**: the model read one of the user's facts -- the one
+  way a reading only the model made can become theirs -- and the value
+  stands in the turn's own words, in a sentence that states it, with no one
+  but the speaker named before it (`clause_subject.names_no_one_else`, the
+  user's spelling: "We moved to Rotterdam", "Moved to Rotterdam last
+  month", "No, Lisbon"); "My sister moved to Rotterdam" records nothing.
+  Either the trust gate refused it over a fact the user stated
+  (`changes.record_pending`; never over the user's words of the same turn)
+  or it is the model's **first reading** of one of `fact_names.KINDS`,
+  written as its inference (`changes.record_first_reading`; `first` on
+  every listed row) -- both from `_apply_beliefs_to_v2` (`_put_to_the_user`).
+  The user confirms it (`changes.confirm`: written `user_explicit`, the
+  change marked confirmed in that write's transaction,
+  `mutate_belief(confirms_change=)`; a first reading the model replaced
+  since is refused, `replaced_since`) or dismisses it; dismissing a first
+  reading takes the model's reading out while it is current and still the
+  model's (audited, `dismiss_reading`), and the same value is never asked
+  again. Any fact the user states answers the changes waiting on it
+  (`changes.answer_pending`). One open pending change per value; an update
+  supersedes them; one open 30 days
   expires; the newest 200 decided ones are kept per tenant. Forget takes a
   change with the fact, the turn, the chat or the text it holds
   (`changes.forget_facts`, `forget_turn`, `forget_chat`,
@@ -4547,8 +4554,10 @@ import-unavailable degradation stay fail-open (treated as layer-off).
   remember AND holds 80 % of the stored words); `user_stated` -- the user's
   literal statement read by the heuristic pass from their own message;
   then `system_tool`, `agent_asserted` (a memory tool the user did not ask
-  for) and `llm_inferred`. A `user_*` fact yields only to `user_*`, except
-  the model pass correcting the heuristic reading of the SAME turn (§15H).
+  for) and `llm_inferred`. A `user_*` fact yields only to `user_*`, in its
+  own turn too (the model pass's same-turn correction was removed by rule A
+  of F1's second security review, 2026-11-18; §15H's entry on a model's
+  reading).
   Until then `memory_store` / `memory_link_entities` wrote `user_explicit`
   for anything the model chose (a fetched page, an email), unscreened, and
   the user's own words were `llm_inferred`: the model's fact blocked the

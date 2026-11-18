@@ -545,6 +545,36 @@ def _default_method(stats: dict[str, Any] | None) -> str:
     return USER_STATED if (stats or {}).get("source") == "heuristic" else LLM_INFERRED
 
 
+def _put_to_the_user(
+    primary_conn, action: dict[str, Any], clean: dict[str, Any], *, user_text: str, tenant_id: str,
+    session_id: str | None, turn: int | None, now: float | None, stats: dict[str, Any],
+) -> None:
+    """A pending change for the model's reading *clean* (``mutate_belief``
+    answered *action*): in place of the fact the user stated when the trust
+    gate refused it, or as the first fact of its kind when it was written as
+    the model's (``changes.record_first_reading``)."""
+    from kazma_core.memory import changes
+
+    try:
+        if action.get("blocked") == "lower_trust_source":
+            recorded = changes.record_pending(primary_conn, tenant_id=tenant_id, refused=action,
+                                              new_value=clean["object"], user_text=user_text,
+                                              session=session_id, turn=turn, now=now)
+        elif action.get("action") != "noop" and not action.get("blocked") and action.get("belief_id"):
+            recorded = changes.record_first_reading(primary_conn, tenant_id=tenant_id, written=action,
+                                                    predicate=clean["predicate"], new_value=clean["object"],
+                                                    user_text=user_text, session=session_id, turn=turn, now=now)
+        else:
+            return
+    except sqlite3.OperationalError as exc:
+        if "memory_changes" not in str(exc):
+            raise
+        logger.warning("[belief_extract] no change log in this store; a reading of the user's fact is not put to them")
+        return
+    if recorded:
+        stats["pending_changes"] = stats.get("pending_changes", 0) + 1
+
+
 def _apply_beliefs_to_v2(
     raw_beliefs: list[dict[str, Any]],
     primary_conn,
@@ -562,10 +592,11 @@ def _apply_beliefs_to_v2(
 ) -> dict[str, Any]:
     """Sync helper: fence + entity-resolve + mutate a list of raw beliefs.
 
-    *user_text* is the turn's message. A fact the model read about the user
-    is the user's own statement (``user_stated``, in the user's spelling)
-    when the user says it of themself there
-    (``clause_subject.speaks_of_self``); any other stays an inference.
+    *user_text* is the turn's message. A fact the model read never gets the
+    user's trust by itself: it is written as the model's inference, and a
+    reading of one of the user's own facts whose value stands in the user's
+    own words is put to the user as a pending change (``memory/changes.py``)
+    -- in place of a fact the user stated, or as the first one of its kind.
     Every product caller names it (``tests/test_memory_own_statements.py``).
 
     *private*: the connections are a private database (the memory
@@ -612,23 +643,17 @@ def _apply_beliefs_to_v2(
         # dialogue). User_explicit stores are NEVER throttled; the functional-
         # supersede-of-user-fact case is the mutate_belief source-trust gate.
         _method = extraction_method or _default_method(stats)
-        # Trust follows who is speaking about themself, not which pass read
-        # the fact: "We moved to Rotterdam" read by the model is the user's
-        # own word, "My sister moved to Rotterdam" never is (2026-11, the
-        # memory framework audit's F1). Credited so, it may add the user's
-        # fact but never replace one the user holds (``adds_only``): whether
-        # the model's name fits the words ("I'm visiting Dubai next week" as
-        # lives_in) only the user can say, so that becomes a pending change
-        # (the review of F1, 2026-11-18).
-        credited = False
-        if _method == "llm_inferred" and clean["subject"] == "user" and user_text:
-            from kazma_core.memory.clause_subject import speaks_of_self
+        # A model's reading never gets the user's trust by itself: whether
+        # its name fits the words ("I'm visiting Dubai next week" as
+        # lives_in, "I met Dana" as name_is) only the user can say (the
+        # second security review of F1, 2026-11-18). It stays the model's
+        # inference, and a reading of the user's own fact is put to the user
+        # (below). The user's facts go by Kazma's names here, so "home_city"
+        # never stands beside the user's "lives_in" (``fact_names``, F4).
+        if clean["subject"] == "user":
+            from kazma_core.memory.fact_names import canonical_for_user
 
-            spelled = speaks_of_self(user_text, clean["object"])
-            if spelled:
-                _method, clean["object"] = "user_stated", spelled
-                credited = True
-                stats["own_statements"] = stats.get("own_statements", 0) + 1
+            clean["predicate"] = canonical_for_user(clean["predicate"])
         if _method != "user_explicit":
             _mode = get_auto_store_mode(cfg)
             if _mode == "off":
@@ -712,27 +737,18 @@ def _apply_beliefs_to_v2(
             subject_id=subject_id,
             now=now,
             private=private,
-            adds_only=credited,
         )
-        if action.get("credit_withheld"):
-            stats["credit_withheld"] = stats.get("credit_withheld", 0) + 1
         if action["action"] != "noop":
             stats["applied"] += 1
         stats["actions"].append(action)
-        # A refused correction no one else is named in is put to the user, not
-        # dropped (memory/changes.py, F1: "Moved to Rotterdam last month").
-        if action.get("blocked") == "lower_trust_source" and clean["subject"] == "user" and user_text:
-            from kazma_core.memory import changes
-
-            try:
-                if changes.record_pending(primary_conn, tenant_id=tenant_id, refused=action,
-                                          new_value=clean["object"], user_text=user_text,
-                                          session=session_id, turn=turn, now=now):
-                    stats["pending_changes"] = stats.get("pending_changes", 0) + 1
-            except sqlite3.OperationalError as exc:
-                if "memory_changes" not in str(exc):
-                    raise
-                logger.warning("[belief_extract] no change log in this store; a refused correction is dropped")
+        # The model's reading of one of the user's own facts, in the user's
+        # own words with no one else named, is put to the user, never
+        # dropped and never applied as theirs (memory/changes.py, F1): in
+        # place of the fact they stated ("Moved to Rotterdam last month"), or
+        # as the first one of its kind ("We moved to Rotterdam").
+        if clean["subject"] == "user" and user_text and _method == "llm_inferred":
+            _put_to_the_user(primary_conn, action, clean, user_text=user_text, tenant_id=tenant_id,
+                             session_id=session_id, turn=turn, now=now, stats=stats)
         if private:
             continue
         # Ego-graph: every non-hub subject must reach ``user``. Payload-only
