@@ -470,7 +470,8 @@ Kazma** lists them:
 
 - **Changed from what you said.** You later said it plainly ("I live in
   Rotterdam now"): Kazma keeps the new value and shows the change, with
-  **Undo**, which brings the earlier value back.
+  **Undo**, which brings the earlier value back (every earlier value, when
+  it replaced a list such as two employers).
 - **Is this a change? Kazma kept the earlier fact.** A message Kazma reads
   as a correction only with its model ("We moved to Rotterdam last month",
   "No, Lisbon", "I'm visiting Dubai next week") does not replace your fact
@@ -479,7 +480,10 @@ Kazma** lists them:
   yours (and the change can still be undone), **No, keep it** leaves
   everything as it was. A message about someone else ("My sister moved to
   Rotterdam"), a denial ("I never lived in Paris") or a question ("Should I
-  move to Rotterdam?") asks nothing.
+  move to Rotterdam?") asks nothing. The same holds when you ask Kazma to
+  remember something and its memory tool would replace one of your facts:
+  "I'm visiting Dubai next week, remember that for the itinerary" asks
+  before it touches your home.
 - **Kazma's reading of your message.** The first time only the model reads
   one of your facts (your home, your name, the name you go by, your
   employer, your role), Kazma keeps it as its own reading, not as yours,
@@ -496,7 +500,9 @@ same fact twice in a day. The rest wait here. It cannot apply a waiting
 change itself; you do, by saying it in your own words or with the buttons.
 In Telegram, Discord, Slack and WhatsApp, `/memory changes` lists them with
 a short id, and `/memory undo`, `/memory confirm` or `/memory dismiss` with
-that id decides one.
+that id decides one. Through the API, an operator's API token may confirm
+one too: it can already edit your facts directly. If a reply fails, the note
+is not used up; the next reply tells it.
 
 A question you leave unanswered is let go after 30 days. Forgetting the
 fact, the conversation or the words a change holds forgets the change too,

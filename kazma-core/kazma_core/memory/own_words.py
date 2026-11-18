@@ -58,7 +58,7 @@ from __future__ import annotations
 
 import re
 
-__all__ = ["last_words", "own_words"]
+__all__ = ["is_plain", "last_words", "own_words"]
 
 #: "[Attached: ...]", "[Full document at: ...]" and "[Forwarded message ...]"
 #: lines: a file's name, or who forwarded something, is not the user's
@@ -101,7 +101,11 @@ _FIRST_PERSON_AR = frozenset({"انا", "احنا", "نحن", "اسمي", "عن�
 
 #: Words before an instruction's verb: courtesy, and calling Kazma by name.
 _POLITE_EN = ("please", "pls", "plz", "kindly", "can you", "could you", "would you", "will you",
-              "hey", "hi", "hello", "ok", "okay", "now", "also", "and", "then", "next", "kazma")
+              "hey", "hi", "hello", "ok", "okay", "now", "also", "and", "then", "next", "kazma",
+              # A reminder to do something: "Don't forget to translate: ..." is
+              # the instruction "translate" (the third review of F1, item 2).
+              "don't forget to", "dont forget to", "do not forget to", "remember to", "make sure to",
+              "be sure to")
 #: Verbs that only ever work on a text, and the labels of a text that is not
 #: the user speaking: the head may stop at a colon.
 _TEXT_VERBS_EN = ("translate", "proofread", "rephrase", "paraphrase", "summarise", "summarize",
@@ -144,9 +148,15 @@ _SAID_EN = frozenset({"said", "says", "wrote", "writes", "told", "tells", "asked
 #: Verbs that report what someone thinks or claims ("Ali thinks I live in
 #: Lyon", "Dana claims I work at Initech"), read as the reporting verbs are.
 #: Never "thought" or "figures": nouns too ("Random thought:").
+#: The third review's forms (item 3): "My parents think I ...", "People
+#: assume I ...", "Dana goes, I'm ...", "The website states that I ...".
+#: With "I" or "we" as the subject they stay the user's.
+_MORE_THINKING_EN = frozenset({"think", "believe", "assume", "claim", "say", "insist", "suspect", "reckon",
+                               "goes", "states", "stated", "shows", "lists"})
 _THINKING_EN = frozenset({"thinks", "believes", "believed", "claims", "claimed", "insists", "insisted",
                           "reckons", "reckoned", "mentions", "mentioned", "suggests", "suggested",
-                          "assumes", "assumed", "argues", "argued", "swears", "swore", "guesses", "guessed"})
+                          "assumes", "assumed", "argues", "argued", "swears", "swore", "guesses",
+                          "guessed"}) | _MORE_THINKING_EN
 _REPORTING_EN = _SAID_EN | _THINKING_EN
 #: A text of someone else's named before a colon: "Dana's bio:", "Her message
 #: was:", "My sister's reply:".
@@ -274,8 +284,28 @@ _LINE_ASIDES_AR = ("كمان ", "وكمان ", "ايضا", "وايضا")
 #: The label is one to three words; a bracketed time may stand before it
 #: (group 1), and then any label names who spoke: the time says the line was
 #: copied from a chat ("[12:01, 18/11/2026] dana_92: ...").
-_SPEAKER_LINE_RE = re.compile(r"[ \t]{0,8}+(\[[^\]\n]{1,40}+\][ \t]{0,4}+)?+([^:\n]{1,40}+):")
+_SPEAKER_LINE_RE = re.compile(
+    r"[ \t]{0,8}+(\[[^\]\n]{1,40}+\][ \t]{0,4}+|\d{1,2}:\d{2}(?:[ \t]?+[AaPp]\.?+[Mm]\.?+)?+[ \t]{1,4}+)?+"
+    r"([^:\n]{1,40}+):"
+)
 _CLOCK_RE = re.compile(r"\d{1,2}:\d{2}")
+#: An IRC-style line: "<Dana> I live in Oslo".
+_ANGLE_LINE_RE = re.compile(r"[ \t]{0,8}+<([^<>\n]{1,40}+)>[ \t]")
+#: Before a label: a list's number ("1. Dana:", "2) Ali:") or a retweet's
+#: "RT" ("RT @dana:").
+_LABEL_LEAD_RE = re.compile(r"(?:\d{1,3}[.)][ \t]{0,3}+|RT[ \t]{1,3}+)")
+#: A phone number as the label: what an export shows for a contact not saved.
+_PHONE_RE = re.compile(r"\+?[\d \-().]{7,24}")
+#: "User 1", "Person A", "Speaker 2": a numbered role.
+_NUMBERED_ROLES_EN = frozenset({"user", "person", "speaker", "participant", "customer", "agent", "guest",
+                                "caller", "student", "member", "client", "interviewer", "respondent", "p"})
+#: Words around a name that are not the name ("Dr. Dana Smith Jr.").
+_TITLES_EN = frozenset({"dr", "mr", "mrs", "ms", "miss", "prof", "sir", "madam", "sheikh", "eng", "capt", "rev",
+                        "jr", "sr", "ii", "iii", "phd", "md"})
+_PARENTHETICAL_RE = re.compile(r"\([^()\n]{0,40}+\)")
+#: A single capital as the label: a transcript's sides ("A:", "B:"); never
+#: "I:" or "Q:".
+_SIDES = frozenset("ABCDEFGHJKLMNOPRSTUVWXYZ")
 #: A greeting before a colon is the user greeting, never who spoke ("Good
 #: morning: I live in Oslo"). Compared lower-cased, spaces folded (English),
 #: or by its first word folded (Arabic).
@@ -297,7 +327,11 @@ _HEADING_WORDS = frozenset({
     "takeaway", "takeaways", "recap", "verdict", "rule", "rules", "lesson", "lessons", "twist", "spoiler",
     "alert", "plot", "honestly", "currently", "lately", "recently", "finally", "basically", "seriously",
     "personally", "meanwhile", "otherwise", "again", "still", "hmm", "hm", "ugh", "wow", "yay", "imo",
-    "imho", "idk", "fwiw", "afaik", "pros", "cons", "mood", "vibe", "vibes"})
+    "imho", "idk", "fwiw", "afaik", "pros", "cons", "mood", "vibe", "vibes",
+    # Events on a line with a time ("Dinner 8:00 PM") are the user's plans,
+    # never who spoke (the copy headers of the third review, item 3).
+    "dinner", "lunch", "breakfast", "meeting", "call", "class", "flight", "appointment", "gym", "practice",
+    "shift", "deadline", "event", "party", "pickup", "dropoff", "reminder", "alarm"})
 #: A role in a conversation or a person named by relation, after "the" or a
 #: possessive ("the customer:", "my sister:", "his boss:"): who spoke.
 _ROLES_EN = frozenset({
@@ -351,7 +385,7 @@ _URL_OBJECT_GAP = 40
 #: else's. Compared lower-cased without leading dashes, ">" or spaces
 #: (English) or folded (Arabic).
 _FORWARD_EN = ("forwarded message", "begin forwarded message", "forwarded from ", "fwd:",
-               "original message", "from:", "subject:")
+               "original message", "from:", "subject:", "to:", "date:", "sent:", "cc:")
 _FORWARD_AR = ("رساله محوله", "رساله معاد توجيهها", "تمت اعاده توجيه", "محوله من", "رساله معاد ارسالها")
 
 #: Direction marks a copied Arabic chat carries around its numbers: left out
@@ -391,9 +425,23 @@ _CLOCK_LINE_RE = re.compile(
 #: at 12:01, Dana <dana@x.y> wrote:"; Gmail in Arabic: "في الثلاثاء ...، كتب
 #: Dana <...>:"). Read at most this far.
 _WROTE_LINE_MAX = 300
-_WROTE_ENDS = ("wrote:", "writes:", "wrote :")
-#: A blank line: where a quoted mail or a copied message ends.
-_BLANK_LINE_RE = re.compile(r"\n[ \t]{0,40}+\n")
+#: English, French ("Le ... a écrit :") and, read apart, German ("Am ...
+#: schrieb Dana <...>:").
+_WROTE_ENDS = ("wrote:", "writes:", "wrote :", "a écrit :", "a écrit:", "a ecrit :", "a ecrit:")
+_WROTE_INSIDE = (" schrieb ",)
+#: Any other header a copied chat puts over a message: who, then only a time
+#: -- "Dana, [18 Nov 2026 at 12:01]", "Dana [12:01 PM]", "Dana 12:01 PM",
+#: "Dana — 12:01", "Dana - Today at 12:01", "Dana, 12:01 PM" (the third
+#: review of F1, item 3). The name must name a speaker (``_names_a_speaker``):
+#: "Meeting at 3:00 PM" is no header.
+_HEADER_RE = re.compile(
+    r"[ \t]{0,8}+(?P<name>[^\n:\[\]—–,]{1,60}?)"
+    r"(?:,[ \t]{0,3}+|[ \t]{0,8}+[—–\-][ \t]{0,3}+|[ \t]{1,8}+)"
+    r"(?:\[[^\]\n]{0,40}?\d{1,2}:\d{2}[^\]\n]{0,16}+\]"
+    r"|(?:(?:[Tt]oday|[Yy]esterday|اليوم|أمس|امس)[ \t]{1,3}+(?:at[ \t]{1,3}+|في[ \t]{1,3}+)?+)?+"
+    r"(?:\d{1,4}[/.\-]\d{1,2}[/.\-]\d{1,4}[,،]?+[ \t]{1,3}+)?+"
+    r"\d{1,2}:\d{2}(?:[ \t]?+(?:[AaPp]\.?+[ \t]?+[Mm]\.?+|[صم]))?+)[ \t]{0,8}+$"
+)
 
 #: How far a head may run before its colon or line end.
 _HEAD_MAX = 80
@@ -653,19 +701,13 @@ def _reported_end(body: str, at: int) -> int:
     """Where someone else's words that start at *at*, after their head's
     colon, end: at the end of their sentence when they start on the head's
     line (the decided cost: "My sister said: I'm a nurse. I live in
-    Rotterdam." files the second sentence as the user's), else at the next
-    blank line, the blank lines right under the head skipped ("Dana
-    wrote:\\nI live in Oslo.\\nMy name is Dana.")."""
+    Rotterdam." files the second sentence as the user's), else at the end
+    of the message ("Dana wrote:\\nI live in Oslo.\\n\\nMy name is Dana."):
+    what someone wrote has paragraphs of its own."""
     eol = body.find("\n", at)
     if body[at:eol if eol >= 0 else len(body)].strip():
         return _sentence_end(body, at)
-    if eol < 0:
-        return len(body)
-    i = eol
-    while i < len(body) and body[i] in " \t\n":
-        i += 1
-    blank = _BLANK_LINE_RE.search(body, i)
-    return len(body) if blank is None else blank.start()
+    return len(body)
 
 
 def _without_addresses(window: str) -> str:
@@ -751,7 +793,9 @@ _SUBJECT_I = frozenset({"i", "i'm", "im", "i've", "i'd", "i'll", "we", "we're", 
                         "نحن"})
 #: Words between a reporting verb and what was reported ("told me I ...",
 #: "said that I ...", "قالت لي أنا ...").
-_REPORT_FILLERS = frozenset({"me", "us", "him", "her", "them", "that", "لي", "له", "لها", "ان"})
+#: "Dana told everyone I ...", "It says here I ..." (the third review, item 3).
+_MORE_FILLERS = frozenset({"you", "everyone", "everybody", "people", "all", "here"})
+_REPORT_FILLERS = frozenset({"me", "us", "him", "her", "them", "that", "لي", "له", "لها", "ان"}) | _MORE_FILLERS
 #: "إني", "إنني", "إننا": "that I", "that we" after a reporting verb.
 _THAT_I_AR = frozenset({"اني", "انني", "اننا"})
 #: The most of a message the scanners read. Scanning all of a long one cost
@@ -809,9 +853,30 @@ def _handle(label: str) -> bool:
 
 def _names_a_role(words: list[str]) -> bool:
     """Whether *words* name who spoke by role or relation: "the customer",
-    "my sister", "his boss"."""
+    "my sister", "his boss", "my best friend", or a numbered role ("User
+    1", "Person A", "Speaker 2")."""
     lowered = [w.lower() for w in words]
-    return len(lowered) == 2 and lowered[0] in _OWNERS_EN and lowered[1] in _ROLES_EN
+    if 2 <= len(lowered) <= 3 and lowered[0] in _OWNERS_EN and lowered[-1] in _ROLES_EN:
+        return True
+    return False
+
+
+def _numbered_role(label: str) -> bool:
+    parts = label.split()
+    return (len(parts) == 2 and parts[0].lower() in _NUMBERED_ROLES_EN
+            and (parts[1].isdigit() or (len(parts[1]) == 1 and parts[1].isalpha() and parts[1].isupper())))
+
+
+def _bare_label(label: str) -> str:
+    """*label* without what surrounds a name: a parenthetical ("Dana (my
+    sister)"), "from ..." ("Dana from HR"), titles ("Dr. Dana Smith Jr.")."""
+    label = _PARENTHETICAL_RE.sub(" ", label)
+    lowered = f" {label.lower()} "
+    cut = lowered.find(" from ")
+    if cut > 0:
+        label = label[:cut - 1] if cut - 1 > 0 else label
+    words = [w for w in label.replace(".", " ").split() if w.lower() not in _TITLES_EN]
+    return " ".join(words)
 
 
 def _names_a_speaker(label: str) -> bool:
@@ -823,6 +888,14 @@ def _names_a_speaker(label: str) -> bool:
     "Step 2"), a phrase in lower case ("just saying"), or a head of its own
     (an instruction, someone reported)."""
     label = label.strip()
+    if _PHONE_RE.fullmatch(label) and sum(ch.isdigit() for ch in label) >= 7:
+        return True  # "+965 9999 1234:": a contact an export shows by number
+    if label in _SIDES:
+        return True  # "A:", "B:": a transcript's two sides
+    if _numbered_role(label):
+        return True
+    if not _handle(label):
+        label = _bare_label(label) or label
     words = _WORD_RE.findall(label)
     if not 1 <= len(words) <= 3 or _is_greeting(label):
         return False
@@ -861,8 +934,13 @@ def _without_speaker_lines(body: str) -> str:
     18/11/2026] Dana: ...", "نورة: اسمي نورة")."""
     out = []
     for line in body.split("\n"):
-        match = _SPEAKER_LINE_RE.match(line)
-        out.append("" if match and (_copied_label(match) or _names_a_speaker(match.group(2))) else line)
+        lead = _LABEL_LEAD_RE.match(line.lstrip(" \t"))
+        bare = line.lstrip(" \t")[lead.end():] if lead else line
+        match = _SPEAKER_LINE_RE.match(bare)
+        angle = _ANGLE_LINE_RE.match(line)
+        spoken = (match is not None and (_copied_label(match) or _names_a_speaker(match.group(2)))) or (
+            angle is not None and _names_a_speaker(angle.group(1)))
+        out.append("" if spoken else line)
     return "\n".join(out)
 
 
@@ -870,8 +948,11 @@ def _is_copy_header(line: str) -> bool:
     """Whether *line* (direction marks left out) is the header a Telegram,
     Discord or Slack copy puts over a message, or a time alone on its line:
     the message follows on the next lines."""
-    return bool(_TELEGRAM_HEADER_RE.match(line) or _DISCORD_HEADER_RE.match(line)
-                or _SLACK_HEADER_RE.match(line) or _CLOCK_LINE_RE.match(line))
+    if (_TELEGRAM_HEADER_RE.match(line) or _DISCORD_HEADER_RE.match(line) or _SLACK_HEADER_RE.match(line)
+            or _CLOCK_LINE_RE.match(line)):
+        return True
+    header = _HEADER_RE.match(line)
+    return header is not None and _names_a_speaker(header.group("name"))
 
 
 def _is_wrote_line(line: str) -> bool:
@@ -882,8 +963,9 @@ def _is_wrote_line(line: str) -> bool:
     text = line.strip().lstrip(">").strip()
     if not text or len(text) > _WROTE_LINE_MAX:
         return False
-    if text.lower().endswith(_WROTE_ENDS):
-        return not any(w.split("'")[0] in {"i", "we"} for w in _words(text))
+    lowered = text.lower()
+    if lowered.endswith(_WROTE_ENDS) or (lowered.endswith(":") and any(m in f" {lowered} " for m in _WROTE_INSIDE)):
+        return not any(w.split("'")[0] in {"i", "we", "ich", "je"} for w in _words(text))
     folded = _fold(text).split()
     return text.endswith(":") and len(folded) > 2 and folded[0] == "في" and (
         "كتب" in folded or "كتبت" in folded)
@@ -891,32 +973,27 @@ def _is_wrote_line(line: str) -> bool:
 
 def _without_pasted_chats(body: str) -> str:
     """*body* without a pasted chat or quoted mail: a WhatsApp export's lines
-    with the lines that continue them; a copy header (Telegram, Discord,
-    Slack) or a mail's "... wrote:" line with the message under it -- each
-    to the next blank line (the blank lines right under a header are
-    skipped: the message comes after them)."""
+    with the lines that continue them, to the next blank line; and from a
+    copy header (Telegram, Discord, Slack, any "Name, time" line) or a mail's
+    "... wrote:" line, everything after it -- a copied mail or chat has
+    paragraphs of its own (the third review of F1, item 3)."""
     lines = body.split("\n")
     out: list[str] = []
     dropping = False
-    reached = False  # whether the dropped block's text has started
-    for line in lines:
+    for at, line in enumerate(lines):
         bare = line.translate(_BIDI_MARKS)
         if not bare.strip():
-            if dropping and reached:
-                dropping = False
+            dropping = False
             out.append(line)
             continue
+        if _is_copy_header(bare) or _is_wrote_line(bare):
+            out.extend("" for _ in lines[at:])
+            break
         if _EXPORT_LINE_RE.match(bare):
-            dropping, reached = True, True
-            out.append("")
-        elif _is_copy_header(bare) or _is_wrote_line(bare):
-            dropping, reached = True, False
-            out.append("")
-        elif dropping:
-            reached = True
+            dropping = True
             out.append("")
         else:
-            out.append(line)
+            out.append("" if dropping else line)
     return "\n".join(out)
 
 
@@ -1015,6 +1092,20 @@ def _attributed(folded: list[str]) -> bool:
     for k, word in enumerate(folded):
         if word == "according" and k + 1 < len(folded) and folded[k + 1] == "to":
             return (folded[k + 2] if k + 2 < len(folded) else "") != "me"
+    lead_en = [w for w in folded[:5] if w not in _LEAD_INS_EN]
+    if lead_en:
+        # "Per Ali, ...", "In Dana's words, ...", "Her reply was ..." (the
+        # third review of F1, item 3); never "per me", "in my words".
+        if lead_en[0] == "per" and len(lead_en) > 1 and lead_en[1] != "me":
+            return True
+        if (lead_en[0] == "in" and len(lead_en) > 2 and lead_en[2] == "words"
+                and lead_en[1] not in ("my", "our")):
+            return True
+        if _names_someones_text_en(lead_en[:4]):
+            return True
+    if folded and (folded[0] == "مكتوب" or (
+            len(folded) > 1 and folded[1] in ("كان", "كانت") and _names_someones_text_ar(folded[:1]))):
+        return True  # "مكتوب في الرسالة ..." (it is written), "ردها كان ..." (her reply was)
     lead = [w for w in folded[:5] if w not in _LEAD_INS_AR]
     if len(lead) > 1 and lead[0] == "علي" and lead[1] in _ACCORDING_AR:
         lead = lead[1:]  # "على حسب" ("على" folds as the name "علي")
@@ -1068,6 +1159,8 @@ def _reported_cut(sentence: str) -> str:
         last = _reports_at(folded, k)
         if last is None:
             continue
+        if k > 0 and folded[k - 1] in _NEGATIONS:
+            return sentence[:tokens[k][0]] + end  # "I never said I live in Oslo"
         if any(w in _SUBJECT_I for w in folded[:k]):
             return sentence  # the user's own report ("I told Ali I ...")
         if _reports_on_the_user_at(folded, last):
@@ -1092,14 +1185,69 @@ def _asks(sentence: str) -> bool:
     return False
 
 
+#: Before a reporting verb, a denial: "I never said ...", "I didn't say ...".
+_NEGATIONS = frozenset({"never", "not", "didn't", "didnt", "don't", "dont", "doesn't", "doesnt", "won't",
+                        "wouldn't", "can't", "cant", "cannot", "never", "ما", "لم", "مو", "ابد", "ابدا"})
+#: Where a hypothetical starts: "If I live in Oslo, ...", "لو كنت ساكن ...".
+_SUPPOSING = frozenset({"if", "suppose", "supposing", "assuming", "imagine", "hypothetically", "lets", "let's",
+                        "اذا", "لو", "فرضا", "افترض", "تخيل"})
+#: Asking how to say something: "Is it correct to say I live in Oslo".
+_ASKS_TO_SAY_EN = ("is it correct to say", "is it right to say", "is it ok to say", "is it okay to say",
+                   "is it wrong to say", "is it proper to say", "can i say", "could i say", "should i say",
+                   "how do i say", "how would i say", "how to say", "how do you say", "is this correct")
+_ASKS_TO_SAY_AR = ("هل صحيح اقول", "هل يصح اقول", "هل يصح ان اقول", "هل اقدر اقول", "كيف اقول", "شلون اقول",
+                   "شلون اكتب", "كيف اكتب")
+
+
+def _supposes_or_asks_to_say(sentence: str) -> bool:
+    """Whether *sentence* is a hypothetical ("If I live in Oslo, ...") or
+    asks how to say something ("Is it correct to say I live in Oslo"): it
+    states nothing of the user (the third review of F1, item 3)."""
+    lowered = [w.lower().replace("’", "'") for w in _WORD_RE.findall(sentence)]
+    lowered = [w for w in lowered if w not in _LEAD_INS_EN] or [""]
+    folded = [_fold(w) for w in _WORD_RE.findall(sentence) if _fold(w) not in _LEAD_INS_AR] or [""]
+    if lowered[0] in _SUPPOSING or folded[0] in _SUPPOSING or lowered[:2] in (["what", "if"], ["even", "if"]):
+        return True
+    said = " ".join(lowered)
+    if any(said == p or said.startswith(p + " ") for p in _ASKS_TO_SAY_EN):
+        return True
+    joined = " ".join(folded)
+    return any(joined == p or joined.startswith(p + " ") for p in _ASKS_TO_SAY_AR)
+
+
+def _ends_reporting(sentence: str) -> bool:
+    """Whether *sentence* ends with someone's reporting verb and no colon:
+    "Dana said" on a line of its own, what she said on the next."""
+    folded = [_fold(t).lower().replace("’", "'") for t in _WORD_RE.findall(sentence)]
+    return bool(folded) and _reporting(folded[-1]) and not any(w in _SUBJECT_I for w in folded)
+
+
 def _without_reported_or_asked(body: str) -> str:
     out = []
+    after_report = False
     for sentence in _sentences(body):
-        if _asks(sentence):
+        if not sentence.strip():
+            out.append(sentence)
+            continue
+        if after_report or _asks(sentence) or _supposes_or_asks_to_say(sentence):
             out.append("\n" if sentence.endswith("\n") else " ")
-        else:
-            out.append(_reported_cut(sentence))
+            after_report = False
+            continue
+        out.append(_reported_cut(sentence))
+        after_report = sentence.endswith("\n") and _ends_reporting(sentence)
     return "".join(out)
+
+
+def _from_someone(line: str) -> bool:
+    """Whether *line* heads a message from someone: "From Dana:", "From
+    Dana Smith <dana@x.y>:" -- never "From now on: ..."."""
+    if not line.lower().startswith("from "):
+        return False
+    colon = line.find(":", 5, 70)
+    if colon < 0:
+        return False
+    name = line[5:colon].split("<")[0].strip()
+    return bool(name) and _names_a_speaker(name)
 
 
 def _without_forwarded(body: str) -> str:
@@ -1108,7 +1256,7 @@ def _without_forwarded(body: str) -> str:
     while start <= len(body):
         end = body.find("\n", start)
         line = body[start:end if end >= 0 else len(body)][:120].lstrip(" \t>-*_")
-        if line and _starts_with(line, _FORWARD_EN, _FORWARD_AR):
+        if line and (_starts_with(line, _FORWARD_EN, _FORWARD_AR) or _from_someone(line)):
             return body[:start]
         if end < 0:
             return body
@@ -1188,6 +1336,47 @@ def last_words(text: str | None) -> str:
     if _read(body[:_SCAN_MAX])[1]:
         return ""  # "Translate the following:" at the start works on all of it
     return _read(body[start:])[0]
+
+
+#: A text named by where it was taken from ("this note from the web page",
+#: "من الموقع"): pasted, whatever its shape.
+_SOURCE_NOUNS_EN = frozenset({"page", "webpage", "website", "site", "web", "article", "email", "mail", "message",
+                              "post", "tweet", "chat", "document", "doc", "pdf", "book", "link", "internet",
+                              "google", "chatgpt", "news", "paper", "report", "screenshot", "forum", "reddit",
+                              "wikipedia", "thread", "comment", "group"})
+_SOURCE_NOUNS_AR = frozenset({"الموقع", "الصفحه", "المقال", "الرساله", "الايميل", "المحادثه", "الكتاب", "النت",
+                              "الانترنت", "جوجل", "القروب", "الجروب", "التغريده", "المنشور", "الخبر", "التقرير"})
+
+
+def is_plain(text: str | None) -> bool:
+    """Whether *text* is the user's own plain words, all of it: nothing in it
+    is a paste, someone else's words or claim, the text an instruction works
+    on, or a question (:func:`own_words` keeps every word), it names no
+    source it was taken from ("this note from the web page"), and it is no
+    longer than the part :func:`own_words` reads. A request to remember
+    earns the user's highest trust only for such a message
+    (``provenance.agent_write_source``; the third review of F1, item 2)."""
+    body = _message_body(text)
+    if not body.strip() or len(body) > _SCAN_MAX:
+        return False
+    kept = own_words(text)
+    if [_fold(w) for w in _WORD_RE.findall(body)] != [_fold(w) for w in _WORD_RE.findall(kept)]:
+        return False
+    return not _names_a_source(kept) and not _reports(kept)
+
+
+def _names_a_source(text: str) -> bool:
+    """Whether *text* says where its words were taken from: "from" (or
+    "من") and a source within the next four words."""
+    words = [w.lower() for w in _WORD_RE.findall(text)]
+    folded = [_fold(w) for w in _WORD_RE.findall(text)]
+    for k, word in enumerate(words):
+        if word == "from" and any(w in _SOURCE_NOUNS_EN for w in words[k + 1:k + 5]):
+            return True
+    for k, word in enumerate(folded):
+        if word == "من" and any(w in _SOURCE_NOUNS_AR for w in folded[k + 1:k + 5]):
+            return True
+    return False
 
 
 def _sentence_start(body: str, at: int) -> int | None:

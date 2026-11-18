@@ -79,6 +79,35 @@ _USER_FACT_STANDS = (
     "The user's own fact stands: a memory tool cannot replace what the user said. "
     "If it changed, ask the user; their own words correct it."
 )
+#: ... and when the replacement was put to the user to confirm.
+_PUT_TO_THE_USER = (
+    "The user's own fact stands: a memory tool cannot replace what the user said. "
+    "The change is waiting for the user to confirm it (the Memory page, or /memory changes); "
+    "do not store it again."
+)
+
+
+def _put_to_the_user(primary: Any, result: dict, *, value: str, tenant: str, thread: str, turn: int) -> bool:
+    """A memory tool's write that would replace the user's own fact (the
+    third review of F1, item 1: the subject and the fact's name are the
+    model's, even when the value is the user's): put to the user as a
+    pending change when the value stands in their own words with no one
+    else named (``changes.record_pending``). True when recorded; commits."""
+    import sqlite3
+
+    from kazma_core.memory import changes
+    from kazma_core.memory.provenance import latest_user_message
+    from kazma_core.tools.export_session import get_current_session_messages
+
+    latest = latest_user_message(get_current_session_messages() or [])
+    try:
+        return bool(changes.record_pending(primary, tenant_id=tenant, refused=result, new_value=value,
+                                           user_text=latest, session=thread or None, turn=turn or None))
+    except sqlite3.OperationalError as exc:
+        if "memory_changes" not in str(exc):
+            raise
+        logger.warning("[memory] no change log in this store; a replacement of the user's fact is not put to them")
+        return False
 
 
 #: What memory_search answers when recall itself failed: never "no memories",
@@ -500,9 +529,15 @@ def register_memory_tools(registry: Any) -> None:
                 tenant_id=tenant,
                 source_session=thread or None,
                 source_turn=turn or None,
+                replaces_users_fact=False,
             )
+            asked = result.get("blocked") == "lower_trust_source" and _put_to_the_user(
+                primary, result, value=object_, tenant=tenant, thread=thread, turn=turn)
             ops.close()
             primary.close()
+            if asked:
+                return json.dumps({"ok": True, "stored": False, "asked_the_user": True, "hint": _PUT_TO_THE_USER},
+                                  ensure_ascii=False)
             if result.get("blocked") == "lower_trust_source":
                 raise RefusedBeforeEffect(json.dumps({"ok": False, "error": "user_fact_stands", "hint": _USER_FACT_STANDS}))
             return json.dumps(
@@ -712,8 +747,13 @@ def register_memory_tools(registry: Any) -> None:
                             source_session=thread or None,
                             source_turn=turn or None,
                             cfg=None,
+                            replaces_users_fact=False,
                         )
                     )
+                    if actions[-1].get("blocked") == "lower_trust_source" and _put_to_the_user(
+                            primary, actions[-1], value=str(fact["object"]), tenant=_tenant, thread=thread,
+                            turn=turn):
+                        actions[-1]["asked_the_user"] = True
             else:
                 # Generic free-text remember — additive diary belief
                 actions.append(
@@ -736,11 +776,12 @@ def register_memory_tools(registry: Any) -> None:
             bids = [a.get("belief_id", "") for a in actions if a.get("belief_id")]
             supersedes = sum(1 for a in actions if a.get("action") == "supersede")
             stands = sum(1 for a in actions if a.get("blocked") == "lower_trust_source")
+            asked = sum(1 for a in actions if a.get("asked_the_user"))
             if eid or bids:
                 detail = f"beliefs={','.join(bids) or 'n/a'}"
                 if supersedes:
                     detail += f", superseded={supersedes}"
-                note = f" {_USER_FACT_STANDS}" if stands else ""
+                note = f" {_PUT_TO_THE_USER}" if asked else (f" {_USER_FACT_STANDS}" if stands else "")
                 return f"Stored memory (v2 episode={eid or 'n/a'}, {detail}).{note}"
             return "Error: memory store failed — V2 write returned no ids."
         except Exception as exc:

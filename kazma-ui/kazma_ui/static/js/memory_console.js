@@ -1582,11 +1582,15 @@
           ? '<button type="button" class="btn btn-sm btn-primary v2-change-act" data-id="' + _attr(c.id) + '"' + readingAttr + ' data-decision="confirm">' + _esc(yes) + '</button>' +
             '<button type="button" class="btn btn-sm btn-outline v2-change-act" data-id="' + _attr(c.id) + '"' + readingAttr + ' data-decision="dismiss">' + _esc(no) + '</button>'
           : '<button type="button" class="btn btn-sm btn-outline v2-change-act" data-id="' + _attr(c.id) + '" data-decision="undo">' + _esc(_mt('memory.console.change_undo', 'Undo')) + '</button>';
-        // The fact's name is the data's own word, its own block.
+        // The fact's name: the page's word for one of the user's own facts
+        // (home, name, employer...), in the page's language; any other name
+        // is the data's own word, its own block.
+        const fact = _mtData('memory.console.fact_', c.predicate || '');
+        const factText = fact.attr ? String(c.predicate || '').replace(/_/g, ' ') : fact.text;
         return '<div class="mem-row v2-change" data-kind="' + _attr(c.kind) + '" style="display:flex;gap:8px;align-items:flex-start;justify-content:space-between;padding:6px 0;">' +
           '<span style="min-width:0;overflow-wrap:anywhere;">' +
           '<span style="display:block;color:var(--text-primary);font-weight:600;">' + _esc(title) + '</span>' +
-          '<span translate="no" style="display:block;">' + _esc(String(c.predicate || '').replace(/_/g, ' ')) + '</span>' +
+          '<span class="v2-change-fact"' + fact.attr + ' style="display:block;">' + _esc(factText) + '</span>' +
           lines +
           '<span class="mem-muted" style="display:block;font-size:0.65rem;"><bdi>' + _esc(c.created_at ? _memWhen(c.created_at) : '') + '</bdi></span>' +
           '</span>' +

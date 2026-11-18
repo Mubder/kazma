@@ -38,7 +38,7 @@ user corrects their own facts. Agent writes are screened for injection first
 
 from __future__ import annotations
 
-from kazma_core.memory.own_words import own_words
+from kazma_core.memory.own_words import is_plain, own_words
 
 __all__ = [
     "AGENT_ASSERTED",
@@ -109,12 +109,17 @@ def agent_write_source(text: str, latest_user_message: str | None) -> str:
     fact in English, ``audit_2611_test_codeword``, so an Arabic "remember
     this" never held those words and the user's own fact was stored as the
     model's). Both are judged on the user's own words (``memory.own_words``):
-    a value held only by an attached document or a quote is the agent's."""
+    a value held only by an attached document or a quote is the agent's.
+
+    ``user_explicit`` only when the whole message is the user's plain
+    statement (``own_words.is_plain``): a request to remember around a mail,
+    a chat, a page's note or someone's words is ``user_stated`` at most (the
+    third review of F1, item 2)."""
     from kazma_core.memory.remember_request import is_remember_request
 
     message = own_words(latest_user_message)
     if is_remember_request(message) and _holds(message, text):
-        return USER_EXPLICIT
+        return USER_EXPLICIT if is_plain(latest_user_message) else USER_STATED
     return AGENT_ASSERTED
 
 

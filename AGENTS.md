@@ -2162,7 +2162,28 @@ four injected were noise.
   user (or Kazma's reading), never the user's trust. An episode keeps the
   first 4,000 characters of the user's message (`dual_write`), and the deep
   pass reads the episode: the end of a message longer than that reaches
-  neither pass. The quick pass (`extract_beliefs_heuristic`),
+  neither pass (the main session's decision: it stays). **The third
+  review's items 2 and 3 (2026-11-18)**: a request to remember earns
+  `user_explicit` only when the whole message is the user's plain words
+  (`own_words.is_plain`: own_words drops nothing, no source named, "this
+  note from the web page", no reporting verb), else `user_stated` at most;
+  "Don't forget to <verb>" is the instruction it names. A copy header or a
+  mail's "wrote:" line (also French "a écrit :" and German "schrieb ...:")
+  and someone's words under a head that ends its line run to the END of the
+  message (copies have paragraphs); more headers ("Name, [date at time]",
+  "Name [12:01 PM]", "Name 12:01 PM", "Name — time", "Name - Today at",
+  "Name, 12:01 PM", `_HEADER_RE` with a name that names a speaker, never
+  an event like "Dinner"), "12:01 Name:", "To:", "Date:", "From Name:";
+  labels: a phone number, "A:" (`_SIDES`), "User 1", "Person A", titles,
+  parentheticals, "Dana from HR", "My best friend", "1. Dana:", `<Dana>`,
+  "RT @dana:"; reported speech: bare verbs ("My parents think", "People
+  assume", `_MORE_THINKING_EN`), "told everyone", "says here"
+  (`_MORE_FILLERS`), "Per Ali", "In Dana's words", "Her reply was",
+  "مكتوب", "ردها كان", "Dana said" ending its line; not statements: a
+  conditional, "I never said", "Is it correct to say"
+  (`_supposes_or_asks_to_say`). The best effort the main session asked for:
+  the threat is text the user pasted, and the change log is the net. The
+  quick pass (`extract_beliefs_heuristic`),
   `is_remember_request` and `provenance.agent_write_source` read through
   it; the turn keeps the whole message and the deep pass reads it (to the
   episode's 4,000 characters) at
@@ -2266,11 +2287,28 @@ four injected were noise.
   replaced since is refused, `replaced_since`) or dismisses it; "Not me" on
   a reading takes the model's fact out while it is current and still the
   model's (audited, `dismiss_reading`), and the deep pass never files that
-  value again (`changes.user_said_not_me`; such rows are never pruned) --
-  the user's own words still can. Any fact the user states answers what is
-  waiting on it (`changes.answer_pending`). One open change per value; an
-  update supersedes them; one open 30 days
-  expires; the newest 200 decided ones are kept per tenant. Forget takes a
+  value again (`changes.user_said_not_me`; the newest `KEEP_NOT_ME`, 500 a
+  tenant, are kept) -- the user's own words still can. Any fact the user
+  states answers what is waiting on it (`changes.answer_pending`). One open
+  change per value; an update supersedes them; one open 30 days
+  expires; the newest 200 decided ones are kept per tenant. An update that
+  closed the user's other list entries with its fact records them
+  (`also_closed`), and undo reopens every one (the third review, item 4).
+  **A memory tool follows rule A on replacement** (item 1): its subject and
+  fact name are the model's even when the value is the user's, so its write
+  passes `mutate_belief(replaces_users_fact=False)`; one that would replace
+  a fact the user stated is put to the user as a pending change
+  (`tool_builtins/memory._put_to_the_user`), one that only adds stays as it
+  was. The model's "User" is the user (`belief_extractor._as_the_user`); a
+  list-labelled value on a fact the user keeps single takes the user's
+  row's class (`belief_mutation._established_kind`); the name table also
+  reads "hometown", "location", "city", "current_location", "address",
+  "moved_to", "first_name", "user_name" and other separators ("lives-in")
+  (item 5). The turn's note is read at iteration 0
+  (`changes.read_changes_note`) and marked told only after the model
+  answered (`changes.mark_noted`): a failed call does not spend it (item
+  6). An operator's API token may confirm a change: it can already edit
+  facts at `user_explicit` (the main session's decision). Forget takes a
   change with the fact, the turn, the chat or the text it holds
   (`changes.forget_facts`, `forget_turn`, `forget_chat`,
   `forget_mentioning`); it is in the export and the M01 plant. The accepted
@@ -2291,9 +2329,10 @@ four injected were noise.
   (`slash_commands.MEMORY_CHANGE_WORDS` in `changes_global_config`: they
   show and rewrite the tenant's facts). The next turn of the chat a change
   came from is told once: the supervisor adds the turn note
-  `memory_changes` at iteration 0 (`changes.changes_note`, off the loop;
-  the changes whose `source_session` is one of the thread's ids, marked
-  `noted_at` as they are taken; the values fenced, Kazma's lines outside).
+  `memory_changes` at iteration 0 (`changes.read_changes_note`, off the
+  loop; the changes whose `source_session` is one of the thread's ids,
+  marked `noted_at` by `changes.mark_noted` once the model answered; the
+  values fenced, Kazma's lines outside).
   It asks little (`changes._to_tell`): every update, at most one question
   a turn, never about a fact asked about in the last day, never a reading;
   the rest wait on the page and in `/memory changes`.

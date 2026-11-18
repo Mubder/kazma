@@ -299,7 +299,29 @@ def _established_kind(
     and state lists, ``favorite_*``, the rotating current facts) keeps the
     type Kazma gives it.
     """
-    if ptype not in ("functional", "state") or kazma_classifies(predicate):
+    if kazma_classifies(predicate):
+        return ptype
+    if ptype == "set":
+        # The reverse (the third review of F1, item 5): a value labelled a
+        # list on a fact the user keeps single ("blood_type") takes the
+        # class of the user's own row, so it never stands beside it.
+        try:
+            held = conn.execute(
+                "SELECT predicate_type FROM beliefs WHERE tenant_id=? AND subject=? AND predicate=? "
+                "AND predicate_type IN ('functional', 'state') "
+                "AND extraction_method IN ('user_explicit', 'user_stated') "
+                "AND valid_until IS NULL AND invalidated_at IS NULL LIMIT 1",
+                (tenant_id, subject, predicate),
+            ).fetchone()
+        except sqlite3.Error:
+            logger.debug("[belief_mutate] could not read %s %s's kind; keeping %s", subject, predicate, ptype)
+            return ptype
+        if held:
+            logger.info("[belief_mutate] %s %s is the user's single value: this list-labelled value is one too",
+                        subject, predicate)
+            return str(held[0])
+        return ptype
+    if ptype not in ("functional", "state"):
         return ptype
     try:
         holds_list = conn.execute(
@@ -407,12 +429,20 @@ def mutate_belief(
     now: float | None = None,
     private: bool = False,
     confirms_change: tuple[str, str] | None = None,
+    replaces_users_fact: bool = True,
 ) -> dict[str, Any]:
     """Apply a belief mutation per the predicate-type rules.
 
     *confirms_change* is ``(change id, actor)`` of the pending change this
     write answers (``changes.confirm``): marked confirmed in the write's own
     transaction, never superseded by it.
+
+    *replaces_users_fact* False: the write may add a fact, never replace one
+    the user stated, whatever its source -- it answers ``blocked:
+    lower_trust_source``, as the trust gate does. A memory tool's write is
+    the model's choice of subject and name even when the value is the
+    user's (the third review of F1, item 1): a replacement it would make is
+    put to the user instead (``changes.record_pending``).
 
     *now* is when the fact was stated (default: this moment): the valid
     time (``valid_from`` / ``valid_until``). Something that records a fact
@@ -542,6 +572,7 @@ def mutate_belief(
                     source_session=source_session, source_turn=source_turn,
                     mem_class=mem_class, now=now, recorded=recorded, cfg=cfg,
                     private=private, confirms_change=confirms_change,
+                    replaces_users_fact=replaces_users_fact,
                 )
             elif ptype == "state":
                 result = _mutate_state(
@@ -550,7 +581,7 @@ def mutate_belief(
                     extraction_method=extraction_method, tenant_id=tenant_id,
                     source_session=source_session, source_turn=source_turn,
                     mem_class=mem_class, now=now, recorded=recorded, cfg=cfg,
-                    private=private,
+                    private=private, replaces_users_fact=replaces_users_fact,
                 )
             else:
                 result = _mutate_set(
@@ -997,8 +1028,7 @@ def _mutate_functional_locked(
             and _col(existing, "source_session", 4) == kw.get("source_session")
             and _col(existing, "source_turn", 5) == kw.get("source_turn")
         )
-        if (bool(gate_cfg.get("functional_supersede_requires_user_assert", True))
-                and not may_overrule(existing_method, kw["extraction_method"])):
+        if _gate_refuses(existing_method, kw, gate_cfg, may_overrule):
             logger.info(
                 "[belief_mutate] blocked_supersede predicate=%s subject=%s "
                 "existing_source=%s incoming_source=%s — user fact stands",
@@ -1063,7 +1093,8 @@ def _mutate_functional_locked(
         }
     bid = str(state_after.get("id") or bid)
     _note_in_change_log(conn, kw, tenant_id=tenant_id, sub=sub, pred=pred, obj=obj, bid=bid, now=now,
-                        replaced=(str(superseded_id), state_before) if users_fact_replaced else None)
+                        replaced=(str(superseded_id), state_before) if users_fact_replaced else None,
+                        also_closed=[str(_col(r, "id", 0)) for r in held_list] if users_fact_replaced else [])
     conn.commit()
     _write_audit(
         ops_conn, tenant_id=tenant_id, event_type=audit_event_type,
@@ -1075,14 +1106,28 @@ def _mutate_functional_locked(
             "superseded_object": str(state_before["object"] or "") if state_before else None}
 
 
+def _gate_refuses(existing_method: Any, kw: dict[str, Any], gate_cfg: dict[str, Any], may_overrule: Any) -> bool:
+    """Whether the trust gate keeps the existing fact: a lower source may not
+    overrule it (``provenance.may_overrule``), and a write that may not
+    replace the user's fact (``replaces_users_fact`` False: a memory tool's)
+    never replaces one the user stated."""
+    from kazma_core.memory.provenance import USER_SOURCES
+
+    if (bool(gate_cfg.get("functional_supersede_requires_user_assert", True))
+            and not may_overrule(existing_method, kw["extraction_method"])):
+        return True
+    return not kw.get("replaces_users_fact", True) and existing_method in USER_SOURCES
+
+
 def _note_in_change_log(
     conn: sqlite3.Connection, kw: dict[str, Any], *, tenant_id: str, sub: str, pred: str, obj: str, bid: str,
-    now: float, replaced: tuple[str, dict[str, Any] | None] | None,
+    now: float, replaced: tuple[str, dict[str, Any] | None] | None, also_closed: list[str] | None = None,
 ) -> None:
     """In the write's own transaction (``memory/changes.py``): the user's fact
-    *replaced* (``(old id, state before)``) is an update the user can undo;
-    any other fact of the user's own answers the changes waiting on it. A
-    write that is not the user's records nothing."""
+    *replaced* (``(old id, state before)``) is an update the user can undo,
+    with the user's other list entries the write closed (*also_closed*); any
+    other fact of the user's own answers the changes waiting on it. A write
+    that is not the user's records nothing."""
     from kazma_core.memory import changes
     from kazma_core.memory.provenance import USER_SOURCES
 
@@ -1095,7 +1140,7 @@ def _note_in_change_log(
                 conn, tenant_id=tenant_id, subject=sub, predicate=pred, old_belief_id=old_id,
                 old_value=str(before["object"] if before else ""), new_belief_id=bid, new_value=obj,
                 session=kw.get("source_session"), turn=kw.get("source_turn"), now=now,
-                confirms=kw.get("confirms_change"),
+                confirms=kw.get("confirms_change"), also_closed=also_closed,
             )
         else:
             changes.answer_pending(conn, tenant_id=tenant_id, subject=sub, predicate=pred, now=now,

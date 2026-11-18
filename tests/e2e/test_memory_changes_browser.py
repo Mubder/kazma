@@ -179,9 +179,11 @@ def test_the_user_answers_kazmas_reading(harness: Harness, lang: str, decision: 
     assert out["after"] == after
     if lang == "en":
         assert "Kazma's reading of your message" in out["card"] and "Kazma read: Rotterdam" in out["card"]
+        assert "Home" in out["card"]  # the fact's name in the page's words
         assert (out["yes"], out["no"]) == ("This is right", "Not me")
     else:
         assert "قراءة Kazma لرسالتك" in out["card"] and "Rotterdam" in out["card"]
+        assert "مكان السكن" in out["card"] and "lives in" not in out["card"]
         assert (out["yes"], out["no"]) == ("هذا صحيح", "ليس عني")
 
 

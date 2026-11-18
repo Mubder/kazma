@@ -30,8 +30,10 @@ __all__ = ["KINDS", "canonical_for_user", "plural_of_a_kind"]
 #: Kazma's name -> the names a model gives the same fact about a person.
 KINDS: dict[str, tuple[str, ...]] = {
     "lives_in": ("located_in", "resides_in", "residence", "home_city", "current_city", "home", "based_in",
-                 "living_in", "lives_at", "home_location", "city_of_residence", "resident_of", "residence_city"),
-    "name_is": ("full_name", "real_name", "legal_name", "is_called", "called", "named"),
+                 "living_in", "lives_at", "home_location", "city_of_residence", "resident_of", "residence_city",
+                 # The third review of F1, item 5.
+                 "hometown", "location", "city", "current_location", "address", "moved_to"),
+    "name_is": ("full_name", "real_name", "legal_name", "is_called", "called", "named", "first_name", "user_name"),
     "preferred_name": ("nickname", "goes_by", "prefers_to_be_called", "preferred_nickname"),
     "works_at": ("employer", "works_for", "employed_at", "employed_by", "company", "workplace",
                  "current_employer", "employer_name"),
@@ -58,12 +60,14 @@ def canonical_for_user(predicate: str) -> str:
     from kazma_core.memory.belief_mutation import _plural_of
     from kazma_core.memory.predicates import _predicate_key
 
-    key = _predicate_key(predicate)
+    # "lives-in", "lives in": the same name with other separators.
+    named = "_".join(predicate.replace("-", " ").split())
+    key = _predicate_key(named)
     found = _aliases().get(key) if key else None
     if found is None:
         return predicate
     kazma, name = found
-    return predicate if _plural_of(predicate, name) else kazma
+    return predicate if _plural_of(named, name) else kazma
 
 
 def plural_of_a_kind(predicate: str) -> bool:

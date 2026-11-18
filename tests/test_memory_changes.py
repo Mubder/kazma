@@ -50,6 +50,13 @@ def _fact(predicate: str, value: str) -> dict:
     return {"subject": "user", "predicate": predicate, "predicate_type": "functional", "object": value}
 
 
+def _note(*, tenant_id: str, thread_id: str) -> str:
+    """The turn's note, marked told as a turn whose model answered marks it."""
+    note, ids = changes.read_changes_note(tenant_id=tenant_id, thread_id=thread_id)
+    changes.mark_noted(tenant_id=tenant_id, ids=ids)
+    return note
+
+
 def _turn(mem, monkeypatch, *, first: str, then: str, model: list[dict], predicate: str = "lives_in",
           turn: int = 2) -> str:
     """The user's earlier statement (``user_stated``), then the worker's deep
@@ -247,7 +254,7 @@ def test_a_first_reading_is_kazmas_reading_and_no_question(mem, monkeypatch):
     assert _current(mem) == [("rotterdam", "llm_inferred")]
     [reading] = _changes(mem, "open")
     assert (reading["kind"], reading["old_value"], reading["new_value"]) == ("reading", "", "Rotterdam")
-    assert changes.changes_note(tenant_id="default", thread_id="s1") == ""
+    assert _note(tenant_id="default", thread_id="s1") == ""
 
 
 def test_a_reading_replaced_since_cannot_be_confirmed(mem, monkeypatch):
@@ -280,6 +287,24 @@ def test_not_me_is_kept_past_the_decided_bound(mem, monkeypatch):
     assert changes.user_said_not_me(mem.db, tenant_id="default", subject="user", predicate="lives_in", value="Dubai")
 
 
+def test_not_me_answers_are_bounded_too(mem, monkeypatch):
+    """The third review of F1, item 6: "Not me" rows grew without end. The
+    newest :data:`KEEP_NOT_ME` stay."""
+    monkeypatch.setattr(changes, "KEEP_NOT_ME", 2)
+    now = time.time()
+    for n in range(5):
+        mem.db.execute(
+            "INSERT INTO memory_changes (id, tenant_id, kind, state, subject, predicate, new_value, created_at, "
+            "decided_at) VALUES (?, 'default', 'reading', 'dismissed', 'user', 'lives_in', ?, ?, ?)",
+            (f"mc_notme{n}", f"City{n}", now, now + n))
+    mem.db.commit()
+    changes._prune(mem.db, "default", now + 10)
+    mem.db.commit()
+    kept = [r[0] for r in mem.db.execute(
+        "SELECT new_value FROM memory_changes WHERE state = 'dismissed' ORDER BY decided_at")]
+    assert kept == ["City3", "City4"]
+
+
 # ── the next turn's note asks little ──────────────────────────────────────
 
 
@@ -307,13 +332,13 @@ def test_one_question_a_turn_and_never_the_same_fact_twice_a_day(mem, monkeypatc
                             source_session="s1", source_turn=4, now=now + 2)
     assert changes.record_pending(mem.db, tenant_id="default", refused=refused, new_value="Initech",
                                   user_text="Moved to Initech.", session="s1", turn=4, now=now + 2)
-    first = changes.changes_note(tenant_id="default", thread_id="s1")
+    first = _note(tenant_id="default", thread_id="s1")
     assert first.count("waiting for the user") == 1 and "Initech" in first  # the newest question
-    second = changes.changes_note(tenant_id="default", thread_id="s1")
+    second = _note(tenant_id="default", thread_id="s1")
     assert second.count("waiting for the user") == 1 and "Lisbon" in second  # another fact
-    assert changes.changes_note(tenant_id="default", thread_id="s1") == ""  # lives_in was asked today
+    assert _note(tenant_id="default", thread_id="s1") == ""  # lives_in was asked today
     monkeypatch.setattr(changes, "_ASK_AGAIN_AFTER_S", 0.0)  # a day later
-    assert "Rotterdam" in changes.changes_note(tenant_id="default", thread_id="s1")
+    assert "Rotterdam" in _note(tenant_id="default", thread_id="s1")
 
 
 def test_control_every_question_in_one_note(mem, monkeypatch):
@@ -324,7 +349,7 @@ def test_control_every_question_in_one_note(mem, monkeypatch):
     now = time.time() - 600
     _question(mem, value="Rotterdam", turn=2, created=now)
     _question(mem, value="Lisbon", turn=3, created=now + 1)
-    assert changes.changes_note(tenant_id="default", thread_id="s1").count("waiting for the user") == 2
+    assert _note(tenant_id="default", thread_id="s1").count("waiting for the user") == 2
 
 
 # ── forget, bounds ────────────────────────────────────────────────────────
@@ -517,9 +542,10 @@ def test_the_chat_command_is_an_admins():
 # ── the next turn's note ──────────────────────────────────────────────────
 
 
-async def _model_sees(monkeypatch, thread: str) -> list[dict]:
+async def _model_sees(monkeypatch, thread: str, *, fail: bool = False) -> list[dict]:
     """The messages the model receives on a turn of *thread*, through the
-    real supervisor graph with a recording model."""
+    real supervisor graph with a recording model (one that fails, with
+    *fail*)."""
     from kazma_core.agent.graph_builder import build_supervisor_graph
     from kazma_core.agent.tool_registry import LocalToolRegistry
     from kazma_core.authority import create_authority
@@ -536,6 +562,10 @@ async def _model_sees(monkeypatch, thread: str) -> list[dict]:
     class RecordingLLM:
         async def chat(self, *, messages, tools=None, model=None, **kwargs):
             seen.append([dict(m) for m in messages])
+            if fail:
+                from kazma_core.llm_provider import LLMError
+
+                raise LLMError("the provider refused", transient=False)
             return LLMResponse(content="Done.", tool_calls=[], finish_reason="stop",
                                model="stub", usage={"total_tokens": 1}, cost_usd=0.0)
 
@@ -574,6 +604,32 @@ def test_the_chats_next_turn_is_told_once_and_no_other_thread_spends_it(mem, mon
     assert _changes(mem, "open")[0]["noted_at"]
 
 
+def test_a_failed_model_call_does_not_spend_the_note(mem, monkeypatch):
+    """The third review of F1, item 6: the changes were marked told before
+    the model was called, so a failed call spent the note."""
+    _turn(mem, monkeypatch, first="Paris", then="Moved to Rotterdam last month.",
+          model=[_fact("lives_in", "rotterdam")])
+    assert _notes(asyncio.run(_model_sees(monkeypatch, "s1", fail=True)))  # read, the call failed
+    assert not _changes(mem, "open")[0]["noted_at"]
+    [note] = _notes(asyncio.run(_model_sees(monkeypatch, "s1")))  # told again
+    assert "Rotterdam" in note
+
+
+def test_control_marking_at_read_time_a_failed_call_spends_the_note(mem, monkeypatch):
+    real = changes.read_changes_note
+
+    def marked_at_once(*, tenant_id, thread_id):
+        note, ids = real(tenant_id=tenant_id, thread_id=thread_id)
+        changes.mark_noted(tenant_id=tenant_id, ids=ids)
+        return note, ids
+
+    monkeypatch.setattr(changes, "read_changes_note", marked_at_once)
+    _turn(mem, monkeypatch, first="Paris", then="Moved to Rotterdam last month.",
+          model=[_fact("lives_in", "rotterdam")])
+    asyncio.run(_model_sees(monkeypatch, "s1", fail=True))
+    assert _notes(asyncio.run(_model_sees(monkeypatch, "s1"))) == []
+
+
 def test_control_a_note_chosen_by_tenant_alone_is_spent_by_another_thread(mem, monkeypatch):
     """Negative control: every thread taken for the chat (a note chosen by
     tenant alone), the scheduled task's turn takes it and the chat never
@@ -606,3 +662,37 @@ def test_control_without_the_change_log_a_refusal_was_silent(mem, monkeypatch):
     _quick(mem, "I live in Lisbon now.", turn=3)
     assert _current(mem) == [("Lisbon", "user_stated")]  # replaced, nothing shown
     assert _changes(mem) == []
+
+
+def _jobs(mem) -> list[str]:
+    return sorted(r[0] for r in mem.db.execute(
+        "SELECT object FROM beliefs WHERE subject = 'user' AND predicate = 'works_at' "
+        "AND valid_until IS NULL AND invalidated_at IS NULL"))
+
+
+def _replace_a_list(mem) -> str:
+    """The user's two jobs (a list), then one job from a later turn: the write
+    closes both. The change it records."""
+    now = time.time()
+    for turn, job in enumerate(("Acme", "Initech"), start=1):
+        mutate_belief(mem.db, "user", "works_at", job, predicate_type="set", extraction_method="user_stated",
+                      source_session="s1", source_turn=turn, now=now - 600 + turn)
+    assert _jobs(mem) == ["Acme", "Initech"]
+    mutate_belief(mem.db, "user", "works_at", "Globex", predicate_type="functional",
+                  extraction_method="user_stated", source_session="s1", source_turn=5, now=now)
+    assert _jobs(mem) == ["Globex"]
+    (change,) = [c for c in changes.list_changes(mem.db, tenant_id="default") if c["kind"] == "update"]
+    return change["id"]
+
+
+def test_undo_of_a_list_replacement_brings_back_every_entry(mem):
+    """The third review's item 4: an update that closed the user's whole list
+    reopened only one entry on undo."""
+    changes.undo(mem.db, _replace_a_list(mem), tenant_id="default")
+    assert _jobs(mem) == ["Acme", "Initech"]
+
+
+def test_control_undo_without_the_closed_entries_brings_back_one(mem, monkeypatch):
+    monkeypatch.setattr(changes, "_also_closed", lambda conn, change_id, tenant: [])
+    changes.undo(mem.db, _replace_a_list(mem), tenant_id="default")
+    assert len(_jobs(mem)) == 1

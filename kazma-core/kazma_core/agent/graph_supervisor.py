@@ -510,13 +510,18 @@ async def supervisor_node(
     # answer (memory/changes.py): the first turn of the chat they came from
     # after they were made is told, once. A read failure costs this turn the
     # note; the Memory page and /memory changes still show them.
+    # The changes are marked told only after the model answered (below): a
+    # failed call does not spend the note (the third review of F1, item 6).
+    _changes_told: list[str] = []
+    _changes_tenant = ""
     if iteration == 0:
-        from kazma_core.memory.changes import changes_note
+        from kazma_core.memory.changes import read_changes_note
         from kazma_core.spaces.scope import NoSpaceBound
 
         try:
-            _changes_note = await asyncio.to_thread(
-                changes_note, tenant_id=space_of_state(state),
+            _changes_tenant = space_of_state(state)
+            _changes_note, _changes_told = await asyncio.to_thread(
+                read_changes_note, tenant_id=_changes_tenant,
                 thread_id=str(state.get("thread_id") or ""),
             )
         except NoSpaceBound:
@@ -1917,6 +1922,14 @@ async def supervisor_node(
             return primary
 
         response = await _call_llm_resilient()
+        if _changes_told:
+            from kazma_core.memory.changes import mark_noted
+
+            try:
+                await asyncio.to_thread(mark_noted, tenant_id=_changes_tenant, ids=_changes_told)
+            except sqlite3.Error:
+                logger.warning("[Supervisor] could not mark the memory changes told; the next turn tells them again",
+                               exc_info=True)
     except Exception as exc:
         logger.error("[Supervisor] LLM call failed after retries: %s", exc)
         from kazma_core.retry import friendly_llm_error

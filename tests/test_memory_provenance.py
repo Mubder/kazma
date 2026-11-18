@@ -145,6 +145,74 @@ def test_an_agent_write_cannot_replace_a_users_fact_and_says_so(mem):
     assert _current(mem.db)["lives_in"] == ("Lisbon", "user_stated")
 
 
+# ── The third review of F1, item 1: tools follow rule A on replacement ───
+
+#: The review's three: the user asks to remember something, and the model
+#: files a fact of theirs that replaces one the user stated. (the user's
+#: message, the tool's fact, the value put to the user or None).
+TOOL_REPLACEMENTS = [
+    ("I'm visiting Dubai next week, remember that for the itinerary", ("lives_in", "Dubai"), "Dubai"),
+    ("Remember that my sister lives in Oslo", ("lives_in", "Oslo"), None),
+    ("I met Dana yesterday, remember that", ("name_is", "Dana"), "Dana"),
+]
+_HELD = {"lives_in": "Lisbon", "name_is": "Sam"}
+
+
+def _waiting(mem) -> list[str]:
+    from kazma_core.memory import changes
+
+    return [c["new_value"] for c in changes.list_changes(mem.db, tenant_id="default") if c["kind"] == "pending"]
+
+
+@pytest.mark.parametrize(("said", "fact", "asked"), TOOL_REPLACEMENTS)
+def test_a_tool_write_never_replaces_a_users_fact_it_is_put_to_the_user(mem, said, fact, asked):
+    predicate, value = fact
+    # An earlier turn: the tool's call is turn 2 (``_call``'s two user messages).
+    _user_says(mem, {"lives_in": "I live in Lisbon.", "name_is": "My name is Sam."}[predicate], turn=1,
+               now=time.time() - 600)
+    out = _call("memory_link_entities", user_said=said, subject="user", object=value, predicate=predicate,
+                predicate_type="functional")
+    assert _current(mem.db)[predicate] == (_HELD[predicate], "user_stated")
+    assert _waiting(mem) == ([asked] if asked else [])
+    if asked:
+        assert json.loads(out)["asked_the_user"] is True
+
+
+def test_a_tool_write_that_only_adds_stays_as_it_was(mem):
+    out = _call("memory_link_entities", user_said="Remember that I work at Initech.", subject="user",
+                object="Initech", predicate="works_at", predicate_type="functional")
+    assert '"ok": true' in out
+    assert _current(mem.db)["works_at"] == ("Initech", "user_explicit")
+
+
+def test_memory_store_puts_a_replacement_to_the_user(mem):
+    _user_says(mem, "I live in Lisbon.", turn=1, now=time.time() - 600)
+    out = _call("memory_store", user_said="I'm visiting Dubai next week, remember that for the itinerary",
+                text="I'm visiting Dubai next week", metadata={"facts": [
+                    {"subject": "user", "predicate": "lives_in", "object": "Dubai"}]})
+    assert _current(mem.db)["lives_in"] == ("Lisbon", "user_stated")
+    assert _waiting(mem) == ["Dubai"] and "waiting for the user to confirm" in out, out
+
+
+def test_control_a_tool_write_that_may_replace_takes_the_users_home(mem, monkeypatch):
+    """Negative control: with the tool's write allowed to replace, the
+    review's first sentence replaces the user's home at their trust."""
+    from kazma_core.memory import belief_mutation
+
+    real = belief_mutation.mutate_belief
+
+    def may_replace(*args, **kwargs):
+        kwargs["replaces_users_fact"] = True
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(belief_mutation, "mutate_belief", may_replace)
+    _user_says(mem, "I live in Lisbon.", turn=1, now=time.time() - 600)
+    said, (predicate, value), _ = TOOL_REPLACEMENTS[0]
+    _call("memory_link_entities", user_said=said, subject="user", object=value, predicate=predicate,
+          predicate_type="functional")
+    assert _current(mem.db)["lives_in"] == ("Dubai", "user_explicit")
+
+
 # ── The injection corpus ──────────────────────────────────────────────────
 
 

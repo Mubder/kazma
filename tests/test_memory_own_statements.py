@@ -162,6 +162,58 @@ def test_a_new_job_in_arabic_waits_for_the_user(mem, monkeypatch):
     assert _waiting(mem) == ["أريدُو"]
 
 
+@pytest.mark.parametrize(("name", "kazma"), [
+    ("hometown", "lives_in"), ("location", "lives_in"), ("city", "lives_in"), ("current_location", "lives_in"),
+    ("address", "lives_in"), ("moved_to", "lives_in"), ("lives-in", "lives_in"), ("lives in", "lives_in"),
+    ("first_name", "name_is"), ("user_name", "name_is"),
+])
+def test_the_third_reviews_names_are_kazmas(name, kazma):
+    from kazma_core.memory.fact_names import canonical_for_user
+
+    assert canonical_for_user(name) == kazma
+
+
+def test_a_capital_user_is_the_user(mem, monkeypatch):
+    """The third review, item 5: the model's "User" skipped the name map and
+    the question, and its "home_city" stood beside the user's home."""
+    model = [{"subject": "User", "predicate": "home_city", "predicate_type": "functional", "object": "rotterdam"}]
+    assert _deep_pass(mem, monkeypatch, value_first="Paris", then="We moved to Rotterdam last month.",
+                      model=model) == [("Paris", "user_stated")]
+    assert _waiting(mem) == ["Rotterdam"]
+
+
+def test_control_without_the_case_the_models_user_is_someone_else(mem, monkeypatch):
+    monkeypatch.setattr("kazma_core.memory.belief_extractor._as_the_user", lambda subject: subject)
+    model = [{"subject": "User", "predicate": "home_city", "predicate_type": "functional", "object": "rotterdam"}]
+    _deep_pass(mem, monkeypatch, value_first="Paris", then="We moved to Rotterdam last month.", model=model)
+    assert _waiting(mem) == []
+
+
+def test_a_list_label_on_the_users_single_value_does_not_stand_beside_it(conn):
+    """The third review, item 5: a model fact labelled ``set`` on a fact the
+    user keeps single (``blood_type``) takes the user's row's class."""
+    from kazma_core.memory.belief_mutation import mutate_belief
+
+    mutate_belief(conn, "user", "blood_type", "O+", predicate_type="functional", extraction_method="user_stated",
+                  source_session="s1", source_turn=1)
+    mutate_belief(conn, "user", "blood_type", "A-", predicate_type="set", extraction_method="llm_inferred",
+                  source_session="s1", source_turn=2)
+    assert _current(conn, "blood_type") == [("O+", "user_stated")]
+
+
+def test_control_without_the_users_class_the_list_value_stands_beside(conn, monkeypatch):
+    from kazma_core.memory import belief_mutation
+
+    real = belief_mutation._established_kind
+    monkeypatch.setattr(belief_mutation, "_established_kind",
+                        lambda c, **kw: kw["ptype"] if kw["ptype"] == "set" else real(c, **kw))
+    belief_mutation.mutate_belief(conn, "user", "blood_type", "O+", predicate_type="functional",
+                                  extraction_method="user_stated", source_session="s1", source_turn=1)
+    belief_mutation.mutate_belief(conn, "user", "blood_type", "A-", predicate_type="set",
+                                  extraction_method="llm_inferred", source_session="s1", source_turn=2)
+    assert sorted(_current(conn, "blood_type")) == [("A-", "llm_inferred"), ("O+", "user_stated")]
+
+
 #: A long message (past the 2,000 characters the quick pass reads, within the
 #: 4,000 an episode keeps for the deep pass: ``dual_write``) that ends with
 #: the user's correction.

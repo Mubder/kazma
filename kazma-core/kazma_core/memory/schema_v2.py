@@ -326,7 +326,8 @@ CREATE TABLE IF NOT EXISTS memory_changes (
   created_at      REAL NOT NULL,
   decided_at      REAL,
   decided_by      TEXT,
-  noted_at        REAL
+  noted_at        REAL,
+  also_closed     TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS idx_memory_changes_tenant
   ON memory_changes(tenant_id, state, created_at);
@@ -484,6 +485,9 @@ def ensure_primary_schema(conn: Any) -> None:
     # stuffing them there was a latent bug). Added via ALTER so existing
     # DBs upgrade in place, matching the schema.py convention.
     add_missing_columns(conn, "episodes", (("embedding", "BLOB"),))
+    # The user's other list entries an update closed with the replaced fact
+    # (a JSON list of ids): an undo reopens them all (memory/changes.py).
+    add_missing_columns(conn, "memory_changes", (("also_closed", "TEXT NOT NULL DEFAULT '[]'"),))
     add_missing_columns(
         conn,
         "beliefs",

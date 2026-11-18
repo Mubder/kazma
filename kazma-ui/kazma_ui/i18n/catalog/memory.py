@@ -1669,6 +1669,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "لا معتقدات نشطة بعد.",
         "en": "No active beliefs yet.",
     },
+    # The user's own facts by Kazma's names (memory/fact_names.py KINDS), as
+    # a change card names them (the third review of F1, item 6).
+    "memory.console.fact_lives_in": {
+        "ar": "مكان السكن",
+        "en": "Home",
+    },
+    "memory.console.fact_name_is": {
+        "ar": "الاسم",
+        "en": "Name",
+    },
+    "memory.console.fact_preferred_name": {
+        "ar": "الاسم الذي تُنادى به",
+        "en": "Name you go by",
+    },
+    "memory.console.fact_works_at": {
+        "ar": "جهة العمل",
+        "en": "Employer",
+    },
+    "memory.console.fact_current_role": {
+        "ar": "المسمى الوظيفي",
+        "en": "Role",
+    },
     "memory.console.ptype_functional": {
         "ar": "أحادي القيمة",
         "en": "functional",

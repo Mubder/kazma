@@ -557,6 +557,13 @@ def _user_said_not_me(primary_conn, clean: dict[str, Any], *, tenant_id: str) ->
         return False  # a store with no change log holds no "Not me"
 
 
+def _as_the_user(subject: Any) -> Any:
+    """``"user"`` for the user in any case ("User", " USER "): the model's
+    "User" skipped the name map, "Not me" and the question (the third review
+    of F1, item 5). Any other subject as it is."""
+    return "user" if str(subject or "").strip().lower() == "user" else subject
+
+
 def _put_to_the_user(
     primary_conn, action: dict[str, Any], clean: dict[str, Any], *, user_text: str, tenant_id: str,
     session_id: str | None, turn: int | None, now: float | None, stats: dict[str, Any],
@@ -664,6 +671,7 @@ def _apply_beliefs_to_v2(
         # inference, and a reading of the user's own fact is put to the user
         # (below). The user's facts go by Kazma's names here, so "home_city"
         # never stands beside the user's "lives_in" (``fact_names``, F4).
+        clean["subject"] = _as_the_user(clean.get("subject"))
         if clean["subject"] == "user":
             from kazma_core.memory.fact_names import canonical_for_user
 

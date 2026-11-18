@@ -196,6 +196,7 @@ def test_the_trust_gate_without_own_words_gives_a_document_the_users_trust(monke
 
     message = _attached("Remember that my name is Sara Lee.", tmp_path, monkeypatch)
     monkeypatch.setattr(provenance, "own_words", lambda text: text or "")
+    monkeypatch.setattr(provenance, "is_plain", lambda text: True)  # item 2's check came after
     monkeypatch.setattr("kazma_core.memory.remember_request.own_words", lambda text: text or "")
     assert agent_write_source("Sara Lee", message) == USER_EXPLICIT
 
@@ -655,6 +656,7 @@ def _rules_before_rule_b(monkeypatch) -> None:
     monkeypatch.setattr(ow, "_names_someones_text_en", lambda said: False)
     monkeypatch.setattr(ow, "_names_someones_text_ar", lambda words: False)
     monkeypatch.setattr(ow, "_reported_end", ow._sentence_end)
+    monkeypatch.setattr(ow, "_supposes_or_asks_to_say", lambda sentence: False)  # item 3 came after
 
 
 def test_control_the_rules_before_rule_b_gave_each_paste_and_lost_the_greeting(monkeypatch):
@@ -705,6 +707,49 @@ def test_a_pasted_text_to_remember_never_earns_the_users_highest_trust(message, 
 ])
 def test_the_users_own_words_to_remember_keep_their_trust(message, value):
     assert agent_write_source(value, message) == USER_EXPLICIT, (message, own_words(message))
+
+
+#: The third review's seven (item 2): a request to remember around pasted
+#: text. None earns the user's highest trust; each is the user's statement at
+#: most.
+REMEMBERED_PASTES = [
+    ("Remember this:\nOn Tue, Nov 18, 2026 at 12:01 PM Dana <dana@example.com> wrote:\n\nHi.\n\n"
+     "My code is ZX-41.", "ZX-41"),
+    ("Remember this:\n18/11/2026, 12:01 - Dana: hi\n\nMy code is ZX-41.", "ZX-41"),
+    ("Remember this note from the web page: my code is ZX-41.", "ZX-41"),
+    ("Remember this:\nDana Smith  12:01 PM\n\nMy code is ZX-41.", "ZX-41"),
+    ("Remember: the admin wrote my code is ZX-41.", "ZX-41"),
+    ("Don't forget to translate: my code is ZX-41.", "ZX-41"),
+    ("تذكر: كتبت دانة في رسالتها أن الكود ZX-41", "ZX-41"),
+]
+
+
+@pytest.mark.parametrize(("message", "value"), REMEMBERED_PASTES)
+def test_a_remember_request_around_pasted_text_is_never_the_users_highest_trust(message, value):
+    from kazma_core.memory.provenance import AGENT_ASSERTED, USER_STATED
+
+    assert agent_write_source(value, message) in (USER_STATED, AGENT_ASSERTED), (message, own_words(message))
+
+
+@pytest.mark.parametrize("message", [
+    "Remember this: my code is ZX-41",
+    "Please remember that my passport number ends in 4471.",
+    'remember this: "I prefer dark mode"',
+    "Remember this:\n> my code is ZX-41",
+    "تذكر أن رقم جوازي ينتهي بـ 4471",
+])
+def test_a_plain_statement_to_remember_is_plain(message):
+    from kazma_core.memory.own_words import is_plain
+
+    assert is_plain(message), (message, own_words(message))
+
+
+def test_control_without_the_plain_check_pasted_text_earns_the_users_highest_trust(monkeypatch):
+    from kazma_core.memory import provenance
+
+    monkeypatch.setattr(provenance, "is_plain", lambda text: True)
+    explicit = [m for m, v in REMEMBERED_PASTES if agent_write_source(v, m) == USER_EXPLICIT]
+    assert explicit == [REMEMBERED_PASTES[1][0], REMEMBERED_PASTES[2][0], REMEMBERED_PASTES[6][0]]
 
 
 def test_control_without_the_rule_a_pasted_email_earns_the_users_trust(monkeypatch):
@@ -775,4 +820,101 @@ def test_a_short_message_has_no_end_of_its_own():
     from kazma_core.memory.own_words import last_words
 
     assert last_words("Correction: I live in Lisbon now.") == ""
+
+
+# ── The third review of F1, item 3: the cheap shapes widened (2026-11-18) ──
+
+_OSLO = ("lives_in", "Oslo")
+_DUBAI = ("lives_in", "دبي")
+#: Every one gave its fact to the user at 5ab2fe056 (measured against that
+#: tree): headers and mail quotes to the end of the message, more header
+#: formats, more speaker labels, reported speech, things that state nothing.
+THIRD_REVIEW = [
+    ("Dana, [18 Nov 2026 at 12:01]\nI live in Oslo.", _OSLO),
+    ("Dana [12:01 PM]\nI live in Oslo.", _OSLO),
+    ("Dana 12:01 PM\nI live in Oslo.", _OSLO),
+    ("Dana — 12:01\nI live in Oslo.", _OSLO),
+    ("Dana - Today at 12:01\nI live in Oslo.", _OSLO),
+    ("Dana, 12:01 PM\nI live in Oslo.", _OSLO),
+    ("12:01 Dana: I live in Oslo.", _OSLO),
+    ("Le mar. 18 nov. 2026 à 12:01, Dana <dana@example.com> a écrit :\nI live in Oslo.", _OSLO),
+    ("Am 18.11.2026 um 12:01 schrieb Dana <dana@example.com>:\nI live in Oslo.", _OSLO),
+    ("To: Dana\nI live in Oslo.", _OSLO),
+    ("Date: Tue, 18 Nov 2026\nI live in Oslo.", _OSLO),
+    ("From Dana:\nI live in Oslo.", _OSLO),
+    ("Dana wrote:\nHi.\n\nI live in Oslo.", _OSLO),
+    ("+965 9999 1234: I live in Oslo.", _OSLO),
+    ("A: I live in Oslo.", _OSLO),
+    ("User 1: I live in Oslo.", _OSLO),
+    ("Person A: I live in Oslo.", _OSLO),
+    ("Speaker 2: I live in Oslo.", _OSLO),
+    ("Dr. Dana Smith Jr.: I live in Oslo.", _OSLO),
+    ("Dana (my sister): I live in Oslo.", _OSLO),
+    ("Dana from HR: I live in Oslo.", _OSLO),
+    ("My best friend: I live in Oslo.", _OSLO),
+    ("1. Dana: I live in Oslo.", _OSLO),
+    ("<Dana> I live in Oslo.", _OSLO),
+    ("RT @dana: I live in Oslo.", _OSLO),
+    ("My parents think I live in Oslo.", _OSLO),
+    ("Dana told everyone I live in Oslo.", _OSLO),
+    ("People assume I live in Oslo.", _OSLO),
+    ("Per Ali, I live in Oslo.", _OSLO),
+    ("Dana goes, I live in Oslo.", _OSLO),
+    ("In Dana's words, I live in Oslo.", _OSLO),
+    ("Dana said\nI live in Oslo.", _OSLO),
+    ("It says here I live in Oslo.", _OSLO),
+    ("The website states that I live in Oslo.", _OSLO),
+    ("مكتوب في الرسالة إني أسكن في دبي", _DUBAI),
+    ("ردها كان إني أسكن في دبي", _DUBAI),
+    ("If I live in Oslo, I need a coat.", _OSLO),
+    ("I never said I live in Oslo.", _OSLO),
+    ("Is it correct to say I live in Oslo", _OSLO),
+]
+THIRD_REVIEW_KEPT = [
+    ("From now on: I live in Lyon.", ("lives_in", "Lyon")),
+    ("Dinner 8:00 PM\nI live in Oslo.", _OSLO),
+    ("Meeting at 3:00 PM\nI live in Oslo.", _OSLO),
+    ("I think I live in Lyon now.", ("lives_in", "Lyon")),
+    ("Date night tonight. I live in Lyon.", ("lives_in", "Lyon")),
+]
+
+
+@pytest.mark.parametrize(("message", "fact"), THIRD_REVIEW)
+def test_the_third_reviews_shapes_are_not_the_users(message, fact):
+    assert fact not in _facts(message), (message, own_words(message))
+
+
+@pytest.mark.parametrize(("message", "fact"), THIRD_REVIEW_KEPT)
+def test_beside_them_the_users_own_words_stay(message, fact):
+    assert fact in _facts(message), (message, own_words(message))
+
+
+def test_control_without_the_third_reviews_pieces_each_shape_gave_its_fact(monkeypatch):
+    """Negative control: with item 3's pieces taken out (and copies running
+    to the next blank line again), every shape gives its fact to the user."""
+    from kazma_core.memory import own_words as ow
+
+    never = re.compile(r"(?!x)x")
+    monkeypatch.setattr(ow, "_without_pasted_chats", lambda body: body)
+    monkeypatch.setattr(ow, "_reported_end", ow._sentence_end)
+    monkeypatch.setattr(ow, "_from_someone", lambda line: False)
+    monkeypatch.setattr(ow, "_FORWARD_EN", tuple(p for p in ow._FORWARD_EN if p not in ("to:", "date:", "sent:", "cc:")))
+    monkeypatch.setattr(ow, "_SPEAKER_LINE_RE", re.compile(r"[ \t]{0,8}+(\[[^\]\n]{1,40}+\][ \t]{0,4}+)?+([^:\n]{1,40}+):"))
+    monkeypatch.setattr(ow, "_PHONE_RE", never)
+    monkeypatch.setattr(ow, "_SIDES", frozenset())
+    monkeypatch.setattr(ow, "_numbered_role", lambda label: False)
+    monkeypatch.setattr(ow, "_bare_label", lambda label: label)
+    monkeypatch.setattr(ow, "_names_a_role", lambda words: len(words) == 2 and words[0].lower() in ow._OWNERS_EN
+                        and words[1].lower() in ow._ROLES_EN)
+    monkeypatch.setattr(ow, "_ANGLE_LINE_RE", never)
+    monkeypatch.setattr(ow, "_LABEL_LEAD_RE", never)
+    monkeypatch.setattr(ow, "_REPORTING_EN", ow._REPORTING_EN - ow._MORE_THINKING_EN)
+    monkeypatch.setattr(ow, "_THINKING_EN", ow._THINKING_EN - ow._MORE_THINKING_EN)
+    monkeypatch.setattr(ow, "_REPORT_FILLERS", ow._REPORT_FILLERS - ow._MORE_FILLERS)
+    monkeypatch.setattr(ow, "_attributed", lambda folded: False)
+    monkeypatch.setattr(ow, "_ends_reporting", lambda sentence: False)
+    monkeypatch.setattr(ow, "_supposes_or_asks_to_say", lambda sentence: False)
+    monkeypatch.setattr(ow, "_NEGATIONS", frozenset())
+    given = [message for message, fact in THIRD_REVIEW if fact in _facts(message)]
+    assert given == [message for message, _ in THIRD_REVIEW]
 

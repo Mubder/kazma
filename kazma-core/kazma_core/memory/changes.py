@@ -16,7 +16,8 @@ user stated changes only in ways the user can see and take back.
   can say whether its name fits the words ("I'm visiting Dubai next week"
   read as a home). The user confirms it -- the value is then written at the
   user's own trust -- or dismisses it. The next turn's note asks at most one
-  question, never about one fact twice in a day (:func:`changes_note`).
+  question, never about one fact twice in a day (:func:`read_changes_note`),
+  marked told once the turn's model has answered (:func:`mark_noted`).
 * **A reading** -- no question: the model's first reading of one of the
   user's own facts, where the user gave none (:func:`record_first_reading`).
   It is written as the model's, and any later statement of the user's
@@ -39,6 +40,7 @@ Nothing here calls a model or leaves the machine: a confirmation is one
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 import threading
@@ -56,7 +58,8 @@ __all__ = [
     "REF_CHARS",
     "ChangeRefusedError",
     "answer_pending",
-    "changes_note",
+    "mark_noted",
+    "read_changes_note",
     "confirm",
     "decide_change",
     "dismiss",
@@ -84,6 +87,9 @@ READING = "reading"
 PENDING_DAYS = 30
 #: Decided changes kept per tenant, newest first.
 KEEP_DECIDED = 200
+#: "Not me" answers kept per tenant, newest first, on their own bound: each
+#: keeps a value from being filed again.
+KEEP_NOT_ME = 500
 #: The start of a change id the chat apps show (``mc_`` and eight hex
 #: digits); a command takes any unique start of at least
 #: :data:`_REF_MIN_CHARS`.
@@ -124,23 +130,24 @@ def _row(conn: sqlite3.Connection, change_id: str, tenant_id: str) -> dict[str, 
 def record_update(
     conn: sqlite3.Connection, *, tenant_id: str, subject: str, predicate: str, old_belief_id: str,
     old_value: str, new_belief_id: str, new_value: str, session: str | None, turn: int | None, now: float,
-    confirms: tuple[str, str] | None = None,
+    confirms: tuple[str, str] | None = None, also_closed: list[str] | None = None,
 ) -> str:
     """Record that the user's fact *old_belief_id* was replaced by
     *new_belief_id*. Runs inside the caller's transaction (``belief_mutation``
     commits it with the replacement). *confirms* is ``(change id, actor)`` of
     the pending change this replacement answers: marked ``confirmed``. Any
     other open pending change for the same fact is answered by it too:
-    marked ``superseded``."""
+    marked ``superseded``. *also_closed* are the user's other list entries
+    the same write closed: an undo reopens them all."""
     tenant = tenant_id
     answer_pending(conn, tenant_id=tenant, subject=subject, predicate=predicate, now=now, confirms=confirms)
     change_id = _new_id()
     conn.execute(
         "INSERT INTO memory_changes (id, tenant_id, kind, state, subject, predicate, old_belief_id, old_value, "
-        "new_belief_id, new_value, source_session, source_turn, created_at) "
-        "VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "new_belief_id, new_value, source_session, source_turn, created_at, also_closed) "
+        "VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (change_id, tenant, UPDATE, subject, predicate, old_belief_id, str(old_value or ""), new_belief_id,
-         str(new_value or ""), session, turn, now),
+         str(new_value or ""), session, turn, now, json.dumps([str(i) for i in also_closed or []])),
     )
     _prune(conn, tenant, now)
     return change_id
@@ -389,6 +396,18 @@ def dismiss(
     return {"ok": True, "change_id": change_id, "taken_out": taken_out}
 
 
+def _also_closed(conn: sqlite3.Connection, change_id: str, tenant: str) -> list[str]:
+    """The user's other list entries an update closed with its fact."""
+    found = conn.execute("SELECT also_closed FROM memory_changes WHERE id = ? AND tenant_id = ?",
+                         (change_id, tenant)).fetchone()
+    try:
+        ids = json.loads(found[0] or "[]") if found is not None else []
+    except ValueError:
+        logger.warning("[memory_changes] change %s names its closed entries unreadably", change_id)
+        return []
+    return [str(i) for i in ids if i] if isinstance(ids, list) else []
+
+
 def undo(
     conn: sqlite3.Connection, change_id: str, *, tenant_id: str, actor: str = "user",
     ops_conn: sqlite3.Connection | None = None,
@@ -425,6 +444,11 @@ def undo(
                           "AND tenant_id = ?", (now, now, row["new_belief_id"], tenant))
             beliefs_write(conn, "UPDATE beliefs SET valid_until = NULL, invalidated_at = NULL WHERE id = ? "
                           "AND tenant_id = ?", (row["old_belief_id"], tenant))
+            # The user's other list entries the update closed with it: every
+            # one back, never one forgotten since (its value emptied).
+            for other in _also_closed(conn, change_id, tenant):
+                beliefs_write(conn, "UPDATE beliefs SET valid_until = NULL, invalidated_at = NULL WHERE id = ? "
+                              "AND tenant_id = ? AND COALESCE(object, '') != ''", (other, tenant))
             _decide(conn, change_id, tenant, "undone", actor, now)
             conn.commit()
             committed = True
@@ -554,17 +578,19 @@ def _to_tell(conn: sqlite3.Connection, rows: list[dict[str, Any]], tenant: str, 
     return told[:_NOTE_MAX]
 
 
-def changes_note(*, tenant_id: str, thread_id: str) -> str:
-    """The note for this turn of the chat *thread_id*: the tenant's open
-    changes made in that chat (any of its ids, ``forget.chat_keys``) that no
-    turn was told of yet (:func:`_to_tell`: every update, at most one
-    question, never Kazma's readings), each marked told (``noted_at``) as it
-    is taken. A turn of another thread -- a scheduled task, a sub-agent,
-    another agent's request -- never spends them."""
+def read_changes_note(*, tenant_id: str, thread_id: str) -> tuple[str, list[str]]:
+    """The note for this turn of the chat *thread_id*, and the changes it
+    tells: the tenant's open changes made in that chat (any of its ids,
+    ``forget.chat_keys``) no turn was told of yet (:func:`_to_tell`: every
+    update, at most one question, never Kazma's readings). Nothing is marked
+    told here: the caller marks them (:func:`mark_noted`) once the model has
+    answered, so a failed call does not spend the note (the third review of
+    F1, item 6). A turn of another thread -- a scheduled task, a sub-agent,
+    another agent's request -- never reads them."""
     from kazma_core.memory.forget import chat_keys
 
     if not thread_id:
-        return ""
+        return "", []
     keys = [k for k in (chat_keys(thread_id) or [thread_id]) if k]
     tenant = tenant_id
     marks = ",".join("?" for _ in keys)
@@ -576,16 +602,27 @@ def changes_note(*, tenant_id: str, thread_id: str) -> str:
             "ORDER BY created_at DESC LIMIT 50",
             (tenant, UPDATE, PENDING, *keys),
         ).fetchall()
-        now = time.time()
-        rows = _to_tell(conn, [dict(zip(_COLUMNS, r, strict=True)) for r in found], tenant, now)
-        if not rows:
-            return ""
-        conn.executemany("UPDATE memory_changes SET noted_at = ? WHERE id = ? AND tenant_id = ?",
-                         [(now, row["id"], tenant) for row in rows])
+        rows = _to_tell(conn, [dict(zip(_COLUMNS, r, strict=True)) for r in found], tenant, time.time())
+    finally:
+        conn.close()
+    if not rows:
+        return "", []
+    return format_changes_note(rows), [str(row["id"]) for row in rows]
+
+
+def mark_noted(*, tenant_id: str, ids: list[str]) -> None:
+    """Mark the changes *ids* told (``noted_at``): the turn that read them
+    (:func:`read_changes_note`) got its model's answer."""
+    if not ids:
+        return
+    now = time.time()
+    conn = _open()
+    try:
+        conn.executemany("UPDATE memory_changes SET noted_at = ? WHERE id = ? AND tenant_id = ? AND noted_at IS NULL",
+                         [(now, change_id, tenant_id) for change_id in ids])
         conn.commit()
     finally:
         conn.close()
-    return format_changes_note(rows)
 
 
 # ── for a caller with no connection of its own (the chat apps' /memory) ──
@@ -693,8 +730,10 @@ def decide_change(ref: str, decision: str, *, tenant_id: str, actor: str) -> dic
 def _prune(conn: sqlite3.Connection, tenant: str, now: float) -> None:
     """Let go of open pending changes and readings no one answered in
     :data:`PENDING_DAYS`, and keep the newest :data:`KEEP_DECIDED` decided
-    ones -- and every "Not me" (a dismissed reading): it is what keeps the
-    value from being filed again (:func:`user_said_not_me`)."""
+    ones; a "Not me" (a dismissed reading) on its own bound, the newest
+    :data:`KEEP_NOT_ME`: it is what keeps the value from being filed again
+    (:func:`user_said_not_me`), and it must not grow without end (the third
+    review of F1, item 6)."""
     conn.execute(
         "UPDATE memory_changes SET state = 'expired', decided_at = ?, decided_by = 'expiry' "
         "WHERE tenant_id = ? AND kind IN (?, ?) AND state = 'open' AND created_at < ?",
@@ -706,4 +745,10 @@ def _prune(conn: sqlite3.Connection, tenant: str, now: float) -> None:
         "SELECT id FROM memory_changes WHERE tenant_id = ? AND state != 'open' "
         "ORDER BY COALESCE(decided_at, created_at) DESC LIMIT ?)",
         (tenant, READING, tenant, KEEP_DECIDED),
+    )
+    conn.execute(
+        "DELETE FROM memory_changes WHERE tenant_id = ? AND kind = ? AND state = 'dismissed' AND id NOT IN ("
+        "SELECT id FROM memory_changes WHERE tenant_id = ? AND kind = ? AND state = 'dismissed' "
+        "ORDER BY COALESCE(decided_at, created_at) DESC LIMIT ?)",
+        (tenant, READING, tenant, READING, KEEP_NOT_ME),
     )
