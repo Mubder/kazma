@@ -148,6 +148,65 @@ def test_control_whatsapp_without_the_mark_gave_dana_the_users_name(monkeypatch)
     assert ("name_is", "Dana") in _facts(m.text)
 
 
+def _wa_voice(monkeypatch, *, context: dict | None, transcript: str) -> Any:
+    """A WhatsApp voice note through the real webhook route and adapter
+    (tests/test_whatsapp.py's stand-in Meta), transcribed by a stand-in for
+    the shared speech-to-text path. The message the agent is handed."""
+    from kazma_gateway.adapters import voice_helpers
+
+    from tests.test_whatsapp import OWNER, FakeMeta, _payload, _Rig
+
+    async def fake_transcribe(msg: Any, **_kw: Any) -> Any:
+        msg.text = transcript
+        msg.context_metadata = {**msg.context_metadata, "voice_transcribed": True}
+        return msg
+
+    monkeypatch.setattr(voice_helpers, "transcribe_inbound_message", fake_transcribe)
+    note: dict[str, Any] = {"from": OWNER, "id": "w1", "timestamp": "1", "type": "audio",
+                            "audio": {"id": "m-voice", "mime_type": "audio/ogg; codecs=opus", "voice": True}}
+    if context is not None:
+        note["context"] = context
+    taken: list[Any] = []
+
+    async def run() -> None:
+        async with _Rig(FakeMeta()) as rig:
+            await rig.post(_payload(note))
+            taken.extend(rig.taken())
+
+    asyncio.run(run())
+    [msg] = taken
+    return msg
+
+
+@pytest.mark.parametrize("said", [DANA_EN, DANA_AR])
+def test_a_forwarded_whatsapp_voice_note_is_not_the_users(monkeypatch, said):
+    """A voice note has no caption, so the parse fenced nothing: its
+    transcript was the person's own words (the review of F3, 2026-11-18)."""
+    msg = _wa_voice(monkeypatch, context={"forwarded": True}, transcript=said)
+    assert msg.text.startswith("[Forwarded message]") and said not in outside_fences(msg.text)
+    assert own_words(msg.text) == "" and _facts(msg.text) == set()
+
+
+def test_a_voice_note_the_person_recorded_is_theirs(monkeypatch):
+    msg = _wa_voice(monkeypatch, context=None, transcript=DANA_EN)
+    assert msg.text == DANA_EN and ("name_is", "Dana") in _facts(msg.text)
+
+
+def test_control_the_adapter_that_fenced_only_text_gave_dana_the_users_name(monkeypatch):
+    """Negative control: the forward mark read at the parse only (where a
+    voice note has no words), as the adapter was."""
+    from kazma_gateway.adapters import whatsapp_parse
+
+    real = whatsapp_parse.WaInbound
+
+    def unmarked(**fields: Any) -> Any:
+        return real(**{**fields, "forwarded": False})
+
+    monkeypatch.setattr(whatsapp_parse, "WaInbound", unmarked)
+    msg = _wa_voice(monkeypatch, context={"forwarded": True}, transcript=DANA_EN)
+    assert msg.text == DANA_EN and ("name_is", "Dana") in _facts(msg.text)
+
+
 # ── a pasted forward ────────────────────────────────────────────────────
 
 

@@ -8,7 +8,10 @@ F3). A forwarded message's text now reaches the agent inside a data fence
 (``prompt_fence.format_untrusted_block``, source ``forwarded_message``) under
 a "[Forwarded message from <name>]" line: the model reads it as data, never
 as instructions, and ``memory.own_words`` leaves both out of the user's
-words. Discord and Slack hand the bot a forwarded or shared message's text
+words. A forwarded voice note's transcript is fenced the same way, after it
+is transcribed (Telegram's update path, ``whatsapp.WhatsAppAdapter``; the
+review of F3, 2026-11-18: WhatsApp fenced only a caption, and a voice note
+has none). Discord and Slack hand the bot a forwarded or shared message's text
 in fields the adapters do not read, so nothing of it reaches the agent there.
 """
 

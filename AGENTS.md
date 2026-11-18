@@ -2083,7 +2083,8 @@ four injected were noise.
   the user's message), "[Attached: ...]" lines, fenced code, "> " lines, a
   forwarded message (a pasted header, "Forwarded from ...", "رسالة محولة";
   Telegram and WhatsApp forwards are fenced by the gateway,
-  `kazma_gateway/forwarded.py`), a quoted sentence in the first person
+  `kazma_gateway/forwarded.py`, a forwarded voice note's transcript too:
+  `WaInbound.forwarded`), a quoted sentence in the first person
   (straight, curly, single, backtick quotes or «», never an inch mark), someone
   else's words after a colon ("my sister said:", "قالت أختي:", "قلت لي:",
   to the end of that sentence: "Kazma said: your name is Ahmed. No, my name

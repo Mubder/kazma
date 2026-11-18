@@ -69,6 +69,9 @@ class WaInbound:
     #: A button the person pressed: its id (Kazma's callback data) and title.
     button_id: str = ""
     button_title: str = ""
+    #: WhatsApp says the person forwarded it: its words are someone else's,
+    #: a voice note's transcript too (``whatsapp.WhatsAppAdapter``).
+    forwarded: bool = False
 
     @property
     def readable(self) -> bool:
@@ -110,9 +113,12 @@ def _one(raw: dict[str, Any], value: dict[str, Any], names: dict[str, str]) -> W
         return None
     kind = str(raw.get("type") or "unknown")
     phone_number_id = str(((value.get("metadata") or {}).get("phone_number_id")) or "")
+    from kazma_gateway.forwarded import whatsapp_forwarded
+
     base = {
         "message_id": message_id, "from_id": from_id, "name": names.get(from_id, ""),
         "phone_number_id": phone_number_id, "timestamp": _float(raw.get("timestamp")), "kind": kind,
+        "forwarded": whatsapp_forwarded(raw),
     }
     if kind == "text":
         return WaInbound(**base, text=_said(raw, str((raw.get("text") or {}).get("body") or "")))
