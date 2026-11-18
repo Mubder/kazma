@@ -101,8 +101,12 @@ it, with no wait on memory.
 
 ### 1.1 The four decisions needed now
 
-Everything else in section 6 goes "as proposed unless the owner says
-otherwise", each with the stage it belongs to.
+**Decided by the owner, 2026-11-18: yes to all four, as proposed. The other
+fifteen go as proposed.** The owner added two things. Losing the live
+install's memory would be acceptable ("nothing important out there"), so no
+heavy migration care is built for it; existing data must still never be
+broken silently. And the memory track runs on Opus, with Fable kept for the
+tasks that need it.
 
 | | Decision | Proposal |
 |---|---|---|
@@ -989,12 +993,14 @@ My proposal is a short study, like R3, after S1-11 (decision 18).
 
 ## 6. Decisions for the owner
 
-Nineteen decisions came out of the two audits. Four are needed now. The
-rest go ahead as proposed unless the owner says otherwise; each is listed
-with the part of section 4 it belongs to, so it can be raised again when
-that part starts.
+Nineteen decisions came out of the two audits. **Decided by the owner on
+2026-11-18: the four of 6.1 as proposed, and the fifteen of 6.2 as
+proposed.** Each is listed with the part of section 4 it belongs to. The
+owner's word on live memory: losing it would be acceptable, so its
+migration needs no special care, but existing data must never be broken
+silently.
 
-### 6.1 Needed now
+### 6.1 Needed now (decided: yes to all four)
 
 | | Decision | Proposal | What a yes starts |
 |---|---|---|---|
@@ -1003,7 +1009,7 @@ that part starts.
 | **C** (decision 2) | **One recording budget.** | 150 fresh askings of the model, 300 at most, with the owner's yes in the recording session and the read-only rules. Made once, after part C2's prompt changes; recording before them spends the budget twice. The old 36 replies are kept as a drift check. | Nothing yet. It is spent at the end of C2. |
 | **D** (decision 17) | **Spaces: how memory's rows are keyed.** | Rows now, with the space salted into new ids and no rebuild of the tables' keys. A memory database set per space folder is planned for the sealed version (N6 kept that open). | Already the working rule for S1-09; it needs the owner's word before S1-09 merges. |
 
-### 6.2 As proposed unless the owner says otherwise
+### 6.2 As proposed (decided)
 
 | # | Decision | Proposal | Part |
 |---|---|---|---|
