@@ -480,18 +480,20 @@ Kazma** lists them:
   everything as it was. A message about someone else ("My sister moved to
   Rotterdam"), a denial ("I never lived in Paris") or a question ("Should I
   move to Rotterdam?") asks nothing.
-- **Is this about you? Kazma read it from your message.** The first time
-  only the model reads one of your facts (your home, your name, the name you
-  go by, your employer, your role), Kazma keeps it as its own reading and
-  asks: **Yes, that's right** makes it yours, **No** takes it out, and
-  Kazma does not ask about that value again.
+- **Kazma's reading of your message.** The first time only the model reads
+  one of your facts (your home, your name, the name you go by, your
+  employer, your role), Kazma keeps it as its own reading, not as yours,
+  and does not ask: anything you say later replaces it. **This is right**
+  makes it yours; **Not me** takes it out, and Kazma never files that value
+  again (your own words still can).
 
 Kazma also tells you, once, in its next reply in the chat the change came
-from: what it changed, or the question it is waiting on. It cannot apply a
-waiting change itself; you do, by saying it in your own words or with the
-buttons. In Telegram, Discord, Slack and WhatsApp, `/memory changes` lists
-them with a short id, and `/memory undo`, `/memory confirm` or `/memory
-dismiss` with that id decides one.
+from: what it changed, and at most one question a turn, never about the
+same fact twice in a day. The rest wait here. It cannot apply a waiting
+change itself; you do, by saying it in your own words or with the buttons.
+In Telegram, Discord, Slack and WhatsApp, `/memory changes` lists them with
+a short id, and `/memory undo`, `/memory confirm` or `/memory dismiss` with
+that id decides one.
 
 A question you leave unanswered is let go after 30 days. Forgetting the
 fact, the conversation or the words a change holds forgets the change too,
@@ -852,11 +854,12 @@ of its own). Only the first 2,000 characters of a message are read this way,
 up to their last blank line; the deep pass reads all of it. A fact only
 the model's deep pass reads is never your own word by itself: whether the
 model's name fits your words ("I'm visiting Dubai next week" read as your
-home) only you can say. When it is about one of your facts and in your own
-words ("We moved to Rotterdam last month"), Kazma asks you (below): beside a
-home you gave, and when you never gave one too. Until you say yes it is the
-model's inference, and a fact you state yourself always wins over it. Another
-name for the same fact ("home city", "resides in") counts as the same fact.
+home) only you can say. It stays the model's inference, and a fact you state
+yourself always wins over it. When it disagrees with a fact you gave and is
+in your own words ("We moved to Rotterdam last month" beside your Paris),
+Kazma asks you (below); when you never gave that fact, it shows as Kazma's
+reading on the Memory page and asks nothing. Another name for the same fact
+("home city", "resides in") counts as the same fact.
 "My sister moved to Rotterdam" is never asked about, whoever the model files
 it under. What it misses --
 relatives, jobs, dates -- is the model's deep pass to find. That pass is scored from the configured model's recorded

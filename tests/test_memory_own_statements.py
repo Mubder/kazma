@@ -166,28 +166,87 @@ def test_a_new_job_in_arabic_waits_for_the_user(mem, monkeypatch):
     ("We moved to Rotterdam last month.", "rotterdam", "Rotterdam"),
     ("انتقلنا إلى الرياض الشهر الماضي.", "الرياض", "الرياض"),
 ])
-def test_a_first_reading_is_the_models_and_is_put_to_the_user(mem, monkeypatch, then, model, spelled):
+def test_a_first_reading_is_the_models_and_asks_nothing(mem, monkeypatch, then, model, spelled):
     """With no fact of the user's, the reading is written as the model's
-    inference and asked about; only the user's yes makes it theirs."""
+    inference and shown on the Memory page as Kazma's reading -- never a
+    question. "This is right" makes it the user's."""
     from kazma_core.memory import changes
 
     assert _deep_pass(mem, monkeypatch, value_first=None, then=then,
                       model=[_fact("lives_in", model)]) == [(model, "llm_inferred")]
-    [change] = [c for c in changes.list_changes(mem.db, tenant_id="default") if c["kind"] == "pending"]
-    assert change["first"] and change["new_value"] == spelled
-    changes.confirm(mem.db, change["id"], tenant_id="default", private=True)
+    assert _waiting(mem) == []
+    [reading] = changes.list_changes(mem.db, tenant_id="default")
+    assert (reading["kind"], reading["new_value"]) == ("reading", spelled)
+    changes.confirm(mem.db, reading["id"], tenant_id="default", private=True)
     assert _facts(mem, "lives_in") == [(spelled, "user_explicit")]
 
 
-def test_a_first_reading_the_user_says_no_to_is_taken_out(mem, monkeypatch):
+def test_not_me_takes_the_reading_out_and_it_is_never_filed_again(mem, monkeypatch):
     from kazma_core.memory import changes
 
     _deep_pass(mem, monkeypatch, value_first=None, then="I'm visiting Dubai next week.",
                model=[_fact("lives_in", "dubai")])
-    [change] = changes.list_changes(mem.db, tenant_id="default")
-    assert changes.dismiss(mem.db, change["id"], tenant_id="default")["taken_out"]
+    [reading] = changes.list_changes(mem.db, tenant_id="default")
+    assert changes.dismiss(mem.db, reading["id"], tenant_id="default")["taken_out"]
     assert _facts(mem, "lives_in") == []
-    assert changes.list_changes(mem.db, tenant_id="default", states=("dismissed",))[0]["id"] == change["id"]
+    _deep_pass(mem, monkeypatch, value_first=None, then="Back in Dubai for the week.",
+               model=[_fact("home_city", "Dubai")])
+    assert _facts(mem, "lives_in") == []
+    assert changes.list_changes(mem.db, tenant_id="default") == []
+
+
+def test_not_me_never_stops_the_users_own_words(mem, monkeypatch):
+    from kazma_core.memory import changes
+    from kazma_core.memory.belief_mutation import mutate_belief
+
+    _deep_pass(mem, monkeypatch, value_first=None, then="I'm visiting Dubai next week.",
+               model=[_fact("lives_in", "dubai")])
+    [reading] = changes.list_changes(mem.db, tenant_id="default")
+    changes.dismiss(mem.db, reading["id"], tenant_id="default")
+    conn = sqlite3.connect(str(mem.dir / "memory_state.db"), isolation_level=None)
+    mutate_belief(conn, "user", "lives_in", "Dubai", extraction_method="user_stated", source_session="s1",
+                  source_turn=5)
+    conn.close()
+    assert _facts(mem, "lives_in") == [("Dubai", "user_stated")]
+
+
+#: Five facts the deep pass files about a user who gave none: on most turns
+#: it files several. None of them is a question.
+FIVE_FACTS = [_fact("lives_in", "rotterdam"), _fact("works_at", "initech"), _fact("current_role", "nurse"),
+              _fact("prefers", "black coffee"), _fact("active_project", "garden shed")]
+FIVE_SAID = ("We moved to Rotterdam last month; I'm a nurse at Initech now, I love black coffee and I'm "
+             "building a garden shed.")
+
+
+def _questions(mem) -> int:
+    from kazma_core.memory import changes
+
+    note = changes.format_changes_note([c for c in changes.list_changes(mem.db, tenant_id="default")
+                                        if c["kind"] == "pending"])
+    return note.count("waiting for the user")
+
+
+def test_a_turn_of_five_first_readings_asks_nothing(mem, monkeypatch):
+    _deep_pass(mem, monkeypatch, value_first=None, then=FIVE_SAID, model=FIVE_FACTS)
+    assert _facts(mem, "lives_in") == [("rotterdam", "llm_inferred")]
+    assert _waiting(mem) == [] and _questions(mem) == 0
+
+
+def test_control_asking_about_every_first_reading_questions_the_user(mem, monkeypatch):
+    """Negative control: every first reading recorded as a question -- the
+    rule this replaced."""
+    from kazma_core.memory import changes
+
+    real = changes._insert
+
+    def as_a_question(conn, **kw):
+        return real(conn, **{**kw, "kind": changes.PENDING})
+
+    monkeypatch.setattr(changes, "_insert", as_a_question)
+    monkeypatch.setattr(changes, "_reading_names",
+                        lambda: frozenset({"lives_in", "works_at", "current_role", "prefers", "active_project"}))
+    _deep_pass(mem, monkeypatch, value_first=None, then=FIVE_SAID, model=FIVE_FACTS)
+    assert _questions(mem) >= 3
 
 
 def test_a_wrong_first_reading_never_blocks_the_users_own_words(mem, monkeypatch):
@@ -303,11 +362,17 @@ def test_control_without_the_name_table_another_name_stands_beside(mem, monkeypa
     assert _waiting(mem) == []
 
 
-def test_control_without_the_first_reading_nothing_is_asked(mem, monkeypatch):
-    monkeypatch.setattr("kazma_core.memory.changes.record_first_reading", lambda conn, **kw: None)
-    _deep_pass(mem, monkeypatch, value_first=None, then="We moved to Rotterdam last month.",
-               model=[_fact("lives_in", "rotterdam")])
-    assert _waiting(mem) == []
+def test_control_without_not_me_the_value_is_filed_again(mem, monkeypatch):
+    from kazma_core.memory import changes
+
+    _deep_pass(mem, monkeypatch, value_first=None, then="I'm visiting Dubai next week.",
+               model=[_fact("lives_in", "dubai")])
+    [reading] = changes.list_changes(mem.db, tenant_id="default")
+    changes.dismiss(mem.db, reading["id"], tenant_id="default")
+    monkeypatch.setattr(changes, "user_said_not_me", lambda conn, **kw: False)
+    _deep_pass(mem, monkeypatch, value_first=None, then="Back in Dubai for the week.",
+               model=[_fact("lives_in", "dubai")])
+    assert _facts(mem, "lives_in") == [("dubai", "llm_inferred")]
 
 
 # ── one value written two ways ───────────────────────────────────────────

@@ -2173,9 +2173,11 @@ four injected were noise.
   (`provenance.may_overrule`) lets a fact the user stated yield only to the
   user's own words -- in its own turn too: the exception that let the model
   pass correct the quick pass of its turn is gone. A reading of one of the
-  user's facts in their own words with no one else named is put to them as
-  a pending change (below): over the fact they stated, or as the first of
-  its kind. The user's facts go by Kazma's names before the write
+  user's facts in their own words with no one else named is put to them
+  (below): a question only where it disagrees with a fact the USER gave;
+  as the first of its kind it is Kazma's reading, never a question -- not
+  sticky, since any later statement of the user's replaces it. The user's
+  facts go by Kazma's names before the write
   (`memory/fact_names.py`, `canonical_for_user`: "home_city", "located_in",
   "resides_in" -> "lives_in"; employer, role, name, preferred name; subject
   `user` only; a plural is a list -- the first layer of F4's table, which
@@ -2187,10 +2189,11 @@ four injected were noise.
   underscores, spacing, Arabic forms and marks): the model's respelling
   ("lisbon", "gulf_bank") is no change. Gates:
   `tests/test_memory_own_statements.py` (the worker's own
-  micro_consolidation: corrections, first readings, aliases, the same turn,
-  the review's readings, a summarised page, the sister and the manager;
-  every reading at the user's trust, no name table and no first reading as
-  negative controls; every applier call names its message),
+  micro_consolidation: corrections, first readings, a turn of five first
+  readings asking nothing, "Not me", aliases, the same turn, the review's
+  readings, a summarised page, the sister and the manager; every reading at
+  the user's trust, no name table, asking about every first reading and no
+  "Not me" as negative controls; every applier call names its message),
   `tests/test_memory_provenance.py` (the same-turn exception as the
   control), and the write scenarios (v4).
 - **A fact the user stated changes only in ways the user can see and take
@@ -2201,26 +2204,28 @@ four injected were noise.
   replacement's own transaction; `changes.undo` reopens the old fact and
   closes the new one under the mutation lock, audited (`undo_update`), and
   refuses with a code (`ChangeRefusedError`: `replaced_since`, `forgotten`).
-  A **pending change**: the model read one of the user's facts -- the one
-  way a reading only the model made can become theirs -- and the value
-  stands in the turn's own words, in a sentence that states it, with no one
-  but the speaker named before it (`clause_subject.names_no_one_else`, the
-  user's spelling: "We moved to Rotterdam", "Moved to Rotterdam last
-  month", "No, Lisbon"); "My sister moved to Rotterdam" records nothing.
-  Either the trust gate refused it over a fact the user stated
-  (`changes.record_pending`; never over the user's words of the same turn)
-  or it is the model's **first reading** of one of `fact_names.KINDS`,
-  written as its inference (`changes.record_first_reading`; `first` on
-  every listed row) -- both from `_apply_beliefs_to_v2` (`_put_to_the_user`).
-  The user confirms it (`changes.confirm`: written `user_explicit`, the
-  change marked confirmed in that write's transaction,
-  `mutate_belief(confirms_change=)`; a first reading the model replaced
-  since is refused, `replaced_since`) or dismisses it; dismissing a first
-  reading takes the model's reading out while it is current and still the
-  model's (audited, `dismiss_reading`), and the same value is never asked
-  again. Any fact the user states answers the changes waiting on it
-  (`changes.answer_pending`). One open pending change per value; an update
-  supersedes them; one open 30 days
+  The model read one of the user's facts -- the one way a reading only the
+  model made can become theirs -- with the value in the turn's own words,
+  in a sentence that states it, with no one but the speaker named before it
+  (`clause_subject.names_no_one_else`, the user's spelling: "We moved to
+  Rotterdam", "Moved to Rotterdam last month", "No, Lisbon"; "My sister
+  moved to Rotterdam" records nothing), from `_apply_beliefs_to_v2`
+  (`_put_to_the_user`). A **pending change** -- a question -- only where the
+  trust gate refused it over a fact the user stated (`changes.record_pending`;
+  never over the user's words of the same turn). A **reading** (kind
+  `reading`) -- never a question -- for the model's first reading of one of
+  `fact_names.KINDS`, written as its inference (`changes.record_first_reading`):
+  the deep pass files several facts on most turns, and a question the user
+  ignores teaches nothing. The user confirms either (`changes.confirm`:
+  written `user_explicit`, the change marked confirmed in that write's
+  transaction, `mutate_belief(confirms_change=)`; a reading the model
+  replaced since is refused, `replaced_since`) or dismisses it; "Not me" on
+  a reading takes the model's fact out while it is current and still the
+  model's (audited, `dismiss_reading`), and the deep pass never files that
+  value again (`changes.user_said_not_me`; such rows are never pruned) --
+  the user's own words still can. Any fact the user states answers what is
+  waiting on it (`changes.answer_pending`). One open change per value; an
+  update supersedes them; one open 30 days
   expires; the newest 200 decided ones are kept per tenant. Forget takes a
   change with the fact, the turn, the chat or the text it holds
   (`changes.forget_facts`, `forget_turn`, `forget_chat`,
@@ -2233,8 +2238,9 @@ four injected were noise.
   status: 404, 409); they are in the memory tenant gate's REQUESTS, from
   which Spaces S1-09 makes their matrix cases. The Memory page's card
   "Changes to what you told Kazma" (`memory_console.js` `loadV2Changes`,
-  EN/AR, each value a `<bdi translate="no">`) shows them with Undo, or
-  "Yes, change it" / "No, keep it". In the chat apps `/memory changes`
+  EN/AR, each value a `<bdi translate="no">`) shows them with Undo,
+  "Yes, change it" / "No, keep it", or for a reading "This is right" /
+  "Not me". In the chat apps `/memory changes`
   lists them with a short id (`changes.short_ref`) and `/memory undo|confirm|dismiss <id>`
   decides one (`changes.decide_change`: a unique start of the id, refused
   `ambiguous` or `wrong_kind`); the four words are a gateway admin's
@@ -2244,14 +2250,18 @@ four injected were noise.
   `memory_changes` at iteration 0 (`changes.changes_note`, off the loop;
   the changes whose `source_session` is one of the thread's ids, marked
   `noted_at` as they are taken; the values fenced, Kazma's lines outside).
+  It asks little (`changes._to_tell`): every update, at most one question
+  a turn, never about a fact asked about in the last day, never a reading;
+  the rest wait on the page and in `/memory changes`.
   A turn of another thread -- a scheduled task, a sub-agent, an A2A
   request -- never spends it; the model cannot apply a waiting change
   (no tool decides one: a confirmation is the user's channel). Gates:
-  `tests/test_memory_changes.py` (EN/AR; the refusal with no change log as
-  the negative control), the plant's control in
-  `tests/test_memory_store_registry.py`, and in a browser, reached by the
-  sidebar, `tests/e2e/test_memory_changes_browser.py` (an undo and a
-  confirmation, the database read after each, EN/AR).
+  `tests/test_memory_changes.py` (EN/AR; the refusal with no change log
+  and every question in one note as negative controls), the plant's
+  control in `tests/test_memory_store_registry.py`, and in a browser,
+  reached by the sidebar, `tests/e2e/test_memory_changes_browser.py` (an
+  undo, a confirmation and Kazma's reading answered, the database read
+  after each, EN/AR).
 - The heuristic reads "I work at/for X" as `works_at` (it shared a pattern
   with "I live in" and stored the employer as `lives_in`), and the local
   embedder remembers short texts (<= 256 characters, 4,096 of them): each

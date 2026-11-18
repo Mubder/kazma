@@ -118,7 +118,8 @@ def _decide_on_the_page(harness: Harness, lang: str) -> dict:
 
 def _seed_first_reading() -> None:
     """The model's first reading of the user's home (no fact of theirs),
-    written as its inference and asked about (rule A, 2026-11-18)."""
+    written as its inference and shown as Kazma's reading, never asked
+    (rule A, 2026-11-18)."""
     from kazma_core.memory import changes
     from kazma_core.memory.belief_mutation import mutate_belief
     from kazma_core.memory.schema_v2 import ensure_primary_schema
@@ -153,13 +154,13 @@ def _answer_a_first_reading(harness: Harness, lang: str, decision: str) -> dict:
             pg.wait_for_function("location.pathname === '/memory'", timeout=15000)
             pg.wait_for_function("() => document.querySelectorAll('#v2-changes-list .v2-change').length === 1",
                                  timeout=30000)
-            card = pg.locator("#v2-changes-list .v2-change[data-kind='pending']")
+            card = pg.locator("#v2-changes-list .v2-change[data-kind='reading']")
             shown = {"card": card.inner_text(),
                      "yes": card.locator("[data-decision='confirm']").inner_text(),
                      "no": card.locator("[data-decision='dismiss']").inner_text()}
             card.locator(f"[data-decision='{decision}']").click()
             pg.wait_for_function(
-                "() => !document.querySelector(\"#v2-changes-list .v2-change[data-kind='pending']\")", timeout=15000)
+                "() => !document.querySelector(\"#v2-changes-list .v2-change[data-kind='reading']\")", timeout=15000)
             return {**shown, "after": _current("lives_in"), "errors": errors}
         finally:
             context.close()
@@ -170,18 +171,18 @@ def _answer_a_first_reading(harness: Harness, lang: str, decision: str) -> dict:
     ("en", "dismiss", []),
     ("ar", "confirm", [("Rotterdam", "user_explicit")]),
 ])
-def test_the_user_answers_a_first_reading(harness: Harness, lang: str, decision: str, after: list) -> None:
+def test_the_user_answers_kazmas_reading(harness: Harness, lang: str, decision: str, after: list) -> None:
     _seed_first_reading()
     assert _current("lives_in") == [("rotterdam", "llm_inferred")]
     out = _answer_a_first_reading(harness, lang, decision)
     assert out["errors"] == []
     assert out["after"] == after
     if lang == "en":
-        assert "Is this about you?" in out["card"] and "Kazma read: Rotterdam" in out["card"]
-        assert (out["yes"], out["no"]) == ("Yes, that's right", "No")
+        assert "Kazma's reading of your message" in out["card"] and "Kazma read: Rotterdam" in out["card"]
+        assert (out["yes"], out["no"]) == ("This is right", "Not me")
     else:
-        assert "هل هذا عنك؟" in out["card"] and "Rotterdam" in out["card"]
-        assert (out["yes"], out["no"]) == ("نعم، صحيح", "لا")
+        assert "قراءة Kazma لرسالتك" in out["card"] and "Rotterdam" in out["card"]
+        assert (out["yes"], out["no"]) == ("هذا صحيح", "ليس عني")
 
 
 @pytest.mark.parametrize("lang", ["en", "ar"])

@@ -945,13 +945,7 @@
      "exact": true
     }
    ],
-   "not_current": [],
-   "pending": [
-    {
-     "subject": "user",
-     "object": "teller"
-    }
-   ]
+   "not_current": []
   },
   {
    "id": "kept-ar-name-and-city",
@@ -1029,13 +1023,7 @@
      "object": "Sam"
     }
    ],
-   "not_current": [],
-   "pending": [
-    {
-     "subject": "user",
-     "object": "Sam"
-    }
-   ]
+   "not_current": []
   },
   {
    "id": "short-en-diet",

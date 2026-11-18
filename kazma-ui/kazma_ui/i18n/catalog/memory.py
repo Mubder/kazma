@@ -1617,29 +1617,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "تعذّر إجراء هذا التغيير",
         "en": "That change could not be made",
     },
-    "memory.console.change_first_title": {
-        "ar": "هل هذا عنك؟ قرأه Kazma من رسالتك",
-        "en": "Is this about you? Kazma read it from your message",
+    "memory.console.change_reading_title": {
+        "ar": "قراءة Kazma لرسالتك",
+        "en": "Kazma's reading of your message",
     },
     "memory.console.change_read": {
         "ar": "قرأ Kazma: {value}",
         "en": "Kazma read: {value}",
     },
-    "memory.console.change_first_confirm": {
-        "ar": "نعم، صحيح",
-        "en": "Yes, that's right",
+    "memory.console.change_reading_right": {
+        "ar": "هذا صحيح",
+        "en": "This is right",
     },
-    "memory.console.change_first_dismiss": {
-        "ar": "لا",
-        "en": "No",
+    "memory.console.change_reading_not_me": {
+        "ar": "ليس عني",
+        "en": "Not me",
     },
-    "memory.console.change_first_confirmed": {
+    "memory.console.change_reading_kept": {
         "ar": "حُفظت على أنها منك",
         "en": "Kept as yours",
     },
-    "memory.console.change_first_dismissed": {
-        "ar": "أُزيلت",
-        "en": "Taken out",
+    "memory.console.change_reading_removed": {
+        "ar": "أُزيلت، ولن يحفظها Kazma مرة أخرى",
+        "en": "Removed. Kazma will not file it again",
     },
     "memory.console.no_changes": {
         "ar": "لم يتغيّر شيء في المعلومات التي أخبرت بها Kazma، ولا شيء ينتظر ردّك.",

@@ -1522,13 +1522,14 @@
     confirm: ['memory.console.change_confirmed', 'Changed'],
     dismiss: ['memory.console.change_dismissed', 'Kept as it was'],
   };
-  // The model's first reading of a fact, put to the user (no earlier fact).
-  var _FIRST_DONE = {
-    confirm: ['memory.console.change_first_confirmed', 'Kept as yours'],
-    dismiss: ['memory.console.change_first_dismissed', 'Taken out'],
+  // Kazma's reading of a fact the user gave none of: never a question; the
+  // user may say it is right, or not them.
+  var _READING_DONE = {
+    confirm: ['memory.console.change_reading_kept', 'Kept as yours'],
+    dismiss: ['memory.console.change_reading_removed', 'Removed. Kazma will not file it again'],
   };
-  async function _decideChange(id, decision, first) {
-    var done = (first && _FIRST_DONE[decision]) || _CHANGE_DONE[decision];
+  async function _decideChange(id, decision, reading) {
+    var done = (reading && _READING_DONE[decision]) || _CHANGE_DONE[decision];
     try {
       const r = await window.kazmaSave('/api/memory/v2/changes/' + encodeURIComponent(id) + '/' + decision, { method: 'POST' });
       if (window.showToast) {
@@ -1560,26 +1561,26 @@
         return;
       }
       el.innerHTML = rows.map(function(c) {
-        const pending = c.kind === 'pending';
-        const first = pending && !!c.first;
-        const title = first
-          ? _mt('memory.console.change_first_title', 'Is this about you? Kazma read it from your message')
+        const reading = c.kind === 'reading';
+        const pending = c.kind === 'pending' || reading;
+        const title = reading
+          ? _mt('memory.console.change_reading_title', "Kazma's reading of your message")
           : pending
             ? _mt('memory.console.change_pending_title', 'Is this a change? Kazma kept the earlier fact')
             : _mt('memory.console.change_update_title', 'Changed from what you said');
-        const lines = first
+        const lines = reading
           ? _changeLine(_mtHtml('memory.console.change_read', 'Kazma read: {value}', _changeValue(c.new_value)))
           : pending
             ? _changeLine(_mtHtml('memory.console.change_kept', 'Kept: {value}', _changeValue(c.old_value))) +
               _changeLine(_mtHtml('memory.console.change_heard', 'You may have said: {value}', _changeValue(c.new_value)))
             : _changeLine(_mtHtml('memory.console.change_was', 'Before: {value}', _changeValue(c.old_value))) +
               _changeLine(_mtHtml('memory.console.change_now', 'Now: {value}', _changeValue(c.new_value)));
-        const firstAttr = first ? ' data-first="1"' : '';
-        const yes = first ? _mt('memory.console.change_first_confirm', "Yes, that's right") : _mt('memory.console.change_confirm', 'Yes, change it');
-        const no = first ? _mt('memory.console.change_first_dismiss', 'No') : _mt('memory.console.change_dismiss', 'No, keep it');
+        const readingAttr = reading ? ' data-reading="1"' : '';
+        const yes = reading ? _mt('memory.console.change_reading_right', 'This is right') : _mt('memory.console.change_confirm', 'Yes, change it');
+        const no = reading ? _mt('memory.console.change_reading_not_me', 'Not me') : _mt('memory.console.change_dismiss', 'No, keep it');
         const buttons = pending
-          ? '<button type="button" class="btn btn-sm btn-primary v2-change-act" data-id="' + _attr(c.id) + '"' + firstAttr + ' data-decision="confirm">' + _esc(yes) + '</button>' +
-            '<button type="button" class="btn btn-sm btn-outline v2-change-act" data-id="' + _attr(c.id) + '"' + firstAttr + ' data-decision="dismiss">' + _esc(no) + '</button>'
+          ? '<button type="button" class="btn btn-sm btn-primary v2-change-act" data-id="' + _attr(c.id) + '"' + readingAttr + ' data-decision="confirm">' + _esc(yes) + '</button>' +
+            '<button type="button" class="btn btn-sm btn-outline v2-change-act" data-id="' + _attr(c.id) + '"' + readingAttr + ' data-decision="dismiss">' + _esc(no) + '</button>'
           : '<button type="button" class="btn btn-sm btn-outline v2-change-act" data-id="' + _attr(c.id) + '" data-decision="undo">' + _esc(_mt('memory.console.change_undo', 'Undo')) + '</button>';
         // The fact's name is the data's own word, its own block.
         return '<div class="mem-row v2-change" data-kind="' + _attr(c.kind) + '" style="display:flex;gap:8px;align-items:flex-start;justify-content:space-between;padding:6px 0;">' +
@@ -1594,7 +1595,7 @@
       el.querySelectorAll('.v2-change-act').forEach(function(btn) {
         btn.addEventListener('click', function() {
           btn.disabled = true;
-          _decideChange(btn.getAttribute('data-id'), btn.getAttribute('data-decision'), btn.getAttribute('data-first') === '1');
+          _decideChange(btn.getAttribute('data-id'), btn.getAttribute('data-decision'), btn.getAttribute('data-reading') === '1');
         });
       });
     } catch (e) { el.textContent = _mt('memory.console.changes_load_failed', 'Changes load failed'); }

@@ -9,10 +9,11 @@ model read ("Moved to Rotterdam last month"), refused for good.
 transaction as the replacement, and a pending change (confirm or dismiss)
 for a reading of the user's fact in their own words with no one else named.
 A model's reading never gets the user's trust by itself (rule A of the
-second security review, 2026-11-18), so its first reading of a fact is
-asked about too, and a "no" takes it out. "My sister moved to Rotterdam"
-records nothing. Forget takes a change with its fact or its turn. Through
-the worker's own deep-pass path.
+second security review, 2026-11-18); its first reading of a fact is
+Kazma's reading, shown on the Memory page and never asked about ("This is
+right", "Not me"), and the next turn's note asks at most one question. "My
+sister moved to Rotterdam" records nothing. Forget takes a change with its
+fact or its turn. Through the worker's own deep-pass path.
 """
 
 from __future__ import annotations
@@ -234,21 +235,22 @@ def test_the_users_own_words_answer_a_pending_change(mem, monkeypatch):
     assert ("pending", "superseded") in states and ("update", "open") in states
 
 
-# ── a first reading (rule A of the second security review, 2026-11-18) ────
+# ── Kazma's reading: a first reading, never a question ─────────────────────
 
 
-def test_a_first_reading_is_put_to_the_user(mem, monkeypatch):
+def test_a_first_reading_is_kazmas_reading_and_no_question(mem, monkeypatch):
     """No fact of the user's: the model's reading is written as its own
-    inference and asked about, never the user's until they say so."""
+    inference and shown on the Memory page as Kazma's reading; the next
+    turn's note never asks about it."""
     _turn(mem, monkeypatch, first="", then="We moved to Rotterdam last month.",
           model=[_fact("lives_in", "rotterdam")])
     assert _current(mem) == [("rotterdam", "llm_inferred")]
-    [change] = _changes(mem, "open")
-    assert (change["kind"], change["old_value"], change["new_value"], change["first"]) == (
-        "pending", "", "Rotterdam", True)
+    [reading] = _changes(mem, "open")
+    assert (reading["kind"], reading["old_value"], reading["new_value"]) == ("reading", "", "Rotterdam")
+    assert changes.changes_note(tenant_id="default", thread_id="s1") == ""
 
 
-def test_a_first_reading_replaced_since_cannot_be_confirmed(mem, monkeypatch):
+def test_a_reading_replaced_since_cannot_be_confirmed(mem, monkeypatch):
     _turn(mem, monkeypatch, first="", then="We moved to Rotterdam last month.",
           model=[_fact("lives_in", "rotterdam")])
     [first] = _changes(mem, "open")
@@ -260,20 +262,69 @@ def test_a_first_reading_replaced_since_cannot_be_confirmed(mem, monkeypatch):
     assert _current(mem) == [("lisbon", "llm_inferred")]
 
 
-def test_a_first_reading_the_user_said_no_to_is_not_asked_again(mem, monkeypatch):
+def test_not_me_is_kept_past_the_decided_bound(mem, monkeypatch):
+    """A "Not me" is what keeps the value from being filed again: the bound
+    on decided changes never lets it go."""
     _turn(mem, monkeypatch, first="", then="I'm visiting Dubai next week.", model=[_fact("lives_in", "dubai")])
-    [change] = _changes(mem, "open")
-    changes.dismiss(mem.db, change["id"], tenant_id="default")
-    _turn(mem, monkeypatch, first="", then="I'm in Dubai again.", model=[_fact("lives_in", "dubai")], turn=3)
-    assert _changes(mem, "open") == []
+    [reading] = _changes(mem, "open")
+    changes.dismiss(mem.db, reading["id"], tenant_id="default")
+    monkeypatch.setattr(changes, "KEEP_DECIDED", 1)
+    now = time.time()
+    for n in range(3):
+        mem.db.execute(
+            "INSERT INTO memory_changes (id, tenant_id, kind, state, subject, predicate, created_at, decided_at) "
+            "VALUES (?, 'default', 'pending', 'dismissed', 'user', 'pet', ?, ?)", (f"mc_old{n}", now, now + n))
+    mem.db.commit()
+    changes._prune(mem.db, "default", now + 10)
+    mem.db.commit()
+    assert changes.user_said_not_me(mem.db, tenant_id="default", subject="user", predicate="lives_in", value="Dubai")
 
 
-def test_the_note_says_a_first_reading_is_not_yet_the_users():
-    note = changes.format_changes_note([{"id": "mc_0123456789abcdef", "kind": "pending", "predicate": "lives_in",
-                                         "old_belief_id": None, "new_belief_id": "b_1", "old_value": "",
-                                         "new_value": "Rotterdam"}])
-    assert "read from the user's message, not yet theirs: lives in: \"Rotterdam\"" in note
-    assert "/memory dismiss" in note
+# ── the next turn's note asks little ──────────────────────────────────────
+
+
+def _question(mem, *, value: str, turn: int, created: float) -> str:
+    refused = mutate_belief(mem.db, "user", "lives_in", value, extraction_method="llm_inferred",
+                            source_session="s1", source_turn=turn, now=created)
+    change_id = changes.record_pending(mem.db, tenant_id="default", refused=refused, new_value=value,
+                                       user_text=f"Moved to {value}.", session="s1", turn=turn, now=created)
+    assert change_id
+    return change_id
+
+
+def _held(mem, predicate: str, value: str) -> None:
+    mutate_belief(mem.db, "user", predicate, value, extraction_method="user_stated", source_session="s0",
+                  source_turn=1, now=time.time() - 9000)
+
+
+def test_one_question_a_turn_and_never_the_same_fact_twice_a_day(mem, monkeypatch):
+    _held(mem, "lives_in", "Paris")
+    _held(mem, "works_at", "Acme")
+    now = time.time() - 600
+    _question(mem, value="Rotterdam", turn=2, created=now)
+    _question(mem, value="Lisbon", turn=3, created=now + 1)
+    refused = mutate_belief(mem.db, "user", "works_at", "Initech", extraction_method="llm_inferred",
+                            source_session="s1", source_turn=4, now=now + 2)
+    assert changes.record_pending(mem.db, tenant_id="default", refused=refused, new_value="Initech",
+                                  user_text="Moved to Initech.", session="s1", turn=4, now=now + 2)
+    first = changes.changes_note(tenant_id="default", thread_id="s1")
+    assert first.count("waiting for the user") == 1 and "Initech" in first  # the newest question
+    second = changes.changes_note(tenant_id="default", thread_id="s1")
+    assert second.count("waiting for the user") == 1 and "Lisbon" in second  # another fact
+    assert changes.changes_note(tenant_id="default", thread_id="s1") == ""  # lives_in was asked today
+    monkeypatch.setattr(changes, "_ASK_AGAIN_AFTER_S", 0.0)  # a day later
+    assert "Rotterdam" in changes.changes_note(tenant_id="default", thread_id="s1")
+
+
+def test_control_every_question_in_one_note(mem, monkeypatch):
+    """Negative control: no limit on questions."""
+    monkeypatch.setattr(changes, "_NOTE_QUESTIONS", 99)
+    monkeypatch.setattr(changes, "_ASK_AGAIN_AFTER_S", 0.0)
+    _held(mem, "lives_in", "Paris")
+    now = time.time() - 600
+    _question(mem, value="Rotterdam", turn=2, created=now)
+    _question(mem, value="Lisbon", turn=3, created=now + 1)
+    assert changes.changes_note(tenant_id="default", thread_id="s1").count("waiting for the user") == 2
 
 
 # ── forget, bounds ────────────────────────────────────────────────────────
@@ -373,13 +424,13 @@ def test_the_routes_list_confirm_and_undo_with_real_statuses(mem, monkeypatch):
     assert c.get("/api/memory/v2/changes?state=everything").status_code == 422
 
 
-def test_the_routes_mark_a_first_reading_and_dismissing_it_takes_it_out(mem, monkeypatch):
+def test_the_routes_list_a_reading_and_not_me_takes_it_out(mem, monkeypatch):
     _turn(mem, monkeypatch, first="", then="We moved to Rotterdam last month.",
           model=[_fact("lives_in", "rotterdam")])
     c = _client(mem, monkeypatch)
-    [pending] = c.get("/api/memory/v2/changes").json()["changes"]
-    assert pending["first"] is True
-    r = c.post(f"/api/memory/v2/changes/{pending['id']}/dismiss")
+    [reading] = c.get("/api/memory/v2/changes").json()["changes"]
+    assert reading["kind"] == "reading"
+    r = c.post(f"/api/memory/v2/changes/{reading['id']}/dismiss")
     assert r.status_code == 200 and r.json()["taken_out"], r.text
     assert _current(mem) == []
     ops = sqlite3.connect(str(mem.dir / "memory_ops.db"))
@@ -431,9 +482,9 @@ def test_the_chat_command_lists_confirms_and_undoes(mem, monkeypatch):
 
 @pytest.mark.parametrize(("decision", "said", "current"), [
     ("confirm", "✅ Kept as yours: lives in is Rotterdam.", [("Rotterdam", "user_explicit")]),
-    ("dismiss", "👍 Taken out: Kazma no longer reads lives in as Rotterdam.", []),
+    ("dismiss", "👍 Removed: Kazma no longer reads lives in as Rotterdam, and will not file it again.", []),
 ])
-def test_the_chat_command_asks_about_a_first_reading(mem, monkeypatch, decision, said, current):
+def test_the_chat_command_lists_kazmas_reading(mem, monkeypatch, decision, said, current):
     import re
 
     _turn(mem, monkeypatch, first="", then="We moved to Rotterdam last month.",

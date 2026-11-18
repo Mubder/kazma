@@ -7,17 +7,22 @@ user stated changes only in ways the user can see and take back.
   later words or by a correction the user confirmed ("home Paris ->
   Rotterdam"). ``belief_mutation`` records it in the same transaction as the
   replacement. Undo reopens the old fact and closes the new one, audited.
-* **A pending change** -- the model read one of the user's own facts, and
+* **A pending change** -- a question: the trust gate refused the model's
+  reading over a fact the user stated ("Moved to Rotterdam last month"), and
   the value stands in the turn's own words with no one but the speaker named
   before it (``clause_subject.names_no_one_else``; "My sister moved to
   Rotterdam" records nothing). A model's reading never gets the user's trust
   by itself (the second security review of F1, 2026-11-18): only the user
   can say whether its name fits the words ("I'm visiting Dubai next week"
-  read as a home). Either the trust gate refused it over a fact the user
-  stated ("Moved to Rotterdam last month"), or it is the first fact of its
-  kind, written as the model's (:func:`record_first_reading`). The user
-  confirms it -- the value is then written at the user's own trust -- or
-  dismisses it; dismissing a first reading takes the model's reading out.
+  read as a home). The user confirms it -- the value is then written at the
+  user's own trust -- or dismisses it. The next turn's note asks at most one
+  question, never about one fact twice in a day (:func:`changes_note`).
+* **A reading** -- no question: the model's first reading of one of the
+  user's own facts, where the user gave none (:func:`record_first_reading`).
+  It is written as the model's, and any later statement of the user's
+  replaces it; the Memory page shows it as Kazma's reading. "This is right"
+  makes it the user's; "Not me" takes it out, and that value is never
+  filed again (:func:`user_said_not_me`).
 
 The rows live in ``memory_state.db`` (``memory_changes``), so a restored
 older copy holds the changes of its own time. Forget takes a change with the
@@ -60,7 +65,6 @@ __all__ = [
     "forget_mentioning",
     "forget_turn",
     "format_changes_note",
-    "is_first_reading",
     "list_changes",
     "open_changes",
     "record_first_reading",
@@ -69,11 +73,14 @@ __all__ = [
     "resolve_ref",
     "short_ref",
     "undo",
+    "user_said_not_me",
 ]
 
 UPDATE = "update"
 PENDING = "pending"
-#: An open pending change no one answered is let go after this many days.
+READING = "reading"
+#: An open pending change or reading no one answered is let go after this
+#: many days.
 PENDING_DAYS = 30
 #: Decided changes kept per tenant, newest first.
 KEEP_DECIDED = 200
@@ -83,7 +90,11 @@ KEEP_DECIDED = 200
 REF_CHARS = 11
 _REF_MIN_CHARS = 8
 #: What the user can do with a change, by kind.
-DECISIONS = {"undo": UPDATE, "confirm": PENDING, "dismiss": PENDING}
+DECISIONS = {"undo": (UPDATE,), "confirm": (PENDING, READING), "dismiss": (PENDING, READING)}
+#: Questions in one turn's note, and how long before the same fact is asked
+#: about again: a question a user ignores teaches nothing.
+_NOTE_QUESTIONS = 1
+_ASK_AGAIN_AFTER_S = 86400.0
 
 _COLUMNS = ("id", "tenant_id", "kind", "state", "subject", "predicate", "old_belief_id", "old_value",
             "new_belief_id", "new_value", "source_session", "source_turn", "created_at", "decided_at",
@@ -141,14 +152,14 @@ def answer_pending(
 ) -> None:
     """A fact of the user's own was just written for *subject* *predicate*,
     in the caller's transaction: *confirms* (``(change id, actor)``) is the
-    pending change it answers, marked ``confirmed``; any other open pending
-    change of that fact is answered by it too, marked ``superseded``."""
+    pending change or reading it answers, marked ``confirmed``; any other
+    open one of that fact is answered by it too, marked ``superseded``."""
     if confirms:
         _decide(conn, confirms[0], tenant_id, "confirmed", confirms[1], now)
     conn.execute(
         "UPDATE memory_changes SET state = 'superseded', decided_at = ?, decided_by = 'update' "
-        "WHERE tenant_id = ? AND subject = ? AND predicate = ? AND kind = ? AND state = 'open'",
-        (now, tenant_id, subject, predicate, PENDING),
+        "WHERE tenant_id = ? AND subject = ? AND predicate = ? AND kind IN (?, ?) AND state = 'open'",
+        (now, tenant_id, subject, predicate, PENDING, READING),
     )
 
 
@@ -182,16 +193,16 @@ def record_pending(
     if session is not None and stated[3] == session and stated[4] == turn:
         return None
     subject, predicate, old_value = str(stated[0]), str(stated[1]), str(stated[2] or "")
-    if _asked_before(conn, tenant, subject, predicate, new_value):
+    if _recorded(conn, tenant, PENDING, subject, predicate, new_value, ("open",)):
         return None
-    return _insert_pending(conn, tenant=tenant, subject=subject, predicate=predicate,
-                           old_belief_id=refused["belief_id"], old_value=old_value, new_belief_id=None,
-                           new_value=new_value, session=session, turn=turn, now=now)
+    return _insert(conn, kind=PENDING, tenant=tenant, subject=subject, predicate=predicate,
+                   old_belief_id=refused["belief_id"], old_value=old_value, new_belief_id=None,
+                   new_value=new_value, session=session, turn=turn, now=now)
 
 
-#: The user's own facts a first reading is put to them for: Kazma's names
-#: for a person's single-valued facts (``fact_names``).
-def _first_reading_names() -> frozenset[str]:
+#: The user's own facts a first reading is shown for: Kazma's names for a
+#: person's single-valued facts (``fact_names``).
+def _reading_names() -> frozenset[str]:
     from kazma_core.memory.fact_names import KINDS
 
     return frozenset(KINDS)
@@ -201,46 +212,51 @@ def record_first_reading(
     conn: sqlite3.Connection, *, tenant_id: str, written: dict[str, Any], predicate: str, new_value: str,
     user_text: str | None, session: str | None, turn: int | None, now: float | None = None,
 ) -> str | None:
-    """Put the model's first reading of one of the user's own facts to the
-    user: *written* is ``mutate_belief``'s answer for the model's fact under
-    *predicate* (one of ``fact_names.KINDS``), which held no fact the user
-    stated. Recorded as for :func:`record_pending` -- the value in the
-    user's own words with no one else named, never twice for one value, and
-    never again after the user said no to it. Confirmed, the value is the
-    user's; dismissed, the model's reading is taken out. Returns the change
-    id, or None. Commits."""
+    """Show the model's first reading of one of the user's own facts on the
+    Memory page -- no question: *written* is ``mutate_belief``'s answer for
+    the model's fact under *predicate* (one of ``fact_names.KINDS``), where
+    the user gave none. Recorded when the value stands in the user's own
+    words with no one else named; never twice for one value. "This is
+    right" makes it the user's, "Not me" takes it out
+    (:func:`user_said_not_me`). Returns the change id, or None. Commits."""
     from kazma_core.memory.clause_subject import names_no_one_else
 
-    if predicate not in _first_reading_names() or not written.get("belief_id"):
+    if predicate not in _reading_names() or not written.get("belief_id"):
         return None
     spelled = names_no_one_else(user_text, new_value)
     if not spelled:
         return None
     tenant = tenant_id
-    if _asked_before(conn, tenant, "user", predicate, spelled, dismissed_too=True):
+    if _recorded(conn, tenant, READING, "user", predicate, spelled, ("open", "dismissed")):
         return None
-    return _insert_pending(conn, tenant=tenant, subject="user", predicate=predicate, old_belief_id=None,
-                           old_value="", new_belief_id=str(written["belief_id"]), new_value=spelled,
-                           session=session, turn=turn, now=now)
+    return _insert(conn, kind=READING, tenant=tenant, subject="user", predicate=predicate, old_belief_id=None,
+                   old_value="", new_belief_id=str(written["belief_id"]), new_value=spelled,
+                   session=session, turn=turn, now=now)
 
 
-def _asked_before(conn: sqlite3.Connection, tenant: str, subject: str, predicate: str, value: str, *,
-                  dismissed_too: bool = False) -> bool:
-    """Whether a pending change for *value* of this fact is open (or, with
-    *dismissed_too*, was answered no)."""
+def user_said_not_me(conn: sqlite3.Connection, *, tenant_id: str, subject: str, predicate: str,
+                     value: str) -> bool:
+    """Whether the user said "Not me" to *value* of this fact: the deep pass
+    never files it again (``belief_extractor._apply_beliefs_to_v2``); the
+    user's own words still can."""
+    return _recorded(conn, tenant_id, READING, subject, predicate, value, ("dismissed",))
+
+
+def _recorded(conn: sqlite3.Connection, tenant: str, kind: str, subject: str, predicate: str, value: str,
+              states: tuple[str, ...]) -> bool:
+    """Whether a change of *kind* for *value* of this fact is in *states*."""
     from kazma_core.memory.belief_mutation import _same_value
 
-    states = ("open", "dismissed") if dismissed_too else ("open",)
     marks = ",".join("?" for _ in states)
     return any(_same_value(found, value) for (found,) in conn.execute(
         f"SELECT new_value FROM memory_changes WHERE tenant_id = ? AND subject = ? AND predicate = ? "  # nosec B608 - placeholders only
         f"AND kind = ? AND state IN ({marks})",
-        (tenant, subject, predicate, PENDING, *states),
+        (tenant, subject, predicate, kind, *states),
     ).fetchall())
 
 
-def _insert_pending(
-    conn: sqlite3.Connection, *, tenant: str, subject: str, predicate: str, old_belief_id: str | None,
+def _insert(
+    conn: sqlite3.Connection, *, kind: str, tenant: str, subject: str, predicate: str, old_belief_id: str | None,
     old_value: str, new_belief_id: str | None, new_value: str, session: str | None, turn: int | None,
     now: float | None,
 ) -> str:
@@ -250,31 +266,26 @@ def _insert_pending(
         "INSERT INTO memory_changes (id, tenant_id, kind, state, subject, predicate, old_belief_id, old_value, "
         "new_belief_id, new_value, source_session, source_turn, created_at) "
         "VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (change_id, tenant, PENDING, subject, predicate, old_belief_id, str(old_value or ""), new_belief_id,
+        (change_id, tenant, kind, subject, predicate, old_belief_id, str(old_value or ""), new_belief_id,
          str(new_value), session, turn, when),
     )
     _prune(conn, tenant, when)
     conn.commit()
-    logger.info("[memory] a reading of the user's fact waits for them: %s %s (change %s)",
-                subject, predicate, change_id)
+    logger.info("[memory] %s of the user's fact recorded: %s %s (change %s)", kind, subject, predicate, change_id)
     return change_id
 
 
 def list_changes(
     conn: sqlite3.Connection, *, tenant_id: str, states: tuple[str, ...] = ("open",), limit: int = 50,
 ) -> list[dict[str, Any]]:
-    """The tenant's changes in *states*, newest first. ``first`` marks the
-    model's first reading of a fact (no fact the user stated before it)."""
+    """The tenant's changes in *states*, newest first."""
     marks = ",".join("?" for _ in states) or "''"
     rows = conn.execute(
         f"SELECT {', '.join(_COLUMNS)} FROM memory_changes WHERE tenant_id = ? AND state IN ({marks}) "  # nosec B608 - fixed columns, placeholders only
         "ORDER BY created_at DESC LIMIT ?",
         (tenant_id,*states, max(1, int(limit))),
     ).fetchall()
-    out = [dict(zip(_COLUMNS, r, strict=True)) for r in rows]
-    for row in out:
-        row["first"] = _first_reading(row)
-    return out
+    return [dict(zip(_COLUMNS, r, strict=True)) for r in rows]
 
 
 def _decide(conn: sqlite3.Connection, change_id: str, tenant: str, state: str, actor: str, now: float) -> bool:
@@ -288,21 +299,23 @@ def _decide(conn: sqlite3.Connection, change_id: str, tenant: str, state: str, a
 def confirm(
     conn: sqlite3.Connection, change_id: str, *, tenant_id: str, actor: str = "user", private: bool = False,
 ) -> dict[str, Any]:
-    """The user says the pending change is right: its value is written at
-    the user's own trust (``user_explicit``), replacing the old fact -- which
-    records an update the user can still undo. The change is marked confirmed
-    in the replacement's own transaction (``mutate_belief(confirms_change=)``).
-    *private*: a private database (the memory benchmark's write scenarios):
-    nothing reaches a mirror (``mutate_belief(private=)``)."""
+    """The user says the pending change -- or Kazma's reading ("This is
+    right") -- is right: its value is written at the user's own trust
+    (``user_explicit``), replacing the old fact, which records an update the
+    user can still undo, or raising the model's reading to the user's. The
+    change is marked confirmed in the write's own transaction
+    (``mutate_belief(confirms_change=)``). *private*: a private database (the
+    memory benchmark's write scenarios): nothing reaches a mirror
+    (``mutate_belief(private=)``)."""
     from kazma_core.memory.belief_mutation import mutate_belief
 
     tenant = tenant_id
     row = _row(conn, change_id, tenant)
     if row is None:
         raise ChangeRefusedError("not_found")
-    if row["kind"] != PENDING or row["state"] != "open":
+    if row["kind"] not in (PENDING, READING) or row["state"] != "open":
         raise ChangeRefusedError("not_open")
-    if _first_reading(row) and not _current(conn, row["new_belief_id"], tenant):
+    if row["kind"] == READING and not _current(conn, row["new_belief_id"], tenant):
         raise ChangeRefusedError("replaced_since")  # the model read something else since
     result = mutate_belief(
         conn, row["subject"], row["predicate"], row["new_value"], predicate_type="functional",
@@ -322,18 +335,6 @@ def confirm(
             "action": result.get("action")}
 
 
-def _first_reading(row: dict[str, Any]) -> bool:
-    """A pending change with no fact the user stated before it: the model's
-    first reading of the fact (:func:`record_first_reading`)."""
-    return row.get("kind") == PENDING and not row.get("old_belief_id") and bool(row.get("new_belief_id"))
-
-
-def is_first_reading(change: dict[str, Any]) -> bool:
-    """Whether *change* (a row of :func:`list_changes` or ``decide_change``'s
-    ``change``) is the model's first reading of a fact."""
-    return _first_reading(change)
-
-
 def _current(conn: sqlite3.Connection, belief_id: str | None, tenant: str) -> bool:
     return bool(belief_id) and conn.execute(
         "SELECT 1 FROM beliefs WHERE id = ? AND tenant_id = ? AND valid_until IS NULL AND invalidated_at IS NULL",
@@ -345,10 +346,11 @@ def dismiss(
     conn: sqlite3.Connection, change_id: str, *, tenant_id: str, actor: str = "user",
     ops_conn: sqlite3.Connection | None = None,
 ) -> dict[str, Any]:
-    """The user says the pending change is wrong. Over a fact the user
-    stated, nothing changes; a first reading the user says no to is taken
-    out -- while it is still current and still the model's -- in one
-    transaction under the mutation lock, audited."""
+    """The user says the pending change is wrong: nothing changes. Or says
+    "Not me" to Kazma's reading: it is taken out -- while it is still current
+    and still the model's -- in one transaction under the mutation lock,
+    audited, and the deep pass never files that value again
+    (:func:`user_said_not_me`)."""
     from kazma_core.memory.belief_mutation import _mutation_lock, _write_audit
     from kazma_core.memory.hygiene import beliefs_write
     from kazma_core.memory.provenance import USER_SOURCES
@@ -358,13 +360,13 @@ def dismiss(
         row = _row(conn, change_id, tenant)
         if row is None:
             raise ChangeRefusedError("not_found")
-        if row["kind"] != PENDING or row["state"] != "open":
+        if row["kind"] not in (PENDING, READING) or row["state"] != "open":
             raise ChangeRefusedError("not_open")
         now = time.time()
         conn.execute("BEGIN IMMEDIATE")
         taken_out = None
         try:
-            if _first_reading(row):
+            if row["kind"] == READING:
                 held = conn.execute(
                     "SELECT extraction_method FROM beliefs WHERE id = ? AND tenant_id = ? AND valid_until IS NULL "
                     "AND invalidated_at IS NULL", (row["new_belief_id"], tenant),
@@ -511,9 +513,6 @@ def format_changes_note(rows: list[dict[str, Any]]) -> str:
         if row.get("kind") == UPDATE:
             lines.append(f"- {ref} updated from the user's own words: {what}: was "
                          f"\"{row.get('old_value')}\", now \"{row.get('new_value')}\"")
-        elif _first_reading(row):
-            lines.append(f"- {ref} read from the user's message, not yet theirs: {what}: "
-                         f"\"{row.get('new_value')}\"")
         else:
             lines.append(f"- {ref} not applied, waiting for the user: {what}: still "
                          f"\"{row.get('old_value')}\"; their message may have meant \"{row.get('new_value')}\"")
@@ -523,20 +522,45 @@ def format_changes_note(rows: list[dict[str, Any]]) -> str:
         "again in later turns.)\n"
         + format_untrusted_block("\n".join(lines), source="memory_changes")
         + "\nAn update: say what you changed; the user can undo it on the Memory page (Changes to what "
-        "you told Kazma), or with `/memory undo <id>` in a chat app. A change not applied, or a fact "
-        "read from their message: ask once whether it is right. It becomes theirs when the user says "
-        "it in their own words (for example \"I work at Initech now\"), or with \"Yes\" on the Memory "
-        "page, or `/memory confirm <id>` in a chat app; \"No\" there, or `/memory dismiss <id>`, keeps "
-        "it out. You cannot apply it yourself."
+        "you told Kazma), or with `/memory undo <id>` in a chat app. A change not applied: ask once "
+        "whether it is right. It changes when the user says it in their own words (for example \"I "
+        "work at Initech now\"), or with \"Yes, change it\" on the Memory page, or `/memory confirm "
+        "<id>` in a chat app. You cannot apply it yourself."
     )
+
+
+def _to_tell(conn: sqlite3.Connection, rows: list[dict[str, Any]], tenant: str, now: float) -> list[dict[str, Any]]:
+    """Of *rows* (open, untold, newest first), what one turn's note says:
+    every update, and at most :data:`_NOTE_QUESTIONS` question -- never about
+    a fact the user was asked about in the last :data:`_ASK_AGAIN_AFTER_S`.
+    A question the user ignores teaches nothing; the rest wait on the
+    Memory page and in ``/memory changes``."""
+    told: list[dict[str, Any]] = []
+    asked = 0
+    for row in rows:
+        if row["kind"] == UPDATE:
+            told.append(row)
+            continue
+        if row["kind"] != PENDING or asked >= _NOTE_QUESTIONS:
+            continue
+        recently = conn.execute(
+            "SELECT 1 FROM memory_changes WHERE tenant_id = ? AND subject = ? AND predicate = ? AND kind = ? "
+            "AND noted_at > ? LIMIT 1",
+            (tenant, row["subject"], row["predicate"], PENDING, now - _ASK_AGAIN_AFTER_S),
+        ).fetchone()
+        if recently is None:
+            told.append(row)
+            asked += 1
+    return told[:_NOTE_MAX]
 
 
 def changes_note(*, tenant_id: str, thread_id: str) -> str:
     """The note for this turn of the chat *thread_id*: the tenant's open
     changes made in that chat (any of its ids, ``forget.chat_keys``) that no
-    turn was told of yet, each marked told (``noted_at``) as it is taken.
-    A turn of another thread -- a scheduled task, a sub-agent, another
-    agent's request -- never spends them."""
+    turn was told of yet (:func:`_to_tell`: every update, at most one
+    question, never Kazma's readings), each marked told (``noted_at``) as it
+    is taken. A turn of another thread -- a scheduled task, a sub-agent,
+    another agent's request -- never spends them."""
     from kazma_core.memory.forget import chat_keys
 
     if not thread_id:
@@ -548,13 +572,14 @@ def changes_note(*, tenant_id: str, thread_id: str) -> str:
     try:
         found = conn.execute(
             f"SELECT {', '.join(_COLUMNS)} FROM memory_changes WHERE tenant_id = ? AND state = 'open' "  # nosec B608 - fixed columns, placeholders only
-            f"AND noted_at IS NULL AND source_session IN ({marks}) ORDER BY created_at DESC LIMIT ?",
-            (tenant, *keys, _NOTE_MAX),
+            f"AND kind IN (?, ?) AND noted_at IS NULL AND source_session IN ({marks}) "
+            "ORDER BY created_at DESC LIMIT 50",
+            (tenant, UPDATE, PENDING, *keys),
         ).fetchall()
-        rows = [dict(zip(_COLUMNS, r, strict=True)) for r in found]
+        now = time.time()
+        rows = _to_tell(conn, [dict(zip(_COLUMNS, r, strict=True)) for r in found], tenant, now)
         if not rows:
             return ""
-        now = time.time()
         conn.executemany("UPDATE memory_changes SET noted_at = ? WHERE id = ? AND tenant_id = ?",
                          [(now, row["id"], tenant) for row in rows])
         conn.commit()
@@ -638,7 +663,7 @@ def decide_change(ref: str, decision: str, *, tenant_id: str, actor: str) -> dic
         row = _row(conn, change_id, tenant)
         if row is None:
             raise ChangeRefusedError("not_found")
-        if row["kind"] != DECISIONS[decision]:
+        if row["kind"] not in DECISIONS[decision]:
             raise ChangeRefusedError("wrong_kind")
         if decision in ("undo", "dismiss"):
             from kazma_core.memory.schema_v2 import ensure_ops_schema
@@ -666,16 +691,19 @@ def decide_change(ref: str, decision: str, *, tenant_id: str, actor: str) -> dic
 
 
 def _prune(conn: sqlite3.Connection, tenant: str, now: float) -> None:
-    """Let go of open pending changes no one answered in :data:`PENDING_DAYS`,
-    and keep the newest :data:`KEEP_DECIDED` decided ones."""
+    """Let go of open pending changes and readings no one answered in
+    :data:`PENDING_DAYS`, and keep the newest :data:`KEEP_DECIDED` decided
+    ones -- and every "Not me" (a dismissed reading): it is what keeps the
+    value from being filed again (:func:`user_said_not_me`)."""
     conn.execute(
         "UPDATE memory_changes SET state = 'expired', decided_at = ?, decided_by = 'expiry' "
-        "WHERE tenant_id = ? AND kind = ? AND state = 'open' AND created_at < ?",
-        (now, tenant, PENDING, now - PENDING_DAYS * 86400.0),
+        "WHERE tenant_id = ? AND kind IN (?, ?) AND state = 'open' AND created_at < ?",
+        (now, tenant, PENDING, READING, now - PENDING_DAYS * 86400.0),
     )
     conn.execute(
-        "DELETE FROM memory_changes WHERE tenant_id = ? AND state != 'open' AND id NOT IN ("
+        "DELETE FROM memory_changes WHERE tenant_id = ? AND state != 'open' "
+        "AND NOT (kind = ? AND state = 'dismissed') AND id NOT IN ("
         "SELECT id FROM memory_changes WHERE tenant_id = ? AND state != 'open' "
         "ORDER BY COALESCE(decided_at, created_at) DESC LIMIT ?)",
-        (tenant, tenant, KEEP_DECIDED),
+        (tenant, READING, tenant, KEEP_DECIDED),
     )

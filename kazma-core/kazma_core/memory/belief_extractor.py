@@ -545,14 +545,27 @@ def _default_method(stats: dict[str, Any] | None) -> str:
     return USER_STATED if (stats or {}).get("source") == "heuristic" else LLM_INFERRED
 
 
+def _user_said_not_me(primary_conn, clean: dict[str, Any], *, tenant_id: str) -> bool:
+    from kazma_core.memory import changes
+
+    try:
+        return changes.user_said_not_me(primary_conn, tenant_id=tenant_id, subject="user",
+                                        predicate=clean["predicate"], value=clean["object"])
+    except sqlite3.OperationalError as exc:
+        if "memory_changes" not in str(exc):
+            raise
+        return False  # a store with no change log holds no "Not me"
+
+
 def _put_to_the_user(
     primary_conn, action: dict[str, Any], clean: dict[str, Any], *, user_text: str, tenant_id: str,
     session_id: str | None, turn: int | None, now: float | None, stats: dict[str, Any],
 ) -> None:
-    """A pending change for the model's reading *clean* (``mutate_belief``
-    answered *action*): in place of the fact the user stated when the trust
-    gate refused it, or as the first fact of its kind when it was written as
-    the model's (``changes.record_first_reading``)."""
+    """The model's reading *clean* (``mutate_belief`` answered *action*) put
+    to the user: a question when the trust gate refused it over a fact the
+    user stated (``changes.record_pending``); Kazma's reading, shown on the
+    Memory page and never asked, when it is the first fact of its kind
+    (``changes.record_first_reading``)."""
     from kazma_core.memory import changes
 
     try:
@@ -593,10 +606,11 @@ def _apply_beliefs_to_v2(
     """Sync helper: fence + entity-resolve + mutate a list of raw beliefs.
 
     *user_text* is the turn's message. A fact the model read never gets the
-    user's trust by itself: it is written as the model's inference, and a
-    reading of one of the user's own facts whose value stands in the user's
-    own words is put to the user as a pending change (``memory/changes.py``)
-    -- in place of a fact the user stated, or as the first one of its kind.
+    user's trust by itself: it is written as the model's inference. A reading
+    of one of the user's own facts whose value stands in the user's own words
+    is put to them (``memory/changes.py``): a question when it disagrees
+    with a fact they stated, Kazma's reading on the Memory page when it is
+    the first of its kind; a value the user said "Not me" to is not filed.
     Every product caller names it (``tests/test_memory_own_statements.py``).
 
     *private*: the connections are a private database (the memory
@@ -654,6 +668,12 @@ def _apply_beliefs_to_v2(
             from kazma_core.memory.fact_names import canonical_for_user
 
             clean["predicate"] = canonical_for_user(clean["predicate"])
+            # "Not me" on Kazma's reading of this value: never filed again by
+            # the model (the user's own words still can).
+            if _method == "llm_inferred" and _user_said_not_me(primary_conn, clean, tenant_id=tenant_id):
+                stats["rejected"] += 1
+                stats["not_me"] = stats.get("not_me", 0) + 1
+                continue
         if _method != "user_explicit":
             _mode = get_auto_store_mode(cfg)
             if _mode == "off":
@@ -743,9 +763,10 @@ def _apply_beliefs_to_v2(
         stats["actions"].append(action)
         # The model's reading of one of the user's own facts, in the user's
         # own words with no one else named, is put to the user, never
-        # dropped and never applied as theirs (memory/changes.py, F1): in
-        # place of the fact they stated ("Moved to Rotterdam last month"), or
-        # as the first one of its kind ("We moved to Rotterdam").
+        # applied as theirs (memory/changes.py, F1): a question over the
+        # fact they stated ("Moved to Rotterdam last month"), Kazma's reading
+        # on the Memory page as the first of its kind ("We moved to
+        # Rotterdam"), never a question.
         if clean["subject"] == "user" and user_text and _method == "llm_inferred":
             _put_to_the_user(primary_conn, action, clean, user_text=user_text, tenant_id=tenant_id,
                              session_id=session_id, turn=turn, now=now, stats=stats)
