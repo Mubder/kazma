@@ -47,6 +47,7 @@ def _built_notes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, s
     )
     from kazma_core.ide.env_context import _build_env_context_sync
     from kazma_core.language_lock import language_lock_message
+    from kazma_core.memory.changes import format_changes_note
     from kazma_core.memory.procedural import format_procedural_hints
     from kazma_core.memory.recall import RecallHit, RecallResult, format_recall_block
     from kazma_core.memory.transcript_recall import format_transcript_block
@@ -73,6 +74,10 @@ def _built_notes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, s
         "procedural_hints": format_procedural_hints([{
             "name": "release", "confidence": 0.8, "total_trials": 3,
             "description": "tag and push", "steps": ["git tag"],
+        }]),
+        "memory_changes": format_changes_note([{
+            "id": "mc_0123456789abcdef0123", "kind": "update", "predicate": "lives_in",
+            "old_value": "Paris", "new_value": "Rotterdam",
         }]),
         "knowledge": format_untrusted_block("chunk", source="knowledge"),
         "self_improvement": format_untrusted_block("delta", source="self_improvement"),

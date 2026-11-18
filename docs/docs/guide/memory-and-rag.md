@@ -479,6 +479,13 @@ Kazma** lists them:
   everything as it was. A message about someone else ("My sister moved to
   Rotterdam") asks nothing.
 
+Kazma also tells you, once, in its next reply in the chat the change came
+from: what it changed, or the question it is waiting on. It cannot apply a
+waiting change itself; you do, by saying it in your own words or with the
+buttons. In Telegram, Discord, Slack and WhatsApp, `/memory changes` lists
+them with a short id, and `/memory undo`, `/memory confirm` or `/memory
+dismiss` with that id decides one.
+
 A question you leave unanswered is let go after 30 days. Forgetting the
 fact, the conversation or the words a change holds forgets the change too,
 and the changes are in the memory export. Nothing here calls a model.

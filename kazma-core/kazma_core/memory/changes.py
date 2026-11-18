@@ -42,9 +42,11 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "DECISIONS",
     "KEEP_DECIDED",
+    "NOTE_OPENING",
     "PENDING_DAYS",
     "REF_CHARS",
     "ChangeRefusedError",
+    "changes_note",
     "confirm",
     "decide_change",
     "dismiss",
@@ -52,6 +54,7 @@ __all__ = [
     "forget_facts",
     "forget_mentioning",
     "forget_turn",
+    "format_changes_note",
     "list_changes",
     "open_changes",
     "record_pending",
@@ -342,6 +345,78 @@ def forget_chat(conn: sqlite3.Connection, *, tenant_id: str | None, keys: list[s
         sql += " AND tenant_id = ?"
         params.append(tenant_id)
     return conn.execute(sql, params).rowcount
+
+
+# ── the next turn's note ─────────────────────────────────────────────────
+
+#: How the note opens (``turn_notes.TURN_NOTE_KINDS["memory_changes"]``).
+NOTE_OPENING = "MEMORY CHANGES ("
+#: At most this many changes in one note, newest first.
+_NOTE_MAX = 5
+
+
+def format_changes_note(rows: list[dict[str, Any]]) -> str:
+    """The turn note telling the model what changed in facts the user stated
+    since its last reply in this chat, to say once. The values are the
+    data's (fenced); Kazma's own lines -- what to say, how the user decides
+    -- stand outside the fence. ``""`` for no rows."""
+    from kazma_core.safety.prompt_fence import format_untrusted_block
+
+    if not rows:
+        return ""
+    lines = []
+    for row in rows[:_NOTE_MAX]:
+        what = str(row.get("predicate") or "").replace("_", " ")
+        ref = short_ref(str(row.get("id") or ""))
+        if row.get("kind") == UPDATE:
+            lines.append(f"- {ref} updated from the user's own words: {what}: was "
+                         f"\"{row.get('old_value')}\", now \"{row.get('new_value')}\"")
+        else:
+            lines.append(f"- {ref} not applied, waiting for the user: {what}: still "
+                         f"\"{row.get('old_value')}\"; their message may have meant \"{row.get('new_value')}\"")
+    return (
+        f"{NOTE_OPENING}facts the user told you, changed since your last reply in this chat. Tell the user "
+        "once, briefly and in their language, then go on with what they asked; do not bring these up "
+        "again in later turns.)\n"
+        + format_untrusted_block("\n".join(lines), source="memory_changes")
+        + "\nAn update: say what you changed; the user can undo it on the Memory page (Changes to what "
+        "you told Kazma), or with `/memory undo <id>` in a chat app. A change not applied: ask once "
+        "whether it is right. It changes when the user says it in their own words (for example \"I "
+        "work at Initech now\"), or with \"Yes, change it\" on the Memory page, or `/memory confirm "
+        "<id>` in a chat app. You cannot apply it yourself."
+    )
+
+
+def changes_note(*, tenant_id: str, thread_id: str) -> str:
+    """The note for this turn of the chat *thread_id*: the tenant's open
+    changes made in that chat (any of its ids, ``forget.chat_keys``) that no
+    turn was told of yet, each marked told (``noted_at``) as it is taken.
+    A turn of another thread -- a scheduled task, a sub-agent, another
+    agent's request -- never spends them."""
+    from kazma_core.memory.forget import chat_keys
+
+    if not thread_id:
+        return ""
+    keys = [k for k in (chat_keys(thread_id) or [thread_id]) if k]
+    tenant = tenant_id or "default"
+    marks = ",".join("?" for _ in keys)
+    conn = _open()
+    try:
+        found = conn.execute(
+            f"SELECT {', '.join(_COLUMNS)} FROM memory_changes WHERE tenant_id = ? AND state = 'open' "  # nosec B608
+            f"AND noted_at IS NULL AND source_session IN ({marks}) ORDER BY created_at DESC LIMIT ?",
+            (tenant, *keys, _NOTE_MAX),
+        ).fetchall()
+        rows = [dict(zip(_COLUMNS, r, strict=True)) for r in found]
+        if not rows:
+            return ""
+        now = time.time()
+        conn.executemany("UPDATE memory_changes SET noted_at = ? WHERE id = ? AND tenant_id = ?",
+                         [(now, row["id"], tenant) for row in rows])
+        conn.commit()
+    finally:
+        conn.close()
+    return format_changes_note(rows)
 
 
 # ── for a caller with no connection of its own (the chat apps' /memory) ──

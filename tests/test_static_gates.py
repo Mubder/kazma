@@ -1029,7 +1029,7 @@ _LOOP_STALL_HELPERS = frozenset({
     "get_about", "set_about",
     # Changes to facts the user stated (the audit's F1, memory/changes.py):
     # the chat apps' /memory changes and the turn's note read and write them.
-    "open_changes", "decide_change", "list_changes",
+    "open_changes", "decide_change", "list_changes", "changes_note",
     # Checkpoint retention (2026-09-27): SQLite files and Postgres deletes,
     # one transaction per chat; the task store's single-task delete.
     "run_checkpoint_retention", "retention_setting", "delete_task",

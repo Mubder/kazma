@@ -474,6 +474,26 @@ async def supervisor_node(
             _env_block = ""
         messages = _ensure_environment_note(messages, _env_block)
 
+    # ── What changed in the user's facts since the last reply (the audit's F1) ──
+    # An update Kazma made from their words, a correction waiting for their
+    # answer (memory/changes.py): the first turn of the chat they came from
+    # after they were made is told, once. A read failure costs this turn the
+    # note; the Memory page and /memory changes still show them.
+    if iteration == 0:
+        from kazma_core.memory.changes import changes_note
+
+        try:
+            _changes_note = await asyncio.to_thread(
+                changes_note, tenant_id=str(state.get("tenant_id") or "default"),
+                thread_id=str(state.get("thread_id") or ""),
+            )
+        except sqlite3.Error:
+            logger.warning("[Supervisor] memory changes unreadable; this turn goes without the note",
+                           exc_info=True)
+            _changes_note = ""
+        if _changes_note:
+            messages.insert(1, {"role": "system", "content": _changes_note})
+
     # ── LLM call ──────────────────────────────────────────────────
     # Extract the latest user message (used by both the model router and
     # per-turn memory retrieval below).

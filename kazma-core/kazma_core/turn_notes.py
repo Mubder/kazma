@@ -71,6 +71,9 @@ TURN_NOTE_KINDS: dict[str, tuple[str, ...]] = {
     "past_chats": ('<kazma:data source="chat_history"',),
     # memory.procedural.format_procedural_hints.
     "procedural_hints": ('<kazma:data source="memory_v2_procedural"',),
+    # memory.changes.format_changes_note: what changed in the user's facts
+    # since the last reply, said once (the audit's F1).
+    "memory_changes": ("MEMORY CHANGES (",),
     # Knowledge Library auto-inject (transports and supervisor).
     "knowledge": ('<kazma:data source="knowledge"',),
     # Self-improvement Soul, re-read every turn (§11).

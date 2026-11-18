@@ -2161,7 +2161,14 @@ four injected were noise.
   decides one (`changes.decide_change`: a unique start of the id, refused
   `ambiguous` or `wrong_kind`); the four words are a gateway admin's
   (`slash_commands.MEMORY_CHANGE_WORDS` in `changes_global_config`: they
-  show and rewrite the tenant's facts). Gates:
+  show and rewrite the tenant's facts). The next turn of the chat a change
+  came from is told once: the supervisor adds the turn note
+  `memory_changes` at iteration 0 (`changes.changes_note`, off the loop;
+  the changes whose `source_session` is one of the thread's ids, marked
+  `noted_at` as they are taken; the values fenced, Kazma's lines outside).
+  A turn of another thread -- a scheduled task, a sub-agent, an A2A
+  request -- never spends it; the model cannot apply a waiting change
+  (no tool decides one: a confirmation is the user's channel). Gates:
   `tests/test_memory_changes.py` (EN/AR; the refusal with no change log as
   the negative control), the plant's control in
   `tests/test_memory_store_registry.py`, and in a browser, reached by the
