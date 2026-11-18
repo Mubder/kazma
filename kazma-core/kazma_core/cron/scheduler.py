@@ -781,8 +781,9 @@ class CronScheduler:
             timing = " ".join(timing.split())
         else:
             timing = None
+        pinned: int | None = None
         if prompt is not None or timing:
-            refused = await self._not_theirs_to_change(
+            refused, pinned = await self._change_rule(
                 job_id, tenant_id, prompt=prompt is not None, recurring=bool(series_start))
             if refused:
                 logger.info("[CronScheduler] edit %s -> %s actor=%s source=%s", job_id, refused,
@@ -791,10 +792,15 @@ class CronScheduler:
         carried: str | None = None
         if prompt is not None and (written_by_person or outside_text):
             carried = "" if written_by_person else _outside_text_json(outside_text)
+        # Someone else's change was allowed for the job as it was read: it is
+        # made only to that version, while it is still pending (a fire that
+        # began meanwhile, or another change, answers conflict; S1-16
+        # follow-up). A claim keeps the version, so pending is checked too.
+        expected = expected_version if expected_version is not None else pinned
         status = await self._store.update_job(
             job_id, timing=timing, prompt=prompt, next_run=next_run, series_start=series_start,
-            tenant_id=tenant_id, expected_version=expected_version, actor=actor, source=source,
-            outside_text=carried)
+            tenant_id=tenant_id, expected_version=expected, actor=actor, source=source,
+            outside_text=carried, pending_only=pinned is not None)
         logger.info("[CronScheduler] edit %s -> %s (timing=%r prompt_edited=%s) actor=%s source=%s",
                     job_id, status, timing or "(unchanged)", prompt is not None, actor or "-", source or "-")
         return {"status": status, "job_id": job_id, "timing": timing or "", "next_run": next_run or ""}
@@ -805,7 +811,7 @@ class CronScheduler:
         """Run a finished job again, at *timing* (the explicit "Run again")."""
         from kazma_core.cron.timing import TimingError, resolve_timing
 
-        refused = await self._not_theirs_to_change(job_id, tenant_id)
+        refused, _pinned = await self._change_rule(job_id, tenant_id)
         if refused:
             logger.info("[CronScheduler] restore %s -> %s actor=%s source=%s", job_id, refused,
                         actor or "-", source or "-")
@@ -822,10 +828,24 @@ class CronScheduler:
             expected_version=expected_version, actor=actor, source=source)
         return {"status": status, "job_id": job_id, "next_run": next_run if status == "restored" else ""}
 
+    async def _change_rule(self, job_id: str, tenant_id: str | None, *,
+                           prompt: bool = True, recurring: bool = False) -> tuple[str, int | None]:
+        """``(refusal, pinned version)`` for this change to *job_id*: the
+        refusal of :meth:`_not_theirs_to_change`, and -- for a change someone
+        else may make -- the version of the job it was allowed for, which the
+        write must still find (a fire or another change in between answers
+        ``conflict``, Spaces S1-16 follow-up). ``("", None)`` for the
+        caller's own change, and while Spaces is not enforced."""
+        found = await self._not_theirs_to_change(job_id, tenant_id, prompt=prompt, recurring=recurring)
+        if isinstance(found, _SomeoneElses):
+            return "", found.version
+        return str(found or ""), None
+
     async def _not_theirs_to_change(self, job_id: str, tenant_id: str | None, *,
-                                    prompt: bool = True, recurring: bool = False) -> str:
+                                    prompt: bool = True, recurring: bool = False) -> str | _SomeoneElses:
         """Why the caller may not make this change to *job_id*, or ``""``
-        (Spaces S1-14 review).
+        (Spaces S1-14 review); for a change someone else may make, a
+        :class:`_SomeoneElses` naming the version it was allowed for.
 
         Once Spaces is enforced a job fires as the account it acts for (its
         creator, ``_fire_binding``). Anyone else may only move a pending
@@ -857,7 +877,9 @@ class CronScheduler:
             return ""
         if prompt or recurring or job.status != JobStatus.PENDING or job.series_start:
             return "not_yours"
-        return ""  # someone else moving a pending one-off to another one-off time
+        # Someone else moving a pending one-off to another one-off time: for
+        # this version only (_change_rule).
+        return _SomeoneElses(version=int(job.version))
 
     async def _hold_for_identity(self, job: ScheduledJob, exc: BaseException) -> bool:
         """A fire whose binding cannot be read because the database is away
@@ -865,11 +887,13 @@ class CronScheduler:
         occurrence, as a task held while the database is away (§44), and the
         availability watch holds the next passes before they claim. True
         then. False for any other failure (a registry that is not a mapping):
-        the caller fails the fire once, never claims it again every pass."""
+        the caller fails the fire once, never claims it again every pass.
+        A locked or busy SQLite settings file passes too, so it is held the
+        same way, without being an outage (Spaces S1-16 follow-up)."""
         from kazma_core.db import availability
 
         cause = exc.__cause__ if exc.__cause__ is not None else exc
-        if not availability.note_failure("scheduled", cause):
+        if not (_sqlite_lock_passes(cause) or availability.note_failure("scheduled", cause)):
             logger.error("[CronScheduler] %s: who it fires as cannot be read (%s); the fire fails", job.job_id,
                          type(cause).__name__)
             return False
@@ -1461,6 +1485,24 @@ def _acting_account(space_id: str | None) -> str:
     from kazma_core.spaces import identity
 
     return identity.acting_account(str(space_id or ""))
+
+
+@dataclass(frozen=True)
+class _SomeoneElses:
+    """A change to a job that acts for someone else, allowed for the job at
+    *version* only (``CronScheduler._change_rule``)."""
+
+    version: int
+
+
+def _sqlite_lock_passes(exc: BaseException) -> bool:
+    """A locked or busy SQLite file: it passes once the writer is done, as an
+    outage does when Postgres comes back (it is never one: the availability
+    watch is Postgres's)."""
+    import sqlite3
+
+    text = str(exc).lower()
+    return isinstance(exc, sqlite3.OperationalError) and ("locked" in text or "busy" in text)
 
 
 def _fire_binding(job: ScheduledJob) -> _FireBinding | None:

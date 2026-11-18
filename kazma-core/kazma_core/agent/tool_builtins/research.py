@@ -110,11 +110,16 @@ def register_research_tools(registry: Any) -> None:
         topic: str = "", depth: str = "deep", max_sources: int = 8, export_docx: bool = False, resume_session_id: str = ""
     ) -> str:
         try:
-            from kazma_core.tools.research_session import session_here
+            from kazma_core.tools.research_session import session_to_change
             from kazma_core.tools.research_session import start_deep_research as _start
 
-            if resume_session_id and await asyncio.to_thread(session_here, resume_session_id) is None:
-                return json.dumps({"error": "not found"}, ensure_ascii=False)  # another space's (S1-16)
+            if resume_session_id:
+                # Another space's: as an unknown one (S1-16); a member who may
+                # only read it is told so (N32).
+                _sess, refused = await asyncio.to_thread(session_to_change, resume_session_id)
+                if refused:
+                    return json.dumps({"error": "not found" if refused == "not_found" else refused},
+                                      ensure_ascii=False)
             sess = await _start(topic, depth=depth, max_sources=max_sources, export_docx=export_docx, resume_session_id=resume_session_id or None)
             return json.dumps(sess.to_dict(), ensure_ascii=False, indent=2, default=str)
         except Exception as exc:
@@ -134,10 +139,13 @@ def register_research_tools(registry: Any) -> None:
 
     @registry.register(description="Request cancellation of a background research session. Cancelling remains visible until owned cleanup completes.", category="research")
     async def cancel_research_session(session_id: str) -> str:
-        from kazma_core.tools.research_session import cancel_session, session_here
+        from kazma_core.tools.research_session import cancel_session, session_to_change
         from kazma_core.web_acquire.crawl_jobs import call
 
-        if await call(session_here, session_id) is None:  # another space's: as an unknown one (S1-16)
-            return json.dumps({"error": "not found"}, ensure_ascii=False)
+        # Another space's: as an unknown one (S1-16); a member who may only
+        # read it is told so (N32).
+        _sess, refused = await call(session_to_change, session_id)
+        if refused:
+            return json.dumps({"error": "not found" if refused == "not_found" else refused}, ensure_ascii=False)
         session = await call(cancel_session, session_id)
         return json.dumps(session.to_dict() if session else {"error": "not found"}, ensure_ascii=False, default=str)

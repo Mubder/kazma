@@ -10,7 +10,10 @@ the older multi-user mode, behave as before. Enforced:
 * a chat's web search is kept as one session per question per space: the
   same question asked in two spaces is two rows (the owner's keeps its ids);
 * a research task (a swarm task of kind research) keeps to its space, as
-  every swarm task does (S1-15).
+  every swarm task does (S1-15);
+* (the follow-up) shared research is read by every member and changed by its
+  author and the space's owner (N32); a chat search's id is unambiguous and
+  a row of another space is a miss; work bound to no space makes no session.
 
 A research report and the other research files are the workspace folder's,
 which S1-19 makes the space's; their routes and tools wait for it there.
@@ -121,14 +124,17 @@ def test_control_the_task_list_with_no_space_filter(matrix, monkeypatch) -> None
 
 @pytest.mark.parametrize("target", ("tool:web_search", "tool:web_search_duckduckgo"))
 def test_control_one_search_row_for_every_space(target, matrix, monkeypatch) -> None:
-    """The chat search's row named by its question alone: the same question
-    asked in two spaces is one row, and B's search is written into A's."""
+    """The chat search's row named by its question alone, and a row of
+    another space under that id written as one's own (both guards of the
+    follow-up taken out): the same question asked in two spaces is one row,
+    and B's search is written into A's."""
     import hashlib
 
     from kazma_core.tools import research_session
 
     monkeypatch.setattr(research_session, "_chat_search_key",
-                        lambda topic, space: hashlib.md5(topic.encode(), usedforsecurity=False).hexdigest()[:12])
+                        lambda topic, *_who: hashlib.md5(topic.encode(), usedforsecurity=False).hexdigest()[:12])
+    monkeypatch.setattr(research_session, "_row_is_this_spaces", lambda row, space: True)
     _fails(target, matrix)
 
 
@@ -185,4 +191,252 @@ def test_the_owners_chat_search_keeps_the_ids_it_had() -> None:
     old = hashlib.md5(b"a question", usedforsecurity=False).hexdigest()[:12]
     assert _chat_search_key("a question", "") == old
     assert _chat_search_key("a question", OWNER_SPACE_ID) == old
+    assert _chat_search_key("a question", OWNER_SPACE_ID, OWNER_ACCOUNT_ID) == old
     assert _chat_search_key("a question", Matrix.SPACE_A) != old
+
+
+# ── the follow-up: shared research is read by every member, changed by two ──
+#
+# Decision N32: in a shared space the author of a research session or task
+# and the space's owner may change it; another member reads it.
+
+SHARED = "matrix-research-shared"
+
+
+@pytest.fixture
+def shared(matrix) -> str:
+    """A space person A made (its owner) and person B joined."""
+    from kazma_core.spaces import identity
+
+    identity.create_space("Shared research", created_by=matrix.account_a, space_id=SHARED)
+    identity.add_member(SHARED, matrix.account_b)
+    return SHARED
+
+
+def _in_shared(w, who: str, method: str, path: str, **kwargs):
+    from kazma_ui import space_binding
+
+    return w.client.request(method, path, headers={"x-matrix-person": who, space_binding.SPACE_HEADER: SHARED},
+                            **kwargs)
+
+
+def _shared_session(w, who: str, mark: str):
+    from kazma_core.tools.research_session import create_session, update_session
+
+    with scope.bind_scope(SHARED, w.account_of(who)):
+        made = create_session(f"topic {mark}", depth="deep")
+    update_session(made.id, status="done", stage="complete", message="Done", summary=f"summary {mark}")
+    return made
+
+
+_CHANGES = (("POST", "/api/research/sessions/{}/archive"), ("POST", "/api/research/sessions/{}/unarchive"),
+            ("POST", "/api/research/sessions/{}/cancel"), ("POST", "/api/research/sessions/{}/resume"),
+            ("DELETE", "/api/research/sessions/{}"))
+
+
+def _member_changes(matrix) -> tuple[dict[str, int], int, dict, dict]:
+    """B's every change to A's session in the shared space, B's read of it,
+    the session as it was and as it is after B's changes."""
+    from tests._research_space_cases import world
+
+    with world(matrix) as w:
+        authored = _shared_session(w, "a", matrix.plant("sharedsession").a)
+        before = w.held_session(authored)
+        read = _in_shared(w, "b", "GET", f"/api/research/sessions/{authored.id}").status_code
+        answers = {f"{m} {p}": _in_shared(w, "b", m, p.format(authored.id)).status_code for m, p in _CHANGES}
+        return answers, read, before, w.held_session(authored)
+
+
+def test_in_a_shared_space_a_member_reads_shared_research_and_changes_none(matrix, shared) -> None:
+    answers, read, before, after = _member_changes(matrix)
+    assert read == 200
+    assert set(answers.values()) == {403}, answers
+    assert after == before
+
+
+def test_control_any_member_changes_shared_research(matrix, shared, monkeypatch) -> None:
+    import kazma_core.spaces.shared_work as shared_work
+
+    monkeypatch.setattr(shared_work, "may_change", lambda space_id, author: True)
+    answers, _read, _before, _after = _member_changes(matrix)
+    assert 403 not in answers.values(), answers  # B archived, cancelled... A's session
+
+
+def test_the_author_and_the_spaces_owner_change_shared_research(matrix, shared) -> None:
+    from tests._research_space_cases import world
+
+    with world(matrix) as w:
+        bs = _shared_session(w, "b", matrix.plant("authorb").b)
+        assert _in_shared(w, "b", "POST", f"/api/research/sessions/{bs.id}/archive").status_code == 200
+        assert _in_shared(w, "a", "POST", f"/api/research/sessions/{bs.id}/unarchive").status_code == 200
+        assert _in_shared(w, "a", "DELETE", f"/api/research/sessions/{bs.id}").status_code == 200
+        assert w.held_session(bs) == {}
+
+
+def test_the_research_tools_refuse_a_member_who_may_only_read(matrix, shared) -> None:
+    from tests._chat_space_cases import _registry
+    from tests._research_space_cases import world
+
+    with world(matrix) as w:
+        authored = _shared_session(w, "a", matrix.plant("sharedtool").a)
+        account_b = w.account_of("b")
+
+        def as_b(name: str, **kwargs) -> str:
+            tool = _registry().get_tool(name)
+
+            async def run() -> str:
+                with scope.bind_scope(SHARED, account_b):
+                    return str(await tool.func(**kwargs))
+
+            return w.client.portal.call(run)
+
+        assert '"not_yours"' in as_b("cancel_research_session", session_id=authored.id)
+        assert '"not_yours"' in as_b("start_deep_research", resume_session_id=authored.id)
+        assert authored.id in as_b("research_session_status", session_id=authored.id)  # reads it
+
+
+def _shared_task(w, who: str, mark: str):
+    from kazma_core.swarm.task import SwarmTask, TaskResult, TaskStatus
+
+    task = SwarmTask(prompt=f"research {mark}", status=TaskStatus.COMPLETED,
+                     metadata={"kind": "research", "tenant_id": SHARED, "asker": w.account_of(who)},
+                     completed_at="2026-11-18T08:00:00+00:00")
+    task.result = TaskResult(task_id=task.id, status="success", aggregated_output=f"report {mark}")
+    assert w.engine._task_store.persist_task(task), task.id
+    return task
+
+
+def _member_changes_a_task(matrix) -> tuple[list[int], dict, dict]:
+    from tests._research_space_cases import world
+
+    with world(matrix) as w:
+        authored = _shared_task(w, "a", matrix.plant("sharedtask").a)
+        before = w.held_task(authored)
+        answers = [_in_shared(w, "b", "POST", f"/api/research/tasks/{authored.id}/archive").status_code,
+                   _in_shared(w, "b", "POST", f"/api/research/tasks/{authored.id}/unarchive").status_code,
+                   _in_shared(w, "b", "DELETE", f"/api/research/tasks/{authored.id}").status_code]
+        return answers, before, w.held_task(authored)
+
+
+def test_one_rule_for_a_research_tasks_archive_and_delete(matrix, shared) -> None:
+    answers, before, after = _member_changes_a_task(matrix)
+    assert answers == [403, 403, 403] and after == before, answers
+
+
+def test_control_a_research_task_changed_by_any_member(matrix, shared, monkeypatch) -> None:
+    import kazma_core.spaces.shared_work as shared_work
+
+    monkeypatch.setattr(shared_work, "may_change", lambda space_id, author: True)
+    answers, _before, after = _member_changes_a_task(matrix)
+    assert 403 not in answers and after == {}, answers
+
+
+def test_the_spaces_owner_changes_a_members_research_task(matrix, shared) -> None:
+    from tests._research_space_cases import world
+
+    with world(matrix) as w:
+        theirs = _shared_task(w, "b", matrix.plant("ownertask").b)
+        assert _in_shared(w, "a", "POST", f"/api/research/tasks/{theirs.id}/archive").status_code == 200
+        assert _in_shared(w, "a", "DELETE", f"/api/research/tasks/{theirs.id}").status_code == 200
+        assert w.held_task(theirs) == {}
+
+
+# ── the follow-up: a chat search's id, the author, and no space ──────────
+
+
+def test_no_topic_of_the_owners_shares_an_id_with_another_spaces_search() -> None:
+    """The review's collision: the owner's key was the bare topic and another
+    space's ``space|topic``, so the owner's search of "<B>|T" and B's "T"
+    were one row."""
+    import hashlib
+
+    from kazma_core.tools.research_session import _chat_search_key
+
+    def as_s1_16(topic: str, space: str) -> str:
+        key = topic if space in ("", OWNER_SPACE_ID) else f"{space}|{topic}"
+        return hashlib.md5(key.encode(), usedforsecurity=False).hexdigest()[:12]
+
+    crafted = f"{Matrix.SPACE_B}|T"
+    assert as_s1_16(crafted, OWNER_SPACE_ID) == as_s1_16("T", Matrix.SPACE_B)  # the control
+    assert _chat_search_key(crafted, OWNER_SPACE_ID) != _chat_search_key("T", Matrix.SPACE_B, "acct-b")
+    assert _chat_search_key("T", Matrix.SPACE_B, "acct-b").startswith("s")  # never 12 hex digits
+
+
+def test_two_members_of_a_shared_space_keep_their_own_search(private_sessions, matrix, monkeypatch) -> None:
+    from kazma_core.tools.research_session import get_session, record_chat_research
+
+    monkeypatch.setattr(scope, "_enforced", True)
+    with scope.bind_scope(SHARED, matrix.account_a):
+        mine = record_chat_research("the same question", result_text="person A's results")
+    with scope.bind_scope(SHARED, matrix.account_b):
+        theirs = record_chat_research("the same question", result_text="person B's longer results here")
+    assert mine.id != theirs.id
+    assert get_session(mine.id).summary == "person A's results"
+    assert (mine.asker, theirs.asker) == (matrix.account_a, matrix.account_b)
+
+
+def _a_search_over_another_spaces_row(monkeypatch):
+    from kazma_core.tools.research_session import get_session, record_chat_research
+
+    monkeypatch.setattr(scope, "_enforced", True)
+    with scope.bind_scope(Matrix.SPACE_B, "acct-b"):
+        record_chat_research("t", session_id="rs_chat_shared", result_text="B's row")
+    with scope.bind_scope(Matrix.SPACE_A, "acct-a"):
+        written = record_chat_research("t", session_id="rs_chat_shared", result_text="A's longer results")
+    return written, get_session("rs_chat_shared")
+
+
+def test_a_row_of_another_space_under_the_id_is_a_miss(private_sessions, monkeypatch) -> None:
+    written, b_row = _a_search_over_another_spaces_row(monkeypatch)
+    assert written.id != "rs_chat_shared" and written.tenant_id == Matrix.SPACE_A
+    assert b_row.summary == "B's row" and b_row.tenant_id == Matrix.SPACE_B
+
+
+def test_control_a_row_of_another_space_written_as_ones_own(private_sessions, monkeypatch) -> None:
+    from kazma_core.tools import research_session
+
+    monkeypatch.setattr(research_session, "_row_is_this_spaces", lambda row, space: True)
+    written, b_row = _a_search_over_another_spaces_row(monkeypatch)
+    assert written.id == "rs_chat_shared" and b_row.summary == "A's longer results"
+
+
+def test_a_session_records_its_author_whatever_the_mode(private_sessions, matrix) -> None:
+    from kazma_core.tools.research_session import create_session, record_chat_research
+
+    with scope.bind_scope(Matrix.SPACE_A, matrix.account_a):
+        assert create_session("a topic").asker == matrix.account_a
+        assert record_chat_research("a search").asker == matrix.account_a
+    assert create_session("nobody's").asker == ""
+
+
+def test_once_enforced_work_bound_to_no_space_makes_no_session(private_sessions, monkeypatch) -> None:
+    from kazma_core.tools.research_session import create_session, list_sessions, record_chat_research
+
+    monkeypatch.setattr(scope, "_enforced", True)
+    with pytest.raises(scope.NoSpaceBound):
+        create_session("for no one")
+    with pytest.raises(scope.NoSpaceBound):
+        record_chat_research("for no one")
+    with scope.bind_scope(OWNER_SPACE_ID, OWNER_ACCOUNT_ID):
+        assert list_sessions(limit=10) == []  # nothing became the owner's
+
+
+def test_control_a_session_for_no_one_became_the_owners(private_sessions, monkeypatch) -> None:
+    from kazma_core.tenant_context import get_current_tenant_id
+    from kazma_core.tools import research_session
+
+    def as_s1_16() -> str:
+        bound = scope.current_scope()
+        return bound.space_id if bound is not None else (get_current_tenant_id() or "")
+
+    monkeypatch.setattr(scope, "_enforced", True)
+    monkeypatch.setattr(research_session, "_session_space", as_s1_16)
+    made = research_session.create_session("for no one")
+    with scope.bind_scope(OWNER_SPACE_ID, OWNER_ACCOUNT_ID):
+        assert made.id in {s.id for s in research_session.list_sessions(limit=10)}
+
+
+def test_not_enforced_a_session_for_no_one_is_made_as_before(private_sessions) -> None:
+    from kazma_core.tools.research_session import create_session
+
+    assert create_session("as before").tenant_id == ""

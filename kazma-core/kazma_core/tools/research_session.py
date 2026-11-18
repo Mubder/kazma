@@ -38,6 +38,8 @@ __all__ = [
     "subscribe_progress",
     "unsubscribe_progress",
     "record_chat_research",
+    "session_here",
+    "session_to_change",
     "suppress_chat_recording",
 ]
 
@@ -157,6 +159,10 @@ class ResearchSession:
     #: The space the session is (Spaces S1-16, always stamped); ``""`` for a
     #: session from before, which is the owner's.
     tenant_id: str = ""
+    #: The account that started it (Spaces S1-16 follow-up, always stamped
+    #: when a person is bound); ``""`` for a session from before or one
+    #: Kazma started. Its author may change it (decision N32).
+    asker: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -195,7 +201,8 @@ def _conn() -> sqlite3.Connection:
             updated_at REAL,
             meta_json TEXT DEFAULT '{}',
             archived INTEGER DEFAULT 0,
-            tenant_id TEXT DEFAULT ''
+            tenant_id TEXT DEFAULT '',
+            asker TEXT DEFAULT ''
         )
         """
     )
@@ -210,6 +217,7 @@ def _conn() -> sqlite3.Connection:
             ("rubric_ok", "INTEGER"),
             ("archived", "INTEGER DEFAULT 0"),
             ("tenant_id", "TEXT DEFAULT ''"),
+            ("asker", "TEXT DEFAULT ''"),
         ),
     )
     c.commit()
@@ -261,6 +269,7 @@ def _row_to_session(r: sqlite3.Row) -> ResearchSession:
         meta=meta if isinstance(meta, dict) else {},
         archived=rarch,
         tenant_id=str(r["tenant_id"] or "") if "tenant_id" in keys else "",
+        asker=str(r["asker"] or "") if "asker" in keys else "",
     )
 
 
@@ -371,6 +380,7 @@ def create_session(
         updated_at=now,
         meta={**(meta or {}), "process_owner": _process_owner()},
         tenant_id=_session_space(),
+        asker=_session_author(),
     )
     c = _conn()
     try:
@@ -382,8 +392,8 @@ def create_session(
             INSERT INTO research_sessions
             (id, topic, depth, status, stage, message, log_json, report_path,
              summary, error, sources, max_sources, rubric_score, rubric_ok,
-             created_at, updated_at, meta_json, archived, tenant_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             created_at, updated_at, meta_json, archived, tenant_id, asker)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 sess.id,
@@ -405,6 +415,7 @@ def create_session(
                 json.dumps(sess.meta),
                 0,
                 sess.tenant_id,
+                sess.asker,
             ),
         )
         c.commit()
@@ -417,25 +428,76 @@ def create_session(
     return sess
 
 
-def _chat_search_key(topic: str, space: str) -> str:
-    """The id part of a chat search's row: one row per topic, per space
-    (Spaces S1-16). The owner's space keeps the ids it had (the topic alone);
-    any other space's are salted with it, so one topic asked in two spaces is
-    two rows, never one row both read and write."""
+def _chat_search_key(topic: str, space: str, asker: str = "") -> str:
+    """The id part of a chat search's row: one row per topic, per space and,
+    in a space with several people, per person (Spaces S1-16 and its
+    follow-up). The owner's space -- one person -- keeps the ids it had: 12
+    hex digits of the topic alone. Every other space's key starts with
+    ``s`` (never a hex digit) and hashes the space, the person and the topic
+    as one JSON list, so no topic of the owner's, and no other space's or
+    person's, can give the same id."""
     from kazma_core.spaces.scope import OWNER_SPACE_ID
 
-    key = topic if space in ("", OWNER_SPACE_ID) else f"{space}|{topic}"
-    return hashlib.md5(key.encode(), usedforsecurity=False).hexdigest()[:12]
+    if space in ("", OWNER_SPACE_ID):
+        return hashlib.md5(topic.encode(), usedforsecurity=False).hexdigest()[:12]
+    named = json.dumps([space, asker, topic], ensure_ascii=False)
+    return "s" + hashlib.sha256(named.encode()).hexdigest()[:16]
 
 
 def _session_space() -> str:
     """The space a session made now belongs to (Spaces S1-16): the bound
-    scope's, else the bound tenant, else ``""``. A ContextVar read: no I/O."""
-    from kazma_core.spaces.scope import current_scope
+    scope's, else the bound tenant, else ``""``. Once Spaces is enforced,
+    work bound to no space makes no session: ``NoSpaceBound`` (it became the
+    owner's, follow-up). A ContextVar read: no I/O."""
+    from kazma_core.spaces.scope import current_scope, require_space_id, spaces_enforced
     from kazma_core.tenant_context import get_current_tenant_id
 
+    if spaces_enforced():
+        return require_space_id()
     bound = current_scope()
     return bound.space_id if bound is not None else (get_current_tenant_id() or "")
+
+
+def _session_author() -> str:
+    """The person a session made now is for, ``""`` when none is bound (a
+    stamp, always written). A ContextVar read: no I/O."""
+    from kazma_core.spaces.scope import bound_asker
+
+    return bound_asker() or ""
+
+
+def session_to_change(session_id: str) -> tuple[ResearchSession | None, str]:
+    """The session *session_id* when the caller may change it -- archive,
+    restore, delete, cancel, resume -- and ``""``; else ``(None, code)``:
+    ``not_found`` (unknown, or another space's), ``not_yours`` (a member
+    who may only read it: decision N32, the author and the space's owner
+    change shared research) or ``identity_unavailable``. Every route and
+    tool that changes a session asks it. Blocking."""
+    from kazma_core.spaces.identity import IdentityUnavailable
+    from kazma_core.spaces.shared_work import NOT_YOURS, may_change
+
+    sess = session_here(session_id)
+    if sess is None:
+        return None, "not_found"
+    try:
+        allowed = may_change(sess.tenant_id, sess.asker)
+    except IdentityUnavailable:
+        logger.warning("[research_session] who may change %s cannot be read; refused", session_id)
+        return None, "identity_unavailable"
+    return (sess, "") if allowed else (None, NOT_YOURS)
+
+
+def _row_is_this_spaces(row: sqlite3.Row, space: str) -> bool:
+    """Whether a chat search's existing row is this space's: always while
+    Spaces is not enforced; once it is, a row of another space is a miss and
+    is never written (follow-up). A row from before Spaces is the owner's."""
+    from kazma_core.spaces.scope import OWNER_SPACE_ID, spaces_enforced
+
+    if not spaces_enforced():
+        return True
+    keys = row.keys()
+    held = (str(row["tenant_id"] or "") if "tenant_id" in keys else "") or OWNER_SPACE_ID
+    return held == (space or OWNER_SPACE_ID)
 
 
 def _spaces_shown() -> tuple[str, ...] | None:
@@ -971,12 +1033,17 @@ def record_chat_research(
         return None
     now = time.time()
     space = _session_space()
-    sid = session_id or (f"rs_chat_{_chat_search_key(topic, space)}" if topic else f"rs_chat_{uuid.uuid4().hex[:12]}")
+    author = _session_author()
+    sid = session_id or (f"rs_chat_{_chat_search_key(topic, space, author)}" if topic
+                         else f"rs_chat_{uuid.uuid4().hex[:12]}")
     c = _conn()
     try:
         c.execute('BEGIN IMMEDIATE')
         cur = c.execute("SELECT * FROM research_sessions WHERE id = ?", (sid,))
         row = cur.fetchone()
+        if row and not _row_is_this_spaces(row, space):
+            # Another space's row under this id: a miss, never written.
+            sid, row = f"rs_chat_{uuid.uuid4().hex[:12]}", None
         if row:
             sess = _row_to_session(row)
             sess.updated_at = now
@@ -1017,6 +1084,7 @@ def record_chat_research(
                     **({"results": int(result_count)} if result_count is not None else {}),
                 },
                 tenant_id=space,
+                asker=author,
             )
             _bounded_session_row(sess)
             _history_admission(c, chat=True)
@@ -1025,8 +1093,8 @@ def record_chat_research(
                 INSERT INTO research_sessions
                 (id, topic, depth, status, stage, message, log_json, report_path,
                  summary, error, sources, max_sources, rubric_score, rubric_ok,
-                 created_at, updated_at, meta_json, archived, tenant_id)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 created_at, updated_at, meta_json, archived, tenant_id, asker)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     sess.id,
@@ -1048,6 +1116,7 @@ def record_chat_research(
                     json.dumps(sess.meta),
                     0,
                     sess.tenant_id,
+                    sess.asker,
                 ),
             )
             c.commit()

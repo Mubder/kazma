@@ -777,10 +777,11 @@ def register_system_tools(registry: Any) -> None:
         import asyncio as _asyncio
 
         from kazma_core.swarm import SwarmTask, TaskType, get_swarm_engine
-        from kazma_core.swarm.single_operator import swarm_refusal
+        from kazma_core.swarm.single_operator import swarm_write_refusal
 
-        # A single-operator surface (SW-S16, decision D1).
-        refusal = await _asyncio.to_thread(swarm_refusal)
+        # A single-operator surface (SW-S16, decision D1); once Spaces is
+        # enforced, the admin's, as the Swarm page's dispatch (until S2-11).
+        refusal = await _asyncio.to_thread(swarm_write_refusal)
         if refusal:
             raise RefusedBeforeEffect(f"Error: {refusal}")
         engine = get_swarm_engine()

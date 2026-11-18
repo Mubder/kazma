@@ -19,16 +19,23 @@ space: work bound to a space is served there, work bound to none is refused
 
 from __future__ import annotations
 
+import logging
+
 __all__ = [
+    "ADMIN_ONLY_REFUSAL",
     "MULTI_USER_REFUSAL",
     "NO_SPACE_REFUSAL",
+    "OWNER_ANSWER_WAIT_S",
     "answered_by_caller",
     "for_the_owner",
     "swarm_refusal",
+    "swarm_write_refusal",
     "task_answered_by_caller",
-    "task_for_the_owner",
     "task_of_this_space",
+    "wait_for_owner_answer",
 ]
+
+logger = logging.getLogger(__name__)
 
 MULTI_USER_REFUSAL = (
     "The swarm works on a single-operator install. This install has platform "
@@ -51,6 +58,31 @@ def swarm_refusal() -> str | None:
     from kazma_core.security.single_operator import single_operator_refusal
 
     return single_operator_refusal(MULTI_USER_REFUSAL)
+
+
+#: Spaces enforced and the caller not the install's admin: the swarm's
+#: writes are the admin's until feature grants give the swarm to others
+#: (S2-11), on every surface -- the Swarm page's routes and the agent's
+#: ``dispatch_swarm`` alike (Spaces S1-16 follow-up).
+ADMIN_ONLY_REFUSAL = (
+    "Starting swarm work is for the install's admin until the swarm is given to others."
+)
+
+
+def swarm_write_refusal() -> str | None:
+    """Why the swarm refuses new work from this caller, or None:
+    :func:`swarm_refusal`, then -- once Spaces is enforced -- the admin rule
+    the Swarm page's write routes follow (``kazma_ui.auth.admin_decision``):
+    with sign-in off there is no admin role to require; with it on, only the
+    install's admin, who is the owner. Blocking (the install's secret):
+    async callers use ``asyncio.to_thread``."""
+    from kazma_core.config_store import get_kazma_secret
+    from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, bound_asker, spaces_enforced
+
+    refusal = swarm_refusal()
+    if refusal or not spaces_enforced() or not get_kazma_secret():
+        return refusal
+    return None if bound_asker() == OWNER_ACCOUNT_ID else ADMIN_ONLY_REFUSAL
 
 
 def task_of_this_space(task: object) -> bool:
@@ -116,7 +148,50 @@ def for_the_owner(space: str, asker: str | None) -> bool:
     return _acts_for(space, asker) == OWNER_ACCOUNT_ID
 
 
-def task_for_the_owner(task: object) -> bool:
+def _task_for_the_owner(task: object) -> bool:
     """:func:`for_the_owner` for *task* (a ``SwarmTask`` or its dict)."""
     meta = _metadata(task)
     return for_the_owner(str(meta.get("tenant_id") or ""), meta.get("asker"))
+
+
+#: How long a finished task's result waits for the identity store to say
+#: whose it is before it stays in its space (the Swarm panel holds it).
+OWNER_ANSWER_WAIT_S = 6 * 3600.0
+_OWNER_ANSWER_STEPS = (5.0, 15.0, 60.0, 300.0)
+
+
+async def wait_for_owner_answer(task: object, *, label: str) -> bool:
+    """:func:`_task_for_the_owner`, read off the loop, waiting while the
+    identity store cannot answer (Spaces S1-16 follow-up): a database outage
+    holds the owner's result until it can be read, it is never dropped. True
+    when the owner's channels may carry it; False for someone else's, and
+    after :data:`OWNER_ANSWER_WAIT_S` or when Kazma stops (the result stays
+    in the Swarm panel). Not enforced: True at once, nothing read."""
+    import asyncio
+    import time
+
+    from kazma_core.db import availability
+    from kazma_core.shutdown import sleep_or_shutdown
+    from kazma_core.spaces.identity import IdentityUnavailable
+
+    give_up = time.monotonic() + OWNER_ANSWER_WAIT_S
+    attempt = 0
+    while True:
+        try:
+            return await asyncio.to_thread(_task_for_the_owner, task)
+        except IdentityUnavailable as exc:
+            outage = availability.note_failure("swarm", exc.__cause__ or exc)
+            if time.monotonic() >= give_up:
+                logger.warning("[swarm] %s: whose it is could not be read for %.0f h; its result stays in "
+                               "the Swarm panel", label, OWNER_ANSWER_WAIT_S / 3600)
+                return False
+            if attempt == 0:
+                logger.warning("[swarm] %s: whose it is cannot be read; its result waits", label)
+        attempt += 1
+        if outage and availability.is_away():
+            # The database is away: wait for it, then read again at once.
+            if await availability.wait_while_away():
+                return False
+            continue
+        if await sleep_or_shutdown(_OWNER_ANSWER_STEPS[min(attempt - 1, len(_OWNER_ANSWER_STEPS) - 1)]):
+            return False
