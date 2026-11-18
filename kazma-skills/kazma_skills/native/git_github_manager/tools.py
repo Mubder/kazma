@@ -305,14 +305,7 @@ async def _git_token() -> str:
     """
     from kazma_core.spaces.connected_accounts import owners_environment
 
-    token = ""
-    if _in_the_owners_space():
-        try:
-            from kazma_core.git_identity import get_app_installation_token
-
-            token = (await asyncio.to_thread(get_app_installation_token)) or ""
-        except Exception:
-            token = ""
+    token = await _owners_app_token()
     if not token:
         try:
             from kazma_gateway.routers.github_client import get_github_token
@@ -327,6 +320,36 @@ async def _git_token() -> str:
 
     # Strip token in case of whitespace/newlines from .env or db
     return token.strip()
+
+
+async def _owners_app_token(*, fresh: bool = False) -> str:
+    """The GitHub App's installation token in the owner's space; '' in any other.
+
+    The App acts on the owner's repositories, so it is the owner's space's
+    sign-in only (Spaces S1-17 part c, N26), and every call for its token
+    asks here (``tests/test_github_account_spaces.py`` holds every caller of
+    the App's token to asking the space first). *fresh* drops the cached
+    token and mints a new one: a push GitHub refused is tried once more with
+    it. Until the review of S1-17c that retry minted the App's token whatever
+    the space, so a friend's push refused with their own token was pushed
+    again as the owner's App.
+    """
+    if not _in_the_owners_space():
+        return ""
+    try:
+        from kazma_core.git_identity import (
+            get_app_installation_token,
+            invalidate_app_token_cache,
+            mint_app_installation_token,
+        )
+
+        if fresh:
+            invalidate_app_token_cache()
+            return (await asyncio.to_thread(mint_app_installation_token, force=True)) or ""
+        return (await asyncio.to_thread(get_app_installation_token)) or ""
+    except Exception:
+        logger.debug("[git] the GitHub App's token could not be read", exc_info=True)
+        return ""
 
 
 async def _git_sync(action: str = "pull", branch: str | None = None, remote: str = "origin") -> str:
@@ -504,28 +527,20 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
         returncode, output = await _run()
 
         async def _refresh_and_retry(prev_output: str) -> str | None:
-            """Clear token cache, mint a fresh token, rebuild cmd, retry once.
+            """Mint a fresh App token, rebuild cmd, retry once -- in the
+            owner's space only (``_owners_app_token``): elsewhere the push
+            used the space's own account, and the App is the owner's.
 
             Returns the retry output string if a retry happened, else None.
             Handles the rebuild + single retry shared by the exit-nonzero path
             and the verify-mismatch path.
             """
             nonlocal token
-            logger.info(
-                "[git_push_pull] Push auth failure — clearing token cache and re-minting for a single retry"
-            )
-            try:
-                from kazma_core.git_identity import (
-                    invalidate_app_token_cache,
-                    mint_app_installation_token,
+            fresh = await _owners_app_token(fresh=True)
+            if fresh:
+                logger.info(
+                    "[git_push_pull] Push auth failure — a fresh App token for a single retry"
                 )
-
-                invalidate_app_token_cache()
-                fresh = await asyncio.to_thread(
-                    mint_app_installation_token, force=True
-                )
-            except Exception:
-                fresh = None
 
             if not (fresh and fresh != token):
                 return None  # No fresh token available; caller reports prev_output.
@@ -857,7 +872,7 @@ async def github_create_pr(title: str, body: str, head: str, base: str = "main")
         return owner_repo  # error message
 
     owner, repo = owner_repo
-    client = _get_shared_client()
+    client = await asyncio.to_thread(_get_shared_client)
     _no_account_here(client)
     if client is not None:
         try:
@@ -896,7 +911,7 @@ async def github_merge_pr(number: int, commit_title: str | None = None, merge_me
         return owner_repo
 
     owner, repo = owner_repo
-    client = _get_shared_client()
+    client = await asyncio.to_thread(_get_shared_client)
     _no_account_here(client)
     payload: dict[str, Any] = {"merge_method": merge_method}
     if commit_title:
@@ -940,7 +955,7 @@ async def github_create_issue(title: str, body: str, labels: list[str] | None = 
         return owner_repo
 
     owner, repo = owner_repo
-    client = _get_shared_client()
+    client = await asyncio.to_thread(_get_shared_client)
     _no_account_here(client)
     payload = {"title": title, "body": body}
     if labels:
@@ -979,7 +994,7 @@ async def github_comment_issue(number: int, body: str) -> str:
         return owner_repo
 
     owner, repo = owner_repo
-    client = _get_shared_client()
+    client = await asyncio.to_thread(_get_shared_client)
     _no_account_here(client)
     if client is not None:
         try:
@@ -1032,7 +1047,7 @@ async def github_list_issues(repo: str | None = None, state: str = "open") -> st
         slug = repo
 
     params = {"state": state, "per_page": _ISSUES_PAGE}
-    client = _get_shared_client()
+    client = await asyncio.to_thread(_get_shared_client)
     _no_account_here(client)
     if client is not None:
         try:
@@ -1196,6 +1211,10 @@ def _get_shared_client():
     gateway is present, the returned client resolves the token via
     ConfigStore (OAuth → PAT → env), closing the gap where OAuth-saved
     tokens were invisible to these tools.
+
+    Blocking: the client reads its token when it is made (settings and vault
+    reads, maybe a GitHub App token mint), so async code calls this through
+    ``asyncio.to_thread`` -- the thread carries the space bound to the work.
     """
     try:
         from kazma_gateway.routers.github_client import GitHubClient  # type: ignore

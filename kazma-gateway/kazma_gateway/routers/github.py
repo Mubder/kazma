@@ -682,33 +682,43 @@ def oauth_setup(request: Request) -> Any:
 @router.post("/oauth/revoke")
 async def oauth_revoke() -> JSONResponse:
     """Disconnect: clear the space's GitHub credentials (OAuth, PAT) and, in
-    the owner's space, the GitHub App's (Spaces S1-17 part c)."""
-    from kazma_gateway.routers.github_client import in_the_owners_space, clear_oauth_token, github_key
-
-    await asyncio.to_thread(clear_oauth_token)
-    # Deleted, never written empty: the settings store refuses to blank a
-    # stored secret, and the empty batch left the token and the App's key in
-    # place (S1-17 part c; X's Disconnect had the same bug).
-    keys = [github_key("connectors.github.token")]
-    owners = await asyncio.to_thread(in_the_owners_space)
-    if owners:
-        keys += ["connectors.github.app_id", "connectors.github.app_installation_id",
-                 "connectors.github.app_slug", "connectors.github.app_private_key",
-                 "connectors.github.app_private_key_path"]
+    the owner's space, the GitHub App's (Spaces S1-17 part c) -- every copy
+    the vault keeps (``forget_github_keys``). A delete that fails answers
+    that it failed, never "disconnected" (the review of S1-17c: the failure
+    was logged and the page told it was disconnected)."""
+    from kazma_gateway.routers.github_client import (
+        clear_oauth_token,
+        forget_github_keys,
+        github_key,
+        in_the_owners_space,
+    )
 
     def _clear() -> None:
-        from kazma_core.config_store import get_config_store
-
-        store = get_config_store()
-        for key in keys:
-            store.delete(key)
+        # Deleted, never written empty: the settings store refuses to blank a
+        # stored secret, and the empty batch left the token and the App's key
+        # in place (S1-17 part c; X's Disconnect had the same bug).
+        clear_oauth_token()
+        keys = [github_key("connectors.github.token")]
+        owners = in_the_owners_space()
         if owners:
-            store.set("git.bot_identity.enabled", "false", category="git")
+            keys += ["connectors.github.app_id", "connectors.github.app_installation_id",
+                     "connectors.github.app_slug", "connectors.github.app_private_key",
+                     "connectors.github.app_private_key_path"]
+        forget_github_keys(keys)
+        if owners:
+            from kazma_core.config_store import get_config_store
+
+            get_config_store().set("git.bot_identity.enabled", "false", category="git")
 
     try:
         await asyncio.to_thread(_clear)
-    except Exception:
-        logger.exception("[github/oauth] failed to clear GitHub App credentials")
+    except Exception as exc:
+        logger.error("[github/oauth] GitHub was not disconnected (%s)", type(exc).__name__)
+        return JSONResponse(
+            {"ok": False, "code": "disconnect_failed", "connected": None,
+             "error": described_error("GitHub was not disconnected", exc)},
+            status_code=503,
+        )
 
     logger.info("[github/oauth] All GitHub credentials and tokens cleared (disconnected)")
     return JSONResponse({"status": "ok", "connected": False, "has_token": False})
@@ -832,7 +842,7 @@ async def list_pulls(state: str = "open", limit: int = 20) -> JSONResponse:
     owner, repo = owner_repo
     limit = max(1, min(limit, 100))
     try:
-        async with GitHubClient() as gh:
+        async with (await GitHubClient.of_this_space()) as gh:
             pulls = await gh.get(
                 f"/repos/{owner}/{repo}/pulls",
                 params={"state": state, "per_page": limit, "sort": "updated", "direction": "desc"},
@@ -867,7 +877,7 @@ async def get_pull(number: int) -> JSONResponse:
         return owner_repo
     owner, repo = owner_repo
     try:
-        async with GitHubClient() as gh:
+        async with (await GitHubClient.of_this_space()) as gh:
             pr = await gh.get(f"/repos/{owner}/{repo}/pulls/{number}")
             if not pr:
                 return JSONResponse({"error": f"PR #{number} not found."})
@@ -927,7 +937,7 @@ async def merge_pull(number: int, body: MergePRRequest) -> JSONResponse:
         payload["commit_title"] = body.commit_title
 
     try:
-        async with GitHubClient() as gh:
+        async with (await GitHubClient.of_this_space()) as gh:
             res = await gh.put(f"/repos/{owner}/{repo}/pulls/{number}/merge", json=payload)
         return JSONResponse(res)
     except Exception as exc:
@@ -956,7 +966,7 @@ async def create_issue(body: CreateIssueRequest) -> JSONResponse:
         payload["labels"] = body.labels
 
     try:
-        async with GitHubClient() as gh:
+        async with (await GitHubClient.of_this_space()) as gh:
             res = await gh.post(f"/repos/{owner}/{repo}/issues", json=payload)
         return JSONResponse(res)
     except Exception as exc:
@@ -975,7 +985,7 @@ async def list_issues(state: str = "open", limit: int = 30) -> JSONResponse:
     owner, repo = owner_repo
     limit = max(1, min(limit, 100))
     try:
-        async with GitHubClient() as gh:
+        async with (await GitHubClient.of_this_space()) as gh:
             raw = await gh.get(
                 f"/repos/{owner}/{repo}/issues",
                 params={"state": state, "per_page": limit, "sort": "updated", "direction": "desc"},
@@ -1012,7 +1022,7 @@ async def list_commits(limit: int = 20) -> JSONResponse:
     owner, repo = owner_repo
     limit = max(1, min(limit, 100))
     try:
-        async with GitHubClient() as gh:
+        async with (await GitHubClient.of_this_space()) as gh:
             raw = await gh.get(f"/repos/{owner}/{repo}/commits", params={"per_page": limit})
         items = [
             {
@@ -1042,7 +1052,7 @@ async def list_workflows(limit: int = 10) -> JSONResponse:
     owner, repo = owner_repo
     limit = max(1, min(limit, 30))
     try:
-        async with GitHubClient() as gh:
+        async with (await GitHubClient.of_this_space()) as gh:
             runs = await gh.paginate(
                 f"/repos/{owner}/{repo}/actions/runs",
                 params={"per_page": limit},
@@ -1079,7 +1089,7 @@ async def list_branches(limit: int = 30) -> JSONResponse:
     owner, repo = owner_repo
     limit = max(1, min(limit, 100))
     try:
-        async with GitHubClient() as gh:
+        async with (await GitHubClient.of_this_space()) as gh:
             raw = await gh.get(f"/repos/{owner}/{repo}/branches", params={"per_page": limit})
         items = [
             {
@@ -1106,7 +1116,7 @@ async def list_releases(limit: int = 10) -> JSONResponse:
     owner, repo = owner_repo
     limit = max(1, min(limit, 50))
     try:
-        async with GitHubClient() as gh:
+        async with (await GitHubClient.of_this_space()) as gh:
             raw = await gh.get(f"/repos/{owner}/{repo}/releases", params={"per_page": limit})
         items = [
             {
@@ -1135,7 +1145,7 @@ async def list_user_repos(limit: int = 50) -> JSONResponse:
     from kazma_gateway.routers.github_client import GitHubClient
 
     try:
-        async with GitHubClient() as gh:
+        async with (await GitHubClient.of_this_space()) as gh:
             raw = await gh.get("/user/repos", params={
                 "affiliation": "owner,collaborator",
                 "sort": "updated",
@@ -1218,7 +1228,7 @@ async def clone_repo(body: CloneRepoRequest) -> JSONResponse:
     else:
         # Fetch from the API if not provided.
         try:
-            async with GitHubClient() as gh:
+            async with (await GitHubClient.of_this_space()) as gh:
                 repo_info = await gh.get(f"/repos/{full_name}")
             url = (repo_info.get("ssh_url") if body.use_ssh else repo_info.get("clone_url")) or ""
         except Exception as exc:
@@ -1349,7 +1359,7 @@ async def repo_activity(limit: int = 30) -> JSONResponse:
       }
     }"""
     try:
-        async with GitHubClient() as gh:
+        async with (await GitHubClient.of_this_space()) as gh:
             data = await gh.graphql(query, {"owner": owner, "repo": repo, "lim": per_type})
         items: list[dict[str, Any]] = []
         repo_node = data.get("repository") or {}
@@ -1380,7 +1390,7 @@ async def repo_activity(limit: int = 30) -> JSONResponse:
         # CI runs — separate REST call (actions has no GraphQL equivalent
         # in the public schema); bounded per-type so CI doesn't dominate.
         try:
-            async with GitHubClient() as gh:
+            async with (await GitHubClient.of_this_space()) as gh:
                 runs = await gh.get(f"/repos/{owner}/{repo}/actions/runs", params={"per_page": per_type})
             for r in ((runs or {}).get("workflow_runs") or [])[:per_type]:
                 items.append({
@@ -1404,7 +1414,7 @@ async def _activity_rest_fallback(owner: str, repo: str, limit: int) -> JSONResp
 
     items: list[dict[str, Any]] = []
     try:
-        async with GitHubClient() as gh:
+        async with (await GitHubClient.of_this_space()) as gh:
             commits = await gh.get(f"/repos/{owner}/{repo}/commits", params={"per_page": min(limit, 10)})
             pulls = await gh.get(f"/repos/{owner}/{repo}/pulls", params={"state": "all", "per_page": min(limit, 10)})
             issues = await gh.get(f"/repos/{owner}/{repo}/issues", params={"state": "all", "per_page": min(limit, 10)})

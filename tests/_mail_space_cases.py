@@ -3,8 +3,10 @@
 
 Every case runs with Spaces enforced, as person A in ``matrix-a`` against
 person B's ``matrix-b``, through the product's own mail and calendar routers
-behind the real tenant middleware, or through the product's own tools, on a
-real vault of the case's own.
+behind the real tenant middleware and the auth middleware's role check (A and
+B are members, so operators: connecting a space's own mailbox and calendar is
+theirs, the review of S1-17c), or through the product's own tools, on a real
+vault of the case's own.
 
 B's connections are planted through the product's own writers in B's space: a
 generic IMAP mailbox, a Gmail grant, an extra account named ``home`` and a
@@ -57,11 +59,14 @@ _HELD_ENV = ("EMAIL_ADDRESS", "EMAIL_IMAP_HOST")
 class World:
     """The mail and calendar routers in one app, with two signed-in people."""
 
-    def __init__(self, matrix: Matrix, client: TestClient, marks: Any, ran_in: list[Any]) -> None:
+    def __init__(self, matrix: Matrix, client: TestClient, marks: Any, ran_in: list[Any],
+                 role_refused: list[tuple[str, str]]) -> None:
         self.matrix = matrix
         self.client = client
         self.marks = marks
         self.ran_in = ran_in
+        #: The requests the role check refused (``Matrix.role_checked``).
+        self.role_refused = role_refused
 
     def as_who(self, who: str) -> Any:
         return {"a": self.matrix.as_a, "b": self.matrix.as_b}[who]()
@@ -165,12 +170,13 @@ def world(matrix: Matrix, *, plant_a: bool = True) -> Iterator[World]:
             _plant(matrix.as_a(), marks.a)
         app = FastAPI()
         app.middleware("http")(auth.create_tenant_middleware())
+        role_refused = Matrix.role_checked(app)
         for router in (email_api.router, email_api.protected_router, calendar_api.router,
                        calendar_api.protected_router):
             app.include_router(router)
         try:
             with TestClient(app, base_url=_ORIGIN) as client:
-                yield World(matrix, client, marks, ran_in)
+                yield World(matrix, client, marks, ran_in, role_refused)
         finally:
             v.close()
             for name in _MAIL_ENV:  # what the owner's space's writes set
@@ -195,6 +201,7 @@ def _route(target: str, body: Any = None, *, check: Callable[[World, Any], None]
         before = w.held("b")
         answer = w.call("a", method, path.replace("{alias}", "home"),
                         **({"json": body} if body is not None else {}))
+        assert w.role_refused == [], f"a member may not: {w.role_refused}"
         assert answer.status_code < 500, answer.text[:300]
         assert w.marks.b not in answer.text, answer.text[:300]
         assert w.held("b") == before, "A's request changed what B's space holds"
@@ -287,6 +294,7 @@ def _add_account(w: World) -> None:
         answer = w.call("a", "POST", "/api/email/accounts", json={
             "alias": "work", "type": "imap", "address": "a-work@example.org", "password": "pw-work",
             "imap_host": "imap.work.example"})
+        assert w.role_refused == [], f"a member may not: {w.role_refused}"
         assert w.marks.b not in answer.text and w.held("b") == before
         _added_in_a(w, answer)
 

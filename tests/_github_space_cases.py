@@ -2,8 +2,10 @@
 
 Every case runs with Spaces enforced, as person A in ``matrix-a`` against
 person B's ``matrix-b``, through the product's own GitHub router behind the
-real tenant middleware, or through the product's own tools, on a real vault of
-the case's own.
+real tenant middleware and the auth middleware's role check (A and B are
+members, so operators: connecting and disconnecting a space's own GitHub is
+theirs, and the GitHub App the admin's -- the review of S1-17c), or through the
+product's own tools, on a real vault of the case's own.
 
 B's space connects its own GitHub account with a token, through the product's
 own route; the token names B's marker. The owner's space has every sign-in
@@ -56,12 +58,15 @@ _OWNER_APP_KEYS = ("connectors.github.app_id", "connectors.github.app_installati
 class World:
     """The GitHub router in one app, with two signed-in people."""
 
-    def __init__(self, matrix: Matrix, client: TestClient, marks: Any, sent: list[Any]) -> None:
+    def __init__(self, matrix: Matrix, client: TestClient, marks: Any, sent: list[Any],
+                 role_refused: list[tuple[str, str]]) -> None:
         self.matrix = matrix
         self.client = client
         self.marks = marks
         #: Every request to GitHub: (the space it was sent from, its token).
         self.sent = sent
+        #: The requests the role check refused (``Matrix.role_checked``).
+        self.role_refused = role_refused
 
     def as_who(self, who: str) -> Any:
         if who == "owner":
@@ -166,10 +171,11 @@ def world(matrix: Matrix, *, connect_a: bool = True) -> Iterator[World]:
                          ("connectors.github.app_installation_id", "77", "connectors")])
         app = FastAPI()
         app.middleware("http")(auth.create_tenant_middleware())
+        role_refused = Matrix.role_checked(app)
         app.include_router(github.router)
         try:
             with TestClient(app, base_url=_ORIGIN) as client:
-                made = World(matrix, client, marks, sent)
+                made = World(matrix, client, marks, sent, role_refused)
                 made.connect("b")
                 if connect_a:
                     made.connect("a")
@@ -212,16 +218,19 @@ def _only_own_token(w: World) -> None:
         assert token not in OWNER_TOKENS and w.marks.b not in token, (space, token)
 
 
-def _route(target: str, body: Any = None, *, check: Callable[[World, Any], None] | None = None) -> None:
+def _route(target: str, body: Any = None, *, check: Callable[[World, Any], None] | None = None,
+           the_admins: bool = False) -> None:
     """A case for *target*: as A, B's and the owner's spaces hold what they
     held, B's marker is never shown, and every request to GitHub carried A's
-    own token; *check* the positive for A."""
+    own token; *check* the positive for A. A member reaches it, unless it is
+    *the_admins* (an install piece): then the role check refuses A."""
     method, path = target.split(" ", 1)
+    concrete = path.replace("{number}", "1")
 
     def run(w: World) -> None:
         before = {who: w.held(who) for who in ("b", "owner")}
-        answer = w.call("a", method, path.replace("{number}", "1"),
-                        **({"json": body} if body is not None else {}))
+        answer = w.call("a", method, concrete, **({"json": body} if body is not None else {}))
+        assert w.role_refused == ([(method, concrete)] if the_admins else []), w.role_refused
         assert answer.status_code < 500, answer.text[:300]
         assert w.marks.b not in answer.text, answer.text[:300]
         assert not any(token in answer.text for token in OWNER_TOKENS), answer.text[:300]
@@ -247,8 +256,11 @@ def _cleared_in_a(w: World, answer: Any) -> None:
     assert w.held("a") == {"token": "", "oauth": False}
 
 
-def _app_is_the_owners(w: World, answer: Any) -> None:
-    assert answer.status_code == 409 and answer.json()["code"] == "owners_space_only", answer.text[:300]
+def _app_is_the_admins(w: World, answer: Any) -> None:
+    """The GitHub App is the install's: a member is refused it by role (and
+    an admin in a space other than the owner's by the route,
+    ``test_the_github_app_is_the_owners_spaces_only``)."""
+    assert answer.status_code == 403, answer.text[:300]
 
 
 def _started_in_a(w: World, answer: Any) -> None:
@@ -277,7 +289,8 @@ def _github_app_registered(run: Callable[[World], None]) -> Callable[[World], No
 # ── the sign-in and its settings ─────────────────────────────────────────
 
 _route("POST /api/github/token", {"token": "ghp_a_new_token_for_a"}, check=_saved_in_a)
-_route("POST /api/github/app/config", {"app_id": "999", "app_installation_id": "1"}, check=_app_is_the_owners)
+_route("POST /api/github/app/config", {"app_id": "999", "app_installation_id": "1"}, check=_app_is_the_admins,
+       the_admins=True)
 _route("GET /api/github/status")
 _route("GET /api/github/oauth/status", check=_has_own_token)
 _route("GET /api/github/oauth/setup")
@@ -287,6 +300,7 @@ _route("POST /api/github/oauth/revoke", check=_cleared_in_a)
 def _oauth_start(w: World) -> None:
     before = {who: w.held(who) for who in ("b", "owner")}
     answer = w.call("a", "POST", "/api/github/oauth/start", json={})
+    assert w.role_refused == [], w.role_refused
     assert w.marks.b not in answer.text and {who: w.held(who) for who in ("b", "owner")} == before
     _each_holds_its_own(w)
     _started_in_a(w, answer)
@@ -313,6 +327,7 @@ def _data_route(target: str, body: Any = None) -> None:
         before = {who: w.held(who) for who in ("b", "owner")}
         answer = w.call("a", method, path.replace("{number}", "1"),
                         **({"json": body} if body is not None else {}))
+        assert w.role_refused == [], w.role_refused
         assert answer.status_code < 500, answer.text[:300]
         assert w.marks.b not in answer.text, answer.text[:300]
         assert not any(token in answer.text for token in OWNER_TOKENS), answer.text[:300]

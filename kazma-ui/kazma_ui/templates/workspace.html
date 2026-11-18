@@ -1436,6 +1436,10 @@ function workspaceApp() {
           KazmaStream.toast(t('workspace.toast_gh_disconnected'), 'info', 2000);
           await this.loadOAuthStatus();
           await this.loadGitHubStatus();
+        } else {
+          // Not disconnected: the server says why (a delete it could not make).
+          const data = await resp.json().catch(() => ({}));
+          KazmaStream.toast(t('workspace.toast_disconnect_failed', {msg: data.error || String(resp.status)}), 'error', 4000);
         }
       } catch (e) {
         KazmaStream.toast(t('workspace.toast_disconnect_failed', {msg: e.message}), 'error', 3000);

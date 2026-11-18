@@ -12890,6 +12890,19 @@ product can turn it on, so an install with one account behaves as before.
     `email.accounts` for the owner's space and `email.accounts_by_space`
     (CREDENTIAL in `settings_restore`: S1-28 carries it) for the others. The
     mail presets and the two app-registration routes are `install` routes.
+  - **A member connects their space's own accounts** (the review of
+    S1-17c, N26): once Spaces is enforced, the mail and calendar routes and
+    GitHub's token, sign-in and disconnect need membership, not admin
+    (`platform_rbac._connects_a_spaces_own_account`, checked before the admin
+    prefixes; a member is an operator); the install's pieces stay the
+    admin's -- the mail presets and app registrations (held equal to
+    `route_scopes`' `install` routes), the GitHub App and a clone. Not
+    enforced, every one is the admin's, as before. The matrix's mail and
+    GitHub cases put the auth middleware's role check (`auth._role_refusal`,
+    the one rule the middleware applies; `Matrix.role_checked`) in front of
+    the routers: they mounted the tenant middleware only, and no case met an
+    admin-only route a member could not reach. The page a member connects
+    mail and calendar from is S1-23's (Settings is the admin's today).
   - **A sign-in finishes in the space it started in**: `oauth_attempts.begin`
     records the bound space and person, and a callback binds them back
     (`kazma_ui.oauth_sign_in.attempt_scope`); an attempt of no space, or of a
@@ -12975,7 +12988,12 @@ product can turn it on, so an install with one account behaves as before.
     read the owner's environment, App, or a global vault row an older
     install keeps.
   - **A friend's push never acts as the owner**: `_git_token` takes the App
-    first in the owner's space only; the GitHub tools refuse before any
+    first in the owner's space only, and so does the retry of a push GitHub
+    refused (the review of S1-17c: it minted the App's token whatever the
+    space). One function hands out the App's token in the git tools,
+    `_owners_app_token`, and every caller of `get_app_installation_token` /
+    `mint_app_installation_token` asks the space first, or is declared (a
+    gate, the old retry as its control). The GitHub tools refuse before any
     request in a space with no account (`_no_account_here`; the owner's
     space as before). A token saved in another space never reaches the
     process environment (`bind_github_token_to_process`, owner's only), the
@@ -12990,8 +13008,16 @@ product can turn it on, so an install with one account behaves as before.
   - **Disconnect deletes** (`clear_oauth_token`, `oauth_revoke`): it wrote
     the keys empty, the settings store refuses to blank a stored secret, and
     Disconnect cleared nothing (the bug X's Disconnect had; found on the
-    way). The bot identity's switch has a settings rule
+    way). It deletes every copy the vault keeps (`forget_github_keys`,
+    `SecretVault.delete(every_scope=True)`: the GitHub names are not
+    install-scoped, and the settings store's delete reached the request's
+    scope only -- live keeps two copies of the OAuth token), and a delete
+    that fails answers 503 `disconnect_failed`, never "disconnected" (the
+    review of S1-17c). The bot identity's switch has a settings rule
     (`git.bot_identity.`).
+  - **The GitHub client reads its token off the loop**: `GitHubClient()`
+    with no token is a loop-stall helper; async code makes it with
+    `await GitHubClient.of_this_space()` and the tools in a thread.
   - Left: the repository the routes and tools act on is still the install's
     active workspace (`resolve_repo`, S1-19 and S1-20); the commit author
     (the bot's name and email) is the install's.
@@ -13000,8 +13026,9 @@ product can turn it on, so an install with one account behaves as before.
     connects its own and every request carries it alone; B and the owner
     keep theirs -- 18 of 23 fail with the space rule taken out),
     `tests/test_github_account_spaces.py` (each rule with its control; a
-    source gate on the environment and on the sign-in's keys, each with a
-    planted reader).
+    source gate on the environment -- any shape naming the variable but the
+    one reader's and the owner's binding -- and on the sign-in's keys --
+    each key constant handed to `github_key` -- each with planted shapes).
 
 ## UI Conventions (Web)
 

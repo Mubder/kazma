@@ -120,9 +120,9 @@ DYNAMIC_WRITES: dict[str, tuple[str, ...] | str] = {
     # (github_client.github_key: the tenant prefix the rules ignore).
     "kazma-gateway/kazma_gateway/routers/github_client.py::store_oauth_token": (
         "connectors.github.oauth_token", "connectors.github.oauth_scope", "connectors.github.oauth_token_type"),
-    "kazma-gateway/kazma_gateway/routers/github_client.py::clear_oauth_token": (
-        "connectors.github.oauth_token", "connectors.github.oauth_scope", "connectors.github.oauth_token_type"),
-    "kazma-gateway/kazma_gateway/routers/github.py::_clear": ("connectors.github.", "git.bot_identity.enabled"),
+    # Disconnect: the sign-in's keys of the space, and in the owner's space
+    # the GitHub App's.
+    "kazma-gateway/kazma_gateway/routers/github_client.py::forget_github_keys": ("connectors.github.",),
     "kazma-ui/kazma_ui/x_api.py::x_disconnect": ("connectors.x.",),
     "kazma-ui/kazma_ui/x_api.py::x_save_credentials": ("connectors.x.",),
     "kazma-ui/kazma_ui/x_api.py::x_api_access_save": (

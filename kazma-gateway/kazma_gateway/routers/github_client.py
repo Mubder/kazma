@@ -39,6 +39,7 @@ __all__ = [
     "build_authorize_url",
     "clear_oauth_token",
     "exchange_code_for_token",
+    "forget_github_keys",
     "get_active_cwd",
     "get_github_token",
     "github_key",
@@ -223,8 +224,13 @@ class GitHubClient:
 
     Use as an async context manager so all calls share one ``httpx`` client::
 
-        async with GitHubClient() as gh:
+        async with await GitHubClient.of_this_space() as gh:
             repo = await gh.get(f"/repos/{owner}/{repo}")
+
+    Made with no token, it reads the space's (:func:`get_github_token`:
+    settings and vault reads, maybe a GitHub App token mint), so it blocks:
+    async code makes it with :meth:`of_this_space`, which reads in a thread
+    (a loop-stall helper, ``tests/test_static_gates.py``).
 
     Raises :class:`GitHubError` on non-2xx / rate-limit / transport errors.
     """
@@ -238,6 +244,14 @@ class GitHubClient:
         self._token = token if token is not None else get_github_token()
         self._timeout = timeout or _DEFAULT_TIMEOUT
         self._client: httpx.AsyncClient | None = None
+
+    @classmethod
+    async def of_this_space(cls, *, timeout: httpx.Timeout | None = None) -> GitHubClient:
+        """A client with the GitHub token of the space this work is bound to,
+        read off the event loop (the thread carries the bound space)."""
+        import asyncio
+
+        return cls(token=await asyncio.to_thread(get_github_token), timeout=timeout)
 
     # ── lifecycle ───────────────────────────────────────────────────
 
@@ -500,21 +514,42 @@ def store_oauth_token(token_data: dict[str, Any]) -> None:
         logger.exception("[github] failed to persist OAuth token")
 
 
+def forget_github_keys(keys: list[str]) -> None:
+    """Delete each settings key of a GitHub sign-in, and every copy the vault
+    keeps of it. Raises when one cannot be deleted.
+
+    The GitHub names are not install-scoped, so the settings store's delete
+    removes the vault copy of the request's scope only and leaves an
+    encrypted copy in any other -- live keeps two of
+    ``cfg:connectors.github.oauth_token`` (a global row and a ``default``
+    one). Every copy goes: a name of another space (``tenant.<space>.``) is
+    that space's alone, and the owner's bare names hold only the owner's
+    sign-in (other spaces never write them). *keys* are already the space's
+    (``github_key``) or the owner's space's own (the GitHub App's).
+    """
+    from kazma_core.config_store import get_config_store, is_sensitive_config_key
+    from kazma_core.security.vault import CONFIG_SECRET_PREFIX, get_vault
+
+    store = get_config_store()
+    vault = get_vault()
+    if vault is None and os.environ.get("KAZMA_VAULT_KEY"):
+        # A vault this install has but could not open now: its copies stay.
+        raise RuntimeError("the vault could not be opened")
+    for key in keys:
+        store.delete(key)
+        if vault is not None and is_sensitive_config_key(key):
+            vault.delete(f"{CONFIG_SECRET_PREFIX}{key}", every_scope=True)
+
+
 def clear_oauth_token() -> None:
     """Remove the stored OAuth token (disconnect) of the space this work is
-    bound to. Deleted, never written empty: the settings store refuses to
-    blank a stored secret, so the empty write left the token in place (the
-    bug X's Disconnect had, 2026-11-17)."""
-    keys = [github_key(key) for key in (
-        "connectors.github.oauth_token", "connectors.github.oauth_scope", "connectors.github.oauth_token_type")]
-    try:
-        from kazma_core.config_store import get_config_store
-
-        store = get_config_store()
-        for key in keys:
-            store.delete(key)
-    except Exception:
-        logger.exception("[github] failed to clear OAuth token")
+    bound to, every copy of it (:func:`forget_github_keys`). Deleted, never
+    written empty: the settings store refuses to blank a stored secret, so
+    the empty write left the token in place (the bug X's Disconnect had,
+    2026-11-17). Raises when it could not be deleted: it logged and went on,
+    and Disconnect answered "disconnected" over a token still held."""
+    forget_github_keys([github_key(key) for key in (
+        "connectors.github.oauth_token", "connectors.github.oauth_scope", "connectors.github.oauth_token_type")])
 
 
 def is_oauth_connected() -> bool:

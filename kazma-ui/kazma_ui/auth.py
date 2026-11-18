@@ -1299,6 +1299,24 @@ def principal_allows(principal: dict[str, Any], path: str, method: str) -> bool:
     return role_allows(str(principal.get("role") or "viewer"), path, method)
 
 
+def _role_refusal(principal: dict[str, Any] | None, path: str, method: str) -> Response | None:
+    """The HTTP middleware's role check: a 403 when *principal* may not do
+    ``method path`` (:func:`principal_allows`; no principal is a viewer),
+    else None. One function, so the Spaces matrix's cases test a member as
+    the operator they are, through the rule the middleware applies (the
+    review of S1-17c: the cases mounted the tenant middleware only, and no
+    case met the admin-only routes a member could not reach)."""
+    who = principal or {}
+    if principal_allows(who, path, method):
+        return None
+    logger.warning("[RBAC] denied role=%s %s %s", who.get("role") or "viewer", method, path)
+    return Response(
+        content='{"detail":"Forbidden for your role"}',
+        status_code=403,
+        media_type="application/json",
+    )
+
+
 def get_request_principal(request: Request) -> dict[str, Any] | None:
     """Return authenticated principal {username, role, user_id, source} or None."""
     provided = extract_provided_credential(request)
@@ -1696,24 +1714,12 @@ def create_auth_middleware(
         _is_secret = bool(provided) and verify_secret(provided, expected)
         if _multi_user or not _is_secret:
             try:
-                from kazma_core.security.platform_rbac import role_allows
-
                 principal = await asyncio.to_thread(get_request_principal, request)
-                role = (principal or {}).get("role") or "viewer"
-                # Shared-secret and admin still full access
-                if (principal or {}).get("source") != "secret" and role != "admin":
-                    if not role_allows(str(role), path, request.method):
-                        logger.warning(
-                            "[RBAC] denied role=%s %s %s",
-                            role,
-                            request.method,
-                            path,
-                        )
-                        return Response(
-                            content='{"detail":"Forbidden for your role"}',
-                            status_code=403,
-                            media_type="application/json",
-                        )
+                # Shared-secret and admin still full access: principal_allows,
+                # the one role rule (the Spaces matrix's cases apply it too).
+                refused = _role_refusal(principal, path, request.method)
+                if refused is not None:
+                    return refused
             except Exception as exc:
                 logger.warning("[RBAC] check failed — denying: %s", exc)
                 return Response(

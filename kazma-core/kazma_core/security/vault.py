@@ -696,16 +696,18 @@ class SecretVault:
                 for r in cursor
             ]
 
-    def delete(self, name: str, tenant_id: str | None = None) -> bool:
+    def delete(self, name: str, tenant_id: str | None = None, *, every_scope: bool = False) -> bool:
         """Delete a secret. Returns True if a row was deleted.
 
         A name in :data:`INSTALL_SCOPED_SECRETS` is deleted in EVERY scope:
         disconnecting an account removes its tokens globally, and a tenant copy
         left behind would keep the account looking connected to any caller
-        that has a tenant.
+        that has a tenant. *every_scope* does the same for a name the caller
+        knows has no other owner (a GitHub sign-in's, Spaces S1-17's review:
+        Disconnect left an encrypted copy in the scope it did not run in).
         """
         refuse_write("vault", name)
-        if is_install_scoped_secret(name):
+        if every_scope or is_install_scoped_secret(name):
             with self._lock:
                 cur = self._conn.execute("DELETE FROM secrets WHERE name = ?", (name,))
             if cur.rowcount > 0:

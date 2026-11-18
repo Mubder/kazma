@@ -532,6 +532,36 @@ class Matrix:
 
     # ── the request boundary ─────────────────────────────────────────────
 
+    @staticmethod
+    def role_checked(app: FastAPI) -> list[tuple[str, str]]:
+        """Put the auth middleware's role check in front of *app*
+        (``auth._role_refusal``, the one rule it applies), outside every
+        middleware added before it: a case's person is the operator a member
+        is, never an admin by omission. Returns the list the requests it
+        refused go in, ``(method, path)``, so a case can say none was.
+
+        The review of S1-17c: the cases mounted the tenant middleware only,
+        so no case met the admin-only routes -- connecting a space's own
+        GitHub, mailbox or calendar -- that no member could reach."""
+        from kazma_ui.request_path import judged_path
+
+        refused: list[tuple[str, str]] = []
+
+        async def check(request: Any, call_next: Any) -> Any:
+            path = judged_path(request)
+            # What the auth middleware lets through before any role is read:
+            # an open path (a sign-in callback), one that is not sensitive.
+            if auth.is_always_open(path) or not auth.is_sensitive_path(path):
+                return await call_next(request)
+            answer = auth._role_refusal(auth.get_request_principal(request), path, request.method)
+            if answer is not None:
+                refused.append((request.method, path))
+                return answer
+            return await call_next(request)
+
+        app.middleware("http")(check)
+        return refused
+
     @contextmanager
     def requests_as(self, who: str) -> Iterator[TestClient]:
         """A client whose requests are signed in as person ``"a"`` or
