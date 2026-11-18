@@ -13,7 +13,7 @@ import sqlite3
 import time
 from typing import Any
 
-from kazma_core.memory.tenant_view import sees_every_tenant
+from kazma_core.memory.tenant_view import narrowed_to
 
 logger = logging.getLogger(__name__)
 
@@ -197,15 +197,14 @@ def invalidate_belief(
             ensure_primary_schema(conn)
         assert conn is not None
 
-        scoped = not sees_every_tenant(tenant_id)
+        # The caller's own fact, in each statement (Spaces S1-35).
+        only = narrowed_to(tenant_id)
         row = conn.execute(
             """
             SELECT id, subject, predicate, object, tenant_id, valid_until, invalidated_at
-            FROM beliefs WHERE id=?
-            """
-            + (" AND tenant_id=?" if scoped else "")
-            + " LIMIT 1",
-            (bid, tenant_id) if scoped else (bid,),
+            FROM beliefs WHERE id=? AND (? IS NULL OR tenant_id = ?) LIMIT 1
+            """,
+            (bid, only, only),
         ).fetchone()
         if not row:
             if own_conn:
@@ -233,9 +232,9 @@ def invalidate_belief(
             conn,
             """
             UPDATE beliefs SET valid_until=?, invalidated_at=?
-            WHERE id=? AND valid_until IS NULL
+            WHERE id=? AND valid_until IS NULL AND (? IS NULL OR tenant_id = ?)
             """,
-            (ts, ts, bid),
+            (ts, ts, bid, only, only),
         )
         conn.commit()
         n = int(cur.rowcount or 0)

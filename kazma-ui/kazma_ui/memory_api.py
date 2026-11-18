@@ -21,7 +21,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from kazma_core.errors import safe_error
 
-from kazma_core.memory.tenant_view import sees_every_tenant
+from kazma_core.memory.tenant_view import narrowed_to, sees_every_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -72,18 +72,19 @@ def _would_orphan(
         return []
     try:
         placeholders = ",".join("?" * len(belief_ids))
-        scoped = not sees_every_tenant(tenant_id)
-        scope = " AND tenant_id = ?" if scoped else ""
-        params = (*belief_ids, tenant_id) if scoped else tuple(belief_ids)
+        # The caller's own rows, in the statement (Spaces S1-35): every
+        # tenant's on an install that does not enforce Spaces.
+        only = narrowed_to(tenant_id)
+        params = (*belief_ids, only, only)
         # Active beliefs NOT in the to-remove set — endpoints here stay anchored.
         surviving = conn.execute(
             f"""SELECT DISTINCT subject AS eid FROM beliefs
                 WHERE invalidated_at IS NULL AND valid_until IS NULL
-                  AND id NOT IN ({placeholders}){scope}
+                  AND id NOT IN ({placeholders}) AND (? IS NULL OR tenant_id = ?)
                 UNION
                 SELECT DISTINCT object AS eid FROM beliefs
                 WHERE invalidated_at IS NULL AND valid_until IS NULL
-                  AND id NOT IN ({placeholders}){scope}""",
+                  AND id NOT IN ({placeholders}) AND (? IS NULL OR tenant_id = ?)""",
             params * 2,
         ).fetchall()
         surviving_ids = {r["eid"] for r in surviving if r["eid"]}
@@ -91,11 +92,11 @@ def _would_orphan(
         touched = conn.execute(
             f"""SELECT DISTINCT subject AS eid FROM beliefs
                 WHERE invalidated_at IS NULL AND valid_until IS NULL
-                  AND id IN ({placeholders}){scope}
+                  AND id IN ({placeholders}) AND (? IS NULL OR tenant_id = ?)
                 UNION
                 SELECT DISTINCT object AS eid FROM beliefs
                 WHERE invalidated_at IS NULL AND valid_until IS NULL
-                  AND id IN ({placeholders}){scope}""",
+                  AND id IN ({placeholders}) AND (? IS NULL OR tenant_id = ?)""",
             params * 2,
         ).fetchall()
         return sorted(
@@ -1562,11 +1563,14 @@ def _edit_belief_sync(belief_id: str, payload: Any) -> dict[str, Any]:
         if not _belief_tenant_ok(conn, bid):
             conn.close()
             return {"ok": False, "error": "not_found"}
+        # Every statement below names the caller's tenant too (Spaces S1-35):
+        # the check above is not what keeps another space's row out.
+        only = narrowed_to(_memory_tenant_id())
         row = conn.execute(
             "SELECT id, tenant_id, subject, predicate, predicate_type, object, "
             "valid_until, invalidated_at, metadata_json "
-            "FROM beliefs WHERE id=?",
-            (bid,),
+            "FROM beliefs WHERE id=? AND (? IS NULL OR tenant_id = ?)",
+            (bid, only, only),
         ).fetchone()
         if not row:
             conn.close()
@@ -1610,7 +1614,7 @@ def _edit_belief_sync(belief_id: str, payload: Any) -> dict[str, Any]:
                        extraction_method='user_explicit',
                        metadata_json=?,
                        embedding=NULL
-                   WHERE id=?""",
+                   WHERE id=? AND (? IS NULL OR tenant_id = ?)""",
                 (
                     subject,
                     predicate,
@@ -1618,6 +1622,8 @@ def _edit_belief_sync(belief_id: str, payload: Any) -> dict[str, Any]:
                     ptype,
                     json.dumps(meta, ensure_ascii=False),
                     bid,
+                    only,
+                    only,
                 ),
             )
         else:
@@ -1626,7 +1632,7 @@ def _edit_belief_sync(belief_id: str, payload: Any) -> dict[str, Any]:
                    SET subject=?, predicate=?, object=?, predicate_type=?,
                        extraction_method='user_explicit',
                        metadata_json=?
-                   WHERE id=?""",
+                   WHERE id=? AND (? IS NULL OR tenant_id = ?)""",
                 (
                     subject,
                     predicate,
@@ -1634,6 +1640,8 @@ def _edit_belief_sync(belief_id: str, payload: Any) -> dict[str, Any]:
                     ptype,
                     json.dumps(meta, ensure_ascii=False),
                     bid,
+                    only,
+                    only,
                 ),
             )
         # Phase 3: an edit can change subject/object, so recompute counts for
@@ -1679,15 +1687,18 @@ def _edit_belief_sync(belief_id: str, payload: Any) -> dict[str, Any]:
 
         def _restore_edit_sync() -> dict[str, Any]:
             c = _conn()
+            # The tenant the edit was made in: an undo runs in a later request.
             c.execute(
                 "UPDATE beliefs SET subject=?, predicate=?, object=?, predicate_type=? "
-                "WHERE id=?",
+                "WHERE id=? AND (? IS NULL OR tenant_id = ?)",
                 (
                     prior["subject"],
                     prior["predicate"],
                     prior["object"],
                     prior["predicate_type"],
                     bid,
+                    only,
+                    only,
                 ),
             )
             c.commit()
@@ -1837,6 +1848,8 @@ def _invalidate_batch_sync(wanted: list[str]) -> dict[str, Any]:
         # again. Re-adds the Neo4j edge best-effort via re-link is omitted
         # (edge re-sync happens on the next dual-write / reconsolidation).
         captured = list(invalidated_ids)
+        # The tenant the invalidation ran in: an undo runs in a later request.
+        only = narrowed_to(tid)
 
         def _reactivate() -> dict[str, Any]:
             conn = _conn()
@@ -1844,8 +1857,8 @@ def _invalidate_batch_sync(wanted: list[str]) -> dict[str, Any]:
                 placeholders = ",".join("?" for _ in captured)
                 cur = conn.execute(
                     f"UPDATE beliefs SET valid_until=NULL, invalidated_at=NULL "
-                    f"WHERE id IN ({placeholders})",
-                    captured,
+                    f"WHERE id IN ({placeholders}) AND (? IS NULL OR tenant_id = ?)",
+                    (*captured, only, only),
                 )
                 conn.commit()
                 return {"restored": int(cur.rowcount or 0)}

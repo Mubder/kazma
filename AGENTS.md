@@ -12976,8 +12976,20 @@ product can turn it on, so an install with one account behaves as before.
     (`recall._own_episodes`) before anything reads one by id; a database
     error there rises, and recall says it failed.
   - **A statement that picks a memory row by id alone** names its tenant in
-    the same WHERE: `tests/test_memory_id_only_statements.py` counts the
-    ones left (a ratchet; S1-35 makes it a gate).
+    the same WHERE, `(? IS NULL OR tenant_id = ?)` with
+    `tenant_view.narrowed_to` (nothing filtered on an install that does not
+    enforce Spaces), or is declared (S1-35): `tests/test_memory_id_only_statements.py`
+    is a gate, its `DECLARED` table naming each function, how many such
+    statements it holds and why another tenant's row cannot be reached -- a
+    row the same work chose by tenant, recall's candidates held by
+    `recall._own_episodes`, a queued task that names its own row, Kazma's own
+    sweeps, the mirror. A new statement fails, in a declared function too.
+    The ones that take an id from a request or the model -- the Memory page's
+    edit, undo, invalidate, detail and recall trail, Forget of a memory, a
+    fact's source and a weekly summary -- name it themselves: the route's
+    check before them was the only thing keeping another space's row out
+    (`tests/test_memory_id_scoped_statements.py`, each with the check taken
+    away and the statement without its tenant as the control).
   - **Memory outside every space** (a tenant of the retired modes) is
     counted in memory health (`tenant_view.tenants_outside_spaces`), never
     merged. Memory's copies outside the data folder declare a space rule
