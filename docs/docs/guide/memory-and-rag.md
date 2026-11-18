@@ -485,7 +485,10 @@ Kazma** lists them:
   employer, your role), Kazma keeps it as its own reading, not as yours,
   and does not ask: anything you say later replaces it. **This is right**
   makes it yours; **Not me** takes it out, and Kazma never files that value
-  again (your own words still can).
+  again (your own words still can). When a fact like this is recalled into a
+  conversation, it carries "(Kazma's reading)" ("(قراءة Kazma)" for an
+  Arabic fact), so the model knows you did not say it; so does any fact a
+  tool or the model wrote.
 
 Kazma also tells you, once, in its next reply in the chat the change came
 from: what it changed, and at most one question a turn, never about the

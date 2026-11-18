@@ -769,7 +769,38 @@ def _pg_primary_beliefs(
     sources = {
         bid: (["dense", "pgvector"] if bid in by_meaning else ["postgres_state"]) for bid in rows
     }
-    return _finish_beliefs(ranked, rows, sources if explain else None)[:limit]
+    hits = _finish_beliefs(ranked, rows, sources if explain else None)[:limit]
+    _add_local_methods(hits, tenant_id=tenant_id)
+    return hits
+
+
+def _add_local_methods(hits: list[RecallHit], *, tenant_id: str) -> None:
+    """Who stated each fact the shared store found (``extraction_method``):
+    the mirror does not hold it, this install's copy does. A fact this
+    install does not hold keeps none, and is shown untagged."""
+    want = [h.id for h in hits if not (h.metadata or {}).get("extraction_method")]
+    if not want:
+        return
+    from kazma_core.paths import primary_memory_db
+
+    conn = None
+    try:
+        conn = _connect_existing(primary_memory_db())
+        if conn is None:
+            return
+        marks = ",".join("?" for _ in want)
+        methods = {str(r[0]): r[1] for r in conn.execute(
+            f"SELECT id, extraction_method FROM beliefs WHERE tenant_id = ? AND id IN ({marks})",
+            (tenant_id, *want))}
+    except sqlite3.Error:
+        logger.warning("[recall] could not read who stated the shared store's facts", exc_info=True)
+        return
+    finally:
+        if conn is not None:
+            conn.close()
+    for hit in hits:
+        if hit.id in methods:
+            hit.metadata["extraction_method"] = methods[hit.id]
 
 
 #: Recent query vectors: one recall runs two meaning searches (episodes and
@@ -1130,6 +1161,7 @@ def _finish_beliefs(
             "confidence": _field(row, "confidence"),
             "importance": _field(row, "structural_importance"),
             "valid_from": _field(row, "valid_from"),
+            "extraction_method": _field(row, "extraction_method"),
         })
         if sources is not None:
             hit.metadata["sources"] = list(dict.fromkeys(sources.get(hit.id) or [hit.source]))
@@ -1991,7 +2023,7 @@ def _hydrate_beliefs(
         rows = conn.execute(
             f"""SELECT id, subject, predicate, object, predicate_type,
                       confidence, structural_importance, valid_from,
-                      source_trust_weight, embedding
+                      source_trust_weight, embedding, extraction_method
                FROM beliefs
                WHERE {BELIEF_ACTIVE_SQL}
                  AND tenant_id = ? AND id IN ({placeholders})""",
@@ -2410,6 +2442,30 @@ def _episode_texts(conn: sqlite3.Connection, episode_id: str) -> tuple[str, str]
 
 # ── Formatting ────────────────────────────────────────────────────────────
 
+#: After a fact Kazma inferred rather than the user stated (any source but
+#: ``provenance.USER_SOURCES``): under rule A of the second security review
+#: of F1 (2026-11-18) a model's reading never gets the user's trust, and this
+#: tag is what tells the model which recalled facts the user actually said.
+#: In the fact's own language.
+READING_TAG_EN = "(Kazma's reading)"
+READING_TAG_AR = "(قراءة Kazma)"
+
+
+def _reading_tag(hit: RecallHit) -> str:
+    """The tag a recalled fact carries when Kazma inferred it, else "": a
+    belief whose source is known and is not the user's own words. A fact
+    whose source is not known (another install's, on the shared store) is
+    shown untagged."""
+    from kazma_core.memory.provenance import USER_SOURCES
+
+    method = (hit.metadata or {}).get("extraction_method")
+    if hit.kind != "belief" or not method or method in USER_SOURCES:
+        return ""
+    from kazma_core.documents.arabic import is_rtl_dominant
+
+    value = str((hit.metadata or {}).get("object") or shown_text(hit))
+    return READING_TAG_AR if is_rtl_dominant(value) else READING_TAG_EN
+
 
 def format_recall_block(
     result: RecallResult,
@@ -2453,6 +2509,9 @@ def format_recall_block(
 
     def _line(h: RecallHit) -> str:
         shown = shown_text(h)
+        tag = _reading_tag(h)
+        if tag:
+            shown = f"{shown} {tag}"
         base = f"- {shown}"
         if (h.metadata or {}).get("strength") == "weak":
             # Found on thin evidence (memory/recall.py _EVIDENCE_STRONG): the

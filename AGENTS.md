@@ -2231,7 +2231,15 @@ four injected were noise.
   the user's trust, no name table, asking about every first reading and no
   "Not me" as negative controls; every applier call names its message),
   `tests/test_memory_provenance.py` (the same-turn exception as the
-  control), and the write scenarios (v4).
+  control), and the write scenarios (v4). **Recall says which facts the user
+  did not state**: in the recall block a fact whose `extraction_method` is
+  known and not in `provenance.USER_SOURCES` carries "(Kazma's reading)", or
+  "(قراءة Kazma)" for an Arabic value (`recall.READING_TAG_EN`,
+  `READING_TAG_AR`); the Postgres-primary path reads the source from this
+  install's copy (`recall._add_local_methods`; another install's fact is
+  shown untagged). Recall's ranking is unchanged (the benchmark's 103 scores
+  equal). Gate: `tests/test_memory_recall_reading_tag.py` (the hydrate
+  without the source as the negative control).
 - **A fact the user stated changes only in ways the user can see and take
   back** (2026-11, the audit's F1, second half; `memory/changes.py`, table
   `memory_changes` in `memory_state.db`). An **update**: a `user_*` fact
