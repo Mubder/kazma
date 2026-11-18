@@ -22,7 +22,14 @@ from kazma_core.mcp_servers_store import (
 
 @pytest.fixture()
 def dual_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """Isolated ConfigStore mock + temp kazma.yaml."""
+    """Isolated ConfigStore mock + temp kazma.yaml, with no vault.
+
+    These tests read secrets back as typed, which is what a store with no
+    vault keeps; a vault another test left behind made them read pointers
+    (2026-11-18, three full-suite failures). The vault's own path is
+    tests/test_mcp_secrets.py.
+    """
+    monkeypatch.setattr("kazma_core.config_store._try_get_vault", lambda: None)
     yaml_path = tmp_path / "kazma.yaml"
     yaml_path.write_text(
         yaml.safe_dump({"agent": {"name": "test"}, "mcp": {"servers": []}}),

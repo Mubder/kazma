@@ -200,6 +200,28 @@ def test_without_the_guard_the_vault_reaches_the_next_test():
         KAZMA_TEST_ISOLATION="0",
     )
     assert proc.returncode == 1, proc.stdout[-2000:]
+
+
+# A file-wide fixture reaches past one test: an app built for a whole file
+# wrote a generated vault key into the environment and made the vault, and
+# both reached every later file (2026-11-19, the full suite).
+_FILE_PROBES = (
+    str(Path(__file__).with_name("_probe_file_vault_first.py")),
+    str(Path(__file__).with_name("_probe_file_vault_second.py")),
+)
+
+
+def test_a_file_wide_vault_does_not_reach_the_next_file():
+    proc = _child_pytest(*_FILE_PROBES, KAZMA_FILE_VAULT_PROBE="1")
+    assert proc.returncode == 0, proc.stdout[-2000:]
+    assert "2 passed" in proc.stdout, proc.stdout[-2000:]
+
+
+def test_without_the_guard_a_file_wide_vault_reaches_the_next_file():
+    """Negative control: the same two files with test isolation off."""
+    proc = _child_pytest(*_FILE_PROBES, KAZMA_FILE_VAULT_PROBE="1", KAZMA_TEST_ISOLATION="0")
+    assert proc.returncode == 1, proc.stdout[-2000:]
+    assert "1 failed, 1 passed" in proc.stdout, proc.stdout[-2000:]
     assert "1 failed, 1 passed" in proc.stdout, proc.stdout[-2000:]
 
 

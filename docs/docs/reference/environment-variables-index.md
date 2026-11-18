@@ -120,7 +120,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_HARD_MAX_COST` | (none) | `kazma_core.cost_breaker` | yes |
 | `KAZMA_HITL_CANONICAL_FLOOR` | `""` | `kazma_core.safety.hitl` | yes |
 | `KAZMA_HITL_GRANT_TTL_SECONDS` | (none) | `kazma_core.safety.hitl_grants` | yes |
-| `KAZMA_HOST` | `"127.0.0.1"` | `kazma_cli.main`, `kazma_core.security.boot_guard`, `kazma_core.security.hardening` +5 | yes |
+| `KAZMA_HOST` | `"127.0.0.1"` | `kazma_cli.main`, `kazma_core.security.boot_guard`, `kazma_core.security.hardening` +6 | yes |
 | `KAZMA_HOST_SHELL` | (none) | `kazma_core.safety.post_hitl` | yes |
 | `KAZMA_HUB_DB` | (none) | `kazma_core.hub.cli`, `kazma_core.paths` | yes |
 | `KAZMA_HUB_URL` | (none) | `kazma_core.hub.cli` | yes |
@@ -223,7 +223,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_PROJECT_ROOT` | (none) | `kazma_core.mcp.server`, `kazma_core.paths` | yes |
 | `KAZMA_PROMPT_CACHE` | (none) | `kazma_core.prompt_cache` | yes |
 | `KAZMA_PROVIDER` | `""` | `kazma_core.model_registry`, `kazma_core.web_acquire.research_pipeline_job`, `kazma_ui.app` | yes |
-| `KAZMA_PUBLIC_URL` | `""` | `kazma_cli.port_setup`, `kazma_core.ide.env_context`, `kazma_core.migration.exporter` +11 | yes |
+| `KAZMA_PUBLIC_URL` | `""` | `kazma_cli.port_setup`, `kazma_core.ide.env_context`, `kazma_core.migration.exporter` +12 | yes |
 | `KAZMA_RATE_LIMIT_ENABLED` | `""` | `kazma_ui.rate_limit` | yes |
 | `KAZMA_READ_ONLY_START` | (none) | `kazma_ui.read_only_mode` | yes |
 | `KAZMA_READ_URL_MAX_CHARS` | (none) | `kazma_core.tools.read_url` | yes |
@@ -292,7 +292,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_UPDATE_REMOTE_ALLOWLIST` | `""` | `kazma_cli.update` | yes |
 | `KAZMA_UPDATE_VERIFY_SIGNATURES` | `""` | `kazma_cli.update` | yes |
 | `KAZMA_USER_HOME` | (none) | `kazma_core.paths` | yes |
-| `KAZMA_VAULT_KEY` | `""` | `kazma_core.backup.restore_drill`, `kazma_core.migration.bundle`, `kazma_core.migration.exporter` +4 | yes |
+| `KAZMA_VAULT_KEY` | `""` | `kazma_core.backup.restore_drill`, `kazma_core.migration.bundle`, `kazma_core.migration.exporter` +5 | yes |
 | `KAZMA_VECTOR_DB` | (none) | `kazma_core.paths` | yes |
 | `KAZMA_VECTOR_MODEL` | `""` | `kazma_core.memory.embedder` | yes |
 | `KAZMA_VECTOR_PATH` | (none) | `kazma_core.paths`, `kazma_core.stores.knowledge_index` | yes |

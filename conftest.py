@@ -403,7 +403,43 @@ def _fresh_x_stores():
 # typed) then read a vault:// pointer, failing only when such a test ran
 # earlier in the same chunk. The singleton is put back as the test found it;
 # KAZMA_TEST_ISOLATION=0 turns this off (tests/test_order_independence.py).
+#
+# A test file's own setup reaches past one test (2026-11-19, the full suite):
+# a file-wide fixture that builds the app writes a generated KAZMA_VAULT_KEY
+# into the environment (kazma_ui/app.py, as a first boot does) and makes the
+# vault, and the per-test guards put back only what a test found. So the
+# environment and the singleton are also put back when a file ends, and a
+# test starts with no decision the environment it runs in contradicts: a
+# vault with no key, or "no vault" with a key set.
 _VAULT_SINGLETON = ("_vault", "_vault_init_attempted", "_vault_retry_at", "_vault_retry_wait")
+
+
+def _vault_state():
+    from kazma_core.security import vault as vault_module
+
+    return vault_module, {name: getattr(vault_module, name) for name in _VAULT_SINGLETON}
+
+
+def _put_back_vault_state(vault_module, state) -> None:
+    for name, value in state.items():
+        setattr(vault_module, name, value)
+
+
+@_pytest.fixture(autouse=True, scope="module")
+def _file_environment_and_vault_restored():
+    """What a test file's own setup changed leaves with the file."""
+    if os.environ.get("KAZMA_TEST_ISOLATION") == "0":
+        yield
+        return
+    environment = dict(os.environ)
+    vault_module, state = _vault_state()
+    yield
+    for key in [k for k in os.environ if k not in environment]:
+        del os.environ[key]
+    for key, value in environment.items():
+        if os.environ.get(key) != value:
+            os.environ[key] = value
+    _put_back_vault_state(vault_module, state)
 
 
 @_pytest.fixture(autouse=True)
@@ -411,12 +447,16 @@ def _vault_singleton_restored():
     if os.environ.get("KAZMA_TEST_ISOLATION") == "0":
         yield
         return
-    from kazma_core.security import vault as vault_module
-
-    before = {name: getattr(vault_module, name) for name in _VAULT_SINGLETON}
+    vault_module, before = _vault_state()
+    key_set = bool(os.environ.get("KAZMA_VAULT_KEY", "").strip())
+    if vault_module._vault_init_attempted and key_set != (vault_module._vault is not None):
+        # Decided under another environment: the test asks again.
+        _put_back_vault_state(vault_module, {
+            "_vault": None, "_vault_init_attempted": False,
+            "_vault_retry_at": 0.0, "_vault_retry_wait": 0.0,
+        })
     yield
-    for name, value in before.items():
-        setattr(vault_module, name, value)
+    _put_back_vault_state(vault_module, before)
 
 
 @_pytest.fixture(autouse=True)
