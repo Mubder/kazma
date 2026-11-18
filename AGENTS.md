@@ -2027,13 +2027,22 @@ four injected were noise.
   Arabic quick pass's triggers are each declared `_MARKED` (the form says the
   user is the subject: "أسكن", "انتقلنا", "اسمي") or `_UNMARKED` (a
   participle, or "انتقلت", which is I, you and she alike): an unmarked one
-  counts in the user's own clause and only with no one else named before it.
+  counts in the user's own clause (or after a time phrase: "قبل سنتين
+  انتقلت") and only with no one else named before it.
   "أختي انتقلت إلى روتردام" was the user's home at the user's own trust, and
-  so was "أخوي اسمه أحمد وساكن في دبي" (a clause joined by "و"). Gate:
+  so was "أخوي اسمه أحمد وساكن في دبي" (a clause joined by "و"). Names no
+  one: a person noun right after the speaker ("أنا مدير", "عندي بنت", "I'm a
+  teacher": a description or a possession), a definite word ("الأهلي",
+  "الجاري" are never "my ..."), "جاري" (work in progress as often as a
+  neighbour), "her" with nothing after it ("I told her."). A sentence end
+  clears who was named, except someone introduced by name ("عندي أخت اسمها
+  نورة. انتقلت" is still Noura); the cost, decided, is "صديقتي معلمة. ساكنة
+  في جدة" read as the user's. Gate:
   `tests/test_memory_clause_subject.py` (every trigger declared once, a planted
   one as control; every unmarked trigger after a sentence about someone
-  else; the old trigger list and the rule switched off as negative
-  controls), and the write scenario `other-ar-sister-moved`.
+  else; the old trigger list, the rule switched off, and 40db48ba6's
+  time-phrase, sentence and role rules as negative controls), and the write
+  scenario `other-ar-sister-moved`.
 - **Only the user's own words are the user's statement** (2026-11, the
   audit's F3, `memory/own_words.py`). `own_words` is the message without
   data fences (an attached document's text: `build_user_content` puts it in

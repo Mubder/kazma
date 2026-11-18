@@ -21,10 +21,12 @@ what the English pass refuses by capitalisation, which Arabic does not have:
   by "و" to what came before;
 * a trigger whose form does not say who its subject is -- a participle
   ("ساكن", "شغال") or a past verb whose ending is the same for I, you and she
-  ("انتقلت") -- counts where the user's own clause begins, and only when no
-  one else is named before it (``memory.clause_subject``): "أخوي ساكن في دبي" is
+  ("انتقلت") -- counts where the user's own clause begins or after a time
+  phrase that opens it ("قبل سنتين انتقلت إلى دبي"), and only when no one
+  else is named before it (``memory.clause_subject``): "أخوي ساكن في دبي" is
   the brother, "أختي انتقلت إلى روتردام" the sister, and in "عندي أخت اسمها
-  نورة وانتقلت إلى روتردام" it is Noura who moved;
+  نورة وانتقلت إلى روتردام" it is Noura who moved, while "أنا مدير مشاريع
+  وساكن في دبي" and "عندي بنت وساكن في الكويت" are the user;
 * a verb without its hamza ("اشتغل", "استخدم") is the imperative the user
   gives Kazma unless "أنا" comes first;
 * "أحب/أعشق" keep only a definite noun ("أحب الشاي"), never a verb
@@ -72,7 +74,8 @@ _ENDERS = {"الشهر", "السنه", "الاسبوع", "العام", "امس",
 _WORK_TRIGGERS = {"اشتغل", "نشتغل", "اعمل", "نعمل", "شغال", "شغاله", "اداوم", "موظف", "موظفه"}
 #: Triggers whose form does not say who their subject is: participles, and
 #: a past verb whose ending is the same for I, you and she. The user's only
-#: in the user's own clause, with no one else named before them.
+#: in the user's own clause (or after a time phrase that opens it), with no
+#: one else named before them.
 _UNMARKED = {"ساكن", "ساكنه", "ساكنين", "عايش", "عايشه", "عايشين", "مقيم", "مقيمه",
              "شغال", "شغاله", "موظف", "موظفه", "انتقلت"}
 #: Triggers whose form says the user is their subject: a first-person prefix
@@ -83,6 +86,13 @@ _MARKED = {"اسمي", "ناديني", "نادني", "اسكن", "نسكن", "ا
            "عندي", "لدي"}
 #: Verbs that read as an imperative without their hamza ("اشتغل على الملف").
 _HAMZA_VERBS = {"اشتغل", "اعمل", "استخدم", "استعمل"}
+#: A time phrase that may open the user's clause, folded: "قبل سنتين",
+#: "السنة الماضية", "بعد التخرج", "من سنة", "في 2020".
+_TIME_WORDS = {"قبل", "بعد", "من", "منذ", "في", "خلال", "حوالي", "تقريبا", "السنه", "سنه", "سنتين",
+               "سنين", "سنوات", "العام", "عام", "عامين", "الشهر", "شهر", "شهرين", "شهور", "اشهر",
+               "الاسبوع", "اسبوع", "اسبوعين", "الماضي", "الماضيه", "اللي", "فات", "فاتت", "اخيرا",
+               "مؤخرا", "حديثا", "التخرج", "الزواج", "زمان", "امس", "البارحه", "اليوم", "كم", "يوم",
+               "ايام", "اول", "الصيف", "الشتا", "الشتاء", "رمضان"}
 #: Words after which the user's own clause begins.
 _OPENERS = {"انا", "وانا", "احنا", "نحن", "هلا", "مرحبا", "اهلا", "هاي", "السلام", "عليكم", "طيب",
             "اوكي", "حاليا", "الحين", "الان"}
@@ -146,12 +156,25 @@ def _own_clause(words: list[_Word], i: int) -> bool:
     return i == 0 or words[i - 1].punct or words[i - 1].folded in _OPENERS or w.bare != w.folded
 
 
+def _after_time_phrase(words: list[_Word], i: int) -> bool:
+    """Whether word *i* follows only a time phrase in its clause ("قبل سنتين
+    انتقلت", "بعد التخرج انتقلت", "في 2020 انتقلت"): the user's own clause
+    still, where a name before the verb ("سارة انتقلت") is not."""
+    j = i - 1
+    while j >= 0 and not words[j].punct and words[j].folded not in _OPENERS:
+        w = words[j]
+        if not (w.folded in _TIME_WORDS or w.bare in _TIME_WORDS or w.folded.isdigit()):
+            return False
+        j -= 1
+    return j < i - 1
+
+
 def _first_person(words: list[_Word], i: int, named: list[str | None]) -> bool:
     """Whether word *i*, a trigger, speaks of the user. *named* is who the
     words before each word last named (``clause_subject.subjects``)."""
     w = words[i]
     if w.bare in _UNMARKED:
-        return _own_clause(words, i) and named[i] != OTHER
+        return (_own_clause(words, i) or _after_time_phrase(words, i)) and named[i] != OTHER
     if w.folded in _NAME_TRIGGERS:
         return _own_clause(words, i)
     if w.bare in _HAMZA_VERBS:

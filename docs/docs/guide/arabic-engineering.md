@@ -122,9 +122,12 @@ too short.
   A negation, an imperative ("استخدم البحث"), a question, or a statement about
   someone else ("أخوي ساكن في دبي", "أختي انتقلت إلى روتردام") stores nothing
   about the user. "انتقلت" is "I moved" and "she moved" alike, so it counts as
-  the user's only when no one else is named before it; once a message names
+  the user's only when no one else is named before it; once a sentence names
   someone else ("عندي أخت اسمها نورة وانتقلت..."), it is theirs until "أنا"
-  comes. A place has to end where it is read.
+  comes. A new sentence starts fresh unless the person was introduced by name
+  ("اسمها نورة"); a role or a possession after "أنا"/"عندي" ("أنا مدير",
+  "عندي بنت") still describes the user, and a definite word ("الأهلي") is
+  never "my ...". A place has to end where it is read.
 - **Small talk by words, not length.** A greeting, thanks or "تمام" is small
   talk only when the whole message is, and only with a short reply. A short
   question about something is still a memory.

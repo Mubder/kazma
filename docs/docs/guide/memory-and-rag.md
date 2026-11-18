@@ -795,9 +795,12 @@ grammar, so it keeps nothing from a negation ("ما أحب"), an instruction to
 Kazma ("استخدم البحث"), a question, someone else ("أخوي ساكن في دبي", "أختي
 انتقلت إلى روتردام", and "عندي أخت اسمها نورة وانتقلت إلى روتردام", where it
 is Noura who moved) or a field of work ("أشتغل في المبيعات", like "I work in
-sales"). Once a message names someone else, a statement with no "أنا" after it
+sales"). Once a sentence names someone else, a statement with no "أنا" after it
 is read as about them: the quick pass would rather miss a fact than file
-another person's under you. It reads only your own words: not an attached
+another person's under you. A new sentence starts fresh, except for someone
+you introduced by name ("عندي أخت اسمها نورة. انتقلت إلى روتردام" is still
+Noura), and what describes you is still you ("أنا مدير مشاريع وساكن في دبي",
+"عندي بنت وساكن في الكويت", "قبل سنتين انتقلت إلى دبي"). It reads only your own words: not an attached
 document, a quote, what someone else said ("my sister said: ...") or a text
 you asked Kazma to work on ("Translate to French: My name is Pierre" does not
 make your name Pierre). "Correct: my name is Ahmad" is your own words and
