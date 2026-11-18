@@ -37,7 +37,10 @@ def person_of(word: str) -> str | None:
 # ── who a word names ─────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("word", ["أنا", "وأنا", "احنا", "نحن", "اسمي", "I", "I'm", "we", "We're"])
+@pytest.mark.parametrize("word", [
+    "أنا", "وأنا", "احنا", "نحن", "اسمي", "عندي", "I", "I'm", "we", "We're", "my", "our", "me",
+    "أشتغل", "وأسكن", "انتقلنا", "نشتغل",  # first-person verbs: with the hamza, or "we"
+])
 def test_the_speaker_is_named_by_a_first_person_word(word):
     assert person_of(word) == SPEAKER
 
@@ -59,7 +62,9 @@ def test_someone_else_is_named_by_a_relative_a_companion_or_a_pronoun(word):
     "أبها",    # Abha
     "ربع",     # a quarter
     "خال",     # empty
-    "الكويت", "دبي", "ساكن", "انتقلت", "Rotterdam", "moved", "my",
+    "اشتغل",   # without its hamza, also the imperative
+    "أفضل",    # also "better"
+    "الكويت", "دبي", "ساكن", "انتقلت", "Rotterdam", "moved",
 ])
 def test_a_word_that_is_also_something_else_names_no_one(word):
     assert person_of(word) is None

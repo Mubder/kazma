@@ -2056,6 +2056,28 @@ four injected were noise.
   `build_user_content` attachment; the user's own corrections kept; the
   quoted write scenarios pass and fail with the raw message; the raw message
   as the negative control for the quick pass and the trust gate).
+- **Trust follows who is speaking about themself, not which pass read the
+  fact** (2026-11, the audit's F1, first half). `_apply_beliefs_to_v2`
+  takes the turn's `user_text`; a fact the model read about `user` is
+  `user_stated`, in the user's own spelling, when
+  `clause_subject.speaks_of_self` answers: the value's words stand in
+  `own_words`, and in their sentence the nearest word before them that
+  names a person names the speaker ("I", "we", "my", "أنا", "اسمي", a
+  first-person verb written with its hamza or a "we" form), with no
+  third-person pronoun after them. Stricter than the quick pass: no one
+  named is an inference ("Moved to Rotterdam", "No, Lisbon"). Before, "We
+  moved to Rotterdam" and "I left Google, I am at Meta now" were inferences
+  the trust gate refused against the user's earlier fact. Every product call
+  that applies extracted facts names `user_text` (the two forwarders aside).
+  And "the same value" is compared folded (`belief_mutation._same_value`:
+  case, underscores, spacing, Arabic forms and marks): the model's
+  respelling ("lisbon", "gulf_bank") replaced the user's fact in its own
+  turn and took the user's trust with it. Gate:
+  `tests/test_memory_own_statements.py` (EN/AR/mixed readings; the worker's
+  own micro_consolidation with a correction, a new job in Arabic, and the
+  sister and the manager filed under the user by the model; every applier
+  call names its message, a planted one as control; the grading switched off
+  and the letter-for-letter comparison as negative controls).
 - The heuristic reads "I work at/for X" as `works_at` (it shared a pattern
   with "I live in" and stored the employer as `lives_in`), and the local
   embedder remembers short texts (<= 256 characters, 4,096 of them): each

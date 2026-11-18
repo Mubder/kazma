@@ -801,7 +801,11 @@ another person's under you. It reads only your own words: not an attached
 document, a quote, what someone else said ("my sister said: ...") or a text
 you asked Kazma to work on ("Translate to French: My name is Pierre" does not
 make your name Pierre). "Correct: my name is Ahmad" is your own words and
-counts. What it misses --
+counts. A fact the model's deep pass reads counts as your own word too when
+you say it of yourself: "We moved to Rotterdam last month" replaces the home
+you gave before, in your spelling. "My sister moved to Rotterdam" never
+does, whoever the model files it under, and a reading that names no one
+("Moved to Rotterdam") stays the model's inference. What it misses --
 relatives, jobs, dates -- is the model's deep pass to find. That pass is scored from the configured model's recorded
 replies (`scripts/memory_extraction_record.py --out <fixture>`, run with an
 install's own Python, one model call per turn); a turn with no recorded reply

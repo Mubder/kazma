@@ -734,6 +734,22 @@ def _insert_kw(kw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _same_value(old: Any, new: Any) -> bool:
+    """Whether two values are one value written two ways: compared after
+    folding case, underscores, spacing and Arabic letter forms and marks
+    (``documents.arabic.fold_for_search``)."""
+    if old == new:
+        return True
+    if not old or not new:
+        return False
+    from kazma_core.documents.arabic import fold_for_search
+
+    def folded(value: Any) -> str:
+        return " ".join(fold_for_search(str(value).replace("_", " ")).split())
+
+    return folded(old) == folded(new)
+
+
 def _survivor(current: list[Any]) -> Any:
     """Which of a single-valued fact's current rows (newest first) stays
     current when there are several: the newest the user said, else the
@@ -846,8 +862,12 @@ def _mutate_functional_locked(
             existing["extraction_method"]
             if isinstance(existing, sqlite3.Row) else existing[2]
         )
-        # If the new object equals the existing one, this is a no-op
-        if old_obj == obj:
+        # The same value written another way ("lisbon", "gulf_bank", a vowel
+        # mark) is no change, and the stored spelling -- the user's -- stays:
+        # compared letter for letter, the model's respelling replaced the
+        # user's own fact in its own turn and took the user's trust with it
+        # (2026-11, the memory framework audit's F1).
+        if _same_value(old_obj, obj):
             # Release the BEGIN IMMEDIATE lock we acquired (no writes to
             # commit). Only roll back if WE started the txn — if the caller
             # already had one open, leave it to the caller (audit finding:

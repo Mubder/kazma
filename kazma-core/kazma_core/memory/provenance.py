@@ -19,7 +19,10 @@ The ladder, from the top:
     words being stored (:func:`agent_write_source`).
 ``user_stated``
     The user's literal statement, read from their own message by the
-    heuristic pass ("my name is", "I live in", "I work at").
+    heuristic pass ("my name is", "I live in", "I work at"), or a fact the
+    model's pass read that the user says of themself in their own words
+    (``clause_subject.speaks_of_self``: "We moved to Rotterdam"; never "My
+    sister moved to Rotterdam").
 ``system_tool`` / ``agent_asserted`` / ``llm_inferred``
     A migration, an agent tool call the user did not ask for, the extractor's
     model pass.

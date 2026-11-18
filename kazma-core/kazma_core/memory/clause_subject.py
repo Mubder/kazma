@@ -32,10 +32,11 @@ own, and answers for every word in one pass.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from functools import lru_cache
 
-__all__ = ["OTHER", "SPEAKER", "subjects"]
+__all__ = ["OTHER", "SPEAKER", "speaks_of_self", "subjects"]
 
 SPEAKER = "speaker"
 OTHER = "other"
@@ -43,7 +44,16 @@ OTHER = "other"
 _PUNCTUATION = set(".,!?،؛؟:;()")
 
 # Arabic, written folded (``documents.arabic.fold_for_search``).
-_AR_SPEAKER = {"انا", "احنا", "نحن", "اسمي"}
+_AR_SPEAKER = {"انا", "احنا", "نحن", "اسمي", "عندي", "لدي"}
+#: First-person verbs written with their hamza ("أشتغل", "أسكن"): without it
+#: each is also the imperative ("اشتغل على التقرير"), so it names no one.
+#: ("أفضل" and "أشجع" are left out: also "better" and "braver".)
+_AR_I_VERBS = {"اسكن", "اعيش", "اقيم", "اشتغل", "اعمل", "اداوم", "ادرس", "احب", "اعشق", "استخدم",
+               "استعمل", "املك", "انتقل", "اروح", "اسافر", "اكون", "اصير", "اتابع", "اكره", "اسوق",
+               "اتكلم"}
+#: "We" verbs, which carry their person whatever the spelling.
+_AR_WE_VERBS = {"نسكن", "نعيش", "نقيم", "نشتغل", "نعمل", "ندرس", "ننتقل", "نروح", "نسافر", "نكون",
+                "انتقلنا", "سكنا", "اشتغلنا", "رحنا", "سافرنا", "تزوجنا", "نقلنا"}
 #: Third-person pronouns: someone else where their clause begins.
 _AR_PRONOUNS = {"هو", "هي", "هم", "هما", "هن"}
 #: Someone else wherever they stand: "his/her name", reporting verbs.
@@ -66,7 +76,8 @@ _AR_PREFIXES = ("وال", "فال", "بال", "لل", "ال", "و", "ف", "ب", 
 #: Never someone else: "أبي" is also "I want" in the Gulf.
 _AR_NEVER = {"ابي"}
 
-_EN_SPEAKER = {"i", "we"}
+_EN_SPEAKER = {"i", "we", "me", "us", "my", "our", "mine", "ours", "myself", "ourselves"}
+_EN_PRONOUNS = {"he", "she", "they"}
 _EN_OTHER = {"he", "she", "they", "him", "her", "his", "hers", "them", "their", "theirs",
              "sister", "brother", "sibling", "mother", "mom", "mum", "father", "dad", "parent",
              "wife", "husband", "partner", "son", "daughter", "child", "children", "kid",
@@ -83,7 +94,20 @@ def _is_person_stem(stem: str) -> bool:
     return stem.endswith("ت") and (stem[:-1] + "ه") in (_AR_PEOPLE | _AR_PEOPLE_OWNED)
 
 
-def _arabic_person(word: str) -> tuple[str | None, bool]:
+def _arabic_verb_person(word: str, written: str) -> str | None:
+    """SPEAKER for a first-person verb: a "we" form, or an "I" form written
+    with its hamza (*written* is the word as typed, without "و"/"ف")."""
+    for form in (word, word[1:] if len(word) > 3 and word[0] in "وف" else ""):
+        if form in _AR_WE_VERBS:
+            return SPEAKER
+        if form in _AR_I_VERBS and written.startswith("أ"):
+            return SPEAKER
+    return None
+
+
+def _arabic_person(word: str, written: str = "") -> tuple[str | None, bool]:
+    if _arabic_verb_person(word, written):
+        return SPEAKER, False
     forms = [word] + [word[len(p):] for p in _AR_PREFIXES
                       if word.startswith(p) and len(word) - len(p) >= 2]
     for form in forms:
@@ -122,7 +146,8 @@ def _classify(word: str) -> tuple[str | None, bool]:
     if not folded:
         return None, False
     if any("؀" <= c <= "ۿ" for c in folded):
-        return _arabic_person(folded)
+        written = word[1:] if len(word) > 3 and word[0] in "وف" else word
+        return _arabic_person(folded, written)
     return _english_person(folded), False
 
 
@@ -140,3 +165,90 @@ def subjects(words: Sequence[str]) -> list[str | None]:
             last = person
         clause_start = word in _PUNCTUATION
     return out
+
+
+# ── the strict reading: does the user say this of themself? ──────────────
+
+#: A word, a punctuation mark of its own, or a line break.
+_TOKEN_RE = re.compile(r"[^\s.,!?،؛؟:;()\"«»“”]++|[.,!?،؛؟:;()]|\n")
+#: Where a sentence ends: a value's subject is looked for inside its sentence.
+_SENTENCE_END = {".", "!", "?", "؟", "\n"}
+#: Letters written onto a word before a value ("بدبي", "والرياض", "وبالكويت").
+_PREPOSITION_LETTERS = "وفبل"
+
+
+def _fold(text: str) -> str:
+    from kazma_core.documents.arabic import fold_for_search
+
+    return fold_for_search(text)
+
+
+def _token_holds(token: str, word: str) -> tuple[int, bool] | None:
+    """Whether the folded *token* is *word*: ``(cut, same)`` -- how many
+    letters written onto it to drop ("بدبي" is "دبي" after one), and whether
+    what is left is the word letter for letter (else it differs only by the
+    article "ال"). None when it is not the word."""
+    bare = word[2:] if word.startswith("ال") and len(word) > 3 else word
+    for cut in (0, 1, 2):
+        if cut and (len(token) - cut < 2 or any(c not in _PREPOSITION_LETTERS for c in token[:cut])):
+            continue
+        rest = token[cut:]
+        if rest == word:
+            return cut, True
+        if rest in (bare, "ال" + bare) or (token[:cut].endswith("ل") and "ال" + rest == word):
+            return cut, False
+    return None
+
+
+def _third_person_pronoun(token: str) -> bool:
+    folded = _fold(token)
+    bare = folded[1:] if len(folded) > 2 and folded[0] in "وف" else folded
+    return folded.replace("’", "'").split("'", 1)[0] in _EN_PRONOUNS or bare in _AR_PRONOUNS
+
+
+def speaks_of_self(message: str | None, value: str | None) -> str | None:
+    """The user's own spelling of *value* when the user says it of
+    themself in *message*, else None.
+
+    The value's words must stand in the user's own words (``own_words``:
+    never a quote, an attached document or a text to translate), and in
+    their sentence the nearest word before them that names a person must
+    name the speaker -- "I", "we", "my", "أنا", "اسمي", a first-person verb
+    ("أشتغل", "انتقلنا") -- with no third-person pronoun after them in the
+    sentence ("I think Rotterdam is where she lives"). Stricter than the
+    quick pass, where no one named is the speaker: "Moved to Rotterdam last
+    month" names no one and is None. A fact the model read is the user's own
+    statement only when this answers.
+    """
+    from kazma_core.memory.own_words import own_words
+
+    pieces = str(value or "").replace("_", " ").split()
+    words = [_fold(p) for p in pieces]
+    if not words or not all(words) or not message:
+        return None
+    raw = _TOKEN_RE.findall(own_words(message))
+    folded = [_fold(t) for t in raw]
+    k = len(words)
+    for i in range(len(raw) - k + 1):
+        held = [_token_holds(folded[i + j], words[j]) for j in range(k)]
+        if any(h is None for h in held):
+            continue
+        start = i
+        while start > 0 and raw[start - 1] not in _SENTENCE_END:
+            start -= 1
+        end = i + k
+        while end < len(raw) and raw[end] not in _SENTENCE_END:
+            end += 1
+        if subjects(raw[start:i + 1])[-1] != SPEAKER:
+            continue
+        if any(_third_person_pronoun(t) for t in raw[i + k:end]):
+            continue
+        # The user's spelling, without a preposition written onto it; where
+        # only the article differs, the model's word (its own letters).
+        return " ".join(raw[i + j][cut:].lstrip(_MARKS) if same else pieces[j]
+                        for j, (cut, same) in enumerate(h for h in held if h is not None))
+    return None
+
+
+#: Arabic vowel marks a word may carry after a letter written onto it.
+_MARKS = "".join(chr(c) for c in range(0x064B, 0x0660)) + "ٰ"

@@ -462,6 +462,7 @@ async def extract_and_apply_beliefs(
         tenant_id=tenant_id,
         cfg=cfg,
         extraction_method=extraction_method,
+        user_text=user_text,
     )
 
 
@@ -550,8 +551,15 @@ def _apply_beliefs_to_v2(
     extraction_method: str | None = None,
     now: float | None = None,
     private: bool = False,
+    user_text: str | None = None,
 ) -> dict[str, Any]:
     """Sync helper: fence + entity-resolve + mutate a list of raw beliefs.
+
+    *user_text* is the turn's message. A fact the model read about the user
+    is the user's own statement (``user_stated``, in the user's spelling)
+    when the user says it of themself there
+    (``clause_subject.speaks_of_self``); any other stays an inference.
+    Every product caller names it (``tests/test_memory_own_statements.py``).
 
     *private*: the connections are a private database (the memory
     benchmark's), and nothing reaches a mirror, a graph copy or a remote
@@ -597,6 +605,17 @@ def _apply_beliefs_to_v2(
         # dialogue). User_explicit stores are NEVER throttled; the functional-
         # supersede-of-user-fact case is the mutate_belief source-trust gate.
         _method = extraction_method or _default_method(stats)
+        # Trust follows who is speaking about themself, not which pass read
+        # the fact: "We moved to Rotterdam" read by the model is the user's
+        # own word, "My sister moved to Rotterdam" never is (2026-11, the
+        # memory framework audit's F1).
+        if _method == "llm_inferred" and clean["subject"] == "user" and user_text:
+            from kazma_core.memory.clause_subject import speaks_of_self
+
+            spelled = speaks_of_self(user_text, clean["object"])
+            if spelled:
+                _method, clean["object"] = "user_stated", spelled
+                stats["own_statements"] = stats.get("own_statements", 0) + 1
         if _method != "user_explicit":
             _mode = get_auto_store_mode(cfg)
             if _mode == "off":
@@ -672,7 +691,7 @@ def _apply_beliefs_to_v2(
             predicate_type=clean["predicate_type"],
             confidence=clean["confidence"],
             importance=clean["importance"],
-            extraction_method=extraction_method or _default_method(stats),
+            extraction_method=_method,
             tenant_id=tenant_id,
             source_session=session_id,
             source_turn=turn,
@@ -769,4 +788,5 @@ def extract_and_apply_beliefs_sync(
         extraction_method=extraction_method,
         now=now,
         private=private,
+        user_text=user_text,
     )

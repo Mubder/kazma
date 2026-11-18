@@ -137,9 +137,9 @@
   },
   "scores": {
    "kept_as_said.ar.passed": 1.0,
-   "kept_as_said.en.passed": 0.0,
-   "kept_as_said.mixed.passed": 0.0,
-   "overall.passed": 0.75,
+   "kept_as_said.en.passed": 1.0,
+   "kept_as_said.mixed.passed": 1.0,
+   "overall.passed": 0.9643,
    "quoted.ar.passed": 1.0,
    "quoted.en.passed": 1.0,
    "quoted.mixed.passed": 1.0,
@@ -148,17 +148,11 @@
    "someone_else.ar.passed": 1.0,
    "someone_else.en.passed": 1.0,
    "someone_else.mixed.passed": 1.0,
-   "update.ar.passed": 0.6667,
-   "update.en.passed": 0.5,
-   "update.mixed.passed": 0.0
+   "update.ar.passed": 1.0,
+   "update.en.passed": 1.0,
+   "update.mixed.passed": 1.0
   },
   "failing": [
-   "update-en-moved",
-   "update-en-new-job",
-   "update-ar-new-job",
-   "update-mixed-moved",
-   "kept-en-name-and-city",
-   "kept-mixed-employer",
    "short-en-no-city"
   ]
  },

@@ -801,7 +801,7 @@ def _run_scenario(scenario: dict[str, Any], client: _ScriptedClient, recorded: d
                 entities=entity_vocabulary(primary, tenant_id=BENCH_TENANT)))
             if raw:
                 _apply_beliefs_to_v2(raw, primary, ops, stats=stats, session_id=session, turn=number,
-                                     tenant_id=BENCH_TENANT, now=at, private=True)
+                                     tenant_id=BENCH_TENANT, now=at, private=True, user_text=turn["user"])
         rows = [dict(r) for r in primary.execute(
             "SELECT subject, predicate, object, extraction_method FROM beliefs WHERE tenant_id = ? "
             "AND valid_until IS NULL AND invalidated_at IS NULL ORDER BY valid_from", (BENCH_TENANT,))]
