@@ -2398,6 +2398,11 @@ def create_graph_handler(
             "⚠️ What this chat keeps out of memory could not be copied to the fork, "
             "so nothing was forked."
         ),
+        "thread_record_unavailable": (
+            "⚠️ Where this chat lives could not be read or recorded, so nothing was changed "
+            "(the server log says why)."
+        ),
+        "no_space": "⚠️ This chat is not tied to a space yet, so nothing was forked.",
     }
 
     def _refusal_text(refused: Any) -> str:

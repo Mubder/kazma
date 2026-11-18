@@ -591,10 +591,15 @@ async def delete_session(request: Request, thread_id: str) -> JSONResponse:
         # The chat the thread belongs to (web and platform ids alike). Store
         # writes: off the event loop.
         chat_keys = [thread_id]
+        leftovers = False
         try:
             chat_keys = await asyncio.to_thread(_delete_chats_of_thread, thread_id)
         except Exception as exc:
-            logger.debug("SessionManager delete skipped: %s", exc)
+            leftovers = True
+            logger.warning(
+                "[dashboard] the checkpoints of %s were deleted, but its chat was NOT (%s)",
+                thread_id, type(exc).__name__, exc_info=True,
+            )
 
         # Its Time Travel steps go with it, under every key it had (§12 G,
         # TT-05), as the chat page's delete does: they are copies of the chat.
@@ -607,10 +612,11 @@ async def delete_session(request: Request, thread_id: str) -> JSONResponse:
         try:
             await asyncio.to_thread(forget_thread_snapshots, [thread_id, *chat_keys])
         except (SnapshotStoreError, sqlite3.Error, OSError):
+            leftovers = True
             logger.warning(
                 "[dashboard] %s deleted, but its saved steps were NOT", thread_id, exc_info=True
             )
-        else:
+        if not leftovers:
             # The thread's space record goes last, once nothing of the chat
             # is left: while a copy remains, the record keeps it in its space.
             try:

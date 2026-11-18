@@ -2378,6 +2378,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "تعذّر نسخ ما تُبقيه هذه المحادثة خارج الذاكرة إلى الفرع، فلم يُنشأ شيء. سجل الخادم يذكر السبب.",
         "en": "What this chat keeps out of memory could not be copied to the fork, so nothing was forked. The server log says why.",
     },
+    "replay.refused_thread_record": {
+        "ar": "تعذّرت قراءة مكان هذه المحادثة أو تسجيله، فلم يتغيّر شيء. سجل الخادم يذكر السبب.",
+        "en": "Where this chat lives could not be read or recorded, so nothing was changed. The server log says why.",
+    },
+    "replay.refused_no_space": {
+        "ar": "هذا الطلب غير مرتبط بمساحة، فلم يُنشأ فرع.",
+        "en": "This request is not tied to a space, so nothing was forked.",
+    },
     "replay.fork_open": {
         "ar": "افتح المحادثة الجديدة",
         "en": "Open the new chat",

@@ -20,6 +20,9 @@ ids of another. This file holds what the matrix does not:
 
 from __future__ import annotations
 
+import secrets
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import pytest
@@ -67,8 +70,12 @@ def enforced(monkeypatch) -> None:
 
 
 def _fails(target: str, matrix: Matrix) -> None:
-    """The case of *target* fails: its guard is out, and it noticed."""
-    with pytest.raises((AssertionError, KeyError, TypeError, pytest.fail.Exception)):
+    """The case of *target* fails on one of its own assertions: its guard is
+    out, and the case saw another space's data shown or changed. A case that
+    stops for any other reason (a KeyError, a TypeError: a broken stand-in)
+    proves nothing, and is an error here. ``pytest.fail.Exception`` is the
+    case's own "the refusal did not come"."""
+    with pytest.raises((AssertionError, pytest.fail.Exception)):
         CASES[target].run(matrix)
 
 
@@ -183,15 +190,175 @@ def test_a_fork_or_restore_of_another_spaces_chat_is_refused(matrix) -> None:
         assert recorded_space(forked["new_thread_id"]) == Matrix.SPACE_A
 
 
-def test_control_without_the_guard_a_fork_copies_anothers_chat(matrix, monkeypatch) -> None:
+def _restore(w: World, who: str, thread_id: str, snapshot_id: str) -> dict[str, Any]:
+    from kazma_ui.thread_rewind import rewind_thread
+
+    async def run() -> dict[str, Any]:
+        with w.as_(who):
+            return await rewind_thread(w.graph, thread_id, snapshot_id, actor="test",
+                                       surface="test", recorder=w.recorder)
+
+    return tt.run(run())
+
+
+def _no_rewind_guard(monkeypatch) -> None:
     from kazma_ui import thread_rewind
 
     monkeypatch.setattr(thread_rewind, "_in_this_space", lambda thread_id, new_thread_id=None: None)
+
+
+def test_the_checkpoint_store_refuses_a_fork_and_a_restore_the_rewind_guard_let_through(
+    matrix, monkeypatch,
+) -> None:
+    """Time Travel writes through the product's own ``CheckpointManager``
+    (the world's graph is built on it). With the rewind service's guard out,
+    the manager's thread guard is what a fork or a restore of another
+    space's chat meets: nothing is written."""
+    _no_rewind_guard(monkeypatch)
+    with world(matrix) as w:
+        _mine, theirs = w.pair("second-line")
+        w.checkpoint("b", theirs)
+        their_step = w.step(theirs)
+        with pytest.raises(threads.ThreadInAnotherSpace):
+            _fork(w, "a", theirs.thread_id, their_step)
+        with pytest.raises(threads.ThreadInAnotherSpace):
+            _restore(w, "a", theirs.thread_id, their_step)
+        # B's thread holds what it held; no chat of A's shows B's text.
+        state = tt.run(w.graph.aget_state(tt.config(theirs.thread_id)))
+        assert theirs.mark not in str(state.values)
+        assert theirs.mark not in w.call("a", "GET", "/api/chat/sessions").text
+
+
+def test_control_with_neither_guard_a_fork_copies_anothers_chat(matrix, monkeypatch) -> None:
+    """Both guards out (the rewind service's, and the checkpoint store's):
+    the fork goes through and holds another space's text."""
+    _no_rewind_guard(monkeypatch)
+    _no_thread_guard(monkeypatch)
     with world(matrix) as w:
         _mine, theirs = w.pair("copied")
         forked = _fork(w, "a", theirs.thread_id, w.step(theirs))
         state = tt.run(w.graph.aget_state(tt.config(forked["new_thread_id"])))
         assert theirs.mark in str(state.values)
+
+
+# ── a fork that cannot be recorded in a space is refused, never a 500 ────
+
+
+def test_a_fork_whose_new_chat_cannot_be_recorded_is_refused(matrix, monkeypatch, caplog) -> None:
+    """The fork records its new chat's space before it writes anything. A
+    record store that cannot be written is a refusal with its own code and a
+    WARNING; it was a raw ``sqlite3.Error`` (a 500)."""
+    import sqlite3
+
+    from kazma_ui.thread_rewind import RewindRefused
+
+    def _cannot(thread_id: str) -> None:
+        raise sqlite3.OperationalError("unable to open database file")
+
+    with world(matrix) as w:
+        mine, _theirs = w.pair("unrecorded")
+        step = w.step(mine)
+        before = w.call("a", "GET", "/api/chat/sessions").text
+        monkeypatch.setattr(threads, "record_new_thread", _cannot)
+        with caplog.at_level("WARNING", logger="kazma_ui.thread_rewind"):
+            with pytest.raises(RewindRefused) as refused:
+                _fork(w, "a", mine.thread_id, step)
+        assert refused.value.code == "thread_record_unavailable" and refused.value.status == 503
+        assert any("could not be read or written" in r.getMessage() for r in caplog.records)
+        answered = w.call("a", "POST", "/api/replay/fork",
+                          json={"thread_id": mine.thread_id, "snapshot_id": step})
+        assert answered.status_code == 503, answered.text
+        assert answered.json()["error"] == "thread_record_unavailable"
+        # Nothing was forked.
+        assert w.call("a", "GET", "/api/chat/sessions").text == before
+
+
+def test_a_restore_that_cannot_ask_the_record_store_is_refused(matrix, monkeypatch) -> None:
+    import sqlite3
+
+    from kazma_ui.thread_rewind import RewindRefused
+
+    def _cannot(thread_id: str, **_: Any) -> None:
+        raise sqlite3.OperationalError("database is locked")
+
+    with world(matrix) as w:
+        mine, _theirs = w.pair("unasked")
+        step = w.step(mine)
+        monkeypatch.setattr(threads, "thread_refusal", _cannot)
+        with pytest.raises(RewindRefused) as refused:
+            _restore(w, "a", mine.thread_id, step)
+        assert refused.value.code == "thread_record_unavailable"
+
+
+def test_a_fork_bound_to_no_space_is_refused_once_spaces_is_enforced(matrix) -> None:
+    """A chat app's /fork binds no scope. With Spaces enforced the new chat
+    would be nobody's: refused as a rewind refusal (it was ``NoSpaceBound``,
+    which the chat apps answered as an unknown error)."""
+    from kazma_ui.thread_rewind import RewindRefused, fork_thread
+
+    with world(matrix) as w:
+        mine, _theirs = w.pair("unbound")
+        step = w.step(mine)
+
+        async def unbound() -> Any:
+            return await fork_thread(w.graph, mine.thread_id, step, actor="telegram:1",
+                                     surface="telegram", recorder=w.recorder,
+                                     new_thread_id="gw-telegram-1-unbound")
+
+        with pytest.raises(RewindRefused) as refused:
+            tt.run(unbound())
+        assert refused.value.code == "no_space" and refused.value.status == 403
+        assert recorded_space("gw-telegram-1-unbound") is None
+
+
+def test_control_the_old_guard_raised_what_the_record_store_raised(matrix, monkeypatch) -> None:
+    """The guard as S1-08 first wrote it: the record store's own error, and
+    ``NoSpaceBound``, reached the caller."""
+    import sqlite3
+
+    from kazma_ui import thread_rewind
+
+    def _old(thread_id: str, new_thread_id: str | None = None) -> None:
+        if threads.thread_refusal(thread_id):
+            raise thread_rewind.RewindRefused("not_found", "That chat was not found.", status=404)
+        if new_thread_id:
+            threads.record_new_thread(new_thread_id)
+
+    def _cannot(thread_id: str) -> None:
+        raise sqlite3.OperationalError("unable to open database file")
+
+    monkeypatch.setattr(thread_rewind, "_in_this_space", _old)
+    with world(matrix) as w:
+        mine, _theirs = w.pair("old-guard")
+        step = w.step(mine)
+
+        async def unbound() -> Any:
+            return await thread_rewind.fork_thread(w.graph, mine.thread_id, step, actor="t",
+                                                   surface="t", recorder=w.recorder)
+
+        with pytest.raises(scope.NoSpaceBound):
+            tt.run(unbound())
+        monkeypatch.setattr(threads, "record_new_thread", _cannot)
+        with pytest.raises(sqlite3.OperationalError):
+            _fork(w, "a", mine.thread_id, step)
+
+
+def test_every_rewind_refusal_has_words_on_the_chat_apps_and_the_page() -> None:
+    """A refusal code the service raises is worded by the chat apps and by
+    the Time Travel page (a code with no words shows as a load error)."""
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    service = (root / "kazma-ui/kazma_ui/thread_rewind.py").read_text(encoding="utf-8")
+    codes = set(re.findall(r'RewindRefused\(\s*"([a-z_]+)"', service))
+    assert {"thread_record_unavailable", "no_space", "not_found"} <= codes
+    gateway = (root / "kazma-gateway/kazma_gateway/agent_handler/graph.py").read_text(encoding="utf-8")
+    page = (root / "kazma-ui/kazma_ui/static/js/replay.js").read_text(encoding="utf-8")
+    #: The page never forks for a chat-app sender, so it never sees this one.
+    not_on_the_page = {"owner_unavailable"}
+    assert sorted(c for c in codes if f'"{c}"' not in gateway) == []
+    assert sorted(c for c in codes - not_on_the_page if f"'{c}'" not in page) == []
 
 
 # ── the checkpoint store on one shared table ─────────────────────────────
@@ -337,6 +504,277 @@ def test_a_deleted_chats_record_stays_while_a_copy_of_the_chat_remains(matrix, m
         assert w.steps(mine) == 1
         assert recorded_space(mine.thread_id) == Matrix.SPACE_A
     assert sse_chat._not_this_spaces_chat("an-id-nobody-holds") is False  # owner's space: as before
+
+
+def test_a_deleted_chats_record_stays_when_its_checkpoints_were_not_deleted(
+    matrix, monkeypatch, caplog,
+) -> None:
+    """The chat page's delete: no checkpoint store to ask, or one that fails,
+    leaves the chat's checkpoints where they are. The record that keeps them
+    in their space then stays, and the failure is a WARNING (it was DEBUG,
+    and the record went)."""
+    from kazma_ui import dashboard
+
+    async def _cannot(thread_id: str) -> None:
+        raise OSError("the checkpoint store cannot be reached")
+
+    with world(matrix) as w:
+        unasked, _ = w.pair("no-manager")
+        failing, _ = w.pair("failing-manager")
+        for chat in (unasked, failing):
+            w.checkpoint("a", chat)
+        manager = w.manager
+        monkeypatch.setattr(dashboard, "_checkpoint_manager", None)
+        assert w.call("a", "DELETE", f"/api/chat/sessions/{unasked.session_id}").json() == {"status": "ok"}
+        assert recorded_space(unasked.thread_id) == Matrix.SPACE_A
+        monkeypatch.setattr(dashboard, "_checkpoint_manager", manager)
+        monkeypatch.setattr(manager, "adelete_thread", _cannot)
+        with caplog.at_level("WARNING", logger="kazma_ui.sse_chat"):
+            assert w.call("a", "DELETE", f"/api/chat/sessions/{failing.session_id}").json() == {"status": "ok"}
+        assert recorded_space(failing.thread_id) == Matrix.SPACE_A
+        assert any("its checkpoints were NOT" in r.getMessage() for r in caplog.records)
+        monkeypatch.undo()
+        # Both chats' checkpoints are still A's to read.
+        assert w.checkpoints("a", unasked) and w.checkpoints("a", failing)
+
+
+def test_the_dashboards_delete_keeps_the_record_when_the_chat_was_not_deleted(
+    matrix, monkeypatch, caplog,
+) -> None:
+    from kazma_ui import dashboard
+
+    def _cannot(thread_id: str) -> list[str]:
+        raise OSError("the chat store cannot be reached")
+
+    with world(matrix) as w:
+        mine, _theirs = w.pair("chat-left")
+        w.checkpoint("a", mine)
+        monkeypatch.setattr(dashboard, "_delete_chats_of_thread", _cannot)
+        with caplog.at_level("WARNING", logger="kazma_ui.dashboard"):
+            done = w.call("a", "DELETE", f"/api/sessions/{mine.thread_id}")
+        assert done.status_code == 200, done.text
+        # The chat is still in A's space, and so is its record.
+        assert w.stored("a", mine) is not None
+        assert recorded_space(mine.thread_id) == Matrix.SPACE_A
+        assert any("its chat was NOT" in r.getMessage() for r in caplog.records)
+
+
+# ── the scope's space, not the tenant an older value names ───────────────
+
+
+@contextmanager
+def _resumed(space: str, account: str, *, older: str) -> Iterator[None]:
+    """A step bound to *space* while the tenant ContextVar still names
+    *older*: the shape of a turn resumed from a checkpoint that an older
+    build, or the older multi-user mode, wrote under another tenant."""
+    from kazma_core.tenant_context import tenant_scope
+
+    with tenant_scope(older):
+        token = scope.set_scope_only(scope.Scope(space, account))
+        try:
+            yield
+        finally:
+            scope.reset_scope_only(token)
+
+
+def _drafts_and_notes_follow_the_scope(matrix: Matrix) -> None:
+    from kazma_core.agent.artifacts import get_artifact_store
+
+    from tests._chat_space_cases import _call, _thread_of, _turn
+
+    marks = matrix.plant("resumed-draft")
+    thread_a = _thread_of(matrix, "a")
+    with _resumed(Matrix.SPACE_A, matrix.account_a, older=Matrix.SPACE_B), _turn(thread_a):
+        _call("save_proposal", kind="notes", items=[f"draft {marks.a}"])
+        _call("update_scratchpad", key="finding", finding=f"note {marks.a}")
+    with matrix.as_b(), _turn(thread_a):
+        theirs = _call("list_proposals") + str(get_artifact_store().list_scratchpad(thread_a))
+    with matrix.as_a(), _turn(thread_a):
+        mine = _call("list_proposals") + str(get_artifact_store().list_scratchpad(thread_a))
+    assert marks.a not in theirs, "a draft or a note was filed under the older tenant"
+    assert mine.count(marks.a) == 2
+
+
+def test_a_draft_and_a_note_are_filed_in_the_bound_scopes_space(matrix, enforced) -> None:
+    _drafts_and_notes_follow_the_scope(matrix)
+
+
+def test_control_filed_by_the_tenant_value_a_draft_lands_in_the_older_tenant(
+    matrix, enforced, monkeypatch,
+) -> None:
+    """The rule before S1-08: ``get_current_tenant_id() or "default"``."""
+    from kazma_core.tenant_context import get_current_tenant_id
+
+    monkeypatch.setattr(scope, "require_space_id", lambda: get_current_tenant_id() or OWNER_SPACE_ID)
+    with pytest.raises(AssertionError, match="older tenant"):
+        _drafts_and_notes_follow_the_scope(matrix)
+
+
+def _a_receipt_follows_the_scope(matrix: Matrix) -> None:
+    """Two turns reach the same call identity but for the space: the same
+    thread, turn, iteration and call id, and a state that names B's tenant
+    (the value an older checkpoint carries). A's step must run its own call,
+    never answer with the result B's step recorded."""
+    from kazma_core.agent.effect_journal import execute_effect
+
+    marks = matrix.plant("receipt")
+
+    class _Runs:
+        def __init__(self, mark: str) -> None:
+            self.mark, self.calls = mark, 0
+
+        async def execute(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
+            self.calls += 1
+            return {"content": f"wrote {self.mark}", "error": False}
+
+    state = {"thread_id": f"t-receipt-{secrets.token_hex(6)}", "tenant_id": Matrix.SPACE_B,
+             "created_at": "turn-1", "iteration": 0}
+    call = {"id": "call-1", "name": "file_write"}
+    theirs, mine = _Runs(marks.b), _Runs(marks.a)
+
+    async def both() -> tuple[dict[str, Any], dict[str, Any]]:
+        with matrix.as_b():
+            first = await execute_effect(theirs, dict(state), call, {"path": "x", "content": "y"})
+        with _resumed(Matrix.SPACE_A, matrix.account_a, older=Matrix.SPACE_B):
+            second = await execute_effect(mine, dict(state), call, {"path": "x", "content": "y"})
+        return first, second
+
+    first, second = tt.run(both())
+    assert marks.b in str(first)
+    assert marks.b not in str(second), "A's step was answered with the result B's step recorded"
+    assert mine.calls == 1 and marks.a in str(second)
+
+
+def test_a_receipt_is_the_bound_scopes_whatever_the_state_says(matrix, enforced) -> None:
+    _a_receipt_follows_the_scope(matrix)
+
+
+def test_control_keyed_by_the_states_tenant_a_receipt_answers_another_space(
+    matrix, enforced, monkeypatch,
+) -> None:
+    """The rule before S1-08: ``state.get("tenant_id") or "default"``."""
+    from kazma_core.agent import effect_journal
+
+    monkeypatch.setattr(effect_journal, "space_of_state",
+                        lambda state: str(state.get("tenant_id") or OWNER_SPACE_ID))
+    with pytest.raises(AssertionError, match="recorded"):
+        _a_receipt_follows_the_scope(matrix)
+
+
+# ── one shared table: a space's threads are asked once, in the statement ─
+
+
+def _many_threads(w: World, who: str, n: int, word: str) -> list[Any]:
+    made = [w.chat(who, f"{word}-{i}-{w.matrix.plant(word).a[-6:]}") for i in range(n)]
+    for chat in made:
+        w.checkpoint(who, chat)
+    return made
+
+
+def test_on_one_shared_table_an_older_spaces_threads_are_still_listed(matrix, monkeypatch) -> None:
+    """The listing is held to the space's threads by its own statement,
+    before the limit. Filtered after reading the newest ``limit * 5`` threads
+    of the table, a space whose chats are older got a short or empty list."""
+    from kazma_gateway.stores import checkpoint as store
+
+    _one_table(monkeypatch)
+    with world(matrix) as w:
+        mine = _many_threads(w, "a", 2, "older")
+        _many_threads(w, "b", 7, "newer")  # every one newer than A's
+        listed = w.call("a", "GET", "/api/sessions?limit=1").json()["sessions"]
+        assert [row["thread_id"] for row in listed] == [mine[-1].thread_id]
+        both = w.call("a", "GET", "/api/sessions?limit=50").json()["sessions"]
+        assert sorted(row["thread_id"] for row in both) == sorted(c.thread_id for c in mine)
+
+        async def as_it_was(limit: int) -> list[str]:
+            # The listing as S1-08 first wrote it: the newest limit*5 threads
+            # of the table, then the space's own among them.
+            cursor = await w.manager._saver.conn.execute(store._NEWEST_PER_THREAD_SQLITE, (limit * 5,))
+            rows = await cursor.fetchall()
+            return [str(r[0]) for r in rows if threads.thread_home(str(r[0])) == Matrix.SPACE_A][:limit]
+
+        assert tt.run(as_it_was(1)) == []  # the control: A was shown nothing
+
+
+def test_on_one_shared_table_the_owner_is_shown_threads_from_before_spaces(matrix, monkeypatch) -> None:
+    """A thread with no record is the owner's (N19): the owner's listing is
+    every thread no other space recorded."""
+    _one_table(monkeypatch)
+    with world(matrix) as w:
+        _mine, theirs = w.pair("owner-view")
+        w.checkpoint("b", theirs)
+
+        async def plant_and_list() -> list[str]:
+            from langgraph.checkpoint.base import empty_checkpoint
+
+            with scope.bind_scope(OWNER_SPACE_ID, OWNER_ACCOUNT_ID):
+                await w.manager.aput(tt.config("t-from-before-spaces"), empty_checkpoint(),
+                                     {"source": "input", "step": 0, "writes": {}}, {})
+                return [row["thread_id"] for row in await w.manager.list_checkpoints(limit=50)]
+
+        assert tt.run(plant_and_list()) == ["t-from-before-spaces"]
+
+
+def test_a_clear_and_a_listing_ask_the_record_store_once(matrix, monkeypatch) -> None:
+    """A clear-all and a listing over a shared table asked the record store
+    thread by thread, and a thread with no record (never remembered) on every
+    asking. They ask once, for the space's threads."""
+    _one_table(monkeypatch)
+    asked: list[int] = []
+    real = threads._connection
+
+    def counted() -> Any:
+        asked.append(1)
+        return real()
+
+    with world(matrix) as w:
+        _mine, theirs = w.pair("asked-once")
+        w.checkpoint("b", theirs)
+
+        async def run() -> tuple[int, int, int]:
+            from langgraph.checkpoint.base import empty_checkpoint
+
+            with scope.bind_scope(OWNER_SPACE_ID, OWNER_ACCOUNT_ID):
+                for i in range(6):
+                    await w.manager.aput(tt.config(f"t-unrecorded-{i}"), empty_checkpoint(),
+                                         {"source": "input", "step": 0, "writes": {}}, {})
+                monkeypatch.setattr(threads, "_connection", counted)
+                asked.clear()
+                listed = [item async for item in w.manager.alist(None)]
+                for_listing = len(asked)
+                asked.clear()
+                removed = await w.manager.adelete_all_threads()
+                return len(listed), for_listing, removed
+
+        listed, for_listing, removed = tt.run(run())
+        assert listed == 6 and removed == 6
+        assert for_listing == 1 and len(asked) == 1
+        monkeypatch.setattr(threads, "_connection", real)
+        assert w.checkpoints("b", theirs)  # B's thread was not cleared
+
+
+def test_a_turns_thread_is_answered_from_memory_afterwards(matrix, enforced, monkeypatch) -> None:
+    """Every turn reads its thread's record (``scope_for_turn``). The guards
+    the turn's own code asks later, often on the event loop, then read no
+    store: the record's space was remembered by that read."""
+    import sqlite3
+
+    recorded = "t-read-by-its-turn"
+    threads.record_thread(recorded, Matrix.SPACE_A, matrix.account_a)
+    monkeypatch.setattr(threads, "_spaces", {})
+    assert threads.known_space(recorded) is None
+    with matrix.as_a():
+        threads.scope_for_turn(recorded)
+    assert threads.known_space(recorded) == Matrix.SPACE_A
+
+    def _no_store() -> Any:
+        raise sqlite3.OperationalError("the record store was read")
+
+    monkeypatch.setattr(threads, "_connection", _no_store)
+    with matrix.as_a():
+        assert threads.thread_refusal(recorded) is None
+    with matrix.as_b():
+        assert threads.thread_refusal(recorded)
 
 
 # ── messages name their author ───────────────────────────────────────────
