@@ -234,6 +234,7 @@ def _extract_facts(
     the reconcile state. A locked database is an outage, never a verdict: it
     raises to the maintenance runner and counts nothing.
     """
+    from kazma_core.memory.belief_extractor import is_filler_turn
     from kazma_core.memory.consolidator import _v2_extract_sync
     from kazma_core.memory.task_queue import enqueue_task
 
@@ -274,7 +275,8 @@ def _extract_facts(
             report["facts_after"] = rowid
             continue
         attempts.pop(str(episode_id), None)
-        if enqueue_task("micro_consolidation", {"episode_id": episode_id}):
+        # Small talk queues no deep pass (consolidator._run_turn_memory's rule).
+        if not is_filler_turn(user or "") and enqueue_task("micro_consolidation", {"episode_id": episode_id}):
             report["deep_queued"] += 1
         report["facts_turns"] += 1
         report["facts_after"] = rowid

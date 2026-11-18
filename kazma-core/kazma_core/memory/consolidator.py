@@ -452,10 +452,14 @@ def _run_turn_memory(
     # loop (where httpx is valid), so it can safely call the LLM. We point
     # it at the episode the mirror just wrote.
     try:
+        from kazma_core.memory.belief_extractor import is_filler_turn
         from kazma_core.memory.dual_write import _episode_id
 
         user_text, _ = extract_turn_texts(messages)
-        if user_text and not user_text.strip().startswith("/"):
+        # Small talk queues no deep pass: it is one model call, and a reply
+        # like "go ahead" or "نعم" holds nothing for it to find (the review
+        # of the memory framework audit's F8).
+        if user_text and not user_text.strip().startswith("/") and not is_filler_turn(user_text):
             eid = _episode_id(
                 session_id or "unknown",
                 int(turn) if turn is not None else 0,

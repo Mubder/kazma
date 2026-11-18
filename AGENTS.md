@@ -1840,9 +1840,17 @@ four injected were noise.
   `episode_text.is_small_talk_words` (every word small talk, or no word at
   all) after the durable cues. A message of twelve characters or fewer was
   filler by its length, and "I'm diabetic", "Call me Sam", "No, Lisbon" and
-  "عندي سكري" reached neither pass. Gate:
+  "عندي سكري" reached neither pass. The small-talk words include the replies
+  a person answers and goes ahead with ("نعم", "لا", "ايوه", "كمل", "يلا",
+  "خلاص", "ان شاء الله", "go ahead", "yes please", "sounds good", "I'm
+  good"), and a filler turn queues no deep pass (one model call): the
+  post-turn path and turn reconcile ask `is_filler_turn` before queueing
+  `micro_consolidation`. Gate:
   `tests/test_memory_short_statements.py` (the length rule as the negative
-  control) and the write scenarios' `short` category.
+  control), the write scenarios' `short` category, and
+  `tests/test_filler_queues_no_deep_pass.py` (tasks counted through the real
+  post-turn function; every function queueing a deep pass asks, or is
+  declared; the path without the check as the control).
 - **The graph walk reads the seeds' neighbourhood (R5).** It loaded the
   tenant's most important facts (800 at the defaults) and walked those: a
   fact below the cut was out of reach however close to the question.

@@ -59,15 +59,23 @@ _ACKNOWLEDGEMENT_REPLY = 200
 
 
 #: The words small talk is made of, folded: greetings, thanks, goodbyes,
-#: acknowledgements, laughter, and the words that come with them ("thank you
-#: so much", "صباح الخير", "يعطيك العافية").
+#: acknowledgements, laughter, the go-aheads and answers a person replies
+#: with, and the words that come with them ("thank you so much", "صباح
+#: الخير", "يعطيك العافية", "go ahead", "ان شاء الله", "I'm good"). A
+#: message is small talk only when EVERY word is one of these, so a short
+#: statement with a word of its own ("I'm vegan", "No, Lisbon") never is.
 _SMALL_TALK_WORDS = frozenset({
     "hi", "hello", "hey", "hiya", "yo", "thanks", "thank", "thx", "ty", "bye", "goodbye", "good", "morning",
-    "afternoon", "evening", "night", "ok", "okay", "k", "got", "it", "noted", "sure", "yes", "yep", "yeah",
-    "no", "nope", "cool", "nice", "great", "perfect", "awesome", "lol", "kazma", "there", "you", "all", "a",
-    "lot", "so", "much", "very", "again", "mrhba", "مرحبا", "اهلا", "هلا", "والله", "السلام", "عليكم",
+    "afternoon", "evening", "night", "ok", "okay", "k", "kk", "got", "it", "noted", "sure", "thing", "yes",
+    "yep", "yup", "yeah", "no", "nope", "nah", "np", "cool", "nice", "great", "perfect", "awesome", "fine",
+    "lol", "lmao", "kazma", "there", "you", "all", "a", "lot", "so", "much", "very", "again", "please",
+    "go", "ahead", "proceed", "continue", "done", "do", "will", "sounds", "bro", "man", "brb", "gm", "gn",
+    "nvm", "i", "m", "am", "im",
+    "mrhba", "مرحبا", "اهلا", "هلا", "والله", "السلام", "عليكم",
     "وعليكم", "صباح", "مساء", "الخير", "النور", "شكرا", "مشكور", "مشكوره", "يعطيك", "العافيه", "مع",
     "السلامه", "تمام", "طيب", "اوك", "اوكي", "ممتاز", "حلو", "زين", "جزيلا", "يسلمو", "تسلم", "حبيبي",
+    "نعم", "لا", "اي", "ايوه", "ايه", "كمل", "كملي", "يلا", "خلاص", "تم", "ماشي", "صح", "الحمدلله",
+    "الحمد", "لله", "ان", "شاء", "الله", "حياك", "ابشر", "ايدك", "يعافيك",
 })
 _LAUGH_OR_PAUSE_RE = re.compile(r"(?:ha){2,}+|(?:he){2,}+|lo+l|hm+|uh+|um+|ه{2,}+")
 _WORD_RE = re.compile(r"\w+")
