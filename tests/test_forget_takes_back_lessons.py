@@ -54,7 +54,7 @@ def _teach(lesson: str, chat: str, turn: int) -> None:
 
 
 def _lessons() -> list[str]:
-    return si._lessons(si.get_agent_evolution_block())[1]
+    return si._lessons(si._agent_evolution_block())[1]
 
 
 def _memory_of(chat: str, turn: int) -> str:

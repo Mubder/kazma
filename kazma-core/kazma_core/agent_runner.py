@@ -398,27 +398,11 @@ class KazmaAgent:
         except Exception:
             logger.debug("[agent_runner] agent skills catalog injection skipped", exc_info=True)
 
-        # Self-improvement Soul (Kazma-wide) — accumulated from past chat/swarm
-        # outcomes. Also re-injected per turn in SSE (may grow after init).
-        # Wrapped in an untrusted data fence so the model treats deltas as
-        # observation context, never instructions (prompt-injection defense).
-        try:
-            from kazma_core.safety.prompt_fence import format_untrusted_block
-            from kazma_core.skills.self_improvement import get_agent_evolution_block
-
-            from kazma_core.spaces.scope import spaces_enforced
-
-            # The base prompt is every space's once Spaces is enforced: no
-            # Soul is baked in (the supervisor adds the turn's space's own,
-            # Spaces S1-10). An install with one Soul keeps it here.
-            evo = "" if spaces_enforced() else get_agent_evolution_block("supervisor")
-            fenced = format_untrusted_block(evo, source="self_improvement")
-            if fenced and fenced not in self.system_prompt:
-                self.system_prompt = (
-                    self.system_prompt.rstrip() + "\n\n" + fenced
-                )
-        except Exception:
-            logger.debug("[agent_runner] agent evolution injection skipped", exc_info=True)
+        # The self-improvement Soul is NOT baked into the base prompt: the
+        # supervisor adds the current lessons of the turn's space, fenced, at
+        # the start of every turn on every surface (S1-10 review). Baked here
+        # it was read once at start (stale after the first new lesson) and
+        # reached the model beside the transport's own copy: twice a call.
 
         # The Knowledge Library is injected per turn by the supervisor (one
         # block, for the turn's message; KB-S08), never into the system prompt.

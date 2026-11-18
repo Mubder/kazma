@@ -2058,7 +2058,9 @@ def _next_embedder(current: dict[str, Any]) -> dict[str, Any]:
 
 def _safe(lib: str) -> str:
     """The folder name a library's fetched pages are kept under (the product's rule)."""
-    return "".join(c if c.isalnum() or c in "-_" else "_" for c in lib)[:80] or "library"
+    from kazma_core.stores.knowledge import library_name_part
+
+    return library_name_part(lib)
 
 
 def _page_fact(seed: int, lib: str, spec: dict[str, Any], page_no: int, version: int) -> dict[str, Any]:

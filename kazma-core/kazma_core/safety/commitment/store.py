@@ -284,11 +284,15 @@ def update_status(
     commitment_id: str, status: str, *,
     event_type: str | None = None, payload: dict[str, Any] | None = None,
     result: dict[str, Any] | None = None, cfg: dict[str, Any] | None = None,
+    expected: str | None = None,
 ) -> Commitment | None:
     """Transition a commitment to *status*, recompute expires_at, emit an event.
 
     Terminal transitions (committed/aborted/expired) stamp resolved_at and clear
-    expires_at. ``event_type`` defaults to the status name.
+    expires_at. ``event_type`` defaults to the status name. With *expected*,
+    only a commitment still in that status moves, in the same UPDATE (a
+    compare-and-set): the commitment is returned as it is, and the caller
+    reads its status to know whether this call moved it.
     """
     if status not in STATUSES:
         raise ValueError(f"unknown commitment status: {status}")
@@ -325,19 +329,22 @@ def update_status(
 
         # Atomic CAS update: if transitioning to an active state, refuse if the row
         # has been moved to 'expired' or 'aborted' concurrently in the DB
+        only_from = " AND status = ?" if expected is not None else ""
+        held = (expected,) if expected is not None else ()
         if status in ("committed", "ready", "needs_confirm", "needs_clarify", "draft"):
             cur = conn.execute(
                 """UPDATE commitments SET status=?, updated_at=?, expires_at=?,
                    resolved_at=?, result_json=?
-                   WHERE commitment_id=? AND (status NOT IN ('expired', 'aborted') OR status = ?)""",
-                (status, now, expires_at, resolved_at, result_json, commitment_id, status),
+                   WHERE commitment_id=? AND (status NOT IN ('expired', 'aborted') OR status = ?)"""
+                + only_from,
+                (status, now, expires_at, resolved_at, result_json, commitment_id, status, *held),
             )
         else:
             cur = conn.execute(
                 """UPDATE commitments SET status=?, updated_at=?, expires_at=?,
                    resolved_at=?, result_json=?
-                   WHERE commitment_id=?""",
-                (status, now, expires_at, resolved_at, result_json, commitment_id),
+                   WHERE commitment_id=?""" + only_from,
+                (status, now, expires_at, resolved_at, result_json, commitment_id, *held),
             )
 
         if cur.rowcount == 0:
@@ -346,6 +353,14 @@ def update_status(
                 "SELECT * FROM commitments WHERE commitment_id=?", (commitment_id,),
             ).fetchone()
             curr_status = current_row["status"] if current_row else "unknown"
+            if expected is not None and curr_status != expected:
+                # The caller's compare-and-set: decided already, left as it is.
+                logger.info("[commitment] %s is %s, not %s: not moved to %s",
+                            commitment_id, curr_status, expected, status)
+                _emit_event(conn, commitment_id, "transition_refused",
+                            {"attempted": status, "expected": expected, "current": curr_status})
+                conn.commit()
+                return _row_to_commitment(current_row) if current_row else None
             logger.warning(
                 "[commitment] refused revive of %s %s → %s (concurrent transition)",
                 commitment_id, curr_status, status,
@@ -588,12 +603,14 @@ async def async_update_status(
     payload: dict[str, Any] | None = None,
     result: dict[str, Any] | None = None,
     cfg: dict[str, Any] | None = None,
+    expected: str | None = None,
 ) -> Commitment | None:
     """Async wrapper for update_status via asyncio.to_thread."""
     return await asyncio.to_thread(
         update_status,
         commitment_id,
         status,
+        expected=expected,
         event_type=event_type,
         payload=payload,
         result=result,

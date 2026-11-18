@@ -71,6 +71,7 @@ __all__ = [
     "get_knowledge_store",
     "KnowledgeSpaceFull",
     "library_ceiling",
+    "library_name_part",
     "reset_knowledge_store",
     "validate_web_url",
 ]
@@ -191,6 +192,26 @@ def _library_id_in_space(raw: str, space_id: str) -> str:
     base = text[: -len(mark)] if text.endswith(mark) else text
     slug = _slugify_library_id(base)[: MAX_LIBRARY_ID - len(mark)].strip("_-") or "library"
     return slug + mark
+
+
+def library_name_part(library_id: str) -> str:
+    """*library_id* as part of a name the install builds from it: its Chroma
+    collection (``kazma_kb_<part>``) and its fetched-pages folder
+    (``knowledge_provenance/<part>``). The one rule for both (Spaces S1-13
+    review).
+
+    Letters, digits, ``-``, ``_`` and the space mark ``.`` stay; anything
+    else becomes ``_``. Turned into ``_``, the mark made a space's
+    "docs.ab12cd34" and an owner's library named "docs.ab12cd34" (whose id
+    is ``docs_ab12cd34``) one folder: deleting the owner's library deleted
+    the other space's pages. An id holds no other character (a slug, plus
+    the mark and hex), so every name from before is unchanged. A part made
+    of dots alone (never an id) is ``library``: it must not name a folder
+    above its own.
+    """
+    part = "".join(c if c.isalnum() or c in "-_" + _SPACE_MARK else "_" for c in str(library_id))
+    part = part[:80]
+    return part if part.strip(_SPACE_MARK) else "library"
 
 
 def validate_web_url(url: str, *, allow_empty: bool = False) -> str:
@@ -409,6 +430,9 @@ _ADMISSION_HEADROOM_BYTES = 16 * 1024**2
 #: refused new work; the others go on. The install quota above stays the
 #: guard of the database file. Per-space limits become settings with S2-08.
 _SPACE_QUOTA_BYTES = 256 * 1024**2
+#: How long a space's measured bytes answer admission before they are read
+#: again (:meth:`KnowledgeStore.space_used_bytes`).
+_SPACE_BYTES_TTL_S = 60.0
 
 #: FTS errors that are the query's own syntax, not the index failing.
 _FTS_SYNTAX_MARKERS = ("fts5: syntax error", "unterminated string", "unknown special query",
@@ -433,6 +457,8 @@ class KnowledgeStore:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None
         self._lock = threading.Lock()
+        #: space id -> (when measured, bytes): admission's view of each space.
+        self._space_bytes: dict[str, tuple[float, int]] = {}
         #: The last FTS storage failure (a missing, locked or corrupt index),
         #: for health; None while the index answers (KB-E11).
         self.fts_problem: str | None = None
@@ -2096,15 +2122,36 @@ class KnowledgeStore:
 
     def space_used_bytes(self, space_id: str) -> int:
         """The text one space's libraries hold: the bytes of their active
-        chunks (Spaces S1-13). Blocking."""
-        with self._lock:
-            row = self._get_conn().execute(
+        chunks (Spaces S1-13). Blocking.
+
+        It reads every chunk of the space, so it runs on a read connection of
+        its own, never under the store lock (S1-13 review: a scan under it
+        stalled every Knowledge call for its length), and a measure answers
+        for :data:`_SPACE_BYTES_TTL_S`. The quota is an admission check, as
+        the install's own is: a crawl admitted under it may carry its space
+        past it by what it publishes; the next one is refused.
+        """
+        import time
+
+        now = time.monotonic()
+        held = self._space_bytes.get(space_id)
+        if held is not None and now - held[0] < _SPACE_BYTES_TTL_S:
+            return held[1]
+        conn = sqlite3.connect(f"file:{self._db_path.as_posix()}?mode=ro", uri=True, timeout=10)
+        try:
+            row = conn.execute(
                 "SELECT COALESCE(SUM(LENGTH(CAST(c.content AS BLOB))), 0) FROM knowledge_chunks c "
                 "JOIN knowledge_libraries l ON l.id = c.library_id "
                 "WHERE l.tenant_id = ? AND c.active = 1 AND c.tombstoned = 0",
                 (space_id,),
             ).fetchone()
-        return int(row[0] or 0)
+        finally:
+            conn.close()
+        used = int(row[0] or 0)
+        if len(self._space_bytes) >= 4096:
+            self._space_bytes.clear()
+        self._space_bytes[space_id] = (now, used)
+        return used
 
     def compact(self) -> dict[str, Any]:
         """Return freed pages to the file system (incremental vacuum).
