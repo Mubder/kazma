@@ -1828,6 +1828,14 @@ four injected were noise.
   (local, Postgres-primary, mirror top-up) leaves it out; the row stays. A
   small-talk MESSAGE looks nothing up: `recall` returns empty at once and
   `search_transcripts` (the past-chats fallback an empty recall runs) too.
+  **Extraction's filler check follows the same rule** (2026-11, the memory
+  framework audit's F8): `belief_extractor.is_filler_turn` asks
+  `episode_text.is_small_talk_words` (every word small talk, or no word at
+  all) after the durable cues. A message of twelve characters or fewer was
+  filler by its length, and "I'm diabetic", "Call me Sam", "No, Lisbon" and
+  "عندي سكري" reached neither pass. Gate:
+  `tests/test_memory_short_statements.py` (the length rule as the negative
+  control) and the write scenarios' `short` category.
 - **The graph walk reads the seeds' neighbourhood (R5).** It loaded the
   tenant's most important facts (800 at the defaults) and walked those: a
   fact below the cut was out of reach however close to the question.

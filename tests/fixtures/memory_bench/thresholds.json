@@ -139,12 +139,12 @@
    "kept_as_said.ar.passed": 1.0,
    "kept_as_said.en.passed": 0.0,
    "kept_as_said.mixed.passed": 0.0,
-   "overall.passed": 0.6071,
+   "overall.passed": 0.75,
    "quoted.ar.passed": 1.0,
    "quoted.en.passed": 1.0,
    "quoted.mixed.passed": 1.0,
-   "short.ar.passed": 0.5,
-   "short.en.passed": 0.2,
+   "short.ar.passed": 1.0,
+   "short.en.passed": 0.8,
    "someone_else.ar.passed": 1.0,
    "someone_else.en.passed": 1.0,
    "someone_else.mixed.passed": 1.0,
@@ -159,11 +159,7 @@
    "update-mixed-moved",
    "kept-en-name-and-city",
    "kept-mixed-employer",
-   "short-en-condition",
-   "short-en-call-me",
-   "short-en-diet",
-   "short-en-no-city",
-   "short-ar-condition"
+   "short-en-no-city"
   ]
  },
  "postgres_primary": {

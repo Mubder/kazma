@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import re
 
-__all__ = ["display_text", "embed_text", "is_small_talk", "match_text"]
+__all__ = ["display_text", "embed_text", "is_small_talk", "is_small_talk_words", "match_text"]
 
 #: Characters of each side recall shows the model (five turns fit its budget).
 _SHOW_QUESTION = 200
@@ -56,6 +56,32 @@ _ACKNOWLEDGEMENT_RE = re.compile(
 #: A reply at least this long says something, whatever the user said.
 _GREETING_REPLY = 1000
 _ACKNOWLEDGEMENT_REPLY = 200
+
+
+#: The words small talk is made of, folded: greetings, thanks, goodbyes,
+#: acknowledgements, laughter, and the words that come with them ("thank you
+#: so much", "صباح الخير", "يعطيك العافية").
+_SMALL_TALK_WORDS = frozenset({
+    "hi", "hello", "hey", "hiya", "yo", "thanks", "thank", "thx", "ty", "bye", "goodbye", "good", "morning",
+    "afternoon", "evening", "night", "ok", "okay", "k", "got", "it", "noted", "sure", "yes", "yep", "yeah",
+    "no", "nope", "cool", "nice", "great", "perfect", "awesome", "lol", "kazma", "there", "you", "all", "a",
+    "lot", "so", "much", "very", "again", "mrhba", "مرحبا", "اهلا", "هلا", "والله", "السلام", "عليكم",
+    "وعليكم", "صباح", "مساء", "الخير", "النور", "شكرا", "مشكور", "مشكوره", "يعطيك", "العافيه", "مع",
+    "السلامه", "تمام", "طيب", "اوك", "اوكي", "ممتاز", "حلو", "زين", "جزيلا", "يسلمو", "تسلم", "حبيبي",
+})
+_LAUGH_OR_PAUSE_RE = re.compile(r"(?:ha){2,}+|(?:he){2,}+|lo+l|hm+|uh+|um+|ه{2,}+")
+_WORD_RE = re.compile(r"\w+")
+
+
+def is_small_talk_words(user_text: str | None) -> bool:
+    """Whether every word of *user_text* is small talk ("ok thanks",
+    "شكراً", "hmm"), or it has no word at all ("👍"): such a message teaches
+    nothing, however long. Decided by its words, never by its length: "I'm
+    vegan" and "عندي سكري" are short and are statements."""
+    from kazma_core.documents.arabic import fold_for_search
+
+    words = _WORD_RE.findall(fold_for_search(user_text or ""))
+    return all(w in _SMALL_TALK_WORDS or _LAUGH_OR_PAUSE_RE.fullmatch(w) for w in words)
 
 
 def is_small_talk(user_text: str | None, assistant_text: str | None) -> bool:

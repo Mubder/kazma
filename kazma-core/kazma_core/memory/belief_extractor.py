@@ -141,12 +141,6 @@ Rules:
 
 # ── Heuristic gatekeeper (§5.1) ──────────────────────────────────────────
 
-# Filler patterns — turns that match are skipped before any LLM call.
-_FILLER_PATTERNS = [
-    re.compile(r"^\s*+(okay|ok|got it|noted|thanks|thank you|sure|yes|no|cool|nice|great)\s*+[.!?]*+\s*+$", re.I),
-    re.compile(r"^\s*+(lol|haha|hm+|uh+|um+)\s*+$", re.I),
-    re.compile(r"^\s*.{0,12}\s*$"),  # very short turns (≤12 chars)
-]
 
 # Durable-cue patterns — turns that match are STRONG candidates for extraction.
 _DURABLE_CUES = [
@@ -188,11 +182,12 @@ def is_filler_turn(user_text: str) -> bool:
 
     if extract_arabic_facts(text):
         return False
-    # Otherwise check filler patterns
-    for pat in _FILLER_PATTERNS:
-        if pat.search(text):
-            return True
-    return False
+    # Small talk by its words, never by its length: a message of twelve
+    # characters or fewer was filler, so "I'm diabetic", "Call me Sam" and
+    # "No, Lisbon" taught nothing (2026-11, the memory framework audit's F8).
+    from kazma_core.memory.episode_text import is_small_talk_words
+
+    return is_small_talk_words(text)
 
 
 # ── LLM extraction ───────────────────────────────────────────────────────
