@@ -335,8 +335,12 @@ class KnowledgeIndex:
     def _open_vector_store(self, library_id: str) -> VectorStore:
         """A (not yet connected) store for the library's collection."""
         # Sanitise the library id for use as a Chroma collection name
-        # (alphanumerics + underscore + hyphen only).
-        safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in library_id)
+        # (alphanumerics, underscore, hyphen, and the "." that marks a
+        # library of a space other than the owner's, Spaces S1-13: turned
+        # into "_", "docs.ab12cd34" and an owner's "docs_ab12cd34" were one
+        # collection). A slug never holds a ".", so every id from before
+        # keeps its collection.
+        safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in library_id)
         return VectorStore(collection_name=f"kazma_kb_{safe}", persist_dir=self._persist_dir)
 
     # ------------------------------------------------------------------
@@ -689,7 +693,8 @@ class KnowledgeIndex:
         )
         if library is None:
             return []
-        return self._search_libraries(query, [library_id], self._limit(top_k))
+        # The id the lookup resolved (Spaces S1-13), never the one asked for.
+        return self._search_libraries(query, [library["id"]], self._limit(top_k))
 
     def _gather(
         self, query: str, library_ids: list[str], limit: int,

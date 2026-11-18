@@ -12540,6 +12540,30 @@ product can turn it on, so an install with one account behaves as before.
   - Gates: `tests/test_lessons_per_space.py` (the real hand-off and the
     real supervisor graph; the single Soul as each control),
     `tests/_lesson_space_cases.py`.
+- **The Knowledge Library follows the space (S1-13, 2026-11-18).** Guards
+  act only where Spaces is enforced; the older multi-user mode keeps its
+  refusal (`knowledge_lifecycle.kb_refusal`), and work bound to no space is
+  refused once enforced (`NO_SPACE_REFUSAL`).
+  - **A library's id is its space's**: `knowledge._library_id_in_space` -- the
+    owner's ids never change, every other space's are `slug.<8 hex>` (a slug
+    never holds "."), and the Chroma collection name keeps the "." apart.
+    `KnowledgeStore.own_library_id` resolves an id for a lookup and
+    `library_id_for` for a new library; **every route, tool and `/kb`
+    resolves once and uses the answer** (a check of `get_library(x)` then a
+    read of `x` reads another space's library). A new entry point that takes
+    a library id does the same.
+  - Reads keep to the space (the store's tenant filter is on whenever Spaces
+    is enforced); `publish_page` writes only into a library of the bound
+    space (`_writing_space`). Maintenance lists every library through
+    `all_library_ids` / `library_space`, never the filtered reads.
+  - The crawl journal is the install's: the routes show a space the crawls
+    of its own libraries; a crawl a restart cut off resumes in its library's
+    space (`kb_api._in_the_crawls_space`); the canary runs as the owner's
+    space on its private store.
+  - A quota per space (`_SPACE_QUOTA_BYTES`, `KnowledgeSpaceFull`) beside the
+    install's file quota.
+  - Gates: `tests/_knowledge_space_cases.py` (the matrix cases),
+    `tests/test_knowledge_spaces.py` (each guard taken out as a control).
 
 ## UI Conventions (Web)
 

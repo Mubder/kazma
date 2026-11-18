@@ -752,7 +752,7 @@ SPACE_RULES: dict[str, SpaceRule] = {
             "knowledge_chunks_fts": ("content", "folded", "source_url"),
             "knowledge_pages_gone": ("source_url",),
         },
-        today="refuses"),
+        today="apart"),
     "rbac.db": _install("who may do what in the install: names of users, divisions and roles"),
     "audit.db": _install(
         "the install's access record: who asked for which resource and what was decided; "
@@ -842,8 +842,10 @@ SPACE_RULES: dict[str, SpaceRule] = {
     "document-store": SpaceRule("folder", today="whole"),
     "vector_memory": SpaceRule(
         "derived", why="the Knowledge Library's vectors, split as the libraries are",
-        today="refuses"),
-    "knowledge_provenance": SpaceRule("folder", today="refuses"),
+        today="apart"),
+    "knowledge_provenance": SpaceRule(
+        "derived", why="a library's fetched pages, in a folder named by the library, which carries its space",
+        today="apart"),
     "canary": _install("the daily crawl check's private store: one public page"),
     "code-index": SpaceRule(
         "host", why="indexes of the host's workspaces", today="whole"),

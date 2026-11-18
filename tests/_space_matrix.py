@@ -121,6 +121,7 @@ CASES: dict[str, Case] = {}
 #: An item adds its module here; :func:`load_cases` imports each.
 CASE_MODULES: tuple[str, ...] = (
     "tests._chat_space_cases", "tests._memory_space_cases", "tests._lesson_space_cases",
+    "tests._knowledge_space_cases",
 )
 
 
@@ -167,9 +168,8 @@ PENDING_ROUTE_RULES: tuple[tuple[Pattern, str], ...] = (
     # ── S1-12: documents ──────────────────────────────────────────────────
     ("/documents$", "S1-12"),
     ("/api/documents", "S1-12"),
-    # ── S1-13: knowledge ──────────────────────────────────────────────────
-    ("/knowledge$", "S1-13"),
-    ("/api/kb", "S1-13"),
+    # (S1-13, the Knowledge Library: written. Its cases are in
+    # tests/_knowledge_space_cases.py.)
     # ── S1-14: scheduled ──────────────────────────────────────────────────
     ("/scheduled$", "S1-14"),
     ("/api/scheduled", "S1-14"),
@@ -223,11 +223,6 @@ _PENDING_TOOLS_BY_ITEM: dict[str, tuple[str, ...]] = {
         "document_import", "document_read", "document_status",
         "document_search", "document_index", "document_convert",
         "document_redact", "document_cancel",
-    ),
-    "S1-13": (
-        "knowledge_search", "knowledge_list_libraries",
-        "knowledge_create_library", "knowledge_ingest_url",
-        "knowledge_ingest_site",
     ),
     "S1-14": (
         "schedule_task", "list_scheduled", "edit_scheduled", "cancel_scheduled",
