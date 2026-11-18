@@ -91,7 +91,7 @@ def unrecorded(app, mp) -> list[str]:
     for method, template in _mutating_routes(app):
         path = template
         for name in ("{entity_id}", "{belief_id}", "{episode_id}", "{summary_id}", "{chat_id}", "{task_id}",
-                     "{token}", "{merge_id}", "{group_id}", "{node_id}"):
+                     "{token}", "{merge_id}", "{group_id}", "{node_id}", "{change_id}"):
             path = path.replace(name, "nope")
         seen.clear()
         client.request(method, path, json={})

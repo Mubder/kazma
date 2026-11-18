@@ -275,6 +275,63 @@ def test_an_unanswered_pending_change_expires_and_decided_ones_are_bounded(mem, 
     assert {c["id"] for c in decided} >= {"mc_old5", "mc_old4"}
 
 
+# ── the Memory page's routes ──────────────────────────────────────────────
+
+
+def _client(mem, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from kazma_core.memory.schema_v2 import ensure_ops_schema
+    from kazma_ui import memory_api
+
+    for var in ("KAZMA_MEMORY_ENFORCE_TENANT", "KAZMA_PRODUCTION", "KAZMA_MULTI_USER"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr("kazma_core.tenant_isolation.multi_user_or_production", lambda: False)
+    monkeypatch.setenv("KAZMA_MEMORY_OPS_DB", str(mem.dir / "memory_ops.db"))
+    ops = sqlite3.connect(str(mem.dir / "memory_ops.db"))
+    ensure_ops_schema(ops)
+    ops.close()
+    app = FastAPI()
+    memory_api.mount_memory_api(app)  # with the operator-action recorder: real statuses
+    return TestClient(app)
+
+
+def test_the_routes_list_confirm_and_undo_with_real_statuses(mem, monkeypatch):
+    _turn(mem, monkeypatch, first="Paris", then="Moved to Rotterdam last month.",
+          model=[_fact("lives_in", "rotterdam")])
+    c = _client(mem, monkeypatch)
+    [pending] = c.get("/api/memory/v2/changes").json()["changes"]
+    assert (pending["kind"], pending["old_value"], pending["new_value"]) == ("pending", "Paris", "Rotterdam")
+
+    r = c.post(f"/api/memory/v2/changes/{pending['id']}/confirm")
+    assert r.status_code == 200 and r.json()["ok"], r.text
+    assert _current(mem) == [("Rotterdam", "user_explicit")]
+    [update] = c.get("/api/memory/v2/changes").json()["changes"]
+    assert update["kind"] == "update"
+
+    r = c.post(f"/api/memory/v2/changes/{update['id']}/undo")
+    assert r.status_code == 200 and r.json()["ok"], r.text
+    assert _current(mem) == [("Paris", "user_stated")]
+    assert c.get("/api/memory/v2/changes").json()["changes"] == []
+    decided = {(x["kind"], x["state"]) for x in c.get("/api/memory/v2/changes?state=decided").json()["changes"]}
+    assert decided == {("pending", "confirmed"), ("update", "undone")}
+
+    again = c.post(f"/api/memory/v2/changes/{update['id']}/undo")
+    assert (again.status_code, again.json()["error"]) == (409, "not_open")
+    assert c.post("/api/memory/v2/changes/mc_nope/dismiss").status_code == 404
+    assert c.get("/api/memory/v2/changes?state=everything").status_code == 422
+
+
+def test_the_dismiss_route_leaves_the_fact(mem, monkeypatch):
+    _turn(mem, monkeypatch, first="جدة", then="انتقلت إلى الرياض الشهر الماضي.",
+          model=[_fact("lives_in", "الرياض")])
+    c = _client(mem, monkeypatch)
+    [pending] = c.get("/api/memory/v2/changes").json()["changes"]
+    assert c.post(f"/api/memory/v2/changes/{pending['id']}/dismiss").json()["ok"]
+    assert _current(mem) == [("جدة", "user_stated")]
+    assert c.get("/api/memory/v2/changes").json()["changes"] == []
+
+
 # ── negative control: the refusal as it was ───────────────────────────────
 
 

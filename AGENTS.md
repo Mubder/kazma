@@ -2148,7 +2148,12 @@ four injected were noise.
   (`changes.forget_facts`, `forget_turn`, `forget_chat`,
   `forget_mentioning`); it is in the export and the M01 plant. The accepted
   cost of the speaker rule's sentence end ("صديقتي معلمة. ساكنة في جدة"
-  read as the user's) is an update the user can undo. Gate:
+  read as the user's) is an update the user can undo. The Memory API
+  answers them for the caller's tenant: `GET /api/memory/v2/changes`
+  (`state` open or decided) and `POST /api/memory/v2/changes/{change_id}/confirm`,
+  `.../dismiss`, `.../undo` (a refusal is its code, with the recorder's
+  status: 404, 409); they are in the memory tenant gate's REQUESTS, from
+  which Spaces S1-09 makes their matrix cases. Gate:
   `tests/test_memory_changes.py` (EN/AR; the refusal with no change log as
   the negative control), the plant's control in
   `tests/test_memory_store_registry.py`.

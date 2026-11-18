@@ -59,6 +59,7 @@ _TENANT_TABLES = (
     "entity_merges",
     "episodes",
     "graph_associations",
+    "memory_changes",
     "memory_forgotten",
     "memory_profile",
     "memory_summaries",
@@ -212,6 +213,20 @@ REQUESTS: dict[tuple[str, str], list[tuple[str, Any]]] = {
     ("PUT", "/api/memory/v2/profile"): [
         ("/api/memory/v2/profile", {"about": "Alice's own words, rewritten"}),
     ],
+    # The audit's F1: what changed in the user's facts (memory/changes.py).
+    ("GET", "/api/memory/v2/changes"): [
+        ("/api/memory/v2/changes", None),
+        ("/api/memory/v2/changes?state=decided", None),
+    ],
+    ("POST", "/api/memory/v2/changes/{change_id}/confirm"): [
+        ("/api/memory/v2/changes/beta9_pending/confirm", None),
+    ],
+    ("POST", "/api/memory/v2/changes/{change_id}/dismiss"): [
+        ("/api/memory/v2/changes/beta9_pending/dismiss", None),
+    ],
+    ("POST", "/api/memory/v2/changes/{change_id}/undo"): [
+        ("/api/memory/v2/changes/beta9_update/undo", None),
+    ],
 }
 
 #: What alpha must see of its own rows. A route that answers a tenant-bound
@@ -239,6 +254,7 @@ SHOWS_OWN: dict[str, str] = {
     "/api/memory/v2/export": '"alpha_e1"',
     "/api/memory/v2/summaries": '"alpha_sum1"',
     "/api/memory/v2/profile": "Alice's own words",
+    "/api/memory/v2/changes": "alpha_pending",
 }
 
 #: Install-wide: the platform role check lets an admin through and no one else.
@@ -370,6 +386,21 @@ def _seed(root: Path) -> None:
     c.executemany(
         "INSERT INTO memory_profile (tenant_id, about, updated_at) VALUES (?, ?, ?)",
         [("alpha", "Alice's own words", now), ("beta", "BETA9 Bob's own words", now)],
+    )
+    # changes to the user's facts (the audit's F1): a correction waiting for
+    # each tenant, and an update beta could undo (its old fact, beta9_old)
+    c.executemany(
+        "INSERT INTO memory_changes (id, tenant_id, kind, state, subject, predicate, old_belief_id, "
+        "old_value, new_belief_id, new_value, source_session, source_turn, created_at) "
+        "VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, 2, ?)",
+        [
+            ("alpha_pending", "alpha", "pending", "alice", "lives_in", "alpha_b1", "Paris", None, "Lyon",
+             "alpha_s1", now),
+            ("beta9_pending", "beta", "pending", "beta9_bob", "lives_in", "beta9_lives", "BETA9 Berlin",
+             None, "BETA9 Munich", "beta9_s1", now),
+            ("beta9_update", "beta", "update", "beta9_bob", "likes", "beta9_old", "BETA9 tea",
+             "beta9_note1", "BETA9 coffee", "beta9_s1", now),
+        ],
     )
     c.commit()
     c.close()

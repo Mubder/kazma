@@ -2556,6 +2556,86 @@ def _set_about_me_sync(payload: Any) -> dict[str, Any]:
     return set_about(_memory_tenant_id(), payload["about"])
 
 
+# ── What changed in the user's facts (the audit's F1, memory/changes.py) ──
+#
+# Updates the user can undo, and corrections waiting for the user's answer.
+# Every change is the caller's tenant's: another tenant's id reads as not
+# found, as on every memory route.
+
+#: ``state`` values of :func:`memory_changes`.
+_CHANGE_STATES = {
+    "open": ("open",),
+    "decided": ("confirmed", "dismissed", "undone", "superseded", "expired"),
+}
+
+
+@router.get("/api/memory/v2/changes")
+def memory_changes(state: str = "open", limit: int = 50) -> dict[str, Any]:
+    """The caller's changes to facts they stated, newest first: ``open``
+    (updates to undo, corrections to confirm or dismiss) or ``decided``."""
+    from kazma_core.memory.changes import list_changes
+
+    states = _CHANGE_STATES.get(state)
+    if states is None:
+        return {"ok": False, "error": "unknown state"}
+    conn = _conn()
+    try:
+        rows = list_changes(conn, tenant_id=_memory_tenant_id(), states=states,
+                            limit=min(max(1, int(limit or 50)), 200))
+    finally:
+        conn.close()
+    return {"ok": True, "changes": rows}
+
+
+def _decide_change(change_id: str, decision: str) -> dict[str, Any]:
+    """Confirm, dismiss or undo one change of the caller's tenant. A refusal
+    answers its code (``not_found``, ``not_open``, ``replaced_since``,
+    ``forgotten``, ``not_written``)."""
+    from kazma_core.memory import changes
+    from kazma_core.memory.schema_v2 import ensure_ops_schema
+    from kazma_core.paths import memory_ops_db
+
+    tid = _memory_tenant_id()
+    conn = _conn()
+    ops = None
+    try:
+        if decision == "confirm":
+            return changes.confirm(conn, change_id, tenant_id=tid, actor="memory_page")
+        if decision == "dismiss":
+            return changes.dismiss(conn, change_id, tenant_id=tid, actor="memory_page")
+        ops = sqlite3.connect(memory_ops_db(), check_same_thread=False)
+        ensure_ops_schema(ops)
+        return changes.undo(conn, change_id, tenant_id=tid, actor="memory_page", ops_conn=ops)
+    except changes.ChangeRefusedError as refused:
+        return {"ok": False, "error": refused.code}
+    except sqlite3.Error as exc:
+        logger.exception("[memory_api] change %s failed", decision)
+        return {"ok": False, "error": safe_error(exc)}
+    finally:
+        if ops is not None:
+            ops.close()
+        conn.close()
+
+
+@router.post("/api/memory/v2/changes/{change_id}/confirm")
+def confirm_memory_change(change_id: str) -> dict[str, Any]:
+    """The waiting correction is right: its value replaces the user's fact,
+    at the user's own trust (an update the user can still undo)."""
+    return _decide_change(change_id, "confirm")
+
+
+@router.post("/api/memory/v2/changes/{change_id}/dismiss")
+def dismiss_memory_change(change_id: str) -> dict[str, Any]:
+    """The waiting correction is wrong: the user's fact stays as it is."""
+    return _decide_change(change_id, "dismiss")
+
+
+@router.post("/api/memory/v2/changes/{change_id}/undo")
+def undo_memory_change(change_id: str) -> dict[str, Any]:
+    """Take an update back: the fact the user stated is current again."""
+    return _decide_change(change_id, "undo")
+
+
 def _forgotten_at(meta: Any) -> tuple[bool, Any]:
     """``(forgotten, when)`` from a fact's metadata (JSON text or a dict)."""
     if isinstance(meta, str):

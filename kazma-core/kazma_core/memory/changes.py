@@ -262,10 +262,10 @@ def undo(
             if old is None or not str(old[0] or ""):
                 raise ChangeRefusedError("forgotten")
             now = time.time()
-            beliefs_write(conn, "UPDATE beliefs SET valid_until = ?, invalidated_at = ? WHERE id = ?",
-                          (now, now, row["new_belief_id"]))
-            beliefs_write(conn, "UPDATE beliefs SET valid_until = NULL, invalidated_at = NULL WHERE id = ?",
-                          (row["old_belief_id"],))
+            beliefs_write(conn, "UPDATE beliefs SET valid_until = ?, invalidated_at = ? WHERE id = ? "
+                          "AND tenant_id = ?", (now, now, row["new_belief_id"], tenant))
+            beliefs_write(conn, "UPDATE beliefs SET valid_until = NULL, invalidated_at = NULL WHERE id = ? "
+                          "AND tenant_id = ?", (row["old_belief_id"], tenant))
             _decide(conn, change_id, tenant, "undone", actor, now)
             conn.commit()
             committed = True
