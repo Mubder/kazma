@@ -12739,6 +12739,25 @@ product can turn it on, so an install with one account behaves as before.
     unscoped dispatch as the control for a task run with nothing bound; the
     review's forged dispatch with both layers out; a shared space of two;
     a real worker's real tool call), `tests/test_swarm_task_metadata.py`.
+- **Research follows the space (S1-16, 2026-11-18).** Guards act only where
+  Spaces is enforced.
+  - A research session carries its space (`ResearchSession.tenant_id`,
+    always stamped from the bound scope). A space's list holds its own
+    sessions, the owner's space also those from before Spaces (no tenant).
+    Every route and tool that names a session asks
+    `research_session.session_here` (another space's answers as an unknown
+    one); never `get_session` where a request names the id.
+  - **A chat's web search is one row per question per space**
+    (`_chat_search_key`): the owner's keeps the ids it had, another space's
+    is salted with its id. One id per question wrote B's results into A's row.
+  - A research task is a swarm task of kind research: it keeps to its space
+    as every swarm task does (S1-15; the research routes' `_find_task`).
+  - The research files (reports, papers, extracts, digests, a saved page, a
+    crawl's pages, the pipeline's files, the acquisition journal) are the
+    workspace folder's and wait for S1-19, the space folder.
+  - Gates: `tests/_research_space_cases.py` (the matrix cases),
+    `tests/test_research_spaces.py` (the unfiltered list as the control,
+    and each other guard taken out).
 
 ## UI Conventions (Web)
 

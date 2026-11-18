@@ -122,6 +122,7 @@ CASES: dict[str, Case] = {}
 CASE_MODULES: tuple[str, ...] = (
     "tests._chat_space_cases", "tests._memory_space_cases", "tests._lesson_space_cases",
     "tests._knowledge_space_cases", "tests._scheduled_space_cases", "tests._swarm_space_cases",
+    "tests._research_space_cases",
 )
 
 
@@ -176,9 +177,14 @@ PENDING_ROUTE_RULES: tuple[tuple[Pattern, str], ...] = (
     ("/api/scheduled/x$", "S1-17"),
     # (S1-15, the swarm -- its tasks, their approvals, a worker's log --
     # wrote its cases: tests/_swarm_space_cases.py.)
-    # ── S1-16: research ───────────────────────────────────────────────────
-    ("/research$", "S1-16"),
-    ("/api/research", "S1-16"),
+    # (S1-16, research sessions and tasks: written. Its cases are in
+    # tests/_research_space_cases.py.) A research report, a paper and the
+    # acquisition journal are files and runs of the workspace folder, which
+    # becomes the space's with S1-19:
+    ("/api/research/papers", "S1-19"),
+    ("/api/research/download$", "S1-19"),
+    ("/api/research/eval$", "S1-19"),
+    ("/api/research/acquisition$", "S1-19"),
     # ── S1-20: host tools ─────────────────────────────────────────────────
     # A clone writes a project folder on the machine, so it stands with the
     # workspace before the GitHub connection's rule below.
@@ -232,16 +238,9 @@ _PENDING_TOOLS_BY_ITEM: dict[str, tuple[str, ...]] = {
     # here too: a chat's search is kept as a research session, a crawl has a
     # journal row, and fetched pages share one cache. S1-16 decides for each
     # whether it needs a case or holds nothing of a space.
-    "S1-16": (
-        "start_deep_research", "run_research_pipeline",
-        "research_session_status", "cancel_research_session",
-        "list_research_papers", "plan_research_queries",
-        "critique_synthesis_gaps", "research_readiness",
-        "synthesize_from_digests", "digest_research_file",
-        "summarize_research_file", "list_research_chunks",
-        "read_research_chunk", "read_url_to_file", "crawl_site",
-        "web_search", "web_search_duckduckgo", "read_url", "crawl_page",
-    ),
+    # (S1-16 -- research sessions and the web search a chat keeps -- wrote
+    # its cases: tests/_research_space_cases.py. The research files went to
+    # S1-19, the space folder.)
     # Connected accounts: mail, calendar, X and GitHub.
     "S1-17": (
         "email_accounts", "email_list", "email_get", "email_analyze",
@@ -272,6 +271,12 @@ _PENDING_TOOLS_BY_ITEM: dict[str, tuple[str, ...]] = {
         # kept for whoever drives it, so the space folder is the closest item.
         "browser_navigate", "browser_click", "browser_fill_form",
         "browser_extract_text", "browser_eval_js", "browser_screenshot",
+        # Research files (S1-16 sent them here): the pipeline's reports and
+        # extracts, a page saved to a file, a crawl's saved pages, and the
+        # tools that read them back, all in the workspace's research folder.
+        "run_research_pipeline", "list_research_papers", "synthesize_from_digests",
+        "digest_research_file", "summarize_research_file", "list_research_chunks",
+        "read_research_chunk", "read_url_to_file", "crawl_site",
     ),
     # Host tools: the shell, the project folder and its code index, git, MCP
     # servers, skills and package installs, settings, the machine itself.
@@ -314,6 +319,14 @@ PENDING_TOOLS: dict[str, str] = _flatten(_PENDING_TOOLS_BY_ITEM)
 
 #: Tools that read and write no space's data: the target, then why.
 NOT_IN_THE_MATRIX: dict[str, str] = {
+    "tool:plan_research_queries": "a model call on the topic it is given; it reads and keeps nothing",
+    "tool:critique_synthesis_gaps": "a model call on the text it is given; it reads and keeps nothing",
+    "tool:research_readiness": "the install's search and fetch health; it shows no space's research",
+    "tool:read_url": (
+        "fetches a public page; its cache holds public pages by address and policy, no space's words "
+        "(saving a page is read_url_to_file, S1-19)"
+    ),
+    "tool:crawl_page": "fetches one public page through read_url and returns it; it keeps nothing of a space",
     "tool:current_datetime": "answers the clock and the install's time zone; it reads no stored data",
     "tool:hijri_convert": "converts the date it is given; it reads and writes nothing",
     "tool:arabic_translate": (

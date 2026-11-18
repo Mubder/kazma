@@ -110,8 +110,11 @@ def register_research_tools(registry: Any) -> None:
         topic: str = "", depth: str = "deep", max_sources: int = 8, export_docx: bool = False, resume_session_id: str = ""
     ) -> str:
         try:
+            from kazma_core.tools.research_session import session_here
             from kazma_core.tools.research_session import start_deep_research as _start
 
+            if resume_session_id and await asyncio.to_thread(session_here, resume_session_id) is None:
+                return json.dumps({"error": "not found"}, ensure_ascii=False)  # another space's (S1-16)
             sess = await _start(topic, depth=depth, max_sources=max_sources, export_docx=export_docx, resume_session_id=resume_session_id or None)
             return json.dumps(sess.to_dict(), ensure_ascii=False, indent=2, default=str)
         except Exception as exc:
@@ -123,15 +126,18 @@ def register_research_tools(registry: Any) -> None:
         from kazma_core.web_acquire.crawl_jobs import call
 
         if session_id:
-            session = await call(sessions.get_session, session_id)
+            # Another space's session reads as an unknown one (Spaces S1-16).
+            session = await call(sessions.session_here, session_id)
             return json.dumps(session.to_dict() if session else {"error": "not found"}, ensure_ascii=False, default=str)
         rows = await call(sessions.list_sessions, limit=max(1, min(50, limit)))
         return json.dumps([row.to_dict() for row in rows], ensure_ascii=False, default=str)
 
     @registry.register(description="Request cancellation of a background research session. Cancelling remains visible until owned cleanup completes.", category="research")
     async def cancel_research_session(session_id: str) -> str:
-        from kazma_core.tools.research_session import cancel_session
+        from kazma_core.tools.research_session import cancel_session, session_here
         from kazma_core.web_acquire.crawl_jobs import call
 
+        if await call(session_here, session_id) is None:  # another space's: as an unknown one (S1-16)
+            return json.dumps({"error": "not found"}, ensure_ascii=False)
         session = await call(cancel_session, session_id)
         return json.dumps(session.to_dict() if session else {"error": "not found"}, ensure_ascii=False, default=str)

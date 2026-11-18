@@ -693,7 +693,7 @@ SPACE_RULES: dict[str, SpaceRule] = {
         "row",
         content={"research_sessions": (
             "topic", "message", "log_json", "report_path", "summary", "error", "meta_json")},
-        today="whole"),
+        today="apart"),
     # ── X ──────────────────────────────────────────────────────────────
     "x_posts.db": SpaceRule("row", content={"x_posts": ("text_preview",)}, today="apart"),
     "x_scheduled.db": SpaceRule("row", content={"x_scheduled_posts": ("text",)}, today="apart"),

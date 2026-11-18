@@ -154,6 +154,9 @@ class ResearchSession:
     updated_at: float = 0.0
     meta: dict[str, Any] = field(default_factory=dict)
     archived: bool = False
+    #: The space the session is (Spaces S1-16, always stamped); ``""`` for a
+    #: session from before, which is the owner's.
+    tenant_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -191,7 +194,8 @@ def _conn() -> sqlite3.Connection:
             created_at REAL,
             updated_at REAL,
             meta_json TEXT DEFAULT '{}',
-            archived INTEGER DEFAULT 0
+            archived INTEGER DEFAULT 0,
+            tenant_id TEXT DEFAULT ''
         )
         """
     )
@@ -205,6 +209,7 @@ def _conn() -> sqlite3.Connection:
             ("rubric_score", "REAL"),
             ("rubric_ok", "INTEGER"),
             ("archived", "INTEGER DEFAULT 0"),
+            ("tenant_id", "TEXT DEFAULT ''"),
         ),
     )
     c.commit()
@@ -255,6 +260,7 @@ def _row_to_session(r: sqlite3.Row) -> ResearchSession:
         updated_at=float(r["updated_at"] or 0),
         meta=meta if isinstance(meta, dict) else {},
         archived=rarch,
+        tenant_id=str(r["tenant_id"] or "") if "tenant_id" in keys else "",
     )
 
 
@@ -364,6 +370,7 @@ def create_session(
         created_at=now,
         updated_at=now,
         meta={**(meta or {}), "process_owner": _process_owner()},
+        tenant_id=_session_space(),
     )
     c = _conn()
     try:
@@ -375,8 +382,8 @@ def create_session(
             INSERT INTO research_sessions
             (id, topic, depth, status, stage, message, log_json, report_path,
              summary, error, sources, max_sources, rubric_score, rubric_ok,
-             created_at, updated_at, meta_json, archived)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             created_at, updated_at, meta_json, archived, tenant_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 sess.id,
@@ -397,6 +404,7 @@ def create_session(
                 sess.updated_at,
                 json.dumps(sess.meta),
                 0,
+                sess.tenant_id,
             ),
         )
         c.commit()
@@ -406,6 +414,51 @@ def create_session(
                 c.rollback()
         finally:
             c.close()
+    return sess
+
+
+def _chat_search_key(topic: str, space: str) -> str:
+    """The id part of a chat search's row: one row per topic, per space
+    (Spaces S1-16). The owner's space keeps the ids it had (the topic alone);
+    any other space's are salted with it, so one topic asked in two spaces is
+    two rows, never one row both read and write."""
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    key = topic if space in ("", OWNER_SPACE_ID) else f"{space}|{topic}"
+    return hashlib.md5(key.encode(), usedforsecurity=False).hexdigest()[:12]
+
+
+def _session_space() -> str:
+    """The space a session made now belongs to (Spaces S1-16): the bound
+    scope's, else the bound tenant, else ``""``. A ContextVar read: no I/O."""
+    from kazma_core.spaces.scope import current_scope
+    from kazma_core.tenant_context import get_current_tenant_id
+
+    bound = current_scope()
+    return bound.space_id if bound is not None else (get_current_tenant_id() or "")
+
+
+def _spaces_shown() -> tuple[str, ...] | None:
+    """The tenants this request's space sees, or None for every session (an
+    install that does not enforce Spaces). The owner's space also holds the
+    sessions from before Spaces (no tenant). ``NoSpaceBound`` with nothing
+    bound once enforced."""
+    from kazma_core.spaces.scope import OWNER_SPACE_ID, require_space_id, spaces_enforced
+
+    if not spaces_enforced():
+        return None
+    here = require_space_id()
+    return (here, "") if here == OWNER_SPACE_ID else (here,)
+
+
+def session_here(session_id: str) -> ResearchSession | None:
+    """The session *session_id* as the request's space may see it: None for
+    an unknown one and, once Spaces is enforced, for another space's -- one
+    answer for both (S1-16)."""
+    sess = get_session(session_id)
+    shown = _spaces_shown()
+    if sess is None or (shown is not None and sess.tenant_id not in shown):
+        return None
     return sess
 
 
@@ -461,6 +514,12 @@ def list_sessions(
                 clauses.append("COALESCE(archived, 0) = 0")
         if kind is not None:
             clauses.append(SESSION_KINDS[kind])
+        params: list[Any] = []
+        shown = _spaces_shown()
+        if shown is not None:
+            # A space's list is its own (Spaces S1-16).
+            clauses.append("COALESCE(tenant_id, '') IN (" + ",".join("?" * len(shown)) + ")")
+            params.extend(shown)
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
         rows = c.execute(
             f"""
@@ -469,7 +528,7 @@ def list_sessions(
             ORDER BY created_at DESC
             LIMIT ?
             """,
-            (max(1, min(200, int(limit or 50))),),  # static WHERE
+            (*params, max(1, min(200, int(limit or 50)))),  # static WHERE, values bound
         ).fetchall()
         return [_row_to_session(r) for r in rows]
     finally:
@@ -911,7 +970,8 @@ def record_chat_research(
         )
         return None
     now = time.time()
-    sid = session_id or f"rs_chat_{hashlib.md5((topic or '').encode(), usedforsecurity=False).hexdigest()[:12]}" if topic else f"rs_chat_{uuid.uuid4().hex[:12]}"
+    space = _session_space()
+    sid = session_id or (f"rs_chat_{_chat_search_key(topic, space)}" if topic else f"rs_chat_{uuid.uuid4().hex[:12]}")
     c = _conn()
     try:
         c.execute('BEGIN IMMEDIATE')
@@ -956,6 +1016,7 @@ def record_chat_research(
                     **(meta or {"source": "chat", "tool": tool_name}),
                     **({"results": int(result_count)} if result_count is not None else {}),
                 },
+                tenant_id=space,
             )
             _bounded_session_row(sess)
             _history_admission(c, chat=True)
@@ -964,8 +1025,8 @@ def record_chat_research(
                 INSERT INTO research_sessions
                 (id, topic, depth, status, stage, message, log_json, report_path,
                  summary, error, sources, max_sources, rubric_score, rubric_ok,
-                 created_at, updated_at, meta_json, archived)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 created_at, updated_at, meta_json, archived, tenant_id)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     sess.id,
@@ -986,6 +1047,7 @@ def record_chat_research(
                     sess.updated_at,
                     json.dumps(sess.meta),
                     0,
+                    sess.tenant_id,
                 ),
             )
             c.commit()
