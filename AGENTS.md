@@ -12404,18 +12404,29 @@ product can turn it on, so an install with one account behaves as before.
     table, and a listing or a clear goes thread by thread
     (`_filters_by_thread`). Not enforced: the bound tenant's saver, as
     before.
+    On one shared table a listing is held to the space's threads by its own
+    statement, before its limit, and a listing or a clear asks the record
+    store once (`threads.space_threads`: the owner's space is every thread
+    no other space recorded, N19).
   - **Time Travel** steps are kept by id alone. Restore and fork ask
     `thread_rewind._in_this_space`, and a fork's thread is recorded
     (`threads.record_new_thread`) before anything is written under it. A
-    chat delete of an id the space's store does not hold deletes nothing
-    more (`_not_this_spaces_chat` in `sse_chat`). A deleted chat's record is
-    removed last, and only when nothing of the chat is left
+    record store that fails is the refusal `thread_record_unavailable`
+    (503, a WARNING), and a fork bound to no space once enforced is
+    `no_space`; each refusal code is worded on the chat apps and the Time
+    Travel page. A chat delete of an id the space's store does not hold
+    deletes nothing more (`_not_this_spaces_chat` in `sse_chat`). A deleted
+    chat's record is removed last, and only when nothing of the chat is
+    left: not when its checkpoints, its steps or (the Dashboard's delete)
+    its chat could not be deleted, or no checkpoint store was there to ask
     (`threads.forget_thread`).
   - **A step's space** is `scope.space_of_state(state)`: the state's own
     tenant while Spaces is not enforced (a receipt's identity is hashed
     from it, so it must not move), the bound scope's once it is. Drafts,
     the scratchpad and receipts use it; a plan (`task_ledger.py`) is read
-    and made only through a thread of its own space.
+    and made only through a thread of its own space. Every read of a
+    thread's record remembers its space (`threads.record_of`), so a guard
+    a turn's own code asks on the loop reads no store.
   - **Sockets** name their space like any request:
     `space_binding.space_for_socket` checks membership at the handshake of
     `/ws/chat/{session_id}` and `/ws/voice` (close 4003 with the refusal's
@@ -12430,9 +12441,11 @@ product can turn it on, so an install with one account behaves as before.
     `<meta name="kazma-account">`).
   - Gates: `tests/_chat_space_cases.py` (the matrix cases: the product's
     routers behind the real tenant middleware), `tests/test_chat_state_spaces.py`
-    (each guard taken out must fail its case; the checkpoint store on one
-    shared table, "the shared table reads across" as the control, and on
-    real Postgres), `tests/js/test_message_author.js`,
+    (each guard taken out must fail its case on its own assertion, never a
+    stand-in's error; the checkpoint store on one shared table, "the shared
+    table reads across" as the control, and on real Postgres; Time Travel
+    through the product's own `CheckpointManager`; drafts, notes and
+    receipts against the tenant an older checkpoint left), `tests/js/test_message_author.js`,
     `tests/e2e/test_two_tabs_two_spaces.py` (two tabs in two spaces, by the
     sidebar, EN and AR).
 - **Memory: the space is the tenant, always (S1-09, 2026-11-18).** As
@@ -12467,15 +12480,27 @@ product can turn it on, so an install with one account behaves as before.
     and nothing bound, nothing is written for the owner.
   - **The worker**: `worker_bootstrap.memory_tenants()` is every tenant that
     holds memory plus every space, the owner's first, and raises when it
-    cannot be read. `task_queue._task_space` runs a task bound to the tenant
-    its payload names. A memory sweep names the tenant of each row it
-    touches and asks for no scope.
+    cannot be read; the cadences that visit every tenant list them through
+    `worker_bootstrap._queue_per_tenant` alone (a failed listing is a
+    WARNING, queues nothing and writes no stamp). A queued task's binding is
+    `task_queue._task_binding`: not enforced, the payload's tenant when it is
+    not the owner's, as before; enforced, the task runs whole -- its space
+    (the payload's tenant, or its row's for `ROW_NAMED_TASKS`) and the
+    account it acts for -- or as the install's work (`INSTALL_TASKS`). A new
+    task type goes in exactly one of `TENANT_TASKS`, `ROW_NAMED_TASKS`,
+    `INSTALL_TASKS`. A memory sweep names the tenant of each row it touches
+    and asks for no scope. The deep pass is queued for the id the writer
+    returned, never a recomputed one.
   - **No row under the "no tenant" sentinel** (`schema_v2.NO_TENANT`,
     triggers on every table with a tenant column, both files). The operator
     trail records the space the request acted in (`request.scope["kazma_space"]`,
     left by the tenant middleware).
   - **Recall** holds its episode candidates to the asker's tenant
-    (`recall._own_episodes`) before anything reads one by id.
+    (`recall._own_episodes`) before anything reads one by id; a database
+    error there rises, and recall says it failed.
+  - **A statement that picks a memory row by id alone** names its tenant in
+    the same WHERE: `tests/test_memory_id_only_statements.py` counts the
+    ones left (a ratchet; S1-35 makes it a gate).
   - **Memory outside every space** (a tenant of the retired modes) is
     counted in memory health (`tenant_view.tenants_outside_spaces`), never
     merged. Memory's copies outside the data folder declare a space rule

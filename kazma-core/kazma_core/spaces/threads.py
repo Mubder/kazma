@@ -52,6 +52,7 @@ __all__ = [
     "record_new_thread",
     "record_of",
     "record_thread",
+    "space_threads",
     "thread_refusal",
     "require_thread",
     "scope_for_turn",
@@ -126,13 +127,19 @@ def record_of(thread_id: str) -> ThreadRecord | None:
     if not thread_id:
         return None
     with _connection() as conn:
-        return _row(
+        found = _row(
             conn.execute(
                 "SELECT thread_id, space_id, opener, created_at FROM thread_scopes "
                 "WHERE thread_id = ?",
                 (str(thread_id),),
             ).fetchone()
         )
+    if found is not None:
+        # A record never changes: remember its space, so the guards a turn's
+        # own code asks afterwards (``thread_refusal``, often on the event
+        # loop) answer from memory. ``scope_for_turn`` reads it for every turn.
+        _remember(found)
+    return found
 
 
 def record_thread(thread_id: str, space_id: str, opener: str) -> ThreadRecord:
@@ -188,11 +195,8 @@ def _thread_space(thread_id: str) -> str | None:
         known = _spaces.get(tid)
     if known is not None:
         return known
-    record = record_of(tid)
-    if record is None:
-        return None
-    _remember(record)
-    return record.space_id
+    record = record_of(tid)  # remembers a record it finds
+    return record.space_id if record is not None else None
 
 
 def known_space(thread_id: str) -> str | None:
@@ -211,6 +215,28 @@ def forget_thread(thread_id: str) -> bool:
     with _spaces_lock:
         _spaces.pop(tid, None)
     return bool(removed)
+
+
+def space_threads(space_id: str) -> tuple[bool, list[str]]:
+    """The threads of one space, for a statement over a table that holds
+    every space's threads: ``(True, ids)`` names the space's threads;
+    ``(False, ids)`` names the threads that are NOT its own.
+
+    The owner's space is answered the second way: a thread with no record is
+    from before Spaces and is the owner's (N19), so its threads are every
+    thread no other space recorded. One read of the record store, whatever
+    the number of threads: a listing asks this once, never thread by thread.
+    """
+    with _connection() as conn:
+        if space_id == _scope.OWNER_SPACE_ID:
+            rows = conn.execute(
+                "SELECT thread_id FROM thread_scopes WHERE space_id <> ?", (space_id,)
+            ).fetchall()
+            return False, [str(r[0]) for r in rows]
+        rows = conn.execute(
+            "SELECT thread_id FROM thread_scopes WHERE space_id = ?", (space_id,)
+        ).fetchall()
+        return True, [str(r[0]) for r in rows]
 
 
 def thread_home(thread_id: str) -> str:

@@ -61,6 +61,8 @@
     if (code === 'snapshot_truncated') return tx('replay.refused_truncated', 'This step was too large to keep whole: it can be read, not restored or forked.');
     if (code === 'store_unavailable') return tx('replay.store_unavailable', 'The saved steps could not be read. The server log says why.');
     if (code === 'memory_ledger_unavailable') return tx('replay.refused_memory_ledger', 'What this chat keeps out of memory could not be copied to the fork, so nothing was forked. The server log says why.');
+    if (code === 'thread_record_unavailable') return tx('replay.refused_thread_record', 'Where this chat lives could not be read or recorded, so nothing was changed. The server log says why.');
+    if (code === 'no_space') return tx('replay.refused_no_space', 'This request is not tied to a space, so nothing was forked.');
     return tx('replay.load_error', 'Could not load the steps (HTTP {status}).', { status: status });
   }
   function emptyState(html) {

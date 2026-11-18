@@ -1638,9 +1638,14 @@ def create_sse_chat_router(
                         # The thread's checkpoint-mutation lock (TT-04).
                         async with thread_mutation(thread_id):
                             await cm.adelete_thread(thread_id)
+                    else:
+                        # No checkpoint store to ask: whatever it holds of
+                        # this chat is still there.
+                        leftovers = True
                 except Exception as exc:
                     leftovers = True
-                    logger.debug("Checkpoint cleanup for %s failed: %s", thread_id, exc)
+                    logger.warning("[chat] %s deleted, but its checkpoints were NOT (%s)",
+                                   session_id, type(exc).__name__, exc_info=True)
             # Its Time Travel steps go with it, under each of its keys (TT-05):
             # they are copies of the chat, like the checkpoints above. What
             # Kazma learned is memory, kept unless the dialog's "also forget"

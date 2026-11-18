@@ -49,18 +49,23 @@ class Chat:
 class World:
     """The product's chat routers in one app, with two signed-in people."""
 
-    def __init__(self, matrix: Matrix, client: TestClient, recorder: Any, graph: Any,
-                 held: dict[str, Any]) -> None:
+    def __init__(self, matrix: Matrix, client: TestClient, recorder: Any, held: dict[str, Any]) -> None:
         self.matrix = matrix
         self.client = client
         self.recorder = recorder
-        self.graph = graph
         self._held = held
 
     @property
     def manager(self) -> Any:
         """The checkpoint manager the world's routes use."""
         return self._held["manager"]
+
+    @property
+    def graph(self) -> Any:
+        """The graph Time Travel restores and forks through. Its checkpoints
+        are the product's own ``CheckpointManager``'s (the world's), so a
+        restore or a fork meets the manager's thread guard too."""
+        return self._held["graph"]
 
     # ── who asks ─────────────────────────────────────────────────────────
 
@@ -149,7 +154,6 @@ def world(matrix: Matrix) -> Iterator[World]:
     from kazma_ui.routes_voice_ws import serve_voice_websocket
     from kazma_ui.sse_chat import create_sse_chat_router
     from langgraph.checkpoint.base import empty_checkpoint
-    from langgraph.checkpoint.memory import InMemorySaver
 
     from tests import _tt_graph as tt
 
@@ -166,12 +170,12 @@ def world(matrix: Matrix) -> Iterator[World]:
         # The chat delete forgets steps through the process's recorder.
         patch.setattr(time_travel, "_process_recorder", recorder)
         patch.setattr(time_travel, "_process_built_here", False)
-        graph = tt.build_graph(recorder, [], InMemorySaver())
         held: dict[str, Any] = {}
 
         @asynccontextmanager
         async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             held["manager"] = await create_checkpoint_manager(str(Path(tmp) / "checkpoints.db"))
+            held["graph"] = tt.build_graph(recorder, [], held["manager"])
             dashboard.set_dashboard_context(checkpoint_manager=held["manager"])
             try:
                 yield
@@ -183,7 +187,7 @@ def world(matrix: Matrix) -> Iterator[World]:
         app.middleware("http")(auth.create_tenant_middleware())
         app.include_router(create_sse_chat_router(graph=None))
         app.include_router(create_replay_router(
-            recorder_getter=lambda: recorder, graph_getter=lambda: graph))
+            recorder_getter=lambda: recorder, graph_getter=lambda: held["graph"]))
         app.include_router(dashboard.router)
         app.include_router(create_a2a_router(lambda: None))
         app.include_router(create_ws_chat_router(graph=None))
@@ -211,7 +215,7 @@ def world(matrix: Matrix) -> Iterator[World]:
 
         try:
             with TestClient(app) as client:
-                yield World(matrix, client, recorder, graph, held)
+                yield World(matrix, client, recorder, held)
         finally:
             close = getattr(recorder, "close", None)
             if callable(close):
@@ -608,7 +612,7 @@ def replay_restore(w: World) -> None:
     their_step, my_step = w.step(theirs), w.step(mine)
 
     def state_of(chat: Chat) -> str:
-        # The graph keeps its state in memory: any loop reads it.
+        # Read as Kazma's own work (nothing bound): the thread's own space.
         return str(tt.run(w.graph.aget_state(tt.config(chat.thread_id))).values)
 
     for body in ({"thread_id": theirs.thread_id, "snapshot_id": their_step},

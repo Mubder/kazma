@@ -105,6 +105,67 @@ def test_control_without_spaces_the_owner_is_shown_every_tenant(memory_client, m
     assert len(shown) >= 5, shown
 
 
+#: Every module that reads the one rule by name (``from ... import``), and
+#: the rule's own module for the code that imports it at call time.
+_RULE_READERS = (
+    "kazma_core.memory.tenant_view", "kazma_core.memory.entity_key", "kazma_core.memory.forget",
+    "kazma_core.memory.graph_hygiene", "kazma_core.memory.hygiene", "kazma_core.memory.topic_summaries",
+    "kazma_core.memory.v2_health", "kazma_ui.memory_api", "kazma_ui.routes_direct.memory",
+    "kazma_ui.routes_direct._shared",
+)
+
+
+def _the_rule_before_s1_09(monkeypatch) -> None:
+    """Put back the rule memory code held before S1-09: the literal tenant
+    ``"default"`` saw every tenant, Spaces or not."""
+    import importlib
+
+    def every(tenant_id: str | None) -> bool:
+        return (tenant_id or "default") == "default"
+
+    def narrowed(tenant_id: str | None) -> str | None:
+        return None if every(tenant_id) else tenant_id
+
+    def reach(tenant_id: str | None) -> tuple[str, str]:
+        return (tenant_id or "default", "default")
+
+    for name in _RULE_READERS:
+        module = importlib.import_module(name)
+        for attr, rule in (("sees_every_tenant", every), ("narrowed_to", narrowed), ("ledger_reach", reach)):
+            if hasattr(module, attr):
+                monkeypatch.setattr(module, attr, rule)
+
+
+def test_every_reader_of_the_rule_is_listed_for_the_control() -> None:
+    """The control below swaps the rule in every module that holds it by
+    name: a module that imports it and is not listed would keep S1-09's."""
+    import re
+
+    root = Path(__file__).resolve().parents[1]
+    readers = set()
+    for folder in ("kazma-core/kazma_core", "kazma-ui/kazma_ui"):
+        for path in (root / folder).rglob("*.py"):
+            text = path.read_text(encoding="utf-8")
+            if re.search(r"^from kazma_core\.memory\.tenant_view import", text, re.M):
+                rel = path.relative_to(root / folder.split("/")[0]).with_suffix("")
+                readers.add(".".join(rel.parts))
+    assert len(readers) >= 8, readers  # the walk found the readers
+    assert readers <= set(_RULE_READERS), sorted(readers - set(_RULE_READERS))
+
+
+def test_control_the_rule_before_s1_09_shows_the_enforced_owner_every_tenant(
+    memory_client, monkeypatch,  # noqa: F811
+) -> None:
+    """The enforced pass above, run with the rule memory code held before
+    S1-09: the owner's literal tenant saw every tenant, so the owner was
+    shown beta's rows on the routes the pass checks."""
+    _world(memory_client, monkeypatch, caller=OWNER, renamed=("alpha", OWNER), enforced=True, admin=True)
+    _the_rule_before_s1_09(monkeypatch)
+    shown = [route for route in sorted(gate.REQUESTS)
+             if any("showed tenant beta's data" in p for p in gate._problems(memory_client, route))]
+    assert len(shown) >= 5, shown
+
+
 def test_the_owners_health_counts_its_own_rows(memory_client, monkeypatch) -> None:  # noqa: F811
     _world(memory_client, monkeypatch, caller=OWNER, renamed=("alpha", OWNER), enforced=True, admin=True)
     gate._fresh(memory_client, "counts")
