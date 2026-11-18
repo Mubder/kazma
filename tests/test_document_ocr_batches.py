@@ -219,8 +219,13 @@ def _ingestion_with(ir: DocumentIR):
         def read_manifest(self, *, document_id, version_id):
             return {"ir": ir.to_dict()}
 
+        def for_space(self, tenant_id):
+            # The store of one space (Spaces S1-12): the stand-in has one.
+            return self
+
     class _Version:
         id = "v"
+        tenant_id = "default"
 
     svc = DocumentIngestionService.__new__(DocumentIngestionService)
     svc.storage = _Storage()
