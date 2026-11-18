@@ -831,16 +831,26 @@ another person's under you. A new sentence starts fresh, except for someone
 you introduced by name ("عندي أخت اسمها نورة. انتقلت إلى روتردام" is still
 Noura), and what describes you is still you ("أنا مدير مشاريع وساكن في دبي",
 "عندي بنت وساكن في الكويت", "قبل سنتين انتقلت إلى دبي"). It reads only your
-own words: not an attached document, a forwarded message, a quote, what
-someone else said ("my sister said: ...", to the end of that sentence) or a
-text you asked Kazma to work on ("Translate to French: My name is Pierre"
-does not make your name Pierre). Inside a request to remember, a quote is
-yours ("remember this: "I prefer dark mode""). "Correct: my name is Ahmad" is your own words and
-counts. A fact the model's deep pass reads counts as your own word too when
-you say it of yourself: "We moved to Rotterdam last month" replaces the home
-you gave before, in your spelling. "My sister moved to Rotterdam" never
-does, whoever the model files it under, and a reading that names no one
-("Moved to Rotterdam") stays the model's inference. What it misses --
+own words: not an attached document, a forwarded message or a pasted mail, the
+lines of a pasted chat ("Dana: My name is Dana"), a quote, what someone else
+said ("my sister said: ...", to the end of that sentence; "He said, I live in
+Lyon"; "Ali told me I work at Initech"; "أختي تقول أنا ساكنة في دبي"), a text
+you asked Kazma to work on or about ("Translate to French: My name is Pierre"
+does not make your name Pierre, nor does "Is this sentence correct: I work at
+Initech"), or a question ("How do I say my name is Pierre in French?"). Inside
+a request to remember, a quote is yours ("remember this: "I prefer dark
+mode""), unless it quotes someone ("remember that Dana wrote "I live in
+Oslo""). "Correct: my name is Ahmad" is your own words and counts, and so is
+what you add after the text you asked about ("Summarize https://x.y and my
+name is Sam", "Can you review my text?" then "Also my name is Sam" on a line
+of its own). Only the first 2,000 characters of a message are read this way,
+up to their last blank line; the deep pass reads all of it. A fact the
+model's deep pass reads counts as your own word too when you say it of
+yourself and have given none under that name: "We moved to Rotterdam last
+month" becomes your home when you never gave one. Beside a home you gave, it
+waits for your answer (below). "My sister moved to Rotterdam" never counts,
+whoever the model files it under, and a reading that names no one ("Moved to
+Rotterdam") stays the model's inference. What it misses --
 relatives, jobs, dates -- is the model's deep pass to find. That pass is scored from the configured model's recorded
 replies (`scripts/memory_extraction_record.py --out <fixture>`, run with an
 install's own Python, one model call per turn); a turn with no recorded reply

@@ -156,6 +156,8 @@ _DURABLE_CUES = [
     re.compile(r"\b(?:grok|zcode|supergrok|claude|cursor)\b.*\breset\b", re.I),
     re.compile(r"\bاسمي\b"),  # Arabic "my name is"
 ]
+#: The longest message that may be small talk.
+_FILLER_MAX = 400
 
 
 def is_filler_turn(user_text: str) -> bool:
@@ -167,6 +169,11 @@ def is_filler_turn(user_text: str) -> bool:
     text = (user_text or "").strip()
     if not text:
         return True
+    # A long message is never small talk, and the cues below read the raw
+    # text: past this, they cost its length (the security review of F1's
+    # second half, 2026-11-18).
+    if len(text) > _FILLER_MAX:
+        return False
     # Durable cue → never filler; a request to remember is one in any
     # language (W4: "تذكر هذا" is eight characters, and short turns are filler).
     from kazma_core.memory.remember_request import is_remember_request

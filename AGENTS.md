@@ -1807,9 +1807,14 @@ four injected were noise.
   of (`_LISTABLE`: works_at, active_project, current_role) a list labelled by
   the user's own words stays a list, and stays whole until a write that may
   replace the user's value replaces all of it; every other single-valued name
-  holds one value whoever labels it. Gate:
+  holds one value whoever labels it. **A plural name is a list**
+  (`_names_a_list`, the security review of F1's second half, 2026-11-18):
+  "names", "favorite_foods", "colors_favorite" put Kazma's one-value thing in
+  the plural and are written as a set; "lives_in" and "works_at" keep their
+  verb's "s", and "the_name" or "is_name" is still `name_is`. Gate:
   `tests/test_memory_kazma_class_wins.py` (the label first, keeping the
-  newest, the exact-name class and no listable names as negative controls).
+  newest, the exact-name class, no listable names and no plural rule as
+  negative controls).
 - **A list stays a list** (2026-10-19, `belief_mutation._established_kind`).
   The extractor labels each fact's type; a single-valued label on a predicate
   the subject keeps as a list (current `set` rows) is written as one more
@@ -1856,17 +1861,23 @@ four injected were noise.
   `search_transcripts` (the past-chats fallback an empty recall runs) too.
   **Extraction's filler check follows the same rule** (2026-11, the memory
   framework audit's F8): `belief_extractor.is_filler_turn` asks
-  `episode_text.is_small_talk_words` (every word small talk, or no word at
-  all) after the durable cues. A message of twelve characters or fewer was
-  filler by its length, and "I'm diabetic", "Call me Sam", "No, Lisbon" and
-  "عندي سكري" reached neither pass. The small-talk words include the replies
-  a person answers and goes ahead with ("نعم", "لا", "ايوه", "كمل", "يلا",
-  "خلاص", "ان شاء الله", "go ahead", "yes please", "sounds good", "I'm
-  good"), and a filler turn queues no deep pass (one model call): the
+  `episode_text.is_small_talk_words` after the durable cues. A message of
+  twelve characters or fewer was filler by its length, and "I'm diabetic",
+  "Call me Sam", "No, Lisbon" and "عندي سكري" reached neither pass. **Small
+  talk is read by whole phrases** (the security review of F1's second half,
+  2026-11-18): a message is nothing but `_SMALL_TALK_PHRASES` (longest
+  first), the words that may follow one (`_SMALL_TALK_TAILS`: "thanks
+  man", "شكرا حبيبي"), laughter and pauses -- never every WORD small talk,
+  which made "I am a man", "I am Sure", "I'm Kazma" and "no it will do"
+  filler. The phrases include the replies a person answers and goes ahead
+  with ("نعم", "لا", "ايوه", "كمل", "يلا", "خلاص", "ان شاء الله", "go ahead",
+  "yes please", "sounds good", "I'm good"). A message past `_FILLER_MAX`
+  (400 characters) is never filler, and the cues read no further. A filler
+  turn queues no deep pass (one model call): the
   post-turn path and turn reconcile ask `is_filler_turn` before queueing
   `micro_consolidation`. Gate:
-  `tests/test_memory_short_statements.py` (the length rule as the negative
-  control), the write scenarios' `short` category, and
+  `tests/test_memory_short_statements.py` (the length rule and the
+  word-by-word rule as negative controls), the write scenarios' `short` category, and
   `tests/test_filler_queues_no_deep_pass.py` (tasks counted through the real
   post-turn function; every function queueing a deep pass asks, or is
   declared; the path without the check as the control).
@@ -2097,7 +2108,29 @@ four injected were noise.
   "correct", "صحح") is an instruction only when it names the text ("Fix the
   grammar:"), so "Correct: my name is Ahmad" stays the user's own. Heads
   are read in an 80-character window at the start of the message, a line or
-  a sentence, by either language's rules: linear time. The quick pass (`extract_beliefs_heuristic`),
+  a sentence, by either language's rules: linear time. **What the security
+  review of F1's second half found (2026-11-18)**, each in both languages:
+  the lines of a pasted chat (a name before a colon at a line's start,
+  `_without_speaker_lines`: an English name written with capitals, never one
+  of the user's own labels or a form field, `_OWN_LABELS`, nor an Arabic
+  verb Kazma knows); a pasted mail's "From:" or "Subject:" line; a text
+  handed over or asked about ("Here is the article:", "Tell me if this is
+  spam:", "What does this mean:", "Message from Dana:", "Her bio reads:",
+  "كتبت:"); a reporting head of up to 14 words; someone's words after a
+  reporting verb with no colon, when a first-person word follows ("He said,
+  I live in Lyon.", "Ali told me I work at Initech", "أختي تقول أنا ساكنة"),
+  unless the user is its subject ("I told Ali I ..."), and a sentence that
+  ends naming its speaker ("..., she added."; `_reported_cut`); a question
+  ("How do I say my name is Pierre in French?", `_asks`, unless it asks to
+  remember); a quote over a line break; a request to remember that quotes
+  someone ("remember that Dana wrote "..."") is not the user's statement.
+  Kept the user's: an aside on a line of its own ("Also my name is Sam"),
+  what follows a web address an instruction works on ("Summarize
+  https://x.y and my name is Sam"), facts given for the user's own bio, the
+  '90s, a "> " line under a request to remember. At most the first 2,000
+  characters are read, ended at their last paragraph break (`_bounded`:
+  never the end, which a head, fence or forward line in the unread middle
+  would decide). The quick pass (`extract_beliefs_heuristic`),
   `is_remember_request` and `provenance.agent_write_source` read through
   it; the turn keeps the whole message and the deep pass reads all of it at
   an inference's trust. "Translate to French: My name is Pierre" stored the
@@ -2109,7 +2142,9 @@ four injected were noise.
   quoted write scenarios pass and fail with the raw message; the raw message
   as the negative control for the quick pass and the trust gate; the
   review's forms, kept cases and remember quotes, with the first rules as
-  the control), `tests/test_forwarded_messages.py` (the real Telegram
+  the control; the security review's cases with the rules before it as the
+  control, the cap, and every scanner in bounded time with the uncapped
+  read as the control), `tests/test_forwarded_messages.py` (the real Telegram
   adapter and WhatsApp parser, the adapters that ignored forwards as the
   control).
   **A file's text reaches the model in a data fence on every surface**: the

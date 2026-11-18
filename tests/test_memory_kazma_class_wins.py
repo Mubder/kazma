@@ -198,6 +198,38 @@ def test_a_name_that_holds_one_value_holds_one_whatever_the_user_labels(conn, pr
     assert len(_all_current(conn)) == 1 and _all_current(conn)[0][1:] == ("b", "user_explicit")
 
 
+@pytest.mark.parametrize("predicate", ["names", "favorite_foods", "favorite_colors", "colors_favorite",
+                                       "preferred_names"])
+def test_a_plural_name_is_a_list(conn, predicate):
+    """A plural of a thing Kazma keeps one of is a list, whatever the writer
+    labels it (the security review of F1's second half, 2026-11-18: "names"
+    replaced the user's name, "favorite_foods" kept one food)."""
+    assert belief_mutation._classify_predicate(predicate, "functional") == "set"
+    _write(conn, "a", "functional", "user_stated", 0, predicate)
+    _write(conn, "b", "functional", "user_stated", 1, predicate)
+    assert _current(conn, predicate) == [("a", "user_stated"), ("b", "user_stated")]
+
+
+@pytest.mark.parametrize(("predicate", "named"), [
+    ("lives_in", "lives_in"), ("live_in", "lives_in"), ("works_at", "works_at"), ("work_at", "works_at"),
+    ("is_name", "name_is"), ("the_name", "name_is"), ("name", "name_is"), ("favorite_color", "favorite_color"),
+])
+def test_a_verbs_s_is_no_plural(predicate, named):
+    """"lives_in" and "works_at" keep their own "s"; a name that only adds
+    "the" or "is" is still Kazma's (one value: F7)."""
+    assert belief_mutation._kazma_name(predicate) == named
+    assert belief_mutation._classify_predicate(predicate, "set") == "functional"
+
+
+def test_control_without_the_plural_rule_names_holds_one_value(conn, monkeypatch):
+    monkeypatch.setattr(belief_mutation, "_names_a_list", lambda predicate: False)
+    monkeypatch.setattr(belief_mutation, "_plural_of", lambda predicate, named: False)
+    _write(conn, "a", "set", "user_stated", 0, "names")
+    _write(conn, "b", "set", "user_stated", 1, "names")
+    assert _current(conn, "names") == [("b", "user_stated")]
+    assert belief_mutation._classify_predicate("favorite_foods", "set") == "functional"
+
+
 def test_every_single_valued_name_is_declared_listable_or_not():
     """A new single-valued name says whether a person holds several at once."""
     from kazma_core.memory.predicates import _predicate_key

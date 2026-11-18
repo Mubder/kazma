@@ -114,14 +114,49 @@ def _kazma_names() -> dict[frozenset[str], str]:
 def _kazma_name(predicate: str) -> str | None:
     """Kazma's own single-valued or state name that *predicate* is the same
     words as ("live_in", "in_lives", "lives_in_the" -> "lives_in"; "name",
-    "is_name" -> "name_is"), or None. Compared as ``predicates`` compares
-    names: order, filler words and a plural "s" aside. Read from the exact
-    name, a writer's "in_lives" labelled a list stood beside the user's
-    "lives_in", past the trust gate (the review of F7)."""
+    "is_name", "the_name" -> "name_is"), or None. Compared as ``predicates``
+    compares names: order, filler words and a plural "s" aside. Read from the
+    exact name, a writer's "in_lives" labelled a list stood beside the user's
+    "lives_in", past the trust gate (the review of F7). Never a name that
+    puts Kazma's thing in the plural ("names": ``_names_a_list``)."""
     from kazma_core.memory.predicates import _predicate_key
 
     key = _predicate_key(predicate)
-    return _kazma_names().get(key) if key else None
+    named = _kazma_names().get(key) if key else None
+    return None if named is not None and _plural_of(predicate, named) else named
+
+
+def _name_words(predicate: str) -> list[str]:
+    return [w for w in (predicate or "").strip().lower().replace(" ", "_").split("_") if w]
+
+
+def _is_plural(word: str) -> bool:
+    """A plural noun's "s", as ``predicates._predicate_key`` drops it."""
+    return len(word) > 3 and word.endswith("s") and not word.endswith("ss")
+
+
+def _plural_of(predicate: str, named: str) -> bool:
+    """Whether *predicate* says in the plural a word Kazma's *named* says in
+    the singular ("names" for "name_is"). "lives_in" and "works_at" keep
+    their own "s": a verb's, not a plural's."""
+    own = set(named.split("_"))
+    return any(_is_plural(w) and w not in own and w[:-1] in own for w in _name_words(predicate))
+
+
+def _names_a_list(predicate: str) -> bool:
+    """Whether *predicate* names in the plural what Kazma keeps one of:
+    "names", "favorite_foods", "colors_favorite". A plural name is a list,
+    whatever the writer labels it (the security review of F1's second half,
+    2026-11-18: "names" replaced the user's name, and "favorite_foods" kept
+    one food)."""
+    words = _name_words(predicate)
+    if _is_favorite(predicate) and any(_is_plural(w) for w in words if w != "favorite"):
+        return True
+    from kazma_core.memory.predicates import _predicate_key
+
+    key = _predicate_key(predicate)
+    named = _kazma_names().get(key) if key else None
+    return named is not None and _plural_of(predicate, named)
 
 
 def _is_favorite(predicate: str) -> bool:
@@ -218,7 +253,10 @@ def _classify_predicate(predicate: str, explicit: str | None, *, source: str | N
     # framework audit's F7). Read from the name's words, never its exact
     # spelling (``_kazma_name``), and favorite_* stays single-valued -- but a
     # list the user's own words made on a name a person holds several of
-    # stays a list (``_LISTABLE``).
+    # stays a list (``_LISTABLE``). A plural name is a list ("names",
+    # "favorite_foods": ``_names_a_list``).
+    if _names_a_list(p):
+        return "set"
     named = _kazma_name(p)
     if named in _FUNCTIONAL_PREDICATES or _is_favorite(p):
         from kazma_core.memory.provenance import USER_SOURCES
@@ -236,8 +274,8 @@ def _classify_predicate(predicate: str, explicit: str | None, *, source: str | N
 def kazma_classifies(predicate: str) -> bool:
     """Whether Kazma itself says how many values *predicate* holds (the
     functional and state lists, ``favorite_*``, the rotating current facts),
-    whatever the extractor's label."""
-    if _kazma_name(predicate) is not None or _is_favorite(predicate):
+    whatever the extractor's label. A plural of one of them is a list."""
+    if _kazma_name(predicate) is not None or _is_favorite(predicate) or _names_a_list(predicate):
         return True
     from kazma_core.memory.current_facts import is_functional_current_predicate
 

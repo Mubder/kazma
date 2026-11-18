@@ -216,12 +216,13 @@ def test_a_summarised_page_cannot_steer_the_users_fact(mem, monkeypatch):
 @pytest.mark.parametrize(("predicate", "held", "then", "read", "asked"), MODEL_READINGS)
 def test_control_the_first_halfs_rule_replaced_each(mem, monkeypatch, predicate, held, then, read, asked):
     """Negative control: credited readings that may replace, and every
-    sentence read as stated (the rule of bbfa48cb8). Each replaced the
-    user's fact."""
-    from kazma_core.memory import clause_subject
+    sentence read as stated, questions among the user's words (the rules of
+    bbfa48cb8). Each replaced the user's fact."""
+    from kazma_core.memory import clause_subject, own_words
 
     monkeypatch.setattr(belief_mutation, "_user_holds_another", lambda *a, **k: False)
     monkeypatch.setattr(clause_subject, "_asserted", lambda raw: [True] * len(raw))
+    monkeypatch.setattr(own_words, "_asks", lambda sentence: False)
     current = _deep_pass(mem, monkeypatch, said_first="", value_first=held, then=then, predicate=predicate,
                          model=[_fact(predicate, read)])
     assert current != [(held, "user_stated")] and current[0][1] == "user_stated"

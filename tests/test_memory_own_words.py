@@ -296,6 +296,9 @@ def test_control_the_first_rules_missed_the_reviews_forms(monkeypatch):
     stopped only at a colon or a line end and read one language."""
     from kazma_core.memory import own_words as ow
 
+    # The security review's layers (2026-11-18) came after: off here.
+    monkeypatch.setattr(ow, "_without_reported_or_asked", lambda body: body)
+    monkeypatch.setattr(ow, "_without_speaker_lines", lambda body: body)
     monkeypatch.setattr(ow, "_QUOTED_SPAN_RE", re.compile(r"\"[^\"\n]{1,400}+\"|“[^”\n]{1,400}+”|«[^»\n]{1,400}+»"))
     monkeypatch.setattr(ow, "_speaks_in_first_person",
                         lambda span: any(w in ow._FIRST_PERSON_EN for w in ow._words(span))
@@ -321,4 +324,180 @@ def test_the_reviews_rules_read_a_long_message_in_linear_time(piece):
     started = time.perf_counter()
     own_words(small * 4)
     assert time.perf_counter() - started < max(1.0, once * 12), piece
+
+
+# ── the security review of F1's second half (2026-11-18) ─────────────────
+
+#: Someone else's words the first rules still filed under the user, each
+#: with a fact it gave: a pasted chat or mail, a text handed over or asked
+#: about, reported speech with no colon, a long reporting head, a question,
+#: a quote over a line break, a quote's reporting tail.
+SOMEONE_ELSES = [
+    ("Dana: My name is Dana and I live in Oslo.", ("lives_in", "Oslo")),
+    ("[12:01, 18/11/2026] Dana: I work at Initech now.", ("works_at", "Initech")),
+    ("Me: hi\nDana: I live in Oslo.", ("lives_in", "Oslo")),
+    ("نورة: اسمي نورة وأنا ساكنة في دبي", ("name_is", "نورة")),
+    ("From: Dana\nSubject: hi\n\nMy name is Dana and I live in Oslo.", ("lives_in", "Oslo")),
+    ("Here is the article:\n\nMy name is Dana and I live in Oslo.", ("lives_in", "Oslo")),
+    ("He said, I live in Lyon.", ("lives_in", "Lyon")),
+    ("My friend Ali says I live in Lyon", ("lives_in", "Lyon")),
+    ("Ali told me I work at Initech", ("works_at", "Initech")),
+    ("أختي تقول أنا ساكنة في دبي", ("lives_in", "دبي")),
+    ("My sister who lives far away told me yesterday on the phone: I live in Lyon.", ("lives_in", "Lyon")),
+    ("قالت أختي بالتلفون أمس وهي تبكي كثير: أنا ساكنة في دبي", ("lives_in", "دبي")),
+    ("Her bio reads: I work at Initech.", ("works_at", "Initech")),
+    ("Message from Dana: My name is Dana.", ("name_is", "Dana")),
+    ("Tell me if this is spam: My name is Dana and I work at Initech", ("works_at", "Initech")),
+    ("Is this sentence correct: I work at Initech", ("works_at", "Initech")),
+    ("What does this mean: My name is Pierre", ("name_is", "Pierre")),
+    ("How do I say my name is Pierre in French?", ("name_is", "Pierre")),
+    ('She wrote "My name is Dana.\nI live in Oslo."', ("lives_in", "Oslo")),
+    ("“My name is Dana” she said. I live in Oslo, she added.", ("lives_in", "Oslo")),
+    ("My name is Dana, she said.", ("name_is", "Dana")),
+    ("I live in Oslo, wrote Dana in her letter.", ("lives_in", "Oslo")),
+    ("كتبت: اسمي نورة", ("name_is", "نورة")),
+]
+
+
+@pytest.mark.parametrize(("message", "fact"), SOMEONE_ELSES)
+def test_someone_elses_words_are_not_the_users(message, fact):
+    assert fact not in _facts(message), (message, own_words(message))
+
+
+#: The user's own words the first rules lost, or new rules could: an aside
+#: on its own line, facts given for the user's own bio, what follows an
+#: address, a year's apostrophe, the user's own report, a clause of their
+#: own after a comma, a label of their own, a statement after a question.
+USERS_OWN = [
+    ("Can you review my text?\nAlso my name is Sam.", ("name_is", "Sam")),
+    ("Write a bio: I work at Initech and I live in Dubai.", ("works_at", "Initech")),
+    ("Summarize https://x.y and my name is Sam", ("name_is", "Sam")),
+    ("Summarize https://x.y/a?b=1 and my name is Sam", ("name_is", "Sam")),
+    ("The '90s were great. I live in Lyon. I love rock 'n' roll", ("lives_in", "Lyon")),
+    ("I told Ali I live in Paris.", ("lives_in", "Paris")),
+    ("I work at Initech, which my boss says is great.", ("works_at", "Initech")),
+    ("My name is Sam, as my sister said.", ("name_is", "Sam")),
+    ("Me: I live in Paris", ("lives_in", "Paris")),
+    ("Fun fact: I live in Lyon.", ("lives_in", "Lyon")),
+    ("News: I work at Initech now.", ("works_at", "Initech")),
+    ("ملاحظة: أنا ساكن في دبي", ("lives_in", "دبي")),
+    ("What's your name? My name is Sam.", ("name_is", "Sam")),
+    ("Translate: thanks.\nAlso, I live in Lisbon.", ("lives_in", "Lisbon")),
+]
+
+
+@pytest.mark.parametrize(("message", "fact"), USERS_OWN)
+def test_the_users_own_words_the_review_found_stay_theirs(message, fact):
+    assert fact in _facts(message), (message, own_words(message))
+
+
+def test_an_also_inside_a_line_is_still_the_text():
+    """"Also" ends a text to work on only at a line's start: inside it, it is
+    the text going on."""
+    assert ("name_is", "Pierre") not in _facts("Translate: hello. Also my name is Pierre.")
+
+
+def test_a_remembered_quote_line_is_the_users_statement():
+    message = "Remember this:\n> my code is ZX-41"
+    assert is_remember_request(message) and "my code is ZX-41" in own_words(message)
+    assert agent_write_source("code is ZX-41", message) == USER_EXPLICIT
+    for other in ("Look at this:\n> my code is ZX-41", "Remember what my sister said:\n> my code is ZX-41",
+                  'remember that Dana wrote "my code is ZX-41"'):
+        assert agent_write_source("code is ZX-41", other) != USER_EXPLICIT, other
+
+
+def test_control_the_rules_before_the_review_gave_each_fact(monkeypatch):
+    """Negative control: the rules of 5a60b5f21 -- no speaker lines, no
+    reported speech without a colon, no questions, no remembered quote line,
+    no mail headers, heads of six words, quotes on one line, "كتبت" read as
+    "I wrote", no handed-over or asked-about text -- give every fact above
+    to the user, and lose the user's own (the address, the line aside, the
+    '90s, the bio)."""
+    from kazma_core.memory import own_words as ow
+
+    monkeypatch.setattr(ow, "_bounded", lambda body: body)
+    monkeypatch.setattr(ow, "_without_speaker_lines", lambda body: body)
+    monkeypatch.setattr(ow, "_without_quote_lines", lambda body: ow._QUOTE_LINE_RE.sub(" ", body))
+    monkeypatch.setattr(ow, "_without_reported_or_asked", lambda body: body)
+    monkeypatch.setattr(ow, "_without_addresses", lambda window: window)
+    monkeypatch.setattr(ow, "_URL_RE", re.compile(r"(?!x)x"))
+    monkeypatch.setattr(ow, "_LINE_ASIDES_EN", ())
+    monkeypatch.setattr(ow, "_LINE_ASIDES_AR", ())
+    monkeypatch.setattr(ow, "_FORWARD_EN", ("forwarded message", "begin forwarded message", "forwarded from ",
+                                            "fwd:", "original message"))
+    monkeypatch.setattr(ow, "_REPORTED_HEAD_WORDS", 6)
+    monkeypatch.setattr(ow, "_REPORTING_EN", ow._REPORTING_EN - {"reads", "added", "adds", "answered", "explained"})
+    monkeypatch.setattr(ow, "_HANDS_OVER_EN", ())
+    monkeypatch.setattr(ow, "_HANDS_OVER_AR", frozenset())
+    monkeypatch.setattr(ow, "_ASKS_ABOUT_EN", frozenset())
+    monkeypatch.setattr(ow, "_ASKS_ABOUT_AR", frozenset())
+    monkeypatch.setattr(ow, "_MESSAGE_THINGS_EN", frozenset())
+    monkeypatch.setattr(ow, "_I_AR", ow._I_AR | {"كتبت"})
+    monkeypatch.setattr(ow, "_WRITTEN_THINGS_EN", ow._WRITTEN_THINGS_EN | {"bio"})
+    monkeypatch.setattr(ow, "_QUOTED_SPAN_RE", re.compile(
+        r"(?<!\d)\"[^\"\n]{1,400}+\"|“[^”\n]{1,400}+”|«[^»\n]{1,400}+»"
+        r"|(?<!\w)'(?:[^'\n]|'(?=\w)){1,400}+'(?!\w)|‘(?:[^’\n]|’(?=\w)){1,400}+’(?!\w)|`[^`\n]{1,400}+`"))
+    given = [message for message, fact in SOMEONE_ELSES if fact in _facts(message)]
+    assert given == [message for message, _ in SOMEONE_ELSES]
+    lost = {message for message, fact in USERS_OWN if fact not in _facts(message)}
+    assert {"Summarize https://x.y and my name is Sam", "Can you review my text?\nAlso my name is Sam.",
+            "The '90s were great. I live in Lyon. I love rock 'n' roll",
+            "Write a bio: I work at Initech and I live in Dubai."} <= lost
+    assert agent_write_source("code is ZX-41", "Remember this:\n> my code is ZX-41") != USER_EXPLICIT
+
+
+# ── a long message: read up to a paragraph break (fix 7 of the review) ────
+
+
+def test_a_long_message_is_read_to_its_last_paragraph_break_before_the_cap():
+    from kazma_core.memory.own_words import _SCAN_MAX
+
+    start = "My name is Sam.\n\n"
+    assert own_words(start + "x " * _SCAN_MAX).strip() == "My name is Sam."
+    assert own_words("I live in Lyon. " + "x " * _SCAN_MAX) == ""  # one paragraph: a document
+    # Nothing past the cap is read: a forward line or a head there would
+    # decide what follows it, unread.
+    tail = "\n\n---------- Forwarded message ---------\nMy name is Dana."
+    assert "Dana" not in own_words(start + ("filler words here. " * 150) + tail)
+    # A quote open at the cap is never read cut in half.
+    opened = start + ("y " * (_SCAN_MAX // 2 - 40)) + 'She wrote "My name\nis Dana. ' + "z " * 200 + '"'
+    assert "Dana" not in own_words(opened)
+
+
+@pytest.mark.parametrize("shape", [
+    "\n", "'a ", "Translate. ", "قبل سنتين ", "\"I\n", "I Lyon ", "she said: I live. ", ":", "Dana: x\n",
+    "He said, I live in Lyon. ", "How do I say my name? ", "https://x.y?a ", "> x\n", "Also x\n",
+])
+def test_every_scanner_reads_a_long_message_in_bounded_time(shape):
+    """The review measured about six microseconds a line (12 s for 2 MiB).
+    Read at most ``_SCAN_MAX`` characters: four times the text costs no more
+    than the cap's."""
+    from kazma_core.memory.belief_extractor import extract_beliefs_heuristic as quick
+    from kazma_core.memory.clause_subject import speaks_of_self
+
+    def took(text: str) -> float:
+        started = time.perf_counter()
+        own_words(text)
+        quick(text)
+        speaks_of_self(text, "Lyon")
+        return time.perf_counter() - started
+
+    small = shape * (100_000 // len(shape))
+    once = took(small)
+    assert took(small * 4) < max(0.5, once * 3), shape
+
+
+def test_control_without_the_cap_a_long_message_costs_its_length(monkeypatch):
+    """Negative control: with every line read, 200,000 lines cost far more
+    than the cap's."""
+    from kazma_core.memory import own_words as ow
+
+    text = "\n" * 200_000
+    started = time.perf_counter()
+    ow.own_words(text)
+    bounded = time.perf_counter() - started
+    monkeypatch.setattr(ow, "_bounded", lambda body: body)
+    started = time.perf_counter()
+    ow.own_words(text)
+    assert time.perf_counter() - started > max(0.05, bounded * 10)
 

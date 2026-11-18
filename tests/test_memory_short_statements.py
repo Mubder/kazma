@@ -38,6 +38,57 @@ def test_a_long_message_of_small_talk_is_filler_and_a_long_statement_is_not():
     assert not is_filler_turn("thanks, and by the way I moved to Lisbon")
 
 
+#: Statements made of small-talk WORDS: read word by word, each was filler
+#: and its fact never reached the deep pass (the security review of F1's
+#: second half, 2026-11-18).
+SMALL_TALK_WORDS_STATEMENTS = ["I am a man", "I am Sure", "I'm Kazma", "no it will do", "I'm a man so"]
+
+
+@pytest.mark.parametrize("text", SMALL_TALK_WORDS_STATEMENTS)
+def test_a_statement_made_of_small_talk_words_is_read(text):
+    assert not is_filler_turn(text)
+
+
+@pytest.mark.parametrize("text", [
+    "thanks man", "yes please", "I'm good", "go ahead", "sounds good", "ok then", "انا زين", "اي والله تمام",
+    "Good morning Kazma!", "no thanks", "شكرا جزيلا حبيبي",
+])
+def test_small_talk_phrases_are_filler(text):
+    assert is_filler_turn(text)
+
+
+def test_a_tail_alone_is_not_small_talk():
+    """"man", "you", "so much" follow a phrase; alone they say something."""
+    for text in ("man", "you", "so much", "kazma"):
+        assert not is_filler_turn(text), text
+
+
+def test_a_long_message_is_never_filler_and_costs_nothing_to_judge():
+    import time
+
+    started = time.perf_counter()
+    assert not is_filler_turn("thanks " * 100_000)
+    assert not is_filler_turn("grok " * 100_000)
+    assert time.perf_counter() - started < 1.0
+
+
+def test_control_word_by_word_the_statements_were_filler():
+    """Negative control: every word of each statement is a word of Kazma's
+    small-talk phrases, so the rule of 2026-11 (every word small talk) called
+    them all filler."""
+    from kazma_core.memory import episode_text
+
+    words = {w for phrase in episode_text._SMALL_TALK_PHRASES | episode_text._SMALL_TALK_TAILS
+             for w in phrase.split()}
+
+    def word_by_word(text: str) -> bool:
+        from kazma_core.documents.arabic import fold_for_search
+
+        return all(w in words for w in episode_text._WORD_RE.findall(fold_for_search(text).lower()))
+
+    assert all(word_by_word(text) for text in SMALL_TALK_WORDS_STATEMENTS)
+
+
 def test_the_short_write_scenarios_teach_what_they_say():
     """Through the write path: the short statements become facts, small talk
     does not. "No, Lisbon" is the user's correction read by the model: it
