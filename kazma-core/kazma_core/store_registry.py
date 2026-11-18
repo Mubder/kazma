@@ -589,6 +589,7 @@ _MEMORY_STATE_CONTENT: dict[str, tuple[str, ...]] = {
     "beliefs_archive": ("original_belief_json",),
     "episodes": ("user_text", "assistant_text", "summary_text", "metadata_json"),
     "memory_profile": ("about",),
+    "memory_changes": ("subject", "predicate", "old_value", "new_value"),
     "memory_summaries": ("title", "summary_text", "metadata_json"),
     "graph_associations": ("group_root", "member", "label", "metadata_json"),
     "procedural_dags": (

@@ -703,6 +703,20 @@ def _apply_beliefs_to_v2(
         if action["action"] != "noop":
             stats["applied"] += 1
         stats["actions"].append(action)
+        # A refused correction no one else is named in is put to the user, not
+        # dropped (memory/changes.py, F1: "Moved to Rotterdam last month").
+        if action.get("blocked") == "lower_trust_source" and clean["subject"] == "user" and user_text:
+            from kazma_core.memory import changes
+
+            try:
+                if changes.record_pending(primary_conn, tenant_id=tenant_id, refused=action,
+                                          new_value=clean["object"], user_text=user_text,
+                                          session=session_id, turn=turn, now=now):
+                    stats["pending_changes"] = stats.get("pending_changes", 0) + 1
+            except sqlite3.OperationalError as exc:
+                if "memory_changes" not in str(exc):
+                    raise
+                logger.warning("[belief_extract] no change log in this store; a refused correction is dropped")
         if private:
             continue
         # Ego-graph: every non-hub subject must reach ``user``. Payload-only

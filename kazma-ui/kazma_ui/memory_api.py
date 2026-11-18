@@ -2672,6 +2672,12 @@ _EXPORT_QUERIES: dict[str, tuple[tuple[str, str, Any], ...]] = {
         "ORDER BY forgotten_at",
         None,
     ),),
+    "memory_changes": ((
+        "state",
+        "SELECT tenant_id, id, kind, state, subject, predicate, old_value, new_value, source_session, "
+        "source_turn, created_at, decided_at FROM memory_changes WHERE {scope} ORDER BY created_at",
+        None,
+    ),),
 }
 
 #: Rows read from the database at a time: the export holds one batch, never

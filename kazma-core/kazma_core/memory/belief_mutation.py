@@ -364,8 +364,13 @@ def mutate_belief(
     subject_id: str | None = None,
     now: float | None = None,
     private: bool = False,
+    confirms_change: tuple[str, str] | None = None,
 ) -> dict[str, Any]:
     """Apply a belief mutation per the predicate-type rules.
+
+    *confirms_change* is ``(change id, actor)`` of the pending change this
+    write answers (``changes.confirm``): marked confirmed in the write's own
+    transaction, never superseded by it.
 
     *now* is when the fact was stated (default: this moment): the valid
     time (``valid_from`` / ``valid_until``). Something that records a fact
@@ -494,7 +499,7 @@ def mutate_belief(
                     extraction_method=extraction_method, tenant_id=tenant_id,
                     source_session=source_session, source_turn=source_turn,
                     mem_class=mem_class, now=now, recorded=recorded, cfg=cfg,
-                    private=private,
+                    private=private, confirms_change=confirms_change,
                 )
             elif ptype == "state":
                 result = _mutate_state(
@@ -904,6 +909,7 @@ def _mutate_functional_locked(
         return _record_earlier_statement(conn, ops_conn, sub, pred, obj, began=began, **kw)
     superseded_id = None
     state_before = None
+    users_fact_replaced = False
     if existing:
         superseded_id = existing["id"] if isinstance(existing, sqlite3.Row) else existing[0]
         old_obj = existing["object"] if isinstance(existing, sqlite3.Row) else existing[1]
@@ -967,6 +973,13 @@ def _mutate_functional_locked(
             return {"action": "noop", "belief_id": superseded_id,
                     "superseded_id": None, "blocked": "lower_trust_source"}
         state_before = {"id": superseded_id, "object": old_obj}
+        # A fact the user stated, replaced from another turn: an update the
+        # user sees and can undo (memory/changes.py, F1). Within one turn the
+        # deep pass refines the quick pass's reading: no update.
+        from kazma_core.memory.provenance import USER_SOURCES
+
+        users_fact_replaced = (audit_event_type == "supersede" and existing_method in USER_SOURCES
+                               and not same_turn)
         from kazma_core.memory.hygiene import beliefs_write
 
         beliefs_write(
@@ -1003,6 +1016,22 @@ def _mutate_functional_locked(
             "blocked": "insert_ignored",
         }
     bid = str(state_after.get("id") or bid)
+    if users_fact_replaced:
+        from kazma_core.memory import changes
+
+        try:
+            changes.record_update(
+                conn, tenant_id=tenant_id, subject=sub, predicate=pred, old_belief_id=str(superseded_id),
+                old_value=str(state_before["object"] if state_before else ""), new_belief_id=bid,
+                new_value=obj, session=kw.get("source_session"), turn=kw.get("source_turn"), now=now,
+                confirms=kw.get("confirms_change"),
+            )
+        except sqlite3.OperationalError as exc:
+            if "memory_changes" not in str(exc):
+                raise
+            # A store opened without the current schema: the replacement
+            # stands, unrecorded (ensure_primary_schema creates the table).
+            logger.warning("[belief_mutate] no change log in this store; %s %s replaced unrecorded", sub, pred)
     conn.commit()
     _write_audit(
         ops_conn, tenant_id=tenant_id, event_type=audit_event_type,

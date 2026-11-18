@@ -216,6 +216,9 @@ def test_the_old_rule_lets_the_agent_block_the_user(mem, monkeypatch):
 USER_CHANNEL_SITES = {
     "kazma-ui/kazma_ui/memory_api.py": "the Memory page: the operator's own link and edit",
     "kazma-core/kazma_core/memory/eval_golden.py": "the golden eval's private database, never the install's",
+    "kazma-core/kazma_core/memory/changes.py": (
+        "confirm: the user's own answer to a waiting correction (the Memory page, a chat command)"
+    ),
 }
 
 

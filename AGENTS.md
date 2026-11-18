@@ -2125,6 +2125,33 @@ four injected were noise.
   sister and the manager filed under the user by the model; every applier
   call names its message, a planted one as control; the grading switched off
   and the letter-for-letter comparison as negative controls).
+- **A fact the user stated changes only in ways the user can see and take
+  back** (2026-11, the audit's F1, second half; `memory/changes.py`, table
+  `memory_changes` in `memory_state.db`). An **update**: a `user_*` fact
+  replaced from another turn (`belief_mutation._mutate_functional_locked`,
+  `users_fact_replaced`; within one turn the deep pass refines the quick
+  pass and records nothing) is recorded by `changes.record_update` in the
+  replacement's own transaction; `changes.undo` reopens the old fact and
+  closes the new one under the mutation lock, audited (`undo_update`), and
+  refuses with a code (`ChangeRefusedError`: `replaced_since`, `forgotten`).
+  A **pending change**: the trust gate refused the model's reading of a
+  user fact, and the value stands in the turn's own words with no one but
+  the speaker named before it (`clause_subject.names_no_one_else`, the
+  user's spelling: "Moved to Rotterdam last month", "No, Lisbon") --
+  `changes.record_pending`, from `_apply_beliefs_to_v2`; "My sister moved
+  to Rotterdam" records nothing. The user confirms it (`changes.confirm`:
+  written `user_explicit`, the change marked confirmed in that write's
+  transaction, `mutate_belief(confirms_change=)`) or dismisses it. One open
+  pending change per value; an update supersedes them; one open 30 days
+  expires; the newest 200 decided ones are kept per tenant. Forget takes a
+  change with the fact, the turn, the chat or the text it holds
+  (`changes.forget_facts`, `forget_turn`, `forget_chat`,
+  `forget_mentioning`); it is in the export and the M01 plant. The accepted
+  cost of the speaker rule's sentence end ("صديقتي معلمة. ساكنة في جدة"
+  read as the user's) is an update the user can undo. Gate:
+  `tests/test_memory_changes.py` (EN/AR; the refusal with no change log as
+  the negative control), the plant's control in
+  `tests/test_memory_store_registry.py`.
 - The heuristic reads "I work at/for X" as `works_at` (it shared a pattern
   with "I live in" and stored the employer as `lives_in`), and the local
   embedder remembers short texts (<= 256 characters, 4,096 of them): each

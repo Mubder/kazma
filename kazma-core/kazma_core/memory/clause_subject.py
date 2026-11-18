@@ -48,7 +48,7 @@ from collections.abc import Sequence
 from functools import lru_cache
 from typing import NamedTuple
 
-__all__ = ["OTHER", "SPEAKER", "speaks_of_self", "subjects"]
+__all__ = ["OTHER", "SPEAKER", "names_no_one_else", "speaks_of_self", "subjects"]
 
 SPEAKER = "speaker"
 OTHER = "other"
@@ -296,6 +296,22 @@ def speaks_of_self(message: str | None, value: str | None) -> str | None:
     speaker: "Moved to Rotterdam last month" names no one and is None. A fact
     the model read is the user's own statement only when this answers.
     """
+    return _said(message, value, (SPEAKER,))
+
+
+def names_no_one_else(message: str | None, value: str | None) -> str | None:
+    """The user's own spelling of *value* when it stands in the user's own
+    words of *message* with no one but the speaker named before it in its
+    sentence and no third-person pronoun after it, else None: "Moved to
+    Rotterdam last month" (no one named) and "We moved to Rotterdam" answer,
+    "My sister moved to Rotterdam" does not. A refused correction is put to
+    the user only when this answers (``memory/changes.py``)."""
+    return _said(message, value, (SPEAKER, None))
+
+
+def _said(message: str | None, value: str | None, accept: tuple[str | None, ...]) -> str | None:
+    """The user's own spelling of *value* where the nearest person-naming
+    word before it is one of *accept*, else None."""
     from kazma_core.memory.own_words import own_words
 
     pieces = str(value or "").replace("_", " ").split()
@@ -313,7 +329,7 @@ def speaks_of_self(message: str | None, value: str | None) -> str | None:
             pronoun_after[j + 1] or _third_person_pronoun(raw[j]))
     k = len(words)
     for i in range(len(raw) - k + 1):
-        if named[i] != SPEAKER:
+        if named[i] not in accept:
             continue
         held = [_token_holds(folded[i + j], words[j]) for j in range(k)]
         if any(h is None for h in held):
