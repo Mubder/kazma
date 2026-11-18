@@ -1,0 +1,684 @@
+{
+ "version": 1,
+ "scenarios": [
+  {
+   "id": "update-en-moved",
+   "category": "update",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "I live in Paris.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "Paris",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "We moved to Rotterdam last month.",
+     "recorded": "e06"
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "Rotterdam",
+     "trust": "user"
+    }
+   ],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "Paris"
+    }
+   ]
+  },
+  {
+   "id": "update-en-new-job",
+   "category": "update",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "I work at Google.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "works_at",
+       "predicate_type": "functional",
+       "object": "Google",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "I left Google, I am at Meta now.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "works_at",
+       "predicate_type": "functional",
+       "object": "Meta",
+       "confidence": 0.9
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "Meta",
+     "trust": "user"
+    }
+   ],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "Google"
+    }
+   ]
+  },
+  {
+   "id": "update-en-said-again",
+   "category": "update",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "I live in Paris.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "Paris",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "I live in Rotterdam now.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "Rotterdam",
+       "confidence": 0.9
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "Rotterdam",
+     "trust": "user"
+    }
+   ],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "Paris"
+    }
+   ]
+  },
+  {
+   "id": "update-ar-moved",
+   "category": "update",
+   "lang": "ar",
+   "turns": [
+    {
+     "user": "ساكن في الكويت.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "الكويت",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "انتقلنا إلى الرياض الشهر الماضي.",
+     "recorded": "a05"
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "الرياض",
+     "trust": "user"
+    }
+   ],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "الكويت"
+    }
+   ]
+  },
+  {
+   "id": "update-ar-new-job",
+   "category": "update",
+   "lang": "ar",
+   "turns": [
+    {
+     "user": "أشتغل في شركة زين.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "works_at",
+       "predicate_type": "functional",
+       "object": "شركة زين",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "تركت زين، أشتغل الحين في أريدُو.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "works_at",
+       "predicate_type": "functional",
+       "object": "أريدو",
+       "confidence": 0.9
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "أريدو",
+     "trust": "user"
+    }
+   ],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "زين"
+    }
+   ]
+  },
+  {
+   "id": "update-mixed-moved",
+   "category": "update",
+   "lang": "mixed",
+   "turns": [
+    {
+     "user": "My name is Omar وساكن في Kuwait City.",
+     "recorded": "m01"
+    },
+    {
+     "user": "We moved to Rotterdam last month.",
+     "recorded": "e06"
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "Rotterdam",
+     "trust": "user"
+    }
+   ],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "Kuwait City"
+    }
+   ]
+  },
+  {
+   "id": "kept-en-name-and-city",
+   "category": "kept_as_said",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "My name is Layla and I live in Lisbon now.",
+     "recorded": "e01"
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "Layla",
+     "trust": "user",
+     "exact": true
+    },
+    {
+     "subject": "user",
+     "object": "Lisbon",
+     "trust": "user",
+     "exact": true
+    }
+   ],
+   "not_current": []
+  },
+  {
+   "id": "kept-mixed-employer",
+   "category": "kept_as_said",
+   "lang": "mixed",
+   "turns": [
+    {
+     "user": "أشتغل at Gulf Bank as a teller.",
+     "recorded": "m02"
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "Gulf Bank",
+     "trust": "user",
+     "exact": true
+    }
+   ],
+   "not_current": []
+  },
+  {
+   "id": "kept-ar-name-and-city",
+   "category": "kept_as_said",
+   "lang": "ar",
+   "turns": [
+    {
+     "user": "اسمي ليلى وساكنة في دبي.",
+     "recorded": "a01"
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "ليلى",
+     "trust": "user",
+     "exact": true
+    },
+    {
+     "subject": "user",
+     "object": "دبي",
+     "trust": "user",
+     "exact": true
+    }
+   ],
+   "not_current": []
+  },
+  {
+   "id": "short-en-condition",
+   "category": "short",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "I'm diabetic",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "has_condition",
+       "predicate_type": "set",
+       "object": "diabetes",
+       "confidence": 0.9
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "diabetes"
+    }
+   ],
+   "not_current": []
+  },
+  {
+   "id": "short-en-call-me",
+   "category": "short",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "Call me Sam",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "preferred_name",
+       "predicate_type": "functional",
+       "object": "Sam",
+       "confidence": 0.9
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "Sam"
+    }
+   ],
+   "not_current": []
+  },
+  {
+   "id": "short-en-diet",
+   "category": "short",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "I'm vegan",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "diet",
+       "predicate_type": "functional",
+       "object": "vegan",
+       "confidence": 0.9
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "vegan"
+    }
+   ],
+   "not_current": []
+  },
+  {
+   "id": "short-en-no-city",
+   "category": "short",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "I live in Paris.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "Paris",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "No, Lisbon",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "Lisbon",
+       "confidence": 0.9
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "Lisbon"
+    }
+   ],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "Paris"
+    }
+   ]
+  },
+  {
+   "id": "short-en-thanks",
+   "category": "short",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "Thanks!",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "mood",
+       "predicate_type": "state",
+       "object": "grateful",
+       "confidence": 0.9
+      }
+     ]
+    }
+   ],
+   "current": [],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "grateful"
+    }
+   ]
+  },
+  {
+   "id": "short-ar-condition",
+   "category": "short",
+   "lang": "ar",
+   "turns": [
+    {
+     "user": "عندي سكري",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "has_condition",
+       "predicate_type": "set",
+       "object": "السكري",
+       "confidence": 0.9
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "السكري"
+    }
+   ],
+   "not_current": []
+  },
+  {
+   "id": "short-ar-thanks",
+   "category": "short",
+   "lang": "ar",
+   "turns": [
+    {
+     "user": "شكراً",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "mood",
+       "predicate_type": "state",
+       "object": "ممتن",
+       "confidence": 0.9
+      }
+     ]
+    }
+   ],
+   "current": [],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "ممتن"
+    }
+   ]
+  },
+  {
+   "id": "other-en-sister-moved",
+   "category": "someone_else",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "I live in Paris.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "Paris",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "My sister moved to Rotterdam last month.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "Rotterdam",
+       "confidence": 0.9
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "Paris",
+     "trust": "user"
+    }
+   ],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "Rotterdam"
+    }
+   ]
+  },
+  {
+   "id": "other-en-manager-job",
+   "category": "someone_else",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "I work at Google.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "works_at",
+       "predicate_type": "functional",
+       "object": "Google",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "My manager works at Meta now.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "works_at",
+       "predicate_type": "functional",
+       "object": "Meta",
+       "confidence": 0.9
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "Google",
+     "trust": "user"
+    }
+   ],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "Meta"
+    }
+   ]
+  },
+  {
+   "id": "other-ar-sister-moved",
+   "category": "someone_else",
+   "lang": "ar",
+   "turns": [
+    {
+     "user": "ساكن في الكويت.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "الكويت",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "أختي انتقلت إلى روتردام.",
+     "written": [
+      {
+       "subject": "أختي",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "روتردام",
+       "confidence": 0.9
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "الكويت",
+     "trust": "user"
+    }
+   ],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "روتردام"
+    }
+   ]
+  },
+  {
+   "id": "other-mixed-sister-job",
+   "category": "someone_else",
+   "lang": "mixed",
+   "turns": [
+    {
+     "user": "أشتغل في شركة زين.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "works_at",
+       "predicate_type": "functional",
+       "object": "شركة زين",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "أختي تشتغل at Gulf Bank.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "works_at",
+       "predicate_type": "functional",
+       "object": "Gulf Bank",
+       "confidence": 0.9
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "زين",
+     "trust": "user"
+    }
+   ],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "Gulf Bank"
+    }
+   ]
+  }
+ ]
+}

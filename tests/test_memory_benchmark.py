@@ -20,11 +20,11 @@ import importlib.util
 import json
 from pathlib import Path
 
+# A plain import (benchmark audit R11): with ``importorskip`` a broken numpy
+# skipped every memory benchmark gate, and a skip is green.
+import numpy as np  # noqa: F401 -- the recorded vectors need it
 import pytest
-
-np = pytest.importorskip("numpy")
-
-from kazma_core.memory import benchmark  # noqa: E402
+from kazma_core.memory import benchmark
 
 REPO = Path(__file__).resolve().parents[1]
 FIXTURES = REPO / "tests" / "fixtures" / "memory_bench"
@@ -109,6 +109,16 @@ def test_every_question_was_scored(report):
     assert report["memories"] > 1000
 
 
+def _locked_extraction() -> dict:
+    return json.loads(THRESHOLDS.read_text(encoding="utf-8"))["extraction"]
+
+
+def _locked_parts() -> dict:
+    """The parts of the lock beside the recall scores, as committed."""
+    locked = json.loads(THRESHOLDS.read_text(encoding="utf-8"))
+    return {"extraction": locked["extraction"], "writes": locked["writes"]}
+
+
 def test_the_lock_never_lowers_the_ratchet(tmp_path, monkeypatch):
     """``lock`` refuses a lower score, and ``--rebaseline`` needs a new dataset."""
     script = _build_script()
@@ -118,9 +128,10 @@ def test_the_lock_never_lowers_the_ratchet(tmp_path, monkeypatch):
     scores = {"single.hit_rate": 0.9, "abstain.hit_rate": 0.5}
     monkeypatch.setattr(benchmark, "gated_scores", lambda _report: dict(scores))
     monkeypatch.setattr(benchmark, "run_benchmark", lambda **_kw: {})
+    parts = _locked_parts()
 
     def write(version_, values):
-        locked.write_text(json.dumps({"dataset_version": version_, "scores": values}),
+        locked.write_text(json.dumps({"dataset_version": version_, "scores": values, **parts}),
                           encoding="utf-8")
 
     write(version, {"single.hit_rate": 0.95, "abstain.hit_rate": 0.5})
@@ -195,7 +206,8 @@ def test_a_trade_inside_the_rule_is_recorded(tmp_path, monkeypatch):
                         lambda _r: {"single.mrr": 0.9, "noise.precision": 0.67, "abstain.hit_rate": 0.4})
     monkeypatch.setattr(benchmark, "run_benchmark", lambda **_kw: {})
     locked.write_text(json.dumps({"dataset_version": version, "scores": {
-        "single.mrr": 0.8, "noise.precision": 0.7, "abstain.hit_rate": 0.4}}), encoding="utf-8")
+        "single.mrr": 0.8, "noise.precision": 0.7, "abstain.hit_rate": 0.4},
+        **_locked_parts()}), encoding="utf-8")
     assert script._cmd_lock(rebaseline=False) == 1  # no reason given: refused
     assert script._cmd_lock(rebaseline=False, trade="rank turns above facts") == 0
     trade = json.loads(locked.read_text(encoding="utf-8"))["trades"][-1]
@@ -204,28 +216,303 @@ def test_a_trade_inside_the_rule_is_recorded(tmp_path, monkeypatch):
 
 
 # ── extraction ────────────────────────────────────────────────────────────
+#
+# Scored by value since 2026-11 (benchmark audit R1): a fact kept under any
+# name is found; ``named`` is the share under a listed name. The model's pass
+# is one recording, locked by its identity (R3): the same recording compares
+# exactly, a new one is locked only on purpose, a recording of another prompt
+# is refused, and no recording is a failure.
+
+
+def _recording() -> dict:
+    path = FIXTURES / "extraction_llm.json"
+    assert path.is_file(), ("no recording of the model's extraction pass: a missing recording is a "
+                            "failure, never a skipped score")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _turns() -> list[dict]:
+    return json.loads(benchmark.EXTRACTION_PATH.read_text(encoding="utf-8"))["turns"]
+
+
+def test_the_extraction_dataset_is_what_the_builder_builds():
+    built = _build_script().build_extraction()
+    assert json.loads(benchmark.EXTRACTION_PATH.read_text(encoding="utf-8")) == json.loads(
+        json.dumps(built, ensure_ascii=False))
+
+
+def _recording_problems(report: dict, locked: dict) -> list[str]:
+    """Why the run's recording is not the locked one: other replies, or the
+    same replies saying they answered another prompt (a relabelled file)."""
+    ran, held = report["llm_recording"], locked["recording"]
+    problems = []
+    if ran["sha256"] != held["sha256"]:
+        problems.append("the recording of the model's pass changed: python scripts/memory_bench.py "
+                        "lock --new-recording \"why\"")
+    if ran["prompt_sha256"] != held["prompt_sha256"]:
+        problems.append("the recording says it answered another prompt than the one locked: record again")
+    return problems
 
 
 def test_extraction_only_improves():
-    locked = json.loads(THRESHOLDS.read_text(encoding="utf-8"))["extraction"]
-    replies = FIXTURES / "extraction_llm.json"
-    report = benchmark.run_extraction_benchmark(
-        llm_replies=json.loads(replies.read_text(encoding="utf-8")) if replies.is_file() else None)
-    assert report["version"] == locked["version"]
+    locked = _locked_extraction()
+    report = benchmark.run_extraction_benchmark(llm_replies=_recording())
+    assert report["version"] == locked["version"], (
+        "the extraction dataset changed: python scripts/memory_bench.py lock --rebaseline")
+    problems = _recording_problems(report, locked)
+    assert not problems, "\n".join(problems)
     dropped, rose = _compare(benchmark.extraction_scores(report), locked["scores"])
     assert not dropped, "Extraction got worse:\n  " + "\n  ".join(dropped)
     assert not rose, "Extraction improved -- lock it in: python scripts/memory_bench.py lock\n  " + "\n  ".join(rose)
-    # Every language is measured, each with turns that should keep nothing.
-    assert set(report["heuristic"]) == {"en", "ar", "mixed"}
+    # Every language is measured by both passes, each with turns that should keep nothing.
+    assert set(report["heuristic"]) == set(report["llm"]) == {"en", "ar", "mixed"}
     assert all(row["quiet_turns"] >= 1 for row in report["heuristic"].values())
+    assert {key.split(".")[0] for key in locked["scores"]} == {"heuristic", "llm"}
 
 
 def test_the_extraction_gate_sees_an_extractor_that_keeps_nothing(monkeypatch):
-    """Negative control: an extractor that keeps nothing loses its recall."""
-    locked = json.loads(THRESHOLDS.read_text(encoding="utf-8"))["extraction"]
+    """Negative control: an extractor that keeps nothing loses what it found."""
     monkeypatch.setattr("kazma_core.memory.belief_extractor.extract_beliefs_heuristic", lambda _t: [])
-    dropped, _ = _compare(benchmark.extraction_scores(benchmark.run_extraction_benchmark()), locked["scores"])
-    assert any(d.startswith("heuristic.en.recall") for d in dropped), dropped
+    dropped, _ = _compare(benchmark.extraction_scores(benchmark.run_extraction_benchmark()),
+                          _locked_extraction()["scores"])
+    assert any(d.startswith("heuristic.en.found") for d in dropped), dropped
+    # With no recording given, every score of the model's pass is missing, and missing is a drop.
+    assert any(d.startswith("llm.") for d in dropped), dropped
+
+
+def test_a_relabelled_recording_is_not_the_locked_one(tmp_path, monkeypatch):
+    """The reviewer's experiment on piece 1: the prompt replaced by "Keep
+    nothing." and the recording's ``prompt_sha256`` edited to match. Its
+    replies are the locked ones, so a check of the replies alone passed, the
+    scores stayed, and ``lock`` asked for nothing. Both the gate and the lock
+    now compare the prompt the recording says it answered."""
+    import hashlib
+
+    relabelled = _recording()
+    monkeypatch.setattr("kazma_core.memory.belief_extractor._EXTRACT_SYSTEM", "Keep nothing.")
+    relabelled["prompt_sha256"] = hashlib.sha256(b"Keep nothing.").hexdigest()
+    locked = _locked_extraction()
+    report = benchmark.run_extraction_benchmark(llm_replies=relabelled)
+    # Control: the replies are the locked ones, and so are the scores.
+    assert report["llm_recording"]["sha256"] == locked["recording"]["sha256"]
+    assert benchmark.extraction_scores(report) == locked["scores"]
+    assert any("another prompt" in p for p in _recording_problems(report, locked))
+
+    script = _build_script()
+    path = tmp_path / "extraction_llm.json"
+    path.write_text(json.dumps(relabelled, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(script, "LLM_REPLIES", path)
+    _part, problems = script._extraction_lock(locked)
+    assert any("another prompt" in p for p in problems), problems
+    _part, problems = script._extraction_lock(locked, new_recording="relabelled")
+    assert any("another prompt" in p for p in problems), problems
+
+
+def _probe_turns() -> list[dict]:
+    return [
+        {"id": "p1", "lang": "en", "user": "My name is Layla and I live in Lisbon.",
+         "facts": [[{"subject": "user", "predicates": ["name_is"], "object": "Layla"}],
+                   [{"subject": "user", "predicates": ["lives_in"], "object": "Lisbon"}]]},
+        {"id": "p2", "lang": "en", "user": "I work at Gulf Bank.",
+         "facts": [[{"subject": "user", "predicates": ["works_at"], "object": "Gulf Bank"}]]},
+        {"id": "p3", "lang": "en", "user": "I love hiking.",
+         "facts": [[{"subject": "user", "predicates": ["prefers"], "object": "hiking"}]]},
+    ]
+
+
+def test_found_reads_the_value_and_named_reads_the_name():
+    """On cases made for it: an extractor that renames every predicate keeps
+    ``found`` and loses ``named``; one that drops a fact loses ``found``. The
+    reading before 2026-11 (``recall``, a fact counts only under a listed
+    name) falls in both cases, so it could not tell a lost fact from a renamed
+    one."""
+    turns = _probe_turns()
+    kept = {"p1": [{"subject": "user", "predicate": "name_is", "object": "layla"},
+                   {"subject": "user", "predicate": "lives_in", "object": "lisbon"}],
+            "p2": [{"subject": "user", "predicate": "works_at", "object": "gulf_bank"}],
+            "p3": [{"subject": "user", "predicate": "prefers", "object": "hiking"}]}
+    renamed = {tid: [{**f, "predicate": "zz_" + f["predicate"]} for f in facts] for tid, facts in kept.items()}
+    dropped = {**kept, "p1": kept["p1"][:1]}
+    base = benchmark._score_extraction(turns, kept)["en"]
+    after_rename = benchmark._score_extraction(turns, renamed)["en"]
+    after_drop = benchmark._score_extraction(turns, dropped)["en"]
+    assert base["found"] == base["named"] == base["right"] == 1.0
+    assert after_rename["found"] == 1.0 and after_rename["named"] == 0.0
+    assert after_drop["found"] == 0.75 and after_drop["named"] == 1.0
+    # The control: the old reading falls under a rename as it does under a loss.
+    assert after_rename["recall"] < base["recall"] and after_drop["recall"] < base["recall"]
+
+
+def test_a_value_counts_only_whole_and_never_turned_around():
+    """Piece 1's review: by value alone "user dislikes Lisbon" found "user
+    lives_in Lisbon", and a value cut down to "l" passed every score."""
+    turns = _probe_turns()[:1]
+
+    def found(*facts: dict) -> float:
+        return benchmark._score_extraction(turns, {"p1": list(facts)})["en"]["found"]
+
+    lisbon = {"subject": "user", "predicate": "lives_in", "object": "lisbon"}
+    layla = {"subject": "user", "predicate": "name_is", "object": "layla"}
+    assert found(layla, lisbon) == 1.0
+    assert found(layla, {**lisbon, "predicate": "dislikes"}) == 0.5
+    assert found(layla, {**lisbon, "predicate": "former_home"}) == 0.5
+    assert found(layla, {**lisbon, "object": "l"}) == 0.5
+    assert found(layla, {**lisbon, "object": "lis"}) == 0.5
+    # Whole words still count: the city's name inside a longer value.
+    assert found(layla, {**lisbon, "object": "lisbon_portugal"}) == 1.0
+    # A past relation finds a past fact: the turn's extras say so.
+    m07 = next(t for t in _turns() if t["id"] == "m07")
+    row = benchmark._score_extraction([m07], {"m07": [
+        {"subject": "user", "predicate": "works_at", "object": "zain"},
+        {"subject": "user", "predicate": "previously_worked_at", "object": "ooredoo"}]})["mixed"]
+    assert row["found"] == 1.0 and row["right"] == 1.0
+    # Control: the rule before (contained either way, any name) counts the opposite as found.
+    from kazma_core.memory.benchmark import _folded
+
+    def old_holds(gold: str, value: str) -> bool:
+        return bool(gold and value) and (gold in value or value in gold)
+
+    assert old_holds(_folded("Lisbon"), _folded("l"))
+
+
+def test_a_reply_the_recording_does_not_hold_is_its_own_failure(monkeypatch):
+    """A message the extractor sends in another form than the recording was
+    asked in used to read as "the model is down", and so as "extraction got
+    worse". It is a stale recording, and says so."""
+    turn = next(t for t in _turns() if t["id"] == "a01")
+    reply = json.dumps({"beliefs": []})
+    # The benchmark's own idea of the message, which the precheck uses: here
+    # it differs from what the extractor really sends.
+    monkeypatch.setattr(benchmark, "_llm_blob", lambda text: f"User: {text}\nDate: 2026-11-18\nAssistant: ")
+    replies = {"model": "stand-in", "prompt_sha256": benchmark.extraction_prompt_sha256(),
+               "replies": {benchmark._text_key(benchmark._llm_blob(turn["user"])): reply}}
+    with pytest.raises(benchmark.StaleRecordingError, match="no recorded reply for the message"):
+        benchmark.run_extraction_benchmark({"version": 2, "turns": [turn]}, llm_replies=replies)
+
+
+def test_a_relation_stated_from_the_other_side_is_found():
+    """"lulwa child_of user" keeps "user daughter Lulwa" (turn m05, as the
+    model wrote it); the same words about another person do not."""
+    turn = next(t for t in _turns() if t["id"] == "m05")
+    row = benchmark._score_extraction([turn], {"m05": [
+        {"subject": "lulwa", "predicate": "child_of", "object": "user"},
+        {"subject": "lulwa", "predicate": "studies_at", "object": "bayan_school"}]})["mixed"]
+    assert row["gold_found"] == 2 and row["kept_unwanted"] == 0
+    row = benchmark._score_extraction([turn], {"m05": [
+        {"subject": "noura", "predicate": "child_of", "object": "user"}]})["mixed"]
+    assert row["gold_found"] == 0 and row["kept_unwanted"] == 1
+
+
+def test_a_fact_about_someone_else_filed_under_the_user_is_unwanted():
+    """"My daughter Lulwa studies at Bayan School" must not become "the user
+    studies at Bayan School". By value alone it would count as found: the
+    turn's gold also allows "user daughter_school Bayan School". The turn's
+    ``avoid`` list makes it unwanted, and it finds nothing."""
+    turn = next(t for t in _turns() if t["id"] == "m05")
+    wrong = {"m05": [{"subject": "user", "predicate": "studies_at", "object": "bayan_school"}]}
+    row = benchmark._score_extraction([turn], wrong)["mixed"]
+    assert row["kept_unwanted"] == 1 and row["right"] == 0.0 and row["gold_found"] == 0
+    # Control: the same turn without its avoid list counts the false fact as found and right.
+    plain = {k: v for k, v in turn.items() if k != "avoid"}
+    row = benchmark._score_extraction([plain], wrong)["mixed"]
+    assert row["kept_unwanted"] == 0 and row["gold_found"] == 1
+
+
+def test_a_true_fact_nobody_asked_for_is_not_wrong():
+    turn = next(t for t in _turns() if t["id"] == "m07")
+    got = {"m07": [{"subject": "user", "predicate": "works_at", "object": "zain"},
+                   {"subject": "user", "predicate": "previously_worked_at", "object": "ooredoo"}]}
+    assert benchmark._score_extraction([turn], got)["mixed"]["right"] == 1.0
+    plain = {k: v for k, v in turn.items() if k != "extras"}
+    assert benchmark._score_extraction([plain], got)["mixed"]["right"] == 0.5
+
+
+def test_a_changed_extraction_prompt_needs_a_new_recording(monkeypatch):
+    """Negative control of the recording's identity: with the prompt replaced
+    by "Keep nothing", every deep-pass score used to stay the same
+    (benchmark audit F4). Now the run refuses."""
+    replies = _recording()
+    monkeypatch.setattr("kazma_core.memory.belief_extractor._EXTRACT_SYSTEM", "Keep nothing.")
+    with pytest.raises(benchmark.StaleRecordingError, match="prompt changed"):
+        benchmark.run_extraction_benchmark(llm_replies=replies)
+    # Fool the check before the run: the replay still sees the prompt it is sent.
+    monkeypatch.setattr(benchmark, "extraction_prompt_sha256", lambda: replies["prompt_sha256"])
+    with pytest.raises(benchmark.StaleRecordingError, match="another system prompt"):
+        benchmark.run_extraction_benchmark(llm_replies=replies)
+
+
+def test_a_recording_must_say_what_it_answered():
+    replies = {k: v for k, v in _recording().items() if k != "prompt_sha256"}
+    with pytest.raises(benchmark.StaleRecordingError, match="does not say"):
+        benchmark.run_extraction_benchmark(llm_replies=replies)
+
+
+def test_no_recording_cannot_be_locked(tmp_path, monkeypatch):
+    """Before 2026-11 a lock with the recording gone wrote a floor with no
+    model scores in it, and the gate passed (benchmark audit F13)."""
+    script = _build_script()
+    monkeypatch.setattr(script, "LLM_REPLIES", tmp_path / "missing.json")
+    part, problems = script._extraction_lock(_locked_extraction())
+    assert part == {} and any("no recording" in p for p in problems)
+
+
+def test_a_second_recording_is_locked_only_on_purpose(tmp_path, monkeypatch):
+    """A new recording replaces the model's scores exactly, and only when asked
+    with a reason; the old rule (the higher of the two, score by score) made a
+    floor no recording reaches (benchmark audit F3)."""
+    script = _build_script()
+    recording = _recording()
+    a01 = next(t for t in _turns() if t["id"] == "a01")
+    second = json.loads(json.dumps(recording))
+    second["replies"][benchmark._text_key(benchmark._llm_blob(a01["user"]))] = '{"beliefs": []}'
+    path = tmp_path / "extraction_llm.json"
+    path.write_text(json.dumps(second, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(script, "LLM_REPLIES", path)
+    old = _locked_extraction()
+
+    part, problems = script._extraction_lock(old)
+    assert any("changed" in p for p in problems), problems
+    part, problems = script._extraction_lock(old, new_recording="asked again")
+    assert not problems, problems
+    new_score = part["scores"]["llm.ar.found"]
+    assert new_score < old["scores"]["llm.ar.found"]
+    assert part["recording"]["sha256"] != old["recording"]["sha256"]
+    assert part["recordings"][-1]["reason"] == "asked again"
+    assert part["recordings"][-1]["replaced"]["scores"]["llm.ar.found"] == old["scores"]["llm.ar.found"]
+    # Control: the rule before kept the higher of the two.
+    old_rule = {k: max(v, old["scores"].get(k, -1.0)) for k, v in part["scores"].items()}
+    assert old_rule["llm.ar.found"] > new_score
+
+    # The same recording with a lower locked score (a scorer change) is refused, flag or not.
+    monkeypatch.setattr(script, "LLM_REPLIES", FIXTURES / "extraction_llm.json")
+    raised = json.loads(json.dumps(old))
+    raised["scores"]["llm.en.right"] = 1.5
+    _part, problems = script._extraction_lock(raised)
+    assert any("llm.en.right" in p and "same recording" in p for p in problems), problems
+    # And the quick pass is a ratchet whatever happens to the recording.
+    raised = json.loads(json.dumps(old))
+    raised["scores"]["heuristic.en.found"] = 0.99
+    monkeypatch.setattr(script, "LLM_REPLIES", path)
+    _part, problems = script._extraction_lock(raised, new_recording="asked again")
+    assert any(p.startswith("heuristic.en.found") for p in problems), problems
+
+
+def test_a_new_extraction_dataset_is_rebaselined(tmp_path, monkeypatch):
+    script = _build_script()
+    locked = tmp_path / "thresholds.json"
+    version = benchmark.load_dataset()["version"]
+    monkeypatch.setattr(script, "THRESHOLDS", locked)
+    monkeypatch.setattr(benchmark, "gated_scores", lambda _r: {"single.hit_rate": 0.9})
+    monkeypatch.setattr(benchmark, "run_benchmark", lambda **_kw: {})
+    older = {**_locked_extraction(), "version": 1}
+    locked.write_text(json.dumps({"dataset_version": version, "scores": {"single.hit_rate": 0.9},
+                                  **_locked_parts(), "extraction": older}), encoding="utf-8")
+    assert script._cmd_lock(rebaseline=False) == 1
+    assert script._cmd_lock(rebaseline=True) == 0
+    written = json.loads(locked.read_text(encoding="utf-8"))
+    assert written["extraction"]["version"] == _locked_extraction()["version"]
+    assert written["scores"] == {"single.hit_rate": 0.9}  # the recall part was not reset
+    assert script._cmd_lock(rebaseline=True) == 1  # nothing new: nothing to rebaseline
 
 
 def test_a_slugged_value_matches_the_words_it_stands_for(monkeypatch):
@@ -259,11 +546,90 @@ def test_the_models_pass_replays_recorded_replies():
         {"subject": "user", "predicate": "name", "predicate_type": "functional", "object": "ليلى"},
         {"subject": "user", "predicate": "lives_in", "predicate_type": "functional", "object": "دبي"}]},
         ensure_ascii=False)
-    replies = {"model": "stand-in", "replies": {benchmark._text_key(benchmark._llm_blob(turn["user"])): reply}}
+    replies = {"model": "stand-in", "prompt_sha256": benchmark.extraction_prompt_sha256(),
+               "replies": {benchmark._text_key(benchmark._llm_blob(turn["user"])): reply}}
     one = {"version": data["version"], "turns": [turn]}
     report = benchmark.run_extraction_benchmark(one, llm_replies=replies)
-    assert report["llm"]["ar"]["recall"] == 1.0 and report["llm"]["ar"]["precision"] == 1.0
-    assert report["heuristic"]["ar"]["recall"] == 1.0  # the quick pass reads Arabic (arabic_facts)
+    assert report["llm"]["ar"]["found"] == 1.0 and report["llm"]["ar"]["right"] == 1.0
+    assert report["heuristic"]["ar"]["found"] == 1.0  # the quick pass reads Arabic (arabic_facts)
     other = {"version": data["version"], "turns": [next(t for t in data["turns"] if t["id"] == "e01")]}
     with pytest.raises(KeyError, match="memory_extraction_record"):
         benchmark.run_extraction_benchmark(other, llm_replies=replies)
+
+
+# ── write scenarios (the memory framework audit, F1 and F8) ───────────────
+#
+# A few turns through the write path, the quick pass then the deep pass, and
+# the facts that must be current afterwards. They are locked as they are,
+# failures included: a fix makes a scenario pass and is locked in, and a
+# scenario that passed never fails again.
+
+
+@pytest.fixture(scope="module")
+def writes_report():
+    return benchmark.run_write_scenarios(llm_replies=_recording())
+
+
+def _locked_writes() -> dict:
+    return json.loads(THRESHOLDS.read_text(encoding="utf-8"))["writes"]
+
+
+def test_the_write_scenarios_are_what_the_builder_builds():
+    built = _build_script().build_writes()
+    assert json.loads(benchmark.WRITES_PATH.read_text(encoding="utf-8")) == json.loads(
+        json.dumps(built, ensure_ascii=False))
+
+
+def test_write_scenarios_only_improve(writes_report):
+    locked = _locked_writes()
+    assert writes_report["version"] == locked["version"], (
+        "the write scenarios changed: python scripts/memory_bench.py lock --rebaseline")
+    assert writes_report["llm_recording"]["sha256"] == locked["recording"]["sha256"], (
+        "the recording changed: python scripts/memory_bench.py lock --new-recording \"why\"")
+    why = {r["id"]: r["problems"] for r in writes_report["results"]}
+    newly = sorted(set(writes_report["failing"]) - set(locked["failing"]))
+    fixed = sorted(set(locked["failing"]) - set(writes_report["failing"]))
+    dropped, rose = _compare(benchmark.write_scores(writes_report), locked["scores"])
+    assert not newly and not dropped, "A write scenario that passed now fails:\n  " + "\n  ".join(
+        [f"{i}: {why[i]}" for i in newly] + dropped)
+    assert not fixed and not rose, ("A write scenario passes now -- lock it in: python scripts/memory_bench.py "
+                                    "lock\n  " + "\n  ".join(fixed + rose))
+
+
+def test_every_write_category_is_asked_in_english_and_arabic():
+    data = json.loads(benchmark.WRITES_PATH.read_text(encoding="utf-8"))
+    langs: dict[str, set[str]] = {}
+    for scenario in data["scenarios"]:
+        langs.setdefault(scenario["category"], set()).add(scenario["lang"])
+    assert set(langs) == {"update", "kept_as_said", "short", "someone_else"}
+    assert all({"en", "ar"} <= found for found in langs.values()), langs
+
+
+def test_the_write_scenarios_see_a_gate_that_lets_anything_replace_the_user(monkeypatch, writes_report):
+    """Negative control: with the trust gate open, the model's mistake about
+    the user's sister replaces the user's own home, and the scenario that
+    holds the gate fails."""
+    assert "other-en-sister-moved" not in writes_report["failing"]
+    monkeypatch.setattr("kazma_core.memory.provenance.may_overrule", lambda *_a, **_k: True)
+    open_gate = benchmark.run_write_scenarios(llm_replies=_recording())
+    assert "other-en-sister-moved" in open_gate["failing"]
+
+
+def test_a_write_scenario_says_why_it_failed(writes_report):
+    for result in writes_report["results"]:
+        assert result["passed"] == (not result["problems"]), result
+    moved = next(r for r in writes_report["results"] if r["id"] == "update-en-moved")
+    if not moved["passed"]:
+        assert any("Rotterdam" in p for p in moved["problems"]), moved
+
+
+def test_the_lock_refuses_a_write_scenario_that_stops_passing():
+    script = _build_script()
+    old = json.loads(json.dumps(_locked_writes()))
+    _part, problems = script._writes_lock(old)
+    assert not problems, problems
+    # A lock that holds one scenario fewer as failing than today's run: refused.
+    assert old["failing"], "every scenario passes: drop this case"
+    old["failing"] = old["failing"][1:]
+    _part, problems = script._writes_lock(old)
+    assert any("now fail" in p for p in problems), problems

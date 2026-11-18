@@ -33,16 +33,18 @@ Questions it has no memory for are answered with nothing in 27.8 % of cases (0.0
 
 ### Learning facts from a conversation {#memory-facts}
 
-Turns in English, Arabic and both, with the facts a person would expect remembered. **Quick pass**: Kazma's own rules, on every turn. **Model pass**: the model reading the turn afterwards (recorded replies). **Recall**: facts found. **Precision**: facts found that are right. **Quiet**: turns with nothing to learn that taught nothing.
+Turns in English, Arabic and both, with the facts a person would expect remembered. **Quick pass**: Kazma's own rules, on every turn. **Model pass**: the model reading the turn afterwards (recorded replies). **Found**: the facts expected, kept with their whole value about the right person, whatever the model called them (a name that turns the fact around, such as "dislikes" or "former", does not count). **Same name**: of those, the share kept under a name on the list (a fact kept under two names is two facts to Kazma). **Right**: the facts kept that hold a value the turn gives, about the right person, and are not on the turn's list of what must not be kept; the name is scored apart. **Quiet**: turns with nothing to learn that taught nothing.
 
-| Pass | Language | Recall | Precision | Quiet |
-|---|---|---|---|---|
-| Quick pass | English | 46.2 % | 100.0 % | 100.0 % |
-| Quick pass | Arabic | 63.6 % | 100.0 % | 100.0 % |
-| Quick pass | Mixed | 60.0 % | 100.0 % | 100.0 % |
-| Model pass | English | 76.9 % | 78.6 % | 100.0 % |
-| Model pass | Arabic | 90.9 % | 90.9 % | 100.0 % |
-| Model pass | Mixed | 70.0 % | 58.3 % | 100.0 % |
+| Pass | Language | Found | Same name | Right | Quiet |
+|---|---|---|---|---|---|
+| Quick pass | English | 46.2 % | 100.0 % | 100.0 % | 100.0 % |
+| Quick pass | Arabic | 63.6 % | 100.0 % | 100.0 % | 100.0 % |
+| Quick pass | Mixed | 60.0 % | 100.0 % | 100.0 % | 100.0 % |
+| Model pass (1 asking a turn) | English | 100.0 % | 76.9 % | 100.0 % | 100.0 % |
+| Model pass (1 asking a turn) | Arabic | 100.0 % | 90.9 % | 100.0 % | 100.0 % |
+| Model pass (1 asking a turn) | Mixed | 100.0 % | 70.0 % | 91.7 % | 100.0 % |
+
+The model pass is deepseek-flash's replies, recorded on 2026-10-15, 1 asking a turn. Asked again, a model answers a little differently, so a number from one asking can move by a few facts with nothing changed.
 
 With Postgres as the memory store, the same questions score 89.5 % hit rate, 0.83 MRR and 62.1 % precision.
 

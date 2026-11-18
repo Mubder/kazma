@@ -548,8 +548,13 @@ def _apply_beliefs_to_v2(
     cfg: dict[str, Any] | None = None,
     extraction_method: str | None = None,
     now: float | None = None,
+    private: bool = False,
 ) -> dict[str, Any]:
     """Sync helper: fence + entity-resolve + mutate a list of raw beliefs.
+
+    *private*: the connections are a private database (the memory
+    benchmark's), and nothing reaches a mirror, a graph copy or a remote
+    index (``mutate_belief(private=True)``); the hub anchoring is left out.
 
     *now* is when the beliefs were stated (default: this moment); a turn
     replayed from the chat store passes its own time (see mutate_belief).
@@ -673,10 +678,13 @@ def _apply_beliefs_to_v2(
             cfg=cfg,
             subject_id=subject_id,
             now=now,
+            private=private,
         )
         if action["action"] != "noop":
             stats["applied"] += 1
         stats["actions"].append(action)
+        if private:
+            continue
         # Ego-graph: every non-hub subject must reach ``user``. Payload-only
         # leaves AND floating entity clusters both qualify; the helper no-ops
         # when a hub edge already exists.
@@ -717,6 +725,7 @@ def extract_and_apply_beliefs_sync(
     cfg: dict[str, Any] | None = None,
     extraction_method: str | None = None,
     now: float | None = None,
+    private: bool = False,
 ) -> dict[str, Any]:
     """SYNC extraction pipeline (heuristic only — NO LLM, NO httpx).
 
@@ -758,4 +767,5 @@ def extract_and_apply_beliefs_sync(
         cfg=cfg,
         extraction_method=extraction_method,
         now=now,
+        private=private,
     )

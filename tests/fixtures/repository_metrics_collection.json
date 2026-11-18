@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "input_sha256": "566a0880f4d4d44ead4ed702a45e7fd9c537dc94ffcd906de0ea3dc942d1f9ef",
-  "collected_tests": 23393,
-  "source_commit": "9b9d80692eac71dc3552633962fa387c49d18537",
-  "measured_at": "2026-11-18T04:38:42.507294+00:00",
+  "input_sha256": "d5a99c443e83a159bab8d77055afa38351129ca9ed0b1a5497eb44f8ca9a6d15",
+  "collected_tests": 23411,
+  "source_commit": "4194385a4a38e34b03e9dc70c2bda82118daf53e",
+  "measured_at": "2026-11-18T05:17:31.112861+00:00",
   "python": "3.12.9",
   "platform": "Windows",
   "command": "pytest --collect-only -q -p no:cacheprovider --ignore=tests/e2e",
