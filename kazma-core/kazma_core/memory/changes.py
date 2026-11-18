@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import threading
 import time
 import uuid
 from typing import Any
@@ -39,18 +40,24 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "DECISIONS",
     "KEEP_DECIDED",
     "PENDING_DAYS",
+    "REF_CHARS",
     "ChangeRefusedError",
     "confirm",
+    "decide_change",
     "dismiss",
     "forget_chat",
     "forget_facts",
     "forget_mentioning",
     "forget_turn",
     "list_changes",
+    "open_changes",
     "record_pending",
     "record_update",
+    "resolve_ref",
+    "short_ref",
     "undo",
 ]
 
@@ -60,6 +67,13 @@ PENDING = "pending"
 PENDING_DAYS = 30
 #: Decided changes kept per tenant, newest first.
 KEEP_DECIDED = 200
+#: The start of a change id the chat apps show (``mc_`` and eight hex
+#: digits); a command takes any unique start of at least
+#: :data:`_REF_MIN_CHARS`.
+REF_CHARS = 11
+_REF_MIN_CHARS = 8
+#: What the user can do with a change, by kind.
+DECISIONS = {"undo": UPDATE, "confirm": PENDING, "dismiss": PENDING}
 
 _COLUMNS = ("id", "tenant_id", "kind", "state", "subject", "predicate", "old_belief_id", "old_value",
             "new_belief_id", "new_value", "source_session", "source_turn", "created_at", "decided_at",
@@ -328,6 +342,107 @@ def forget_chat(conn: sqlite3.Connection, *, tenant_id: str | None, keys: list[s
         sql += " AND tenant_id = ?"
         params.append(tenant_id)
     return conn.execute(sql, params).rowcount
+
+
+# ── for a caller with no connection of its own (the chat apps' /memory) ──
+
+
+_schema_ready: set[str] = set()
+_schema_lock = threading.Lock()
+
+
+def _open() -> sqlite3.Connection:
+    """The memory database, its schema made ready once per file per process."""
+    from kazma_core.config_store import apply_sqlite_pragmas
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+    from kazma_core.paths import primary_memory_db
+
+    path = str(primary_memory_db())
+    conn = sqlite3.connect(path, timeout=30, check_same_thread=False)
+    with _schema_lock:
+        if path not in _schema_ready:
+            ensure_primary_schema(conn)
+            _schema_ready.add(path)
+            return conn
+    apply_sqlite_pragmas(conn)
+    return conn
+
+
+def short_ref(change_id: str) -> str:
+    """The start of *change_id* a chat shows (:data:`REF_CHARS`)."""
+    return str(change_id or "")[:REF_CHARS]
+
+
+def resolve_ref(conn: sqlite3.Connection, ref: str, *, tenant_id: str) -> str:
+    """The id of the tenant's change *ref* names: the whole id, or a start of
+    it at least eight characters long that no other change of the tenant
+    shares. Refused ``not_found`` or ``ambiguous``."""
+    from kazma_core.db.sql_patterns import like_literal
+
+    ref = (ref or "").strip()
+    if len(ref) < _REF_MIN_CHARS:
+        raise ChangeRefusedError("not_found")
+    found = [r[0] for r in conn.execute(
+        "SELECT id FROM memory_changes WHERE tenant_id = ? AND id LIKE ? ESCAPE '!' LIMIT 2",
+        (tenant_id or "default", like_literal(ref) + "%"),
+    ).fetchall()]
+    if not found:
+        raise ChangeRefusedError("not_found")
+    if len(found) > 1:
+        raise ChangeRefusedError("ambiguous")
+    return str(found[0])
+
+
+def open_changes(*, tenant_id: str, limit: int = 20) -> list[dict[str, Any]]:
+    """The tenant's open changes, newest first, on a connection of its own."""
+    conn = _open()
+    try:
+        return list_changes(conn, tenant_id=tenant_id, limit=limit)
+    finally:
+        conn.close()
+
+
+def decide_change(ref: str, decision: str, *, tenant_id: str, actor: str) -> dict[str, Any]:
+    """Undo, confirm or dismiss the tenant's change *ref* names
+    (:func:`resolve_ref`), on connections of its own. The answer carries the
+    change as it was (``change``); a confirmation also names the update it
+    made (``update_ref``), which can be undone in turn. A refusal raises
+    :class:`ChangeRefusedError` (``not_found``, ``ambiguous``, ``not_open``,
+    ``replaced_since``, ``forgotten``, ``not_written``, ``wrong_kind``)."""
+    if decision not in DECISIONS:
+        raise ChangeRefusedError("unknown_decision")
+    tenant = tenant_id or "default"
+    conn = _open()
+    ops = None
+    try:
+        change_id = resolve_ref(conn, ref, tenant_id=tenant)
+        row = _row(conn, change_id, tenant)
+        if row is None:
+            raise ChangeRefusedError("not_found")
+        if row["kind"] != DECISIONS[decision]:
+            raise ChangeRefusedError("wrong_kind")
+        if decision == "undo":
+            from kazma_core.memory.schema_v2 import ensure_ops_schema
+            from kazma_core.paths import memory_ops_db
+
+            ops = sqlite3.connect(memory_ops_db(), timeout=30, check_same_thread=False)
+            ensure_ops_schema(ops)
+            out = undo(conn, change_id, tenant_id=tenant, actor=actor, ops_conn=ops)
+        elif decision == "confirm":
+            out = confirm(conn, change_id, tenant_id=tenant, actor=actor)
+            made = conn.execute(
+                "SELECT id FROM memory_changes WHERE tenant_id = ? AND kind = ? AND state = 'open' "
+                "AND new_belief_id = ? ORDER BY created_at DESC LIMIT 1",
+                (tenant, UPDATE, out.get("belief_id")),
+            ).fetchone()
+            out["update_ref"] = short_ref(made[0]) if made else ""
+        else:
+            out = dismiss(conn, change_id, tenant_id=tenant, actor=actor)
+        return {**out, "change": row}
+    finally:
+        if ops is not None:
+            ops.close()
+        conn.close()
 
 
 def _prune(conn: sqlite3.Connection, tenant: str, now: float) -> None:

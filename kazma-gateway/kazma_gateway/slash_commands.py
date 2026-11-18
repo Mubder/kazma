@@ -206,6 +206,10 @@ def changes_global_config(text: str) -> bool:
         # Acting on a run (cancel, retry, close, dismiss, diagnose) -- an
         # incident card's button arrives as "/runs act <incident> <action>".
         return sub == "act"
+    if head == "/memory":
+        # The changes to the tenant's facts: showing them shows the user's
+        # facts to the chat, and a decision rewrites them (the audit's F1).
+        return sub in MEMORY_CHANGE_WORDS
     if head == "/kb":
         # Changing the Knowledge Library every chat injects from (KB-S07):
         # adding, crawling, refreshing or deleting a library.
@@ -345,7 +349,8 @@ def _cmd_help() -> str:
         "• `/help` — Show this list\n"
         "• `/status` — Gateway health overview\n"
         "• `/model` (`/models`) — This chat's model: show, pick, `reset`; `default` sets the install's (admin)\n"
-        "• `/memory` — Report memory usage; `/memory off` / `/memory on` — keep this chat out of memory, or let it back in\n"
+        "• `/memory` — Report memory usage; `/memory off` / `/memory on` — keep this chat out of memory, or let it back in; "
+        "`/memory changes` — what changed in facts you told Kazma (undo, confirm, dismiss)\n"
         "• `/cost` — Tokens and cost of this chat\n"
         "• `/report <what happened>` — Report a problem: shows what would be sent, then `/report send` (admin)\n\n"
         "For anything else, just ask the agent directly!"
@@ -414,6 +419,8 @@ def _cmd_memory(text: str, ctx: dict[str, Any]) -> str:
         # Whose memory this is could not be read. Falling back to "default"
         # would write the forget ledger under another tenant.
         return "💾 Memory could not be reached, so nothing was read or changed."
+    if sub in MEMORY_CHANGE_WORDS:
+        return _memory_changes(sub, parts, tenant)
     if sub in ("off", "on"):
         if not thread:
             return "💾 There is no chat here to set memory for."
@@ -439,6 +446,62 @@ def _cmd_memory(text: str, ctx: dict[str, Any]) -> str:
             else " This chat is not remembered (`/memory on` to start again)."
         )
     return f"💾 Memory: `{count}` stored facts.{here}"
+
+
+#: ``/memory`` words for the changes to facts the user stated (the audit's
+#: F1, ``kazma_core/memory/changes.py``). Each shows or changes the tenant's
+#: own facts, so each is a gateway admin's (:func:`changes_global_config`).
+MEMORY_CHANGE_WORDS = frozenset({"changes", "undo", "confirm", "dismiss"})
+
+_CHANGE_REFUSALS = {
+    "not_found": "🔁 No change `{ref}` here. `/memory changes` lists them with their ids.",
+    "ambiguous": "🔁 `{ref}` names more than one change: send more of its id.",
+    "not_open": "🔁 That change was already decided.",
+    "wrong_kind": "🔁 That is not what this change takes: `/memory changes` says what each one takes.",
+    "replaced_since": "🔁 That fact has changed again since. Undo the newer change first.",
+    "forgotten": "🔁 The earlier value was forgotten, so it cannot come back.",
+    "not_written": "🔁 Kazma could not save the value. Nothing changed.",
+}
+
+
+def _memory_changes(sub: str, parts: list[str], tenant: str) -> str:
+    """``/memory changes`` lists the open changes to facts the user stated:
+    an update Kazma made from their words (``/memory undo <id>`` takes it
+    back) and a correction it was not sure was theirs (``/memory confirm
+    <id>`` or ``/memory dismiss <id>``). Runs in the resolver's thread."""
+    from kazma_core.memory import changes
+
+    if sub == "changes":
+        rows = changes.open_changes(tenant_id=tenant)
+        if not rows:
+            return "🔁 Nothing has changed in the facts you told Kazma, and nothing is waiting for your answer."
+        lines = ["🔁 Changes to what you told Kazma:"]
+        for change in rows:
+            ref = changes.short_ref(change["id"])
+            what = str(change["predicate"]).replace("_", " ")
+            if change["kind"] == "update":
+                lines.append(f"• {what}: was {change['old_value']}, now {change['new_value']}. "
+                             f"Undo it: `/memory undo {ref}`")
+            else:
+                lines.append(f"• {what}: Kazma kept {change['old_value']}; you may have said "
+                             f"{change['new_value']}. `/memory confirm {ref}` changes it, "
+                             f"`/memory dismiss {ref}` keeps it.")
+        return "\n".join(lines)
+    ref = (parts[2] if len(parts) > 2 else "").replace("`", "")[:40]
+    if not ref:
+        return f"🔁 Which change? `/memory changes` lists them with their ids, then `/memory {sub} <id>`."
+    try:
+        out = changes.decide_change(ref, sub, tenant_id=tenant, actor="chat_command")
+    except changes.ChangeRefusedError as refused:
+        return _CHANGE_REFUSALS.get(refused.code, "🔁 That change could not be made.").format(ref=ref)
+    change = out["change"]
+    what = str(change["predicate"]).replace("_", " ")
+    if sub == "undo":
+        return f"↩️ Undone: {what} is {change['old_value']} again."
+    if sub == "confirm":
+        again = f" `/memory undo {out['update_ref']}` takes it back." if out.get("update_ref") else ""
+        return f"✅ Changed: {what} is now {change['new_value']}.{again}"
+    return f"👍 Kept: {what} stays {change['old_value']}."
 
 
 def _cmd_cost(ctx: dict[str, Any]) -> str:

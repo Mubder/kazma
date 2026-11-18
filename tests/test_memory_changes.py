@@ -332,6 +332,56 @@ def test_the_dismiss_route_leaves_the_fact(mem, monkeypatch):
     assert c.get("/api/memory/v2/changes").json()["changes"] == []
 
 
+# ── the chat apps' /memory changes ────────────────────────────────────────
+
+
+def _memory_command(mem, monkeypatch, text: str) -> str:
+    from kazma_gateway.slash_commands import _cmd_memory
+
+    monkeypatch.setenv("KAZMA_MEMORY_OPS_DB", str(mem.dir / "memory_ops.db"))
+    return _cmd_memory(text, {"memory_tenant": "default", "thread_id": "chat-1"})
+
+
+def test_the_chat_command_lists_confirms_and_undoes(mem, monkeypatch):
+    import re
+
+    _turn(mem, monkeypatch, first="Paris", then="Moved to Rotterdam last month.",
+          model=[_fact("lives_in", "rotterdam")])
+    listed = _memory_command(mem, monkeypatch, "/memory changes")
+    assert "lives in: Kazma kept Paris; you may have said Rotterdam" in listed
+    ref = re.search(r"/memory confirm (mc_[0-9a-f]+)", listed).group(1)
+    assert len(ref) == changes.REF_CHARS
+
+    # undo takes an update, not a waiting correction
+    assert "not what this change takes" in _memory_command(mem, monkeypatch, f"/memory undo {ref}")
+    done = _memory_command(mem, monkeypatch, f"/memory confirm {ref}")
+    assert done.startswith("✅ Changed: lives in is now Rotterdam.")
+    assert _current(mem) == [("Rotterdam", "user_explicit")]
+    again = re.search(r"/memory undo (mc_[0-9a-f]+)", done).group(1)
+    assert _memory_command(mem, monkeypatch, f"/memory undo {again}") == "↩️ Undone: lives in is Paris again."
+    assert _current(mem) == [("Paris", "user_stated")]
+    assert _memory_command(mem, monkeypatch, f"/memory undo {again}") == "🔁 That change was already decided."
+    assert "nothing is waiting" in _memory_command(mem, monkeypatch, "/memory changes")
+
+
+def test_the_chat_command_refuses_a_short_or_unknown_id(mem, monkeypatch):
+    _turn(mem, monkeypatch, first="Paris", then="Moved to Rotterdam last month.",
+          model=[_fact("lives_in", "rotterdam")])
+    assert "No change `mc_1`" in _memory_command(mem, monkeypatch, "/memory dismiss mc_1")
+    assert "No change" in _memory_command(mem, monkeypatch, "/memory dismiss mc_ffffffff")
+    assert "Which change?" in _memory_command(mem, monkeypatch, "/memory dismiss")
+    assert _current(mem) == [("Paris", "user_stated")]
+
+
+def test_the_chat_command_is_an_admins():
+    from kazma_gateway.slash_commands import changes_global_config
+
+    for text in ("/memory changes", "/memory undo mc_1a2b3c4d", "/memory confirm x", "/memory dismiss x"):
+        assert changes_global_config(text), text
+    for text in ("/memory", "/memory off", "/memory on"):
+        assert not changes_global_config(text), text
+
+
 # ── negative control: the refusal as it was ───────────────────────────────
 
 

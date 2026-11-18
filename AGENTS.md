@@ -2156,7 +2156,12 @@ four injected were noise.
   which Spaces S1-09 makes their matrix cases. The Memory page's card
   "Changes to what you told Kazma" (`memory_console.js` `loadV2Changes`,
   EN/AR, each value a `<bdi translate="no">`) shows them with Undo, or
-  "Yes, change it" / "No, keep it". Gates:
+  "Yes, change it" / "No, keep it". In the chat apps `/memory changes`
+  lists them with a short id (`changes.short_ref`) and `/memory undo|confirm|dismiss <id>`
+  decides one (`changes.decide_change`: a unique start of the id, refused
+  `ambiguous` or `wrong_kind`); the four words are a gateway admin's
+  (`slash_commands.MEMORY_CHANGE_WORDS` in `changes_global_config`: they
+  show and rewrite the tenant's facts). Gates:
   `tests/test_memory_changes.py` (EN/AR; the refusal with no change log as
   the negative control), the plant's control in
   `tests/test_memory_store_registry.py`, and in a browser, reached by the
