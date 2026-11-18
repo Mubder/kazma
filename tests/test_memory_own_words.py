@@ -513,10 +513,12 @@ def test_control_without_the_cap_a_long_message_costs_its_length(monkeypatch):
 #: handle labels, a role, Telegram, Discord and Slack copy headers, a mail's
 #: "On ... wrote:" running past its own line, a text of someone else's named,
 #: reported speech with no listed verb, an example and a part to play.
+#: The right-to-left mark a copied Arabic chat carries around its numbers.
+_RLM = chr(0x200F)
 PASTES = [
     ("18/11/2026, 12:01 - Dana: I live in Oslo.", ("lives_in", "Oslo")),
     ("11/18/26, 9:41 PM - Dana: I work at Initech.", ("works_at", "Initech")),
-    ("‏١٨‏/١١‏/٢٠٢٦، ١٢:٠١ م - نورة: اسمي نورة", ("name_is", "نورة")),
+    (_RLM + "١٨" + _RLM + "/١١" + _RLM + "/٢٠٢٦، ١٢:٠١ م - نورة: اسمي نورة", ("name_is", "نورة")),
     ("[18/11/2026, 12:01:33] dana_92: I live in Oslo.", ("lives_in", "Oslo")),
     ("[12:01, 18/11/2026] dana: I live in Oslo.", ("lives_in", "Oslo")),
     ("dana: I live in Oslo.", ("lives_in", "Oslo")),

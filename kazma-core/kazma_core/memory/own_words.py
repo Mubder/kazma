@@ -390,7 +390,7 @@ _FORWARD_AR = ("رساله محوله", "رساله معاد توجيهها", "�
 
 #: Direction marks a copied Arabic chat carries around its numbers: left out
 #: before a line is matched.
-_BIDI_MARKS = dict.fromkeys(map(ord, "‎‏؜‪‫‬‭‮⁦⁧⁨⁩"))
+_BIDI_MARKS = dict.fromkeys((0x200E, 0x200F, 0x061C, 0x202A, 0x202B, 0x202C, 0x202D, 0x202E, 0x2066, 0x2067, 0x2068, 0x2069))
 #: A line of a WhatsApp export: a date, a time, then who spoke and a colon
 #: ("18/11/2026, 12:01 - Dana: ...", "[18/11/2026, 12:01:33] Dana: ...",
 #: "١٨/١١/٢٠٢٦، ١٢:٠١ م - نورة: ..."). Any label: the date and time say the
