@@ -838,20 +838,32 @@ another person's under you. A new sentence starts fresh, except for someone
 you introduced by name ("عندي أخت اسمها نورة. انتقلت إلى روتردام" is still
 Noura), and what describes you is still you ("أنا مدير مشاريع وساكن في دبي",
 "عندي بنت وساكن في الكويت", "قبل سنتين انتقلت إلى دبي"). It reads only your
-own words: not an attached document, a forwarded message or a pasted mail, the
-lines of a pasted chat ("Dana: My name is Dana"), a quote, what someone else
-said ("my sister said: ...", to the end of that sentence; "He said, I live in
-Lyon"; "Ali told me I work at Initech"; "أختي تقول أنا ساكنة في دبي"), a text
-you asked Kazma to work on or about ("Translate to French: My name is Pierre"
-does not make your name Pierre, nor does "Is this sentence correct: I work at
-Initech"), or a question ("How do I say my name is Pierre in French?"). Inside
-a request to remember, a quote is yours ("remember this: "I prefer dark
-mode""), unless it quotes someone ("remember that Dana wrote "I live in
-Oslo""). "Correct: my name is Ahmad" is your own words and counts, and so is
-what you add after the text you asked about ("Summarize https://x.y and my
-name is Sam", "Can you review my text?" then "Also my name is Sam" on a line
-of its own). Only the first 2,000 characters of a message are read this way,
-up to their last blank line; the deep pass reads all of it. A fact only
+own words: not an attached document, a forwarded message or a pasted mail, a
+pasted chat (the lines of a WhatsApp export, the header a Telegram, Discord
+or Slack copy puts over a message and the message under it, "Dana: My name is
+Dana", "dana_92: ...", "the customer: ..."), a mail you quote ("On ... Dana
+wrote:" and what follows it to the next blank line), a quote, what someone
+else said or thinks ("my sister said: ...", to the end of that sentence; "He
+said, I live in Lyon"; "Ali told me I work at Initech"; "Ali thinks I ...";
+"He was like, I ..."; "According to Ali, ..."; "أختي تقول أنا ساكنة في
+دبي"), a text of someone else's ("Dana's bio:", "Her message was:"), an
+example or a part to play ("For example: ...", "Pretend you are me and say:
+..."), a text you asked Kazma to work on or about ("Translate to French: My
+name is Pierre" does not make your name Pierre, nor does "Is this sentence
+correct: I work at Initech"), or a question ("How do I say my name is Pierre
+in French?"). A greeting before a colon is yours ("Good morning: I live in
+Oslo"). Inside a request to remember, a quote is yours ("remember this: "I
+prefer dark mode""), unless it quotes someone ("remember that Dana wrote "I
+live in Oslo"") or you name the text as pasted ("Remember this email: ...":
+kept, at the trust of something you pasted, not of your own words). "Don't
+remember this" asks nothing. "Correct: my name is Ahmad" is your own words
+and counts, and so is what you add after the text you asked about
+("Summarize https://x.y and my name is Sam", "Can you review my text?" then
+"Also my name is Sam" on a line of its own). Only the first 2,000 characters
+of a message are read this way, up to their last blank line. The end of a
+longer message (its last paragraph) is read only to ask you: a correction
+there that the model's deep pass reads becomes a question, never your word.
+The deep pass reads the first 4,000 characters of a message. A fact only
 the model's deep pass reads is never your own word by itself: whether the
 model's name fits your words ("I'm visiting Dubai next week" read as your
 home) only you can say. It stays the model's inference, and a fact you state

@@ -2131,9 +2131,41 @@ four injected were noise.
   '90s, a "> " line under a request to remember. At most the first 2,000
   characters are read, ended at their last paragraph break (`_bounded`:
   never the end, which a head, fence or forward line in the unread middle
-  would decide). The quick pass (`extract_beliefs_heuristic`),
+  would decide). **Rule B of the review's second round (2026-11-18)**
+  widened the cheap paste shapes (the change log is the net for the rest):
+  a WhatsApp export's lines and those continuing them, any label
+  (`_EXPORT_LINE_RE`: a digit in the label, the Arabic form with its
+  direction marks), a bracketed time before any label ("[12:01, ...]
+  dana_92:"), a lower-case name or a handle ("dana:", "dana_92:") or a role
+  ("the customer:", "my sister:") at a line's start (`_names_a_speaker`;
+  never a greeting, "Good Morning:", nor a heading, "Random thought:",
+  "Step 2:", nor a lower-case phrase); the header a Telegram, Discord or
+  Slack copy puts over a message, or a time alone on its line, and a mail's
+  "... wrote:" line, with the text under it to the next blank line
+  (`_without_pasted_chats`), as a reporting head that ends its line
+  (`_reported_end`); a text of someone else's named ("Dana's bio:", "Her
+  message was:", "رسالتها:"); reported claims with no listed verb ("Ali
+  thinks I ...", "Dana claims I ...", "He was like, I ...", "As Dana put
+  it, ...", "According to Ali, ...", "حسب كلام أختي"، "أختي كاتبة إني ...":
+  `_THINKING_EN`, `_THINKING_AR`, `_reports_at`, `_attributed`); an example
+  or a part to play ("For example:", "مثلا:", "Pretend you are me and say:",
+  "تخيل"). **Rule C**: a text the user asks to remember and names as
+  pasted ("Remember this email:", "احفظ هذا الإيميل:") is not their
+  statement, so `agent_write_source` gives it `agent_asserted`, and a
+  negated "remember" ("Don't remember this", "I can't remember my
+  password", "لا تذكر") is no request (`remember_request`). **Rule D**:
+  `own_words.last_words` reads the last paragraph of a longer message (or
+  its last 400 characters from a sentence's start) as its own message,
+  never after an open code fence, a forwarded message, a quoted mail or an
+  instruction at the start; only `clause_subject.names_no_one_else` reads
+  it, so the model's reading of a correction there is a question to the
+  user (or Kazma's reading), never the user's trust. An episode keeps the
+  first 4,000 characters of the user's message (`dual_write`), and the deep
+  pass reads the episode: the end of a message longer than that reaches
+  neither pass. The quick pass (`extract_beliefs_heuristic`),
   `is_remember_request` and `provenance.agent_write_source` read through
-  it; the turn keeps the whole message and the deep pass reads all of it at
+  it; the turn keeps the whole message and the deep pass reads it (to the
+  episode's 4,000 characters) at
   an inference's trust. "Translate to French: My name is Pierre" stored the
   user's name as Pierre at `user_stated`, and a document beside a "remember
   this" could earn `user_explicit`. The quick pass no longer reads "I need
@@ -2145,7 +2177,11 @@ four injected were noise.
   review's forms, kept cases and remember quotes, with the first rules as
   the control; the security review's cases with the rules before it as the
   control, the cap, and every scanner in bounded time with the uncapped
-  read as the control), `tests/test_forwarded_messages.py` (the real Telegram
+  read as the control; rule B's pastes and kept cases with the rules before
+  it as the control, rule C with the old remember pattern and the rule taken
+  out as controls, rule D's ends), `tests/test_memory_own_statements.py`
+  (rule D through the real deep pass, without `last_words` as the control),
+  `tests/test_forwarded_messages.py` (the real Telegram
   adapter and WhatsApp parser, the adapters that ignored forwards as the
   control).
   **A file's text reaches the model in a data fence on every surface**: the

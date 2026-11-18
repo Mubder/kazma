@@ -299,6 +299,7 @@ def test_control_the_first_rules_missed_the_reviews_forms(monkeypatch):
     # The security review's layers (2026-11-18) came after: off here.
     monkeypatch.setattr(ow, "_without_reported_or_asked", lambda body: body)
     monkeypatch.setattr(ow, "_without_speaker_lines", lambda body: body)
+    monkeypatch.setattr(ow, "_without_pasted_chats", lambda body: body)
     monkeypatch.setattr(ow, "_QUOTED_SPAN_RE", re.compile(r"\"[^\"\n]{1,400}+\"|“[^”\n]{1,400}+”|«[^»\n]{1,400}+»"))
     monkeypatch.setattr(ow, "_speaks_in_first_person",
                         lambda span: any(w in ow._FIRST_PERSON_EN for w in ow._words(span))
@@ -415,6 +416,7 @@ def test_control_the_rules_before_the_review_gave_each_fact(monkeypatch):
     '90s, the bio)."""
     from kazma_core.memory import own_words as ow
 
+    _rules_before_rule_b(monkeypatch)  # rule B (2026-11-18) came after
     monkeypatch.setattr(ow, "_bounded", lambda body: body)
     monkeypatch.setattr(ow, "_without_speaker_lines", lambda body: body)
     monkeypatch.setattr(ow, "_without_quote_lines", lambda body: ow._QUOTE_LINE_RE.sub(" ", body))
@@ -500,4 +502,247 @@ def test_control_without_the_cap_a_long_message_costs_its_length(monkeypatch):
     started = time.perf_counter()
     ow.own_words(text)
     assert time.perf_counter() - started > max(0.05, bounded * 10)
+
+
+# ── rule B of the second security review of F1 (2026-11-18) ──────────────
+
+#: The paste shapes and reported claims the review listed, each with a fact
+#: the rules before it filed under the user: a WhatsApp export (a digit in
+#: the label, the Arabic form with its direction marks), lower-case and
+#: handle labels, a role, Telegram, Discord and Slack copy headers, a mail's
+#: "On ... wrote:" running past its own line, a text of someone else's named,
+#: reported speech with no listed verb, an example and a part to play.
+PASTES = [
+    ("18/11/2026, 12:01 - Dana: I live in Oslo.", ("lives_in", "Oslo")),
+    ("11/18/26, 9:41 PM - Dana: I work at Initech.", ("works_at", "Initech")),
+    ("‏١٨‏/١١‏/٢٠٢٦، ١٢:٠١ م - نورة: اسمي نورة", ("name_is", "نورة")),
+    ("[18/11/2026, 12:01:33] dana_92: I live in Oslo.", ("lives_in", "Oslo")),
+    ("[12:01, 18/11/2026] dana: I live in Oslo.", ("lives_in", "Oslo")),
+    ("dana: I live in Oslo.", ("lives_in", "Oslo")),
+    ("dana_92: I work at Initech.", ("works_at", "Initech")),
+    ("the customer: My name is Pierre.", ("name_is", "Pierre")),
+    ("Dana Smith, [18.11.26 12:01]\nI live in Oslo.", ("lives_in", "Oslo")),
+    ("نورة، [18.11.26 12:01]\nأشتغل في شركة الاتصالات", ("works_at", "شركة الاتصالات")),
+    ("Dana — Today at 12:01 PM\nI work at Initech.", ("works_at", "Initech")),
+    ("dana_92 — 11/18/2026 12:01 PM\nMy name is Dana.", ("name_is", "Dana")),
+    ("Dana Smith  12:01 PM\nI live in Oslo.", ("lives_in", "Oslo")),
+    ("Dana Smith\n12:01 PM\nI live in Oslo.", ("lives_in", "Oslo")),
+    ("On Tue, Nov 18, 2026 at 12:01 PM Dana Smith <dana@example.com> wrote:\nMy name is Dana.\nI live in Oslo.",
+     ("lives_in", "Oslo")),
+    ("Dana wrote:\nI live in Oslo.\nI work at Initech.", ("works_at", "Initech")),
+    ("Dana wrote:\n\nI live in Oslo.", ("lives_in", "Oslo")),
+    ("My sister said:\nI'm a nurse.\nI live in Rotterdam.", ("lives_in", "Rotterdam")),
+    ("Dana's bio: I work at Initech.", ("works_at", "Initech")),
+    ("Her message was: I live in Oslo.", ("lives_in", "Oslo")),
+    # (An Arabic label at a line's start was already a speaker: these are
+    # heads after a sentence.)
+    ("وصلني هذا اليوم. رسالتها: اسمي سارة", ("name_is", "سارة")),
+    ("وصلتني رسالة اليوم. رسالة دانة: اسمي سارة", ("name_is", "سارة")),
+    ("According to Ali, I work at Initech.", ("works_at", "Initech")),
+    ("I work at Initech, according to Ali.", ("works_at", "Initech")),
+    ("حسب كلام أختي، أنا ساكن في دبي", ("lives_in", "دبي")),
+    ("على حسب كلام علي أنا ساكن في دبي", ("lives_in", "دبي")),
+    ("Ali thinks I live in Lyon.", ("lives_in", "Lyon")),
+    ("Dana claims I live in Lyon.", ("lives_in", "Lyon")),
+    ("He was like, I'm allergic to peanuts.", ("allergic_to", "peanuts")),
+    ("She's like, I live in Lyon.", ("lives_in", "Lyon")),
+    ("As Dana put it, I live in Lyon.", ("lives_in", "Lyon")),
+    ("أختي كاتبة لي إني أشتغل في شركة الاتصالات", ("works_at", "شركة الاتصالات")),
+    ("Pretend you are me and say: I live in Lyon.", ("lives_in", "Lyon")),
+    ("Pretend you are me and say I live in Lyon.", ("lives_in", "Lyon")),
+    ("تخيل إنك أنا وقل: اسمي سارة", ("name_is", "سارة")),
+    ("For example: I work at Initech.", ("works_at", "Initech")),
+    ("e.g.: I work at Initech.", ("works_at", "Initech")),
+    ("عندي سؤال عن الكتابة اليوم. مثلا: اسمي سارة", ("name_is", "سارة")),
+]
+
+#: The user's own, beside them: a greeting or a heading before a colon, a
+#: comma before a time with no copy's brackets, the user's own text and
+#: report, a lower-case phrase, a step, "according to me", the user who is
+#: the writer, what the user knows.
+PASTES_KEPT = [
+    ("Good Morning: I live in Oslo.", ("lives_in", "Oslo")),
+    ("good morning: I live in Oslo.", ("lives_in", "Oslo")),
+    ("صباح الخير: أنا ساكن في دبي", ("lives_in", "دبي")),
+    ("Random thought: I live in Lyon.", ("lives_in", "Lyon")),
+    ("Dinner, 8:00 PM\nI live in Oslo.", ("lives_in", "Oslo")),
+    ("My bio: I work at Initech.", ("works_at", "Initech")),
+    ("My message was: I live in Lyon.", ("lives_in", "Lyon")),
+    ("I think I live in Lyon now.", ("lives_in", "Lyon")),
+    ("As I wrote:\nI live in Lyon.", ("lives_in", "Lyon")),
+    ("According to me, I live in Lyon.", ("lives_in", "Lyon")),
+    ("just saying: I live in Lyon.", ("lives_in", "Lyon")),
+    ("Step 2: I live in Lyon.", ("lives_in", "Lyon")),
+    ("It's like I live in Lyon.", ("lives_in", "Lyon")),
+    ("أنا كاتبة وساكنة في جدة", ("lives_in", "جدة")),
+    ("حسب ما أعرف أنا ساكن في دبي", ("lives_in", "دبي")),
+]
+
+
+@pytest.mark.parametrize(("message", "fact"), PASTES)
+def test_a_pasted_chat_or_someone_elses_claim_is_not_the_users(message, fact):
+    assert fact not in _facts(message), (message, own_words(message))
+
+
+@pytest.mark.parametrize(("message", "fact"), PASTES_KEPT)
+def test_a_greeting_a_heading_or_the_users_own_label_stays_theirs(message, fact):
+    assert fact in _facts(message), (message, own_words(message))
+
+
+def _old_names_a_speaker(label: str) -> bool:
+    """The speaker rule before rule B: one to three words, no digit, an
+    English name with a capital."""
+    from kazma_core.memory import own_words as ow
+
+    label = label.strip()
+    words = ow._WORD_RE.findall(label)
+    if not 1 <= len(words) <= 3 or any(ch.isdigit() for ch in label):
+        return False
+    if any(w.lower() in ow._OWN_LABELS or ow._fold(w) in (ow._OWN_LABELS | ow._POLITE_AR | ow._I_AR) for w in words):
+        return False
+    if ow._speaks_in_first_person(label) or ow._head_kind(label, colon=True) is not None:
+        return False
+    if any(v in ow._AR_VERBS for w in words if not w[0].isascii() for v in ow._ar_verb_forms(ow._fold(w))):
+        return False
+    return all(w[0].isupper() for w in words if w[0].isascii())
+
+
+def _rules_before_rule_b(monkeypatch) -> None:
+    from kazma_core.memory import own_words as ow
+
+    monkeypatch.setattr(ow, "_without_pasted_chats", lambda body: body)
+    monkeypatch.setattr(ow, "_names_a_speaker", _old_names_a_speaker)
+    monkeypatch.setattr(ow, "_copied_label", lambda match: False)
+    monkeypatch.setattr(ow, "_REPORTING_EN", ow._SAID_EN)
+    monkeypatch.setattr(ow, "_REPORTING_AR", ow._SAID_AR)
+    monkeypatch.setattr(ow, "_THINKING_EN", frozenset())
+    monkeypatch.setattr(ow, "_reports_at", lambda folded, k: k if ow._reporting(folded[k]) else None)
+    monkeypatch.setattr(ow, "_attributed", lambda folded: False)
+    monkeypatch.setattr(ow, "_HYPOTHETICAL_EN", ())
+    monkeypatch.setattr(ow, "_HYPOTHETICAL_AR", frozenset())
+    monkeypatch.setattr(ow, "_EXAMPLE_HEADS_EN", ())
+    monkeypatch.setattr(ow, "_EXAMPLE_HEADS_AR", ())
+    monkeypatch.setattr(ow, "_names_someones_text_en", lambda said: False)
+    monkeypatch.setattr(ow, "_names_someones_text_ar", lambda words: False)
+    monkeypatch.setattr(ow, "_reported_end", ow._sentence_end)
+
+
+def test_control_the_rules_before_rule_b_gave_each_paste_and_lost_the_greeting(monkeypatch):
+    """Negative control: with rule B's pieces taken out, every paste above
+    gives its fact to the user, and the greeting is read as a speaker."""
+    _rules_before_rule_b(monkeypatch)
+    given = [message for message, fact in PASTES if fact in _facts(message)]
+    assert given == [message for message, _ in PASTES]
+    assert ("lives_in", "Oslo") not in _facts("Good Morning: I live in Oslo.")
+
+
+@pytest.mark.parametrize("piece", [
+    "18/11/2026, 12:01 - d: x\n", "dana_92: x\n", "Dana — Today at 1:00 PM\n", "Dana  1:00 PM\n", "1:00 PM\n",
+    "Dana, [18.11.26 12:01]\n", "On x wrote:\n", "According to Ali, I x. ", "He was like, I x. ",
+    "Dana's bio: x\n", "x wrote:\n\n", "١٨/١١/٢٠٢٦، ١٢:٠١ م - ن: x\n",
+])
+def test_rule_bs_shapes_read_a_long_message_in_bounded_time(piece):
+    small = piece * (100_000 // len(piece))
+    started = time.perf_counter()
+    own_words(small)
+    once = time.perf_counter() - started
+    started = time.perf_counter()
+    own_words(small * 4)
+    assert time.perf_counter() - started < max(0.5, once * 3), piece
+
+
+# ── rule C: a pasted text the user asks to remember is not their statement ──
+
+@pytest.mark.parametrize(("message", "value"), [
+    ("Remember this email:\nI live in Oslo.", "Oslo"),
+    ("Remember this message below:\nI work at Initech.", "Initech"),
+    ("Can you remember this article: I live in Oslo.", "Oslo"),
+    ("Remember this:\ndana: I live in Oslo.", "Oslo"),
+    ("Remember this:\n18/11/2026, 12:01 - Dana: I live in Oslo.", "Oslo"),
+    ("احفظ هذا الإيميل:\nأنا ساكن في دبي", "دبي"),
+    ("تذكر هالرسالة: اسمي سارة", "سارة"),
+])
+def test_a_pasted_text_to_remember_never_earns_the_users_highest_trust(message, value):
+    assert is_remember_request(message), message
+    assert agent_write_source(value, message) != USER_EXPLICIT, (message, own_words(message))
+
+
+@pytest.mark.parametrize(("message", "value"), [
+    ("Remember this: my code is ZX-41", "ZX-41"),
+    ("Remember this email address: bader@example.com", "bader@example.com"),
+    ("Remember my email: bader@example.com", "bader@example.com"),
+    ("تذكر هذا: الكود ZX-41", "ZX-41"),
+])
+def test_the_users_own_words_to_remember_keep_their_trust(message, value):
+    assert agent_write_source(value, message) == USER_EXPLICIT, (message, own_words(message))
+
+
+def test_control_without_the_rule_a_pasted_email_earns_the_users_trust(monkeypatch):
+    from kazma_core.memory import own_words as ow
+
+    monkeypatch.setattr(ow, "_remembers_pasted_text_en", lambda words: False)
+    assert agent_write_source("Oslo", "Remember this email:\nI live in Oslo.") == USER_EXPLICIT
+
+
+@pytest.mark.parametrize(("message", "asks"), [
+    ("Don't remember this: my code is ZX-41", False),
+    ("Do not remember this: my code is ZX-41", False),
+    ("I don't remember my password", False),
+    ("I can't remember my password", False),
+    ("I never remember that", False),
+    ("No need to remember this", False),
+    ("لا تذكر هذا: الكود ZX-41", False),
+    ("Don't forget: my code is ZX-41", True),
+    ("Remember this: my code is ZX-41", True),
+    ("Please remember that I'm vegan", True),
+    ("تذكر هذا: الكود ZX-41", True),
+    ("لا تنسى: الكود ZX-41", True),
+])
+def test_a_negated_remember_is_no_request(message, asks):
+    assert is_remember_request(message) is asks, message
+
+
+def test_control_without_the_negations_dont_remember_asks_to_remember(monkeypatch):
+    from kazma_core.memory import remember_request
+
+    old = re.compile(r"(?<![\w'])(?<!do you )(?<!did you )(?:" + "|".join(
+        re.escape(p) for p in remember_request._ENGLISH) + r")(?![\w'])")
+    monkeypatch.setattr(remember_request, "_ENGLISH_RE", old)
+    assert is_remember_request("Don't remember this: my code is ZX-41")
+    assert is_remember_request("I don't remember my password")
+
+
+# ── rule D: the end of a long message is read to put it to the user ─────────
+
+_FILLER = "We walked along the river and looked at the old boats for a while. " * 60
+
+
+@pytest.mark.parametrize(("message", "kept"), [
+    ("Hi Kazma.\n\n" + _FILLER + "\n\nCorrection: I live in Lisbon now.", "Correction: I live in Lisbon now."),
+    (_FILLER + " Correction: I live in Lisbon now.", "Correction: I live in Lisbon now."),
+    ("Hi Kazma.\n\n" + _FILLER + "\n\nDana: I live in Lisbon now.", ""),
+])
+def test_the_last_paragraph_of_a_long_message_is_read_as_its_own(message, kept):
+    from kazma_core.memory.own_words import last_words
+
+    assert "Lisbon" not in own_words(message)  # the quick pass never reads it
+    assert last_words(message).endswith(kept)
+
+
+@pytest.mark.parametrize("before", [
+    "Translate the following:\n\n",
+    "---------- Forwarded message ---------\nFrom: Dana\n\n",
+    "```\n",
+    "On Tue, Nov 18, 2026 at 12:01 PM Dana <dana@example.com> wrote:\n\n",
+])
+def test_the_end_is_never_read_when_something_before_it_may_make_it_someone_elses(before):
+    from kazma_core.memory.own_words import last_words
+
+    assert last_words(before + _FILLER + "\n\nI live in Lisbon now.") == ""
+
+
+def test_a_short_message_has_no_end_of_its_own():
+    from kazma_core.memory.own_words import last_words
+
+    assert last_words("Correction: I live in Lisbon now.") == ""
 

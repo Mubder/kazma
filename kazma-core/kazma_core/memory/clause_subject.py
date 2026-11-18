@@ -45,7 +45,7 @@ own, and answers for every word in one pass.
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from functools import lru_cache
 from typing import NamedTuple
 
@@ -314,8 +314,14 @@ def names_no_one_else(message: str | None, value: str | None) -> str | None:
     to Rotterdam" answer, "My sister moved to Rotterdam" does not. The
     model's reading of the user's fact is put to the user only when this
     answers (``memory/changes.py``); it never gives the user's trust by
-    itself (the second security review of F1, 2026-11-18)."""
-    return _said(message, value, (SPEAKER, None))
+    itself (the second security review of F1, 2026-11-18).
+
+    The end of a message longer than ``own_words`` reads counts too
+    (``own_words.last_words``, rule D): a correction at the end of a long
+    message is asked about, never lost and never taken on trust."""
+    from kazma_core.memory.own_words import last_words
+
+    return _said(message, value, (SPEAKER, None)) or _said(message, value, (SPEAKER, None), reader=last_words)
 
 
 def _negates(token: str, following: str) -> bool:
@@ -354,19 +360,21 @@ def _asserted(raw: list[str]) -> list[bool]:
     return out
 
 
-def _said(message: str | None, value: str | None, accept: tuple[str | None, ...]) -> str | None:
+def _said(message: str | None, value: str | None, accept: tuple[str | None, ...], *,
+          reader: Callable[[str | None], str] | None = None) -> str | None:
     """The user's own spelling of *value* where the nearest person-naming
     word before it is one of *accept*, in a sentence that states it
     (:func:`_asserted`: never denied before it, never a question or a
     request -- "I never lived in Paris", "Should I move to Rotterdam?" and
-    "Summarize this page about Dubai" say nothing of the user), else None."""
+    "Summarize this page about Dubai" say nothing of the user), else None.
+    *reader* gives the user's own words of *message* (``own_words``)."""
     from kazma_core.memory.own_words import own_words
 
     pieces = str(value or "").replace("_", " ").split()
     words = [_fold(p) for p in pieces]
     if not words or not all(words) or not message:
         return None
-    raw = _TOKEN_RE.findall(own_words(message))
+    raw = _TOKEN_RE.findall((reader or own_words)(message))
     folded = [_fold(t) for t in raw]
     named = subjects(raw)
     stated = _asserted(raw)

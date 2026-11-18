@@ -162,6 +162,39 @@ def test_a_new_job_in_arabic_waits_for_the_user(mem, monkeypatch):
     assert _waiting(mem) == ["أريدُو"]
 
 
+#: A long message (past the 2,000 characters the quick pass reads, within the
+#: 4,000 an episode keeps for the deep pass: ``dual_write``) that ends with
+#: the user's correction.
+_NOTES = "We walked along the river and looked at the old boats for a while. " * 40
+LONG_CORRECTION = "Hi Kazma, my notes from the trip.\n\n" + _NOTES + "\n\nCorrection: we moved to Lisbon last month."
+
+
+def test_a_correction_at_the_end_of_a_long_message_is_put_to_the_user(mem, monkeypatch):
+    """Rule D of the second security review: the end of a long message was
+    never read, and a correction there was lost. The model's reading of it
+    is put to the user as a question; the user's fact stands until they
+    answer."""
+    assert 2000 < len(LONG_CORRECTION) < 4000
+    assert _deep_pass(mem, monkeypatch, value_first="Paris", then=LONG_CORRECTION,
+                      model=[_fact("lives_in", "lisbon")]) == [("Paris", "user_stated")]
+    assert _waiting(mem) == ["Lisbon"]
+
+
+def test_the_end_after_a_forwarded_message_is_not_put_to_the_user(mem, monkeypatch):
+    forwarded = ("---------- Forwarded message ---------\nFrom: Dana\n\n" + _NOTES
+                 + "\n\nWe moved to Lisbon last month.")
+    assert _deep_pass(mem, monkeypatch, value_first="Paris", then=forwarded,
+                      model=[_fact("lives_in", "lisbon")]) == [("Paris", "user_stated")]
+    assert _waiting(mem) == []
+
+
+def test_control_without_reading_the_end_the_correction_is_lost(mem, monkeypatch):
+    monkeypatch.setattr("kazma_core.memory.own_words.last_words", lambda text: "")
+    assert _deep_pass(mem, monkeypatch, value_first="Paris", then=LONG_CORRECTION,
+                      model=[_fact("lives_in", "lisbon")]) == [("Paris", "user_stated")]
+    assert _waiting(mem) == []
+
+
 @pytest.mark.parametrize(("then", "model", "spelled"), [
     ("We moved to Rotterdam last month.", "rotterdam", "Rotterdam"),
     ("انتقلنا إلى الرياض الشهر الماضي.", "الرياض", "الرياض"),

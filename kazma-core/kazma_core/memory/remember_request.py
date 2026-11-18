@@ -22,6 +22,9 @@ __all__ = ["is_remember_request"]
 #: English, as whole words (Memory audit M26: as substrings "Can you denote
 #: that" matched "note that"). "Do you remember that film?" asks Kazma to
 #: recall, not to remember: a phrase right after "do/did you" is a question.
+#: Nor after a negation: "Don't remember this", "I can't remember my
+#: password", "never remember" (rule C of the second security review of F1,
+#: 2026-11-18; "don't forget" is a phrase of its own and still asks).
 _ENGLISH = (
     "remember that",
     "remember my",
@@ -32,7 +35,8 @@ _ENGLISH = (
     "note that",
 )
 _ENGLISH_RE = re.compile(
-    r"(?<![\w'])(?<!do you )(?<!did you )(?:" + "|".join(re.escape(p) for p in _ENGLISH) + r")(?![\w'])"
+    r"(?<![\w'])(?<!do you )(?<!did you )(?<!n't )(?<!not )(?<!never )(?<!cannot )(?<!dont )(?<!cant )"
+    r"(?<!no need to )(?:" + "|".join(re.escape(p) for p in _ENGLISH) + r")(?![\w'])"
 )
 
 #: Arabic (MSA and Gulf), written in folded form.
@@ -50,8 +54,10 @@ _ARABIC = (
     "حط في بالك",
     "خذ في بالك",
 )
+#: Never after a negation: "لا تذكر هذا" (don't mention this), "ما تذكر"
+#: ("لا تنسى", don't forget, is a phrase of its own and still asks).
 _ARABIC_RE = re.compile(
-    r"(?<!\w)[وف]?(?:" + "|".join(re.escape(p) for p in _ARABIC) + r")(?!\w)"
+    r"(?<!\w)(?<!لا )(?<!ما )(?<!مو )(?<!ليس )[وف]?(?:" + "|".join(re.escape(p) for p in _ARABIC) + r")(?!\w)"
 )
 
 
