@@ -12574,17 +12574,25 @@ product can turn it on, so an install with one account behaves as before.
     `library_id_for` for a new library; **every route, tool and `/kb`
     resolves once and uses the answer** (a check of `get_library(x)` then a
     read of `x` reads another space's library). A new entry point that takes
-    a library id does the same.
+    a library id does the same. **Every name built from an id** (the Chroma
+    collection, the fetched-pages folder, the soak's copy) comes from
+    `knowledge.library_name_part`, which keeps the mark: as "_" it made a
+    space's library and an owner's of the same text one folder.
   - Reads keep to the space (the store's tenant filter is on whenever Spaces
     is enforced); `publish_page` writes only into a library of the bound
     space (`_writing_space`). Maintenance lists every library through
     `all_library_ids` / `library_space`, never the filtered reads.
-  - The crawl journal is the install's: the routes show a space the crawls
-    of its own libraries; a crawl a restart cut off resumes in its library's
-    space (`kb_api._in_the_crawls_space`); the canary runs as the owner's
-    space on its private store.
+  - The crawl journal is the install's: once Spaces is enforced the routes
+    show a space the crawls of its own libraries (`kb_api._own_libraries`,
+    keyed on `spaces_enforced()`, never the store's tenant filter, which
+    production mode turns on too); a crawl a restart cut off resumes in its
+    library's space (`kb_api._in_the_crawls_space`; one whose space cannot
+    be read waits for Resume, the others go on); the canary runs as the
+    owner's space on its private store.
   - A quota per space (`_SPACE_QUOTA_BYTES`, `KnowledgeSpaceFull`) beside the
-    install's file quota.
+    install's file quota, an admission check like it. `space_used_bytes`
+    reads on a connection of its own, never under the store lock, and a
+    measure answers for `_SPACE_BYTES_TTL_S`.
   - Gates: `tests/_knowledge_space_cases.py` (the matrix cases),
     `tests/test_knowledge_spaces.py` (each guard taken out as a control).
 

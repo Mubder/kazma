@@ -844,7 +844,8 @@ SPACE_RULES: dict[str, SpaceRule] = {
         "derived", why="the Knowledge Library's vectors, split as the libraries are",
         today="apart"),
     "knowledge_provenance": SpaceRule(
-        "derived", why="a library's fetched pages, in a folder named by the library, which carries its space",
+        "derived", why=("a library's fetched pages, in a folder named by the library's id, "
+                        "which keeps the id's space mark (knowledge.library_name_part)"),
         today="apart"),
     "canary": _install("the daily crawl check's private store: one public page"),
     "code-index": SpaceRule(

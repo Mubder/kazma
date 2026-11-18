@@ -272,6 +272,7 @@ async def resume_interrupted_crawls() -> list[str]:
     site stopped, an older one, or one that made no progress waits for the
     owner. Returns the job ids resumed.
     """
+    from kazma_core.db.pg_helpers import store_errors
     from kazma_core.web_acquire.crawl_jobs import auto_resume_due, call, claim_auto_resume, inspect_jobs, recover
 
     route = _RESUME_ROUTE.get("resume")
@@ -286,7 +287,15 @@ async def resume_interrupted_crawls() -> list[str]:
         row = await call(inspect_jobs, summary["job_id"])
         if row is None or not auto_resume_due(row) or not await call(claim_auto_resume, row["job_id"]):
             continue
-        answer = await _in_the_crawls_space(row, route)
+        try:
+            answer = await _in_the_crawls_space(row, route)
+        except store_errors() as exc:
+            # The library's space could not be read (the identity store or
+            # Knowledge's own): this crawl waits for Resume, and the others
+            # are still tried (S1-13 review: one such row stopped the pass).
+            logger.warning("[kb_api] crawl %s could not resume after a restart (%s: %s); it waits for Resume",
+                           row["job_id"], type(exc).__name__, exc)
+            continue
         if isinstance(answer, dict) and answer.get("ok"):
             resumed.append(row["job_id"])
             logger.info("[kb_api] crawl %s resumed after a restart", row["job_id"])
@@ -318,13 +327,20 @@ def create_kb_router() -> APIRouter:
         return _store().own_library_id(library_id)
 
     def _own_libraries() -> set[str] | None:
-        """The ids of the caller's libraries (archived ones too) while reads
-        keep to a space, else None: the crawl journal is the install's, and
-        a space sees the crawls of its own libraries only."""
-        store = _store()
-        if not store._tenant_filter_enabled():
+        """The ids of the caller's libraries (archived ones too) once Spaces
+        is enforced, else None: the crawl journal is the install's, and a
+        space sees the crawls of its own libraries only.
+
+        Spaces alone decides, never the store's tenant filter: that is on in
+        production mode too (``KAZMA_PRODUCTION``, the live install), where
+        filtering hid the crawls of a deleted library, answered "Unknown
+        crawl job" for a research job, and put the Dashboard's crawl card at
+        odds with /metrics and the weekly report (S1-13 review)."""
+        from kazma_core.spaces.scope import spaces_enforced
+
+        if not spaces_enforced():
             return None
-        return {lib["id"] for lib in store.list_libraries(include_archived=True)}
+        return {lib["id"] for lib in _store().list_libraries(include_archived=True)}
 
     # ── Libraries ───────────────────────────────────────────────────────
 
