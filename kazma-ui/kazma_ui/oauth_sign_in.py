@@ -132,8 +132,11 @@ def attempt_scope(attempt: dict[str, Any]) -> Any:
     that space. Not enforced: nothing is bound, as before. Enforced: an
     attempt that names no space, or whose person is no longer a member of
     it, raises ``oauth_attempts.AttemptRefused("no_space")`` -- the account
-    is never kept for no one, nor in a space its person left. Blocking (the
-    identity store): call from a thread, or from a route that is a ``def``."""
+    is never kept for no one, nor in a space its person left. An identity
+    store that cannot say is ``AttemptRefused("identity_unavailable")``,
+    reported to the database watch: a refusal the page words, never a 500
+    (S1-17 follow-up). Blocking (the identity store): call from a thread, or
+    from a route that is a ``def``."""
     import contextlib
 
     from kazma_core.security.oauth_attempts import AttemptRefused
@@ -144,7 +147,14 @@ def attempt_scope(attempt: dict[str, Any]) -> Any:
         return contextlib.nullcontext()
     space = str(attempt.get("space") or "")
     asker = str(attempt.get("asker") or "")
-    if not space or not asker or not identity.is_member(asker, space):
+    try:
+        member = bool(space and asker and identity.is_member(asker, space))
+    except identity.IdentityUnavailable as exc:
+        from kazma_core.db import availability
+
+        availability.note_failure("sign_in", exc.__cause__ if exc.__cause__ is not None else exc)
+        raise AttemptRefused("identity_unavailable") from exc
+    if not member:
         raise AttemptRefused("no_space")
     return bind_scope(space, asker)
 

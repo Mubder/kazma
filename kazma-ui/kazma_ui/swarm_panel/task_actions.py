@@ -15,7 +15,10 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-__all__ = ["cancel_task", "retry_task", "set_dispatcher", "set_engine_resolver", "task_refusal"]
+__all__ = [
+    "RESEARCH_KIND", "caller_may_act_on", "cancel_task", "retry_task", "set_dispatcher",
+    "set_engine_resolver", "task_refusal",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +46,30 @@ def _engine() -> Any:
     return get_swarm_engine()
 
 
+#: A research task's ``metadata.kind`` (the Research page lists by it).
+RESEARCH_KIND = "research"
+
+
+def caller_may_act_on(task: Any) -> bool:
+    """Whether the work this call is bound to may change or answer *task*
+    (a ``SwarmTask`` or its dict, of the caller's space): the one rule for
+    both route families, by the task's kind (Spaces S1-17 follow-up).
+
+    A research task (``metadata.kind`` ``research``) follows decision N32,
+    as research sessions do: its author or the space's owner changes it --
+    archive, restore, delete, cancel, retry -- on the Research page and the
+    Swarm page alike. Any other task follows N4: only the person it acts for
+    answers it. Always True while Spaces is not enforced. Raises
+    ``IdentityUnavailable``. Blocking (the identity store)."""
+    from kazma_core.spaces.shared_work import may_change
+    from kazma_core.swarm.single_operator import task_answered_by_caller
+
+    meta = (task.get("metadata") if isinstance(task, dict) else getattr(task, "metadata", None)) or {}
+    if isinstance(meta, dict) and meta.get("kind") == RESEARCH_KIND:
+        return may_change(str(meta.get("tenant_id") or ""), meta.get("asker"))
+    return task_answered_by_caller(task)
+
+
 def task_refusal(engine: Any, task_id: str) -> dict[str, Any] | None:
     """Why the work this call is bound to may not act on *task_id*, or None:
     the one check every surface that acts on a task makes -- the page's
@@ -53,12 +80,13 @@ def task_refusal(engine: Any, task_id: str) -> dict[str, Any] | None:
     While Spaces is not enforced: None. Once it is, ``code`` ``no_space``
     (no space bound: work that is no one's acts on no one's task),
     ``not_found`` (unknown, or another space's: one answer for both),
-    ``not_yours`` (only the person who asked answers it, decision N4) or
+    ``not_yours`` (``caller_may_act_on``: a research task's author or the
+    space's owner, N32; any other task's asker, N4) or
     ``identity_unavailable``. Blocking (the task store, the identity store).
     """
     from kazma_core.spaces.identity import IdentityUnavailable
     from kazma_core.spaces.scope import NoSpaceBound, spaces_enforced
-    from kazma_core.swarm.single_operator import task_answered_by_caller, task_of_this_space
+    from kazma_core.swarm.single_operator import task_of_this_space
 
     if not spaces_enforced():
         return None
@@ -68,9 +96,11 @@ def task_refusal(engine: Any, task_id: str) -> dict[str, Any] | None:
     try:
         if task is None or not task_of_this_space(task):
             return {"ok": False, "code": "not_found", "message": f"Task '{task_id}' not found"}
-        if not task_answered_by_caller(task):
+        if not caller_may_act_on(task):
+            research = (getattr(task, "metadata", None) or {}).get("kind") == RESEARCH_KIND
             return {"ok": False, "code": "not_yours",
-                    "message": "Only the person who asked for this task can answer it."}
+                    "message": ("Only the person who started this research, or the space's owner, can change it."
+                                if research else "Only the person who asked for this task can answer it.")}
     except NoSpaceBound:
         return {"ok": False, "code": "no_space", "message": "This work is not tied to a space."}
     except IdentityUnavailable:

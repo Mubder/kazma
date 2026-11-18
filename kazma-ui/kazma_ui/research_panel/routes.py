@@ -202,18 +202,20 @@ def _task_to_change(task_id: str) -> tuple[Any, Any, str]:
     """(store, task, "") when the caller may change the research task
     *task_id* -- archive, restore, delete -- else (store, None, code): one
     rule for every change (Spaces S1-16 follow-up). Another space's task
-    answers as an unknown one; once Spaces is enforced only its author (the
-    task's asker) and the space's owner change it (decision N32), the rule
-    research sessions follow. Blocking."""
+    answers as an unknown one; once Spaces is enforced who may change it is
+    the Swarm page's rule too (``task_actions.caller_may_act_on``, S1-17
+    follow-up): a research task by its author or the space's owner (N32), a
+    task of another kind by its asker only (N4). Blocking."""
     from kazma_core.spaces.identity import IdentityUnavailable
-    from kazma_core.spaces.shared_work import NOT_YOURS, may_change
+    from kazma_core.spaces.shared_work import NOT_YOURS
+
+    from kazma_ui.swarm_panel.task_actions import caller_may_act_on
 
     store, task = _find_task(task_id)
     if task is None:
         return store, None, "not_found"
-    meta = task.metadata or {}
     try:
-        allowed = may_change(str(meta.get("tenant_id") or ""), meta.get("asker"))
+        allowed = caller_may_act_on(task)
     except IdentityUnavailable:
         logger.warning("[research] who may change task %s cannot be read; refused", task_id)
         return store, None, "identity_unavailable"

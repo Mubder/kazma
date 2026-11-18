@@ -315,6 +315,24 @@ _TOOL_CALLS: dict[str, list[dict[str, Any]]] = {
 }
 
 
+def _sandbox_kept_apart(w: World) -> None:
+    """The practice mailbox is each space's (the S1-17 follow-up's probe):
+    B sends from its own, A sends from its own (nothing connected: the
+    sandbox), and each one's Sent folder holds its own message only -- B
+    reading after A sent does not see A's, A does not see B's."""
+    w.tool("b", "email_send", to="x@example.org", subject=f"sent by {w.marks.b}", body=w.marks.b,
+           provider="sandbox")
+    w.tool("a", "email_send", to="x@example.org", subject=f"sent by {w.marks.a}", body=w.marks.a)
+    mine = w.tool("a", "email_list", folder="Sent")
+    assert w.marks.a in mine and w.marks.b not in mine, mine[:300]
+    theirs = w.tool("b", "email_list", folder="Sent", provider="sandbox")
+    assert w.marks.b in theirs and w.marks.a not in theirs, theirs[:300]
+
+
+#: The tools whose case also sends and reads the practice mailbox.
+_SANDBOX_TOOLS = ("email_send", "email_list")
+
+
 def _tool_case(name: str) -> Callable[[Matrix], None]:
     def run(w: World) -> None:
         before = w.held("b")
@@ -322,6 +340,8 @@ def _tool_case(name: str) -> Callable[[Matrix], None]:
             answer = w.tool("a", name, **kwargs)
             assert w.marks.b not in answer, f"{name}({kwargs}) showed B's connection: {answer[:300]}"
             assert w.held("b") == before, f"{name}({kwargs}) changed what B's space holds"
+        if name in _SANDBOX_TOOLS:
+            _sandbox_kept_apart(w)
 
     run.__name__ = f"tool_{name}"
     return _in_world(run, plant_a=False)

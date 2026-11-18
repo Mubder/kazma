@@ -12797,7 +12797,12 @@ product can turn it on, so an install with one account behaves as before.
     follow-up): the page's routes and the run supervisor's buttons ask the
     same one, so a retry never takes a member's task into the caller's space
     through the admission stamp, and work bound to no space acts on no
-    task's (`no_space`).
+    task's (`no_space`). **Who may act on a task is decided by its kind, in
+    one place** (`task_actions.caller_may_act_on`, S1-17 follow-up): a
+    research task (`metadata.kind` `research`) follows N32 on every route
+    -- its author or the space's owner -- and any other task N4, on the
+    Research page's routes too. The Swarm page held every task to N4 and the
+    Research page every task to N32.
     **Someone else's card and result stay off the owner's chat apps** (O1,
     `single_operator.for_the_owner`): until people link their own chat apps
     every one is the owner's, so a request that does not act for the owner
@@ -12808,7 +12813,12 @@ product can turn it on, so an install with one account behaves as before.
     Push) is S2-05's. An identity store that cannot say whose a result is
     holds it (`single_operator.wait_for_owner_answer`, through an outage, up
     to `OWNER_ANSWER_WAIT_S`): the owner's is never dropped; an approval
-    whose person cannot be read answers 503 and stays pending.
+    whose person cannot be read answers 503 and stays pending. That wait is
+    never the request's: once Spaces is enforced a foreground dispatch
+    answers once its task is done and hands the result over in the
+    background (`routes_tasks._hand_over_result`, S1-17 follow-up: the
+    page's request hung through an outage); not enforced, the hand-over
+    stays in the request, as before.
   - **The swarm's writes stay the admin's in every mode** (dispatch, a
     task's actions, an approval's decision) until feature grants give the
     swarm to others (S2-11); the install's swarm, read -- workers' totals and
@@ -12837,7 +12847,9 @@ product can turn it on, so an install with one account behaves as before.
     (403 `not_yours`). One rule, `spaces.shared_work.may_change`, for a
     session (`research_session.session_to_change`, every route and tool
     that changes one) and a research task (`_task_to_change`, archive and
-    delete alike).
+    delete alike). A task's rule is its kind's on every page
+    (`task_actions.caller_may_act_on`): a swarm task reached through the
+    Research routes follows N4.
   - **A chat's web search is one row per question, per space, per person**
     (`_chat_search_key`): the owner's keeps the ids it had (12 hex digits of
     the question); every other key starts with `s` and hashes the space, the
@@ -12880,8 +12892,15 @@ product can turn it on, so an install with one account behaves as before.
     records the bound space and person, and a callback binds them back
     (`kazma_ui.oauth_sign_in.attempt_scope`); an attempt of no space, or of a
     person no longer a member, is refused (`no_space`, worded in both
-    languages). X's callback binds its own (part b); GitHub's follows in
-    part c.
+    languages); one whose membership cannot be read (the database away) is
+    the refusal `identity_unavailable`, never a 500 (S1-17 follow-up). X's
+    callback binds its own (part b); GitHub's follows in part c.
+  - **The practice mailbox and calendar are each space's** (S1-17
+    follow-up): `sandbox_emails.db` keys a message by space and id
+    (`backends/sandbox.py`; a file from before is rebuilt once, every
+    message the owner's), and the in-memory practice calendar is one per
+    space (`calendar.router._sandbox_instances`). One mailbox for every
+    space put member A's sent mail in member B's Sent folder.
   - **The background connector check goes space by space**
     (`connector_health.check_connectors`): each space's grants are refreshed
     in that space; only the owner's space raises the owner's alerts.

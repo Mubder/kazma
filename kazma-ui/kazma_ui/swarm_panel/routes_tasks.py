@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -129,6 +130,23 @@ def _flatten_swarm_task(task: Any) -> dict[str, Any]:
         "error": result.get("error"),
         "metadata": result.get("metadata", data.get("metadata", {})),
     }
+
+
+async def _hand_over_result(deliver: Callable[[], Awaitable[None]], *, label: str, later: bool) -> None:
+    """Run a finished task's hand-over (*deliver*) now, or -- *later*, once
+    Spaces is enforced -- in a background task of its own, so the request
+    that ran the task answers without waiting for it (Spaces S1-17
+    follow-up). Only an enforced install reads the identity store before a
+    hand-over (``wait_for_owner_answer``), which an outage can hold for
+    hours; one that is not keeps the hand-over in the request, as before."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if later and spaces_enforced():
+        from kazma_core.background import spawn_background
+
+        spawn_background(deliver(), name=f"swarm-result:{label}")
+    else:
+        await deliver()
 
 
 def register_tasks_routes(
@@ -322,26 +340,19 @@ def register_tasks_routes(
         engine: Any,
         swarm_task: Any,
         is_broadcast: bool = False,
+        *,
+        deliver_later: bool = False,
     ) -> Any:
-        """Execute dispatch/broadcast and automatically route the result on completion."""
+        """Execute dispatch/broadcast and automatically route the result on
+        completion. *deliver_later*: the hand-over to the output target runs
+        in the background (a foreground dispatch answers once the task is
+        done, never after whose it is could be read -- S1-17 follow-up)."""
         try:
             # One path for every task type, broadcasts included: dispatch()
             # admits, records RUNNING, tenant-stamps and finalizes (Swarm
             # audit SW-S06: the broadcast route called engine.broadcast and
             # skipped all four). ``is_broadcast`` is the task's own type.
             result = await engine.dispatch(swarm_task)
-            # The result goes to the output target -- the one route swarm
-            # results take. The separate swarm-bot notifier (a fourth
-            # notifier beside AGENTS §33's three, reporting a send Telegram
-            # refused as sent) was removed (Swarm audit SW-S15). The target
-            # is the owner's chat: someone else's result stays in its space.
-            if not await _for_the_owner(swarm_task):
-                logger.info("[Swarm] task '%s': not the owner's, its result stays in its space",
-                            getattr(swarm_task, "id", ""))
-            elif not await _route_task_result(result):
-                logger.info("[Swarm] task '%s': no output target took the result",
-                            getattr(swarm_task, "id", ""))
-            return result
         except Exception as exc:
             logger.exception("[Swarm] Task execution failed under auto-routing wrapper")
             # The chat gets a safe message; the exception's text (paths,
@@ -349,9 +360,33 @@ def register_tasks_routes(
             from kazma_core.exceptions import sanitize_error
 
             error_msg = f"Swarm task '{getattr(swarm_task, 'id', '')}' failed. {sanitize_error(exc)}"
-            if await _for_the_owner(swarm_task):
-                await _maybe_send_to_output_target_fallback(error_msg)
+            await _hand_over(swarm_task, lambda: _maybe_send_to_output_target_fallback(error_msg),
+                             later=deliver_later)
             raise exc
+        # The result goes to the output target -- the one route swarm
+        # results take. The separate swarm-bot notifier (a fourth notifier
+        # beside AGENTS §33's three, reporting a send Telegram refused as
+        # sent) was removed (Swarm audit SW-S15). The target is the owner's
+        # chat: someone else's result stays in its space.
+        await _hand_over(swarm_task, lambda: _route_task_result(result), later=deliver_later)
+        return result
+
+    async def _hand_over(swarm_task: Any, send: Callable[[], Awaitable[bool]], *, later: bool) -> None:
+        """Send a finished task's result (*send*) to the output target once it
+        is known to be the owner's (``_for_the_owner``). During an identity
+        outage that can take hours (``wait_for_owner_answer``): *later* hands
+        it to a background task, so a foreground dispatch answers with the
+        task done and the result held for delivery (S1-17 follow-up: the
+        page's request hung until the store answered)."""
+        label = getattr(swarm_task, "id", "")
+
+        async def deliver() -> None:
+            if not await _for_the_owner(swarm_task):
+                logger.info("[Swarm] task '%s': not the owner's, its result stays in its space", label)
+            elif not await send():
+                logger.info("[Swarm] task '%s': no output target took the result", label)
+
+        await _hand_over_result(deliver, label=label, later=later)
 
     async def _for_the_owner(swarm_task: Any) -> bool:
         """Whether the install's output target -- the owner's chat -- may carry
@@ -638,7 +673,8 @@ def register_tasks_routes(
                     "result_status": "running",
                     "dispatched": dispatched,
                 })
-            task_result = await _run_and_route_task(engine, swarm_task, is_broadcast=True)
+            task_result = await _run_and_route_task(engine, swarm_task, is_broadcast=True,
+                                                    deliver_later=True)
         else:
             if background:
                 _handle = asyncio.create_task(_run_and_route_task(engine, swarm_task, is_broadcast=False))
@@ -654,7 +690,8 @@ def register_tasks_routes(
                     "result_status": "running",
                     "dispatched": dispatched,
                 })
-            task_result = await _run_and_route_task(engine, swarm_task, is_broadcast=False)
+            task_result = await _run_and_route_task(engine, swarm_task, is_broadcast=False,
+                                                    deliver_later=True)
         if task_result is not None and (task_result.metadata or {}).get("admission_denied"):
             return _capacity_refusal(
                 int((task_result.metadata or {}).get("max_concurrent_tasks") or 0),

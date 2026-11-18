@@ -288,6 +288,179 @@ async def _callback_kept(matrix: Matrix, monkeypatch) -> dict[str, str]:
     return kept
 
 
+# ── a sign-in whose person cannot be read is a refusal ───────────────────
+
+
+async def _callback_while_identity_fails(matrix: Matrix, monkeypatch) -> Any:
+    """A's Gmail sign-in comes back while the identity store cannot be read
+    (the database away): the callback's answer."""
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+    from kazma_core.db import availability
+    from kazma_core.security import oauth_attempts
+
+    from kazma_ui import email_api
+    from kazma_ui.oauth_sign_in import binding_cookie_name
+
+    with matrix.as_a():
+        state = oauth_attempts.begin("gmail", redirect_uri="https://kazma.example/api/email/oauth/gmail/callback")
+
+    def unreadable(*args: Any, **kwargs: Any) -> bool:
+        raise identity.IdentityUnavailable("the identity store could not be read: PoolTimeout")
+
+    monkeypatch.setattr(identity, "is_member", unreadable)
+    monkeypatch.setattr(availability, "note_failure", lambda kind, exc=None, **kwargs: True)
+    app = FastAPI()
+    app.include_router(email_api.router)
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="https://kazma.example") as client:
+        client.cookies.set(binding_cookie_name(state), state)
+        return await client.get("/api/email/oauth/gmail/callback", params={"code": "c", "state": state})
+
+
+async def test_a_sign_in_whose_person_cannot_be_read_is_refused(vault, matrix, enforced, monkeypatch) -> None:
+    answer = await _callback_while_identity_fails(matrix, monkeypatch)
+    assert answer.status_code == 302, answer.text[:300]
+    assert answer.headers["location"].endswith("email_oauth=error&reason=identity_unavailable")
+
+
+async def test_control_the_scope_without_the_refusal_answers_500(vault, matrix, enforced, monkeypatch) -> None:
+    """The scope as before: the identity store's error reached the route."""
+    import contextlib
+
+    import kazma_ui.oauth_sign_in as oauth_sign_in
+
+    def as_before(attempt: dict[str, Any]) -> Any:
+        identity.is_member(str(attempt.get("asker")), str(attempt.get("space")))
+        return contextlib.nullcontext()
+
+    monkeypatch.setattr(oauth_sign_in, "attempt_scope", as_before)
+    assert (await _callback_while_identity_fails(matrix, monkeypatch)).status_code == 500
+
+
+# ── the practice mailbox and calendar are each space's ───────────────────
+
+
+async def _sent_folders(matrix: Matrix, db: Path) -> dict[str, list[str]]:
+    """A sends from its practice mailbox; then each space reads its Sent
+    folder: the subjects each one sees."""
+    from kazma_skills.native.email_manager.backends.sandbox import SandboxBackend
+    from kazma_skills.native.email_manager.models import ListQuery, SendRequest
+
+    with matrix.as_a():
+        box = SandboxBackend(db_path=db)
+    await box.send(SendRequest(to=["x@example.org"], subject="sent by A", body="a"))
+    seen: dict[str, list[str]] = {}
+    for who, bound in (("a", matrix.as_a), ("b", matrix.as_b)):
+        with bound():
+            box = SandboxBackend(db_path=db)
+        seen[who] = [m.subject for m in await box.list_messages(ListQuery(folder="Sent"))]
+    return seen
+
+
+async def test_each_space_has_its_own_practice_mailbox(matrix, enforced, tmp_path) -> None:
+    seen = await _sent_folders(matrix, tmp_path / "sandbox_emails.db")
+    assert "sent by A" in seen["a"] and "sent by A" not in seen["b"]
+
+
+async def test_control_one_practice_mailbox_for_every_space(matrix, enforced, tmp_path, monkeypatch) -> None:
+    """The mailbox as it was: one for every space -- B reads what A sent."""
+    from kazma_skills.native.email_manager.backends import sandbox
+
+    monkeypatch.setattr(sandbox, "_mailbox_space", lambda: OWNER_SPACE_ID)
+    seen = await _sent_folders(matrix, tmp_path / "sandbox_emails.db")
+    assert "sent by A" in seen["b"]
+
+
+def test_no_practice_mailbox_is_opened_for_no_one(enforced, tmp_path) -> None:
+    from kazma_skills.native.email_manager.backends.sandbox import SandboxBackend
+
+    with pytest.raises(NoSpaceBound):
+        SandboxBackend(db_path=tmp_path / "sandbox_emails.db")
+
+
+async def test_a_mailbox_from_before_spaces_is_the_owners(matrix, enforced, tmp_path) -> None:
+    """A mailbox file written before spaces (``id`` its key, no space) is
+    kept, every message the owner's; another space gets its own practice
+    mailbox beside it, the same seed ids and all."""
+    import sqlite3
+
+    from kazma_skills.native.email_manager.backends.sandbox import SandboxBackend
+    from kazma_skills.native.email_manager.models import ListQuery
+
+    db = tmp_path / "sandbox_emails.db"
+    old = sqlite3.connect(db)
+    old.executescript("""
+        CREATE TABLE messages (id TEXT PRIMARY KEY, subject TEXT NOT NULL DEFAULT '',
+            from_addr TEXT NOT NULL DEFAULT '', to_addrs TEXT NOT NULL DEFAULT '[]',
+            cc_addrs TEXT NOT NULL DEFAULT '[]', date TEXT NOT NULL DEFAULT '', body TEXT NOT NULL DEFAULT '',
+            snippet TEXT NOT NULL DEFAULT '', unread INTEGER NOT NULL DEFAULT 0,
+            starred INTEGER NOT NULL DEFAULT 0, labels TEXT NOT NULL DEFAULT '[]',
+            folder TEXT NOT NULL DEFAULT 'INBOX', thread_id TEXT NOT NULL DEFAULT '');
+        INSERT INTO messages (id, subject, date) VALUES ('old-1', 'kept from before', '2026-01-01');
+    """)
+    old.commit()
+    old.close()
+    with _owner():
+        owners = SandboxBackend(db_path=db)
+    with matrix.as_b():
+        theirs = SandboxBackend(db_path=db)
+    owner_inbox = [m.subject for m in await owners.list_messages(ListQuery(folder="INBOX", limit=50))]
+    their_inbox = [m.subject for m in await theirs.list_messages(ListQuery(folder="INBOX", limit=50))]
+    assert owner_inbox == ["kept from before"]  # an owner's mailbox that had messages is not seeded
+    assert "kept from before" not in their_inbox and their_inbox  # B's own, seeded
+    seeded = {m.id for m in await theirs.list_messages(ListQuery(folder="INBOX", limit=50))}
+    with _owner():
+        assert SandboxBackend(db_path=db).space == OWNER_SPACE_ID  # opened again: no second rebuild
+    check = sqlite3.connect(db)
+    try:
+        rows = check.execute("SELECT tenant_id, id FROM messages WHERE id = 'old-1'").fetchall()
+        keyed = {row[1] for row in check.execute("SELECT * FROM pragma_table_info('messages') WHERE pk > 0")}
+    finally:
+        check.close()
+    assert rows == [(OWNER_SPACE_ID, "old-1")] and keyed == {"tenant_id", "id"} and seeded
+
+
+def test_one_account_reads_the_one_mailbox_as_before(tmp_path) -> None:
+    """Not enforced: whatever tenant is bound, the owner's mailbox."""
+    from kazma_core.tenant_context import tenant_scope
+    from kazma_skills.native.email_manager.backends.sandbox import SandboxBackend
+
+    with tenant_scope("someone-else"):
+        assert SandboxBackend(db_path=tmp_path / "sandbox_emails.db").space == OWNER_SPACE_ID
+
+
+async def _calendars(matrix: Matrix, monkeypatch) -> dict[str, list[str]]:
+    """A adds an event to its practice calendar; what each space lists."""
+    from kazma_skills.native.calendar import credentials as calendar_credentials
+    from kazma_skills.native.calendar import router as calendar_router
+
+    monkeypatch.setattr(calendar_credentials, "google_connected", lambda: False)
+    monkeypatch.setattr(calendar_credentials, "microsoft_connected", lambda: False)
+    monkeypatch.setattr(calendar_router, "_sandbox_instances", {})
+    with matrix.as_a():
+        calendar = calendar_router.get_backend("auto")
+    await calendar.create_event("A's meeting", "2026-12-01T10:00:00+00:00", "2026-12-01T11:00:00+00:00")
+    listed: dict[str, list[str]] = {}
+    for who, bound in (("a", matrix.as_a), ("b", matrix.as_b)):
+        with bound():
+            calendar = calendar_router.get_backend("auto")
+        events = await calendar.list_events("2026-12-01T00:00:00+00:00", "2026-12-02T00:00:00+00:00")
+        listed[who] = [e["summary"] for e in events]
+    return listed
+
+
+async def test_each_space_has_its_own_practice_calendar(vault, matrix, enforced, monkeypatch) -> None:
+    assert await _calendars(matrix, monkeypatch) == {"a": ["A's meeting"], "b": []}
+
+
+async def test_control_one_practice_calendar_for_every_space(vault, matrix, enforced, monkeypatch) -> None:
+    from kazma_core.spaces import connected_accounts
+
+    monkeypatch.setattr(connected_accounts, "connected_space", lambda: OWNER_SPACE_ID)
+    assert (await _calendars(matrix, monkeypatch))["b"] == ["A's meeting"]
+
+
 # ── the background check goes space by space ─────────────────────────────
 
 

@@ -14,7 +14,9 @@ from kazma_skills.native.email_manager.credentials import account_env
 
 logger = logging.getLogger(__name__)
 
-_sandbox_instance = None
+#: The practice calendar of each space (process-local, in memory): one for
+#: every space was one calendar every space read and wrote (Spaces S1-17).
+_sandbox_instances: dict[str, Any] = {}
 
 GOOGLE_NOT_CONNECTED = (
     "Google Calendar is not connected. Settings → Email → Connect with Google "
@@ -171,9 +173,11 @@ def get_backend(provider: str | None = None, account: str | None = None) -> Any:
             raise CalendarNotConnectedError("outlook", OUTLOOK_NOT_CONNECTED)
         name = "sandbox"
 
+    from kazma_core.spaces.connected_accounts import connected_space
     from kazma_skills.native.calendar.backends.sandbox import SandboxBackend
 
-    global _sandbox_instance
-    if _sandbox_instance is None:
-        _sandbox_instance = SandboxBackend()
-    return _sandbox_instance
+    space = connected_space()
+    found = _sandbox_instances.get(space)
+    if found is None:
+        found = _sandbox_instances.setdefault(space, SandboxBackend())
+    return found

@@ -65,7 +65,10 @@ PROVIDERS = ("github", "gmail", "google_calendar", "microsoft", "x")
 #: Why :func:`take` refused, as a code the pages word.
 #: ``no_space``: Spaces enforced, and the sign-in started in no space or its
 #: person is no longer a member of it (``kazma_ui.oauth_sign_in.attempt_scope``).
-REFUSAL_REASONS = ("other_browser", "unknown", "expired", "other_provider", "no_space")
+#: ``identity_unavailable``: whether its person is still a member could not be
+#: read (the database away): nothing kept, the sign-in is started again.
+REFUSAL_REASONS = ("other_browser", "unknown", "expired", "other_provider", "no_space",
+                   "identity_unavailable")
 
 
 class AttemptRefused(PermissionError):

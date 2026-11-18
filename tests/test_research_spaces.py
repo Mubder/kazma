@@ -25,6 +25,8 @@ the cases that rest on it fail. The route and tool cases are in
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from kazma_core.spaces import scope
 from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, OWNER_SPACE_ID
@@ -339,6 +341,92 @@ def test_the_spaces_owner_changes_a_members_research_task(matrix, shared) -> Non
         assert _in_shared(w, "a", "POST", f"/api/research/tasks/{theirs.id}/archive").status_code == 200
         assert _in_shared(w, "a", "DELETE", f"/api/research/tasks/{theirs.id}").status_code == 200
         assert w.held_task(theirs) == {}
+
+
+# ── the S1-17 follow-up: one rule, by the task's kind, on both pages ─────
+#
+# A research task follows N32 on every route, the Swarm page's too; a task
+# of another kind follows N4 on every route, the Research page's too
+# (``task_actions.caller_may_act_on``).
+
+
+def _plain_task(w, who: str, mark: str):
+    """A swarm task of *who*'s in the shared space: not research."""
+    from kazma_core.swarm.task import SwarmTask, TaskResult, TaskStatus
+
+    task = SwarmTask(prompt=f"task {mark}", status=TaskStatus.COMPLETED,
+                     metadata={"tenant_id": SHARED, "asker": w.account_of(who)},
+                     completed_at="2026-11-18T08:00:00+00:00")
+    task.result = TaskResult(task_id=task.id, status="success", aggregated_output=f"output {mark}")
+    assert w.engine._task_store.persist_task(task), task.id
+    return task
+
+
+def _swarm_refusal(w, who: str, task) -> str:
+    """What the Swarm page's actions (and the run supervisor's) answer *who*
+    for *task*: '' when they may act on it."""
+    from kazma_ui.swarm_panel.task_actions import task_refusal
+
+    with scope.bind_scope(SHARED, w.account_of(who)):
+        return (task_refusal(w.engine, task.id) or {}).get("code", "")
+
+
+def _both_pages(matrix) -> dict[str, Any]:
+    """The space's owner (A) on B's research task through the Swarm page, a
+    member (B) on A's; the owner on B's swarm task through the Research
+    page."""
+    from tests._research_space_cases import world
+
+    with world(matrix) as w:
+        research_b = _shared_task(w, "b", matrix.plant("kindresearch").b)
+        research_a = _shared_task(w, "a", matrix.plant("kindmine").a)
+        plain_b = _plain_task(w, "b", matrix.plant("kindplain").b)
+        before = w.held_task(plain_b)
+        answers = {
+            "swarm: owner on a member's research": _swarm_refusal(w, "a", research_b),
+            "swarm: member on the owner's research": _swarm_refusal(w, "b", research_a),
+            "research: owner archives a member's task": _in_shared(
+                w, "a", "POST", f"/api/research/tasks/{plain_b.id}/archive").status_code,
+            "research: owner deletes a member's task": _in_shared(
+                w, "a", "DELETE", f"/api/research/tasks/{plain_b.id}").status_code,
+        }
+        answers["the member's task as it was"] = w.held_task(plain_b) == before
+        return answers
+
+
+def test_a_task_follows_its_kinds_rule_on_both_pages(matrix, shared) -> None:
+    assert _both_pages(matrix) == {
+        "swarm: owner on a member's research": "",
+        "swarm: member on the owner's research": "not_yours",
+        "research: owner archives a member's task": 403,
+        "research: owner deletes a member's task": 403,
+        "the member's task as it was": True,
+    }
+
+
+def test_control_each_page_with_its_own_rule_as_before(matrix, shared, monkeypatch) -> None:
+    """The two route families as before: the Swarm page held every task to
+    N4 (the owner could not cancel a member's research), the Research page
+    every task to N32 (the owner archived and deleted a member's swarm
+    task)."""
+    import kazma_ui.swarm_panel.task_actions as task_actions
+    from kazma_core.spaces.shared_work import may_change
+    from kazma_core.swarm.single_operator import task_answered_by_caller
+
+    def by_page(task: Any) -> bool:
+        import inspect
+
+        on_the_research_page = any("research_panel" in frame.filename for frame in inspect.stack())
+        if on_the_research_page:
+            meta = task.metadata or {}
+            return may_change(str(meta.get("tenant_id") or ""), meta.get("asker"))
+        return task_answered_by_caller(task)
+
+    monkeypatch.setattr(task_actions, "caller_may_act_on", by_page)
+    answers = _both_pages(matrix)
+    assert answers["swarm: owner on a member's research"] == "not_yours"
+    assert answers["research: owner archives a member's task"] == 200
+    assert answers["the member's task as it was"] is False
 
 
 # ── the follow-up: a chat search's id, the author, and no space ──────────

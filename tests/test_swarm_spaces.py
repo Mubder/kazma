@@ -1051,3 +1051,55 @@ def test_a_result_held_past_the_limit_stays_in_the_panel(enforced, monkeypatch) 
 
     monkeypatch.setattr(single_operator, "OWNER_ANSWER_WAIT_S", 0.0)
     assert _owners_result_with_identity_failing(monkeypatch, failures=1) == []
+
+
+# ── the S1-17 follow-up: a foreground dispatch answers with its task done ─
+
+
+def _foreground_dispatch_while_held(matrix: Matrix, monkeypatch) -> list[str]:
+    """A dispatches in the foreground while whose the task is cannot be read
+    yet (the hand-over held, up to 3 s here, hours in an outage): the order
+    in which the page got its answer and the hand-over was decided."""
+    import threading
+
+    import kazma_core.swarm.single_operator as single_operator
+
+    from tests._swarm_space_cases import world
+
+    order: list[str] = []
+    released = threading.Event()
+
+    async def held(task: Any, *, label: str) -> bool:
+        await asyncio.to_thread(released.wait, 3.0)
+        order.append("hand-over decided")
+        return False
+
+    async def decided() -> None:
+        for _ in range(250):
+            if "hand-over decided" in order:
+                return
+            await asyncio.sleep(0.02)
+
+    monkeypatch.setattr(single_operator, "wait_for_owner_answer", held)
+    with world(matrix) as w:
+        answer = w.call("a", "POST", "/api/swarm/dispatch", json={"task": "a task", "workers": ["probe"]})
+        order.append("answered")
+        assert answer.status_code == 200 and answer.json()["result_status"] == "success", answer.text
+        released.set()
+        w.client.portal.call(decided)
+    return order
+
+
+def test_a_foreground_dispatch_answers_while_its_result_is_held(matrix, monkeypatch) -> None:
+    assert _foreground_dispatch_while_held(matrix, monkeypatch) == ["answered", "hand-over decided"]
+
+
+def test_control_a_hand_over_awaited_in_the_request_holds_the_page(matrix, monkeypatch) -> None:
+    """The route as before: the page's answer waited for the hand-over."""
+    from kazma_ui.swarm_panel import routes_tasks
+
+    async def inline(deliver: Any, *, label: str, later: bool) -> None:
+        await deliver()
+
+    monkeypatch.setattr(routes_tasks, "_hand_over_result", inline)
+    assert _foreground_dispatch_while_held(matrix, monkeypatch) == ["hand-over decided", "answered"]

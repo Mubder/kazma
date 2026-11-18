@@ -229,6 +229,7 @@
         expired: "The sign-in took longer than ten minutes. Start it again.",
         other_provider: "The sign-in came back to the wrong place. Start it again.",
         no_space: "The sign-in belongs to no space you are in. Start it again from your space.",
+        identity_unavailable: "Kazma could not check your space just now, so nothing was kept. Start the sign-in again in a moment.",
         denied: "The sign-in was cancelled at the provider.",
         no_code: "The provider sent no sign-in code back. Start it again.",
         exchange_failed: "The provider refused to finish the sign-in. Start it again.",
