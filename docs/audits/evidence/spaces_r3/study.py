@@ -496,16 +496,100 @@ def _filed(beliefs: list[dict[str, Any]], speaker: dict[str, Any]) -> list[dict[
             for b in beliefs]
 
 
+# ── The extraction scoring this study used, frozen ─────────────────────────
+#
+# The study scored with the extraction benchmark's rules of 2026-11-18
+# morning: a fact counted only under a listed name (recall, precision,
+# quiet). The benchmark has since scored by value (found, named, right) and
+# its replay checks the prompt a recording answered. The study keeps the
+# rules it measured with, here, so its results.json stays reproducible
+# (tests/test_spaces_r3_study_reproduces.py).
+
+
+def _v1_slug(text: str) -> str:
+    return "_".join(str(text or "").strip().lower().replace("-", " ").split())
+
+
+def _folded(text: str) -> str:
+    from kazma_core.documents.arabic import fold_for_search
+
+    return " ".join(fold_for_search(str(text or "").replace("_", " ")).lower().split())
+
+
+def _fact_matches(alternatives: list[dict[str, Any]], got: dict[str, Any]) -> bool:
+    from kazma_core.memory.predicates import _predicate_key
+
+    subject, predicate, value = _v1_slug(got.get("subject")), got.get("predicate") or "", _folded(got.get("object"))
+    if not value:
+        return False
+    for alt in alternatives:
+        if _v1_slug(alt["subject"]) != subject:
+            continue
+        if _predicate_key(predicate) not in {_predicate_key(p) for p in alt["predicates"]}:
+            continue
+        gold = _folded(alt["object"])
+        if gold and (gold in value or value in gold):
+            return True
+    return False
+
+
+def _score_extraction(turns: list[dict[str, Any]], extracted: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    by_lang: dict[str, dict[str, int]] = {}
+    for turn in turns:
+        row = by_lang.setdefault(turn["lang"], {"turns": 0, "gold": 0, "found": 0, "kept": 0, "right": 0,
+                                                "quiet_turns": 0, "quiet_kept_nothing": 0})
+        got = extracted.get(turn["id"], [])
+        row["turns"] += 1
+        row["gold"] += len(turn["facts"])
+        row["kept"] += len(got)
+        row["found"] += sum(1 for alts in turn["facts"] if any(_fact_matches(alts, g) for g in got))
+        row["right"] += sum(1 for g in got if any(_fact_matches(alts, g) for alts in turn["facts"]))
+        if not turn["facts"]:
+            row["quiet_turns"] += 1
+            row["quiet_kept_nothing"] += int(not got)
+    out = {}
+    for lang, row in sorted(by_lang.items()):
+        out[lang] = {
+            **row,
+            "recall": round(row["found"] / row["gold"], 4) if row["gold"] else 0.0,
+            "precision": round(row["right"] / row["kept"], 4) if row["kept"] else 1.0,
+            "quiet": round(row["quiet_kept_nothing"] / row["quiet_turns"], 4) if row["quiet_turns"] else 1.0,
+        }
+    return out
+
+
+def extraction_scores(report: dict[str, Any]) -> dict[str, float]:
+    out = {}
+    for pass_name in ("heuristic", "llm"):
+        part = report.get(pass_name) or {}
+        for lang, row in part.items():
+            if isinstance(row, dict):
+                for k in ("recall", "precision", "quiet"):
+                    out[f"{pass_name}.{lang}.{k}"] = float(row[k])
+    return dict(sorted(out.items()))
+
+
+class _ReplayClient:
+    """Answers the extraction prompt from recorded replies, by the user
+    message alone (the replay of 2026-11-18 morning)."""
+
+    def __init__(self, replies: dict[str, str]) -> None:
+        self._replies = replies
+
+    async def chat(self, messages: list[dict[str, Any]], **_kw: Any) -> str:
+        from kazma_core.memory.benchmark import _text_key
+
+        key = _text_key(messages[-1]["content"])
+        if key not in self._replies:
+            raise KeyError("no recorded reply for this turn")
+        return self._replies[key]
+
+
 def run_extraction(cases: dict[str, Any]) -> dict[str, Any]:
     import asyncio
 
     from kazma_core.memory.belief_extractor import _llm_extract, _sanitize_belief, extract_beliefs_heuristic
-    from kazma_core.memory.benchmark import (
-        EXTRACTION_PATH,
-        _ReplayClient,
-        _score_extraction,
-        extraction_scores,
-    )
+    from kazma_core.memory.benchmark import EXTRACTION_PATH
     from kazma_core.memory.entity_resolution import slug
 
     members = cases["members"]
@@ -706,7 +790,7 @@ def run_deep(cases: dict[str, Any]) -> dict[str, Any]:
     import asyncio
 
     from kazma_core.memory.belief_extractor import _llm_extract, _sanitize_belief
-    from kazma_core.memory.benchmark import _folded, _score_extraction, _text_key, extraction_scores
+    from kazma_core.memory.benchmark import _text_key
     from kazma_core.memory.entity_resolution import slug
 
     if not DEEP.exists():
@@ -765,7 +849,7 @@ def run_deep(cases: dict[str, Any]) -> dict[str, Any]:
         "subjects_as_written": raw_subjects,
     }
     # The same message asked twice: the existing recording, and once more.
-    from kazma_core.memory.benchmark import _fact_matches, _llm_blob
+    from kazma_core.memory.benchmark import _llm_blob
 
     first = json.loads(LLM_REPLIES.read_text(encoding="utf-8"))["replies"]
     again: dict[str, Any] = {}
@@ -859,6 +943,18 @@ def main(argv: list[str]) -> int:
 
     _REAL_GET_EMBEDDER = get_embedder
     vectors = _Vectors(record=command == "record")
+    report = build_report(vectors)
+    if command == "record":
+        print(f"{VECTORS.name}: {_save_merged(vectors.new, vectors.model)} vectors "
+              f"({len(vectors.new)} new) from {vectors.model}")
+    RESULTS.write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n", encoding="utf-8", newline="\n")
+    _print(report)
+    return 0
+
+
+def build_report(vectors: _Vectors) -> dict[str, Any]:
+    """Every part of the study, as ``results.json`` holds it: the lines the
+    model is shown are kept for :data:`SHOWN_FOR` only."""
     cases = json.loads(CASES.read_text(encoding="utf-8"))
     thresholds = json.loads(THRESHOLDS.read_text(encoding="utf-8"))
     a, b = _patched(vectors)
@@ -887,16 +983,11 @@ def main(argv: list[str]) -> int:
         report["extraction"] = run_extraction(cases)
         report["deep_pass"] = run_deep(cases)
         report["correction_rule"] = run_correction_rule(cases)
-    if command == "record":
-        print(f"{VECTORS.name}: {_save_merged(vectors.new, vectors.model)} vectors "
-              f"({len(vectors.new)} new) from {vectors.model}")
     for key, run in report["speakers"].items():
         if key not in SHOWN_FOR:  # the lines the model is shown, for two runs only
             for row in run["results"]:
                 row.pop("shown", None)
-    RESULTS.write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n", encoding="utf-8", newline="\n")
-    _print(report)
-    return 0
+    return report
 
 
 def _print(report: dict[str, Any]) -> None:

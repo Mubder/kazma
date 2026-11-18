@@ -5047,11 +5047,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "X API operations Kazma can call now:",
     },
     "settings.xapi.auth_user": {
-        "ar": "مفاتيح X ‏(OAuth 1.0a)",
+        "ar": "مفاتيح X \u200f(OAuth 1.0a)",
         "en": "X keys (OAuth 1.0a)",
     },
     "settings.xapi.auth_oauth2": {
-        "ar": "تسجيل الدخول بحساب X ‏(OAuth 2.0)",
+        "ar": "تسجيل الدخول بحساب X \u200f(OAuth 2.0)",
         "en": "Sign in with X (OAuth 2.0)",
     },
     "settings.xapi.auth_app": {
@@ -5131,7 +5131,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Sign out of X",
     },
     "settings.xapi.signed_out": {
-        "ar": "تم تسجيل الخروج من X ‏(OAuth 2.0).",
+        "ar": "تم تسجيل الخروج من X \u200f(OAuth 2.0).",
         "en": "Signed out of X (OAuth 2.0).",
     },
     "settings.xapi.remove_client": {
@@ -5139,7 +5139,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Remove the OAuth 2.0 client",
     },
     "settings.xapi.remove_client_confirm": {
-        "ar": "إزالة معرّف العميل وسرّه وتسجيل الخروج من X ‏(OAuth 2.0)؟",
+        "ar": "إزالة معرّف العميل وسرّه وتسجيل الخروج من X \u200f(OAuth 2.0)؟",
         "en": "Remove the client ID and secret, and sign out of X (OAuth 2.0)?",
     },
     "settings.xapi.signed_in_as": {

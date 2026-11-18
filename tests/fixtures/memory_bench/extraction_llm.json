@@ -1,5 +1,9 @@
 {
  "model": "deepseek-flash",
+ "provider": "deepseek",
+ "recorded_on": "2026-10-15",
+ "askings": 1,
+ "prompt_sha256": "3499be576e8493a660ee6105cfa25dbde9660826fa2a8d8e38270c07d969781b",
  "extraction_version": 1,
  "replies": {
   "151872822c6678dbfbbeb63257ef6948": "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"name_is\",\"predicate_type\":\"functional\",\"object\":\"layla\",\"confidence\":0.95,\"importance\":5},{\"subject\":\"user\",\"predicate\":\"lives_in\",\"predicate_type\":\"functional\",\"object\":\"lisbon\",\"confidence\":0.9,\"importance\":4}]}",
