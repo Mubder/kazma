@@ -462,6 +462,27 @@ it. Clear the text to remove it. On an install with several users, only an
 administrator can change it: Kazma takes it into account for everyone who
 uses that tenant.
 
+## Changes to what you told Kazma {#changes-to-what-you-told-kazma}
+
+A fact you told Kazma yourself ("I live in Paris") changes only in ways you
+can see and take back. The Memory page's card **Changes to what you told
+Kazma** lists them:
+
+- **Changed from what you said.** You later said something that replaces
+  it ("We moved to Rotterdam"): Kazma keeps the new value and shows the
+  change, with **Undo**, which brings the earlier value back.
+- **Is this a change? Kazma kept the earlier fact.** A message that may be a
+  correction but does not say who it is about ("Moved to Rotterdam last
+  month", "No, Lisbon") does not replace your fact on its own. Kazma keeps
+  the earlier one and asks: **Yes, change it** writes the new value as
+  yours (and the change can still be undone), **No, keep it** leaves
+  everything as it was. A message about someone else ("My sister moved to
+  Rotterdam") asks nothing.
+
+A question you leave unanswered is let go after 30 days. Forgetting the
+fact, the conversation or the words a change holds forgets the change too,
+and the changes are in the memory export. Nothing here calls a model.
+
 ## One fact, one name
 
 When Kazma learns a fact it names it (`timezone`, `works_at` ...). The same

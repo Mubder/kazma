@@ -2153,10 +2153,15 @@ four injected were noise.
   (`state` open or decided) and `POST /api/memory/v2/changes/{change_id}/confirm`,
   `.../dismiss`, `.../undo` (a refusal is its code, with the recorder's
   status: 404, 409); they are in the memory tenant gate's REQUESTS, from
-  which Spaces S1-09 makes their matrix cases. Gate:
+  which Spaces S1-09 makes their matrix cases. The Memory page's card
+  "Changes to what you told Kazma" (`memory_console.js` `loadV2Changes`,
+  EN/AR, each value a `<bdi translate="no">`) shows them with Undo, or
+  "Yes, change it" / "No, keep it". Gates:
   `tests/test_memory_changes.py` (EN/AR; the refusal with no change log as
   the negative control), the plant's control in
-  `tests/test_memory_store_registry.py`.
+  `tests/test_memory_store_registry.py`, and in a browser, reached by the
+  sidebar, `tests/e2e/test_memory_changes_browser.py` (an undo and a
+  confirmation, the database read after each, EN/AR).
 - The heuristic reads "I work at/for X" as `works_at` (it shared a pattern
   with "I live in" and stored the employer as `lives_in`), and the local
   embedder remembers short texts (<= 256 characters, 4,096 of them): each

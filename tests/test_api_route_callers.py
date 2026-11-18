@@ -192,13 +192,6 @@ NOT_CALLED_BY_A_PAGE: dict[str, str] = {
         "the operator's bulk fact invalidation (api-routes.md): confirm=true, "
         "tenant-scoped, bi-temporal so the history is kept"
     ),
-    # ── what changed in the user's facts (memory/changes.py, the audit's F1) ──
-    # The Memory page's card that calls them is the next piece of F1's second
-    # half; these four leave this table with it.
-    "/api/memory/v2/changes": "the Memory page's Changes card (F1's next piece)",
-    "/api/memory/v2/changes/{change_id}/confirm": "the Memory page's Changes card (F1's next piece)",
-    "/api/memory/v2/changes/{change_id}/dismiss": "the Memory page's Changes card (F1's next piece)",
-    "/api/memory/v2/changes/{change_id}/undo": "the Memory page's Changes card (F1's next piece)",
 }
 
 
