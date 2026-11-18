@@ -48,12 +48,19 @@ from typing import Any
 __all__ = [
     "DATASET_PATH",
     "EXTRACTION_PATH",
+    "EXTRACTION_SCORES",
+    "RECORD_AGAIN",
     "RecordingEmbedder",
     "ReplayEmbedder",
+    "StaleRecordingError",
+    "check_recording",
+    "extraction_prompt_sha256",
     "extraction_scores",
     "gated_scores",
     "load_dataset",
     "record_llm_extraction",
+    "recording_identity",
+    "replayed_extraction",
     "run_benchmark",
     "run_extraction_benchmark",
 ]
@@ -391,19 +398,86 @@ class ReplayEmbedder:
         return (self._vecs[i].astype("float32") * self._scale[i]).tolist()
 
 
-# ── Extraction (Memory audit M24) ──────────────────────────────────────────
+# ── Extraction (Memory audit M24; scored by value since 2026-11) ───────────
 #
 # What the two extraction passes keep from one chat turn, scored against the
 # facts a reader would keep (``benchmark_data/extraction.json``, built by
 # ``scripts/memory_bench.py build``). A gold fact lists the acceptable
 # (subject, predicate names, value); a turn with no gold fact should give
-# nothing. Matching: subject by its slug, predicate by
-# ``predicates._predicate_key`` (the same-words rule), value folded
-# (``documents.arabic.fold_for_search``, digits included) and contained
-# either way. The model's pass replays recorded replies
+# nothing. Each fact a pass keeps is one of:
+#
+# * *found*: a gold fact's value under its subject -- or the same relation
+#   stated from the other side ("lulwa child_of user" for "user daughter
+#   Lulwa") -- under any predicate name. A reader calls that fact kept.
+# * *an extra*: true, and not asked for (``extras``: "moved from Ooredoo").
+# * *unwanted*: anything else, and anything the turn says must not be kept
+#   (``avoid``: a sister's job filed as the user's own).
+#
+# Scores per pass and language: ``found`` (the gold facts kept, under any
+# name), ``named`` (of those, the share kept under a listed name, by the
+# same-words rule ``predicates._predicate_key``: the name is what varies
+# between askings, and two names for one fact keep both current), ``right``
+# (the kept facts that are not unwanted) and ``quiet`` (the turns with
+# nothing to keep that kept nothing). Until 2026-11 a fact counted only under
+# a listed name, so a fact kept under another name was "not found" and
+# "wrong" at once (benchmark audit F1); each row still carries that reading
+# as ``recall`` and ``precision``, ungated, for comparison.
+#
+# The model's pass replays recorded replies
 # (``tests/fixtures/memory_bench/extraction_llm.json``, recorded with
-# ``scripts/memory_extraction_record.py`` on the configured model):
-# without them it is reported as not recorded, never guessed.
+# ``scripts/memory_extraction_record.py`` on the configured model). A
+# recording says what it is: the hash of the system prompt it answered, the
+# model, the provider, the date and the askings a turn
+# (:func:`recording_identity`). A recording of another prompt is refused
+# (:class:`StaleRecordingError`), and a turn it does not hold is an error, never a
+# guess: either way, record again.
+
+#: What to run when a recording does not answer what the code asks.
+RECORD_AGAIN = "python scripts/memory_extraction_record.py --out <fixture>"
+
+
+class StaleRecordingError(ValueError):
+    """The recorded replies do not answer what the extractor asks today."""
+
+
+def _sha256(text: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def extraction_prompt_sha256() -> str:
+    """The hash of the system prompt the deep pass sends."""
+    from kazma_core.memory.belief_extractor import _EXTRACT_SYSTEM
+
+    return _sha256(_EXTRACT_SYSTEM)
+
+
+def recording_identity(llm_replies: dict[str, Any]) -> dict[str, Any]:
+    """What a recording is. ``sha256`` covers its replies alone, so the
+    description beside them can be completed without making it another
+    recording."""
+    replies = llm_replies.get("replies") or {}
+    return {
+        "sha256": _sha256(json.dumps(replies, ensure_ascii=False, sort_keys=True)),
+        "turns": len(replies),
+        "askings": int(llm_replies.get("askings") or 1),
+        "model": llm_replies.get("model"),
+        "provider": llm_replies.get("provider"),
+        "recorded_on": llm_replies.get("recorded_on"),
+        "prompt_sha256": llm_replies.get("prompt_sha256"),
+    }
+
+
+def check_recording(llm_replies: dict[str, Any]) -> None:
+    """Refuse a recording that does not say which prompt it answered, or
+    answered another one (benchmark audit F4: with the prompt replaced by
+    "Keep nothing", every deep-pass score stayed the same)."""
+    recorded = llm_replies.get("prompt_sha256")
+    if not recorded:
+        raise StaleRecordingError(f"the recording does not say which extraction prompt it answered: {RECORD_AGAIN}")
+    if recorded != extraction_prompt_sha256():
+        raise StaleRecordingError(f"the extraction prompt changed since the recording: {RECORD_AGAIN}")
 
 
 def _slug(text: str) -> str:
@@ -419,7 +493,24 @@ def _folded(text: str) -> str:
     return " ".join(fold_for_search(str(text or "").replace("_", " ")).lower().split())
 
 
+def _holds(gold: str, value: str) -> bool:
+    return bool(gold and value) and (gold in value or value in gold)
+
+
+def _value_matches(alt: dict[str, Any], got: dict[str, Any]) -> bool:
+    """*got* keeps *alt*'s value under its subject, under any name -- or
+    states the same relation from the other side (subject and value
+    swapped)."""
+    gold = _folded(alt["object"])
+    subject = _slug(alt["subject"])
+    if _slug(got.get("subject")) == subject and _holds(gold, _folded(got.get("object"))):
+        return True
+    return _slug(got.get("object")) == subject and _holds(gold, _folded(got.get("subject")))
+
+
 def _fact_matches(alternatives: list[dict[str, Any]], got: dict[str, Any]) -> bool:
+    """*got* keeps one of the gold fact's alternatives under its subject AND a
+    listed name (the reading before 2026-11, now the ``named`` score)."""
     from kazma_core.memory.predicates import _predicate_key
 
     subject, predicate, value = _slug(got.get("subject")), got.get("predicate") or "", _folded(got.get("object"))
@@ -430,33 +521,64 @@ def _fact_matches(alternatives: list[dict[str, Any]], got: dict[str, Any]) -> bo
             continue
         if _predicate_key(predicate) not in {_predicate_key(p) for p in alt["predicates"]}:
             continue
-        gold = _folded(alt["object"])
-        if gold and (gold in value or value in gold):
+        if _holds(_folded(alt["object"]), value):
             return True
     return False
 
 
+def _avoided(entry: dict[str, Any], got: dict[str, Any]) -> bool:
+    """*got* is a fact the turn says must not be kept: the entry's subject and
+    value, under one of its names (any name when it lists none)."""
+    from kazma_core.memory.predicates import _predicate_key
+
+    if _slug(got.get("subject")) != _slug(entry["subject"]):
+        return False
+    names = entry.get("predicates")
+    if names and _predicate_key(got.get("predicate") or "") not in {_predicate_key(p) for p in names}:
+        return False
+    return _holds(_folded(entry["object"]), _folded(got.get("object")))
+
+
 def _score_extraction(turns: list[dict[str, Any]], extracted: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
-    by_lang: dict[str, dict[str, int]] = {}
+    by_lang: dict[str, dict[str, Any]] = {}
     for turn in turns:
-        row = by_lang.setdefault(turn["lang"], {"turns": 0, "gold": 0, "found": 0, "kept": 0, "right": 0,
-                                                "quiet_turns": 0, "quiet_kept_nothing": 0})
+        row = by_lang.setdefault(turn["lang"], {
+            "turns": 0, "gold": 0, "gold_found": 0, "gold_named": 0, "kept": 0, "kept_unwanted": 0,
+            "kept_listed": 0, "quiet_turns": 0, "quiet_kept_nothing": 0, "unwanted": []})
         got = extracted.get(turn["id"], [])
+        gold = turn["facts"]
+        allowed = gold + (turn.get("extras") or [])
+        avoid = turn.get("avoid") or []
+        # A fact the turn says must not be kept finds nothing, whatever value
+        # it holds: "user studies_at Bayan School" holds the value of "user
+        # daughter_school Bayan School", and says something false.
+        good = [g for g in got if not any(_avoided(e, g) for e in avoid)]
         row["turns"] += 1
-        row["gold"] += len(turn["facts"])
+        row["gold"] += len(gold)
         row["kept"] += len(got)
-        row["found"] += sum(1 for alts in turn["facts"] if any(_fact_matches(alts, g) for g in got))
-        row["right"] += sum(1 for g in got if any(_fact_matches(alts, g) for alts in turn["facts"]))
-        if not turn["facts"]:
+        row["gold_found"] += sum(1 for alts in gold if any(_value_matches(a, g) for a in alts for g in good))
+        row["gold_named"] += sum(1 for alts in gold if any(_fact_matches(alts, g) for g in good))
+        row["kept_listed"] += sum(1 for g in got if any(_fact_matches(alts, g) for alts in gold))
+        for g in got:
+            if g not in good or not any(_value_matches(a, g) for alts in allowed for a in alts):
+                row["kept_unwanted"] += 1
+                row["unwanted"].append(f"{turn['id']}: {g.get('subject')} {g.get('predicate')} {g.get('object')}")
+        if not gold:
             row["quiet_turns"] += 1
             row["quiet_kept_nothing"] += int(not got)
     out = {}
     for lang, row in sorted(by_lang.items()):
+        found, kept = row["gold_found"], row["kept"]
         out[lang] = {
             **row,
-            "recall": round(row["found"] / row["gold"], 4) if row["gold"] else 0.0,
-            "precision": round(row["right"] / row["kept"], 4) if row["kept"] else 1.0,
+            "found": round(found / row["gold"], 4) if row["gold"] else 0.0,
+            "named": round(row["gold_named"] / found, 4) if found else 1.0,
+            "right": round((kept - row["kept_unwanted"]) / kept, 4) if kept else 1.0,
             "quiet": round(row["quiet_kept_nothing"] / row["quiet_turns"], 4) if row["quiet_turns"] else 1.0,
+            # The reading before 2026-11 (a fact counts only under a listed
+            # name), kept for comparison; not gated.
+            "recall": round(row["gold_named"] / row["gold"], 4) if row["gold"] else 0.0,
+            "precision": round(row["kept_listed"] / kept, 4) if kept else 1.0,
         }
     return out
 
@@ -469,44 +591,44 @@ def _llm_blob(user_text: str) -> str:
 
 class _ReplayClient:
     """Answers the extraction prompt from recorded replies; a prompt nobody
-    recorded is an error (the dataset changed: record again)."""
+    recorded is an error (the dataset changed: record again). It also checks
+    the system message it is sent against the recording's: a prompt built
+    another way at run time is a recording of something else."""
 
-    def __init__(self, replies: dict[str, str]) -> None:
+    def __init__(self, replies: dict[str, str], prompt_sha256: str) -> None:
         self._replies = replies
+        self._prompt = prompt_sha256
+        self.stale = False
 
     async def chat(self, messages: list[dict[str, Any]], **_kw: Any) -> str:
+        system = next((m["content"] for m in messages if m.get("role") == "system"), "")
+        if _sha256(system) != self._prompt:
+            # Raised after the run: the extractor reads any failed call as
+            # "the model is down".
+            self.stale = True
+            return ""
         key = _text_key(messages[-1]["content"])
         if key not in self._replies:
-            raise KeyError("no recorded reply for this turn: python scripts/memory_extraction_record.py --out <fixture>")
+            raise KeyError(f"no recorded reply for this turn: {RECORD_AGAIN}")
         return self._replies[key]
 
 
-def run_extraction_benchmark(
-    dataset: dict[str, Any] | None = None, *, llm_replies: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Score the heuristic pass, and the model's pass when *llm_replies* (the
-    recorded file) is given."""
+def replayed_extraction(turns: list[dict[str, Any]], llm_replies: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """What the deep pass keeps from each turn, from the recorded replies,
+    read by the product's own parser and sanitizer."""
     import asyncio
     from unittest import mock
 
-    from kazma_core.memory.belief_extractor import _llm_extract, _sanitize_belief, extract_beliefs_heuristic
+    from kazma_core.memory.belief_extractor import _llm_extract, _sanitize_belief
 
-    data = dataset or json.loads(EXTRACTION_PATH.read_text(encoding="utf-8"))
-    turns = data["turns"]
-    report: dict[str, Any] = {
-        "version": data["version"],
-        "heuristic": _score_extraction(turns, {t["id"]: extract_beliefs_heuristic(t["user"]) for t in turns}),
-    }
-    if not llm_replies:
-        report["llm"] = {"recorded": False}
-        return report
-    registry = type("_Registry", (), {"get_client": lambda self: _ReplayClient(llm_replies["replies"])})()
-
+    check_recording(llm_replies)
     missing = [t["id"] for t in turns if _text_key(_llm_blob(t["user"])) not in llm_replies["replies"]]
     if missing:
         # Checked here: the extractor reads any failed call as "the model is
         # down", which would score a stale recording as an outage.
-        raise KeyError(f"no recorded reply for {missing}: python scripts/memory_extraction_record.py --out <fixture>")
+        raise KeyError(f"no recorded reply for {missing}: {RECORD_AGAIN}")
+    client = _ReplayClient(llm_replies["replies"], llm_replies["prompt_sha256"])
+    registry = type("_Registry", (), {"get_client": lambda self: client})()
 
     async def ask_all() -> dict[str, list[dict[str, Any]]]:
         got = {}
@@ -517,20 +639,45 @@ def run_extraction_benchmark(
 
     with mock.patch("kazma_core.model_registry.get_model_registry", lambda: registry):
         extracted = asyncio.run(ask_all())
-    report["llm"] = {"recorded": True, "model": llm_replies.get("model"), **_score_extraction(turns, extracted)}
+    if client.stale:
+        raise StaleRecordingError(f"the extractor sent another system prompt than the recording answered: {RECORD_AGAIN}")
+    return extracted
+
+
+def run_extraction_benchmark(
+    dataset: dict[str, Any] | None = None, *, llm_replies: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Score the heuristic pass, and the model's pass when *llm_replies* (the
+    recorded file) is given."""
+    from kazma_core.memory.belief_extractor import extract_beliefs_heuristic
+
+    data = dataset or json.loads(EXTRACTION_PATH.read_text(encoding="utf-8"))
+    turns = data["turns"]
+    report: dict[str, Any] = {
+        "version": data["version"],
+        "heuristic": _score_extraction(turns, {t["id"]: extract_beliefs_heuristic(t["user"]) for t in turns}),
+    }
+    if not llm_replies:
+        report["llm"] = {"recorded": False}
+        return report
+    report["llm"] = _score_extraction(turns, replayed_extraction(turns, llm_replies))
+    report["llm_recording"] = recording_identity(llm_replies)
     return report
 
 
+#: The extraction scores the lock holds, per pass and language.
+EXTRACTION_SCORES = ("found", "named", "right", "quiet")
+
+
 def extraction_scores(report: dict[str, Any]) -> dict[str, float]:
-    """The extraction scores the ratchet holds: per pass and language,
-    recall, precision and quiet (turns with nothing to keep that kept
-    nothing)."""
+    """The extraction scores the lock holds: per pass and language, ``found``,
+    ``named``, ``right`` and ``quiet``."""
     out = {}
     for pass_name in ("heuristic", "llm"):
         part = report.get(pass_name) or {}
         for lang, row in part.items():
             if isinstance(row, dict):
-                for k in ("recall", "precision", "quiet"):
+                for k in EXTRACTION_SCORES:
                     out[f"{pass_name}.{lang}.{k}"] = float(row[k])
     return dict(sorted(out.items()))
 
@@ -554,4 +701,9 @@ async def record_llm_extraction(dataset: dict[str, Any] | None = None) -> dict[s
     # The provider client keeps its model on its config (``LLMProvider.config``).
     model = (getattr(getattr(client, "config", None), "model", None) or getattr(client, "model", None)
              or getattr(registry, "active_model", None) or "unknown")
-    return {"model": str(model), "extraction_version": data["version"], "replies": replies}
+    import datetime as _dt
+
+    return {"model": str(model), "provider": str(getattr(registry, "_active_provider", "") or "unknown"),
+            "recorded_on": _dt.date.today().isoformat(), "askings": 1,
+            "prompt_sha256": _sha256(_EXTRACT_SYSTEM), "extraction_version": data["version"],
+            "replies": replies}

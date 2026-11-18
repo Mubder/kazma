@@ -98,24 +98,38 @@ def _memory(data: dict) -> list[str]:
         "number on this page.",
         "",
     ]
-    ex = (data.get("extraction") or {}).get("scores") or {}
+    extraction = data.get("extraction") or {}
+    ex = extraction.get("scores") or {}
     if ex:
+        recording = extraction.get("recording") or {}
+        askings = int(recording.get("askings") or 1)
+        model_label = f"Model pass ({askings} asking{'' if askings == 1 else 's'} a turn)"
         lines += [
             "### Learning facts from a conversation {#memory-facts}",
             "",
             "Turns in English, Arabic and both, with the facts a person would expect remembered. **Quick pass**: "
             "Kazma's own rules, on every turn. **Model pass**: the model reading the turn afterwards (recorded "
-            "replies). **Recall**: facts found. **Precision**: facts found that are right. **Quiet**: turns with "
-            "nothing to learn that taught nothing.",
+            "replies). **Found**: the facts kept, whatever the model called them. **Same name**: of those, the "
+            "share kept under a name on the list (a fact kept under two names is two facts to Kazma). **Right**: "
+            "the facts kept that are true and about the right person. **Quiet**: turns with nothing to learn that "
+            "taught nothing.",
             "",
-            "| Pass | Language | Recall | Precision | Quiet |",
-            "|---|---|---|---|---|",
+            "| Pass | Language | Found | Same name | Right | Quiet |",
+            "|---|---|---|---|---|---|",
         ]
-        for kind, label in (("heuristic", "Quick pass"), ("llm", "Model pass")):
+        for kind, label in (("heuristic", "Quick pass"), ("llm", model_label)):
             for lang, lang_label in (("en", "English"), ("ar", "Arabic"), ("mixed", "Mixed")):
-                if f"{kind}.{lang}.recall" in ex:
-                    lines.append(f"| {label} | {lang_label} | {_pct(ex[f'{kind}.{lang}.recall'])} | "
-                                 f"{_pct(ex[f'{kind}.{lang}.precision'])} | {_pct(ex[f'{kind}.{lang}.quiet'])} |")
+                if f"{kind}.{lang}.found" in ex:
+                    lines.append(f"| {label} | {lang_label} | {_pct(ex[f'{kind}.{lang}.found'])} | "
+                                 f"{_pct(ex[f'{kind}.{lang}.named'])} | {_pct(ex[f'{kind}.{lang}.right'])} | "
+                                 f"{_pct(ex[f'{kind}.{lang}.quiet'])} |")
+        if recording:
+            lines += [
+                "",
+                f"The model pass is {recording.get('model')}'s replies, recorded on {recording.get('recorded_on')}, "
+                f"{askings} asking{'' if askings == 1 else 's'} a turn. Asked again, a model answers a little "
+                "differently, so a number from one asking can move by a few facts with nothing changed.",
+            ]
         lines.append("")
     pg = data.get("postgres_primary") or {}
     if pg:

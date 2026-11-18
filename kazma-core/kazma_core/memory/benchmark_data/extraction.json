@@ -1,5 +1,5 @@
 {
- "version": 1,
+ "version": 2,
  "turns": [
   {
    "id": "e01",
@@ -177,6 +177,29 @@
       "object": "KLM"
      }
     ]
+   ],
+   "avoid": [
+    {
+     "subject": "user",
+     "predicates": [
+      "job",
+      "job_title",
+      "occupation",
+      "role",
+      "profession",
+      "works_as"
+     ],
+     "object": "pilot"
+    },
+    {
+     "subject": "user",
+     "predicates": [
+      "works_at",
+      "employer",
+      "company"
+     ],
+     "object": "KLM"
+    }
    ]
   },
   {
@@ -406,6 +429,20 @@
       "object": "طبيبة أسنان"
      }
     ]
+   ],
+   "avoid": [
+    {
+     "subject": "user",
+     "predicates": [
+      "job",
+      "job_title",
+      "occupation",
+      "role",
+      "profession",
+      "works_as"
+     ],
+     "object": "طبيبة أسنان"
+    }
    ]
   },
   {
@@ -604,6 +641,17 @@
       "object": "daughter"
      }
     ]
+   ],
+   "avoid": [
+    {
+     "subject": "user",
+     "predicates": [
+      "school",
+      "studies_at",
+      "attends"
+     ],
+     "object": "Bayan School"
+    }
    ]
   },
   {
@@ -628,6 +676,19 @@
       "object": "Zain"
      }
     ]
+   ],
+   "extras": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "previously_worked_at",
+       "former_employer",
+       "worked_at"
+      ],
+      "object": "Ooredoo"
+     }
+    ]
    ]
   },
   {
@@ -647,6 +708,16 @@
       "object": "Abu Faisal"
      }
     ]
+   ],
+   "avoid": [
+    {
+     "subject": "assistant",
+     "object": "Kazma"
+    },
+    {
+     "subject": "kazma",
+     "object": "Abu Faisal"
+    }
    ]
   }
  ]

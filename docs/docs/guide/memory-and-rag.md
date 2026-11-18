@@ -769,12 +769,19 @@ ones, on both paths (vectors replayed from bge-m3):
 
 Extraction (`python scripts/memory_bench.py extraction`): 30 single turns
 in English, Arabic and both, scored on what a reader would keep from each.
+A fact counts as **found** when its value is kept about the right person,
+whatever the pass called it; **same name** is the share of those kept under
+a name on the list (a fact under two names is two facts to Kazma, so the
+name matters too); **right** is the share of kept facts that are true and
+about the right person ("my sister is a pilot" never makes the user a
+pilot). Until 2026-11 a fact counted only under a listed name, so a fact
+kept under another name was counted "not found" and "wrong" at once.
 
-| Heuristic pass | Recall | Precision | Turns with nothing to keep that kept nothing |
-|---|---|---|---|
-| English (12 turns) | 0.46 | 1.0 | 3 of 3 |
-| Arabic (10 turns) | 0.64 | 1.0 | 2 of 2 |
-| Mixed (8 turns) | 0.60 | 1.0 | 1 of 1 |
+| Heuristic pass | Found | Same name | Right | Turns with nothing to keep that kept nothing |
+|---|---|---|---|---|
+| English (12 turns) | 0.46 | 1.0 | 1.0 | 3 of 3 |
+| Arabic (10 turns) | 0.64 | 1.0 | 1.0 | 2 of 2 |
+| Mixed (8 turns) | 0.60 | 1.0 | 1.0 | 1 of 1 |
 
 The heuristic pass is the quick first look at every turn. Until 2026-10-14 it
 had English patterns only and kept nothing from Arabic (0.00, mixed 0.20);
@@ -787,14 +794,20 @@ field of work ("أشتغل في المبيعات", like "I work in sales"). What
 relatives, jobs, dates -- is the model's deep pass to find. That pass is scored from the configured model's recorded
 replies (`scripts/memory_extraction_record.py --out <fixture>`, run with an
 install's own Python, one model call per turn); a turn with no recorded reply
-is an error, never a guess. Recorded 2026-10-15 with DeepSeek's
-`deepseek-flash`:
+is an error, never a guess, and a recording of another prompt is refused.
+Recorded 2026-10-15 with DeepSeek's `deepseek-flash`, one asking a turn:
 
-| Model's pass | Recall | Precision | Turns with nothing to keep that kept nothing |
-|---|---|---|---|
-| English (12 turns) | 0.77 | 0.79 | 3 of 3 |
-| Arabic (10 turns) | 0.91 | 0.91 | 2 of 2 |
-| Mixed (8 turns) | 0.70 | 0.58 | 1 of 1 |
+| Model's pass | Found | Same name | Right | Turns with nothing to keep that kept nothing |
+|---|---|---|---|---|
+| English (12 turns) | 1.0 | 0.77 | 1.0 | 3 of 3 |
+| Arabic (10 turns) | 1.0 | 0.91 | 1.0 | 2 of 2 |
+| Mixed (8 turns) | 1.0 | 0.70 | 0.92 | 1 of 1 |
+
+The model kept every fact asked for. What varies is the name it gives a
+fact, and the one fact it should not have kept: "Call me Abu Faisal يا
+Kazma" also gave "the assistant's name is Kazma". One asking a turn is a
+small sample: asked again, the same model answered differently on three of
+six turns, so these numbers can move by a few facts with nothing changed.
 
 The first recording found the deep pass translating what Arabic speakers
 said into English slugs ("ليلى" kept as `layla`, "دبي" as `dubai`): the

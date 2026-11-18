@@ -5,6 +5,7 @@
   python scripts/memory_bench.py run [--real]      # score recall(); --real loads the model
   python scripts/memory_bench.py lock              # raise the CI ratchet to today's scores
   python scripts/memory_bench.py lock --trade "why"  # a reviewed trade (see TRADE_RULE)
+  python scripts/memory_bench.py lock --new-recording "why"  # lock a new recording of the model's pass
   python scripts/memory_bench.py extraction           # extraction scores from the recorded replies
                                                     # (recorded by scripts/memory_extraction_record.py)
 
@@ -876,14 +877,50 @@ EXTRACTION_TURNS: list[tuple[str, str, str, list[list[tuple[str, list[str], str]
 ]
 
 
+#: True facts a turn holds that its gold list does not ask for: a pass that
+#: keeps one is not wrong (dataset v2).
+EXTRACTION_EXTRAS: dict[str, list[list[tuple[str, list[str], str]]]] = {
+    "m07": [[("user", ["previously_worked_at", "former_employer", "worked_at"], "Ooredoo")]],
+}
+
+#: Facts a turn must not give, whatever else it keeps (dataset v2): the
+#: assistant's name filed as a fact, and someone else's job, employer or
+#: school filed as the user's own (the user is never "a pilot" because their
+#: sister is). ``None`` for the names: under any name.
+_JOB = ["job", "job_title", "occupation", "role", "profession", "works_as"]
+EXTRACTION_AVOID: dict[str, list[tuple[str, list[str] | None, str]]] = {
+    "e07": [("user", _JOB, "pilot"), ("user", ["works_at", "employer", "company"], "KLM")],
+    "a06": [("user", _JOB, "طبيبة أسنان")],
+    "m05": [("user", ["school", "studies_at", "attends"], "Bayan School")],
+    "m08": [("assistant", None, "Kazma"), ("kazma", None, "Abu Faisal")],
+}
+
+#: The extraction dataset's version: v2 added ``extras`` and ``avoid`` and
+#: the scores read the value (benchmark audit F1).
+EXTRACTION_VERSION = 2
+
+
 def build_extraction() -> dict[str, Any]:
     turns = []
+
+    def facts_of(rows: list[list[tuple[str, list[str], str]]]) -> list[list[dict[str, Any]]]:
+        return [[{"subject": a, "predicates": b, "object": c} for a, b, c in alts] for alts in rows]
+
     for tid, lang, text, facts in EXTRACTION_TURNS:
-        turns.append({"id": tid, "lang": lang, "user": text,
-                      "facts": [[{"subject": a, "predicates": b, "object": c} for a, b, c in alts] for alts in facts]})
-    if len({t["id"] for t in turns}) != len(turns):
+        turn: dict[str, Any] = {"id": tid, "lang": lang, "user": text, "facts": facts_of(facts)}
+        if tid in EXTRACTION_EXTRAS:
+            turn["extras"] = facts_of(EXTRACTION_EXTRAS[tid])
+        if tid in EXTRACTION_AVOID:
+            turn["avoid"] = [{"subject": a, **({"predicates": b} if b else {}), "object": c}
+                             for a, b, c in EXTRACTION_AVOID[tid]]
+        turns.append(turn)
+    ids = [t["id"] for t in turns]
+    if len(set(ids)) != len(ids):
         raise ValueError("duplicate extraction turn id")
-    return {"version": 1, "turns": turns}
+    unknown = (set(EXTRACTION_EXTRAS) | set(EXTRACTION_AVOID)) - set(ids)
+    if unknown:
+        raise ValueError(f"extras or avoid for no turn: {sorted(unknown)}")
+    return {"version": EXTRACTION_VERSION, "turns": turns}
 
 
 def _cmd_build() -> int:
@@ -1017,13 +1054,15 @@ def trade_problems(old: dict[str, float], new: dict[str, float]) -> list[str]:
     return problems
 
 
-def _cmd_lock(rebaseline: bool, trade: str | None = None) -> int:
+def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | None = None) -> int:
     """Write the replayed scores as the ratchet; refuse to lower any of them.
 
-    The ratchet names the dataset version it was measured on. A new dataset
-    is a new instrument: its first scores are written with ``--rebaseline``,
-    which is refused while the version is unchanged -- so it can never be
-    used to lower the gate on the same data.
+    The ratchet names the dataset versions it was measured on (the recall
+    dataset and the extraction dataset). A new dataset is a new instrument:
+    its first scores are written with ``--rebaseline``, which resets only the
+    part whose dataset changed and is refused while neither changed -- so it
+    can never be used to lower the gate on the same data. The model's
+    extraction pass follows its own rules (:func:`_extraction_lock`).
     """
     from kazma_core.memory.benchmark import (
         ReplayEmbedder,
@@ -1033,22 +1072,27 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None) -> int:
     )
 
     version = load_dataset()["version"]
+    extraction_version = json.loads(EXTRACTION.read_text(encoding="utf-8"))["version"]
+    old = json.loads(THRESHOLDS.read_text(encoding="utf-8")) if THRESHOLDS.is_file() else {}
+    recall_new = old.get("dataset_version") != version
+    extraction_new = (old.get("extraction") or {}).get("version") != extraction_version
+    if rebaseline and not (recall_new or extraction_new):
+        print(f"the ratchet already measures recall dataset v{version} and extraction dataset "
+              f"v{extraction_version}: nothing to rebaseline", file=sys.stderr)
+        return 1
+    if (recall_new or extraction_new) and not rebaseline:
+        if recall_new:
+            print(f"the ratchet measures recall dataset v{old.get('dataset_version')}, the dataset is "
+                  f"v{version}: record its vectors, then lock --rebaseline", file=sys.stderr)
+        if extraction_new:
+            print(f"the ratchet measures extraction dataset v{(old.get('extraction') or {}).get('version')}, "
+                  f"the dataset is v{extraction_version}: lock --rebaseline", file=sys.stderr)
+        return 1
     replay = ReplayEmbedder(VECTORS)
     a, b = _patched(replay, replay.model)
     with a, b:
         scores = gated_scores(run_benchmark())
-    old = json.loads(THRESHOLDS.read_text(encoding="utf-8")) if THRESHOLDS.is_file() else {}
-    old_scores = old.get("scores", {})
-    if rebaseline:
-        if old.get("dataset_version") == version:
-            print(f"the ratchet already measures dataset v{version}: nothing to rebaseline",
-                  file=sys.stderr)
-            return 1
-        old_scores = {}
-    elif old.get("dataset_version") != version:
-        print(f"the ratchet measures dataset v{old.get('dataset_version')}, the dataset is "
-              f"v{version}: record its vectors, then lock --rebaseline", file=sys.stderr)
-        return 1
+    old_scores = {} if recall_new else old.get("scores", {})
     lower = {k: (v, scores.get(k)) for k, v in old_scores.items() if scores.get(k, -1.0) < v}
     trades = list(old.get("trades", []))
     if lower and trade:
@@ -1072,12 +1116,24 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None) -> int:
         print("refusing to lower the ratchet: fix the regression, or propose a reviewed "
               "trade with --trade \"why\"", file=sys.stderr)
         return 1
+    from kazma_core.memory.benchmark import StaleRecordingError
+
+    try:
+        extraction, problems = _extraction_lock(old.get("extraction") or {}, fresh=extraction_new,
+                                                new_recording=new_recording)
+    except (StaleRecordingError, KeyError) as exc:
+        problems = [str(exc)]
+    if problems:
+        for line in problems:
+            print(f"  {line}", file=sys.stderr)
+        print("refusing to lock the extraction scores", file=sys.stderr)
+        return 1
     THRESHOLDS.write_text(
         json.dumps({"dataset_version": version, "scores": scores, "targets": TARGETS,
-                    "trades": trades, "extraction": _extraction_floor(old),
+                    "trades": trades, "extraction": extraction,
                     # The opt-in Postgres-primary run's floors
                     # (tests/test_memory_benchmark_pg.py), on the same dataset only.
-                    "postgres_primary": {} if rebaseline else old.get("postgres_primary", {})},
+                    "postgres_primary": {} if recall_new else old.get("postgres_primary", {})},
                    indent=1, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
@@ -1088,17 +1144,63 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None) -> int:
     return 0
 
 
-def _extraction_floor(old: dict[str, Any]) -> dict[str, Any]:
-    """The extraction scores, raised to today's (never lowered: refused above
-    for the recall scores; here the old value is kept where today's is lower,
-    and the gate test reports the drop)."""
-    from kazma_core.memory.benchmark import extraction_scores, run_extraction_benchmark
+def _extraction_lock(
+    old: dict[str, Any], *, fresh: bool = False, new_recording: str | None = None,
+) -> tuple[dict[str, Any], list[str]]:
+    """The extraction part of the lock, and why it is refused (empty: it is not).
 
-    replies = json.loads(LLM_REPLIES.read_text(encoding="utf-8")) if LLM_REPLIES.is_file() else None
-    now = extraction_scores(run_extraction_benchmark(llm_replies=replies))
-    was = (old.get("extraction") or {}).get("scores", {})
-    return {"version": json.loads(EXTRACTION.read_text(encoding="utf-8"))["version"],
-            "scores": {k: max(v, was.get(k, -1.0)) for k, v in sorted(now.items())}}
+    *old* is the locked extraction part; *fresh* says the extraction dataset
+    is new (``--rebaseline``), so today's scores are its first lock.
+
+    * The quick pass is Kazma's own code: a ratchet, never lowered.
+    * The model's pass is scored from one recording (benchmark audit F3). On
+      the same recording its scores are compared exactly: only a change in
+      the parser or the scorer moves them, and a drop is refused. A different
+      recording is locked only on purpose (``--new-recording "why"``), and
+      its scores replace the old ones exactly: one asking a turn has no
+      spread to compare against, and the higher of two recordings, score by
+      score, is a floor no recording reaches. The change is written down.
+    * No recording, a prompt it did not answer, or a locked score missing
+      from today's run: refused, never a shorter lock.
+    """
+    import datetime as _dt
+
+    from kazma_core.memory.benchmark import RECORD_AGAIN, extraction_scores, run_extraction_benchmark
+
+    if not LLM_REPLIES.is_file():
+        return {}, [f"no recording of the model's pass ({LLM_REPLIES.name}): it cannot be locked without "
+                    f"one; {RECORD_AGAIN}"]
+    report = run_extraction_benchmark(llm_replies=json.loads(LLM_REPLIES.read_text(encoding="utf-8")))
+    now = extraction_scores(report)
+    identity = report["llm_recording"]
+    was = {} if fresh else (old.get("scores") or {})
+    history = list(old.get("recordings") or [])
+    problems = [f"{k}: locked, and missing from today's run" for k in was if k not in now]
+    problems += [f"{k}: {now[k]} < {v}" for k, v in sorted(was.items())
+                 if k.startswith("heuristic.") and k in now and now[k] < v]
+    same = (old.get("recording") or {}).get("sha256") == identity["sha256"]
+    if fresh:
+        if old.get("recording") and not same:
+            history.append({"date": _dt.date.today().isoformat(),
+                            "reason": f"a new extraction dataset (v{report['version']})",
+                            "replaced": {"recording": old.get("recording"),
+                                         "scores": {k: v for k, v in sorted((old.get("scores") or {}).items())
+                                                    if k.startswith("llm.")}}})
+    elif same:
+        if new_recording:
+            problems.append("--new-recording: the recording is the one already locked")
+        problems += [f"{k}: {now[k]} < {v} on the same recording" for k, v in sorted(was.items())
+                     if k.startswith("llm.") and k in now and now[k] < v]
+    elif not new_recording:
+        problems.append("the recording of the model's pass changed: a new recording is locked only on purpose, "
+                        "with lock --new-recording \"why\" (its scores replace the old ones)")
+    else:
+        history.append({
+            "date": _dt.date.today().isoformat(), "reason": new_recording,
+            "replaced": {"recording": old.get("recording"),
+                         "scores": {k: v for k, v in sorted(was.items()) if k.startswith("llm.")}},
+        })
+    return {"version": report["version"], "recording": identity, "scores": now, "recordings": history}, problems
 
 
 def _cmd_extraction() -> int:
@@ -1121,6 +1223,8 @@ def main(argv: list[str] | None = None) -> int:
                       help="a new dataset version: its first scores become the ratchet")
     lock.add_argument("--trade", metavar="REASON",
                       help="lower some scores for a larger gain elsewhere, under TRADE_RULE; recorded")
+    lock.add_argument("--new-recording", metavar="REASON",
+                      help="lock a new recording of the model's extraction pass; its scores replace the old")
     sub.add_parser("extraction")
     run = sub.add_parser("run")
     run.add_argument("--real", action="store_true", help="load the real embedder")
@@ -1132,7 +1236,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "vectors":
         return _cmd_vectors()
     if args.cmd == "lock":
-        return _cmd_lock(args.rebaseline, args.trade)
+        return _cmd_lock(args.rebaseline, args.trade, args.new_recording)
     if args.cmd == "extraction":
         return _cmd_extraction()
     return _cmd_run(args.real, args.json, args.details)

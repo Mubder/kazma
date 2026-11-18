@@ -1891,13 +1891,29 @@ four injected were noise.
   `mixed` category asks across languages), scored apart
   (`report["heldout"]`, gated as `heldout.*`); an extraction benchmark
   (`benchmark_data/extraction.json`, `run_extraction_benchmark`: 30 turns
-  EN/AR/mixed, recall, precision and "quiet" per language; the heuristic
-  pass in CI, the model's deep pass from recorded replies,
-  `tests/fixtures/memory_bench/extraction_llm.json`, recorded with
-  `scripts/memory_extraction_record.py --out <fixture>` run by an install's
-  own Python (it loads that install's `.env`; `memory_bench.py` stays
-  env-free) -- it costs a call a turn; a turn with no recording is an error, never "the
-  model was down"); explicit abstention targets (`TARGETS`, 0.6, goals not
+  EN/AR/mixed; the heuristic pass in CI, the model's deep pass from
+  recorded replies, `tests/fixtures/memory_bench/extraction_llm.json`,
+  recorded with `scripts/memory_extraction_record.py --out <fixture>` run by
+  an install's own Python (it loads that install's `.env`; `memory_bench.py`
+  stays env-free) -- it costs a call a turn; a turn with no recording is an
+  error, never "the model was down"). **Scored by value since 2026-11**
+  (dataset v2, benchmark audit R1): per pass and language `found` (a gold
+  fact's value under its subject, or the relation from the other side, under
+  any name), `named` (of those, under a listed name), `right` (kept facts
+  not unwanted: a turn's `extras` are true, its `avoid` entries are never
+  right and find nothing) and `quiet`; the old strict reading stays in each
+  row as `recall`/`precision`, ungated. **A recording says what it is**
+  (`recording_identity`: its replies' hash, model, provider, date, askings,
+  the system prompt's hash) and a recording of another prompt is refused
+  (`StaleRecordingError`, also at replay time). The lock (`_extraction_lock`):
+  the quick pass is a ratchet; the model's pass compares exactly on the
+  same recording, a new recording is locked only with
+  `lock --new-recording "why"` and replaces the old scores exactly (written
+  in `recordings`), no recording is a failure, and `lock --rebaseline`
+  resets the extraction part when its dataset version changes. Gates in
+  `tests/test_memory_benchmark.py`, each with its negative control (a
+  renamed extractor keeps `found`; "Keep nothing" as the prompt is refused;
+  the old max-of-two floor). Explicit abstention targets (`TARGETS`, 0.6, goals not
   gates); a reviewed trade (`lock --trade "why"`, `trade_problems`: no
   score falls more than 0.05, one rises 0.05 or more, abstention never
   falls; recorded in `trades`); and the Postgres-primary run
