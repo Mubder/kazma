@@ -62,7 +62,7 @@ def test_put_stream_quota_path_accepts_bytes(pg_pool, tmp_path: Path) -> None:
     from kazma_core.documents.storage import ContentAddressedStorage
 
     repo = PostgresDocumentRepository(pg_pool, tenant_quota_bytes=50 * 1024 * 1024)
-    storage = ContentAddressedStorage(tmp_path / "cas")
+    storage = ContentAddressedStorage(tmp_path / "cas").for_space("default")
     payload = b"quota-path regression\n"
     stored = storage.put_stream(
         io.BytesIO(payload),

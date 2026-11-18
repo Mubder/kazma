@@ -17,7 +17,7 @@ from kazma_core.documents.storage import (
 
 
 def test_stream_write_is_atomic_verified_and_deduplicated(tmp_path, monkeypatch) -> None:
-    storage = ContentAddressedStorage(tmp_path / "storage")
+    storage = ContentAddressedStorage(tmp_path / "storage").for_space("default")
     payload = b"abc" * 10_000
     expected = hashlib.sha256(payload).hexdigest()
     replace_calls: list[tuple[object, object]] = []
@@ -58,7 +58,7 @@ def test_stream_write_is_atomic_verified_and_deduplicated(tmp_path, monkeypatch)
 
 
 def test_oversized_or_bad_checksum_never_promotes_or_leaves_temp(tmp_path) -> None:
-    storage = ContentAddressedStorage(tmp_path / "storage")
+    storage = ContentAddressedStorage(tmp_path / "storage").for_space("default")
 
     with pytest.raises(BlobTooLargeError):
         storage.put_stream([b"1234", b"5678"], kind="quarantine", max_bytes=7)
@@ -76,7 +76,7 @@ def test_oversized_or_bad_checksum_never_promotes_or_leaves_temp(tmp_path) -> No
 
 
 def test_existing_corrupt_blob_is_never_overwritten(tmp_path) -> None:
-    storage = ContentAddressedStorage(tmp_path / "storage")
+    storage = ContentAddressedStorage(tmp_path / "storage").for_space("default")
     payload = b"correct"
     digest = hashlib.sha256(payload).hexdigest()
     target = storage.blob_path(kind="artifacts", sha256=digest)
@@ -90,7 +90,7 @@ def test_existing_corrupt_blob_is_never_overwritten(tmp_path) -> None:
 
 
 def test_manifest_is_atomic_deterministic_and_validates_ids(tmp_path) -> None:
-    storage = ContentAddressedStorage(tmp_path / "storage")
+    storage = ContentAddressedStorage(tmp_path / "storage").for_space("default")
     document_id = DocumentId("11111111-1111-4111-8111-111111111111")
     version_id = VersionId("22222222-2222-4222-8222-222222222222")
 
@@ -128,14 +128,14 @@ def test_manifest_is_atomic_deterministic_and_validates_ids(tmp_path) -> None:
     ],
 )
 def test_storage_rejects_path_traversal(kind: str, digest: str, tmp_path) -> None:
-    storage = ContentAddressedStorage(tmp_path / "storage")
+    storage = ContentAddressedStorage(tmp_path / "storage").for_space("default")
     with pytest.raises(ValueError):
         storage.blob_path(kind=kind, sha256=digest)
 
 
 def test_storage_quota_uses_unique_tenant_referenced_bytes(tmp_path) -> None:
     repository = DocumentRepository(tmp_path / "documents.db", tenant_quota_bytes=3)
-    storage = ContentAddressedStorage(tmp_path / "storage")
+    storage = ContentAddressedStorage(tmp_path / "storage").for_space("tenant-a")
     try:
         payload = b"abc"
         first = storage.put_stream(

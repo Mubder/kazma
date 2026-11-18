@@ -1184,6 +1184,40 @@ async def _try_kb_command(
     return True
 
 
+def _chat_document_scope(svc: Any, msg: IncomingMessage) -> Any:
+    """The scope of ``/documents`` in this chat (``documents.principal``):
+    the asker, in the tenant this chat's own turns run in.
+
+    A chat turn's tenant is the gateway's memory-tenant rule
+    (``memory.config.resolve_tenant_id``, the one ``store.py`` puts in the
+    turn's state and the agent's document tools read). With a retired memory
+    mode stored (``per_platform``, ``per_user``) that is ``telegram`` or the
+    sender, not ``default``: the command reads the same documents as the
+    agent in the same chat, where chat put them, until Spaces is enforced or
+    the owner presses "Use one memory" (Spaces S1-09's rule; the rule itself
+    is memory's). A rule that cannot be read (the settings store away) means
+    the owner's space, as before Spaces, with a WARNING. Enforced, the bound
+    scope decides, and with none bound the command refuses. Blocking.
+    """
+    from kazma_core.db.pg_helpers import store_errors
+    from kazma_core.documents.principal import surface_scope
+    from kazma_core.spaces.scope import OWNER_SPACE_ID, spaces_enforced
+
+    if spaces_enforced():
+        return surface_scope(svc)
+    from kazma_core.memory.config import resolve_tenant_id
+    from kazma_core.tenant_context import tenant_scope
+
+    try:
+        tenant = resolve_tenant_id(msg.platform, msg.sender_id or "")
+    except store_errors() as exc:
+        logger.warning("[AgentHandler] /documents: the chat's tenant could not be read (%s); "
+                       "reading the owner's space", type(exc).__name__)
+        tenant = OWNER_SPACE_ID
+    with tenant_scope(tenant):
+        return surface_scope(svc)
+
+
 async def _try_documents_command(
     msg: IncomingMessage,
     store: SessionStore,
@@ -1218,25 +1252,6 @@ async def _try_documents_command(
     tokens = body.split()
     sub = tokens[0].lower() if tokens else ""
 
-    tenant = "default"
-    try:
-        from kazma_core.memory.config import resolve_tenant_id
-
-        # The tenant rule reads settings (audit 2026-10-26 AUD-111).
-        tenant = await asyncio.to_thread(
-            resolve_tenant_id,
-            msg.platform or "unknown",
-            sender_id=str(msg.sender_id or ""),
-            prefer_context=True,
-        )
-    except Exception:  # pragma: no cover - defensive
-        try:
-            from kazma_core.tenant_context import get_current_tenant_id
-
-            tenant = (get_current_tenant_id() or "default").strip() or "default"
-        except Exception:
-            pass
-
     try:
         from kazma_core.documents.ingestion import get_ingestion_service
 
@@ -1250,17 +1265,21 @@ async def _try_documents_command(
         )
         return True
 
-    # Chat acts as the install's operator, like the Web page and the agent
-    # (DOC-A3, ``documents.principal``); with platform users it refuses (D1).
-    from kazma_core.documents.principal import MULTI_USER_REFUSAL, operator_for
+    # Chat acts as the asker, in the asker's space, like the Web page and the
+    # agent (Spaces S1-12, ``documents.principal``), in the tenant this chat's
+    # own turns run in. The older multi-user mode, which does not enforce
+    # Spaces, refuses (D1).
+    from kazma_core.documents.principal import DocumentsRefused
 
-    actor = await asyncio.to_thread(operator_for, svc, tenant)
-    if actor is None:
-        await _send_model_reply(msg, store, manager, thread_id, f"⚠️ {MULTI_USER_REFUSAL}")
+    try:
+        acting = await asyncio.to_thread(_chat_document_scope, svc, msg)
+    except DocumentsRefused as exc:
+        await _send_model_reply(msg, store, manager, thread_id, f"⚠️ {exc}")
         return True
+    tenant, actor = acting.tenant_id, acting.actor_id
 
     if sub in ("", "help"):
-        docs = svc.list_documents(tenant_id=tenant, actor_id=actor)
+        docs = await asyncio.to_thread(svc.list_documents, tenant_id=tenant, actor_id=actor)
         lines = [
             "📄 **Kazma Documents**",
             "",
@@ -1285,7 +1304,7 @@ async def _try_documents_command(
         return True
 
     if sub == "list":
-        docs = svc.list_documents(tenant_id=tenant, actor_id=actor)
+        docs = await asyncio.to_thread(svc.list_documents, tenant_id=tenant, actor_id=actor)
         if not docs:
             await _send_model_reply(msg, store, manager, thread_id, "No documents yet.")
             return True
@@ -1301,12 +1320,14 @@ async def _try_documents_command(
             await _send_model_reply(msg, store, manager, thread_id, "Usage: `/documents status <id>`")
             return True
         try:
-            status = svc.job_status(tenant_id=tenant, job_id=ident, actor_id=actor)
+            status = await asyncio.to_thread(svc.job_status, tenant_id=tenant, job_id=ident, actor_id=actor)
             if status is None:
                 from kazma_core.documents.repository import DocumentAccessError
 
                 try:
-                    jobs = svc.jobs_for_document(tenant_id=tenant, document_id=ident, actor_id=actor)
+                    jobs = await asyncio.to_thread(
+                        svc.jobs_for_document, tenant_id=tenant, document_id=ident, actor_id=actor
+                    )
                 except DocumentAccessError:
                     jobs = []  # unreadable reads like unknown: no existence hint
                 status = jobs[0] if jobs else None
@@ -1331,8 +1352,8 @@ async def _try_documents_command(
             await _send_model_reply(msg, store, manager, thread_id, "Usage: `/documents read <id>`")
             return True
         try:
-            data = svc.get_content(
-                tenant_id=tenant, actor_id=actor, document_id=ident, max_chars=3000
+            data = await asyncio.to_thread(
+                svc.get_content, tenant_id=tenant, actor_id=actor, document_id=ident, max_chars=3000
             )
             await _send_model_reply(msg, store, manager, thread_id, data["text"] or "(empty)")
         except Exception as exc:  # noqa: BLE001
@@ -1441,7 +1462,7 @@ async def _try_documents_command(
 
     if sub == "health":
         try:
-            health = svc.health()
+            health = await asyncio.to_thread(svc.health)
             worker = health.get("worker", {})
             parsers = health.get("parsers", [])
             ready = sum(1 for p in parsers if p.get("readiness") == "ready")

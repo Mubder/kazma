@@ -33,6 +33,7 @@ from kazma_core.documents import admission
 from kazma_core.documents.config import DocumentConfig
 from kazma_core.documents.ingestion import DocumentIngestionService
 from kazma_core.documents.jobs import DocumentJobState
+from kazma_core.documents.storage import SpaceStorage
 from kazma_core.documents.worker import DocumentWorker
 
 #: Exit code of a child killed on purpose (anything else is a test bug).
@@ -41,7 +42,9 @@ _KILLED = 137
 _INTAKE_STAGES = {
     # stage name -> (service attribute, method the child dies right after)
     "reserve": ("admissions", "reserve"),
-    "stored": ("storage", "put_stream"),
+    # A space's own store writes content (``storage.SpaceStorage``, Spaces
+    # S1-12): the install-level object has no content call.
+    "stored": (None, "put_stream"),
     "publishing": ("admissions", "mark_publishing"),
     "blob": ("repository", "register_blob"),
     "document": ("repository", "create_document"),
@@ -115,7 +118,7 @@ def _kill_after(target, method: str) -> None:
 def _intake_child(root, backend_name, tenant, stage, key, content, document_id):
     svc = _service(root, backend_name)
     holder, method = _INTAKE_STAGES[stage]
-    _kill_after(getattr(svc, holder), method)
+    _kill_after(SpaceStorage if holder is None else getattr(svc, holder), method)
     _upload(svc, tenant, content, key=key, document_id=document_id)
     os._exit(3)  # the stage was never reached: the test is wrong
 

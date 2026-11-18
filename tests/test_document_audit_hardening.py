@@ -31,7 +31,7 @@ def test_backup_checks_metadata_and_normalized_manifest(tmp_path):
     svc = _service(tmp_path)
     try:
         result = _ingest(svc)
-        svc.storage.write_manifest(document_id=result.document_id, version_id=result.version_id,
+        svc.storage.for_space('tenant').write_manifest(document_id=result.document_id, version_id=result.version_id,
             manifest={'ir': {'pages': []}})
         report = perform_document_backup(storage_root=svc.config.storage_root, dest_dir=tmp_path / 'backups')
         assert report['ok']

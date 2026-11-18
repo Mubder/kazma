@@ -93,8 +93,16 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _blob_rel(kind: str, sha: str) -> str:
-    return f"{kind}/sha256/{sha[:2]}/{sha[2:4]}/{sha}"
+def held_paths(root: Path, refs: dict[str, Any]) -> dict[tuple[str, ...], str]:
+    """Where each object the snapshot needs is held now: the first of its
+    places (``storage.blob_rels``) that holds it. A backup and an export
+    record each file there, so a backup taken before Spaces is enforced has
+    the shape it had before Spaces (every file in the root), and after, a
+    space's files are under its folder (Spaces S1-12)."""
+    from .storage import first_present
+
+    return {places: first_present(root, places)
+            for places in refs["blobs"] | refs["manifests"] | refs["required_manifests"]}
 
 
 # ── garbage-collection pins ────────────────────────────────────────────────
@@ -134,7 +142,9 @@ def _write_pin(storage_root: Path, backup_id: str, paths: list[str]) -> Path:
 
 
 def _snapshot_references(cur: Any) -> dict[str, Any]:
-    """What the snapshot's live documents need, read inside the snapshot."""
+    """What the snapshot's live documents need, read inside the snapshot:
+    each object as the tuple of the places it can be (its space's folder,
+    then the root; :func:`held_paths` says which holds it)."""
     cur.execute(
         """SELECT DISTINCT v.source_sha256 AS sha
            FROM document_versions v
@@ -145,38 +155,52 @@ def _snapshot_references(cur: Any) -> dict[str, Any]:
     )
     promoted = {row["sha"] for row in cur.fetchall()}
     cur.execute(
-        """SELECT DISTINCT b.sha256 AS sha, b.storage_kind AS kind, 'source' AS origin
+        """SELECT DISTINCT b.tenant_id AS tenant, b.sha256 AS sha, b.storage_kind AS kind,
+                  'source' AS origin
            FROM document_blobs b
            JOIN document_versions v ON v.source_blob_id = b.id AND v.tenant_id = b.tenant_id
            JOIN documents d ON d.id = v.document_id AND d.tenant_id = v.tenant_id
            WHERE d.deleted_at IS NULL
            UNION
-           SELECT DISTINCT b.sha256 AS sha, b.storage_kind AS kind, 'artifact' AS origin
+           SELECT DISTINCT b.tenant_id AS tenant, b.sha256 AS sha, b.storage_kind AS kind,
+                  'artifact' AS origin
            FROM document_blobs b
            JOIN document_artifacts a ON a.blob_id = b.id AND a.tenant_id = b.tenant_id
            JOIN documents d ON d.id = a.document_id AND d.tenant_id = a.tenant_id
            WHERE d.deleted_at IS NULL"""
     )
-    blobs: set[str] = set()
+    from .backup import object_places
+    from .storage import blob_rels, manifest_rels
+
+    blobs: set[tuple[str, ...]] = set()
     for row in cur.fetchall():
         kind = row["kind"]
         # Intake keeps quarantine provenance on the row; once validated the
         # execution needs ``originals`` (the SQLite backup's rule too).
         if row["origin"] == "source" and row["sha"] in promoted:
             kind = "originals"
-        blobs.add(_blob_rel(kind, row["sha"]))
+        places = object_places(blob_rels, row["tenant"], kind, row["sha"])
+        if places is not None:
+            blobs.add(places)
     cur.execute(
-        """SELECT v.document_id AS doc, v.id AS ver FROM document_versions v
+        """SELECT v.tenant_id AS tenant, v.document_id AS doc, v.id AS ver FROM document_versions v
            JOIN documents d ON d.id = v.document_id AND d.tenant_id = v.tenant_id
            WHERE d.deleted_at IS NULL"""
     )
-    manifests = {f"manifests/{row['doc']}/{row['ver']}.json" for row in cur.fetchall()}
+    manifests = {
+        places for row in cur.fetchall()
+        if (places := object_places(manifest_rels, row["tenant"], row["doc"], row["ver"])) is not None
+    }
     cur.execute(
-        """SELECT DISTINCT j.document_id AS doc, j.version_id AS ver FROM document_jobs j
+        """SELECT DISTINCT j.tenant_id AS tenant, j.document_id AS doc, j.version_id AS ver
+           FROM document_jobs j
            JOIN documents d ON d.id = j.document_id AND d.tenant_id = j.tenant_id
            WHERE j.state = 'ready' AND d.deleted_at IS NULL"""
     )
-    required_manifests = {f"manifests/{row['doc']}/{row['ver']}.json" for row in cur.fetchall()}
+    required_manifests = {
+        places for row in cur.fetchall()
+        if (places := object_places(manifest_rels, row["tenant"], row["doc"], row["ver"])) is not None
+    }
     return {"blobs": blobs, "manifests": manifests, "required_manifests": required_manifests}
 
 
@@ -229,7 +253,9 @@ def perform_pg_document_backup(
                 refs = _snapshot_references(cur)
                 counts = _table_counts(cur)
             needed = sorted(refs["blobs"] | refs["manifests"])
-            pin = _write_pin(root, backup_id, needed)
+            # Pinned in every place an object can be: the copy is read from
+            # whichever holds it.
+            pin = _write_pin(root, backup_id, sorted({rel for places in needed for rel in places}))
             # The exporting transaction stays open while pg_dump imports it.
             dump_path = dump(
                 dsn, out / "documents.pgdump", tables=list(counts), snapshot=str(snapshot["id"])
@@ -237,10 +263,12 @@ def perform_pg_document_backup(
             conn.rollback()
         checksums: dict[str, str] = {"documents.pgdump": _sha256_file(dump_path)}
         missing: list[str] = []
-        for rel in needed:
+        held = held_paths(root, refs)
+        for places in needed:
+            rel = held[places]
             src = root / rel
             if not src.is_file():
-                if rel in refs["blobs"] or rel in refs["required_manifests"]:
+                if places in refs["blobs"] or places in refs["required_manifests"]:
                     missing.append(rel)
                 continue
             dst = out / rel
@@ -255,7 +283,7 @@ def perform_pg_document_backup(
             "finished_at_epoch": time.time(),
             "duration_seconds": round(time.monotonic() - started, 3),
             "table_counts": counts,
-            "required": sorted(refs["blobs"] | refs["required_manifests"]),
+            "required": sorted({held[places] for places in refs["blobs"] | refs["required_manifests"]}),
             "checksums": checksums,
             "missing_at_backup": missing,
         }

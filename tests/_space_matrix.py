@@ -123,6 +123,7 @@ CASE_MODULES: tuple[str, ...] = (
     "tests._chat_space_cases", "tests._memory_space_cases", "tests._lesson_space_cases",
     "tests._knowledge_space_cases", "tests._scheduled_space_cases", "tests._swarm_space_cases",
     "tests._research_space_cases",
+    "tests._document_space_cases",  # S1-12
 )
 
 
@@ -166,9 +167,8 @@ PENDING_ROUTE_RULES: tuple[tuple[Pattern, str], ...] = (
     # (S1-09 -- memory, and a history brought in -- wrote its cases:
     # tests/_memory_space_cases.py.)
     # (S1-10, lessons: written. Its cases are in tests/_lesson_space_cases.py.)
-    # ── S1-12: documents ──────────────────────────────────────────────────
-    ("/documents$", "S1-12"),
-    ("/api/documents", "S1-12"),
+    # (S1-12, documents: written. Its cases are in
+    # tests/_document_space_cases.py.)
     # (S1-13, the Knowledge Library: written. Its cases are in
     # tests/_knowledge_space_cases.py.)
     # (S1-14, Scheduled: written. Its cases are in
@@ -223,13 +223,7 @@ _PENDING_TOOLS_BY_ITEM: dict[str, tuple[str, ...]] = {
     # (S1-08 -- drafts, the task ledger, the scratchpad, the chat itself --
     # wrote its cases: tests/_chat_space_cases.py.)
     # (S1-09 -- the memory tools -- wrote its cases: tests/_memory_space_cases.py.)
-    # The document platform: documents by id. (The tools that take a path
-    # are files of the space: S1-19.)
-    "S1-12": (
-        "document_import", "document_read", "document_status",
-        "document_search", "document_index", "document_convert",
-        "document_redact", "document_cancel",
-    ),
+    # (S1-12 -- the document tools -- wrote its cases: tests/_document_space_cases.py.)
     # (S1-14 -- the scheduling tools -- wrote its cases:
     # tests/_scheduled_space_cases.py.)
     # (S1-15 -- swarm tasks, the worker's hand-off and sub-agents -- wrote
