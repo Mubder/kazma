@@ -140,11 +140,16 @@ def _acquisition_failure(exc: AcquisitionError) -> JSONResponse:
 def _capacity_refusal(lib_id: str, exc: Exception) -> JSONResponse:
     """A store at its quota (507 ``kb_storage_full``), or an install at its
     library ceiling (409 ``kb_library_limit``, KB-Q01), as a stable code."""
-    from kazma_core.stores.knowledge import KnowledgeLibraryLimit
+    from kazma_core.stores.knowledge import KnowledgeLibraryLimit, KnowledgeSpaceFull
 
     if isinstance(exc, KnowledgeLibraryLimit):
         logger.info("[kb_api] library %s refused: %s", lib_id, exc)
         return _fail("kb_library_limit", validation_error(exc), 409, limit=exc.ceiling)
+    if isinstance(exc, KnowledgeSpaceFull):
+        # One space at its share (Spaces S1-13): that space's to settle, not
+        # the install's, so it is no WARNING. Worded as the store at its quota.
+        logger.info("[kb_api] work on %s refused: its space is at its share", lib_id)
+        return _fail("kb_storage_full", validation_error(exc), 507)
     logger.warning("[kb_api] work on %s refused: %s", lib_id, exc)
     return _fail("kb_storage_full", validation_error(exc), 507)
 
@@ -229,6 +234,32 @@ def _not_found() -> JSONResponse:
 _RESUME_ROUTE: dict[str, Any] = {}
 
 
+async def _in_the_crawls_space(row: dict[str, Any], route: Any) -> Any:
+    """Resume the crawl *row* in its library's space (Spaces S1-13).
+
+    Nothing is bound at start-up. Once Spaces is enforced the resume runs as
+    the library's space and the account Kazma's own work there acts for
+    (``identity.acting_account``); a library that is gone is not resumed.
+    Not enforced: as before."""
+    from kazma_core.spaces.scope import bind_scope, spaces_enforced
+
+    if not spaces_enforced():
+        return await route(row["job_id"])
+
+    def where() -> tuple[str, str] | None:
+        from kazma_core.spaces.identity import acting_account
+        from kazma_core.stores.knowledge import get_knowledge_store
+
+        space = get_knowledge_store().library_space(row["library_id"])
+        return None if space is None else (space, acting_account(space))
+
+    found = await asyncio.to_thread(where)
+    if found is None:
+        return {"ok": False, "code": "not_found"}
+    with bind_scope(*found):
+        return await route(row["job_id"])
+
+
 async def resume_interrupted_crawls() -> list[str]:
     """Resume the Knowledge crawls a restart cut off.
 
@@ -241,6 +272,7 @@ async def resume_interrupted_crawls() -> list[str]:
     site stopped, an older one, or one that made no progress waits for the
     owner. Returns the job ids resumed.
     """
+    from kazma_core.db.pg_helpers import store_errors
     from kazma_core.web_acquire.crawl_jobs import auto_resume_due, call, claim_auto_resume, inspect_jobs, recover
 
     route = _RESUME_ROUTE.get("resume")
@@ -255,7 +287,15 @@ async def resume_interrupted_crawls() -> list[str]:
         row = await call(inspect_jobs, summary["job_id"])
         if row is None or not auto_resume_due(row) or not await call(claim_auto_resume, row["job_id"]):
             continue
-        answer = await route(row["job_id"])
+        try:
+            answer = await _in_the_crawls_space(row, route)
+        except store_errors() as exc:
+            # The library's space could not be read (the identity store or
+            # Knowledge's own): this crawl waits for Resume, and the others
+            # are still tried (S1-13 review: one such row stopped the pass).
+            logger.warning("[kb_api] crawl %s could not resume after a restart (%s: %s); it waits for Resume",
+                           row["job_id"], type(exc).__name__, exc)
+            continue
         if isinstance(answer, dict) and answer.get("ok"):
             resumed.append(row["job_id"])
             logger.info("[kb_api] crawl %s resumed after a restart", row["job_id"])
@@ -280,6 +320,27 @@ def create_kb_router() -> APIRouter:
         from kazma_core.stores.knowledge_index import get_knowledge_index
 
         return get_knowledge_index()
+
+    def _own(library_id: str) -> str:
+        """The id *library_id* names in the caller's space, used from then on
+        (``KnowledgeStore.own_library_id``, Spaces S1-13)."""
+        return _store().own_library_id(library_id)
+
+    def _own_libraries() -> set[str] | None:
+        """The ids of the caller's libraries (archived ones too) once Spaces
+        is enforced, else None: the crawl journal is the install's, and a
+        space sees the crawls of its own libraries only.
+
+        Spaces alone decides, never the store's tenant filter: that is on in
+        production mode too (``KAZMA_PRODUCTION``, the live install), where
+        filtering hid the crawls of a deleted library, answered "Unknown
+        crawl job" for a research job, and put the Dashboard's crawl card at
+        odds with /metrics and the weekly report (S1-13 review)."""
+        from kazma_core.spaces.scope import spaces_enforced
+
+        if not spaces_enforced():
+            return None
+        return {lib["id"] for lib in _store().list_libraries(include_archived=True)}
 
     # ── Libraries ───────────────────────────────────────────────────────
 
@@ -315,9 +376,9 @@ def create_kb_router() -> APIRouter:
         return await asyncio.to_thread(_create, data)
 
     def _create(data: _CreateBody) -> Any:
-        from kazma_core.stores.knowledge import KnowledgeStorageFull, KnowledgeUrlRefused, slugify_library_id
+        from kazma_core.stores.knowledge import KnowledgeStorageFull, KnowledgeUrlRefused
 
-        lib_id = slugify_library_id(data.id)
+        lib_id = _store().library_id_for(data.id)
         try:
             if _store().get_library(lib_id):
                 return _fail("library_exists", f"Library '{lib_id}' already exists", 409, library_id=lib_id)
@@ -353,7 +414,7 @@ def create_kb_router() -> APIRouter:
 
     def _set_archived(library_id: str, archived: bool) -> Any:
         try:
-            if not _store().archive_library(library_id, archived=archived):
+            if not _store().archive_library(_own(library_id), archived=archived):
                 return _not_found()
             return {"ok": True}
         except Exception as exc:
@@ -379,7 +440,7 @@ def create_kb_router() -> APIRouter:
         from kazma_core.stores.knowledge import KnowledgeUrlRefused
 
         try:
-            lib = _store().update_library(library_id, name=data.name, description=data.description,
+            lib = _store().update_library(_own(library_id), name=data.name, description=data.description,
                                           seed_url=data.seed_url, auto_inject=data.auto_inject)
             if not lib:
                 return _not_found()
@@ -403,6 +464,7 @@ def create_kb_router() -> APIRouter:
         )
 
         try:
+            library_id = _own(library_id)
             if _store().get_library(library_id) is None:
                 return _not_found()
             outcome = delete_everything(library_id)
@@ -430,6 +492,7 @@ def create_kb_router() -> APIRouter:
         offset: int = Query(0, ge=0, le=10_000_000),
     ) -> Any:
         try:
+            library_id = _own(library_id)
             if _store().get_library(library_id) is None:
                 return _not_found()
             chunks = _store().list_chunks(library_id, limit=limit, offset=offset)
@@ -460,9 +523,9 @@ def create_kb_router() -> APIRouter:
         data = await _body(request, _IngestBody)
         if isinstance(data, JSONResponse):
             return data
-        from kazma_core.stores.knowledge import slugify_library_id
-
-        lib_id = slugify_library_id(data.library_id)
+        # The id in the caller's space: a crawl into "docs" from a second
+        # space wrote into the first space's "docs" (Spaces S1-13).
+        lib_id = await asyncio.to_thread(lambda: _store().library_id_for(data.library_id))
         if data.mode == "page":
             return await _ingest_page(lib_id, data.url, name=data.name)
         return await _start_site(lib_id, data.url, max_pages=data.max_pages, kind="site", name=data.name,
@@ -599,8 +662,10 @@ def create_kb_router() -> APIRouter:
     def durable_jobs() -> Any:
         from kazma_core.web_acquire.crawl_jobs import inspect_jobs
 
+        mine = _own_libraries()
         try:
-            return {'ok': True, 'jobs': sorted((row for row in inspect_jobs() if row['kind'] in {'site', 'refresh'}),
+            return {'ok': True, 'jobs': sorted((row for row in inspect_jobs() if row['kind'] in {'site', 'refresh'}
+                                                and (mine is None or row['library_id'] in mine)),
                 key=lambda row: row['updated_at'], reverse=True)}
         except AcquisitionError as exc:
             return _acquisition_failure(exc)
@@ -613,7 +678,8 @@ def create_kb_router() -> APIRouter:
         from kazma_core.web_acquire.crawl_jobs import outcome_summary
 
         try:
-            return {"ok": True, "summary": outcome_summary(), "canary": canary.state()}
+            return {"ok": True, "summary": outcome_summary(libraries=_own_libraries()),
+                    "canary": canary.state()}
         except AcquisitionError as exc:
             return _acquisition_failure(exc)
 
@@ -625,7 +691,8 @@ def create_kb_router() -> APIRouter:
             durable = projection(job_id)
         except AcquisitionError as exc:
             return _acquisition_failure(exc)
-        if durable is None:
+        mine = _own_libraries()
+        if durable is None or (mine is not None and durable.get('library_id') not in mine):
             return _fail("not_found", "Unknown crawl job; it may have been evicted from the journal.", 404)
         if durable['kind'] not in {'site', 'refresh'}:
             return _fail("not_found", 'This job belongs to research; inspect acquisition readiness.', 404)
@@ -647,6 +714,9 @@ def create_kb_router() -> APIRouter:
             return _fail("resume_refused", 'Only an interrupted durable crawl can resume.', 409)
         if row.get('kind', 'site') not in {'site', 'refresh'}:
             return _fail("resume_refused", 'Research crawls resume through crawl_site with identical options.', 409)
+        mine = await asyncio.to_thread(_own_libraries)
+        if mine is not None and row['library_id'] not in mine:
+            return _fail("not_found", "Unknown crawl job.", 404)
         if not await asyncio.to_thread(lambda: _store().get_library(row['library_id'])):
             return _fail("not_found", 'The crawl library no longer exists.', 404)
         return await _start_site(row['library_id'], row['seed'], max_pages=row['policy']['max_pages'],
@@ -661,11 +731,12 @@ def create_kb_router() -> APIRouter:
         data = await _body(request, _SearchBody)
         if isinstance(data, JSONResponse):
             return data
-        if not await asyncio.to_thread(lambda: _store().get_library(data.library_id)):
+        lib = await asyncio.to_thread(lambda: _store().get_library(data.library_id))
+        if not lib:
             return _not_found()
         try:
             index = await asyncio.to_thread(_index)
-            hits = await index.search(data.query, data.library_id, top_k=data.top_k)
+            hits = await index.search(data.query, lib["id"], top_k=data.top_k)
             return {
                 "ok": True,
                 "hits": [
@@ -692,6 +763,7 @@ def create_kb_router() -> APIRouter:
         lib = await asyncio.to_thread(lambda: _store().get_library(library_id))
         if not lib:
             return _not_found()
+        library_id = lib["id"]
         seed = lib.get("seed_url") or ""
         if not seed:
             return _fail("no_seed", "Library has no seed_url to refresh from", 409)

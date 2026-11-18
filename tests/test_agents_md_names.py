@@ -113,6 +113,7 @@ NOT_CODE: dict[str, str] = {
     "notifications.watch.email_to": "a settings key",
     "providers.list": "a settings key",
     "self_improvement.agent_evolution": "a settings key",
+    "self_improvement.space_evolution": "a settings key",
     "safety.hitl.require_approval_for": "a kazma.yaml key",
     "auth.value": "an MCP server's configuration field",
     "addMapping": "ReportLab's own function",

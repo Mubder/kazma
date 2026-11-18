@@ -1251,6 +1251,11 @@ def _recall_episodes(
     for h in dense:
         sources.setdefault(h.id, []).append("dense")
 
+    # Everything below reads a candidate by its id alone. Whatever channel
+    # found it (a remote vector index answers here too), a candidate that is
+    # not this tenant's row stops here.
+    sparse, dense = _own_episodes(conn, tenant_id, sparse), _own_episodes(conn, tenant_id, dense)
+
     # ── Evidence, not ranks: what is about the question, best first ──
     fused = _rank_episodes_by_evidence(conn, q, sparse, dense)[: limit * 2]
 
@@ -1492,6 +1497,36 @@ def _similarities(
     except sqlite3.Error:
         logger.debug("[recall] similarity lookup failed", exc_info=True)
         return {}
+
+
+def _own_episodes(conn: sqlite3.Connection, tenant_id: str, hits: list[RecallHit]) -> list[RecallHit]:
+    """*hits* without any whose row is not *tenant_id*'s (Spaces S1-09).
+
+    The ranking, the session bias, the tier weight and the text shown each
+    read an episode by id. The local channels filter by tenant; a remote
+    vector index is asked for one tenant and trusted. One statement makes the
+    id reads safe whoever answered. A caller that sees every tenant (the
+    owner's on an install that does not enforce Spaces) is not narrowed.
+
+    A database that cannot answer **raises**: recall then fails and says so
+    (``_failed_recall``, "degraded"), never "nothing found" (AUD-026, M16).
+    Turning the error into no candidates told the asker nothing was
+    remembered.
+    """
+    from kazma_core.memory.tenant_view import narrowed_to
+
+    tenant = narrowed_to(tenant_id)
+    ids = [h.id for h in hits if h.id]
+    if tenant is None or not ids:
+        return hits
+    own = {
+        str(r[0])
+        for r in conn.execute(
+            f"SELECT id FROM episodes WHERE tenant_id = ? AND id IN ({','.join('?' for _ in ids)})",  # nosec B608 - only '?' placeholders are joined; the ids are bound
+            (tenant, *ids),
+        )
+    }
+    return [h for h in hits if h.id in own]
 
 
 def _rank_episodes_by_evidence(

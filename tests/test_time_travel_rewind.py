@@ -406,6 +406,9 @@ NOT_UNDER_THE_LOCK = {
         "called only by kazma_ui.thread_rewind, under the lock (the next gate)",
     "kazma-gateway/kazma_gateway/stores/checkpoint.py:adelete_thread":
         "the checkpoint store's own delete; its callers hold the lock",
+    "kazma-gateway/kazma_gateway/stores/checkpoint.py:adelete_all_threads":
+        "the admin's clear-all on a table several spaces share: each thread of the bound space "
+        "goes, as the DELETE of the whole table beside it does for one space, which holds no lock either",
 }
 
 _WRITERS = ("aupdate_state", "adelete_thread")

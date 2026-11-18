@@ -20,6 +20,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from kazma_core.memory.tenant_view import sees_every_tenant
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["build_v2_health", "count_current_facts"]
@@ -128,6 +130,7 @@ _INSTALL_ONLY = (
     "mirror",
     "embedder",
     "sweeps",
+    "tenants",
 )
 
 
@@ -159,7 +162,7 @@ def build_v2_health(
 
     Never raises — a missing/broken DB returns status="OFF" with zeros.
     """
-    scoped = tenant_id not in (None, "", "default")
+    scoped = not sees_every_tenant(tenant_id)
     # A tenant predicate for every count below: (" AND tenant_id=?", (tid,)).
     tsql = " AND tenant_id=?" if scoped else ""
     tparams: tuple = (tenant_id,) if scoped else ()
@@ -295,6 +298,16 @@ def build_v2_health(
                 (tier, *tparams),
             )
 
+        # Memory kept under a tenant that is no space (the retired
+        # per-platform and per-user modes): counted, never merged here.
+        if install_details:
+            try:
+                from kazma_core.memory.tenant_view import tenants_outside_spaces
+
+                out["tenants"] = tenants_outside_spaces(primary_conn)
+            except (sqlite3.Error, RuntimeError):
+                logger.warning("[v2_health] memory tenants could not be counted", exc_info=True)
+
         # Findability (docs/plans/MEMORY_NOTHING_LOST_PLAN.md, item G): the
         # install's repair and recovery state.
         if install_details:
@@ -306,7 +319,7 @@ def build_v2_health(
         try:
             from kazma_core.memory.topic_summaries import summary_health
 
-            out["summaries"] = summary_health(primary_conn, tenant_id=tenant_id or "default")
+            out["summaries"] = summary_health(primary_conn, tenant_id=tenant_id if scoped else None)
         except sqlite3.Error:
             logger.warning("[v2_health] weekly summary counts unreadable", exc_info=True)
 

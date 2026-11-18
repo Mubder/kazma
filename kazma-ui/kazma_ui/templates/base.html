@@ -20,6 +20,7 @@
        names it on every call the page makes. #}
     <meta name="kazma-space" content="{{ kazma_space() if kazma_space is defined else '' }}">
     <meta name="kazma-spaces-enforced" content="{{ '1' if (spaces_enforced is defined and spaces_enforced()) else '' }}">
+    <meta name="kazma-account" content="{{ kazma_account() if kazma_account is defined else '' }}">
     {# Critical inline theme CSS — in the FIRST HTML bytes so iOS Safari
        paints a correctly-colored canvas before kazma.css downloads+parses.
        Per the CSS spec the canvas takes its color from the root element

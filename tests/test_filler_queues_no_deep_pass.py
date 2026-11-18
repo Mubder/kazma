@@ -41,7 +41,9 @@ def _queued(monkeypatch, user_text: str) -> list[str]:
     queued: list[str] = []
     monkeypatch.setattr(task_queue, "enqueue_task", lambda kind, payload, **kw: queued.append(kind))
     monkeypatch.setattr(consolidator, "promote_working_memory", lambda *a, **k: 0)
-    monkeypatch.setattr(consolidator, "_mirror_turn_to_v2", lambda *a, **k: None)
+    # The deep pass is pointed at the episode the mirror wrote (Spaces S1-09):
+    # the stand-in writes one.
+    monkeypatch.setattr(consolidator, "_mirror_turn_to_v2", lambda *a, **k: "e_written")
     monkeypatch.setattr(consolidator, "_v2_extract_sync", lambda *a, **k: None)
     messages = [{"role": "user", "content": user_text}, {"role": "assistant", "content": "Noted."}]
     consolidator._run_turn_memory(messages, session_id=None, turn=1, tenant_id="t")

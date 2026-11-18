@@ -321,19 +321,15 @@ def _strict_bool(value: Any) -> Any:
 
 
 def _tenant_mode(value: Any) -> Any:
-    # Under enforcement memory belongs to each principal's tenant whatever the
-    # mode; a per-platform or per-user mode there split one user's memory
-    # between the page and the turns (Memory audit M07). Refused, until one
-    # resolver serves both for those modes.
-    from kazma_core.memory.config import memory_tenant_enforced
-
+    # Retired (Spaces S1-09): memory is kept per space, and a space is how
+    # memory is kept apart. An install that stored per_platform or per_user
+    # before keeps it until its owner saves `shared` here (memory.config
+    # .legacy_tenant_mode); nothing can choose one of them again.
     mode = str(value or "").strip().lower()
-    if mode not in ("shared", "per_platform", "per_user"):
-        raise SettingRejected("Memory isolation is one of: shared, per_platform, per_user.")
-    if mode != "shared" and memory_tenant_enforced():
+    if mode != "shared":
         raise SettingRejected(
-            "With tenants enforced (production or several users), memory is already kept per "
-            "tenant: only 'shared' is available here.")
+            "Memory is kept per space now. The per-platform and per-user modes are retired: "
+            "only 'shared' can be saved.")
     return mode
 
 

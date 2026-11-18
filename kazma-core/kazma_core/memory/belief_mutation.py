@@ -988,8 +988,8 @@ def _mutate_functional_locked(
             (now, kw.get("recorded") or now, superseded_id),
         )
         for row in held_list:
-            beliefs_write(conn, "UPDATE beliefs SET valid_until=?, invalidated_at=? WHERE id=?",
-                          (now, kw.get("recorded") or now, str(_col(row, "id", 0))))
+            beliefs_write(conn, "UPDATE beliefs SET valid_until=?, invalidated_at=? WHERE id=? AND tenant_id=?",
+                          (now, kw.get("recorded") or now, str(_col(row, "id", 0)), tenant_id))
         # The superseded row's graph edge and mirror tombstone (M-04) go
         # after the commit, in mutate_belief: a Neo4j or Postgres round trip
         # here held memory_state.db's write lock (Memory audit M14).

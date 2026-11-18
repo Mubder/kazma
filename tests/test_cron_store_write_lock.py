@@ -110,7 +110,7 @@ def _cases(store: SQLiteCronStore) -> list[tuple[str, str, object]]:
         ("update_job", "no field given", lambda: store.update_job("a")),
         ("restore_job", "", lambda: store.restore_job("a", timing="5m", next_run=now.isoformat())),
         ("update_delivery_target", "", lambda: store.update_delivery_target("a", "telegram:2")),
-        ("sibling_delivery_target", "", lambda: store.sibling_delivery_target("t1")),
+        ("sibling_delivery_target", "", lambda: store.sibling_delivery_target("t1", "default")),
         ("list_events", "", lambda: store.list_events("a")),
         ("cancel", "", lambda: store.cancel("a")),
         ("insert", "an old finished job", lambda: store.insert(_job("old", status=JobStatus.DONE, days_old=30))),

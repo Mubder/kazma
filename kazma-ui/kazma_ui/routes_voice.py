@@ -499,6 +499,25 @@ def livekit_voice_status() -> dict[str, Any]:
     return _livekit_public_status()
 
 
+def _livekit_room(session_id: str, sanitize: Any) -> str:
+    """The LiveKit room of a chat's live voice.
+
+    A room carries live audio, so it is its space's: the owner's space keeps
+    the name it always had, and every other space's rooms carry a mark made
+    from the space the request is bound to. A request can therefore never
+    name a room of a space it is not in, whatever chat id it sends.
+    """
+    import hashlib
+
+    from kazma_core.spaces.scope import OWNER_SPACE_ID, require_space_id
+
+    space = require_space_id()
+    if space == OWNER_SPACE_ID:
+        return f"kazma-{sanitize(session_id)}"
+    mark = hashlib.sha256(space.encode("utf-8")).hexdigest()[:12]
+    return f"kazma-{mark}-{sanitize(session_id)}"
+
+
 class _LiveKitTokenBody(BaseModel):
     session_id: str = ""
     identity: str = "web-user"
@@ -529,7 +548,7 @@ def livekit_voice_token(body: _LiveKitTokenBody | None = None) -> dict[str, Any]
         )
     payload = body or _LiveKitTokenBody()
     session_id = str(payload.session_id or "web").strip()
-    room = f"kazma-{sanitize_room_name(session_id)}"
+    room = _livekit_room(session_id, sanitize_room_name)
     identity = str(payload.identity or "web-user").strip() or "web-user"
     try:
         token = mint_livekit_token(

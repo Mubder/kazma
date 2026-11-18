@@ -58,7 +58,12 @@ def main(argv: list[str] | None = None, *, ask: Callable[[str], str] = input,
             sys.stdout.write(f"\r  {done} of {total}")
             sys.stdout.flush()
 
-    report = history_import.import_history(history, progress=progress)
+    # The command is run by the person who owns the install: the memories
+    # are the owner's space's, said to the store by name.
+    from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, OWNER_SPACE_ID, bind_scope
+
+    with bind_scope(OWNER_SPACE_ID, OWNER_ACCOUNT_ID):
+        report = history_import.import_history(history, progress=progress)
     say("")
     say(f"Done: {count_noun(report.written, 'turn')} remembered, {report.already} already there, "
         f"{report.refused} kept out, {report.failed} failed.")

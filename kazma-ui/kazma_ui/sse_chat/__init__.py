@@ -39,8 +39,10 @@ code to one another).
                      turn did not end, content is empty)
   turn_complete      the same data, right after done
   snapshot           snapshot_id, iteration, model (Time Travel saved a step)
-  user_message       content, turn_id, client_msg_id, session_id, ts
-                     (another tab's turn; streams attached to the thread)
+  user_message       content, turn_id, client_msg_id, session_id, ts, author,
+                     author_name (another tab's turn; streams attached to the
+                     thread. author is the account that wrote it; author_name
+                     only on an install that enforces Spaces)
   thread_rewound     thread_id, session_id, snapshot_id, turn_index,
                      message_count (a Time Travel restore; tabs reload)
 """
@@ -58,11 +60,55 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from kazma_core.exceptions import sanitize_error
 
+from kazma_ui import reply_sink as _reply_sink
 from kazma_ui.rate_limit import rate_limit
 from kazma_ui.thread_ownership import resolve_caller_thread
 from kazma_ui.json_body import InvalidJsonBody, invalid_json_response, read_json
 
 logger = logging.getLogger(__name__)
+
+
+def _not_this_spaces_chat(session_id: str) -> bool:
+    """True when a chat id the bound space's store does not hold must be left
+    alone: the request runs in a space other than the owner's (so the id may
+    be another space's chat), or the id is a thread of another space.
+    Blocking: the thread record store."""
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+    from kazma_core.spaces.threads import thread_refusal
+    from kazma_core.tenant_context import get_current_tenant_id
+
+    if (get_current_tenant_id() or OWNER_SPACE_ID) != OWNER_SPACE_ID:
+        return True
+    return thread_refusal(session_id) is not None
+
+
+def _forget_thread_record(thread_id: str) -> None:
+    """Remove a deleted chat's thread record. Blocking; never raises."""
+    import sqlite3
+
+    from kazma_core.spaces.threads import forget_thread
+
+    try:
+        forget_thread(thread_id)
+    except (sqlite3.Error, OSError):
+        logger.warning("[chat] the space record of thread %s was not removed", thread_id, exc_info=True)
+
+
+def _author_of_row(row: dict[str, Any]) -> dict[str, str]:
+    """What a ``user_message`` frame says about who wrote *row*: the account
+    (``author``) and, on an install that enforces Spaces, its name
+    (``author_name``). The page shows the name unless the author is the
+    person looking. Reads the identity store only when Spaces is enforced."""
+    author = str(row.get("author") or "")
+    if not author:
+        return {}
+    from kazma_ui.space_binding import other_authors
+
+    out = {"author": author}
+    name = other_authors([author], None).get(author)
+    if name:
+        out["author_name"] = name
+    return out
 
 #: The IDE chat's open-file context is a file name and a language; anything
 #: longer than this is not what the IDE sends, and is cut.
@@ -868,8 +914,10 @@ def create_sse_chat_router(
         from datetime import datetime as _dt
 
         _ts = _dt.now(UTC).isoformat()
-        _user_row = {"role": "user", "content": display_text(user_message, _text_att) if _text_att else user_message,
-                     "ts": _ts}
+        _user_row = _reply_sink.authored({
+            "role": "user", "content": display_text(user_message, _text_att) if _text_att else user_message,
+            "ts": _ts,
+        })
         # CRITICAL: persist immediately so restarts keep the sidebar transcript.
         # AUD-052: appended under the session's transaction, so a reply the
         # previous turn persisted meanwhile is not overwritten by this
@@ -909,25 +957,8 @@ def create_sse_chat_router(
         if system_prompt:
             system_msgs.append({"role": "system", "content": system_prompt})
 
-        # Kazma-wide self-improvement Soul (fresh every turn so new deltas apply
-        # without rebuilding the cached streaming graph). The deltas are wrapped
-        # in an untrusted data fence — the model must treat them as observation
-        # context, never as instructions to obey (prompt-injection defense).
-        try:
-            from kazma_core.safety.prompt_fence import format_untrusted_block
-            from kazma_core.skills.self_improvement import get_agent_evolution_block
-
-            # The Soul is a settings read (and a one-off migration) (audit 2026-10-26 AUD-111).
-            evo = await asyncio.to_thread(get_agent_evolution_block, "supervisor")
-            if evo:
-                system_msgs.append(
-                    {
-                        "role": "system",
-                        "content": format_untrusted_block(evo, source="self_improvement"),
-                    }
-                )
-        except Exception:
-            logger.debug("[sse_chat] agent evolution inject skipped", exc_info=True)
+        # The self-improvement lessons are the supervisor's, fenced, once per
+        # turn (S1-10 review: this transport added a second copy).
 
         # The Knowledge Library block is the supervisor's, once per turn
         # (Knowledge audit KB-S08: this transport injected the same chunks a
@@ -1249,6 +1280,9 @@ def create_sse_chat_router(
                 # replays, and a reload reads the user row from the store.
                 # emit() raises only for an empty thread id, which this
                 # path cannot have; socket failures are isolated inside it.
+                # Who wrote it, for the other members' tabs (a name only
+                # where Spaces is enforced: an identity-store read, in a thread).
+                _author = await asyncio.to_thread(_author_of_row, _user_row)
                 await get_turn_broker().emit(
                     thread_id,
                     {
@@ -1259,6 +1293,7 @@ def create_sse_chat_router(
                             "client_msg_id": _client_msg_id,
                             "session_id": session_id,
                             "ts": _ts,
+                            **_author,
                         },
                     },
                 )
@@ -1578,8 +1613,14 @@ def create_sse_chat_router(
             # Store reads and writes: off the event loop.
             session = await asyncio.to_thread(store.get, session_id)
             thread_id = session.thread_id if session else ""
+            if session is None and await asyncio.to_thread(_not_this_spaces_chat, session_id):
+                # The chat store is kept by space: an id this space does not
+                # hold is another space's chat, or none. Its saved steps are
+                # kept by id alone, so nothing more is deleted under it.
+                return {"status": "ok"}
             await asyncio.to_thread(store.delete, session_id)
 
+            leftovers = False
             if thread_id:
                 try:
                     from kazma_ui import dashboard as _dash
@@ -1590,8 +1631,14 @@ def create_sse_chat_router(
                         # The thread's checkpoint-mutation lock (TT-04).
                         async with thread_mutation(thread_id):
                             await cm.adelete_thread(thread_id)
+                    else:
+                        # No checkpoint store to ask: whatever it holds of
+                        # this chat is still there.
+                        leftovers = True
                 except Exception as exc:
-                    logger.debug("Checkpoint cleanup for %s failed: %s", thread_id, exc)
+                    leftovers = True
+                    logger.warning("[chat] %s deleted, but its checkpoints were NOT (%s)",
+                                   session_id, type(exc).__name__, exc_info=True)
             # Its Time Travel steps go with it, under each of its keys (TT-05):
             # they are copies of the chat, like the checkpoints above. What
             # Kazma learned is memory, kept unless the dialog's "also forget"
@@ -1605,7 +1652,13 @@ def create_sse_chat_router(
                     forget_thread_snapshots, [k for k in (session_id, thread_id) if k]
                 )
             except (SnapshotStoreError, sqlite3.Error, OSError):
+                leftovers = True
                 logger.warning("[chat] %s deleted, but its saved steps were NOT", session_id, exc_info=True)
+            if thread_id and not leftovers:
+                # The thread's space record goes last, and only when nothing
+                # of the chat is left: while a copy remains, the record is
+                # what keeps it in its space.
+                await asyncio.to_thread(_forget_thread_record, thread_id)
             return {"status": "ok"}
         except Exception as exc:
             logger.error("delete_session failed: %s", exc)
@@ -1953,6 +2006,15 @@ def create_sse_chat_router(
                 logger.debug("[SSE] gate-view snapshot skipped", exc_info=True)
                 live_rows_for_view, views_authoritative = [], False
 
+        # Another member's message is shown with their name (Spaces S1-08).
+        from kazma_core.spaces.scope import bound_asker
+        from kazma_ui.space_binding import other_authors
+
+        _author_names = await asyncio.to_thread(
+            other_authors,
+            [m.get("author") for m in messages if isinstance(m, dict)],
+            bound_asker(),
+        )
         payload: list[dict[str, Any]] = []
         for msg in messages:
             if not _visible(msg):
@@ -1961,6 +2023,8 @@ def create_sse_chat_router(
                 "role": msg.get("role", "user"),
                 "content": msg.get("content", ""),
             }
+            if msg.get("author") in _author_names:
+                item["author_name"] = _author_names[msg["author"]]
             if msg.get("pending"):
                 item["pending"] = True
             if msg.get("open"):
@@ -2249,7 +2313,7 @@ def create_sse_chat_router(
         try:
             if session_id:
                 _label = "/steer! " if mode == "hard" else "/steer "
-                _steer_row = {"role": "user", "content": _label + text}
+                _steer_row = _reply_sink.authored({"role": "user", "content": _label + text})
                 # AUD-052: read, append and write under the session's
                 # transaction (and off the loop: the read was on it).
                 await asyncio.to_thread(

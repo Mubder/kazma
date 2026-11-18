@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "bridge_episode_id",
+    "bridge_episode_ids",
     "store_swarm_result",
     "log_evolution_v2",
 ]
@@ -52,16 +53,39 @@ def _open_primary() -> sqlite3.Connection | None:
         return None
 
 
-def bridge_episode_id(source: str, session_id: str, turn_number: int, content: str) -> str:
+def _bound_space() -> str:
+    """The space this work is bound to (``NoSpaceBound`` when Spaces is
+    enforced and nothing is: the callers store nothing then)."""
+    from kazma_core.spaces.scope import require_space_id
+
+    return require_space_id()
+
+
+def bridge_episode_id(source: str, session_id: str, turn_number: int, content: str,
+                      tenant_id: str | None = None) -> str:
     """The id of an episode this module writes: stable on source, session,
     turn and the first 200 characters of its text, so repeated writes of one
     payload dedupe (INSERT OR IGNORE) while distinct events still land. Memory
-    recovery recomputes it to prove a candidate text is the one written."""
+    recovery recomputes it to prove a candidate text is the one written.
+
+    Every space but the owner's carries its space in the id (Spaces S1-09,
+    as ``dual_write.episode_ids``): the same result written for two spaces is
+    two memories."""
+    return bridge_episode_ids(source, session_id, turn_number, content, tenant_id)[0]
+
+
+def bridge_episode_ids(source: str, session_id: str, turn_number: int, content: str,
+                       tenant_id: str | None = None) -> tuple[str, str]:
+    """Today's id first, then the other form (``dual_write.episode_ids``)."""
     import hashlib
 
-    return "ep_" + hashlib.sha256(
-        f"{source}:{session_id}:{turn_number}:{content[:200]}".encode("utf-8", "ignore")
-    ).hexdigest()[:24]
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    tenant = str(tenant_id or OWNER_SPACE_ID)
+    body = f"{source}:{session_id}:{turn_number}:{content[:200]}"
+    plain = "ep_" + hashlib.sha256(body.encode("utf-8", "ignore")).hexdigest()[:24]
+    spaced = "ep_" + hashlib.sha256(f"{tenant}\x1f{body}".encode("utf-8", "ignore")).hexdigest()[:24]
+    return (plain, spaced) if tenant == OWNER_SPACE_ID else (spaced, plain)
 
 
 def _insert_episode(
@@ -81,7 +105,7 @@ def _insert_episode(
     now = time.time()
     if eid is None:
         eid = bridge_episode_id(
-            source, session_id, turn_number, (user_text or summary_text or "").strip()
+            source, session_id, turn_number, (user_text or summary_text or "").strip(), tenant_id
         )
     # A memory the user took back, or a chat kept out of memory (plan U1):
     # nothing is written, and the embedding below never reaches a tombstone.
@@ -157,9 +181,12 @@ def store_swarm_result(
     task_id: str,
     snippet: str,
     metadata: dict[str, Any] | None = None,
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
 ) -> str | None:
-    """Persist a successful swarm worker result as a V2 episode.
+    """Persist a successful swarm worker result as a V2 episode, for
+    *tenant_id*: the space named, else the one this work is bound to (the
+    owner's on an install that does not enforce Spaces; with Spaces enforced
+    and nothing bound, nothing is stored).
 
     Replaces ``worker_dispatch._index_worker_l4_memory``. The ``snippet``
     is the same ``"Task: …\\nResult: …"`` blob the V1 path indexed. The
@@ -173,6 +200,7 @@ def store_swarm_result(
     if not snippet or len(snippet.strip()) < 12:
         return None
     try:
+        tenant_id = tenant_id or _bound_space()
         meta = dict(metadata or {})
         meta.setdefault("worker", worker)
         meta.setdefault("source", "swarm_worker")
@@ -213,7 +241,7 @@ def log_evolution_v2(
     delta: str,
     summary: str,
     timestamp: str = "",
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
 ) -> str | None:
     """Persist a SoulEvolution entry as a V2 episode (source="soul_evolution").
 
@@ -225,6 +253,7 @@ def log_evolution_v2(
     Returns the V2 episode id, or None on failure. Never raises.
     """
     try:
+        tenant_id = tenant_id or _bound_space()
         if not timestamp:
             from datetime import datetime, UTC
 

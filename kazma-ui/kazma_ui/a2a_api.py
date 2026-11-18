@@ -42,6 +42,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from kazma_core.errors import validation_error
+from kazma_core.spaces.scope import OWNER_SPACE_ID, require_space_id
 
 from kazma_ui.rate_limit import rate_limit
 
@@ -73,6 +74,9 @@ class _Task:
     id: str
     context: str
     request: str
+    #: The space the request was made in (Spaces S1-08): a task and a
+    #: conversation are that space's, and another space reads neither.
+    space: str = OWNER_SPACE_ID
     state: str = "working"
     answer: str = ""
     reason: str = ""
@@ -91,7 +95,7 @@ class _Store:
 
     def __init__(self) -> None:
         self.tasks: OrderedDict[str, _Task] = OrderedDict()
-        self.contexts: OrderedDict[str, list[tuple[str, str]]] = OrderedDict()
+        self.contexts: OrderedDict[tuple[str, str], list[tuple[str, str]]] = OrderedDict()
 
     def running(self) -> int:
         return sum(1 for t in self.tasks.values() if t.state == "working")
@@ -107,7 +111,12 @@ class _Store:
                 break
             self.tasks.pop(oldest, None)
 
-    def remember(self, context: str, request: str, answer: str) -> None:
+    def task_of(self, task_id: str, space: str) -> _Task | None:
+        """The task *task_id* of *space*; another space's reads as none."""
+        found = self.tasks.get(str(task_id or ""))
+        return found if found is not None and found.space == space else None
+
+    def remember(self, context: tuple[str, str], request: str, answer: str) -> None:
         turns = self.contexts.setdefault(context, [])
         turns.append((request, answer))
         del turns[:-_CONTEXT_TURNS]
@@ -153,7 +162,7 @@ async def _run(task: _Task, agent_getter: Callable[[], Any]) -> None:
     from kazma_core.cron.capabilities import cron_fire_graph
 
     history: list[dict[str, str]] = []
-    for request, answer in _STORE.contexts.get(task.context, []):
+    for request, answer in _STORE.contexts.get((task.space, task.context), []):
         history += [{"role": "user", "content": request}, {"role": "assistant", "content": answer}]
     thread = f"a2a-{task.id}"
     try:
@@ -177,7 +186,7 @@ async def _run(task: _Task, agent_getter: Callable[[], Any]) -> None:
             task.state, task.reason = "failed", "Kazma could not answer: the turn failed."
         else:
             task.state, task.answer = "completed", (getattr(turn, "text", "") or "").strip()
-            _STORE.remember(task.context, task.request, task.answer)
+            _STORE.remember((task.space, task.context), task.request, task.answer)
     finally:
         task.at = time.time()
         logger.info("[a2a] task %s %s", task.id, task.state)
@@ -226,7 +235,7 @@ def create_a2a_router(agent_getter: Callable[[], Any]) -> APIRouter:
                 text, context, _continues = read_send_params(params)
                 if _STORE.running() >= MAX_RUNNING:
                     raise A2AError("busy", f"Kazma is answering {MAX_RUNNING} requests; try again shortly")
-                task = _Task(id=str(uuid.uuid4()), context=context, request=text)
+                task = _Task(id=str(uuid.uuid4()), context=context, request=text, space=require_space_id())
                 _STORE.add(task)
                 from kazma_core.background import spawn_background
 
@@ -236,12 +245,12 @@ def create_a2a_router(agent_getter: Callable[[], Any]) -> APIRouter:
                     await asyncio.wait({task.handle}, timeout=TURN_BUDGET_S + 10)
                 return JSONResponse({"jsonrpc": "2.0", "id": rid, "result": task.view()})
             if method == "tasks/get":
-                found = _STORE.tasks.get(str((params or {}).get("id") or ""))
+                found = _STORE.task_of(str((params or {}).get("id") or ""), require_space_id())
                 if found is None:
                     raise A2AError("task_not_found", "no such task")
                 return JSONResponse({"jsonrpc": "2.0", "id": rid, "result": found.view()})
             if method == "tasks/cancel":
-                found = _STORE.tasks.get(str((params or {}).get("id") or ""))
+                found = _STORE.task_of(str((params or {}).get("id") or ""), require_space_id())
                 if found is None:
                     raise A2AError("task_not_found", "no such task")
                 if found.state in _TERMINAL:

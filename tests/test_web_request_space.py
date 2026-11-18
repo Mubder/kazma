@@ -147,6 +147,127 @@ def test_an_unsigned_request_cannot_name_a_space(monkeypatch, people) -> None:
     assert answer == {"space": "default", "asker": None}
 
 
+def test_enforced_a_request_with_no_sign_in_never_gets_another_spaces_answer(
+    monkeypatch, people
+) -> None:
+    """With sign-in switched off there is no account to check: once Spaces
+    is enforced, a space route that names another space is refused, never
+    answered from the owner's space. The owner's space, and a route about
+    the install, run as before."""
+    monkeypatch.setattr(scope, "_enforced", True)
+    with _app(monkeypatch, lambda request: None) as client:
+        other = client.get("/api/chat/sessions", headers={HEADER: "family"})
+        reached = list(client.reached)
+        own = client.get("/api/chat/sessions", headers={HEADER: OWNER_SPACE_ID}).json()
+        install = client.get("/api/auth/status", headers={HEADER: "family"}).json()
+    assert other.status_code == 403, other.text
+    assert other.json()["code"] == "not_a_member"
+    assert reached == [], "the handler never ran"
+    assert own == {"space": OWNER_SPACE_ID, "asker": None}
+    assert install == {"space": OWNER_SPACE_ID, "asker": None}
+
+
+def test_enforced_a_page_that_names_no_space_is_drawn_for_the_persons_own(
+    monkeypatch, people
+) -> None:
+    """A reload after the sidebar moved the tab (the address lost its
+    ``space``) or a bookmark: the page is drawn for the person's own first
+    space, and its script loads it again for the tab's. Its API calls must
+    still say which space."""
+    monkeypatch.setattr(scope, "_enforced", True)
+    with _app(monkeypatch, lambda request: people["layla"]) as client:
+        page = client.get("/chat")
+        api = client.get("/api/chat/sessions")
+        socket_like = client.get("/ws/chat/s1")
+        named = client.get("/chat?space=family").json()
+    assert page.status_code == 200, page.text
+    assert page.json() == {"space": "layla-own", "asker": people["ids"]["layla"]}
+    assert api.status_code == 400 and api.json()["code"] == "space_required"
+    assert socket_like.status_code == 400
+    assert named["space"] == "family"
+
+
+def _owner_in_two_spaces_on_the_real_app(monkeypatch) -> TestClient:
+    """``create_app()`` with sign-in on, Spaces enforced and the owner in
+    their own space and a family space: what the browser test drives, below
+    the browser."""
+    from tests._secured_app import secured_app
+
+    app = secured_app(monkeypatch)
+    identity.create_space("Family", created_by=OWNER_ACCOUNT_ID, space_id="family")
+    monkeypatch.setattr(scope, "_enforced", True)
+    return TestClient(app)
+
+
+def _page_space(html: str) -> str:
+    import re
+
+    found = re.search(r'<meta name="kazma-space" content="([^"]*)"', html)
+    assert found, "the page carries its space"
+    return found.group(1)
+
+
+def test_on_the_real_app_a_page_with_no_space_is_drawn_for_the_owners_own(monkeypatch) -> None:
+    """The two-tab browser test's failure, without a browser: a tab whose
+    address lost its ``space`` (the sidebar moved it, then a reload) asks
+    for ``/chat`` with none. The page is drawn for the person's own space,
+    and its script then loads it for the tab's; a named page is drawn for
+    that space; an API call that names none is still refused."""
+    from tests._secured_app import SECRET
+
+    signed_in = {"x-kazma-secret": SECRET}
+    client = _owner_in_two_spaces_on_the_real_app(monkeypatch)
+    page = client.get("/chat", headers=signed_in)
+    named = client.get("/chat?space=family", headers=signed_in)
+    api = client.get("/api/chat/sessions", headers=signed_in)
+    assert page.status_code == 200, page.text[:300]
+    assert _page_space(page.text) == OWNER_SPACE_ID
+    assert named.status_code == 200 and _page_space(named.text) == "family"
+    assert api.status_code == 400 and api.json()["code"] == "space_required"
+
+
+def test_control_on_the_real_app_the_reloaded_page_was_refused(monkeypatch) -> None:
+    """Negative control: with every ``space`` route made to name its space,
+    the reloaded page is a 400 and the tab cannot get back to its space."""
+    from tests._secured_app import SECRET
+
+    monkeypatch.setattr(space_binding, "must_name_its_space",
+                        lambda method, path, route_scope: route_scope == "space")
+    client = _owner_in_two_spaces_on_the_real_app(monkeypatch)
+    page = client.get("/chat", headers={"x-kazma-secret": SECRET})
+    assert page.status_code == 400 and page.json()["code"] == "space_required"
+
+
+def test_control_a_page_that_names_no_space_was_refused(monkeypatch, people) -> None:
+    """Negative control: every ``space`` route, pages included, had to name
+    its space. A reloaded page was refused and the tab could not get back."""
+    monkeypatch.setattr(space_binding, "must_name_its_space",
+                        lambda method, path, route_scope: route_scope == "space")
+    monkeypatch.setattr(scope, "_enforced", True)
+    with _app(monkeypatch, lambda request: people["layla"]) as client:
+        page = client.get("/chat")
+    assert page.status_code == 400 and page.json()["code"] == "space_required"
+
+
+def test_control_a_request_with_no_sign_in_was_answered_from_the_owners_space(
+    monkeypatch, people
+) -> None:
+    """Negative control: the rule before this one bound a request with no
+    sign-in to the space it would run in, whatever space it named."""
+    def as_before(principal, named, *, legacy_tenant, needs_space):
+        if space_binding.account_of(principal) is None:
+            return space_binding.Binding(space_id=legacy_tenant or OWNER_SPACE_ID, asker=None)
+        return real(principal, named, legacy_tenant=legacy_tenant, needs_space=needs_space)
+
+    real = space_binding.space_for_request
+    monkeypatch.setattr(space_binding, "space_for_request", as_before)
+    monkeypatch.setattr(scope, "_enforced", True)
+    with _app(monkeypatch, lambda request: None) as client:
+        answer = client.get("/api/chat/sessions", headers={HEADER: "family"})
+    assert answer.status_code == 200
+    assert answer.json()["space"] == OWNER_SPACE_ID, "the team's request got the owner's space"
+
+
 # ── The page's own flow on an install that does not enforce Spaces ───────
 #
 # A page is rendered for the tenant its request ran in, and a page that

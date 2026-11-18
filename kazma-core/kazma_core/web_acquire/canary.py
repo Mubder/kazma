@@ -193,6 +193,13 @@ async def run_canary(*, alert=None) -> dict[str, Any]:
     job_id = f"canary:{int(started)}"
     reason = ""
     token = ki._PRIVATE_KNOWLEDGE.set((store, index))
+    # The install's own check, on a private store: once Spaces is enforced it
+    # runs as the owner's space (a library read with no space bound is
+    # refused, S1-13); it reads no space's content. Not enforced: nothing is
+    # bound, as before.
+    from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, OWNER_SPACE_ID, reset_scope, set_scope, spaces_enforced
+
+    scope_tokens = set_scope(OWNER_SPACE_ID, OWNER_ACCOUNT_ID) if spaces_enforced() else None
     try:
         async def crawl() -> None:
             prepared = await ki._prepare_ingest_site(LIBRARY, config["url"], max_pages=1, job_id=job_id,
@@ -218,6 +225,8 @@ async def run_canary(*, alert=None) -> dict[str, Any]:
         logger.warning("[acquisition] canary could not run", exc_info=True)
         reason = f"{type(exc).__name__}: {exc}"
     finally:
+        if scope_tokens is not None:
+            reset_scope(scope_tokens)
         ki._PRIVATE_KNOWLEDGE.reset(token)
         try:
             await crawl_jobs.call(crawl_jobs.purge_terminal, kinds={"canary"})

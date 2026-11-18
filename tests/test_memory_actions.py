@@ -85,7 +85,8 @@ def unrecorded(app, mp) -> list[str]:
     from kazma_ui import memory_actions
 
     seen: list[str] = []
-    mp.setattr(memory_actions, "_record", lambda action, ids, status, headers: seen.append(action))
+    mp.setattr(memory_actions, "_record",
+               lambda action, ids, status, headers, acted_in="": seen.append(action))
     client = TestClient(app, raise_server_exceptions=False)
     missing = []
     for method, template in _mutating_routes(app):

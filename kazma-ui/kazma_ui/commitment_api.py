@@ -11,6 +11,11 @@ The Settings → Safety group lists pending deltas and can confirm/reject
 them. ``soul_requires_confirm`` defaults OFF on a single-operator lab and
 auto-ON in production / multi-user.
 
+Spaces S1-10: a lesson is its space's. A held delta is listed, confirmed,
+rejected and applied in the space it was learned in (the commitment's
+tenant); another space's reads as not found. On an install that does not
+enforce Spaces there is one Soul and one queue, as before.
+
 AUD-104: every route here is admin-only on an install with platform users
 (``/api/commitment`` is in ``platform_rbac._ADMIN_PREFIXES``): a Soul delta
 is guidance in every future system prompt, for every user. A refusal or a
@@ -31,6 +36,28 @@ from kazma_core.errors import safe_error
 logger = logging.getLogger(__name__)
 
 
+def _space() -> str:
+    """The space whose lessons this request acts on: the one Soul's on an
+    install that does not enforce Spaces, else the request's space."""
+    from kazma_core.skills.self_improvement import soul_space
+
+    return soul_space()
+
+
+#: The status of a lesson held for confirmation: the only one a confirm or a
+#: reject acts on.
+_HELD = "needs_confirm"
+
+
+def _lesson_here(commitment: object) -> bool:
+    """True for a lesson of this request's space, held or decided."""
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    if commitment is None or getattr(commitment, "act", "") != "soul_delta":
+        return False
+    return (getattr(commitment, "tenant_id", "") or OWNER_SPACE_ID) == _space()
+
+
 def create_commitment_router() -> APIRouter:
     router = APIRouter(tags=["commitment"])
 
@@ -39,7 +66,7 @@ def create_commitment_router() -> APIRouter:
         """List needs_confirm soul-delta commitments awaiting confirmation."""
         from kazma_core.safety.commitment.store import async_list_pending_soul as _list
 
-        rows = await _list()
+        rows = await _list(_space())
         return {
             "count": len(rows),
             "pending": [
@@ -62,6 +89,17 @@ def create_commitment_router() -> APIRouter:
             status_code=status,
         )
 
+    def _not_held(c: object) -> JSONResponse:
+        """A lesson of this space decided already (confirmed and applied,
+        rejected, expired): no longer held, so nothing is changed."""
+        status = str(getattr(c, "status", "") or "")
+        return JSONResponse(
+            {"error": f"this lesson is no longer held for confirmation (it is {status})",
+             "code": "not_held", "status": status,
+             "commitment_id": getattr(c, "commitment_id", "")},
+            status_code=409,
+        )
+
     @router.post("/api/commitment/soul/{commitment_id}/confirm", response_model=None)
     async def confirm_soul(commitment_id: str) -> dict | JSONResponse:
         """Confirm a soul delta: flip to committed + re-apply (the trigger the
@@ -73,10 +111,17 @@ def create_commitment_router() -> APIRouter:
         )
 
         c = await async_get_commitment(commitment_id)
-        if c is None or c.act != "soul_delta":
+        if not _lesson_here(c):
             return _refusal(404, "not_found", "not a soul commitment", commitment_id)
-        # AUD-104: a commitment-store write; off the event loop.
+        if c.status != _HELD:
+            return _not_held(c)
+        # AUD-104: a commitment-store write; off the event loop. Only a lesson
+        # still held is confirmed (a compare-and-set): a second confirm
+        # applied it a second time.
         if not await asyncio.to_thread(confirm_soul_delta, commitment_id):
+            now = await async_get_commitment(commitment_id)
+            if now is not None and now.status != _HELD:
+                return _not_held(now)
             return _refusal(409, "not_confirmed", "confirm failed", commitment_id)
         slots = c.slots or {}
         delta = slots.get("delta", "")
@@ -86,7 +131,8 @@ def create_commitment_router() -> APIRouter:
         try:
             if agent_id:
                 applied = await asyncio.to_thread(
-                    apply_agent_mutation, agent_id, delta, commitment_id=commitment_id
+                    apply_agent_mutation, agent_id, delta, commitment_id=commitment_id,
+                    space=c.tenant_id or None,
                 )
             elif worker_name:
                 si = get_self_improvement()
@@ -124,12 +170,24 @@ def create_commitment_router() -> APIRouter:
 
     @router.post("/api/commitment/soul/{commitment_id}/reject", response_model=None)
     async def reject_soul(commitment_id: str) -> dict | JSONResponse:
-        """Reject a soul delta: abort the commitment (the delta stays unapplied)."""
-        from kazma_core.safety.commitment.store import async_update_status
+        """Reject a held soul delta: abort the commitment (the delta stays
+        unapplied). Only a lesson still held: an applied one is in the Soul,
+        and "rejected" over it said what had not happened."""
+        from kazma_core.safety.commitment.store import async_get_commitment, async_update_status
 
-        c = await async_update_status(commitment_id, "aborted", event_type="soul_rejected")
+        # Only a held lesson of this space: the route aborted whatever
+        # commitment the id named (a reminder being confirmed, another
+        # space's lesson, a lesson already applied).
+        held = await async_get_commitment(commitment_id)
+        if not _lesson_here(held):
+            return _refusal(404, "not_found", "not a soul commitment", commitment_id)
+        if held.status != _HELD:
+            return _not_held(held)
+        c = await async_update_status(commitment_id, "aborted", event_type="soul_rejected", expected=_HELD)
         if c is None:
             return _refusal(404, "not_found", "not found", commitment_id)
+        if c.status != "aborted":
+            return _not_held(c)
         return {"rejected": True, "commitment_id": commitment_id}
 
     return router

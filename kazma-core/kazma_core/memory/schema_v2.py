@@ -522,6 +522,7 @@ def ensure_primary_schema(conn: Any) -> None:
     _ensure_fts5(conn)
     _ensure_mirror_outbox(conn)
     _ensure_graph_outbox(conn)
+    _refuse_rows_with_no_tenant(conn)
     # Phase 3: one-shot backfill of stale entity counts on first boot after
     # the columns are added (rows default to -1). Idempotent — only touches
     # rows still at the sentinel. Safe to re-run; cheap when nothing's stale.
@@ -543,6 +544,33 @@ def ensure_primary_schema(conn: Any) -> None:
 _MIRRORED_EPISODE_COLUMNS = "tier, user_text, assistant_text, summary_text, metadata_json, structural_importance"
 _MIRRORED_BELIEF_COLUMNS = ("subject, predicate, predicate_type, object, confidence, structural_importance, "
                             "source_trust_weight, valid_from, valid_until, invalidated_at, metadata_json")
+
+
+#: What a memory route's tenant reads as when it cannot be worked out
+#: (``kazma_ui.memory_api._memory_tenant_id``): reads then match nothing.
+NO_TENANT = "__unscoped__"
+
+
+def _refuse_rows_with_no_tenant(conn: Any) -> None:
+    """No row is ever written under :data:`NO_TENANT` (Spaces S1-09).
+
+    A route whose tenant cannot be worked out reads under the sentinel and
+    finds nothing. Its writes used to go ahead under it: About me, a link or
+    a grouping saved for a tenant no one is. A trigger on every table with a
+    ``tenant_id`` column refuses the insert (and a change of tenant to it),
+    whoever writes. Idempotent.
+    """
+    tables = [
+        str(r[0]) for r in conn.execute(
+            "SELECT m.name FROM sqlite_master m JOIN pragma_table_info(m.name) c "
+            "WHERE m.type = 'table' AND c.name = 'tenant_id' AND m.sql NOT LIKE 'CREATE VIRTUAL%'")
+    ]
+    for table in tables:
+        for when, event in (("insert", "INSERT"), ("retenant", "UPDATE OF tenant_id")):
+            conn.execute(
+                f"CREATE TRIGGER IF NOT EXISTS kazma_no_tenant_{when}_{table} BEFORE {event} ON {table} "  # nosec B608 - table names come from this database's own schema; the sentinel is a constant
+                f"WHEN NEW.tenant_id = '{NO_TENANT}' "
+                "BEGIN SELECT RAISE(ABORT, 'memory: no tenant is bound to this write'); END")
 
 
 def _ensure_mirror_outbox(conn: Any) -> None:
@@ -849,6 +877,7 @@ def ensure_ops_schema(conn: Any) -> None:
     # Recall and the Knowledge index already search their own sources.
     conn.execute("DROP TABLE IF EXISTS unified_items")
     add_missing_columns(conn, "memory_task_queue", (("lease_token", "TEXT"), ("next_attempt_at", "REAL")))
+    _refuse_rows_with_no_tenant(conn)
     conn.execute("PRAGMA foreign_keys = ON")
     conn.commit()
     logger.debug("[schema_v2] ops schema ensured")

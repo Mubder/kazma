@@ -334,10 +334,13 @@ class KnowledgeIndex:
 
     def _open_vector_store(self, library_id: str) -> VectorStore:
         """A (not yet connected) store for the library's collection."""
-        # Sanitise the library id for use as a Chroma collection name
-        # (alphanumerics + underscore + hyphen only).
-        safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in library_id)
-        return VectorStore(collection_name=f"kazma_kb_{safe}", persist_dir=self._persist_dir)
+        # The library id as a Chroma collection name: the one rule for every
+        # name built from an id (``knowledge.library_name_part``), which keeps
+        # the "." that marks a library of a space other than the owner's.
+        from kazma_core.stores.knowledge import library_name_part
+
+        return VectorStore(collection_name=f"kazma_kb_{library_name_part(library_id)}",
+                           persist_dir=self._persist_dir)
 
     # ------------------------------------------------------------------
     # Indexing
@@ -689,7 +692,8 @@ class KnowledgeIndex:
         )
         if library is None:
             return []
-        return self._search_libraries(query, [library_id], self._limit(top_k))
+        # The id the lookup resolved (Spaces S1-13), never the one asked for.
+        return self._search_libraries(query, [library["id"]], self._limit(top_k))
 
     def _gather(
         self, query: str, library_ids: list[str], limit: int,

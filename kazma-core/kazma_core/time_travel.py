@@ -89,6 +89,8 @@ __all__ = [
     "turn_boundary_payload",
 ]
 
+from kazma_core.spaces.scope import space_of_state
+
 logger = logging.getLogger(__name__)
 
 # Default paths / limits
@@ -1436,7 +1438,8 @@ async def apply_snapshot_to_thread(
     from kazma_core.memory.forget import rewind_memory
 
     await rewind_memory(thread_id, old_messages, list(payload.get("messages") or []),
-                        tenant_id=str(payload.get("tenant_id") or state.get("tenant_id") or "default"))
+                        tenant_id=space_of_state(
+                            {"tenant_id": payload.get("tenant_id") or state.get("tenant_id")}))
     return payload
 
 

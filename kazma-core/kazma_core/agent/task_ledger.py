@@ -47,6 +47,8 @@ from typing import Any
 
 from kazma_core.config_store import apply_sqlite_pragmas
 from kazma_core.db.sqlite_columns import add_missing_columns
+from kazma_core.spaces.scope import OWNER_SPACE_ID, require_space_id
+from kazma_core.spaces.threads import require_thread, thread_refusal
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +111,9 @@ class TaskLedger:
     open_questions: list[str] = field(default_factory=list)
     status: str = _ACTIVE
     clarify_pending: bool = False
-    tenant_id: str = "default"
+    #: The space of the chat the plan belongs to. A ledger made before
+    #: Spaces has the owner's (decision N19).
+    tenant_id: str = OWNER_SPACE_ID
     updated_at: float = field(default_factory=time.time)
     superseded_by: str | None = None
 
@@ -194,7 +198,7 @@ class TaskLedger:
 
         return cls(
             thread_id=str(row["thread_id"]),
-            tenant_id=str(row.get("tenant_id", "default") or "default"),
+            tenant_id=str(row.get("tenant_id") or OWNER_SPACE_ID),
             status=str(row.get("status", _ACTIVE) or _ACTIVE),
             goal=str(row.get("goal", "") or ""),
             next_action=str(row.get("next_action", "") or ""),
@@ -276,9 +280,14 @@ class TaskLedgerStore:
             finally:
                 conn.close()
 
-    def active_for(self, thread_id: str, tenant_id: str = "default") -> TaskLedger | None:
-        """The ACTIVE ledger for a thread, or None. Never raises."""
+    def active_for(self, thread_id: str, tenant_id: str | None = None) -> TaskLedger | None:
+        """The ACTIVE ledger for a thread, or None. Never raises.
+
+        A plan is kept by thread and follows its chat's space (Spaces S1-08):
+        a thread of another space reads as having no plan."""
         try:
+            if thread_refusal(str(thread_id)):
+                return None
             conn = self._connect()
             try:
                 cur = conn.execute(
@@ -294,16 +303,21 @@ class TaskLedgerStore:
             logger.debug("[task-ledger] read failed", exc_info=True)
             return None
 
-    def get_or_create(self, thread_id: str, tenant_id: str = "default") -> TaskLedger:
+    def get_or_create(self, thread_id: str, tenant_id: str | None = None) -> TaskLedger:
+        # A plan is its chat's: one is never made for a thread of another
+        # space (``ThreadInAnotherSpace``, only once Spaces is enforced).
+        require_thread(str(thread_id))
         led = self.active_for(thread_id, tenant_id)
         if led is not None:
             return led
-        led = TaskLedger(thread_id=str(thread_id), tenant_id=tenant_id or "default")
+        led = TaskLedger(thread_id=str(thread_id), tenant_id=tenant_id or require_space_id())
         self.save(led)
         return led
 
     def history(self, thread_id: str, limit: int = 10) -> list[TaskLedger]:
         try:
+            if thread_refusal(str(thread_id)):
+                return []
             conn = self._connect()
             try:
                 rows = conn.execute(

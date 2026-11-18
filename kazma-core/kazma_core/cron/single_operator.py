@@ -16,7 +16,7 @@ tenant's job id answers exactly like an unknown one.
 
 from __future__ import annotations
 
-__all__ = ["MULTI_USER_REFUSAL", "REFUSAL_CODE", "scheduled_refusal"]
+__all__ = ["MULTI_USER_REFUSAL", "NO_SPACE_REFUSAL", "REFUSAL_CODE", "scheduled_refusal"]
 
 REFUSAL_CODE = "scheduled_single_operator"
 
@@ -27,11 +27,27 @@ MULTI_USER_REFUSAL = (
 )
 
 
+#: Spaces enforced and the work tied to no space (a chat app's turn before
+#: its chats are bound to one, stage 3): a job would belong to no one.
+NO_SPACE_REFUSAL = (
+    "Scheduled tasks work inside a space, and this chat is not tied to one yet."
+)
+
+
 def scheduled_refusal() -> str | None:
-    """:data:`MULTI_USER_REFUSAL` when Scheduled must refuse, else None -- the
+    """Why Scheduled refuses this work, or None.
+
+    Once Spaces is enforced a job carries its space and the account that
+    booked it, and fires as them (S1-14): work bound to a space is served
+    there, work bound to none is refused (:data:`NO_SPACE_REFUSAL`).
+    Otherwise :data:`MULTI_USER_REFUSAL` when Scheduled must refuse -- the
     one rule every single-operator surface asks
     (``security.single_operator``). Blocking: async callers use
     ``asyncio.to_thread``."""
+    from kazma_core.spaces.scope import current_scope, spaces_enforced
+
+    if spaces_enforced():
+        return None if current_scope() is not None else NO_SPACE_REFUSAL
     from kazma_core.security.single_operator import single_operator_refusal
 
     return single_operator_refusal(MULTI_USER_REFUSAL)

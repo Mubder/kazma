@@ -553,6 +553,15 @@ async def delete_session(request: Request, thread_id: str) -> JSONResponse:
     if not _checkpoint_manager:
         return JSONResponse({"deleted": False, "error": "CheckpointManager not initialized"}, status_code=500)
     
+    # A thread of another space is not this space's to delete (Spaces S1-08):
+    # it reads as a thread that is not there.
+    from kazma_core.spaces import threads as _threads
+
+    if await asyncio.to_thread(_threads.thread_refusal, thread_id):
+        return JSONResponse(
+            {"deleted": False, "thread_id": thread_id, "error": "not_found"}, status_code=404
+        )
+
     try:
         # Postgres checkpointers reject the SQLite '?' placeholder. The
         # saver's own delete knows the dialect and the related tables.
@@ -582,10 +591,15 @@ async def delete_session(request: Request, thread_id: str) -> JSONResponse:
         # The chat the thread belongs to (web and platform ids alike). Store
         # writes: off the event loop.
         chat_keys = [thread_id]
+        leftovers = False
         try:
             chat_keys = await asyncio.to_thread(_delete_chats_of_thread, thread_id)
         except Exception as exc:
-            logger.debug("SessionManager delete skipped: %s", exc)
+            leftovers = True
+            logger.warning(
+                "[dashboard] the checkpoints of %s were deleted, but its chat was NOT (%s)",
+                thread_id, type(exc).__name__, exc_info=True,
+            )
 
         # Its Time Travel steps go with it, under every key it had (§12 G,
         # TT-05), as the chat page's delete does: they are copies of the chat.
@@ -598,9 +612,19 @@ async def delete_session(request: Request, thread_id: str) -> JSONResponse:
         try:
             await asyncio.to_thread(forget_thread_snapshots, [thread_id, *chat_keys])
         except (SnapshotStoreError, sqlite3.Error, OSError):
+            leftovers = True
             logger.warning(
                 "[dashboard] %s deleted, but its saved steps were NOT", thread_id, exc_info=True
             )
+        if not leftovers:
+            # The thread's space record goes last, once nothing of the chat
+            # is left: while a copy remains, the record keeps it in its space.
+            try:
+                await asyncio.to_thread(_threads.forget_thread, thread_id)
+            except (sqlite3.Error, OSError):
+                logger.warning(
+                    "[dashboard] the space record of thread %s was not removed", thread_id, exc_info=True
+                )
 
         logger.info("Deleted session: %s (checkpoints + stores)", thread_id)
         return JSONResponse({

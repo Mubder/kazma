@@ -36,6 +36,8 @@ import logging
 import sqlite3
 from typing import Any
 
+from kazma_core.memory.tenant_view import sees_every_tenant
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -79,14 +81,17 @@ def entity_owner(conn: sqlite3.Connection, entity_id: str, caller: str | None) -
     who = str(caller or INSTALL_TENANT)
     if not eid:
         return None
+    # The install's own view, while there is one (memory/tenant_view): once
+    # Spaces is enforced the owner's tenant acts on its own rows like any other.
+    every = sees_every_tenant(caller)
     rows = conn.execute(
-        "SELECT DISTINCT tenant_id FROM entities WHERE id = ? AND (tenant_id = ? OR ? = ?)",
-        (eid, who, who, INSTALL_TENANT),
+        "SELECT DISTINCT tenant_id FROM entities WHERE id = ? AND (tenant_id = ? OR ?)",
+        (eid, who, 1 if every else 0),
     ).fetchall()
     tenants = {str(r[0] or INSTALL_TENANT) for r in rows}
     if who in tenants:
         return who
-    if who == INSTALL_TENANT and len(tenants) == 1:
+    if every and len(tenants) == 1:
         return next(iter(tenants))
     return None
 

@@ -204,6 +204,9 @@ class TestWSChatConnectHitlScan:
 
         mock_ws = AsyncMock()
         mock_ws.query_params = {}
+        # A real handshake's headers: the socket's space is read from them
+        # (Spaces S1-08), and a mock's attribute reads as a named space.
+        mock_ws.headers = {}
         mock_ws.receive_text = AsyncMock(side_effect=Exception("Done"))
 
         router = create_ws_chat_router(graph_getter=lambda: mock_graph)

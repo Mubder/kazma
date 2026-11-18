@@ -63,6 +63,7 @@ __all__ = [
     "REGISTRY_KEY",
     "IdentityError",
     "IdentityUnavailable",
+    "acting_account",
     "add_member",
     "create_space",
     "enforcement_enabled",
@@ -428,6 +429,18 @@ def create_space(
 
     update_registry(_change)
     return made
+
+
+def acting_account(space_id: str) -> str:
+    """The account Kazma's own work for *space_id* acts for when no person
+    asked (a queued memory task, the lesson a finished turn teaches): the
+    space's own person, else its maker; the admin for a tenant no space
+    holds (a tenant of the retired memory modes, R6). Blocking (the settings
+    store). Such work binds a whole scope with it: a space with no asker is
+    half a scope, and ``require_scope`` refuses it once Spaces is enforced.
+    """
+    space = (read_registry().get("spaces") or {}).get(str(space_id or "")) or {}
+    return str(space.get("personal_of") or space.get("created_by") or "") or OWNER_ACCOUNT_ID
 
 
 def add_member(space_id: str, account_id: str, *, role: str = "member") -> None:

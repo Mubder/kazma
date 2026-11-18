@@ -27,6 +27,8 @@ import logging
 import sqlite3
 from typing import Any
 
+from kazma_core.memory.tenant_view import sees_every_tenant
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["graph_hygiene_report"]
@@ -58,7 +60,7 @@ def graph_hygiene_report(conn: sqlite3.Connection, *, tenant_id: str | None = No
     from kazma_core.memory.ego_anchor import subject_should_mint_entity
     from kazma_core.memory.entity_retire import plain_empty_shells
 
-    scoped = tenant_id not in (None, "", "default")
+    scoped = not sees_every_tenant(tenant_id)
     empty = [eid for _tenant, eid in plain_empty_shells(conn, tenant_id=tenant_id if scoped else None)]
     # A merged-away entity is a redirect (metadata.merged_into), not clutter.
     only = tenant_id if scoped else None

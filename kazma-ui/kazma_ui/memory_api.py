@@ -21,6 +21,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from kazma_core.errors import safe_error
 
+from kazma_core.memory.tenant_view import sees_every_tenant
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["memory-admin"])
@@ -70,7 +72,7 @@ def _would_orphan(
         return []
     try:
         placeholders = ",".join("?" * len(belief_ids))
-        scoped = tenant_id not in (None, "", "default")
+        scoped = not sees_every_tenant(tenant_id)
         scope = " AND tenant_id = ?" if scoped else ""
         params = (*belief_ids, tenant_id) if scoped else tuple(belief_ids)
         # Active beliefs NOT in the to-remove set — endpoints here stay anchored.
@@ -288,8 +290,11 @@ def _memory_tenant_id() -> str:
             return require_tenant_id()
         except Exception:
             # Do not fall back to the shared "default" tenant — that would
-            # leak another tenant's rows when isolation is required.
-            return "__unscoped__"
+            # leak another tenant's rows when isolation is required. The
+            # store refuses a write under this id (schema_v2).
+            from kazma_core.memory.schema_v2 import NO_TENANT
+
+            return NO_TENANT
     return "default"
 
 
@@ -313,7 +318,7 @@ def _row_tenant_ok(conn: sqlite3.Connection, table: str, row_id: str) -> bool:
     another tenant's ids.
     """
     tid = _memory_tenant_id()
-    if tid == "default":
+    if sees_every_tenant(tid):
         return True
     try:
         row = conn.execute(_OWNER_SQL[table], (row_id,)).fetchone()
@@ -344,7 +349,7 @@ def _entity_tenant_ok(conn: sqlite3.Connection, eid: str) -> bool:
     The install's own view any node, a virtual fact node with no entity row
     included; a tenant caller only an entity of its own."""
     tid = _memory_tenant_id()
-    return tid == "default" or _entity_owner(conn, eid) == tid
+    return sees_every_tenant(tid) or _entity_owner(conn, eid) == tid
 
 
 def _belief_tenant_ok(conn: sqlite3.Connection, bid: str) -> bool:
@@ -414,8 +419,8 @@ def _memory_vocab_sync() -> dict[str, Any]:
     try:
         conn = _conn()
         tid = _memory_tenant_id()
-        tfilter = " AND tenant_id = ?" if tid != "default" else ""
-        tparam: tuple = (tid,) if tid != "default" else ()
+        tfilter = " AND tenant_id = ?" if not sees_every_tenant(tid) else ""
+        tparam: tuple = (tid,) if not sees_every_tenant(tid) else ()
         # Predicates: DISTINCT name + type + count, frequency-sorted. Only
         # counts active beliefs so stale predicates don't dominate the chips.
         preds = [
@@ -445,7 +450,7 @@ def _memory_vocab_sync() -> dict[str, Any]:
                                 AND (b.subject=e.id OR b.object=e.id))
                            ) AS belief_count
                     FROM entities e
-                    WHERE 1=1 {('AND e.tenant_id = ?' if tid != 'default' else '')}
+                    WHERE 1=1 {('AND e.tenant_id = ?' if not sees_every_tenant(tid) else '')}
                     ORDER BY belief_count DESC, e.name ASC
                     LIMIT 200""",
                 tparam,
@@ -471,7 +476,7 @@ def _memory_admin_summary_sync() -> dict[str, Any]:
         # on; unscoped (today's behavior) otherwise. The tenant filter uses
         # the tenant_id-leading indexes so it stays fast either way.
         tid = _memory_tenant_id()
-        scoped = tid != "default"
+        scoped = not sees_every_tenant(tid)
         tfilter = " AND tenant_id = ?" if scoped else ""
         tparam: tuple = (tid,) if scoped else ()
         # The entity counts' own form: None is the install's view, every tenant.
@@ -604,7 +609,7 @@ def _list_entities_sync(q: str, limit: int, offset: int, empty_only: bool, isola
         # own view, every tenant). The base WHERE carries the filter;
         # FTS/LIKE/empty/isolated clauses append to it.
         tid = _memory_tenant_id()
-        only = tid if tid != "default" else None
+        only = tid if not sees_every_tenant(tid) else None
         try:
             stale_n = conn.execute(
                 "SELECT COUNT(*) FROM entities WHERE belief_count = -1 AND (? IS NULL OR tenant_id = ?)",
@@ -791,7 +796,7 @@ def _rename_entity_sync(entity_id: str, payload: Any) -> dict[str, Any]:
             (eid, owner),
         ).fetchone() if owner else None
         created = False
-        if not row and tid != "default" and not conn.execute(
+        if not row and not sees_every_tenant(tid) and not conn.execute(
             "SELECT 1 FROM beliefs WHERE tenant_id = ? AND (subject = ? OR object = ?) LIMIT 1",
             (tid, eid, eid),
         ).fetchone():
@@ -1447,8 +1452,8 @@ def _unlink_entities_sync(payload: Any) -> dict[str, Any]:
     sub_id = _entity_slug(subject)
     try:
         conn = _conn()
-        tsql = " AND tenant_id=?" if tid != "default" else ""
-        tparams: list = [tid] if tid != "default" else []
+        tsql = " AND tenant_id=?" if not sees_every_tenant(tid) else ""
+        tparams: list = [tid] if not sees_every_tenant(tid) else []
         row = conn.execute(
             """
             SELECT id FROM beliefs
@@ -2209,7 +2214,7 @@ def hygiene_preview() -> dict[str, Any]:
     from kazma_core.memory.entity_retire import plain_empty_shells
 
     tid = _memory_tenant_id()
-    scoped = tid != "default"
+    scoped = not sees_every_tenant(tid)
     only = tid if scoped else None  # None: the install's view, every tenant
     b_scope = " AND tenant_id = ?" if scoped else ""
     tparams: tuple = (tid,) if scoped else ()
@@ -2307,7 +2312,7 @@ def _purge_empty_entities_sync() -> dict[str, Any]:
     conn = _conn()
     try:
         by_tenant: dict[str, list[str]] = {}
-        for tenant, eid in plain_empty_shells(conn, tenant_id=None if tid == "default" else tid):
+        for tenant, eid in plain_empty_shells(conn, tenant_id=None if sees_every_tenant(tid) else tid):
             by_tenant.setdefault(tenant, []).append(eid)
         deleted: list[str] = []
         for tenant, ids in by_tenant.items():
@@ -2338,7 +2343,7 @@ def _archive_invalidated_sync() -> dict[str, Any]:
     The install's own tenant archives the install's; any other tenant, its own.
     """
     tid = _memory_tenant_id()
-    scope = " AND tenant_id = ?" if tid != "default" else ""
+    scope = " AND tenant_id = ?" if not sees_every_tenant(tid) else ""
     conn = None
     try:
         conn = _conn()
@@ -2460,10 +2465,10 @@ def chat_memory(chat_id: str) -> dict[str, Any]:
     conn = _conn()
     try:
         marks = ",".join("?" for _ in keys)
-        scope = "" if tid == "default" else " AND tenant_id = ?"
+        scope = "" if sees_every_tenant(tid) else " AND tenant_id = ?"
         count = conn.execute(
             f"SELECT COUNT(*) FROM episodes WHERE session_id IN ({marks}) AND tier != ?{scope}",
-            (*keys, FORGOTTEN_TIER, *(() if tid == "default" else (tid,))),
+            (*keys, FORGOTTEN_TIER, *(() if sees_every_tenant(tid) else (tid,))),
         ).fetchone()[0]
         kept_out, _turns = forgotten_turns(conn, tenant_id=tid, keys=keys)
         return {"ok": True, "remembered": not kept_out, "memories": int(count)}
@@ -2776,7 +2781,7 @@ def _export_chunks(tid: str, now: Any) -> Iterator[bytes]:
         # other way round: refuse rather than send a file that is not all.
         raise RuntimeError(f"memory export sections disagree with memory_stores: "
                            f"{sorted(declared ^ set(_EXPORT_QUERIES))}")
-    scope, params = ("1 = 1", ()) if tid == "default" else ("tenant_id = ?", (tid,))
+    scope, params = ("1 = 1", ()) if sees_every_tenant(tid) else ("tenant_id = ?", (tid,))
     not_included = {
         e.name: e.excluded for e in (*MEMORY_TABLES, *EXTERNAL_STORES) if not e.export and e.erase != "retired"
     }
