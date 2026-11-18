@@ -64,7 +64,7 @@ PLAN = REPO / "docs" / "plans" / "SPACES_PLAN.md"
 #: item of stage 1 writes the cases of its part and takes them out of the
 #: pending tables; this number may only go down, and lowering it means
 #: lowering the baseline in the same change.
-PENDING_BASELINE = 500
+PENDING_BASELINE = 356
 
 
 # ── what exists ──────────────────────────────────────────────────────────
@@ -229,15 +229,17 @@ def test_pending_targets_only_go_down(routes, tools, live) -> None:
 
 def test_a_target_is_looked_up_one_way() -> None:
     assert pending_item("GET /api/documents/{document_id}") == "S1-12"
-    assert pending_item_for_route("get", "/api/memory/v2/beliefs") == "S1-09"
-    assert pending_item("tool:memory_search") == "S1-09"
+    assert pending_item_for_route("get", "/api/swarm/jobs") == "S1-15"
+    assert pending_item("tool:check_swarm_task") == "S1-15"
+    assert pending_item("tool:memory_search") is None  # its item wrote its case
     assert pending_item("tool:current_datetime") is None  # it has a reason instead
     assert pending_item("tool:no_such_tool") is None
     assert pending_item("GET /api/settings/system/logs") is None  # no rule: not a space route
     # A specific rule stands before its area.
     assert pending_item("POST /api/chat/upload") == "S1-19"
     assert pending_item("GET /api/chat/files/{file_id}") == "S1-19"
-    assert pending_item("POST /api/chat/stream") == "S1-08"
+    # An area whose item wrote its cases has no pending rule left.
+    assert pending_item("POST /api/chat/stream") is None
     assert pending_item("POST /api/github/repos/clone") == "S1-20"
     assert pending_item("GET /api/github/repos") == "S1-17"
     # A prefix ends at a path segment.
@@ -371,30 +373,35 @@ def _planted_case(target: str, item: str = "S1-08") -> Case:
 
 
 def test_a_planted_space_route_with_nothing_is_reported(routes, tools, live) -> None:
-    planted = space_routes([("POST", "/api/replay/planted-thing"), ("GET", "/x")])
-    assert planted == ["GET /x", "POST /api/replay/planted-thing"]
+    planted = space_routes([("POST", "/api/swarm/tasks/planted-thing"), ("GET", "/x")])
+    assert planted == ["GET /x", "POST /api/swarm/tasks/planted-thing"]
     # Without the rules of its area, the route is in no table.
     bare = replace(
         live,
-        route_rules=tuple(r for r in live.route_rules if r[0] not in ("/api/replay", "/x$")),
+        route_rules=tuple(r for r in live.route_rules if r[0] not in ("/api/swarm", "/x$")),
     )
     assert missing(planted, [], bare) == [
         "GET /x: a space route with no case and no pending item",
-        "POST /api/replay/planted-thing: a space route with no case and no pending item",
+        "POST /api/swarm/tasks/planted-thing: a space route with no case and no pending item",
     ]
     # And every real route of that area is reported with it.
     reported = missing(routes, tools, bare)
-    assert "POST /api/replay/restore: a space route with no case and no pending item" in reported
-    assert all("/api/replay" in p or p.startswith("GET /x:") for p in reported)
+    assert "GET /api/swarm/tasks: a space route with no case and no pending item" in reported
+    assert all("/api/swarm" in p or p.startswith("GET /x:") for p in reported)
+    # An area that has its cases: a new route there with none is reported
+    # at once, by name (no prefix rule answers for it any more).
+    assert missing(["GET /api/chat/planted-thing"], [], live) == [
+        "GET /api/chat/planted-thing: a space route with no case and no pending item"
+    ]
     # A case answers for its route.
-    cased = replace(bare, cases={"GET /x": _planted_case("GET /x", "S1-17")})
+    cased = replace(bare, cases={**bare.cases, "GET /x": _planted_case("GET /x", "S1-17")})
     assert missing(["GET /x"], [], cased) == []
 
 
 def test_a_new_route_in_a_pending_area_raises_the_count(routes, tools, live) -> None:
     """A prefix rule answers for a new route of its area, so the count is
     what says a route came without its case."""
-    grown = sorted([*routes, "GET /api/chat/planted-thing"])
+    grown = sorted([*routes, "GET /api/swarm/tasks/planted-thing"])
     assert missing(grown, tools, live) == []
     before = len(pending_targets(routes, tools, live))
     after = len(pending_targets(grown, tools, live))
@@ -403,7 +410,8 @@ def test_a_new_route_in_a_pending_area_raises_the_count(routes, tools, live) -> 
     assert "lower PENDING_BASELINE" in ratchet_problems(before - 1, before)[0]
     assert ratchet_problems(before, before) == []
     # With its case, the count stays where it was.
-    cased = replace(live, cases={"GET /api/chat/planted-thing": _planted_case("GET /api/chat/planted-thing")})
+    cased = replace(live, cases={
+        **live.cases, "GET /api/swarm/tasks/planted-thing": _planted_case("GET /api/swarm/tasks/planted-thing", "S1-15")})
     assert len(pending_targets(grown, tools, cased)) == before
 
 
@@ -415,7 +423,7 @@ def test_a_planted_tool_with_nothing_is_reported(routes, tools, live) -> None:
     for answered in (
         replace(live, tools={**live.tools, "tool:planted_tool": "S1-19"}),
         replace(live, not_in={**live.not_in, "tool:planted_tool": "planted"}),
-        replace(live, cases={"tool:planted_tool": _planted_case("tool:planted_tool")}),
+        replace(live, cases={**live.cases, "tool:planted_tool": _planted_case("tool:planted_tool")}),
     ):
         assert missing(routes, [*tools, "tool:planted_tool"], answered) == []
     # Without its pending entries, a real area's tools are findings.
@@ -450,16 +458,16 @@ def test_a_stale_entry_is_reported(routes, tools, live) -> None:
 
 
 def test_a_target_in_two_tables_is_reported(routes, tools, live) -> None:
-    both = replace(live, cases={"tool:memory_search": _planted_case("tool:memory_search", "S1-09")})
+    both = replace(live, cases={"tool:check_swarm_task": _planted_case("tool:check_swarm_task", "S1-15")})
     assert stale(routes, tools, both) == [
-        "tool:memory_search has a case and is still in PENDING_TOOLS"
+        "tool:check_swarm_task has a case and is still in PENDING_TOOLS"
     ]
     reasoned = replace(live, cases={"tool:hijri_convert": _planted_case("tool:hijri_convert")})
     assert stale(routes, tools, reasoned) == [
         "tool:hijri_convert has a case and is still in NOT_IN_THE_MATRIX"
     ]
-    twice = replace(live, not_in={**live.not_in, "tool:memory_search": "planted"})
-    assert stale(routes, tools, twice) == ["tool:memory_search is pending and in NOT_IN_THE_MATRIX"]
+    twice = replace(live, not_in={**live.not_in, "tool:check_swarm_task": "planted"})
+    assert stale(routes, tools, twice) == ["tool:check_swarm_task is pending and in NOT_IN_THE_MATRIX"]
 
 
 def test_a_stale_route_rule_is_reported(routes, tools, live) -> None:
@@ -477,14 +485,17 @@ def test_a_stale_route_rule_is_reported(routes, tools, live) -> None:
     done = replace(
         live,
         cases={
-            target: _planted_case(target, "S1-10")
-            for target in routes
-            if live.pending_item(target) == "S1-10"
+            **live.cases,
+            **{
+                target: _planted_case(target, "S1-32")
+                for target in routes
+                if live.pending_item(target) == "S1-32"
+            },
         },
     )
-    assert done.cases, "the lessons routes were not found"
+    assert len(done.cases) > len(live.cases), "the Dashboard page's route was not found"
     assert stale(routes, tools, done) == [
-        "pending route rule decides no space route without a case: '/api/commitment' -> S1-10"
+        "pending route rule decides no space route without a case: '/dashboard$' -> S1-32"
     ]
 
 

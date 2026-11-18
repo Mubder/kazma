@@ -17,6 +17,8 @@ from kazma_ui.active_turns import cancel_turn
 
 __all__ = ["abort_turn"]
 
+from kazma_core.spaces.scope import space_of_state
+
 logger = logging.getLogger(__name__)
 
 
@@ -50,7 +52,7 @@ async def abort_turn(thread_id: str, graph_inst: Any, *, session_id: str = "") -
             # A turn aborted before its answer leaves memory too (M09).
             from kazma_core.memory.forget import rewind_memory
 
-            await rewind_memory(thread_id, before, msgs, tenant_id=str(values.get("tenant_id") or "default"))
+            await rewind_memory(thread_id, before, msgs, tenant_id=space_of_state(values))
         from kazma_ui.turn_runtime import close_aborted_turn
 
         await close_aborted_turn(thread_id)  # never raises

@@ -60,6 +60,21 @@ class _Store:
         self.seen("store.get_library")
         return self.libs.get(lib_id)
 
+    # How the store names a library in the caller's space (Spaces S1-13), as
+    # an install that does not enforce Spaces answers: the slug, and the id.
+    def library_id_for(self, raw):
+        from kazma_core.stores.knowledge import _slugify_library_id
+
+        self.seen("store.library_id_for")
+        return _slugify_library_id(raw)
+
+    def own_library_id(self, raw):
+        self.seen("store.own_library_id")
+        return raw
+
+    def _tenant_filter_enabled(self):
+        return False
+
     def create_library(self, lib_id, *, name="", description="", seed_url=""):
         self.seen("store.create_library")
         self.libs[lib_id] = {"id": lib_id, "name": name, "description": description, "seed_url": seed_url}

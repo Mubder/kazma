@@ -17,7 +17,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "kazma-core"))
 
-from kazma_core.stores.knowledge import KnowledgeStore, slugify_library_id
+from kazma_core.stores.knowledge import KnowledgeStore, _slugify_library_id
 
 from tests._fts5_segments import held_only_by_deleted_rows, segment_terms
 
@@ -44,12 +44,12 @@ def test_slugify_normalizes_user_input():
     must be lowercase [a-z0-9_-].  Without slugification, a user entering
     'Meta WhatsApp Documentations 2' gets a fragile ID that breaks the
     collection name and URL-encodes to %20."""
-    assert slugify_library_id("Meta WhatsApp Documentations 2") == "meta_whatsapp_documentations_2"
-    assert slugify_library_id("ShipX-API") == "shipx-api"
-    assert slugify_library_id("  foo / bar!!") == "foo_bar"
-    assert slugify_library_id("already_ok-id") == "already_ok-id"
-    assert slugify_library_id("") == "library"
-    assert slugify_library_id("   ") == "library"
+    assert _slugify_library_id("Meta WhatsApp Documentations 2") == "meta_whatsapp_documentations_2"
+    assert _slugify_library_id("ShipX-API") == "shipx-api"
+    assert _slugify_library_id("  foo / bar!!") == "foo_bar"
+    assert _slugify_library_id("already_ok-id") == "already_ok-id"
+    assert _slugify_library_id("") == "library"
+    assert _slugify_library_id("   ") == "library"
 
 
 def test_create_library_slugifies_id():
@@ -70,7 +70,7 @@ def test_create_or_use_pattern_does_not_race_on_slug_mismatch():
     but create_library() slugified → INSERT hit the UNIQUE constraint on
     the already-existing slug.  The fix is to slugify ONCE at the boundary
     and use the slug for BOTH the existence check and the insert."""
-    from kazma_core.stores.knowledge import slugify_library_id
+    from kazma_core.stores.knowledge import _slugify_library_id
 
     s = _fresh_store()
     # First insert via raw name — slugifies to "shipx_whatsapp_api".
@@ -80,7 +80,7 @@ def test_create_or_use_pattern_does_not_race_on_slug_mismatch():
     # Now simulate the create-or-use pattern done CORRECTLY: slugify first,
     # then check, then maybe-create. Must NOT raise.
     raw = "ShipX WhatsApp API"
-    slug = slugify_library_id(raw)
+    slug = _slugify_library_id(raw)
     existing = s.get_library(slug)
     assert existing is not None  # already there
     # Correct pattern: only create if not existing — no insert attempted.

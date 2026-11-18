@@ -59,9 +59,53 @@ class _Job:
                     "report": self.report, "summary": self.summary, "error": self.error}
 
 
-_JOB = _Job()
-_UPLOADS: dict[str, tuple[Path, float, dict[str, Any]]] = {}
+#: Each space's import (Spaces S1-09): a history becomes memories of the
+#: space it was brought into, and its progress is that space's to see. One
+#: import runs at a time for the install (it embeds every turn).
+_JOBS: dict[str, _Job] = {}
+_JOBS_LOCK = threading.Lock()
+#: Held across "is an import running anywhere?" and the claim of a space's
+#: job, so the answer cannot change between the two: each space has its own
+#: job and its own lock, and two spaces could both see "none" and both start.
+_START_LOCK = threading.Lock()
+#: token -> (file, when, summary, the space that uploaded it).
+_UPLOADS: dict[str, tuple[Path, float, dict[str, Any], str]] = {}
 _UPLOADS_LOCK = threading.Lock()
+
+
+def _space() -> str:
+    """The space this request is for (the owner's on an install without Spaces)."""
+    from kazma_core.spaces.scope import require_space_id
+
+    return require_space_id()
+
+
+def _job(space: str) -> _Job:
+    with _JOBS_LOCK:
+        return _JOBS.setdefault(space, _Job())
+
+
+def _any_running() -> bool:
+    with _JOBS_LOCK:
+        jobs = list(_JOBS.values())
+    return any(job.view()["state"] == "running" for job in jobs)
+
+
+def _claim(space: str, token: str, held: tuple[Path, float, dict[str, Any], str]) -> bool:
+    """Start *space*'s import of *held*, unless an import runs anywhere.
+    True when it was started. One lock for the check and the claim."""
+    with _START_LOCK:
+        if _any_running():
+            return False
+        job = _job(space)
+        with job.lock:
+            job.state, job.done, job.total = "running", 0, int(held[2].get("turns") or 0)
+            job.report, job.summary, job.error = None, held[2], ""
+            job.stop.clear()
+            job.thread = threading.Thread(
+                target=_run, args=(token, held[0], space, job), name="history-import", daemon=True)
+            job.thread.start()
+    return True
 
 
 def _folder() -> Path:
@@ -75,11 +119,11 @@ def _folder() -> Path:
 def _sweep(now: float) -> None:
     """Delete uploads older than an hour (never the one being imported)."""
     with _UPLOADS_LOCK:
-        for token, (path, at, _summary) in list(_UPLOADS.items()):
+        for token, (path, at, _summary, _space_id) in list(_UPLOADS.items()):
             if now - at > _KEEP_S:
                 path.unlink(missing_ok=True)
                 _UPLOADS.pop(token, None)
-    held = {str(p) for p, _a, _s in _UPLOADS.values()}
+    held = {str(p) for p, _a, _s, _sp in _UPLOADS.values()}
     for leftover in _folder().glob("upload-*"):
         try:
             if str(leftover) not in held and now - leftover.stat().st_mtime > _KEEP_S:
@@ -89,33 +133,37 @@ def _sweep(now: float) -> None:
 
 
 def _refusal() -> str | None:
+    """Refused on the older multi-user mode, where memory is the install's.
+    With Spaces an import goes into the space of the person who brings it."""
     from kazma_core.security.single_operator import single_operator_refusal
+    from kazma_core.spaces.scope import spaces_enforced
 
-    return single_operator_refusal(_REFUSAL)
+    return None if spaces_enforced() else single_operator_refusal(_REFUSAL)
 
 
 def _refused(code: str, message: str, status: int) -> JSONResponse:
     return JSONResponse({"ok": False, "error": message, "code": code}, status_code=status)
 
 
-def _run(token: str, path: Path) -> None:
+def _run(token: str, path: Path, space: str, job: _Job) -> None:
     from kazma_core.memory import history_import
 
     try:
         history = history_import.read_export(path)
 
         def progress(done: int, total: int) -> None:
-            with _JOB.lock:
-                _JOB.done, _JOB.total = done, total
+            with job.lock:
+                job.done, job.total = done, total
 
-        report = history_import.import_history(history, progress=progress, should_stop=_JOB.stop.is_set)
-        with _JOB.lock:
-            _JOB.report = report.as_dict()
-            _JOB.state = "stopped" if report.stopped else "done"
+        report = history_import.import_history(
+            history, tenant_id=space, progress=progress, should_stop=job.stop.is_set)
+        with job.lock:
+            job.report = report.as_dict()
+            job.state = "stopped" if report.stopped else "done"
     except (history_import.ImportRefused, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
         logger.warning("[history_import] the import failed", exc_info=True)
-        with _JOB.lock:
-            _JOB.state, _JOB.error = "failed", type(exc).__name__
+        with job.lock:
+            job.state, job.error = "failed", type(exc).__name__
     finally:
         path.unlink(missing_ok=True)
         with _UPLOADS_LOCK:
@@ -171,7 +219,7 @@ def create_history_import_router() -> APIRouter:
             await asyncio.to_thread(path.unlink, True)
             return _refused("not_an_export", validation_error(exc), 422)
         with _UPLOADS_LOCK:
-            _UPLOADS[token] = (path, time.time(), summary)
+            _UPLOADS[token] = (path, time.time(), summary, _space())
         return JSONResponse({"ok": True, "token": token, "summary": summary})
 
     @router.post("/start")
@@ -187,27 +235,23 @@ def create_history_import_router() -> APIRouter:
         if refusal:
             return _refused("single_operator", refusal, 409)
         token = str((body or {}).get("token") or "")
+        space = _space()
         with _UPLOADS_LOCK:
             held = _UPLOADS.get(token)
-        if held is None:
+        # An upload is its space's: another space's token is no upload here.
+        if held is None or held[3] != space:
             return _refused("unknown_upload", "choose the file again", 404)
-        with _JOB.lock:
-            if _JOB.state == "running":
-                return _refused("busy", "an import is running", 409)
-            _JOB.state, _JOB.done, _JOB.total = "running", 0, int(held[2].get("turns") or 0)
-            _JOB.report, _JOB.summary, _JOB.error = None, held[2], ""
-            _JOB.stop.clear()
-            _JOB.thread = threading.Thread(target=_run, args=(token, held[0]), name="history-import", daemon=True)
-            _JOB.thread.start()
+        if not _claim(space, token, held):
+            return _refused("busy", "an import is running", 409)
         return JSONResponse({"ok": True, "state": "running"})
 
     @router.get("/status")
     def status() -> dict[str, Any]:
-        return _JOB.view()
+        return _job(_space()).view()
 
     @router.post("/stop")
     def stop() -> dict[str, Any]:
-        _JOB.stop.set()
+        _job(_space()).stop.set()
         return {"ok": True}
 
     return router

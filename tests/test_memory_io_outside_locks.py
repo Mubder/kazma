@@ -411,7 +411,7 @@ def test_a_forget_while_the_episode_embeds_keeps_its_vector_out(mem):
 
     remote = Remote()
     mem.mp.setattr("kazma_core.memory.backends.get_remote_vector_backend", lambda: remote)
-    eid = dual_write._episode_id("s-race", 1, "the pump housings come from Nordvalve")
+    eid = dual_write._episode_id("s-race", 1, "the pump housings come from Nordvalve", "t")
 
     def forget_now(text):
         other = sqlite3.connect(str(mem.state), check_same_thread=False)

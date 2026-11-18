@@ -433,9 +433,10 @@ def _run_turn_memory(
     except Exception:
         logger.debug("[post_turn] working→episodic promote failed", exc_info=True)
     # ── V2 dual-write mirror ─────────────────────────────────────
+    written: str | None = None
     try:
-        _mirror_turn_to_v2(messages, session_id=session_id, turn=turn, tenant_id=tenant_id,
-                           created_at=at)
+        written = _mirror_turn_to_v2(messages, session_id=session_id, turn=turn, tenant_id=tenant_id,
+                                     created_at=at)
     except Exception as exc:
         logger.warning("[post_turn] V2 mirror failed: %s", exc, exc_info=True)
         _metric_fail("mirror", exc)
@@ -449,27 +450,25 @@ def _run_turn_memory(
         ok = False
     # ── Stage 2: enqueue LLM deep-pass on the worker loop ─────────
     # The micro_consolidation handler runs on the durable worker's event
-    # loop (where httpx is valid), so it can safely call the LLM. We point
-    # it at the episode the mirror just wrote.
+    # loop (where httpx is valid), so it can safely call the LLM. It is
+    # pointed at the episode the mirror wrote: the id the WRITER chose. A
+    # turn of another space may be stored under either form of its id
+    # (``dual_write.episode_ids``), so an id recomputed here could name a
+    # missing row, or another tenant's (Spaces S1-09 review). No episode
+    # written (a refusal, a failure, a slash command): no deep pass; a
+    # failed turn is retried whole by the queue.
     try:
-        from kazma_core.memory.dual_write import _episode_id
-
-        user_text, _ = extract_turn_texts(messages)
-        if user_text and not user_text.strip().startswith("/"):
-            eid = _episode_id(
-                session_id or "unknown",
-                int(turn) if turn is not None else 0,
-                user_text,
-            )
+        if written:
             from kazma_core.memory.task_queue import enqueue_task
 
-            enqueue_task(
+            if enqueue_task(
                 "micro_consolidation",
-                # episode_id only: the handler reads tenant_id from the
-                # episode ROW (authoritative). A payload tenant_id was
-                # dead data — the handler never consulted it (audit finding).
-                {"episode_id": eid},
-            )
+                # The handler reads the tenant from the episode ROW
+                # (authoritative), and runs bound to it (task_queue._task_space).
+                {"episode_id": written},
+            ) is None:
+                logger.warning("[post_turn] the deep pass of %s was not queued", written)
+                _metric_fail("enqueue", RuntimeError("queue refused"))
     except Exception as exc:
         logger.warning(
             "[post_turn] could not enqueue micro_consolidation: %s",
@@ -533,22 +532,23 @@ def _mirror_turn_to_v2(
     turn: int | None,
     tenant_id: str = "default",
     created_at: float | None = None,
-) -> None:
+) -> str | None:
     """Best-effort mirror of the just-finished turn into the V2 schema.
 
     Extracts the last user/assistant pair and writes a V2 episode (working
-    tier by default; explicit-remember → recall).
+    tier by default; explicit-remember → recall). Returns the id the episode
+    is stored under (the writer's choice), or None when nothing was written.
     """
     from kazma_core.memory.dual_write import EpisodeWriteFailed, write_episode
 
     user_text, assistant_text = extract_turn_texts(messages)
     if not (user_text or assistant_text):
-        return
+        return None
     # Skip slash commands and trivial turns
     u = (user_text or "").strip()
     if not u or u.startswith("/"):
-        return
-    status, _eid = write_episode(
+        return None
+    status, eid = write_episode(
         session_id=session_id or "unknown",
         turn_number=int(turn) if turn is not None else 0,
         user_text=user_text,
@@ -560,6 +560,7 @@ def _mirror_turn_to_v2(
         # Not remembered: the caller counts it and the queue retries the turn
         # (Memory audit M12 -- the None was ignored and the turn counted "ok").
         raise EpisodeWriteFailed(f"episode of turn {turn} of {session_id} was not written")
+    return eid if status == "written" else None
 
 
 def _v2_extract_sync(

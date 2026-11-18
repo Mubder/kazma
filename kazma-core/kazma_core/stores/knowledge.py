@@ -69,9 +69,10 @@ __all__ = [
     "KnowledgeStore",
     "KnowledgeUrlRefused",
     "get_knowledge_store",
+    "KnowledgeSpaceFull",
     "library_ceiling",
+    "library_name_part",
     "reset_knowledge_store",
-    "slugify_library_id",
     "validate_web_url",
 ]
 
@@ -102,6 +103,13 @@ class KnowledgeStorageFull(RuntimeError):
     """The Knowledge database reached its quota (KB-E10)."""
 
 
+class KnowledgeSpaceFull(KnowledgeStorageFull):
+    """A space's libraries hold their share of the Knowledge Library
+    (:data:`_SPACE_QUOTA_BYTES`, Spaces S1-13): new work in that space is
+    refused, other spaces go on. A kind of :class:`KnowledgeStorageFull`, so
+    every surface that refuses at the quota refuses here too."""
+
+
 class KnowledgeLibraryLimit(KnowledgeStorageFull):
     """The install holds as many libraries as it may (KB-Q01): a new one is
     refused. A kind of :class:`KnowledgeStorageFull`, so every surface that
@@ -128,7 +136,7 @@ def library_ceiling() -> int:
     return ceiling()
 
 
-def slugify_library_id(raw: str) -> str:
+def _slugify_library_id(raw: str) -> str:
     """Normalize a user-provided library ID into a ChromaDB-safe slug.
 
     Library IDs become ChromaDB collection names (``kazma_kb_<id>``) and
@@ -147,6 +155,63 @@ def slugify_library_id(raw: str) -> str:
     s = re.sub(r"_+", "_", s).strip("_")
     s = s[:MAX_LIBRARY_ID].strip("_-")
     return s or "library"
+
+
+#: Between a library's slug and its space's mark (Spaces S1-13). A slug never
+#: holds it (``_slugify_library_id`` turns it into ``_``), so no name anyone
+#: types can be another space's library.
+_SPACE_MARK = "."
+_SPACE_SUFFIX_CHARS = 8
+
+
+def _space_suffix(space_id: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(space_id.encode("utf-8")).hexdigest()[:_SPACE_SUFFIX_CHARS]
+
+
+def _library_id_in_space(raw: str, space_id: str) -> str:
+    """The id of the library *raw* names in *space_id* (Spaces S1-13).
+
+    A library's id is its Chroma collection's name and a path segment, one
+    namespace for the install. The owner's space keeps the slug it always
+    had. Every other space's libraries carry the space: ``<slug>.<8 hex>``.
+    An id the space already holds (as its listing gives it back) names
+    itself; any other text -- the owner's slug, another space's id -- is a
+    name, slugified and marked for this space, so it never reaches another
+    space's library. Without it, a crawl into "docs" from a second space
+    wrote into the first space's "docs".
+    """
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    text = (raw or "").strip()
+    if space_id == OWNER_SPACE_ID:
+        return _slugify_library_id(text)
+    suffix = _space_suffix(space_id)
+    mark = _SPACE_MARK + suffix
+    base = text[: -len(mark)] if text.endswith(mark) else text
+    slug = _slugify_library_id(base)[: MAX_LIBRARY_ID - len(mark)].strip("_-") or "library"
+    return slug + mark
+
+
+def library_name_part(library_id: str) -> str:
+    """*library_id* as part of a name the install builds from it: its Chroma
+    collection (``kazma_kb_<part>``) and its fetched-pages folder
+    (``knowledge_provenance/<part>``). The one rule for both (Spaces S1-13
+    review).
+
+    Letters, digits, ``-``, ``_`` and the space mark ``.`` stay; anything
+    else becomes ``_``. Turned into ``_``, the mark made a space's
+    "docs.ab12cd34" and an owner's library named "docs.ab12cd34" (whose id
+    is ``docs_ab12cd34``) one folder: deleting the owner's library deleted
+    the other space's pages. An id holds no other character (a slug, plus
+    the mark and hex), so every name from before is unchanged. A part made
+    of dots alone (never an id) is ``library``: it must not name a folder
+    above its own.
+    """
+    part = "".join(c if c.isalnum() or c in "-_" + _SPACE_MARK else "_" for c in str(library_id))
+    part = part[:80]
+    return part if part.strip(_SPACE_MARK) else "library"
 
 
 def validate_web_url(url: str, *, allow_empty: bool = False) -> str:
@@ -360,6 +425,15 @@ _MAX_KNOWLEDGE_BYTES = 1024**3
 #: Room a crawl must have left when it is admitted.
 _ADMISSION_HEADROOM_BYTES = 16 * 1024**2
 
+#: The most one space's libraries may hold, once Spaces is enforced (Spaces
+#: S1-13): the text of their active chunks. One space at its share is
+#: refused new work; the others go on. The install quota above stays the
+#: guard of the database file. Per-space limits become settings with S2-08.
+_SPACE_QUOTA_BYTES = 256 * 1024**2
+#: How long a space's measured bytes answer admission before they are read
+#: again (:meth:`KnowledgeStore.space_used_bytes`).
+_SPACE_BYTES_TTL_S = 60.0
+
 #: FTS errors that are the query's own syntax, not the index failing.
 _FTS_SYNTAX_MARKERS = ("fts5: syntax error", "unterminated string", "unknown special query",
                        "malformed match expression")
@@ -383,6 +457,8 @@ class KnowledgeStore:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None
         self._lock = threading.Lock()
+        #: space id -> (when measured, bytes): admission's view of each space.
+        self._space_bytes: dict[str, tuple[float, int]] = {}
         #: The last FTS storage failure (a missing, locked or corrupt index),
         #: for health; None while the index answers (KB-E11).
         self.fts_problem: str | None = None
@@ -649,15 +725,24 @@ class KnowledgeStore:
 
     @staticmethod
     def _current_tenant() -> str:
-        # require_tenant_id never raises: no tenant bound is "default" there.
+        """The space this work is in (``require_tenant_id``): the bound
+        space, the owner's while Spaces is not enforced, and
+        ``NoSpaceBound`` once it is and nothing is bound."""
         from kazma_core.tenant_isolation import require_tenant_id
 
         return require_tenant_id()
 
     @staticmethod
     def _tenant_filter_enabled() -> bool:
+        """Whether reads keep to the caller's space: always once Spaces is
+        enforced (S1-13; the opt-out below is the older multi-user mode's),
+        else on an install with platform users or in production."""
         import os
 
+        from kazma_core.spaces.scope import spaces_enforced
+
+        if spaces_enforced():
+            return True
         if (os.environ.get("KAZMA_TENANT_FILTER") or "1").strip().lower() in (
             "0", "false", "off", "no",
         ):
@@ -675,6 +760,29 @@ class KnowledgeStore:
             raise ValueError(f"The library {what} is longer than {MAX_LIBRARY_TEXT} characters.")
         return text
 
+    def library_id_for(self, raw: str) -> str:
+        """The id a library made from *raw* gets in the caller's space
+        (:func:`_library_id_in_space`). Not enforced: the slug, exactly as
+        before Spaces."""
+        from kazma_core.spaces.scope import spaces_enforced
+
+        if not spaces_enforced():
+            return _slugify_library_id(raw)
+        return _library_id_in_space(raw, self._current_tenant())
+
+    def own_library_id(self, raw: str) -> str:
+        """The id *raw* names when it is looked up, in the caller's space.
+
+        Every route and tool that takes a library id resolves it here first
+        and uses the answer from then on: checking ``get_library(x)`` and
+        then reading ``x``'s chunks read another space's library whenever
+        ``x`` was its id. Not enforced: *raw* itself, as before Spaces."""
+        from kazma_core.spaces.scope import spaces_enforced
+
+        if not spaces_enforced():
+            return str(raw or "")
+        return _library_id_in_space(raw, self._current_tenant())
+
     def create_library(
         self,
         library_id: str,
@@ -691,10 +799,9 @@ class KnowledgeStore:
         raises :class:`KnowledgeLibraryLimit` (KB-Q01)."""
         now = _now_iso()
         # Library IDs become ChromaDB collection names + URL path segments,
-        # so they must be slugs (lowercase [a-z0-9_-]).  Slugify whatever
-        # the caller passed — this also protects against spaces/uppercase
-        # that would silently break collection creation or URL-encode badly.
-        lib_id = slugify_library_id(library_id)
+        # so they must be slugs (lowercase [a-z0-9_-]), marked with their
+        # space for a space other than the owner's (Spaces S1-13).
+        lib_id = self.library_id_for(library_id)
         if not lib_id:
             raise ValueError("library_id must not be empty")
         seed = validate_web_url(seed_url, allow_empty=True)
@@ -782,8 +889,13 @@ class KnowledgeStore:
         Archiving hides a library from the main list, from auto-inject and
         from searches across libraries WITHOUT deleting its chunks: an
         explicit search by its id still reads them. Use :meth:`delete_library`
-        for permanent removal.
+        for permanent removal. A library the caller may not read is not
+        found (it was archived whatever its space).
         """
+        found = self.get_library(library_id)
+        if found is None:
+            return False
+        library_id = found["id"]
         with self._lock:
             conn = self._get_conn()
             try:
@@ -809,6 +921,10 @@ class KnowledgeStore:
         return row is not None
 
     def get_library(self, library_id: str) -> dict[str, Any] | None:
+        """The library *library_id* names, or None when there is none the
+        caller may read. Once Spaces is enforced the id is read in the
+        caller's space (:meth:`library_id_for`): another space's never."""
+        library_id = self.own_library_id(library_id)
         with self._lock:
             conn = self._get_conn()
             row = conn.execute(
@@ -869,6 +985,7 @@ class KnowledgeStore:
         existing = self.get_library(library_id)
         if existing is None:
             return None
+        library_id = existing["id"]  # the id in the caller's space (S1-13)
         new_name = self._checked_text(name, "name") if name is not None else existing["name"]
         new_desc = (self._checked_text(description, "description")
                     if description is not None else existing["description"])
@@ -1321,14 +1438,21 @@ class KnowledgeStore:
             raise ValueError("page chunk indices must be unique")
         wanted = [(c["id"], c["content_hash"]) for c in prepared]
         now = _now_iso()
+        writer = self._writing_space()
         with self._lock:
             conn = self._get_conn()
             try:
                 _fault("begin")
                 conn.execute("BEGIN IMMEDIATE")
-                if conn.execute("SELECT 1 FROM knowledge_libraries WHERE id = ?",
-                                (library_id,)).fetchone() is None:
+                held = conn.execute("SELECT tenant_id FROM knowledge_libraries WHERE id = ?",
+                                    (library_id,)).fetchone()
+                if held is None:
                     raise KnowledgeLibraryGone(f"knowledge library {library_id!r} no longer exists")
+                if writer is not None and (str(held[0] or "") or "default") != writer:
+                    # The last line (Spaces S1-13): a page is written only
+                    # into a library of the space the work is bound to,
+                    # whatever id a caller passed.
+                    raise KnowledgeLibraryGone(f"knowledge library {library_id!r} is not this space's")
                 _fault("library_checked")
                 existing = conn.execute(
                     """SELECT rowid, id, content_hash FROM knowledge_chunks
@@ -1773,6 +1897,17 @@ class KnowledgeStore:
                     conn.execute("ROLLBACK")
                 raise
 
+    def library_space(self, library_id: str) -> str | None:
+        """The space a library belongs to, whoever asks, or None when there
+        is no such library. For Kazma's own work on a library it was handed
+        by id (a crawl resumed after a restart), which then runs in that
+        space; anything that answers a request uses :meth:`get_library`."""
+        with self._lock:
+            row = self._get_conn().execute(
+                "SELECT tenant_id FROM knowledge_libraries WHERE id = ?", (library_id,)
+            ).fetchone()
+        return (str(row[0] or "") or "default") if row is not None else None
+
     def all_library_ids(self) -> list[str]:
         """Every library of every tenant, oldest first.
 
@@ -1954,9 +2089,16 @@ class KnowledgeStore:
                 "The Knowledge Library is at its storage quota; delete libraries you no "
                 "longer need to make room."
             )
+        from kazma_core.spaces.scope import spaces_enforced
+
+        if spaces_enforced() and self.space_used_bytes(self._current_tenant()) >= _SPACE_QUOTA_BYTES:
+            raise KnowledgeSpaceFull(
+                "This space's Knowledge libraries are at their share of the storage; delete a "
+                "library you no longer need to make room."
+            )
         if library_id is None:
             return
-        lib_id = slugify_library_id(library_id)
+        lib_id = self.library_id_for(library_id)
         with self._lock:
             conn = self._get_conn()
             exists = conn.execute("SELECT 1 FROM knowledge_libraries WHERE id = ?", (lib_id,)).fetchone()
@@ -1964,6 +2106,52 @@ class KnowledgeStore:
         ceiling = library_ceiling()
         if exists is None and held >= ceiling:
             raise KnowledgeLibraryLimit(ceiling)
+
+    @staticmethod
+    def _writing_space() -> str | None:
+        """The space a write must stay in: the bound one once Spaces is
+        enforced, else None (no check: as before Spaces). Work bound to no
+        space -- maintenance -- writes nothing of a space's, and is not held
+        here."""
+        from kazma_core.spaces.scope import current_scope, spaces_enforced
+
+        if not spaces_enforced():
+            return None
+        bound = current_scope()
+        return bound.space_id if bound is not None else None
+
+    def space_used_bytes(self, space_id: str) -> int:
+        """The text one space's libraries hold: the bytes of their active
+        chunks (Spaces S1-13). Blocking.
+
+        It reads every chunk of the space, so it runs on a read connection of
+        its own, never under the store lock (S1-13 review: a scan under it
+        stalled every Knowledge call for its length), and a measure answers
+        for :data:`_SPACE_BYTES_TTL_S`. The quota is an admission check, as
+        the install's own is: a crawl admitted under it may carry its space
+        past it by what it publishes; the next one is refused.
+        """
+        import time
+
+        now = time.monotonic()
+        held = self._space_bytes.get(space_id)
+        if held is not None and now - held[0] < _SPACE_BYTES_TTL_S:
+            return held[1]
+        conn = sqlite3.connect(f"file:{self._db_path.as_posix()}?mode=ro", uri=True, timeout=10)
+        try:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(LENGTH(CAST(c.content AS BLOB))), 0) FROM knowledge_chunks c "
+                "JOIN knowledge_libraries l ON l.id = c.library_id "
+                "WHERE l.tenant_id = ? AND c.active = 1 AND c.tombstoned = 0",
+                (space_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        used = int(row[0] or 0)
+        if len(self._space_bytes) >= 4096:
+            self._space_bytes.clear()
+        self._space_bytes[space_id] = (now, used)
+        return used
 
     def compact(self) -> dict[str, Any]:
         """Return freed pages to the file system (incremental vacuum).

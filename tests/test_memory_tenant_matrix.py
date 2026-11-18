@@ -84,7 +84,9 @@ class _Principal:
 CELLS = [
     (mode, enforced, principal)
     for mode, enforced, principal in itertools.product(MODES, (False, True), (None, "acme"))
-    # Under enforcement only "shared" can be saved (the next test).
+    # Under enforcement only "shared" was ever saved. (No mode can be saved
+    # any more: the cells with another one are an install that stored it
+    # before Spaces and does not enforce Spaces.)
     if not (enforced and mode != "shared")
 ]
 
@@ -118,18 +120,64 @@ def test_every_surface_reaches_the_turns_own_tenant(mem, mode, enforced, princip
                               assistant_text="Lisbon.", tenant_id=turn_tenant) is None
 
 
+@pytest.mark.parametrize("enforced", [False, True])
 @pytest.mark.parametrize("mode", ["per_platform", "per_user"])
-def test_under_enforcement_only_shared_can_be_saved(mem, mode):
+def test_the_retired_modes_cannot_be_saved(mem, mode, enforced):
+    """Spaces S1-09: memory is kept per space, and the mode is retired. Only
+    ``shared`` can be saved, enforced or not; an install that stored another
+    mode before keeps it until its owner saves ``shared``."""
     from kazma_core.settings_validation import SettingRejected, validate_setting
 
-    mem.mp.setenv("KAZMA_MEMORY_ENFORCE_TENANT", "1")
+    if enforced:
+        mem.mp.setenv("KAZMA_MEMORY_ENFORCE_TENANT", "1")
     with pytest.raises(SettingRejected):
         validate_setting("memory.tenant_mode", mode)
     with pytest.raises(SettingRejected):
         validate_setting("memory", {"tenant_mode": mode})
     assert validate_setting("memory.tenant_mode", "shared")[0] == "shared"
-    mem.mp.delenv("KAZMA_MEMORY_ENFORCE_TENANT")
-    assert validate_setting("memory.tenant_mode", mode)[0] == mode  # allowed when not enforced
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_with_spaces_enforced_the_space_is_the_tenant_whatever_the_mode(mem, mode):
+    """The mode is not read once Spaces is enforced: a turn's memory is its
+    space's, every surface reaches it, and a turn with no space is refused."""
+    from kazma_core.memory import forget
+    from kazma_core.memory.config import legacy_tenant_mode, resolve_tenant_id
+    from kazma_core.memory.dual_write import mirror_episode
+    from kazma_core.memory.profile import about_for_turn
+    from kazma_core.spaces import scope
+    from kazma_ui import memory_api
+
+    _cell(mem, mode, False)
+    mem.mp.setattr(scope, "_enforced", True)
+    assert legacy_tenant_mode() is None
+    with pytest.raises(scope.NoSpaceBound):
+        resolve_tenant_id("telegram", "telegram:42", "sess-1")
+    with scope.bind_scope("team-a", "acc-1"):
+        turn_tenant = resolve_tenant_id("telegram", "telegram:42", "sess-1")
+        assert turn_tenant == "team-a" == memory_api._memory_tenant_id()
+        assert memory_api._set_about_me_sync({"about": "I am Sara."})["ok"]
+        assert about_for_turn(turn_tenant)["about"] == "I am Sara."
+        eid = mirror_episode(session_id="sess-1", turn_number=1, user_text="what is my favourite colour",
+                             assistant_text="Teal.", tenant_id=turn_tenant)
+        assert eid and forget.forget_episode(eid, tenant_id=memory_api._memory_tenant_id())["ok"]
+    with scope.bind_scope("team-b", "acc-2"):
+        # Another space: none of it.
+        assert about_for_turn(resolve_tenant_id("web", "", "sess-9"))["about"] == ""
+        assert forget.forget_episode(eid, tenant_id=memory_api._memory_tenant_id()) == {
+            "ok": False, "error": "not_found"}
+
+
+@pytest.mark.parametrize("mode", ["per_platform", "per_user"])
+def test_a_stored_retired_mode_is_kept_until_spaces_is_enforced(mem, mode):
+    from kazma_core.memory.config import legacy_tenant_mode, resolve_tenant_id
+
+    _cell(mem, mode, False)
+    assert legacy_tenant_mode() == mode
+    expected = "telegram" if mode == "per_platform" else "telegram:42"
+    assert resolve_tenant_id("telegram", "telegram:42", "") == expected
+    _cell(mem, "shared", False)
+    assert legacy_tenant_mode() is None and resolve_tenant_id("telegram", "telegram:42", "") == "default"
 
 
 def test_the_old_turn_resolver_split_an_enforced_users_memory(mem):

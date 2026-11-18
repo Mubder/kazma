@@ -975,7 +975,7 @@ async def _try_kb_command(
         await _send_model_reply(msg, store, manager, thread_id, text)
 
     try:
-        from kazma_core.stores.knowledge import get_knowledge_store, slugify_library_id
+        from kazma_core.stores.knowledge import get_knowledge_store
         from kazma_core.stores.knowledge_index import get_knowledge_index
         from kazma_core.stores.knowledge_lifecycle import kb_refusal
 
@@ -1024,7 +1024,7 @@ async def _try_kb_command(
         if len(tokens) < 3:
             await _reply("⚠️ Usage: `/kb add <library_id> <url>`")
             return True
-        lib_id = slugify_library_id(tokens[1])
+        lib_id = kb_store.library_id_for(tokens[1])  # its space's (S1-13)
         url = tokens[2]
         await _reply(f"⏳ Ingesting page `{url}` into library `{lib_id}`…")
         try:
@@ -1052,7 +1052,7 @@ async def _try_kb_command(
         if len(tokens) < 3:
             await _reply("⚠️ Usage: `/kb crawl <library_id> <url> [max_pages]`")
             return True
-        lib_id = slugify_library_id(tokens[1])
+        lib_id = kb_store.library_id_for(tokens[1])  # its space's (S1-13)
         max_pages = None
         if len(tokens) >= 4:
             try:
@@ -1069,7 +1069,7 @@ async def _try_kb_command(
         if len(tokens) < 2:
             await _reply("⚠️ Usage: `/kb refresh <library_id>`")
             return True
-        lib_id = slugify_library_id(tokens[1])
+        lib_id = kb_store.library_id_for(tokens[1])  # its space's (S1-13)
         lib = await asyncio.to_thread(kb_store.get_library, lib_id)
         if not lib:
             await _reply(f"⚠️ Library `{lib_id}` not found.")
@@ -1087,7 +1087,7 @@ async def _try_kb_command(
         if len(tokens) < 2:
             await _reply("⚠️ Usage: `/kb status <library_id>`")
             return True
-        lib_id = slugify_library_id(tokens[1])
+        lib_id = kb_store.library_id_for(tokens[1])  # its space's (S1-13)
         from kazma_core.web_acquire.result import AcquisitionError
 
         try:
@@ -1121,7 +1121,7 @@ async def _try_kb_command(
         if len(tokens) < 3:
             await _reply("⚠️ Usage: `/kb search <library_id> <query>`")
             return True
-        lib_id = slugify_library_id(tokens[1])
+        lib_id = kb_store.library_id_for(tokens[1])  # its space's (S1-13)
         query = " ".join(tokens[2:])[:2000]
         if not await asyncio.to_thread(kb_store.get_library, lib_id):
             await _reply(f"⚠️ Library `{lib_id}` not found.")
@@ -1152,7 +1152,7 @@ async def _try_kb_command(
         if len(tokens) < 2:
             await _reply("⚠️ Usage: `/kb delete <library_id>`")
             return True
-        lib_id = slugify_library_id(tokens[1])
+        lib_id = kb_store.library_id_for(tokens[1])  # its space's (S1-13)
         if not await asyncio.to_thread(kb_store.get_library, lib_id):
             await _reply(f"⚠️ Library `{lib_id}` not found.")
             return True

@@ -24,6 +24,8 @@ from kazma_ui.routes_direct._shared import (
     open_memory_db,
 )
 
+from kazma_core.memory.tenant_view import sees_every_tenant
+
 logger = logging.getLogger(__name__)
 
 
@@ -130,7 +132,7 @@ def register_memory_routes(self: Any) -> None:
     @self.app.post("/api/memory/graph/clear")
     def _memory_graph_clear(
         request: Request,
-        tenant: str = "default",
+        tenant: str = "",
         confirm: bool = False,
     ):
         """Invalidate all currently-active V2 beliefs (bi-temporal clear).
@@ -141,9 +143,11 @@ def register_memory_routes(self: Any) -> None:
         ``valid_until``) so they stop surfacing in recall while history is
         preserved for point-in-time queries. Episodes are not touched.
 
-        Tenant-scoped (M-05): defaults to the shared ``default`` tenant;
-        pass ``tenant=<id>`` to clear a specific one. There is deliberately
-        NO all-tenants mode. Requires explicit confirm=true and tenant authorization.
+        Tenant-scoped (M-05): clears the request's own tenant (its space).
+        ``tenant=<id>`` names another one only for an admin of an install
+        that does not enforce Spaces (the install's own view); a space never
+        clears another space's. There is deliberately NO all-tenants mode.
+        Requires explicit confirm=true.
         """
         import json
         import sqlite3
@@ -155,13 +159,19 @@ def register_memory_routes(self: Any) -> None:
                 status_code=400,
             )
 
-        tid = (tenant or "default").strip() or "default"
+        # The tenant is the request's (Spaces S1-09): it was a query value
+        # that defaulted to the owner's, whoever asked.
+        own = _mem_tid()
+        tid = (tenant or "").strip() or own
 
         from kazma_ui.auth import admin_decision, get_request_principal
 
         decision = admin_decision(request)  # no secret configured => "ok"
         if decision == "unauthorized":
             return JSONResponse({"error": "Unauthorized"}, status_code=401)
+        if tid != own and not (sees_every_tenant(own) and decision == "ok"):
+            return JSONResponse(
+                {"error": "Forbidden: memory is cleared from its own space"}, status_code=403)
 
         principal = get_request_principal(request) or {}
         caller_tenant = principal.get("tenant") or principal.get("tenant_id")
@@ -613,8 +623,8 @@ def register_memory_routes(self: Any) -> None:
             tid = _mem_tid()
             row = conn.execute(
                 "SELECT * FROM beliefs WHERE id=?"
-                + (" AND tenant_id=?" if tid != "default" else ""),
-                (belief_id, tid) if tid != "default" else (belief_id,),
+                + (" AND tenant_id=?" if not sees_every_tenant(tid) else ""),
+                (belief_id, tid) if not sees_every_tenant(tid) else (belief_id,),
             ).fetchone()
             if not row:
                 conn.close()
@@ -673,8 +683,8 @@ def register_memory_routes(self: Any) -> None:
                 "SELECT id, subject, predicate, object, source_session, source_turn, "
                 "extraction_method, access_count, last_accessed, valid_from "
                 "FROM beliefs WHERE id=?"
-                + (" AND tenant_id=?" if tid != "default" else ""),
-                (bid, tid) if tid != "default" else (bid,),
+                + (" AND tenant_id=?" if not sees_every_tenant(tid) else ""),
+                (bid, tid) if not sees_every_tenant(tid) else (bid,),
             ).fetchone()
             if not row:
                 conn.close()
@@ -752,7 +762,7 @@ def register_memory_routes(self: Any) -> None:
             # The page and its "of N" count the same rows: the caller's
             # tenant's, or the whole install for the install's own tenant.
             tid = _mem_tid()
-            scope = None if tid in ("", "default") else tid
+            scope = None if sees_every_tenant(tid) else tid
             merges = list_pending_merges(conn, limit=lim, offset=off, tenant_id=scope)
             total = count_pending_merges(conn, tenant_id=scope)
             conn.close()
@@ -783,7 +793,7 @@ def register_memory_routes(self: Any) -> None:
                     return {"ok": False, "error": "not_found_or_resolved"}
                 tid = _memory_tenant_id()
                 return decide_entity_merge(
-                    conn, merge_id, approve=approve, tenant_id=None if tid == "default" else tid
+                    conn, merge_id, approve=approve, tenant_id=None if sees_every_tenant(tid) else tid
                 )
             except Exception as exc:
                 logger.exception("[memory] entity merge decision failed")
@@ -950,12 +960,19 @@ def register_memory_routes(self: Any) -> None:
         """
         try:
             from kazma_core.memory.task_queue import enqueue_task
+            from kazma_core.memory.worker_bootstrap import memory_tenants
 
-            tid = enqueue_task(
-                "global_reconsolidation",
-                {"tenant_id": "default", "max_merges": 50, "reembed_limit": 100},
-            )
-            return {"ok": True, "task_id": tid}
+            # Install work, asked for by an admin: one task per tenant that
+            # holds memory, as the daily cadence queues them. It named the
+            # owner's tenant alone.
+            ids = [
+                enqueue_task(
+                    "global_reconsolidation",
+                    {"tenant_id": tenant, "max_merges": 50, "reembed_limit": 100},
+                )
+                for tenant in memory_tenants()
+            ]
+            return {"ok": True, "task_id": ids[0] if ids else None, "task_ids": ids}
         except Exception as exc:
             return {"ok": False, "error": safe_error(exc)}
     @self.app.get("/api/memory/v2/procedural")
@@ -968,7 +985,8 @@ def register_memory_routes(self: Any) -> None:
         try:
             conn = open_memory_db()
             if q and q.strip():
-                dags = match_procedural_dags(conn, q.strip(), limit=max(1, min(limit, 50)))
+                dags = match_procedural_dags(
+                    conn, q.strip(), tenant_id=_mem_tid(), limit=max(1, min(limit, 50)))
             else:
                 rows = conn.execute(
                     """
@@ -1257,7 +1275,7 @@ def register_memory_routes(self: Any) -> None:
                 gb = get_graph_backend()
                 if getattr(gb, "name", "") == "neo4j" and getattr(gb, "available", False):
                     if hasattr(gb, "export_topology"):
-                        topo = gb.export_topology(limit=limit)
+                        topo = gb.export_topology(tenant_id=_mem_tid(), limit=limit)
                         if topo.get("nodes") or topo.get("links"):
                             meta = _graph_backend_meta()
                             meta["paint_source"] = "neo4j"
@@ -1281,10 +1299,10 @@ def register_memory_routes(self: Any) -> None:
                 "SELECT id, subject, object, predicate, predicate_type, "
                 "confidence, structural_importance, valid_from, valid_until "
                 "FROM beliefs WHERE invalidated_at IS NULL"
-                + (" AND tenant_id = ?" if _gtid != "default" else "")
+                + (" AND tenant_id = ?" if not sees_every_tenant(_gtid) else "")
             )
             bparams: list = []
-            if _gtid != "default":
+            if not sees_every_tenant(_gtid):
                 bparams.append(_gtid)
             if at and float(at) > 0:
                 atf = float(at)
@@ -1400,7 +1418,7 @@ def register_memory_routes(self: Any) -> None:
                 placeholders = ",".join("?" * len(lookup_ids))
                 # A tenant reads its own rows; the install's view every
                 # tenant's, its own row winning an id two tenants hold (last).
-                only = None if _gtid == "default" else _gtid
+                only = None if sees_every_tenant(_gtid) else _gtid
                 erows = conn.execute(
                     "SELECT id, name, type, is_high_stakes, is_major FROM entities "
                     f"WHERE (? IS NULL OR tenant_id = ?) AND id IN ({placeholders}) ORDER BY tenant_id = ?",

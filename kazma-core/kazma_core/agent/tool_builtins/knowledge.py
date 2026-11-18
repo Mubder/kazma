@@ -149,10 +149,13 @@ def register_knowledge_tools(registry: Any) -> None:
             refused = await asyncio.to_thread(_refusal)
             if refused:
                 raise RefusedBeforeEffect(refused)
-            from kazma_core.stores.knowledge import get_knowledge_store, slugify_library_id
+            from kazma_core.stores.knowledge import get_knowledge_store
             from kazma_core.stores.knowledge_ingest import ingest_url
 
-            lib_id = slugify_library_id((library_id or "").strip()) if (library_id or "").strip() else ""
+            # The id in the turn's space (Spaces S1-13): never another space's.
+            store = await asyncio.to_thread(get_knowledge_store)
+            lib_id = (await asyncio.to_thread(store.library_id_for, library_id.strip())
+                      if (library_id or "").strip() else "")
             page = (url or "").strip()
             if not lib_id or not page:
                 raise RefusedBeforeEffect("Error: library_id and url are required.")
@@ -166,7 +169,6 @@ def register_knowledge_tools(registry: Any) -> None:
                     # Nothing fetched or stored (AUD-039).
                     raise RefusedBeforeEffect(f"Error: ingest refused for {page!r} — {err}")
                 return effect_unknown(f"Error: ingest failed for {page!r} — {err}")
-            store = await asyncio.to_thread(get_knowledge_store)
             lib = await asyncio.to_thread(store.get_library, lib_id) or {}
             return (
                 f"Ingested page into library '{lib_id}': "
@@ -200,11 +202,14 @@ def register_knowledge_tools(registry: Any) -> None:
             refused = await asyncio.to_thread(_refusal)
             if refused:
                 raise RefusedBeforeEffect(refused)
-            from kazma_core.stores.knowledge import get_knowledge_store, slugify_library_id
+            from kazma_core.stores.knowledge import get_knowledge_store
             from kazma_core.stores.knowledge_ingest import _prepare_ingest_site, ingest_site
             from kazma_core.web_acquire.crawl_jobs import call
 
-            lib_id = slugify_library_id((library_id or "").strip()) if (library_id or "").strip() else ""
+            # The id in the turn's space (Spaces S1-13): never another space's.
+            store = await asyncio.to_thread(get_knowledge_store)
+            lib_id = (await asyncio.to_thread(store.library_id_for, library_id.strip())
+                      if (library_id or "").strip() else "")
             seed = (seed_url or "").strip()
             if not lib_id or not seed:
                 raise RefusedBeforeEffect("Error: library_id and seed_url are required.")
@@ -230,7 +235,6 @@ def register_knowledge_tools(registry: Any) -> None:
                 raise RefusedBeforeEffect(
                     f"Error: knowledge_ingest_site refused — {exc}"
                 ) from exc
-            store = await asyncio.to_thread(get_knowledge_store)
 
             def _ensure_library() -> None:
                 if store.get_library(lib_id) is None:
@@ -309,12 +313,14 @@ def register_knowledge_tools(registry: Any) -> None:
             # Pick target library/libraries.
             lib_id = (library or "").strip()
             if lib_id:
-                if not await asyncio.to_thread(store.get_library, lib_id):
+                found = await asyncio.to_thread(store.get_library, lib_id)
+                if not found:
                     return (
                         f"Error: knowledge library '{lib_id}' not found. "
                         "Create it with knowledge_create_library or "
                         "knowledge_ingest_url (auto-creates)."
                     )
+                lib_id = found["id"]  # the id in the turn's space (S1-13)
                 hits = await index.search(query, lib_id, top_k=limit)
             else:
                 libs = await asyncio.to_thread(store.list_libraries)

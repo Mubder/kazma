@@ -81,7 +81,7 @@ Includes isolation, KB toggles, backends, Neo4j Test/Sync, **and embedder** (no 
 | `merge_knowledge_into_chat` | Inject labeled KB into supervisor next to V2 memory |
 | `memory.backends.*` | Vector / state / graph adapters + failover |
 | Graph provider `neo4j` | Dual-write triples; topology **paint** stays SQLite |
-| `tenant_mode` | shared / per_platform / per_user |
+| `tenant_mode` | Retired. Memory is kept per space. An install that stored `per_platform` or `per_user` keeps it until its owner ends it in Settings → Memory; nothing can choose one again. |
 | `KAZMA_MEMORY_ENFORCE_TENANT=1` | Scope every `/api/memory` route by the request tenant -- reads, counts, mutations, undo, hygiene, graph-clear (always on in production and multi-user; off = `default`) |
 
 ## Neo4j

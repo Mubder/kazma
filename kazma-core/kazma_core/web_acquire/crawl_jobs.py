@@ -833,13 +833,16 @@ PAGE_TARGET = 0.99
 _HANDLED = ('ingested', 'unchanged', 'excluded', 'removed')
 
 
-def outcome_summary():
+def outcome_summary(libraries=None):
     """Every retained, finished Knowledge crawl's pages by outcome and by
-    reason, and the share handled (the Dashboard, /metrics, the guide)."""
+    reason, and the share handled (the Dashboard, /metrics, the guide).
+    *libraries*, when given, holds it to the crawls of those libraries (a
+    space's, Spaces S1-13)."""
     from collections import Counter
 
     rows = [row for row in _read()[1].values()
-            if row.get('kind', 'site') in _KB_KINDS and row['status'] in _TERMINAL]
+            if row.get('kind', 'site') in _KB_KINDS and row['status'] in _TERMINAL
+            and (libraries is None or row.get('library_id') in libraries)]
     statuses, outcomes, reasons = Counter(), Counter(), Counter()
     for row in rows:
         statuses[row['status']] += 1

@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from kazma_core.config_store import apply_sqlite_pragmas
+from kazma_core.spaces.scope import require_space_id, space_of_state
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ def _effect_identity(state: dict[str, Any], call: dict[str, Any]) -> str:
     call_id = str(call.get("id") or "")
     if not call_id:
         raise EffectUncertain("The effect has no tool-call identity; dispatch was withheld.")
-    parts = [str(state.get("tenant_id") or "default"), thread, scope,
+    parts = [space_of_state(state), thread, scope,
              int(state.get("iteration") or 0), call_id, str(call.get("name") or "")]
     return hashlib.sha256(json.dumps(parts, ensure_ascii=False).encode()).hexdigest()
 
@@ -164,7 +165,6 @@ async def execute_operation(
     A new deliberate operation needs a new ID. Neither this receipt nor a
     completed replay grants permission to execute a new action.
     """
-    from kazma_core.tenant_context import get_current_tenant_id
 
     class Executor:
         async def execute(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -172,7 +172,7 @@ async def execute_operation(
 
     state = {
         "thread_id": namespace + ":" + actor,
-        "tenant_id": get_current_tenant_id() or "default",
+        "tenant_id": require_space_id(),
         "created_at": namespace, "iteration": 0,
     }
     return await execute_effect(Executor(), state, {"id": operation_id, "name": tool}, arguments)

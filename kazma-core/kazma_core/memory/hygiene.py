@@ -13,6 +13,8 @@ import sqlite3
 import time
 from typing import Any
 
+from kazma_core.memory.tenant_view import sees_every_tenant
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -195,7 +197,7 @@ def invalidate_belief(
             ensure_primary_schema(conn)
         assert conn is not None
 
-        scoped = tenant_id not in (None, "", "default")
+        scoped = not sees_every_tenant(tenant_id)
         row = conn.execute(
             """
             SELECT id, subject, predicate, object, tenant_id, valid_until, invalidated_at

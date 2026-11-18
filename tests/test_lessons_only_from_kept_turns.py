@@ -93,7 +93,7 @@ def _close(values: dict, thread: str, times: int = 1) -> None:
 
 
 def _lessons() -> list[str]:
-    return si._lessons(si.get_agent_evolution_block())[1]
+    return si._lessons(si._agent_evolution_block())[1]
 
 
 def _thread() -> str:
@@ -211,7 +211,7 @@ def test_template_lines_already_stored_leave_the_prompt(env):
               "[SelfImprovement] 1/1 stages failed.\n\n"
               "[SelfImprovement] Task successfully completed (100% rate).")
     get_config_store().set(si._AGENT_EVO_KEY, {"agents": {"supervisor": {"soul": stored, "history": []}}})
-    block = si.get_agent_evolution_block()
+    block = si._agent_evolution_block()
     assert block == "You are Kazma.\n\n[SelfImprovement] Keep answers short."
     assert "stages failed" in stored  # the control: the stored text holds them
 

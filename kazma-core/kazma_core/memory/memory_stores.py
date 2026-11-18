@@ -26,9 +26,11 @@ every text column of both databases.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 __all__ = [
     "ERASURE_HORIZON",
+    "EXTERNAL_SPACE_RULES",
     "EXTERNAL_STORES",
     "MEMORY_TABLES",
     "MemoryStore",
@@ -299,6 +301,45 @@ EXTERNAL_STORES: tuple[MemoryStore, ...] = (
         export="", excluded="the conversation itself",
     ),
 )
+
+def _external_space_rules() -> dict[str, Any]:
+    from kazma_core.store_registry import SpaceRule
+
+    return {
+        "forget journal (memory_forget_journal.db)": ("memory_forget_journal.db",),
+        "remote vector index": SpaceRule(
+            "derived",
+            why="the vectors of memories and facts: each is stored with its row's space, a search "
+                "names one space, and a forget deletes by id and space",
+            today="apart"),
+        "Postgres state mirror (kazma_episodes, kazma_beliefs)": SpaceRule(
+            "row",
+            content={
+                "kazma_episodes": ("user_text", "assistant_text", "summary_text", "metadata_json"),
+                "kazma_beliefs": ("subject", "predicate", "object", "metadata_json"),
+            },
+            today="apart"),
+        "graph backend (Neo4j edges)": SpaceRule(
+            "derived",
+            why="current facts as edges: every node and edge carries its fact's space, and a walk "
+                "names one space",
+            today="apart"),
+        "time-travel snapshots (snapshots.db)": ("snapshots.db",),
+        "self-improvement lessons (settings self_improvement.agent_evolution)": SpaceRule(
+            "row",
+            why="the owner's Soul under its own settings key, every other space's inside one "
+                "document keyed by space (self_improvement.space_evolution); one Soul for an "
+                "install that does not enforce Spaces",
+            today="apart"),
+        "chat store and checkpoints": ("chat_sessions.db", "checkpoints.db"),
+    }
+
+
+#: The space rule of every :data:`EXTERNAL_STORES` entry (Spaces S1-09): a
+#: ``store_registry.SpaceRule`` for a copy outside the data folder, or the
+#: keys of ``store_registry.SPACE_RULES`` for one that is a store there.
+#: ``tests/test_memory_spaces.py`` fails on an entry without one.
+EXTERNAL_SPACE_RULES: dict[str, Any] = _external_space_rules()
 
 #: Copies Forget cannot reach, said next to the Forget button and in the guide.
 ERASURE_HORIZON: tuple[tuple[str, str], ...] = (

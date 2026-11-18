@@ -91,6 +91,9 @@ _VETO_BLANKING = _Veto("empty value over a stored secret -- delete() clears one"
 # vault; ConfigStore keeps a ``vault://cfg:<key>`` pointer only.
 _VAULT_REF_PREFIX = "vault://"
 _VAULT_NAME_PREFIX = "cfg:"
+#: ``atomic_update`` on Postgres locks ``hashtextextended(prefix + key)`` for
+#: its transaction (a name of its own: ``db.pg_schema`` locks another).
+_ATOMIC_UPDATE_LOCK_PREFIX = "kazma_settings.atomic_update:"
 #: The vault names of URLs that carry a password under a key that is not a
 #: credential's (``proxy.url``): install-scoped (``vault.INSTALL_SCOPED_SECRETS``),
 #: so the background readers of the setting find them.
@@ -2441,6 +2444,17 @@ class ConfigStore(_ChangeNotices):
                         raise RuntimeError("Postgres pool unavailable")
                     with pool.connection() as conn:
                         with conn.cursor() as cur:
+                            # The key itself is locked first, for the
+                            # transaction: FOR UPDATE locks nothing while the
+                            # row does not exist, so two first updates of a
+                            # key each read nothing and the second wrote over
+                            # the first (Spaces S1-10 review: two spaces'
+                            # first lessons). Every process's update of the
+                            # key now waits for the one before it.
+                            cur.execute(
+                                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                                (_ATOMIC_UPDATE_LOCK_PREFIX + key,),
+                            )
                             cur.execute(
                                 "SELECT value FROM kazma_settings WHERE key = %s FOR UPDATE",
                                 (key,),

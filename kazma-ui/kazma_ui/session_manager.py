@@ -29,9 +29,18 @@ from datetime import UTC, datetime
 from typing import Any, Iterator
 
 from kazma_core.config_store import apply_sqlite_pragmas
-from kazma_core.tenant_context import get_current_tenant_id
+from kazma_core.spaces.scope import OWNER_SPACE_ID, require_space_id
 
 logger = logging.getLogger(__name__)
+
+
+def _space() -> str:
+    """The space this request or task is in: the chat store's partition
+    (Spaces S1-08). A bound scope or tenant is that space. With nothing
+    bound it is the owner's while the install does not enforce Spaces (one
+    operator, as before) and a refusal once it does: a chat is never read or
+    written for "whoever"."""
+    return require_space_id()
 
 def _paths_data_dir():
     """``paths.data_dir()``, imported lazily (honours KAZMA_DATA_DIR)."""
@@ -84,15 +93,14 @@ class ChatSession:
     created_at: str = ""
     total_cost: float = 0.0
     total_tokens: int = 0
-    # None, not "default": ``put`` resolves this as
-    # ``session.tenant_id or get_current_tenant_id() or "default"`` while
-    # ``get`` resolves ``get_current_tenant_id() or "default"``. A truthy
-    # default made put ALWAYS win with "default" for any caller that did not
-    # pass a tenant, so with a tenant context active a session was written to
-    # ``default:<id>`` and read from ``<tenant>:<id>`` -- present in both the
-    # cache and the database, invisible to the very next lookup. None lets an
-    # unset tenant fall through to the context, which is what get uses.
-    # Callers that know the tenant still pass it and still win.
+    # None, not a space id: ``put`` resolves this as the session's own
+    # space, else the space this work is in (``_space``), which is what
+    # ``get`` resolves. A truthy value here made put ALWAYS win with the
+    # owner's space for any caller that did not pass one, so with another
+    # space bound a session was written to the owner's and read from the
+    # bound one -- present in both the cache and the database, invisible to
+    # the very next lookup. None lets an unset space fall through to the
+    # bound one. Callers that know the space still pass it and still win.
     tenant_id: str | None = None
     thread_id: str = ""
     updated_at: str = ""
@@ -344,7 +352,7 @@ class SessionManager:
             created_at=created_at or "",
             total_cost=float(total_cost or 0.0),
             total_tokens=int(total_tokens or 0),
-            tenant_id=str(tenant_id or "default"),
+            tenant_id=str(tenant_id or OWNER_SPACE_ID),
             thread_id=thread_id or "",
             updated_at=updated_at or "",
             title=title or "",
@@ -367,7 +375,7 @@ class SessionManager:
 
     def _with_spool(self, session: ChatSession) -> ChatSession:
         spool = self._spool
-        tenant_id = session.tenant_id or "default"
+        tenant_id = session.tenant_id or OWNER_SPACE_ID
         if spool is None or not spool.has(tenant_id, session.session_id):
             return session
         spooled = spool.get(tenant_id, session.session_id)
@@ -419,7 +427,7 @@ class SessionManager:
         (``_upsert_db``); nothing else may call it, which
         ``test_session_saves_go_through_the_spool`` enforces.
         """
-        tenant_id = session.tenant_id or "default"
+        tenant_id = session.tenant_id or OWNER_SPACE_ID
         try:
             self._upsert_db(session)
         except Exception as exc:
@@ -440,7 +448,7 @@ class SessionManager:
         spool = self._spool
         if spool is None:
             return False
-        tenant_id = session.tenant_id or "default"
+        tenant_id = session.tenant_id or OWNER_SPACE_ID
         try:
             spool.save(
                 tenant_id,
@@ -767,7 +775,7 @@ class SessionManager:
     def get(self, session_id: str) -> ChatSession | None:
         """Return the current tenant's session for ``session_id`` or ``None``."""
         with self._lock:
-            tenant_id = get_current_tenant_id() or "default"
+            tenant_id = _space()
             key = f"{tenant_id}:{session_id}"
             session = self._sessions.get(key)
             if session is not None:
@@ -801,7 +809,7 @@ class SessionManager:
         (which calls :meth:`put` and persists).
         """
         with self._lock:
-            tenant_id = get_current_tenant_id() or "default"
+            tenant_id = _space()
             if session_id:
                 existing = self.get(session_id)
                 if existing is not None:
@@ -840,7 +848,7 @@ class SessionManager:
         Check memory, durable rows and the spool. Store errors raise so the
         ownership boundary fails closed even when a session is cached.
         """
-        tenant_id = get_current_tenant_id() or "default"
+        tenant_id = _space()
         with self._lock:
             if any(s.thread_id == thread_id and s.tenant_id != tenant_id
                    for s in self._sessions.values()):
@@ -873,7 +881,7 @@ class SessionManager:
         if not thread_id:
             return None
         with self._lock:
-            tenant_id = get_current_tenant_id() or "default"
+            tenant_id = _space()
             for key, session in self._sessions.items():
                 if key.startswith(f"{tenant_id}:") and session.thread_id == thread_id:
                     self._sessions.move_to_end(key)
@@ -922,7 +930,7 @@ class SessionManager:
     def put(self, session: ChatSession) -> None:
         """Insert or replace a session in the store."""
         with self._lock:
-            tenant_id = session.tenant_id or get_current_tenant_id() or "default"
+            tenant_id = session.tenant_id or _space()
             session.tenant_id = tenant_id
             session.updated_at = datetime.now(UTC).isoformat()
 
@@ -949,7 +957,7 @@ class SessionManager:
         Safe to call even if the session doesn't exist in the DB yet.
         """
         with self._lock:
-            tenant_id = get_current_tenant_id() or "default"
+            tenant_id = _space()
             loaded = self._load_one_from_db(tenant_id, session_id)
             if loaded is not None:
                 key = f"{loaded.tenant_id}:{loaded.session_id}"
@@ -1011,7 +1019,7 @@ class SessionManager:
     def delete(self, session_id: str) -> None:
         """Remove a session.  No-op if not found."""
         with self._lock:
-            tenant_id = get_current_tenant_id() or "default"
+            tenant_id = _space()
             key = f"{tenant_id}:{session_id}"
             self._sessions.pop(key, None)
 
@@ -1077,10 +1085,10 @@ class SessionManager:
                 sess = ChatSession(
                     session_id=thread_id,
                     thread_id=thread_id,
-                    tenant_id="default",
+                    tenant_id=OWNER_SPACE_ID,
                     title=f"{plat} · Session",
                 )
-                key = f"default:{thread_id}"
+                key = f"{OWNER_SPACE_ID}:{thread_id}"
                 self._sessions[key] = sess
                 self._write_durably(sess)
         except Exception as exc:
@@ -1102,7 +1110,7 @@ class SessionManager:
         # Snapshot ids under lock, delete outside the iteration to reuse delete().
         to_delete: list[str] = []
         with self._lock:
-            tenant_id = get_current_tenant_id() or "default"
+            tenant_id = _space()
             for key, sess in list(self._sessions.items()):
                 if not key.startswith(f"{tenant_id}:"):
                     continue
@@ -1179,7 +1187,7 @@ class SessionManager:
         and aged ones are garbage-collected when ``prune_empty`` is True so
         the sidebar does not accumulate "Web Session · 0 msgs" forever.
         """
-        tenant_id = get_current_tenant_id() or "default"
+        tenant_id = _space()
         self._refresh_for_list(tenant_id, prune=prune_empty)
 
         # The lock only for the copy: filtering and sorting 200 sessions
@@ -1290,7 +1298,7 @@ class SessionManager:
         WebSocket session-list / message-history endpoints see it.
         """
         with self._lock:
-            tenant_id = get_current_tenant_id() or "default"
+            tenant_id = _space()
             key = f"{tenant_id}:{session_id}"
             session = self._sessions.get(key)
             if session is None:
@@ -1316,7 +1324,7 @@ class SessionManager:
 
     def clear(self) -> None:
         """Remove every session (mainly for tests)."""
-        tenant_id = get_current_tenant_id() or "default"
+        tenant_id = _space()
         if self._pg:
             from kazma_core.db.pg_helpers import get_pool
 
