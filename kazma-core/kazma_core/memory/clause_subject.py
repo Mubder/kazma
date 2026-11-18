@@ -56,6 +56,27 @@ OTHER = "other"
 _PUNCTUATION = set(".,!?،؛؟:;()")
 #: Where a sentence ends: its people end with it.
 _SENTENCE_END = {".", "!", "?", "؟", "\n"}
+#: How a question ends.
+_QUESTION_END = {"?", "؟"}
+#: Words that deny what follows them in their sentence ("I don't live in
+#: Paris", "I never worked at Google", "أنا ما أسكن في دبي"), written folded
+#: and without an apostrophe. "No" and "لا" deny only when a word follows
+#: them: "No, Lisbon." answers, it denies nothing.
+_NEGATIONS = {
+    "not", "never", "no", "nor", "neither", "cannot", "dont", "doesnt", "didnt", "isnt", "arent", "wasnt",
+    "werent", "wont", "cant", "couldnt", "wouldnt", "shouldnt", "havent", "hasnt", "hadnt", "aint",
+    "ما", "مو", "موب", "مب", "مش", "لا", "لم", "لن", "ليس", "ليست", "ماني", "مانيب",
+}
+#: How a sentence that asks, or asks Kazma to act on a text, begins: nothing
+#: in it is the user saying something of themself ("Should I move to
+#: Rotterdam?", "How do I say my name is Pierre in French?", "Summarize this
+#: page about Dubai", "هل أنتقل إلى دبي").
+_ASKING_STARTS = {
+    "should", "shall", "can", "could", "would", "do", "does", "did", "how", "what", "why", "which", "who",
+    "whom", "whose", "summarize", "summarise", "translate", "explain", "rewrite", "proofread", "review",
+    "draft", "compose",
+    "هل", "كيف", "وش", "شنو", "ليش", "متى", "وين", "شلون", "لخص", "ترجم", "اشرح", "صحح", "راجع",
+}
 
 # Arabic, written folded (``documents.arabic.fold_for_search``).
 _AR_SPEAKER = {"انا", "احنا", "نحن", "اسمي", "عندي", "لدي"}
@@ -309,9 +330,48 @@ def names_no_one_else(message: str | None, value: str | None) -> str | None:
     return _said(message, value, (SPEAKER, None))
 
 
+def _negates(token: str, following: str) -> bool:
+    """Whether *token* denies what follows it: a negation word, or one
+    written with "و"/"ف" onto it ("وما"). "No"/"لا" before a mark or at the
+    end answer instead ("No, Lisbon.")."""
+    word = _fold(token).lower().replace("’", "").replace("'", "")
+    if word not in _NEGATIONS and not (len(word) > 2 and word[0] in "وف" and word[1:] in _NEGATIONS):
+        return False
+    if word in ("no", "لا") and (not following or following in _PUNCTUATION or following == "\n"):
+        return False
+    return True
+
+
+def _asserted(raw: list[str]) -> list[bool]:
+    """For each word of *raw*: whether its sentence states something -- no
+    negation before it in its sentence, the sentence neither a question
+    (``?``/``؟`` at its end, or a word that asks at its start) nor a request
+    to act on a text. One pass each way."""
+    n = len(raw)
+    asks_at_end = [False] * (n + 1)
+    for j in range(n - 1, -1, -1):
+        asks_at_end[j] = raw[j] in _QUESTION_END or (raw[j] not in _SENTENCE_END and asks_at_end[j + 1])
+    out = [True] * n
+    start, denied = True, False
+    asking = False
+    for j, token in enumerate(raw):
+        if start and token not in _SENTENCE_END:
+            asking = _fold(token).lower() in _ASKING_STARTS
+            start, denied = False, False
+        out[j] = not (denied or asking or asks_at_end[j])
+        if token in _SENTENCE_END:
+            start, denied, asking = True, False, False
+        elif _negates(token, raw[j + 1] if j + 1 < n else ""):
+            denied = True
+    return out
+
+
 def _said(message: str | None, value: str | None, accept: tuple[str | None, ...]) -> str | None:
     """The user's own spelling of *value* where the nearest person-naming
-    word before it is one of *accept*, else None."""
+    word before it is one of *accept*, in a sentence that states it
+    (:func:`_asserted`: never denied before it, never a question or a
+    request -- "I never lived in Paris", "Should I move to Rotterdam?" and
+    "Summarize this page about Dubai" say nothing of the user), else None."""
     from kazma_core.memory.own_words import own_words
 
     pieces = str(value or "").replace("_", " ").split()
@@ -321,6 +381,7 @@ def _said(message: str | None, value: str | None, accept: tuple[str | None, ...]
     raw = _TOKEN_RE.findall(own_words(message))
     folded = [_fold(t) for t in raw]
     named = subjects(raw)
+    stated = _asserted(raw)
     # Where each word's sentence ends, and whether a third-person pronoun
     # comes after it in that sentence: one pass from the end.
     pronoun_after = [False] * (len(raw) + 1)
@@ -329,7 +390,7 @@ def _said(message: str | None, value: str | None, accept: tuple[str | None, ...]
             pronoun_after[j + 1] or _third_person_pronoun(raw[j]))
     k = len(words)
     for i in range(len(raw) - k + 1):
-        if named[i] not in accept:
+        if named[i] not in accept or not stated[i]:
             continue
         held = [_token_holds(folded[i + j], words[j]) for j in range(k)]
         if any(h is None for h in held):

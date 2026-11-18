@@ -92,12 +92,23 @@ def _changes(mem, state: str | None = None) -> list[dict]:
 # ── updates ───────────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize(("first", "then", "model", "new"), [
-    ("Paris", "We moved to Rotterdam last month.", [_fact("lives_in", "rotterdam")], "Rotterdam"),
-    ("جدة", "انتقلنا إلى الرياض الشهر الماضي.", [_fact("lives_in", "الرياض")], "الرياض"),
+def _quick(mem, then: str, *, turn: int = 2, session: str = "s1") -> None:
+    """The quick pass of the user's turn *then*: its exact shapes are the
+    one way a reading replaces the user's fact (a reading only the model
+    made waits for the user)."""
+    from kazma_core.memory.belief_extractor import extract_and_apply_beliefs_sync
+
+    extract_and_apply_beliefs_sync(mem.db, None, then, session_id=session, turn=turn)
+
+
+@pytest.mark.parametrize(("first", "then", "new"), [
+    ("Paris", "I live in Rotterdam now.", "Rotterdam"),
+    ("جدة", "انتقلنا إلى الرياض الشهر الماضي.", "الرياض"),
 ])
-def test_a_replaced_user_fact_is_an_update_the_user_can_undo(mem, monkeypatch, first, then, model, new):
-    _turn(mem, monkeypatch, first=first, then=then, model=model)
+def test_a_replaced_user_fact_is_an_update_the_user_can_undo(mem, monkeypatch, first, then, new):
+    mutate_belief(mem.db, "user", "lives_in", first, now=time.time() - 1200, extraction_method="user_stated",
+                  source_session="s1", source_turn=1)
+    _quick(mem, then)
     assert _current(mem) == [(new, "user_stated")]
     [change] = _changes(mem, "open")
     assert (change["kind"], change["old_value"], change["new_value"]) == ("update", first, new)
@@ -219,8 +230,7 @@ def test_one_pending_change_per_value(mem, monkeypatch):
 def test_the_users_own_words_answer_a_pending_change(mem, monkeypatch):
     _turn(mem, monkeypatch, first="Paris", then="Moved to Rotterdam last month.",
           model=[_fact("lives_in", "rotterdam")])
-    _turn(mem, monkeypatch, first="", then="I live in Rotterdam now.", model=[_fact("lives_in", "Rotterdam")],
-          turn=3)
+    _quick(mem, "I live in Rotterdam now.", turn=3)  # the quick pass's exact shape
     states = {(c["kind"], c["state"]) for c in _changes(mem)}
     assert ("pending", "superseded") in states and ("update", "open") in states
 
@@ -471,6 +481,6 @@ def test_control_without_the_change_log_a_refusal_was_silent(mem, monkeypatch):
     monkeypatch.setattr(changes, "record_update", lambda *a, **k: "")
     _turn(mem, monkeypatch, first="Paris", then="Moved to Rotterdam last month.",
           model=[_fact("lives_in", "rotterdam")])
-    _turn(mem, monkeypatch, first="", then="We moved to Lisbon.", model=[_fact("lives_in", "Lisbon")], turn=3)
-    assert _current(mem) == [("Lisbon", "user_stated")]
+    _quick(mem, "I live in Lisbon now.", turn=3)
+    assert _current(mem) == [("Lisbon", "user_stated")]  # replaced, nothing shown
     assert _changes(mem) == []

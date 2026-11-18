@@ -40,15 +40,16 @@ def test_a_long_message_of_small_talk_is_filler_and_a_long_statement_is_not():
 
 def test_the_short_write_scenarios_teach_what_they_say():
     """Through the write path: the short statements become facts, small talk
-    does not. "No, Lisbon" is the user's correction read by the model, an
-    inference that may not replace the user's own Paris (the audit's F1)."""
+    does not. "No, Lisbon" is the user's correction read by the model: it
+    may not replace the user's own Paris, and it waits for the user's answer
+    (the audit's F1, memory/changes.py)."""
     import json
 
     from kazma_core.memory.benchmark import WRITES_PATH, run_write_scenarios
 
     data = json.loads(WRITES_PATH.read_text(encoding="utf-8"))
     short = {**data, "scenarios": [s for s in data["scenarios"] if s["category"] == "short"]}
-    assert run_write_scenarios(short)["failing"] == ["short-en-no-city"]
+    assert run_write_scenarios(short)["failing"] == []
 
 
 def test_the_length_rule_kept_every_short_statement_out(monkeypatch):

@@ -608,13 +608,19 @@ def _apply_beliefs_to_v2(
         # Trust follows who is speaking about themself, not which pass read
         # the fact: "We moved to Rotterdam" read by the model is the user's
         # own word, "My sister moved to Rotterdam" never is (2026-11, the
-        # memory framework audit's F1).
+        # memory framework audit's F1). Credited so, it may add the user's
+        # fact but never replace one the user holds (``adds_only``): whether
+        # the model's name fits the words ("I'm visiting Dubai next week" as
+        # lives_in) only the user can say, so that becomes a pending change
+        # (the review of F1, 2026-11-18).
+        credited = False
         if _method == "llm_inferred" and clean["subject"] == "user" and user_text:
             from kazma_core.memory.clause_subject import speaks_of_self
 
             spelled = speaks_of_self(user_text, clean["object"])
             if spelled:
                 _method, clean["object"] = "user_stated", spelled
+                credited = True
                 stats["own_statements"] = stats.get("own_statements", 0) + 1
         if _method != "user_explicit":
             _mode = get_auto_store_mode(cfg)
@@ -699,7 +705,10 @@ def _apply_beliefs_to_v2(
             subject_id=subject_id,
             now=now,
             private=private,
+            adds_only=credited,
         )
+        if action.get("credit_withheld"):
+            stats["credit_withheld"] = stats.get("credit_withheld", 0) + 1
         if action["action"] != "noop":
             stats["applied"] += 1
         stats["actions"].append(action)

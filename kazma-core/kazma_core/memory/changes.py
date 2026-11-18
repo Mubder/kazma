@@ -203,11 +203,15 @@ def _decide(conn: sqlite3.Connection, change_id: str, tenant: str, state: str, a
     ).rowcount > 0
 
 
-def confirm(conn: sqlite3.Connection, change_id: str, *, tenant_id: str, actor: str = "user") -> dict[str, Any]:
+def confirm(
+    conn: sqlite3.Connection, change_id: str, *, tenant_id: str, actor: str = "user", private: bool = False,
+) -> dict[str, Any]:
     """The user says the pending change is right: its value is written at
     the user's own trust (``user_explicit``), replacing the old fact -- which
     records an update the user can still undo. The change is marked confirmed
-    in the replacement's own transaction (``mutate_belief(confirms_change=)``)."""
+    in the replacement's own transaction (``mutate_belief(confirms_change=)``).
+    *private*: a private database (the memory benchmark's write scenarios):
+    nothing reaches a mirror (``mutate_belief(private=)``)."""
     from kazma_core.memory.belief_mutation import mutate_belief
 
     tenant = tenant_id
@@ -220,7 +224,7 @@ def confirm(conn: sqlite3.Connection, change_id: str, *, tenant_id: str, actor: 
         conn, row["subject"], row["predicate"], row["new_value"], predicate_type="functional",
         confidence=1.0, importance=4, extraction_method="user_explicit", tenant_id=tenant,
         source_session=row["source_session"], source_turn=row["source_turn"],
-        confirms_change=(change_id, actor),
+        confirms_change=(change_id, actor), private=private,
     )
     if result.get("blocked") or result.get("rejected") or result.get("error"):
         raise ChangeRefusedError("not_written")

@@ -939,7 +939,11 @@ def build_extraction() -> dict[str, Any]:
 #: words and trust as they were), ``short`` (short statements are read, small
 #: talk is not), ``someone_else`` (a fact about another person never becomes
 #: the user's), ``quoted`` (text the user quoted, attached or asked Kazma to
-#: work on is never the user's own statement).
+#: work on is never the user's own statement), ``model_read`` (a name the
+#: model chose may not fit the words: the user's fact stands, and a
+#: statement is asked about). ``pending`` names the corrections that must wait
+#: for the user (``memory/changes.py``), and only those; an ``("", ("answer",
+#: "confirm"))`` turn is the user answering the newest one.
 def _said(subject: str, predicate: str, kind: str, obj: str) -> dict[str, Any]:
     return {"subject": subject, "predicate": predicate, "predicate_type": kind, "object": obj, "confidence": 0.9}
 
@@ -967,14 +971,27 @@ def _attached(message: str, filename: str, mime: str, document: str) -> str:
 
 WRITE_SCENARIOS: list[dict[str, Any]] = [
     # ── update: stated, then corrected in the user's own words ──────────────
+    # A correction the quick pass reads in its exact shapes replaces the fact
+    # ("I live in Rotterdam now", "انتقلنا إلى ..."). One only the model reads
+    # never does: Kazma cannot tell without a model whether the model's name
+    # fits the words, so it keeps the user's fact and asks (``pending``);
+    # the user's "Yes, change it" (an ``answer`` turn) makes the change (the
+    # review of the memory framework audit's F1, 2026-11-18; v3).
     {"id": "update-en-moved", "category": "update", "lang": "en", "turns": [
         ("I live in Paris.", ("written", [_said("user", "lives_in", "functional", "Paris")])),
         ("We moved to Rotterdam last month.", ("recorded", "e06"))],
+     "current": [_now("user", "Paris", "user")], "not_current": [_now("user", "Rotterdam")],
+     "pending": [_now("user", "Rotterdam")]},
+    {"id": "update-en-moved-confirmed", "category": "update", "lang": "en", "turns": [
+        ("I live in Paris.", ("written", [_said("user", "lives_in", "functional", "Paris")])),
+        ("We moved to Rotterdam last month.", ("recorded", "e06")),
+        ("", ("answer", "confirm"))],
      "current": [_now("user", "Rotterdam", "user")], "not_current": [_now("user", "Paris")]},
     {"id": "update-en-new-job", "category": "update", "lang": "en", "turns": [
         ("I work at Google.", ("written", [_said("user", "works_at", "functional", "Google")])),
         ("I left Google, I am at Meta now.", ("written", [_said("user", "works_at", "functional", "Meta")]))],
-     "current": [_now("user", "Meta", "user")], "not_current": [_now("user", "Google")]},
+     "current": [_now("user", "Google", "user")], "not_current": [_now("user", "Meta")],
+     "pending": [_now("user", "Meta")]},
     {"id": "update-en-said-again", "category": "update", "lang": "en", "turns": [
         ("I live in Paris.", ("written", [_said("user", "lives_in", "functional", "Paris")])),
         ("I live in Rotterdam now.", ("written", [_said("user", "lives_in", "functional", "Rotterdam")]))],
@@ -986,11 +1003,18 @@ WRITE_SCENARIOS: list[dict[str, Any]] = [
     {"id": "update-ar-new-job", "category": "update", "lang": "ar", "turns": [
         ("أشتغل في شركة زين.", ("written", [_said("user", "works_at", "functional", "شركة زين")])),
         ("تركت زين، أشتغل الحين في أريدُو.", ("written", [_said("user", "works_at", "functional", "أريدو")]))],
+     "current": [_now("user", "زين", "user")], "not_current": [_now("user", "أريدو")],
+     "pending": [_now("user", "أريدو")]},
+    {"id": "update-ar-new-job-confirmed", "category": "update", "lang": "ar", "turns": [
+        ("أشتغل في شركة زين.", ("written", [_said("user", "works_at", "functional", "شركة زين")])),
+        ("تركت زين، أشتغل الحين في أريدُو.", ("written", [_said("user", "works_at", "functional", "أريدو")])),
+        ("", ("answer", "confirm"))],
      "current": [_now("user", "أريدو", "user")], "not_current": [_now("user", "زين")]},
     {"id": "update-mixed-moved", "category": "update", "lang": "mixed", "turns": [
         ("My name is Omar وساكن في Kuwait City.", ("recorded", "m01")),
         ("We moved to Rotterdam last month.", ("recorded", "e06"))],
-     "current": [_now("user", "Rotterdam", "user")], "not_current": [_now("user", "Kuwait City")]},
+     "current": [_now("user", "Kuwait City", "user")], "not_current": [_now("user", "Rotterdam")],
+     "pending": [_now("user", "Rotterdam")]},
     # A word that also introduces a text to work on, said with no text named:
     # the user's own correction, kept as theirs.
     {"id": "update-en-correction", "category": "update", "lang": "en", "turns": [
@@ -1001,6 +1025,56 @@ WRITE_SCENARIOS: list[dict[str, Any]] = [
         ("اسمي أحمد.", ("written", [_said("user", "name_is", "functional", "أحمد")])),
         ("صحح: اسمي محمد.", ("written", [_said("user", "name_is", "functional", "محمد")]))],
      "current": [_now("user", "محمد", "user")], "not_current": [_now("user", "أحمد")]},
+    # ── model_read: the model files a reading under a name the words may not
+    # fit. The user's fact stands in every one; a statement is asked about,
+    # a denial, a question or a request is not (the review of F1's first
+    # half: each of these replaced the user's fact).
+    {"id": "model-en-visiting", "category": "model_read", "lang": "en", "turns": [
+        ("I live in Kuwait.", ("written", [_said("user", "lives_in", "functional", "Kuwait")])),
+        ("I'm visiting Dubai next week.", ("written", [_said("user", "lives_in", "functional", "dubai")]))],
+     "current": [_now("user", "Kuwait", "user")], "not_current": [_now("user", "Dubai")],
+     "pending": [_now("user", "Dubai")]},
+    {"id": "model-en-never", "category": "model_read", "lang": "en", "turns": [
+        ("I live in Kuwait.", ("written", [_said("user", "lives_in", "functional", "Kuwait")])),
+        ("I never lived in Paris.", ("written", [_said("user", "lives_in", "functional", "paris")]))],
+     "current": [_now("user", "Kuwait", "user")], "not_current": [_now("user", "Paris")]},
+    {"id": "model-en-someone-named", "category": "model_read", "lang": "en", "turns": [
+        ("I live in Kuwait.", ("written", [_said("user", "lives_in", "functional", "Kuwait")])),
+        ("I think Rotterdam is where Dana lives.",
+         ("written", [_said("user", "lives_in", "functional", "rotterdam")]))],
+     "current": [_now("user", "Kuwait", "user")], "not_current": [_now("user", "Rotterdam")],
+     "pending": [_now("user", "Rotterdam")]},
+    {"id": "model-en-met", "category": "model_read", "lang": "en", "turns": [
+        ("My name is Sam.", ("written", [_said("user", "name_is", "functional", "Sam")])),
+        ("I met Dana yesterday.", ("written", [_said("user", "name_is", "functional", "dana")]))],
+     "current": [_now("user", "Sam", "user")], "not_current": [_now("user", "Dana")],
+     "pending": [_now("user", "Dana")]},
+    {"id": "model-en-read-that", "category": "model_read", "lang": "en", "turns": [
+        ("I work at Acme.", ("written", [_said("user", "works_at", "functional", "Acme")])),
+        ("I read that Initech is hiring.", ("written", [_said("user", "works_at", "functional", "initech")]))],
+     "current": [_now("user", "Acme", "user")], "not_current": [_now("user", "Initech")],
+     "pending": [_now("user", "Initech")]},
+    {"id": "model-en-question", "category": "model_read", "lang": "en", "turns": [
+        ("I live in Paris.", ("written", [_said("user", "lives_in", "functional", "Paris")])),
+        ("Should I move to Rotterdam?", ("written", [_said("user", "lives_in", "functional", "rotterdam")]))],
+     "current": [_now("user", "Paris", "user")], "not_current": [_now("user", "Rotterdam")]},
+    {"id": "model-en-summary", "category": "model_read", "lang": "en", "turns": [
+        ("I live in Kuwait.", ("written", [_said("user", "lives_in", "functional", "Kuwait")])),
+        ("Summarize this page about Dubai.", ("written", [_said("user", "lives_in", "functional", "Dubai")]))],
+     "current": [_now("user", "Kuwait", "user")], "not_current": [_now("user", "Dubai")]},
+    {"id": "model-ar-going", "category": "model_read", "lang": "ar", "turns": [
+        ("ساكن في الكويت.", ("written", [_said("user", "lives_in", "functional", "الكويت")])),
+        ("أنا رايح دبي الأسبوع الجاي", ("written", [_said("user", "lives_in", "functional", "دبي")]))],
+     "current": [_now("user", "الكويت", "user")], "not_current": [_now("user", "دبي")],
+     "pending": [_now("user", "دبي")]},
+    {"id": "model-ar-never", "category": "model_read", "lang": "ar", "turns": [
+        ("ساكن في الكويت.", ("written", [_said("user", "lives_in", "functional", "الكويت")])),
+        ("أنا ما أسكن في دبي.", ("written", [_said("user", "lives_in", "functional", "دبي")]))],
+     "current": [_now("user", "الكويت", "user")], "not_current": [_now("user", "دبي")]},
+    {"id": "model-ar-question", "category": "model_read", "lang": "ar", "turns": [
+        ("ساكن في الكويت.", ("written", [_said("user", "lives_in", "functional", "الكويت")])),
+        ("هل أنتقل إلى دبي؟", ("written", [_said("user", "lives_in", "functional", "دبي")]))],
+     "current": [_now("user", "الكويت", "user")], "not_current": [_now("user", "دبي")]},
     # ── kept as said: the deep pass of the same turn keeps the user's words ─
     {"id": "kept-en-name-and-city", "category": "kept_as_said", "lang": "en", "turns": [
         ("My name is Layla and I live in Lisbon now.", ("recorded", "e01"))],
@@ -1023,10 +1097,12 @@ WRITE_SCENARIOS: list[dict[str, Any]] = [
     {"id": "short-en-diet", "category": "short", "lang": "en", "turns": [
         ("I'm vegan", ("written", [_said("user", "diet", "functional", "vegan")]))],
      "current": [_now("user", "vegan")], "not_current": []},
+    # "No, Lisbon" names no one: the model's reading of it waits for the user.
     {"id": "short-en-no-city", "category": "short", "lang": "en", "turns": [
         ("I live in Paris.", ("written", [_said("user", "lives_in", "functional", "Paris")])),
         ("No, Lisbon", ("written", [_said("user", "lives_in", "functional", "Lisbon")]))],
-     "current": [_now("user", "Lisbon")], "not_current": [_now("user", "Paris")]},
+     "current": [_now("user", "Paris", "user")], "not_current": [_now("user", "Lisbon")],
+     "pending": [_now("user", "Lisbon")]},
     {"id": "short-en-thanks", "category": "short", "lang": "en", "turns": [
         ("Thanks!", ("written", [_said("user", "mood", "state", "grateful")]))],
      "current": [], "not_current": [_now("user", "grateful")]},
@@ -1097,8 +1173,10 @@ WRITE_SCENARIOS: list[dict[str, Any]] = [
      "current": [_now("user", "Paris", "user")], "not_current": [_now("user", "Lyon")]},
 ]
 
-#: The write scenarios' version.
-WRITES_VERSION = 2
+#: The write scenarios' version. 3: a correction only the model reads waits
+#: for the user (``pending``, ``answer`` turns), and the ``model_read``
+#: category (2026-11-18).
+WRITES_VERSION = 3
 
 
 def build_writes() -> dict[str, Any]:
@@ -1118,10 +1196,17 @@ def build_writes() -> dict[str, Any]:
                     if not all(fact.get(k) for k in ("subject", "predicate", "predicate_type", "object")):
                         raise ValueError(f"{sc['id']}: a written reply needs subject, predicate, type and object")
                 turns.append({"user": text, "written": reply})
+            elif kind == "answer":
+                if reply not in ("confirm", "dismiss"):
+                    raise ValueError(f"{sc['id']}: the user answers confirm or dismiss, not {reply!r}")
+                turns.append({"answer": reply})
             else:
-                raise ValueError(f"{sc['id']}: a turn's reply is recorded or written, not {kind!r}")
-        scenarios.append({"id": sc["id"], "category": sc["category"], "lang": sc["lang"], "turns": turns,
-                          "current": sc["current"], "not_current": sc["not_current"]})
+                raise ValueError(f"{sc['id']}: a turn's reply is recorded, written or an answer, not {kind!r}")
+        built = {"id": sc["id"], "category": sc["category"], "lang": sc["lang"], "turns": turns,
+                 "current": sc["current"], "not_current": sc["not_current"]}
+        if sc.get("pending"):
+            built["pending"] = sc["pending"]
+        scenarios.append(built)
     ids = [s["id"] for s in scenarios]
     if len(set(ids)) != len(ids):
         raise ValueError("duplicate write scenario id")

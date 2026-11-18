@@ -2130,10 +2130,21 @@ four injected were noise.
   `own_words`, and in their sentence the nearest word before them that
   names a person names the speaker ("I", "we", "my", "أنا", "اسمي", a
   first-person verb written with its hamza or a "we" form), with no
-  third-person pronoun after them. Stricter than the quick pass: no one
-  named is an inference ("Moved to Rotterdam", "No, Lisbon"). Before, "We
-  moved to Rotterdam" and "I left Google, I am at Meta now" were inferences
-  the trust gate refused against the user's earlier fact. Every product call
+  third-person pronoun after them, in a sentence that states it
+  (`clause_subject._asserted`: no denial before it -- "I never lived in
+  Paris", "أنا ما أسكن في دبي" --, no question, no request to act on a
+  text). Stricter than the quick pass: no one named is an inference ("Moved
+  to Rotterdam", "No, Lisbon"). **Credited so, a reading may ADD the user's
+  fact where the user holds none of their own under the name, never
+  REPLACE one** (`mutate_belief(adds_only=True)`, `_user_holds_another`;
+  the review of this half, 2026-11-18): Kazma cannot tell without a model
+  whether the model's name fits the words -- "I'm visiting Dubai next
+  week" as lives_in, "I met Dana" as name_is, "I read that Initech is
+  hiring" as works_at all replaced the user's fact -- so the reading is
+  written at the model's trust, the gate refuses it, and it waits for the
+  user (F1's second half, below). A replacement comes from the quick
+  pass's exact shapes or the user's answer; the same turn's quick-pass
+  reading may still be corrected. Every product call
   that applies extracted facts names `user_text` (the two forwarders aside).
   And "the same value" is compared folded (`belief_mutation._same_value`:
   case, underscores, spacing, Arabic forms and marks): the model's
@@ -2141,9 +2152,12 @@ four injected were noise.
   turn and took the user's trust with it. Gate:
   `tests/test_memory_own_statements.py` (EN/AR/mixed readings; the worker's
   own micro_consolidation with a correction, a new job in Arabic, and the
-  sister and the manager filed under the user by the model; every applier
+  sister and the manager filed under the user by the model; the review's
+  eight readings and a summarised page through the worker's deep pass, the
+  first half's rule as their negative control; every applier
   call names its message, a planted one as control; the grading switched off
-  and the letter-for-letter comparison as negative controls).
+  and the letter-for-letter comparison as negative controls), and the write
+  scenarios' `model_read` category (v3).
 - **A fact the user stated changes only in ways the user can see and take
   back** (2026-11, the audit's F1, second half; `memory/changes.py`, table
   `memory_changes` in `memory_state.db`). An **update**: a `user_*` fact
@@ -2154,9 +2168,11 @@ four injected were noise.
   closes the new one under the mutation lock, audited (`undo_update`), and
   refuses with a code (`ChangeRefusedError`: `replaced_since`, `forgotten`).
   A **pending change**: the trust gate refused the model's reading of a
-  user fact, and the value stands in the turn's own words with no one but
-  the speaker named before it (`clause_subject.names_no_one_else`, the
-  user's spelling: "Moved to Rotterdam last month", "No, Lisbon") --
+  user fact -- the one way a reading only the model made can change it --
+  and the value stands in the turn's own words, in a sentence that states
+  it, with no one but the speaker named before it
+  (`clause_subject.names_no_one_else`, the user's spelling: "We moved to
+  Rotterdam", "Moved to Rotterdam last month", "No, Lisbon") --
   `changes.record_pending`, from `_apply_beliefs_to_v2`; "My sister moved
   to Rotterdam" records nothing. The user confirms it (`changes.confirm`:
   written `user_explicit`, the change marked confirmed in that write's

@@ -14,9 +14,18 @@ Now trust follows who is speaking about themself: a fact the model read
 about the user is the user's own statement, in the user's spelling, when
 the user says it of themself in their own words
 (``clause_subject.speaks_of_self``: never a quote or an attached document,
-and the nearest person named before the value is the speaker). "My sister
+the nearest person named before the value is the speaker, and the sentence
+states it -- no denial before it, no question, no request). "My sister
 moved to Rotterdam" stays an inference whatever the model files it under.
 And one value written two ways is no change.
+
+Credited so, a reading may ADD the user's fact where the user holds none,
+and never REPLACE one (the review of this half, 2026-11-18): Kazma cannot
+tell without a model whether the model's name fits the words -- "I'm
+visiting Dubai next week" read as lives_in, "I met Dana" as name_is -- so
+the user's fact stands and the correction waits for the user
+(``memory/changes.py``). A replacement comes from the quick pass's exact
+shapes, or from the user's answer.
 """
 
 from __future__ import annotations
@@ -67,6 +76,14 @@ def test_the_user_says_it_of_themself(message, value, spelled):
     ("عندي أخت اسمها نورة وانتقلت إلى روتردام.", "روتردام"),
     ("اشتغل في زين", "زين"),                                  # no hamza: also the imperative
     ("I live in Paris.", "lisbon"),                          # not in the message at all
+    ("I don't live in Paris.", "paris"),                     # denied
+    ("I never worked at Google.", "google"),
+    ("أنا ما أسكن في دبي.", "دبي"),
+    ("Should I move to Rotterdam?", "rotterdam"),            # asked
+    ("Do I still live in Paris", "paris"),
+    ("هل أنتقل إلى دبي؟", "دبي"),
+    ("How do I say my name is Pierre in French?", "pierre"),
+    ("Summarize my notes on Dubai.", "dubai"),               # a request to act on a text
 ])
 def test_anyone_else_or_no_one_is_not_the_user(message, value):
     assert speaks_of_self(message, value) is None
@@ -92,11 +109,12 @@ def mem(tmp_path, monkeypatch):
     db.close()
 
 
-def _deep_pass(mem, monkeypatch, *, said_first: str, value_first: str, then: str, model: list[dict],
-               predicate: str = "lives_in") -> list[tuple[str, str]]:
-    """The user's first statement (the quick pass's, ``user_stated``), then
-    the worker's micro_consolidation of a later turn, the model's reply
-    written for the test. The current facts of *predicate* afterwards."""
+def _deep_pass(mem, monkeypatch, *, said_first: str, value_first: str | None, then: str, model: list[dict],
+               predicate: str = "lives_in", assistant: str = "Noted.") -> list[tuple[str, str]]:
+    """The user's first statement (the quick pass's, ``user_stated``; none
+    for *value_first* None), then the worker's micro_consolidation of a later
+    turn, the model's reply written for the test. The current facts of
+    *predicate* afterwards."""
     import time
 
     from kazma_core.memory import worker_bootstrap
@@ -104,11 +122,12 @@ def _deep_pass(mem, monkeypatch, *, said_first: str, value_first: str, then: str
     from kazma_core.memory.dual_write import _episode_id, mirror_episode
 
     turn_time = time.time() - 600
-    first = sqlite3.connect(str(mem.dir / "memory_state.db"), isolation_level=None)
-    mutate_belief(first, "user", predicate, value_first, now=turn_time - 600, extraction_method="user_stated",
-                  source_session="s1", source_turn=1)
-    first.close()
-    mirror_episode(session_id="s1", turn_number=2, user_text=then, assistant_text="Noted.",
+    if value_first is not None:
+        first = sqlite3.connect(str(mem.dir / "memory_state.db"), isolation_level=None)
+        mutate_belief(first, "user", predicate, value_first, now=turn_time - 600,
+                      extraction_method="user_stated", source_session="s1", source_turn=1)
+        first.close()
+    mirror_episode(session_id="s1", turn_number=2, user_text=then, assistant_text=assistant,
                    created_at=turn_time)
 
     async def llm(user_text, assistant_text="", *, use_llm=True, ignore_filler=False, vocabulary=None,
@@ -128,16 +147,84 @@ def _fact(predicate: str, value: str, subject: str = "user") -> dict:
     return {"subject": subject, "predicate": predicate, "predicate_type": "functional", "object": value}
 
 
-def test_a_correction_in_free_words_replaces_the_users_fact(mem, monkeypatch):
+def _waiting(mem) -> list[str]:
+    from kazma_core.memory import changes
+
+    return [c["new_value"] for c in changes.list_changes(mem.db, tenant_id="default") if c["kind"] == "pending"]
+
+
+def test_a_correction_only_the_model_read_waits_for_the_user(mem, monkeypatch):
+    """The user's own correction in free words: the user's fact stands, and
+    the correction waits for the user in their spelling (memory/changes.py)."""
     assert _deep_pass(mem, monkeypatch, said_first="I live in Paris.", value_first="Paris",
                       then="We moved to Rotterdam last month.",
-                      model=[_fact("lives_in", "rotterdam")]) == [("Rotterdam", "user_stated")]
+                      model=[_fact("lives_in", "rotterdam")]) == [("Paris", "user_stated")]
+    assert _waiting(mem) == ["Rotterdam"]
 
 
-def test_a_new_job_in_arabic_replaces_the_old_one(mem, monkeypatch):
+def test_a_new_job_in_arabic_waits_for_the_user(mem, monkeypatch):
     assert _deep_pass(mem, monkeypatch, said_first="أشتغل في شركة زين.", value_first="شركة زين",
                       then="تركت زين، أشتغل الحين في أريدُو.", predicate="works_at",
-                      model=[_fact("works_at", "أريدو")]) == [("أريدُو", "user_stated")]
+                      model=[_fact("works_at", "أريدو")]) == [("شركة زين", "user_stated")]
+    assert _waiting(mem) == ["أريدُو"]
+
+
+@pytest.mark.parametrize(("then", "model", "spelled"), [
+    ("We moved to Rotterdam last month.", "rotterdam", "Rotterdam"),
+    ("انتقلنا إلى الرياض الشهر الماضي.", "الرياض", "الرياض"),
+])
+def test_where_the_user_holds_none_a_credited_reading_adds_theirs(mem, monkeypatch, then, model, spelled):
+    assert _deep_pass(mem, monkeypatch, said_first="", value_first=None, then=then,
+                      model=[_fact("lives_in", model)]) == [(spelled, "user_stated")]
+    assert _waiting(mem) == []
+
+
+#: The review of F1's first half (2026-11-18): each of these replaced the
+#: user's own fact. (predicate, the user's value, the later message, the
+#: model's reading, whether it is asked about: a statement is, a denial, a
+#: question or a request is not.)
+MODEL_READINGS = [
+    ("lives_in", "Kuwait", "I'm visiting Dubai next week", "dubai", True),
+    ("lives_in", "Kuwait", "I never lived in Paris.", "paris", False),
+    ("lives_in", "Kuwait", "I think Rotterdam is where Dana lives.", "rotterdam", True),
+    ("name_is", "Sam", "I met Dana yesterday.", "dana", True),
+    ("works_at", "Acme", "I read that Initech is hiring.", "initech", True),
+    ("lives_in", "الكويت", "أنا رايح دبي الأسبوع الجاي", "دبي", True),
+    ("lives_in", "Kuwait", "Should I move to Rotterdam?", "rotterdam", False),
+    ("lives_in", "الكويت", "أنا ما أسكن في دبي.", "دبي", False),
+]
+
+
+@pytest.mark.parametrize(("predicate", "held", "then", "read", "asked"), MODEL_READINGS)
+def test_a_reading_only_the_model_made_never_replaces_the_users_fact(mem, monkeypatch, predicate, held, then,
+                                                                    read, asked):
+    assert _deep_pass(mem, monkeypatch, said_first="", value_first=held, then=then, predicate=predicate,
+                      model=[_fact(predicate, read)]) == [(held, "user_stated")]
+    assert bool(_waiting(mem)) is asked
+
+
+def test_a_summarised_page_cannot_steer_the_users_fact(mem, monkeypatch):
+    """The deep pass reads the reply too: a page Kazma summarised, read as
+    the user's facts, changes nothing and asks nothing."""
+    assert _deep_pass(mem, monkeypatch, said_first="", value_first="Kuwait",
+                      then="Summarize this page about the expo for me.",
+                      assistant="The page says the organiser lives in Dubai and works at Emaar.",
+                      model=[_fact("lives_in", "Dubai")]) == [("Kuwait", "user_stated")]
+    assert _waiting(mem) == []
+
+
+@pytest.mark.parametrize(("predicate", "held", "then", "read", "asked"), MODEL_READINGS)
+def test_control_the_first_halfs_rule_replaced_each(mem, monkeypatch, predicate, held, then, read, asked):
+    """Negative control: credited readings that may replace, and every
+    sentence read as stated (the rule of bbfa48cb8). Each replaced the
+    user's fact."""
+    from kazma_core.memory import clause_subject
+
+    monkeypatch.setattr(belief_mutation, "_user_holds_another", lambda *a, **k: False)
+    monkeypatch.setattr(clause_subject, "_asserted", lambda raw: [True] * len(raw))
+    current = _deep_pass(mem, monkeypatch, said_first="", value_first=held, then=then, predicate=predicate,
+                         model=[_fact(predicate, read)])
+    assert current != [(held, "user_stated")] and current[0][1] == "user_stated"
 
 
 @pytest.mark.parametrize("then", ["My sister moved to Rotterdam last month.", "أختي انتقلت إلى روتردام."])

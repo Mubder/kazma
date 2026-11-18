@@ -468,16 +468,18 @@ A fact you told Kazma yourself ("I live in Paris") changes only in ways you
 can see and take back. The Memory page's card **Changes to what you told
 Kazma** lists them:
 
-- **Changed from what you said.** You later said something that replaces
-  it ("We moved to Rotterdam"): Kazma keeps the new value and shows the
-  change, with **Undo**, which brings the earlier value back.
-- **Is this a change? Kazma kept the earlier fact.** A message that may be a
-  correction but does not say who it is about ("Moved to Rotterdam last
-  month", "No, Lisbon") does not replace your fact on its own. Kazma keeps
+- **Changed from what you said.** You later said it plainly ("I live in
+  Rotterdam now"): Kazma keeps the new value and shows the change, with
+  **Undo**, which brings the earlier value back.
+- **Is this a change? Kazma kept the earlier fact.** A message Kazma reads
+  as a correction only with its model ("We moved to Rotterdam last month",
+  "No, Lisbon", "I'm visiting Dubai next week") does not replace your fact
+  on its own: the model may have filed it under the wrong fact. Kazma keeps
   the earlier one and asks: **Yes, change it** writes the new value as
   yours (and the change can still be undone), **No, keep it** leaves
   everything as it was. A message about someone else ("My sister moved to
-  Rotterdam") asks nothing.
+  Rotterdam"), a denial ("I never lived in Paris") or a question ("Should I
+  move to Rotterdam?") asks nothing.
 
 Kazma also tells you, once, in its next reply in the chat the change came
 from: what it changed, or the question it is waiting on. It cannot apply a

@@ -125,7 +125,7 @@
   "recordings": []
  },
  "writes": {
-  "version": 2,
+  "version": 3,
   "recording": {
    "sha256": "89c1b101b6ddbede2743d37b1ea2f2040f1ff1497cad515c2d035614f8f89157",
    "turns": 30,
@@ -139,12 +139,14 @@
    "kept_as_said.ar.passed": 1.0,
    "kept_as_said.en.passed": 1.0,
    "kept_as_said.mixed.passed": 1.0,
-   "overall.passed": 0.9643,
+   "model_read.ar.passed": 1.0,
+   "model_read.en.passed": 1.0,
+   "overall.passed": 1.0,
    "quoted.ar.passed": 1.0,
    "quoted.en.passed": 1.0,
    "quoted.mixed.passed": 1.0,
    "short.ar.passed": 1.0,
-   "short.en.passed": 0.8,
+   "short.en.passed": 1.0,
    "someone_else.ar.passed": 1.0,
    "someone_else.en.passed": 1.0,
    "someone_else.mixed.passed": 1.0,
@@ -152,9 +154,7 @@
    "update.en.passed": 1.0,
    "update.mixed.passed": 1.0
   },
-  "failing": [
-   "short-en-no-city"
-  ]
+  "failing": []
  },
  "postgres_primary": {
   "abstain.hit_rate": 0.2778,

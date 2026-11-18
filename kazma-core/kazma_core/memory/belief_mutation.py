@@ -275,6 +275,57 @@ def _established_kind(
     return ptype
 
 
+def _user_holds_another(
+    conn: sqlite3.Connection, *, tenant_id: str, subject: str, predicate: str, obj: str,
+    extraction_method: str, session: str | None, turn: int | None,
+) -> bool:
+    """Whether the user holds a current fact of their own (``user_*``) under
+    *predicate* with another value, from another turn -- the case where a
+    credited reading must not replace it (``mutate_belief(adds_only=)``). The
+    same turn's quick-pass reading is not the user's other fact: the model
+    pass may correct it (§15H). A store that cannot answer holds one: the
+    reading is then written at the model's trust."""
+    from kazma_core.memory.provenance import USER_SOURCES
+
+    if extraction_method not in USER_SOURCES:
+        return False
+    sources = sorted(USER_SOURCES)
+    where_source = " OR ".join("extraction_method = ?" for _ in sources)
+    sql = f"SELECT object, source_session, source_turn FROM beliefs WHERE ({where_source}) "  # nosec B608 - placeholders only
+    try:
+        rows = conn.execute(
+            sql + "AND tenant_id = ? AND subject = ? AND predicate = ? AND valid_until IS NULL "
+            "AND invalidated_at IS NULL",
+            (*sources, tenant_id, subject, predicate),
+        ).fetchall()
+    except sqlite3.Error:
+        logger.warning("[belief_mutate] could not read the user's %s %s; the reading keeps the model's trust",
+                       subject, predicate)
+        return True
+    for row in rows:
+        held, held_session, held_turn = (str(row[0] or ""), row[1], row[2])
+        if session is not None and held_session == session and held_turn == turn:
+            continue
+        if not _same_value(held, obj):
+            return True
+    return False
+
+
+def _credit_kept(
+    conn: sqlite3.Connection, *, adds_only: bool, tenant_id: str, subject: str, predicate: str, obj: str,
+    extraction_method: str, trust: float, session: str | None, turn: int | None, cfg: dict[str, Any] | None,
+) -> tuple[str, float, bool]:
+    """``(extraction_method, trust, withheld)`` for this write: a credited
+    reading (*adds_only*) the user holds another value against is written
+    at the model's trust (:func:`_user_holds_another`); anything else as it
+    came."""
+    if adds_only and _user_holds_another(conn, tenant_id=tenant_id, subject=subject, predicate=predicate,
+                                         obj=obj, extraction_method=extraction_method, session=session,
+                                         turn=turn):
+        return "llm_inferred", _trust_weight("llm_inferred", cfg), True
+    return extraction_method, trust, False
+
+
 def _trust_weight(extraction_method: str, cfg: dict[str, Any] | None) -> float:
     """The ladder of ``memory.provenance``, as a weight."""
     v2 = (cfg or {}).get("v2") or {}
@@ -365,12 +416,23 @@ def mutate_belief(
     now: float | None = None,
     private: bool = False,
     confirms_change: tuple[str, str] | None = None,
+    adds_only: bool = False,
 ) -> dict[str, Any]:
     """Apply a belief mutation per the predicate-type rules.
 
     *confirms_change* is ``(change id, actor)`` of the pending change this
     write answers (``changes.confirm``): marked confirmed in the write's own
     transaction, never superseded by it.
+
+    *adds_only*: the model read this fact and it was credited to the user
+    (``belief_extractor._apply_beliefs_to_v2``). It may add the user's fact
+    where the user holds none of their own under the name, never replace
+    one: when the user holds another value from another turn, it is written
+    at ``llm_inferred`` instead -- the trust gate refuses a replacement and
+    the change waits for the user (``memory/changes.py``). Kazma cannot tell
+    without a model whether the name fits the words ("I'm visiting Dubai
+    next week" read as ``lives_in``); the user can (the review of the
+    memory framework audit's F1, 2026-11-18).
 
     *now* is when the fact was stated (default: this moment): the valid
     time (``valid_from`` / ``valid_until``). Something that records a fact
@@ -475,6 +537,7 @@ def mutate_belief(
     now = recorded if now is None else float(now)
 
     result: dict[str, Any] | None = None
+    downgraded = False
     try:
         with _mutation_lock:
             # W6: the name the subject already uses for the same words and
@@ -492,6 +555,11 @@ def mutate_belief(
                 logger.debug("[belief_mutate] predicate names unreadable; keeping %r", pred)
             ptype = _established_kind(primary_conn, tenant_id=tenant_id, subject=sub,
                                       predicate=pred, ptype=ptype)
+            extraction_method, trust, downgraded = _credit_kept(
+                primary_conn, adds_only=adds_only, tenant_id=tenant_id, subject=sub, predicate=pred, obj=obj,
+                extraction_method=extraction_method, trust=trust, session=source_session, turn=source_turn,
+                cfg=cfg,
+            )
             if ptype == "functional":
                 result = _mutate_functional(
                     primary_conn, ops_conn, sub, pred, obj,
@@ -519,6 +587,10 @@ def mutate_belief(
                     mem_class=mem_class, now=now, recorded=recorded, cfg=cfg,
                     private=private,
                 )
+        if downgraded:
+            # The user's own fact stands; the reading was written at the
+            # model's trust (a refusal of it waits for the user).
+            result["credit_withheld"] = "user_fact_stands"
         # Phase 0 instrumentation (Commitment Layer): surface every functional
         # supersede so ``belief.supersede_without_user_assert`` (plan §8.1) is
         # observable. The signal of interest is a supersede whose incoming
