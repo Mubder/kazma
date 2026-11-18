@@ -1070,6 +1070,13 @@ def _restore_document_store(
             if not dst.exists():
                 shutil.copy2(src, dst)
                 count += 1
+        # A bundle from before Spaces keeps another tenant's files in the
+        # root; the target's record of which tenants are in their folder
+        # (documents.space_files) no longer describes them. Without it, reads
+        # fall back to the root and the next start copies them again.
+        from kazma_core.documents.storage import SPACE_FILES_JOURNAL
+
+        (target_root / SPACE_FILES_JOURNAL).unlink(missing_ok=True)
         _log(f"  restored {count} document content file(s)")
 
 

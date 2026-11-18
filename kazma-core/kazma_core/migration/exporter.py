@@ -569,10 +569,11 @@ def _export_document_store(
     #    pass, so integrity is verified on import).
     try:
         from kazma_core.documents.backup import (
-            _blob_rel_path,
             _read_references,
+            object_places,
             promoted_versions_from_postgres,
         )
+        from kazma_core.documents.storage import blob_rels, first_present, manifest_rels
 
         # A Postgres queue beside the SQLite catalog holds the promotions
         # (read after the snapshot: a superset). The queue itself travels in
@@ -586,11 +587,17 @@ def _export_document_store(
         )
         blob_count = 0
         missing_blobs: list[str] = []
-        for sha, kind in refs:
-            rel = _blob_rel_path(kind, sha)
+        # Each file goes into the bundle where the live store keeps it (Spaces
+        # S1-12): the root, for every tenant before Spaces is enforced; a
+        # space's folder after.
+        for tenant, sha, kind in refs:
+            places = object_places(blob_rels, tenant, kind, sha)
+            if places is None:
+                continue
+            rel = first_present(root, places)
             src = root / rel
             if not src.is_file():
-                missing_blobs.append(str(rel).replace("\\", "/"))
+                missing_blobs.append(rel)
                 continue
             dst = dest_root / rel
             dst.parent.mkdir(parents=True, exist_ok=True)
@@ -603,11 +610,15 @@ def _export_document_store(
                 f"{sample}"
             )
         manifest_count = 0
-        for doc_id, ver_id in versions:
-            src = root / "manifests" / doc_id / f"{ver_id}.json"
+        for tenant, doc_id, ver_id in versions:
+            places = object_places(manifest_rels, tenant, doc_id, ver_id)
+            if places is None:
+                continue
+            rel = first_present(root, places)
+            src = root / rel
             if not src.is_file():
                 continue
-            dst = dest_root / "manifests" / doc_id / f"{ver_id}.json"
+            dst = dest_root / rel
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
             manifest_count += 1
@@ -634,17 +645,19 @@ def _export_postgres_document_content(
     import psycopg
     from psycopg.rows import dict_row
 
-    from kazma_core.documents.backup_pg import _snapshot_references
+    from kazma_core.documents.backup_pg import _snapshot_references, held_paths
 
     with psycopg.connect(dsn, row_factory=dict_row) as conn, conn.cursor() as cur:
         refs = _snapshot_references(cur)
     dest_root = staging / "document-store"
     copied = 0
     missing: list[str] = []
-    for rel in sorted(refs["blobs"] | refs["manifests"]):
+    held = held_paths(root, refs)  # where the live store keeps each file
+    for places in sorted(refs["blobs"] | refs["manifests"]):
+        rel = held[places]
         src = root / rel
         if not src.is_file():
-            if rel in refs["blobs"] or rel in refs["required_manifests"]:
+            if places in refs["blobs"] or places in refs["required_manifests"]:
                 missing.append(rel)
             continue
         dst = dest_root / rel

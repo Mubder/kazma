@@ -1,4 +1,33 @@
-"""Verified content-addressed storage for document source and derived bytes."""
+"""Verified content-addressed storage for document source and derived bytes.
+
+**Kept per space** (Spaces S1-12). Once Spaces is enforced every byte of a
+document -- its quarantined and promoted original, its artifacts, its parsed
+manifest -- is written to its space's own folder, so one space can be
+exported or erased alone. A store is asked as ``storage.for_space(tenant_id)``;
+there is no call that reads or writes content without naming a space. The
+folder is :func:`space_folder`:
+
+* the owner's space (``default``) is the storage root itself, as before
+  Spaces: an install's documents do not move (plan section 7, "a mapping,
+  not a move");
+* any other space is ``spaces/<space id>/`` under the root (a tenant that is
+  not a space id, from an older install, gets ``spaces/_t<hash>/``).
+
+**Before Spaces is enforced nothing changes** (:func:`writes_folder`): every
+tenant's files are written to the root, where they always were -- the older
+multi-user mode's tenants and a retired memory mode's (``telegram``) too, so
+a chat finds its documents where it always did and an older build (a revert)
+reads every file. Once enforced, the files an older install kept in the root
+are copied into their space's folder, journaled and safe to interrupt
+(``documents.space_files``).
+
+**Reads look in both places** (:func:`blob_rels`): the space's folder, then
+the root. The root keeps a copy of every tenant's file in this release
+(garbage collection never removes a root file a live row of any tenant
+names), so an older build, which reads the root only, still reads every
+document after a revert. Removing the root copies of a space's files is a
+later step, after S1-33.
+"""
 
 from __future__ import annotations
 
@@ -23,11 +52,118 @@ __all__ = [
     "BlobTooLargeError",
     "BlobLengthError",
     "ContentAddressedStorage",
+    "SPACES_DIR",
+    "SPACE_FILES_JOURNAL",
+    "SpaceStorage",
     "StoredBlob",
+    "blob_rel",
+    "blob_rels",
     "bounded_stream_digest",
+    "first_present",
+    "manifest_rel",
+    "manifest_rels",
+    "space_folder",
+    "writes_folder",
     "StorageQuotaExceeded",
     "StorageQuotaExceededError",
 ]
+
+#: The folder under the storage root that holds every space but the owner's.
+SPACES_DIR = "spaces"
+
+#: The record of which tenants' files are in their space's folder
+#: (``documents.space_files``), at the storage root.
+SPACE_FILES_JOURNAL = ".space-files.json"
+
+
+def space_folder(tenant_id: str) -> str:
+    """The folder of a space's content, relative to the storage root, with
+    ``/`` separators: ``""`` for the owner's space, ``spaces/<id>`` for any
+    other. The one answer every reader and writer of document files asks
+    (storage, garbage collection, backups, the migration export)."""
+    from kazma_core.spaces.scope import OWNER_SPACE_ID, valid_space_id
+
+    tenant = str(tenant_id or "").strip()
+    if not tenant:
+        raise ValueError("a document's files need its space")
+    if tenant == OWNER_SPACE_ID:
+        return ""
+    if valid_space_id(tenant):
+        return f"{SPACES_DIR}/{tenant}"
+    # A tenant an older install named freely: never a path of its own.
+    return f"{SPACES_DIR}/_t{hashlib.sha256(tenant.encode('utf-8')).hexdigest()[:32]}"
+
+
+def _join(folder: str, rel: str) -> str:
+    return f"{folder}/{rel}" if folder else rel
+
+
+def blob_rel(tenant_id: str, kind: str, sha256: str) -> str:
+    """A blob's path relative to the storage root (``/`` separators)."""
+    digest = _validate_sha256(sha256)
+    return _join(space_folder(tenant_id), f"{_validate_kind(kind)}/sha256/{digest[:2]}/{digest[2:4]}/{digest}")
+
+
+def _path_part(value: Any) -> str:
+    """An id read from the catalog, as one path segment. Backups and the
+    migration export take ids as the catalog holds them (they never
+    validated their shape); a separator or a parent step is refused."""
+    text = str(value)
+    if not text or "/" in text or "\\" in text or text in {".", ".."}:
+        raise ValueError(f"not an id: {text!r}")
+    return text
+
+
+def manifest_rel(tenant_id: str, document_id: Any, version_id: Any) -> str:
+    """A version manifest's path relative to the storage root."""
+    return _join(space_folder(tenant_id),
+                 f"manifests/{_path_part(document_id)}/{_path_part(version_id)}.json")
+
+
+def legacy_blob_rel(kind: str, sha256: str) -> str:
+    """Where every tenant's blob lived before Spaces: the root's own tree."""
+    digest = _validate_sha256(sha256)
+    return f"{_validate_kind(kind)}/sha256/{digest[:2]}/{digest[2:4]}/{digest}"
+
+
+def legacy_manifest_rel(document_id: Any, version_id: Any) -> str:
+    return f"manifests/{_path_part(document_id)}/{_path_part(version_id)}.json"
+
+
+def writes_folder(tenant_id: str) -> str:
+    """Where a space's new files are written now, relative to the storage
+    root: its own folder (:func:`space_folder`) once Spaces is enforced; the
+    root before, for every tenant, as before Spaces. Enforcement is a flag
+    kept in memory (``spaces.scope.spaces_enforced``): no settings read."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    folder = space_folder(tenant_id)
+    return folder if folder and spaces_enforced() else ""
+
+
+def blob_rels(tenant_id: str, kind: str, sha256: str) -> tuple[str, ...]:
+    """Every place a space's blob can be, relative to the storage root, in
+    the order to read it: the space's own folder, then the root (where it was
+    written before Spaces was enforced, and where its copy stays)."""
+    own = blob_rel(tenant_id, kind, sha256)
+    root = legacy_blob_rel(kind, sha256)
+    return (own,) if own == root else (own, root)
+
+
+def manifest_rels(tenant_id: str, document_id: Any, version_id: Any) -> tuple[str, ...]:
+    """Every place a version's manifest can be (as :func:`blob_rels`)."""
+    own = manifest_rel(tenant_id, document_id, version_id)
+    root = legacy_manifest_rel(document_id, version_id)
+    return (own,) if own == root else (own, root)
+
+
+def first_present(root: Path, rels: tuple[str, ...]) -> str:
+    """The first of *rels* that is a file under *root*; the first of them
+    when none is (the place a missing object is reported at)."""
+    for rel in rels:
+        if (root / rel).is_file():
+            return rel
+    return rels[0]
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _KINDS = frozenset({"quarantine", "originals", "artifacts"})
@@ -139,19 +275,46 @@ def _sync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
-class ContentAddressedStorage:
-    """Immutable sha256-addressed blobs plus atomic per-version manifests."""
+class SpaceStorage:
+    """One space's immutable sha256-addressed blobs and atomic per-version
+    manifests. New files go to :func:`writes_folder` (the space's own folder
+    once Spaces is enforced, the root before); reads look in every place the
+    file can be (:func:`blob_rels`). Made by
+    :meth:`ContentAddressedStorage.for_space` only."""
 
-    def __init__(self, root: str | Path) -> None:
-        self.root = Path(root).expanduser().resolve()
-        self.root.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.RLock()
+    def __init__(self, install: ContentAddressedStorage, tenant_id: str) -> None:
+        self.tenant_id = str(tenant_id).strip()
+        folder = writes_folder(self.tenant_id)
+        self.install = install
+        self.root = install.root / folder if folder else install.root
+        self._lock = install._lock
 
     def blob_path(self, *, kind: str, sha256: str) -> Path:
-        """Return the canonical path after strict kind/hash validation."""
+        """Where a blob of this space is written now."""
         normalized_kind = _validate_kind(kind)
         digest = _validate_sha256(sha256)
         return self.root / normalized_kind / "sha256" / digest[:2] / digest[2:4] / digest
+
+    def locate_blob(self, *, kind: str, sha256: str) -> Path:
+        """Where to read a blob: the first of the space's folder and the root
+        that holds it (the path it is written at when neither does)."""
+        for rel in blob_rels(self.tenant_id, kind, sha256):
+            candidate = self.install.root / rel
+            if candidate.is_file():
+                return candidate
+        return self.blob_path(kind=kind, sha256=sha256)
+
+    def manifest_path(self, *, document_id: DocumentId, version_id: VersionId) -> Path:
+        """Where a manifest of this space is written now."""
+        return self.root / "manifests" / str(DocumentId(document_id)) / f"{VersionId(version_id)}.json"
+
+    def locate_manifest(self, *, document_id: DocumentId, version_id: VersionId) -> Path:
+        """Where to read a manifest (as :meth:`locate_blob`)."""
+        for rel in manifest_rels(self.tenant_id, str(DocumentId(document_id)), str(VersionId(version_id))):
+            candidate = self.install.root / rel
+            if candidate.is_file():
+                return candidate
+        return self.manifest_path(document_id=document_id, version_id=version_id)
 
     def put_stream(
         self,
@@ -176,6 +339,9 @@ class ContentAddressedStorage:
         ):
             raise ValueError("expected_byte_size must be within the intake limit")
         expected = _validate_sha256(expected_sha256) if expected_sha256 is not None else None
+        if tenant_id is not None and str(tenant_id).strip() != self.tenant_id:
+            # A space's store writes its own space's files only.
+            raise ValueError("tenant_id names another space than this store's")
         quota_enabled = repository is not None or tenant_id is not None or tenant_quota_bytes is not None
         if quota_enabled and (
             repository is None
@@ -284,7 +450,7 @@ class ContentAddressedStorage:
 
     def verify_blob(self, *, kind: str, sha256: str) -> bool:
         """Verify that an addressed blob exists and matches its path checksum."""
-        target = self.blob_path(kind=kind, sha256=sha256)
+        target = self.locate_blob(kind=kind, sha256=sha256)
         if not target.is_file():
             return False
         actual, _ = _file_digest(target)
@@ -338,12 +504,60 @@ class ContentAddressedStorage:
         version_id: VersionId,
     ) -> dict[str, Any] | None:
         """Read a validated manifest path, returning ``None`` when absent."""
-        doc_id = DocumentId(document_id)
-        ver_id = VersionId(version_id)
-        target = self.root / "manifests" / str(doc_id) / f"{ver_id}.json"
+        target = self.locate_manifest(document_id=document_id, version_id=version_id)
         if not target.is_file():
             return None
         value = json.loads(target.read_text(encoding="utf-8"))
         if not isinstance(value, dict):
             raise ValueError("stored manifest is not a JSON object")
         return value
+
+
+class ContentAddressedStorage:
+    """The install's document content store: a root folder holding each
+    space's own (:class:`SpaceStorage`, :func:`space_folder`).
+
+    Nothing here reads or writes a space's content: ask :meth:`for_space`.
+    It knows which tenants' files the copy has put in their space's folder
+    (``documents.space_files``; a record, read by nothing that decides where
+    a file is: reads look in every place).
+    """
+
+    def __init__(self, root: str | Path) -> None:
+        self.root = Path(root).expanduser().resolve()
+        self.root.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
+        self._moved: frozenset[str] | None = None
+
+    def for_space(self, tenant_id: str) -> SpaceStorage:
+        """The store of one space (a document's tenant)."""
+        return SpaceStorage(self, tenant_id)
+
+    def journal_path(self) -> Path:
+        return self.root / SPACE_FILES_JOURNAL
+
+    def moved_tenants(self) -> frozenset[str]:
+        """Tenants whose files are in their space's folder: read from the
+        journal once, then kept current by :meth:`note_moved`."""
+        moved = self._moved
+        if moved is None:
+            moved = frozenset(_read_journal(self.journal_path()).get("moved") or ())
+            self._moved = moved
+        return moved
+
+    def note_moved(self, tenant_id: str) -> None:
+        """This process saw *tenant_id*'s files copied into its folder."""
+        self._moved = self.moved_tenants() | {str(tenant_id)}
+
+
+def _read_journal(path: Path) -> dict[str, Any]:
+    """The space-files journal; an absent or unreadable one is empty (the
+    copy then checks every tenant again: the safe side)."""
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError):
+        logger.warning("[documents.storage] the space-files journal could not be read", exc_info=True)
+        return {}
+    return value if isinstance(value, dict) else {}

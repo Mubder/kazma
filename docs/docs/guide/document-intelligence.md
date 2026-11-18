@@ -461,14 +461,29 @@ Side paths: `retry_wait` (transient / lease recovery), `cancelled`, `dead_letter
   looked up.
   A job the caller cannot read answers exactly like an unknown one (404 on the
   Web routes) on every surface; a replay of another actor's upload key is an
-  `idempotency_conflict`. On a single-operator install the Web page, chat and
-  the agent's tools act as one principal, the install's operator
-  (`documents.principal.OPERATOR`): a document ingested on one surface is
-  read on the others. Documents ingested under an older name (`agent`, a
-  signed-in name) get an `owner` ACL row for the operator, granted by their
-  owner and audited; ownership never changes. With platform users the page
-  acts as each user and chat and the agent refuse (one operator per install;
-  per-user chat identity is not built).
+  `idempotency_conflict`. A document's tenant is its space and its owner the
+  account that ingested it (Spaces S1-12): the Web page, chat and the agent's
+  tools act as the asker, in the asker's space
+  (`documents.principal.surface_scope`), so a document ingested on one surface
+  is read on the others in the same space, and never in another. On a
+  single-account install that is the owner's account in the owner's space;
+  documents ingested before (under `operator`, `agent` or a signed-in name)
+  get an `owner` ACL row for the owner's account, granted by their owner and
+  audited; ownership never changes. Members of one space share its documents
+  the same way. An install of the older multi-user mode, which does not
+  enforce Spaces, works as before: the page acts as each user, and chat and
+  the agent refuse. Chat `/documents` reads the documents of the tenant its
+  own turns run in: on an install that kept a per-platform or per-user memory
+  mode from before Spaces, that chat's own (`telegram`), as before.
+- **Each space's files in its own folder, once Spaces is enforced.** A
+  document's original, artifacts and parsed manifest are then written under
+  its space's folder of the storage root: the root itself for the owner's
+  space (nothing moves), `spaces/<id>/` for any other, so one space can be
+  exported or erased alone. Until then every file is written to the root, as
+  before Spaces. Once enforced, the files kept in the root are copied into
+  their space's folder at start, journaled (`.space-files.json`) and safe to
+  interrupt; the root keeps its copy (an older version, after a revert, reads
+  the root only), and reads look in the space's folder, then the root.
 
 ### Backpressure
 
@@ -532,7 +547,9 @@ The document store is backed up every six hours, with the native memory
 backup (the `native_backup` task).
 
 - **SQLite store:** `documents.db` is snapshotted first, then the referenced
-  content-addressed tree and normalized manifests are copied. Verification
+  content-addressed tree and normalized manifests are copied, each where
+  the live store keeps it (the root, until Spaces is enforced; a space's
+  folder after: an older version cannot verify such a backup). Verification
   checks the database, blobs and copied manifests, and rejects an absent or
   invalid checksum inventory. Retention counts verified recovery points.
 - **Postgres store** (`documents/backup_pg.py`, taken automatically when the

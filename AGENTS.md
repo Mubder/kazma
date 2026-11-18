@@ -3213,20 +3213,78 @@ and cancelling needs write access, as a retry does (2026-10-15, the Q04
 defensive check: read was enough). Gate:
 `tests/test_document_job_read_matrix.py` (signature gate with its control).
 
-**B4b. One operator, one principal** (2026-10-13, DOC-A3). The Web page acted
-as the signed-in name and chat `/documents` and the agent's tools as `agent`:
-a page upload was invisible to chat and the agent, and theirs to the page. On
-a single-operator install every surface acts as `documents.principal.OPERATOR`;
-`DocumentIngestionService.grant_operator_access` gives it an `owner` ACL row
-on documents ingested under another name (granted by their owner, audited,
-ownership unchanged, re-checked at most once a minute per tenant). With
-platform users (`multi_user_enabled`) the page acts as each user and chat and
-the agent refuse (`MULTI_USER_REFUSAL`, D1); a failed mode check refuses.
-`operator_for` (the one helper the three surfaces call) and
-`grant_operator_access` are loop-stall helpers. No
-surface passes a literal actor. Gate: `tests/test_document_operator_principal.py`
-(page->chat->agent and back on a real service; the old `agent` principal and
-a literal actor as controls).
+**B4b. The asker, in the asker's space** (Spaces S1-12, 2026-11-18; it
+replaced DOC-A3's one stand-in principal, `operator`). A document's tenant is
+its space and its owner the account that ingested it. The page, chat
+`/documents` and the agent's tools ask one function,
+`documents.principal.surface_scope`, and act as the scope's asker: Spaces
+enforced, the bound scope (its asker must be a member; none bound refuses,
+`NO_SPACE_REFUSAL`); one operator, the owner's account in the bound tenant;
+platform users without Spaces (the older multi-user mode), as before -- the
+page acts as each user's name, chat and the agent refuse
+(`MULTI_USER_REFUSAL`, D1). Members of a space share it:
+`DocumentIngestionService.grant_member_access` gives the asker an `owner` ACL
+row on the space's documents it lacks (granted by each document's owner,
+audited `grant_member`, ownership unchanged, re-checked at most once a minute
+per space and member, at once after a new document in this process); that is
+also how documents made before Spaces (owned by `operator`, `auto-cookie`,
+`agent`) reach the owner's account, with no step to run. The grant is made
+through the built service: the agent's tools build it first
+(`_ensure_service`, then `_scope(svc)`), so the first call of a process, or
+of a turn during boot, already reads them. Chat `/documents` reads the tenant
+its own turns run in (`_chat_document_scope`: memory's
+`resolve_tenant_id`, the one the turn's state and the agent's tools carry):
+with a retired memory mode stored, `telegram` or the sender, until Spaces is
+enforced or the owner presses "Use one memory" (S1-09's rule); a rule that
+cannot be read (a settings outage) means the owner's space, as before, with
+a WARNING. The run
+supervisor's buttons use `owner_actor` (the owner's account,
+single-operator only) until S1-21. `surface_scope`, `owner_actor` and
+`grant_member_access` are loop-stall helpers. No surface passes a literal
+actor. Gates: `tests/test_document_spaces.py` (one real intake through the
+page and the agent, seeded documents for the rest; the old `agent`
+principal resolved through the tool's own scope path, older documents with
+no grant, a grant through the installed service during boot, the first
+chat rule on a retired memory mode and a literal actor as controls), the
+matrix's Documents cases (`tests/_document_space_cases.py`).
+
+**B4c. Each space's files in its own folder, once Spaces is enforced**
+(Spaces S1-12). A space's folder is `storage.space_folder` (the root for the
+owner's space, so an install's documents never move; `spaces/<id>` for any
+other). Content is read and written only through
+`ContentAddressedStorage.for_space(tenant)` (`SpaceStorage`); the
+install-level object has no content call.
+- **Before enforcement nothing changes** (`storage.writes_folder`): every
+  tenant writes to the root, as before Spaces -- the older multi-user mode's
+  tenants and a retired memory mode's (`telegram`) too -- so a chat finds its
+  documents where it always did, a backup has the shape it always had, and an
+  older build reads every file. Once enforced, each space writes to its own
+  folder.
+- **Reads look in both places** (`storage.blob_rels` / `manifest_rels`): the
+  space's folder, then the root.
+- **The root keeps every tenant's files in this release** (a revert reads the
+  root only): GC's root folder keeps every live reference of any tenant (its
+  recheck asks any tenant; a catalog row with no tenant name is kept there
+  too), and `spaces/<f>` keeps only its own tenants'
+  (`repository.gc_marks_from_rows` gives references per tenant,
+  `gc_is_live_reference(tenant_ids=)`). Removing a copied space's root copies
+  is a later step, after S1-33.
+- **The copy** (`documents.space_files.copy_into_space_folders`, at start,
+  only while enforced) checks every tenant at every start and copies what a
+  space's folder lacks, a file an older build wrote during a revert included.
+  Journal `.space-files.json`: `copying` recorded before, `moved` after; each
+  file digest-checked and renamed into place; a stop or crash resumes. A
+  reference whose id names no file, a tenant with no name, a file that cannot
+  be read or does not match its digest is a WARNING and the copy goes on
+  (an ERROR at every start would trip the deploy's log check).
+- **Backups and the export record each file where the live store keeps it**
+  (`backup._held_rel`, `backup_pg.held_paths`); a verify accepts either place.
+  So a backup taken before enforcement has the old shape; one taken after
+  holds `spaces/...` paths, which an older build cannot verify. An import
+  drops the journal (the next start re-checks).
+Gate: `tests/test_document_space_files.py` (a store writing the space folders
+before enforcement, one folder for every tenant once enforced, and the first
+collector that let the root forget a copied tenant, as controls).
 
 **B6. One status per error code** (2026-10-13, DOC-A4/A9).
 `documents_api._STATUS_BY_CODE` answers every route: writes off, an unavailable
@@ -12445,7 +12503,11 @@ product can turn it on, so an install with one account behaves as before.
   tenant" from `default`).
 - **The matrix** (`tests/_space_matrix.py`, `tests/test_space_matrix.py`):
   every `space` route and every agent tool has a case, or names the plan
-  item that adds it. A new one with neither fails.
+  item that adds it. A new one with neither fails. An item registers its
+  cases in a module named in `CASE_MODULES` (Documents:
+  `tests/_document_space_cases.py`, run with Spaces enforced, the real router
+  behind the real tenant middleware, engines stubbed) and lowers
+  `PENDING_BASELINE` in the same change.
 - Gates: `tests/test_identity_store.py`, `tests/test_no_space_no_data.py`,
   `tests/test_sign_in_is_an_account.py`, `tests/test_web_request_space.py`,
   `tests/test_turn_scope_bound.py`, `tests/js/test_space_scope.js`, each
@@ -12607,6 +12669,10 @@ product can turn it on, so an install with one account behaves as before.
   - Gates: `tests/test_lessons_per_space.py` (the real hand-off and the
     real supervisor graph; the single Soul as each control),
     `tests/_lesson_space_cases.py`.
+- **Documents follow the space (S1-12, 2026-11-18; §19 B4b and B4c).** The
+  asker in its space on every surface, the refusal of chat and the agent
+  lifted where Spaces is enforced, each space's files in its own folder once
+  it is (the root keeps every tenant's copy in this release, for a revert).
 - **The Knowledge Library follows the space (S1-13, 2026-11-18).** Guards
   act only where Spaces is enforced; the older multi-user mode keeps its
   refusal (`knowledge_lifecycle.kb_refusal`), and work bound to no space is

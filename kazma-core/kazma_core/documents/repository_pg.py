@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -40,6 +40,7 @@ from .repository import (
     _ACL_PERMISSIONS,
     _BLOB_KINDS,
     _decode_json,
+    gc_marks_from_rows,
     _json_object,
     _required,
     _sha256,
@@ -1367,7 +1368,7 @@ class PostgresDocumentRepository:
                 if has_jobs:
                     cur.execute(
                         """
-                        SELECT DISTINCT v.source_sha256 AS source_sha256
+                        SELECT DISTINCT v.tenant_id AS tenant_id, v.source_sha256 AS source_sha256
                         FROM document_versions v
                         JOIN documents d
                           ON d.id = v.document_id AND d.tenant_id = v.tenant_id
@@ -1394,7 +1395,7 @@ class PostgresDocumentRepository:
                 else:
                     cur.execute(
                         """
-                        SELECT DISTINCT v.source_sha256 AS source_sha256
+                        SELECT DISTINCT v.tenant_id AS tenant_id, v.source_sha256 AS source_sha256
                         FROM document_versions v
                         JOIN documents d
                           ON d.id = v.document_id AND d.tenant_id = v.tenant_id
@@ -1402,11 +1403,11 @@ class PostgresDocumentRepository:
                         """,
                         (tombstone_cutoff,),
                     )
-                keep_source = {_cell(r, "source_sha256", 0) for r in cur.fetchall()
-                               if r and _cell(r, "source_sha256", 0)}
+                sources = [(_cell(r, "tenant_id", 0), _cell(r, "source_sha256", 1))
+                           for r in cur.fetchall() if r]
                 cur.execute(
                     """
-                    SELECT DISTINCT b.sha256 AS sha256
+                    SELECT DISTINCT a.tenant_id AS tenant_id, b.sha256 AS sha256
                     FROM document_artifacts a
                     JOIN document_blobs b
                       ON b.id = a.blob_id AND b.tenant_id = a.tenant_id
@@ -1416,10 +1417,10 @@ class PostgresDocumentRepository:
                     """,
                     (tombstone_cutoff,),
                 )
-                keep_artifacts = {_cell(r, "sha256", 0) for r in cur.fetchall() if r and _cell(r, "sha256", 0)}
+                artifacts = [(_cell(r, "tenant_id", 0), _cell(r, "sha256", 1)) for r in cur.fetchall() if r]
                 cur.execute(
                     """
-                    SELECT v.id AS id, v.document_id AS document_id
+                    SELECT v.tenant_id AS tenant_id, v.id AS id, v.document_id AS document_id
                     FROM document_versions v
                     JOIN documents d
                       ON d.id = v.document_id AND d.tenant_id = v.tenant_id
@@ -1427,7 +1428,8 @@ class PostgresDocumentRepository:
                     """,
                     (tombstone_cutoff,),
                 )
-                keep_versions = {(_cell(r, "document_id", 1), _cell(r, "id", 0)) for r in cur.fetchall() if r}
+                versions = [(_cell(r, "tenant_id", 0), _cell(r, "document_id", 2), _cell(r, "id", 1))
+                            for r in cur.fetchall() if r]
                 cur.execute(
                     """
                     SELECT source_blob_id AS blob_id FROM document_versions
@@ -1437,14 +1439,18 @@ class PostgresDocumentRepository:
                 )
                 referenced_blob_ids = {_cell(r, "blob_id", 0) for r in cur.fetchall()
                                        if r and _cell(r, "blob_id", 0)}
-        return {
-            "keep_source": keep_source,
-            "keep_artifacts": keep_artifacts,
-            "keep_versions": keep_versions,
-            "referenced_blob_ids": referenced_blob_ids,
-        }
+        return gc_marks_from_rows(sources, artifacts, versions, referenced_blob_ids)
 
-    def gc_is_live_reference(self, *, kind: str, sha: str) -> bool:
+    def gc_is_live_reference(
+        self, *, kind: str, sha: str, tenant_ids: Iterable[str] | None = None,
+    ) -> bool:
+        """A live row still names *sha* -- of one of *tenant_ids* when given
+        (the tenants whose space folder holds the file), else of any."""
+        tenants = None if tenant_ids is None else sorted({str(t) for t in tenant_ids})
+        if tenants is not None and not tenants:
+            return False
+        only = "" if tenants is None else " AND b.tenant_id = ANY(%s)"
+        params: tuple[Any, ...] = (sha,) if tenants is None else (sha, tenants)
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
                 if kind == "artifacts":
@@ -1457,10 +1463,10 @@ class PostgresDocumentRepository:
                         JOIN documents d
                           ON d.id = a.document_id AND d.tenant_id = a.tenant_id
                         WHERE b.sha256 = %s AND b.storage_kind = 'artifacts'
-                          AND d.deleted_at IS NULL
+                          AND d.deleted_at IS NULL""" + only + """
                         LIMIT 1
                         """,
-                        (sha,),
+                        params,
                     )
                     return cur.fetchone() is not None
                 if kind == "originals":
@@ -1472,10 +1478,10 @@ class PostgresDocumentRepository:
                           ON b.id = v.source_blob_id AND b.tenant_id = v.tenant_id
                         JOIN documents d
                           ON d.id = v.document_id AND d.tenant_id = v.tenant_id
-                        WHERE b.sha256 = %s AND d.deleted_at IS NULL
+                        WHERE b.sha256 = %s AND d.deleted_at IS NULL""" + only + """
                         LIMIT 1
                         """,
-                        (sha,),
+                        params,
                     )
                     return cur.fetchone() is not None
         return False

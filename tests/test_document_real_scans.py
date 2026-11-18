@@ -143,7 +143,7 @@ def measure_document(entry: dict, work: Path, engine: str = "tesseract") -> dict
         asyncio.run(_drive(svc))
         state = svc.job_status(tenant_id=TENANT, job_id=result.job_id, actor_id=SYSTEM_ACTOR)["state"]
         record = svc.repository.get_document(tenant_id=TENANT, document_id=result.document_id, actor_id="operator")
-        manifest = svc.storage.read_manifest(document_id=result.document_id, version_id=record.current_version_id)
+        manifest = svc.storage.for_space(TENANT).read_manifest(document_id=result.document_id, version_id=record.current_version_id)
         ir = DocumentIR.from_dict(manifest["ir"])
         pages = {}
         for page in ir.pages:

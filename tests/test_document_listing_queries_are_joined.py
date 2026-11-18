@@ -1,12 +1,13 @@
-"""The Documents listing and the operator grant make a fixed number of queries.
+"""The Documents listing and the member grant make a fixed number of queries.
 
 Audit 2026-10-26 AUD-115. ``list_documents`` asked ``has_access`` once per
 document, then every job id of the document and every job by id: a page of
-N documents cost about 3N queries. ``grant_operator_access`` checked every
+N documents cost about 3N queries. The operator grant (now
+``grant_member_access``, Spaces S1-12) checked every
 document with a query of its own, every minute. Now the readable documents
 come from one joined query (documents x ACL) and the newest job of each
 from one more, on both backends; the grant reads only the documents the
-operator lacks.
+member lacks.
 
 The query count is measured on SQLite with the connection's own trace
 callback, for 2 and for 8 documents. Negative control: on the old code the
@@ -158,6 +159,10 @@ def sqlite_backends(monkeypatch):
     monkeypatch.setenv("KAZMA_DOCUMENTS_METADATA_BACKEND", "sqlite")
 
 
+#: The account the grant gives the space's documents to.
+MEMBER = "owner"
+
+
 def _service(tmp_path) -> DocumentIngestionService:
     return DocumentIngestionService(config=DocumentConfig(
         storage_root=tmp_path, security_malware_scan="off",
@@ -166,12 +171,10 @@ def _service(tmp_path) -> DocumentIngestionService:
 
 
 def _seed(svc: DocumentIngestionService, count: int) -> None:
-    """*count* documents, every other one the operator's own, two jobs each;
-    alice owns the rest and may read the operator's."""
-    from kazma_core.documents.principal import OPERATOR
-
+    """*count* documents, every other one the owner's own, two jobs each;
+    alice owns the rest and may read the owner's."""
     for n in range(count):
-        owner = OPERATOR if n % 2 else "alice"
+        owner = MEMBER if n % 2 else "alice"
         record = svc.repository.create_document(tenant_id="t", owner_id=owner, title=f"d{n}")
         if owner != "alice":
             svc.repository.grant_access(tenant_id="t", document_id=record.id, actor_id=owner,
@@ -208,21 +211,19 @@ def test_listing_costs_the_same_for_two_documents_and_for_eight(tmp_path, count,
         svc.close()
 
 
-def test_the_operator_grant_reads_once_and_never_grants_twice(tmp_path, monkeypatch, sqlite_backends):
-    from kazma_core.documents import principal
-
+def test_the_member_grant_reads_once_and_never_grants_twice(tmp_path, monkeypatch, sqlite_backends):
     svc = _service(tmp_path)
     try:
         _seed(svc, 6)
-        first, _ = _statements(svc, lambda: svc.grant_operator_access(tenant_id="t", force=True))
-        assert first == 3  # the three documents alice (not the operator) owns
+        first, _ = _statements(svc, lambda: svc.grant_member_access(tenant_id="t", member=MEMBER, force=True))
+        assert first == 3  # the three documents alice (not the member) owns
         audited: list[str] = []
         monkeypatch.setattr(svc.audit, "record", lambda **kw: audited.append(kw["action"]))
-        again, statements = _statements(svc, lambda: svc.grant_operator_access(tenant_id="t", force=True))
+        again, statements = _statements(svc, lambda: svc.grant_member_access(tenant_id="t", member=MEMBER, force=True))
         assert again == 0 and audited == []
         assert statements <= 2, statements
-        # The operator now reads every document.
-        listed = svc.list_documents(tenant_id="t", actor_id=principal.OPERATOR)
+        # The member now reads every document.
+        listed = svc.list_documents(tenant_id="t", actor_id=MEMBER)
         assert len(listed) == 6
     finally:
         svc.close()

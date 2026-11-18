@@ -28,7 +28,7 @@ async def test_native_restore_resumes_queue_and_preserves_content_acl_and_histor
         version = source.repository.get_version(tenant_id='tenant', version_id=accepted.version_id)
         # This is a normal post-promotion GC state: intake provenance still
         # names quarantine, but the durable queue consumes originals.
-        source.storage.blob_path(kind='quarantine', sha256=version.source_sha256).unlink()
+        source.storage.for_space('tenant').blob_path(kind='quarantine', sha256=version.source_sha256).unlink()
         report = await asyncio.to_thread(perform_document_backup, storage_root=cfg.storage_root,
             dest_dir=tmp_path / 'backups')
         assert report['ok'], report

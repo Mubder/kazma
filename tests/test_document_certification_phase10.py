@@ -263,7 +263,7 @@ def _setup_job_infra(
     repo = DocumentRepository(db_path)
     storage = ContentAddressedStorage(store_root)
     content = b"crash-recovery test content"
-    blob = storage.put_stream(iter([content]), kind="originals", max_bytes=1024*1024)
+    blob = storage.for_space("t1").put_stream(iter([content]), kind="originals", max_bytes=1024*1024)
     blob_rec = repo.register_blob(
         tenant_id="t1", sha256=blob.sha256, byte_size=blob.byte_size,
         storage_kind=blob.kind,
@@ -683,7 +683,9 @@ class TestDocumentA11y:
         """Document UI template must contain aria labels or roles."""
         ui_root = _KZ_ROOT / "kazma-ui" / "kazma_ui"
         templates = self._collect_html_templates(ui_root)
-        doc_templates = [t for t in templates if "document" in str(t).lower()]
+        # Judged by the path below the UI folder: a checkout in a folder
+        # whose name holds "document" made every template a document one.
+        doc_templates = [t for t in templates if "document" in t.relative_to(ui_root).as_posix().lower()]
         if not doc_templates:
             pytest.skip("No document-specific HTML templates found")
 
@@ -696,7 +698,9 @@ class TestDocumentA11y:
         """All x-show panels must carry x-cloak to prevent flash."""
         ui_root = _KZ_ROOT / "kazma-ui" / "kazma_ui"
         templates = self._collect_html_templates(ui_root)
-        doc_templates = [t for t in templates if "document" in str(t).lower()]
+        # Judged by the path below the UI folder: a checkout in a folder
+        # whose name holds "document" made every template a document one.
+        doc_templates = [t for t in templates if "document" in t.relative_to(ui_root).as_posix().lower()]
         if not doc_templates:
             pytest.skip("No document-specific HTML templates found")
 
@@ -711,7 +715,9 @@ class TestDocumentA11y:
         """Arabic/English content containers must use dir=auto (Phase 10 a11y)."""
         ui_root = _KZ_ROOT / "kazma-ui" / "kazma_ui"
         templates = self._collect_html_templates(ui_root)
-        doc_templates = [t for t in templates if "document" in str(t).lower()]
+        # Judged by the path below the UI folder: a checkout in a folder
+        # whose name holds "document" made every template a document one.
+        doc_templates = [t for t in templates if "document" in t.relative_to(ui_root).as_posix().lower()]
         if not doc_templates:
             pytest.skip("No document-specific HTML templates found")
 

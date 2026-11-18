@@ -159,7 +159,7 @@ def _controls(monkeypatch) -> dict[tuple[str, str], list]:
     doc_retry = rec(("document_job", "retry"), {"job_id": "j2", "state": "received"})[1]
     monkeypatch.setattr("kazma_core.documents.ingestion.peek_ingestion_service",
                         lambda: SimpleNamespace(cancel_job=doc_cancel, retry_job=doc_retry))
-    monkeypatch.setattr("kazma_core.documents.principal.operator_for", lambda service, tenant: "operator")
+    monkeypatch.setattr("kazma_core.documents.principal.owner_actor", lambda service, tenant: "owner")
     monkeypatch.setattr("kazma_core.tools.research_session.cancel_session",
                         rec(("research_session", "cancel"), SimpleNamespace(status="cancelling"))[1])
     monkeypatch.setattr("kazma_core.x_api.publication_service.update_schedule",

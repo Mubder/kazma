@@ -195,7 +195,7 @@ def _sqlite_catalog_beside_postgres_queue(dsn: str, root: str, dest: str) -> dic
         # own events -- none, the queue is in Postgres -- and so required the
         # quarantine copy GC removed.
         old_refs, _ = backup._read_references(Path(report["path"]) / "documents.db")
-        old_missing = [f"{kind}/{sha}" for sha, kind in old_refs
+        old_missing = [f"{kind}/{sha}" for _tenant, sha, kind in old_refs
                        if not (Path(root) / backup._blob_rel_path(kind, sha)).is_file()]
         return {"ok": report["ok"], "removed": removed, "jobs_backend": report.get("jobs_backend"),
                 "old_missing": old_missing, "error": report.get("error"),

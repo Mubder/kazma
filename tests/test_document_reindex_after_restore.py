@@ -212,7 +212,10 @@ def test_a_library_this_install_lacks_is_reported_never_created(tmp_path, backen
 def test_a_missing_manifest_is_reported(tmp_path, backend, monkeypatch):
     svc, doc, entry = _indexed_then_restored(tmp_path, backend)
     try:
-        monkeypatch.setattr(svc.storage, "read_manifest", lambda **_kw: None)
+        from kazma_core.documents.storage import SpaceStorage
+
+        # Every space's store reads its manifests (Spaces S1-12).
+        monkeypatch.setattr(SpaceStorage, "read_manifest", lambda self, **_kw: None)
         report = svc.reconcile_index(tenant_id=backend.tenant)
         assert report["unavailable"] == [{**entry, "reason": "manifest_missing"}]
         assert _hits(svc, backend.tenant, doc.document_id) == []
