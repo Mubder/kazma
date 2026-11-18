@@ -113,6 +113,12 @@ def _locked_extraction() -> dict:
     return json.loads(THRESHOLDS.read_text(encoding="utf-8"))["extraction"]
 
 
+def _locked_parts() -> dict:
+    """The parts of the lock beside the recall scores, as committed."""
+    locked = json.loads(THRESHOLDS.read_text(encoding="utf-8"))
+    return {"extraction": locked["extraction"], "writes": locked["writes"]}
+
+
 def test_the_lock_never_lowers_the_ratchet(tmp_path, monkeypatch):
     """``lock`` refuses a lower score, and ``--rebaseline`` needs a new dataset."""
     script = _build_script()
@@ -122,11 +128,11 @@ def test_the_lock_never_lowers_the_ratchet(tmp_path, monkeypatch):
     scores = {"single.hit_rate": 0.9, "abstain.hit_rate": 0.5}
     monkeypatch.setattr(benchmark, "gated_scores", lambda _report: dict(scores))
     monkeypatch.setattr(benchmark, "run_benchmark", lambda **_kw: {})
-    extraction = _locked_extraction()
+    parts = _locked_parts()
 
     def write(version_, values):
-        locked.write_text(json.dumps({"dataset_version": version_, "scores": values,
-                                      "extraction": extraction}), encoding="utf-8")
+        locked.write_text(json.dumps({"dataset_version": version_, "scores": values, **parts}),
+                          encoding="utf-8")
 
     write(version, {"single.hit_rate": 0.95, "abstain.hit_rate": 0.5})
     assert script._cmd_lock(rebaseline=False) == 1  # 0.9 < 0.95: refused
@@ -201,7 +207,7 @@ def test_a_trade_inside_the_rule_is_recorded(tmp_path, monkeypatch):
     monkeypatch.setattr(benchmark, "run_benchmark", lambda **_kw: {})
     locked.write_text(json.dumps({"dataset_version": version, "scores": {
         "single.mrr": 0.8, "noise.precision": 0.7, "abstain.hit_rate": 0.4},
-        "extraction": _locked_extraction()}), encoding="utf-8")
+        **_locked_parts()}), encoding="utf-8")
     assert script._cmd_lock(rebaseline=False) == 1  # no reason given: refused
     assert script._cmd_lock(rebaseline=False, trade="rank turns above facts") == 0
     trade = json.loads(locked.read_text(encoding="utf-8"))["trades"][-1]
@@ -399,7 +405,7 @@ def test_a_new_extraction_dataset_is_rebaselined(tmp_path, monkeypatch):
     monkeypatch.setattr(benchmark, "run_benchmark", lambda **_kw: {})
     older = {**_locked_extraction(), "version": 1}
     locked.write_text(json.dumps({"dataset_version": version, "scores": {"single.hit_rate": 0.9},
-                                  "extraction": older}), encoding="utf-8")
+                                  **_locked_parts(), "extraction": older}), encoding="utf-8")
     assert script._cmd_lock(rebaseline=False) == 1
     assert script._cmd_lock(rebaseline=True) == 0
     written = json.loads(locked.read_text(encoding="utf-8"))
@@ -448,3 +454,81 @@ def test_the_models_pass_replays_recorded_replies():
     other = {"version": data["version"], "turns": [next(t for t in data["turns"] if t["id"] == "e01")]}
     with pytest.raises(KeyError, match="memory_extraction_record"):
         benchmark.run_extraction_benchmark(other, llm_replies=replies)
+
+
+# ── write scenarios (the memory framework audit, F1 and F8) ───────────────
+#
+# A few turns through the write path, the quick pass then the deep pass, and
+# the facts that must be current afterwards. They are locked as they are,
+# failures included: a fix makes a scenario pass and is locked in, and a
+# scenario that passed never fails again.
+
+
+@pytest.fixture(scope="module")
+def writes_report():
+    return benchmark.run_write_scenarios(llm_replies=_recording())
+
+
+def _locked_writes() -> dict:
+    return json.loads(THRESHOLDS.read_text(encoding="utf-8"))["writes"]
+
+
+def test_the_write_scenarios_are_what_the_builder_builds():
+    built = _build_script().build_writes()
+    assert json.loads(benchmark.WRITES_PATH.read_text(encoding="utf-8")) == json.loads(
+        json.dumps(built, ensure_ascii=False))
+
+
+def test_write_scenarios_only_improve(writes_report):
+    locked = _locked_writes()
+    assert writes_report["version"] == locked["version"], (
+        "the write scenarios changed: python scripts/memory_bench.py lock --rebaseline")
+    assert writes_report["llm_recording"]["sha256"] == locked["recording"]["sha256"], (
+        "the recording changed: python scripts/memory_bench.py lock --new-recording \"why\"")
+    why = {r["id"]: r["problems"] for r in writes_report["results"]}
+    newly = sorted(set(writes_report["failing"]) - set(locked["failing"]))
+    fixed = sorted(set(locked["failing"]) - set(writes_report["failing"]))
+    dropped, rose = _compare(benchmark.write_scores(writes_report), locked["scores"])
+    assert not newly and not dropped, "A write scenario that passed now fails:\n  " + "\n  ".join(
+        [f"{i}: {why[i]}" for i in newly] + dropped)
+    assert not fixed and not rose, ("A write scenario passes now -- lock it in: python scripts/memory_bench.py "
+                                    "lock\n  " + "\n  ".join(fixed + rose))
+
+
+def test_every_write_category_is_asked_in_english_and_arabic():
+    data = json.loads(benchmark.WRITES_PATH.read_text(encoding="utf-8"))
+    langs: dict[str, set[str]] = {}
+    for scenario in data["scenarios"]:
+        langs.setdefault(scenario["category"], set()).add(scenario["lang"])
+    assert set(langs) == {"update", "kept_as_said", "short", "someone_else"}
+    assert all({"en", "ar"} <= found for found in langs.values()), langs
+
+
+def test_the_write_scenarios_see_a_gate_that_lets_anything_replace_the_user(monkeypatch, writes_report):
+    """Negative control: with the trust gate open, the model's mistake about
+    the user's sister replaces the user's own home, and the scenario that
+    holds the gate fails."""
+    assert "other-en-sister-moved" not in writes_report["failing"]
+    monkeypatch.setattr("kazma_core.memory.provenance.may_overrule", lambda *_a, **_k: True)
+    open_gate = benchmark.run_write_scenarios(llm_replies=_recording())
+    assert "other-en-sister-moved" in open_gate["failing"]
+
+
+def test_a_write_scenario_says_why_it_failed(writes_report):
+    for result in writes_report["results"]:
+        assert result["passed"] == (not result["problems"]), result
+    moved = next(r for r in writes_report["results"] if r["id"] == "update-en-moved")
+    if not moved["passed"]:
+        assert any("Rotterdam" in p for p in moved["problems"]), moved
+
+
+def test_the_lock_refuses_a_write_scenario_that_stops_passing():
+    script = _build_script()
+    old = json.loads(json.dumps(_locked_writes()))
+    _part, problems = script._writes_lock(old)
+    assert not problems, problems
+    # A lock that holds one scenario fewer as failing than today's run: refused.
+    assert old["failing"], "every scenario passes: drop this case"
+    old["failing"] = old["failing"][1:]
+    _part, problems = script._writes_lock(old)
+    assert any("now fail" in p for p in problems), problems

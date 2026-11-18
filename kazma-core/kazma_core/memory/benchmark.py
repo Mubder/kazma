@@ -61,12 +61,16 @@ __all__ = [
     "record_llm_extraction",
     "recording_identity",
     "replayed_extraction",
+    "WRITES_PATH",
     "run_benchmark",
     "run_extraction_benchmark",
+    "run_write_scenarios",
+    "write_scores",
 ]
 
 DATASET_PATH = Path(__file__).with_name("benchmark_data") / "dataset.json"
 EXTRACTION_PATH = Path(__file__).with_name("benchmark_data") / "extraction.json"
+WRITES_PATH = Path(__file__).with_name("benchmark_data") / "writes.json"
 BENCH_TENANT = "bench"
 #: A fixed clock, so every run seeds the same created_at values.
 BASE_TIME = 1780000000.0
@@ -680,6 +684,161 @@ def extraction_scores(report: dict[str, Any]) -> dict[str, float]:
                 for k in EXTRACTION_SCORES:
                     out[f"{pass_name}.{lang}.{k}"] = float(row[k])
     return dict(sorted(out.items()))
+
+
+# ── Write scenarios (2026-11: the memory framework audit, F1 and F8) ─────────
+#
+# A few turns of one chat through the write path, in the order a live turn
+# takes it: the turn's own quick pass (``extract_and_apply_beliefs_sync``,
+# as ``consolidator._v2_extract_sync`` runs it), then the model's deep pass as
+# the memory worker runs it (``extract_beliefs_for_turn`` with the names in
+# use, applied by ``_apply_beliefs_to_v2`` at the turn's time). Then the facts
+# that must be current, and must not, are read from the private database.
+# The model's reply to a turn is the scenario's: the model's recorded reply to
+# an extraction turn of the same text, or written in the model's shape
+# (``benchmark_data/writes.json``, built by ``scripts/memory_bench.py
+# build``). So a scenario measures Kazma's rules around the model, never the
+# model. Scores: per category and language, the share of scenarios that pass.
+
+#: The sources that are the user's own words (``memory.provenance``).
+_USER_SOURCES = frozenset({"user_explicit", "user_stated"})
+
+
+class _ScriptedClient:
+    """The deep pass's model: answers with the reply the scenario gives the
+    turn being read, whatever it is asked."""
+
+    def __init__(self) -> None:
+        self.reply = ""
+
+    async def chat(self, messages: list[dict[str, Any]], **_kw: Any) -> str:
+        return self.reply
+
+
+def _turn_reply(turn: dict[str, Any], recorded: dict[str, str]) -> str:
+    if "recorded" in turn:
+        key = _text_key(_llm_blob(turn["user"]))
+        if key not in recorded:
+            raise KeyError(f"no recorded reply for {turn['recorded']}: {RECORD_AGAIN}")
+        return recorded[key]
+    return json.dumps({"beliefs": turn["written"]}, ensure_ascii=False)
+
+
+def _expected_holds(expected: dict[str, Any], row: dict[str, Any]) -> bool:
+    """*row*, a current fact, is the one *expected* names: its subject, its
+    value (folded, or letter for letter with ``exact``), and the user's own
+    words as its source when ``trust`` is ``"user"``."""
+    if _slug(row["subject"]) != _slug(expected["subject"]):
+        return False
+    if expected.get("exact"):
+        if row["object"] != expected["object"]:
+            return False
+    elif not _holds(_folded(expected["object"]), _folded(row["object"])):
+        return False
+    return expected.get("trust") != "user" or row["extraction_method"] in _USER_SOURCES
+
+
+def _run_scenario(scenario: dict[str, Any], client: _ScriptedClient, recorded: dict[str, str]) -> dict[str, Any]:
+    import asyncio
+
+    from kazma_core.memory.belief_extractor import (
+        _apply_beliefs_to_v2,
+        extract_and_apply_beliefs_sync,
+        extract_beliefs_for_turn,
+    )
+    from kazma_core.memory.entity_resolution import entity_vocabulary
+    from kazma_core.memory.predicates import predicate_vocabulary
+    from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
+
+    paths = []
+    for name in ("primary", "ops"):
+        fd, path = tempfile.mkstemp(prefix=f"kazma-writes-{name}-", suffix=".db")
+        os.close(fd)
+        paths.append(path)
+    # Autocommit, as the live writers open them: mutate_belief owns its
+    # transactions.
+    primary = sqlite3.connect(paths[0], isolation_level=None)
+    primary.row_factory = sqlite3.Row
+    ops = sqlite3.connect(paths[1], isolation_level=None)
+    try:
+        ensure_primary_schema(primary)
+        ensure_ops_schema(ops)
+        session = f"writes-{scenario['id']}"
+        for number, turn in enumerate(scenario["turns"], 1):
+            at = BASE_TIME + number * 86400
+            extract_and_apply_beliefs_sync(primary, ops, turn["user"], session_id=session, turn=number,
+                                           tenant_id=BENCH_TENANT, now=at, private=True)
+            client.reply = _turn_reply(turn, recorded)
+            raw, stats = asyncio.run(extract_beliefs_for_turn(
+                turn["user"], "", vocabulary=predicate_vocabulary(primary, tenant_id=BENCH_TENANT),
+                entities=entity_vocabulary(primary, tenant_id=BENCH_TENANT)))
+            if raw:
+                _apply_beliefs_to_v2(raw, primary, ops, stats=stats, session_id=session, turn=number,
+                                     tenant_id=BENCH_TENANT, now=at, private=True)
+        rows = [dict(r) for r in primary.execute(
+            "SELECT subject, predicate, object, extraction_method FROM beliefs WHERE tenant_id = ? "
+            "AND valid_until IS NULL AND invalidated_at IS NULL ORDER BY valid_from", (BENCH_TENANT,))]
+    finally:
+        primary.close()
+        ops.close()
+        for path in paths:
+            for suffix in ("", "-wal", "-shm"):
+                try:
+                    os.remove(path + suffix)
+                except OSError:
+                    pass
+    problems = []
+    for expected in scenario["current"]:
+        if not any(_expected_holds(expected, r) for r in rows):
+            whose = " in the user's own words" if expected.get("trust") == "user" else ""
+            problems.append(f"not current{whose}: {expected['subject']} {expected['object']}")
+    for unwanted in scenario["not_current"]:
+        problems += [f"still current: {r['subject']} {r['predicate']} {r['object']}"
+                     for r in rows if _expected_holds(unwanted, r)]
+    return {"id": scenario["id"], "category": scenario["category"], "lang": scenario["lang"],
+            "passed": not problems, "problems": problems,
+            "current": [f"{r['subject']} {r['predicate']} {r['object']} [{r['extraction_method']}]" for r in rows]}
+
+
+def run_write_scenarios(
+    dataset: dict[str, Any] | None = None, *, llm_replies: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Every write scenario through the write path; what passed, by category
+    and language. *llm_replies* is the recording the ``recorded`` turns
+    replay (the extraction benchmark's)."""
+    from unittest import mock
+
+    data = dataset or json.loads(WRITES_PATH.read_text(encoding="utf-8"))
+    if llm_replies:
+        check_recording(llm_replies)
+    recorded = (llm_replies or {}).get("replies") or {}
+    client = _ScriptedClient()
+    registry = type("_Registry", (), {"get_client": lambda self: client})()
+    # Facts are judged by their rows: no vector is needed, and none is made.
+    with mock.patch("kazma_core.model_registry.get_model_registry", lambda: registry), \
+            mock.patch("kazma_core.memory.embedder.get_embedder", lambda: None):
+        results = [_run_scenario(s, client, recorded) for s in data["scenarios"]]
+    groups: dict[str, dict[str, int]] = {}
+    for r in results:
+        for key in (f"{r['category']}.{r['lang']}", "overall"):
+            row = groups.setdefault(key, {"scenarios": 0, "passed": 0})
+            row["scenarios"] += 1
+            row["passed"] += int(r["passed"])
+    report: dict[str, Any] = {
+        "version": data["version"],
+        "groups": {k: {**v, "share": round(v["passed"] / v["scenarios"], 4)} for k, v in sorted(groups.items())},
+        "failing": [r["id"] for r in results if not r["passed"]],
+        "results": results,
+    }
+    if llm_replies:
+        report["llm_recording"] = recording_identity(llm_replies)
+    return report
+
+
+def write_scores(report: dict[str, Any]) -> dict[str, float]:
+    """The share of write scenarios that pass, per category and language, and
+    overall: the scores the lock holds."""
+    return {f"{k}.passed": float(v["share"]) for k, v in sorted(report["groups"].items())}
 
 
 async def record_llm_extraction(dataset: dict[str, Any] | None = None) -> dict[str, Any]:

@@ -1913,7 +1913,19 @@ four injected were noise.
   resets the extraction part when its dataset version changes. Gates in
   `tests/test_memory_benchmark.py`, each with its negative control (a
   renamed extractor keeps `found`; "Keep nothing" as the prompt is refused;
-  the old max-of-two floor). Explicit abstention targets (`TARGETS`, 0.6, goals not
+  the old max-of-two floor). **Write scenarios** (`benchmark_data/writes.json`,
+  `run_write_scenarios`, 2026-11): a few turns of one chat through the write
+  path in the live order (the quick pass, `extract_and_apply_beliefs_sync`;
+  then the deep pass, `extract_beliefs_for_turn` with the names in use and
+  `_apply_beliefs_to_v2` at the turn's time, both `private=True`), the
+  model's reply to each turn recorded (an extraction turn of the same text)
+  or written in its shape, and the facts that must be current and must not.
+  Categories `update`, `kept_as_said`, `short`, `someone_else`, each in
+  English and Arabic. Locked as they are, failures included (`writes` in
+  `thresholds.json`: the share passing per category and language, and the
+  failing ids): a fix is locked in, and a scenario that passed never fails
+  again (`_writes_lock`; the open trust gate as the negative control).
+  Explicit abstention targets (`TARGETS`, 0.6, goals not
   gates); a reviewed trade (`lock --trade "why"`, `trade_problems`: no
   score falls more than 0.05, one rises 0.05 or more, abstention never
   falls; recorded in `trades`); and the Postgres-primary run

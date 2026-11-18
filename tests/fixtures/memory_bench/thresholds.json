@@ -203,5 +203,45 @@
   "update.mrr": 1.0,
   "update.order": 1.0,
   "update.precision": 0.5611
+ },
+ "writes": {
+  "version": 1,
+  "recording": {
+   "sha256": "89c1b101b6ddbede2743d37b1ea2f2040f1ff1497cad515c2d035614f8f89157",
+   "turns": 30,
+   "askings": 1,
+   "model": "deepseek-flash",
+   "provider": "deepseek",
+   "recorded_on": "2026-10-15",
+   "prompt_sha256": "3499be576e8493a660ee6105cfa25dbde9660826fa2a8d8e38270c07d969781b"
+  },
+  "scores": {
+   "kept_as_said.ar.passed": 1.0,
+   "kept_as_said.en.passed": 0.0,
+   "kept_as_said.mixed.passed": 0.0,
+   "overall.passed": 0.4,
+   "short.ar.passed": 0.5,
+   "short.en.passed": 0.2,
+   "someone_else.ar.passed": 0.0,
+   "someone_else.en.passed": 1.0,
+   "someone_else.mixed.passed": 1.0,
+   "update.ar.passed": 0.5,
+   "update.en.passed": 0.3333,
+   "update.mixed.passed": 0.0
+  },
+  "failing": [
+   "update-en-moved",
+   "update-en-new-job",
+   "update-ar-new-job",
+   "update-mixed-moved",
+   "kept-en-name-and-city",
+   "kept-mixed-employer",
+   "short-en-condition",
+   "short-en-call-me",
+   "short-en-diet",
+   "short-en-no-city",
+   "short-ar-condition",
+   "other-ar-sister-moved"
+  ]
  }
 }
