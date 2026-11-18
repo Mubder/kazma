@@ -104,13 +104,15 @@ class _DocumentAdapter:
 
     async def act(self, native_id: str, action: str, *, actor: str) -> ActionResult:
         from kazma_core.documents.ingestion import peek_ingestion_service
-        from kazma_core.documents.principal import operator_for
+        from kazma_core.documents.principal import owner_actor
 
         tenant, _, job_id = native_id.partition("/")
         service = peek_ingestion_service()
         if service is None:
             return ActionResult(False, "documents_unavailable", "Documents are not running.")
-        principal = await asyncio.to_thread(operator_for, service, tenant)
+        # The owner's account on a single-operator install; a run's own asker
+        # once running work carries one (Spaces S1-21).
+        principal = await asyncio.to_thread(owner_actor, service, tenant)
         if principal is None:
             return ActionResult(False, "single_operator", "Documents act for one operator only.")
         call = {"cancel": service.cancel_job, "retry": service.retry_job}.get(action)

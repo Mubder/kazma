@@ -22,16 +22,9 @@ _INGEST_WAIT_SECONDS = 30.0
 _TERMINAL_STATES = frozenset({"ready", "cancelled", "dead_letter", "rejected"})
 
 
-def _tenant_and_workspace() -> tuple[str, str]:
-    """Resolve (tenant_id, workspace_id) from context, safely. Blocking."""
-    tenant = "default"
-    try:
-        from kazma_core.tenant_context import get_current_tenant_id
-
-        tenant = (get_current_tenant_id() or "default").strip() or "default"
-    except Exception:  # pragma: no cover - defensive
-        pass
-
+def _workspace() -> str:
+    """The workspace the tool runs in: the task's, else the active one.
+    Blocking (a store read)."""
     workspace = "default"
     try:
         from kazma_core.ide.workspace_scope import current_workspace_id
@@ -48,39 +41,37 @@ def _tenant_and_workspace() -> tuple[str, str]:
     except Exception:  # pragma: no cover - defensive
         pass
 
-    return tenant, workspace
+    return workspace
 
 
-def _operator_scope() -> tuple[str, str, str] | None:
-    """(tenant, workspace, actor) for the install's operator, or None.
+def _document_scope() -> tuple[str, str, str]:
+    """(tenant, workspace, actor): the turn's space and its asker.
 
-    Every document surface acts as the install's operator (DOC-A3,
-    ``documents.principal``): a document uploaded on the Web page is the
-    agent's to read, and the reverse. Documents ingested under an older name
-    get an ACL row for the operator first. None with platform users: which
-    user the agent acts for is not built (D1). Blocking.
+    Every document surface asks ``documents.principal.surface_scope`` (Spaces
+    S1-12): a document uploaded on the Web page is the agent's to read in the
+    same space, and the reverse, and nothing crosses spaces. The older
+    multi-user mode, which does not enforce Spaces, raises
+    ``DocumentsRefused`` (D1). Blocking.
     """
     from kazma_core.documents.ingestion import peek_ingestion_service
-    from kazma_core.documents.principal import operator_for
+    from kazma_core.documents.principal import surface_scope
 
-    tenant, workspace = _tenant_and_workspace()
     # The running service, if there is one yet (``_ensure_service`` builds
-    # it inside the tool's own error handling); without it nothing is granted
-    # this time, and the operator still reads its own documents.
-    actor = operator_for(peek_ingestion_service(), tenant)
-    if actor is None:
-        return None
-    return tenant, workspace, actor
+    # it inside the tool's own error handling); without it nothing is shared
+    # this time, and the asker still reads the documents it owns.
+    acting = surface_scope(peek_ingestion_service())
+    return acting.tenant_id, _workspace(), acting.actor_id
 
 
 async def _scope() -> tuple[str, str, str] | str:
-    """The tool's scope, or the refusal to answer with (off the event loop)."""
-    scope = await asyncio.to_thread(_operator_scope)
-    if scope is None:
-        from kazma_core.documents.principal import MULTI_USER_REFUSAL
+    """The tool's scope, or the refusal to answer with (off the event loop;
+    the thread copies the turn's scope)."""
+    from kazma_core.documents.principal import DocumentsRefused
 
-        return f"Error: {MULTI_USER_REFUSAL}"
-    return scope
+    try:
+        return await asyncio.to_thread(_document_scope)
+    except DocumentsRefused as exc:
+        return f"Error: {exc}"
 
 
 def _resolve_workspace_file(path: str) -> tuple[Path | None, str | None]:

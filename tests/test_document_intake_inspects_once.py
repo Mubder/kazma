@@ -49,7 +49,7 @@ def test_an_intake_inspects_its_document_once(tmp_path, monkeypatch):
         assert len(seen) == 1, seen
         version = svc.repository.get_version(tenant_id="t", version_id=result.version_id)
         assert version.mime_type == "text/markdown"
-        assert svc.storage.blob_path(kind="originals", sha256=version.source_sha256).is_file()
+        assert svc.storage.for_space("t").blob_path(kind="originals", sha256=version.source_sha256).is_file()
     finally:
         svc.close()
 

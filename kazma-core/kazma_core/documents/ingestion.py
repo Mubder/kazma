@@ -255,9 +255,11 @@ class DocumentIngestionService:
         self._intake_sweeper: asyncio.Task[None] | None = None
         self._index_reconcile: asyncio.Task[Any] | None = None
         self._reconcile_stop = threading.Event()
-        #: Tenant -> when ``grant_operator_access`` last looked (monotonic).
-        self._operator_checked: dict[str, float] = {}
-        self._operator_lock = threading.Lock()
+        self._space_files: asyncio.Task[Any] | None = None
+        self._space_files_stop = threading.Event()
+        #: (space, member) -> when ``grant_member_access`` last looked (monotonic).
+        self._member_checked: dict[tuple[str, str], float] = {}
+        self._member_lock = threading.Lock()
 
     @property
     def config(self) -> DocumentConfig:
@@ -302,6 +304,8 @@ class DocumentIngestionService:
             self._index_reconcile = spawn_background(
                 self._reconcile_index_once(), name="documents:index-reconcile"
             )
+        self._space_files_stop.clear()
+        self._space_files = spawn_background(self._copy_space_files_once(), name="documents:space-files")
         logger.info(
             "[documents.ingestion] worker pool started concurrency=%d",
             self.config.worker_concurrency,
@@ -331,6 +335,25 @@ class DocumentIngestionService:
             except store_errors() as exc:
                 logger.warning("[documents.ingestion] stranded intake sweep failed (%s: %s)",
                                type(exc).__name__, exc)
+
+    async def _copy_space_files_once(self) -> None:
+        """Each space's files in its own folder (Spaces S1-12): an older
+        install's files of another tenant are copied out of the root, once,
+        journaled (``documents.space_files``). Reads fall back to the root
+        until a tenant's copy is done, so nothing waits for this."""
+        from .space_files import copy_into_space_folders
+
+        try:
+            report = await asyncio.to_thread(
+                copy_into_space_folders, self.storage, self.repository, stop=self._space_files_stop,
+            )
+        except (OSError, *store_errors()) as exc:
+            logger.warning("[documents.ingestion] the copy of space files failed (%s); the next start "
+                           "tries again", type(exc).__name__)
+            return
+        if report["left"]:
+            logger.warning("[documents.ingestion] %d space(s) still read their files from the root",
+                           len(report["left"]))
 
     async def _reconcile_index_once(self) -> None:
         """Bring the knowledge index back to what this store records, once
@@ -452,7 +475,7 @@ class DocumentIngestionService:
                         {**item, "current_version_id": str(record.current_version_id)}
                     )
                     continue
-                manifest = self.storage.read_manifest(
+                manifest = self.storage.for_space(tenant).read_manifest(
                     document_id=record.id, version_id=record.current_version_id
                 )
                 if manifest is None or "ir" not in manifest:
@@ -529,6 +552,12 @@ class DocumentIngestionService:
             # The thread finishes the document it is on and stops.
             self._reconcile_stop.set()
             await asyncio.gather(reconcile, return_exceptions=True)
+        copying, self._space_files = self._space_files, None
+        if copying is not None:
+            # The thread finishes the space it is on and stops; the journal
+            # lets the next start go on from there.
+            self._space_files_stop.set()
+            await asyncio.gather(copying, return_exceptions=True)
         manager = self._manager
         self._manager = None
         if manager is not None:
@@ -813,7 +842,7 @@ class DocumentIngestionService:
     ) -> IngestionResult:
         # 1) Stream to quarantine CAS (bounded + tenant-quota enforced).
         try:
-            stored = self.storage.put_stream(
+            stored = self.storage.for_space(tenant).put_stream(
                 source,
                 kind="quarantine",
                 max_bytes=self.config.intake_max_bytes,
@@ -839,10 +868,7 @@ class DocumentIngestionService:
         try:
             from .malware import scan_if_configured
 
-            quarantine_path = self.storage.blob_path(
-                kind="quarantine", sha256=stored.sha256
-            )
-            scan_if_configured(quarantine_path, self.config)
+            scan_if_configured(stored.path, self.config)
         except DocumentParseError as exc:
             self._audit_intake_rejection(
                 tenant, workspace, actor, getattr(exc, "code", "unsafe_document")
@@ -949,6 +975,8 @@ class DocumentIngestionService:
             job_id=job.id,
             detail={"byte_size": stored.byte_size, "state": job.state.value},
         )
+        if document_id is None:
+            self._forget_member_checks(tenant)
         logger.info(
             "[documents.ingestion] intake accepted",
             extra=telemetry.correlation_extra(
@@ -1208,14 +1236,13 @@ class DocumentIngestionService:
         )
         if version is None:
             raise DocumentParseError("Document version is unavailable", code="document_missing")
-        quarantine_path = self.storage.blob_path(
-            kind="quarantine", sha256=version.source_sha256
-        )
+        space = self.storage.for_space(tenant)
+        quarantine_path = space.locate_blob(kind="quarantine", sha256=version.source_sha256)
         if not quarantine_path.is_file():
             # A validated immutable source can have lost its redundant
             # quarantine copy to GC (or restore). Revalidate the original
             # against today's policy instead of making recovery depend on it.
-            quarantine_path = self.storage.blob_path(kind="originals", sha256=version.source_sha256)
+            quarantine_path = space.locate_blob(kind="originals", sha256=version.source_sha256)
             if not quarantine_path.is_file():
                 raise DocumentParseError(
                     "Document source bytes are missing", code="document_missing"
@@ -1239,7 +1266,7 @@ class DocumentIngestionService:
         )
         # Physically promote to the immutable originals store (same sha).
         with quarantine_path.open("rb") as handle:
-            self.storage.put_stream(
+            space.put_stream(
                 handle,
                 kind="originals",
                 max_bytes=self.config.intake_max_bytes,
@@ -1377,7 +1404,7 @@ class DocumentIngestionService:
             raise PermanentDocumentError(
                 "document_missing", "Document version is unavailable"
             )
-        originals_path = self.storage.blob_path(
+        originals_path = self.storage.for_space(job.tenant_id).locate_blob(
             kind="originals", sha256=version.source_sha256
         )
         if not originals_path.is_file():
@@ -1453,7 +1480,7 @@ class DocumentIngestionService:
             raise DocumentIngestionError(
                 "document_access_denied", "Document version is unavailable"
             )
-        manifest = self.storage.read_manifest(
+        manifest = self.storage.for_space(tenant).read_manifest(
             document_id=doc_id, version_id=version.id
         )
         if manifest is None or "ir" not in manifest:
@@ -1491,49 +1518,65 @@ class DocumentIngestionService:
             "continuation": read.continuation,
         }
 
-    #: How often a tenant is looked over again for documents the operator
-    #: cannot open (a document ingested under an older name, or before a
-    #: switch from multi-user mode).
-    OPERATOR_GRANT_INTERVAL_SECONDS = 60.0
+    #: How often a member's share of a space is looked over again in this
+    #: process for documents the member cannot open. A document ingested here
+    #: clears its space's checks at once (:meth:`_forget_member_checks`); one
+    #: ingested by another process is shared within this interval.
+    MEMBER_GRANT_INTERVAL_SECONDS = 60.0
 
-    def grant_operator_access(self, *, tenant_id: str, force: bool = False) -> int:
-        """Give the install's operator an ``owner`` ACL row on every document.
+    def grant_member_access(self, *, tenant_id: str, member: str, force: bool = False) -> int:
+        """Give *member* an ``owner`` ACL row on every document of the space
+        *tenant_id* it lacks (Spaces S1-12).
 
-        Single-operator installs only (``documents.principal``; the caller
-        decides). Each grant is made by the document's own owner through the
-        normal ACL path and audited; ownership never changes, and leaving
-        single-operator mode is enough to stop using the grants. Returns how
-        many were added. Blocking.
+        Inside a space members share everything, so each member reaches every
+        document of it; across spaces nothing is shared (every read names its
+        tenant). The caller decides that *member* belongs to the space
+        (``documents.principal.surface_scope``). Each grant is made by the
+        document's own owner through the normal ACL path and audited
+        (``grant_member``); ownership never changes. The documents an install
+        made before Spaces (owned by ``operator``, ``auto-cookie``, ``agent``)
+        reach the owner's account the same way. Returns how many were added.
+        Blocking.
         """
-        from .principal import OPERATOR
-
         tenant = _clean(tenant_id, "tenant_id")
+        principal = _clean(member, "member")
         now = time.monotonic()
-        with self._operator_lock:
-            last = self._operator_checked.get(tenant)
-            if not force and last is not None and now - last < self.OPERATOR_GRANT_INTERVAL_SECONDS:
+        key = (tenant, principal)
+        with self._member_lock:
+            last = self._member_checked.get(key)
+            if not force and last is not None and now - last < self.MEMBER_GRANT_INTERVAL_SECONDS:
                 return 0
         granted = 0
-        # Only the documents the operator lacks, in one joined query (audit
+        # Only the documents the member lacks, in one joined query (audit
         # 2026-10-26 AUD-115): every document was checked with a query of its
         # own, every minute.
         for record in self.repository.list_documents_by_access(
-            tenant_id=tenant, actor_id=OPERATOR, permission="owner", granted=False,
+            tenant_id=tenant, actor_id=principal, permission="owner", granted=False,
         ):
             self.repository.grant_access(
                 tenant_id=tenant, document_id=record.id, actor_id=record.owner_id,
-                principal_id=OPERATOR, permission="owner",
+                principal_id=principal, permission="owner",
             )
             self.audit.record(
-                tenant_id=tenant, event_type="access", action="grant_operator",
+                tenant_id=tenant, event_type="access", action="grant_member",
                 outcome="success", actor_id=record.owner_id, document_id=record.id,
+                detail={"member": principal},
             )
             granted += 1
-        with self._operator_lock:
-            self._operator_checked[tenant] = now
+        with self._member_lock:
+            if len(self._member_checked) >= 4096:
+                self._member_checked.clear()
+            self._member_checked[key] = now
         if granted:
-            logger.info("[documents] gave the operator access to %d document(s) of tenant %s", granted, tenant)
+            logger.info("[documents] shared %d document(s) of space %s with a member", granted, tenant)
         return granted
+
+    def _forget_member_checks(self, tenant: str) -> None:
+        """A document was added to *tenant*: its members are looked over
+        again at their next call, not a minute later."""
+        with self._member_lock:
+            for key in [k for k in self._member_checked if k[0] == tenant]:
+                del self._member_checked[key]
 
     def list_documents(
         self, *, tenant_id: str, actor_id: str
@@ -1844,7 +1887,7 @@ class DocumentIngestionService:
             raise DocumentIngestionError(
                 "document_access_denied", "Document is unavailable"
             )
-        manifest = self.storage.read_manifest(
+        manifest = self.storage.for_space(tenant).read_manifest(
             document_id=doc_id, version_id=record.current_version_id
         )
         if manifest is None or "ir" not in manifest:
@@ -2058,7 +2101,9 @@ class DocumentIngestionService:
         generated = self._OCR_TEXT_FORMATS.get(fmt)
         if generated is None:
             return None
-        manifest = self.storage.read_manifest(document_id=doc_id, version_id=version.id)
+        manifest = self.storage.for_space(version.tenant_id).read_manifest(
+            document_id=doc_id, version_id=version.id
+        )
         if not manifest or "ir" not in manifest:
             return None
         ir = DocumentIR.from_dict(manifest["ir"])
@@ -2442,7 +2487,7 @@ class DocumentIngestionService:
             raise DocumentIngestionError(
                 "artifact_access_denied", "Artifact content is unavailable"
             )
-        path = self.storage.blob_path(kind=blob.storage_kind, sha256=blob.sha256)
+        path = self.storage.for_space(tenant).locate_blob(kind=blob.storage_kind, sha256=blob.sha256)
         if not path.is_file():
             raise DocumentIngestionError(
                 "not_ready", "Artifact content is unavailable"
@@ -2738,7 +2783,8 @@ class DocumentIngestionService:
               COALESCE(SUM(CASE WHEN rn = 1 THEN byte_size ELSE 0 END), 0) AS physical
             FROM (
               SELECT byte_size,
-                     ROW_NUMBER() OVER (PARTITION BY sha256, storage_kind ORDER BY id) AS rn
+                     -- one file per space and content (Spaces S1-12)
+                     ROW_NUMBER() OVER (PARTITION BY tenant_id, sha256, storage_kind ORDER BY id) AS rn
               FROM document_blobs
             )
         """
@@ -2911,7 +2957,7 @@ class DocumentIngestionService:
     ) -> "DocumentIngestionService._Materialized":
         """Materialize only the immutable ``originals`` blob for a version."""
 
-        blob_path = self.storage.blob_path(
+        blob_path = self.storage.for_space(version.tenant_id).locate_blob(
             kind="originals", sha256=version.source_sha256
         )
         if not blob_path.is_file():
@@ -3031,9 +3077,8 @@ class DocumentIngestionService:
         the VALIDATING stage, which inspects again and records it, and the
         version is stored with a generic type meanwhile.
         """
-        path = self.storage.blob_path(kind="quarantine", sha256=stored.sha256)
         try:
-            with self._materialize(path, filename) as staged:
+            with self._materialize(stored.path, filename) as staged:
                 result = self.service.inspect_path(staged)
         except DocumentParseError:
             return None
@@ -3074,14 +3119,14 @@ class DocumentIngestionService:
             "ir": ir.to_dict(),
             "ir_sha256": hashlib.sha256(ir.to_json().encode("utf-8")).hexdigest(),
         }
-        self.storage.write_manifest(
+        self.storage.for_space(job.tenant_id).write_manifest(
             document_id=job.document_id,
             version_id=job.version_id,
             manifest=payload,
         )
 
     def _read_manifest(self, job: DocumentJobRecord) -> dict[str, Any] | None:
-        return self.storage.read_manifest(
+        return self.storage.for_space(job.tenant_id).read_manifest(
             document_id=job.document_id, version_id=job.version_id
         )
 

@@ -570,9 +570,11 @@ def _export_document_store(
     try:
         from kazma_core.documents.backup import (
             _blob_rel_path,
+            _live_source,
             _read_references,
             promoted_versions_from_postgres,
         )
+        from kazma_core.documents.storage import legacy_blob_rel, legacy_manifest_rel, manifest_rel
 
         # A Postgres queue beside the SQLite catalog holds the promotions
         # (read after the snapshot: a superset). The queue itself travels in
@@ -586,9 +588,11 @@ def _export_document_store(
         )
         blob_count = 0
         missing_blobs: list[str] = []
-        for sha, kind in refs:
-            rel = _blob_rel_path(kind, sha)
-            src = root / rel
+        # Each file goes under its space's folder in the bundle (Spaces
+        # S1-12), read from wherever the live store keeps it now.
+        for tenant, sha, kind in refs:
+            rel = _blob_rel_path(tenant, kind, sha)
+            src = _live_source(root, tenant, str(rel).replace("\\", "/"), legacy_blob_rel(kind, sha))
             if not src.is_file():
                 missing_blobs.append(str(rel).replace("\\", "/"))
                 continue
@@ -603,11 +607,12 @@ def _export_document_store(
                 f"{sample}"
             )
         manifest_count = 0
-        for doc_id, ver_id in versions:
-            src = root / "manifests" / doc_id / f"{ver_id}.json"
+        for tenant, doc_id, ver_id in versions:
+            rel = manifest_rel(tenant, doc_id, ver_id)
+            src = _live_source(root, tenant, rel, legacy_manifest_rel(doc_id, ver_id))
             if not src.is_file():
                 continue
-            dst = dest_root / "manifests" / doc_id / f"{ver_id}.json"
+            dst = dest_root / rel
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
             manifest_count += 1
@@ -643,6 +648,8 @@ def _export_postgres_document_content(
     missing: list[str] = []
     for rel in sorted(refs["blobs"] | refs["manifests"]):
         src = root / rel
+        if not src.is_file() and rel in refs["legacy"]:
+            src = root / refs["legacy"][rel]  # a space whose files are not copied yet
         if not src.is_file():
             if rel in refs["blobs"] or rel in refs["required_manifests"]:
                 missing.append(rel)

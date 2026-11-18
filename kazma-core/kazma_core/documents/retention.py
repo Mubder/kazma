@@ -13,6 +13,14 @@ file is older than the safety grace period. The collector is a *mark/sweep*:
   grace period. Deletions are bounded per run (``gc_max_deletions_per_run``)
   and each is an atomic ``unlink`` of a single regular file.
 
+**Per space** (Spaces S1-12). Each space's files are in its own folder
+(``storage.space_folder``: the root for the owner's space, ``spaces/<id>``
+for the others), so the sweep goes folder by folder and a folder keeps only
+the references of the tenants whose files it holds. A tenant of another space
+whose files an older install kept in the root, and that are not copied into
+its folder yet (``documents.space_files``), still counts for the root. A
+folder no tenant references (an erased space) keeps nothing past the grace.
+
 Safety invariants:
 
 * Never deletes a referenced blob, a current version's content, or an artifact
@@ -31,6 +39,7 @@ audit rows.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
@@ -54,6 +63,25 @@ __all__ = [
 
 _SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 _KINDS = ("quarantine", "originals", "artifacts")
+
+
+def _in_folder(folder: str, rel: str) -> str:
+    """A path under a space's folder, relative to the storage root."""
+    return f"{folder}/{rel}" if folder else rel
+
+
+@dataclass(frozen=True, slots=True)
+class _Folder:
+    """One folder of the store: a space's (the root for the owner's), and
+    the live references it keeps."""
+
+    rel: str
+    root: Path
+    keep_source: set[str]
+    keep_artifacts: set[str]
+    keep_versions: set[tuple[str, str]]
+    #: The tenants whose live rows can name its files; None: any tenant's.
+    tenants: tuple[str, ...] | None
 
 
 @dataclass(slots=True)
@@ -136,21 +164,23 @@ class DocumentGarbageCollector:
         grace = timedelta(seconds=int(cfg.gc_grace_seconds))
         quarantine_window = timedelta(days=int(cfg.retention_quarantine_days))
 
-        # Sweep physical blob files kind-by-kind.
-        for kind in _KINDS:
-            if budget <= 0:
-                report.budget_exhausted = True
-                break
-            budget = self._sweep_kind(
-                kind,
-                marks=marks,
-                now=now,
-                grace=grace,
-                quarantine_window=quarantine_window,
-                budget=budget,
-                report=report,
-                dry_run=dry_run,
-            )
+        folders = self._folders(marks, report)
+        # Sweep physical blob files folder by folder, kind by kind.
+        for folder in folders:
+            for kind in _KINDS:
+                if budget <= 0:
+                    report.budget_exhausted = True
+                    break
+                budget = self._sweep_kind(
+                    kind,
+                    folder=folder,
+                    now=now,
+                    grace=grace,
+                    quarantine_window=quarantine_window,
+                    budget=budget,
+                    report=report,
+                    dry_run=dry_run,
+                )
 
         # Scratch a crash left behind: upload spools, staged copies, parser
         # and operation run directories (2026-10-13, F08 -- none was swept).
@@ -158,12 +188,13 @@ class DocumentGarbageCollector:
             budget = self._sweep_scratch(now=now, grace=grace, budget=budget, report=report, dry_run=dry_run)
 
         # Sweep manifests.
-        if budget > 0:
+        for folder in folders:
+            if budget <= 0:
+                report.budget_exhausted = True
+                break
             budget = self._sweep_manifests(
-                marks=marks, now=now, grace=grace, budget=budget, report=report, dry_run=dry_run
+                folder=folder, now=now, grace=grace, budget=budget, report=report, dry_run=dry_run
             )
-        else:
-            report.budget_exhausted = True
 
         # Prune orphan blob rows (metadata only; physical files handled above).
         if budget > 0 and not dry_run:
@@ -364,7 +395,7 @@ class DocumentGarbageCollector:
         self,
         kind: str,
         *,
-        marks: dict[str, Any],
+        folder: _Folder,
         now: datetime,
         grace: timedelta,
         quarantine_window: timedelta,
@@ -372,13 +403,13 @@ class DocumentGarbageCollector:
         report: GcReport,
         dry_run: bool,
     ) -> int:
-        base = self._root / kind / "sha256"
+        base = folder.root / kind / "sha256"
         if not base.exists():
             return budget
         grace_cutoff = now - grace
         quarantine_cutoff = now - quarantine_window
-        keep_source: set[str] = marks["keep_source"]
-        keep_artifacts: set[str] = marks["keep_artifacts"]
+        keep_source = folder.keep_source
+        keep_artifacts = folder.keep_artifacts
 
         for path, sha, mtime, is_staging in self._iter_files(base, report):
             if budget <= 0:
@@ -402,13 +433,13 @@ class DocumentGarbageCollector:
             elif kind == "quarantine":
                 if sha not in keep_source and mtime < grace_cutoff:
                     deletable = True
-                elif self._originals_exists(sha) and mtime < quarantine_cutoff:
+                elif self._originals_exists(folder, sha) and mtime < quarantine_cutoff:
                     # Redundant untrusted copy after successful promotion.
                     deletable = True
 
             if not deletable:
                 continue
-            if not dry_run and self._is_live_reference(kind=kind, sha=sha):
+            if not dry_run and self._is_live_reference(folder, kind=kind, sha=sha):
                 # Close the mark/sweep TOCTOU window: ingestion may have
                 # published a reference after the mark snapshot.
                 continue
@@ -430,12 +461,16 @@ class DocumentGarbageCollector:
 
         return rel in backup_pins(self._root)
 
-    def _is_live_reference(self, *, kind: str, sha: str) -> bool:
-        """Recheck authoritative references immediately before unlink."""
-        if self._pinned(f"{kind}/sha256/{sha[:2]}/{sha[2:4]}/{sha}"):
+    def _is_live_reference(self, folder: _Folder, *, kind: str, sha: str) -> bool:
+        """Recheck authoritative references immediately before unlink: a live
+        row of one of the folder's tenants (any tenant's when the mark could
+        not say whose)."""
+        if self._pinned(_in_folder(folder.rel, f"{kind}/sha256/{sha[:2]}/{sha[2:4]}/{sha}")):
             return True
         if hasattr(self._repo, "gc_is_live_reference"):
-            return bool(self._repo.gc_is_live_reference(kind=kind, sha=sha))
+            if folder.tenants is None:
+                return bool(self._repo.gc_is_live_reference(kind=kind, sha=sha))
+            return bool(self._repo.gc_is_live_reference(kind=kind, sha=sha, tenant_ids=folder.tenants))
 
         conn = self._repo._conn  # noqa: SLF001
         lock = self._repo._lock  # noqa: SLF001
@@ -476,18 +511,18 @@ class DocumentGarbageCollector:
     def _sweep_manifests(
         self,
         *,
-        marks: dict[str, Any],
+        folder: _Folder,
         now: datetime,
         grace: timedelta,
         budget: int,
         report: GcReport,
         dry_run: bool,
     ) -> int:
-        base = self._root / "manifests"
+        base = folder.root / "manifests"
         if not base.exists():
             return budget
         grace_cutoff = now - grace
-        keep_versions: set[tuple[str, str]] = marks["keep_versions"]
+        keep_versions = folder.keep_versions
         try:
             doc_dirs = [d for d in os.scandir(base) if d.is_dir(follow_symlinks=False)]
         except OSError:
@@ -521,7 +556,7 @@ class DocumentGarbageCollector:
                     continue
                 if mtime >= grace_cutoff:
                     continue
-                if not dry_run and self._pinned(f"manifests/{doc_id}/{entry.name}"):
+                if not dry_run and self._pinned(_in_folder(folder.rel, f"manifests/{doc_id}/{entry.name}")):
                     continue
                 if self._delete_file(path, report, dry_run):
                     report.deleted_manifests += 1
@@ -567,15 +602,93 @@ class DocumentGarbageCollector:
                     continue
                 yield Path(full), sha, mtime, is_staging
 
-    def _originals_exists(self, sha: str) -> bool:
+    def _originals_exists(self, folder: _Folder, sha: str) -> bool:
+        """The promoted original of *sha* is in the same folder and whole."""
+        path = folder.root / "originals" / "sha256" / sha[:2] / sha[2:4] / sha
         try:
-            return self._storage.verify_blob(kind="originals", sha256=sha)
-        except Exception:  # noqa: BLE001
-            # Fall back to a path check without hashing on any error.
-            try:
-                return self._storage.blob_path(kind="originals", sha256=sha).is_file()
-            except Exception:  # noqa: BLE001
+            if not path.is_file() or path.is_symlink():
                 return False
+            digest = hashlib.sha256()
+            with path.open("rb") as handle:
+                while chunk := handle.read(1 << 20):
+                    digest.update(chunk)
+            return digest.hexdigest() == sha
+        except OSError:
+            return False
+
+    # ── Folders: one per space ───────────────────────────────────────────
+
+    def _space_dirs(self, report: GcReport) -> list[str]:
+        """The folders under ``spaces/``, as ``spaces/<name>``: real
+        directories only, never one a link or junction leads out of."""
+        from .storage import SPACES_DIR
+
+        base = self._root / SPACES_DIR
+        if not base.is_dir() or base.is_symlink():
+            return []
+        base_real = os.path.realpath(base)
+        found: list[str] = []
+        try:
+            entries = sorted(os.scandir(base), key=lambda entry: entry.name)
+        except OSError:
+            return []
+        for entry in entries:
+            if entry.is_symlink() or os.path.realpath(entry.path) != os.path.join(base_real, entry.name):
+                report.refused_symlinks += 1
+                continue
+            if entry.is_dir(follow_symlinks=False):
+                found.append(f"{SPACES_DIR}/{entry.name}")
+        return found
+
+    def _folders(self, marks: dict[str, Any], report: GcReport) -> list[_Folder]:
+        """Each folder of the store with the references it keeps.
+
+        The root keeps the owner's space's references and those of every
+        tenant of another space not yet copied into its folder; ``spaces/<f>``
+        keeps its own tenants'. A mark that does not say whose (an older
+        repository) makes every folder keep every reference.
+        """
+        from kazma_core.spaces.scope import OWNER_SPACE_ID, valid_space_id
+
+        from .storage import space_folder
+
+        existing = self._space_dirs(report)
+        by_source = marks.get("keep_source_by_tenant")
+        by_artifact = marks.get("keep_artifacts_by_tenant")
+        by_version = marks.get("keep_versions_by_tenant")
+        if by_source is None or by_artifact is None or by_version is None:
+            return [
+                _Folder(rel=rel, root=self._root / rel if rel else self._root,
+                        keep_source=set(marks["keep_source"]),
+                        keep_artifacts=set(marks["keep_artifacts"]),
+                        keep_versions=set(marks["keep_versions"]), tenants=None)
+                for rel in ("", *existing)
+            ]
+        moved_tenants = getattr(self._storage, "moved_tenants", None)
+        moved = moved_tenants() if callable(moved_tenants) else frozenset()
+        groups: dict[str, set[str]] = {"": {OWNER_SPACE_ID}}
+        for tenant in set(by_source) | set(by_artifact) | set(by_version):
+            folder = space_folder(tenant)
+            groups.setdefault(folder, set()).add(tenant)
+            if folder and tenant not in moved:
+                groups[""].add(tenant)  # its files may still be in the root
+        for rel in existing:
+            members = groups.setdefault(rel, set())
+            name = rel.split("/", 1)[1]
+            if valid_space_id(name):
+                # A space that published after the mark is still asked about.
+                members.add(name)
+        return [
+            _Folder(
+                rel=rel,
+                root=self._root / rel if rel else self._root,
+                keep_source=set().union(*(by_source.get(t, set()) for t in members)),
+                keep_artifacts=set().union(*(by_artifact.get(t, set()) for t in members)),
+                keep_versions=set().union(*(by_version.get(t, set()) for t in members)),
+                tenants=tuple(sorted(members)),
+            )
+            for rel, members in sorted(groups.items())
+        ]
 
     def _delete_file(self, path: Path, report: GcReport, dry_run: bool) -> bool:
         if dry_run:

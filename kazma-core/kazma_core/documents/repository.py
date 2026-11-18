@@ -7,7 +7,7 @@ import logging
 import re
 import sqlite3
 import threading
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -38,6 +38,7 @@ __all__ = [
     "DocumentRepository",
     "TombstoneRecord",
     "VersionRecord",
+    "gc_marks_from_rows",
 ]
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -50,6 +51,40 @@ _ACL_COVERS: dict[str, frozenset[str]] = {
     "write": frozenset({"write", "owner"}),
     "owner": frozenset({"owner"}),
 }
+
+
+def gc_marks_from_rows(
+    sources: Iterable[tuple[str, str]],
+    artifacts: Iterable[tuple[str, str]],
+    versions: Iterable[tuple[str, str, str]],
+    blob_ids: set[Any],
+) -> dict[str, Any]:
+    """The garbage collector's live reference sets, from ``(tenant, sha)``,
+    ``(tenant, sha)`` and ``(tenant, document, version)`` rows: each set for
+    the install and per tenant (``*_by_tenant``). A space's files are in its
+    own folder (Spaces S1-12), so a folder keeps only its tenants' references.
+    """
+    by_source: dict[str, set[str]] = {}
+    by_artifact: dict[str, set[str]] = {}
+    by_version: dict[str, set[tuple[str, str]]] = {}
+    for tenant, sha in sources:
+        if tenant and sha:
+            by_source.setdefault(str(tenant), set()).add(str(sha))
+    for tenant, sha in artifacts:
+        if tenant and sha:
+            by_artifact.setdefault(str(tenant), set()).add(str(sha))
+    for tenant, document_id, version_id in versions:
+        if tenant and document_id and version_id:
+            by_version.setdefault(str(tenant), set()).add((str(document_id), str(version_id)))
+    return {
+        "keep_source": set().union(*by_source.values()) if by_source else set(),
+        "keep_artifacts": set().union(*by_artifact.values()) if by_artifact else set(),
+        "keep_versions": set().union(*by_version.values()) if by_version else set(),
+        "keep_source_by_tenant": by_source,
+        "keep_artifacts_by_tenant": by_artifact,
+        "keep_versions_by_tenant": by_version,
+        "referenced_blob_ids": blob_ids,
+    }
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS documents (
@@ -1388,7 +1423,8 @@ class DocumentRepository:
         rejected_cutoff: str,
         dead_cutoff: str,
     ) -> dict[str, Any]:
-        """Authoritative live reference sets for garbage collection."""
+        """Authoritative live reference sets for garbage collection, for the
+        install and per tenant (``gc_marks_from_rows``)."""
         with self._lock:
             has_jobs = (
                 self._conn.execute(
@@ -1397,11 +1433,11 @@ class DocumentRepository:
                 is not None
             )
             if has_jobs:
-                keep_source = {
-                    row["source_sha256"]
+                sources = [
+                    (row["tenant_id"], row["source_sha256"])
                     for row in self._conn.execute(
                         """
-                        SELECT DISTINCT v.source_sha256 AS source_sha256
+                        SELECT DISTINCT v.tenant_id AS tenant_id, v.source_sha256 AS source_sha256
                         FROM document_versions v
                         JOIN documents d
                           ON d.id = v.document_id AND d.tenant_id = v.tenant_id
@@ -1425,13 +1461,13 @@ class DocumentRepository:
                         """,
                         (tombstone_cutoff, rejected_cutoff, dead_cutoff),
                     ).fetchall()
-                }
+                ]
             else:
-                keep_source = {
-                    row["source_sha256"]
+                sources = [
+                    (row["tenant_id"], row["source_sha256"])
                     for row in self._conn.execute(
                         """
-                        SELECT DISTINCT v.source_sha256 AS source_sha256
+                        SELECT DISTINCT v.tenant_id AS tenant_id, v.source_sha256 AS source_sha256
                         FROM document_versions v
                         JOIN documents d
                           ON d.id = v.document_id AND d.tenant_id = v.tenant_id
@@ -1439,12 +1475,12 @@ class DocumentRepository:
                         """,
                         (tombstone_cutoff,),
                     ).fetchall()
-                }
-            keep_artifacts = {
-                row["sha256"]
+                ]
+            artifacts = [
+                (row["tenant_id"], row["sha256"])
                 for row in self._conn.execute(
                     """
-                    SELECT DISTINCT b.sha256 AS sha256
+                    SELECT DISTINCT a.tenant_id AS tenant_id, b.sha256 AS sha256
                     FROM document_artifacts a
                     JOIN document_blobs b
                       ON b.id = a.blob_id AND b.tenant_id = a.tenant_id
@@ -1454,12 +1490,12 @@ class DocumentRepository:
                     """,
                     (tombstone_cutoff,),
                 ).fetchall()
-            }
-            keep_versions = {
-                (row["document_id"], row["id"])
+            ]
+            versions = [
+                (row["tenant_id"], row["document_id"], row["id"])
                 for row in self._conn.execute(
                     """
-                    SELECT v.id AS id, v.document_id AS document_id
+                    SELECT v.tenant_id AS tenant_id, v.id AS id, v.document_id AS document_id
                     FROM document_versions v
                     JOIN documents d
                       ON d.id = v.document_id AND d.tenant_id = v.tenant_id
@@ -1467,7 +1503,7 @@ class DocumentRepository:
                     """,
                     (tombstone_cutoff,),
                 ).fetchall()
-            }
+            ]
             referenced_blob_ids = {
                 row["blob_id"]
                 for row in self._conn.execute(
@@ -1478,18 +1514,21 @@ class DocumentRepository:
                     """
                 ).fetchall()
             }
-        return {
-            "keep_source": keep_source,
-            "keep_artifacts": keep_artifacts,
-            "keep_versions": keep_versions,
-            "referenced_blob_ids": referenced_blob_ids,
-        }
+        return gc_marks_from_rows(sources, artifacts, versions, referenced_blob_ids)
 
-    def gc_is_live_reference(self, *, kind: str, sha: str) -> bool:
+    def gc_is_live_reference(
+        self, *, kind: str, sha: str, tenant_ids: Iterable[str] | None = None,
+    ) -> bool:
+        """A live row still names *sha* -- of one of *tenant_ids* when given
+        (the tenants whose space folder holds the file), else of any."""
+        tenants = None if tenant_ids is None else sorted({str(t) for t in tenant_ids})
+        if tenants is not None and not tenants:
+            return False
+        only = "" if tenants is None else f" AND b.tenant_id IN ({','.join('?' * len(tenants))})"
         with self._lock:
             if kind == "artifacts":
                 row = self._conn.execute(
-                    """
+                    f"""
                     SELECT 1
                     FROM document_artifacts a
                     JOIN document_blobs b
@@ -1497,25 +1536,25 @@ class DocumentRepository:
                     JOIN documents d
                       ON d.id = a.document_id AND d.tenant_id = a.tenant_id
                     WHERE b.sha256 = ? AND b.storage_kind = 'artifacts'
-                      AND d.deleted_at IS NULL
+                      AND d.deleted_at IS NULL{only}
                     LIMIT 1
-                    """,
-                    (sha,),
+                    """,  # noqa: S608 - placeholders only
+                    (sha, *(tenants or ())),
                 ).fetchone()
                 return row is not None
             if kind == "originals":
                 row = self._conn.execute(
-                    """
+                    f"""
                     SELECT 1
                     FROM document_versions v
                     JOIN document_blobs b
                       ON b.id = v.source_blob_id AND b.tenant_id = v.tenant_id
                     JOIN documents d
                       ON d.id = v.document_id AND d.tenant_id = v.tenant_id
-                    WHERE b.sha256 = ? AND d.deleted_at IS NULL
+                    WHERE b.sha256 = ? AND d.deleted_at IS NULL{only}
                     LIMIT 1
-                    """,
-                    (sha,),
+                    """,  # noqa: S608 - placeholders only
+                    (sha, *(tenants or ())),
                 ).fetchone()
                 return row is not None
         return False

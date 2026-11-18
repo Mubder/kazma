@@ -58,8 +58,32 @@ def _sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def _blob_rel_path(kind: str, sha: str) -> Path:
-    return Path(kind) / "sha256" / sha[:2] / sha[2:4] / sha
+def _blob_rel_path(tenant_id: str, kind: str, sha: str) -> Path:
+    """Where a backup holds a blob: under its space's folder (Spaces S1-12),
+    whatever folder the live store keeps it in today."""
+    from .storage import blob_rel
+
+    return Path(blob_rel(tenant_id, kind, sha))
+
+
+def _required_candidates(primary: str, legacy: str, tenant_id: str) -> list[str]:
+    """The paths a backup may hold a required object at: its space's, and --
+    for a tenant of another space, in a backup an older build made -- the
+    root's, where every tenant's files were (``documents.space_files``)."""
+    from .storage import space_folder
+
+    return [primary, legacy] if space_folder(tenant_id) else [primary]
+
+
+def _live_source(root: Path, tenant_id: str, rel: str, legacy: str) -> Path:
+    """Where the live store keeps an object now: its space's folder, or the
+    root while the tenant's files are not copied there yet."""
+    from .storage import space_folder
+
+    own = root / rel
+    if own.is_file() or not space_folder(tenant_id):
+        return own
+    return root / legacy
 
 
 def installed_document_backends() -> tuple[str, str]:
@@ -211,11 +235,13 @@ def perform_document_backup(
         refs, versions = _read_references(db_dest, promoted_versions=promoted)
         checksums: dict[str, str] = {"documents.db": _sha256_file(db_dest)}
         copied = 0
-        for sha, kind in refs:
-            rel = _blob_rel_path(kind, sha)
+        from .storage import legacy_blob_rel, legacy_manifest_rel, manifest_rel
+
+        for tenant, sha, kind in refs:
+            rel = _blob_rel_path(tenant, kind, sha)
             rel_key = str(rel).replace("\\", "/")
             checksums[rel_key] = sha
-            src = root / rel
+            src = _live_source(root, tenant, rel_key, legacy_blob_rel(kind, sha))
             if not src.is_file():
                 continue
             dst = out / rel
@@ -225,11 +251,12 @@ def perform_document_backup(
                 copied += 1
 
         manifests_copied = 0
-        for doc_id, ver_id in versions:
-            src = root / "manifests" / doc_id / f"{ver_id}.json"
+        for tenant, doc_id, ver_id in versions:
+            rel = manifest_rel(tenant, doc_id, ver_id)
+            src = _live_source(root, tenant, rel, legacy_manifest_rel(doc_id, ver_id))
             if not src.is_file():
                 continue
-            dst = out / "manifests" / doc_id / f"{ver_id}.json"
+            dst = out / rel
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
             checksums[str(dst.relative_to(out)).replace("\\", "/")] = _sha256_file(dst)
@@ -289,8 +316,10 @@ def _open_snapshot(db_path: Path, *, snapshot: bool = True) -> sqlite3.Connectio
 
 def _read_references(
     db_path: Path, *, promoted_versions: set[str] | None = None, snapshot: bool = True,
-) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
-    """Return blobs and versions still owned by a document that is not deleted.
+) -> tuple[list[tuple[str, str, str]], list[tuple[str, str, str]]]:
+    """Return blobs ``(tenant, sha, kind)`` and versions ``(tenant, document,
+    version)`` still owned by a document that is not deleted. The tenant
+    names the space whose folder holds the file (Spaces S1-12).
 
     A soft-deleted document can keep its version row after garbage collection
     has removed the file. That missing file must not fail a backup or a
@@ -302,8 +331,8 @@ def _read_references(
     ``snapshot``: *db_path* is a copy nothing else opens (see
     :func:`_open_snapshot`); False for a live database.
     """
-    refs: list[tuple[str, str]] = []
-    versions: list[tuple[str, str]] = []
+    refs: list[tuple[str, str, str]] = []
+    versions: list[tuple[str, str, str]] = []
     conn = _open_snapshot(db_path, snapshot=snapshot)
     try:
         conn.row_factory = sqlite3.Row
@@ -326,13 +355,13 @@ def _read_references(
             )}
         for row in conn.execute(
             """
-            SELECT DISTINCT b.sha256, b.storage_kind, 'source' AS origin
+            SELECT DISTINCT b.tenant_id, b.sha256, b.storage_kind, 'source' AS origin
             FROM document_blobs b JOIN document_versions v
               ON v.source_blob_id=b.id AND v.tenant_id=b.tenant_id
             JOIN documents d ON d.id=v.document_id AND d.tenant_id=v.tenant_id
             WHERE d.deleted_at IS NULL
             UNION
-            SELECT DISTINCT b.sha256, b.storage_kind, 'artifact' AS origin
+            SELECT DISTINCT b.tenant_id, b.sha256, b.storage_kind, 'artifact' AS origin
             FROM document_blobs b JOIN document_artifacts a
               ON a.blob_id=b.id AND a.tenant_id=b.tenant_id
             JOIN documents d ON d.id=a.document_id AND d.tenant_id=a.tenant_id
@@ -345,16 +374,16 @@ def _read_references(
             # originals, while GC may legitimately remove quarantine copies.
             if row["origin"] == "source" and row["sha256"] in promoted:
                 kind = "originals"
-            refs.append((row["sha256"], kind))
+            refs.append((row["tenant_id"], row["sha256"], kind))
         for row in conn.execute(
             """
-            SELECT v.id AS id, v.document_id AS document_id
+            SELECT v.tenant_id AS tenant_id, v.id AS id, v.document_id AS document_id
             FROM document_versions v
             JOIN documents d ON d.id = v.document_id
             WHERE d.deleted_at IS NULL
             """
         ):
-            versions.append((row["document_id"], row["id"]))
+            versions.append((row["tenant_id"], row["document_id"], row["id"]))
     finally:
         conn.close()
     return sorted(set(refs)), versions
@@ -399,22 +428,29 @@ def verify_document_backup(
     db_path = out / "documents.db"
     if db_path.is_file():
         try:
+            from .storage import blob_rel, legacy_blob_rel, legacy_manifest_rel, manifest_rel
+
             refs, _versions = _read_references(db_path, promoted_versions=promoted_versions)
-            required = {str(_blob_rel_path(kind, sha)).replace("\\", "/") for sha, kind in refs}
+            required = {
+                tuple(_required_candidates(blob_rel(tenant, kind, sha), legacy_blob_rel(kind, sha), tenant))
+                for tenant, sha, kind in refs
+            }
             conn = _open_snapshot(db_path)
             try:
                 has_jobs = conn.execute("SELECT 1 FROM sqlite_master WHERE name='document_jobs'").fetchone()
                 if has_jobs:
-                    for doc, ver in conn.execute(
-                        """SELECT DISTINCT j.document_id, j.version_id
+                    for tenant, doc, ver in conn.execute(
+                        """SELECT DISTINCT j.tenant_id, j.document_id, j.version_id
                            FROM document_jobs j JOIN documents d
                              ON d.id=j.document_id AND d.tenant_id=j.tenant_id
                            WHERE j.state='ready' AND d.deleted_at IS NULL"""
                     ):
-                        required.add(f"manifests/{doc}/{ver}.json")
+                        required.add(tuple(_required_candidates(
+                            manifest_rel(tenant, doc, ver), legacy_manifest_rel(doc, ver), tenant)))
             finally:
                 conn.close()
-            for rel in required:
+            for candidates in sorted(required):
+                rel = next((c for c in candidates if c in checksums), candidates[0])
                 if rel not in checksums:
                     invalid_inventory.append("required_object_not_checksummed:" + rel)
                 if not (out / rel).is_file():

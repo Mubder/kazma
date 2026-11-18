@@ -119,7 +119,9 @@ CASES: dict[str, Case] = {}
 
 #: The modules that register cases, as import names (``tests._chat_space_cases``).
 #: An item adds its module here; :func:`load_cases` imports each.
-CASE_MODULES: tuple[str, ...] = ()
+CASE_MODULES: tuple[str, ...] = (
+    "tests._document_space_cases",  # S1-12
+)
 
 
 def case(target: str, item: str) -> Callable[[Callable[[Matrix], None]], Callable[[Matrix], None]]:
@@ -176,9 +178,13 @@ PENDING_ROUTE_RULES: tuple[tuple[Pattern, str], ...] = (
     ("/api/import/history", "S1-09"),
     # ── S1-10: lessons ────────────────────────────────────────────────────
     ("/api/commitment", "S1-10"),
-    # ── S1-12: documents ──────────────────────────────────────────────────
-    ("/documents$", "S1-12"),
-    ("/api/documents", "S1-12"),
+    # ── S1-12: documents (their cases: tests/_document_space_cases.py) ─────
+    # Indexing a document into a Knowledge library, taking it out and
+    # searching a library read and write Knowledge libraries, which become
+    # per space with Knowledge's own item.
+    ("/api/documents/{document_id}/index$", "S1-13"),
+    ("/api/documents/{document_id}/unindex$", "S1-13"),
+    ("/api/documents/search$", "S1-13"),
     # ── S1-13: knowledge ──────────────────────────────────────────────────
     ("/knowledge$", "S1-13"),
     ("/api/kb", "S1-13"),
@@ -238,14 +244,10 @@ _PENDING_TOOLS_BY_ITEM: dict[str, tuple[str, ...]] = {
         "memory_invalidate", "memory_forget_mentions", "memory_delete_entity",
         "memory_merge_entities", "memory_purge_empty_entities",
     ),
-    # The document platform: documents by id. (The tools that take a path
-    # are files of the space: S1-19.)
-    "S1-12": (
-        "document_import", "document_read", "document_status",
-        "document_search", "document_index", "document_convert",
-        "document_redact", "document_cancel",
-    ),
+    # S1-12's document tools have their cases (tests/_document_space_cases.py),
+    # but for the two that read and write Knowledge libraries.
     "S1-13": (
+        "document_search", "document_index",
         "knowledge_search", "knowledge_list_libraries",
         "knowledge_create_library", "knowledge_ingest_url",
         "knowledge_ingest_site",

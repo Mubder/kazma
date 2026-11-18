@@ -89,12 +89,13 @@ def _touch(root: Path, kind: str, sha: str, payload: bytes) -> None:
 def test_read_references_skips_deleted_documents_only(tmp_path: Path) -> None:
     db = _store(tmp_path / "store")
     refs, versions = _read_references(db)
-    shas = {sha for sha, _kind in refs}
+    shas = {sha for _tenant, sha, _kind in refs}
     assert _LIVE in shas
     assert _SHARED in shas
     assert _DEAD not in shas
-    assert ("dead-doc", "ver-dead") not in versions
-    assert ("live-doc", "ver-live") in versions
+    pairs = {(doc, ver) for _tenant, doc, ver in versions}
+    assert ("dead-doc", "ver-dead") not in pairs
+    assert ("live-doc", "ver-live") in pairs
 
 
 def test_export_ignores_a_missing_deleted_blob_and_rejects_a_missing_live_one(

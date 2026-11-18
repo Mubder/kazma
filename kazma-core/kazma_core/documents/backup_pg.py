@@ -93,8 +93,16 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _blob_rel(kind: str, sha: str) -> str:
-    return f"{kind}/sha256/{sha[:2]}/{sha[2:4]}/{sha}"
+def _rel_and_legacy(tenant_id: str, rel: str, legacy: str, store: dict[str, str]) -> str:
+    """*rel* (the object's path under its space's folder, where the backup
+    holds it), remembering where the live store may still keep it: the root,
+    for a tenant of another space whose files are not copied yet
+    (``documents.space_files``; Spaces S1-12)."""
+    from .storage import space_folder
+
+    if space_folder(tenant_id):
+        store[rel] = legacy
+    return rel
 
 
 # ── garbage-collection pins ────────────────────────────────────────────────
@@ -145,18 +153,23 @@ def _snapshot_references(cur: Any) -> dict[str, Any]:
     )
     promoted = {row["sha"] for row in cur.fetchall()}
     cur.execute(
-        """SELECT DISTINCT b.sha256 AS sha, b.storage_kind AS kind, 'source' AS origin
+        """SELECT DISTINCT b.tenant_id AS tenant, b.sha256 AS sha, b.storage_kind AS kind,
+                  'source' AS origin
            FROM document_blobs b
            JOIN document_versions v ON v.source_blob_id = b.id AND v.tenant_id = b.tenant_id
            JOIN documents d ON d.id = v.document_id AND d.tenant_id = v.tenant_id
            WHERE d.deleted_at IS NULL
            UNION
-           SELECT DISTINCT b.sha256 AS sha, b.storage_kind AS kind, 'artifact' AS origin
+           SELECT DISTINCT b.tenant_id AS tenant, b.sha256 AS sha, b.storage_kind AS kind,
+                  'artifact' AS origin
            FROM document_blobs b
            JOIN document_artifacts a ON a.blob_id = b.id AND a.tenant_id = b.tenant_id
            JOIN documents d ON d.id = a.document_id AND d.tenant_id = a.tenant_id
            WHERE d.deleted_at IS NULL"""
     )
+    from .storage import blob_rel, legacy_blob_rel, legacy_manifest_rel, manifest_rel
+
+    legacy: dict[str, str] = {}
     blobs: set[str] = set()
     for row in cur.fetchall():
         kind = row["kind"]
@@ -164,20 +177,27 @@ def _snapshot_references(cur: Any) -> dict[str, Any]:
         # execution needs ``originals`` (the SQLite backup's rule too).
         if row["origin"] == "source" and row["sha"] in promoted:
             kind = "originals"
-        blobs.add(_blob_rel(kind, row["sha"]))
+        blobs.add(_rel_and_legacy(row["tenant"], blob_rel(row["tenant"], kind, row["sha"]),
+                                  legacy_blob_rel(kind, row["sha"]), legacy))
     cur.execute(
-        """SELECT v.document_id AS doc, v.id AS ver FROM document_versions v
+        """SELECT v.tenant_id AS tenant, v.document_id AS doc, v.id AS ver FROM document_versions v
            JOIN documents d ON d.id = v.document_id AND d.tenant_id = v.tenant_id
            WHERE d.deleted_at IS NULL"""
     )
-    manifests = {f"manifests/{row['doc']}/{row['ver']}.json" for row in cur.fetchall()}
+    manifests = {
+        _rel_and_legacy(row["tenant"], manifest_rel(row["tenant"], row["doc"], row["ver"]),
+                        legacy_manifest_rel(row["doc"], row["ver"]), legacy)
+        for row in cur.fetchall()
+    }
     cur.execute(
-        """SELECT DISTINCT j.document_id AS doc, j.version_id AS ver FROM document_jobs j
+        """SELECT DISTINCT j.tenant_id AS tenant, j.document_id AS doc, j.version_id AS ver
+           FROM document_jobs j
            JOIN documents d ON d.id = j.document_id AND d.tenant_id = j.tenant_id
            WHERE j.state = 'ready' AND d.deleted_at IS NULL"""
     )
-    required_manifests = {f"manifests/{row['doc']}/{row['ver']}.json" for row in cur.fetchall()}
-    return {"blobs": blobs, "manifests": manifests, "required_manifests": required_manifests}
+    required_manifests = {manifest_rel(row["tenant"], row["doc"], row["ver"]) for row in cur.fetchall()}
+    return {"blobs": blobs, "manifests": manifests, "required_manifests": required_manifests,
+            "legacy": legacy}
 
 
 def _table_counts(cur: Any) -> dict[str, int]:
@@ -229,7 +249,9 @@ def perform_pg_document_backup(
                 refs = _snapshot_references(cur)
                 counts = _table_counts(cur)
             needed = sorted(refs["blobs"] | refs["manifests"])
-            pin = _write_pin(root, backup_id, needed)
+            # Pinned where each object is now, too: the root, for a space
+            # whose files are not copied into its folder yet.
+            pin = _write_pin(root, backup_id, sorted({*needed, *refs["legacy"].values()}))
             # The exporting transaction stays open while pg_dump imports it.
             dump_path = dump(
                 dsn, out / "documents.pgdump", tables=list(counts), snapshot=str(snapshot["id"])
@@ -239,6 +261,8 @@ def perform_pg_document_backup(
         missing: list[str] = []
         for rel in needed:
             src = root / rel
+            if not src.is_file() and rel in refs["legacy"]:
+                src = root / refs["legacy"][rel]
             if not src.is_file():
                 if rel in refs["blobs"] or rel in refs["required_manifests"]:
                     missing.append(rel)

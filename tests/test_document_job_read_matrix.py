@@ -176,7 +176,7 @@ async def test_the_agent_cancel_tool_checks_the_agents_access(service, monkeypat
         return service
 
     monkeypatch.setattr(tools, "_ensure_service", ensure)
-    monkeypatch.setattr(tools, "_operator_scope", lambda: ("t", "w", "agent"))
+    monkeypatch.setattr(tools, "_document_scope", lambda: ("t", "w", "agent"))
     someone_elses = _upload(service, "alice")
     refused = await tools.document_cancel(str(someone_elses.job_id))
     assert refused.startswith("Error") and "state" not in refused.lower()

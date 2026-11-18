@@ -60,8 +60,8 @@ def _store(tmp_path: Path, **cfg_overrides):
 
 def _make_referenced_blob(repo, storage, *, tenant="t1", data=b"referenced"):
     sha = hashlib.sha256(data).hexdigest()
-    storage.put_stream(io.BytesIO(data), kind="quarantine", max_bytes=1_000_000)
-    storage.put_stream(io.BytesIO(data), kind="originals", max_bytes=1_000_000)
+    storage.for_space(tenant).put_stream(io.BytesIO(data), kind="quarantine", max_bytes=1_000_000)
+    storage.for_space(tenant).put_stream(io.BytesIO(data), kind="originals", max_bytes=1_000_000)
     doc = repo.create_document(tenant_id=tenant, owner_id="o", title="Doc")
     blob = repo.register_blob(
         tenant_id=tenant, sha256=sha, byte_size=len(data), storage_kind="quarantine"
@@ -211,17 +211,17 @@ def test_gc_reference_safe_and_dry_run(tmp_path):
     _doc, _ver, ref_sha = _make_referenced_blob(repo, storage)
     orphan = b"orphan no ref"
     orphan_sha = hashlib.sha256(orphan).hexdigest()
-    storage.put_stream(io.BytesIO(orphan), kind="originals", max_bytes=1_000_000)
+    storage.for_space("t1").put_stream(io.BytesIO(orphan), kind="originals", max_bytes=1_000_000)
     gc = DocumentGarbageCollector(repository=repo, storage=storage, audit=audit, config=cfg)
     time.sleep(0.02)
 
     dry = gc.collect(dry_run=True)
     assert dry.deleted_blobs >= 1  # would delete the orphan
-    assert storage.verify_blob(kind="originals", sha256=orphan_sha)  # dry-run touched nothing
+    assert storage.for_space("t1").verify_blob(kind="originals", sha256=orphan_sha)  # dry-run touched nothing
 
     real = gc.collect(dry_run=False)
-    assert storage.verify_blob(kind="originals", sha256=ref_sha)  # referenced survives
-    assert not storage.blob_path(kind="originals", sha256=orphan_sha).is_file()  # orphan gone
+    assert storage.for_space("t1").verify_blob(kind="originals", sha256=ref_sha)  # referenced survives
+    assert not storage.for_space("t1").blob_path(kind="originals", sha256=orphan_sha).is_file()  # orphan gone
     assert real.deleted_blobs >= 1 and not real.errors
 
 
@@ -229,11 +229,11 @@ def test_gc_grace_period_protects_recent_files(tmp_path):
     cfg, repo, _jobs, storage, audit = _store(tmp_path, gc_grace_seconds=3600)
     orphan = b"recent orphan"
     orphan_sha = hashlib.sha256(orphan).hexdigest()
-    storage.put_stream(io.BytesIO(orphan), kind="originals", max_bytes=1_000_000)
+    storage.for_space("t1").put_stream(io.BytesIO(orphan), kind="originals", max_bytes=1_000_000)
     gc = DocumentGarbageCollector(repository=repo, storage=storage, audit=audit, config=cfg)
     report = gc.collect(dry_run=False)
     # File is younger than the grace window → not deleted.
-    assert storage.verify_blob(kind="originals", sha256=orphan_sha)
+    assert storage.for_space("t1").verify_blob(kind="originals", sha256=orphan_sha)
     assert report.deleted_blobs == 0
 
 
@@ -242,7 +242,7 @@ def test_gc_rechecks_reference_published_after_mark(tmp_path, monkeypatch):
         tmp_path, gc_grace_seconds=0, retention_quarantine_days=0
     )
     data = b"deduplicated during gc"
-    stored = storage.put_stream(
+    stored = storage.for_space("t1").put_stream(
         io.BytesIO(data), kind="originals", max_bytes=1_000_000
     )
     original_mark = DocumentGarbageCollector._mark
@@ -274,7 +274,7 @@ def test_gc_rechecks_reference_published_after_mark(tmp_path, monkeypatch):
     time.sleep(0.02)
     report = gc.collect(dry_run=False)
 
-    assert storage.verify_blob(kind="originals", sha256=stored.sha256)
+    assert storage.for_space("t1").verify_blob(kind="originals", sha256=stored.sha256)
     assert report.deleted_blobs == 0
 
 
@@ -284,7 +284,7 @@ def test_gc_bounded_batch(tmp_path):
     )
     for i in range(5):
         data = f"orphan-{i}".encode()
-        storage.put_stream(io.BytesIO(data), kind="originals", max_bytes=1_000_000)
+        storage.for_space("t1").put_stream(io.BytesIO(data), kind="originals", max_bytes=1_000_000)
     gc = DocumentGarbageCollector(repository=repo, storage=storage, audit=audit, config=cfg)
     time.sleep(0.02)
     report = gc.collect(dry_run=False)
@@ -329,7 +329,7 @@ def test_gc_tombstoned_document_collected(tmp_path):
     time.sleep(0.02)
     report = gc.collect(dry_run=False)
     # Expired-tombstone content is reclaimable.
-    assert not storage.blob_path(kind="originals", sha256=sha).is_file()
+    assert not storage.for_space("t1").blob_path(kind="originals", sha256=sha).is_file()
     assert report.deleted_blobs >= 1
 
 
@@ -749,7 +749,7 @@ def test_readiness_negative_control_a_fallback_is_never_ready(monkeypatch):
 def test_backup_consistency_db_blob_manifest(tmp_path):
     cfg, repo, _jobs, storage, _audit = _store(tmp_path)
     doc, ver, _sha = _make_referenced_blob(repo, storage, data=b"backup body")
-    storage.write_manifest(document_id=doc.id, version_id=ver.id, manifest={"ir": {"pages": []}})
+    storage.for_space("t1").write_manifest(document_id=doc.id, version_id=ver.id, manifest={"ir": {"pages": []}})
     report = perform_document_backup(storage_root=cfg.storage_root, dest_dir=tmp_path / "backups")
     assert report["ok"] and report["copied_blobs"] >= 1 and report["manifests"] == 1
     assert report["verification"]["ok"] and report["verification"]["checked"] >= 1
@@ -761,8 +761,8 @@ def test_backup_consistency_db_blob_manifest(tmp_path):
 def test_backup_fails_when_referenced_blob_is_missing(tmp_path):
     cfg, repo, _jobs, storage, _audit = _store(tmp_path)
     _doc, _ver, sha = _make_referenced_blob(repo, storage, data=b"missing body")
-    storage.blob_path(kind="quarantine", sha256=sha).unlink(missing_ok=True)
-    storage.blob_path(kind="originals", sha256=sha).unlink(missing_ok=True)
+    storage.for_space("t1").blob_path(kind="quarantine", sha256=sha).unlink(missing_ok=True)
+    storage.for_space("t1").blob_path(kind="originals", sha256=sha).unlink(missing_ok=True)
 
     report = perform_document_backup(
         storage_root=cfg.storage_root, dest_dir=tmp_path / "backups"
@@ -794,7 +794,7 @@ def test_migration_document_store_roundtrip(tmp_path, monkeypatch):
     repo = DocumentRepository(str(root_a / "documents.db"), tenant_quota_bytes=10_000_000)
     storage = ContentAddressedStorage(root_a)
     doc, ver, sha = _make_referenced_blob(repo, storage, data=b"cross-machine content")
-    storage.write_manifest(document_id=doc.id, version_id=ver.id, manifest={"ir": {"pages": []}})
+    storage.for_space("t1").write_manifest(document_id=doc.id, version_id=ver.id, manifest={"ir": {"pages": []}})
     repo.close()
 
     staging = tmp_path / "staging"
@@ -847,8 +847,8 @@ def test_migration_export_refuses_missing_referenced_blob(tmp_path, monkeypatch)
     storage = ContentAddressedStorage(root)
     _doc, _ver, sha = _make_referenced_blob(repo, storage, data=b"missing export")
     repo.close()
-    storage.blob_path(kind="quarantine", sha256=sha).unlink(missing_ok=True)
-    storage.blob_path(kind="originals", sha256=sha).unlink(missing_ok=True)
+    storage.for_space("t1").blob_path(kind="quarantine", sha256=sha).unlink(missing_ok=True)
+    storage.for_space("t1").blob_path(kind="originals", sha256=sha).unlink(missing_ok=True)
     staging = tmp_path / "staging-missing"
     (staging / "data").mkdir(parents=True)
     monkeypatch.setattr(
@@ -860,7 +860,9 @@ def test_migration_export_refuses_missing_referenced_blob(tmp_path, monkeypatch)
 
 
 def storage_b_has(root: Path, kind: str, sha: str) -> bool:
-    return (root / kind / "sha256" / sha[:2] / sha[2:4] / sha).is_file()
+    from kazma_core.documents.storage import blob_rel
+
+    return (root / blob_rel("t1", kind, sha)).is_file()  # under the space's folder
 
 
 # ── API layer: HTTP status codes + operational endpoints (fake service) ──

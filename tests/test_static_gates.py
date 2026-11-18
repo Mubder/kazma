@@ -926,9 +926,10 @@ _LOOP_STALL_HELPERS = frozenset({
     # The day's date for the base prompt: reads cron.timezone from settings,
     # on every supervisor call (2026-10-23).
     "daily_prompt_note",
-    # Who a document surface acts as (DOC-A3): a settings read, and the
-    # operator's ACL grants (a catalog walk and writes).
-    "grant_operator_access", "operator_for",
+    # Who a document surface acts as (Spaces S1-12): the identity store and
+    # the platform-user list (settings reads), and the member's ACL grants (a
+    # catalog walk and writes).
+    "grant_member_access", "surface_scope", "owner_actor",
     # The document worker broker exchange waits for a whole container job
     # (the worker deadline plus start and removal); the readiness report
     # reads the broker's status over a socket.

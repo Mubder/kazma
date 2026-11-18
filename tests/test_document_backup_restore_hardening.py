@@ -28,11 +28,11 @@ async def test_native_restore_resumes_queue_and_preserves_content_acl_and_histor
         version = source.repository.get_version(tenant_id='tenant', version_id=accepted.version_id)
         # This is a normal post-promotion GC state: intake provenance still
         # names quarantine, but the durable queue consumes originals.
-        source.storage.blob_path(kind='quarantine', sha256=version.source_sha256).unlink()
+        source.storage.for_space('tenant').blob_path(kind='quarantine', sha256=version.source_sha256).unlink()
         report = await asyncio.to_thread(perform_document_backup, storage_root=cfg.storage_root,
             dest_dir=tmp_path / 'backups')
         assert report['ok'], report
-        assert any(key.startswith('originals/') for key in report['checksums'])
+        assert any(key.startswith('spaces/tenant/originals/') for key in report['checksums'])
     finally:
         source.close()
     started = time.monotonic()
@@ -52,7 +52,7 @@ async def test_native_restore_resumes_queue_and_preserves_content_acl_and_histor
         assert events[0]['to_state'] == 'received' and events[-1]['to_state'] == 'ready'
         ready = await asyncio.to_thread(perform_document_backup, storage_root=restore_root,
             dest_dir=tmp_path / 'ready-backups')
-        assert ready['ok'] and any(key.startswith('manifests/') for key in ready['checksums'])
+        assert ready['ok'] and any(key.startswith('spaces/tenant/manifests/') for key in ready['checksums'])
         assert verify_document_backup(backup_dir=ready['path'])['ok']
     finally:
         await restored.stop_workers()

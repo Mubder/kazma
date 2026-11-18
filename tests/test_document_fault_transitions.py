@@ -156,21 +156,24 @@ async def test_a_full_disk_while_writing_the_manifest_is_retried(tmp_path, monke
     monkeypatch.setattr(svc.jobs, "_clock", clock)
     try:
         result = _upload(svc)
-        real = svc.storage.write_manifest
+        from kazma_core.documents.storage import SpaceStorage
+
+        real = SpaceStorage.write_manifest
         calls = {"n": 0}
 
-        def full_once(**kwargs):
+        def full_once(self, **kwargs):
             calls["n"] += 1
             if calls["n"] == 1:
                 raise OSError(errno.ENOSPC, "No space left on device")
-            return real(**kwargs)
+            return real(self, **kwargs)
 
-        monkeypatch.setattr(svc.storage, "write_manifest", full_once)
+        # Every space's store writes its manifests (Spaces S1-12).
+        monkeypatch.setattr(SpaceStorage, "write_manifest", full_once)
         await _process_one(svc)
         held = _job(svc, result)
         assert held.state is DocumentJobState.RETRY_WAIT
         assert held.error_code == "storage_full"
-        assert svc.storage.read_manifest(document_id=result.document_id, version_id=result.version_id) is None
+        assert svc.storage.for_space("t").read_manifest(document_id=result.document_id, version_id=result.version_id) is None
         clock.advance()
         await _process_one(svc)
         assert _job(svc, result).state is DocumentJobState.READY

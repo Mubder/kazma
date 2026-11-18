@@ -1218,25 +1218,6 @@ async def _try_documents_command(
     tokens = body.split()
     sub = tokens[0].lower() if tokens else ""
 
-    tenant = "default"
-    try:
-        from kazma_core.memory.config import resolve_tenant_id
-
-        # The tenant rule reads settings (audit 2026-10-26 AUD-111).
-        tenant = await asyncio.to_thread(
-            resolve_tenant_id,
-            msg.platform or "unknown",
-            sender_id=str(msg.sender_id or ""),
-            prefer_context=True,
-        )
-    except Exception:  # pragma: no cover - defensive
-        try:
-            from kazma_core.tenant_context import get_current_tenant_id
-
-            tenant = (get_current_tenant_id() or "default").strip() or "default"
-        except Exception:
-            pass
-
     try:
         from kazma_core.documents.ingestion import get_ingestion_service
 
@@ -1250,14 +1231,17 @@ async def _try_documents_command(
         )
         return True
 
-    # Chat acts as the install's operator, like the Web page and the agent
-    # (DOC-A3, ``documents.principal``); with platform users it refuses (D1).
-    from kazma_core.documents.principal import MULTI_USER_REFUSAL, operator_for
+    # Chat acts as the asker, in the asker's space, like the Web page and the
+    # agent (Spaces S1-12, ``documents.principal``). The older multi-user
+    # mode, which does not enforce Spaces, refuses (D1).
+    from kazma_core.documents.principal import DocumentsRefused, surface_scope
 
-    actor = await asyncio.to_thread(operator_for, svc, tenant)
-    if actor is None:
-        await _send_model_reply(msg, store, manager, thread_id, f"⚠️ {MULTI_USER_REFUSAL}")
+    try:
+        acting = await asyncio.to_thread(surface_scope, svc)
+    except DocumentsRefused as exc:
+        await _send_model_reply(msg, store, manager, thread_id, f"⚠️ {exc}")
         return True
+    tenant, actor = acting.tenant_id, acting.actor_id
 
     if sub in ("", "help"):
         docs = svc.list_documents(tenant_id=tenant, actor_id=actor)

@@ -344,7 +344,12 @@ The collector is a crash-safe **mark/sweep** with the metadata database
   expired-tombstone content, terminally-failed (rejected/dead-letter) version
   content, orphan blob rows, orphan manifests, and aged-out audit rows.
 - **Never** deletes referenced blobs, current-version content, or artifacts
-  (content-addressed dedup preserved).
+  (content-addressed dedup preserved within a space).
+- Sweeps **folder by folder**: each space's files are in its own folder (the
+  root for the owner's space, `spaces/<id>/` for the others), and a folder
+  keeps only its own space's references. A tenant whose files an older
+  install kept in the root, not yet copied into its folder, still counts for
+  the root.
 - Honors a grace period, bounds deletions per run
   (`documents.gc.max_deletions_per_run`), and refuses to follow or delete
   through a symlink/junction or outside the store root.
@@ -903,7 +908,8 @@ requires (since 2026-10-13, the same rule as the backup; the CLI reads the
 configured backends, as it has no running service):
 
 - **SQLite catalog:** `documents.db` (when present) + the content-addressed
-  tree + manifests. `documents.db` has no embedded paths, so it needs no
+  tree + manifests, each under its space's folder in the bundle (read from
+  wherever the live store keeps it). `documents.db` has no embedded paths, so it needs no
   rewrite. Beside a Postgres queue the promotions are read from the queue, and
   the queue travels in `data/postgres.dump`.
 - **Postgres catalog:** the catalog travels in `data/postgres.dump`, taken

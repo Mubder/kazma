@@ -244,7 +244,8 @@ def test_an_unreadable_switch_keeps_the_last_answer(monkeypatch) -> None:
 #: product code paths. Each store's item of stage 1 (S1-08 onward) replaces
 #: its own with a bound handle; this number may only go down, and lowering it
 #: means lowering the baseline in the same change.
-FALLBACK_BASELINE = 299
+#: S1-12 (Documents) took the page's, chat's and the agent's three.
+FALLBACK_BASELINE = 296
 
 _FALLBACK_RE = re.compile(
     r"""(?:tenant\w*|tid)\b[^\n=]{0,40}\bor\s+["']default["']"""

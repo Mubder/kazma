@@ -263,7 +263,7 @@ def _setup_job_infra(
     repo = DocumentRepository(db_path)
     storage = ContentAddressedStorage(store_root)
     content = b"crash-recovery test content"
-    blob = storage.put_stream(iter([content]), kind="originals", max_bytes=1024*1024)
+    blob = storage.for_space("t1").put_stream(iter([content]), kind="originals", max_bytes=1024*1024)
     blob_rec = repo.register_blob(
         tenant_id="t1", sha256=blob.sha256, byte_size=blob.byte_size,
         storage_kind=blob.kind,
