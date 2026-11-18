@@ -501,7 +501,7 @@ def _memory_changes(sub: str, parts: list[str], tenant: str) -> str:
     if sub == "confirm":
         again = f" `/memory undo {out['update_ref']}` takes it back." if out.get("update_ref") else ""
         return f"✅ Changed: {what} is now {change['new_value']}.{again}"
-    return f"👍 Kept: {what} stays {change['old_value']}."
+    return f"👍 Nothing changed: {what} is still {change['old_value']}."
 
 
 def _cmd_cost(ctx: dict[str, Any]) -> str:

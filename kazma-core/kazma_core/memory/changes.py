@@ -98,7 +98,7 @@ def _new_id() -> str:
 def _row(conn: sqlite3.Connection, change_id: str, tenant_id: str) -> dict[str, Any] | None:
     found = conn.execute(
         f"SELECT {', '.join(_COLUMNS)} FROM memory_changes WHERE id = ? AND tenant_id = ?",  # nosec B608 - fixed columns
-        (change_id, tenant_id or "default"),
+        (change_id, tenant_id),
     ).fetchone()
     return dict(zip(_COLUMNS, found, strict=True)) if found is not None else None
 
@@ -114,7 +114,7 @@ def record_update(
     the pending change this replacement answers: marked ``confirmed``. Any
     other open pending change for the same fact is answered by it too:
     marked ``superseded``."""
-    tenant = tenant_id or "default"
+    tenant = tenant_id
     if confirms:
         _decide(conn, confirms[0], tenant, "confirmed", confirms[1], now)
     conn.execute(
@@ -152,7 +152,7 @@ def record_pending(
     if not spelled:
         return None
     new_value = spelled  # the user's own spelling, as an update keeps it
-    tenant = tenant_id or "default"
+    tenant = tenant_id
     stated = conn.execute(
         "SELECT subject, predicate, object FROM beliefs WHERE id = ? AND tenant_id = ?",
         (refused["belief_id"], tenant),
@@ -188,9 +188,9 @@ def list_changes(
     """The tenant's changes in *states*, newest first."""
     marks = ",".join("?" for _ in states) or "''"
     rows = conn.execute(
-        f"SELECT {', '.join(_COLUMNS)} FROM memory_changes WHERE tenant_id = ? AND state IN ({marks}) "  # nosec B608
+        f"SELECT {', '.join(_COLUMNS)} FROM memory_changes WHERE tenant_id = ? AND state IN ({marks}) "  # nosec B608 - fixed columns, placeholders only
         "ORDER BY created_at DESC LIMIT ?",
-        (tenant_id or "default", *states, max(1, int(limit))),
+        (tenant_id,*states, max(1, int(limit))),
     ).fetchall()
     return [dict(zip(_COLUMNS, r, strict=True)) for r in rows]
 
@@ -210,7 +210,7 @@ def confirm(conn: sqlite3.Connection, change_id: str, *, tenant_id: str, actor: 
     in the replacement's own transaction (``mutate_belief(confirms_change=)``)."""
     from kazma_core.memory.belief_mutation import mutate_belief
 
-    tenant = tenant_id or "default"
+    tenant = tenant_id
     row = _row(conn, change_id, tenant)
     if row is None:
         raise ChangeRefusedError("not_found")
@@ -236,7 +236,7 @@ def confirm(conn: sqlite3.Connection, change_id: str, *, tenant_id: str, actor: 
 
 def dismiss(conn: sqlite3.Connection, change_id: str, *, tenant_id: str, actor: str = "user") -> dict[str, Any]:
     """The user says the pending change is wrong: nothing changes."""
-    tenant = tenant_id or "default"
+    tenant = tenant_id
     row = _row(conn, change_id, tenant)
     if row is None:
         raise ChangeRefusedError("not_found")
@@ -257,7 +257,7 @@ def undo(
     from kazma_core.memory.belief_mutation import _mutation_lock, _write_audit
     from kazma_core.memory.hygiene import beliefs_write
 
-    tenant = tenant_id or "default"
+    tenant = tenant_id
     with _mutation_lock:
         row = _row(conn, change_id, tenant)
         if row is None:
@@ -306,7 +306,7 @@ def forget_facts(conn: sqlite3.Connection, fact_ids: list[str]) -> int:
         return 0
     marks = ",".join("?" for _ in fact_ids)
     return conn.execute(
-        f"DELETE FROM memory_changes WHERE old_belief_id IN ({marks}) OR new_belief_id IN ({marks})",  # nosec B608
+        f"DELETE FROM memory_changes WHERE old_belief_id IN ({marks}) OR new_belief_id IN ({marks})",  # nosec B608 - placeholders only
         (*fact_ids, *fact_ids),
     ).rowcount
 
@@ -318,7 +318,7 @@ def forget_mentioning(conn: sqlite3.Connection, *, tenant_id: str, pattern: str)
     return conn.execute(
         "DELETE FROM memory_changes WHERE tenant_id = ? AND (old_value LIKE ? ESCAPE '!' "
         "OR new_value LIKE ? ESCAPE '!')",
-        (tenant_id or "default", pattern, pattern),
+        (tenant_id,pattern, pattern),
     ).rowcount
 
 
@@ -328,8 +328,8 @@ def forget_turn(conn: sqlite3.Connection, *, tenant_id: str, keys: list[str], tu
         return 0
     marks = ",".join("?" for _ in keys)
     return conn.execute(
-        f"DELETE FROM memory_changes WHERE tenant_id = ? AND source_turn = ? AND source_session IN ({marks})",  # nosec B608
-        (tenant_id or "default", turn, *keys),
+        f"DELETE FROM memory_changes WHERE tenant_id = ? AND source_turn = ? AND source_session IN ({marks})",  # nosec B608 - placeholders only
+        (tenant_id,turn, *keys),
     ).rowcount
 
 
@@ -339,7 +339,7 @@ def forget_chat(conn: sqlite3.Connection, *, tenant_id: str | None, keys: list[s
     if not keys:
         return 0
     marks = ",".join("?" for _ in keys)
-    sql = f"DELETE FROM memory_changes WHERE source_session IN ({marks})"  # nosec B608
+    sql = f"DELETE FROM memory_changes WHERE source_session IN ({marks})"  # nosec B608 - placeholders only
     params: list[Any] = [*keys]
     if tenant_id is not None:
         sql += " AND tenant_id = ?"
@@ -398,12 +398,12 @@ def changes_note(*, tenant_id: str, thread_id: str) -> str:
     if not thread_id:
         return ""
     keys = [k for k in (chat_keys(thread_id) or [thread_id]) if k]
-    tenant = tenant_id or "default"
+    tenant = tenant_id
     marks = ",".join("?" for _ in keys)
     conn = _open()
     try:
         found = conn.execute(
-            f"SELECT {', '.join(_COLUMNS)} FROM memory_changes WHERE tenant_id = ? AND state = 'open' "  # nosec B608
+            f"SELECT {', '.join(_COLUMNS)} FROM memory_changes WHERE tenant_id = ? AND state = 'open' "  # nosec B608 - fixed columns, placeholders only
             f"AND noted_at IS NULL AND source_session IN ({marks}) ORDER BY created_at DESC LIMIT ?",
             (tenant, *keys, _NOTE_MAX),
         ).fetchall()
@@ -459,7 +459,7 @@ def resolve_ref(conn: sqlite3.Connection, ref: str, *, tenant_id: str) -> str:
         raise ChangeRefusedError("not_found")
     found = [r[0] for r in conn.execute(
         "SELECT id FROM memory_changes WHERE tenant_id = ? AND id LIKE ? ESCAPE '!' LIMIT 2",
-        (tenant_id or "default", like_literal(ref) + "%"),
+        (tenant_id,like_literal(ref) + "%"),
     ).fetchall()]
     if not found:
         raise ChangeRefusedError("not_found")
@@ -486,7 +486,7 @@ def decide_change(ref: str, decision: str, *, tenant_id: str, actor: str) -> dic
     ``replaced_since``, ``forgotten``, ``not_written``, ``wrong_kind``)."""
     if decision not in DECISIONS:
         raise ChangeRefusedError("unknown_decision")
-    tenant = tenant_id or "default"
+    tenant = tenant_id
     conn = _open()
     ops = None
     try:

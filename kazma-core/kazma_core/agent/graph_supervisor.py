@@ -451,8 +451,9 @@ async def supervisor_node(
 
     from kazma_core.memory.profile import about_block, about_for_turn
 
+    _turn_tenant = str(state.get("tenant_id") or "default")
     try:
-        _about = await asyncio.to_thread(about_for_turn, str(state.get("tenant_id") or "default"))
+        _about = await asyncio.to_thread(about_for_turn, _turn_tenant)
     except sqlite3.Error:
         logger.warning("[Supervisor] About me unreadable; this call goes without it", exc_info=True)
         _about = {"about": ""}
@@ -484,7 +485,7 @@ async def supervisor_node(
 
         try:
             _changes_note = await asyncio.to_thread(
-                changes_note, tenant_id=str(state.get("tenant_id") or "default"),
+                changes_note, tenant_id=_turn_tenant,
                 thread_id=str(state.get("thread_id") or ""),
             )
         except sqlite3.Error:
