@@ -11,7 +11,11 @@ Usage (with the install's own Python, in that install):
 It costs one model call per turn (the turns of
 ``kazma_core/memory/benchmark_data/extraction.json``). It writes nothing but
 ``--out``; name a checkout's fixture there, then score and lock in that
-checkout (``python scripts/memory_bench.py extraction``, then ``lock``).
+checkout (``python scripts/memory_bench.py extraction``, then
+``lock --new-recording "why"``: a new recording replaces the model pass's
+scores only on purpose). The file says what it is: the model, the provider,
+the date, the askings a turn and the hash of the system prompt it answered;
+a later change to that prompt makes the benchmark refuse it.
 ``--out`` is required so a run inside an install never writes into the
 install's own checkout. ``scripts/memory_bench.py`` stays env-free: it builds
 its benchmarks on temporary databases, and an install's ``.env`` would point

@@ -53,7 +53,13 @@ def test_on_sqlite_two_first_updates_keep_both(tmp_path) -> None:
             pytest.skip("the SQLite case: this run's settings store is Postgres")
         key = "test.atomic.first." + uuid.uuid4().hex
         _two_first_updates(stores, key)
-        assert sorted(stores[0].get(key)) == ["writer-0", "writer-1"]
+        # Read through a store of its own: each instance caches its own last
+        # write, and the other writer's update reaches a third reader only.
+        reader = ConfigStore(db_path=db, yaml_path=str(tmp_path / "none.yaml"))
+        try:
+            assert sorted(reader.get(key)) == ["writer-0", "writer-1"]
+        finally:
+            reader.close()
     finally:
         for store in stores:
             store.close()
@@ -91,7 +97,7 @@ def test_control_for_update_alone_locks_nothing_on_a_new_key(tmp_path) -> None:
     writer's item is lost."""
     import json
 
-    import psycopg
+    psycopg = pytest.importorskip("psycopg")
 
     _postgres_or_skip()
     ConfigStore(db_path=str(tmp_path / "unused-schema.db")).close()  # the table exists
