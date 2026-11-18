@@ -1905,7 +1905,7 @@ four injected were noise.
   a turn's `extras` are true, its `avoid` entries are never right and find
   nothing; the name is scored apart) and `quiet`; the old strict reading
   stays in each row as `recall`/`precision`, ungated. **A recording says
-  what it is** (`recording_identity`: its replies' hash, model, provider,
+  what it is** (`_recording_identity`: its replies' hash, model, provider,
   date, askings, the system prompt's hash) and a recording of another prompt
   is refused (`StaleRecordingError`, also at replay time); a message the
   recording holds no reply for is its own failure, never "the model is

@@ -384,7 +384,7 @@ def test_a_reply_the_recording_does_not_hold_is_its_own_failure(monkeypatch):
     # The benchmark's own idea of the message, which the precheck uses: here
     # it differs from what the extractor really sends.
     monkeypatch.setattr(benchmark, "_llm_blob", lambda text: f"User: {text}\nDate: 2026-11-18\nAssistant: ")
-    replies = {"model": "stand-in", "prompt_sha256": benchmark.extraction_prompt_sha256(),
+    replies = {"model": "stand-in", "prompt_sha256": benchmark._extraction_prompt_sha256(),
                "replies": {benchmark._text_key(benchmark._llm_blob(turn["user"])): reply}}
     with pytest.raises(benchmark.StaleRecordingError, match="no recorded reply for the message"):
         benchmark.run_extraction_benchmark({"version": 2, "turns": [turn]}, llm_replies=replies)
@@ -436,7 +436,7 @@ def test_a_changed_extraction_prompt_needs_a_new_recording(monkeypatch):
     with pytest.raises(benchmark.StaleRecordingError, match="prompt changed"):
         benchmark.run_extraction_benchmark(llm_replies=replies)
     # Fool the check before the run: the replay still sees the prompt it is sent.
-    monkeypatch.setattr(benchmark, "extraction_prompt_sha256", lambda: replies["prompt_sha256"])
+    monkeypatch.setattr(benchmark, "_extraction_prompt_sha256", lambda: replies["prompt_sha256"])
     with pytest.raises(benchmark.StaleRecordingError, match="another system prompt"):
         benchmark.run_extraction_benchmark(llm_replies=replies)
 
@@ -546,7 +546,7 @@ def test_the_models_pass_replays_recorded_replies():
         {"subject": "user", "predicate": "name", "predicate_type": "functional", "object": "ليلى"},
         {"subject": "user", "predicate": "lives_in", "predicate_type": "functional", "object": "دبي"}]},
         ensure_ascii=False)
-    replies = {"model": "stand-in", "prompt_sha256": benchmark.extraction_prompt_sha256(),
+    replies = {"model": "stand-in", "prompt_sha256": benchmark._extraction_prompt_sha256(),
                "replies": {benchmark._text_key(benchmark._llm_blob(turn["user"])): reply}}
     one = {"version": data["version"], "turns": [turn]}
     report = benchmark.run_extraction_benchmark(one, llm_replies=replies)

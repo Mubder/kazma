@@ -53,14 +53,10 @@ __all__ = [
     "RecordingEmbedder",
     "ReplayEmbedder",
     "StaleRecordingError",
-    "check_recording",
-    "extraction_prompt_sha256",
     "extraction_scores",
     "gated_scores",
     "load_dataset",
     "record_llm_extraction",
-    "recording_identity",
-    "replayed_extraction",
     "WRITES_PATH",
     "run_benchmark",
     "run_extraction_benchmark",
@@ -432,7 +428,7 @@ class ReplayEmbedder:
 # ``scripts/memory_extraction_record.py`` on the configured model). A
 # recording says what it is: the hash of the system prompt it answered, the
 # model, the provider, the date and the askings a turn
-# (:func:`recording_identity`). A recording of another prompt is refused
+# (:func:`_recording_identity`). A recording of another prompt is refused
 # (:class:`StaleRecordingError`), and a turn it does not hold is an error, never a
 # guess: either way, record again.
 
@@ -450,14 +446,14 @@ def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def extraction_prompt_sha256() -> str:
+def _extraction_prompt_sha256() -> str:
     """The hash of the system prompt the deep pass sends."""
     from kazma_core.memory.belief_extractor import _EXTRACT_SYSTEM
 
     return _sha256(_EXTRACT_SYSTEM)
 
 
-def recording_identity(llm_replies: dict[str, Any]) -> dict[str, Any]:
+def _recording_identity(llm_replies: dict[str, Any]) -> dict[str, Any]:
     """What a recording is. ``sha256`` covers its replies alone, so the
     description beside them can be completed without making it another
     recording."""
@@ -473,14 +469,14 @@ def recording_identity(llm_replies: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def check_recording(llm_replies: dict[str, Any]) -> None:
+def _check_recording(llm_replies: dict[str, Any]) -> None:
     """Refuse a recording that does not say which prompt it answered, or
     answered another one (benchmark audit F4: with the prompt replaced by
     "Keep nothing", every deep-pass score stayed the same)."""
     recorded = llm_replies.get("prompt_sha256")
     if not recorded:
         raise StaleRecordingError(f"the recording does not say which extraction prompt it answered: {RECORD_AGAIN}")
-    if recorded != extraction_prompt_sha256():
+    if recorded != _extraction_prompt_sha256():
         raise StaleRecordingError(f"the extraction prompt changed since the recording: {RECORD_AGAIN}")
 
 
@@ -645,7 +641,7 @@ class _ReplayClient:
         return self._replies[key]
 
 
-def replayed_extraction(turns: list[dict[str, Any]], llm_replies: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+def _replayed_extraction(turns: list[dict[str, Any]], llm_replies: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
     """What the deep pass keeps from each turn, from the recorded replies,
     read by the product's own parser and sanitizer."""
     import asyncio
@@ -653,7 +649,7 @@ def replayed_extraction(turns: list[dict[str, Any]], llm_replies: dict[str, Any]
 
     from kazma_core.memory.belief_extractor import _llm_extract, _sanitize_belief
 
-    check_recording(llm_replies)
+    _check_recording(llm_replies)
     missing = [t["id"] for t in turns if _text_key(_llm_blob(t["user"])) not in llm_replies["replies"]]
     if missing:
         # Checked here: the extractor reads any failed call as "the model is
@@ -695,8 +691,8 @@ def run_extraction_benchmark(
     if not llm_replies:
         report["llm"] = {"recorded": False}
         return report
-    report["llm"] = _score_extraction(turns, replayed_extraction(turns, llm_replies))
-    report["llm_recording"] = recording_identity(llm_replies)
+    report["llm"] = _score_extraction(turns, _replayed_extraction(turns, llm_replies))
+    report["llm_recording"] = _recording_identity(llm_replies)
     return report
 
 
@@ -841,7 +837,7 @@ def run_write_scenarios(
 
     data = dataset or json.loads(WRITES_PATH.read_text(encoding="utf-8"))
     if llm_replies:
-        check_recording(llm_replies)
+        _check_recording(llm_replies)
     recorded = (llm_replies or {}).get("replies") or {}
     client = _ScriptedClient()
     registry = type("_Registry", (), {"get_client": lambda self: client})()
@@ -862,7 +858,7 @@ def run_write_scenarios(
         "results": results,
     }
     if llm_replies:
-        report["llm_recording"] = recording_identity(llm_replies)
+        report["llm_recording"] = _recording_identity(llm_replies)
     return report
 
 
