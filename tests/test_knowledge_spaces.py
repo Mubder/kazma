@@ -10,7 +10,10 @@ matrix does not:
   each must fail;
 * **a library's id in a space**: the owner's ids never change; every other
   space's carry a mark no typed name can produce;
-* **search and the turn's injection never cross**;
+* **search and the turn's injection never cross**, a search by meaning
+  included: with the real Chroma and the install's own embedder
+  (``real_model``, ``KAZMA_TEST_REAL_MODEL=1``), each person's question
+  answered only by meaning finds their own space's page, never the other's;
 * **the quota per space**: one space at its share is refused, another goes on;
 * **work bound to no space** (a chat app's ``/kb`` before stage 3) is refused,
   and a crawl a restart cut off resumes in its library's space;
@@ -190,6 +193,81 @@ def test_control_with_no_space_filter_another_spaces_library_is_injected(matrix,
     _no_space_filter(monkeypatch)
     shown, mark = _injected(matrix).rsplit("|", 1)
     assert mark in shown
+
+
+# ── a search by meaning, with the real Chroma and embedder ───────────────
+
+_QUESTION = "how many attempts are made to resend callbacks"
+_ANSWER = {"a": "Webhooks retry delivery five times", "b": "Undelivered messages get tried again five times"}
+_UNRELATED = ["Install the command line tool", "Pick a colour theme for the dashboard",
+              "Export invoices as spreadsheet files", "Archive old projects"]
+
+
+def _searched_by_meaning(matrix: Matrix, tmp_path, monkeypatch) -> dict[str, str]:
+    """Two spaces, each with a page that answers :data:`_QUESTION` by meaning
+    and shares no word with it; the vectors made by the install's real
+    embedder in a real Chroma store; the product's ``knowledge_search`` tool
+    asked by each person, in their space. ``{who: answer}``."""
+    from kazma_core.memory import vector_store_global as vsg
+    from kazma_core.stores.knowledge import reset_knowledge_store
+    from kazma_core.stores.knowledge_index import get_knowledge_index, reset_knowledge_index
+
+    from tests._knowledge_space_cases import _call
+
+    pytest.importorskip("chromadb")
+    pytest.importorskip("sentence_transformers")
+    monkeypatch.setattr(scope, "_enforced", True)
+    monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("KAZMA_VECTOR_PATH", str(tmp_path / "vector_memory"))
+    monkeypatch.setattr(vsg, "_CLIENTS", {})
+    reset_knowledge_index()
+    reset_knowledge_store()
+    try:
+        for who in ("a", "b"):
+            with matrix.as_a() if who == "a" else matrix.as_b():
+                from kazma_core.stores.knowledge import get_knowledge_store
+
+                store = get_knowledge_store()
+                made = store.create_library(NAME, name="Docs")
+                url = f"https://{who}.example/page"
+                texts = [_ANSWER[who], *_UNRELATED]
+                assert store.publish_page(made["id"], url, [{
+                    "library_id": made["id"], "source_url": url, "chunk_index": i, "content": text,
+                    "content_hash": hashlib.sha256(text.encode()).hexdigest(),
+                    "document_title": "Docs", "section_header": "",
+                } for i, text in enumerate(texts)])
+                # Words alone find nothing: a hit can only come by meaning.
+                assert store.fts_search(_QUESTION, made["id"], limit=5) == []
+        made_vectors = get_knowledge_index().backfill_vectors(time_budget_s=600)
+        assert made_vectors["embedded"] == 2 * (1 + len(_UNRELATED)), made_vectors
+        assert "bge-m3" in vsg.embedder_identity(vsg.get_encoder()).lower(), "the install's own embedder"
+        answers = {}
+        for who in ("a", "b"):
+            with matrix.as_a() if who == "a" else matrix.as_b():
+                answers[who] = _call("knowledge_search", query=_QUESTION)
+        return answers
+    finally:
+        reset_knowledge_index()
+        reset_knowledge_store()
+
+
+@pytest.mark.real_model
+def test_a_search_by_meaning_never_crosses_spaces(matrix, tmp_path, monkeypatch) -> None:
+    """With the real Chroma and the real embedder: each person's search by
+    meaning finds their own space's answer and never the other's, though
+    both answer the question."""
+    answers = _searched_by_meaning(matrix, tmp_path, monkeypatch)
+    assert _ANSWER["a"] in answers["a"] and _ANSWER["b"] not in answers["a"], answers["a"]
+    assert _ANSWER["b"] in answers["b"] and _ANSWER["a"] not in answers["b"], answers["b"]
+
+
+@pytest.mark.real_model
+def test_control_with_no_space_filter_a_search_by_meaning_crosses(matrix, tmp_path, monkeypatch) -> None:
+    """Negative control: the store's space filter taken out, the same search
+    by meaning shows the other space's answer."""
+    _no_space_filter(monkeypatch)
+    answers = _searched_by_meaning(matrix, tmp_path, monkeypatch)
+    assert _ANSWER["b"] in answers["a"], answers["a"]
 
 
 # ── the quota per space ──────────────────────────────────────────────────
