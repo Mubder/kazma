@@ -166,12 +166,8 @@ PENDING_ROUTE_RULES: tuple[tuple[Pattern, str], ...] = (
     # (S1-09 -- memory, and a history brought in -- wrote its cases:
     # tests/_memory_space_cases.py.)
     # (S1-10, lessons: written. Its cases are in tests/_lesson_space_cases.py.)
-    # ── S1-12: documents (their cases: tests/_document_space_cases.py) ─────
-    # Indexing a document into a Knowledge library, taking it out and
-    # searching a library: written once Knowledge is per space (S1-13).
-    ("/api/documents/{document_id}/index$", "S1-12"),
-    ("/api/documents/{document_id}/unindex$", "S1-12"),
-    ("/api/documents/search$", "S1-12"),
+    # (S1-12, documents: written. Its cases are in
+    # tests/_document_space_cases.py.)
     # (S1-13, the Knowledge Library: written. Its cases are in
     # tests/_knowledge_space_cases.py.)
     # (S1-14, Scheduled: written. Its cases are in
@@ -222,9 +218,7 @@ _PENDING_TOOLS_BY_ITEM: dict[str, tuple[str, ...]] = {
     # (S1-08 -- drafts, the task ledger, the scratchpad, the chat itself --
     # wrote its cases: tests/_chat_space_cases.py.)
     # (S1-09 -- the memory tools -- wrote its cases: tests/_memory_space_cases.py.)
-    # S1-12's document tools have their cases (tests/_document_space_cases.py),
-    # but for the two that read and write Knowledge libraries.
-    "S1-12": ("document_search", "document_index"),
+    # (S1-12 -- the document tools -- wrote its cases: tests/_document_space_cases.py.)
     # (S1-14 -- the scheduling tools -- wrote its cases:
     # tests/_scheduled_space_cases.py.)
     # Swarm tasks, and the worker's own hand-off tool (never in the registry).

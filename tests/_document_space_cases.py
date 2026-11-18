@@ -14,9 +14,10 @@ are a stub that records which space and asker reached it and answers a coded
 failure, so a case sees an operation reach its engine for A's own document
 and never for B's.
 
-Not here, with why (``tests/_space_matrix.py`` keeps them pending): indexing
-a document into a Knowledge library, taking it out and searching a library
-read and write Knowledge libraries, which become per space with S1-13.
+A document in a Knowledge library (index, unindex, the library search, and
+their two tools) runs on a private Knowledge store with a library named
+"docs" in each space (``knowledge_world``): Knowledge is per space since
+S1-13, and a library of another space reads as none.
 """
 
 from __future__ import annotations
@@ -579,3 +580,155 @@ def tool_document_cancel(matrix: Matrix) -> None:
         job = w.service.job_status(tenant_id=Matrix.SPACE_A, job_id=mine.job_id, actor_id=matrix.account_a)
         assert job["state"] == "cancelled", job
 
+
+
+# ── a document in a Knowledge library (per space since S1-13) ───────────────
+
+
+@dataclass
+class KnowledgeWorld:
+    """:class:`World` with a private Knowledge store: a library named "docs"
+    in each space, and B's document indexed into B's, by B."""
+
+    w: World
+    store: Any
+    lib_a: str
+    lib_b: str
+
+    def texts(self, library_id: str) -> list[str]:
+        """The active chunks a library holds, whoever asks."""
+        return [row[0] for row in self.store._get_conn().execute(
+            "SELECT content FROM knowledge_chunks WHERE library_id = ? AND active = 1", (library_id,))]
+
+    def index_a(self) -> None:
+        """A's document into A's library, by A (the service, as a surface would)."""
+        with self.w.matrix.as_a():
+            self.w.service.index_document(tenant_id=Matrix.SPACE_A, actor_id=self.w.matrix.account_a,
+                                          document_id=self.w.a.document_id, library_id=self.lib_a)
+        assert any(self.w.mark_a in text for text in self.texts(self.lib_a))
+
+    def b_library_is_untouched(self) -> None:
+        texts = self.texts(self.lib_b)
+        assert any(self.w.mark_b in text for text in texts), "B's indexed document left B's library"
+        assert not any(self.w.mark_a in text for text in texts), "A's document reached B's library"
+
+
+@contextmanager
+def knowledge_world(matrix: Matrix) -> Iterator[KnowledgeWorld]:
+    from kazma_core.documents.knowledge import DocumentKnowledgeAdapter
+    from kazma_core.stores.knowledge import get_knowledge_store, reset_knowledge_store
+    from kazma_core.stores.knowledge_index import knowledge_index_for, reset_knowledge_index
+
+    from tests._no_models import keep_models_out
+
+    # The store's own folder: Chroma keeps its file open past the store's
+    # reset, so its removal may fail (the Knowledge cases' way too).
+    with world(matrix) as w, tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as data:
+        w.patch.setenv("KAZMA_DATA_DIR", data)
+        keep_models_out(w.patch)  # keyword search answers: no embedder
+        reset_knowledge_index()
+        reset_knowledge_store()
+        try:
+            store = get_knowledge_store()
+            adapter = DocumentKnowledgeAdapter(
+                repository=w.service.repository, knowledge_store=store,
+                knowledge_index=knowledge_index_for(store),
+                config=w.service._policy.initial, policy=w.service._policy,
+            )
+            w.patch.setattr(w.service, "knowledge_adapter", adapter)
+            w.patch.setattr(w.service.service, "knowledge_adapter", adapter)
+            with matrix.as_a():
+                lib_a = store.create_library("docs", name="docs of A")["id"]
+            with matrix.as_b():
+                lib_b = store.create_library("docs", name="docs of B")["id"]
+                w.service.index_document(tenant_id=Matrix.SPACE_B, actor_id=matrix.account_b,
+                                         document_id=w.b.document_id, library_id=lib_b)
+            made = KnowledgeWorld(w=w, store=store, lib_a=lib_a, lib_b=lib_b)
+            made.b_library_is_untouched()
+            yield made
+        finally:
+            reset_knowledge_index()
+            reset_knowledge_store()
+
+
+def _refused_or_empty(w: World, response: Any) -> None:
+    """Another space's document or library reads as none: refused, or
+    answered with nothing of B's."""
+    assert response.status_code in (200, 403, 404), (response.status_code, response.text[:300])
+    w.nothing_of_b(response)
+
+
+@case("POST /api/documents/{document_id}/index", ITEM)
+def documents_index(matrix: Matrix) -> None:
+    with knowledge_world(matrix) as k, k.w.as_a() as client:
+        w = k.w
+        other = client.post(f"/api/documents/{w.b.document_id}/index", json={"library_id": k.lib_a})
+        w.refused(other)
+        into_b = client.post(f"/api/documents/{w.a.document_id}/index", json={"library_id": k.lib_b})
+        assert into_b.status_code in (403, 404), (into_b.status_code, into_b.text[:300])
+        w.nothing_of_b(into_b)
+        k.b_library_is_untouched()
+        assert not any(w.mark_b in text for text in k.texts(k.lib_a)), "B's document reached A's library"
+        own = client.post(f"/api/documents/{w.a.document_id}/index", json={"library_id": k.lib_a})
+        assert own.status_code == 200, (own.status_code, own.text[:300])
+        assert any(w.mark_a in text for text in k.texts(k.lib_a))
+        k.b_library_is_untouched()
+        w.b_is_untouched()
+
+
+@case("POST /api/documents/{document_id}/unindex", ITEM)
+def documents_unindex(matrix: Matrix) -> None:
+    with knowledge_world(matrix) as k, k.w.as_a() as client:
+        w = k.w
+        for library_id in (k.lib_b, k.lib_a):
+            other = client.post(f"/api/documents/{w.b.document_id}/unindex", json={"library_id": library_id})
+            _refused_or_empty(w, other)
+            k.b_library_is_untouched()
+        k.index_a()
+        own = client.post(f"/api/documents/{w.a.document_id}/unindex", json={"library_id": k.lib_a})
+        assert own.status_code == 200, (own.status_code, own.text[:300])
+        assert not any(w.mark_a in text for text in k.texts(k.lib_a)), "A's own unindex did nothing"
+        w.b_is_untouched()
+
+
+@case("POST /api/documents/search", ITEM)
+def documents_search(matrix: Matrix) -> None:
+    with knowledge_world(matrix) as k, k.w.as_a() as client:
+        w = k.w
+        k.index_a()
+        other = client.post("/api/documents/search", json={"library_id": k.lib_b, "query": w.mark_b})
+        _refused_or_empty(w, other)
+        mine = client.post("/api/documents/search", json={"library_id": k.lib_a, "query": w.mark_b})
+        _refused_or_empty(w, mine)
+        own = client.post("/api/documents/search", json={"library_id": k.lib_a, "query": w.mark_a})
+        assert own.status_code == 200 and w.mark_a in own.text, (own.status_code, own.text[:300])
+
+
+@case("tool:document_index", ITEM)
+def tool_document_index(matrix: Matrix) -> None:
+    tools = _tools()
+    with knowledge_world(matrix) as k, matrix.as_a():
+        w = k.w
+        other = w.run(tools.document_index(w.b.document_id, k.lib_a))
+        into_b = w.run(tools.document_index(w.a.document_id, k.lib_b))
+        for reply in (other, into_b):
+            assert reply.startswith("Error"), reply
+            w.nothing_of_b(reply)
+        k.b_library_is_untouched()
+        assert not any(w.mark_b in text for text in k.texts(k.lib_a))
+        assert w.run(tools.document_index(w.a.document_id, k.lib_a)).startswith("Indexed")
+        assert any(w.mark_a in text for text in k.texts(k.lib_a))
+        w.b_is_untouched()
+
+
+@case("tool:document_search", ITEM)
+def tool_document_search(matrix: Matrix) -> None:
+    tools = _tools()
+    with knowledge_world(matrix) as k:
+        w = k.w
+        k.index_a()
+        with matrix.as_a():
+            for reply in (w.run(tools.document_search(k.lib_b, w.mark_b)),
+                          w.run(tools.document_search(k.lib_a, w.mark_b))):
+                w.nothing_of_b(reply)
+            assert w.mark_a in w.run(tools.document_search(k.lib_a, w.mark_a))

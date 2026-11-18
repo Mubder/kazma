@@ -501,6 +501,7 @@ async def test_enforced_platform_users_no_longer_refuse(service, tools, spaces):
 @pytest.mark.parametrize("target", [
     "GET /api/documents", "GET /api/documents/{document_id}/content",
     "tool:document_read", "tool:document_convert",
+    "POST /api/documents/search", "tool:document_index",
 ])
 def test_control_the_matrix_cases_catch_a_surface_that_reads_another_space(monkeypatch, target):
     """Negative control of ``tests/_document_space_cases.py``: a surface that

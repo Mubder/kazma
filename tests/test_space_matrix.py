@@ -64,7 +64,7 @@ PLAN = REPO / "docs" / "plans" / "SPACES_PLAN.md"
 #: item of stage 1 writes the cases of its part and takes them out of the
 #: pending tables; this number may only go down, and lowering it means
 #: lowering the baseline in the same change.
-PENDING_BASELINE = 325
+PENDING_BASELINE = 320
 
 
 # ── what exists ──────────────────────────────────────────────────────────
@@ -230,7 +230,7 @@ def test_pending_targets_only_go_down(routes, tools, live) -> None:
 def test_a_target_is_looked_up_one_way() -> None:
     # A target with a case is not pending (S1-12 wrote the documents' cases).
     assert pending_item("GET /api/documents/{document_id}") is None
-    assert pending_item("POST /api/documents/search") == "S1-12"
+    assert pending_item("POST /api/documents/search") is None
     assert pending_item_for_route("get", "/api/swarm/jobs") == "S1-15"
     assert pending_item("tool:check_swarm_task") == "S1-15"
     assert pending_item("tool:memory_search") is None  # its item wrote its case
