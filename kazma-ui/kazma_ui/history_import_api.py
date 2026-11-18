@@ -64,6 +64,10 @@ class _Job:
 #: import runs at a time for the install (it embeds every turn).
 _JOBS: dict[str, _Job] = {}
 _JOBS_LOCK = threading.Lock()
+#: Held across "is an import running anywhere?" and the claim of a space's
+#: job, so the answer cannot change between the two: each space has its own
+#: job and its own lock, and two spaces could both see "none" and both start.
+_START_LOCK = threading.Lock()
 #: token -> (file, when, summary, the space that uploaded it).
 _UPLOADS: dict[str, tuple[Path, float, dict[str, Any], str]] = {}
 _UPLOADS_LOCK = threading.Lock()
@@ -85,6 +89,23 @@ def _any_running() -> bool:
     with _JOBS_LOCK:
         jobs = list(_JOBS.values())
     return any(job.view()["state"] == "running" for job in jobs)
+
+
+def _claim(space: str, token: str, held: tuple[Path, float, dict[str, Any], str]) -> bool:
+    """Start *space*'s import of *held*, unless an import runs anywhere.
+    True when it was started. One lock for the check and the claim."""
+    with _START_LOCK:
+        if _any_running():
+            return False
+        job = _job(space)
+        with job.lock:
+            job.state, job.done, job.total = "running", 0, int(held[2].get("turns") or 0)
+            job.report, job.summary, job.error = None, held[2], ""
+            job.stop.clear()
+            job.thread = threading.Thread(
+                target=_run, args=(token, held[0], space, job), name="history-import", daemon=True)
+            job.thread.start()
+    return True
 
 
 def _folder() -> Path:
@@ -220,18 +241,8 @@ def create_history_import_router() -> APIRouter:
         # An upload is its space's: another space's token is no upload here.
         if held is None or held[3] != space:
             return _refused("unknown_upload", "choose the file again", 404)
-        if _any_running():
+        if not _claim(space, token, held):
             return _refused("busy", "an import is running", 409)
-        job = _job(space)
-        with job.lock:
-            if job.state == "running":
-                return _refused("busy", "an import is running", 409)
-            job.state, job.done, job.total = "running", 0, int(held[2].get("turns") or 0)
-            job.report, job.summary, job.error = None, held[2], ""
-            job.stop.clear()
-            job.thread = threading.Thread(
-                target=_run, args=(token, held[0], space, job), name="history-import", daemon=True)
-            job.thread.start()
         return JSONResponse({"ok": True, "state": "running"})
 
     @router.get("/status")

@@ -99,13 +99,21 @@ def _id_in_tenant(conn: Any, ids: tuple[str, ...], tenant_id: str) -> tuple[str 
     """``(id, held)`` for a turn about to be written for *tenant_id*: the id
     it is already stored under (``held`` True), else the first of *ids* no
     other tenant holds (``held`` False), else ``(None, False)``. Called
-    inside the writer's transaction."""
+    inside the writer's transaction.
+
+    An empty tenant is the owner's, on both sides of the comparison: a
+    writer that passed ``None`` or ``""`` never matched its own stored row,
+    and each re-write added a copy under the other id.
+    """
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    tenant = str(tenant_id or OWNER_SPACE_ID)
     free: str | None = None
     for candidate in ids:
         row = conn.execute("SELECT tenant_id FROM episodes WHERE id = ?", (candidate,)).fetchone()
         if row is None:
             free = free or candidate
-        elif str(row[0] or "default") == tenant_id:
+        elif str(row[0] or OWNER_SPACE_ID) == tenant:
             return candidate, True
     return free, False
 
@@ -290,6 +298,11 @@ class DualWriteMirror:
         """
         if not self._ensure():
             return "failed", None
+        from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+        # One spelling of the owner's tenant for the ids, the lookup, the
+        # ledger and the insert (an empty one wrote a NULL tenant row).
+        tenant_id = str(tenant_id or OWNER_SPACE_ID)
         row = episode_row(
             session_id=session_id,
             turn_number=turn_number,

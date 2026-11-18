@@ -22,6 +22,7 @@ the old behaviour as its negative control:
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from types import SimpleNamespace
 from typing import Any
@@ -279,22 +280,298 @@ def test_a_tenant_list_that_cannot_be_read_is_a_failure_not_the_owners_alone(mem
             worker_bootstrap.memory_tenants()
 
 
-def test_a_queued_task_runs_in_the_space_it_names(mem) -> None:
-    from kazma_core.memory.task_queue import _task_space
+def _bound_as(task_type: str, payload: dict[str, Any]) -> Any:
+    """Run *task_type* through the worker's own dispatch (``_process``) with a
+    stand-in handler, and return what the handler ran as: its scope, or the
+    refusal it met."""
+    import asyncio
+
+    from kazma_core.memory import task_queue
+
+    seen: dict[str, Any] = {}
+
+    async def handler(_payload: dict[str, Any]) -> bool:
+        try:
+            seen["scope"] = scope.require_scope()
+        except scope.NoSpaceBound as refused:
+            seen["refused"] = str(refused)
+        return True
+
+    async def run() -> None:
+        worker = task_queue._MemoryWorker()
+        worker._ack = lambda task, **_: None  # type: ignore[method-assign]
+        await worker._process("memory", {
+            "id": "t1", "task_type": task_type, "payload_json": json.dumps(payload)})
+
+    old = task_queue._HANDLERS.get(task_type)
+    task_queue._HANDLERS[task_type] = handler
+    try:
+        asyncio.run(run())
+    finally:
+        if old is None:
+            task_queue._HANDLERS.pop(task_type, None)
+        else:
+            task_queue._HANDLERS[task_type] = old
+    return seen
+
+
+def _registered_task_types() -> set[str]:
+    from kazma_core.memory import task_queue, worker_bootstrap
+
+    worker_bootstrap.register_v2_handlers()
+    worker_bootstrap.register_backup_export_handlers()
+    return set(task_queue._HANDLERS)
+
+
+def test_every_queued_task_type_says_how_it_finds_its_space() -> None:
+    """A task type a handler is registered for names its tenant, names a row
+    whose tenant is its space, or is the install's work: exactly one."""
+    from kazma_core.memory.task_queue import INSTALL_TASKS, ROW_NAMED_TASKS, TENANT_TASKS
+
+    tables = (TENANT_TASKS, set(ROW_NAMED_TASKS), INSTALL_TASKS)
+    registered = _registered_task_types()
+    unsaid = sorted(t for t in registered if sum(t in table for table in tables) != 1)
+    assert unsaid == [], unsaid
+    stale = sorted(t for table in tables for t in table if t not in registered)
+    assert stale == [], stale
+
+
+def _summary_of(mem, space: str) -> str:
+    sid = f"sum-{space}"
+    mem.db.execute(
+        "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, title, summary_text, "
+        "created_at, updated_at) VALUES (?, ?, '2026-W40', 0, 1, 't', 's', 1, 1)", (sid, space))
+    mem.db.commit()
+    return sid
+
+
+@pytest.mark.parametrize("task_type", sorted({
+    "macro_sleep", "entity_merge", "global_reconsolidation", "post_turn_memory",
+    "topic_summaries", "nightly_export", "micro_consolidation", "topic_summary_rebuild",
+}))
+def test_a_queued_memory_task_runs_whole_in_its_space_with_spaces_enforced(mem, task_type) -> None:
+    """Enforced, a queued task binds its space AND the account it acts for
+    (here the space's maker): a space with no asker is half a scope, and
+    ``require_scope`` refused every queued deep pass. A row-named task finds
+    its space from its row."""
+    from kazma_core.memory.task_queue import ROW_NAMED_TASKS
+
+    payload: dict[str, Any] = {"tenant_id": B}
+    if task_type == "micro_consolidation":
+        payload = {"episode_id": _turn(B, "chat-q", 1, "a turn of beta for the deep pass")}
+    elif task_type == "topic_summary_rebuild":
+        payload = {"summary_id": _summary_of(mem, B)}
+    assert (task_type in ROW_NAMED_TASKS) == ("tenant_id" not in payload)
+    seen = _bound_as(task_type, payload)
+    assert "refused" not in seen, seen
+    assert seen["scope"] == scope.Scope(B, OWNER_ACCOUNT_ID)
+
+
+@pytest.mark.parametrize("task_type", sorted({
+    "native_backup", "native_pg_backup", "native_pg_offsite", "restic_maintenance",
+    "connector_health", "universal_backup",
+}))
+def test_an_install_task_runs_as_the_installs_work(mem, task_type) -> None:
+    seen = _bound_as(task_type, {})
+    assert "scope" not in seen and "memory task" in seen["refused"]
+
+
+def test_a_task_for_a_tenant_no_space_holds_acts_for_the_admin(mem) -> None:
+    """A tenant of the retired modes is no space: its maintenance is the
+    admin's (R6), never no one's."""
+    assert _bound_as("macro_sleep", {"tenant_id": "telegram"})["scope"] == scope.Scope("telegram", OWNER_ACCOUNT_ID)
+
+
+def test_a_task_whose_row_is_gone_reads_no_space(mem) -> None:
+    seen = _bound_as("micro_consolidation", {"episode_id": "e_gone"})
+    assert "scope" not in seen and "names no space" in seen["refused"]
+
+
+def test_control_a_task_bound_by_its_tenant_alone_is_refused_its_space(mem, monkeypatch) -> None:
+    """The binding before the S1-09 review: the payload's tenant alone (no
+    asker), and nothing for a task that names a row."""
+    import contextlib
+
+    from kazma_core.memory import task_queue
+    from kazma_core.tenant_context import tenant_scope
+
+    @contextlib.contextmanager
+    def as_it_was(binding: Any) -> Any:
+        # The old rule read the payload; the binding carries its space.
+        if binding.space:
+            with tenant_scope(binding.space):
+                yield
+        else:
+            yield
+
+    def tenant_only(task_type: str, payload: Any) -> Any:
+        tenant = str((payload or {}).get("tenant_id") or "").strip()
+        return task_queue.TaskBinding(space=tenant or None)
+
+    monkeypatch.setattr(task_queue, "_task_space", as_it_was)
+    monkeypatch.setattr(task_queue, "_task_binding", tenant_only)
+    assert "refused" in _bound_as("macro_sleep", {"tenant_id": B})
+    episode = _turn(B, "chat-q", 1, "a turn of beta for the deep pass")
+    assert "refused" in _bound_as("micro_consolidation", {"episode_id": episode})
+
+
+def test_not_enforced_a_queued_task_binds_as_before(mem) -> None:
+    from kazma_core.memory.task_queue import TaskBinding, _task_space, _task_binding
     from kazma_core.tenant_context import get_current_tenant_id
 
-    with _task_space({"tenant_id": B}):
-        assert get_current_tenant_id() == B and scope.require_space_id() == B
-    with _task_space({"tenant_id": OWNER_SPACE_ID}):
-        assert scope.require_space_id() == OWNER_SPACE_ID
-    with _task_space({}):
-        assert get_current_tenant_id() is None
-    # Not enforced: the owner's own tasks run with nothing bound, as before.
     mem.mp.setattr(scope, "_enforced", False)
-    with _task_space({"tenant_id": OWNER_SPACE_ID}):
-        assert get_current_tenant_id() is None
-    with _task_space({"tenant_id": "telegram"}):
-        assert get_current_tenant_id() == "telegram"
+    assert _task_binding("macro_sleep", {"tenant_id": OWNER_SPACE_ID}) == TaskBinding()
+    assert _task_binding("micro_consolidation", {"episode_id": "e_x"}) == TaskBinding()
+    assert _task_binding("native_backup", {}) == TaskBinding()
+    with _task_space(_task_binding("macro_sleep", {"tenant_id": OWNER_SPACE_ID})):
+        assert get_current_tenant_id() is None and scope.current_scope() is None
+    with _task_space(_task_binding("macro_sleep", {"tenant_id": "telegram"})):
+        assert get_current_tenant_id() == "telegram" and scope.current_scope() is None
+
+
+# ── review: the deep pass names the id the writer chose ─────────────────
+
+
+_DEEP_TURN = [{"role": "user", "content": "Which crane did we rent for the Tagus site?"},
+              {"role": "assistant", "content": "The Liebherr LTM 1100, for three weeks."}]
+
+
+def _deep_pass_ids(mem, monkeypatch) -> list[str]:
+    from kazma_core.memory import task_queue
+
+    queued: list[str] = []
+
+    def record(task_type: str, payload: dict[str, Any], **_: Any) -> str:
+        if task_type == "micro_consolidation":
+            queued.append(str(payload.get("episode_id")))
+        return "t"
+
+    monkeypatch.setattr(task_queue, "enqueue_task", record)
+    return queued
+
+
+def test_the_deep_pass_is_queued_for_the_row_the_writer_chose(mem) -> None:
+    """Beta holds this turn under the id with no space (an older multi-user
+    build wrote it). The writer finds it there; the deep pass must name that
+    row, never the id a recomputation gives."""
+    from kazma_core.memory import consolidator
+    from kazma_core.memory.dual_write import episode_row
+
+    question = _DEEP_TURN[0]["content"]
+    spaced, plain = episode_row(session_id="chat-d", turn_number=1, user_text=question,
+                                assistant_text=_DEEP_TURN[1]["content"], tenant_id=B)["ids"]
+    written = _turn(B, "chat-d", 1, question, _DEEP_TURN[1]["content"])
+    assert written == spaced
+    mem.db.execute("UPDATE episodes SET id = ? WHERE id = ?", (plain, spaced))
+    mem.db.commit()
+    queued = _deep_pass_ids(mem, mem.mp)
+    assert consolidator._run_turn_memory(_DEEP_TURN, session_id="chat-d", turn=1, tenant_id=B) is True
+    assert queued == [plain]
+    assert mem.db.execute("SELECT tenant_id FROM episodes WHERE id = ?", (plain,)).fetchone()[0] == B
+    # The control: the id the code before the fix queued (recomputed from the
+    # turn) names no row at all.
+    from kazma_core.memory.dual_write import _episode_id
+
+    assert _episode_id("chat-d", 1, question, B) == spaced
+    assert mem.db.execute("SELECT 1 FROM episodes WHERE id = ?", (spaced,)).fetchone() is None
+
+
+def test_no_deep_pass_is_queued_for_a_turn_that_was_not_written(mem) -> None:
+    from kazma_core.memory import consolidator, forget
+
+    queued = _deep_pass_ids(mem, mem.mp)
+    mem.mp.setattr(forget, "chat_remembered", lambda key, **_: True)
+    mem.mp.setattr(forget, "refuses_write", lambda *a, **k: True)
+    consolidator._run_turn_memory(_DEEP_TURN, session_id="chat-kept-out", turn=1, tenant_id=B)
+    assert queued == []
+
+
+# ── review: an empty tenant is the owner's, on both sides ────────────────
+
+
+def test_an_empty_tenant_writes_the_owners_turn_once(mem) -> None:
+    from kazma_core.memory.dual_write import write_episode
+
+    mem.mp.setattr(scope, "_enforced", False)
+    question = "where are the spare keys of the van"
+    first = write_episode(session_id="chat-e", turn_number=1, user_text=question, tenant_id=OWNER_SPACE_ID)
+    for empty in (None, ""):
+        again = write_episode(session_id="chat-e", turn_number=1, user_text=question, tenant_id=empty)
+        assert again == first, empty
+    assert _tenants_of(mem, "SELECT tenant_id FROM episodes WHERE session_id = 'chat-e'") == [OWNER_SPACE_ID]
+
+
+def test_control_the_raw_tenant_comparison_misses_the_owners_row(mem) -> None:
+    """``_id_in_tenant`` as S1-09 first wrote it: an empty tenant never
+    matched the owner's stored row, so a re-write took the other id."""
+    from kazma_core.memory import dual_write
+
+    question = "where are the spare keys of the van"
+    eid = _turn(OWNER_SPACE_ID, "chat-e", 1, question)
+
+    def as_it_was(conn: Any, ids: tuple[str, ...], tenant_id: str) -> tuple[str | None, bool]:
+        free = None
+        for candidate in ids:
+            row = conn.execute("SELECT tenant_id FROM episodes WHERE id = ?", (candidate,)).fetchone()
+            if row is None:
+                free = free or candidate
+            elif str(row[0] or "default") == tenant_id:
+                return candidate, True
+        return free, False
+
+    ids = dual_write.episode_ids("chat-e", 1, question, None)
+    assert dual_write._id_in_tenant(mem.db, ids, None) == (eid, True)
+    assert as_it_was(mem.db, ids, None) == (ids[1], False)  # a second row under the other id
+
+
+# ── review: a recall that cannot hold its candidates fails, said ────────
+
+
+class _BrokenTenantCheck(sqlite3.Connection):
+    """A connection whose tenant check of recall's candidates fails."""
+
+    def execute(self, sql: str, *args: Any) -> Any:  # type: ignore[override]
+        if "FROM episodes WHERE tenant_id = ? AND id IN" in sql:
+            raise sqlite3.OperationalError("database disk image is malformed")
+        return super().execute(sql, *args)
+
+
+def _recall_with_a_broken_check(mem) -> Any:
+    from kazma_core.memory.recall import recall
+
+    question = "which supplier makes the pump housings"
+    _turn(A, "chat-a", 1, question, "Nordvalve, says alpha")
+    conn = sqlite3.connect(str(mem.tmp / "memory_state.db"), factory=_BrokenTenantCheck,
+                           check_same_thread=False)
+    try:
+        return recall(question, tenant_id=A, conn=conn)
+    finally:
+        conn.close()
+
+
+def test_a_recall_whose_tenant_check_fails_says_it_failed(mem) -> None:
+    from kazma_core.memory.recall import RECALL_FAILED
+
+    found = _recall_with_a_broken_check(mem)
+    assert found.degraded and found.degraded.startswith(RECALL_FAILED), found.degraded
+    assert not found.episodes
+
+
+def test_control_the_check_that_kept_nothing_read_as_nothing_found(mem) -> None:
+    """``_own_episodes`` as S1-09 first wrote it: a database error became no
+    candidates, and recall answered "nothing found" (not degraded)."""
+    from kazma_core.memory import recall as recall_mod
+
+    def as_it_was(conn: Any, tenant_id: str, hits: list[Any]) -> list[Any]:
+        try:
+            return recall_mod.__dict__["_own_episodes_now"](conn, tenant_id, hits)
+        except sqlite3.Error:
+            return []
+
+    mem.mp.setattr(recall_mod, "_own_episodes_now", recall_mod._own_episodes, raising=False)
+    mem.mp.setattr(recall_mod, "_own_episodes", as_it_was)
+    found = _recall_with_a_broken_check(mem)
+    assert found.degraded is None and not found.episodes
 
 
 _SWEEPS = (
@@ -313,26 +590,63 @@ def _seed_two_spaces(mem) -> None:
     mem.db.commit()
 
 
+def _sweep_problems(mem, sweep: str, caplog: Any) -> list[str]:
+    """What is wrong after *sweep* ran with Spaces enforced and nothing bound
+    on a store holding two spaces: it raised, it said something went wrong
+    (a sweep that swallowed "no space is bound" did nothing, and said so),
+    or a space lost memories."""
+    from kazma_core.memory import worker_bootstrap
+
+    _seed_two_spaces(mem)
+
+    def counts() -> dict[str, int]:
+        return {space: mem.db.execute(
+            "SELECT COUNT(*) FROM episodes WHERE tenant_id = ?", (space,)).fetchone()[0] for space in (A, B)}
+
+    before = counts()
+    assert scope.current_scope() is None and all(before.values())
+    caplog.clear()
+    problems: list[str] = []
+    with caplog.at_level("WARNING"):
+        try:
+            getattr(worker_bootstrap, sweep)()
+        except Exception as exc:  # noqa: BLE001 - reported as the sweep's problem
+            problems.append(f"raised {type(exc).__name__}: {exc}")
+    problems += [r.getMessage() for r in caplog.records if r.levelname in ("WARNING", "ERROR", "CRITICAL")]
+    after = counts()
+    problems += [f"{space} went from {before[space]} to {after[space]}" for space in (A, B)
+                 if after[space] < before[space]]
+    return problems
+
+
 @pytest.mark.parametrize("sweep", _SWEEPS)
 def test_a_memory_sweep_runs_with_spaces_enforced_and_nothing_bound(mem, sweep, caplog) -> None:
     """The worker has no request: a sweep that asks for "the" space fails
     every pass once Spaces is enforced. Each one runs here on a store that
     holds two spaces, and leaves both as they were or better."""
-    from kazma_core.memory import worker_bootstrap
+    assert _sweep_problems(mem, sweep, caplog) == [], sweep
 
-    _seed_two_spaces(mem)
-    before = {space: mem.db.execute(
-        "SELECT COUNT(*) FROM episodes WHERE tenant_id = ?", (space,)).fetchone()[0] for space in (A, B)}
-    assert scope.current_scope() is None
-    with caplog.at_level("WARNING"):
-        getattr(worker_bootstrap, sweep)()
-    # A sweep that swallowed "no space is bound" did nothing and said so in
-    # the log: that is a failure here too.
-    said = [r.getMessage() for r in caplog.records if r.levelname in ("WARNING", "ERROR", "CRITICAL")]
-    assert not said, (sweep, said)
-    after = {space: mem.db.execute(
-        "SELECT COUNT(*) FROM episodes WHERE tenant_id = ?", (space,)).fetchone()[0] for space in (A, B)}
-    assert all(after[space] >= before[space] >= 1 for space in (A, B)), (sweep, before, after)
+
+def test_control_a_sweep_that_asks_for_the_space_is_caught(mem, caplog) -> None:
+    """The shape the queued tasks had before the S1-09 review: work with no
+    request that asks for "the" space. In a sweep it raises (or, caught and
+    said, is a WARNING): either is a problem the check above sees."""
+    from kazma_core.memory import turn_reconcile, worker_bootstrap
+
+    def asks(*_a: Any, **_k: Any) -> Any:
+        return scope.require_scope()
+
+    mem.mp.setattr(turn_reconcile, "run_turn_reconcile_pass", asks)
+    assert any("NoSpaceBound" in p for p in _sweep_problems(mem, "_reconcile_memory_turns", caplog))
+
+    def asks_and_says(*_a: Any, **_k: Any) -> None:
+        try:
+            scope.require_scope()
+        except scope.NoSpaceBound:
+            worker_bootstrap.logger.warning("[memory_worker] reconcile skipped: no space is bound")
+
+    mem.mp.setattr(turn_reconcile, "run_turn_reconcile_pass", asks_and_says)
+    assert any("no space is bound" in p for p in _sweep_problems(mem, "_reconcile_memory_turns", caplog))
 
 
 def test_every_memory_sweep_of_the_worker_is_in_the_list_above() -> None:
@@ -640,3 +954,133 @@ def test_a_steps_space_is_the_bound_scopes_once_spaces_is_enforced(mem) -> None:
     mem.mp.setattr(scope, "_enforced", False)
     assert scope.space_of_state(state) == B  # as before Spaces: the state's own tenant
     assert scope.space_of_state({}) == OWNER_SPACE_ID
+
+
+# ── review: the cadences that fan out over the tenants say a failure ────
+
+
+def test_a_cadence_that_cannot_list_the_tenants_says_so_and_queues_nothing(mem, caplog) -> None:
+    import asyncio
+
+    from kazma_core.memory import task_queue, worker_bootstrap
+
+    queued: list[str] = []
+    mem.mp.setattr(task_queue, "enqueue_task", lambda task_type, payload, **_: queued.append(task_type) or "t")
+
+    def broken() -> list[str]:
+        raise sqlite3.OperationalError("database disk image is malformed")
+
+    mem.mp.setattr(worker_bootstrap, "_distinct_tenants", broken)
+    with caplog.at_level("WARNING", logger="kazma_core.memory.worker_bootstrap"):
+        ok = asyncio.run(worker_bootstrap._queue_per_tenant("reconsolidation", "global_reconsolidation", {}))
+    assert ok is False and queued == []
+    assert any("reconsolidation was not queued" in r.getMessage() and r.levelname == "WARNING"
+               for r in caplog.records)
+    mem.mp.setattr(worker_bootstrap, "_distinct_tenants", lambda: [OWNER_SPACE_ID, A])
+    assert asyncio.run(worker_bootstrap._queue_per_tenant("x", "global_reconsolidation", {"max_merges": 1}))
+    assert queued == ["global_reconsolidation", "global_reconsolidation"]
+
+
+def _tenant_fanouts(source: str) -> list[str]:
+    """The innermost functions of *source* that use ``_distinct_tenants``
+    (called, or handed to a thread)."""
+    import ast
+
+    tree = ast.parse(source)
+    found = []
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        inner = {id(n) for sub in ast.walk(fn) if sub is not fn
+                 and isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef)) for n in ast.walk(sub)}
+        if any(isinstance(n, ast.Name) and n.id == "_distinct_tenants" and id(n) not in inner
+               for n in ast.walk(fn)):
+            found.append(fn.name)
+    return found
+
+
+def test_every_cadence_fans_out_over_the_tenants_through_one_helper() -> None:
+    """Macro sleep, reconsolidation and the nightly export list the tenants
+    through ``_queue_per_tenant`` alone. Each had its own loop, and the
+    reconsolidation's said a failed listing at DEBUG."""
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1]
+              / "kazma-core/kazma_core/memory/worker_bootstrap.py").read_text(encoding="utf-8")
+    assert sorted(set(_tenant_fanouts(source))) == ["_queue_per_tenant"]
+    assert source.count("_queue_per_tenant(") >= 4  # its definition and the three cadences
+
+
+def test_the_fanout_gate_sees_a_cadence_with_its_own_loop() -> None:
+    planted = (
+        "async def _loop():\n"
+        "    for tenant in await asyncio.to_thread(_distinct_tenants):\n"
+        "        pass\n"
+    )
+    assert _tenant_fanouts(planted) == ["_loop"]
+
+
+# ── review: one history import at a time, across spaces ──────────────────
+
+
+def _race_two_starts(monkeypatch, claim: Any) -> list[bool]:
+    """Two spaces start an import at the same moment: both have asked "is an
+    import running?" before either claims its job."""
+    import threading
+    from pathlib import Path
+
+    from kazma_ui import history_import_api
+
+    monkeypatch.setattr(history_import_api, "_JOBS", {})
+    monkeypatch.setattr(history_import_api, "_run", lambda token, path, space, job: None)
+    gate = threading.Barrier(2)
+    real = history_import_api._any_running
+
+    def slow() -> bool:
+        answer = real()
+        try:
+            gate.wait(timeout=1.0)  # both asked before either claims
+        except threading.BrokenBarrierError:
+            pass
+        return answer
+
+    monkeypatch.setattr(history_import_api, "_any_running", slow)
+    results: dict[str, bool] = {}
+    held = (Path("upload"), 0.0, {"turns": 1}, "")
+
+    def start(space: str) -> None:
+        results[space] = claim(space, f"token-{space}", held)
+
+    threads = [threading.Thread(target=start, args=(space,)) for space in (A, B)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+    return sorted(results.values())
+
+
+def test_two_spaces_cannot_start_an_import_at_once(monkeypatch) -> None:
+    from kazma_ui import history_import_api
+
+    assert _race_two_starts(monkeypatch, history_import_api._claim) == [False, True]
+
+
+def test_control_the_check_outside_the_claim_lets_both_start(monkeypatch) -> None:
+    """The start as S1-09 first wrote it: "is an import running?" asked
+    outside the job's own lock."""
+    import threading
+
+    from kazma_ui import history_import_api
+
+    def as_it_was(space: str, token: str, held: Any) -> bool:
+        if history_import_api._any_running():
+            return False
+        job = history_import_api._job(space)
+        with job.lock:
+            if job.state == "running":
+                return False
+            job.state = "running"
+            job.thread = threading.Thread(target=lambda: None)
+        return True
+
+    assert _race_two_starts(monkeypatch, as_it_was) == [True, True]

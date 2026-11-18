@@ -12480,15 +12480,27 @@ product can turn it on, so an install with one account behaves as before.
     and nothing bound, nothing is written for the owner.
   - **The worker**: `worker_bootstrap.memory_tenants()` is every tenant that
     holds memory plus every space, the owner's first, and raises when it
-    cannot be read. `task_queue._task_space` runs a task bound to the tenant
-    its payload names. A memory sweep names the tenant of each row it
-    touches and asks for no scope.
+    cannot be read; the cadences that visit every tenant list them through
+    `worker_bootstrap._queue_per_tenant` alone (a failed listing is a
+    WARNING, queues nothing and writes no stamp). A queued task's binding is
+    `task_queue._task_binding`: not enforced, the payload's tenant when it is
+    not the owner's, as before; enforced, the task runs whole -- its space
+    (the payload's tenant, or its row's for `ROW_NAMED_TASKS`) and the
+    account it acts for -- or as the install's work (`INSTALL_TASKS`). A new
+    task type goes in exactly one of `TENANT_TASKS`, `ROW_NAMED_TASKS`,
+    `INSTALL_TASKS`. A memory sweep names the tenant of each row it touches
+    and asks for no scope. The deep pass is queued for the id the writer
+    returned, never a recomputed one.
   - **No row under the "no tenant" sentinel** (`schema_v2.NO_TENANT`,
     triggers on every table with a tenant column, both files). The operator
     trail records the space the request acted in (`request.scope["kazma_space"]`,
     left by the tenant middleware).
   - **Recall** holds its episode candidates to the asker's tenant
-    (`recall._own_episodes`) before anything reads one by id.
+    (`recall._own_episodes`) before anything reads one by id; a database
+    error there rises, and recall says it failed.
+  - **A statement that picks a memory row by id alone** names its tenant in
+    the same WHERE: `tests/test_memory_id_only_statements.py` counts the
+    ones left (a ratchet; S1-35 makes it a gate).
   - **Memory outside every space** (a tenant of the retired modes) is
     counted in memory health (`tenant_view.tenants_outside_spaces`), never
     merged. Memory's copies outside the data folder declare a space rule

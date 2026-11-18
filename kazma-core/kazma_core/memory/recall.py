@@ -1506,8 +1506,12 @@ def _own_episodes(conn: sqlite3.Connection, tenant_id: str, hits: list[RecallHit
     read an episode by id. The local channels filter by tenant; a remote
     vector index is asked for one tenant and trusted. One statement makes the
     id reads safe whoever answered. A caller that sees every tenant (the
-    owner's on an install that does not enforce Spaces) is not narrowed; a
-    database that cannot answer keeps nothing.
+    owner's on an install that does not enforce Spaces) is not narrowed.
+
+    A database that cannot answer **raises**: recall then fails and says so
+    (``_failed_recall``, "degraded"), never "nothing found" (AUD-026, M16).
+    Turning the error into no candidates told the asker nothing was
+    remembered.
     """
     from kazma_core.memory.tenant_view import narrowed_to
 
@@ -1515,17 +1519,13 @@ def _own_episodes(conn: sqlite3.Connection, tenant_id: str, hits: list[RecallHit
     ids = [h.id for h in hits if h.id]
     if tenant is None or not ids:
         return hits
-    try:
-        own = {
-            str(r[0])
-            for r in conn.execute(
-                f"SELECT id FROM episodes WHERE tenant_id = ? AND id IN ({','.join('?' for _ in ids)})",  # nosec B608
-                (tenant, *ids),
-            )
-        }
-    except sqlite3.Error:
-        logger.warning("[recall] candidates could not be held to their tenant; none is used", exc_info=True)
-        return []
+    own = {
+        str(r[0])
+        for r in conn.execute(
+            f"SELECT id FROM episodes WHERE tenant_id = ? AND id IN ({','.join('?' for _ in ids)})",  # nosec B608
+            (tenant, *ids),
+        )
+    }
     return [h for h in hits if h.id in own]
 
 
