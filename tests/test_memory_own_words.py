@@ -589,6 +589,36 @@ def test_a_greeting_a_heading_or_the_users_own_label_stays_theirs(message, fact)
     assert fact in _facts(message), (message, own_words(message))
 
 
+#: A request verb before a colon at a line's start: the user asking Kazma,
+#: never who spoke (the full suite of 4b04e1795 found "Save:" read as a name:
+#: tests/test_memory_current_facts.py).
+REQUESTS = [
+    ("Save: My Grok weekly next reset: August 10, 02:48 local time.", ("grok_next_reset", None)),
+    ("Save: I live in Lyon.", ("lives_in", "Lyon")),
+    ("save: I live in Lyon.", ("lives_in", "Lyon")),
+    ("Add: I work at Initech.", ("works_at", "Initech")),
+    ("Log: I'm allergic to peanuts.", ("allergic_to", "peanuts")),
+]
+
+
+def _holds(message: str, fact: tuple[str, str | None]) -> bool:
+    predicate, value = fact
+    return any(p == predicate and (value is None or o == value) for p, o in _facts(message))
+
+
+@pytest.mark.parametrize(("message", "fact"), REQUESTS)
+def test_a_request_verb_before_a_colon_is_the_user_asking(message, fact):
+    assert _holds(message, fact), (message, own_words(message))
+
+
+def test_control_without_the_request_verbs_save_reads_as_a_name(monkeypatch):
+    from kazma_core.memory import own_words as ow
+
+    monkeypatch.setattr(ow, "_REQUEST_VERBS_EN", frozenset())
+    lost = [message for message, fact in REQUESTS if not _holds(message, fact)]
+    assert lost == [message for message, _ in REQUESTS]
+
+
 def _old_names_a_speaker(label: str) -> bool:
     """The speaker rule before rule B: one to three words, no digit, an
     English name with a capital."""

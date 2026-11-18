@@ -310,6 +310,15 @@ _ROLES_EN = frozenset({
     "neighbour", "neighbor", "roommate", "flatmate", "boyfriend", "girlfriend", "fiance", "fiancee",
     "grandma", "grandpa", "grandmother", "grandfather", "niece", "nephew"})
 _OWNERS_EN = frozenset({"the", "my", "his", "her", "their", "our", "your"})
+#: A verb at a label's start is the user asking Kazma, never who spoke
+#: ("Save: My Grok weekly next reset: August 10", "Add: ...", "Log: ...").
+#: Never a verb people carry as a name ("Will", "Mark", "Bill").
+_REQUEST_VERBS_EN = frozenset({
+    "save", "keep", "store", "memorize", "memorise", "remember", "log", "record", "add", "track", "jot",
+    "set", "schedule", "book", "remind", "update", "change", "delete", "forget", "list", "show", "find",
+    "search", "send", "buy", "get", "make", "do", "fix", "correct", "edit", "write", "draft", "compose",
+    "translate", "summarize", "summarise", "check", "review", "cancel", "plan", "note", "tell", "ask",
+    "call", "email", "text", "reply", "answer", "help", "use", "try", "read", "open", "create"})
 #: Labels before a colon that are the user's own, or a form they fill in
 #: about themself: never a speaker ("Correct: my name is Ahmad", "Name: Sam",
 #: "News: I got the job"). Compared lower-cased (English) or folded (Arabic).
@@ -823,6 +832,8 @@ def _names_a_speaker(label: str) -> bool:
     if any(w in _OWN_LABELS or w in _HEADING_WORDS for w in lowered) or any(
             _fold(w) in (_OWN_LABELS | _POLITE_AR | _I_AR) for w in words):
         return False  # "كما قلت:": the user's own report
+    if lowered[0] in _REQUEST_VERBS_EN:
+        return False  # "Save:", "Add:": the user asking
     if _speaks_in_first_person(label) or _head_kind(label, colon=True) is not None:
         return False
     # Arabic has no capitals: a verb Kazma knows is no name ("صحح: اسمي أحمد"
