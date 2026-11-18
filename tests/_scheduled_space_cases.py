@@ -41,6 +41,9 @@ OWNER_CHAT = "telegram:owner-chat"
 _TEMPLATES = Path(__file__).resolve().parents[1] / "kazma-ui" / "kazma_ui" / "templates"
 _SAME_ORIGIN = {"X-Requested-With": "XMLHttpRequest"}
 _UNKNOWN = "cron-000000000000"
+#: A space the owner and person A are both members of (the S1-14 review: a
+#: member must not put their words into a job that fires as the owner).
+SHARED = "matrix-cron-shared"
 
 
 @dataclass
@@ -88,6 +91,41 @@ class World:
         self.client.portal.call(self.store.insert, job)
         return Job(id=job.job_id, mark=mark)
 
+    def owners_in_shared(self, mark: str, *, status: str = "pending") -> Job:
+        """A reminder the owner booked in :data:`SHARED`, a space person A is
+        a member of beside the owner: it fires as the owner."""
+        from kazma_core.cron.store import JobStatus, ScheduledJob
+        from kazma_core.spaces.scope import OWNER_ACCOUNT_ID
+
+        finished = status in ("done", "failed", "cancelled")
+        job = ScheduledJob(
+            job_id=f"cron-{secrets.token_hex(6)}", timing="2h", prompt=f"remind {mark}",
+            platform="telegram", thread_id=f"thread-{mark}", kind="reminder",
+            next_run=(datetime.now(UTC) + timedelta(hours=2)).isoformat(),
+            tenant_id=SHARED, delivery_target=OWNER_CHAT, status=JobStatus(status),
+            finished_at=datetime.now(UTC).isoformat() if finished else "",
+            creator=OWNER_ACCOUNT_ID,
+        )
+        self.client.portal.call(self.store.insert, job)
+        return Job(id=job.job_id, mark=mark)
+
+    def call_in_shared(self, method: str, path: str, **kwargs: Any) -> Any:
+        """Person A, asking in :data:`SHARED`."""
+        headers = {"x-matrix-person": "a", space_binding.SPACE_HEADER: SHARED, **_SAME_ORIGIN}
+        return self.client.request(method, path, headers=headers, **kwargs)
+
+    def tool_in_shared(self, name: str, *args: Any, **kwargs: Any) -> str:
+        """The product's scheduling tool *name*, run as person A in :data:`SHARED`."""
+        tools = importlib.import_module("kazma_skills.native.task_scheduler_cron.tools")
+        fn = getattr(tools, name)
+        account = self.matrix.account_a
+
+        async def as_member() -> str:
+            with scope.bind_scope(SHARED, account):
+                return str(await fn(*args, **kwargs))
+
+        return self.client.portal.call(as_member)
+
     def pair(self, word: str, **kwargs: Any) -> tuple[Job, Job]:
         marks = self.matrix.plant(word)
         return self.plant("a", marks.a, **kwargs), self.plant("b", marks.b, **kwargs)
@@ -131,10 +169,15 @@ def world(matrix: Matrix) -> Iterator[World]:
     middleware, on the real scheduler and a private store. The person a
     request is signed in as is named by a test header: sign-in is S1-03's."""
     import kazma_core.cron.scheduler as sm
+    from kazma_core.spaces import identity
+    from kazma_core.spaces.scope import OWNER_ACCOUNT_ID
     from kazma_ui.scheduled_api import create_scheduled_router
 
     people = {"a": matrix.principal_a, "b": matrix.principal_b}
     sent = importlib.import_module("kazma_core.tools.send_message")
+    if SHARED not in (identity.read_registry().get("spaces") or {}):
+        identity.create_space("Matrix shared", created_by=OWNER_ACCOUNT_ID, space_id=SHARED)
+        identity.add_member(SHARED, matrix.account_a)
     with pytest.MonkeyPatch.context() as patch, tempfile.TemporaryDirectory(
         ignore_cleanup_errors=True
     ) as tmp:
@@ -226,6 +269,21 @@ def scheduled_edit(w: World) -> None:
     done = w.call("a", "PUT", f"/api/scheduled/cron/{mine.id}", json={"prompt": "remind me of mine"})
     assert done.status_code == 200, done.text
     assert w.held(mine)["prompt"] == "remind me of mine" and w.held(theirs) == before
+    _member_cannot_reword_the_owners_job(w)
+
+
+def _member_cannot_reword_the_owners_job(w: World) -> None:
+    """Inside a shared space: A is a member and sees the owner's job, but its
+    words are the owner's (it fires as the owner, into the owner's chat). A
+    new prompt is refused; a new time is not."""
+    owners = w.owners_in_shared("shared-edit")
+    before = w.held(owners)
+    refused = w.call_in_shared("PUT", f"/api/scheduled/cron/{owners.id}", json={"prompt": "my words"})
+    assert refused.status_code == 403 and refused.json()["code"] == "not_yours", refused.text
+    assert w.held(owners) == before
+    timed = w.call_in_shared("PUT", f"/api/scheduled/cron/{owners.id}", json={"timing": "4h"})
+    assert timed.status_code == 200, timed.text
+    assert w.held(owners)["prompt"] == before["prompt"]
 
 
 @scheduled_case("DELETE /api/scheduled/cron/{job_id}")
@@ -248,6 +306,12 @@ def scheduled_restore(w: World) -> None:
     done = w.call("a", "POST", f"/api/scheduled/cron/{mine.id}/restore", json={"timing": "3h"})
     assert done.status_code == 200, done.text
     assert w.held(mine)["status"] == "pending" and w.held(theirs) == before
+    # Inside a shared space: the owner's finished job is not A's to run again.
+    owners = w.owners_in_shared("shared-restore", status="done")
+    before = w.held(owners)
+    refused = w.call_in_shared("POST", f"/api/scheduled/cron/{owners.id}/restore", json={"timing": "3h"})
+    assert refused.status_code == 403 and refused.json()["code"] == "not_yours", refused.text
+    assert w.held(owners) == before
 
 
 # ── bookings ─────────────────────────────────────────────────────────────
@@ -302,6 +366,12 @@ def tool_edit(w: World) -> None:
     assert w.held(theirs) == before
     w.tool("a", "edit_scheduled", mine.id, prompt="mine again")
     assert w.held(mine)["prompt"] == "mine again" and w.held(theirs) == before
+    # Inside a shared space: the owner's job is not A's to reword.
+    owners = w.owners_in_shared("shared-tooledit")
+    before = w.held(owners)
+    refused = w.tool_in_shared("edit_scheduled", owners.id, prompt="my words")
+    assert '"not_yours"' in refused, refused
+    assert w.held(owners) == before
 
 
 @scheduled_case("tool:cancel_scheduled")

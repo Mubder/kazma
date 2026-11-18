@@ -208,6 +208,7 @@ _CRON_STATUS_HTTP = {
     "rescheduled": 200, "cancelled": 200, "restored": 200,
     "edit_pending": 202, "cancel_pending": 202,
     "not_found": 404, "conflict": 409, "not_editable": 409, "not_cancellable": 409, "not_finished": 409,
+    "not_yours": 403, "identity_unavailable": 503,
     "unchanged": 400, "error": 400,
 }
 
@@ -220,6 +221,8 @@ _CRON_REASONS = {
     "not_finished": "The task still has work to do; edit it instead.",
     "not_found": "No such scheduled task.",
     "unchanged": "Provide a new time and/or prompt.",
+    "not_yours": "Only the person this task acts for can change what it says or run it again.",
+    "identity_unavailable": "Accounts cannot be read right now. Try again.",
 }
 
 

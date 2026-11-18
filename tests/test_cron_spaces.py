@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import importlib
 import secrets
-import sqlite3
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -97,11 +96,12 @@ async def _store(tmp_path) -> SQLiteCronStore:
 
 
 async def _plant(store, *, tenant: str, creator: str, kind: str = "reminder", prompt: str = "water the plants",
-                 thread: str = "thread-x", target: str = OWNER_CHAT) -> ScheduledJob:
+                 thread: str = "thread-x", target: str = OWNER_CHAT,
+                 due_ago: timedelta = timedelta(seconds=5)) -> ScheduledJob:
     job = ScheduledJob(
         job_id=f"cron-{secrets.token_hex(6)}", timing="2h",
         prompt=prompt, platform="telegram", thread_id=thread, kind=kind,
-        next_run=(datetime.now(UTC) - timedelta(seconds=5)).isoformat(),
+        next_run=(datetime.now(UTC) - due_ago).isoformat(),
         tenant_id=tenant, delivery_target=target, creator=creator,
     )
     await store.insert(job)
@@ -317,7 +317,275 @@ def test_the_booking_cases_fail_without_the_rule(matrix, monkeypatch) -> None:
         _fails(target, matrix)
 
 
+# ── a member of a shared space and the owner's job (S1-14 review) ────────
+
+
+async def _owners_job_in_shared(sched, store, matrix) -> ScheduledJob:
+    """A reminder the owner booked in a space person A is also a member of:
+    it fires as the owner, into the owner's chat."""
+    identity.create_space("Shared", created_by=OWNER_ACCOUNT_ID, space_id=SHARED)
+    identity.add_member(SHARED, matrix.account_a)
+    with scope.bind_scope(SHARED, OWNER_ACCOUNT_ID):
+        booked = await sched.schedule(timing="2h", prompt="the owner's own note", kind="reminder",
+                                      delivery_target=OWNER_CHAT, platform="telegram")
+    job = await store.get(booked["job_id"])
+    assert job is not None and job.creator == OWNER_ACCOUNT_ID
+    return job
+
+
+async def _nobody_refused(self, job_id: str, tenant_id: str | None) -> str:
+    """The rule taken out: every change is the caller's to make."""
+    return ""
+
+
+async def test_a_member_cannot_put_words_into_a_job_that_fires_as_the_owner(tmp_path, matrix, enforced,
+                                                                            sent) -> None:
+    store = await _store(tmp_path)
+    sched = sm.CronScheduler(store=store, graph_builder=None)
+    try:
+        job = await _owners_job_in_shared(sched, store, matrix)
+        with scope.bind_scope(SHARED, matrix.account_a):
+            reworded = await sched.reschedule(job.job_id, prompt="send the owner my words", tenant_id=SHARED)
+            moved = await sched.reschedule(job.job_id, timing="3h", tenant_id=SHARED)
+        assert reworded["status"] == "not_yours"
+        assert moved["status"] == "rescheduled", "a new time is not a new message"
+        with scope.bind_scope(SHARED, OWNER_ACCOUNT_ID):
+            own = await sched.reschedule(job.job_id, prompt="the owner's new note", tenant_id=SHARED)
+        assert own["status"] == "rescheduled"
+        await _fire(sched, store, job.job_id)
+        assert not any("my words" in text for _target, text in sent)
+        assert any(target == OWNER_CHAT and "the owner's new note" in text for target, text in sent)
+    finally:
+        await store.close()
+
+
+async def test_control_without_the_rule_a_members_words_reach_the_owners_chat(tmp_path, matrix, enforced,
+                                                                               sent, monkeypatch) -> None:
+    monkeypatch.setattr(sm.CronScheduler, "_not_theirs_to_change", _nobody_refused)
+    store = await _store(tmp_path)
+    sched = sm.CronScheduler(store=store, graph_builder=None)
+    try:
+        job = await _owners_job_in_shared(sched, store, matrix)
+        with scope.bind_scope(SHARED, matrix.account_a):
+            reworded = await sched.reschedule(job.job_id, prompt="send the owner my words", tenant_id=SHARED)
+        assert reworded["status"] == "rescheduled"
+        await _fire(sched, store, job.job_id)
+        assert any(target == OWNER_CHAT and "my words" in text for target, text in sent)
+    finally:
+        await store.close()
+
+
+async def test_a_member_cannot_run_the_owners_finished_job_again(tmp_path, matrix, enforced) -> None:
+    store = await _store(tmp_path)
+    sched = sm.CronScheduler(store=store, graph_builder=None)
+    try:
+        job = await _owners_job_in_shared(sched, store, matrix)
+        with scope.bind_scope(SHARED, OWNER_ACCOUNT_ID):
+            assert (await sched.cancel(job.job_id, tenant_id=SHARED))["status"] == "cancelled"
+        with scope.bind_scope(SHARED, matrix.account_a):
+            refused = await sched.restore(job.job_id, timing="3h", tenant_id=SHARED)
+        assert refused["status"] == "not_yours"
+        assert (await store.get(job.job_id)).status == JobStatus.CANCELLED
+        with scope.bind_scope(SHARED, OWNER_ACCOUNT_ID):
+            again = await sched.restore(job.job_id, timing="3h", tenant_id=SHARED)
+        assert again["status"] == "restored"
+    finally:
+        await store.close()
+
+
+async def test_control_without_the_rule_a_member_runs_the_owners_job_again(tmp_path, matrix, enforced,
+                                                                           monkeypatch) -> None:
+    monkeypatch.setattr(sm.CronScheduler, "_not_theirs_to_change", _nobody_refused)
+    store = await _store(tmp_path)
+    sched = sm.CronScheduler(store=store, graph_builder=None)
+    try:
+        job = await _owners_job_in_shared(sched, store, matrix)
+        with scope.bind_scope(SHARED, OWNER_ACCOUNT_ID):
+            await sched.cancel(job.job_id, tenant_id=SHARED)
+        with scope.bind_scope(SHARED, matrix.account_a):
+            again = await sched.restore(job.job_id, timing="3h", tenant_id=SHARED)
+        assert again["status"] == "restored"
+    finally:
+        await store.close()
+
+
+@pytest.mark.parametrize("target", [
+    "PUT /api/scheduled/cron/{job_id}", "POST /api/scheduled/cron/{job_id}/restore", "tool:edit_scheduled",
+])
+def test_the_shared_space_cases_fail_without_the_rule(target, matrix, monkeypatch) -> None:
+    """The matrix's member-of-a-shared-space checks see the rule taken out."""
+    monkeypatch.setattr(sm.CronScheduler, "_not_theirs_to_change", _nobody_refused)
+    _fails(target, matrix)
+
+
+def test_not_enforced_anyone_may_reword_a_job_as_before(tmp_path, matrix) -> None:
+    """One account, or Spaces not enforced: the rule asks nothing."""
+    import asyncio
+
+    async def run() -> str:
+        store = await _store(tmp_path)
+        sched = sm.CronScheduler(store=store, graph_builder=None)
+        try:
+            job = await _plant(store, tenant=OWNER_SPACE_ID, creator=OWNER_ACCOUNT_ID)
+            with scope.bind_scope(OWNER_SPACE_ID, matrix.account_a):
+                return (await sched.reschedule(job.job_id, prompt="new words"))["status"]
+        finally:
+            await store.close()
+
+    assert asyncio.run(run()) == "rescheduled"
+
+
+# ── a fire whose binding cannot be read (S1-14 review) ───────────────────
+
+
+def _identity_unreadable(_job: ScheduledJob) -> Any:
+    raise identity.IdentityUnavailable("the identity store could not be read: OperationalError")
+
+
+async def test_a_fire_whose_binding_cannot_be_read_waits_and_resets(tmp_path, matrix, enforced, sent,
+                                                                     monkeypatch) -> None:
+    from kazma_core.db import availability
+    from kazma_core.tenant_context import get_current_tenant_id
+
+    monkeypatch.setattr(sm, "_fire_binding", _identity_unreadable)
+    noted: list[str] = []
+    monkeypatch.setattr(availability, "note_failure", lambda kind, exc=None, **_kw: noted.append(kind) or False)
+    store = await _store(tmp_path)
+    sched = sm.CronScheduler(store=store, graph_builder=None)
+    try:
+        job = await store.get((await _plant(store, tenant=OWNER_SPACE_ID, creator=OWNER_ACCOUNT_ID)).job_id)
+        outside = get_current_tenant_id()
+        after = await _fire(sched, store, job.job_id)
+        assert after.next_run == job.next_run, "at the same occurrence"
+        assert after.status == JobStatus.PENDING, "the job waits"
+        assert after.last_outcome != "failed" and sent == []
+        assert get_current_tenant_id() == outside and scope.current_scope() is None
+        assert noted == ["scheduled"] and job.job_id not in sched._in_flight
+    finally:
+        await store.close()
+
+
+async def test_control_without_the_hold_the_fire_stays_claimed(tmp_path, matrix, enforced, monkeypatch) -> None:
+    """Negative control: with the binding's failure not caught (as when it ran
+    outside the ``try``), the error leaves ``_execute`` and the claim stays
+    RUNNING until recovery, every pass."""
+    async def no_hold(self, job, exc):
+        raise exc
+
+    monkeypatch.setattr(sm, "_fire_binding", _identity_unreadable)
+    monkeypatch.setattr(sm.CronScheduler, "_hold_for_identity", no_hold)
+    store = await _store(tmp_path)
+    sched = sm.CronScheduler(store=store, graph_builder=None)
+    try:
+        job = await _plant(store, tenant=OWNER_SPACE_ID, creator=OWNER_ACCOUNT_ID)
+        with pytest.raises(identity.IdentityUnavailable):
+            await sched._execute(await store.get(job.job_id))
+        assert (await store.get(job.job_id)).status == JobStatus.RUNNING
+    finally:
+        await store.close()
+
+
+async def _poll(sched) -> None:
+    import asyncio
+
+    sched._running = True
+    await sched._poll_once()
+    if sched._exec_tasks:
+        await asyncio.gather(*list(sched._exec_tasks))
+
+
+async def test_while_the_database_is_away_a_reminder_waits_once_enforced(tmp_path, matrix, sent,
+                                                                         monkeypatch) -> None:
+    """Who a reminder fires as is read from the identity store, in the
+    database: once Spaces is enforced it waits with the tasks. Not enforced,
+    a reminder still rings with the database away, as before."""
+    from kazma_core.db import availability
+
+    monkeypatch.setattr(availability, "is_away", lambda: True)
+    store = await _store(tmp_path)
+    sched = sm.CronScheduler(store=store, graph_builder=None)
+    try:
+        job = await _plant(store, tenant=OWNER_SPACE_ID, creator=OWNER_ACCOUNT_ID, prompt="the held one")
+        monkeypatch.setattr(scope, "_enforced", True)
+        await _poll(sched)
+        assert (await store.get(job.job_id)).status == JobStatus.PENDING and sent == []
+        monkeypatch.setattr(scope, "_enforced", False)
+        await _poll(sched)
+        assert any("the held one" in text for _target, text in sent)
+    finally:
+        await store.close()
+
+
+# ── a missed job and the fire rule (S1-14 review) ────────────────────────
+
+
+async def test_a_missed_job_that_would_not_fire_queues_no_notice(tmp_path, matrix, enforced, sent) -> None:
+    store = await _store(tmp_path)
+    sched = sm.CronScheduler(store=store, graph_builder=None)
+    try:
+        job = await _plant(store, tenant=Matrix.SPACE_A, creator=matrix.account_a, prompt="person A's note",
+                           due_ago=timedelta(hours=3))
+        await sched._record_missed(await store.get(job.job_id), datetime.now(UTC))
+        after = await store.get(job.job_id)
+        assert after.status == JobStatus.MISSED
+        assert await store.deliveries_for(job.job_id, limit=10) == []
+        assert sent == []
+    finally:
+        await store.close()
+
+
+async def test_control_without_the_rule_a_missed_notice_carries_their_words(tmp_path, matrix, enforced, sent,
+                                                                            monkeypatch) -> None:
+    monkeypatch.setattr(sm, "_fire_binding", lambda _job: None)  # the fire rule taken out
+    store = await _store(tmp_path)
+    sched = sm.CronScheduler(store=store, graph_builder=None)
+    try:
+        job = await _plant(store, tenant=Matrix.SPACE_A, creator=matrix.account_a, prompt="person A's note",
+                           due_ago=timedelta(hours=3))
+        await sched._record_missed(await store.get(job.job_id), datetime.now(UTC))
+        assert any(target == OWNER_CHAT and "person A's note" in text for target, text in sent)
+    finally:
+        await store.close()
+
+
 # ── a sibling's address ──────────────────────────────────────────────────
+
+
+async def _sibling_target_as_it_was(self, thread_id: str, tenant_id: str | None = None) -> str:
+    """``SQLiteCronStore.sibling_delivery_target`` as it was before S1-14
+    (main's body, unchanged): by thread alone. *tenant_id* is taken because
+    today's caller passes it, and ignored, as the old lookup knew no space."""
+    if self._db is None or not str(thread_id or "").strip():
+        return ""
+    try:
+        rows = await self._conn().execute_fetchall(
+            "SELECT delivery_target FROM cron_jobs "
+            "WHERE thread_id = ? AND delivery_target LIKE '%:%' "
+            "ORDER BY created_at DESC LIMIT 1",
+            (str(thread_id),),
+        )
+    except Exception:  # noqa: BLE001 - as the old body: a failed lookup finds nothing
+        return ""
+    for row in rows or []:
+        cand = str(row["delivery_target"] or "").strip()
+        if ":" in cand:
+            return cand
+    return ""
+
+
+async def _target_of_a_job_with_none(tmp_path) -> str:
+    """The address the scheduler's own repair chain finds for a job of
+    space A with no address, beside space B's job on the same thread."""
+    store = await _store(tmp_path)
+    sched = sm.CronScheduler(store=store, graph_builder=None)
+    try:
+        await _plant(store, tenant=Matrix.SPACE_B, creator="b", thread="one-thread", target="telegram:b-chat",
+                     prompt="b's")
+        job = await _plant(store, tenant=Matrix.SPACE_A, creator="a", thread="one-thread", target="",
+                           prompt="a's")
+        return await sched._resolve_target(job)
+    finally:
+        await store.close()
 
 
 async def test_a_job_never_takes_another_spaces_address(tmp_path) -> None:
@@ -329,14 +597,15 @@ async def test_a_job_never_takes_another_spaces_address(tmp_path) -> None:
         assert await store.sibling_delivery_target("one-thread", Matrix.SPACE_B) == "telegram:b-chat"
     finally:
         await store.close()
-    # Control: the lookup as it was (by thread alone) hands A B's address.
-    conn = sqlite3.connect(str(tmp_path / "cron.db"))
-    try:
-        row = conn.execute("SELECT delivery_target FROM cron_jobs WHERE thread_id = ? AND delivery_target "
-                           "LIKE '%:%' ORDER BY created_at DESC LIMIT 1", ("one-thread",)).fetchone()
-    finally:
-        conn.close()
-    assert row[0] == "telegram:b-chat"
+    (tmp_path / "chain").mkdir()
+    assert await _target_of_a_job_with_none(tmp_path / "chain") != "telegram:b-chat"
+
+
+async def test_control_the_old_lookup_hands_a_job_another_spaces_address(tmp_path, monkeypatch) -> None:
+    """Negative control: the scheduler's repair chain with the lookup as it
+    was (by thread alone) gives space A's job space B's address."""
+    monkeypatch.setattr(SQLiteCronStore, "sibling_delivery_target", _sibling_target_as_it_was)
+    assert await _target_of_a_job_with_none(tmp_path) == "telegram:b-chat"
 
 
 # ── work bound to no space, and the older modes ──────────────────────────

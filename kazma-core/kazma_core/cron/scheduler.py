@@ -781,6 +781,12 @@ class CronScheduler:
             timing = " ".join(timing.split())
         else:
             timing = None
+        if prompt is not None:
+            refused = await self._not_theirs_to_change(job_id, tenant_id)
+            if refused:
+                logger.info("[CronScheduler] edit %s -> %s actor=%s source=%s", job_id, refused,
+                            actor or "-", source or "-")
+                return {"status": refused, "job_id": job_id}
         carried: str | None = None
         if prompt is not None and (written_by_person or outside_text):
             carried = "" if written_by_person else _outside_text_json(outside_text)
@@ -798,6 +804,11 @@ class CronScheduler:
         """Run a finished job again, at *timing* (the explicit "Run again")."""
         from kazma_core.cron.timing import TimingError, resolve_timing
 
+        refused = await self._not_theirs_to_change(job_id, tenant_id)
+        if refused:
+            logger.info("[CronScheduler] restore %s -> %s actor=%s source=%s", job_id, refused,
+                        actor or "-", source or "-")
+            return {"status": refused, "job_id": job_id}
         zone, zone_name = await self._zone(zone, zone_name)
         try:
             resolved = resolve_timing(timing, zone=zone, zone_name=zone_name, now=self._clock.now())
@@ -809,6 +820,48 @@ class CronScheduler:
             series_start=next_run if resolved.recurring else "", tenant_id=tenant_id,
             expected_version=expected_version, actor=actor, source=source)
         return {"status": status, "job_id": job_id, "next_run": next_run if status == "restored" else ""}
+
+    async def _not_theirs_to_change(self, job_id: str, tenant_id: str | None) -> str:
+        """Why the caller may not change what *job_id* says or run it again,
+        or ``""`` (Spaces S1-14 review).
+
+        Once Spaces is enforced a job fires as the account it acts for (its
+        creator, ``_fire_binding``): a prompt edited, or a finished job run
+        again, by anyone else would put their words, or their wish, into
+        that person's chat as that person. ``not_yours`` then;
+        ``identity_unavailable`` when the identity store cannot say who the
+        job acts for. Not enforced, and for a job the caller cannot see (the
+        store answers ``not_found``), nothing is refused here.
+        """
+        from kazma_core.spaces.identity import IdentityUnavailable
+        from kazma_core.spaces.scope import bound_asker, spaces_enforced
+
+        if not spaces_enforced():
+            return ""
+        job = await self._store.get(job_id, tenant_id=tenant_id)
+        if job is None:
+            return ""
+        try:
+            binding = await asyncio.to_thread(_fire_binding, job)
+        except IdentityUnavailable:
+            logger.warning("[CronScheduler] who %s acts for cannot be read; the change is refused", job_id)
+            return "identity_unavailable"
+        acts_for = binding.asker if binding is not None else ""
+        caller = bound_asker() or ""
+        return "" if caller and caller == acts_for else "not_yours"
+
+    async def _hold_for_identity(self, job: ScheduledJob, exc: BaseException) -> None:
+        """A fire whose binding cannot be read gives its claim back: the job
+        is pending again at the same occurrence, as a task held while the
+        database is away (§44). A failure of the database itself is reported
+        to the availability watch, so the next passes hold before claiming."""
+        from kazma_core.db import availability
+
+        cause = exc.__cause__ if exc.__cause__ is not None else exc
+        availability.note_failure("scheduled", cause)
+        released = await self._store.release_fire(job.job_id, owner=self._owner, reason="identity_unavailable")
+        logger.warning("[CronScheduler] %s waits: who it fires as cannot be read (%s); %s", job.job_id,
+                       type(cause).__name__, "held for the next pass" if released else "the claim was gone")
 
     # ── the poll loop ────────────────────────────────────────────────────
 
@@ -845,6 +898,7 @@ class CronScheduler:
         settings = None
         held = 0
         from kazma_core.db import availability
+        from kazma_core.spaces.scope import spaces_enforced
 
         for job in await self._store.due_jobs(now=now, limit=max(50, self._max_concurrent * 10)):
             if not self._running:
@@ -858,13 +912,15 @@ class CronScheduler:
             if self._is_missed(job, now, settings.catchup_seconds):
                 await self._record_missed(job, now)
                 continue
-            if job.kind != "reminder" and availability.is_away():
+            if availability.is_away() and (job.kind != "reminder" or spaces_enforced()):
                 # A task fire runs an agent turn on the settings, the vault's
                 # keys and the model list: with the database away it only
                 # fails and spends one of its three runs. It waits for the
                 # database; past its catch-up window it is missed, and says
                 # so, as any late job. A reminder needs only cron.db and the
-                # chat apps, and still rings.
+                # chat apps, and still rings -- except once Spaces is
+                # enforced: who it fires as is read from the identity store,
+                # which is in the database (S1-14 review).
                 held += 1
                 continue
             # Every due job of the pass is started; the semaphore holds all
@@ -997,14 +1053,23 @@ class CronScheduler:
         # Once Spaces is enforced the fire runs as a whole scope: the job's
         # space and the account that booked it (S1-14). A job whose tenant is
         # no space of this install, or one that acts for anyone but the owner
-        # while the owner's are the only addresses, does not fire.
-        binding = await asyncio.to_thread(_fire_binding, job)
+        # while the owner's are the only addresses, does not fire. Inside the
+        # try: an identity store that cannot answer gives the claim back (the
+        # database-away wait), and the context is reset either way (S1-14
+        # review: outside it, the claim stayed RUNNING with nothing reset).
         scope_tokens = None
-        if binding is not None and not binding.refusal:
-            from kazma_core.spaces.scope import set_scope
-
-            scope_tokens = set_scope(binding.space, binding.asker)
         try:
+            from kazma_core.spaces.identity import IdentityUnavailable
+
+            try:
+                binding = await asyncio.to_thread(_fire_binding, job)
+            except IdentityUnavailable as exc:
+                await self._hold_for_identity(job, exc)
+                return
+            if binding is not None and not binding.refusal:
+                from kazma_core.spaces.scope import set_scope
+
+                scope_tokens = set_scope(binding.space, binding.asker)
             zone, zone_name = await asyncio.to_thread(resolve_cron_zone)
             current = await self._store.get(job.job_id) or job
             now = self._clock.now()
@@ -1168,6 +1233,21 @@ class CronScheduler:
         return ""
 
     async def _record_missed(self, job: ScheduledJob, now: datetime) -> None:
+        # The fire rule holds for the notice too (S1-14 review): a job that
+        # would not fire (no space, or acting for anyone but the owner) is
+        # recorded missed and queues nothing -- its notice carries its prompt.
+        from kazma_core.spaces.identity import IdentityUnavailable
+
+        try:
+            binding = await asyncio.to_thread(_fire_binding, job)
+        except IdentityUnavailable as exc:
+            from kazma_core.db import availability
+
+            availability.note_failure("scheduled", exc.__cause__ if exc.__cause__ is not None else exc)
+            logger.warning("[CronScheduler] %s missed, but who it acts for cannot be read; recorded next pass",
+                           job.job_id)
+            return
+        refused = binding.refusal if binding is not None else ""
         zone, zone_name = await asyncio.to_thread(resolve_cron_zone)
         due = _parse_dt(job.next_run)
         when = due.astimezone(zone).strftime("%Y-%m-%d %H:%M") + f" {zone_name}" if due else "earlier"
@@ -1176,9 +1256,10 @@ class CronScheduler:
         else:
             notice = (f"⏰ A scheduled task did not run: it was due {when}, while Kazma was offline.\n\n"
                       f"Task: {job.prompt.strip()[:500]}")
-        target = await self._resolve_target(job)
+        target = "" if refused else await self._resolve_target(job)
         res = await self._store.mark_missed(job.job_id, expected_next_run=str(job.next_run), notice=notice,
-                                            target=target, advance=self._advancer(zone), now=now)
+                                            target=target, advance=self._advancer(zone), now=now,
+                                            refused=refused)
         if res is None:
             return
         logger.warning("[cron] outcome job=%s outcome=missed status=%s (due %s)", job.job_id, res["status"], when)

@@ -877,12 +877,15 @@ class SQLiteCronStore:
     async def mark_missed(
         self, job_id: str, *, expected_next_run: str, notice: str, target: str,
         advance: Callable[[str, datetime, str], datetime | None], now: datetime | None = None,
+        refused: str = "",
     ) -> dict[str, Any] | None:
         """Record an occurrence missed while Kazma was down: one notice, never "done".
 
         A one-off ends ``missed``; a recurring job moves to its next occurrence
         after *now*. None when the job changed meanwhile (compare-and-swap on
-        status and ``next_run``).
+        status and ``next_run``). *refused*: the job would not fire (a key of
+        the scheduler's fire refusals, Spaces S1-14): it is recorded missed
+        and no notice is queued.
         """
         now = now or self.clock.now()
         async with self._tx() as db:
@@ -890,11 +893,14 @@ class SQLiteCronStore:
             if row is None or str(row["status"]) != "pending" or str(row["next_run"]) != expected_next_run:
                 return None
             due = str(row["next_run"])
-            cur = await db.execute(
-                "INSERT OR IGNORE INTO cron_deliveries (job_id, tenant_id, fire_key, purpose, target, body, "
-                "due_at, created_at) VALUES (?, ?, ?, 'missed', ?, ?, ?, ?)",
-                (job_id, row["tenant_id"], f"{job_id}:{due}:missed", target, notice[:4000], due, self.clock.time()))
-            delivery_id = cur.lastrowid if cur.rowcount else None
+            delivery_id = None
+            if not refused:
+                cur = await db.execute(
+                    "INSERT OR IGNORE INTO cron_deliveries (job_id, tenant_id, fire_key, purpose, target, body, "
+                    "due_at, created_at) VALUES (?, ?, ?, 'missed', ?, ?, ?, ?)",
+                    (job_id, row["tenant_id"], f"{job_id}:{due}:missed", target, notice[:4000], due,
+                     self.clock.time()))
+                delivery_id = cur.lastrowid if cur.rowcount else None
             nxt = advance(str(row["timing"]), now, str(row["series_start"] or ""))
             if nxt is not None:
                 await db.execute(
@@ -908,7 +914,8 @@ class SQLiteCronStore:
                     (norm_iso(now), f"Missed: due {due} while Kazma was not running.", job_id))
                 status = "missed"
             await self._event(db, job_id, "missed", source="scheduler",
-                              detail={"due": due, "delivery_id": delivery_id, "status": status})
+                              detail={"due": due, "delivery_id": delivery_id, "status": status,
+                                      **({"notice_withheld": refused} if refused else {})})
             return {"status": status, "delivery_id": delivery_id, "due": due, "next_run": norm_iso(nxt) if nxt else ""}
 
     # ── the delivery outbox ──────────────────────────────────────────────
