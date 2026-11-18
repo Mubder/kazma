@@ -2001,7 +2001,7 @@ four injected were noise.
   (sentences not in the benchmark, both ways; the pass switched off as the
   negative control).
 - **A fact about someone else is never the user's** (2026-11, the memory
-  framework audit's speaker rule, `memory/speaker.py`). `subjects` says, for
+  framework audit's speaker rule, `memory/clause_subject.py`). `subjects` says, for
   each word, who the words before it last named: the speaker ("أنا", "I",
   "we", "اسمي"), someone else (a relative or a companion in any form, a
   third-person pronoun where its clause begins, "اسمها", a reporting verb),
@@ -2012,7 +2012,7 @@ four injected were noise.
   counts in the user's own clause and only with no one else named before it.
   "أختي انتقلت إلى روتردام" was the user's home at the user's own trust, and
   so was "أخوي اسمه أحمد وساكن في دبي" (a clause joined by "و"). Gate:
-  `tests/test_memory_speaker.py` (every trigger declared once, a planted
+  `tests/test_memory_clause_subject.py` (every trigger declared once, a planted
   one as control; every unmarked trigger after a sentence about someone
   else; the old trigger list and the rule switched off as negative
   controls), and the write scenario `other-ar-sister-moved`.

@@ -107,7 +107,7 @@ def _facts(text: str) -> list[tuple[str, str]]:
 
 def _named_last(text: str) -> str | None:
     """Who the words before the last word of *text* last named."""
-    from kazma_core.memory.speaker import subjects
+    from kazma_core.memory.clause_subject import subjects
 
     return subjects(re.findall(r"[^\s.,!?،؛؟:;]+|[.,!?،؛؟:;]", text))[-1]
 
@@ -305,9 +305,9 @@ PAIRS: list[Pair] = [
          "Correct: my name is Ahmad.", "صحح: اسمي أحمد.", _facts, [("user", "name_is")]),
     Pair("own_words_reported_kept_out", (M + "memory/own_words.py",),
          "My sister said: I live in Lyon.", "قالت أختي: ساكنة في ليون.", _facts, []),
-    Pair("speaker_someone_else", (M + "memory/speaker.py",),
+    Pair("speaker_someone_else", (M + "memory/clause_subject.py",),
          "My sister is a nurse. Moved", "أختي ممرضة. انتقلت", _named_last, "other"),
-    Pair("speaker_the_user", (M + "memory/speaker.py",),
+    Pair("speaker_the_user", (M + "memory/clause_subject.py",),
          "My sister is in Jeddah and I moved", "أختي في جدة وأنا انتقلت", _named_last, "speaker"),
     Pair("remind_tomorrow_9", (M + "safety/commitment/relative_time.py",),
          "remind me tomorrow at 9am to call mom", "ذكرني بكرة الساعة 9 الصبح أتصل على أمي", _remind,

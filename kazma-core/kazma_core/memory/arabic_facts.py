@@ -22,7 +22,7 @@ what the English pass refuses by capitalisation, which Arabic does not have:
 * a trigger whose form does not say who its subject is -- a participle
   ("ساكن", "شغال") or a past verb whose ending is the same for I, you and she
   ("انتقلت") -- counts where the user's own clause begins, and only when no
-  one else is named before it (``memory.speaker``): "أخوي ساكن في دبي" is
+  one else is named before it (``memory.clause_subject``): "أخوي ساكن في دبي" is
   the brother, "أختي انتقلت إلى روتردام" the sister, and in "عندي أخت اسمها
   نورة وانتقلت إلى روتردام" it is Noura who moved;
 * a verb without its hamza ("اشتغل", "استخدم") is the imperative the user
@@ -43,7 +43,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from kazma_core.memory.speaker import OTHER, subjects
+from kazma_core.memory.clause_subject import OTHER, subjects
 
 __all__ = ["extract_arabic_facts"]
 
@@ -148,7 +148,7 @@ def _own_clause(words: list[_Word], i: int) -> bool:
 
 def _first_person(words: list[_Word], i: int, named: list[str | None]) -> bool:
     """Whether word *i*, a trigger, speaks of the user. *named* is who the
-    words before each word last named (``speaker.subjects``)."""
+    words before each word last named (``clause_subject.subjects``)."""
     w = words[i]
     if w.bare in _UNMARKED:
         return _own_clause(words, i) and named[i] != OTHER

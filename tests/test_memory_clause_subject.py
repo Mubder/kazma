@@ -9,7 +9,7 @@ step further: "أخوي اسمه أحمد وساكن في دبي" (my brother is
 lives in Dubai) gave the user a home in Dubai, because a participle joined by
 "و" counted as the user's own clause whoever the clause was about.
 
-``memory/speaker.py`` says who the words before a word last named -- the
+``memory/clause_subject.py`` says who the words before a word last named -- the
 speaker, someone else, or no one -- and ``arabic_facts`` keeps a trigger that
 does not mark its own person only when no one else is named before it. Every
 trigger is declared as marking its person or not, so a new one cannot skip
@@ -22,7 +22,7 @@ import pytest
 from kazma_core.memory import arabic_facts
 from kazma_core.memory.arabic_facts import extract_arabic_facts
 from kazma_core.memory.belief_extractor import extract_beliefs_heuristic
-from kazma_core.memory.speaker import OTHER, SPEAKER, subjects
+from kazma_core.memory.clause_subject import OTHER, SPEAKER, subjects
 
 
 def _facts(text: str) -> set[tuple[str, str]]:

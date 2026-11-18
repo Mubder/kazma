@@ -130,12 +130,12 @@ too short.
   question about something is still a memory.
 
 **Where.** `kazma_core/memory/remember_request.py`,
-`kazma_core/memory/arabic_facts.py`, `kazma_core/memory/speaker.py`,
+`kazma_core/memory/arabic_facts.py`, `kazma_core/memory/clause_subject.py`,
 `kazma_core/memory/episode_text.py` (`is_small_talk`).
 
 **Proof.** `tests/test_memory_arabic_facts.py` (sentences not in the
 benchmark, both ways, with the pass switched off as the negative control),
-`tests/test_memory_speaker.py` (every trigger after a sentence about someone
+`tests/test_memory_clause_subject.py` (every trigger after a sentence about someone
 else, with the old rule as the negative control),
 `tests/test_memory_remember_and_small_talk.py`.
 
