@@ -12894,7 +12894,7 @@ product can turn it on, so an install with one account behaves as before.
     person no longer a member, is refused (`no_space`, worded in both
     languages); one whose membership cannot be read (the database away) is
     the refusal `identity_unavailable`, never a 500 (S1-17 follow-up). X's
-    callback binds its own (part b); GitHub's follows in part c.
+    and GitHub's callbacks bind theirs (parts b and c).
   - **The practice mailbox and calendar are each space's** (S1-17
     follow-up): `sandbox_emails.db` keys a message by space and id
     (`backends/sandbox.py`; a file from before is rebuilt once, every
@@ -12951,6 +12951,48 @@ product can turn it on, so an install with one account behaves as before.
     their own X account and its rows; X and the X model stood in for, every
     call to X carrying the asker's keys), `tests/test_x_account_spaces.py`
     (each rule with its control; the source gate with a planted read).
+- **A GitHub sign-in belongs to a space (S1-17, part c, 2026-11-18;
+  decision N26).** Guards act only where Spaces is enforced; one account as
+  before.
+  - **The owner's space keeps today's sign-in**: its stored tokens, the
+    install's GitHub App (its installation token acts on the owner's
+    repositories) and `GITHUB_TOKEN` / `GITHUB_PAT` in the process
+    environment. Every other space keeps only its own OAuth token and PAT,
+    under `tenant.<space>.connectors.github.*`
+    (`github_client.github_key` -> `connected_accounts.space_setting_key`),
+    and reads nothing else: `get_github_token` gives the App and the
+    environment (`connected_accounts.owners_environment`) to the owner's
+    space only. With nothing connected a space reads no token at all -- it
+    read the owner's environment, App, or a global vault row an older
+    install keeps.
+  - **A friend's push never acts as the owner**: `_git_token` takes the App
+    first in the owner's space only; the GitHub tools refuse before any
+    request in a space with no account (`_no_account_here`; the owner's
+    space as before). A token saved in another space never reaches the
+    process environment (`bind_github_token_to_process`, owner's only), the
+    GitHub App's settings are the owner's space's (`POST
+    /api/github/app/config` answers 409 `owners_space_only` elsewhere), and
+    the turn's note, the Skills marketplace search and the agent's skill
+    search read the environment's token for the owner's space only.
+  - **Sign in with GitHub finishes in the space it started in**: the
+    callback is open before sign-in, so with no binding it ran in the owner's
+    space and a member's account became the owner's sign-in; it binds the
+    attempt's space (`oauth_sign_in.attempt_scope`).
+  - **Disconnect deletes** (`clear_oauth_token`, `oauth_revoke`): it wrote
+    the keys empty, the settings store refuses to blank a stored secret, and
+    Disconnect cleared nothing (the bug X's Disconnect had; found on the
+    way). The bot identity's switch has a settings rule
+    (`git.bot_identity.`).
+  - Left: the repository the routes and tools act on is still the install's
+    active workspace (`resolve_repo`, S1-19 and S1-20); the commit author
+    (the bot's name and email) is the install's.
+  - Gates: `tests/_github_space_cases.py` (every GitHub route and the five
+    tools: A with nothing connected sends no token, the tools refuse; then A
+    connects its own and every request carries it alone; B and the owner
+    keep theirs -- 18 of 23 fail with the space rule taken out),
+    `tests/test_github_account_spaces.py` (each rule with its control; a
+    source gate on the environment and on the sign-in's keys, each with a
+    planted reader).
 
 ## UI Conventions (Web)
 

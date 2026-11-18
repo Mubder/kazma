@@ -5,11 +5,18 @@ Used by the ``github`` router (``/api/github/*``) and the
 ``git_github_manager`` native skill so they share one token-resolution
 path and one set of rate-limit/error handling.
 
-Token resolution order:
+Token resolution order, in the space the work is bound to:
     1. ``ConfigStore`` key ``connectors.github.oauth_token`` (OAuth flow)
     2. ``ConfigStore`` key ``connectors.github.token`` (legacy PAT)
-    3. ``$GITHUB_TOKEN`` environment variable
-    4. ``$GITHUB_PAT`` environment variable
+    3. The GitHub App's installation token
+    4. ``$GITHUB_TOKEN``, then ``$GITHUB_PAT``
+
+The GitHub sign-in belongs to a space (Spaces S1-17 part c, decision N26).
+The owner's space keeps today's keys, the install's GitHub App and the
+process environment; every other space keeps only its own OAuth token and
+PAT, under ``tenant.<space>.`` (``connected_accounts.space_setting_key``),
+and has none of the rest: until it connects its own account, git push and
+the GitHub tools refuse there. A friend's push never acts as the owner.
 """
 
 from __future__ import annotations
@@ -34,6 +41,8 @@ __all__ = [
     "exchange_code_for_token",
     "get_active_cwd",
     "get_github_token",
+    "github_key",
+    "in_the_owners_space",
     "get_oauth_client_id",
     "get_oauth_client_secret",
     "is_oauth_connected",
@@ -85,21 +94,45 @@ class GitHubError(Exception):
 # ── Token + repo resolution (shared helpers) ──────────────────────────
 
 
+def github_key(key: str) -> str:
+    """The settings key of the GitHub sign-in's *key* in the space this work
+    is bound to: *key* in the owner's space, ``tenant.<space>.<key>`` in any
+    other (Spaces S1-17 part c). ``NoSpaceBound`` with Spaces enforced and
+    none bound: no sign-in is read or written for no one."""
+    from kazma_core.spaces.connected_accounts import space_setting_key
+
+    return space_setting_key(key)
+
+
+def in_the_owners_space() -> bool:
+    """Whether this work is the owner's space's: the install's GitHub App and
+    the process environment's token are the owner's sign-in (N26)."""
+    from kazma_core.spaces.connected_accounts import connected_space
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    return connected_space() == OWNER_SPACE_ID
+
+
 def get_github_token() -> str:
-    """Return the configured GitHub token (OAuth → PAT → GitHub App → env). Empty if unset."""
+    """Return the GitHub token of the space this work is bound to (OAuth →
+    PAT → GitHub App → env; the App and the environment the owner's space's
+    only). Empty if unset."""
+    oauth_key, pat_key = github_key("connectors.github.oauth_token"), github_key("connectors.github.token")
     try:
         from kazma_core.config_store import get_config_store
 
         store = get_config_store()
         # OAuth token (from the OAuth flow) takes precedence.
-        oauth = store.get("connectors.github.oauth_token", "")
+        oauth = store.get(oauth_key, "")
         if oauth:
             return oauth
-        token = store.get("connectors.github.token", "")
+        token = store.get(pat_key, "")
         if token:
             return token
     except Exception:
         logger.debug("[github] ConfigStore token lookup failed", exc_info=True)
+    if not in_the_owners_space():
+        return ""
 
     # GitHub App installation token fallback
     try:
@@ -111,7 +144,9 @@ def get_github_token() -> str:
     except Exception:
         logger.debug("[github] GitHub App token lookup failed", exc_info=True)
 
-    return os.environ.get("GITHUB_TOKEN", "") or os.environ.get("GITHUB_PAT", "")
+    from kazma_core.spaces.connected_accounts import owners_environment
+
+    return owners_environment("GITHUB_TOKEN") or owners_environment("GITHUB_PAT")
 
 
 
@@ -447,43 +482,47 @@ async def exchange_code_for_token(code: str, redirect_uri: str) -> dict[str, Any
 
 
 def store_oauth_token(token_data: dict[str, Any]) -> None:
-    """Persist the OAuth access token to ConfigStore (never to .env)."""
+    """Persist the OAuth access token to ConfigStore (never to .env), in the
+    space this work is bound to."""
     access_token = token_data.get("access_token", "")
     if not access_token:
         return
+    rows = [
+        (github_key("connectors.github.oauth_token"), access_token, "connectors"),
+        (github_key("connectors.github.oauth_scope"), token_data.get("scope", ""), "connectors"),
+        (github_key("connectors.github.oauth_token_type"), token_data.get("token_type", ""), "connectors"),
+    ]
     try:
         from kazma_core.config_store import get_config_store
 
-        store = get_config_store()
-        store.batch_set([
-            ("connectors.github.oauth_token", access_token, "connectors"),
-            ("connectors.github.oauth_scope", token_data.get("scope", ""), "connectors"),
-            ("connectors.github.oauth_token_type", token_data.get("token_type", ""), "connectors"),
-        ])
+        get_config_store().batch_set(rows)
     except Exception:
         logger.exception("[github] failed to persist OAuth token")
 
 
 def clear_oauth_token() -> None:
-    """Remove the stored OAuth token (disconnect)."""
+    """Remove the stored OAuth token (disconnect) of the space this work is
+    bound to. Deleted, never written empty: the settings store refuses to
+    blank a stored secret, so the empty write left the token in place (the
+    bug X's Disconnect had, 2026-11-17)."""
+    keys = [github_key(key) for key in (
+        "connectors.github.oauth_token", "connectors.github.oauth_scope", "connectors.github.oauth_token_type")]
     try:
         from kazma_core.config_store import get_config_store
 
         store = get_config_store()
-        store.batch_set([
-            ("connectors.github.oauth_token", "", "connectors"),
-            ("connectors.github.oauth_scope", "", "connectors"),
-            ("connectors.github.oauth_token_type", "", "connectors"),
-        ])
+        for key in keys:
+            store.delete(key)
     except Exception:
         logger.exception("[github] failed to clear OAuth token")
 
 
 def is_oauth_connected() -> bool:
-    """True if an OAuth access token is stored in ConfigStore."""
+    """True if the space this work is bound to holds an OAuth access token."""
+    key = github_key("connectors.github.oauth_token")
     try:
         from kazma_core.config_store import get_config_store
 
-        return bool(get_config_store().get("connectors.github.oauth_token", ""))
+        return bool(get_config_store().get(key, ""))
     except Exception:
         return False

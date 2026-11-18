@@ -125,6 +125,11 @@ def _redact_token(text: str | None, secret: str | None) -> str:
     return body
 
 
+#: The answer of a route that sets what only the owner's space keeps: the
+#: GitHub App and the bot identity (Spaces S1-17 part c).
+_OWNERS_SPACE_ONLY = "owners_space_only"
+
+
 def bind_github_token_to_process(token: str) -> None:
     """Bind GITHUB_TOKEN for this process only.
 
@@ -149,30 +154,48 @@ async def save_token(body: TokenSaveRequest) -> JSONResponse:
 
     Nothing is written to ``.env``: a raw PAT on disk was audit B8. The binding
     is process-local and does not survive a restart; ConfigStore is the store
-    of record.
+    of record. The token is the space's (Spaces S1-17 part c): another space's
+    is kept under its own key, and only the owner's space binds the process
+    environment, which every space's work could read.
     """
+    from kazma_gateway.routers.github_client import in_the_owners_space, github_key
+
     token = body.token.strip()
     if not token:
         raise HTTPException(status_code=422, detail="Token must not be empty.")
 
     # Save to SQLite ConfigStore
+    key = github_key("connectors.github.token")
     try:
         from kazma_core.config_store import get_config_store
         await asyncio.to_thread(
-            get_config_store().set, "connectors.github.token", token, category="connectors",
+            get_config_store().set, key, token, category="connectors",
         )
     except Exception as exc:
         logger.error("[github/token] Failed to write to ConfigStore: %s", exc)
         raise HTTPException(status_code=500, detail="Failed to save token to database.") from exc
 
-    bind_github_token_to_process(token)
+    if in_the_owners_space():
+        bind_github_token_to_process(token)
 
     return JSONResponse({"status": "ok", "message": "GitHub token saved to the vault-backed ConfigStore."})
 
 
 @router.post("/app/config")
 async def save_app_config(body: AppConfigSaveRequest) -> JSONResponse:
-    """Save GitHub App credentials to ConfigStore."""
+    """Save GitHub App credentials to ConfigStore. The GitHub App is the
+    owner's space's (Spaces S1-17 part c, N26): its installation token acts on
+    the owner's repositories, so another space connects its own account with
+    a token or Sign in with GitHub instead."""
+    from kazma_gateway.routers.github_client import in_the_owners_space
+
+    if not await asyncio.to_thread(in_the_owners_space):
+        return JSONResponse(
+            {"ok": False, "code": _OWNERS_SPACE_ONLY,
+             "error": "The GitHub App belongs to the owner's own space. Connect this space's own "
+                      "GitHub account with a token or Sign in with GitHub."},
+            status_code=409,
+        )
     app_id = body.app_id.strip()
     app_inst = body.app_installation_id.strip()
     if not app_id or not app_inst:
@@ -599,7 +622,7 @@ async def oauth_callback(request: Request) -> RedirectResponse:
         store_oauth_token,
         GitHubError,
     )
-    from kazma_ui.oauth_sign_in import forget_binding, take_attempt
+    from kazma_ui.oauth_sign_in import attempt_scope, forget_binding, take_attempt
 
     code = request.query_params.get("code", "")
     state = request.query_params.get("state", "")
@@ -612,8 +635,11 @@ async def oauth_callback(request: Request) -> RedirectResponse:
         return forget_binding(response, request, state, attempt)  # type: ignore[return-value]
 
     # The attempt goes first, whatever GitHub answered: a state is good once.
+    # The sign-in finishes in the space it started in (Spaces S1-17 part c):
+    # GitHub's redirect names no space, and this route is open before sign-in.
     try:
         attempt = await take_attempt(request, state, providers=("github",))
+        in_its_space = await asyncio.to_thread(attempt_scope, attempt)
     except AttemptRefused as exc:
         # Never the state itself: the log is readable by the agent's log tool
         # (AUD-024). The reason says enough (another browser, used, expired).
@@ -640,7 +666,8 @@ async def oauth_callback(request: Request) -> RedirectResponse:
         logger.error("[github/oauth] unexpected error during token exchange (%s)", type(exc).__name__)
         return _answer("error", "exchange_failed", attempt)
 
-    await asyncio.to_thread(store_oauth_token, token_data)
+    with in_its_space:
+        await asyncio.to_thread(store_oauth_token, token_data)
     logger.info("[github/oauth] successfully connected (scope=%s)", token_data.get("scope", ""))
     return _answer("ok", "", attempt)
 
@@ -654,23 +681,32 @@ def oauth_setup(request: Request) -> Any:
 
 @router.post("/oauth/revoke")
 async def oauth_revoke() -> JSONResponse:
-    """Disconnect: clear all stored GitHub credentials (OAuth, PAT, App credentials)."""
-    from kazma_gateway.routers.github_client import clear_oauth_token
+    """Disconnect: clear the space's GitHub credentials (OAuth, PAT) and, in
+    the owner's space, the GitHub App's (Spaces S1-17 part c)."""
+    from kazma_gateway.routers.github_client import in_the_owners_space, clear_oauth_token, github_key
 
     await asyncio.to_thread(clear_oauth_token)
+    # Deleted, never written empty: the settings store refuses to blank a
+    # stored secret, and the empty batch left the token and the App's key in
+    # place (S1-17 part c; X's Disconnect had the same bug).
+    keys = [github_key("connectors.github.token")]
+    owners = await asyncio.to_thread(in_the_owners_space)
+    if owners:
+        keys += ["connectors.github.app_id", "connectors.github.app_installation_id",
+                 "connectors.github.app_slug", "connectors.github.app_private_key",
+                 "connectors.github.app_private_key_path"]
 
-    try:
+    def _clear() -> None:
         from kazma_core.config_store import get_config_store
 
-        await asyncio.to_thread(get_config_store().batch_set, [
-            ("connectors.github.token", "", "connectors"),
-            ("connectors.github.app_id", "", "connectors"),
-            ("connectors.github.app_installation_id", "", "connectors"),
-            ("connectors.github.app_slug", "", "connectors"),
-            ("connectors.github.app_private_key", "", "connectors"),
-            ("connectors.github.app_private_key_path", "", "connectors"),
-            ("git.bot_identity.enabled", "false", "git"),
-        ])
+        store = get_config_store()
+        for key in keys:
+            store.delete(key)
+        if owners:
+            store.set("git.bot_identity.enabled", "false", category="git")
+
+    try:
+        await asyncio.to_thread(_clear)
     except Exception:
         logger.exception("[github/oauth] failed to clear GitHub App credentials")
 

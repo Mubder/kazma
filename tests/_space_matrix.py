@@ -123,7 +123,7 @@ CASE_MODULES: tuple[str, ...] = (
     "tests._chat_space_cases", "tests._memory_space_cases", "tests._lesson_space_cases",
     "tests._knowledge_space_cases", "tests._scheduled_space_cases", "tests._swarm_space_cases",
     "tests._research_space_cases", "tests._mail_space_cases", "tests._x_space_cases",
-    "tests._document_space_cases",  # S1-12
+    "tests._github_space_cases", "tests._document_space_cases",  # S1-12
 )
 
 
@@ -196,9 +196,9 @@ PENDING_ROUTE_RULES: tuple[tuple[Pattern, str], ...] = (
     ("/ide$", "S1-20"),
     ("/api/ide", "S1-20"),
     # ── S1-17: connected accounts ─────────────────────────────────────────
-    # (Mail and calendar, then X: written. Their cases are in
-    # tests/_mail_space_cases.py and tests/_x_space_cases.py.)
-    ("/api/github", "S1-17"),
+    # (Mail and calendar, X, then GitHub: written. Their cases are in
+    # tests/_mail_space_cases.py, tests/_x_space_cases.py and
+    # tests/_github_space_cases.py; a clone is S1-20's, above.)
     # ── S1-21: approvals and running work ─────────────────────────────────
     ("/api/approve", "S1-21"),
     ("/api/pending-approvals", "S1-21"),
@@ -233,13 +233,9 @@ _PENDING_TOOLS_BY_ITEM: dict[str, tuple[str, ...]] = {
     # its cases: tests/_research_space_cases.py. The research files went to
     # S1-19, the space folder.)
     # Connected accounts: mail, calendar, X and GitHub.
-    # (S1-17's first part -- mail and calendar -- and its second -- X --
-    # wrote their cases: tests/_mail_space_cases.py, tests/_x_space_cases.py.
-    # GitHub is its third.)
-    "S1-17": (
-        "github_list_issues", "github_create_issue", "github_comment_issue",
-        "github_create_pr", "github_merge_pr",
-    ),
+    # (S1-17's three parts -- mail and calendar, X, GitHub -- wrote their
+    # cases: tests/_mail_space_cases.py, tests/_x_space_cases.py,
+    # tests/_github_space_cases.py.)
     "S1-18": ("vault_list", "vault_retrieve", "vault_store", "vault_delete"),
     # The space folder: every tool that takes a path or writes a file.
     "S1-19": (

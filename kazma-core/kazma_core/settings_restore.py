@@ -233,6 +233,8 @@ KEY_RULES: tuple[KeyRule, ...] = (
     KeyRule("cron.timezone", SETTING, "the reminders' time zone"),
     KeyRule("containers.engine", SETTING, "which container engine Kazma uses (its own, or "
             "Docker Desktop); a machine without that engine refuses it"),
+    KeyRule("git.bot_identity.", SETTING, "whether, and under which name, the agent's commits carry "
+            "Kazma's bot identity (the GitHub App sets it on, Disconnect off)"),
     KeyRule("guard.telegram.chat_id", SETTING, "the Telegram chat the guard pages when Kazma is "
             "down (Settings -> Alerts), and Kazma's direct alert fallback"),
     KeyRule("runs.runbooks", SETTING, "which automatic first steps the run supervisor may take "

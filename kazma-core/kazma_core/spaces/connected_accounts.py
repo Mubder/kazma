@@ -15,6 +15,12 @@ environment is the install's, so another space's environment values are kept
 in the vault too (``space:<id>:env.EMAIL_IMAP_HOST``) and the process
 environment is never read or written for it.
 
+The GitHub sign-in keeps its tokens in settings keys (vaulted by their name):
+the owner's space under today's keys, any other under ``tenant.<id>.``
+(:func:`space_setting_key`, the form X's settings take). What the process
+environment holds for a connected account (``GITHUB_TOKEN``) is the owner's
+sign-in, read for the owner's space only (:func:`owners_environment`).
+
 What an account's code reads and writes is the space the work is bound to
 (:func:`connected_space`): the owner's while Spaces is not enforced, as
 before; once it is, the bound space, and ``NoSpaceBound`` with none bound --
@@ -25,7 +31,10 @@ from __future__ import annotations
 
 from kazma_core.spaces.scope import OWNER_SPACE_ID
 
-__all__ = ["SPACE_SECRET_PREFIX", "connected_space", "env_secret_name", "space_secret_name"]
+__all__ = [
+    "SPACE_SECRET_PREFIX", "connected_space", "env_secret_name", "owners_environment", "space_secret_name",
+    "space_setting_key",
+]
 
 #: The prefix of a space's connected-account secrets (install-scoped in the
 #: vault, ``security.vault.INSTALL_SCOPED_SECRETS``).
@@ -51,6 +60,27 @@ def space_secret_name(name: str, space: str | None = None) -> str:
     if space == OWNER_SPACE_ID:
         return name
     return f"{SPACE_SECRET_PREFIX}{space}:{name}"
+
+
+def space_setting_key(key: str, space: str | None = None) -> str:
+    """The settings key of a connected account's setting *key* in *space*
+    (the bound one when None): *key* itself in the owner's space, else
+    ``tenant.<space>.<key>`` -- the form X's settings already take
+    (``x_api.ownership.x_config_key``). The GitHub sign-in keeps its tokens
+    this way (S1-17 part c)."""
+    space = connected_space() if space is None else space
+    return key if space == OWNER_SPACE_ID else f"tenant.{space}.{key}"
+
+
+def owners_environment(variable: str) -> str:
+    """The process environment's *variable*, for work of the owner's space
+    only: the environment is the install's, and what it holds for a
+    connected account (``GITHUB_TOKEN``) is the owner's -- another space
+    reads ``""``, never the owner's sign-in (N26). ``NoSpaceBound`` with
+    Spaces enforced and none bound."""
+    import os
+
+    return os.environ.get(variable, "") if connected_space() == OWNER_SPACE_ID else ""
 
 
 def env_secret_name(variable: str, space: str) -> str:

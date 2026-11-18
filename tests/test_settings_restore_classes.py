@@ -116,6 +116,13 @@ DYNAMIC_WRITES: dict[str, tuple[str, ...] | str] = {
         "the page's single save writes the key the page sends (a setting), "
         "through settings_validation"
     ),
+    # The GitHub sign-in's keys, in the space the work is bound to
+    # (github_client.github_key: the tenant prefix the rules ignore).
+    "kazma-gateway/kazma_gateway/routers/github_client.py::store_oauth_token": (
+        "connectors.github.oauth_token", "connectors.github.oauth_scope", "connectors.github.oauth_token_type"),
+    "kazma-gateway/kazma_gateway/routers/github_client.py::clear_oauth_token": (
+        "connectors.github.oauth_token", "connectors.github.oauth_scope", "connectors.github.oauth_token_type"),
+    "kazma-gateway/kazma_gateway/routers/github.py::_clear": ("connectors.github.", "git.bot_identity.enabled"),
     "kazma-ui/kazma_ui/x_api.py::x_disconnect": ("connectors.x.",),
     "kazma-ui/kazma_ui/x_api.py::x_save_credentials": ("connectors.x.",),
     "kazma-ui/kazma_ui/x_api.py::x_api_access_save": (
