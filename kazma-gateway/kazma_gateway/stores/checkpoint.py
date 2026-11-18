@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import re
 from collections import OrderedDict
@@ -52,6 +53,26 @@ _NEWEST_PER_THREAD_PG = """
     LIMIT %s
 """
 _NEWEST_PER_THREAD_SQLITE = _NEWEST_PER_THREAD_PG.replace("%s", "?")
+
+#: The same listing held to one space's threads, on a table that holds every
+#: space's (Spaces S1-08). The filter is part of the statement, before the
+#: limit: filtered afterwards, a space whose chats are older than the newest
+#: ``limit`` threads of the table got a short or an empty list. ``{held}`` is
+#: ``IN`` for a list of the space's own threads and ``NOT IN`` for a list of
+#: every other space's (the owner's space: ``spaces.threads.space_threads``).
+#: Postgres takes the ids as one array; SQLite as one JSON text.
+_NEWEST_OF_THREADS_PG = _NEWEST_PER_THREAD_PG.replace(
+    "WHERE checkpoint_ns = ''", "WHERE checkpoint_ns = '' AND {pg_held}"
+)
+_NEWEST_OF_THREADS_SQLITE = _NEWEST_PER_THREAD_SQLITE.replace(
+    "WHERE checkpoint_ns = ''", "WHERE checkpoint_ns = '' AND {sqlite_held}"
+)
+_HELD = {
+    True: {"pg_held": "thread_id = ANY(%s::text[])",
+           "sqlite_held": "thread_id IN (SELECT value FROM json_each(?))"},
+    False: {"pg_held": "NOT (thread_id = ANY(%s::text[]))",
+            "sqlite_held": "thread_id NOT IN (SELECT value FROM json_each(?))"},
+}
 
 __all__ = [
     "CheckpointManager",
@@ -293,14 +314,32 @@ class CheckpointManager(BaseCheckpointSaver):
         if saver is None:
             return
         # A listing over every thread of a shared table shows a bound space
-        # its own threads only.
+        # its own threads only. The space's threads are asked once.
         only = self._asked_space() if (named is None and self._filters_by_thread()) else None
-        async for item in saver.alist(config, filter=filter, before=before, limit=limit):
-            if only is not None:
-                listed = self._thread_of(getattr(item, "config", None))
-                if listed is None or await self._home(listed) != only:
-                    continue
+        if only is None:
+            async for item in saver.alist(config, filter=filter, before=before, limit=limit):
+                yield item
+            return
+        mine = await self._threads_of(only)
+        shown = 0
+        # The saver's own limit counts every space's rows: it is applied here,
+        # to the rows this space is shown.
+        async for item in saver.alist(config, filter=filter, before=before):
+            listed = self._thread_of(getattr(item, "config", None))
+            if listed is None or not mine(listed):
+                continue
             yield item
+            shown += 1
+            if limit is not None and shown >= limit:
+                return
+
+    @staticmethod
+    async def _threads_of(space_id: str) -> Any:
+        """A test "is this thread the space's?", from one read of the thread
+        record store (``spaces.threads.space_threads``), off the loop."""
+        own, ids = await asyncio.to_thread(_threads.space_threads, space_id)
+        held = frozenset(ids)
+        return (lambda thread_id: thread_id in held) if own else (lambda thread_id: thread_id not in held)
 
     def _filters_by_thread(self) -> bool:
         """True when one table holds several spaces' threads and Spaces is
@@ -345,7 +384,8 @@ class CheckpointManager(BaseCheckpointSaver):
             from kazma_core.spaces.scope import require_space_id
 
             only = require_space_id()
-            mine = [t for t in await self._thread_ids(saver) if t and await self._home(t) == only]
+            is_mine = await self._threads_of(only)
+            mine = [t for t in await self._thread_ids(saver) if t and is_mine(t)]
             for thread_id in mine:
                 await saver.adelete_thread(thread_id)
             return len(mine)
@@ -441,9 +481,12 @@ class CheckpointManager(BaseCheckpointSaver):
         # ── Postgres backend ──────────────────────────────────────────
         if "Postgres" in saver_type:
             if self._filters_by_thread() and (only := self._asked_space()) is not None:
-                # One table, several spaces: the bound space's threads only.
-                rows = await self._list_checkpoints_postgres(saver, limit * 5)
-                return [r for r in rows if await self._home(str(r.get("thread_id") or "")) == only][:limit]
+                # One table, several spaces: the bound space's threads only,
+                # chosen by the statement itself.
+                own, ids = await asyncio.to_thread(_threads.space_threads, only)
+                return await self._list_checkpoints_postgres(
+                    saver, limit, query=_NEWEST_OF_THREADS_PG.format(**_HELD[own]), threads=ids,
+                )
             return await self._list_checkpoints_postgres(saver, limit)
 
         # ── SQLite backend (default) ──────────────────────────────────
@@ -458,12 +501,14 @@ class CheckpointManager(BaseCheckpointSaver):
         # where each space has its file; kept so the rule is one rule).
         only = self._asked_space() if self._filters_by_thread() else None
         try:
-            cursor = await conn.execute(
-                _NEWEST_PER_THREAD_SQLITE, (limit * 5 if only is not None else limit,)
-            )
-            rows = await cursor.fetchall()
             if only is not None:
-                rows = [row for row in rows if await self._home(str(row[0])) == only][:limit]
+                own, ids = await asyncio.to_thread(_threads.space_threads, only)
+                cursor = await conn.execute(
+                    _NEWEST_OF_THREADS_SQLITE.format(**_HELD[own]), (json.dumps(ids), limit)
+                )
+            else:
+                cursor = await conn.execute(_NEWEST_PER_THREAD_SQLITE, (limit,))
+            rows = await cursor.fetchall()
             results: list[dict[str, Any]] = []
             for thread_id, checkpoint_id, steps in rows:
                 checkpoint: dict[str, Any] | None = None
@@ -485,7 +530,8 @@ class CheckpointManager(BaseCheckpointSaver):
             return []
 
     async def _list_checkpoints_postgres(
-        self, saver: Any, limit: int
+        self, saver: Any, limit: int, *, query: str = _NEWEST_PER_THREAD_PG,
+        threads: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Postgres variant of list_checkpoints using the AsyncConnectionPool.
 
@@ -499,7 +545,7 @@ class CheckpointManager(BaseCheckpointSaver):
         try:
             async with pool.connection() as conn:  # type: ignore[union-attr]
                 async with conn.cursor() as cur:  # type: ignore[union-attr]
-                    await cur.execute(_NEWEST_PER_THREAD_PG, (limit,))
+                    await cur.execute(query, (limit,) if threads is None else (threads, limit))
                     rows = await cur.fetchall()
 
                 results: list[dict[str, Any]] = []

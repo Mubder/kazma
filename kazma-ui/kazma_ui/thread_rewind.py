@@ -369,11 +369,31 @@ def _in_this_space(thread_id: str, new_thread_id: str | None = None) -> None:
     before anything is written under it (Spaces S1-08). Blocking: the thread
     record store."""
     from kazma_core.spaces import threads
+    from kazma_core.spaces.scope import NoSpaceBound
 
-    if threads.thread_refusal(thread_id):
+    try:
+        refused = threads.thread_refusal(thread_id)
+        if not refused and new_thread_id:
+            threads.record_new_thread(new_thread_id)
+    except (sqlite3.Error, OSError) as exc:
+        # The record store is where a chat's space is kept: a restore or a
+        # fork that cannot ask it, or cannot record the new chat, does not
+        # happen. Nothing was written yet.
+        logger.warning("[rewind] the space record of chat %s could not be read or written (%s); "
+                       "nothing was changed", str(thread_id)[:12], type(exc).__name__, exc_info=True)
+        raise RewindRefused("thread_record_unavailable",
+                            "Where this chat lives could not be read or recorded.",
+                            status=503) from exc
+    except NoSpaceBound as exc:
+        # Spaces is enforced and this request named no space (a chat app's
+        # /fork before its turns are bound to one): the new chat would
+        # belong to nobody.
+        logger.warning("[rewind] a fork of chat %s was refused: the request is bound to no space",
+                       str(thread_id)[:12])
+        raise RewindRefused("no_space", "This request is not tied to a space, so nothing was forked.",
+                            status=403) from exc
+    if refused:
         raise RewindRefused("not_found", "That chat was not found.", status=404)
-    if new_thread_id:
-        threads.record_new_thread(new_thread_id)
 
 
 def _save_fork_chat(session_id: str, title: str, messages: list[dict[str, Any]], tenant_id: str | None = None) -> None:

@@ -1180,9 +1180,14 @@ def apply_scratchpad_write(key: str, finding: str) -> str:
     try:
         from kazma_core.agent.artifacts import get_artifact_store
         from kazma_core.safety.hitl import get_current_tenant_id
+        from kazma_core.spaces.scope import spaces_enforced
 
+        # Once Spaces is enforced a note is filed in the space this step is
+        # bound to, as a draft is (the store asks the scope when no tenant is
+        # named), never under a tenant value an older checkpoint left in the
+        # context. Not enforced: the bound tenant, exactly as before.
         get_artifact_store().put_scratchpad(
-            get_current_tenant_id(), tid, key_s, val
+            None if spaces_enforced() else get_current_tenant_id(), tid, key_s, val
         )
     except Exception as exc:  # store down must not break the live buffer
         _store_err = f" (durable store write failed: {exc.__class__.__name__})"
