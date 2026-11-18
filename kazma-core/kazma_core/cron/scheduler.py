@@ -39,6 +39,7 @@ import sqlite3
 import uuid
 from collections.abc import AsyncIterator, Callable
 from contextvars import ContextVar as _ContextVar
+from dataclasses import dataclass
 from datetime import UTC, datetime, tzinfo
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -625,6 +626,18 @@ class CronScheduler:
             from kazma_core.tenant_isolation import require_tenant_id
 
             tenant_id = require_tenant_id()
+        from kazma_core.spaces.scope import bound_asker, spaces_enforced
+
+        # The person who booked it (Spaces S1-14), always stamped: once Spaces
+        # is enforced the job fires as them.
+        creator = bound_asker() or ""
+        if spaces_enforced():
+            who = creator or await asyncio.to_thread(_acting_account, tenant_id)
+            if who != _owner_account():
+                # Every address Kazma can send to before people link their own
+                # chat apps (S3-05) is the owner's: a job booked by anyone else
+                # would carry their words into the owner's chat.
+                raise CronLimitError(NO_OWN_ADDRESS, code="no_own_address")
         settings = await asyncio.to_thread(cron_settings)
         if await self._store.count_jobs(tenant_id=tenant_id) >= settings.max_jobs_per_tenant:
             raise CronLimitError(
@@ -655,6 +668,7 @@ class CronScheduler:
             updated_by=actor,
             source=source,
             outside_text=_outside_text_json(outside_text),
+            creator=creator,
         )
         await self._store.insert(job)
         logger.info(
@@ -980,12 +994,26 @@ class CronScheduler:
         )
 
         tenant_token = set_current_tenant_id(job.tenant_id or "default")
+        # Once Spaces is enforced the fire runs as a whole scope: the job's
+        # space and the account that booked it (S1-14). A job whose tenant is
+        # no space of this install, or one that acts for anyone but the owner
+        # while the owner's are the only addresses, does not fire.
+        binding = await asyncio.to_thread(_fire_binding, job)
+        scope_tokens = None
+        if binding is not None and not binding.refusal:
+            from kazma_core.spaces.scope import set_scope
+
+            scope_tokens = set_scope(binding.space, binding.asker)
         try:
             zone, zone_name = await asyncio.to_thread(resolve_cron_zone)
             current = await self._store.get(job.job_id) or job
             now = self._clock.now()
             due = _parse_dt(current.fire_due or current.next_run)
-            result = await self._produce(current, settings, zone, zone_name, due=due, now=now)
+            if binding is not None and binding.refusal:
+                result = FireResult(success=False, outcome=binding.refusal,
+                                    result_text=_FIRE_REFUSALS[binding.refusal])
+            else:
+                result = await self._produce(current, settings, zone, zone_name, due=due, now=now)
             result.target = await self._resolve_target(current)
             result.lateness_s = max(0.0, (now - due).total_seconds()) if due else 0.0
             advance = self._advancer(zone)
@@ -1002,6 +1030,10 @@ class CronScheduler:
             # A failed fire's alert committed with its outcome; raise it now.
             await self._drain_alerts()
         finally:
+            if scope_tokens is not None:
+                from kazma_core.spaces.scope import reset_scope
+
+                reset_scope(scope_tokens)
             reset_current_tenant_id(tenant_token)
             _cron_parent_ctx.reset(parent_token)
             self._in_flight.discard(job.job_id)
@@ -1113,7 +1145,7 @@ class CronScheduler:
             return target_id
         healed = ""
         try:
-            healed = await self._store.sibling_delivery_target(job.thread_id)
+            healed = await self._store.sibling_delivery_target(job.thread_id, job.tenant_id)
         except Exception:  # noqa: BLE001
             logger.warning("[CronScheduler] sibling target lookup failed for %s", job.job_id, exc_info=True)
         if _valid_target(healed):
@@ -1291,6 +1323,73 @@ def _parse_dt(value: Any) -> datetime | None:
     return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
+#: Why a booking is refused once Spaces is enforced (code ``no_own_address``).
+NO_OWN_ADDRESS = (
+    "Kazma can only send a scheduled message to the owner's chat app for now, "
+    "so only the owner can book one. Sending to your own chat app comes later."
+)
+
+#: Why a fire is refused once Spaces is enforced, by outcome.
+_FIRE_REFUSALS = {
+    "no_space": "Error: this job belongs to no space of this install, so it does not fire.",
+    "no_own_address": ("Error: this job acts for someone other than the owner, and the only "
+                       "addresses Kazma has are the owner's, so it does not fire."),
+}
+
+
+@dataclass(frozen=True)
+class _FireBinding:
+    """What a fire runs as once Spaces is enforced: the job's space and the
+    account it acts for, or why it does not fire (``refusal``, a key of
+    ``_FIRE_REFUSALS``)."""
+
+    space: str
+    asker: str
+    refusal: str = ""
+
+
+def _owner_account() -> str:
+    from kazma_core.spaces.scope import OWNER_ACCOUNT_ID
+
+    return OWNER_ACCOUNT_ID
+
+
+def _acting_account(space_id: str | None) -> str:
+    """``identity.acting_account``. Blocking (the identity store)."""
+    from kazma_core.spaces import identity
+
+    return identity.acting_account(str(space_id or ""))
+
+
+def _fire_binding(job: ScheduledJob) -> _FireBinding | None:
+    """How *job* fires (Spaces S1-14). Blocking (the identity store).
+
+    None while Spaces is not enforced: the job's tenant alone is bound, as
+    before. Enforced: the job's space, as the account that booked it -- or,
+    for a job booked with no person bound, the account Kazma's own work for
+    that space acts for (``identity.acting_account``). It does not fire
+    (``refusal``) when the job's tenant is no space of the install
+    (``no_space``), or when it acts for anyone but the owner
+    (``no_own_address``): until people link their own chat apps (S3-05)
+    every address a job can deliver to is the owner's.
+    """
+    from kazma_core.spaces import identity
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if not spaces_enforced():
+        return None
+    space = str(job.tenant_id or "")
+    spaces = identity.read_registry().get("spaces") or {}
+    if space not in spaces:
+        return _FireBinding(space="", asker="", refusal="no_space")
+    asker = str(job.creator or "")
+    if not asker or not identity.is_member(asker, space):
+        asker = identity.acting_account(space)
+    if asker != _owner_account():
+        return _FireBinding(space=space, asker=asker, refusal="no_own_address")
+    return _FireBinding(space=space, asker=asker)
+
+
 def _tenant_scope() -> tuple[bool, str | None]:
     """``(scoped, tenant)`` -- the one tenant rule of every Scheduled surface:
     reads and changes alike are the caller's tenant's in multi-user or
@@ -1298,7 +1397,12 @@ def _tenant_scope() -> tuple[bool, str | None]:
 
     Blocking (an RBAC read): async callers use ``asyncio.to_thread``.
     """
+    from kazma_core.spaces.scope import spaces_enforced
     from kazma_core.tenant_isolation import multi_user_or_production, require_tenant_id
+
+    if spaces_enforced():
+        # Every Scheduled read and change keeps to the caller's space (S1-14).
+        return True, require_tenant_id()
 
     try:
         scoped = multi_user_or_production()

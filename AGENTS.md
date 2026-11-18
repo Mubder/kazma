@@ -12564,6 +12564,27 @@ product can turn it on, so an install with one account behaves as before.
     install's file quota.
   - Gates: `tests/_knowledge_space_cases.py` (the matrix cases),
     `tests/test_knowledge_spaces.py` (each guard taken out as a control).
+- **Scheduled follows the space (S1-14, 2026-11-18).** Guards act only where
+  Spaces is enforced; the older multi-user mode keeps its refusal
+  (`cron.single_operator.scheduled_refusal`), and work bound to no space is
+  refused once enforced (`NO_SPACE_REFUSAL`).
+  - A job carries its space (`tenant_id`) and the account that booked it
+    (`ScheduledJob.creator`, always stamped). Every Scheduled read and change
+    keeps to the caller's space (`scheduler._tenant_scope`); another space's
+    job id answers as an unknown one.
+  - A fire runs as a whole scope (`scheduler._fire_binding`): the job's space
+    and its creator, else `identity.acting_account`. A job whose tenant is no
+    space of the install does not fire (`no_space`).
+  - **Only the owner's own jobs use the owner's address.** Until people link
+    their own chat apps (S3-05) every address a job can deliver to is the
+    owner's, so a booking by anyone else is refused
+    (`scheduler.NO_OWN_ADDRESS`, code `no_own_address`) and a job that would
+    act for anyone else does not fire. S3-05 lifts it; never lift it by
+    sending a member's job to the owner's chat.
+  - A job takes a sibling's address only within its tenant
+    (`sibling_delivery_target(thread_id, tenant_id)`).
+  - Gates: `tests/_scheduled_space_cases.py` (the matrix cases),
+    `tests/test_cron_spaces.py` (each guard taken out as a control).
 
 ## UI Conventions (Web)
 

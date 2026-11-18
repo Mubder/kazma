@@ -677,7 +677,7 @@ SPACE_RULES: dict[str, SpaceRule] = {
             "cron_events": ("detail",),
             "cron_alerts": ("title", "detail"),
         },
-        today="refuses"),
+        today="apart"),
     "swarm_tasks.db": SpaceRule(
         "row",
         why="the tenant is inside a task's metadata today, not a column",

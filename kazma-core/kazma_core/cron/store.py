@@ -155,6 +155,11 @@ class ScheduledJob:
     #: delegation_state``). The fired turn starts with it: the stored prompt
     #: is the booking model's words, never the user's. ``""``: none.
     outside_text: str = ""
+    #: The account that booked the job (Spaces S1-14), or ``""`` for a job
+    #: booked with no person bound (before Spaces, or Kazma's own). Once
+    #: Spaces is enforced the job fires as this account, in its space.
+    #: ``created_by`` stays the actor's label for the trail.
+    creator: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         """The job for a list, a tool result or the page.
@@ -242,6 +247,7 @@ _ADDED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("updated_by", "TEXT NOT NULL DEFAULT ''"),
     ("source", "TEXT NOT NULL DEFAULT ''"),
     ("outside_text", "TEXT NOT NULL DEFAULT ''"),
+    ("creator", "TEXT NOT NULL DEFAULT ''"),
 )
 
 _EXTRA_SCHEMA = (
@@ -498,7 +504,7 @@ class SQLiteCronStore:
             delivery_error=str(val("delivery_error", "")), catchup_seconds=int(val("catchup_seconds", 0) or 0),
             series_start=str(val("series_start", "")), created_by=str(val("created_by", "")),
             updated_by=str(val("updated_by", "")), source=str(val("source", "")),
-            outside_text=str(val("outside_text", "")),
+            outside_text=str(val("outside_text", "")), creator=str(val("creator", "")),
         )
 
     async def _jobs(self, sql: str, args: tuple[Any, ...] = ()) -> list[ScheduledJob]:
@@ -548,8 +554,10 @@ class SQLiteCronStore:
             f"SELECT COUNT(*) AS n FROM cron_jobs WHERE {' AND '.join(where)}", tuple(args))
         return int(rows[0]["n"]) if rows else 0
 
-    async def sibling_delivery_target(self, thread_id: str) -> str:
-        """A VALID delivery_target from any other job on the same thread.
+    async def sibling_delivery_target(self, thread_id: str, tenant_id: str) -> str:
+        """A VALID delivery_target from any other job on the same thread, of
+        the same tenant (Spaces S1-14: a job never takes another space's
+        address).
 
         The repair chain: rescheduled/legacy rows born with an empty or
         malformed target adopt a sibling's routing -- the whole batch shares
@@ -560,9 +568,9 @@ class SQLiteCronStore:
         try:
             rows = await self._conn().execute_fetchall(
                 "SELECT delivery_target FROM cron_jobs "
-                "WHERE thread_id = ? AND delivery_target LIKE '%:%' "
+                "WHERE thread_id = ? AND tenant_id = ? AND delivery_target LIKE '%:%' "
                 "ORDER BY created_at DESC LIMIT 1",
-                (str(thread_id),),
+                (str(thread_id), str(tenant_id)),
             )
         except aiosqlite.Error:
             logger.warning("[CronStore] sibling target lookup failed", exc_info=True)
@@ -592,7 +600,8 @@ class SQLiteCronStore:
                  job.version, job.fire_owner, job.lease_until, job.fire_attempt, job.fire_due,
                  job.pending_edit, job.pending_cancel, job.finished_at, job.last_outcome,
                  job.last_fire_at, job.delivery_state, job.delivery_error, job.catchup_seconds,
-                 job.series_start, job.created_by, job.updated_by, job.source, job.outside_text),
+                 job.series_start, job.created_by, job.updated_by, job.source, job.outside_text,
+                 job.creator),
             )
             await self._event(db, job.job_id, "created", actor=job.created_by, source=job.source,
                               detail={"timing": job.timing, "kind": job.kind, "capabilities": job.capabilities})

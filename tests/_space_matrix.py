@@ -121,7 +121,7 @@ CASES: dict[str, Case] = {}
 #: An item adds its module here; :func:`load_cases` imports each.
 CASE_MODULES: tuple[str, ...] = (
     "tests._chat_space_cases", "tests._memory_space_cases", "tests._lesson_space_cases",
-    "tests._knowledge_space_cases",
+    "tests._knowledge_space_cases", "tests._scheduled_space_cases",
 )
 
 
@@ -170,9 +170,10 @@ PENDING_ROUTE_RULES: tuple[tuple[Pattern, str], ...] = (
     ("/api/documents", "S1-12"),
     # (S1-13, the Knowledge Library: written. Its cases are in
     # tests/_knowledge_space_cases.py.)
-    # ── S1-14: scheduled ──────────────────────────────────────────────────
-    ("/scheduled$", "S1-14"),
-    ("/api/scheduled", "S1-14"),
+    # (S1-14, Scheduled: written. Its cases are in
+    # tests/_scheduled_space_cases.py; an X post booked from the page is the
+    # X account's, S1-17.)
+    ("/api/scheduled/x$", "S1-17"),
     # ── S1-15: swarm (its tasks, their approvals, a worker's log) ─────────
     ("/swarm$", "S1-15"),
     ("/api/swarm", "S1-15"),
@@ -224,9 +225,8 @@ _PENDING_TOOLS_BY_ITEM: dict[str, tuple[str, ...]] = {
         "document_search", "document_index", "document_convert",
         "document_redact", "document_cancel",
     ),
-    "S1-14": (
-        "schedule_task", "list_scheduled", "edit_scheduled", "cancel_scheduled",
-    ),
+    # (S1-14 -- the scheduling tools -- wrote its cases:
+    # tests/_scheduled_space_cases.py.)
     # Swarm tasks, and the worker's own hand-off tool (never in the registry).
     # No item names sub-agents: like a swarm worker, a sub-agent's tool calls
     # must land in the asker's space, so they stand here.
