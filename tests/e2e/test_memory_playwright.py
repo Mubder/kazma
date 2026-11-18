@@ -141,6 +141,8 @@ def test_memory_page_loads_and_renders(memory_server: str) -> None:
 
             # Graph canvas mounts.
             page.wait_for_selector("#v2g-canvas", timeout=8000)
+            # The clean-up tabs are folded away (2026-11-18): opened first.
+            page.click("#memory-cleanup > summary")
             # Ops strip tabs exist (Entities is the default tab).
             page.wait_for_selector("#mem-tab-entities", timeout=5000)
             page.wait_for_selector("#mem-tab-beliefs", timeout=5000)
@@ -169,13 +171,15 @@ def test_memory_beliefs_tab_renders(memory_server: str) -> None:
         try:
             page = browser.new_context().new_page()
             page.goto(memory_server + "/memory", timeout=15000)
+            page.wait_for_selector("#memory-cleanup > summary", timeout=8000)
+            page.click("#memory-cleanup > summary")
             page.wait_for_selector("#mem-tab-beliefs", timeout=8000)
             page.click("#mem-tab-beliefs")
-            # The beliefs table header (Subject / Predicate / Object) renders
-            # once the tab is active — proves loadBeliefs() wired up. Whether
-            # the seeded row appears depends on the app boot config (e.g.
+            # The facts table header (About / Relation / Value) renders once
+            # the tab is active — proves loadBeliefs() wired up. Whether the
+            # seeded row appears depends on the app boot config (e.g.
             # Postgres), so assert structure, not the specific seed.
-            page.wait_for_selector("text=Predicate", timeout=10000)
+            page.wait_for_selector("th:has-text('Relation')", timeout=10000)
         finally:
             browser.close()
 

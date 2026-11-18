@@ -289,9 +289,13 @@ def register_system_routes(self: Any) -> None:
         }
     @self.app.get("/api/system/memory/backups")
     def _list_memory_backups():
-        """List V2 native backup files (memory_state_<ts>.db / memory_ops_<ts>.db)."""
+        """The memory database's backups (memory_state_<ts>.db), the ones
+        Restore takes. The operations database's copies beside them
+        (memory_ops_<ts>.db) are not listed: restoring one replaced every
+        memory with the task queue (2026-11-18)."""
         from pathlib import Path
 
+        from kazma_core.memory.backup import is_memory_backup_name
         from kazma_core.paths import backups_dir
 
         try:
@@ -299,6 +303,8 @@ def register_system_routes(self: Any) -> None:
             backups: list[dict[str, Any]] = []
             if bdir.is_dir():
                 for f in sorted(bdir.glob("memory_*_*.db"), reverse=True):
+                    if not is_memory_backup_name(f.name):
+                        continue
                     try:
                         st = f.stat()
                     except Exception:
@@ -790,10 +796,14 @@ def register_system_routes(self: Any) -> None:
             from kazma_core.memory.backup import perform_native_backups
 
             written = await asyncio.to_thread(perform_native_backups, retention=10)
+            if not written:
+                # Nothing was copied (no database yet, or every copy failed):
+                # never "completed successfully".
+                return {"status": "failed", "detail": "nothing_backed_up"}
             return {
                 "status": "success",
                 "manifest": {
-                    "files": [str(p) for p in written],
+                    "files": [p.name for p in written],
                     "count": len(written),
                     "dir": "backups/",
                 },
@@ -827,7 +837,15 @@ def register_system_routes(self: Any) -> None:
         import sqlite3
         from pathlib import Path
 
+        from kazma_core.memory.backup import NotAMemoryBackup, is_memory_backup_name
         from kazma_core.paths import backups_dir, primary_memory_db
+
+        # Only a backup of the memory database, never the operations
+        # database's copy beside it: restored over the memory database, it
+        # took every memory away (2026-11-18).
+        if not is_memory_backup_name(backup_name):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail="not_a_memory_backup")
 
         try:
             _backups_root = Path(backups_dir()).resolve()
@@ -850,7 +868,11 @@ def register_system_routes(self: Any) -> None:
             dest = Path(primary_memory_db())
             from kazma_core.memory.backup import restore_memory_backup
 
-            caught_up = restore_memory_backup(src)
+            try:
+                caught_up = restore_memory_backup(src)
+            except NotAMemoryBackup:
+                from fastapi import HTTPException
+                raise HTTPException(status_code=400, detail="not_a_memory_backup") from None
             # Count active beliefs in the restored DB for confirmation.
             conn = sqlite3.connect(str(dest))
             conn.row_factory = sqlite3.Row
@@ -866,6 +888,8 @@ def register_system_routes(self: Any) -> None:
             }
         except Exception as e:
             from fastapi import HTTPException
+            if isinstance(e, HTTPException):
+                raise  # this route's own refusals keep their status
             raise HTTPException(status_code=500, detail=safe_error(e))
         finally:
             try:
@@ -881,6 +905,7 @@ def register_system_routes(self: Any) -> None:
 
         try:
             details: dict[str, Any] = {}
+            failed: list[str] = []
             for label, db in (("primary", primary_memory_db()), ("ops", memory_ops_db())):
                 try:
                     conn = sqlite3.connect(db)
@@ -890,12 +915,14 @@ def register_system_routes(self: Any) -> None:
                     details[label] = "VACUUM + ANALYZE ok"
                 except Exception as exc:
                     details[label] = described_error(f"{label} database maintenance failed", exc)
+                    failed.append(label)
                 finally:
                     try:
                         conn.close()
                     except Exception:
                         pass  # already closed / never opened
-            return {"status": "success", "details": details}
+            # A database that failed is said, never "completed successfully".
+            return {"status": "failed" if failed else "success", "details": details, "failed": failed}
         except Exception as e:
             from fastapi import HTTPException
             raise HTTPException(status_code=500, detail=safe_error(e))

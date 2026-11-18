@@ -676,14 +676,42 @@ the changes requested per action (`kazma_memory_operator_actions_total`).
 
 ### Layout
 
-1. **Graph & health** (top) — V2 belief canvas, KPIs, probe, backups.  
-2. **Ops tabs** — Entities, Beliefs, Pending merges, Hygiene.
+Reworked 2026-11-18 so a person can tell what each part is and does. From
+top to bottom:
+
+1. **Status** -- whether memory is on and working, one sentence, with a link
+   to Settings -> Memory. When something needs attention, a warning above
+   the map opens **Health and maintenance**.
+2. **Memory map** -- what Kazma knows as dots (things: people, places,
+   projects, ideas) joined by lines (facts). The toolbar finds a dot, zooms
+   (**-**, **+**, **Show all**), shows conversations on the map, reloads it
+   and exports it (picture, drawing, data, GraphML). A legend under it names
+   only the marks the map is using. Two folds below it: **Connect or join
+   two things** (fixing the map by hand) and **Filter the map** (by kind of
+   thing, kind of fact, or as it was on a day). A map that could not be
+   loaded says so; it is never shown as an empty memory.
+3. **What Kazma knows** -- the facts (click one for where it came from, show
+   it on the map, or remove it) and **Changes to what you told Kazma**.
+4. **Conversations Kazma remembers** -- memories and weekly summaries, each
+   with **Forget**, the memory search, and the history import.
+5. **Clean up memory** (folded) -- the tabs **Facts**, **Things**,
+   **Suggested joins** and **Tidy up**. Joining two things and running a
+   tidy-up ask first and name what will happen.
+6. **Health and maintenance** (folded) -- memory's parts and checks, the
+   background queue, backups (a restore asks first and only takes a backup
+   of the memory database).
+
+The map draws flat, in the theme's colours (light and dark): a label under
+each dot, the most connected first where two would overlap, Arabic names
+right to left; a line's relation is written on it when its dot is chosen.
+It moves only while its layout settles or a dot is dragged, and fits itself
+in view once settled. On a phone, two fingers pinch to zoom.
 
 ### Operator capabilities (2026-08 overhaul)
 
 | Capability | Where | Notes |
 |------------|-------|-------|
-| **Pagination + real counts** | every list tab | "Showing 1–150 of 3,412" + **Load more**. The graph reports `total_nodes`/`truncated` and shows an amber banner when capped — including **connections hidden by slicing**. No more silent 200-row cap. |
+| **Pagination + real counts** | every list in Clean up memory | "Showing 1–150 of 3,412" + **Load more**. The graph reports `total_nodes`/`truncated` and shows an amber banner when capped — including **connections hidden by slicing**. No more silent 200-row cap. |
 | **Diacritic-insensitive search** | Entities, Beliefs search boxes | Routes through `beliefs_fts` / `entities_fts` (FTS5) — `francais` matches `Français`, aliases are searchable. Falls back to `LIKE` if FTS is unavailable. |
 | **"Why recalled"** | belief drawer | Click a belief → see `recalled N× · last <date> · via <method> · from <episode>`, plus a **Probe from this belief →** button. Endpoint: `GET /beliefs/{id}/recall-trail`. |
 | **Undo** | action toast | Invalidate-batch, link, edit, delete-entity return a receipt + a 60s single-use undo token; the toast has an **[Undo]** button. Merge shows a "N beliefs rewired" receipt (not undoable — restore from backup). |
@@ -749,7 +777,7 @@ not a hardcoded “You”.
 - Active beliefs only (not invalidated/superseded).  
 - Sets `extraction_method=user_explicit`; clears embedding when object text
   changes (FTS triggers keep search in sync).  
-- UI: Beliefs tab → **Edit** (guided prompts for object → predicate → subject).
+- UI: Clean up memory → Facts → **Edit** (guided prompts for object → predicate → subject).
 
 ### Other entity ops (unchanged contract)
 
@@ -759,7 +787,7 @@ not a hardcoded “You”.
 | Merge shells | `POST /api/memory/v2/entities/merge` |
 | Link two entities | `POST /api/memory/v2/entities/link` |
 | Delete empty shell | `DELETE /api/memory/v2/entities/{id}` (not protected entities). Copies `entity_merges` rows to `entity_merges_archive` first (FK still drops live ledger rows). |
-| Purge empty entities | Hygiene tab, `POST /api/memory/v2/hygiene/run` with `purge_empty_entities`: removes only shells with no live fact and nothing but their own name, the rule that removes them automatically. Merge redirects stay: they send a merged name to its target, and the Entities list shows them as "merged into". The page's **Empty** count is this list. |
+| Purge empty entities | Clean up memory → Tidy up, `POST /api/memory/v2/hygiene/run` with `purge_empty_entities`: removes only shells with no live fact and nothing but their own name, the rule that removes them automatically. Merge redirects stay: they send a merged name to its target, and the Entities list shows them as "merged into". The page's **Empty** count is this list. |
 | Invalidate belief | `POST /api/memory/v2/beliefs/{id}/invalidate` (+ batch) |
 
 Protected entities are never deleted, purged or merged away: the hub

@@ -421,36 +421,50 @@
     }
   }
 
+  // The status line at the top of the page says what a person needs (on, a
+  // problem, unknown); the engine's own wording goes to Health and
+  // maintenance (#memory-status-detail).
+  const memoryDetail = document.getElementById('memory-status-detail');
+  let _memStatusRead = false;
+
   async function pollMemoryStatus() {
     try {
       // null while the server restarts (a proxy's HTML error page): keep what
-      // is shown and let the next tick try again.
+      // is shown and let the next tick try again -- but never leave the first
+      // "Checking..." standing as if all were well.
       const data = await window.kazmaGetJson('/api/system/status');
-      if (!data) return;
+      if (!data) {
+        if (!_memStatusRead) {
+          memoryBadge.textContent = _mt('memory.page.status_unknown', 'Unknown');
+          _memSetBadge(memoryBadge, 'warning');
+          memoryDesc.removeAttribute('translate');
+          memoryDesc.textContent = _mt('memory.page.status_unknown_desc', 'Kazma could not read memory\'s status. It tries again in a few seconds.');
+        }
+        return;
+      }
+      _memStatusRead = true;
       const status = data.status || 'ACTIVE';
 
       if (status === 'ACTIVE') {
         memoryBadge.textContent = I18N.memoryActive;
         _memSetBadge(memoryBadge, 'success');
-        // Prefer live headline (Postgres + vector status) over static Chroma-only copy
         memoryDesc.removeAttribute('translate');
-        if (data.headline) {
+        memoryDesc.textContent = I18N.memoryDescActive;
+        if (memoryDetail) {
           const comps = Array.isArray(data.components) ? data.components : [];
           const backend = data.backend || {};
           const engineOk = comps.some(c => c.id === 'vector_memory' && c.status === 'ok');
           const okN = comps.filter(c => c.status === 'ok').length;
-          memoryDesc.textContent = _mt('memory.console.headline',
-            'Persistence: {config} (config/sessions/swarm); checkpoints: {checkpoints}. {engine}.', {
-              config: backend.config || 'sqlite',
-              checkpoints: backend.checkpoints || 'sqlite',
-              engine: engineOk
-                ? _mt('memory.console.engine_ok', 'V2 cognitive engine operational')
-                : _mt('memory.console.engine_degraded', 'V2 memory degraded or offline'),
-            }) + (comps.length ? ' · ' + window.kazmaCount('memory.console.components_healthy', comps.length, { ok: okN }) : '');
-        } else {
-          memoryDesc.textContent = data.summary
-            ? (I18N.memoryDescActive + ' ' + data.summary)
-            : I18N.memoryDescActive;
+          memoryDetail.textContent = data.headline
+            ? _mt('memory.console.headline',
+              'Persistence: {config} (config/sessions/swarm); checkpoints: {checkpoints}. {engine}.', {
+                config: backend.config || 'sqlite',
+                checkpoints: backend.checkpoints || 'sqlite',
+                engine: engineOk
+                  ? _mt('memory.console.engine_ok', 'V2 cognitive engine operational')
+                  : _mt('memory.console.engine_degraded', 'V2 memory degraded or offline'),
+              }) + (comps.length ? ' · ' + window.kazmaCount('memory.console.components_healthy', comps.length, { ok: okN }) : '')
+            : (data.summary || '–');
         }
         installBtn.style.display = 'none';
         installBtn.disabled = false;
@@ -472,34 +486,18 @@
       } else {
         memoryBadge.textContent = I18N.memoryDegraded;
         _memSetBadge(memoryBadge, 'danger');
-        // Prefer first live issue as the headline reason.
+        memoryDesc.removeAttribute('translate');
+        memoryDesc.textContent = I18N.memoryDescDegraded;
+        // The first live issue is the server's diagnostic, shown as written
+        // in Health and maintenance.
         const firstIssue = data.issues && data.issues[0];
-        // A live issue is the server's diagnostic, shown as written.
-        if (firstIssue) memoryDesc.setAttribute('translate', 'no');
-        else memoryDesc.removeAttribute('translate');
-        memoryDesc.textContent = firstIssue || I18N.memoryDescDegraded;
+        if (memoryDetail) memoryDetail.textContent = firstIssue || '–';
         installBtn.style.display = 'inline-block';
         installBtn.disabled = false;
         installBtn.textContent = I18N.installMl;
       }
 
       renderMemoryComponents(data);
-
-      // Update metrics inside collapsible deck
-      const ftsSizeEl = document.getElementById('fts5-size-metric');
-      const ftsCountEl = document.getElementById('fts5-count-metric');
-      if (ftsSizeEl && data.fts5_size !== undefined) {
-        ftsSizeEl.textContent = formatBytes(data.fts5_size);
-        if (ftsCountEl) ftsCountEl.textContent = `${data.fts5_count || 0} ${I18N.records}`;
-      }
-
-      const vecSizeEl = document.getElementById('vector-size-metric');
-      const vecCountEl = document.getElementById('vector-count-metric');
-      if (vecSizeEl && data.vector_size !== undefined) {
-        vecSizeEl.textContent = formatBytes(data.vector_size);
-        if (vecCountEl) vecCountEl.textContent = `${data.vector_count || 0} ${I18N.vectors}`;
-      }
-
     } catch (e) {
       console.error('Failed to poll memory status:', e);
     }
@@ -545,51 +543,48 @@
       // (tests/test_empty_states_after_load.py).
       if (!resp.ok || data.error) throw new Error('HTTP ' + resp.status);
       const backups = data.backups || [];
-      
+
       if (backups.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text-muted);">${I18N.noBackups}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--text-muted);">${_esc(I18N.noBackups)}</td></tr>`;
         return;
       }
 
+      // Only the memory database's backups are listed (the route leaves
+      // out the operations database's copies, which Restore refuses): when
+      // it was made, its size, its file (2026-11-18 review: every row said
+      // "None (0 docs)" from fields the route never sent).
       tbody.innerHTML = '';
       backups.forEach(backup => {
-        const ftsSize = backup.fts5_size ? formatBytes(backup.fts5_size) : _mt('memory.console.none', 'None');
-        const vecSize = backup.vector_size ? formatBytes(backup.vector_size) : _mt('memory.console.none', 'None');
-        const created = window.KazmaFormat ? window.KazmaFormat.dateTime(backup.timestamp) : new Date(backup.timestamp).toLocaleString();
-        // Row hairline and hover come from .data-table (memory_console.html).
+        const created = window.KazmaFormat ? window.KazmaFormat.dateTime(backup.timestamp) : new Date(backup.timestamp * 1000).toLocaleString();
         const tr = document.createElement('tr');
 
-        const tdName = document.createElement('td');
-        tdName.style.padding = '10px 16px';
-        tdName.style.fontFamily = 'var(--font-mono)';
-        tdName.textContent = backup.name;
-
-        const tdFts = document.createElement('td');
-        tdFts.style.padding = '10px 16px';
-        tdFts.textContent = window.kazmaCount('memory.console.fts_docs', backup.fts5_count || 0, { size: ftsSize });
-
-        const tdVec = document.createElement('td');
-        tdVec.style.padding = '10px 16px';
-        tdVec.textContent = vecSize;
-
         const tdCreated = document.createElement('td');
-        tdCreated.style.padding = '10px 16px';
-        tdCreated.style.color = 'var(--text-tertiary)';
+        tdCreated.style.padding = '10px 12px';
         tdCreated.textContent = created;
 
+        const tdSize = document.createElement('td');
+        tdSize.style.padding = '10px 12px';
+        tdSize.textContent = formatBytes(backup.size || 0);
+
+        const tdName = document.createElement('td');
+        tdName.style.padding = '10px 12px';
+        tdName.style.color = 'var(--text-muted)';
+        tdName.setAttribute('translate', 'no');
+        tdName.textContent = backup.name;
+
         const tdAction = document.createElement('td');
-        tdAction.style.padding = '10px 16px';
-        tdAction.style.textAlign = 'center';
+        tdAction.style.padding = '10px 12px';
+        tdAction.style.textAlign = 'end';
         const btn = document.createElement('button');
         btn.dataset.name = backup.name;
-        btn.className = 'btn btn-xs btn-primary restore-btn';
+        btn.dataset.when = created;
+        btn.className = 'btn btn-xs btn-secondary restore-btn';
         btn.textContent = I18N.restore;
         tdAction.appendChild(btn);
 
-        tr.appendChild(tdName);
-        tr.appendChild(tdFts);
-        tr.appendChild(tdVec);
         tr.appendChild(tdCreated);
+        tr.appendChild(tdSize);
+        tr.appendChild(tdName);
         tr.appendChild(tdAction);
         tbody.appendChild(tr);
       });
@@ -598,7 +593,8 @@
       document.querySelectorAll('.restore-btn').forEach(btn => {
         btn.addEventListener('click', async function() {
           const name = this.getAttribute('data-name');
-          if (await window.kazmaConfirm({ title: _mt('memory.console.restore_title', 'Restore backup'), message: I18N.confirmRestore + ` "${name}"? ` + I18N.restoreWarning, confirmText: _mt('memory.console.restore', 'Restore'), danger: true })) {
+          const when = this.getAttribute('data-when') || name;
+          if (await window.kazmaConfirm({ title: _mt('memory.console.restore_title', 'Restore backup'), message: _mt('memory.page.restore_confirm', 'Bring memory back to the copy made {when}?', { when: when }), confirmText: _mt('memory.console.restore', 'Restore'), danger: true })) {
             this.disabled = true;
             this.textContent = I18N.restoring;
             try {
@@ -607,13 +603,16 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ backup_name: name })
               });
-              const res = await r.json();
-              if (res.status === 'success') {
+              const res = await r.json().catch(() => ({}));
+              if (r.ok && res.status === 'success') {
                 window.kazmaAlert({ title: _mt('memory.console.restore_complete', 'Restore complete'), message: I18N.restoreSuccess });
                 pollMemoryStatus();
                 loadBackups();
               } else {
-                window.kazmaAlert({ title: _mt('memory.console.error', 'Error'), message: _mt('memory.console.restoration_error', 'Restoration error: {error}', { error: res.detail || _mt('memory.console.unknown_error', 'unknown error') }), variant: 'btn-danger' });
+                const detail = res.detail === 'not_a_memory_backup'
+                  ? _mt('memory.page.restore_not_memory', 'That file is not a backup of memory, so nothing was restored.')
+                  : _mt('memory.console.restoration_error', 'Restoration error: {error}', { error: res.detail || ('HTTP ' + r.status) });
+                window.kazmaAlert({ title: _mt('memory.console.error', 'Error'), message: detail, variant: 'btn-danger' });
               }
             } catch (e) {
               window.kazmaAlert({ title: _mt('memory.console.error', 'Error'), message: _mt('memory.console.restoration_failed', 'Restoration failed: {error}', { error: e }), variant: 'btn-danger' });
@@ -624,21 +623,22 @@
           }
         });
       });
-      
+
     } catch (e) {
-      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--danger);">${_esc(_mt('memory.console.backups_load_failed', 'Failed to load backups.'))}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--danger);">${_esc(_mt('memory.console.backups_load_failed', 'Failed to load backups.'))}</td></tr>`;
     }
   }
 
   toggleBtn.addEventListener('click', () => {
-    if (deck.style.display === 'none') {
-      deck.style.display = 'block';
-      arrow.innerHTML = (window.KazmaIcons ? KazmaIcons.get('chevron-down') : '');
-      loadBackups();
-    } else {
-      deck.style.display = 'none';
-      arrow.innerHTML = (window.KazmaIcons ? KazmaIcons.get('play') : '');
+    const opening = deck.style.display === 'none';
+    deck.style.display = opening ? 'block' : 'none';
+    toggleBtn.setAttribute('aria-expanded', opening ? 'true' : 'false');
+    arrow.innerHTML = (window.KazmaIcons ? KazmaIcons.get(opening ? 'chevron-down' : 'chevron-right') : '');
+    const label = toggleBtn.lastChild;
+    if (label && label.nodeType === 3) {
+      label.textContent = ' ' + (opening ? _mt('memory.page.backups_hide', 'Hide backups') : _mt('memory.page.backups_show', 'Show backups'));
     }
+    if (opening) loadBackups();
   });
 
   // Action Buttons Triggers
@@ -650,13 +650,18 @@
     backupSpinner.style.display = 'inline-block';
     try {
       const resp = await fetch('/api/system/memory/backup', { method: 'POST' });
-      const res = await resp.json();
-      if (res.status === 'success') {
-        window.kazmaAlert({ title: _mt('memory.console.backup_complete', 'Backup complete'), message: I18N.backupSuccess + `: ${res.manifest.name}` });
+      const res = await resp.json().catch(() => ({}));
+      if (resp.ok && res.status === 'success') {
+        // The files the backup wrote (it answered "undefined" here before).
+        const files = ((res.manifest && res.manifest.files) || []).join(', ');
+        window.kazmaAlert({ title: _mt('memory.console.backup_complete', 'Backup complete'), message: _mt('memory.page.backup_made', 'Backed up: {files}', { files: files }) });
         loadBackups();
         pollMemoryStatus();
       } else {
-        window.kazmaAlert({ title: _mt('memory.console.error', 'Error'), message: I18N.backupFailed + ': ' + (res.detail || _mt('memory.console.unknown_error', 'unknown error')), variant: 'btn-danger' });
+        const why = res.detail === 'nothing_backed_up'
+          ? _mt('memory.page.backup_nothing', 'Nothing was backed up.')
+          : I18N.backupFailed + ': ' + (res.detail || ('HTTP ' + resp.status));
+        window.kazmaAlert({ title: _mt('memory.console.error', 'Error'), message: why, variant: 'btn-danger' });
       }
     } catch (e) {
       window.kazmaAlert({ title: _mt('memory.console.error', 'Error'), message: I18N.backupFailed + ': ' + e, variant: 'btn-danger' });
@@ -674,19 +679,17 @@
     optimizeSpinner.style.display = 'inline-block';
     try {
       const resp = await fetch('/api/system/memory/maintenance', { method: 'POST' });
-      const res = await resp.json();
-      if (res.status === 'success') {
-        let msg = I18N.optimizeSuccess + '\n\n';
-        if (res.details.fts5) {
-          msg += _mt('memory.console.optimize_fts', '• FTS5 keyword index optimized (VACUUM & ANALYZE completed).\n  Reclaimed space: {size}\n\n', { size: formatBytes(res.details.fts5.reclaimed_bytes) });
-        }
-        if (res.details.vector) {
-          msg += _mt('memory.console.optimize_vector', '• Vector index optimized.\n  Reclaimed space: {size}\n', { size: formatBytes(res.details.vector.reclaimed_bytes) });
-        }
-        window.kazmaAlert({ title: _mt('memory.console.optimize_complete', 'Optimization complete'), message: msg });
+      const res = await resp.json().catch(() => ({}));
+      if (resp.ok && res.status === 'success') {
+        window.kazmaAlert({ title: _mt('memory.console.optimize_complete', 'Optimization complete'), message: _mt('memory.page.optimize_done', 'Both databases were compacted.') });
         pollMemoryStatus();
+      } else if (res.status === 'failed' && res.details) {
+        // Each database's own outcome: one that failed is said, never
+        // "completed successfully" (it was, whatever happened).
+        const lines = Object.keys(res.details).map((k) => '• ' + res.details[k]);
+        window.kazmaAlert({ title: _mt('memory.console.error', 'Error'), message: _mt('memory.page.optimize_partial', 'Not every database could be compacted:') + '\n' + lines.join('\n'), variant: 'btn-danger' });
       } else {
-        window.kazmaAlert({ title: _mt('memory.console.error', 'Error'), message: I18N.optimizeFailed + ': ' + (res.detail || _mt('memory.console.unknown_error', 'unknown error')), variant: 'btn-danger' });
+        window.kazmaAlert({ title: _mt('memory.console.error', 'Error'), message: I18N.optimizeFailed + ': ' + (res.detail || ('HTTP ' + resp.status)), variant: 'btn-danger' });
       }
     } catch (e) {
       window.kazmaAlert({ title: _mt('memory.console.error', 'Error'), message: I18N.optimizeFailed + ': ' + e, variant: 'btn-danger' });
@@ -695,7 +698,6 @@
       optimizeSpinner.style.display = 'none';
     }
   });
-
   // Snapshot cleanup: TTL prune + VACUUM of snapshots.db (replay/fork history).
   const snapshotsBtn = document.getElementById('trigger-snapshots-btn');
   const snapshotsSpinner = document.getElementById('snapshots-spinner');
@@ -1078,12 +1080,10 @@
         '<div translate="no"><b>' + _esc(b.subject) + '</b> ' + _esc((b.predicate||'').replace(/_/g,' ')) +
         ' <b>' + _esc(b.object) + '</b></div>' +
         '<div style="color:var(--text-muted);margin-top:4px;">' +
-        _mt('memory.console.belief_meta', 'id: {id} · conf {conf}% · imp {imp} · access {access}', {
-          id: '<span translate="no">' + _esc(b.id) + '</span>',
+        _esc(_mt('memory.console.belief_meta', 'Confidence {conf}% · {recalled}', {
           conf: Math.round((b.confidence || 0) * 100),
-          imp: _esc(b.structural_importance || '?'),
-          access: b.access_count || 0,
-        }) + '</div>' +
+          recalled: window.kazmaCount('memory.page.recalled_n', b.access_count || 0),
+        })) + '</div>' +
         trailHtml +
         (chain ? '<div style="margin-top:6px;color:var(--text-muted);">' + _mt('memory.console.supersedes_chain', 'supersedes chain: {chain}', { chain: '<span translate="no">' + chain + '</span>' }) + '</div>' : '') +
         probeBtn;
@@ -1099,7 +1099,8 @@
           }
           const probeBtn2 = document.getElementById('v2-probe-btn') || document.getElementById('v2g-probe-btn');
           if (probeBtn2) probeBtn2.click();
-          document.getElementById('v2g-canvas-wrap')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          // To the results it just asked for (it scrolled to the map).
+          document.getElementById('v2-search-ops')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         });
       }
     } catch (e) {
@@ -1116,6 +1117,8 @@
       ? await window.kazmaConfirm({
         title: _mt('memory.console.unlink_title', 'Unlink belief?'),
         message: _mt('memory.console.unlink_message', 'Soft-invalidate this edge from active memory.'),
+        confirmText: _mt('memory.page.remove', 'Remove'),
+        danger: true,
       })
       : await window.confirm(_mt('memory.console.unlink_native', 'Unlink (invalidate) belief?'));
     if (!ok) return;
@@ -1193,7 +1196,9 @@
       if (window.showToast) window.showToast(d.ok ? window.kazmaCount('memory.console.cleared_failed', d.deleted || 0) : (d.error || d.detail || _mt('memory.console.failed', 'Failed')), d.ok ? 'success' : 'error');
       loadV2Queue();
       pollV2Health();
-    } catch (e) { /* silent */ }
+    } catch (e) {
+      if (window.showToast) window.showToast(_mt('memory.console.failed', 'Failed'), 'error');
+    }
   });
 
   async function loadV2Merges() {
@@ -1366,12 +1371,23 @@
   document.getElementById('v2-queue-refresh')?.addEventListener('click', loadV2Queue);
   document.getElementById('v2-merges-refresh')?.addEventListener('click', loadV2Merges);
   document.getElementById('v2-reconsolidate-btn')?.addEventListener('click', async function() {
+    // It merges facts for everyone using this Kazma and cannot be undone:
+    // asked first (it ran on one click before the 2026-11-18 review).
+    const ok = await window.kazmaConfirm({
+      title: _mt('memory.page.reconsolidate_confirm_title', 'Merge duplicate facts now?'),
+      message: _mt('memory.page.reconsolidate_confirm', 'Facts stored twice are merged into one. This cannot be undone.'),
+      confirmText: _mt('memory.page.reconsolidate_go', 'Merge now'),
+      danger: true,
+    });
+    if (!ok) return;
     try {
       const r = await fetch('/api/memory/v2/reconsolidate', { method: 'POST' });
-      const d = await r.json();
+      const d = await r.json().catch(() => ({}));
       if (window.showToast) window.showToast(d.ok ? _mt('memory.console.reconsol_enqueued', 'Reconsolidation enqueued') : (d.error || d.detail || _mt('memory.console.failed', 'Failed')), d.ok ? 'success' : 'error');
       loadV2Queue();
-    } catch (e) { /* silent */ }
+    } catch (e) {
+      if (window.showToast) window.showToast(_mt('memory.console.failed', 'Failed'), 'error');
+    }
   });
   async function loadV2Procedural() {
     const el = document.getElementById('v2-procedural-list');
@@ -1746,19 +1762,23 @@
   _memEvery(15000, function() { if (document.hidden) return; loadV2Queue(); loadV2Merges(); loadV2Procedural(); loadV2Quality(); });
 
   async function loadV2Beliefs(q) {
+    const list = document.getElementById('v2-belief-list');
+    if (!list) return;
+    const emptyCta = document.getElementById('v2-belief-empty-cta');
     try {
       const url = '/api/memory/v2/beliefs' + (q ? ('?q=' + encodeURIComponent(q)) : '');
       const resp = await fetch(url);
       const data = await resp.json();
-      const list = document.getElementById('v2-belief-list');
-      if (!list) return;
-      // A refused read is not "No active beliefs yet".
+      // A refused read is not "No facts yet".
       if (!resp.ok || data.error) throw new Error('HTTP ' + resp.status);
       const beliefs = data.beliefs || [];
-      const emptyCta = document.getElementById('v2-belief-empty-cta');
       if (!beliefs.length) {
-        list.innerHTML = '<div class="mem-muted" style="padding:12px;font-size:0.78rem;">' + _esc(_mt('memory.console.no_active_beliefs', 'No active beliefs yet.')) + '</div>';
-        if (emptyCta) emptyCta.style.display = 'block';
+        // A search that matched nothing is not an empty memory.
+        list.innerHTML = '<div class="mem-muted" style="padding:12px;font-size:0.82rem;">' + _esc(q
+          ? _mt('memory.page.known_none_match', 'No fact holds these words.')
+          : _mt('memory.page.known_empty', 'No facts yet.')) + '</div>';
+        if (emptyCta) emptyCta.style.display = q ? 'none' : 'block';
+        if (!q) list.innerHTML = '';
         return;
       }
       if (emptyCta) emptyCta.style.display = 'none';
@@ -1770,15 +1790,17 @@
         const objRaw = String(b.object || '');
         const objFull = _esc(objRaw);
         const objShown = objRaw.length > 160 ? objFull.slice(0, 160) + '…' : objFull;
-        return '<div class="v2-belief-row" data-id="' + _attr(b.id) + '" data-subject="' + _attr(b.subject) + '" data-object="' + _attr(b.object) + '" data-predicate="' + _attr(b.predicate) + '">' +
+        const confText = _mt('memory.console.edge_conf', ' · confidence {n}%', { n: conf }).replace(/^\s*·\s*/, '');
+        return '<div class="v2-belief-row" role="button" tabindex="0" data-id="' + _attr(b.id) + '" data-subject="' + _attr(b.subject) + '" data-object="' + _attr(b.object) + '" data-predicate="' + _attr(b.predicate) + '">' +
                '<span' + ptype.attr + ' class="mem-ptype" style="--mem-c:' + pc + ';">' + _esc(ptype.text) + '</span>' +
-               '<div translate="no" style="flex:1;color:var(--text-primary);min-width:0;word-break:break-word;line-height:1.4;"><b>' + _esc(b.subject) + '</b> ' + _esc(b.predicate.replace(/_/g,' ')) + ' <b title="' + objFull + '">' + objShown + '</b></div>' +
-               '<span class="mem-muted" style="font-size:0.68rem;font-family:var(--font-mono);flex-shrink:0;margin-top:2px;">i' + b.structural_importance + ' · ' + conf + '%</span>' +
+               '<div translate="no" dir="auto" style="flex:1;color:var(--text-primary);min-width:0;word-break:break-word;line-height:1.45;"><bdi><b>' + _esc(b.subject) + '</b></bdi> <bdi dir="ltr">' + _esc(String(b.predicate || '').replace(/_/g,' ')) + '</bdi> <bdi><b title="' + objFull + '">' + objShown + '</b></bdi></div>' +
+               '<span class="mem-muted" style="font-size:0.72rem;flex-shrink:0;margin-top:2px;">' + _esc(confText) + '</span>' +
                '</div>';
       }).join('');
-      // Make each belief row clickable — drawer + highlight graph
+      // Each fact row opens its drawer and shows it on the map, by click or
+      // by keyboard (Enter / Space).
       list.querySelectorAll('.v2-belief-row').forEach(function(row) {
-        row.addEventListener('click', function() {
+        function open() {
           var subj = row.getAttribute('data-subject');
           var obj = row.getAttribute('data-object');
           var bid = row.getAttribute('data-id');
@@ -1786,9 +1808,16 @@
           _v2gSelectByBelief(subj, obj);
           list.querySelectorAll('.v2-belief-row').forEach(function(r) { r.classList.remove('is-selected'); });
           row.classList.add('is-selected');
+        }
+        row.addEventListener('click', open);
+        row.addEventListener('keydown', function(ev) {
+          if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(); }
         });
       });
-    } catch (e) { /* silent */ }
+    } catch (e) {
+      if (emptyCta) emptyCta.style.display = 'none';
+      list.innerHTML = '<div role="alert" style="padding:12px;font-size:0.82rem;color:var(--danger);">' + _esc(_mt('memory.page.known_failed', 'The facts could not be loaded. This is not an empty memory.')) + '</div>';
+    }
   }
 
   // Select a belief's OBJECT node in the graph canvas + zoom to it.
@@ -1965,7 +1994,9 @@
   var _v2gPosCache = {};
   var _v2gAlpha = 0, _v2gAnim = null, _v2gDrag = null, _v2gHover = -1, _v2gSelectedId = null;
   var _v2gInspectAllEdges = false;
-  var _v2gCap = 80, _v2gNodeBaseR = 7;
+  // As many dots as the filter keeps (_LOD_MAX, 200): at 80 the rest of a
+  // larger memory was never drawn, and no line said so.
+  var _v2gCap = 200, _v2gNodeBaseR = 7;
   var _v2gMinScale = 0.3, _v2gMaxScale = 4;
   var _v2gTimeRange = { min: 0, max: 0 };
   var _v2gFilters = { entity: {}, predicate: {} };
@@ -2216,18 +2247,25 @@
     };
   }
 
-  // Force sim step: repulsion + spring + gravity + collision
+  // Force sim step: repulsion + spring + gravity + collision. Spaced for
+  // labels (2026-11-18 review): a dot's label sits under it, so lines are
+  // longer and dots keep a gap a label fits in.
   function _v2gStep(W, H) {
     var n = _v2gPts.length; if (!n) return;
     var cx = W / 2, cy = H / 2;
     // Repulsion (Coulomb) — O(n²) but capped at _v2gCap nodes
+    var charge = n > 120 ? 1400 : 2200;
     for (var i = 0; i < n; i++) {
       for (var j = i + 1; j < n; j++) {
         var a = _v2gPts[i], b = _v2gPts[j];
         var dx = b.x - a.x, dy = b.y - a.y;
         var d2 = dx * dx + dy * dy + 0.01;
         var d = Math.sqrt(d2);
-        var force = 900 * _v2gAlpha / d2;
+        var force = charge * _v2gAlpha / d2;
+        // Collision: two dots closer than their radii and a label's gap push
+        // apart hard, so neither hides the other.
+        var minD = a.r + b.r + 26;
+        if (d < minD) force += (minD - d) * 0.35 * _v2gAlpha;
         var fx = (dx / d) * force, fy = (dy / d) * force;
         // Pinned / dragged nodes are fixed anchors (user layout sticks)
         if (!(_v2gDrag && _v2gDrag.idx === i) && !_v2gIsPinned(a)) { a.vx -= fx; a.vy -= fy; }
@@ -2240,18 +2278,18 @@
       if (!A || !B) continue;
       var dx = B.x - A.x, dy = B.y - A.y;
       var d = Math.sqrt(dx * dx + dy * dy + 0.01);
-      var targetLen = 70;
-      var k = 0.04 * (0.5 + (ed.confidence || 0.5));
+      var targetLen = 110;
+      var k = 0.035 * (0.5 + (ed.confidence || 0.5));
       var f = (d - targetLen) * k * _v2gAlpha;
       var fx = (dx / d) * f, fy = (dy / d) * f;
       if (!(_v2gDrag && _v2gDrag.idx === ed.a) && !_v2gIsPinned(A)) { A.vx += fx; A.vy += fy; }
       if (!(_v2gDrag && _v2gDrag.idx === ed.b) && !_v2gIsPinned(B)) { B.vx -= fx; B.vy -= fy; }
     }
     // P2d: group-spring — holds grouped children in a tier-relative orbit
-    // around their parent. Stiffer than belief-edges (k=0.06 vs 0.04) so a
-    // cross-cluster belief edge doesn't pull a child out of its cluster.
-    // Mutates vx/vy only (matches the existing force contract); reuses the
-    // same pinned/dragged guards. Ungrouped nodes (groupParent === -1) skip.
+    // around their parent. Stiffer than belief-edges so a cross-cluster
+    // belief edge doesn't pull a child out of its cluster. Mutates vx/vy only
+    // (matches the existing force contract); reuses the same pinned/dragged
+    // guards. Ungrouped nodes (groupParent === -1) skip.
     for (var gi = 0; gi < n; gi++) {
       var gp = _v2gPts[gi];
       if (!gp || gp.groupParent === undefined || gp.groupParent < 0) continue;
@@ -2259,7 +2297,7 @@
       if (!par) continue;
       var gdx = par.x - gp.x, gdy = par.y - gp.y;
       var gd = Math.sqrt(gdx * gdx + gdy * gdy + 0.01);
-      var gTarget = 50 + (gp.tier >= 0 ? gp.tier : 1) * 30;
+      var gTarget = 60 + (gp.tier >= 0 ? gp.tier : 1) * 34;
       var gk = 0.06 * _v2gAlpha;
       var gf = (gd - gTarget) * gk;
       var gfx = (gdx / gd) * gf, gfy = (gdy / gd) * gf;
@@ -2272,8 +2310,8 @@
         par.vx -= gfx; par.vy -= gfy;
       }
     }
-    // Gravity + collision-aware integration
-    var margin = 30;
+    // Gravity + integration. The map is not boxed into the canvas: Show all
+    // fits whatever the layout needs (it squeezed a large map into the box).
     for (var p = 0; p < n; p++) {
       var pt = _v2gPts[p];
       if (_v2gDrag && _v2gDrag.idx === p) { pt.vx = 0; pt.vy = 0; continue; }
@@ -2283,18 +2321,14 @@
         _v2gRememberPos(pt);
         continue;
       }
-      pt.vx += (cx - pt.x) * 0.004 * _v2gAlpha;
-      pt.vy += (cy - pt.y) * 0.004 * _v2gAlpha;
-      if (pt.x < margin) pt.vx += (margin - pt.x) * 0.02 * _v2gAlpha;
-      if (pt.x > W - margin) pt.vx -= (pt.x - (W - margin)) * 0.02 * _v2gAlpha;
-      if (pt.y < margin) pt.vy += (margin - pt.y) * 0.02 * _v2gAlpha;
-      if (pt.y > H - margin) pt.vy -= (pt.y - (H - margin)) * 0.02 * _v2gAlpha;
-      pt.vx *= 0.82; pt.vy *= 0.82;
+      pt.vx += (cx - pt.x) * 0.003 * _v2gAlpha;
+      pt.vy += (cy - pt.y) * 0.003 * _v2gAlpha;
+      pt.vx *= 0.8; pt.vy *= 0.8;
       var sp = Math.sqrt(pt.vx * pt.vx + pt.vy * pt.vy);
-      if (sp > 14) { pt.vx = pt.vx / sp * 14; pt.vy = pt.vy / sp * 14; }
+      if (sp > 16) { pt.vx = pt.vx / sp * 16; pt.vy = pt.vy / sp * 16; }
       pt.x += pt.vx; pt.y += pt.vy;
     }
-    _v2gAlpha *= 0.985;
+    _v2gAlpha *= 0.982;
     if (_v2gAlpha < 0.004) _v2gAlpha = 0;
   }
 
@@ -2375,6 +2409,7 @@
         p.isVirtual = !!nd.isVirtual;
         p.isValue = !!nd.isValue;
         p.isHighStakes = !!nd.isHighStakes;
+        p.isolated = !!nd.isolated;
         p.type = nd.type || p.type;
         // Keep tier in sync if the payload updated it (e.g. after a group op).
         if (typeof nd.tier === 'number') p.tier = nd.tier;
@@ -2433,6 +2468,9 @@
           // One fact's literal value (true, 4): its id is not an entity.
           isValue: !!nd.isValue,
           isEpisode: !!nd.isEpisode,
+          // A thing the filter kept although none of its lines survived it.
+          isolated: !!nd.isolated,
+          degree: 0,
           tier: (typeof nd.tier === 'number' ? nd.tier : -1),
           pinned: pinned,
         };
@@ -2496,6 +2534,12 @@
           });
         }
       });
+      // How many lines meet each dot: the labels of the most connected are
+      // drawn first when they would overlap.
+      _v2gEdges.forEach(function(ed) {
+        if (_v2gPts[ed.a]) _v2gPts[ed.a].degree++;
+        if (_v2gPts[ed.b]) _v2gPts[ed.b].degree++;
+      });
       // Drop selected edge if topology rebuilt without it
       if (_v2gOps.selectedEdgeIdx >= _v2gEdges.length) _v2gOps.selectedEdgeIdx = -1;
       // Keep pan/zoom if we already had a layout; only reset on first paint.
@@ -2506,6 +2550,8 @@
       } else {
         _v2gView = { scale: 1, ox: 0, oy: 0 };
         _v2gAlpha = 1;
+        // The first layout is fitted in view once it settles.
+        _v2gFitPending = true;
       }
       _v2gSelectedId = keepSel && _v2gIds[keepSel] !== undefined ? keepSel : null;
     }
@@ -2513,22 +2559,24 @@
     if (!_v2gAnim) _v2gTick();
   }
 
+  // The map moves only while its layout settles or something is dragged:
+  // no idle animation (a "breathing" hub and a pulsing ring kept a frame
+  // loop running for as long as the page was open). Once the first layout
+  // has settled, the whole map is fitted in view unless the person has
+  // already moved or zoomed it.
+  var _v2gFitPending = true;
+  var _v2gUserView = false;
+
   function _v2gTick() {
     var size = _v2gCanvasSize(); if (!size) { _v2gAnim = null; return; }
     var ctx = size.ctx, W = size.w, H = size.h;
     if (_v2gAlpha > 0) _v2gStep(W, H);
-    _v2gPaint(ctx, W, H);
-    // Keep a low-FPS idle loop for You/user breath + high-stakes pulse
-    var idle = false;
-    for (var i = 0; i < _v2gPts.length; i++) {
-      if (_v2gIsUser(_v2gPts[i]) || _v2gPts[i].isHighStakes) { idle = true; break; }
+    if (_v2gFitPending && !_v2gUserView && _v2gPts.length && _v2gAlpha < 0.05) {
+      _v2gFitPending = false;
+      _v2gFitView(W, H);
     }
-    var sheetOpen = false;
-    try {
-      var inspTick = document.getElementById('v2g-inspect');
-      sheetOpen = !!(inspTick && inspTick.classList.contains('is-open') && _v2gIsPhone());
-    } catch (eTick) { /* ignore */ }
-    if (_v2gAlpha > 0 || _v2gDrag || (idle && !sheetOpen)) {
+    _v2gPaint(ctx, W, H);
+    if (_v2gAlpha > 0 || _v2gDrag) {
       _v2gAnim = requestAnimationFrame(_v2gTick);
     } else {
       _v2gAnim = null;
@@ -2537,98 +2585,160 @@
 
   function _v2gRepaint() { if (!_v2gAnim) _v2gAnim = requestAnimationFrame(_v2gTick); }
 
+  // Fit every dot (and the label under it) in view, centred.
+  function _v2gFitView(W, H) {
+    if (!_v2gPts.length) return;
+    if (!W || !H) {
+      var size = _v2gCanvasSize();
+      if (!size) return;
+      W = size.w; H = size.h;
+    }
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (var i = 0; i < _v2gPts.length; i++) {
+      var p = _v2gPts[i];
+      minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+      minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+    }
+    var padX = 70, padTop = 36, padBottom = 54;
+    var bw = Math.max(1, maxX - minX), bh = Math.max(1, maxY - minY);
+    var scale = Math.min((W - padX * 2) / bw, (H - padTop - padBottom) / bh);
+    scale = Math.max(_v2gMinScale, Math.min(1.6, scale));
+    _v2gView.scale = scale;
+    _v2gView.ox = W / 2 - ((minX + maxX) / 2) * scale;
+    _v2gView.oy = (padTop + (H - padBottom)) / 2 - ((minY + maxY) / 2) * scale;
+    _v2gRepaint();
+  }
+
+  // Zoom around a point of the canvas (the centre, from the buttons).
+  function _v2gZoomAt(factor, sx, sy) {
+    var size = _v2gCanvasSize();
+    if (!size) return;
+    if (sx == null) { sx = size.w / 2; sy = size.h / 2; }
+    var ns = Math.max(_v2gMinScale, Math.min(_v2gMaxScale, _v2gView.scale * factor));
+    if (ns === _v2gView.scale) return;
+    var wx = _v2gWX(sx), wy = _v2gWY(sy);
+    _v2gView.scale = ns; _v2gView.ox = sx - wx * ns; _v2gView.oy = sy - wy * ns;
+    _v2gUserView = true;
+    _v2gRepaint();
+  }
+
+  // Whether text reads right to left: its first strong letter is Arabic,
+  // Hebrew, Syriac, Thaana or N'Ko (the label is drawn and cut from that end).
+  var _V2G_RTL = /[֐-ࣿיִ-﷿ﹰ-﻿]/;
+  var _V2G_LTR = /[A-Za-zÀ-ɏͰ-ϿЀ-ӿ]/;
+  function _v2gIsRtl(text) {
+    var s = String(text || '');
+    for (var i = 0; i < s.length; i++) {
+      var ch = s.charAt(i);
+      if (_V2G_RTL.test(ch)) return true;
+      if (_V2G_LTR.test(ch)) return false;
+    }
+    return false;
+  }
+
+  // A label cut to *max* pixels, from its logical end: in a right-to-left
+  // label the ellipsis lands on the left, where that text ends.
+  function _v2gFit(ctx, text, max) {
+    var s = String(text || '');
+    if (ctx.measureText(s).width <= max) return s;
+    while (s.length > 2 && ctx.measureText(s + '…').width > max) s = s.slice(0, -1);
+    return s.replace(/\s+$/, '') + '…';
+  }
+
+  function _v2gRoundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    if (typeof ctx.roundRect === 'function') { ctx.roundRect(x, y, w, h, r); return; }
+    ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+
+  function _v2gOverlaps(rect, placed) {
+    for (var i = 0; i < placed.length; i++) {
+      var q = placed[i];
+      if (rect.x < q.x + q.w && rect.x + rect.w > q.x && rect.y < q.y + q.h && rect.y + rect.h > q.y) return true;
+    }
+    return false;
+  }
+
+  // The map, drawn flat in the theme's tokens: lines in the secondary ink,
+  // a dot in its kind's colour with a ring of the card colour, labels on a
+  // plate under the dot. A line's relation is written on it only when it
+  // matters (its dot chosen or hovered, the line chosen, or zoomed in on a
+  // small map); a label that would overlap another is left out, the most
+  // connected and the chosen ones first (2026-11-18 review: glows, a
+  // pulsing hub, hidden arrowheads and labels on top of each other).
   function _v2gPaint(ctx, W, H) {
     _v2gRefreshPalette();
     var theme = _v2gTheme();
     ctx.clearRect(0, 0, W, H);
-    // Soft ambient glow (site accent)
-    var amb = ctx.createRadialGradient(W * 0.5, H * 0.42, 8, W * 0.5, H * 0.5, Math.max(W, H) * 0.55);
-    amb.addColorStop(0, _v2gHexAlpha(theme.accent, 0.07));
-    amb.addColorStop(0.45, _v2gHexAlpha(theme.secondary, 0.03));
-    amb.addColorStop(1, _v2gHexAlpha(theme.accent, 0));
-    ctx.fillStyle = amb;
-    ctx.fillRect(0, 0, W, H);
+    ctx.lineCap = 'round';
+    ctx.shadowBlur = 0;
 
-    // Edges — accent family, gradient along the link when connected to You
-    // Wider hit targets via thicker stroke when zoomed out (pick still uses _v2gHitEdge)
-    ctx.font = _v2gFont(10);
+    var hoverId = _v2gHover >= 0 && _v2gPts[_v2gHover] ? _v2gPts[_v2gHover].id : null;
+    var focusId = _v2gSelectedId || hoverId;
+    // The focus's neighbours, once per frame (dots, labels and lines ask).
+    var focusNbr = {};
+    if (focusId) {
+      for (var fe = 0; fe < _v2gEdges.length; fe++) {
+        var fa = _v2gPts[_v2gEdges[fe].a], fb = _v2gPts[_v2gEdges[fe].b];
+        if (!fa || !fb) continue;
+        if (fa.id === focusId) focusNbr[fb.id] = true;
+        if (fb.id === focusId) focusNbr[fa.id] = true;
+      }
+    }
+    var smallMap = _v2gEdges.length <= 60;
+    var edgeLabels = [];
+
+    // ── Lines ──
     for (var e = 0; e < _v2gEdges.length; e++) {
       var ed = _v2gEdges[e]; var A = _v2gPts[ed.a], B = _v2gPts[ed.b];
       if (!A || !B) continue;
       var ax = _v2gSX(A.x), ay = _v2gSY(A.y), bx = _v2gSX(B.x), by = _v2gSY(B.y);
-      var hot = _v2gSelectedId && (A.id === _v2gSelectedId || B.id === _v2gSelectedId);
+      var len = Math.sqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay));
+      if (len < 1) continue;
+      var ux = (bx - ax) / len, uy = (by - ay) / len;
       var edgeSelected = e === _v2gOps.selectedEdgeIdx;
       var beliefHot = _v2gHighlightSubj && _v2gHighlightObj &&
         ((A.id === _v2gHighlightSubj && B.id === _v2gHighlightObj) ||
          (A.id === _v2gHighlightObj && B.id === _v2gHighlightSubj));
-      var pcolor = _V2G_PRED_COLORS[ed.type] || theme.accent;
-      var touchesUser = _v2gIsUser(A) || _v2gIsUser(B);
-      ctx.lineCap = 'round';
       var pathHot = !!ed.pathHot || (_v2gPathIds[A.id] && _v2gPathIds[B.id]);
-      // Source/target slot rings on edges between ops endpoints
       var opsEdge = (_v2gOps.sourceId && _v2gOps.targetId &&
         ((A.id === _v2gOps.sourceId && B.id === _v2gOps.targetId) ||
          (A.id === _v2gOps.targetId && B.id === _v2gOps.sourceId)));
-      if (edgeSelected || beliefHot || pathHot) {
-        ctx.strokeStyle = edgeSelected ? theme.warning : theme.accentLight;
-        ctx.lineWidth = edgeSelected ? 3.6 : (pathHot ? 3.0 : 3.4);
-        ctx.shadowColor = _v2gHexAlpha(edgeSelected ? theme.warning : theme.accent, 0.55); ctx.shadowBlur = 10;
-      } else if (opsEdge) {
-        ctx.strokeStyle = theme.user; ctx.lineWidth = 2.6;
-        ctx.shadowColor = _v2gHexAlpha(theme.user, 0.45); ctx.shadowBlur = 8;
-      } else if (hot) {
-        ctx.strokeStyle = theme.accent; ctx.lineWidth = 2.3;
-        ctx.shadowColor = _v2gHexAlpha(theme.accent, 0.4); ctx.shadowBlur = 8;
-      } else if (ed.superseded) {
-        ctx.strokeStyle = _v2gHexAlpha(theme.muted, 0.45); ctx.lineWidth = 1;
-        ctx.shadowBlur = 0;
-      } else {
-        var grad = ctx.createLinearGradient(ax, ay, bx, by);
-        if (touchesUser) {
-          grad.addColorStop(0, _v2gHexAlpha(theme.user, 0.75));
-          grad.addColorStop(1, _v2gHexAlpha(theme.accent, 0.55));
-        } else {
-          grad.addColorStop(0, _v2gHexAlpha(pcolor, 0.55));
-          grad.addColorStop(1, _v2gHexAlpha(theme.accentLight, 0.4));
-        }
-        ctx.strokeStyle = grad;
-        ctx.lineWidth = 1 + (ed.confidence || 0.5) * 1.6;
-        ctx.shadowBlur = 0;
-      }
-      if (ed.superseded) ctx.setLineDash([4, 3]); else ctx.setLineDash([]);
-      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      var touchesFocus = focusId && (A.id === focusId || B.id === focusId);
+      var hot = edgeSelected || beliefHot || pathHot || touchesFocus;
+      var dimmed = focusId && !hot && !opsEdge;
+      var color, width, alpha;
+      if (edgeSelected || beliefHot) { color = theme.accent; width = 3; alpha = 1; }
+      else if (opsEdge) { color = theme.user; width = 2.6; alpha = 1; }
+      else if (hot) { color = theme.accent; width = 2.2; alpha = 0.9; }
+      else if (ed.superseded) { color = theme.muted; width = 1.2; alpha = 0.5; }
+      else { color = theme.ink2; width = 1.1 + (ed.confidence || 0.5) * 0.7; alpha = dimmed ? 0.12 : 0.32; }
+      // Start and end at the dots' edges, so the arrowhead is seen.
+      var x1 = ax + ux * (A.r + 2), y1 = ay + uy * (A.r + 2);
+      var x2 = bx - ux * (B.r + 3), y2 = by - uy * (B.r + 3);
+      ctx.strokeStyle = _v2gHexAlpha(color, alpha);
+      ctx.lineWidth = width;
+      ctx.setLineDash(ed.superseded ? [5, 4] : []);
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
       ctx.setLineDash([]);
-      ctx.shadowBlur = 0;
-      // Arrowhead
-      var ang = Math.atan2(by - ay, bx - ax);
-      var ah = 6;
+      // Arrowhead: from the fact's subject to its value.
+      var ah = hot ? 8 : 6, aw = 0.42;
+      var ang = Math.atan2(uy, ux);
+      ctx.fillStyle = _v2gHexAlpha(color, Math.min(1, alpha + 0.2));
       ctx.beginPath();
-      ctx.moveTo(bx, by);
-      ctx.lineTo(bx - ah * Math.cos(ang - 0.4), by - ah * Math.sin(ang - 0.4));
-      ctx.lineTo(bx - ah * Math.cos(ang + 0.4), by - ah * Math.sin(ang + 0.4));
+      ctx.moveTo(x2, y2);
+      ctx.lineTo(x2 - ah * Math.cos(ang - aw), y2 - ah * Math.sin(ang - aw));
+      ctx.lineTo(x2 - ah * Math.cos(ang + aw), y2 - ah * Math.sin(ang + aw));
       ctx.closePath();
-      ctx.fillStyle = hot || beliefHot ? theme.accentLight : (ed.superseded ? _v2gHexAlpha(theme.muted, 0.6) : _v2gHexAlpha(pcolor, 0.85));
       ctx.fill();
-      // Label
-      if (_v2gView.scale > 0.7 && ed.label) {
-        var mx = (ax + bx) / 2, my = (ay + by) / 2;
-        var tw = ctx.measureText(ed.label).width;
-        ctx.fillStyle = _v2gHexAlpha(theme.card, 0.9);
-        ctx.beginPath();
-        // rounded pill
-        var px = mx - tw / 2 - 5, py = my - 9, pw = tw + 10, ph = 15, pr = 4;
-        ctx.moveTo(px + pr, py); ctx.arcTo(px + pw, py, px + pw, py + ph, pr);
-        ctx.arcTo(px + pw, py + ph, px, py + ph, pr); ctx.arcTo(px, py + ph, px, py, pr);
-        ctx.arcTo(px, py, px + pw, py, pr); ctx.closePath(); ctx.fill();
-        ctx.strokeStyle = _v2gHexAlpha(theme.accent, 0.3); ctx.lineWidth = 1; ctx.stroke();
-        ctx.fillStyle = hot || beliefHot ? theme.accentLight : theme.ink2;
-        ctx.textAlign = 'center'; ctx.fillText(ed.label, mx, my + 3);
+      if (ed.fullLabel && (edgeSelected || beliefHot || touchesFocus || (smallMap && _v2gView.scale >= 1.5))) {
+        edgeLabels.push({ text: ed.fullLabel.replace(/_/g, ' '), x: (x1 + x2) / 2, y: (y1 + y2) / 2, hot: hot });
       }
     }
-    // Nodes
-    var showLabels = _v2gView.scale > 0.55;
-    ctx.font = _v2gFont(11);
-    var tNow = Date.now();
+
+    // ── Dots ──
     for (var i = 0; i < _v2gPts.length; i++) {
       var p = _v2gPts[i];
       var x = _v2gSX(p.x), y = _v2gSY(p.y);
@@ -2636,136 +2746,126 @@
       var isHover = (i === _v2gHover), isSel = (p.id === _v2gSelectedId);
       var isUser = _v2gIsUser(p);
       var onPath = !!_v2gPathIds[p.id];
-      if (isSel || isHover || onPath) r += 3;
-      if (isUser) r += 1;
-      var color = p.isEpisode ? _v2gHexAlpha(theme.secondary, 0.55) : _v2gNodeColor(p);
-      // Soft outer glow
-      var glowR = r + (isUser || onPath ? 10 : 7);
-      var glow = ctx.createRadialGradient(x, y, r * 0.2, x, y, glowR);
-      glow.addColorStop(0, _v2gHexAlpha(color, isUser || isSel || onPath ? 0.5 : 0.22));
-      glow.addColorStop(1, _v2gHexAlpha(color, 0));
-      ctx.fillStyle = glow;
-      ctx.beginPath(); ctx.arc(x, y, glowR, 0, 2 * Math.PI); ctx.fill();
-      if (onPath) {
-        ctx.beginPath(); ctx.arc(x, y, r + 6, 0, 2 * Math.PI);
-        ctx.strokeStyle = theme.accentLight; ctx.lineWidth = 2; ctx.stroke();
+      // A value or a conversation has one colour each, as the legend says;
+      // a thing its kind's.
+      var color = p.isEpisode ? theme.secondary
+        : ((p.isValue || p.isVirtual) && !isUser ? theme.accent : _v2gNodeColor(p));
+      var faded = (p.isolated && !isSel && !isHover);
+      // Dots that do not touch the focus fade, so the eye goes to the chosen one.
+      var dim = focusId && !isSel && !isHover && p.id !== focusId && !focusNbr[p.id];
+      ctx.globalAlpha = faded ? 0.35 : (dim ? 0.45 : 1);
+      if (p.isBlob && !isUser) {
+        // A long note: a small rounded chip, dashed, so it never reads as a
+        // person or a place.
+        var chipW = r * 2.6, chipH = r * 1.6;
+        _v2gRoundRect(ctx, x - chipW / 2, y - chipH / 2, chipW, chipH, 4);
+        ctx.fillStyle = theme.card; ctx.fill();
+        ctx.setLineDash([3, 2]); ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.stroke(); ctx.setLineDash([]);
+      } else if (p.isVirtual || p.isValue || p.isEpisode) {
+        // A value (a fact's answer) or a conversation: a hollow dot.
+        ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI);
+        ctx.fillStyle = theme.card; ctx.fill();
+        ctx.setLineDash(p.isEpisode ? [3, 2] : []);
+        ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke();
+        ctx.setLineDash([]);
+      } else {
+        ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI);
+        ctx.fillStyle = color; ctx.fill();
+        ctx.strokeStyle = theme.card; ctx.lineWidth = 2; ctx.stroke();
       }
-      // High-stakes red halo (above glow)
-      if (p.isHighStakes) {
-        var pulse = 0.5 + 0.5 * Math.sin(tNow / 400);
-        ctx.beginPath(); ctx.arc(x, y, r + 5 + pulse * 2, 0, 2 * Math.PI);
-        ctx.strokeStyle = _v2gHexAlpha(theme.danger, 0.4 + pulse * 0.3); ctx.lineWidth = 2; ctx.stroke();
-      }
-      // User: gentle amber breath
+      ctx.globalAlpha = 1;
       if (isUser) {
-        var up = 0.5 + 0.5 * Math.sin(tNow / 650);
-        ctx.beginPath(); ctx.arc(x, y, r + 5 + up * 2.5, 0, 2 * Math.PI);
-        ctx.strokeStyle = _v2gHexAlpha(theme.user, 0.35 + up * 0.25); ctx.lineWidth = 2; ctx.stroke();
+        ctx.beginPath(); ctx.arc(x, y, r + 4, 0, 2 * Math.PI);
+        ctx.strokeStyle = _v2gHexAlpha(theme.user, 0.55); ctx.lineWidth = 2; ctx.stroke();
       }
-      // Selected ring (accent)
-      if (isSel) {
+      if (p.isHighStakes) {
         ctx.beginPath(); ctx.arc(x, y, r + 5, 0, 2 * Math.PI);
-        ctx.strokeStyle = theme.accentLight; ctx.lineWidth = 2.2; ctx.stroke();
+        ctx.setLineDash([3, 3]); ctx.strokeStyle = theme.danger; ctx.lineWidth = 1.5; ctx.stroke(); ctx.setLineDash([]);
       }
-      // Ops source / target rings (cyan = src, blue = tgt)
+      if (p.isolated && !p.isVirtual) {
+        ctx.beginPath(); ctx.arc(x, y, r + 3, 0, 2 * Math.PI);
+        ctx.setLineDash([2, 3]); ctx.strokeStyle = theme.warning; ctx.lineWidth = 1.5; ctx.stroke(); ctx.setLineDash([]);
+      }
+      if (isSel || isHover || onPath) {
+        ctx.beginPath(); ctx.arc(x, y, r + (isUser ? 8 : 5), 0, 2 * Math.PI);
+        ctx.strokeStyle = isSel || onPath ? theme.accent : _v2gHexAlpha(theme.ink2, 0.6);
+        ctx.lineWidth = isSel ? 2.5 : 2; ctx.stroke();
+      }
       if (_v2gOps.sourceId && p.id === _v2gOps.sourceId) {
-        ctx.beginPath(); ctx.arc(x, y, r + 7, 0, 2 * Math.PI);
+        ctx.beginPath(); ctx.arc(x, y, r + 10, 0, 2 * Math.PI);
         ctx.strokeStyle = theme.accent; ctx.lineWidth = 2.4; ctx.stroke();
       }
       if (_v2gOps.targetId && p.id === _v2gOps.targetId) {
-        ctx.beginPath(); ctx.arc(x, y, r + 9, 0, 2 * Math.PI);
-        ctx.strokeStyle = theme.secondary; ctx.lineWidth = 2; ctx.setLineDash([3, 2]); ctx.stroke();
-        ctx.setLineDash([]);
-      }
-      // Blob compaction: prose-note nodes (>80 chars) render as compact
-      // rounded-rect chips, not circles — smaller, distinct shape, so they
-      // don't dominate the canvas and the group-spring can reposition them.
-      if (p.isBlob && !isUser) {
-        var chipW = r * 2.4, chipH = r * 1.4;
-        var chipAlpha = (p.isolated && !isSel && !isHover) ? 0.4
-                      : (p.isVirtual && !isSel && !isHover) ? 0.72 : 1;
-        ctx.globalAlpha = chipAlpha;
-        // chip body
-        ctx.fillStyle = _v2gHexAlpha(color, 0.55);
-        ctx.beginPath();
-        if (typeof ctx.roundRect === 'function') {
-          ctx.roundRect(x - chipW / 2, y - chipH / 2, chipW, chipH, 3);
-        } else {
-          ctx.rect(x - chipW / 2, y - chipH / 2, chipW, chipH);
-        }
-        ctx.fill();
-        // chip border (dashed = note, not entity)
-        ctx.setLineDash([2, 2]);
-        ctx.strokeStyle = _v2gHexAlpha(color, 0.8);
-        ctx.lineWidth = 1;
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.globalAlpha = 1;
-        // label inside the chip (truncated display name + …), clamped to chip width
-        if (showLabels) {
-          ctx.font = _v2gFont(9);
-          var chipLab = p.label;
-          while (ctx.measureText(chipLab).width > chipW - 6 && chipLab.length > 3) {
-            chipLab = chipLab.slice(0, -2) + '…';
-          }
-          ctx.fillStyle = theme.ink;
-          ctx.textAlign = 'center';
-          ctx.fillText(chipLab, x, y + 3);
-        }
-        continue;  // skip the normal circle body below
-      }
-      // Body — radial highlight for depth
-      var body = ctx.createRadialGradient(x - r * 0.3, y - r * 0.35, 0, x, y, r);
-      body.addColorStop(0, color);
-      body.addColorStop(1, _v2gHexAlpha(color, 0.82));
-      ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI);
-      ctx.fillStyle = body;
-      // F2: isolated (link-less under filter) + virtual nodes render faded.
-      ctx.globalAlpha = (p.isVirtual && !isSel && !isHover) ? 0.72
-                      : (p.isolated && !isSel && !isHover) ? 0.4 : 1;
-      ctx.fill();
-      ctx.globalAlpha = 1;
-      if (p.isVirtual) {
-        ctx.setLineDash([3, 2]);
-        ctx.strokeStyle = _v2gHexAlpha(theme.accentLight, 0.55);
-      } else if (p.isolated) {
-        // Isolation badge: amber dashed ring so a stranded node is visible,
-        // not mistaken for a healthy connected node.
-        ctx.setLineDash([2, 3]);
-        ctx.strokeStyle = _v2gHexAlpha(theme.warning, 0.75);
-      } else {
-        ctx.setLineDash([]);
-        ctx.strokeStyle = _v2gHexAlpha(theme.card, isUser ? 0.85 : 0.6);
-      }
-      ctx.lineWidth = isUser ? 1.6 : 1;
-      ctx.stroke();
-      ctx.setLineDash([]);
-      // User center mark
-      if (isUser && r > 8) {
-        ctx.beginPath(); ctx.arc(x, y, Math.max(2.2, r * 0.22), 0, 2 * Math.PI);
-        ctx.fillStyle = _v2gHexAlpha(theme.card, 0.9); ctx.fill();
-      }
-      if (showLabels) {
-        var lab = p.label;
-        // Clamp the label to fit within a plate proportional to the node
-        // radius (so long names don't overflow the card/box). Truncate with
-        // … if the measured text exceeds the max width.
-        ctx.font = (isUser ? '600 ' : '') + _v2gFont(isUser ? 12 : 11);
-        var maxLabelW = Math.max(60, r * 3.2);
-        while (ctx.measureText(lab).width > maxLabelW && lab.length > 4) {
-          lab = lab.slice(0, -2) + '…';
-        }
-        // Canvas font: weight + size/family (re-set after measure loop)
-        ctx.font = (isUser ? '600 ' : '') + _v2gFont(isUser ? 12 : 11);
-        // subtle label plate for readability
-        var lw = ctx.measureText(lab).width;
-        ctx.fillStyle = _v2gHexAlpha(theme.card, 0.82);
-        ctx.fillRect(x - lw / 2 - 4, y + r + 3, lw + 8, 14);
-        ctx.fillStyle = isUser ? theme.user : theme.ink;
-        ctx.textAlign = 'center';
-        ctx.fillText(lab, x, y + r + 13);
+        ctx.beginPath(); ctx.arc(x, y, r + 12, 0, 2 * Math.PI);
+        ctx.strokeStyle = theme.secondary; ctx.lineWidth = 2; ctx.setLineDash([4, 3]); ctx.stroke(); ctx.setLineDash([]);
       }
     }
+
+    // ── Labels: the chosen, the hovered, you, then the most connected;
+    // one that would overlap a label already placed is left out. ──
+    if (_v2gView.scale < 0.4) return;
+    var order = [];
+    for (var o = 0; o < _v2gPts.length; o++) order.push(o);
+    function rank(idx) {
+      var q = _v2gPts[idx];
+      if (q.id === _v2gSelectedId) return 1e9;
+      if (idx === _v2gHover) return 1e8;
+      if (_v2gIsUser(q)) return 1e7;
+      if (focusNbr[q.id]) return 1e6 + (q.degree || 0);
+      return (q.isMajor ? 1e5 : 0) + (q.degree || 0) * 10 + (q.isVirtual ? 0 : 5);
+    }
+    var ranks = {};
+    for (var rk = 0; rk < order.length; rk++) ranks[rk] = rank(rk);
+    order.sort(function(a, b) { return ranks[b] - ranks[a]; });
+    var placed = [];
+    // Edge labels claim their space first when a dot is chosen (they are why
+    // it was chosen); the dots' own discs are never covered.
+    for (var di = 0; di < _v2gPts.length; di++) {
+      var dp = _v2gPts[di];
+      var ddx = _v2gSX(dp.x), ddy = _v2gSY(dp.y);
+      placed.push({ x: ddx - dp.r, y: ddy - dp.r, w: dp.r * 2, h: dp.r * 2 });
+    }
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    for (var li = 0; li < edgeLabels.length; li++) {
+      var el = edgeLabels[li];
+      ctx.font = _v2gFont(11);
+      ctx.direction = _v2gIsRtl(el.text) ? 'rtl' : 'ltr';
+      var et = _v2gFit(ctx, el.text, 160);
+      var ew = ctx.measureText(et).width + 12, eh = 18;
+      var er = { x: el.x - ew / 2, y: el.y - eh / 2, w: ew, h: eh };
+      if (!el.hot && _v2gOverlaps(er, placed)) continue;
+      placed.push(er);
+      _v2gRoundRect(ctx, er.x, er.y, er.w, er.h, 9);
+      ctx.fillStyle = _v2gHexAlpha(theme.card, 0.94); ctx.fill();
+      ctx.strokeStyle = _v2gHexAlpha(el.hot ? theme.accent : theme.ink2, el.hot ? 0.55 : 0.2);
+      ctx.lineWidth = 1; ctx.stroke();
+      ctx.fillStyle = el.hot ? theme.ink : theme.ink2;
+      ctx.fillText(et, el.x, el.y + 0.5);
+    }
+    for (var n2 = 0; n2 < order.length; n2++) {
+      var idx = order[n2];
+      var q = _v2gPts[idx];
+      var qx = _v2gSX(q.x), qy = _v2gSY(q.y);
+      var must = q.id === _v2gSelectedId || idx === _v2gHover || _v2gIsUser(q);
+      var bold = _v2gIsUser(q) || q.id === _v2gSelectedId;
+      ctx.font = (bold ? '600 ' : '') + _v2gFont(bold ? 13 : 12);
+      var full = q.fullLabel || q.label || String(q.id || '');
+      ctx.direction = _v2gIsRtl(full) ? 'rtl' : 'ltr';
+      var lab = _v2gFit(ctx, full, must ? 220 : 150);
+      var lw = ctx.measureText(lab).width + 10, lh = 18;
+      var ly = qy + q.r + 6;
+      var rect = { x: qx - lw / 2, y: ly, w: lw, h: lh };
+      if (!must && _v2gOverlaps(rect, placed)) continue;
+      placed.push(rect);
+      var dimLabel = focusId && !must && ranks[idx] < 1e6;
+      _v2gRoundRect(ctx, rect.x, rect.y, rect.w, rect.h, 6);
+      ctx.fillStyle = _v2gHexAlpha(theme.card, dimLabel ? 0.7 : 0.9); ctx.fill();
+      ctx.fillStyle = dimLabel ? _v2gHexAlpha(theme.ink, 0.55) : theme.ink;
+      ctx.fillText(lab, qx, ly + lh / 2 + 0.5);
+    }
+    ctx.direction = 'inherit';
+    ctx.textBaseline = 'alphabetic';
   }
 
   function _v2gHit(sx, sy) {
@@ -2879,15 +2979,27 @@
     var hint = document.getElementById('v2g-ops-hint');
     var linkBtn = document.getElementById('v2g-ops-link');
     var mergeBtn = document.getElementById('v2g-ops-merge');
+    // The two things a person picked, by the name the map shows (the ids
+    // "src: shipx" read as code).
     if (srcEl) {
-      srcEl.textContent = _mt('memory.console.ops_src', 'src: {id}', { id: _v2gOps.sourceId ? _v2gShortId(_v2gOps.sourceId) : '—' });
-      srcEl.title = _v2gOps.sourceId || _mt('memory.mc.source_entity', 'Source entity');
+      srcEl.textContent = _v2gOps.sourceId
+        ? _mt('memory.page.connect_from', 'From: {name}', { name: _v2gNameOf(_v2gOps.sourceId) })
+        : _mt('memory.page.connect_from_empty', 'From: none');
+      srcEl.title = _v2gOps.sourceId || _mt('memory.page.connect_from_hint', 'The first thing');
       srcEl.classList.toggle('is-set', !!_v2gOps.sourceId);
     }
     if (tgtEl) {
-      tgtEl.textContent = _mt('memory.console.ops_tgt', 'tgt: {id}', { id: _v2gOps.targetId ? _v2gShortId(_v2gOps.targetId) : '—' });
-      tgtEl.title = _v2gOps.targetId || _mt('memory.mc.target_entity', 'Target entity');
+      tgtEl.textContent = _v2gOps.targetId
+        ? _mt('memory.page.connect_to', 'To: {name}', { name: _v2gNameOf(_v2gOps.targetId) })
+        : _mt('memory.page.connect_to_empty', 'To: none');
+      tgtEl.title = _v2gOps.targetId || _mt('memory.page.connect_to_hint', 'The second thing');
       tgtEl.classList.toggle('is-set', !!_v2gOps.targetId);
+    }
+    // A pick or a mode opens the fold that holds these controls, so what was
+    // picked is never out of sight.
+    if (_v2gOps.sourceId || _v2gOps.targetId || _v2gOps.mode) {
+      var fold = document.getElementById('v2g-edit');
+      if (fold && !fold.open) fold.open = true;
     }
     if (hint) {
       if (_v2gOps.mode === 'link') {
@@ -2919,13 +3031,21 @@
       // Soft until armed, filled when it will act (never no variant at all).
       linkBtn.classList.toggle('btn-primary', linkOn);
       linkBtn.classList.toggle('btn-secondary', !linkOn);
-      linkBtn.textContent = _v2gOps.mode === 'link' ? _mt('memory.console.linking', 'Linking…') : _mt('memory.mc.link', 'Link');
+      linkBtn.textContent = _v2gOps.mode === 'link' ? _mt('memory.console.linking', 'Linking…') : _mt('memory.page.connect_link', 'Connect');
     }
     if (mergeBtn) {
       mergeBtn.classList.toggle('btn-primary', _v2gOps.mode === 'merge');
       mergeBtn.classList.toggle('btn-secondary', _v2gOps.mode !== 'merge');
-      mergeBtn.textContent = _v2gOps.mode === 'merge' ? _mt('memory.console.merging', 'Merging…') : _mt('memory.mc.merge', 'Merge');
+      mergeBtn.textContent = _v2gOps.mode === 'merge' ? _mt('memory.console.merging', 'Merging…') : _mt('memory.page.connect_merge', 'Join into one');
     }
+  }
+
+  // The name the map shows for a node id, else the id.
+  function _v2gNameOf(id) {
+    for (var i = 0; i < _v2gPts.length; i++) {
+      if (_v2gPts[i].id === id) return _v2gDisplayName(_v2gPts[i]);
+    }
+    return _v2gShortId(id);
   }
 
   function _v2gBroadcastSlots() {
@@ -3043,9 +3163,12 @@
       _v2gToast(_mt('memory.console.slots_differ', 'Source and target must differ'), 'error');
       return false;
     }
+    // It cannot be undone: said, and asked as a destructive action.
     var ok = await _v2gConfirm({
-      title: _mt('memory.console.merge_title', 'Merge entities'),
-      message: _mt('memory.console.merge_message', 'Merge {source} into {target}?\nBeliefs rewire to the target; source is retired.', { source: src, target: tgt }),
+      title: _mt('memory.page.merge_confirm_title', 'Join into one? This cannot be undone'),
+      message: _mt('memory.page.merge_confirm', 'Every fact about {from} moves to {to}, and {from} goes. This cannot be undone.', { from: _v2gNameOf(src), to: _v2gNameOf(tgt) }),
+      confirmText: _mt('memory.page.merge_confirm_button', 'Join them'),
+      danger: true,
     });
     if (!ok) return false;
     try {
@@ -3426,7 +3549,7 @@
         ? _mt('memory.console.moved_stranded', ' · stranded: {ids}', { ids: data.warn_orphaned.join(', ') })
         : '';
       _v2gToast(_mt('memory.console.moved_edge', 'Moved edge to {id}', { id: _v2gShortId(newEndpoint) }) +
-        (data.undo_token ? _mt('memory.console.moved_undo', ' · Undo') : '') + warn, 'success');
+        warn, 'success');
       _v2gOps.mode = null;
       _v2gOps.repoint = null;
       _v2gSyncOpsBar();
@@ -3745,26 +3868,25 @@
     _v2gHighlightObj = B.id;
     var pcolor = _v2gPredVar(ed.type) || 'var(--accent-light)';
     var pred = ed.fullLabel || ed.label || '';
-    var html = '<div style="font-weight:700;font-size:0.8rem;color:var(--warning);word-break:break-word;margin-bottom:6px;">' + _esc(_mt('memory.console.edge_belief', 'Edge · belief')) + '</div>';
-    html += '<div translate="no" style="font-size:0.74rem;line-height:1.45;margin-bottom:8px;color:var(--text-primary);">';
-    html += '<b>' + _v2gEsc(_v2gDisplayName(A)) + '</b> ';
-    html += '<span style="color:' + pcolor + ';">' + _v2gEsc(String(pred).replace(/_/g, ' ')) + '</span> ';
-    html += '<b>' + _v2gEsc(_v2gDisplayName(B)) + '</b>';
+    // One fact: its sentence first, in the page's own reading order, then
+    // what kind of fact it is, then what can be done with it.
+    var html = '<div class="mem-section-label" style="margin-bottom:6px;">' + _esc(_mt('memory.console.edge_belief', 'Fact')) + '</div>';
+    html += '<div translate="no" dir="auto" style="font-size:0.85rem;line-height:1.5;margin-bottom:8px;color:var(--text-primary);">';
+    html += '<bdi><b>' + _v2gEsc(_v2gDisplayName(A)) + '</b></bdi> ';
+    html += '<bdi dir="ltr" style="color:' + pcolor + ';">' + _v2gEsc(String(pred).replace(/_/g, ' ')) + '</bdi> ';
+    html += '<bdi><b>' + _v2gEsc(_v2gDisplayName(B)) + '</b></bdi>';
     html += '</div>';
-    html += '<div style="color:var(--text-muted);font-size:0.65rem;margin-bottom:8px;font-family:var(--font-mono);">';
-    if (ed.beliefId) html += _v2gEsc(_mt('memory.console.edge_id', 'id: {id}', { id: String(ed.beliefId).slice(0, 20) }));
-    else html += _v2gEsc(_mt('memory.console.edge_id_missing', 'id: (missing — unlink may fail)'));
+    html += '<div style="color:var(--text-muted);font-size:0.75rem;margin-bottom:10px;">';
     var edType = _mtData('memory.console.ptype_', ed.type || '?');
-    html += ' · <span' + edType.attr + '>' + _v2gEsc(edType.text) + '</span>' +
+    html += '<span' + edType.attr + '>' + _v2gEsc(edType.text) + '</span>' +
       _v2gEsc(_mt('memory.console.edge_conf', ' · conf {n}%', { n: Math.round((ed.confidence || 0) * 100) }));
     if (ed.superseded) html += _v2gEsc(_mt('memory.console.superseded', ' · superseded'));
+    if (!ed.beliefId) html += ' · ' + _v2gEsc(_mt('memory.console.edge_id_missing', 'id: (missing — unlink may fail)'));
     html += '</div>';
-    html += '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;">';
-    html += '<button type="button" class="btn btn-sm btn-danger v2g-edge-act" data-act="unlink" style="font-size:0.65rem;padding:2px 8px;" title="' + _v2gEsc(_mt('memory.console.cut_this_edge', 'Cut this edge')) + '">' + _v2gEsc(_mt('memory.console.cut', 'Cut')) + '</button>';
-    html += '<button type="button" class="btn btn-sm btn-secondary v2g-edge-act" data-act="edit" style="font-size:0.65rem;padding:2px 8px;">' + _v2gEsc(_mt('memory.console.edit', 'Edit')) + '</button>';
-    html += '<button type="button" class="btn btn-sm btn-secondary v2g-edge-act" data-act="src" style="font-size:0.65rem;padding:2px 8px;">' + _v2gEsc(_mt('memory.console.src_from_a', 'Src←A')) + '</button>';
-    html += '<button type="button" class="btn btn-sm btn-secondary v2g-edge-act" data-act="tgt" style="font-size:0.65rem;padding:2px 8px;">' + _v2gEsc(_mt('memory.console.tgt_to_b', 'Tgt→B')) + '</button>';
-    html += '<button type="button" class="btn btn-sm btn-secondary v2g-edge-act" data-act="list" style="font-size:0.65rem;padding:2px 8px;">' + _v2gEsc(_mt('memory.console.in_list', 'In list')) + '</button>';
+    html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px;">';
+    html += '<button type="button" class="btn btn-sm btn-secondary v2g-edge-act" data-act="edit">' + _v2gEsc(_mt('memory.console.edit', 'Edit')) + '</button>';
+    html += '<button type="button" class="btn btn-sm btn-secondary v2g-edge-act" data-act="list" title="' + _v2gEsc(_mt('memory.console.act_in_list_title', 'Show in list')) + '">' + _v2gEsc(_mt('memory.console.in_list', 'In list')) + '</button>';
+    html += '<button type="button" class="btn btn-sm btn-danger v2g-edge-act" data-act="unlink" title="' + _v2gEsc(_mt('memory.console.cut_this_edge', 'Cut this edge')) + '">' + _v2gEsc(_mt('memory.console.cut_this_edge', 'Remove this fact')) + '</button>';
     html += '</div>';
     // Stash edge triple on the panel for delegated clicks (survives re-renders better)
     el.setAttribute('data-edge-belief-id', ed.beliefId || '');
@@ -3817,8 +3939,37 @@
       var rect = canvas.getBoundingClientRect();
       return { sx: ev.clientX - rect.left, sy: ev.clientY - rect.top };
     }
+    // Two fingers on a phone: pinch to zoom, and move the map with them.
+    var touches = {};
+    var pinch = null;
+    function touchCount() { return Object.keys(touches).length; }
+    function pinchState() {
+      var ids = Object.keys(touches);
+      var a = touches[ids[0]], b = touches[ids[1]];
+      return {
+        d: Math.max(1, Math.sqrt((b.sx - a.sx) * (b.sx - a.sx) + (b.sy - a.sy) * (b.sy - a.sy))),
+        mx: (a.sx + b.sx) / 2,
+        my: (a.sy + b.sy) / 2,
+      };
+    }
+    function liftTouch(ev) {
+      delete touches[ev.pointerId];
+      if (touchCount() < 2) pinch = null;
+    }
     canvas.addEventListener('pointerdown', function(ev) {
-      var c = evToCanvas(ev); var idx = _v2gHit(c.sx, c.sy);
+      var c = evToCanvas(ev);
+      if (ev.pointerType === 'touch') {
+        touches[ev.pointerId] = c;
+        if (touchCount() === 2) {
+          var st = pinchState();
+          pinch = { d0: st.d, scale0: _v2gView.scale, wx: _v2gWX(st.mx), wy: _v2gWY(st.my) };
+          // The first finger's drag (a dot or the map) gives way to the pinch.
+          _v2gDrag = null;
+          _v2gUserView = true;
+          return;
+        }
+      }
+      var idx = _v2gHit(c.sx, c.sy);
       if (idx >= 0) {
         var p = _v2gPts[idx];
         // Link/merge pick mode: first/second node click assigns slots
@@ -3876,10 +4027,21 @@
     });
     canvas.addEventListener('pointermove', function(ev) {
       var c = evToCanvas(ev);
+      if (ev.pointerType === 'touch' && touches[ev.pointerId]) touches[ev.pointerId] = c;
+      if (pinch && touchCount() >= 2) {
+        var ps = pinchState();
+        var pscale = Math.max(_v2gMinScale, Math.min(_v2gMaxScale, pinch.scale0 * ps.d / pinch.d0));
+        _v2gView.scale = pscale;
+        _v2gView.ox = ps.mx - pinch.wx * pscale;
+        _v2gView.oy = ps.my - pinch.wy * pscale;
+        _v2gRepaint();
+        return;
+      }
       if (_v2gDrag) {
         if (_v2gDrag.pan) {
           _v2gView.ox = _v2gDrag.ox + (c.sx - _v2gDrag.sx);
           _v2gView.oy = _v2gDrag.oy + (c.sy - _v2gDrag.sy);
+          _v2gUserView = true;
         } else {
           var p = _v2gPts[_v2gDrag.idx];
           if (p) {
@@ -3907,16 +4069,25 @@
           var tc = _v2gNodeVar(p);
           var tLabel = _v2gTitle(_v2gDisplayName(p));
           var modeHint = '';
-          if (_v2gOps.mode === 'link') modeHint = '<br><span style="color:var(--accent);">' + _v2gEsc(_mt('memory.console.tip_link_pick', 'link pick')) + '</span>';
+          if (_v2gOps.mode === 'link') modeHint = '<br><span style="color:var(--accent-light);">' + _v2gEsc(_mt('memory.console.tip_link_pick', 'link pick')) + '</span>';
           else if (_v2gOps.mode === 'merge') modeHint = '<br><span style="color:var(--warning);">' + _v2gEsc(_mt('memory.console.tip_merge_pick', 'merge pick')) + '</span>';
-          tip.innerHTML = '<b style="color:' + tc + ';word-break:break-word;">' + _v2gEsc(tLabel) + '</b><br><span style="color:var(--text-muted);">' +
-            _v2gEsc(_v2gIsUser(p)
-              ? _mt('memory.console.tip_you', 'you · center of memory')
-              : _mt('memory.console.tip_type', 'type: {type}', { type: p.type })) +
+          // Name, then what it is and how many facts touch it, then what a
+          // click does. The id ("id: ent_4f2a…") meant nothing to anyone.
+          var kindText;
+          if (_v2gIsUser(p)) kindText = _mt('memory.page.tip_you', 'You: everything else connects to you');
+          else if (p.isEpisode) kindText = _mt('memory.page.legend_conversation', 'a conversation');
+          else if (p.isValue || p.isVirtual) kindText = _mt('memory.page.legend_value', 'a value');
+          else {
+            kindText = _mt('memory.page.tip_kind', '{kind} · {facts}', {
+              kind: _mtData('memory.console.etype_', p.type || 'entity').text,
+              facts: window.kazmaCount('memory.page.facts_n', p.degree || 0),
+            });
+          }
+          tip.innerHTML = '<b translate="no" dir="auto" style="display:block;color:' + tc + ';word-break:break-word;">' + _v2gEsc(tLabel) + '</b>' +
+            '<span style="color:var(--text-secondary);">' + _v2gEsc(kindText) +
             (p.isHighStakes ? ' · ' + _v2gEsc(_mt('memory.console.tip_high_stakes', 'high-stakes')) : '') +
-            (p.isVirtual ? ' · ' + _v2gEsc(_mt('memory.console.tip_fact', 'fact')) : '') +
-            (p.id && _v2gDisplayName(p) !== p.id ? ' · id: ' + _v2gEsc(String(p.id).slice(0, 24)) : '') +
-            '</span>' + modeHint;
+            '</span><br><span style="color:var(--text-muted);font-size:0.72rem;">' +
+            _v2gEsc(_mt('memory.page.tip_click', 'Click to see its facts')) + '</span>' + modeHint;
           tip.style.display = 'block';
           tip.style.borderColor = '';
           var rect = canvas.getBoundingClientRect();
@@ -3925,12 +4096,16 @@
         } else if (eHover >= 0 && tip) {
           var edh = _v2gEdges[eHover];
           var Ah = _v2gPts[edh.a], Bh = _v2gPts[edh.b];
-          tip.innerHTML = '<b style="color:var(--warning);">' + _v2gEsc((edh.fullLabel || edh.label || _mt('memory.console.tip_edge', 'edge')).replace(/_/g, ' ')) + '</b><br>' +
-            '<span style="color:var(--text-muted);">' +
-            _v2gEsc(Ah ? _v2gDisplayName(Ah) : '?') + ' → ' + _v2gEsc(Bh ? _v2gDisplayName(Bh) : '?') +
-            '</span><br><span style="color:var(--text-muted);font-size:0.68rem;">' + _v2gEsc(_mt('memory.console.tip_edge_click', 'click to edit / unlink')) + '</span>';
+          // The fact as a sentence (who, the relation, what), each part
+          // isolated so an Arabic name and an English relation keep their order.
+          tip.innerHTML = '<span translate="no" dir="auto" style="display:block;color:var(--text-primary);">' +
+            '<bdi><b>' + _v2gEsc(Ah ? _v2gDisplayName(Ah) : '?') + '</b></bdi> ' +
+            '<bdi dir="ltr" style="color:var(--accent-light);">' + _v2gEsc((edh.fullLabel || edh.label || '').replace(/_/g, ' ')) + '</bdi> ' +
+            '<bdi><b>' + _v2gEsc(Bh ? _v2gDisplayName(Bh) : '?') + '</b></bdi></span>' +
+            (edh.superseded ? '<span style="color:var(--text-muted);">' + _v2gEsc(_mt('memory.page.legend_ended', 'a fact that ended')) + '</span><br>' : '') +
+            '<span style="color:var(--text-muted);font-size:0.72rem;">' + _v2gEsc(_mt('memory.page.tip_line_click', 'Click to change or remove this fact')) + '</span>';
           tip.style.display = 'block';
-          tip.style.borderColor = 'var(--warning-border)';
+          tip.style.borderColor = '';
           var rect2 = canvas.getBoundingClientRect();
           tip.style.left = Math.min(c.sx + 12, rect2.width - 200) + 'px';
           tip.style.top = (c.sy + 12) + 'px';
@@ -3938,6 +4113,7 @@
       }
     });
     canvas.addEventListener('pointerup', function(ev) {
+      if (ev.pointerType === 'touch') liftTouch(ev);
       // After a real drag, pin the node so physics / refresh cannot yank it back.
       if (_v2gDrag && !_v2gDrag.pan && _v2gDrag.moved && _v2gPts[_v2gDrag.idx]) {
         var placed = _v2gPts[_v2gDrag.idx];
@@ -3947,15 +4123,13 @@
       }
       _v2gDrag = null; canvas.style.cursor = 'grab'; _v2gRepaint();
     });
-    canvas.addEventListener('pointercancel', function() { _v2gDrag = null; });
+    canvas.addEventListener('pointercancel', function(ev) {
+      if (ev.pointerType === 'touch') liftTouch(ev);
+      _v2gDrag = null;
+    });
     canvas.addEventListener('wheel', function(ev) {
       ev.preventDefault(); var c = evToCanvas(ev);
-      var factor = ev.deltaY < 0 ? 1.15 : 1 / 1.15;
-      var ns = Math.max(_v2gMinScale, Math.min(_v2gMaxScale, _v2gView.scale * factor));
-      if (ns === _v2gView.scale) return;
-      var wx = _v2gWX(c.sx), wy = _v2gWY(c.sy);
-      _v2gView.scale = ns; _v2gView.ox = c.sx - wx * ns; _v2gView.oy = c.sy - wy * ns;
-      _v2gRepaint();
+      _v2gZoomAt(ev.deltaY < 0 ? 1.15 : 1 / 1.15, c.sx, c.sy);
     }, { passive: false });
     canvas.addEventListener('dblclick', function(ev) {
       var c = evToCanvas(ev); var idx = _v2gHit(c.sx, c.sy);
@@ -4399,19 +4573,57 @@
     var nodes = (stats && stats.nodes) || 0;
     var links = (stats && stats.links) || 0;
     var focus = _v2gSelectedId || '';
-    var base = _mt('memory.mc.v2_belief_topology_graph_arrow', 'V2 belief topology graph. Arrow keys pan, plus minus zoom, Home resets. Click edges to edit or unlink beliefs.');
+    var base = _mt('memory.page.map_aria', 'Memory map. Arrow keys move it, plus and minus zoom, Home shows everything. Click a line to change or remove its fact.');
     canvas.setAttribute('aria-label', base + ' ' +
       _mt('memory.console.aria_showing', 'Currently showing {nodes} and {links}.', {
-        nodes: window.kazmaCount('memory.console.nodes_n', nodes),
-        links: window.kazmaCount('memory.console.edges_n', links),
+        nodes: window.kazmaCount('memory.page.things_n', nodes),
+        links: window.kazmaCount('memory.page.facts_n', links),
       }) +
       (focus ? ' ' + _mt('memory.console.aria_focused', 'Focused on {id}.', { id: focus }) : ''));
   }
 
+  // The map's own state over the canvas: loading (first load only), failed
+  // (nothing drawn yet: never shown as an empty memory) or neither.
+  function _v2gShowState(state) {
+    var loading = document.getElementById('v2g-loading');
+    var failed = document.getElementById('v2g-failed');
+    if (loading) loading.style.display = state === 'loading' ? 'flex' : 'none';
+    if (failed) failed.style.display = state === 'failed' ? 'flex' : 'none';
+    if (state === 'failed') {
+      var empty = document.getElementById('v2g-empty');
+      if (empty) empty.style.display = 'none';
+    }
+  }
+
+  var _v2gEverLoaded = false;
+
+  // A failed load: before anything was drawn, the map says it failed; after,
+  // the map keeps what it shows and the line under it says it is not current
+  // (once: the map is reloaded every 30 s).
+  function _v2gLoadFailed() {
+    if (!_v2gEverLoaded) { _v2gShowState('failed'); return; }
+    _v2gShowState(null);
+    var sl = document.getElementById('v2g-stats-line');
+    if (sl && !sl.getAttribute('data-stale')) {
+      sl.setAttribute('data-stale', '1');
+      sl.textContent += ' · ' + _mt('memory.page.map_stale', 'could not refresh: this is what was last loaded');
+    }
+  }
+
   async function _v2gLoad() {
+    if (!_v2gEverLoaded) _v2gShowState('loading');
     try {
       var resp = await fetch(_v2gBuildUrl());
-      var data = await resp.json();
+      var data = null;
+      try { data = await resp.json(); } catch (eJson) { data = null; }
+      // The route answers 200 with `error` and no dots when it cannot read
+      // the memory: that is a failure, not an empty map.
+      if (!resp.ok || !data || data.error) {
+        _v2gLoadFailed();
+        return;
+      }
+      _v2gEverLoaded = true;
+      _v2gShowState(null);
       var stats = data.stats || {};
       _v2gLastStats = stats;
       _v2gRawNodes = data.nodes || [];
@@ -4450,12 +4662,21 @@
       // is settled on page load and groupings have no visible effect.
       // Only fires when alpha is already 0 (avoids reheating every 30s poll).
       if (_v2gGroups && _v2gGroups.length && _v2gAlpha < 0.01) _v2gHeated();
-    } catch (e) { /* silent */ }
+    } catch (e) {
+      // A network failure is said like any other (it was swallowed, and the
+      // map sat empty).
+      _v2gLoadFailed();
+    }
   }
 
-  function _v2gTypeCountsFromData() {
+  // thingsOnly (the legend): a fact's value and a conversation have legend
+  // entries of their own, and counted as "idea" they made its count wrong.
+  // The filter counts every dot its checkbox filters.
+  function _v2gTypeCountsFromData(thingsOnly) {
     var counts = {};
     (_v2gRawNodes || []).forEach(function(n) {
+      if (!n) return;
+      if (thingsOnly && (n.isValue || n.isVirtual || n.isEpisode)) return;
       var t = n.type || 'concept';
       counts[t] = (counts[t] || 0) + 1;
     });
@@ -4471,35 +4692,41 @@
     return counts;
   }
 
+  // What the map's marks mean: only the ones on the map now -- you, each kind
+  // of thing with how many, a fact (a line), a fact that ended (dashed), a
+  // value (a hollow dot), a conversation (dashed hollow). It listed every
+  // kind's dot and ended with "· site accent", which explained nothing.
   function _v2gUpdateLegend(entCounts) {
     var leg = document.getElementById('v2g-legend');
     if (!leg) return;
-    var hasUser = (_v2gRawNodes || []).some(function(n) {
-      return String(n.id || '').toLowerCase() === 'user';
-    });
-    var parts = [];
-    if (hasUser) {
-      parts.push(
-        '<span title="' + _attr(_mt('memory.mc.legend_you', 'You')) + '"><span class="mem-legend-dot" style="--mem-c:' +
-        _v2gTokenVar(_V2G_USER_TOKEN) + ';"></span>' + _esc(_mt('memory.mc.legend_you', 'You')) + '</span>'
-      );
+    var raw = _v2gRawNodes || [];
+    var hasUser = raw.some(function(n) { return n && (n.isHub || String(n.id || '').toLowerCase() === 'user'); });
+    var hasValue = raw.some(function(n) { return n && (n.isValue || n.isVirtual) && !n.isEpisode; });
+    var hasEpisode = raw.some(function(n) { return n && n.isEpisode; });
+    var hasEnded = (_v2gRawLinks || []).some(function(l) { return l && l.superseded; });
+    function item(mark, text, count) {
+      return '<span class="mem-legend-item">' + mark + '<span>' + _esc(text) + '</span>' +
+        (count ? '<span class="mem-legend-count">' + _esc(window.KazmaFormat ? window.KazmaFormat.number(count) : String(count)) + '</span>' : '') +
+        '</span>';
     }
-    var order = ['person', 'tool', 'concept', 'location', 'project', 'entity'];
+    function dot(token, extra) {
+      return '<span class="mem-legend-dot' + (extra ? ' ' + extra : '') + '" aria-hidden="true" style="--mem-c:' + _v2gTokenVar(token) + ';"></span>';
+    }
+    var parts = [];
+    if (hasUser) parts.push(item(dot(_V2G_USER_TOKEN), _mt('memory.page.legend_you', 'You')));
+    var order = ['person', 'organization', 'location', 'project', 'tool', 'event', 'concept', 'entity'];
     var keys = order.filter(function(k) { return (entCounts[k] || 0) > 0; });
     Object.keys(entCounts || {}).forEach(function(k) {
-      if (keys.indexOf(k) < 0 && entCounts[k] > 0) keys.push(k);
+      if (keys.indexOf(k) < 0 && entCounts[k] > 0 && k !== 'episode') keys.push(k);
     });
-    if (!keys.length) keys = ['concept'];
     keys.forEach(function(k) {
-      // person count includes user — still show type chip in its own colour
-      var n = entCounts[k] || 0;
       var kl = _mtData('memory.console.etype_', k);
-      parts.push(
-        '<span' + kl.attr + '><span class="mem-legend-dot" style="--mem-c:' + _v2gTypeVar(k) + ';"></span>' +
-        _esc(kl.text) + (n ? ' <span>(' + n + ')</span>' : '') + '</span>'
-      );
+      parts.push(item(dot(_V2G_TYPE_TOKENS[k] || '--accent'), kl.text, entCounts[k] || 0));
     });
-    parts.push('<span style="margin-inline-start:2px;">' + _esc(_mt('memory.console.site_accent', '· site accent')) + '</span>');
+    parts.push(item('<span class="mem-legend-line" aria-hidden="true"></span>', _mt('memory.page.legend_line', 'a fact')));
+    if (hasEnded) parts.push(item('<span class="mem-legend-line is-ended" aria-hidden="true"></span>', _mt('memory.page.legend_ended', 'a fact that ended')));
+    if (hasValue) parts.push(item(dot('--accent', 'is-hollow'), _mt('memory.page.legend_value', 'a value')));
+    if (hasEpisode) parts.push(item(dot('--secondary', 'is-hollow is-dashed'), _mt('memory.page.legend_conversation', 'a conversation')));
     leg.innerHTML = parts.join('');
   }
 
@@ -4575,24 +4802,38 @@
     // Expose the isolated count for the ops-bar indicator + tests.
     _v2gIsolatedCount = isolatedCount;
     if (sl) {
-      var st = _v2gLastStats || {};
-      var paint = st.paint_source || st.source || 'sqlite';
-      var gprov = st.graph_provider || paint;
-      var parts = [window.kazmaCount('memory.console.nodes_n', nodes.length) + ' · ' +
-        window.kazmaCount('memory.console.beliefs_n', links.length)];
-      if (isolatedCount > 0) parts.push(_mt('memory.console.stats_isolated', '{n} isolated', { n: isolatedCount }));
-      parts.push(_mt('memory.console.stats_paint', 'paint {source}', { source: paint }));
-      if (gprov === 'neo4j') {
-        parts.push(st.graph_online
-          ? _mt('memory.console.stats_neo4j_online', 'neo4j dual-write online')
-          : _mt('memory.console.stats_neo4j_offline', 'neo4j offline'));
-      }
+      // What is on the map, in the page's words. Where the map was read
+      // from ("paint sqlite", "neo4j dual-write online") is the health
+      // panel's to say, not a line under the map.
+      var parts = [_mt('memory.page.stats', '{things} · {facts}', {
+        things: window.kazmaCount('memory.page.things_n', nodes.length),
+        facts: window.kazmaCount('memory.page.facts_n', links.length),
+      })];
+      if (isolatedCount > 0) parts.push(window.kazmaCount('memory.page.unconnected_n', isolatedCount));
       if (activeEnt.length || activePred.length || search) {
-        parts.push(_mt('memory.console.stats_filtered', 'filtered from {n}', { n: _v2gRawNodes.length }));
+        parts.push(_mt('memory.page.stats_filtered', 'filtered, out of {all}', {
+          all: window.kazmaCount('memory.page.things_n', _v2gRawNodes.length),
+        }));
+      } else if (_v2gRawNodes.length > _LOD_MAX) {
+        parts.push(_mt('memory.page.stats_capped', 'the first {shown} of {all} are drawn', {
+          shown: window.KazmaFormat ? window.KazmaFormat.number(_LOD_MAX) : _LOD_MAX,
+          all: window.kazmaCount('memory.page.things_n', _v2gRawNodes.length),
+        }));
       }
       sl.textContent = parts.join(' · ');
+      sl.removeAttribute('data-stale');
     }
-    _v2gUpdateLegend(_v2gTypeCountsFromData());
+    // Nothing to draw: say whether the memory is empty or the filter hid it.
+    var emptyText = document.getElementById('v2g-empty-text');
+    var emptyTeach = document.getElementById('v2g-empty-teach');
+    var timeSlider = document.getElementById('v2g-time-slider');
+    var filtered = (!!(activeEnt.length || activePred.length || search) && _v2gRawNodes.length > 0) ||
+      !!(timeSlider && parseFloat(timeSlider.value) < 100);
+    if (emptyText) {
+      emptyText.textContent = emptyText.getAttribute(filtered ? 'data-filtered' : 'data-none') || '';
+    }
+    if (emptyTeach) emptyTeach.style.display = filtered ? 'none' : '';
+    _v2gUpdateLegend(_v2gTypeCountsFromData(true));
     // Let _v2gDrawCanvas compare signatures. Clearing always forced a full
     // spiral re-layout and wiped user-dragged positions on every 30s poll /
     // filter pass. Positions are restored from _v2gPosCache on rebuild.
@@ -4745,12 +4986,16 @@
       }).concat(Object.keys(_v2gFilters.predicate).map(function(k) {
         return { group: 'predicate', key: k, label: _esc(_mt('memory.console.filter_pred', 'pred:{type}', { type: _mtData('memory.console.ptype_', k).text })) };
       }));
-      var html = all.map(function(c, idx) {
-        return '<span data-fg="' + _attr(c.group) + '" data-fk="' + _attr(c.key) + '" class="badge badge-accent mem-filter-chip" style="font-size:0.62rem;padding:2px 6px;display:inline-flex;align-items:center;gap:3px;">' + c.label + ' ' + KazmaIcons.span('x') + '</span>';
+      // Buttons, so a keyboard reaches them; each says what pressing it does.
+      var html = all.map(function(c) {
+        return '<button type="button" data-fg="' + _attr(c.group) + '" data-fk="' + _attr(c.key) + '" class="badge badge-accent mem-filter-chip" ' +
+          'title="' + _attr(_mt('memory.page.filter_remove', 'Remove this filter')) + '" ' +
+          'style="font-size:0.72rem;padding:3px 8px;display:inline-flex;align-items:center;gap:4px;border:0;cursor:pointer;">' +
+          c.label + ' ' + KazmaIcons.span('x') + '</button>';
       }).join('');
-      if (all.length) html += '<span id="v2g-reset-filters" class="badge badge-danger mem-filter-chip" style="font-size:0.62rem;padding:2px 6px;margin-inline-start:4px;">' + _esc(_mt('memory.console.reset_all', 'Reset all')) + '</span>';
+      if (all.length) html += '<button type="button" id="v2g-reset-filters" class="btn btn-ghost btn-xs">' + _esc(_mt('memory.page.filter_reset', 'Clear filters')) + '</button>';
       chips.innerHTML = html;
-      chips.querySelectorAll('span[data-fg]').forEach(function(span) {
+      chips.querySelectorAll('[data-fg]').forEach(function(span) {
         span.addEventListener('click', function() {
           var g = span.getAttribute('data-fg');
           var k = span.getAttribute('data-fk');
@@ -5008,6 +5253,25 @@
         _v2gLoad();
       });
     }
+    // The map's own buttons: zoom around the centre, and show everything.
+    var zoomIn = document.getElementById('v2g-zoom-in');
+    if (zoomIn) zoomIn.addEventListener('click', function() { _v2gZoomAt(1.25); });
+    var zoomOut = document.getElementById('v2g-zoom-out');
+    if (zoomOut) zoomOut.addEventListener('click', function() { _v2gZoomAt(1 / 1.25); });
+    var fitBtn = document.getElementById('v2g-fit');
+    if (fitBtn) fitBtn.addEventListener('click', function() { _v2gFitView(); });
+    var retryBtn = document.getElementById('v2g-retry');
+    if (retryBtn) retryBtn.addEventListener('click', function() { _v2gLoad(); });
+    // The warning above the map opens the health panel it points to.
+    document.querySelectorAll('.mem-open-health').forEach(function(a) {
+      a.addEventListener('click', function(ev) {
+        var health = document.getElementById('memory-health');
+        if (!health) return;
+        ev.preventDefault();
+        health.open = true;
+        health.scrollIntoView({ behavior: _v2gPreferReducedMotion ? 'auto' : 'smooth', block: 'start' });
+      });
+    });
     // Keyboard a11y: pan / zoom / reset
     var canvas = document.getElementById('v2g-canvas');
     if (canvas && !canvas._v2gKeys) {
@@ -5015,16 +5279,18 @@
       canvas.addEventListener('keydown', function(ev) {
         var step = 28;
         var handled = true;
-        if (ev.key === 'ArrowLeft') _v2gView.ox += step;
-        else if (ev.key === 'ArrowRight') _v2gView.ox -= step;
-        else if (ev.key === 'ArrowUp') _v2gView.oy += step;
-        else if (ev.key === 'ArrowDown') _v2gView.oy -= step;
+        if (ev.key === 'ArrowLeft') { _v2gView.ox += step; _v2gUserView = true; }
+        else if (ev.key === 'ArrowRight') { _v2gView.ox -= step; _v2gUserView = true; }
+        else if (ev.key === 'ArrowUp') { _v2gView.oy += step; _v2gUserView = true; }
+        else if (ev.key === 'ArrowDown') { _v2gView.oy -= step; _v2gUserView = true; }
         else if (ev.key === '+' || ev.key === '=') {
-          _v2gView.scale = Math.min(_v2gMaxScale, _v2gView.scale * 1.15);
+          _v2gZoomAt(1.15);
         } else if (ev.key === '-' || ev.key === '_') {
-          _v2gView.scale = Math.max(_v2gMinScale, _v2gView.scale / 1.15);
+          _v2gZoomAt(1 / 1.15);
         } else if (ev.key === 'Home') {
-          _v2gView = { scale: 1, ox: 0, oy: 0 };
+          // Show everything (it set the view to 1:1 at the canvas's corner,
+          // which could put the whole map out of sight).
+          _v2gFitView();
         } else if (ev.key === 'Escape') {
           _v2gPathIds = {};
           _v2gOps.mode = null;
@@ -5107,6 +5373,19 @@
       if (_v2gPts[i].id === id) return { x: _v2gPts[i].x, y: _v2gPts[i].y, tier: _v2gPts[i].tier, groupParent: _v2gPts[i].groupParent };
     }
     return null;
+  };
+  // The view (scale and offset) and the drawn dots' screen boxes, for tests:
+  // zoom, Show all and label placement are read from here.
+  window._v2gGetView = function() {
+    var wrap = document.getElementById('v2g-canvas-wrap');
+    var rect = wrap ? wrap.getBoundingClientRect() : { width: 0, height: 0 };
+    var inView = 0;
+    _v2gPts.forEach(function(p) {
+      var x = _v2gSX(p.x), y = _v2gSY(p.y);
+      if (x >= 0 && y >= 0 && x <= rect.width && y <= rect.height) inView++;
+    });
+    return { scale: _v2gView.scale, ox: _v2gView.ox, oy: _v2gView.oy, dots: _v2gPts.length,
+             inView: inView, settled: _v2gAlpha === 0 };
   };
   window._v2gSelectEntity = _v2gSelectEntity;
   window._v2gSelectBelief = function(subj, obj, beliefId, opts) {

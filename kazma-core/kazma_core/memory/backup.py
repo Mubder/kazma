@@ -160,8 +160,59 @@ def _bring_schema_up_to_date(path: Path) -> None:
         conn.close()
 
 
+class NotAMemoryBackup(ValueError):
+    """The file named is not a copy of the memory database: restoring it
+    would put another database (the operations one: its queue and audit
+    log) in the memory's place, every memory gone."""
+
+
+#: Tables the memory database holds and the operations database does not.
+_MEMORY_TABLES = frozenset({"beliefs", "episodes", "entities"})
+
+
+def memory_backup_prefix() -> str:
+    """The name every backup of the memory database starts with
+    (``<stem>_<timestamp>.db``, ``perform_native_backups``)."""
+    from kazma_core.paths import primary_memory_db
+
+    return Path(primary_memory_db()).stem
+
+
+def is_memory_backup_name(name: str) -> bool:
+    """Whether *name* is a backup of the memory database by its name:
+    ``memory_state_<timestamp>.db``, never the operations database's
+    ``memory_ops_<timestamp>.db`` beside it."""
+    stem, dot, ext = str(name or "").rpartition(".")
+    prefix, _, stamp = stem.rpartition("_")
+    return bool(dot) and ext == "db" and prefix == memory_backup_prefix() and stamp.isdigit()
+
+
+def is_memory_backup(path: Path) -> bool:
+    """Whether the file at *path* holds the memory database's own tables,
+    read without writing anything (``immutable=1``)."""
+    import sqlite3
+
+    try:
+        uri = Path(path).resolve().as_uri() + "?mode=ro&immutable=1"
+        conn = sqlite3.connect(uri, uri=True)
+    except (OSError, ValueError, sqlite3.Error):
+        return False
+    try:
+        names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    except sqlite3.Error:
+        return False
+    finally:
+        conn.close()
+    return _MEMORY_TABLES <= names
+
+
 def restore_memory_backup(src: Path, *, reconcile_budget_s: float = 120.0) -> dict[str, Any]:
     """Restore the memory database from one of these backups, and catch up.
+
+    Refused (``NotAMemoryBackup``) before anything is copied when *src* does
+    not hold the memory database's tables: the Memory page listed the
+    operations database's backups beside it, and restoring one replaced
+    every memory with the task queue (2026-11-18).
 
     The copy is one step over the live file (``db/sqlite_snapshot``). Then
     what a start would do, at once rather than at the next 15-minute pass:
@@ -187,6 +238,8 @@ def restore_memory_backup(src: Path, *, reconcile_budget_s: float = 120.0) -> di
 
     from kazma_core.memory.graph_sync import mark_full_due
 
+    if not is_memory_backup(Path(src)):
+        raise NotAMemoryBackup(f"{Path(src).name} is not a backup of the memory database")
     started = time.monotonic()
     snapshot_copy(Path(src), Path(primary_memory_db()))
     _bring_schema_up_to_date(Path(primary_memory_db()))
