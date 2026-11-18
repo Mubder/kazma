@@ -177,8 +177,10 @@ def _classify_predicate(predicate: str, explicit: str | None) -> str:
             return "functional"
     except Exception:
         pass
-    if explicit in ("functional", "set", "state"):
-        return explicit
+    # Kazma's own class wins over the caller's label: the agent's memory tools
+    # label a fact "set" by default, and a list label on "lives_in" added a
+    # second home beside the user's, past the trust gate (2026-11, the memory
+    # framework audit's F7).
     if p in _FUNCTIONAL_PREDICATES:
         return "functional"
     if p in _STATE_PREDICATES:
@@ -186,6 +188,8 @@ def _classify_predicate(predicate: str, explicit: str | None) -> str:
     # favorite_* stays single-valued
     if p.startswith("favorite_"):
         return "functional"
+    if explicit in ("functional", "set", "state"):
+        return explicit
     return "set"
 
 
@@ -730,6 +734,23 @@ def _insert_kw(kw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _survivor(current: list[Any]) -> Any:
+    """Which of a single-valued fact's current rows (newest first) stays
+    current when there are several: the newest the user said, else the
+    newest. A value no lower source could have replaced (the trust gate,
+    ``provenance.may_overrule``) is never closed as an extra: an agent's write
+    labelled a list once stood beside the user's own fact, and the clean-up
+    kept the newer one and closed the user's (F7)."""
+    from kazma_core.memory.provenance import USER_SOURCES
+
+    if not current:
+        return None
+    for row in current:
+        if _col(row, "extraction_method", 2) in USER_SOURCES:
+            return row
+    return current[0]
+
+
 def _mutate_functional(
     conn: sqlite3.Connection,
     ops_conn: sqlite3.Connection | None,
@@ -791,17 +812,20 @@ def _mutate_functional_locked(
            ORDER BY valid_from DESC, ingested_at DESC""",  # nosec B608 - a fixed clause, values bound
         (sub, pred, tenant_id),
     ).fetchall()
-    existing = current[0] if current else None
+    existing = _survivor(current)
     if len(current) > 1:
         from kazma_core.memory.hygiene import beliefs_write
 
-        newest_from = float(_col(existing, "valid_from", 3) or now)
-        extra = [str(_col(r, "id", 0)) for r in current[1:]]
-        logger.warning("[belief_mutate] %d current values of %s %s: keeping the newest, closing %s",
-                       len(current), sub, pred, extra)
-        for bid in extra:
+        kept_from = float(_col(existing, "valid_from", 3) or now)
+        extra = [r for r in current if r is not existing]
+        logger.warning("[belief_mutate] %d current values of %s %s: keeping %s, closing %s",
+                       len(current), sub, pred, _col(existing, "id", 0), [str(_col(r, "id", 0)) for r in extra])
+        for row in extra:
+            # An older value held until the kept one began; a newer one never
+            # held in its place (it closes where it began).
+            ends = max(kept_from, float(_col(row, "valid_from", 3) or kept_from))
             beliefs_write(conn, "UPDATE beliefs SET valid_until=?, invalidated_at=? WHERE id=?",
-                          (newest_from, kw.get("recorded") or now, bid))
+                          (ends, kw.get("recorded") or now, str(_col(row, "id", 0))))
         if began:
             # Kept whatever this call decides next (a no-op rolls back).
             conn.commit()

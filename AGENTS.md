@@ -1774,6 +1774,16 @@ four injected were noise.
   marks its episode (`metadata.deep_pass`, `_DEEP_PASS_VERSION`) and a
   second task for it does nothing; the embedder singleton is built once
   under a lock. Gate: `tests/test_memory_write_path_items.py`.
+- **A single value stays single whatever the writer labels it** (2026-11,
+  the memory framework audit's F7, `belief_mutation._classify_predicate`,
+  `_survivor`). Kazma's own class (`kazma_classifies`) wins over the caller's
+  label: the agent's memory tools label a fact "set" by default, and an
+  agent's `lives_in Tokyo` labelled a list stood beside the user's own
+  London, past the trust gate. Of several current rows of a single-valued
+  fact, the newest the user said stays (else the newest), and a newer row
+  from a lower source closes where it began. Gate:
+  `tests/test_memory_kazma_class_wins.py` (the label first and keeping the
+  newest as negative controls).
 - **A list stays a list** (2026-10-19, `belief_mutation._established_kind`).
   The extractor labels each fact's type; a single-valued label on a predicate
   the subject keeps as a list (current `set` rows) is written as one more
