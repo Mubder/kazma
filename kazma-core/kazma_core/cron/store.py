@@ -679,6 +679,7 @@ class SQLiteCronStore:
         actor: str = "",
         source: str = "",
         outside_text: str | None = None,
+        pending_only: bool = False,
     ) -> str:
         """Edit a job's timing and/or prompt. Returns one of:
 
@@ -694,6 +695,10 @@ class SQLiteCronStore:
         *outside_text* goes with a new prompt: the state of the turn that
         wrote it (the agent, after outside text), or ``""`` (a person wrote
         it). None leaves the job's as it is.
+
+        *pending_only*: a change allowed only for a pending job (someone
+        else's, Spaces S1-16 follow-up) answers ``conflict`` when the job is
+        no longer pending -- a fire claims a job without a new version.
         """
         if timing is None and prompt is None:
             return "unchanged"
@@ -706,6 +711,8 @@ class SQLiteCronStore:
             if expected_version is not None and int(row["version"]) != int(expected_version):
                 return "conflict"
             status = str(row["status"])
+            if pending_only and status != "pending":
+                return "conflict"
             change = {k: v for k, v in (("timing", timing), ("prompt", prompt), ("next_run", norm_iso(next_run) or None),
                                          ("series_start", series_start), ("outside_text", outside_text))
                       if v is not None}

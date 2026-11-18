@@ -72,6 +72,7 @@ __all__ = [
     "list_accounts",
     "local_users",
     "move_platform_users",
+    "owns_space",
     "prime_enforcement",
     "read_registry",
     "remove_member",
@@ -390,6 +391,15 @@ def is_member(account_id: str, space_id: str) -> bool:
     raises: "not a member" is never guessed."""
     return any(
         m.get("account") == account_id and m.get("space") == space_id
+        for m in read_registry()["memberships"]
+    )
+
+
+def owns_space(account_id: str, space_id: str) -> bool:
+    """True when the account is an ``owner`` of the space: the one member of
+    a personal space, the maker of a shared one. An unreadable store raises."""
+    return any(
+        m.get("account") == account_id and m.get("space") == space_id and m.get("role") == "owner"
         for m in read_registry()["memberships"]
     )
 

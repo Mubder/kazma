@@ -785,3 +785,137 @@ async def test_one_account_books_and_fires_as_before(tmp_path, sent) -> None:
         assert [t for t, _ in sent] == [OWNER_CHAT]
     finally:
         await store.close()
+
+
+# ── the S1-16 follow-up: a locked settings file holds the fire ──────────
+
+
+def _settings_locked(_job: ScheduledJob) -> Any:
+    """The identity store on a SQLite settings file another writer holds."""
+    import sqlite3
+
+    raise identity.IdentityUnavailable("the identity store could not be read: OperationalError") \
+        from sqlite3.OperationalError("database is locked")
+
+
+async def test_a_fire_held_by_a_locked_settings_file_waits(tmp_path, matrix, enforced, sent, watch,
+                                                           monkeypatch) -> None:
+    monkeypatch.setattr(sm, "_fire_binding", _settings_locked)
+    store = await _store(tmp_path)
+    sched = sm.CronScheduler(store=store, graph_builder=None)
+    try:
+        job = await store.get((await _plant(store, tenant=OWNER_SPACE_ID, creator=OWNER_ACCOUNT_ID)).job_id)
+        after = await _fire(sched, store, job.job_id)
+        assert after.status == JobStatus.PENDING and after.next_run == job.next_run
+        assert after.failure_count == 0 and after.last_outcome != "identity_unavailable"
+        assert sent == [] and not watch.is_away(), "a SQLite lock is no Postgres outage"
+    finally:
+        await store.close()
+
+
+async def test_control_a_locked_settings_file_failed_the_fire(tmp_path, matrix, enforced, sent, watch,
+                                                              monkeypatch) -> None:
+    monkeypatch.setattr(sm, "_fire_binding", _settings_locked)
+    monkeypatch.setattr(sm, "_sqlite_lock_passes", lambda exc: False)
+    store = await _store(tmp_path)
+    sched = sm.CronScheduler(store=store, graph_builder=None)
+    try:
+        job = await _plant(store, tenant=OWNER_SPACE_ID, creator=OWNER_ACCOUNT_ID)
+        after = await _fire(sched, store, job.job_id)
+        assert after.last_outcome == "identity_unavailable" and after.failure_count == 1
+    finally:
+        await store.close()
+
+
+# ── the S1-16 follow-up: someone else's new time is pinned to what was checked ──
+
+
+def _after_the_check(monkeypatch, meanwhile) -> None:
+    """Run *meanwhile* (an async function of the job id) between the rule's
+    check and the write, as a fire or another change racing the edit."""
+    real = sm.CronScheduler._not_theirs_to_change
+
+    async def then(self, job_id: str, tenant_id: str | None, **change: Any) -> Any:
+        found = await real(self, job_id, tenant_id, **change)
+        await meanwhile(job_id)
+        return found
+
+    monkeypatch.setattr(sm.CronScheduler, "_not_theirs_to_change", then)
+
+
+async def _unpinned(self, job_id: str, tenant_id: str | None, **change: Any) -> tuple[str, int | None]:
+    """The rule as before the follow-up: allowed, with nothing pinned."""
+    found = await self._not_theirs_to_change(job_id, tenant_id, **change)
+    return ("", None) if isinstance(found, sm._SomeoneElses) else (str(found or ""), None)
+
+
+async def _members_new_time_raced(tmp_path, matrix, monkeypatch, meanwhile, *, pinned: bool = True
+                                  ) -> tuple[str, ScheduledJob]:
+    store = await _store(tmp_path)
+    sched = sm.CronScheduler(store=store, graph_builder=None)
+    try:
+        job = await _owners_job_in_shared(sched, store, matrix)
+
+        async def run(job_id: str) -> None:
+            await meanwhile(store, job_id)
+
+        _after_the_check(monkeypatch, run)
+        if not pinned:
+            monkeypatch.setattr(sm.CronScheduler, "_change_rule", _unpinned)
+        with scope.bind_scope(SHARED, matrix.account_a):
+            moved = await sched.reschedule(job.job_id, timing="3h", tenant_id=SHARED)
+        return moved["status"], await store.get(job.job_id)
+    finally:
+        await store.close()
+
+
+async def _a_fire_claims_it(store, job_id: str) -> None:
+    assert await store.claim_job(job_id, owner="another-runtime")
+
+
+async def _the_owner_rewords_it(store, job_id: str) -> None:
+    assert await store.update_job(job_id, prompt="the owner's later words", tenant_id=SHARED) == "rescheduled"
+
+
+async def test_a_members_new_time_never_lands_on_a_fire_that_began_meanwhile(tmp_path, matrix, enforced,
+                                                                            monkeypatch) -> None:
+    status, after = await _members_new_time_raced(tmp_path, matrix, monkeypatch, _a_fire_claims_it)
+    assert status == "conflict" and not after.pending_edit, (status, after.pending_edit)
+
+
+async def test_control_unpinned_the_new_time_is_recorded_on_the_fire(tmp_path, matrix, enforced,
+                                                                    monkeypatch) -> None:
+    """The edit recorded while it fires is applied when the fire ends: the
+    finished one-off is put back, as the owner, by someone else."""
+    status, after = await _members_new_time_raced(tmp_path, matrix, monkeypatch, _a_fire_claims_it,
+                                                  pinned=False)
+    assert status == "edit_pending" and after.pending_edit
+
+
+async def test_a_members_new_time_never_lands_over_a_change_made_meanwhile(tmp_path, matrix, enforced,
+                                                                          monkeypatch) -> None:
+    status, after = await _members_new_time_raced(tmp_path, matrix, monkeypatch, _the_owner_rewords_it)
+    assert status == "conflict", status
+    assert after.prompt == "the owner's later words" and after.status == JobStatus.PENDING
+
+
+async def test_control_unpinned_the_new_time_lands_over_the_owners_change(tmp_path, matrix, enforced,
+                                                                         monkeypatch) -> None:
+    status, _after = await _members_new_time_raced(tmp_path, matrix, monkeypatch, _the_owner_rewords_it,
+                                                   pinned=False)
+    assert status == "rescheduled"
+
+
+async def test_the_creators_own_change_is_not_pinned(tmp_path, matrix, enforced, monkeypatch) -> None:
+    """The person a job acts for changes it as before: nothing is pinned."""
+    store = await _store(tmp_path)
+    sched = sm.CronScheduler(store=store, graph_builder=None)
+    try:
+        job = await _owners_job_in_shared(sched, store, matrix)
+        with scope.bind_scope(SHARED, OWNER_ACCOUNT_ID):
+            assert await sched._change_rule(job.job_id, SHARED) == ("", None)
+            assert await sched._change_rule(job.job_id, SHARED, prompt=False) == ("", None)
+        with scope.bind_scope(SHARED, matrix.account_a):
+            assert await sched._change_rule(job.job_id, SHARED, prompt=False) == ("", job.version)
+    finally:
+        await store.close()

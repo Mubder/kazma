@@ -725,7 +725,7 @@ def test_a_members_result_never_goes_to_the_owners_output_target(matrix, monkeyp
 def test_control_a_members_result_routed_to_the_output_target(matrix, monkeypatch) -> None:
     import kazma_core.swarm.single_operator as single_operator
 
-    monkeypatch.setattr(single_operator, "task_for_the_owner", lambda task: True)
+    monkeypatch.setattr(single_operator, "_task_for_the_owner", lambda task: True)
     assert len(_dispatched_and_routed(matrix, monkeypatch)) == 1
 
 
@@ -826,3 +826,228 @@ async def test_a_chat_button_pressed_on_the_loop_reads_whose_request_off_it(enfo
             break
         await asyncio.sleep(0.01)
     assert read_in and loop_thread not in read_in, read_in
+
+
+# ── the S1-16 follow-up: one check inside the shared task actions ────────
+
+
+def _owner_retries_from_the_supervisor(matrix: Matrix, monkeypatch, *, bound: bool = True
+                                       ) -> tuple[dict[str, Any], Any]:
+    """The run supervisor's Retry (``runs.adapters.swarm``) of person A's
+    failed task, pressed by the owner in the owner's space (or with nothing
+    bound): its outcome, and the retried task as the store holds it."""
+    import kazma_gateway.agent_handler as agent_handler
+    from kazma_core.runs.adapters.swarm import ADAPTER
+
+    from tests._swarm_space_cases import world
+
+    async def no_output_target(*_args: Any, **_kwargs: Any) -> bool:
+        return False
+
+    monkeypatch.setattr(agent_handler, "_maybe_send_to_output_target", no_output_target)
+    with world(matrix) as w:
+        task = w.plant("a", w.matrix.plant("supervised").a, status="failed")
+
+        async def press() -> Any:
+            if not bound:
+                return await ADAPTER.act(task.id, "retry", actor="owner")
+            with scope.bind_scope(OWNER_SPACE_ID, OWNER_ACCOUNT_ID):
+                return await ADAPTER.act(task.id, "retry", actor="owner")
+
+        outcome = w.client.portal.call(press)
+        w.settle()
+        retried = None
+        if outcome.ok:
+            new_id = outcome.message.rsplit("'", 2)[-2]
+            retried = w.store.get_task(new_id)
+        return {"ok": outcome.ok, "code": outcome.code}, retried
+
+
+def test_the_supervisors_retry_never_takes_a_members_task_into_the_owners_space(matrix, monkeypatch) -> None:
+    outcome, retried = _owner_retries_from_the_supervisor(matrix, monkeypatch)
+    assert outcome == {"ok": False, "code": "not_found"}, outcome  # another space's: as an unknown one
+    assert retried is None
+
+
+def test_control_without_the_shared_check_the_retry_moves_the_task(matrix, monkeypatch) -> None:
+    """The hole the review found: the supervisor's Retry had no check, and
+    the admission stamp put the retried task in the owner's space."""
+    from kazma_ui.swarm_panel import task_actions
+
+    monkeypatch.setattr(task_actions, "task_refusal", lambda engine, task_id: None)
+    outcome, retried = _owner_retries_from_the_supervisor(matrix, monkeypatch)
+    assert outcome["ok"], outcome
+    assert (retried.metadata or {}).get("tenant_id") == OWNER_SPACE_ID  # moved
+
+
+def test_the_supervisors_retry_with_nothing_bound_is_refused_once_enforced(matrix, monkeypatch) -> None:
+    outcome, retried = _owner_retries_from_the_supervisor(matrix, monkeypatch, bound=False)
+    assert outcome == {"ok": False, "code": "no_space"} and retried is None
+
+
+def test_not_enforced_the_shared_check_asks_nothing(matrix) -> None:
+    from kazma_ui.swarm_panel.task_actions import task_refusal
+
+    assert not scope.spaces_enforced()
+    assert task_refusal(SimpleNamespace(), "any-task") is None  # nothing read
+
+
+@pytest.mark.parametrize("verb", ("cancel", "retry"))
+def test_in_a_shared_space_the_shared_action_refuses_a_member_who_did_not_ask(verb, matrix, shared) -> None:
+    """The check is inside the shared action: the supervisor's button, not
+    only the page's route, refuses B for A's task."""
+    from kazma_core.runs.adapters.swarm import ADAPTER
+
+    from tests._swarm_space_cases import world
+
+    with world(matrix) as w:
+        task = w.plant("a", w.matrix.plant(verb).a, status="paused" if verb == "cancel" else "failed",
+                       space=shared)
+        before = w.held(task)
+
+        async def as_b() -> Any:
+            with scope.bind_scope(shared, matrix.account_b):
+                return await ADAPTER.act(task.id, verb, actor="b")
+
+        outcome = w.client.portal.call(as_b)
+        assert (outcome.ok, outcome.code) == (False, "not_yours"), outcome
+        assert w.held(task) == before
+
+
+# ── the S1-16 follow-up: dispatch_swarm is the admin's, as the routes ────
+
+
+def _dispatched_by_tool(matrix: Matrix, who: str) -> tuple[str, list[Any]]:
+    from kazma_core.agent.tool_refusal import RefusedBeforeEffect
+
+    from tests._swarm_space_cases import world
+
+    with world(matrix) as w:
+        mark = w.matrix.plant("admintool").a
+        try:
+            answer = w.tool(who, "dispatch_swarm", prompt=f"task {mark}", worker="probe")
+        except RefusedBeforeEffect as exc:
+            answer = f"refused: {exc}"
+        w.settle()
+        stored = [t for t in w.store.list_tasks(metadata_filter={"tenant_id": "*"}, page_size=100)
+                  if mark in t.prompt]
+        return answer, stored
+
+
+def test_with_sign_in_on_dispatch_swarm_is_the_admins_once_enforced(matrix, monkeypatch) -> None:
+    from kazma_core.swarm.single_operator import ADMIN_ONLY_REFUSAL
+
+    monkeypatch.setenv("KAZMA_SECRET", "s" * 40)
+    answer, stored = _dispatched_by_tool(matrix, "a")
+    assert ADMIN_ONLY_REFUSAL in answer and stored == [], answer
+
+
+def test_control_dispatch_swarm_with_the_read_rule_only(matrix, monkeypatch) -> None:
+    import kazma_core.swarm.single_operator as single_operator
+
+    monkeypatch.setenv("KAZMA_SECRET", "s" * 40)
+    monkeypatch.setattr(single_operator, "swarm_write_refusal", single_operator.swarm_refusal)
+    answer, stored = _dispatched_by_tool(matrix, "a")
+    assert "dispatched" in answer and len(stored) == 1, answer
+
+
+def test_the_admin_rule_follows_the_routes(matrix, enforced, monkeypatch) -> None:
+    """Sign-in off: no admin role to require (the routes are open too);
+    sign-in on: the owner only. Not enforced: the read rule, as before (the
+    matrix's platform users make it the older multi-user refusal)."""
+    from kazma_core.swarm.single_operator import ADMIN_ONLY_REFUSAL, swarm_refusal, swarm_write_refusal
+
+    with scope.bind_scope(Matrix.SPACE_A, matrix.account_a):
+        assert swarm_write_refusal() is None
+        monkeypatch.setenv("KAZMA_SECRET", "s" * 40)
+        assert swarm_write_refusal() == ADMIN_ONLY_REFUSAL
+    with scope.bind_scope(OWNER_SPACE_ID, OWNER_ACCOUNT_ID):
+        assert swarm_write_refusal() is None
+    monkeypatch.setattr(scope, "_enforced", False)
+    with scope.bind_scope(Matrix.SPACE_A, matrix.account_a):
+        assert swarm_write_refusal() == swarm_refusal()
+
+
+# ── the S1-16 follow-up: an approval whose person cannot be read ─────────
+
+
+def test_an_approval_whose_person_cannot_be_read_answers_503_and_waits(matrix, shared, monkeypatch) -> None:
+    import kazma_core.swarm.single_operator as single_operator
+    from kazma_core.swarm import shared_approvals
+
+    from tests._swarm_space_cases import world
+
+    def unreadable(space: str, asker: str | None) -> str:
+        raise identity.IdentityUnavailable("the identity store could not be read: PoolTimeout")
+
+    with world(matrix) as w:
+        request = w.approval("a", w.matrix.plant("unreadable").a, space=shared)
+        monkeypatch.setattr(single_operator, "_acts_for", unreadable)
+        answer = w.call("a", "POST", f"/api/swarm/approvals/{request}/decide", space=shared,
+                        json={"decision": "approve"})
+        assert answer.status_code == 503 and answer.json()["error"] == "identity_unavailable", answer.text
+        assert shared_approvals.describe(request)["status"] == "pending"
+
+
+# ── the S1-16 follow-up: the owner's result waits through an outage ──────
+
+
+def _owners_result_with_identity_failing(monkeypatch, failures: int) -> list[str]:
+    """The owner's chat-app task finishes while whose it is cannot be read
+    *failures* times: the chats the result reached."""
+    import kazma_core.shutdown as shutdown
+    import kazma_core.swarm.single_operator as single_operator
+    import kazma_core.tools.send_message as send_message
+    from kazma_core.swarm import chat_delivery
+
+    sent: list[str] = []
+    left = [failures]
+
+    async def send(target: str, text: str, **_kwargs: Any) -> str:
+        sent.append(target)
+        return f"sent:{target}"
+
+    def flaky(task: Any) -> bool:
+        if left[0]:
+            left[0] -= 1
+            raise identity.IdentityUnavailable("the identity store could not be read: PoolTimeout")
+        return True
+
+    async def no_wait(_seconds: float) -> bool:
+        return False
+
+    monkeypatch.setattr(send_message, "send_message", send)
+    monkeypatch.setattr(single_operator, "_task_for_the_owner", flaky)
+    monkeypatch.setattr(shutdown, "sleep_or_shutdown", no_wait)
+    result = SimpleNamespace(status="success", aggregated_output="done", synthesized_output="", error="",
+                             duration_seconds=1.0, worker_results=[])
+    owners = SimpleNamespace(id="t-owner-" + uuid.uuid4().hex[:6],
+                             metadata={"tenant_id": OWNER_SPACE_ID, "asker": OWNER_ACCOUNT_ID})
+    asyncio.run(chat_delivery._deliver(owners, result, "telegram", "telegram:777"))
+    return sent
+
+
+def test_the_owners_result_is_held_while_whose_it_is_cannot_be_read(enforced, monkeypatch) -> None:
+    assert _owners_result_with_identity_failing(monkeypatch, failures=3) == ["telegram:777"]
+
+
+def test_control_dropped_at_the_first_failure_the_owners_result_is_lost(enforced, monkeypatch) -> None:
+    """The delivery as before the review: one unreadable answer kept the
+    owner's result in the Swarm panel for good."""
+    import kazma_core.swarm.single_operator as single_operator
+
+    async def drop_at_once(task: Any, *, label: str) -> bool:
+        try:
+            return await asyncio.to_thread(single_operator._task_for_the_owner, task)
+        except identity.IdentityUnavailable:
+            return False
+
+    monkeypatch.setattr(single_operator, "wait_for_owner_answer", drop_at_once)
+    assert _owners_result_with_identity_failing(monkeypatch, failures=1) == []
+
+
+def test_a_result_held_past_the_limit_stays_in_the_panel(enforced, monkeypatch) -> None:
+    import kazma_core.swarm.single_operator as single_operator
+
+    monkeypatch.setattr(single_operator, "OWNER_ANSWER_WAIT_S", 0.0)
+    assert _owners_result_with_identity_failing(monkeypatch, failures=1) == []

@@ -83,6 +83,19 @@ def _metadata_refusal(payload: dict[str, Any]) -> JSONResponse | None:
     )
 
 
+#: The status of a task action ``task_actions.task_refusal`` refused.
+_REFUSAL_STATUS = {"not_found": 404, "not_yours": 403, "no_space": 409, "identity_unavailable": 503}
+
+
+def _refusal_answer(refused: dict[str, Any] | None) -> JSONResponse | None:
+    """The page's answer to a task action the shared check refused (Spaces
+    S1-16 follow-up), else None."""
+    if refused is None:
+        return None
+    return JSONResponse({"status": "error", "code": refused["code"], "message": refused["message"]},
+                        status_code=_REFUSAL_STATUS.get(str(refused["code"]), 403))
+
+
 def _coerce_timeout(payload: dict[str, Any]) -> float:
     """Return a numeric task timeout from the API payload."""
     try:
@@ -131,28 +144,14 @@ def register_tasks_routes(
         return svc.resolve_engine(swarm_manager)
 
     def _not_here(engine: Any, task_id: str) -> JSONResponse | None:
-        """The answer for a task this request may not act on, else None.
+        """The answer for a task this request may not approve or reject, else
+        None: ``task_actions.task_refusal``, the one check Cancel and Retry
+        make inside the shared action (Spaces S1-15, its follow-up). Another
+        space's task answers as an unknown one; only the person who asked
+        answers it (decision N4). Blocking."""
+        from kazma_ui.swarm_panel.task_actions import task_refusal
 
-        Once Spaces is enforced a task of another space answers exactly as
-        an unknown one (Spaces S1-15), and a task of this space that acts
-        for someone else is not this caller's to answer: only the person
-        who asked approves, rejects, cancels or retries it (decision N4).
-        Blocking (the task store, the identity store)."""
-        from kazma_core.spaces.scope import spaces_enforced
-        from kazma_core.swarm.single_operator import task_answered_by_caller, task_of_this_space
-
-        if not spaces_enforced():
-            return None
-        store = getattr(engine, "task_store", None) or getattr(engine, "_task_store", None)
-        task = (engine.get_active_task(task_id) if hasattr(engine, "get_active_task") else None) \
-            or engine.get_task(task_id) or (store.get_task(task_id) if store is not None else None)
-        if task is None or not task_of_this_space(task):
-            return JSONResponse({"status": "error", "message": f"Task '{task_id}' not found"}, status_code=404)
-        if not task_answered_by_caller(task):
-            return JSONResponse({"status": "error", "code": "not_yours",
-                                 "message": "Only the person who asked for this task can answer it."},
-                                status_code=403)
-        return None
+        return _refusal_answer(task_refusal(engine, task_id))
 
     def _require_admin(request: Request) -> JSONResponse | None:
         """Admin/operator gate for the task action routes (approve/reject/cancel/retry).
@@ -358,16 +357,11 @@ def register_tasks_routes(
         """Whether the install's output target -- the owner's chat -- may carry
         this task's result (Spaces S1-15 review, O1): always while Spaces is
         not enforced; once it is, only a task that acts for the owner. A
-        store that cannot say keeps the result in its space."""
-        from kazma_core.spaces.identity import IdentityUnavailable
-        from kazma_core.swarm.single_operator import task_for_the_owner
+        store that cannot say holds the result until it can (an outage),
+        never drops the owner's (S1-16 follow-up)."""
+        from kazma_core.swarm.single_operator import wait_for_owner_answer
 
-        try:
-            return await asyncio.to_thread(task_for_the_owner, swarm_task)
-        except IdentityUnavailable:
-            logger.warning("[Swarm] task '%s': whose it is cannot be read; its result stays in its space",
-                           getattr(swarm_task, "id", ""))
-            return False
+        return await wait_for_owner_answer(swarm_task, label=f"task '{getattr(swarm_task, 'id', '')}'")
 
     def _settle_handle(svc: Any, task_id: str, handle: asyncio.Task) -> None:
         """A background dispatch ended: drop its handle and retrieve its
@@ -1021,12 +1015,12 @@ def register_tasks_routes(
         _denied = await asyncio.to_thread(_require_admin, request)
         if _denied is not None:
             return _denied
-        _hidden = await asyncio.to_thread(_not_here, _current_engine(), task_id)
-        if _hidden is not None:
-            return _hidden
         from kazma_ui.swarm_panel.task_actions import cancel_task
 
+        # The space-and-asker check is the shared action's (task_refusal).
         outcome = await cancel_task(task_id)
+        if outcome["code"] in _REFUSAL_STATUS:
+            return _refusal_answer(outcome)
         if outcome["ok"]:
             return JSONResponse({"status": "ok", "message": outcome["message"], "task_id": task_id})
         status = {"engine_unavailable": 503, "not_active": 404}.get(outcome["code"], 500)
@@ -1034,17 +1028,17 @@ def register_tasks_routes(
 
     @router.post("/api/swarm/tasks/{task_id}/retry")
     async def swarm_retry_task(task_id: str, request: Request) -> JSONResponse:
+        """Retry a failed/timeout/cancelled task by re-dispatching."""
         _denied = await asyncio.to_thread(_require_admin, request)
         if _denied is not None:
             return _denied
-        _hidden = await asyncio.to_thread(_not_here, _current_engine(), task_id)
-        if _hidden is not None:
-            return _hidden
-        """Retry a failed/timeout/cancelled task by re-dispatching."""
         from kazma_ui.swarm_panel.task_actions import retry_task
 
+        # The space-and-asker check is the shared action's (task_refusal).
         acknowledge = request.query_params.get("acknowledge_unknown") in ("1", "true")
         outcome = await retry_task(task_id, acknowledge_unknown=acknowledge)
+        if outcome["code"] in _REFUSAL_STATUS:
+            return _refusal_answer(outcome)
         if outcome["code"] == "retry_outcome_unknown":
             # The original may already have changed things: the page asks the
             # operator, then retries with acknowledge_unknown=1 (SW-E08).

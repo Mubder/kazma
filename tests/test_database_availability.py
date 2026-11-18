@@ -433,6 +433,9 @@ AWARE = {
     "kazma-core/kazma_core/observability/firing_ledger.py::ledger_scheduler",
     "kazma-core/kazma_core/runs/supervisor.py::_loop",
     "kazma-core/kazma_core/swarm/engine.py::SwarmEngine.start_maintenance_loop._loop",
+    # A finished task's result waits for the identity store (Spaces S1-16
+    # follow-up): through an outage it waits for the database, then reads.
+    "kazma-core/kazma_core/swarm/single_operator.py::wait_for_owner_answer",
     "kazma-core/kazma_core/time_travel.py::start_snapshot_maintenance_loop._loop",
     "kazma-core/kazma_core/web_acquire/canary.py::_loop",
     "kazma-core/kazma_core/web_acquire/monitor.py::_loop",

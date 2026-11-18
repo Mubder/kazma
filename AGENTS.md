@@ -12664,14 +12664,20 @@ product can turn it on, so an install with one account behaves as before.
     (`CronScheduler._not_theirs_to_change`: `not_yours`, 403). Anyone else in
     the space may only move a pending one-off to another one-off time. In a
     shared space a member's words, or a daily recurrence, would otherwise
-    reach the owner's chat as the owner.
+    reach the owner's chat as the owner. Such a change is made only to the
+    job it was allowed for (S1-16 follow-up, `CronScheduler._change_rule`):
+    the write pins the version read and `update_job(pending_only=True)`
+    answers `conflict` when a fire began meanwhile -- a claim keeps the
+    version.
   - **The fire's binding is inside its `try`**: an identity store that
     cannot answer because the database is away gives the claim back at the
     same occurrence (`_hold_for_identity`, reported to the database watch),
     and while the database is away the poll holds reminders too once Spaces
     is enforced (who a reminder fires as is in the database). Any other
     failure to read it (a registry that is not a mapping) fails the fire
-    once (`identity_unavailable`), never a claim and release every pass. The
+    once (`identity_unavailable`), never a claim and release every pass; a
+    locked SQLite settings file is held the same way, without being an
+    outage (`_sqlite_lock_passes`, S1-16 follow-up). The
     missed path asks the same fire rule: a job that would not fire is
     recorded missed and queues no notice (`mark_missed(refused=)`).
   - Gates: `tests/_scheduled_space_cases.py` (the matrix cases, a member of
@@ -12720,7 +12726,12 @@ product can turn it on, so an install with one account behaves as before.
     page shows it only in that space. **Only the person who asked answers**
     (decision N4, `single_operator.answered_by_caller`): a task's approve,
     reject, cancel and retry and its worker's approval are refused to anyone
-    else (403 `not_yours`); another member of a shared space sees them.
+    else (403 `not_yours`); another member of a shared space sees them. The
+    check is the shared action's, `task_actions.task_refusal` (S1-16
+    follow-up): the page's routes and the run supervisor's buttons ask the
+    same one, so a retry never takes a member's task into the caller's space
+    through the admission stamp, and work bound to no space acts on no
+    task's (`no_space`).
     **Someone else's card and result stay off the owner's chat apps** (O1,
     `single_operator.for_the_owner`): until people link their own chat apps
     every one is the owner's, so a request that does not act for the owner
@@ -12728,12 +12739,17 @@ product can turn it on, so an install with one account behaves as before.
     row, answered in its space) and a chat app's button never decides it;
     its result goes to neither the output target nor a chat
     (`chat_delivery`). Delivering a request to its asker (the bell, Web
-    Push) is S2-05's.
+    Push) is S2-05's. An identity store that cannot say whose a result is
+    holds it (`single_operator.wait_for_owner_answer`, through an outage, up
+    to `OWNER_ANSWER_WAIT_S`): the owner's is never dropped; an approval
+    whose person cannot be read answers 503 and stays pending.
   - **The swarm's writes stay the admin's in every mode** (dispatch, a
     task's actions, an approval's decision) until feature grants give the
     swarm to others (S2-11); the install's swarm, read -- workers' totals and
     breakers, the output target -- is the admin's once enforced
-    (`route_roles.INSTALL_READ`).
+    (`route_roles.INSTALL_READ`). The agent's `dispatch_swarm` follows the
+    routes' rule once enforced (`single_operator.swarm_write_refusal`: open
+    with sign-in off, the owner only with it on).
   - Gates: `tests/_swarm_space_cases.py` (the matrix cases),
     `tests/test_swarm_spaces.py` (each guard taken out as a control; the
     unscoped dispatch as the control for a task run with nothing bound; the
@@ -12746,10 +12762,22 @@ product can turn it on, so an install with one account behaves as before.
     sessions, the owner's space also those from before Spaces (no tenant).
     Every route and tool that names a session asks
     `research_session.session_here` (another space's answers as an unknown
-    one); never `get_session` where a request names the id.
-  - **A chat's web search is one row per question per space**
-    (`_chat_search_key`): the owner's keeps the ids it had, another space's
-    is salted with its id. One id per question wrote B's results into A's row.
+    one); never `get_session` where a request names the id. Once enforced,
+    work bound to no space makes no session (`NoSpaceBound`: it became the
+    owner's), and a session records its author (`asker`, always stamped).
+  - **Shared research is read by every member and changed by two**
+    (decision N32, the S1-16 follow-up): its author and the space's owner
+    archive, restore, delete, cancel or resume it; another member reads it
+    (403 `not_yours`). One rule, `spaces.shared_work.may_change`, for a
+    session (`research_session.session_to_change`, every route and tool
+    that changes one) and a research task (`_task_to_change`, archive and
+    delete alike).
+  - **A chat's web search is one row per question, per space, per person**
+    (`_chat_search_key`): the owner's keeps the ids it had (12 hex digits of
+    the question); every other key starts with `s` and hashes the space, the
+    person and the question together, so no question of the owner's shares
+    an id with another space's. A row of another space under an id is a
+    miss, never written (`_row_is_this_spaces`).
   - A research task is a swarm task of kind research: it keeps to its space
     as every swarm task does (S1-15; the research routes' `_find_task`).
   - The research files (reports, papers, extracts, digests, a saved page, a
@@ -12757,7 +12785,9 @@ product can turn it on, so an install with one account behaves as before.
     workspace folder's and wait for S1-19, the space folder.
   - Gates: `tests/_research_space_cases.py` (the matrix cases),
     `tests/test_research_spaces.py` (the unfiltered list as the control,
-    and each other guard taken out).
+    and each other guard taken out; a shared space of two, any member
+    changing shared research as the control; the review's crafted
+    collision; a session for no one as the owner's as the control).
 
 ## UI Conventions (Web)
 

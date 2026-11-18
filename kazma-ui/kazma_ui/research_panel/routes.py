@@ -185,6 +185,41 @@ def _export_reply(fmt: str, msg: Any) -> JSONResponse:
     )
 
 
+#: A refused change's status, by the code research_session and the task
+#: check below answer (Spaces S1-16 follow-up).
+_REFUSED_STATUS = {"not_found": 404, "not_yours": 403, "identity_unavailable": 503}
+
+
+def _refused(code: str) -> JSONResponse:
+    """The answer to a change this caller may not make: as an unknown one,
+    ``not_yours`` (a member who may only read it, decision N32), or the
+    identity store not answering."""
+    return JSONResponse({"ok": False, "error": "not found" if code == "not_found" else code},
+                        status_code=_REFUSED_STATUS.get(code, 403))
+
+
+def _task_to_change(task_id: str) -> tuple[Any, Any, str]:
+    """(store, task, "") when the caller may change the research task
+    *task_id* -- archive, restore, delete -- else (store, None, code): one
+    rule for every change (Spaces S1-16 follow-up). Another space's task
+    answers as an unknown one; once Spaces is enforced only its author (the
+    task's asker) and the space's owner change it (decision N32), the rule
+    research sessions follow. Blocking."""
+    from kazma_core.spaces.identity import IdentityUnavailable
+    from kazma_core.spaces.shared_work import NOT_YOURS, may_change
+
+    store, task = _find_task(task_id)
+    if task is None:
+        return store, None, "not_found"
+    meta = task.metadata or {}
+    try:
+        allowed = may_change(str(meta.get("tenant_id") or ""), meta.get("asker"))
+    except IdentityUnavailable:
+        logger.warning("[research] who may change task %s cannot be read; refused", task_id)
+        return store, None, "identity_unavailable"
+    return (store, task, "") if allowed else (store, None, NOT_YOURS)
+
+
 def _set_archived(task_id: str, archived: bool) -> JSONResponse:
     """Toggle the archived flag on a research task's metadata.
 
@@ -192,9 +227,11 @@ def _set_archived(task_id: str, archived: bool) -> JSONResponse:
     ``metadata["archived"]``, and re-persists. This respects the store's
     locking and works for both SQLite and Postgres. Blocking.
     """
-    store, task = _find_task(task_id)
-    if task is None:
+    store, task, refused = _task_to_change(task_id)
+    if refused == "not_found":
         return JSONResponse({"error": "task not found"}, status_code=404)
+    if refused:
+        return _refused(refused)
 
     # Mutate metadata and re-persist.
     if task.metadata is None:
@@ -345,9 +382,10 @@ def create_research_router() -> APIRouter:
 
     @router.post("/api/research/sessions/{session_id}/resume", dependencies=[Depends(rate_limit("research", 10))])
     async def resume_research_session(session_id: str) -> JSONResponse:
-        from kazma_core.tools.research_session import ResearchSessionBusyError, session_here, start_deep_research
-        if await asyncio.to_thread(session_here, session_id) is None:
-            return JSONResponse({'ok': False, 'error': 'not found'}, status_code=404)
+        from kazma_core.tools.research_session import ResearchSessionBusyError, session_to_change, start_deep_research
+        _sess, refused = await asyncio.to_thread(session_to_change, session_id)
+        if refused:
+            return _refused(refused)
         try:
             session = await start_deep_research('', resume_session_id=session_id)
             return JSONResponse({'ok': True, 'session': session.to_dict()})
@@ -392,11 +430,11 @@ def create_research_router() -> APIRouter:
     def archive_research_session(session_id: str) -> JSONResponse:
         """Soft-hide a session from the main Research list."""
         try:
-            from kazma_core.tools.research_session import archive_session
-            from kazma_core.tools.research_session import session_here as get_session
+            from kazma_core.tools.research_session import archive_session, session_to_change
 
-            if get_session(session_id) is None:
-                return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
+            _sess, refused = session_to_change(session_id)
+            if refused:
+                return _refused(refused)
             sess = archive_session(session_id, archived=True)
             return JSONResponse({"ok": True, "session": sess.to_dict() if sess else None})
         except Exception as exc:
@@ -407,11 +445,11 @@ def create_research_router() -> APIRouter:
     def unarchive_research_session(session_id: str) -> JSONResponse:
         """Restore an archived session to the main Research list."""
         try:
-            from kazma_core.tools.research_session import archive_session
-            from kazma_core.tools.research_session import session_here as get_session
+            from kazma_core.tools.research_session import archive_session, session_to_change
 
-            if get_session(session_id) is None:
-                return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
+            _sess, refused = session_to_change(session_id)
+            if refused:
+                return _refused(refused)
             sess = archive_session(session_id, archived=False)
             return JSONResponse({"ok": True, "session": sess.to_dict() if sess else None})
         except Exception as exc:
@@ -422,11 +460,14 @@ def create_research_router() -> APIRouter:
     def delete_research_session(session_id: str) -> JSONResponse:
         """Delete settled history; retain active cancellation for inspection."""
         try:
-            from kazma_core.tools.research_session import ResearchSessionBusyError, delete_session, session_here
+            from kazma_core.tools.research_session import ResearchSessionBusyError, delete_session, session_to_change
 
-            # Another space's session answers as an unknown one (S1-16).
-            deleted = session_here(session_id) is not None and delete_session(session_id)
-            if not deleted:
+            # Another space's session answers as an unknown one (S1-16); a
+            # member who may only read it is told so (N32).
+            _sess, refused = session_to_change(session_id)
+            if refused:
+                return _refused(refused)
+            if not delete_session(session_id):
                 return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
             return JSONResponse({"ok": True, "deleted": session_id})
         except ResearchSessionBusyError as exc:
@@ -454,11 +495,11 @@ def create_research_router() -> APIRouter:
     def cancel_research_session(session_id: str) -> JSONResponse:
         """Cancel a running deep-research session (best-effort)."""
         try:
-            from kazma_core.tools.research_session import cancel_session, ResearchSessionBusyError
-            from kazma_core.tools.research_session import session_here as get_session
+            from kazma_core.tools.research_session import ResearchSessionBusyError, cancel_session, session_to_change
 
-            if get_session(session_id) is None:
-                return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
+            _sess, refused = session_to_change(session_id)
+            if refused:
+                return _refused(refused)
             sess = cancel_session(session_id)
             return JSONResponse(
                 {"ok": True, "session": sess.to_dict() if sess else None}
@@ -847,8 +888,12 @@ def create_research_router() -> APIRouter:
             return JSONResponse({"error": "store unavailable"}, status_code=503)
         try:
             # Idempotent: an id already gone is the state the caller wanted.
-            # Another space's task answers the same, and is not touched.
-            _store, task = _find_task(task_id)
+            # Another space's task answers the same, and is not touched; a
+            # member who may only read it is told so (N32, one rule with
+            # archive: _task_to_change).
+            _store, task, refused = _task_to_change(task_id)
+            if refused and refused != "not_found":
+                return _refused(refused)
             if task is not None:
                 store.delete_task(task_id)
             return JSONResponse({"ok": True, "deleted": task_id})
