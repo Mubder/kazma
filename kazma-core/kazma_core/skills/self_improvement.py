@@ -1202,17 +1202,22 @@ def learn_from_finished_turn(values: dict[str, Any] | None, *, thread_id: str = 
         while len(_learned) > _LEARNED_MAX:
             _learned.popitem(last=False)
     from kazma_core.background import spawn_background
+    from kazma_core.spaces.scope import current_scope
 
+    tenant = str(post.get("tenant_id") or "default")
+    # The person the turn ran for, when the closing code is still bound to
+    # the turn's space: the lesson is learned for them.
+    bound = current_scope()
+    asker = bound.asker if bound is not None and bound.space_id == tenant else None
     spawn_background(
-        _learn_from_turn(question, answer, session=session, turn=turn,
-                         tenant_id=str(post.get("tenant_id") or "default")),
+        _learn_from_turn(question, answer, session=session, turn=turn, tenant_id=tenant, asker=asker),
         name=f"self-improvement:{session[:12]}",
     )
     return True
 
 
 async def _learn_from_turn(
-    question: str, answer: str, *, session: str, turn: int, tenant_id: str,
+    question: str, answer: str, *, session: str, turn: int, tenant_id: str, asker: str | None = None,
 ) -> dict[str, Any]:
     from kazma_core.memory.forget import turn_kept_out
 
@@ -1221,8 +1226,13 @@ async def _learn_from_turn(
         return {"action": "skip", "reason": "kept out of memory"}
     # The lesson is the turn's space's (Spaces S1-10), named here: this is a
     # background task, and what its context holds is not the turn's word.
-    # The refiner's own memory search runs for that tenant too.
-    from kazma_core.spaces.scope import spaces_enforced
+    # The refiner's own memory search runs for that tenant too. Once Spaces
+    # is enforced the task runs as a whole scope -- the space and the person
+    # the turn ran for (else the space's own: ``identity.acting_account``):
+    # bound by its tenant alone it was half a scope, and anything the
+    # refiner reached that asks ``require_scope`` was refused.
+    from kazma_core.spaces.identity import acting_account
+    from kazma_core.spaces.scope import bind_scope, spaces_enforced
     from kazma_core.tenant_context import tenant_scope
 
     async def learn() -> dict[str, Any]:
@@ -1231,7 +1241,11 @@ async def _learn_from_turn(
             source={"chat": session, "turn": turn}, space=tenant_id,
         )
 
-    if tenant_id != _owner_space() or spaces_enforced():
+    if spaces_enforced():
+        who = asker or await asyncio.to_thread(acting_account, tenant_id)
+        with bind_scope(tenant_id, who):
+            return await learn()
+    if tenant_id != _owner_space():
         with tenant_scope(tenant_id):
             return await learn()
     return await learn()

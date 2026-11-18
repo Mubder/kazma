@@ -158,7 +158,7 @@ def _task_binding(task_type: str, payload: Any) -> TaskBinding:
     holds, R6) -- or runs as the install's work: a space with no asker is
     half a scope, and ``require_scope`` refused every queued deep pass.
     """
-    from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, OWNER_SPACE_ID, spaces_enforced
+    from kazma_core.spaces.scope import OWNER_SPACE_ID, spaces_enforced
 
     data = payload if isinstance(payload, dict) else {}
     tenant = str(data.get("tenant_id") or "").strip()
@@ -174,11 +174,9 @@ def _task_binding(task_type: str, payload: Any) -> TaskBinding:
         # A row that is gone, or a task type no table above names: nothing
         # of a space is read (a handler that asks is refused, and retried).
         return TaskBinding(install=f"the memory task {task_type}, which names no space")
-    from kazma_core.spaces import identity
+    from kazma_core.spaces.identity import acting_account
 
-    space = (identity.read_registry().get("spaces") or {}).get(tenant) or {}
-    asker = str(space.get("personal_of") or space.get("created_by") or "") or OWNER_ACCOUNT_ID
-    return TaskBinding(space=tenant, asker=asker)
+    return TaskBinding(space=tenant, asker=acting_account(tenant))
 
 
 def _row_tenant(table: str, key: str, payload: dict[str, Any]) -> str | None:

@@ -141,6 +141,66 @@ def test_control_without_spaces_there_is_one_soul_whatever_the_turns_tenant(env)
     assert env.store.get(si._SPACE_EVO_KEY) is None
 
 
+def _scopes_the_refiner_ran_in(env) -> list[object]:
+    """What the refiner's own memory search ran as, each time it asked."""
+    seen: list[object] = []
+
+    def search(*_a, **_k):
+        try:
+            seen.append(scope.require_scope())
+        except scope.NoSpaceBound:
+            seen.append("refused")
+        return []
+
+    env.mp.setattr("kazma_core.memory.recall.search", search)
+    return seen
+
+
+def test_a_lesson_is_learned_as_a_whole_scope(env) -> None:
+    """Enforced, the background lesson task runs as the turn's space and the
+    person the turn ran for; with nobody bound at the close, as the space's
+    own account (its maker here)."""
+    seen = _scopes_the_refiner_ran_in(env)
+    with scope.bind_scope(A, "sara"):
+        _close(A)
+    _close(B)
+    assert set(seen) == {scope.Scope(A, "sara"), scope.Scope(B, OWNER_ACCOUNT_ID)}
+
+
+def test_control_a_lesson_task_bound_by_its_tenant_alone_is_refused(env) -> None:
+    """The binding S1-10 first wrote: the tenant alone, a half scope."""
+    from kazma_core.tenant_context import tenant_scope
+
+    seen = _scopes_the_refiner_ran_in(env)
+
+    async def as_it_was(question, answer, *, session, turn, tenant_id, asker=None):
+        with tenant_scope(tenant_id):
+            return await si.analyze_and_apply_chat_turn(
+                user_message=question, success=True, output_snippet=answer[:600],
+                source={"chat": session, "turn": turn}, space=tenant_id)
+
+    env.mp.setattr(si, "_learn_from_turn", as_it_was)
+    _close(A)
+    assert "refused" in seen
+
+
+def test_the_account_a_spaces_own_work_acts_for(env) -> None:
+    from kazma_core.config_store import get_config_store
+
+    assert identity.acting_account(A) == OWNER_ACCOUNT_ID  # its maker
+    assert identity.acting_account("telegram") == OWNER_ACCOUNT_ID  # no space: the admin
+
+    def personal(reg):
+        reg["accounts"]["sara"] = {"id": "sara", "name": "Sara", "role": "member", "enabled": True}
+        reg["spaces"]["sara-own"] = {"id": "sara-own", "name": "", "kind": "sandboxed",
+                                     "personal_of": "sara", "created_by": OWNER_ACCOUNT_ID}
+        reg["memberships"].append({"account": "sara", "space": "sara-own", "role": "owner"})
+
+    identity.update_registry(personal)
+    assert identity.acting_account("sara-own") == "sara"  # a personal space: its person
+    assert get_config_store() is not None
+
+
 def test_two_spaces_taught_one_after_another_keep_both_souls(env) -> None:
     assert si.apply_agent_mutation("supervisor", LESSON_A, space=A)
     assert si.apply_agent_mutation("supervisor", LESSON_B, space=B)

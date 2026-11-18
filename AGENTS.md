@@ -12519,8 +12519,12 @@ product can turn it on, so an install with one account behaves as before.
     `_agent_evo_lock`). Every reader and writer of a Soul takes `space`.
   - **Learning**: `learn_from_finished_turn` passes the turn's tenant
     (`_post_turn_memory.tenant_id`, which `respond_node` sets from
-    `space_of_state`) down to `apply_agent_mutation(space=)`; the background
-    task runs bound to that tenant.
+    `space_of_state`) down to `apply_agent_mutation(space=)`. Once Spaces is
+    enforced the background task binds a whole scope: the turn's space and
+    the person the turn ran for, else `spaces.identity.acting_account` --
+    the one answer to "who does Kazma's own work for a space act for" (the
+    queued memory tasks use it too). Not enforced: the tenant alone, as
+    before.
   - **Reading**: once enforced, the supervisor chooses a turn's lessons at
     its first step (`graph_helpers._ensure_space_lessons`: every
     `self_improvement` turn note the call holds is dropped, the note of
