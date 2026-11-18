@@ -1,0 +1,417 @@
+{
+ "seconds_one_replay": 5.7,
+ "gated_scores": 78,
+ "replay_differs_from_the_lock": {},
+ "overall": {
+  "tuning": {
+   "questions": 89,
+   "hit_rate": 0.9253,
+   "mrr": 0.8444,
+   "precision": 0.6443,
+   "latency_p50_ms": 30.4,
+   "latency_p95_ms": 58.2
+  },
+  "heldout": {
+   "questions": 40,
+   "hit_rate": 0.8909,
+   "mrr": 0.8448,
+   "precision": 0.6464,
+   "latency_p50_ms": 56.9,
+   "latency_p95_ms": 61.8
+  }
+ },
+ "questions_behind_each_score": {
+  "categories": [
+   {
+    "category": "heldout.keyword",
+    "questions": 1,
+    "gated_scores": 3
+   },
+   {
+    "category": "heldout.noise",
+    "questions": 1,
+    "gated_scores": 3
+   },
+   {
+    "category": "heldout.overview",
+    "questions": 2,
+    "gated_scores": 3
+   },
+   {
+    "category": "heldout.arabic",
+    "questions": 3,
+    "gated_scores": 3
+   },
+   {
+    "category": "heldout.assistant",
+    "questions": 3,
+    "gated_scores": 3
+   },
+   {
+    "category": "heldout.fact",
+    "questions": 3,
+    "gated_scores": 3
+   },
+   {
+    "category": "heldout.single",
+    "questions": 3,
+    "gated_scores": 4
+   },
+   {
+    "category": "multi",
+    "questions": 3,
+    "gated_scores": 4
+   },
+   {
+    "category": "noise",
+    "questions": 3,
+    "gated_scores": 3
+   },
+   {
+    "category": "fact",
+    "questions": 4,
+    "gated_scores": 3
+   },
+   {
+    "category": "heldout.update",
+    "questions": 4,
+    "gated_scores": 4
+   },
+   {
+    "category": "keyword",
+    "questions": 4,
+    "gated_scores": 4
+   },
+   {
+    "category": "heldout.paraphrase",
+    "questions": 5,
+    "gated_scores": 4
+   },
+   {
+    "category": "assistant",
+    "questions": 6,
+    "gated_scores": 3
+   },
+   {
+    "category": "heldout.mixed",
+    "questions": 7,
+    "gated_scores": 4
+   },
+   {
+    "category": "update",
+    "questions": 7,
+    "gated_scores": 4
+   },
+   {
+    "category": "arabic",
+    "questions": 8,
+    "gated_scores": 3
+   },
+   {
+    "category": "heldout.abstain",
+    "questions": 8,
+    "gated_scores": 1
+   },
+   {
+    "category": "paraphrase",
+    "questions": 8,
+    "gated_scores": 4
+   },
+   {
+    "category": "overview",
+    "questions": 10,
+    "gated_scores": 4
+   },
+   {
+    "category": "abstain",
+    "questions": 18,
+    "gated_scores": 1
+   },
+   {
+    "category": "single",
+    "questions": 18,
+    "gated_scores": 4
+   }
+  ],
+  "gated_scores_on_one_question": 6,
+  "gated_scores_on_four_or_fewer": 40,
+  "gated_scores_in_categories": 72
+ },
+ "second_replay": {
+  "gated_scores_moved": 0,
+  "moved": {},
+  "questions_changed": [],
+  "hit_flips": []
+ },
+ "questions_in_another_order": {
+  "gated_scores_moved": 0,
+  "moved": {},
+  "questions_changed": [],
+  "hit_flips": []
+ },
+ "heldout_asked_first": {
+  "questions_changed": []
+ },
+ "numpy_search_path": {
+  "gated_scores_moved": 0,
+  "moved": {},
+  "questions_changed": [],
+  "hit_flips": []
+ },
+ "recorded_vectors_moved": {
+  "inside_the_rounding_half_a_step": {
+   "draws": 30,
+   "draws_with_every_score_unchanged": 3,
+   "gated_scores_moved_per_draw": [
+    7,
+    3,
+    2,
+    2,
+    6,
+    6,
+    9,
+    11,
+    4,
+    8,
+    0,
+    8,
+    2,
+    7,
+    7,
+    8,
+    2,
+    2,
+    3,
+    0,
+    9,
+    3,
+    0,
+    7,
+    2,
+    4,
+    5,
+    5,
+    2,
+    2
+   ],
+   "scores_that_moved_in_n_draws": [
+    [
+     "heldout.overall.precision",
+     19
+    ],
+    [
+     "overall.precision",
+     16
+    ],
+    [
+     "overall.mrr",
+     13
+    ],
+    [
+     "heldout.fact.precision",
+     12
+    ],
+    [
+     "single.precision",
+     11
+    ],
+    [
+     "heldout.mixed.precision",
+     8
+    ],
+    [
+     "noise.hit_rate",
+     7
+    ],
+    [
+     "noise.mrr",
+     7
+    ],
+    [
+     "noise.precision",
+     7
+    ],
+    [
+     "overall.hit_rate",
+     7
+    ],
+    [
+     "overview.mrr",
+     7
+    ],
+    [
+     "overview.precision",
+     7
+    ],
+    [
+     "heldout.update.precision",
+     5
+    ],
+    [
+     "heldout.overall.mrr",
+     4
+    ],
+    [
+     "heldout.update.mrr",
+     4
+    ],
+    [
+     "paraphrase.precision",
+     1
+    ],
+    [
+     "arabic.precision",
+     1
+    ]
+   ],
+   "questions_that_changed_in_n_draws": [
+    [
+     "h019",
+     12
+    ],
+    [
+     "q810",
+     11
+    ],
+    [
+     "h026",
+     8
+    ],
+    [
+     "q601",
+     7
+    ],
+    [
+     "q957",
+     7
+    ],
+    [
+     "q017",
+     6
+    ],
+    [
+     "q003",
+     6
+    ],
+    [
+     "h015",
+     4
+    ],
+    [
+     "q001",
+     3
+    ],
+    [
+     "h012",
+     1
+    ],
+    [
+     "q103",
+     1
+    ],
+    [
+     "q706",
+     1
+    ]
+   ],
+   "hit_flips_in_n_draws": [
+    [
+     "q601",
+     7
+    ]
+   ]
+  },
+  "a_fiftieth_of_a_step": {
+   "draws": 8,
+   "draws_with_every_score_unchanged": 8,
+   "gated_scores_moved_per_draw": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "scores_that_moved_in_n_draws": [],
+   "questions_that_changed_in_n_draws": [],
+   "hit_flips_in_n_draws": []
+  },
+  "a_thousandth_of_a_step": {
+   "draws": 8,
+   "draws_with_every_score_unchanged": 8,
+   "gated_scores_moved_per_draw": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "scores_that_moved_in_n_draws": [],
+   "questions_that_changed_in_n_draws": [],
+   "hit_flips_in_n_draws": []
+  }
+ },
+ "pool": {
+  "turns": 1120,
+  "different_user_messages": 134,
+  "different_turns": 241,
+  "recorded_vectors": 460,
+  "facts": 69,
+  "weekly_summaries": 128
+ },
+ "the_question_whose_hit_flips": {
+  "q601": {
+   "as_recorded": {
+    "question": "what is it that I do for a living?",
+    "category": "noise",
+    "answered_by": [
+     "p17#1|f33|f34"
+    ],
+    "facts": [
+     {
+      "memory": "f33",
+      "score": 0.1004,
+      "lift": 0.0604,
+      "coverage": 0.0,
+      "evidence": 0.0604,
+      "strength": "weak"
+     },
+     {
+      "memory": "f25",
+      "score": 0.0887,
+      "lift": 0.0687,
+      "coverage": 0.0,
+      "evidence": 0.0687,
+      "strength": "weak"
+     }
+    ],
+    "turns": [],
+    "summaries": []
+   },
+   "inside_the_rounding": {
+    "question": "what is it that I do for a living?",
+    "category": "noise",
+    "answered_by": [
+     "p17#1|f33|f34"
+    ],
+    "facts": [
+     {
+      "memory": "f25",
+      "score": 0.109,
+      "lift": 0.069,
+      "coverage": 0.0,
+      "evidence": 0.069,
+      "strength": "weak"
+     }
+    ],
+    "turns": [],
+    "summaries": []
+   }
+  }
+ }
+}
