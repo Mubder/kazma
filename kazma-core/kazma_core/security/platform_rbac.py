@@ -122,6 +122,46 @@ _ADMIN_WRITE_PREFIXES = (
     "/api/models/saved",
 )
 
+# Once Spaces is enforced, a space's own connected accounts are its members'
+# to connect and disconnect (decision N26: each person connects their own; the
+# review of Spaces S1-17c): GitHub's token, sign-in and disconnect, and the
+# mail and calendar routes. They were the admin's in every mode, and a member
+# is an operator: no member could connect a mailbox, a calendar or GitHub of
+# their own space. Membership is the tenant middleware's to check (every one
+# is a ``space`` route). The install's own pieces stay the admin's: the mail
+# sign-ins' app registrations and the mail presets (``install`` routes, held
+# equal to ``route_scopes`` by ``tests/test_github_account_spaces.py``), and,
+# being outside this list, the GitHub App and a clone. Not enforced, every
+# one is the admin's, as before.
+_SPACE_ACCOUNT_PREFIXES = (
+    "/api/github/token",
+    "/api/github/oauth/start",
+    "/api/github/oauth/revoke",
+    "/api/email",
+    "/api/calendar",
+)
+_INSTALL_ACCOUNT_PIECES = (
+    "/api/email/presets",
+    "/api/email/oauth/gmail/client",
+    "/api/email/oauth/microsoft/client",
+)
+
+
+def _under(path: str, prefixes: tuple[str, ...]) -> bool:
+    return any(path == p or path.startswith(p + "/") for p in prefixes)
+
+
+def _connects_a_spaces_own_account(path: str) -> bool:
+    """Whether *path* connects or disconnects a space's own account, which a
+    member may do once Spaces is enforced (:data:`_SPACE_ACCOUNT_PREFIXES`).
+    Read from memory (``spaces_enforced``): no settings read."""
+    if not _under(path, _SPACE_ACCOUNT_PREFIXES) or _under(path, _INSTALL_ACCOUNT_PIECES):
+        return False
+    from kazma_core.spaces.scope import spaces_enforced
+
+    return spaces_enforced()
+
+
 # Single routes (never their children) only an administrator may call.
 # Model discovery asks the address a request names: with an operator's
 # credential, or a link the signed-in owner opened (a GET carries the
@@ -195,6 +235,8 @@ def role_allows(role: str, path: str, method: str = "GET") -> bool:
         return False
     if path.rstrip("/") in _ADMIN_EXACT:
         return False
+    if _connects_a_spaces_own_account(path):
+        return rank >= ROLE_RANK["operator"]
     # Admin-only surfaces
     for p in _ADMIN_PREFIXES:
         if path == p or path.startswith(p + "/"):

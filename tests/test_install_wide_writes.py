@@ -7,7 +7,11 @@ the active workspace or a process-wide switch: the GitHub token and App key
 revoke), a clone that becomes the active workspace, creating, switching and
 deleting workspaces and the folders outside them every file tool may use,
 the chat apps' stop, a division request's decision and a model profile's
-key. They are admin now (``_ADMIN_WRITE_PREFIXES``: reads stay open).
+key. They are admin now (``_ADMIN_WRITE_PREFIXES``: reads stay open). Once
+Spaces is enforced the GitHub token, sign-in and revoke are a space's own and
+its members' (the review of S1-17c, ``platform_rbac._connects_a_spaces_own_account``,
+held in ``tests/test_github_account_spaces.py``); this gate runs on an install
+that does not enforce Spaces, where they stay the admin's.
 
 The gate, both ways against the built app: every route in
 :data:`INSTALL_WIDE_WRITES` is served and admin-only; every write route whose

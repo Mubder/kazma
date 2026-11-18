@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from typing import Any
 
 import httpx
@@ -152,7 +151,15 @@ async def search_agent_skills(query: str, limit: int = 8) -> str:
         return "Error: query required — e.g. search_agent_skills(query='release notes')"
     lim = max(1, min(int(limit or 8), 20))
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "kazma"}
-    token = (os.environ.get("GITHUB_TOKEN") or "").strip()
+    # The environment's token is the owner's sign-in: the owner's space's only
+    # (Spaces S1-17 part c); elsewhere the search goes out unauthenticated.
+    from kazma_core.spaces.connected_accounts import owners_environment
+    from kazma_core.spaces.scope import NoSpaceBound
+
+    try:
+        token = owners_environment("GITHUB_TOKEN").strip()
+    except NoSpaceBound:
+        token = ""
     if token:
         headers["Authorization"] = f"Bearer {token}"
     try:

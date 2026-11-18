@@ -1053,6 +1053,11 @@ _LOOP_STALL_HELPERS = frozenset({
     # line, read by file_read before it answers.
     "saved_from_web",
     "get_github_token", "is_oauth_connected", "store_oauth_token", "clear_oauth_token",
+    # The GitHub client made with no token reads the space's (the review of
+    # Spaces S1-17c): the routes and the GitHub tools made it on the loop.
+    # Async code makes it with ``GitHubClient.of_this_space()``. Disconnect's
+    # delete of every copy of a sign-in, too.
+    "GitHubClient", "forget_github_keys",
     # Chat apps' /cost and /context (2026-10-01): the per-call ledger's
     # totals for a chat (SQLite), and the context report -- the active
     # profile, the window and the trim budget are settings reads, which the

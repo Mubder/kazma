@@ -117,6 +117,12 @@ ROUTE_SCOPE_RULES: tuple[tuple[Pattern, str], ...] = (
 
     # ── The signed-in person ──────────────────────────────────────────────
     ("/api/auth/me$", ACCOUNT),
+    # Sign in with X's callback: behind sign-in (the browser coming back
+    # from X carries the session), and it can name no space -- the attempt
+    # it finishes does, and the handler binds that (Spaces S1-17 part b,
+    # ``oauth_sign_in.attempt_scope``). Classed ``space`` it was refused for
+    # anyone in two spaces ("must say which space").
+    ("/api/x/oauth2/callback$", ACCOUNT),
     # The spaces the person is a member of (the space switcher reads it).
     ("/api/account", ACCOUNT),
     # Password, sessions and API tokens.
@@ -250,9 +256,15 @@ ROUTE_SCOPE_RULES: tuple[tuple[Pattern, str], ...] = (
     ("/api/research", SPACE),
     ("/api/runs", SPACE),
     # Connected accounts belong to the space that connected them (plan 4.6):
-    # X today, mail, calendar and GitHub with spaces.
+    # X today, mail, calendar and GitHub with spaces. The mail app
+    # registration -- the one Google and Microsoft app every space's
+    # accounts sign in through -- and the mail presets (Kazma's own host
+    # list) are the install's (Spaces S1-17).
     ("/x$", SPACE),
     ("/api/x", SPACE),
+    ("/api/email/presets$", INSTALL),
+    ("/api/email/oauth/gmail/client$", INSTALL),
+    ("/api/email/oauth/microsoft/client$", INSTALL),
     ("/api/email", SPACE),
     ("/api/calendar", SPACE),
     ("/api/github", SPACE),

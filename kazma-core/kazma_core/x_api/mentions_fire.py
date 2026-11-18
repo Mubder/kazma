@@ -92,12 +92,15 @@ async def ensure_mentions_loop() -> bool:
 
     Called from boot AND from Settings save, so turning auto-reply on in a
     running server no longer needs a restart. Config is re-read under
-    tenant ``default`` because connector credentials are tenant-scoped.
+    tenant ``default`` because connector credentials are tenant-scoped -- the
+    owner's space, whole, once Spaces is enforced (``x_work_scope``): the
+    poller answers mentions of the owner's X account.
     """
-    from kazma_core.tenant_context import tenant_scope
+    from kazma_core.x_api.ownership import x_work_scope
     from kazma_core.x_api.stance import get_reply_config
 
-    with tenant_scope("default"):
+    owners = await asyncio.to_thread(x_work_scope, "default")
+    with owners():
         cfg = await asyncio.to_thread(get_reply_config)  # ConfigStore + vault reads
     if cfg.can_draft():
         await start_mentions_loop()
@@ -119,10 +122,12 @@ async def _loop(poll_interval: float | None) -> None:
         if await availability.wait_while_away():
             return
         try:
-            from kazma_core.tenant_context import tenant_scope
+            from kazma_core.x_api.ownership import x_work_scope
 
-            # Everything below reads tenant-scoped config/credentials.
-            with tenant_scope("default"):
+            # Everything below reads tenant-scoped config/credentials: the
+            # owner's (the owner's space, whole, once Spaces is enforced).
+            owners = await asyncio.to_thread(x_work_scope, "default")
+            with owners():
                 from kazma_core.x_api.stance import get_reply_config
 
                 # Off the loop (ConfigStore reads). to_thread copies the

@@ -51,8 +51,10 @@ __all__ = [
     "upsert_oauth_account",
 ]
 
-#: The settings key holding the list of extra accounts.
+#: The settings key holding the owner's space's list of extra accounts.
 ACCOUNTS_KEY = "email.accounts"
+#: Every other space's list, by space (Spaces S1-17): ``{space: [rows]}``.
+SPACE_ACCOUNTS_KEY = "email.accounts_by_space"
 
 #: What an extra account can be.
 ACCOUNT_TYPES = ("gmail", "microsoft", "imap", "pop")
@@ -121,11 +123,30 @@ def _store():
     return get_config_store()
 
 
+def _space() -> str:
+    """The space whose accounts this work names (``NoSpaceBound`` once Spaces
+    is enforced with none bound)."""
+    from kazma_core.spaces.connected_accounts import connected_space
+
+    return connected_space()
+
+
+def _read_list(space: str) -> Any:
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    if space == OWNER_SPACE_ID:
+        return _store().get(ACCOUNTS_KEY)
+    by_space = _store().get(SPACE_ACCOUNTS_KEY)
+    return by_space.get(space) if isinstance(by_space, dict) else None
+
+
 def stored_accounts() -> list[dict[str, Any]]:
-    """The extra accounts added in Settings, as saved (a malformed row is
-    skipped, never guessed)."""
+    """The extra accounts the bound space added in Settings, as saved (a
+    malformed row is skipped, never guessed). The owner's space keeps the
+    list it always had; another space its own (Spaces S1-17)."""
+    space = _space()
     try:
-        raw = _store().get(ACCOUNTS_KEY)
+        raw = _read_list(space)
     except Exception:
         logger.warning("[email.accounts] the account list could not be read", exc_info=True)
         return []
@@ -148,7 +169,19 @@ def stored_account(alias: str) -> dict[str, Any] | None:
 
 
 def _save(rows: list[dict[str, Any]]) -> None:
-    _store().set(ACCOUNTS_KEY, rows, category="email")
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    space = _space()
+    if space == OWNER_SPACE_ID:
+        _store().set(ACCOUNTS_KEY, rows, category="email")
+        return
+
+    def _put(curr: Any) -> dict[str, Any]:
+        by_space = dict(curr) if isinstance(curr, dict) else {}
+        by_space[space] = rows
+        return by_space
+
+    _store().atomic_update(SPACE_ACCOUNTS_KEY, _put, "email")
 
 
 #: The list is read, changed and written back; two sign-ins finishing at once

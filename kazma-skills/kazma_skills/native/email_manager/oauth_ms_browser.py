@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 import httpx
@@ -14,6 +13,7 @@ from kazma_skills.native.email_manager.oauth_common import (
 )
 from kazma_core.http_tls import shared_ssl_context
 from kazma_core.security.oauth_attempts import begin
+from kazma_skills.native.email_manager.credentials import account_env
 
 logger = logging.getLogger(__name__)
 
@@ -40,11 +40,11 @@ def _client_secret() -> str:
 
 
 def _tenant() -> str:
-    return (os.environ.get("EMAIL_MS_TENANT_ID") or "common").strip() or "common"
+    return account_env("EMAIL_MS_TENANT_ID", "common") or "common"
 
 
 def ms_redirect_uri(request_base: str | None = None) -> str:
-    custom = (os.environ.get("EMAIL_MS_REDIRECT_URI") or "").strip()
+    custom = account_env("EMAIL_MS_REDIRECT_URI")
     if custom:
         return custom
     return f"{public_base_url(request_base)}/api/email/oauth/microsoft/callback"

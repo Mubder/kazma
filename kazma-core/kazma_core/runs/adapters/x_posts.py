@@ -104,9 +104,15 @@ class _XAdapter:
 
     @staticmethod
     def _cancel(native_id: str) -> ActionResult:
+        from kazma_core.spaces.scope import current_scope, spaces_enforced
         from kazma_core.tenant_context import tenant_scope
         from kazma_core.x_api.publication_service import update_schedule
 
+        if spaces_enforced() and current_scope() is None:
+            # Work that is no one's acts on no space's post: once Spaces is
+            # enforced the bound space is the one tenant looked in (S1-17
+            # part b), never every tenant's.
+            return ActionResult(False, "no_space", "This work is not tied to a space.")
         store, tenants = _store_and_tenants()
         for tenant in tenants:
             row = store.get(native_id, tenant_id=tenant)

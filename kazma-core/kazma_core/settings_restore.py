@@ -233,6 +233,8 @@ KEY_RULES: tuple[KeyRule, ...] = (
     KeyRule("cron.timezone", SETTING, "the reminders' time zone"),
     KeyRule("containers.engine", SETTING, "which container engine Kazma uses (its own, or "
             "Docker Desktop); a machine without that engine refuses it"),
+    KeyRule("git.bot_identity.", SETTING, "whether, and under which name, the agent's commits carry "
+            "Kazma's bot identity (the GitHub App sets it on, Disconnect off)"),
     KeyRule("guard.telegram.chat_id", SETTING, "the Telegram chat the guard pages when Kazma is "
             "down (Settings -> Alerts), and Kazma's direct alert fallback"),
     KeyRule("runs.runbooks", SETTING, "which automatic first steps the run supervisor may take "
@@ -244,6 +246,9 @@ KEY_RULES: tuple[KeyRule, ...] = (
     KeyRule("database.shared_store.acknowledged_peers", SETTING, "installs the owner said may share the store"),
     KeyRule("documents.", SETTING, "document processing: intake, OCR, workers, retention"),
     KeyRule("email.accounts", SETTING, "extra mail accounts (back only where this vault still holds the sign-in)"),
+    KeyRule("email.accounts_by_space", CREDENTIAL, "the extra mail accounts of every space but the owner's "
+            "(Spaces S1-17): whose they are is the identity store's, so a backup carries them only "
+            "with it (S1-28)"),
     KeyRule("embedding.", SETTING, "the embedding model memory and the Knowledge Library use"),
     KeyRule("knowledge.", SETTING, "Knowledge Library search"),
     KeyRule("llm.", SETTING, "the LLM connection kazma.yaml or the environment sets"),

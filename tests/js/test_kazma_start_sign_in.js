@@ -83,8 +83,8 @@ async function main() {
   assert.strictEqual(window.kazmaSignInProblem(broken, "fallback"), "fallback");
 
   // The callback's refusals, by code; anything else keeps the fallback.
-  for (const code of ["other_browser", "unknown", "expired", "other_provider", "denied", "no_code",
-                      "exchange_failed"]) {
+  for (const code of ["other_browser", "unknown", "expired", "other_provider", "no_space",
+                      "identity_unavailable", "denied", "no_code", "exchange_failed"]) {
     assert.ok(window.kazmaSignInFailed(code, "x").startsWith("[oauth.failed." + code + "] "), code);
   }
   assert.strictEqual(window.kazmaSignInFailed("toString", "fallback"), "fallback");

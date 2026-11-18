@@ -63,9 +63,14 @@ class ConnectorStatus:
     age_days: float | None = None
     expires_in_days: float | None = None
     skipped: str = ""
+    #: The space whose connection this is, when it is not the owner's
+    #: (Spaces S1-17); empty for the owner's space, as before.
+    space: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"connector": self.name, "ok": self.ok}
+        if self.space:
+            d["space"] = self.space
         if self.detail:
             d["detail"] = self.detail[:300]
         if self.age_days is not None:
@@ -78,12 +83,12 @@ class ConnectorStatus:
 
 
 def _vault_get(key: str) -> str:
-    try:
-        from kazma_core.security.vault import retrieve_with_tenant_ladder
+    """The bound space's connection secret *key* (the mail code's own
+    reader, ``credentials.vault_retrieve``: the owner's space reads the
+    names it always had; Spaces S1-17)."""
+    from kazma_skills.native.email_manager.credentials import vault_retrieve
 
-        return retrieve_with_tenant_ladder(key)
-    except Exception:  # noqa: BLE001
-        return ""
+    return vault_retrieve(key)
 
 
 def google_grant_age_days(now: float | None = None) -> float | None:
@@ -301,9 +306,50 @@ async def _probe_google_calendar() -> tuple[bool, str]:
         return False, f"probe failed: {exc}"
 
 
+def _spaces_to_check() -> list[tuple[str, str]]:
+    """(space, account) of every space whose connections are checked, the
+    owner's first: the owner's alone while Spaces is not enforced; once it
+    is, every space, each as the account its own work acts for. Blocking
+    (the identity store)."""
+    from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, OWNER_SPACE_ID, spaces_enforced
+
+    if not spaces_enforced():
+        return [(OWNER_SPACE_ID, OWNER_ACCOUNT_ID)]
+    from kazma_core.spaces import identity
+
+    spaces = sorted(identity.read_registry().get("spaces") or {})
+    out: list[tuple[str, str]] = []
+    for space in [OWNER_SPACE_ID, *(s for s in spaces if s != OWNER_SPACE_ID)]:
+        found = identity.work_scope(space, None)
+        if found is not None:
+            out.append(found)
+    return out
+
+
+def _bound_to(space: str, account: str) -> Any:
+    """The scope a space's check runs in: nothing while Spaces is not
+    enforced (the owner's, as before), the space and its account once it is."""
+    import contextlib
+
+    from kazma_core.spaces.scope import bind_scope, spaces_enforced
+
+    return bind_scope(space, account) if spaces_enforced() else contextlib.nullcontext()
+
+
 async def check_connectors(*, alert_on_findings: bool = True) -> list[ConnectorStatus]:
-    """Run every connector health check. Failures in one must not skip the rest."""
+    """Run every connector health check, space by space (Spaces S1-17): each
+    space's grants are refreshed and probed in that space, so a refresh
+    writes only its own. Only the owner's space raises the owner's alerts:
+    another space's mailbox is not the owner's to hear about (O1), and its
+    status is logged. Failures in one must not skip the rest."""
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
     out: list[ConnectorStatus] = []
-    out.append(await check_google(alert_on_findings=alert_on_findings))
-    out.append(await check_google_calendar(alert_on_findings=alert_on_findings))
+    for space, account in await asyncio.to_thread(_spaces_to_check):
+        owners = space == OWNER_SPACE_ID
+        with _bound_to(space, account):
+            for check in (check_google, check_google_calendar):
+                status = await check(alert_on_findings=alert_on_findings and owners)
+                status.space = "" if owners else space
+                out.append(status)
     return out

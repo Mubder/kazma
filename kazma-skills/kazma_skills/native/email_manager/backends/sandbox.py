@@ -1,9 +1,20 @@
-"""SQLite sandbox mailbox backend."""
+"""SQLite sandbox mailbox backend.
+
+Each space has its own practice mailbox (Spaces S1-17): every row names its
+space (``tenant_id``, the owner's ``default`` for a mailbox from before), the
+key is the space and the id (the seed's ids are in every space), and every
+statement names the space the mailbox was opened for -- the owner's while
+Spaces is not enforced, as before, else the bound one
+(``connected_accounts.connected_space``). One mailbox for every space was one
+Sent folder member A's ``email_send`` wrote and member B's ``email_list``
+read.
+"""
 
 from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 import uuid
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime
@@ -20,7 +31,8 @@ from kazma_skills.native.email_manager.models import (
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS messages (
-    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    id TEXT NOT NULL,
     subject TEXT NOT NULL DEFAULT '',
     from_addr TEXT NOT NULL DEFAULT '',
     to_addrs TEXT NOT NULL DEFAULT '[]',
@@ -32,11 +44,15 @@ CREATE TABLE IF NOT EXISTS messages (
     starred INTEGER NOT NULL DEFAULT 0,
     labels TEXT NOT NULL DEFAULT '[]',
     folder TEXT NOT NULL DEFAULT 'INBOX',
-    thread_id TEXT NOT NULL DEFAULT ''
+    thread_id TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (tenant_id, id)
 );
-CREATE INDEX IF NOT EXISTS idx_email_folder ON messages(folder);
-CREATE INDEX IF NOT EXISTS idx_email_unread ON messages(unread);
 """
+
+_INDEXES = (
+    "CREATE INDEX IF NOT EXISTS idx_email_space_folder ON messages(tenant_id, folder)",
+    "CREATE INDEX IF NOT EXISTS idx_email_space_unread ON messages(tenant_id, unread)",
+)
 
 
 def _default_db_path() -> Path:
@@ -52,13 +68,36 @@ def _seed_path() -> Path:
     return Path(__file__).resolve().parent.parent / "seed" / "sandbox_seed.json"
 
 
+def _mailbox_space() -> str:
+    """The space a mailbox opened now is for: the owner's while Spaces is
+    not enforced, else the bound one (``NoSpaceBound`` with none: no
+    practice mailbox is opened for no one)."""
+    from kazma_core.spaces.connected_accounts import connected_space
+
+    return connected_space()
+
+
+#: The mailboxes this process has made ready, by file and space: the schema
+#: step (a write transaction) runs once each, not at every construction --
+#: the router makes a backend for every call.
+_READY: set[tuple[str, str]] = set()
+_READY_LOCK = threading.Lock()
+
+
 class SandboxBackend:
     name = "sandbox"
 
-    def __init__(self, db_path: str | Path | None = None) -> None:
+    def __init__(self, db_path: str | Path | None = None, *, space: str | None = None) -> None:
+        self.space = space if space is not None else _mailbox_space()
         self.db_path = Path(db_path) if db_path else _default_db_path()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        ready = (str(self.db_path.resolve()), self.space)
+        with _READY_LOCK:
+            if ready in _READY:
+                return
         self._init_db()
+        with _READY_LOCK:
+            _READY.add(ready)
 
     def _connect(self) -> AbstractContextManager[sqlite3.Connection]:
         """One short-lived connection that commits AND closes on exit."""
@@ -71,8 +110,16 @@ class SandboxBackend:
 
     def _init_db(self) -> None:
         with self._connect() as conn:
-            conn.executescript(_SCHEMA)
-            count = conn.execute("SELECT COUNT(*) AS c FROM messages").fetchone()["c"]
+            conn.execute("BEGIN IMMEDIATE")
+            columns = [row["name"] for row in conn.execute("PRAGMA table_info(messages)")]
+            if columns and "tenant_id" not in columns:
+                _key_by_space(conn)
+            else:
+                conn.execute(_SCHEMA)
+            for statement in _INDEXES:
+                conn.execute(statement)
+            count = conn.execute("SELECT COUNT(*) AS c FROM messages WHERE tenant_id = ?",
+                                 (self.space,)).fetchone()["c"]
             if count == 0:
                 self._seed(conn)
 
@@ -85,11 +132,12 @@ class SandboxBackend:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO messages
-                (id, subject, from_addr, to_addrs, cc_addrs, date, body, snippet,
+                (tenant_id, id, subject, from_addr, to_addrs, cc_addrs, date, body, snippet,
                  unread, starred, labels, folder, thread_id)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
+                    self.space,
                     m["id"],
                     m.get("subject", ""),
                     m.get("from_addr", ""),
@@ -132,8 +180,8 @@ class SandboxBackend:
             folder = "INBOX"
         limit = max(1, min(50, int(query.limit or 20)))
         offset = max(0, int(query.offset or 0))
-        clauses = ["folder = ?"]
-        params: list[Any] = [folder]
+        clauses = ["tenant_id = ?", "folder = ?"]
+        params: list[Any] = [self.space, folder]
         if query.unread_only:
             clauses.append("unread = 1")
         if query.query:
@@ -155,7 +203,7 @@ class SandboxBackend:
     async def get_message(self, message_id: str) -> EmailMessage:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT * FROM messages WHERE id = ?", (message_id,)
+                "SELECT * FROM messages WHERE tenant_id = ? AND id = ?", (self.space, message_id)
             ).fetchone()
         if not row:
             raise KeyError(f"Message not found: {message_id}")
@@ -190,11 +238,12 @@ class SandboxBackend:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO messages
-                (id, subject, from_addr, to_addrs, cc_addrs, date, body, snippet,
+                (tenant_id, id, subject, from_addr, to_addrs, cc_addrs, date, body, snippet,
                  unread, starred, labels, folder, thread_id)
-                VALUES (?,?,?,?,?,?,?,?,0,0,?,?,?)
+                VALUES (?,?,?,?,?,?,?,?,?,0,0,?,?,?)
                 """,
                 (
+                    self.space,
                     mid,
                     subject,
                     "you@example.com",
@@ -219,26 +268,26 @@ class SandboxBackend:
     async def delete(self, message_id: str, permanent: bool = False) -> None:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT * FROM messages WHERE id = ?", (message_id,)
+                "SELECT * FROM messages WHERE tenant_id = ? AND id = ?", (self.space, message_id)
             ).fetchone()
             if not row:
                 raise KeyError(f"Message not found: {message_id}")
             if permanent:
-                conn.execute("DELETE FROM messages WHERE id = ?", (message_id,))
+                conn.execute("DELETE FROM messages WHERE tenant_id = ? AND id = ?", (self.space, message_id))
             else:
                 labels = json.loads(row["labels"] or "[]")
                 if "Trash" not in labels:
                     labels.append("Trash")
                 conn.execute(
-                    "UPDATE messages SET folder = 'Trash', labels = ? WHERE id = ?",
-                    (json.dumps(labels), message_id),
+                    "UPDATE messages SET folder = 'Trash', labels = ? WHERE tenant_id = ? AND id = ?",
+                    (json.dumps(labels), self.space, message_id),
                 )
             conn.commit()
 
     async def categorize(self, req: CategorizeRequest) -> None:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT * FROM messages WHERE id = ?", (req.message_id,)
+                "SELECT * FROM messages WHERE tenant_id = ? AND id = ?", (self.space, req.message_id)
             ).fetchone()
             if not row:
                 raise KeyError(f"Message not found: {req.message_id}")
@@ -264,7 +313,22 @@ class SandboxBackend:
                 folder = req.move_to_folder
                 labels.add(req.move_to_folder)
             conn.execute(
-                "UPDATE messages SET unread=?, starred=?, labels=?, folder=? WHERE id=?",
-                (unread, starred, json.dumps(sorted(labels)), folder, req.message_id),
+                "UPDATE messages SET unread=?, starred=?, labels=?, folder=? WHERE tenant_id=? AND id=?",
+                (unread, starred, json.dumps(sorted(labels)), folder, self.space, req.message_id),
             )
             conn.commit()
+
+
+def _key_by_space(conn: sqlite3.Connection) -> None:
+    """A mailbox from before spaces (``id`` its key, no space): rebuilt, in
+    the caller's write transaction, keyed by space and id, every message the
+    owner's -- the one mailbox there was."""
+    conn.execute(_SCHEMA.replace("CREATE TABLE IF NOT EXISTS messages", "CREATE TABLE messages_by_space"))
+    conn.execute(
+        "INSERT INTO messages_by_space (tenant_id, id, subject, from_addr, to_addrs, cc_addrs, date, body, "
+        "snippet, unread, starred, labels, folder, thread_id) "
+        "SELECT 'default', id, subject, from_addr, to_addrs, cc_addrs, date, body, "
+        "snippet, unread, starred, labels, folder, thread_id FROM messages"
+    )
+    conn.execute("DROP TABLE messages")
+    conn.execute("ALTER TABLE messages_by_space RENAME TO messages")

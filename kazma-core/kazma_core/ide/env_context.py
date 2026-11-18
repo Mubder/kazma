@@ -380,19 +380,29 @@ def _build_env_context_sync(workspace_id: str | None = None) -> str:
         ]
     )
 
-    # GitHub integration availability hint.
+    # GitHub integration availability hint: the space's own sign-in (Spaces
+    # S1-17 part c); the environment's token is the owner's space's only.
     try:
         from kazma_gateway.routers.github_client import get_github_token
 
         if get_github_token():
             lines.append("")
             lines.append("GitHub: authenticated (can create PRs, list issues).")
-    except Exception:
+    except ImportError:
         # gateway may be absent in headless/core-only deployments
-        token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GITHUB_PAT")
+        from kazma_core.spaces.connected_accounts import owners_environment
+        from kazma_core.spaces.scope import NoSpaceBound
+
+        try:
+            token = owners_environment("GITHUB_TOKEN") or owners_environment("GITHUB_PAT")
+        except NoSpaceBound:
+            token = ""
         if token:
             lines.append("")
             lines.append("GitHub: token detected in environment.")
+    except Exception:
+        # Work bound to no space, or a read that failed: no GitHub line.
+        logger.debug("[env_context] GitHub sign-in not read", exc_info=True)
 
     tools = _list_available_tools()
     lines.append(

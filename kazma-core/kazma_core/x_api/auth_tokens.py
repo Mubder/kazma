@@ -84,8 +84,22 @@ def _expires_at() -> float:
 
 
 def bearer_token() -> str:
-    """The app's Bearer token, or ``""``; ``X_BEARER_TOKEN`` wins when set."""
-    return os.environ.get("X_BEARER_TOKEN", "").strip() or _get(BEARER_KEY)
+    """The app's Bearer token, or ``""``; ``X_BEARER_TOKEN`` wins when set.
+    The environment is the owner's: once Spaces is enforced only the owner's
+    space reads it (another space would spend the owner's X API budget,
+    Spaces S1-17 part b)."""
+    return bearer_from_env() or _get(BEARER_KEY)
+
+
+def bearer_from_env() -> str:
+    """``X_BEARER_TOKEN`` when this space may use it, else ``""``: always
+    while Spaces is not enforced, else in the owner's space only."""
+    from kazma_core.spaces.scope import spaces_enforced
+    from kazma_core.x_api.ownership import x_tenant_id
+
+    if spaces_enforced() and x_tenant_id() != "default":
+        return ""
+    return os.environ.get("X_BEARER_TOKEN", "").strip()
 
 
 def oauth2_client() -> tuple[str, str]:

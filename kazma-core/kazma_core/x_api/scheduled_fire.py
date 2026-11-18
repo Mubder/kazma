@@ -123,7 +123,40 @@ async def _fire_post(post: ScheduledXPost) -> None:
     # every scheduled fire failed with "connector disabled at fire time"
     # while the same credentials worked from chat (2026-09-03). Same
     # pattern as the cron delivery_target fix (§16): bind context at
-    # schedule time, restore it at fire time.
+    # schedule time, restore it at fire time. Once Spaces is enforced the
+    # whole scope of the post's space is bound, as every queued work's
+    # (Spaces S1-17 part b), and a post of no space is not sent.
+    from kazma_core.spaces.scope import NoSpaceBound, spaces_enforced
+
+    if spaces_enforced():
+        from kazma_core.spaces.identity import IdentityUnavailable
+        from kazma_core.x_api.ownership import x_work_scope
+
+        try:
+            scope = await asyncio.to_thread(x_work_scope, post.tenant_id)
+        except NoSpaceBound:
+            logger.warning("[x-schedule] post %s: no space of this install holds it; not sent", post.id)
+            store = await asyncio.to_thread(get_x_scheduled_store)
+            await asyncio.to_thread(store.mark_failed, post.id, "no space of this install holds this post")
+            return
+        except IdentityUnavailable as exc:
+            from kazma_core.x_api.ownership import identity_failure_passes
+
+            if identity_failure_passes(exc):
+                # The database away: still pending, due again at the next
+                # pass -- never "internal error before send", which the
+                # caller's catch-all would make of it, for good.
+                logger.info("[x-schedule] post %s waits: whose it is cannot be read (%s)",
+                            post.id, type(exc).__name__)
+                return
+            logger.warning("[x-schedule] post %s: whose it is cannot be read (%s); not sent",
+                           post.id, type(exc).__name__)
+            store = await asyncio.to_thread(get_x_scheduled_store)
+            await asyncio.to_thread(store.mark_failed, post.id, "whose post this is cannot be read")
+            return
+        with scope():
+            await _fire_post_inner(post)
+        return
     _tenant_token = None
     if post.tenant_id:
         from kazma_core.tenant_context import reset_current_tenant_id, set_current_tenant_id
@@ -224,7 +257,17 @@ async def _deliver(post: ScheduledXPost, text: str) -> None:
     (captured at booking); otherwise fan out through the SwarmMessageBus
     to every configured platform — the same route the lifecycle notifier
     uses (§17A). A post booked from a context with no target used to fire
-    completely silently, success AND failure (2026-09-03)."""
+    completely silently, success AND failure (2026-09-03).
+
+    Another space's notice stays off the owner's channels (O1, Spaces S1-17):
+    before people link their own chat apps (stage 3), the address a booking
+    captured and every chat app are the owner's -- and the notice carries the
+    post's text. Delivering it to its space's people is S2-05's."""
+    from kazma_core.x_api.ownership import kept_in_its_space
+
+    if kept_in_its_space(post.tenant_id):
+        logger.info("[x-schedule] post %s: its notice stays in its space (not the owner's channels)", post.id)
+        return
     target = post.delivery_target or ""
     if target and ":" in target:
         try:

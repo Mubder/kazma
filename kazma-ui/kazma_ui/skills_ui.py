@@ -278,12 +278,17 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
         if not query:
             return []
         lim = max(1, min(int(limit or 10), 30))
-        import os
-
         import httpx
+        from kazma_core.spaces.connected_accounts import owners_environment
+        from kazma_core.spaces.scope import NoSpaceBound
 
         headers = {"Accept": "application/vnd.github+json", "User-Agent": "kazma"}
-        token = (os.environ.get("GITHUB_TOKEN") or "").strip()
+        # The environment's token is the owner's sign-in: the owner's space's
+        # only (Spaces S1-17 part c); elsewhere the search goes out without it.
+        try:
+            token = owners_environment("GITHUB_TOKEN").strip()
+        except NoSpaceBound:
+            token = ""
         if token:
             headers["Authorization"] = f"Bearer {token}"
         try:

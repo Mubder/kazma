@@ -722,24 +722,72 @@ async def fire_legacy_schedule(post: Any, cfg: XConfig) -> tuple[bool, dict[str,
     return False, {"outcome": "not_sent", "error": "Legacy account binding unavailable; verify the connected account and review this booking."}
 
 
+#: Tenants whose X work does not run, each said once until its work runs
+#: again; at most :data:`_SAID_NOT_RUN_MAX` (then said again: a log line).
+_SAID_NOT_RUN: set[str] = set()
+_SAID_NOT_RUN_MAX = 256
+
+#: ``_work_scope``'s answer when whose work it is cannot be read for now.
+_WAIT = object()
+
+_NO_SPACE = "No space of this install holds this post; it was not sent."
+_UNREADABLE = "Whose post this is cannot be read; it was not sent."
+
+
+async def _work_scope(tenant: str) -> Any:
+    """What X work of *tenant* runs in (Spaces S1-17 part b), resolved off
+    the loop (the identity store): a scope to call and enter; ``_WAIT`` when
+    whose it is cannot be read for now (the database away, a locked file:
+    ``identity_failure_passes``) -- it waits for a later pass, nothing held
+    or failed; else the reason it does not run (a tenant no space of the
+    install holds, an identity store that cannot be read), said once."""
+    from kazma_core.spaces.identity import IdentityUnavailable
+    from kazma_core.spaces.scope import NoSpaceBound
+    from kazma_core.x_api.ownership import identity_failure_passes, x_work_scope
+
+    try:
+        scope = await asyncio.to_thread(x_work_scope, tenant)
+    except NoSpaceBound:
+        why = _NO_SPACE
+    except IdentityUnavailable as exc:
+        if identity_failure_passes(exc):
+            logger.info("[x-publication] X work of %r waits: whose it is cannot be read (%s)",
+                        tenant, type(exc).__name__)
+            return _WAIT
+        why = _UNREADABLE
+    else:
+        _SAID_NOT_RUN.discard(tenant)  # it runs: said again if it stops again
+        return scope
+    if tenant not in _SAID_NOT_RUN:
+        if len(_SAID_NOT_RUN) >= _SAID_NOT_RUN_MAX:
+            _SAID_NOT_RUN.clear()
+        _SAID_NOT_RUN.add(tenant)
+        logger.warning("[x-publication] X work of %r does not run: %s", tenant, why)
+    return why
+
+
 async def fire_due_operations() -> None:
-    from kazma_core.tenant_context import tenant_scope
     from kazma_core.x_api.notifications import drain_notifications
     from kazma_core.x_api.schedule import get_x_scheduled_store
 
     store = await asyncio.to_thread(get_publication_store)
     await asyncio.to_thread(store.recover)
+    # Each tenant's work runs in that space's whole scope once Spaces is
+    # enforced (x_work_scope): the tenant alone, as before, until then.
     for tenant in await asyncio.to_thread(store.unconfirmed_tenants):
-        with tenant_scope(tenant):
-            await asyncio.to_thread(_reconcile_receipts)
+        if callable(scope := await _work_scope(tenant)):
+            with scope():
+                await asyncio.to_thread(_reconcile_receipts)
     legacy = await asyncio.to_thread(get_x_scheduled_store)
     for tenant in await asyncio.to_thread(legacy.legacy_tenants):
-        with tenant_scope(tenant):
-            cfg = await asyncio.to_thread(_config)
-            await asyncio.to_thread(_migrate_legacy_schedule, cfg)
+        if callable(scope := await _work_scope(tenant)):
+            with scope():
+                cfg = await asyncio.to_thread(_config)
+                await asyncio.to_thread(_migrate_legacy_schedule, cfg)
     for tenant in await asyncio.to_thread(store.repair_tenants):
-        with tenant_scope(tenant):
-            await asyncio.to_thread(_project_pending)
+        if callable(scope := await _work_scope(tenant)):
+            with scope():
+                await asyncio.to_thread(_project_pending)
     from kazma_core.x_api.schedule import x_schedule_enabled
 
     if not x_schedule_enabled():
@@ -747,7 +795,14 @@ async def fire_due_operations() -> None:
         return
     due = await asyncio.to_thread(store.due)
     for row in due:
-        with tenant_scope(row["tenant_id"]):
+        scope = await _work_scope(row["tenant_id"])
+        if scope is _WAIT:
+            continue  # due again at the next pass
+        if not callable(scope):
+            # Held for review, never sent as anyone.
+            await asyncio.to_thread(store.hold, row["id"], tenant_id=row["tenant_id"], reason=scope)
+            continue
+        with scope():
             try:
                 await _dispatch_operation(row["id"])
             except asyncio.CancelledError:

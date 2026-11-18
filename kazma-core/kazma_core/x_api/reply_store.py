@@ -375,14 +375,15 @@ class XReplyStore:
                     conn.rollback()
                 conn.close()
 
-    def finish_notification(self, row: dict[str, Any], *, owner: str, delivered: bool, superseded: bool = False) -> None:
+    def finish_notification(self, row: dict[str, Any], *, owner: str, delivered: bool, superseded: bool = False,
+                            kept: bool = False) -> None:
         from kazma_core.x_api.notifications import finish
 
         with self._lock:
             conn = self._connect()
             try:
                 conn.execute("BEGIN IMMEDIATE")
-                finish(conn, row, owner=owner, delivered=delivered, superseded=superseded)
+                finish(conn, row, owner=owner, delivered=delivered, superseded=superseded, kept=kept)
                 conn.commit()
             finally:
                 if conn.in_transaction:

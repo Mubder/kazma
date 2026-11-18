@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 from typing import Any
 
@@ -12,6 +11,7 @@ import httpx
 
 from kazma_skills.native.email_manager.credentials import VaultWriteFailed, vault_store
 from kazma_core.http_tls import shared_ssl_context
+from kazma_skills.native.email_manager.credentials import set_account_env
 
 logger = logging.getLogger(__name__)
 
@@ -204,13 +204,13 @@ def store_microsoft_tokens(payload: dict[str, Any], client_id: str) -> str:
 
     access = str(payload.get("access_token") or "")
     refresh = str(payload.get("refresh_token") or "")
-    os.environ["EMAIL_MS_ACCESS_TOKEN"] = access
+    set_account_env("EMAIL_MS_ACCESS_TOKEN", access)
     vault_store("email.microsoft.access_token", access, category="email")
     if refresh:
-        os.environ["EMAIL_MS_REFRESH_TOKEN"] = refresh
+        set_account_env("EMAIL_MS_REFRESH_TOKEN", refresh)
         vault_store("email.microsoft.refresh_token", refresh, category="email")
     vault_store("email.microsoft.client_id", client_id, category="email")
-    os.environ["EMAIL_MS_AUTH"] = "oauth"
+    set_account_env("EMAIL_MS_AUTH", "oauth")
     vault_store("email.microsoft.auth", "oauth", category="email")
     scope_str = str(payload.get("scope") or SCOPES)
     vault_store("email.microsoft.scopes", scope_str, category="email")

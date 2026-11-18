@@ -793,7 +793,7 @@ SPACE_RULES: dict[str, SpaceRule] = {
         "row",
         content={"messages": (
             "subject", "from_addr", "to_addrs", "cc_addrs", "body", "snippet", "labels")},
-        today="whole"),
+        today="apart"),
     # ── caches and per-machine state ───────────────────────────────────
     "semantic_cache.db": _retired(),
     "security_scan.db": _retired(),

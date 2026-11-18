@@ -127,11 +127,13 @@ def _int_cfg(key: str, default: int, *, lo: int, hi: int) -> int:
 
 
 def _load_credentials() -> XCredentials:
+    from kazma_core.spaces.scope import spaces_enforced
     from kazma_core.x_api.ownership import x_tenant_id
 
+    owners = x_tenant_id() == "default"
     values = ["", "", "", ""]
     for i, env_name in enumerate(ENV_CREDENTIAL_KEYS):
-        if x_tenant_id() == "default":
+        if owners:
             values[i] = (os.environ.get(env_name) or "").strip()
     if not all(values):
         for i, key in enumerate(CREDENTIAL_KEYS):
@@ -140,7 +142,14 @@ def _load_credentials() -> XCredentials:
             got = _cs_get(key)
             if isinstance(got, str) and got.strip() and not got.startswith("vault://"):
                 values[i] = got.strip()
-    if not all(values):
+    # The legacy vault names (x_api_key ...) are the owner's, like the
+    # environment: once Spaces is enforced another space never reads them.
+    # They are the same names in every space, and the vault's read still
+    # falls back from a space to a global row (for any name), so a global
+    # copy would lend the owner's account (S1-17 part b). A space's own keys
+    # are its x_config_key settings: a global row under one of those names
+    # could only come from that space's own write.
+    if not all(values) and (owners or not spaces_enforced()):
         for i, name in enumerate(_VAULT_NAMES):
             if values[i]:
                 continue

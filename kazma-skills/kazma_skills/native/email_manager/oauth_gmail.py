@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 from typing import Any
 
@@ -17,6 +16,7 @@ from kazma_skills.native.email_manager.oauth_common import (
 )
 from kazma_core.http_tls import shared_ssl_context
 from kazma_core.security.oauth_attempts import begin
+from kazma_skills.native.email_manager.credentials import account_env, set_account_env
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +76,7 @@ def _client_secret() -> str:
 
 
 def gmail_redirect_uri(request_base: str | None = None) -> str:
-    custom = (os.environ.get("EMAIL_GMAIL_REDIRECT_URI") or "").strip()
+    custom = account_env("EMAIL_GMAIL_REDIRECT_URI")
     if custom:
         return custom
     return f"{public_base_url(request_base)}/api/email/oauth/gmail/callback"
@@ -187,8 +187,8 @@ def start_gmail_oauth(request_base: str | None = None, *, account: str = "") -> 
     # write: this function runs in a thread.
     state = begin("gmail", redirect_uri=redirect, account=alias)
     # Persist client for callback process
-    os.environ["EMAIL_GMAIL_CLIENT_ID"] = cid
-    os.environ["EMAIL_GMAIL_CLIENT_SECRET"] = secret
+    set_account_env("EMAIL_GMAIL_CLIENT_ID", cid)
+    set_account_env("EMAIL_GMAIL_CLIENT_SECRET", secret)
     # prompt=consent + access_type=offline → refresh token every reconnect
     # Do NOT set include_granted_scopes — partial prior grants (email only) caused
     # tokens without gmail.modify and Gmail API 403 insufficientPermissions.
@@ -461,19 +461,19 @@ def persist_gmail_tokens(
     scopes: str = "",
 ) -> None:
     if access:
-        os.environ["EMAIL_GMAIL_ACCESS_TOKEN"] = access
+        set_account_env("EMAIL_GMAIL_ACCESS_TOKEN", access)
         vault_store("email.gmail.access_token", access, category="email")
     if refresh:
-        os.environ["EMAIL_GMAIL_REFRESH_TOKEN"] = refresh
+        set_account_env("EMAIL_GMAIL_REFRESH_TOKEN", refresh)
         vault_store("email.gmail.refresh_token", refresh, category="email")
     if email:
-        os.environ["EMAIL_GMAIL_ADDRESS"] = email
+        set_account_env("EMAIL_GMAIL_ADDRESS", email)
         vault_store("email.gmail.address", email, category="email")
     if scopes:
-        os.environ["EMAIL_GMAIL_SCOPES"] = scopes
+        set_account_env("EMAIL_GMAIL_SCOPES", scopes)
         vault_store("email.gmail.scopes", scopes, category="email")
     # Mark auth mode (wins over IMAP/POP until user reconnects protocol)
-    os.environ["EMAIL_GMAIL_AUTH"] = "oauth"
+    set_account_env("EMAIL_GMAIL_AUTH", "oauth")
     vault_store("email.gmail.auth", "oauth", category="email")
     if refresh:
         # When this grant was minted. Google expires refresh tokens after 7

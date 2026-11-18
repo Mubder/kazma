@@ -291,7 +291,9 @@ def test_no_rule_is_stale(routes) -> None:
 def test_the_routes_the_plan_names_are_classed() -> None:
     """S1-05 names the routes added since the plan's first draft."""
     assert scope_of("POST", "/api/x/oauth2/start") == "space"
-    assert scope_of("GET", "/api/x/oauth2/callback") == "space"
+    # Behind sign-in and naming no space: the attempt it finishes names the
+    # space, which the handler binds (Spaces S1-17 part b).
+    assert scope_of("GET", "/api/x/oauth2/callback") == "account"
     assert scope_of("POST", "/api/x/api-access") == "space"
     assert scope_of("POST", "/api/a2a") == "space"
     assert scope_of("GET", "/api/a2a/status") == "install"

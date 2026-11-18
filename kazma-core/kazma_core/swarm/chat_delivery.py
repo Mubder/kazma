@@ -158,15 +158,11 @@ async def _deliver(task: Any, result: Any, platform: str, target: str) -> None:
 
 async def _for_the_owner(task: Any) -> bool:
     """Whether the task acts for the owner (always, Spaces not enforced). A
-    store that cannot say keeps the result in its space."""
-    from kazma_core.spaces.identity import IdentityUnavailable
-    from kazma_core.swarm.single_operator import task_for_the_owner
+    store that cannot say holds the result until it can (an outage), never
+    drops the owner's (Spaces S1-16 follow-up)."""
+    from kazma_core.swarm.single_operator import wait_for_owner_answer
 
-    try:
-        return await asyncio.to_thread(task_for_the_owner, task)
-    except IdentityUnavailable:
-        logger.warning("[swarm] task %s: whose it is cannot be read; its result stays in its space", task.id)
-        return False
+    return await wait_for_owner_answer(task, label=f"task {task.id}")
 
 
 def deliver_finished_task(task: Any, result: Any) -> bool:

@@ -155,11 +155,12 @@ class _PublicationStore:
         with self._connection(transaction=True) as conn:
             return claim(conn, now=time.time(), owner=owner)
 
-    def finish_notification(self, row: dict[str, Any], *, owner: str, delivered: bool, superseded: bool = False) -> None:
+    def finish_notification(self, row: dict[str, Any], *, owner: str, delivered: bool, superseded: bool = False,
+                            kept: bool = False) -> None:
         from kazma_core.x_api.notifications import finish
 
         with self._connection(transaction=True) as conn:
-            finish(conn, row, owner=owner, delivered=delivered, superseded=superseded)
+            finish(conn, row, owner=owner, delivered=delivered, superseded=superseded, kept=kept)
 
     @staticmethod
     def _quota(conn: sqlite3.Connection, *, tenant_id: str, account_id: str, due_at: float,

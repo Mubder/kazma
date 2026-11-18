@@ -11,7 +11,6 @@ happen, reported as one that did (the AGENTS.md §34 rule, already Calendar's).
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 from kazma_skills.native.email_manager.backends.sandbox import SandboxBackend
@@ -66,7 +65,12 @@ def _account_hint(alias: str, detail: str) -> str:
 
 
 def _env(name: str, default: str = "") -> str:
-    return (os.environ.get(name) or default).strip()
+    """A connected account's environment value, for the bound space
+    (``credentials.account_env``: the owner's space reads the process
+    environment, another space its own copy; Spaces S1-17)."""
+    from kazma_skills.native.email_manager.credentials import account_env
+
+    return account_env(name, default)
 
 
 def _gmail_oauth_ready() -> bool:

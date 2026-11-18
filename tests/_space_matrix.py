@@ -122,8 +122,8 @@ CASES: dict[str, Case] = {}
 CASE_MODULES: tuple[str, ...] = (
     "tests._chat_space_cases", "tests._memory_space_cases", "tests._lesson_space_cases",
     "tests._knowledge_space_cases", "tests._scheduled_space_cases", "tests._swarm_space_cases",
-    "tests._research_space_cases",
-    "tests._document_space_cases",  # S1-12
+    "tests._research_space_cases", "tests._mail_space_cases", "tests._x_space_cases",
+    "tests._github_space_cases", "tests._document_space_cases",  # S1-12
 )
 
 
@@ -173,8 +173,7 @@ PENDING_ROUTE_RULES: tuple[tuple[Pattern, str], ...] = (
     # tests/_knowledge_space_cases.py.)
     # (S1-14, Scheduled: written. Its cases are in
     # tests/_scheduled_space_cases.py; an X post booked from the page is the
-    # X account's, S1-17.)
-    ("/api/scheduled/x$", "S1-17"),
+    # X account's: S1-17's second part, tests/_x_space_cases.py.)
     # (S1-15, the swarm -- its tasks, their approvals, a worker's log --
     # wrote its cases: tests/_swarm_space_cases.py.)
     # (S1-16, research sessions and tasks: written. Its cases are in
@@ -197,11 +196,9 @@ PENDING_ROUTE_RULES: tuple[tuple[Pattern, str], ...] = (
     ("/ide$", "S1-20"),
     ("/api/ide", "S1-20"),
     # ── S1-17: connected accounts ─────────────────────────────────────────
-    ("/x$", "S1-17"),
-    ("/api/x", "S1-17"),
-    ("/api/email", "S1-17"),
-    ("/api/calendar", "S1-17"),
-    ("/api/github", "S1-17"),
+    # (Mail and calendar, X, then GitHub: written. Their cases are in
+    # tests/_mail_space_cases.py, tests/_x_space_cases.py and
+    # tests/_github_space_cases.py; a clone is S1-20's, above.)
     # ── S1-21: approvals and running work ─────────────────────────────────
     ("/api/approve", "S1-21"),
     ("/api/pending-approvals", "S1-21"),
@@ -236,18 +233,9 @@ _PENDING_TOOLS_BY_ITEM: dict[str, tuple[str, ...]] = {
     # its cases: tests/_research_space_cases.py. The research files went to
     # S1-19, the space folder.)
     # Connected accounts: mail, calendar, X and GitHub.
-    "S1-17": (
-        "email_accounts", "email_list", "email_get", "email_analyze",
-        "email_send", "email_categorize", "email_delete",
-        "list_events", "find_free_slots", "create_event", "update_event",
-        "delete_event",
-        "x_status", "x_account", "x_post", "x_delete_post", "x_draft_posts",
-        "x_schedule_post", "x_list_scheduled", "x_cancel_scheduled_post",
-        "x_download_media", "x_upload_media", "x_api_operations",
-        "x_api_read", "x_api_act",
-        "github_list_issues", "github_create_issue", "github_comment_issue",
-        "github_create_pr", "github_merge_pr",
-    ),
+    # (S1-17's three parts -- mail and calendar, X, GitHub -- wrote their
+    # cases: tests/_mail_space_cases.py, tests/_x_space_cases.py,
+    # tests/_github_space_cases.py.)
     "S1-18": ("vault_list", "vault_retrieve", "vault_store", "vault_delete"),
     # The space folder: every tool that takes a path or writes a file.
     "S1-19": (
@@ -483,6 +471,12 @@ class Matrix:
 
     def __exit__(self, *_exc: object) -> None:
         get_config_store().delete(identity.REGISTRY_KEY)
+        # Its people made the install multi-user, and the vault caches that
+        # (sticky for the process: its default rung stays closed). A test
+        # after this one sees an install of one again.
+        from kazma_core.security.vault import reset_posture_cache
+
+        reset_posture_cache()
 
     @staticmethod
     def _person(name: str) -> dict[str, Any]:
@@ -537,6 +531,36 @@ class Matrix:
         return Planted(a=f"mxa{tail}", b=f"mxb{tail}")
 
     # ── the request boundary ─────────────────────────────────────────────
+
+    @staticmethod
+    def role_checked(app: FastAPI) -> list[tuple[str, str]]:
+        """Put the auth middleware's role check in front of *app*
+        (``auth._role_refusal``, the one rule it applies), outside every
+        middleware added before it: a case's person is the operator a member
+        is, never an admin by omission. Returns the list the requests it
+        refused go in, ``(method, path)``, so a case can say none was.
+
+        The review of S1-17c: the cases mounted the tenant middleware only,
+        so no case met the admin-only routes -- connecting a space's own
+        GitHub, mailbox or calendar -- that no member could reach."""
+        from kazma_ui.request_path import judged_path
+
+        refused: list[tuple[str, str]] = []
+
+        async def check(request: Any, call_next: Any) -> Any:
+            path = judged_path(request)
+            # What the auth middleware lets through before any role is read:
+            # an open path (a sign-in callback), one that is not sensitive.
+            if auth.is_always_open(path) or not auth.is_sensitive_path(path):
+                return await call_next(request)
+            answer = auth._role_refusal(auth.get_request_principal(request), path, request.method)
+            if answer is not None:
+                refused.append((request.method, path))
+                return answer
+            return await call_next(request)
+
+        app.middleware("http")(check)
+        return refused
 
     @contextmanager
     def requests_as(self, who: str) -> Iterator[TestClient]:

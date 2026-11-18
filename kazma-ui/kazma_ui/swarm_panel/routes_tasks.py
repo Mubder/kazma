@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -83,6 +84,19 @@ def _metadata_refusal(payload: dict[str, Any]) -> JSONResponse | None:
     )
 
 
+#: The status of a task action ``task_actions.task_refusal`` refused.
+_REFUSAL_STATUS = {"not_found": 404, "not_yours": 403, "no_space": 409, "identity_unavailable": 503}
+
+
+def _refusal_answer(refused: dict[str, Any] | None) -> JSONResponse | None:
+    """The page's answer to a task action the shared check refused (Spaces
+    S1-16 follow-up), else None."""
+    if refused is None:
+        return None
+    return JSONResponse({"status": "error", "code": refused["code"], "message": refused["message"]},
+                        status_code=_REFUSAL_STATUS.get(str(refused["code"]), 403))
+
+
 def _coerce_timeout(payload: dict[str, Any]) -> float:
     """Return a numeric task timeout from the API payload."""
     try:
@@ -118,6 +132,40 @@ def _flatten_swarm_task(task: Any) -> dict[str, Any]:
     }
 
 
+async def _reported(swarm_task: Any, step: Callable[[], Awaitable[Any]], *,
+                    tell: Callable[[str], Awaitable[Any]]) -> Any:
+    """Run *step*; a failure is logged and its safe message *tell*ed,
+    then raised again. The chat gets a safe message; the exception's text
+    (paths, hosts, internals) stays in the log (SW-S15). One handler for
+    the dispatch and the routing, which ran in one ``try`` until the
+    hand-over moved out of the request (S1-17 follow-up review)."""
+    try:
+        return await step()
+    except Exception as exc:
+        logger.exception("[Swarm] Task execution failed under auto-routing wrapper")
+        from kazma_core.exceptions import sanitize_error
+
+        await tell(f"Swarm task '{getattr(swarm_task, 'id', '')}' failed. {sanitize_error(exc)}")
+        raise
+
+
+async def _hand_over_result(deliver: Callable[[], Awaitable[None]], *, label: str, later: bool) -> None:
+    """Run a finished task's hand-over (*deliver*) now, or -- *later*, once
+    Spaces is enforced -- in a background task of its own, so the request
+    that ran the task answers without waiting for it (Spaces S1-17
+    follow-up). Only an enforced install reads the identity store before a
+    hand-over (``wait_for_owner_answer``), which an outage can hold for
+    hours; one that is not keeps the hand-over in the request, as before."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if later and spaces_enforced():
+        from kazma_core.background import spawn_background
+
+        spawn_background(deliver(), name=f"swarm-result:{label}")
+    else:
+        await deliver()
+
+
 def register_tasks_routes(
     router: APIRouter,
     templates: Any,
@@ -131,28 +179,14 @@ def register_tasks_routes(
         return svc.resolve_engine(swarm_manager)
 
     def _not_here(engine: Any, task_id: str) -> JSONResponse | None:
-        """The answer for a task this request may not act on, else None.
+        """The answer for a task this request may not approve or reject, else
+        None: ``task_actions.task_refusal``, the one check Cancel and Retry
+        make inside the shared action (Spaces S1-15, its follow-up). Another
+        space's task answers as an unknown one; only the person who asked
+        answers it (decision N4). Blocking."""
+        from kazma_ui.swarm_panel.task_actions import task_refusal
 
-        Once Spaces is enforced a task of another space answers exactly as
-        an unknown one (Spaces S1-15), and a task of this space that acts
-        for someone else is not this caller's to answer: only the person
-        who asked approves, rejects, cancels or retries it (decision N4).
-        Blocking (the task store, the identity store)."""
-        from kazma_core.spaces.scope import spaces_enforced
-        from kazma_core.swarm.single_operator import task_answered_by_caller, task_of_this_space
-
-        if not spaces_enforced():
-            return None
-        store = getattr(engine, "task_store", None) or getattr(engine, "_task_store", None)
-        task = (engine.get_active_task(task_id) if hasattr(engine, "get_active_task") else None) \
-            or engine.get_task(task_id) or (store.get_task(task_id) if store is not None else None)
-        if task is None or not task_of_this_space(task):
-            return JSONResponse({"status": "error", "message": f"Task '{task_id}' not found"}, status_code=404)
-        if not task_answered_by_caller(task):
-            return JSONResponse({"status": "error", "code": "not_yours",
-                                 "message": "Only the person who asked for this task can answer it."},
-                                status_code=403)
-        return None
+        return _refusal_answer(task_refusal(engine, task_id))
 
     def _require_admin(request: Request) -> JSONResponse | None:
         """Admin/operator gate for the task action routes (approve/reject/cancel/retry).
@@ -323,51 +357,64 @@ def register_tasks_routes(
         engine: Any,
         swarm_task: Any,
         is_broadcast: bool = False,
+        *,
+        deliver_later: bool = False,
     ) -> Any:
-        """Execute dispatch/broadcast and automatically route the result on completion."""
-        try:
-            # One path for every task type, broadcasts included: dispatch()
-            # admits, records RUNNING, tenant-stamps and finalizes (Swarm
-            # audit SW-S06: the broadcast route called engine.broadcast and
-            # skipped all four). ``is_broadcast`` is the task's own type.
-            result = await engine.dispatch(swarm_task)
-            # The result goes to the output target -- the one route swarm
-            # results take. The separate swarm-bot notifier (a fourth
-            # notifier beside AGENTS §33's three, reporting a send Telegram
-            # refused as sent) was removed (Swarm audit SW-S15). The target
-            # is the owner's chat: someone else's result stays in its space.
-            if not await _for_the_owner(swarm_task):
-                logger.info("[Swarm] task '%s': not the owner's, its result stays in its space",
-                            getattr(swarm_task, "id", ""))
-            elif not await _route_task_result(result):
-                logger.info("[Swarm] task '%s': no output target took the result",
-                            getattr(swarm_task, "id", ""))
-            return result
-        except Exception as exc:
-            logger.exception("[Swarm] Task execution failed under auto-routing wrapper")
-            # The chat gets a safe message; the exception's text (paths,
-            # hosts, internals) stays in the log (SW-S15).
-            from kazma_core.exceptions import sanitize_error
+        """Execute dispatch/broadcast and automatically route the result on
+        completion. *deliver_later*: the hand-over to the output target runs
+        in the background (a foreground dispatch answers once the task is
+        done, never after whose it is could be read -- S1-17 follow-up)."""
+        # One path for every task type, broadcasts included: dispatch()
+        # admits, records RUNNING, tenant-stamps and finalizes (Swarm audit
+        # SW-S06: the broadcast route called engine.broadcast and skipped all
+        # four). ``is_broadcast`` is the task's own type. A failure's safe
+        # message is handed over like a result: to the owner's chat only.
+        result = await _reported(
+            swarm_task, lambda: engine.dispatch(swarm_task),
+            tell=lambda message: _hand_over(
+                swarm_task, lambda: _maybe_send_to_output_target_fallback(message), later=deliver_later),
+        )
+        # The result goes to the output target -- the one route swarm
+        # results take. The separate swarm-bot notifier (a fourth notifier
+        # beside AGENTS §33's three, reporting a send Telegram refused as
+        # sent) was removed (Swarm audit SW-S15). The target is the owner's
+        # chat: someone else's result stays in its space. A routing that
+        # fails sends the failure's message instead (the hand-over has
+        # already found the task the owner's).
+        await _hand_over(
+            swarm_task,
+            lambda: _reported(swarm_task, lambda: _route_task_result(result),
+                              tell=_maybe_send_to_output_target_fallback),
+            later=deliver_later,
+        )
+        return result
 
-            error_msg = f"Swarm task '{getattr(swarm_task, 'id', '')}' failed. {sanitize_error(exc)}"
-            if await _for_the_owner(swarm_task):
-                await _maybe_send_to_output_target_fallback(error_msg)
-            raise exc
+    async def _hand_over(swarm_task: Any, send: Callable[[], Awaitable[bool]], *, later: bool) -> None:
+        """Send a finished task's result (*send*) to the output target once it
+        is known to be the owner's (``_for_the_owner``). During an identity
+        outage that can take hours (``wait_for_owner_answer``): *later* hands
+        it to a background task, so a foreground dispatch answers with the
+        task done and the result held for delivery (S1-17 follow-up: the
+        page's request hung until the store answered)."""
+        label = getattr(swarm_task, "id", "")
+
+        async def deliver() -> None:
+            if not await _for_the_owner(swarm_task):
+                logger.info("[Swarm] task '%s': not the owner's, its result stays in its space", label)
+            elif not await send():
+                logger.info("[Swarm] task '%s': no output target took the result", label)
+
+        await _hand_over_result(deliver, label=label, later=later)
 
     async def _for_the_owner(swarm_task: Any) -> bool:
         """Whether the install's output target -- the owner's chat -- may carry
         this task's result (Spaces S1-15 review, O1): always while Spaces is
         not enforced; once it is, only a task that acts for the owner. A
-        store that cannot say keeps the result in its space."""
-        from kazma_core.spaces.identity import IdentityUnavailable
-        from kazma_core.swarm.single_operator import task_for_the_owner
+        store that cannot say holds the result until it can (an outage),
+        never drops the owner's (S1-16 follow-up)."""
+        from kazma_core.swarm.single_operator import wait_for_owner_answer
 
-        try:
-            return await asyncio.to_thread(task_for_the_owner, swarm_task)
-        except IdentityUnavailable:
-            logger.warning("[Swarm] task '%s': whose it is cannot be read; its result stays in its space",
-                           getattr(swarm_task, "id", ""))
-            return False
+        return await wait_for_owner_answer(swarm_task, label=f"task '{getattr(swarm_task, 'id', '')}'")
 
     def _settle_handle(svc: Any, task_id: str, handle: asyncio.Task) -> None:
         """A background dispatch ended: drop its handle and retrieve its
@@ -644,7 +691,8 @@ def register_tasks_routes(
                     "result_status": "running",
                     "dispatched": dispatched,
                 })
-            task_result = await _run_and_route_task(engine, swarm_task, is_broadcast=True)
+            task_result = await _run_and_route_task(engine, swarm_task, is_broadcast=True,
+                                                    deliver_later=True)
         else:
             if background:
                 _handle = asyncio.create_task(_run_and_route_task(engine, swarm_task, is_broadcast=False))
@@ -660,7 +708,8 @@ def register_tasks_routes(
                     "result_status": "running",
                     "dispatched": dispatched,
                 })
-            task_result = await _run_and_route_task(engine, swarm_task, is_broadcast=False)
+            task_result = await _run_and_route_task(engine, swarm_task, is_broadcast=False,
+                                                    deliver_later=True)
         if task_result is not None and (task_result.metadata or {}).get("admission_denied"):
             return _capacity_refusal(
                 int((task_result.metadata or {}).get("max_concurrent_tasks") or 0),
@@ -1021,12 +1070,12 @@ def register_tasks_routes(
         _denied = await asyncio.to_thread(_require_admin, request)
         if _denied is not None:
             return _denied
-        _hidden = await asyncio.to_thread(_not_here, _current_engine(), task_id)
-        if _hidden is not None:
-            return _hidden
         from kazma_ui.swarm_panel.task_actions import cancel_task
 
+        # The space-and-asker check is the shared action's (task_refusal).
         outcome = await cancel_task(task_id)
+        if outcome["code"] in _REFUSAL_STATUS:
+            return _refusal_answer(outcome)
         if outcome["ok"]:
             return JSONResponse({"status": "ok", "message": outcome["message"], "task_id": task_id})
         status = {"engine_unavailable": 503, "not_active": 404}.get(outcome["code"], 500)
@@ -1034,17 +1083,17 @@ def register_tasks_routes(
 
     @router.post("/api/swarm/tasks/{task_id}/retry")
     async def swarm_retry_task(task_id: str, request: Request) -> JSONResponse:
+        """Retry a failed/timeout/cancelled task by re-dispatching."""
         _denied = await asyncio.to_thread(_require_admin, request)
         if _denied is not None:
             return _denied
-        _hidden = await asyncio.to_thread(_not_here, _current_engine(), task_id)
-        if _hidden is not None:
-            return _hidden
-        """Retry a failed/timeout/cancelled task by re-dispatching."""
         from kazma_ui.swarm_panel.task_actions import retry_task
 
+        # The space-and-asker check is the shared action's (task_refusal).
         acknowledge = request.query_params.get("acknowledge_unknown") in ("1", "true")
         outcome = await retry_task(task_id, acknowledge_unknown=acknowledge)
+        if outcome["code"] in _REFUSAL_STATUS:
+            return _refusal_answer(outcome)
         if outcome["code"] == "retry_outcome_unknown":
             # The original may already have changed things: the page asks the
             # operator, then retries with acknowledge_unknown=1 (SW-E08).
