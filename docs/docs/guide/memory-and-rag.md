@@ -800,10 +800,12 @@ is read as about them: the quick pass would rather miss a fact than file
 another person's under you. A new sentence starts fresh, except for someone
 you introduced by name ("عندي أخت اسمها نورة. انتقلت إلى روتردام" is still
 Noura), and what describes you is still you ("أنا مدير مشاريع وساكن في دبي",
-"عندي بنت وساكن في الكويت", "قبل سنتين انتقلت إلى دبي"). It reads only your own words: not an attached
-document, a quote, what someone else said ("my sister said: ...") or a text
-you asked Kazma to work on ("Translate to French: My name is Pierre" does not
-make your name Pierre). "Correct: my name is Ahmad" is your own words and
+"عندي بنت وساكن في الكويت", "قبل سنتين انتقلت إلى دبي"). It reads only your
+own words: not an attached document, a forwarded message, a quote, what
+someone else said ("my sister said: ...", to the end of that sentence) or a
+text you asked Kazma to work on ("Translate to French: My name is Pierre"
+does not make your name Pierre). Inside a request to remember, a quote is
+yours ("remember this: "I prefer dark mode""). "Correct: my name is Ahmad" is your own words and
 counts. A fact the model's deep pass reads counts as your own word too when
 you say it of yourself: "We moved to Rotterdam last month" replaces the home
 you gave before, in your spelling. "My sister moved to Rotterdam" never

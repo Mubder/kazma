@@ -198,3 +198,127 @@ def test_the_trust_gate_without_own_words_gives_a_document_the_users_trust(monke
     monkeypatch.setattr(provenance, "own_words", lambda text: text or "")
     monkeypatch.setattr("kazma_core.memory.remember_request.own_words", lambda text: text or "")
     assert agent_write_source("Sara Lee", message) == USER_EXPLICIT
+
+
+# ── the review of F3 (2026-11): what the first rules missed ──────────────
+
+#: More ways a message carries someone else's text or a text to work on,
+#: each found by the review.
+MORE_FORMS = {
+    "curly quote": lambda s: f"She wrote “{s}”",
+    "single quote": lambda s: f"She wrote '{s}'",
+    "curly single quote": lambda s: f"She wrote ‘{s}’",
+    "guillemets stuck to the words": lambda s: f"got this text: «{s}»",
+    "backticks": lambda s: f"Run `echo {s}`",
+    "calling Kazma by name": lambda s: f"Hey Kazma, translate this: {s}",
+    "a head in two languages": lambda s: f"translate للعربي: {s}",
+    "a question as the head": lambda s: f"Can you translate this into Spanish? {s}",
+    "no colon": lambda s: f"Translate to French {s}",
+    "fix this (gulf)": lambda s: f"صلح هذا: {s}",
+    "this sentence (gulf)": lambda s: f"صحح لي هالجملة: {s}",
+    "make a translation (gulf)": lambda s: f"سوي لي ترجمة: {s}",
+    "give a translation (gulf)": lambda s: f"عطني ترجمة: {s}",
+    "write an email": lambda s: f"Write an email to my landlord saying: {s}",
+    "write a message (ar)": lambda s: f"اكتب لي رسالة: {s}",
+    "roleplay": lambda s: f"Roleplay as a customer: {s}",
+    "example sentence": lambda s: f"Example sentence: {s}",
+    "forwarded (mail)": lambda s: f"---------- Forwarded message ---------\nFrom: Dana\n{s}",
+    "forwarded from": lambda s: f"Forwarded from Dana\n{s}",
+    "forwarded (ar)": lambda s: f"رسالة محولة\n{s}",
+    "you told me (ar)": lambda s: f"قلت لي: {s}",
+    "an old stub with a bracket in its name": lambda s: f"[Attached: report] {s} (application/pdf) — use file_read]",
+}
+
+
+@pytest.mark.parametrize("form", sorted(MORE_FORMS))
+@pytest.mark.parametrize(("sentence", "fact"), STATEMENTS)
+def test_the_reviews_forms_are_not_the_users_statement(form, sentence, fact):
+    assert fact not in _facts(MORE_FORMS[form](sentence)), MORE_FORMS[form](sentence)
+
+
+@pytest.mark.parametrize(("message", "kept", "dropped"), [
+    # Someone else's words end at their sentence: the user's answer stays.
+    ("Kazma said: your name is Ahmed. No, my name is Ahmad.", ("name_is", "Ahmad"), None),
+    ("You said: I live in Paris. Wrong, I live in Lisbon.", ("lives_in", "Lisbon"), ("lives_in", "Paris")),
+    ("You wrote: lives in Paris. Actually I live in Lisbon now", ("lives_in", "Lisbon"), None),
+    ("قلت لي: ساكن في باريس. لا، أنا ساكن في لشبونة", ("lives_in", "لشبونة"), ("lives_in", "باريس")),
+    ("My sister said: I live in Oslo. I live in Bergen.", ("lives_in", "Bergen"), ("lives_in", "Oslo")),
+    # An aside ends the text an instruction works on.
+    ("Translate: thanks.\nBy the way, my name is Sam.", ("name_is", "Sam"), None),
+    ("Translate to French: My name is Pierre. Btw, I live in Dubai.", ("lives_in", "Dubai"),
+     ("name_is", "Pierre")),
+    ("ترجم: شكرا.\nبالمناسبة، اسمي سام.", ("name_is", "سام"), None),
+    # An inch mark is no quote.
+    ("My 27\" monitor arrived and I live in Berlin, \"finally\"", ("lives_in", "Berlin"), None),
+    # Idioms that look like an instruction and are the user speaking.
+    ("Please check my email: I work at Initech now", ("works_at", "Initech"), None),
+    ("Write this down: I live in Lisbon.", ("lives_in", "Lisbon"), None),
+])
+def test_the_users_own_words_beside_someone_elses_stay_theirs(message, kept, dropped):
+    facts = _facts(message)
+    assert kept in facts, (message, facts)
+    if dropped:
+        assert dropped not in facts, (message, facts)
+
+
+@pytest.mark.parametrize(("message", "stored"), [
+    ('remember this: "I prefer dark mode"', "I prefer dark mode"),
+    ('remember: "I prefer dark mode"', "I prefer dark mode"),
+    ("remember this: 'my code is ZX-41'", "my code is ZX-41"),
+    ("Remember that: “my code is ZX-41”", "my code is ZX-41"),
+    ("تذكر هذا: «أحب القهوة»", "أحب القهوة"),
+    ("تذكر: «الكود ZX-41»", "الكود ZX-41"),
+])
+def test_inside_a_remember_request_the_quote_is_the_users_statement(message, stored):
+    assert is_remember_request(message)
+    assert stored in own_words(message)
+    assert agent_write_source(stored, message) == USER_EXPLICIT
+
+
+@pytest.mark.parametrize("message", [
+    'she wrote: "I prefer dark mode"',
+    "قالت أختي «أحب القهوة»",
+])
+def test_a_quote_outside_a_remember_request_is_not(message):
+    assert agent_write_source("I prefer dark mode" if "dark" in message else "أحب القهوة", message) != USER_EXPLICIT
+
+
+def test_control_without_the_remember_rule_the_quote_is_left_out(monkeypatch):
+    from kazma_core.memory import remember_request
+
+    monkeypatch.setattr(remember_request, "asks_to_remember", lambda text: False)
+    assert "dark mode" not in own_words('remember this: "I prefer dark mode"')
+
+
+def test_control_the_first_rules_missed_the_reviews_forms(monkeypatch):
+    """The rules of 3adb66f2e: a reporting head ran to the end of its line, a
+    quote was straight, curly or «» and judged by space-split words, a head
+    stopped only at a colon or a line end and read one language."""
+    from kazma_core.memory import own_words as ow
+
+    monkeypatch.setattr(ow, "_QUOTED_SPAN_RE", re.compile(r"\"[^\"\n]{1,400}+\"|“[^”\n]{1,400}+”|«[^»\n]{1,400}+»"))
+    monkeypatch.setattr(ow, "_speaks_in_first_person",
+                        lambda span: any(w in ow._FIRST_PERSON_EN for w in ow._words(span))
+                        or any(w in ow._FIRST_PERSON_AR for w in ow._fold(span).split()))
+    monkeypatch.setattr(ow, "_without_forwarded", lambda body: body)
+    monkeypatch.setattr(ow, "_sentence_end", lambda body, at: (body.find("\n", at) + 1) or len(body))
+    assert ("name_is", "Dana") in _facts("She wrote 'My name is Dana.'")
+    assert ("name_is", "نورة") in _facts("got this text: «اسمي نورة»")
+    assert ("name_is", "Dana") in _facts("Forwarded from Dana\nMy name is Dana.")
+    assert ("name_is", "Ahmad") not in _facts("Kazma said: your name is Ahmed. No, my name is Ahmad.")
+
+
+@pytest.mark.parametrize("piece", [
+    "'I ", "‘I ", "`I ", "\"I ", "You said: x. ", "Translate: x.\nBy the way, y. ",
+    "قلت لي: س. ", "Forwarded \n", "[Attached: x\n", "translate this ",
+    "Can you translate this? ", "Write an email saying: x\n",
+])
+def test_the_reviews_rules_read_a_long_message_in_linear_time(piece):
+    small = piece * 4000
+    started = time.perf_counter()
+    own_words(small)
+    once = time.perf_counter() - started
+    started = time.perf_counter()
+    own_words(small * 4)
+    assert time.perf_counter() - started < max(1.0, once * 12), piece
+

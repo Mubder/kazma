@@ -26,6 +26,7 @@ _ENGLISH = (
     "remember that",
     "remember my",
     "remember this",
+    "remember:",
     "don't forget",
     "do not forget",
     "note that",
@@ -58,7 +59,14 @@ def is_remember_request(text: str | None) -> bool:
     """True when the user's own words in *text* ask Kazma to remember
     something: never a "remember" inside an attached document, a quote or a
     text the user asked Kazma to translate (``memory.own_words``)."""
-    text = own_words(text)
+    return asks_to_remember(own_words(text))
+
+
+def asks_to_remember(text: str | None) -> bool:
+    """Whether *text*, as it stands, asks Kazma to remember something.
+    ``own_words`` asks it of the words before a quote ("remember this:
+    "..."": the quote is then the user's own statement); everything else
+    asks :func:`is_remember_request`."""
     if not text:
         return False
     lowered = " ".join(text.strip().lower().replace("\u2019", "'").split())

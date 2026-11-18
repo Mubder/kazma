@@ -2047,14 +2047,22 @@ four injected were noise.
   audit's F3, `memory/own_words.py`). `own_words` is the message without
   data fences (an attached document's text: `build_user_content` puts it in
   the user's message), "[Attached: ...]" lines, fenced code, "> " lines, a
-  quoted sentence in the first person, someone else's words after a colon
-  ("my sister said:", "قالت أختي:", to the end of that line), and the text an
-  instruction works on ("Translate to French:", "ترجم:", "Fix the grammar:",
-  to the end of the message). A verb that also means something else ("fix",
+  forwarded message (a pasted header, "Forwarded from ...", "رسالة محولة";
+  Telegram and WhatsApp forwards are fenced by the gateway,
+  `kazma_gateway/forwarded.py`), a quoted sentence in the first person
+  (straight, curly, single, backtick quotes or «», never an inch mark), someone
+  else's words after a colon ("my sister said:", "قالت أختي:", "قلت لي:",
+  to the end of that sentence: "Kazma said: your name is Ahmed. No, my name
+  is Ahmad." keeps the correction), and the text an instruction works on
+  ("Translate to French:", "ترجم:", "Fix the grammar:", "Can you translate
+  this?", "سوي لي ترجمة:", "Write an email ... saying:", to the end of the
+  message or an aside after it: "By the way, ...", "بالمناسبة"). Inside a
+  request to remember, a quote is the user's statement
+  (`remember_request.asks_to_remember`). A verb that also means something else ("fix",
   "correct", "صحح") is an instruction only when it names the text ("Fix the
   grammar:"), so "Correct: my name is Ahmad" stays the user's own. Heads
   are read in an 80-character window at the start of the message, a line or
-  a sentence: linear time. The quick pass (`extract_beliefs_heuristic`),
+  a sentence, by either language's rules: linear time. The quick pass (`extract_beliefs_heuristic`),
   `is_remember_request` and `provenance.agent_write_source` read through
   it; the turn keeps the whole message and the deep pass reads all of it at
   an inference's trust. "Translate to French: My name is Pierre" stored the
@@ -2064,7 +2072,11 @@ four injected were noise.
   per quick-pass pattern, EN/AR, in twelve forms and a real
   `build_user_content` attachment; the user's own corrections kept; the
   quoted write scenarios pass and fail with the raw message; the raw message
-  as the negative control for the quick pass and the trust gate).
+  as the negative control for the quick pass and the trust gate; the
+  review's forms, kept cases and remember quotes, with the first rules as
+  the control), `tests/test_forwarded_messages.py` (the real Telegram
+  adapter and WhatsApp parser, the adapters that ignored forwards as the
+  control).
   **A file's text reaches the model in a data fence on every surface**: the
   web chat sends a text file beside the message (`text_attachment`), and the
   server fences it and keeps only its name in the chat

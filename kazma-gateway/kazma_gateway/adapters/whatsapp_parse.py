@@ -95,6 +95,14 @@ def _float(value: Any) -> float:
         return 0.0
 
 
+def _said(raw: dict[str, Any], text: str) -> str:
+    """A message's words as the agent is given them: a forwarded message's
+    are someone else's, fenced as data (``kazma_gateway/forwarded.py``)."""
+    from kazma_gateway.forwarded import forwarded_text, whatsapp_forwarded
+
+    return forwarded_text(text) if text and whatsapp_forwarded(raw) else text
+
+
 def _one(raw: dict[str, Any], value: dict[str, Any], names: dict[str, str]) -> WaInbound | None:
     message_id = str(raw.get("id") or "")
     from_id = wa_digits(raw.get("from"))
@@ -107,12 +115,12 @@ def _one(raw: dict[str, Any], value: dict[str, Any], names: dict[str, str]) -> W
         "phone_number_id": phone_number_id, "timestamp": _float(raw.get("timestamp")), "kind": kind,
     }
     if kind == "text":
-        return WaInbound(**base, text=str((raw.get("text") or {}).get("body") or ""))
+        return WaInbound(**base, text=_said(raw, str((raw.get("text") or {}).get("body") or "")))
     if kind in ("image", "document", "audio"):
         media = raw.get(kind) or {}
         return WaInbound(
             **base,
-            text=str(media.get("caption") or ""),
+            text=_said(raw, str(media.get("caption") or "")),
             media_id=str(media.get("id") or ""),
             mime=str(media.get("mime_type") or ""),
             filename=str(media.get("filename") or ""),

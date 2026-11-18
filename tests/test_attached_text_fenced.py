@@ -181,7 +181,7 @@ def _tracked(*patterns: str) -> list[Path]:
 def _client_built_stubs(sources: dict[str, str]) -> list[str]:
     """Page scripts and templates that write an attachment stub themselves:
     a stub carries a file into a message, and only the server may fence it."""
-    return sorted(name for name, text in sources.items() if "[Attached" in text)
+    return sorted(name for name, text in sources.items() if any(o in text for o in STUB_OPENINGS))
 
 
 def test_no_page_script_builds_an_attachment_stub():
@@ -209,7 +209,12 @@ DECLARED = {
         "reads stubs: drops them, and everything after the web chat's",
     ("kazma-core/kazma_core/agent/turn_input.py", "extract_active_attachments"):
         "reads stubs for the attachment names working memory pins",
+    ("kazma-gateway/kazma_gateway/forwarded.py", "forwarded_text"):
+        "a forwarded message's text goes in format_untrusted_block (forwarded_message)",
 }
+
+#: The stubs that carry someone else's text into a message.
+STUB_OPENINGS = ("[Attached", "[Forwarded")
 
 
 def _stub_sites(sources: dict[str, str]) -> set[tuple[str, str]]:
@@ -222,8 +227,8 @@ def _stub_sites(sources: dict[str, str]) -> set[tuple[str, str]]:
                 for inner in ast.walk(node):
                     owner.setdefault(id(inner), node.name)
         for node in ast.walk(tree):
-            if isinstance(node, ast.Constant) and isinstance(node.value, str) and "[Attached" in node.value \
-                    and not _is_docstring(tree, node):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) \
+                    and any(o in node.value for o in STUB_OPENINGS) and not _is_docstring(tree, node):
                 sites.add((rel, owner.get(id(node), "<module>")))
     return sites
 
