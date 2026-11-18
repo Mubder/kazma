@@ -80,7 +80,7 @@ def world(tmp_path):
     index = _Index(store)
     adapter = DocumentKnowledgeAdapter(repository=svc.repository, knowledge_store=store,
                                        knowledge_index=index, config=svc.config)
-    manifest = svc.storage.read_manifest(document_id=result.document_id, version_id=result.version_id)
+    manifest = svc.storage.for_space("t").read_manifest(document_id=result.document_id, version_id=result.version_id)
     ir = DocumentIR.from_dict(manifest["ir"])
     try:
         yield svc, adapter, index, store, ir

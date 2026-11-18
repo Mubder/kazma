@@ -39,8 +39,8 @@ def _service(tmp_path, **changes) -> DocumentIngestionService:
     return DocumentIngestionService(config=DocumentConfig(**settings))
 
 
-def _put_artifact(svc: DocumentIngestionService, data: bytes):
-    return svc.storage.put_stream(io.BytesIO(data), kind="artifacts", max_bytes=1 << 20)
+def _put_artifact(svc: DocumentIngestionService, data: bytes, tenant: str):
+    return svc.storage.for_space(tenant).put_stream(io.BytesIO(data), kind="artifacts", max_bytes=1 << 20)
 
 
 def _fake_generation(svc: DocumentIngestionService, stored, monkeypatch) -> None:
@@ -72,7 +72,7 @@ def test_generating_bytes_another_tenant_holds_leaves_its_blob(tmp_path, monkeyp
         # Tenant B: a document and an artifact row on the shared bytes.
         mine = svc.ingest_stream(io.BytesIO(b"tenant b's document\n"), filename="b.txt",
                                  tenant_id="tenant-b", actor_id="bob", workspace_id="w")
-        stored = _put_artifact(svc, PAYLOAD)
+        stored = _put_artifact(svc, PAYLOAD, "tenant-b")
         blob = svc.repository.register_blob(
             tenant_id="tenant-b", sha256=stored.sha256, byte_size=stored.byte_size,
             storage_kind="artifacts",
@@ -100,7 +100,7 @@ def test_an_unreferenced_transient_artifact_is_collected_by_gc(tmp_path, monkeyp
     """What the cleanup did, GC does -- across every tenant, after its grace."""
     svc = _service(tmp_path, gc_grace_seconds=60)
     try:
-        stored = _put_artifact(svc, b"nobody's rendering\n")
+        stored = _put_artifact(svc, b"nobody's rendering\n", "tenant-a")
         _fake_generation(svc, stored, monkeypatch)
         asyncio.run(svc.generate_document(
             tenant_id="tenant-a", actor_id="alice", workspace_id="w",

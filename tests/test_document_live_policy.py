@@ -299,7 +299,7 @@ async def test_worker_tasks_do_not_keep_startups_policy(tmp_path, monkeypatch, d
         if detach:
             assert status["error_code"] == "document_limit_exceeded"
         else:
-            manifest = svc.storage.read_manifest(document_id=result.document_id, version_id=result.version_id)
+            manifest = svc.storage.for_space("t").read_manifest(document_id=result.document_id, version_id=result.version_id)
             assert manifest["policy_revision"] == version.metadata["intake_policy_revision"]
     finally:
         release.set()

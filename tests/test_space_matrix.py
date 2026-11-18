@@ -64,7 +64,7 @@ PLAN = REPO / "docs" / "plans" / "SPACES_PLAN.md"
 #: item of stage 1 writes the cases of its part and takes them out of the
 #: pending tables; this number may only go down, and lowering it means
 #: lowering the baseline in the same change.
-PENDING_BASELINE = 308
+PENDING_BASELINE = 272
 
 
 # ── what exists ──────────────────────────────────────────────────────────
@@ -228,7 +228,9 @@ def test_pending_targets_only_go_down(routes, tools, live) -> None:
 
 
 def test_a_target_is_looked_up_one_way() -> None:
-    assert pending_item("GET /api/documents/{document_id}") == "S1-12"
+    # A target with a case is not pending (S1-12 wrote the documents' cases).
+    assert pending_item("GET /api/documents/{document_id}") is None
+    assert pending_item("POST /api/documents/search") is None
     assert pending_item_for_route("get", "/api/email/jobs") == "S1-17"
     assert pending_item("tool:email_list") == "S1-17"
     assert pending_item("tool:memory_search") is None  # its item wrote its case
@@ -458,11 +460,11 @@ def test_a_stale_entry_is_reported(routes, tools, live) -> None:
 
 
 def test_a_target_in_two_tables_is_reported(routes, tools, live) -> None:
-    both = replace(live, cases={"tool:email_list": _planted_case("tool:email_list", "S1-17")})
+    both = replace(live, cases={**live.cases, "tool:email_list": _planted_case("tool:email_list", "S1-17")})
     assert stale(routes, tools, both) == [
         "tool:email_list has a case and is still in PENDING_TOOLS"
     ]
-    reasoned = replace(live, cases={"tool:hijri_convert": _planted_case("tool:hijri_convert")})
+    reasoned = replace(live, cases={**live.cases, "tool:hijri_convert": _planted_case("tool:hijri_convert")})
     assert stale(routes, tools, reasoned) == [
         "tool:hijri_convert has a case and is still in NOT_IN_THE_MATRIX"
     ]
@@ -508,7 +510,7 @@ def test_an_item_the_plan_does_not_have_is_reported(live) -> None:
         items, replace(live, route_rules=(*live.route_rules, ("/api/planted", "S2-05")))
     ) == ["the pending rule '/api/planted' names S2-05, which is not an item of stage 1"]
     assert unknown_items(
-        items, replace(live, cases={"tool:memory_search": _planted_case("tool:memory_search", "S4-01")})
+        items, replace(live, cases={**live.cases, "tool:memory_search": _planted_case("tool:memory_search", "S4-01")})
     ) == ["the case of tool:memory_search names S4-01, which is not an item of stage 1"]
     # The ids come from the plan's own table.
     assert plan_items("| S1-01 | x |\n| S1-02 | y |\ntext S1-77 in a sentence\n| S2-01 | z |") == {

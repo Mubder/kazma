@@ -64,7 +64,7 @@ from fastapi.routing import APIRoute
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from kazma_core.diagnostic_scope import read_only_diagnostic
 from kazma_core.documents.errors import DocumentPolicyError
-from kazma_core.errors import safe_error
+from kazma_core.errors import safe_error, validation_error
 
 from kazma_ui.error_envelope import http_envelope, validation_envelope
 from kazma_ui.rate_limit import rate_limit
@@ -92,42 +92,51 @@ def _active_workspace_id() -> str:
     return "default"
 
 
+def _page_user(request: Request) -> str:
+    """The signed-in name: the page's actor on an install of the older
+    multi-user mode, which does not enforce Spaces (``documents.principal``).
+    A session-store read: run it in a thread."""
+    try:
+        from kazma_ui.auth import get_request_principal
+
+        principal = get_request_principal(request)
+        if principal and principal.get("username"):
+            return str(principal["username"]).strip() or "local"
+    except Exception:  # pragma: no cover - defensive
+        logger.debug("[documents_api] principal lookup failed", exc_info=True)
+    return "local"
+
+
 async def _resolve_scope(request: Request) -> tuple[str, str, str]:
     """Return (tenant_id, actor_id, workspace_id) from trusted server context.
 
+    The tenant is the request's space and the actor its asker
+    (``documents.principal.surface_scope``, the one answer the page, chat and
+    the agent share; Spaces S1-12). The tenant middleware bound both and
+    checked membership before this route ran.
+
     Async since 2026-10-01: the workspace is a store read and the principal
     may be a session-store read, which every document route ran on the event
-    loop through this helper. Both are read in one thread.
+    loop through this helper. All are read in one thread (the thread copies
+    the request's scope).
     """
-    tenant = "default"
+
+    def _scope_and_workspace() -> tuple[str, str, str]:
+        from kazma_core.documents.principal import surface_scope
+
+        scope = surface_scope(
+            getattr(request.app.state, "documents", None), page_user=lambda: _page_user(request),
+        )
+        return scope.tenant_id, scope.actor_id, _active_workspace_id()
+
+    from kazma_core.documents.principal import DocumentsRefused
+
     try:
-        from kazma_core.tenant_context import get_current_tenant_id
-
-        tenant = (get_current_tenant_id() or "default").strip() or "default"
-    except Exception:  # pragma: no cover - defensive
-        pass
-
-    def _actor_and_workspace() -> tuple[str, str]:
-        from kazma_core.documents.principal import operator_for
-
-        # One operator per install: the page, chat and the agent are the same
-        # principal (DOC-A3); with platform users the page acts as each user.
-        operator = operator_for(getattr(request.app.state, "documents", None), tenant)
-        if operator is not None:
-            return operator, _active_workspace_id()
-        actor = "local"
-        try:
-            from kazma_ui.auth import get_request_principal
-
-            principal = get_request_principal(request)
-            if principal and principal.get("username"):
-                actor = str(principal["username"]).strip() or "local"
-        except Exception:  # pragma: no cover - defensive
-            logger.debug("[documents_api] principal lookup failed", exc_info=True)
-        return actor, _active_workspace_id()
-
-    actor, workspace = await asyncio.to_thread(_actor_and_workspace)
-    return tenant, actor, workspace
+        return await asyncio.to_thread(_scope_and_workspace)
+    except DocumentsRefused as exc:
+        raise HTTPException(
+            status_code=403, detail={"error": validation_error(exc), "code": "documents_refused"},
+        ) from exc
 
 
 def create_documents_router() -> APIRouter:

@@ -169,8 +169,9 @@ def test_spoofed_length_never_publishes_cas_or_metadata(tmp_path, declared):
         assert error.value.code == "intake_length_mismatch"
         assert svc.admissions.snapshot()["pending"] == 0
         assert not svc.repository.list_documents(tenant_id="t")
-        assert not list(tmp_path.glob("quarantine/sha256/*/*/*"))
-        assert not list(tmp_path.glob("quarantine/sha256/.incoming-*"))
+        # Every space's folder (Spaces S1-12): the root and spaces/<id>.
+        assert not list(tmp_path.glob("**/quarantine/sha256/*/*/*"))
+        assert not list(tmp_path.glob("**/quarantine/sha256/.incoming-*"))
     finally:
         svc.close()
 

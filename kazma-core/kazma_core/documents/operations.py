@@ -461,7 +461,8 @@ class DocumentOperations:
                     "Durable artifact scope requires a document repository",
                 )
             with output.open("rb") as handle:
-                stored = self.storage.put_stream(
+                # Kept in the space the operation runs for (Spaces S1-12).
+                stored = self.storage.for_space(scope.tenant_id).put_stream(
                     handle,
                     kind="artifacts",
                     max_bytes=self.config.max_expanded_bytes,
