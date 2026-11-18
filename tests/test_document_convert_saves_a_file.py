@@ -56,7 +56,7 @@ def wired(tmp_path, monkeypatch):
         async def ensure():
             return svc
 
-        async def scope():
+        async def scope(_service):
             return ("default", "w", "operator")
 
         monkeypatch.setattr(tools, "_ensure_service", ensure)

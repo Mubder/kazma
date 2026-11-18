@@ -860,9 +860,7 @@ def test_migration_export_refuses_missing_referenced_blob(tmp_path, monkeypatch)
 
 
 def storage_b_has(root: Path, kind: str, sha: str) -> bool:
-    from kazma_core.documents.storage import blob_rel
-
-    return (root / blob_rel("t1", kind, sha)).is_file()  # under the space's folder
+    return (root / kind / "sha256" / sha[:2] / sha[2:4] / sha).is_file()
 
 
 # ── API layer: HTTP status codes + operational endpoints (fake service) ──

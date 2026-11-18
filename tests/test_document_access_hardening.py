@@ -125,9 +125,9 @@ async def test_native_status_keeps_resolved_actor(service, monkeypatch, by_docum
         return service
     monkeypatch.setattr(tools, '_ensure_service', ensure)
     args = {'document_id': str(first.document_id)} if by_document else {'job_id': str(first.job_id)}
-    monkeypatch.setattr(tools, '_document_scope', lambda: ('t', 'w', 'alice'))
+    monkeypatch.setattr(tools, '_document_scope', lambda _service: ('t', 'w', 'alice'))
     assert 'state:' in await tools.document_status(**args)
-    monkeypatch.setattr(tools, '_document_scope', lambda: ('t', 'w', 'bob'))
+    monkeypatch.setattr(tools, '_document_scope', lambda _service: ('t', 'w', 'bob'))
     refused = await tools.document_status(**args)
     assert refused.startswith('Error') and str(first.job_id) not in refused
 

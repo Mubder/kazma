@@ -240,12 +240,124 @@ async def test_documents_made_before_spaces_stay_the_owners(service, tools, monk
 
 
 async def test_control_the_old_agent_principal_cannot_read_the_owners_document(service, tools, monkeypatch, no_people):
-    # Negative control: the principal chat and the agent used before DOC-A3.
+    # Negative control: the principal chat and the agent resolved before
+    # DOC-A3 -- the turn's tenant and the fixed name ``agent``, granted
+    # nothing. The tool's own scope path runs (``_scope`` -> ``_document_scope``
+    # -> the principal); only the resolution is the old one.
+    from kazma_core.documents import principal
+
     marker = _marker("owners")
     seeded = seed_document(service, tenant_id=OWNER_SPACE_ID, owner=OWNER_ACCOUNT_ID, marker=marker)
-    monkeypatch.setattr(tools, "_document_scope", lambda: (OWNER_SPACE_ID, "w", "agent"))
+    resolved: list[principal.DocumentScope] = []
+
+    def old_resolution(_service, *, page_user=None):
+        acting = principal.DocumentScope(tenant_id=scope.require_space_id(), actor_id="agent")
+        resolved.append(acting)
+        return acting
+
+    monkeypatch.setattr(principal, "surface_scope", old_resolution)
     reply = await tools.document_read(seeded.document_id)
+    assert resolved == [principal.DocumentScope(OWNER_SPACE_ID, "agent")], "the tool resolved its scope"
     assert reply.startswith("Error") and marker not in reply
+
+
+async def test_control_without_the_grant_the_owner_cannot_read_older_documents(service, tools, monkeypatch, no_people):
+    # Negative control: a single-account install's documents from before
+    # Spaces are owned by ``operator``; the owner's account reads them only
+    # through grant_member_access.
+    marker = _marker("ungranted")
+    old = seed_document(service, tenant_id=OWNER_SPACE_ID, owner="operator", marker=marker)
+    monkeypatch.setattr(service, "grant_member_access", lambda **_kw: 0)
+    reply = await tools.document_read(old.document_id)
+    assert reply.startswith("Error") and marker not in reply
+    assert old.document_id not in await _chat("/documents list")
+    with _web(service, monkeypatch, OWNER_PRINCIPAL) as client:
+        assert old.document_id not in _listed(client)
+
+
+async def test_the_agents_first_call_grants_before_the_service_is_installed(service, tools, monkeypatch, no_people):
+    """A chat turn during boot, or a CLI process: no service is installed yet
+    when the tool starts. The tool builds it first (``_ensure_service``) and
+    grants through it, so the first call already reads the older documents
+    (the first version granted through ``peek_ingestion_service()``, None
+    then, and failed that call)."""
+    marker = _marker("firstcall")
+    old = seed_document(service, tenant_id=OWNER_SPACE_ID, owner="operator", marker=marker)
+    set_ingestion_service(None)  # nothing installed: the tool builds the service
+    assert marker in await tools.document_read(old.document_id)
+
+
+async def test_control_granting_through_the_installed_service_fails_the_first_call(
+    service, tools, monkeypatch, no_people,
+):
+    # Negative control: the first version's scope, granted through the
+    # service installed so far (none during boot).
+    from kazma_core.documents.ingestion import peek_ingestion_service
+
+    marker = _marker("beforeboot")
+    old = seed_document(service, tenant_id=OWNER_SPACE_ID, owner="operator", marker=marker)
+    set_ingestion_service(None)
+    real = tools._document_scope
+    monkeypatch.setattr(tools, "_document_scope", lambda _built: real(peek_ingestion_service()))
+    reply = await tools.document_read(old.document_id)
+    assert reply.startswith("Error") and marker not in reply
+
+
+# ── a stored retired memory mode: chat reads its own tenant ─────────────────
+
+
+@pytest.fixture
+def per_platform():
+    """An install from before Spaces that chose per-platform memory."""
+    store = get_config_store()
+    store.set("memory.tenant_mode", "per_platform")
+    try:
+        yield
+    finally:
+        store.delete("memory.tenant_mode")
+
+
+async def _chat_from(platform: str, text: str) -> str:
+    from kazma_gateway.agent_handler.commands import _try_documents_command
+
+    msg = types.SimpleNamespace(platform=platform, sender_id=f"{platform}:1", context_metadata={}, text=text)
+    manager = _Manager()
+    assert await _try_documents_command(msg, _Store(), manager, "thread") is True
+    return manager.sent[-1]
+
+
+async def test_with_a_retired_memory_mode_chat_reads_the_documents_its_turns_made(
+    service, tools, per_platform, no_people,
+):
+    """A Telegram chat's documents sit under ``telegram``, where its turns put
+    them (the tool worker binds the turn's tenant): chat ``/documents`` and the
+    agent in that chat read them, as before Spaces, until Spaces is enforced
+    or the owner presses "Use one memory" (S1-09's rule)."""
+    marker = _marker("telegramdoc")
+    in_chat = seed_document(service, tenant_id="telegram", owner="operator", marker=marker)
+    on_page = seed_document(service, tenant_id=OWNER_SPACE_ID, owner="operator", marker=_marker("page"))
+
+    listed = await _chat_from("telegram", "/documents list")
+    assert in_chat.document_id in listed and on_page.document_id not in listed
+    assert marker in await _chat_from("telegram", f"/documents read {in_chat.document_id}")
+    from kazma_core.tenant_context import tenant_scope
+
+    with tenant_scope("telegram"):  # what the tool worker binds from the turn's state
+        assert marker in await tools.document_read(in_chat.document_id)
+    # The files stay where they were written: the root, as before Spaces.
+    assert (service.storage.root / "originals" / "sha256" / in_chat.sha256[:2]
+            / in_chat.sha256[2:4] / in_chat.sha256).is_file()
+    assert not (service.storage.root / "spaces").exists()
+
+
+async def test_control_the_first_chat_rule_loses_the_chats_documents(service, per_platform, no_people):
+    # Negative control: the first version's chat read the bound space, which
+    # a chat-app message has none of: ``default``.
+    in_chat = seed_document(service, tenant_id="telegram", owner="operator", marker=_marker("lost"))
+    acting = surface_scope(service)
+    assert acting.tenant_id == OWNER_SPACE_ID
+    listed = service.list_documents(tenant_id=acting.tenant_id, actor_id=acting.actor_id)
+    assert in_chat.document_id not in [row["document_id"] for row in listed]
 
 
 # ── platform users, Spaces not enforced: as before ──────────────────────────

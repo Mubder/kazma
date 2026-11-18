@@ -630,7 +630,11 @@ class DocumentGarbageCollector:
         found: list[str] = []
         try:
             entries = sorted(os.scandir(base), key=lambda entry: entry.name)
-        except OSError:
+        except OSError as exc:
+            # No space's folder is swept this run; said, never "none there".
+            report.errors.append(f"space_folders:{type(exc).__name__}")
+            logger.warning("[documents.retention] the spaces' folders could not be listed (%s); "
+                           "none of them is swept this run", type(exc).__name__)
             return []
         for entry in entries:
             if entry.is_symlink() or os.path.realpath(entry.path) != os.path.join(base_real, entry.name):
@@ -643,52 +647,57 @@ class DocumentGarbageCollector:
     def _folders(self, marks: dict[str, Any], report: GcReport) -> list[_Folder]:
         """Each folder of the store with the references it keeps.
 
-        The root keeps the owner's space's references and those of every
-        tenant of another space not yet copied into its folder; ``spaces/<f>``
-        keeps its own tenants'. A mark that does not say whose (an older
-        repository) makes every folder keep every reference.
+        **The root keeps every tenant's references** (its live recheck asks
+        any tenant): before Spaces is enforced every tenant writes there, and
+        once it is the root keeps its copy of a space's files in this release
+        (``documents.space_files``), so an older build -- a revert -- reads
+        every document there. ``spaces/<f>`` keeps only its own tenants'. A
+        mark that does not say whose (an older repository) makes every folder
+        keep every reference.
         """
-        from kazma_core.spaces.scope import OWNER_SPACE_ID, valid_space_id
+        from kazma_core.spaces.scope import valid_space_id
 
         from .storage import space_folder
 
         existing = self._space_dirs(report)
+        everything = _Folder(rel="", root=self._root, keep_source=set(marks["keep_source"]),
+                             keep_artifacts=set(marks["keep_artifacts"]),
+                             keep_versions=set(marks["keep_versions"]), tenants=None)
         by_source = marks.get("keep_source_by_tenant")
         by_artifact = marks.get("keep_artifacts_by_tenant")
         by_version = marks.get("keep_versions_by_tenant")
         if by_source is None or by_artifact is None or by_version is None:
-            return [
-                _Folder(rel=rel, root=self._root / rel if rel else self._root,
-                        keep_source=set(marks["keep_source"]),
-                        keep_artifacts=set(marks["keep_artifacts"]),
-                        keep_versions=set(marks["keep_versions"]), tenants=None)
-                for rel in ("", *existing)
-            ]
-        moved_tenants = getattr(self._storage, "moved_tenants", None)
-        moved = moved_tenants() if callable(moved_tenants) else frozenset()
-        groups: dict[str, set[str]] = {"": {OWNER_SPACE_ID}}
+            return [everything, *(
+                _Folder(rel=rel, root=self._root / rel, keep_source=everything.keep_source,
+                        keep_artifacts=everything.keep_artifacts,
+                        keep_versions=everything.keep_versions, tenants=None)
+                for rel in existing
+            )]
+        groups: dict[str, set[str]] = {}
         for tenant in set(by_source) | set(by_artifact) | set(by_version):
-            folder = space_folder(tenant)
-            groups.setdefault(folder, set()).add(tenant)
-            if folder and tenant not in moved:
-                groups[""].add(tenant)  # its files may still be in the root
+            try:
+                folder = space_folder(tenant)
+            except ValueError:
+                continue  # no name, no folder: its files are the root's, kept above
+            if folder:
+                groups.setdefault(folder, set()).add(tenant)
         for rel in existing:
             members = groups.setdefault(rel, set())
             name = rel.split("/", 1)[1]
             if valid_space_id(name):
                 # A space that published after the mark is still asked about.
                 members.add(name)
-        return [
+        return [everything, *(
             _Folder(
                 rel=rel,
-                root=self._root / rel if rel else self._root,
+                root=self._root / rel,
                 keep_source=set().union(*(by_source.get(t, set()) for t in members)),
                 keep_artifacts=set().union(*(by_artifact.get(t, set()) for t in members)),
                 keep_versions=set().union(*(by_version.get(t, set()) for t in members)),
                 tenants=tuple(sorted(members)),
             )
             for rel, members in sorted(groups.items())
-        ]
+        )]
 
     def _delete_file(self, path: Path, report: GcReport, dry_run: bool) -> bool:
         if dry_run:

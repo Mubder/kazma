@@ -825,9 +825,11 @@ SPACE_RULES: dict[str, SpaceRule] = {
     "kazma-watch": _install("the install's own Kazma Watch code and configuration"),
     "images": SpaceRule("folder", today="whole"),
     "workspace": SpaceRule("folder", today="whole"),
-    # Each space's document files under its own folder: the root for the
-    # owner's space, spaces/<id> for the others (documents.storage, S1-12).
-    "document-store": SpaceRule("folder", today="apart"),
+    # Each space's document files under its own folder once Spaces is
+    # enforced: the root for the owner's space, spaces/<id> for the others
+    # (documents.storage, S1-12). Before, every tenant's files are in the
+    # root, one tree, as before Spaces.
+    "document-store": SpaceRule("folder", today="whole"),
     "vector_memory": SpaceRule(
         "derived", why="the Knowledge Library's vectors, split as the libraries are",
         today="refuses"),

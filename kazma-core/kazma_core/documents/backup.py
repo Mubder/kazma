@@ -58,32 +58,36 @@ def _sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def _blob_rel_path(tenant_id: str, kind: str, sha: str) -> Path:
-    """Where a backup holds a blob: under its space's folder (Spaces S1-12),
-    whatever folder the live store keeps it in today."""
-    from .storage import blob_rel
+def _blob_rel_path(kind: str, sha: str) -> Path:
+    """A blob's path in the root's own tree (where every tenant's is before
+    Spaces is enforced, and where its copy stays after)."""
+    from .storage import legacy_blob_rel
 
-    return Path(blob_rel(tenant_id, kind, sha))
-
-
-def _required_candidates(primary: str, legacy: str, tenant_id: str) -> list[str]:
-    """The paths a backup may hold a required object at: its space's, and --
-    for a tenant of another space, in a backup an older build made -- the
-    root's, where every tenant's files were (``documents.space_files``)."""
-    from .storage import space_folder
-
-    return [primary, legacy] if space_folder(tenant_id) else [primary]
+    return Path(legacy_blob_rel(kind, sha))
 
 
-def _live_source(root: Path, tenant_id: str, rel: str, legacy: str) -> Path:
-    """Where the live store keeps an object now: its space's folder, or the
-    root while the tenant's files are not copied there yet."""
-    from .storage import space_folder
+def object_places(make: Any, *args: Any) -> tuple[str, ...] | None:
+    """Every place an object can be (``storage.blob_rels`` /
+    ``storage.manifest_rels``), or None, with a WARNING, for a reference whose
+    id names no file (a catalog row an older build wrote badly): it is
+    neither copied nor required, by a backup, its verify or an export alike."""
+    try:
+        return make(*args)
+    except ValueError:
+        logger.warning("[documents.backup] a document reference has an id that names no file; "
+                       "it is left out")
+        return None
 
-    own = root / rel
-    if own.is_file() or not space_folder(tenant_id):
-        return own
-    return root / legacy
+
+def _held_rel(root: Path, rels: tuple[str, ...]) -> str:
+    """Where a backup holds an object: where the live store keeps it (the
+    first of its places that holds it, ``storage.blob_rels``). Before Spaces
+    is enforced that is the root for every tenant, so the backup has the
+    shape it had before Spaces and an older build verifies it; after, a
+    space's files are under its folder (Spaces S1-12)."""
+    from .storage import first_present
+
+    return first_present(root, rels)
 
 
 def installed_document_backends() -> tuple[str, str]:
@@ -235,16 +239,18 @@ def perform_document_backup(
         refs, versions = _read_references(db_dest, promoted_versions=promoted)
         checksums: dict[str, str] = {"documents.db": _sha256_file(db_dest)}
         copied = 0
-        from .storage import legacy_blob_rel, legacy_manifest_rel, manifest_rel
+        from .storage import blob_rels, manifest_rels
 
         for tenant, sha, kind in refs:
-            rel = _blob_rel_path(tenant, kind, sha)
-            rel_key = str(rel).replace("\\", "/")
+            places = object_places(blob_rels, tenant, kind, sha)
+            if places is None:
+                continue
+            rel_key = _held_rel(root, places)
             checksums[rel_key] = sha
-            src = _live_source(root, tenant, rel_key, legacy_blob_rel(kind, sha))
+            src = root / rel_key
             if not src.is_file():
                 continue
-            dst = out / rel
+            dst = out / rel_key
             dst.parent.mkdir(parents=True, exist_ok=True)
             if not dst.exists():
                 shutil.copy2(src, dst)
@@ -252,8 +258,11 @@ def perform_document_backup(
 
         manifests_copied = 0
         for tenant, doc_id, ver_id in versions:
-            rel = manifest_rel(tenant, doc_id, ver_id)
-            src = _live_source(root, tenant, rel, legacy_manifest_rel(doc_id, ver_id))
+            places = object_places(manifest_rels, tenant, doc_id, ver_id)
+            if places is None:
+                continue
+            rel = _held_rel(root, places)
+            src = root / rel
             if not src.is_file():
                 continue
             dst = out / rel
@@ -428,12 +437,15 @@ def verify_document_backup(
     db_path = out / "documents.db"
     if db_path.is_file():
         try:
-            from .storage import blob_rel, legacy_blob_rel, legacy_manifest_rel, manifest_rel
+            from .storage import blob_rels, manifest_rels
 
             refs, _versions = _read_references(db_path, promoted_versions=promoted_versions)
+            # A required object may be held at any of its places: the root
+            # (a backup taken before Spaces was enforced, or by an older
+            # build) or its space's folder (after).
             required = {
-                tuple(_required_candidates(blob_rel(tenant, kind, sha), legacy_blob_rel(kind, sha), tenant))
-                for tenant, sha, kind in refs
+                places for tenant, sha, kind in refs
+                if (places := object_places(blob_rels, tenant, kind, sha)) is not None
             }
             conn = _open_snapshot(db_path)
             try:
@@ -445,8 +457,9 @@ def verify_document_backup(
                              ON d.id=j.document_id AND d.tenant_id=j.tenant_id
                            WHERE j.state='ready' AND d.deleted_at IS NULL"""
                     ):
-                        required.add(tuple(_required_candidates(
-                            manifest_rel(tenant, doc, ver), legacy_manifest_rel(doc, ver), tenant)))
+                        places = object_places(manifest_rels, tenant, doc, ver)
+                        if places is not None:
+                            required.add(places)
             finally:
                 conn.close()
             for candidates in sorted(required):

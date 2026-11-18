@@ -44,32 +44,30 @@ def _workspace() -> str:
     return workspace
 
 
-def _document_scope() -> tuple[str, str, str]:
+def _document_scope(service: Any) -> tuple[str, str, str]:
     """(tenant, workspace, actor): the turn's space and its asker.
 
     Every document surface asks ``documents.principal.surface_scope`` (Spaces
     S1-12): a document uploaded on the Web page is the agent's to read in the
     same space, and the reverse, and nothing crosses spaces. The older
     multi-user mode, which does not enforce Spaces, raises
-    ``DocumentsRefused`` (D1). Blocking.
+    ``DocumentsRefused`` (D1). *service* is the built service: the asker's
+    share of the space's documents is granted through it before the tool
+    reads anything (the first call of a process included). Blocking.
     """
-    from kazma_core.documents.ingestion import peek_ingestion_service
     from kazma_core.documents.principal import surface_scope
 
-    # The running service, if there is one yet (``_ensure_service`` builds
-    # it inside the tool's own error handling); without it nothing is shared
-    # this time, and the asker still reads the documents it owns.
-    acting = surface_scope(peek_ingestion_service())
+    acting = surface_scope(service)
     return acting.tenant_id, _workspace(), acting.actor_id
 
 
-async def _scope() -> tuple[str, str, str] | str:
+async def _scope(service: Any) -> tuple[str, str, str] | str:
     """The tool's scope, or the refusal to answer with (off the event loop;
-    the thread copies the turn's scope)."""
+    the thread copies the turn's scope). Asked after ``_ensure_service``."""
     from kazma_core.documents.principal import DocumentsRefused
 
     try:
-        return await asyncio.to_thread(_document_scope)
+        return await asyncio.to_thread(_document_scope, service)
     except DocumentsRefused as exc:
         return f"Error: {exc}"
 
@@ -124,12 +122,12 @@ async def document_import(path: str, title: str = "") -> str:
     if error:
         return error
     assert resolved is not None
-    scope = await _scope()
-    if isinstance(scope, str):
-        return scope
-    tenant, workspace, actor = scope
     try:
         svc = await _ensure_service()
+        scope = await _scope(svc)
+        if isinstance(scope, str):
+            return scope
+        tenant, workspace, actor = scope
 
         def _ingest() -> Any:
             with resolved.open("rb") as source:
@@ -178,12 +176,12 @@ async def document_status(document_id: str = "", job_id: str = "") -> str:
     returns that job's stage/attempts.
     """
 
-    scope = await _scope()
-    if isinstance(scope, str):
-        return scope
-    tenant, _ws, actor = scope
     try:
         svc = await _ensure_service()
+        scope = await _scope(svc)
+        if isinstance(scope, str):
+            return scope
+        tenant, _ws, actor = scope
         if job_id.strip():
             status = await asyncio.to_thread(
                 svc.job_status, tenant_id=tenant, job_id=job_id.strip(), actor_id=actor
@@ -212,12 +210,12 @@ async def document_read(
 ) -> str:
     """Read paged, fenced content of a processed document by opaque ID."""
 
-    scope = await _scope()
-    if isinstance(scope, str):
-        return scope
-    tenant, _ws, actor = scope
     try:
         svc = await _ensure_service()
+        scope = await _scope(svc)
+        if isinstance(scope, str):
+            return scope
+        tenant, _ws, actor = scope
         data = await asyncio.to_thread(
             svc.get_content,
             tenant_id=tenant,
@@ -249,12 +247,12 @@ async def document_index(document_id: str, library_id: str) -> str:
 
     if not library_id.strip():
         return "Error: library_id is required"
-    scope = await _scope()
-    if isinstance(scope, str):
-        return scope
-    tenant, _ws, actor = scope
     try:
         svc = await _ensure_service()
+        scope = await _scope(svc)
+        if isinstance(scope, str):
+            return scope
+        tenant, _ws, actor = scope
         result = await asyncio.to_thread(
             svc.index_document,
             tenant_id=tenant,
@@ -280,12 +278,12 @@ async def document_search(library_id: str, query: str, top_k: int = 5) -> str:
 
     if not library_id.strip() or not query.strip():
         return "Error: library_id and query are required"
-    scope = await _scope()
-    if isinstance(scope, str):
-        return scope
-    tenant, _ws, actor = scope
     try:
         svc = await _ensure_service()
+        scope = await _scope(svc)
+        if isinstance(scope, str):
+            return scope
+        tenant, _ws, actor = scope
         data = await svc.search_library(
             tenant_id=tenant,
             library_id=library_id.strip(),
@@ -307,12 +305,12 @@ async def document_cancel(job_id: str) -> str:
 
     if not job_id.strip():
         raise RefusedBeforeEffect("Error: job_id is required")
-    scope = await _scope()
-    if isinstance(scope, str):
-        return scope
-    tenant, _ws, actor = scope
     try:
         svc = await _ensure_service()
+        scope = await _scope(svc)
+        if isinstance(scope, str):
+            return scope
+        tenant, _ws, actor = scope
         status = await asyncio.to_thread(
             svc.cancel_job, tenant_id=tenant, job_id=job_id.strip(), actor_id=actor
         )
@@ -336,12 +334,12 @@ async def document_convert(
 
     if not document_id.strip() or not target_format.strip():
         return "Error: document_id and target_format are required"
-    scope = await _scope()
-    if isinstance(scope, str):
-        return scope
-    tenant, workspace, actor = scope
     try:
         svc = await _ensure_service()
+        scope = await _scope(svc)
+        if isinstance(scope, str):
+            return scope
+        tenant, workspace, actor = scope
         data = await svc.convert_document(
             tenant_id=tenant,
             actor_id=actor,
@@ -374,12 +372,12 @@ async def document_redact(
         raise RefusedBeforeEffect("Error: document_id is required")
     if not isinstance(terms, (list, tuple)) or not terms:
         raise RefusedBeforeEffect("Error: at least one redaction term is required")
-    scope = await _scope()
-    if isinstance(scope, str):
-        return scope
-    tenant, workspace, actor = scope
     try:
         svc = await _ensure_service()
+        scope = await _scope(svc)
+        if isinstance(scope, str):
+            return scope
+        tenant, workspace, actor = scope
         data = await svc.redact_document(
             tenant_id=tenant,
             actor_id=actor,

@@ -337,10 +337,12 @@ class DocumentIngestionService:
                                type(exc).__name__, exc)
 
     async def _copy_space_files_once(self) -> None:
-        """Each space's files in its own folder (Spaces S1-12): an older
-        install's files of another tenant are copied out of the root, once,
-        journaled (``documents.space_files``). Reads fall back to the root
-        until a tenant's copy is done, so nothing waits for this."""
+        """Each space's files in its own folder (Spaces S1-12): once Spaces
+        is enforced, an older install's files of another tenant are copied
+        out of the root, journaled (``documents.space_files``; before, every
+        tenant's files stay in the root and nothing is copied). Reads look in
+        the root too, so nothing waits for this. A bad file is the copy's own
+        WARNING; only a failure of the whole run reaches here."""
         from .space_files import copy_into_space_folders
 
         try:
@@ -352,8 +354,8 @@ class DocumentIngestionService:
                            "tries again", type(exc).__name__)
             return
         if report["left"]:
-            logger.warning("[documents.ingestion] %d space(s) still read their files from the root",
-                           len(report["left"]))
+            logger.warning("[documents.ingestion] %d space(s) still read some of their files from the "
+                           "root; the next start tries again", len(report["left"]))
 
     async def _reconcile_index_once(self) -> None:
         """Bring the knowledge index back to what this store records, once
