@@ -281,6 +281,9 @@ def _member_cannot_reword_the_owners_job(w: World) -> None:
     refused = w.call_in_shared("PUT", f"/api/scheduled/cron/{owners.id}", json={"prompt": "my words"})
     assert refused.status_code == 403 and refused.json()["code"] == "not_yours", refused.text
     assert w.held(owners) == before
+    daily = w.call_in_shared("PUT", f"/api/scheduled/cron/{owners.id}", json={"timing": "every day at 09:00"})
+    assert daily.status_code == 403 and daily.json()["code"] == "not_yours", daily.text
+    assert w.held(owners) == before, "a recurrence would fire it as the owner every day"
     timed = w.call_in_shared("PUT", f"/api/scheduled/cron/{owners.id}", json={"timing": "4h"})
     assert timed.status_code == 200, timed.text
     assert w.held(owners)["prompt"] == before["prompt"]

@@ -781,8 +781,9 @@ class CronScheduler:
             timing = " ".join(timing.split())
         else:
             timing = None
-        if prompt is not None:
-            refused = await self._not_theirs_to_change(job_id, tenant_id)
+        if prompt is not None or timing:
+            refused = await self._not_theirs_to_change(
+                job_id, tenant_id, prompt=prompt is not None, recurring=bool(series_start))
             if refused:
                 logger.info("[CronScheduler] edit %s -> %s actor=%s source=%s", job_id, refused,
                             actor or "-", source or "-")
@@ -821,17 +822,21 @@ class CronScheduler:
             expected_version=expected_version, actor=actor, source=source)
         return {"status": status, "job_id": job_id, "next_run": next_run if status == "restored" else ""}
 
-    async def _not_theirs_to_change(self, job_id: str, tenant_id: str | None) -> str:
-        """Why the caller may not change what *job_id* says or run it again,
-        or ``""`` (Spaces S1-14 review).
+    async def _not_theirs_to_change(self, job_id: str, tenant_id: str | None, *,
+                                    prompt: bool = True, recurring: bool = False) -> str:
+        """Why the caller may not make this change to *job_id*, or ``""``
+        (Spaces S1-14 review).
 
         Once Spaces is enforced a job fires as the account it acts for (its
-        creator, ``_fire_binding``): a prompt edited, or a finished job run
-        again, by anyone else would put their words, or their wish, into
-        that person's chat as that person. ``not_yours`` then;
-        ``identity_unavailable`` when the identity store cannot say who the
-        job acts for. Not enforced, and for a job the caller cannot see (the
-        store answers ``not_found``), nothing is refused here.
+        creator, ``_fire_binding``). Anyone else may only move a pending
+        one-off to another one-off time: a new prompt (*prompt*, Run again's
+        default) would put their words into that person's chat as that
+        person, and a time change that makes it recurring (*recurring*), or
+        one recorded while it fires (applied when the fire ends, which puts a
+        finished one-off back), would run it again as them. ``not_yours``
+        then; ``identity_unavailable`` when the identity store cannot say
+        who the job acts for. Not enforced, and for a job the caller cannot
+        see (the store answers ``not_found``), nothing is refused here.
         """
         from kazma_core.spaces.identity import IdentityUnavailable
         from kazma_core.spaces.scope import bound_asker, spaces_enforced
@@ -848,20 +853,30 @@ class CronScheduler:
             return "identity_unavailable"
         acts_for = binding.asker if binding is not None else ""
         caller = bound_asker() or ""
-        return "" if caller and caller == acts_for else "not_yours"
+        if caller and caller == acts_for:
+            return ""
+        if prompt or recurring or job.status != JobStatus.PENDING or job.series_start:
+            return "not_yours"
+        return ""  # someone else moving a pending one-off to another one-off time
 
-    async def _hold_for_identity(self, job: ScheduledJob, exc: BaseException) -> None:
-        """A fire whose binding cannot be read gives its claim back: the job
-        is pending again at the same occurrence, as a task held while the
-        database is away (§44). A failure of the database itself is reported
-        to the availability watch, so the next passes hold before claiming."""
+    async def _hold_for_identity(self, job: ScheduledJob, exc: BaseException) -> bool:
+        """A fire whose binding cannot be read because the database is away
+        gives its claim back: the job is pending again at the same
+        occurrence, as a task held while the database is away (§44), and the
+        availability watch holds the next passes before they claim. True
+        then. False for any other failure (a registry that is not a mapping):
+        the caller fails the fire once, never claims it again every pass."""
         from kazma_core.db import availability
 
         cause = exc.__cause__ if exc.__cause__ is not None else exc
-        availability.note_failure("scheduled", cause)
+        if not availability.note_failure("scheduled", cause):
+            logger.error("[CronScheduler] %s: who it fires as cannot be read (%s); the fire fails", job.job_id,
+                         type(cause).__name__)
+            return False
         released = await self._store.release_fire(job.job_id, owner=self._owner, reason="identity_unavailable")
         logger.warning("[CronScheduler] %s waits: who it fires as cannot be read (%s); %s", job.job_id,
                        type(cause).__name__, "held for the next pass" if released else "the claim was gone")
+        return True
 
     # ── the poll loop ────────────────────────────────────────────────────
 
@@ -1064,8 +1079,9 @@ class CronScheduler:
             try:
                 binding = await asyncio.to_thread(_fire_binding, job)
             except IdentityUnavailable as exc:
-                await self._hold_for_identity(job, exc)
-                return
+                if await self._hold_for_identity(job, exc):
+                    return
+                binding = _FireBinding(space="", asker="", refusal="identity_unavailable")
             if binding is not None and not binding.refusal:
                 from kazma_core.spaces.scope import set_scope
 
@@ -1243,10 +1259,13 @@ class CronScheduler:
         except IdentityUnavailable as exc:
             from kazma_core.db import availability
 
-            availability.note_failure("scheduled", exc.__cause__ if exc.__cause__ is not None else exc)
-            logger.warning("[CronScheduler] %s missed, but who it acts for cannot be read; recorded next pass",
-                           job.job_id)
-            return
+            if availability.note_failure("scheduled", exc.__cause__ if exc.__cause__ is not None else exc):
+                logger.warning("[CronScheduler] %s missed, but who it acts for cannot be read; recorded next "
+                               "pass", job.job_id)
+                return
+            # Not an outage: recorded missed now, and no notice (who would
+            # read it cannot be told).
+            binding = _FireBinding(space="", asker="", refusal="identity_unavailable")
         refused = binding.refusal if binding is not None else ""
         zone, zone_name = await asyncio.to_thread(resolve_cron_zone)
         due = _parse_dt(job.next_run)
@@ -1415,6 +1434,8 @@ _FIRE_REFUSALS = {
     "no_space": "Error: this job belongs to no space of this install, so it does not fire.",
     "no_own_address": ("Error: this job acts for someone other than the owner, and the only "
                        "addresses Kazma has are the owner's, so it does not fire."),
+    "identity_unavailable": ("Error: the accounts of this install cannot be read, so who this job "
+                             "acts for is unknown and it does not fire."),
 }
 
 

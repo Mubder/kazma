@@ -333,9 +333,65 @@ async def _owners_job_in_shared(sched, store, matrix) -> ScheduledJob:
     return job
 
 
-async def _nobody_refused(self, job_id: str, tenant_id: str | None) -> str:
+async def _nobody_refused(self, job_id: str, tenant_id: str | None, **_change: Any) -> str:
     """The rule taken out: every change is the caller's to make."""
     return ""
+
+
+async def _prompt_only_rule(self, job_id: str, tenant_id: str | None, *, prompt: bool = True,
+                            recurring: bool = False) -> str:
+    """The first rule of the S1-14 review: only a new prompt (and Run again)
+    was refused to someone else; any new time passed."""
+    return await _FIRST_RULE(self, job_id, tenant_id) if prompt else ""
+
+
+async def _FIRST_RULE(self, job_id: str, tenant_id: str | None) -> str:  # noqa: N802
+    from kazma_core.spaces.scope import bound_asker
+
+    job = await self._store.get(job_id, tenant_id=tenant_id)
+    if job is None:
+        return ""
+    binding = sm._fire_binding(job)
+    acts_for = binding.asker if binding is not None else ""
+    caller = bound_asker() or ""
+    return "" if caller and caller == acts_for else "not_yours"
+
+
+async def test_a_member_cannot_make_the_owners_job_run_again_by_its_time(tmp_path, matrix, enforced,
+                                                                        sent) -> None:
+    """Someone else may only move a pending one-off to another one-off time:
+    a recurrence would fire it as the owner every day, and a time recorded
+    while it fires puts the finished one-off back."""
+    store = await _store(tmp_path)
+    sched = sm.CronScheduler(store=store, graph_builder=None)
+    try:
+        job = await _owners_job_in_shared(sched, store, matrix)
+        with scope.bind_scope(SHARED, matrix.account_a):
+            daily = await sched.reschedule(job.job_id, timing="every day at 09:00", tenant_id=SHARED)
+        assert daily["status"] == "not_yours"
+        assert (await store.get(job.job_id)).series_start == ""
+        assert await store.claim_job(job.job_id, owner="another-runtime")  # it is firing now
+        with scope.bind_scope(SHARED, matrix.account_a):
+            during = await sched.reschedule(job.job_id, timing="3h", tenant_id=SHARED)
+        assert during["status"] == "not_yours"
+        assert not (await store.get(job.job_id)).pending_edit
+    finally:
+        await store.close()
+
+
+async def test_control_the_prompt_only_rule_lets_a_time_make_it_recur(tmp_path, matrix, enforced,
+                                                                      monkeypatch) -> None:
+    monkeypatch.setattr(sm.CronScheduler, "_not_theirs_to_change", _prompt_only_rule)
+    store = await _store(tmp_path)
+    sched = sm.CronScheduler(store=store, graph_builder=None)
+    try:
+        job = await _owners_job_in_shared(sched, store, matrix)
+        with scope.bind_scope(SHARED, matrix.account_a):
+            daily = await sched.reschedule(job.job_id, timing="every day at 09:00", tenant_id=SHARED)
+        assert daily["status"] == "rescheduled"
+        assert (await store.get(job.job_id)).series_start, "the owner's one-off now fires every day"
+    finally:
+        await store.close()
 
 
 async def test_a_member_cannot_put_words_into_a_job_that_fires_as_the_owner(tmp_path, matrix, enforced,
@@ -418,6 +474,11 @@ def test_the_shared_space_cases_fail_without_the_rule(target, matrix, monkeypatc
     _fails(target, matrix)
 
 
+def test_the_shared_space_edit_case_fails_with_the_prompt_only_rule(matrix, monkeypatch) -> None:
+    monkeypatch.setattr(sm.CronScheduler, "_not_theirs_to_change", _prompt_only_rule)
+    _fails("PUT /api/scheduled/cron/{job_id}", matrix)
+
+
 def test_not_enforced_anyone_may_reword_a_job_as_before(tmp_path, matrix) -> None:
     """One account, or Spaces not enforced: the rule asks nothing."""
     import asyncio
@@ -439,17 +500,34 @@ def test_not_enforced_anyone_may_reword_a_job_as_before(tmp_path, matrix) -> Non
 
 
 def _identity_unreadable(_job: ScheduledJob) -> Any:
-    raise identity.IdentityUnavailable("the identity store could not be read: OperationalError")
+    """Not an outage: a registry that cannot be read as one (no cause)."""
+    raise identity.IdentityUnavailable("kazma.identity holds str, not a mapping")
 
 
-async def test_a_fire_whose_binding_cannot_be_read_waits_and_resets(tmp_path, matrix, enforced, sent,
-                                                                     monkeypatch) -> None:
+def _database_away(_job: ScheduledJob) -> Any:
+    """An outage: the identity store's read could not reach the database."""
+    from kazma_core.db.postgres_pool import PostgresUnreachable
+
+    raise identity.IdentityUnavailable("the identity store could not be read: PostgresUnreachable") \
+        from PostgresUnreachable(3, "connection refused")
+
+
+@pytest.fixture
+def watch(monkeypatch):
+    """The real availability watch, with no prober thread signing in."""
     from kazma_core.db import availability
+
+    availability.reset()
+    monkeypatch.setattr(availability, "_spawn_prober", lambda *_a, **_k: None)
+    yield availability
+    availability.reset()
+
+
+async def test_a_fire_held_by_a_database_outage_waits_and_resets(tmp_path, matrix, enforced, sent, watch,
+                                                                 monkeypatch) -> None:
     from kazma_core.tenant_context import get_current_tenant_id
 
-    monkeypatch.setattr(sm, "_fire_binding", _identity_unreadable)
-    noted: list[str] = []
-    monkeypatch.setattr(availability, "note_failure", lambda kind, exc=None, **_kw: noted.append(kind) or False)
+    monkeypatch.setattr(sm, "_fire_binding", _database_away)
     store = await _store(tmp_path)
     sched = sm.CronScheduler(store=store, graph_builder=None)
     try:
@@ -460,7 +538,60 @@ async def test_a_fire_whose_binding_cannot_be_read_waits_and_resets(tmp_path, ma
         assert after.status == JobStatus.PENDING, "the job waits"
         assert after.last_outcome != "failed" and sent == []
         assert get_current_tenant_id() == outside and scope.current_scope() is None
-        assert noted == ["scheduled"] and job.job_id not in sched._in_flight
+        assert watch.is_away(), "the next passes hold before they claim"
+        assert job.job_id not in sched._in_flight
+    finally:
+        await store.close()
+
+
+async def test_a_binding_failure_that_is_no_outage_fails_the_fire_once(tmp_path, matrix, enforced, sent, watch,
+                                                                        monkeypatch) -> None:
+    """A registry that cannot be read as one is no outage: the fire fails
+    (counted, alerted), never claimed and released again every pass."""
+    monkeypatch.setattr(sm, "_fire_binding", _identity_unreadable)
+    store = await _store(tmp_path)
+    sched = sm.CronScheduler(store=store, graph_builder=None)
+    try:
+        job = await _plant(store, tenant=OWNER_SPACE_ID, creator=OWNER_ACCOUNT_ID)
+        after = await _fire(sched, store, job.job_id)
+        assert after.last_outcome == "identity_unavailable", after.last_outcome
+        assert after.status != JobStatus.RUNNING and after.failure_count == 1
+        assert sent == [] and not watch.is_away()
+    finally:
+        await store.close()
+
+
+async def test_control_holding_every_binding_failure_loops(tmp_path, matrix, enforced, watch, monkeypatch) -> None:
+    """Negative control: a hold for any failure gives the claim back with
+    nothing failed, so a store that never reads again is claimed and
+    released every pass, and the job never ends."""
+    async def always_hold(self, job, exc):
+        await self._store.release_fire(job.job_id, owner=self._owner, reason="identity_unavailable")
+        return True
+
+    monkeypatch.setattr(sm, "_fire_binding", _identity_unreadable)
+    monkeypatch.setattr(sm.CronScheduler, "_hold_for_identity", always_hold)
+    store = await _store(tmp_path)
+    sched = sm.CronScheduler(store=store, graph_builder=None)
+    try:
+        job = await _plant(store, tenant=OWNER_SPACE_ID, creator=OWNER_ACCOUNT_ID)
+        for _ in range(3):
+            after = await _fire(sched, store, job.job_id)
+        assert after.status == JobStatus.PENDING and after.failure_count == 0
+    finally:
+        await store.close()
+
+
+async def test_a_missed_job_whose_binding_is_no_outage_is_recorded_without_a_notice(
+        tmp_path, matrix, enforced, sent, watch, monkeypatch) -> None:
+    monkeypatch.setattr(sm, "_fire_binding", _identity_unreadable)
+    store = await _store(tmp_path)
+    sched = sm.CronScheduler(store=store, graph_builder=None)
+    try:
+        job = await _plant(store, tenant=OWNER_SPACE_ID, creator=OWNER_ACCOUNT_ID, due_ago=timedelta(hours=3))
+        await sched._record_missed(await store.get(job.job_id), datetime.now(UTC))
+        assert (await store.get(job.job_id)).status == JobStatus.MISSED
+        assert await store.deliveries_for(job.job_id, limit=10) == [] and sent == []
     finally:
         await store.close()
 
@@ -472,7 +603,7 @@ async def test_control_without_the_hold_the_fire_stays_claimed(tmp_path, matrix,
     async def no_hold(self, job, exc):
         raise exc
 
-    monkeypatch.setattr(sm, "_fire_binding", _identity_unreadable)
+    monkeypatch.setattr(sm, "_fire_binding", _database_away)
     monkeypatch.setattr(sm.CronScheduler, "_hold_for_identity", no_hold)
     store = await _store(tmp_path)
     sched = sm.CronScheduler(store=store, graph_builder=None)

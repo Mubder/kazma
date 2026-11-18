@@ -12625,18 +12625,22 @@ product can turn it on, so an install with one account behaves as before.
     sending a member's job to the owner's chat.
   - A job takes a sibling's address only within its tenant
     (`sibling_delivery_target(thread_id, tenant_id)`).
-  - **What a job says is its person's** (S1-14 review): a new prompt and Run
-    again need the caller to be the account the job fires as
-    (`CronScheduler._not_theirs_to_change`: `not_yours`, 403; a new time is
-    anyone's in the space). In a shared space a member's words would
-    otherwise reach the owner's chat as the owner.
+  - **What a job says and when it runs again are its person's** (S1-14
+    review): only the account the job fires as may give it a new prompt,
+    Run it again, make it recurring, or change its time while it fires
+    (`CronScheduler._not_theirs_to_change`: `not_yours`, 403). Anyone else in
+    the space may only move a pending one-off to another one-off time. In a
+    shared space a member's words, or a daily recurrence, would otherwise
+    reach the owner's chat as the owner.
   - **The fire's binding is inside its `try`**: an identity store that
-    cannot answer gives the claim back at the same occurrence
-    (`_hold_for_identity`, reported to the database watch), and while the
-    database is away the poll holds reminders too once Spaces is enforced
-    (who a reminder fires as is in the database). The missed path asks the
-    same fire rule: a job that would not fire is recorded missed and queues
-    no notice (`mark_missed(refused=)`).
+    cannot answer because the database is away gives the claim back at the
+    same occurrence (`_hold_for_identity`, reported to the database watch),
+    and while the database is away the poll holds reminders too once Spaces
+    is enforced (who a reminder fires as is in the database). Any other
+    failure to read it (a registry that is not a mapping) fails the fire
+    once (`identity_unavailable`), never a claim and release every pass. The
+    missed path asks the same fire rule: a job that would not fire is
+    recorded missed and queues no notice (`mark_missed(refused=)`).
   - Gates: `tests/_scheduled_space_cases.py` (the matrix cases, a member of
     a shared space among them), `tests/test_cron_spaces.py` (each guard
     taken out as a control).
