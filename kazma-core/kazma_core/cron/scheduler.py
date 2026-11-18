@@ -1480,13 +1480,10 @@ def _fire_binding(job: ScheduledJob) -> _FireBinding | None:
 
     if not spaces_enforced():
         return None
-    space = str(job.tenant_id or "")
-    spaces = identity.read_registry().get("spaces") or {}
-    if space not in spaces:
+    found = identity.work_scope(str(job.tenant_id or ""), job.creator)
+    if found is None:
         return _FireBinding(space="", asker="", refusal="no_space")
-    asker = str(job.creator or "")
-    if not asker or not identity.is_member(asker, space):
-        asker = identity.acting_account(space)
+    space, asker = found
     if asker != _owner_account():
         return _FireBinding(space=space, asker=asker, refusal="no_own_address")
     return _FireBinding(space=space, asker=asker)

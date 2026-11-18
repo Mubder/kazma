@@ -934,12 +934,17 @@ class SwarmEngine:
         task.status = TaskStatus.RUNNING
         task.generation = int(task.generation or 0) + 1
         task.run_id = _new_run_id()
-        # Stamp tenant for multi-tenant list isolation (metadata filter).
+        # Stamp tenant for multi-tenant list isolation (metadata filter), and
+        # the account that asked (Spaces S1-15, always stamped when one is
+        # bound): once Spaces is enforced the task's workers run as them.
         try:
+            from kazma_core.spaces.scope import bound_asker
             from kazma_core.tenant_isolation import require_tenant_id
 
             task.metadata = dict(task.metadata or {})
             task.metadata.setdefault("tenant_id", require_tenant_id())
+            if bound_asker():
+                task.metadata.setdefault("asker", bound_asker())
         except Exception:
             # An unstamped task is listed for every tenant (SW-E14: was silent).
             logger.warning("[SwarmEngine] could not stamp the tenant of task '%s'", task.id, exc_info=True)

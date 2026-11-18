@@ -79,6 +79,41 @@ async def _index_worker_l4_memory(
         logger.debug("[SwarmEngine] V2 swarm_result store failed for %s", name, exc_info=True)
 
 
+class _TaskOfNoSpace(RuntimeError):
+    """A swarm task names no space of this install, with Spaces enforced: its
+    worker does not run (Spaces S1-15)."""
+
+
+def _worker_scope(tenant_id: str | None, asker: str | None) -> Any:
+    """The context a worker runs in. Blocking (the identity store).
+
+    Not enforced: the task's tenant, else ``default``, as before Spaces.
+    Enforced: the task's space and the account that asked for it, while
+    still a member, else the account Kazma's work for that space acts for
+    (``identity.work_scope``); a task of no space raises
+    :class:`_TaskOfNoSpace` and runs nothing.
+    """
+    from kazma_core.spaces.scope import bind_scope, spaces_enforced
+    from kazma_core.tenant_context import tenant_scope
+
+    if not spaces_enforced():
+        return tenant_scope(tenant_id or "default")
+    from kazma_core.spaces.identity import work_scope
+
+    found = work_scope(str(tenant_id or ""), asker)
+    if found is None:
+        raise _TaskOfNoSpace("this task belongs to no space of this install, so its worker does not run")
+    return bind_scope(*found)
+
+
+def _space_of(context: Any) -> str:
+    """The task's space, for the worker's log and status (Spaces S1-15); ``""``
+    when the dispatch carries none."""
+    if isinstance(context, SwarmDispatchContext):
+        return str((context.metadata or {}).get("tenant_id") or "")
+    return ""
+
+
 def _end_claim(engine: SwarmEngine, worker: SwarmWorker) -> None:
     """A dispatch its breaker refused never began: the autoscaler's claim on
     the instance ends here, so the next task gets it (and its breaker) rather
@@ -116,6 +151,7 @@ async def dispatch_worker(
     occurs the list contains the source worker's result followed by
     every result from the target chain.
     """
+    _task_space = _space_of(context)
     # Normalize "no deadline" inputs BEFORE they reach TimeoutGuard
     # (same semantics as dispatch_helpers.wait_timeout): the guard's
     # execute() raises ValueError for timeout <= 0 and treats None as
@@ -233,7 +269,7 @@ async def dispatch_worker(
             # One dispatch is one in-flight count, however many attempts its
             # retry policy makes: mark_completed runs once (SW-E12).
             if not dispatched:
-                worker.mark_dispatched(prompt)
+                worker.mark_dispatched(prompt, space=_task_space)
             dispatched = True
             # Record activity for auto-scaler reaping
             if engine._autoscaler is not None:
@@ -245,15 +281,16 @@ async def dispatch_worker(
                 from kazma_core.ide.workspace_scope import workspace_scope
                 from kazma_core.safety.commitment.scope import swarm_scope
                 from kazma_core.safety.outside_text_fetch import outside_text_scope
-                from kazma_core.tenant_context import tenant_scope
 
                 tid = None
+                asker = None
                 unrestricted = None
                 carried = None
                 if isinstance(context, SwarmDispatchContext):
                     raw = (context.metadata or {}).get("tenant_id")
                     if raw:
                         tid = str(raw)
+                    asker = (context.metadata or {}).get("asker")
                     # Sent from a chat under /unrestricted: the worker's
                     # budgets follow it (agent.unrestricted).
                     if "unrestricted" in (context.metadata or {}):
@@ -266,7 +303,12 @@ async def dispatch_worker(
                 # worker with no ContextVar reads every vault:// pointer as
                 # missing and the registry substitutes a different provider
                 # (audit 2026-09-17). Install metadata tenant, else default.
-                with tenant_scope(tid or "default"), unrestricted_scope(unrestricted):
+                # Once Spaces is enforced the worker runs as a whole scope:
+                # the task's space and the account that asked for it (S1-15),
+                # so every tool call lands in that space; a task of no space
+                # of this install does not run.
+                bound = await asyncio.to_thread(_worker_scope, tid, asker)
+                with bound, unrestricted_scope(unrestricted):
                     # Both managers no-op when their token is None, so always wrap.
                     async with workspace_scope(_ws_id), swarm_scope(_scope_token):
                         # The task's text is the user's message for its
@@ -405,7 +447,7 @@ async def dispatch_worker(
         await asyncio.to_thread(_record_outcome)
         recorded = True
 
-        worker.mark_completed(worker_result.status)
+        worker.mark_completed(worker_result.status, space=_task_space)
         dispatched = False  # busy released on the normal result path
         # Stamp activity at completion so a long task does not look idle
         # the moment busy drops (M-14). reap_idle also skips busy workers.
@@ -486,7 +528,8 @@ async def dispatch_worker(
                 worker.mark_completed(
                     "cancelled"
                     if isinstance(exc, asyncio.CancelledError)
-                    else "error"
+                    else "error",
+                    space=_task_space,
                 )
                 if engine._autoscaler is not None:
                     engine._autoscaler.record_activity(worker.name)

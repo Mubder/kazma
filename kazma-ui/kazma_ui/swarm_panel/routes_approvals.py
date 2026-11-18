@@ -44,6 +44,14 @@ def _actor(request: Request) -> str:
     return str(principal.get("username") or principal.get("user_id") or "web user")
 
 
+def _not_this_spaces(view: dict[str, Any] | None) -> bool:
+    """True for a request this page may not see: once Spaces is enforced,
+    one of another space (Spaces S1-15). Answered as an unknown one."""
+    from kazma_core.spaces.scope import require_space_id, spaces_enforced
+
+    return view is not None and spaces_enforced() and str(view.get("space") or "") != require_space_id()
+
+
 def register_approval_routes(router: APIRouter) -> None:
     """The approval panel's two routes. Plain ``def``s: each reads the
     settings store and the gate registry, off the event loop."""
@@ -53,7 +61,7 @@ def register_approval_routes(router: APIRouter) -> None:
         from kazma_core.swarm import shared_approvals
 
         view = shared_approvals.describe(valid_approval_id(approval_id))
-        if view is None:
+        if view is None or _not_this_spaces(view):
             return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
         return JSONResponse({"ok": True, "approval": view})
 
@@ -65,6 +73,8 @@ def register_approval_routes(router: APIRouter) -> None:
         if decision not in ("approve", "deny"):
             return JSONResponse({"ok": False, "error": "bad_decision"}, status_code=422)
         approval_id = valid_approval_id(approval_id)
+        if _not_this_spaces(shared_approvals.describe(approval_id)):
+            return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
         actor = _actor(request)
         decided = shared_approvals.decide_from_web(approval_id, decision == "approve", actor=actor)
         if decided is None:

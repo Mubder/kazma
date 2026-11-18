@@ -888,10 +888,13 @@ def register_system_tools(registry: Any) -> None:
         async def lookup() -> Any:
             # In-memory active tasks first, then TaskStore (persisted) -- a
             # database read, in a thread (this tool runs on the event loop).
+            from kazma_core.swarm.single_operator import task_of_this_space
+
             found = engine.get_active_task(task_id) if engine else None
             if found is None and engine and getattr(engine, "_task_store", None):
                 found = await _asyncio.to_thread(engine._task_store.get_task, task_id)
-            return found
+            # Another space's task reads as an unknown one (Spaces S1-15).
+            return found if found is not None and task_of_this_space(found) else None
 
         def unfinished(found: Any) -> bool:
             return str(found.status).lower().replace("taskstatus.", "") in ("running", "pending")

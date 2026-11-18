@@ -155,6 +155,7 @@ def describe(approval_id: str) -> dict[str, Any] | None:
         digest = gate.args_digest or arguments_digest(args)
     return {
         "id": approval_id,
+        "space": str((row or {}).get("space") or (gate.tenant_id if gate else "") or ""),
         "tool": tool,
         "status": status,
         "arguments": redacted_arguments_json(tool, args),
@@ -207,9 +208,12 @@ def open_request(
     args: str | None,
     deadline: float,
     platforms: int = 1,
+    space: str = "",
 ) -> dict[str, Any]:
     """Open the row for a new request. An id is opened once: a row already
-    there (a reused id) raises, so no request ever inherits a decision."""
+    there (a reused id) raises, so no request ever inherits a decision.
+    *space* is the space the asking worker runs in (Spaces S1-15, always
+    stamped): the Web page shows and decides it only there."""
     if not approval_id:
         raise ValueError("an approval request needs an id")
     row = {
@@ -219,6 +223,7 @@ def open_request(
         "opened_at": time.time(),
         "deadline_at": float(deadline),
         "platforms": max(1, int(platforms or 1)),
+        "space": str(space or ""),
     }
     created = [False]
 

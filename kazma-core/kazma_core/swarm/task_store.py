@@ -575,6 +575,13 @@ class TaskStore:
         # Multi-tenant hard filter: inject tenant_id unless caller opts out
         # via metadata_filter={"tenant_id": "*"} or KAZMA_TENANT_FILTER=0.
         metadata_filter = dict(metadata_filter or {})
+        from kazma_core.spaces.scope import require_space_id, spaces_enforced
+
+        if spaces_enforced() and metadata_filter.get("tenant_id") != "*":
+            # Spaces S1-15: a space's list is its own, whatever the older
+            # switches say; with no space bound it is refused (NoSpaceBound),
+            # never every space's. Kazma's own work asks with "*".
+            metadata_filter["tenant_id"] = require_space_id()
         try:
             import os as _os_tf
 

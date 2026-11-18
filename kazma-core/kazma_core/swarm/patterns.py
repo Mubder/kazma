@@ -230,7 +230,42 @@ async def _run_self_improvement(
 
     Each worker is analyzed against ONLY its own result (not all stages),
     avoiding redundant LLM calls and misattribution.
+
+    Once Spaces is enforced the lessons are the task's space's, learned as
+    the person the task runs for (``identity.work_scope``, as its workers
+    run): kept in that space's Soul, never in the worker's prompt every space
+    shares (S1-15). A task of no space teaches nothing.
     """
+    from kazma_core.spaces.scope import bind_scope, spaces_enforced
+
+    if not spaces_enforced():
+        await _learn_from_workers(task, worker_results, status, space=None)
+        return
+    meta = task.metadata or {}
+    from kazma_core.spaces.identity import IdentityUnavailable, work_scope
+
+    try:
+        found = await asyncio.to_thread(work_scope, str(meta.get("tenant_id") or ""), meta.get("asker"))
+    except IdentityUnavailable:
+        logger.warning("[SwarmPatterns] the task's space cannot be read; no lessons from task %s", task.id,
+                       exc_info=True)
+        return
+    if found is None:
+        logger.info("[SwarmPatterns] task %s belongs to no space: no lessons", task.id)
+        return
+    with bind_scope(*found):
+        await _learn_from_workers(task, worker_results, status, space=found[0])
+
+
+async def _learn_from_workers(
+    task: SwarmTask,
+    worker_results: list[WorkerResult],
+    status: str,
+    *,
+    space: str | None,
+) -> None:
+    """The hook's body: each worker's result analyzed, its lesson applied
+    (in *space*'s Soul once Spaces is enforced)."""
     try:
         from kazma_core.skills.self_improvement import (
             get_self_improvement,
@@ -277,9 +312,9 @@ async def _run_self_improvement(
             if analysis.get("action") == "mutate":
                 _delta = analysis["delta"]
                 _cid = await asyncio.to_thread(
-                    mint_soul_commitment, _delta, worker_name=res.worker
+                    mint_soul_commitment, _delta, worker_name=res.worker, space=space
                 )
-                await si.apply_mutation(res.worker, _delta, commitment_id=_cid)
+                await si.apply_mutation(res.worker, _delta, commitment_id=_cid, space=space)
     except Exception as exc:
         logger.warning("[SwarmPatterns] Self-improvement hook failed: %s", exc)
 

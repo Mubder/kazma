@@ -105,6 +105,23 @@ def register_tasks_routes(
         svc = get_swarm_service()
         return svc.resolve_engine(swarm_manager)
 
+    def _not_here(engine: Any, task_id: str) -> JSONResponse | None:
+        """The answer for a task this request may not see, else None.
+
+        Once Spaces is enforced a task of another space answers exactly as
+        an unknown one (Spaces S1-15). Blocking (the task store)."""
+        from kazma_core.spaces.scope import spaces_enforced
+        from kazma_core.swarm.single_operator import task_of_this_space
+
+        if not spaces_enforced():
+            return None
+        store = getattr(engine, "task_store", None) or getattr(engine, "_task_store", None)
+        task = (engine.get_active_task(task_id) if hasattr(engine, "get_active_task") else None) \
+            or engine.get_task(task_id) or (store.get_task(task_id) if store is not None else None)
+        if task is None or not task_of_this_space(task):
+            return JSONResponse({"status": "error", "message": f"Task '{task_id}' not found"}, status_code=404)
+        return None
+
     def _require_admin(request: Request) -> JSONResponse | None:
         """Admin/operator gate for the task action routes (approve/reject/cancel/retry).
 
@@ -112,9 +129,15 @@ def register_tasks_routes(
         authenticated user could approve/reject/cancel another user's swarm
         HITL checkpoint (audit finding). No-secret deployments pass; a check
         that raises now DENIES — this copy used to allow (audit 2026-09-22).
+        Once Spaces is enforced these are a space's own work (``route_roles``
+        SPACE, Spaces S1-15): the route's role check asked for the space,
+        and the task is checked to be the space's (:func:`_not_here`).
         """
+        from kazma_core.spaces.scope import spaces_enforced
         from kazma_ui.auth import admin_decision
 
+        if spaces_enforced():
+            return None
         decision = admin_decision(request)
         if decision == "ok":
             return None
@@ -500,10 +523,14 @@ def register_tasks_routes(
             }
         )
         if uses_external_dispatch:
+            from kazma_core.spaces.scope import current_scope
+
+            _bound = current_scope()
+            _space = _bound.space_id if _bound is not None else ""
             for name in dispatched:
                 worker = engine.get_worker(name)
                 if worker is not None:
-                    worker.mark_dispatched(task)
+                    worker.mark_dispatched(task, space=_space)
                 try:
                     result = await swarm_manager.dispatch(name, task, context)
                 except Exception:
@@ -516,7 +543,7 @@ def register_tasks_routes(
                         "error": "Dispatch failed — check server logs for details.",
                     }
                 if worker is not None:
-                    worker.mark_completed(result.get("status", "error"))
+                    worker.mark_completed(result.get("status", "error"), space=_space)
                 results.append(result)
             return JSONResponse(
                 {
@@ -632,7 +659,9 @@ def register_tasks_routes(
         svc = get_swarm_service()
         if not svc.has_swarm_core() or engine is None:
             return JSONResponse({"tasks": [], "count": 0})
-        active = engine.list_active_tasks()
+        from kazma_core.swarm.single_operator import task_of_this_space
+
+        active = [t for t in engine.list_active_tasks() if task_of_this_space(t)]
         flat = [_flatten_swarm_task(t) for t in active]
         return JSONResponse({"tasks": flat, "count": len(flat)})
 
@@ -693,7 +722,10 @@ def register_tasks_routes(
             })
 
         # Fallback to in-memory history.
-        tasks = [task.to_dict() if hasattr(task, 'to_dict') else dict(task) for task in engine.list_tasks(task_type)]
+        from kazma_core.swarm.single_operator import task_of_this_space
+
+        tasks = [task.to_dict() if hasattr(task, 'to_dict') else dict(task) for task in engine.list_tasks(task_type)
+                 if task_of_this_space(task)]
         return JSONResponse({"tasks": tasks, "count": len(tasks)})
 
     @router.get("/api/swarm/tasks/export")
@@ -765,7 +797,9 @@ def register_tasks_routes(
             task = store.get_task(task_id)
         if task is None:
             task = engine.get_task(task_id)
-        if task is None:
+        from kazma_core.swarm.single_operator import task_of_this_space
+
+        if task is None or not task_of_this_space(task):
             return JSONResponse(
                 {"status": "error", "message": f"Task '{task_id}' not found"},
                 status_code=404,
@@ -781,6 +815,9 @@ def register_tasks_routes(
         _denied = await asyncio.to_thread(_require_admin, request)
         if _denied is not None:
             return _denied
+        _hidden = await asyncio.to_thread(_not_here, _current_engine(), task_id)
+        if _hidden is not None:
+            return _hidden
         engine = _current_engine()
         svc = get_swarm_service()
         if not svc.has_swarm_core() or engine is None:
@@ -875,6 +912,9 @@ def register_tasks_routes(
         _denied = await asyncio.to_thread(_require_admin, request)
         if _denied is not None:
             return _denied
+        _hidden = await asyncio.to_thread(_not_here, _current_engine(), task_id)
+        if _hidden is not None:
+            return _hidden
         engine = _current_engine()
         svc = get_swarm_service()
         if not svc.has_swarm_core() or engine is None:
@@ -929,6 +969,9 @@ def register_tasks_routes(
         _denied = await asyncio.to_thread(_require_admin, request)
         if _denied is not None:
             return _denied
+        _hidden = await asyncio.to_thread(_not_here, _current_engine(), task_id)
+        if _hidden is not None:
+            return _hidden
         from kazma_ui.swarm_panel.task_actions import cancel_task
 
         outcome = await cancel_task(task_id)
@@ -942,6 +985,9 @@ def register_tasks_routes(
         _denied = await asyncio.to_thread(_require_admin, request)
         if _denied is not None:
             return _denied
+        _hidden = await asyncio.to_thread(_not_here, _current_engine(), task_id)
+        if _hidden is not None:
+            return _hidden
         """Retry a failed/timeout/cancelled task by re-dispatching."""
         from kazma_ui.swarm_panel.task_actions import retry_task
 

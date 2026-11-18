@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from kazma_ui.swarm_panel.route_roles import ADMIN, SWARM_ROUTE_ROLES, USER
+from kazma_ui.swarm_panel.route_roles import ADMIN, SPACE, SWARM_ROUTE_ROLES, USER, role_for
 
 
 def _routes() -> set[tuple[str, str]]:
@@ -40,7 +40,7 @@ def test_every_swarm_route_is_in_the_role_table() -> None:
     assert not missing, f"swarm routes with no role: {missing}"
     stale = sorted(set(SWARM_ROUTE_ROLES) - routes)
     assert not stale, f"roles for routes that no longer exist: {stale}"
-    assert set(SWARM_ROUTE_ROLES.values()) <= {USER, ADMIN}
+    assert set(SWARM_ROUTE_ROLES.values()) <= {USER, ADMIN, SPACE}
 
 
 def test_every_swarm_route_asks_the_table() -> None:
@@ -72,9 +72,20 @@ def test_every_swarm_route_asks_the_table() -> None:
     assert not isinstance(bare.routes[0], RoleCheckedRoute)
 
 
-def test_reading_is_for_users_and_changing_is_for_the_operator() -> None:
+def test_reading_is_for_users_and_changing_is_for_the_operator(monkeypatch) -> None:
+    """Every change is the operator's while Spaces is not enforced, as before
+    (``role_for``). A space's own work (``SPACE``: a dispatch, a task's
+    actions, a bus approval's decision) is its member's once it is enforced
+    (Spaces S1-15); the install's swarm stays the admin's."""
+    from kazma_core.spaces import scope
+
+    monkeypatch.setattr(scope, "_enforced", False)
     for (method, path), role in SWARM_ROUTE_ROLES.items():
-        assert role == (USER if method == "GET" else ADMIN), (method, path, role)
+        assert role in ((USER,) if method == "GET" else (ADMIN, SPACE)), (method, path, role)
+        assert role_for(method, path) == (USER if method == "GET" else ADMIN), (method, path)
+    monkeypatch.setattr(scope, "_enforced", True)
+    assert role_for("POST", "/api/swarm/dispatch") == SPACE
+    assert role_for("POST", "/api/swarm/workers") == ADMIN, "registering a worker is the install's"
 
 
 @pytest.fixture

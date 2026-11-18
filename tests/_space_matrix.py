@@ -121,7 +121,7 @@ CASES: dict[str, Case] = {}
 #: An item adds its module here; :func:`load_cases` imports each.
 CASE_MODULES: tuple[str, ...] = (
     "tests._chat_space_cases", "tests._memory_space_cases", "tests._lesson_space_cases",
-    "tests._knowledge_space_cases", "tests._scheduled_space_cases",
+    "tests._knowledge_space_cases", "tests._scheduled_space_cases", "tests._swarm_space_cases",
 )
 
 
@@ -174,9 +174,8 @@ PENDING_ROUTE_RULES: tuple[tuple[Pattern, str], ...] = (
     # tests/_scheduled_space_cases.py; an X post booked from the page is the
     # X account's, S1-17.)
     ("/api/scheduled/x$", "S1-17"),
-    # ── S1-15: swarm (its tasks, their approvals, a worker's log) ─────────
-    ("/swarm$", "S1-15"),
-    ("/api/swarm", "S1-15"),
+    # (S1-15, the swarm -- its tasks, their approvals, a worker's log --
+    # wrote its cases: tests/_swarm_space_cases.py.)
     # ── S1-16: research ───────────────────────────────────────────────────
     ("/research$", "S1-16"),
     ("/api/research", "S1-16"),
@@ -227,13 +226,8 @@ _PENDING_TOOLS_BY_ITEM: dict[str, tuple[str, ...]] = {
     ),
     # (S1-14 -- the scheduling tools -- wrote its cases:
     # tests/_scheduled_space_cases.py.)
-    # Swarm tasks, and the worker's own hand-off tool (never in the registry).
-    # No item names sub-agents: like a swarm worker, a sub-agent's tool calls
-    # must land in the asker's space, so they stand here.
-    "S1-15": (
-        "dispatch_swarm", "check_swarm_task", "handoff_to_worker",
-        "spawn_agent", "spawn_agents",
-    ),
+    # (S1-15 -- swarm tasks, the worker's hand-off and sub-agents -- wrote
+    # its cases: tests/_swarm_space_cases.py.)
     # Research sessions, reports and saved research files. The web tools are
     # here too: a chat's search is kept as a research session, a crawl has a
     # journal row, and fetched pages share one cache. S1-16 decides for each

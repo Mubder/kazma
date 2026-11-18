@@ -111,6 +111,17 @@ _ALWAYS_HITL_FALLBACK: frozenset[str] = frozenset({
 })
 
 
+
+def _asking_space() -> str:
+    """The space the asking work runs in, for the request's record (Spaces
+    S1-15): the bound scope's, else the bound tenant, else ``""``. A
+    ContextVar read: no I/O."""
+    from kazma_core.spaces.scope import current_scope
+    from kazma_core.tenant_context import get_current_tenant_id
+
+    bound = current_scope()
+    return bound.space_id if bound is not None else (get_current_tenant_id() or "")
+
 class SafetyViolationError(Exception):
     """Raised when a tool call is blocked by the safety middleware."""
 
@@ -513,6 +524,7 @@ class SafetyMiddleware:
                     # built from the masked view: a text redactor cannot know
                     # a tool's own secret arguments (vault_store's value).
                     GateRow(gate_id=gate_id, thread_id=thread, tool=tool_name,
+                            tenant_id=_asking_space(),
                             mechanism="swarm_bus", args_json=tool_args or "",
                             message=(redacted_arguments_json(tool_name, tool_args or "") or "")[:500]),
                     ttl_seconds=timeout,
@@ -524,7 +536,7 @@ class SafetyMiddleware:
         platforms = len(getattr(bus.adapter, "adapters", None) or [bus.adapter])
         await _aio.to_thread(
             shared_approvals.open_request, approval_id, tool=tool_name, args=tool_args,
-            deadline=time.time() + timeout, platforms=platforms,
+            deadline=time.time() + timeout, platforms=platforms, space=_asking_space(),
         )
         row: dict[str, Any] = {"status": "cancelled"}
         # The card's notes, in the task's language (safety.card_notes).

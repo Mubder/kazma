@@ -12644,6 +12644,38 @@ product can turn it on, so an install with one account behaves as before.
   - Gates: `tests/_scheduled_space_cases.py` (the matrix cases, a member of
     a shared space among them), `tests/test_cron_spaces.py` (each guard
     taken out as a control).
+- **The swarm follows the space (S1-15, 2026-11-18).** Guards act only where
+  Spaces is enforced; the older multi-user mode keeps its refusal
+  (`swarm.single_operator.swarm_refusal`), and work bound to no space is
+  refused once enforced (`NO_SPACE_REFUSAL`).
+  - A task carries its space and the person who asked (`metadata`
+    `tenant_id` and `asker`, stamped at admission). Every list, task,
+    stream, action and the export keep to the caller's space
+    (`single_operator.task_of_this_space`; the task store's list filter
+    names the bound space, `"*"` is Kazma's own work); another space's task
+    answers as an unknown one.
+  - **A worker runs as its task's person**: `worker_dispatch._worker_scope`
+    binds `identity.work_scope(space, asker)` (the asker while still a
+    member, else the space's acting account; a task of no space runs
+    nothing). A worker usually inherits the dispatching request's scope;
+    the binding is what holds for a task run with nothing bound (a pipeline
+    resumed after a restart, the durable path), a hand-off target and its
+    approval's resume. A sub-agent runs in its spawner's scope.
+  - **A worker serves every space**: its log lines and last task carry
+    their space (`mark_dispatched(space=)`, `logs_for`) and are shown in it
+    only (`services._kept_to_space`). A worker's lessons are the task's
+    space's (`self_improvement.worker_lessons`, kept under
+    `worker:<name>` in that space's Soul, never in the registry prompt every
+    space shares); the registry prompt's own lessons were learned before
+    Spaces and are shown in the owner's space only
+    (`worker._prompt_in_this_space`).
+  - A bus approval records the space that asked (`shared_approvals`
+    `space`, the gate row's tenant); the Web page shows and decides it only
+    there. The swarm's writes on a space's own work are a member's once
+    enforced (`route_roles.SPACE`); the install's swarm stays the admin's.
+  - Gates: `tests/_swarm_space_cases.py` (the matrix cases),
+    `tests/test_swarm_spaces.py` (each guard taken out as a control; the
+    unscoped dispatch as the control for a task run with nothing bound).
 
 ## UI Conventions (Web)
 

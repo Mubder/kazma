@@ -28,6 +28,12 @@ logger = logging.getLogger(__name__)
 
 USER = "user"
 ADMIN = "admin"
+#: A space's own swarm work: its dispatches, its tasks' approvals, cancels
+#: and retries. The admin's while Spaces is not enforced (as before Spaces);
+#: once it is, any account the request is bound to the space as -- the
+#: tenant middleware checked its membership (Spaces S1-15). The install's
+#: swarm (workers, templates, start and stop, the output target) stays ADMIN.
+SPACE = "space"
 
 #: (method, path) -> the role it needs. Reading is for any signed-in user;
 #: everything that runs, changes or routes swarm work is the operator's.
@@ -50,18 +56,18 @@ SWARM_ROUTE_ROLES: dict[tuple[str, str], str] = {
     # A bus approval request on the Web dashboard (SW-S03): its whole call is
     # read like the rest of the page; answering it is the operator's.
     ("GET", "/api/swarm/approvals/{approval_id}"): USER,
-    ("POST", "/api/swarm/approvals/{approval_id}/decide"): ADMIN,
-    ("POST", "/api/swarm/dispatch"): ADMIN,
+    ("POST", "/api/swarm/approvals/{approval_id}/decide"): SPACE,
+    ("POST", "/api/swarm/dispatch"): SPACE,
     ("POST", "/api/swarm/start"): ADMIN,
     ("POST", "/api/swarm/stop"): ADMIN,
     ("POST", "/api/swarm/autoscaler/reap"): ADMIN,
     ("PUT", "/api/swarm/output-target"): ADMIN,
     ("POST", "/api/swarm/templates"): ADMIN,
     ("DELETE", "/api/swarm/templates/{name}"): ADMIN,
-    ("POST", "/api/swarm/tasks/{task_id}/approve"): ADMIN,
-    ("POST", "/api/swarm/tasks/{task_id}/reject"): ADMIN,
-    ("POST", "/api/swarm/tasks/{task_id}/cancel"): ADMIN,
-    ("POST", "/api/swarm/tasks/{task_id}/retry"): ADMIN,
+    ("POST", "/api/swarm/tasks/{task_id}/approve"): SPACE,
+    ("POST", "/api/swarm/tasks/{task_id}/reject"): SPACE,
+    ("POST", "/api/swarm/tasks/{task_id}/cancel"): SPACE,
+    ("POST", "/api/swarm/tasks/{task_id}/retry"): SPACE,
     ("POST", "/api/swarm/workers"): ADMIN,
     ("POST", "/api/swarm/workers/spawn"): ADMIN,
     ("PUT", "/api/swarm/workers/{name}"): ADMIN,
@@ -73,9 +79,16 @@ SWARM_ROUTE_ROLES: dict[tuple[str, str], str] = {
 
 
 def role_for(method: str, path: str) -> str:
-    """The role a route needs; a route not in the table needs ``admin``."""
+    """The role a route needs; a route not in the table needs ``admin``. A
+    ``space`` route needs the admin while Spaces is not enforced, and an
+    account bound to the space once it is (:data:`SPACE`)."""
     method = "GET" if method == "HEAD" else method
-    return SWARM_ROUTE_ROLES.get((method, path), ADMIN)
+    role = SWARM_ROUTE_ROLES.get((method, path), ADMIN)
+    if role == SPACE:
+        from kazma_core.spaces.scope import spaces_enforced
+
+        return SPACE if spaces_enforced() else ADMIN
+    return role
 
 
 class RoleCheckedRoute(APIRoute):
@@ -97,7 +110,18 @@ class RoleCheckedRoute(APIRoute):
                 else:
                     return JSONResponse({"status": "error", "code": "swarm_single_operator",
                                          "message": refusal}, status_code=409)
-            if role_for(request.method, path) == ADMIN:
+            role = role_for(request.method, path)
+            if role == SPACE:
+                # A space's own work, Spaces enforced: the request must be
+                # bound to a space as an account (the middleware checked
+                # that account's membership); no admin is asked.
+                from kazma_core.spaces.scope import current_scope
+
+                bound = current_scope()
+                if bound is None or not bound.asker:
+                    return JSONResponse({"status": "error", "code": "no_space",
+                                         "message": "This request names no space."}, status_code=403)
+            if role == ADMIN:
                 from kazma_ui.auth import admin_decision
 
                 # The session and user stores: off the event loop.

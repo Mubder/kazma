@@ -64,6 +64,7 @@ __all__ = [
     "IdentityError",
     "IdentityUnavailable",
     "acting_account",
+    "work_scope",
     "add_member",
     "create_space",
     "enforcement_enabled",
@@ -441,6 +442,25 @@ def acting_account(space_id: str) -> str:
     """
     space = (read_registry().get("spaces") or {}).get(str(space_id or "")) or {}
     return str(space.get("personal_of") or space.get("created_by") or "") or OWNER_ACCOUNT_ID
+
+
+def work_scope(space_id: str, asker: str | None) -> tuple[str, str] | None:
+    """The scope work queued for *space_id* by *asker* runs as, or None when
+    *space_id* is no space of this install (such work does not run).
+
+    The asker while they are still a member of the space; else the account
+    Kazma's own work for that space acts for (:func:`acting_account`). The
+    one answer for every job that runs later -- a scheduled fire (S1-14), a
+    swarm task's worker (S1-15). Blocking (the settings store)."""
+    space = str(space_id or "")
+    registry = read_registry()
+    if space not in (registry.get("spaces") or {}):
+        return None
+    who = str(asker or "")
+    member = any(
+        m.get("account") == who and m.get("space") == space for m in registry.get("memberships") or ()
+    )
+    return space, (who if who and member else acting_account(space))
 
 
 def add_member(space_id: str, account_id: str, *, role: str = "member") -> None:
