@@ -41,6 +41,8 @@ from typing import Any
 from kazma_core.db.fts5_purge import purge_deleted_rows
 from kazma_core.memory.memory_stores import MEMORY_TABLES
 
+from kazma_core.memory.tenant_view import ledger_reach, sees_every_tenant
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -150,10 +152,10 @@ def refuses_write(
     return bool(
         _ledger_rows(
             conn,
-            f"SELECT 1 FROM memory_forgotten WHERE tenant_id IN (?, 'default') AND session_key IN ({marks}) "
+            f"SELECT 1 FROM memory_forgotten WHERE tenant_id IN (?, ?) AND session_key IN ({marks}) "
             "AND ((turn_number = 0 AND question_sha = '') "
             "OR (turn_number = ? AND question_sha = ?)) LIMIT 1",
-            (tenant_id or "default", *names, int(turn_number or 0), question_sha(user_text)),
+            (*ledger_reach(tenant_id), *names, int(turn_number or 0), question_sha(user_text)),
         )
     )
 
@@ -170,8 +172,8 @@ def forgotten_turns(
     rows = _ledger_rows(
         conn,
         f"SELECT turn_number, question_sha FROM memory_forgotten "
-        f"WHERE tenant_id IN (?, 'default') AND session_key IN ({marks})",
-        (tenant_id or "default", *keys),
+        f"WHERE tenant_id IN (?, ?) AND session_key IN ({marks})",
+        (*ledger_reach(tenant_id), *keys),
     )
     whole = any(int(r[0]) == 0 and not r[1] for r in rows)
     return whole, {(int(r[0]), str(r[1])) for r in rows if r[1]}
@@ -297,7 +299,7 @@ def forget_episode(
             (eid,),
         ).fetchone()
         caller = tenant_id or "default"
-        if row is None or (caller != "default" and str(row["tenant_id"] or "default") != caller):
+        if row is None or (not sees_every_tenant(caller) and str(row["tenant_id"] or "default") != caller):
             return {"ok": False, "error": "not_found"}
 
         owner = str(row["tenant_id"] or "default")
@@ -1054,7 +1056,7 @@ def forget_belief_source(belief_id: str, *, tenant_id: str) -> dict[str, Any]:
         row = conn.execute(
             "SELECT tenant_id, source_session, source_turn, object FROM beliefs WHERE id = ?", (bid,),
         ).fetchone()
-        if row is None or (caller != "default" and str(row["tenant_id"] or "default") != caller):
+        if row is None or (not sees_every_tenant(caller) and str(row["tenant_id"] or "default") != caller):
             return {"ok": False, "error": "not_found"}
         owner = str(row["tenant_id"] or "default")
         session, turn = str(row["source_session"] or ""), row["source_turn"]
@@ -1245,12 +1247,13 @@ def forget_chat(
     try:
         caller = tenant_id or "default"
         marks = ",".join("?" for _ in keys)
-        scope = "" if caller == "default" else " AND tenant_id = ?"
+        every = sees_every_tenant(caller)
+        scope = "" if every else " AND tenant_id = ?"
         ids = [
             str(r[0])
             for r in conn.execute(
                 f"SELECT id FROM episodes WHERE session_id IN ({marks}) AND tier != ?{scope}",
-                (*keys, FORGOTTEN_TIER, *(() if caller == "default" else (caller,))),
+                (*keys, FORGOTTEN_TIER, *(() if every else (caller,))),
             ).fetchall()
         ]
         facts = 0
@@ -1261,7 +1264,7 @@ def forget_chat(
             lessons += int(one.get("lessons_removed") or 0)
         # What the agent noted during the chat in turns that left no memory of
         # their own, and every fact naming the chat whatever its turn.
-        owner = None if caller == "default" else caller
+        owner = None if every else caller
         notes = _chat_notes(conn, tenant_id=owner, keys=keys)
         note_tenants = {
             str(r[0]): str(r[1] or "default")

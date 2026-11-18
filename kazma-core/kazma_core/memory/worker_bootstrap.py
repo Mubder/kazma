@@ -661,37 +661,44 @@ _MACRO_SLEEP_CADENCE_KEY = "system.cadence.macro_sleep"
 _RECONSOLIDATION_CADENCE_KEY = "system.cadence.reconsolidation"
 
 
-def _distinct_tenants() -> list[str]:
-    """Return all tenant IDs that have episodes in memory_state.db.
+#: The memory tables whose rows name a tenant that maintenance must visit:
+#: a tenant with facts, a summary or About me and no turn was never swept.
+_TENANT_TABLES = ("episodes", "beliefs", "entities", "memory_summaries", "memory_profile")
 
-    Used by the schedulers to fan maintenance tasks over every active
-    tenant instead of only ``"default"``. In the common single-user case
-    (``tenant_mode="shared"``) this returns ``["default"]`` and behavior
-    is unchanged from the old hardcoded-default path.
 
-    Best-effort: on any error returns ``["default"]`` so maintenance
-    continues even if the query fails.
+def memory_tenants() -> list[str]:
+    """Every tenant memory maintenance visits: each tenant that holds a row
+    of memory, each space of this install, and the owner's (first).
+
+    Blocking (the memory database, the settings store). **Raises** when the
+    database or the spaces cannot be read: a sweep that cannot list its
+    tenants has failed, and its runner says so. Until Spaces S1-09 the list
+    came from turns alone and any error became ``["default"]`` at DEBUG, so
+    a broken database swept the owner's tenant and called it done.
     """
+    import sqlite3
+
+    from kazma_core.paths import primary_memory_db
+    from kazma_core.spaces import identity
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    found: list[str] = [OWNER_SPACE_ID]
+    conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
     try:
-        import sqlite3
+        tables = {str(r[0]) for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        for table in _TENANT_TABLES:
+            if table in tables:
+                found += [str(r[0]) for r in conn.execute(
+                    f"SELECT DISTINCT tenant_id FROM {table}") if r[0]]  # nosec B608 - a fixed table name
+    finally:
+        conn.close()
+    found += list(identity.read_registry().get("spaces") or {})
+    return list(dict.fromkeys(found))
 
-        from kazma_core.paths import primary_memory_db
 
-        conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
-        try:
-            rows = conn.execute(
-                "SELECT DISTINCT tenant_id FROM episodes"
-            ).fetchall()
-            tenants = [r[0] for r in rows if r[0]]
-            # Always include "default" even if it has no episodes yet (fresh install).
-            if "default" not in tenants:
-                tenants.insert(0, "default")
-            return tenants
-        finally:
-            conn.close()
-    except Exception:
-        logger.debug("[memory_worker] _distinct_tenants failed — using ['default']", exc_info=True)
-        return ["default"]
+def _distinct_tenants() -> list[str]:
+    """:func:`memory_tenants`, for the schedulers."""
+    return memory_tenants()
 
 
 def _start_macro_sleep_scheduler() -> None:
@@ -730,7 +737,8 @@ def _start_macro_sleep_scheduler() -> None:
                 await asyncio.to_thread(stamp_run, _MACRO_SLEEP_CADENCE_KEY)
                 logger.debug("[memory_worker] enqueued periodic macro_sleep")
             except Exception:
-                logger.debug("[memory_worker] macro_sleep enqueue failed", exc_info=True)
+                # A cadence that could not queue its work ran nothing: said.
+                logger.warning("[memory_worker] macro_sleep was not queued", exc_info=True)
 
     try:
         _t = loop.create_task(_loop())
@@ -838,7 +846,7 @@ def _start_backup_export_scheduler() -> None:
                     await asyncio.to_thread(_enqueue_checked, "nightly_export", {"tenant_id": tenant})
                 logger.debug("[memory_worker] enqueued nightly backup + export")
             except Exception:
-                logger.debug("[memory_worker] backup/export enqueue failed", exc_info=True)
+                logger.warning("[memory_worker] the backup and export were not queued", exc_info=True)
             if await sleep_or_shutdown(_BACKUP_EXPORT_INTERVAL_HOURS * 3600):
                 return
 

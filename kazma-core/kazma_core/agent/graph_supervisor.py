@@ -453,7 +453,7 @@ async def supervisor_node(
     from kazma_core.memory.profile import about_block, about_for_turn
 
     try:
-        _about = await asyncio.to_thread(about_for_turn, str(state.get("tenant_id") or "default"))
+        _about = await asyncio.to_thread(about_for_turn, space_of_state(state))
     except sqlite3.Error:
         logger.warning("[Supervisor] About me unreadable; this call goes without it", exc_info=True)
         _about = {"about": ""}
@@ -1183,7 +1183,7 @@ async def supervisor_node(
                     _recall_query or last_user_content,
                     limit=_top_k,
                     session_id=_recall_session_id,
-                    tenant_id=state.get("tenant_id", "default"),
+                    tenant_id=space_of_state(state),
                     explain=_explain,
                 )
                 if not result.empty:
@@ -1214,7 +1214,7 @@ async def supervisor_node(
                                 search_transcripts,
                                 _recall_query or last_user_content,
                                 exclude_session_id=_recall_session_id,
-                                tenant_id=str(state.get("tenant_id", "default")),
+                                tenant_id=space_of_state(state),
                             )
                             if _tx_hits:
                                 _tx_block = format_transcript_block(_tx_hits)
@@ -1286,7 +1286,7 @@ async def supervisor_node(
                             return list(match_procedural_dags(
                                 pconn,
                                 last_user_content,
-                                tenant_id=state.get("tenant_id", "default"),
+                                tenant_id=space_of_state(state),
                                 limit=3,
                             ))
                         finally:

@@ -460,6 +460,7 @@ def _run_turn_memory(
                 session_id or "unknown",
                 int(turn) if turn is not None else 0,
                 user_text,
+                tenant_id,
             )
             from kazma_core.memory.task_queue import enqueue_task
 

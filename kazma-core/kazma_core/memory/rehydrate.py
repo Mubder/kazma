@@ -142,22 +142,24 @@ def _is_bridge(row: Any) -> bool:
     return str(row["id"]).startswith("ep_")
 
 
-def _id_for(row: Any, cand: _Candidate) -> str:
-    """The id the episode's writer would have given *cand*."""
+def _ids_for(row: Any, cand: _Candidate) -> tuple[str, ...]:
+    """The ids the episode's writer may have given *cand* in the row's
+    tenant: today's form and the one from before a space was part of it."""
     session, turn = str(row["session_id"] or ""), int(row["turn_number"] or 0)
+    tenant = str(row["tenant_id"] or "default") if "tenant_id" in row.keys() else "default"
     if _is_bridge(row):
-        from kazma_core.memory.swarm_bridge import bridge_episode_id
+        from kazma_core.memory.swarm_bridge import bridge_episode_ids
 
         content = (cand.user or cand.summary or "").strip()
-        return bridge_episode_id(str(_meta(row).get("source") or ""), session, turn, content)
-    from kazma_core.memory.dual_write import _episode_id
+        return bridge_episode_ids(str(_meta(row).get("source") or ""), session, turn, content, tenant)
+    from kazma_core.memory.dual_write import episode_ids
 
-    return _episode_id(session, turn, (cand.user or cand.assistant or cand.summary or "").strip())
+    return episode_ids(session, turn, (cand.user or cand.assistant or cand.summary or "").strip(), tenant)
 
 
 def _check(row: Any, cand: _Candidate) -> str:
     """``"full"`` (id and stub both reproduced), ``"question"`` (the id only), or ``""``."""
-    if _id_for(row, cand) != str(row["id"]):
+    if str(row["id"]) not in _ids_for(row, cand):
         return ""
     text_cap, summary_cap = _BRIDGE_CAPS if _is_bridge(row) else _MIRROR_CAPS
     stub = _archive_stub(cand.user[:text_cap], cand.assistant[:text_cap], cand.summary[:summary_cap])

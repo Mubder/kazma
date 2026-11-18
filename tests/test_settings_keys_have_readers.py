@@ -307,7 +307,9 @@ def test_the_tui_writes_are_read_by_the_gate():
     chat's /config sends by name."""
     keys = tui_written_keys()
     assert len(keys) >= 15
-    assert {"memory.enabled", "memory.v2.recall_ttl_days", "memory.tenant_mode"} <= set(keys)
+    assert {"memory.enabled", "memory.v2.recall_ttl_days"} <= set(keys)
+    # The retired memory mode is no longer a choice in the terminal app.
+    assert "memory.tenant_mode" not in set(keys)
 
 
 def test_negative_control_a_dead_tui_toggle_is_found():

@@ -2797,7 +2797,9 @@ id reads as not found (`memory_api._row_tenant_ok`,
 `hygiene.invalidate_belief(tenant_id=)`) -- and the engine's own maintenance
 (task queue, reconsolidation, golden eval) is admin-only
 (`platform_rbac._ADMIN_PREFIXES`). The install's own tenant (`default`: no
-binding) is the install's view (`_tenant_clause`). Gate:
+binding) is the install's view (`_tenant_clause`) only while Spaces is not
+enforced; once it is, `default` is the owner's space and reads its own rows
+(§70, `memory/tenant_view.py`). Gate:
 `tests/test_memory_routes_tenant_scope.py` -- every route, enumerated from the
 app, called as one tenant with another's ids; nothing of the other shown or
 changed, and the caller's own rows shown. **Entities are keyed by
@@ -12433,6 +12435,54 @@ product can turn it on, so an install with one account behaves as before.
     real Postgres), `tests/js/test_message_author.js`,
     `tests/e2e/test_two_tabs_two_spaces.py` (two tabs in two spaces, by the
     sidebar, EN and AR).
+- **Memory: the space is the tenant, always (S1-09, 2026-11-18).** As
+  S1-08: a guard acts only where Spaces is enforced, a stamp is always
+  written.
+  - **One rule for who sees every tenant** (`memory/tenant_view.py`:
+    `sees_every_tenant`, `narrowed_to`, `ledger_reach`): Kazma's own work
+    (no tenant named) always; the owner's tenant `default` only while Spaces
+    is not enforced; any other tenant never. Once enforced, `default` is the
+    owner's personal space: its own rows, its own forget ledger, its own
+    About me. Memory code never compares a tenant with the literal `default`
+    (the class gate in `tests/test_memory_default_is_a_space.py`; a
+    comparison that means something else is declared there).
+  - **The mode setting is retired.** Only `shared` can be saved. A stored
+    `per_platform` or `per_user` is honoured while Spaces is not enforced
+    (`config.legacy_tenant_mode`) and ended from Settings ("Use one
+    memory"); enforced, `resolve_tenant_id` answers the bound space.
+  - **A turn's memory tenant is `scope.space_of_state(state)`** in the graph
+    nodes, Time Travel and the rewinds; never `state.get("tenant_id") or
+    "default"`.
+  - **An episode's id carries its space** (the owner's decision 17: `id`
+    stays the key, no table is rebuilt). `dual_write.episode_ids` and
+    `swarm_bridge.bridge_episode_ids` give today's id and the other form:
+    plain for the owner's tenant, salted with the tenant for every other.
+    The writer picks the id inside its transaction (`_id_in_tenant`): the
+    one the turn is already stored under, else one no other tenant holds.
+    Code that finds a turn by id asks for both forms together with the
+    row's tenant (recovery, the history import).
+  - **A writer names its tenant or asks the scope**: the tool-outcome
+    recorder reads `require_space_id()` on the caller's thread, the swarm
+    bridge and `import_history` when none is passed; with Spaces enforced
+    and nothing bound, nothing is written for the owner.
+  - **The worker**: `worker_bootstrap.memory_tenants()` is every tenant that
+    holds memory plus every space, the owner's first, and raises when it
+    cannot be read. `task_queue._task_space` runs a task bound to the tenant
+    its payload names. A memory sweep names the tenant of each row it
+    touches and asks for no scope.
+  - **No row under the "no tenant" sentinel** (`schema_v2.NO_TENANT`,
+    triggers on every table with a tenant column, both files). The operator
+    trail records the space the request acted in (`request.scope["kazma_space"]`,
+    left by the tenant middleware).
+  - **Recall** holds its episode candidates to the asker's tenant
+    (`recall._own_episodes`) before anything reads one by id.
+  - **Memory outside every space** (a tenant of the retired modes) is
+    counted in memory health (`tenant_view.tenants_outside_spaces`), never
+    merged. Memory's copies outside the data folder declare a space rule
+    (`memory_stores.EXTERNAL_SPACE_RULES`).
+  - Gates: `tests/_memory_space_cases.py` (the matrix cases),
+    `tests/test_memory_default_is_a_space.py`, `tests/test_memory_spaces.py`
+    (each rule with the old behaviour as its control).
 
 ## UI Conventions (Web)
 

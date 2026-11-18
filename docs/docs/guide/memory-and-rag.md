@@ -60,7 +60,7 @@ Do **not** merge these — background consolidation must not WAL-contend with ch
 
 | Control | Effect |
 |---------|--------|
-| Tenant mode | `shared` / `per_platform` / `per_user` |
+| Tenant mode | Retired: memory is one memory per install today, and per space once Spaces is on. An install that stored `per_platform` or `per_user` keeps it until its owner presses **Use one memory** |
 | Inject Knowledge into chat | `merge_knowledge_into_chat` (default on; library text is injected into the turn, never saved into chat memory) |
 | Graph store | `sqlite` (default) or `neo4j` dual-write |
 | Vector / embedder | sqlite-vec on one node; **pgvector** when `KAZMA_DATABASE_URL` / state URL is set (`KAZMA_PGVECTOR=0` to keep local) |

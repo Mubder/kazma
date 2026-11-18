@@ -429,11 +429,16 @@ TENANT_MODE_KEY = "memory.tenant_mode"
 
 
 def memory_tenant_mode(cfg: dict[str, Any] | None = None) -> str:
-    """Return the active tenant isolation mode.
+    """The stored tenant mode of an install from before Spaces. **Retired**
+    (Spaces S1-09): the space is the memory tenant, and nothing can choose a
+    mode any more (``settings_validation`` saves ``shared`` only).
 
-    - ``"shared"`` (default): all platforms + users share one memory pool.
-    - ``"per_platform"``: each platform isolates (Telegram ≠ Web ≠ Discord).
-    - ``"per_user"``: each sender/session gets fully isolated memory.
+    - ``"shared"`` (every install's default): one memory for the install.
+    - ``"per_platform"`` / ``"per_user"``: an older install that chose one
+      keeps it while it does not enforce Spaces, so its memory is still
+      found where it was written; :func:`legacy_tenant_mode` says so, and
+      memory health counts its tenants. Once Spaces is enforced the mode is
+      not read at all.
     """
     c = cfg if cfg is not None else read_memory_cfg()
     mode = str(c.get("tenant_mode", "shared") or "shared").strip().lower()
@@ -442,11 +447,30 @@ def memory_tenant_mode(cfg: dict[str, Any] | None = None) -> str:
     return mode
 
 
+def legacy_tenant_mode() -> str | None:
+    """``"per_platform"`` or ``"per_user"`` when this install still runs on
+    one of the retired modes (stored before Spaces, Spaces not enforced);
+    None otherwise. Blocking: a settings read."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if spaces_enforced():
+        return None
+    mode = memory_tenant_mode()
+    return mode if mode != "shared" else None
+
+
 def memory_tenant_enforced() -> bool:
-    """Whether memory is isolated by tenant: ``KAZMA_MEMORY_ENFORCE_TENANT``,
-    production, or multi-user (a failed probe counts as enforced). The one
-    answer for turns and memory surfaces (Memory audit M07)."""
+    """Whether memory is isolated by tenant: Spaces enforced,
+    ``KAZMA_MEMORY_ENFORCE_TENANT``, production, or multi-user (a failed
+    probe counts as enforced). The one answer for turns and memory surfaces
+    (Memory audit M07)."""
     import os
+
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if spaces_enforced():
+        # The space is the tenant, always (Spaces S1-09).
+        return True
 
     if str(os.environ.get("KAZMA_MEMORY_ENFORCE_TENANT", "")).strip().lower() in ("1", "true", "yes", "on"):
         return True
@@ -482,6 +506,13 @@ def resolve_tenant_id(
         prefer_context: When True and mode is ``per_user``, honor
             ``get_current_tenant_id()`` if set by auth middleware (JWT/principal).
     """
+    from kazma_core.spaces.scope import require_space_id, spaces_enforced
+
+    if spaces_enforced():
+        # The space is the memory tenant, always: the scope the turn is bound
+        # to (a turn with none is refused, never filed under the owner's).
+        # No mode is read (Spaces S1-09).
+        return require_space_id()
     if memory_tenant_enforced():
         # Under enforcement a turn's memory belongs to its principal's tenant,
         # in every mode: the Memory page, Forget, Export, "Don't remember" and

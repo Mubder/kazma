@@ -119,7 +119,7 @@ CASES: dict[str, Case] = {}
 
 #: The modules that register cases, as import names (``tests._chat_space_cases``).
 #: An item adds its module here; :func:`load_cases` imports each.
-CASE_MODULES: tuple[str, ...] = ("tests._chat_space_cases",)
+CASE_MODULES: tuple[str, ...] = ("tests._chat_space_cases", "tests._memory_space_cases")
 
 
 def case(target: str, item: str) -> Callable[[Callable[[Matrix], None]], Callable[[Matrix], None]]:
@@ -159,11 +159,8 @@ PENDING_ROUTE_RULES: tuple[tuple[Pattern, str], ...] = (
     ("/api/chat/files", "S1-19"),
     # (S1-08 -- chats, checkpoints, Time Travel, drafts, speech and A2A --
     # wrote its cases: tests/_chat_space_cases.py.)
-    # ── S1-09: memory ─────────────────────────────────────────────────────
-    ("/memory$", "S1-09"),
-    ("/api/memory", "S1-09"),
-    # An imported chat history becomes memories.
-    ("/api/import/history", "S1-09"),
+    # (S1-09 -- memory, and a history brought in -- wrote its cases:
+    # tests/_memory_space_cases.py.)
     # ── S1-10: lessons ────────────────────────────────────────────────────
     ("/api/commitment", "S1-10"),
     # ── S1-12: documents ──────────────────────────────────────────────────
@@ -218,12 +215,7 @@ PENDING_ROUTE_RULES: tuple[tuple[Pattern, str], ...] = (
 _PENDING_TOOLS_BY_ITEM: dict[str, tuple[str, ...]] = {
     # (S1-08 -- drafts, the task ledger, the scratchpad, the chat itself --
     # wrote its cases: tests/_chat_space_cases.py.)
-    "S1-09": (
-        "memory_search", "memory_store", "memory_admin",
-        "memory_list_beliefs", "memory_list_entities", "memory_link_entities",
-        "memory_invalidate", "memory_forget_mentions", "memory_delete_entity",
-        "memory_merge_entities", "memory_purge_empty_entities",
-    ),
+    # (S1-09 -- the memory tools -- wrote its cases: tests/_memory_space_cases.py.)
     # The document platform: documents by id. (The tools that take a path
     # are files of the space: S1-19.)
     "S1-12": (

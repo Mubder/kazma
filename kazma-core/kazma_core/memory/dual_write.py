@@ -63,12 +63,51 @@ def _embedding_model_version() -> str:
     except Exception:
         return ""
 
-def _episode_id(session_id: str, turn: int, content: str) -> str:
-    """Stable episode PK."""
-    h = hashlib.sha256(
-        f"{session_id}|{turn}|{content[:512]}".encode("utf-8")
-    ).hexdigest()
-    return f"e_{h[:24]}"
+def _episode_id(session_id: str, turn: int, content: str, tenant_id: str | None = None) -> str:
+    """Stable episode PK: the id a turn of *tenant_id* is written under.
+
+    The owner's space keeps the id it always had (chat, turn number, text).
+    Every other space's ids carry the space (Spaces S1-09, the owner's
+    decision 17: the space is salted into new ids and ``id`` stays the
+    table's key). The id held no tenant, so the same turn written for a
+    second space was ignored by the insert, reported as written, and found
+    by recall in the first space only.
+    """
+    return episode_ids(session_id, turn, content, tenant_id)[0]
+
+
+def episode_ids(session_id: str, turn: int, content: str, tenant_id: str | None = None) -> tuple[str, str]:
+    """Both ids a turn may be stored under in *tenant_id*: today's first,
+    then the other form.
+
+    ``plain`` is the id from before Spaces; ``spaced`` carries the tenant.
+    The owner's space writes ``plain``; every other tenant writes ``spaced``,
+    and may hold ``plain`` rows an older build wrote (an older multi-user
+    tenant). Code that looks a turn up by id -- the writer, recovery -- asks
+    for both, always together with the row's tenant.
+    """
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    tenant = str(tenant_id or OWNER_SPACE_ID)
+    body = f"{session_id}|{turn}|{content[:512]}"
+    plain = "e_" + hashlib.sha256(body.encode("utf-8")).hexdigest()[:24]
+    spaced = "e_" + hashlib.sha256(f"{tenant}\x1f{body}".encode("utf-8")).hexdigest()[:24]
+    return (plain, spaced) if tenant == OWNER_SPACE_ID else (spaced, plain)
+
+
+def _id_in_tenant(conn: Any, ids: tuple[str, ...], tenant_id: str) -> tuple[str | None, bool]:
+    """``(id, held)`` for a turn about to be written for *tenant_id*: the id
+    it is already stored under (``held`` True), else the first of *ids* no
+    other tenant holds (``held`` False), else ``(None, False)``. Called
+    inside the writer's transaction."""
+    free: str | None = None
+    for candidate in ids:
+        row = conn.execute("SELECT tenant_id FROM episodes WHERE id = ?", (candidate,)).fetchone()
+        if row is None:
+            free = free or candidate
+        elif str(row[0] or "default") == tenant_id:
+            return candidate, True
+    return free, False
 
 
 #: Phrases that mark a turn the user explicitly asked Kazma to keep.
@@ -117,7 +156,8 @@ def episode_row(
         effective_tier = "working"
         meta["promote_reason"] = "working_buffer"
     return {
-        "id": _episode_id(session_id, turn_number, content),
+        "id": _episode_id(session_id, turn_number, content, tenant_id),
+        "ids": episode_ids(session_id, turn_number, content, tenant_id),
         "tenant_id": tenant_id,
         "session_id": session_id,
         "turn_number": int(turn_number),
@@ -299,6 +339,18 @@ class DualWriteMirror:
                 if refused:
                     logger.debug("[dual_write] turn kept out of memory by the user: %s", eid)
                     return "refused", None
+                # The id this turn has in THIS tenant: the one it is already
+                # stored under (either form), else one no other tenant holds.
+                # The insert below ignores a taken id, and everything after it
+                # (the vector, the mirror) names the id: writing under another
+                # tenant's would change that tenant's row and report success.
+                found, _held = _id_in_tenant(self._primary, row["ids"], tenant_id)
+                if found is None:
+                    logger.warning(
+                        "[dual_write] turn %s of %s not written: both of its ids are held by other tenants",
+                        row["turn_number"], session_id)
+                    return "failed", None
+                eid = row["id"] = found
                 self._primary.execute(
                     """
                     INSERT OR IGNORE INTO episodes (

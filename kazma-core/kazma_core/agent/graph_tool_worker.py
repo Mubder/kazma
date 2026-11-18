@@ -287,7 +287,7 @@ def _commitment_resolve_gate(
                 if _is_semantic(str(_probe.get("name") or "")):
                     _sem.append(_probe)
             if _sem:
-                _tenant = state.get("tenant_id") or "default"
+                _tenant = space_of_state(state)
                 _req_at = _dt.now(_tz.utc)
                 try:
                     _beliefs = _load_beliefs(_tenant) if _load_beliefs else []

@@ -108,13 +108,21 @@ def _actor_and_tenant(headers: list[tuple[bytes, bytes]]) -> tuple[str, str]:
     return actor_for_session(sid, payload), tenant
 
 
-def _record(action: str, ids: list[str], status: int, headers: list[tuple[bytes, bytes]]) -> None:
-    """The trail: one INFO line and one audit row (ids, never values)."""
+def _record(action: str, ids: list[str], status: int, headers: list[tuple[bytes, bytes]],
+            acted_in: str = "") -> None:
+    """The trail: one INFO line and one audit row (ids, never values).
+
+    *acted_in* is the space the request was bound to (the tenant middleware
+    leaves it in the ASGI scope): the trail names where the change was made.
+    It named the session's own tenant, which is another thing once a person
+    has more than one space. Without it (an app with no tenant middleware),
+    the session's."""
     try:
         actor, tenant = _actor_and_tenant(headers)
     except (sqlite3.Error, OSError, ValueError, KeyError):
         logger.warning("[memory] the actor of %s could not be read", action, exc_info=True)
         actor, tenant = "web:unknown", "default"
+    tenant = acted_in or tenant
     ids = [str(i)[:120] for i in ids][:20]
     _COUNTS[action] += 1
     logger.info("[memory] operator action=%s actor=%s tenant=%s ids=%s status=%d",
@@ -215,4 +223,4 @@ class MemoryActionRecorder:
         ids = [str(v) for v in (scope.get("path_params") or {}).values()]
         status = int(held.get("status") or (held.get("start") or {}).get("status") or 500)
         await asyncio.to_thread(_record, f"{scope['method']} {template}", ids, status,
-                                list(scope.get("headers") or []))
+                                list(scope.get("headers") or []), str(scope.get("kazma_space") or ""))

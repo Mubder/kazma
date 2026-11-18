@@ -180,15 +180,19 @@
             this.nonstop.failover_enabled = true;
         },
 
-        async saveTenantMode() {
+        // The per-platform and per-user memory modes are retired: an install
+        // that still stores one can end it here (the server saves only
+        // 'shared'), and nothing can choose one again.
+        async endLegacyTenantMode() {
             this.saving = true;
             try {
                 await window.kazmaSave('/api/settings', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                    body: JSON.stringify([{ key: 'memory.tenant_mode', value: this.memoryTenantMode, category: 'memory' }]),
+                    body: JSON.stringify([{ key: 'memory.tenant_mode', value: 'shared', category: 'memory' }]),
                 });
-                showToast(_k('settings.agentjs.memory_isolation_mode_saved_takes', 'Memory isolation mode saved — takes effect next turn'), 'success');
+                this.memoryTenantMode = 'shared';
+                showToast(_k('settings.agentjs.memory_one_memory_saved', 'Saved. Kazma keeps one memory from the next turn.'), 'success');
             } catch (e) {
                 showToast(_k('settings.agentjs.save_failed_2', 'Save failed'), 'error');
             }

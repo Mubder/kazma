@@ -17,12 +17,14 @@ started lazily on first enqueue (or explicitly via :func:`start_worker`).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import sqlite3
 import threading
 import time
 import uuid
+from collections.abc import Iterator
 from typing import Any, Awaitable, Callable
 
 logger = logging.getLogger(__name__)
@@ -107,6 +109,28 @@ def _report_dead_letters(task_types: list[str], error: str | None) -> None:
 # Handler registry: task_type → async callable(payload) -> bool (success)
 TaskHandler = Callable[[dict[str, Any]], Awaitable[bool]]
 _HANDLERS: dict[str, TaskHandler] = {}
+
+
+@contextlib.contextmanager
+def _task_space(payload: Any) -> Iterator[None]:
+    """Run a task's handler in the space its payload names (Spaces S1-09).
+
+    The worker has no request, so nothing was bound: code a handler reaches
+    that asks for the space (the chat store, a writer with no tenant given)
+    read the owner's for every task. A task of another space is bound to it;
+    so is every task once Spaces is enforced. The owner's own tasks on an
+    install that does not enforce Spaces run with nothing bound, exactly as
+    before (the vault tells "no tenant" from the owner's).
+    """
+    from kazma_core.spaces.scope import OWNER_SPACE_ID, spaces_enforced
+    from kazma_core.tenant_context import tenant_scope
+
+    tenant = str((payload or {}).get("tenant_id") or "").strip() if isinstance(payload, dict) else ""
+    if tenant and (tenant != OWNER_SPACE_ID or spaces_enforced()):
+        with tenant_scope(tenant):
+            yield
+    else:
+        yield
 
 
 def register_handler(task_type: str, handler: TaskHandler) -> None:
@@ -432,7 +456,8 @@ class _MemoryWorker:
                     payload = json.loads(task["payload_json"] or "{}")
                 except Exception:
                     payload = {}
-                success = await handler(payload)
+                with _task_space(payload):
+                    success = await handler(payload)
                 await asyncio.to_thread(
                     self._ack, task,
                     success=bool(success),

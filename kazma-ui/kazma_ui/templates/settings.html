@@ -1655,20 +1655,18 @@
             </button>
         </div>
 
-        <!-- Memory Tenant Mode -->
-        <div class="settings-group mb-6">
+        <!-- The retired memory mode: shown only on an install that still
+             stores per-platform or per-user memory from before Spaces. It
+             can be ended here, never chosen again. -->
+        <div class="settings-group mb-6" id="memory-legacy-mode" x-show="memoryTenantMode !== 'shared'" x-cloak>
             <h3>{{ t('settings.memory_isolation_title') }}</h3>
-            <div class="form-group">
-                <label for="f-memory-tenant-mode">{{ t('settings.memory_tenant_mode') }}</label>
-                <select id="f-memory-tenant-mode" class="form-select" x-model="memoryTenantMode" @change="saveTenantMode()">
-                    <option value="shared">{{ t('settings.memory_tenant_shared') }}</option>
-                    <option value="per_platform">{{ t('settings.memory_tenant_platform') }}</option>
-                    <option value="per_user">{{ t('settings.memory_tenant_user') }}</option>
-                </select>
-                <p style="font-size:0.75rem;color:var(--text-muted);margin-top:6px;">
-                    {{ t('settings.memory_tenant_hint') }}
-                </p>
+            <div class="notice tone-warning" role="status">
+                <p>{{ t('settings.memory_legacy_mode_notice') }}</p>
             </div>
+            <button type="button" class="btn btn-secondary" style="margin-top:10px;"
+                    :disabled="saving" @click="endLegacyTenantMode()">
+                {{ t('settings.memory_legacy_mode_button') }}
+            </button>
         </div>
 
         <!-- Knowledge merge + recall UX (left-aligned toggles) -->

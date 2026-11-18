@@ -191,7 +191,9 @@ def _get_permission_manager() -> Any:
 # concurrency: a single worker thread drains a bounded queue, so exactly one
 # thread ever touches these databases. That also fixes the unbounded
 # thread-per-call spawn, which was its own problem.
-_PROCEDURAL_QUEUE: queue.Queue[tuple[str, dict[str, Any], bool, Any] | None] = queue.Queue(
+#: An item: tool, arguments, outcome, the memory settings, and the tenant
+#: the tool ran for (read on the caller's thread: the worker has no context).
+_PROCEDURAL_QUEUE: queue.Queue[tuple[str, dict[str, Any], bool, Any, str] | None] = queue.Queue(
     maxsize=512
 )
 _PROCEDURAL_WORKER: threading.Thread | None = None
@@ -219,7 +221,7 @@ def _procedural_worker() -> None:
             try:
                 if item is None:  # shutdown sentinel
                     return
-                tool_name, arguments, success, cfg = item
+                tool_name, arguments, success, cfg, tenant = item
 
                 # Resolve the target per item rather than once at startup.
                 # The data directory is fixed in production but not under
@@ -256,6 +258,7 @@ def _procedural_worker() -> None:
                     dag_steps=[{"tool": tool_name, "args_keys": sorted(arguments.keys())}],
                     postconditions={"succeeded": success},
                     success=success,
+                    tenant_id=tenant,
                     cfg=cfg,
                 )
             except Exception:
@@ -334,8 +337,17 @@ def _record_procedural_outcome(tool_name: str, arguments: dict[str, Any], *, suc
         from kazma_core.memory.config import read_memory_cfg
 
         cfg = read_memory_cfg()
+        # The space the tool ran for (Spaces S1-09): every outcome was
+        # recorded under the owner's. A call with no space bound, on an
+        # install that enforces Spaces, is recorded for no one.
+        from kazma_core.spaces.scope import NoSpaceBound, require_space_id
+
         try:
-            _PROCEDURAL_QUEUE.put_nowait((tool_name, arguments, success, cfg))
+            tenant = require_space_id()
+        except NoSpaceBound:
+            return
+        try:
+            _PROCEDURAL_QUEUE.put_nowait((tool_name, arguments, success, cfg, tenant))
         except queue.Full:
             logger.debug("[ToolRegistry] procedural queue full — outcome dropped")
     except Exception:
