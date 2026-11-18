@@ -12814,7 +12814,8 @@ product can turn it on, so an install with one account behaves as before.
     records the bound space and person, and a callback binds them back
     (`kazma_ui.oauth_sign_in.attempt_scope`); an attempt of no space, or of a
     person no longer a member, is refused (`no_space`, worded in both
-    languages). The GitHub and X callbacks bind theirs with parts c and b.
+    languages). X's callback binds its own (part b); GitHub's follows in
+    part c.
   - **The background connector check goes space by space**
     (`connector_health.check_connectors`): each space's grants are refreshed
     in that space; only the owner's space raises the owner's alerts.
@@ -12824,6 +12825,47 @@ product can turn it on, so an install with one account behaves as before.
     no other module names their secrets but the declared offsite backup and
     settings restore; each with its control), `tests/_mail_space_cases.py`
     (19 routes and 12 tools; with the space names taken out, the cases fail).
+
+- **An X account belongs to a space (S1-17, part b, 2026-11-18).** Every
+  X key and row was already kept per tenant (`x_api.ownership.x_config_key`,
+  `tenant.<t>.connectors.x.*`; the stores "apart"), and a space is a tenant.
+  Guards act only where Spaces is enforced; one account as before.
+  - **The tenant X work is under is the bound space**
+    (`ownership.x_tenant_id`, a tenant bound by older code naming its space
+    as `require_space_id` reads it): work bound to no space reads no X
+    account (`NoSpaceBound`) -- it read the owner's.
+  - **The owner's environment and legacy names are the owner's space's**:
+    the OAuth 1.0a keys from the environment, the legacy vault names
+    (`x_api_key` ...; a space's vault read falls back to a global row, so a
+    stray global copy lent the owner's account to every space) and
+    `X_BEARER_TOKEN` (`auth_tokens.bearer_from_env`: another space spent the
+    owner's X API budget). Source gate: no other X code reads the
+    environment but Kazma's own switches.
+  - **Background X work runs in its row's whole scope**
+    (`ownership.x_work_scope`, resolved off the loop: the space and the
+    account its own work acts for, as every queued work): a booked post, its
+    receipt, a projection repair, the legacy schedule's migration and fire,
+    the mention poller (the owner's space: it answers the owner's account).
+    A row of no space does not run -- with the tenant alone bound it was
+    sent: a booked post is held for review, a legacy post marked failed.
+    Whose row it is that cannot be read for now (the database away, a
+    locked file: `ownership.identity_failure_passes`) waits for a later
+    pass, nothing held or failed -- the legacy fire's catch-all would have
+    failed it for good. The run supervisor's X Cancel with nothing bound is
+    refused (`no_space`).
+  - **Sign in with X finishes in the space it started in**
+    (`kazma_ui.oauth_sign_in.attempt_scope`; the callback is an `account`
+    route: behind sign-in, it names no space -- classed `space`, it was
+    refused for anyone in two spaces), and `x_draft_posts` saves under the
+    X account's space.
+  - **Another space's X notice stays off the owner's channels** (O1,
+    `notifications._kept_in_its_space`: held undelivered,
+    `KEPT_IN_ITS_SPACE`; delivering it to its space's people is S2-05's).
+  - Gates: `tests/_x_space_cases.py` (every X route, the X page, the
+    Scheduled page's X booking and the 13 X tools: two spaces each with
+    their own X account and its rows; X and the X model stood in for, every
+    call to X carrying the asker's keys), `tests/test_x_account_spaces.py`
+    (each rule with its control; the source gate with a planted read).
 
 ## UI Conventions (Web)
 

@@ -64,7 +64,7 @@ PLAN = REPO / "docs" / "plans" / "SPACES_PLAN.md"
 #: item of stage 1 writes the cases of its part and takes them out of the
 #: pending tables; this number may only go down, and lowering it means
 #: lowering the baseline in the same change.
-PENDING_BASELINE = 274
+PENDING_BASELINE = 210
 
 
 # ── what exists ──────────────────────────────────────────────────────────
@@ -241,11 +241,12 @@ def test_a_target_is_looked_up_one_way() -> None:
     assert pending_item("GET /api/chat/files/{file_id}") == "S1-19"
     # An area whose item wrote its cases has no pending rule left.
     assert pending_item("POST /api/chat/stream") is None
+    assert pending_item("GET /api/x/status") is None
     assert pending_item("POST /api/github/repos/clone") == "S1-20"
     assert pending_item("GET /api/github/repos") == "S1-17"
     # A prefix ends at a path segment.
-    assert pending_item("GET /api/xyz") is None
-    assert pending_item("GET /api/x/status") == "S1-17"
+    assert pending_item("GET /api/githubx/repos") is None
+    assert pending_item("GET /api/github/user") == "S1-17"
 
 
 def test_the_route_filter_keeps_space_routes_only() -> None:
@@ -374,29 +375,29 @@ def _planted_case(target: str, item: str = "S1-08") -> Case:
 
 
 def test_a_planted_space_route_with_nothing_is_reported(routes, tools, live) -> None:
-    planted = space_routes([("POST", "/api/github/planted-thing"), ("GET", "/x")])
-    assert planted == ["GET /x", "POST /api/github/planted-thing"]
+    planted = space_routes([("POST", "/api/github/planted-thing"), ("GET", "/ide")])
+    assert planted == ["GET /ide", "POST /api/github/planted-thing"]
     # Without the rules of its area, the route is in no table.
     bare = replace(
         live,
-        route_rules=tuple(r for r in live.route_rules if r[0] not in ("/api/github", "/x$")),
+        route_rules=tuple(r for r in live.route_rules if r[0] not in ("/api/github", "/ide$")),
     )
     assert missing(planted, [], bare) == [
-        "GET /x: a space route with no case and no pending item",
+        "GET /ide: a space route with no case and no pending item",
         "POST /api/github/planted-thing: a space route with no case and no pending item",
     ]
     # And every real route of that area is reported with it.
     reported = missing(routes, tools, bare)
     assert "GET /api/github/repos: a space route with no case and no pending item" in reported
-    assert all("/api/github" in p or p.startswith("GET /x:") for p in reported)
+    assert all("/api/github" in p or p.startswith("GET /ide:") for p in reported)
     # An area that has its cases: a new route there with none is reported
     # at once, by name (no prefix rule answers for it any more).
     assert missing(["GET /api/chat/planted-thing"], [], live) == [
         "GET /api/chat/planted-thing: a space route with no case and no pending item"
     ]
     # A case answers for its route.
-    cased = replace(bare, cases={**bare.cases, "GET /x": _planted_case("GET /x", "S1-17")})
-    assert missing(["GET /x"], [], cased) == []
+    cased = replace(bare, cases={**bare.cases, "GET /ide": _planted_case("GET /ide", "S1-20")})
+    assert missing(["GET /ide"], [], cased) == []
 
 
 def test_a_new_route_in_a_pending_area_raises_the_count(routes, tools, live) -> None:

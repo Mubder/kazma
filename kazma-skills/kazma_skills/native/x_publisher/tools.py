@@ -644,7 +644,7 @@ async def x_draft_posts(brief: str, count: int = 1) -> str:
     from kazma_core.agent.artifacts import get_artifact_store
     from kazma_core.agent.tool_refusal import KnownEffectError
     from kazma_core.safety.commitment.proposals import current_turn
-    from kazma_core.safety.hitl import get_current_tenant_id, get_current_thread_id
+    from kazma_core.safety.hitl import get_current_thread_id
     from kazma_core.x_api.post_drafting import draft_posts
     from kazma_core.x_api.reply import DraftFailed
     from kazma_core.x_api.text_length import validate_text
@@ -662,7 +662,12 @@ async def x_draft_posts(brief: str, count: int = 1) -> str:
         # A bad brief, the X settings, or a reference document that cannot be
         # read: refused before any model call.
         raise RefusedBeforeEffect(str(exc)) from exc
-    tenant, thread, turn = get_current_tenant_id() or "default", get_current_thread_id() or "", current_turn()
+    from kazma_core.x_api.ownership import x_tenant_id
+
+    # The X account's space (S1-17 part b): never the owner's for work bound
+    # to no space. A settings read when no tenant is bound: off the loop.
+    tenant = await asyncio.to_thread(x_tenant_id)
+    thread, turn = get_current_thread_id() or "", current_turn()
     reviews = [{**review, "models": list(result.models)} for review in result.reviews]
     store = await asyncio.to_thread(get_artifact_store)
     payload = await asyncio.to_thread(store.save_proposal, tenant, thread, "x_posts", list(result.drafts),

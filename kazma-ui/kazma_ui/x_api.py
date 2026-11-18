@@ -620,8 +620,6 @@ def _api_access_payload(base: str) -> dict[str, Any]:
     """What Settings -> X shows about the whole X API: which authentications
     are there, who signed in with X, and how many operations Kazma can call
     now. Never a token."""
-    import os
-
     from kazma_core.x_api import auth_tokens
     from kazma_core.x_api import operations as ops
     from kazma_core.x_api.oauth2_sign_in import redirect_uri
@@ -636,7 +634,7 @@ def _api_access_payload(base: str) -> dict[str, Any]:
         "spec_version": ops.spec_version(),
         "available_auth": have,
         "bearer_set": bool(auth_tokens.bearer_token()),
-        "bearer_from_env": bool(os.environ.get("X_BEARER_TOKEN", "").strip()),
+        "bearer_from_env": bool(auth_tokens.bearer_from_env()),
         "client_id": client_id,
         "client_secret_set": bool(client_secret),
         "signed_in": bool(have.get("oauth2")),
@@ -733,11 +731,8 @@ async def x_oauth2_callback(
     from urllib.parse import quote
 
     from kazma_core.security.oauth_attempts import AttemptRefused
-    from kazma_core.x_api import auth_tokens, oauth2_sign_in
-    from kazma_core.x_api.client import XApiError, XClient
-    from kazma_core.x_api.config import get_x_config
 
-    from kazma_ui.oauth_sign_in import forget_binding, take_attempt
+    from kazma_ui.oauth_sign_in import attempt_scope, forget_binding, take_attempt
 
     back = _own_base(request) + "/settings?tab=x"
     if error or not code or not state:
@@ -746,10 +741,29 @@ async def x_oauth2_callback(
         return RedirectResponse(f"{back}&x_oauth=error&msg={quote(why)}", status_code=302)
     try:
         attempt = await take_attempt(request, state, providers=("x",))
+        # The sign-in finishes in the space it started in (Spaces S1-17
+        # part b): the redirect from X names no space, so the attempt does.
+        in_its_space = await asyncio.to_thread(attempt_scope, attempt)
     except AttemptRefused as exc:
         logger.warning("[x.oauth2] callback refused: %s", exc.reason)
         return forget_binding(RedirectResponse(f"{back}&x_oauth=error&reason={quote(exc.reason)}",
                                                status_code=302), request, state)
+    with in_its_space:
+        return await _finish_x_sign_in(request, code, state, attempt, back)
+
+
+async def _finish_x_sign_in(request: Request, code: str, state: str, attempt: dict[str, Any],
+                            back: str) -> RedirectResponse:
+    """Trade the code for X's tokens and keep them, in the scope the callback
+    bound (the attempt's space)."""
+    from urllib.parse import quote
+
+    from kazma_core.x_api import auth_tokens, oauth2_sign_in
+    from kazma_core.x_api.client import XApiError, XClient
+    from kazma_core.x_api.config import get_x_config
+
+    from kazma_ui.oauth_sign_in import forget_binding
+
     try:
         answer = await asyncio.to_thread(oauth2_sign_in.exchange, code, state, attempt)
     except oauth2_sign_in.SignInFailed as exc:

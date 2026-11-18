@@ -56,12 +56,37 @@ def claim(conn: sqlite3.Connection, *, now: float, owner: str) -> dict[str, Any]
     return dict(row)
 
 
-def finish(conn: sqlite3.Connection, row: dict[str, Any], *, owner: str, delivered: bool, superseded: bool = False) -> None:
+#: Why another space's notice was not sent to the owner's channels.
+KEPT_IN_ITS_SPACE = ("Kept in its space: the owner's channels carry the owner's space's X notices only "
+                     "(Spaces S1-17).")
+
+
+def finish(conn: sqlite3.Connection, row: dict[str, Any], *, owner: str, delivered: bool, superseded: bool = False,
+           kept: bool = False) -> None:
+    """*kept*: another space's notice, held undelivered for good (it is not
+    retried on the owner's channels; delivering it to its space's people is
+    S2-05's)."""
     now = time.time()
-    delay = 10**12 if superseded else min(3600, 30 * 2 ** min(int(row["attempts"]), 7))
+    delay = 10**12 if superseded or kept else min(3600, 30 * 2 ** min(int(row["attempts"]), 7))
+    if kept:
+        why = KEPT_IN_ITS_SPACE
+    elif superseded:
+        why = "Superseded revision; delivery suppressed."
+    else:
+        why = "" if delivered else "No acknowledged ops route; will retry."
     conn.execute("UPDATE x_notification_outbox SET delivered_at = ?, next_attempt = ?, "
                  "lease_until = 0, lease_owner = '', last_error = ? WHERE id = ? AND lease_owner = ?",
-                 (now if delivered else None, now + delay, "Superseded revision; delivery suppressed." if superseded else ("" if delivered else "No acknowledged ops route; will retry."), row["id"], owner))
+                 (now if delivered else None, now + delay, why, row["id"], owner))
+
+
+def _kept_in_its_space(tenant: str) -> bool:
+    """Whether a notice of *tenant* stays off the owner's channels: once
+    Spaces is enforced, every space's but the owner's (O1, Spaces S1-17
+    part b). Until people link their own chat apps (stage 3) every ops
+    channel is the owner's. No I/O."""
+    from kazma_core.spaces.scope import OWNER_SPACE_ID, spaces_enforced
+
+    return spaces_enforced() and (str(tenant or "") or OWNER_SPACE_ID) != OWNER_SPACE_ID
 
 
 async def _drain_store(store: Any, *, limit: int = 20) -> int:
@@ -78,6 +103,9 @@ async def _drain_store(store: Any, *, limit: int = 20) -> int:
         current = await asyncio.to_thread(store.notification_current, row)
         if not current:
             await asyncio.to_thread(store.finish_notification, row, owner=owner, delivered=False, superseded=True)
+            continue
+        if _kept_in_its_space(row["tenant_id"]):
+            await asyncio.to_thread(store.finish_notification, row, owner=owner, delivered=False, kept=True)
             continue
         with tenant_scope(row["tenant_id"]):
             taken = await deliver_acknowledged(row["message"])

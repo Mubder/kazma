@@ -123,7 +123,40 @@ async def _fire_post(post: ScheduledXPost) -> None:
     # every scheduled fire failed with "connector disabled at fire time"
     # while the same credentials worked from chat (2026-09-03). Same
     # pattern as the cron delivery_target fix (§16): bind context at
-    # schedule time, restore it at fire time.
+    # schedule time, restore it at fire time. Once Spaces is enforced the
+    # whole scope of the post's space is bound, as every queued work's
+    # (Spaces S1-17 part b), and a post of no space is not sent.
+    from kazma_core.spaces.scope import NoSpaceBound, spaces_enforced
+
+    if spaces_enforced():
+        from kazma_core.spaces.identity import IdentityUnavailable
+        from kazma_core.x_api.ownership import x_work_scope
+
+        try:
+            scope = await asyncio.to_thread(x_work_scope, post.tenant_id)
+        except NoSpaceBound:
+            logger.warning("[x-schedule] post %s: no space of this install holds it; not sent", post.id)
+            store = await asyncio.to_thread(get_x_scheduled_store)
+            await asyncio.to_thread(store.mark_failed, post.id, "no space of this install holds this post")
+            return
+        except IdentityUnavailable as exc:
+            from kazma_core.x_api.ownership import identity_failure_passes
+
+            if identity_failure_passes(exc):
+                # The database away: still pending, due again at the next
+                # pass -- never "internal error before send", which the
+                # caller's catch-all would make of it, for good.
+                logger.info("[x-schedule] post %s waits: whose it is cannot be read (%s)",
+                            post.id, type(exc).__name__)
+                return
+            logger.warning("[x-schedule] post %s: whose it is cannot be read (%s); not sent",
+                           post.id, type(exc).__name__)
+            store = await asyncio.to_thread(get_x_scheduled_store)
+            await asyncio.to_thread(store.mark_failed, post.id, "whose post this is cannot be read")
+            return
+        with scope():
+            await _fire_post_inner(post)
+        return
     _tenant_token = None
     if post.tenant_id:
         from kazma_core.tenant_context import reset_current_tenant_id, set_current_tenant_id

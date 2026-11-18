@@ -117,6 +117,12 @@ ROUTE_SCOPE_RULES: tuple[tuple[Pattern, str], ...] = (
 
     # ── The signed-in person ──────────────────────────────────────────────
     ("/api/auth/me$", ACCOUNT),
+    # Sign in with X's callback: behind sign-in (the browser coming back
+    # from X carries the session), and it can name no space -- the attempt
+    # it finishes does, and the handler binds that (Spaces S1-17 part b,
+    # ``oauth_sign_in.attempt_scope``). Classed ``space`` it was refused for
+    # anyone in two spaces ("must say which space").
+    ("/api/x/oauth2/callback$", ACCOUNT),
     # The spaces the person is a member of (the space switcher reads it).
     ("/api/account", ACCOUNT),
     # Password, sessions and API tokens.
