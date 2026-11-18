@@ -460,7 +460,7 @@ async def _handle_micro_consolidation(payload: dict[str, Any]) -> bool:
                 stats = await asyncio.to_thread(
                     _apply_if_still_remembered, raw, primary, ops, stats=stats, episode_id=str(episode_id),
                     session_id=row["session_id"], turn=row["turn_number"],
-                    tenant_id=row["tenant_id"], now=row["created_at"],
+                    tenant_id=row["tenant_id"], now=row["created_at"], user_text=row["user_text"] or "",
                 )
             await asyncio.to_thread(_mark_deep_pass, primary, str(episode_id))
             logger.info(

@@ -33,7 +33,7 @@ from kazma_core.agent_skills import parser as skill_parser
 from kazma_core.code_index import symbols
 from kazma_core.documents import image_refs, renderer_worker, resources
 from kazma_core.documents.errors import DocumentSecurityError
-from kazma_core.memory import belief_extractor, current_facts
+from kazma_core.memory import belief_extractor, current_facts, episode_text
 from kazma_core.safety import shell_paths
 from kazma_core.safety.commitment import authorize, relative_time
 from kazma_core.security import dependency_scanner, secret_scan
@@ -344,12 +344,16 @@ def test_resource_checks_never_pass_what_they_refused():
 
 
 def test_filler_patterns_answer_as_before():
+    """The filler patterns became a rule over words (2026-11, the memory
+    framework audit's F8: ``episode_text.is_small_talk_words``). Every
+    message the old whole-message patterns called filler is still small
+    talk; the rule only adds messages made of several small-talk words."""
     words = ["okay", "ok", "got it", "thanks", "no", "lol", "haha", "hm", "hmm", "uh", "uhh", "um", " ", "  ", "\n",
              "\t", ".", "!", "?", "x", "h"]
     for _ in range(30000):
         s = _words(words)
-        assert bool(belief_extractor._FILLER_PATTERNS[0].search(s)) == bool(OLD_FILLER_WORDS.search(s)), s
-        assert _view(belief_extractor._FILLER_PATTERNS[1], s, "search") == _view(OLD_FILLER_SOUNDS, s, "search"), s
+        if OLD_FILLER_WORDS.search(s) or OLD_FILLER_SOUNDS.search(s):
+            assert episode_text.is_small_talk_words(s), s
     assert belief_extractor.is_filler_turn("okay!")
 
 
@@ -673,8 +677,8 @@ def test_hostile_inputs_finish_at_once():
         ("frontmatter", lambda: skill_parser.parse_skill_md("---" + "\n" * n)),
         ("css", lambda: renderer_worker._CSS_RULE.findall("a" * n)),
         ("resources", lambda: _new_resources_pass("![" * (5 * n), frozenset())),
-        ("filler words", lambda: belief_extractor._FILLER_PATTERNS[0].search("okay" + " " * n + "x")),
-        ("filler sounds", lambda: belief_extractor._FILLER_PATTERNS[1].search("u" + "h" * n + "x")),
+        ("filler words", lambda: episode_text.is_small_talk_words("okay" + " " * n + "x")),
+        ("filler sounds", lambda: episode_text.is_small_talk_words("u" + "h" * n + "x")),
         ("reset line", lambda: current_facts.parse_current_facts("grok reset 1" + " " * n + "x")),
         ("reset value", lambda: current_facts.parse_current_facts("grok reset x" + " " * n + "y")),
         ("fork bomb", lambda: [p.search(":(){ " + ":|&" * (n // 3)) for p in authorize._EXEC_DENYLIST]),

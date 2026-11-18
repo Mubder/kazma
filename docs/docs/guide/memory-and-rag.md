@@ -462,6 +462,56 @@ it. Clear the text to remove it. On an install with several users, only an
 administrator can change it: Kazma takes it into account for everyone who
 uses that tenant.
 
+## Changes to what you told Kazma {#changes-to-what-you-told-kazma}
+
+A fact you told Kazma yourself ("I live in Paris") changes only in ways you
+can see and take back. The Memory page's card **Changes to what you told
+Kazma** lists them:
+
+- **Changed from what you said.** You later said it plainly ("I live in
+  Rotterdam now"): Kazma keeps the new value and shows the change, with
+  **Undo**, which brings the earlier value back (every earlier value, when
+  it replaced a list such as two employers; one you have said again since
+  is already there and is not added twice).
+- **Is this a change? Kazma kept the earlier fact.** A message Kazma reads
+  as a correction only with its model ("We moved to Rotterdam last month",
+  "No, Lisbon", "I'm visiting Dubai next week") does not replace your fact
+  on its own: the model may have filed it under the wrong fact. Kazma keeps
+  the earlier one and asks: **Yes, change it** writes the new value as
+  yours (and the change can still be undone), **No, keep it** leaves
+  everything as it was. A message about someone else ("My sister moved to
+  Rotterdam"), a denial ("I never lived in Paris") or a question ("Should I
+  move to Rotterdam?") asks nothing. The same holds when you ask Kazma to
+  remember something and its memory tool would replace one of your facts:
+  "I'm visiting Dubai next week, remember that for the itinerary" asks
+  before it touches your home.
+- **Kazma's reading of your message.** The first time only the model reads
+  one of your facts (your home, your name, the name you go by, your
+  employer, your role), Kazma keeps it as its own reading, not as yours,
+  and does not ask: anything you say later replaces it. **This is right**
+  makes it yours; **Not me** takes it out, and Kazma never files that value
+  again (your own words still can). When a fact like this is recalled into a
+  conversation, it starts with "(Kazma's reading)" ("(قراءة Kazma)" for an
+  Arabic fact), so the model knows you did not say it; so does any fact a
+  tool or the model wrote, and a fact whose source is not recorded (an
+  older one, or another install's) starts with "(source unknown)". Only
+  your own words go untagged. Each recalled fact is one line, whatever its
+  value holds.
+
+Kazma also tells you, once, in its next reply in the chat the change came
+from: what it changed, and at most one question a turn, never about the
+same fact twice in a day. The rest wait here. It cannot apply a waiting
+change itself; you do, by saying it in your own words or with the buttons.
+In Telegram, Discord, Slack and WhatsApp, `/memory changes` lists them with
+a short id, and `/memory undo`, `/memory confirm` or `/memory dismiss` with
+that id decides one. Through the API, an operator's API token may confirm
+one too: it can already edit your facts directly. If a reply fails, the note
+is not used up; the next reply tells it.
+
+A question you leave unanswered is let go after 30 days. Forgetting the
+fact, the conversation or the words a change holds forgets the change too,
+and the changes are in the memory export. Nothing here calls a model.
+
 ## One fact, one name
 
 When Kazma learns a fact it names it (`timezone`, `works_at` ...). The same
@@ -792,8 +842,51 @@ it now reads the same kinds of fact in Arabic and in Arabic mixed with
 English -- name, where you live (or moved to), where you work, a favourite,
 a preference, an allergy (`memory/arabic_facts.py`). Its rules come from the
 grammar, so it keeps nothing from a negation ("ما أحب"), an instruction to
-Kazma ("استخدم البحث"), a question, someone else ("أخوي ساكن في دبي") or a
-field of work ("أشتغل في المبيعات", like "I work in sales"). What it misses --
+Kazma ("استخدم البحث"), a question, someone else ("أخوي ساكن في دبي", "أختي
+انتقلت إلى روتردام", and "عندي أخت اسمها نورة وانتقلت إلى روتردام", where it
+is Noura who moved) or a field of work ("أشتغل في المبيعات", like "I work in
+sales"). Once a sentence names someone else, a statement with no "أنا" after it
+is read as about them: the quick pass would rather miss a fact than file
+another person's under you. A new sentence starts fresh, except for someone
+you introduced by name ("عندي أخت اسمها نورة. انتقلت إلى روتردام" is still
+Noura), and what describes you is still you ("أنا مدير مشاريع وساكن في دبي",
+"عندي بنت وساكن في الكويت", "قبل سنتين انتقلت إلى دبي"). It reads only your
+own words: not an attached document, a forwarded message or a pasted mail, a
+pasted chat (the lines of a WhatsApp export, the header a Telegram, Discord
+or Slack copy puts over a message and the message under it, "Dana: My name is
+Dana", "dana_92: ...", "the customer: ..."), a mail you quote ("On ... Dana
+wrote:" and what follows it to the next blank line), a quote, what someone
+else said or thinks ("my sister said: ...", to the end of that sentence; "He
+said, I live in Lyon"; "Ali told me I work at Initech"; "Ali thinks I ...";
+"He was like, I ..."; "According to Ali, ..."; "أختي تقول أنا ساكنة في
+دبي"), a text of someone else's ("Dana's bio:", "Her message was:"), an
+example or a part to play ("For example: ...", "Pretend you are me and say:
+..."), a text you asked Kazma to work on or about ("Translate to French: My
+name is Pierre" does not make your name Pierre, nor does "Is this sentence
+correct: I work at Initech"), or a question ("How do I say my name is Pierre
+in French?"). A greeting before a colon is yours ("Good morning: I live in
+Oslo"). Inside a request to remember, a quote is yours ("remember this: "I
+prefer dark mode""), unless it quotes someone ("remember that Dana wrote "I
+live in Oslo"") or you name the text as pasted ("Remember this email: ...":
+kept, at the trust of something you pasted, not of your own words). "Don't
+remember this" asks nothing. "Correct: my name is Ahmad" is your own words
+and counts, and so is what you add after the text you asked about
+("Summarize https://x.y and my name is Sam", "Can you review my text?" then
+"Also my name is Sam" on a line of its own). Only the first 2,000 characters
+of a message are read this way, up to their last blank line. The end of a
+longer message (its last paragraph) is read only to ask you: a correction
+there that the model's deep pass reads becomes a question, never your word.
+The deep pass reads the first 4,000 characters of a message. A fact only
+the model's deep pass reads is never your own word by itself: whether the
+model's name fits your words ("I'm visiting Dubai next week" read as your
+home) only you can say. It stays the model's inference, and a fact you state
+yourself always wins over it. When it disagrees with a fact you gave and is
+in your own words ("We moved to Rotterdam last month" beside your Paris),
+Kazma asks you (below); when you never gave that fact, it shows as Kazma's
+reading on the Memory page and asks nothing. Another name for the same fact
+("home city", "resides in") counts as the same fact.
+"My sister moved to Rotterdam" is never asked about, whoever the model files
+it under. What it misses --
 relatives, jobs, dates -- is the model's deep pass to find. That pass is scored from the configured model's recorded
 replies (`scripts/memory_extraction_record.py --out <fixture>`, run with an
 install's own Python, one model call per turn); a turn with no recorded reply

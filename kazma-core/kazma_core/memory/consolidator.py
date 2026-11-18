@@ -458,7 +458,13 @@ def _run_turn_memory(
     # written (a refusal, a failure, a slash command): no deep pass; a
     # failed turn is retried whole by the queue.
     try:
-        if written:
+        from kazma_core.memory.belief_extractor import is_filler_turn
+
+        user_text, _ = extract_turn_texts(messages)
+        # Small talk queues no deep pass: it is one model call, and a reply
+        # like "go ahead" or "نعم" holds nothing for it to find (the review
+        # of the memory framework audit's F8).
+        if written and not is_filler_turn(user_text or ""):
             from kazma_core.memory.task_queue import enqueue_task
 
             if enqueue_task(

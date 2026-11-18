@@ -25,6 +25,8 @@ import re
 import sqlite3
 from typing import Any
 
+from kazma_core.memory.own_words import own_words
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -139,12 +141,6 @@ Rules:
 
 # ── Heuristic gatekeeper (§5.1) ──────────────────────────────────────────
 
-# Filler patterns — turns that match are skipped before any LLM call.
-_FILLER_PATTERNS = [
-    re.compile(r"^\s*+(okay|ok|got it|noted|thanks|thank you|sure|yes|no|cool|nice|great)\s*+[.!?]*+\s*+$", re.I),
-    re.compile(r"^\s*+(lol|haha|hm+|uh+|um+)\s*+$", re.I),
-    re.compile(r"^\s*.{0,12}\s*$"),  # very short turns (≤12 chars)
-]
 
 # Durable-cue patterns — turns that match are STRONG candidates for extraction.
 _DURABLE_CUES = [
@@ -160,6 +156,8 @@ _DURABLE_CUES = [
     re.compile(r"\b(?:grok|zcode|supergrok|claude|cursor)\b.*\breset\b", re.I),
     re.compile(r"\bاسمي\b"),  # Arabic "my name is"
 ]
+#: The longest message that may be small talk.
+_FILLER_MAX = 400
 
 
 def is_filler_turn(user_text: str) -> bool:
@@ -171,6 +169,11 @@ def is_filler_turn(user_text: str) -> bool:
     text = (user_text or "").strip()
     if not text:
         return True
+    # A long message is never small talk, and the cues below read the raw
+    # text: past this, they cost its length (the security review of F1's
+    # second half, 2026-11-18).
+    if len(text) > _FILLER_MAX:
+        return False
     # Durable cue → never filler; a request to remember is one in any
     # language (W4: "تذكر هذا" is eight characters, and short turns are filler).
     from kazma_core.memory.remember_request import is_remember_request
@@ -186,11 +189,12 @@ def is_filler_turn(user_text: str) -> bool:
 
     if extract_arabic_facts(text):
         return False
-    # Otherwise check filler patterns
-    for pat in _FILLER_PATTERNS:
-        if pat.search(text):
-            return True
-    return False
+    # Small talk by its words, never by its length: a message of twelve
+    # characters or fewer was filler, so "I'm diabetic", "Call me Sam" and
+    # "No, Lisbon" taught nothing (2026-11, the memory framework audit's F8).
+    from kazma_core.memory.episode_text import is_small_talk_words
+
+    return is_small_talk_words(text)
 
 
 # ── LLM extraction ───────────────────────────────────────────────────────
@@ -336,7 +340,10 @@ def extract_beliefs_heuristic(user_text: str) -> list[dict[str, Any]]:
     kept nothing). Returns beliefs typed as 'functional' for
     name/location/employer/favorite, 'set' for preferences and allergies.
     """
-    text = (user_text or "").strip()
+    # The user's own words only: never an attached document, a quote, someone
+    # else's words or a text the user asked Kazma to translate or fix
+    # ("Translate to French: My name is Pierre" is not the user's name).
+    text = own_words(user_text)
     if not text:
         return []
     beliefs: list[dict[str, Any]] = []
@@ -353,7 +360,8 @@ def extract_beliefs_heuristic(user_text: str) -> list[dict[str, Any]]:
         # "I work in X" names a place or a field -- too ambiguous to store.
         (re.compile(r"\b[Ii] work (?:at|for)\s+([A-Z][a-zA-Z0-9&]+(?:\s+[A-Z][a-zA-Z0-9&]+){0,2})(?:\s+(?:now|too|also|currently)\b|[.,!]|\s+and\s|\s+[Ii]\s|\s+(?=[\u0621-\u064a])|$)"), "employer"),
         (re.compile(r"\b[Mm]y (?:favorite|favourite)\s+(\w+)\s+is\s+([a-z][a-zA-Z]+(?:\s+[a-z][a-zA-Z]+){0,2})", re.IGNORECASE), "favorite"),
-        (re.compile(r"\b[Ii] (?:prefer|like|love|use|need)\s+([a-z][a-zA-Z]+(?:\s+[a-z][a-zA-Z]+){0,2}"
+        # Not "need": "I need to finish this report" is no preference.
+        (re.compile(r"\b[Ii] (?:prefer|like|love|use)\s+([a-z][a-zA-Z]+(?:\s+[a-z][a-zA-Z]+){0,2}"
                     r"|[\u0621-\u064a\u0671-\u06d3]+(?:\s+[\u0621-\u064a\u0671-\u06d3]+){0,2})", re.IGNORECASE), "prefers"),
         (re.compile(r"\b[Ii](?:'m| am) allergic to\s+([a-z][a-zA-Z]+(?:\s+[a-z][a-zA-Z]+){0,2})", re.IGNORECASE), "allergy"),
     ]
@@ -461,6 +469,7 @@ async def extract_and_apply_beliefs(
         tenant_id=tenant_id,
         cfg=cfg,
         extraction_method=extraction_method,
+        user_text=user_text,
     )
 
 
@@ -536,6 +545,49 @@ def _default_method(stats: dict[str, Any] | None) -> str:
     return USER_STATED if (stats or {}).get("source") == "heuristic" else LLM_INFERRED
 
 
+def _user_said_not_me(primary_conn, clean: dict[str, Any], *, tenant_id: str) -> bool:
+    from kazma_core.memory import changes
+
+    try:
+        return changes.user_said_not_me(primary_conn, tenant_id=tenant_id, subject="user",
+                                        predicate=clean["predicate"], value=clean["object"])
+    except sqlite3.OperationalError as exc:
+        if "memory_changes" not in str(exc):
+            raise
+        return False  # a store with no change log holds no "Not me"
+
+
+def _put_to_the_user(
+    primary_conn, action: dict[str, Any], clean: dict[str, Any], *, user_text: str, tenant_id: str,
+    session_id: str | None, turn: int | None, now: float | None, stats: dict[str, Any],
+) -> None:
+    """The model's reading *clean* (``mutate_belief`` answered *action*) put
+    to the user: a question when the trust gate refused it over a fact the
+    user stated (``changes.record_pending``); Kazma's reading, shown on the
+    Memory page and never asked, when it is the first fact of its kind
+    (``changes.record_first_reading``)."""
+    from kazma_core.memory import changes
+
+    try:
+        if action.get("blocked") == "lower_trust_source":
+            recorded = changes.record_pending(primary_conn, tenant_id=tenant_id, refused=action,
+                                              new_value=clean["object"], user_text=user_text,
+                                              session=session_id, turn=turn, now=now)
+        elif action.get("action") != "noop" and not action.get("blocked") and action.get("belief_id"):
+            recorded = changes.record_first_reading(primary_conn, tenant_id=tenant_id, written=action,
+                                                    predicate=clean["predicate"], new_value=clean["object"],
+                                                    user_text=user_text, session=session_id, turn=turn, now=now)
+        else:
+            return
+    except sqlite3.OperationalError as exc:
+        if "memory_changes" not in str(exc):
+            raise
+        logger.warning("[belief_extract] no change log in this store; a reading of the user's fact is not put to them")
+        return
+    if recorded:
+        stats["pending_changes"] = stats.get("pending_changes", 0) + 1
+
+
 def _apply_beliefs_to_v2(
     raw_beliefs: list[dict[str, Any]],
     primary_conn,
@@ -549,8 +601,17 @@ def _apply_beliefs_to_v2(
     extraction_method: str | None = None,
     now: float | None = None,
     private: bool = False,
+    user_text: str | None = None,
 ) -> dict[str, Any]:
     """Sync helper: fence + entity-resolve + mutate a list of raw beliefs.
+
+    *user_text* is the turn's message. A fact the model read never gets the
+    user's trust by itself: it is written as the model's inference. A reading
+    of one of the user's own facts whose value stands in the user's own words
+    is put to them (``memory/changes.py``): a question when it disagrees
+    with a fact they stated, Kazma's reading on the Memory page when it is
+    the first of its kind; a value the user said "Not me" to is not filed.
+    Every product caller names it (``tests/test_memory_own_statements.py``).
 
     *private*: the connections are a private database (the memory
     benchmark's), and nothing reaches a mirror, a graph copy or a remote
@@ -596,6 +657,23 @@ def _apply_beliefs_to_v2(
         # dialogue). User_explicit stores are NEVER throttled; the functional-
         # supersede-of-user-fact case is the mutate_belief source-trust gate.
         _method = extraction_method or _default_method(stats)
+        # A model's reading never gets the user's trust by itself: whether
+        # its name fits the words ("I'm visiting Dubai next week" as
+        # lives_in, "I met Dana" as name_is) only the user can say (the
+        # second security review of F1, 2026-11-18). It stays the model's
+        # inference, and a reading of the user's own fact is put to the user
+        # (below). The user's facts go by Kazma's names here, so "home_city"
+        # never stands beside the user's "lives_in" (``fact_names``, F4).
+        from kazma_core.memory.fact_names import users_names
+
+        clean["subject"], clean["predicate"] = users_names(clean.get("subject"), clean["predicate"])
+        if clean["subject"] == "user":
+            # "Not me" on Kazma's reading of this value: never filed again by
+            # the model (the user's own words still can).
+            if _method == "llm_inferred" and _user_said_not_me(primary_conn, clean, tenant_id=tenant_id):
+                stats["rejected"] += 1
+                stats["not_me"] = stats.get("not_me", 0) + 1
+                continue
         if _method != "user_explicit":
             _mode = get_auto_store_mode(cfg)
             if _mode == "off":
@@ -671,7 +749,7 @@ def _apply_beliefs_to_v2(
             predicate_type=clean["predicate_type"],
             confidence=clean["confidence"],
             importance=clean["importance"],
-            extraction_method=extraction_method or _default_method(stats),
+            extraction_method=_method,
             tenant_id=tenant_id,
             source_session=session_id,
             source_turn=turn,
@@ -683,6 +761,15 @@ def _apply_beliefs_to_v2(
         if action["action"] != "noop":
             stats["applied"] += 1
         stats["actions"].append(action)
+        # The model's reading of one of the user's own facts, in the user's
+        # own words with no one else named, is put to the user, never
+        # applied as theirs (memory/changes.py, F1): a question over the
+        # fact they stated ("Moved to Rotterdam last month"), Kazma's reading
+        # on the Memory page as the first of its kind ("We moved to
+        # Rotterdam"), never a question.
+        if clean["subject"] == "user" and user_text and _method == "llm_inferred":
+            _put_to_the_user(primary_conn, action, clean, user_text=user_text, tenant_id=tenant_id,
+                             session_id=session_id, turn=turn, now=now, stats=stats)
         if private:
             continue
         # Ego-graph: every non-hub subject must reach ``user``. Payload-only
@@ -768,4 +855,5 @@ def extract_and_apply_beliefs_sync(
         extraction_method=extraction_method,
         now=now,
         private=private,
+        user_text=user_text,
     )

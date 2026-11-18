@@ -785,6 +785,8 @@ jobs:
             tests/e2e/test_about_me_limit_arabic.py \
             tests/e2e/test_memory_forget_older.py \
             tests/e2e/test_memory_hostile_type.py \
+            tests/e2e/test_memory_changes_browser.py \
+            tests/e2e/test_attached_text_browser.py \
             tests/e2e/test_return_to_running_turn.py \
             tests/e2e/test_update_notice.py \
             tests/e2e/test_always_ask_one_time_approval.py \

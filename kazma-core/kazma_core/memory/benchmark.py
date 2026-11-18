@@ -792,6 +792,19 @@ def _run_scenario(scenario: dict[str, Any], client: _ScriptedClient, recorded: d
         ensure_ops_schema(ops)
         session = f"writes-{scenario['id']}"
         for number, turn in enumerate(scenario["turns"], 1):
+            if "answer" in turn:
+                # The user answers the newest change waiting for them, on the
+                # Memory page or with /memory confirm (memory/changes.py).
+                from kazma_core.memory import changes
+
+                waiting = [c for c in changes.list_changes(primary, tenant_id=BENCH_TENANT)
+                           if c["kind"] == "pending"]
+                if waiting and turn["answer"] == "confirm":
+                    changes.confirm(primary, waiting[0]["id"], tenant_id=BENCH_TENANT, actor="benchmark",
+                                    private=True)
+                elif waiting:
+                    changes.dismiss(primary, waiting[0]["id"], tenant_id=BENCH_TENANT, actor="benchmark")
+                continue
             at = BASE_TIME + number * 86400
             extract_and_apply_beliefs_sync(primary, ops, turn["user"], session_id=session, turn=number,
                                            tenant_id=BENCH_TENANT, now=at, private=True)
@@ -801,10 +814,13 @@ def _run_scenario(scenario: dict[str, Any], client: _ScriptedClient, recorded: d
                 entities=entity_vocabulary(primary, tenant_id=BENCH_TENANT)))
             if raw:
                 _apply_beliefs_to_v2(raw, primary, ops, stats=stats, session_id=session, turn=number,
-                                     tenant_id=BENCH_TENANT, now=at, private=True)
+                                     tenant_id=BENCH_TENANT, now=at, private=True, user_text=turn["user"])
         rows = [dict(r) for r in primary.execute(
             "SELECT subject, predicate, object, extraction_method FROM beliefs WHERE tenant_id = ? "
             "AND valid_until IS NULL AND invalidated_at IS NULL ORDER BY valid_from", (BENCH_TENANT,))]
+        waiting = [dict(r) for r in primary.execute(
+            "SELECT subject, new_value AS object FROM memory_changes WHERE tenant_id = ? AND kind = 'pending' "
+            "AND state = 'open' ORDER BY created_at", (BENCH_TENANT,))]
     finally:
         primary.close()
         ops.close()
@@ -822,9 +838,18 @@ def _run_scenario(scenario: dict[str, Any], client: _ScriptedClient, recorded: d
     for unwanted in scenario["not_current"]:
         problems += [f"still current: {r['subject']} {r['predicate']} {r['object']}"
                      for r in rows if _expected_holds(unwanted, r)]
+    # A correction only the model read waits for the user (memory/changes.py):
+    # exactly the scenario's ``pending`` values, and no other.
+    expected_waiting = scenario.get("pending") or []
+    for expected in expected_waiting:
+        if not any(_expected_holds(expected, {**w, "extraction_method": ""}) for w in waiting):
+            problems.append(f"not waiting for the user: {expected['subject']} {expected['object']}")
+    problems += [f"waiting for the user, unexpected: {w['subject']} {w['object']}" for w in waiting
+                 if not any(_expected_holds(e, {**w, "extraction_method": ""}) for e in expected_waiting)]
     return {"id": scenario["id"], "category": scenario["category"], "lang": scenario["lang"],
             "passed": not problems, "problems": problems,
-            "current": [f"{r['subject']} {r['predicate']} {r['object']} [{r['extraction_method']}]" for r in rows]}
+            "current": [f"{r['subject']} {r['predicate']} {r['object']} [{r['extraction_method']}]" for r in rows],
+            "waiting": [f"{w['subject']} {w['object']}" for w in waiting]}
 
 
 def run_write_scenarios(

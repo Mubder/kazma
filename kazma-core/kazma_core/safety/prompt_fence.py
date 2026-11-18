@@ -441,13 +441,51 @@ def format_untrusted_block(content: str, *, source: str) -> str:
     )
 
 
-# One fence as format_untrusted_block writes it. The body cannot hold a fence
-# tag or a sentinel (_sanitize_fence_body), so the shortest match is the block.
-_FENCED_BLOCK_RE: re.Pattern[str] = re.compile(
-    r"<kazma:data source=\"[^\"]*\" untrusted=\"true\">\n"
-    r".*?--- BEGIN OBSERVATION ---\n(.*?)\n--- END OBSERVATION ---\n</kazma:data>",
-    re.DOTALL,
-)
+# One fence as format_untrusted_block writes it: the opening, a preamble, the
+# body between the two sentinels, the closing. The body cannot hold a fence
+# tag or a sentinel (_sanitize_fence_body), so the first END after the first
+# BEGIN closes the block.
+_FENCE_OPEN_LINE_RE: re.Pattern[str] = re.compile(r"<kazma:data source=\"[^\"]*+\" untrusted=\"true\">\n")
+_FENCE_BEGIN = "--- BEGIN OBSERVATION ---\n"
+_FENCE_END = "\n--- END OBSERVATION ---\n</kazma:data>"
+
+
+def _fenced_blocks(text: str) -> list[tuple[int, int, int, int]]:
+    """``(start, end, body_start, body_end)`` of each whole fence in *text*,
+    left to right, in time linear in its length.
+
+    A regular expression with a lazy ``.*?`` from each opening read to the
+    end of the text from every opening with no closing after it, so a message
+    of repeated openings cost the square of its length (review of the memory
+    framework audit's F3, 2026-11). Once no BEGIN or END follows a position,
+    none follows any later one: the scan stops there."""
+    blocks: list[tuple[int, int, int, int]] = []
+    pos = 0
+    while True:
+        opening = _FENCE_OPEN_LINE_RE.search(text, pos)
+        if opening is None:
+            return blocks
+        begin = text.find(_FENCE_BEGIN, opening.end())
+        if begin < 0:
+            return blocks
+        body_start = begin + len(_FENCE_BEGIN)
+        body_end = text.find(_FENCE_END, body_start)
+        if body_end < 0:
+            return blocks
+        end = body_end + len(_FENCE_END)
+        blocks.append((opening.start(), end, body_start, body_end))
+        pos = end
+
+
+def _replace_fences(text: str, replace) -> str:
+    out: list[str] = []
+    pos = 0
+    for start, end, body_start, body_end in _fenced_blocks(text):
+        out.append(text[pos:start])
+        out.append(replace(text[body_start:body_end]))
+        pos = end
+    out.append(text[pos:])
+    return "".join(out)
 
 
 def observation_text(text: str) -> str:
@@ -460,7 +498,7 @@ def observation_text(text: str) -> str:
     """
     if not text or "<kazma:data" not in text:
         return text or ""
-    return _FENCED_BLOCK_RE.sub(lambda m: m.group(1), text)
+    return _replace_fences(text, lambda body: body)
 
 
 def holds_fence(text: str | None) -> bool:
@@ -475,7 +513,7 @@ def outside_fences(text: str | None) -> str:
     body = str(text or "")
     if "<kazma:data" not in body:
         return body
-    body = _FENCED_BLOCK_RE.sub(" ", body)
+    body = _replace_fences(body, lambda _body: " ")
     # A fence cut off (a bounded output) is dropped from its opening on.
     match = _FENCE_OPEN_RE.search(body)
     return body[: match.start()] if match else body

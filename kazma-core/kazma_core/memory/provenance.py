@@ -19,20 +19,26 @@ The ladder, from the top:
     words being stored (:func:`agent_write_source`).
 ``user_stated``
     The user's literal statement, read from their own message by the
-    heuristic pass ("my name is", "I live in", "I work at").
+    heuristic pass ("my name is", "I live in", "I work at"). Never a fact
+    the model's pass read: whether the model's name fits the words ("I'm
+    visiting Dubai" as a home) only the user can say, so such a reading is
+    put to them as a pending change (``memory/changes.py``; the second
+    security review of F1, 2026-11-18).
 ``system_tool`` / ``agent_asserted`` / ``llm_inferred``
     A migration, an agent tool call the user did not ask for, the extractor's
     model pass.
 
 A fact from the user (``user_explicit`` or ``user_stated``) is replaced only by
-the user's own words (:func:`may_overrule`); the one exception is the model
-pass correcting the heuristic reading of the SAME turn (both carry the turn's
-time, AGENTS.md section 15H). An agent write that would replace a user fact is
-refused, and the tool says so: the user corrects their own facts. Agent writes
-are screened for injection first (:func:`screen_agent_text`).
+the user's own words (:func:`may_overrule`), in its own turn too: the model
+pass may no longer correct the heuristic reading of the same turn. An agent
+write that would replace a user fact is refused, and the tool says so: the
+user corrects their own facts. Agent writes are screened for injection first
+(:func:`screen_agent_text`).
 """
 
 from __future__ import annotations
+
+from kazma_core.memory.own_words import is_plain, own_words
 
 __all__ = [
     "AGENT_ASSERTED",
@@ -61,14 +67,16 @@ USER_SOURCES = frozenset({USER_EXPLICIT, USER_STATED})
 _HELD_SHARE = 0.8
 
 
-def may_overrule(existing: str | None, incoming: str, *, same_turn: bool = False) -> bool:
-    """Whether a statement from *incoming* may replace a fact from *existing*."""
+def may_overrule(existing: str | None, incoming: str) -> bool:
+    """Whether a statement from *incoming* may replace a fact from
+    *existing*: a fact the user stated yields only to the user's own words.
+    Not to the model's reading of the same turn either: it let a careless
+    reading of "My name is Sam. I met Dana yesterday." make the user Dana
+    (the second security review of F1, 2026-11-18). A reading the user may
+    mean is put to them (``memory/changes.py``)."""
     if existing not in USER_SOURCES:
         return True
-    if incoming in USER_SOURCES:
-        return True
-    # The model pass may still correct the heuristic reading of its own turn.
-    return existing == USER_STATED and incoming == LLM_INFERRED and same_turn
+    return incoming in USER_SOURCES
 
 
 def _holds(message: str, text: str) -> bool:
@@ -100,12 +108,18 @@ def agent_write_source(text: str, latest_user_message: str | None) -> str:
     subject and predicate the model named it with (FA-228: the model names a
     fact in English, ``audit_2611_test_codeword``, so an Arabic "remember
     this" never held those words and the user's own fact was stored as the
-    model's)."""
+    model's). Both are judged on the user's own words (``memory.own_words``):
+    a value held only by an attached document or a quote is the agent's.
+
+    ``user_explicit`` only when the whole message is the user's plain
+    statement (``own_words.is_plain``): a request to remember around a mail,
+    a chat, a page's note or someone's words is ``user_stated`` at most (the
+    third review of F1, item 2)."""
     from kazma_core.memory.remember_request import is_remember_request
 
-    message = latest_user_message or ""
+    message = own_words(latest_user_message)
     if is_remember_request(message) and _holds(message, text):
-        return USER_EXPLICIT
+        return USER_EXPLICIT if is_plain(latest_user_message) else USER_STATED
     return AGENT_ASSERTED
 
 

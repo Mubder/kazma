@@ -304,6 +304,34 @@ CREATE TABLE IF NOT EXISTS memory_summary_sources (
 CREATE INDEX IF NOT EXISTS idx_memory_summary_sources_episode
   ON memory_summary_sources(episode_id);
 
+-- What changed in the user's facts, and what waits for the user
+-- (memory/changes.py, the memory framework audit's F1). kind: update (a fact
+-- the user stated was replaced; Undo reopens it) | pending (a refused
+-- correction the user confirms or dismisses). state: open | confirmed |
+-- dismissed | undone | superseded | expired. Forget takes a row with the
+-- fact or the turn it names.
+CREATE TABLE IF NOT EXISTS memory_changes (
+  id              TEXT PRIMARY KEY,
+  tenant_id       TEXT NOT NULL DEFAULT 'default',
+  kind            TEXT NOT NULL,
+  state           TEXT NOT NULL DEFAULT 'open',
+  subject         TEXT NOT NULL,
+  predicate       TEXT NOT NULL,
+  old_belief_id   TEXT,
+  old_value       TEXT NOT NULL DEFAULT '',
+  new_belief_id   TEXT,
+  new_value       TEXT NOT NULL DEFAULT '',
+  source_session  TEXT,
+  source_turn     INTEGER,
+  created_at      REAL NOT NULL,
+  decided_at      REAL,
+  decided_by      TEXT,
+  noted_at        REAL,
+  also_closed     TEXT NOT NULL DEFAULT '[]'
+);
+CREATE INDEX IF NOT EXISTS idx_memory_changes_tenant
+  ON memory_changes(tenant_id, state, created_at);
+
 -- One row per tenant and week the summaries were queued for.
 -- status: queued | done | failed (queued too many times without finishing).
 CREATE TABLE IF NOT EXISTS memory_summary_periods (
@@ -457,6 +485,9 @@ def ensure_primary_schema(conn: Any) -> None:
     # stuffing them there was a latent bug). Added via ALTER so existing
     # DBs upgrade in place, matching the schema.py convention.
     add_missing_columns(conn, "episodes", (("embedding", "BLOB"),))
+    # The user's other list entries an update closed with the replaced fact
+    # (a JSON list of ids): an undo reopens them all (memory/changes.py).
+    add_missing_columns(conn, "memory_changes", (("also_closed", "TEXT NOT NULL DEFAULT '[]'"),))
     add_missing_columns(
         conn,
         "beliefs",

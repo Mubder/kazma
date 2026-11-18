@@ -3070,15 +3070,19 @@
       renderSessionList();
     }
 
-    // Build message content. Text attachments are inlined; binary uploads
+    // Build message content: the user's words only. A text file read here
+    // goes beside them (text_attachment): the server gives its text to the
+    // model inside a data fence and keeps only its name in the chat
+    // (kazma_core/agent/attached_text.py). Put into the message, a file was
+    // the user's own words to memory and the model, and a file holding a
+    // line of three backticks ended its code block early. Binary uploads
     // are referenced as attachments and rendered in the transcript by name.
     var content = text;
     var displayAttachName = pendingTextName || (readyUploads[0] && readyUploads[0].filename) || '';
-    if (pendingText) {
-      content = text
-        ? text + '\n\n[Attached file: ' + pendingTextName + ']\n```\n' + pendingText.slice(0, 8000) + '\n```'
-        : '[Attached file: ' + pendingTextName + ']\n```\n' + pendingText.slice(0, 8000) + '\n```';
-    } else if (hasUploads && !text) {
+    var textAttachment = pendingText
+      ? { name: pendingTextName, text: pendingText.slice(0, 8000) }
+      : null;
+    if (!pendingText && hasUploads && !text) {
       content = '[' + (readyUploads[0].kind || 'file') + ']';
     }
     // Build the attachments payload for the server (binary uploads only).
@@ -3122,7 +3126,7 @@
 
     // Sidebar: show this season immediately (before the server list round-trip).
     // Critical for WS path which used to skip loadSessions entirely.
-    noteSessionActivity(text || content);
+    noteSessionActivity(text || content || displayAttachName);
 
     // Arm the delivery wait — set BEFORE any transport dispatch.
     // This flag is ONLY cleared in loadSession() (when we re-render from
@@ -3151,6 +3155,7 @@
         model: selectedModel || '',
         workspace_id: _activeWorkspaceId || '',
         attachments: attachmentsPayload,
+        text_attachment: textAttachment,
         // Echoed on the user_message frame the other tabs paint; ours is
         // dropped by it (beginObservedTurn).
         client_msg_id: _newClientMsgId(),

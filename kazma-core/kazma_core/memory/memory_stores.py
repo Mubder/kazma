@@ -184,6 +184,16 @@ MEMORY_TABLES: tuple[MemoryStore, ...] = (
         export="weekly_summaries", bound="one row per summarized turn",
     ),
     MemoryStore(
+        "memory_changes", "state", "forget", "fact_text",
+        forget="changes.forget_facts (with the fact it names, from forget._forget_fact_rows), "
+               "changes.forget_turn and changes.forget_chat: the row and the old and new values go; "
+               "the user confirms (changes.confirm), dismisses (changes.dismiss) or undoes "
+               "(changes.undo), listed by changes.list_changes, a refused decision a ChangeRefusedError",
+        export="memory_changes",
+        retention="an open pending change expires after 30 days; the newest 200 decided per tenant kept",
+        bound="one row per replaced user fact or refused correction, pruned on write",
+    ),
+    MemoryStore(
         "procedural_dags", "state", "no_turn_text", "names_only",
         forget="nothing a turn wrote: tool names and argument NAMES (values were stripped "
                "2026-10-13, procedural.strip_argument_values)",

@@ -335,6 +335,14 @@ class WhatsAppAdapter(SenderGate, BaseAdapter):
             from kazma_gateway.adapters.voice_helpers import transcribe_inbound_message
 
             msg = await transcribe_inbound_message(msg)
+            if m.forwarded and msg.context_metadata.get("voice_transcribed") and msg.text:
+                # A forwarded voice note is someone else speaking: its
+                # transcript reaches the agent fenced, as a forwarded text
+                # does (kazma_gateway/forwarded.py; Telegram the same). The
+                # parse fences only a caption, and a voice note has none.
+                from kazma_gateway.forwarded import forwarded_text
+
+                msg.text = forwarded_text(msg.text)
         self._enqueue(msg, m)
 
     def _enqueue(self, msg: IncomingMessage, m: WaInbound) -> None:

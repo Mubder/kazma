@@ -61,6 +61,10 @@
   var _ERR = {
     not_found: ['memory.err.not_found', 'Not found: it may have been changed or removed meanwhile'],
     protected: ['memory.err.protected', 'This entity is protected'],
+    not_open: ['memory.err.not_open', 'This was already decided'],
+    replaced_since: ['memory.err.replaced_since', 'This fact has changed again since; undo the newer change first'],
+    forgotten: ['memory.err.forgotten', 'The earlier value was forgotten, so it cannot come back'],
+    not_written: ['memory.err.not_written', 'The value could not be saved'],
   };
   function _errText(key, fallback, d) {
     var code = d && (d.code || d.error);
@@ -1509,6 +1513,99 @@
     });
   })();
   loadV2Memories();
+
+  // Changes to facts the user stated (the audit's F1, memory/changes.py):
+  // one Kazma made from the user's words, which the user can undo, and one
+  // Kazma was not sure was the user's, which waits for their answer.
+  var _CHANGE_DONE = {
+    undo: ['memory.console.change_undone', 'Change undone'],
+    confirm: ['memory.console.change_confirmed', 'Changed'],
+    dismiss: ['memory.console.change_dismissed', 'Kept as it was'],
+  };
+  // Kazma's reading of a fact the user gave none of: never a question; the
+  // user may say it is right, or not them.
+  var _READING_DONE = {
+    confirm: ['memory.console.change_reading_kept', 'Kept as yours'],
+    dismiss: ['memory.console.change_reading_removed', 'Removed. Kazma will not file it again'],
+  };
+  async function _decideChange(id, decision, reading) {
+    var done = (reading && _READING_DONE[decision]) || _CHANGE_DONE[decision];
+    try {
+      const r = await window.kazmaSave('/api/memory/v2/changes/' + encodeURIComponent(id) + '/' + decision, { method: 'POST' });
+      if (window.showToast) {
+        window.showToast(r && r.ok ? _mt(done[0], done[1]) : _errText('memory.console.change_failed', 'That change could not be made', r), r && r.ok ? 'success' : 'error');
+      }
+    } catch (e) {
+      window.kazmaAlert({ title: _mt('memory.console.change_failed', 'That change could not be made'), message: (e && e.body) ? _errText('memory.console.failed', 'Failed', e.body) : e.message, variant: 'btn-danger' });
+    }
+    loadV2Changes();
+  }
+  // One line of the interface with the data's value in it, isolated and
+  // marked as content: the value keeps its own direction on either page.
+  function _changeValue(value) {
+    return { value: '<bdi translate="no">' + _esc(value) + '</bdi>' };
+  }
+  function _changeLine(html) {
+    return '<span style="display:block;">' + html + '</span>';
+  }
+  async function loadV2Changes() {
+    const el = document.getElementById('v2-changes-list');
+    if (!el) return;
+    try {
+      const resp = await fetch('/api/memory/v2/changes');
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) throw new Error('HTTP ' + resp.status);
+      const rows = data.changes || [];
+      if (!rows.length) {
+        el.textContent = _mt('memory.console.no_changes', 'Nothing has changed in the facts you told Kazma, and nothing is waiting for your answer.');
+        return;
+      }
+      el.innerHTML = rows.map(function(c) {
+        const reading = c.kind === 'reading';
+        const pending = c.kind === 'pending' || reading;
+        const title = reading
+          ? _mt('memory.console.change_reading_title', "Kazma's reading of your message")
+          : pending
+            ? _mt('memory.console.change_pending_title', 'Is this a change? Kazma kept the earlier fact')
+            : _mt('memory.console.change_update_title', 'Changed from what you said');
+        const lines = reading
+          ? _changeLine(_mtHtml('memory.console.change_read', 'Kazma read: {value}', _changeValue(c.new_value)))
+          : pending
+            ? _changeLine(_mtHtml('memory.console.change_kept', 'Kept: {value}', _changeValue(c.old_value))) +
+              _changeLine(_mtHtml('memory.console.change_heard', 'You may have said: {value}', _changeValue(c.new_value)))
+            : _changeLine(_mtHtml('memory.console.change_was', 'Before: {value}', _changeValue(c.old_value))) +
+              _changeLine(_mtHtml('memory.console.change_now', 'Now: {value}', _changeValue(c.new_value)));
+        const readingAttr = reading ? ' data-reading="1"' : '';
+        const yes = reading ? _mt('memory.console.change_reading_right', 'This is right') : _mt('memory.console.change_confirm', 'Yes, change it');
+        const no = reading ? _mt('memory.console.change_reading_not_me', 'Not me') : _mt('memory.console.change_dismiss', 'No, keep it');
+        const buttons = pending
+          ? '<button type="button" class="btn btn-sm btn-primary v2-change-act" data-id="' + _attr(c.id) + '"' + readingAttr + ' data-decision="confirm">' + _esc(yes) + '</button>' +
+            '<button type="button" class="btn btn-sm btn-outline v2-change-act" data-id="' + _attr(c.id) + '"' + readingAttr + ' data-decision="dismiss">' + _esc(no) + '</button>'
+          : '<button type="button" class="btn btn-sm btn-outline v2-change-act" data-id="' + _attr(c.id) + '" data-decision="undo">' + _esc(_mt('memory.console.change_undo', 'Undo')) + '</button>';
+        // The fact's name: the page's word for one of the user's own facts
+        // (home, name, employer...), in the page's language; any other name
+        // is the data's own word, its own block.
+        const fact = _mtData('memory.console.fact_', c.predicate || '');
+        const factText = fact.attr ? String(c.predicate || '').replace(/_/g, ' ') : fact.text;
+        return '<div class="mem-row v2-change" data-kind="' + _attr(c.kind) + '" style="display:flex;gap:8px;align-items:flex-start;justify-content:space-between;padding:6px 0;">' +
+          '<span style="min-width:0;overflow-wrap:anywhere;">' +
+          '<span style="display:block;color:var(--text-primary);font-weight:600;">' + _esc(title) + '</span>' +
+          '<span class="v2-change-fact"' + fact.attr + ' style="display:block;">' + _esc(factText) + '</span>' +
+          lines +
+          '<span class="mem-muted" style="display:block;font-size:0.65rem;"><bdi>' + _esc(c.created_at ? _memWhen(c.created_at) : '') + '</bdi></span>' +
+          '</span>' +
+          '<span style="display:inline-flex;gap:4px;flex-shrink:0;flex-wrap:wrap;">' + buttons + '</span></div>';
+      }).join('');
+      el.querySelectorAll('.v2-change-act').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          btn.disabled = true;
+          _decideChange(btn.getAttribute('data-id'), btn.getAttribute('data-decision'), btn.getAttribute('data-reading') === '1');
+        });
+      });
+    } catch (e) { el.textContent = _mt('memory.console.changes_load_failed', 'Changes load failed'); }
+  }
+  document.getElementById('v2-changes-refresh')?.addEventListener('click', loadV2Changes);
+  loadV2Changes();
 
   // Weekly topic summaries (plan C2): what each week's conversations said
   // about each topic. Forget one and its week never writes it again; the

@@ -658,7 +658,7 @@ Lists all available commands grouped by category.
 • `/help` — Show this list
 • `/status` — Gateway health overview
 • `/model` (`/models`) — This chat's model: show, pick, `reset`; `default` sets the install's (admin)
-• `/memory` — Report memory usage; `/memory off` / `/memory on` — keep this chat out of memory, or let it back in
+• `/memory` — Report memory usage; `/memory off` / `/memory on` — keep this chat out of memory, or let it back in; `/memory changes` — what changed in facts you told Kazma (undo, confirm, dismiss)
 • `/cost` — Tokens and cost of this chat
 • `/report <what happened>` — Report a problem: shows what would be sent, then `/report send` (admin)
 
@@ -750,11 +750,22 @@ chat. `/memory off` keeps this chat out of memory from now on and forgets
 what it left there; `/memory on` lets new messages back in (what was
 forgotten stays forgotten).
 
+`/memory changes` lists the changes to facts you told Kazma, each with a
+short id: one Kazma made from your later words, which `/memory undo <id>`
+takes back, and one it was not sure was yours and kept the earlier fact
+for, which `/memory confirm <id>` applies and `/memory dismiss <id>` lets
+go. The Memory page shows the same changes
+([Changes to what you told Kazma](../guide/memory-and-rag.md#changes-to-what-you-told-kazma)).
+
 **Usage:**
 ```
 /memory
 /memory off
 /memory on
+/memory changes
+/memory undo mc_1a2b3c4d
+/memory confirm mc_5e6f7a8b
+/memory dismiss mc_5e6f7a8b
 ```
 
 **Response:**
@@ -764,7 +775,8 @@ forgotten stays forgotten).
 
 **Context key:** `memory_count` — the current facts of your memory tenant.
 
-**Required permissions:** None.
+**Required permissions:** None; `/memory changes` and its undo, confirm and
+dismiss are admin-only (they show and change your facts).
 
 ---
 

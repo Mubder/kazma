@@ -114,6 +114,23 @@ def _plant(mem) -> dict:
     mem.db.commit()
     assert first["action"] in ("append", "supersede", "transition"), first
     assert second["superseded_id"] == first["belief_id"], second
+    # A fact the user stated in another chat, replaced by this turn (an
+    # update), and one the model's reading of this turn could not replace (a
+    # pending change; memory/changes.py): both hold the word.
+    from kazma_core.memory import changes
+
+    earlier = time.time() - 7200
+    for predicate, value in (("hometown", "Paris"), ("lives_in", "Lisbon")):
+        mutate_belief(mem.db, "user", predicate, value, ops_conn=mem.ops, predicate_type="functional",
+                      extraction_method="user_stated", source_session="other", source_turn=3, now=earlier)
+    mutate_belief(mem.db, "user", "hometown", f"{WORD} city", ops_conn=mem.ops, predicate_type="functional",
+                  extraction_method="user_stated", source_session="th1", source_turn=1)
+    refused = mutate_belief(mem.db, "user", "lives_in", f"{WORD}ville", ops_conn=mem.ops,
+                            predicate_type="functional", extraction_method="llm_inferred",
+                            source_session="th1", source_turn=1)
+    assert changes.record_pending(mem.db, tenant_id="default", refused=refused, new_value=f"{WORD}ville",
+                                  user_text=f"Moved to {WORD}ville last month.", session="th1", turn=1)
+    assert len(changes.list_changes(mem.db, tenant_id="default")) == 2
     # The operator corrects it: the old value moves to operator_edit.previous.
     assert memory_api._edit_belief_sync(second["belief_id"], {"object": f"{WORD} gamma"})["ok"]
     # Hygiene's "Archive invalidated": the superseded value moves to beliefs_archive.

@@ -558,6 +558,17 @@
             <div id="v2-quality-detail" class="mem-muted" style="font-size:0.72rem;margin-top:4px;">–</div>
           </div>
         </div>
+        <!-- What changed in facts the user stated, which they can undo, and
+             corrections Kazma was not sure were theirs, waiting for their
+             answer (the audit's F1, kazma_core/memory/changes.py). -->
+        <div class="card-nested" style="padding:12px;margin-bottom:8px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;gap:6px;flex-wrap:wrap;">
+            <span class="mem-section-label" style="font-size:0.72rem;color:var(--text-secondary);">{{ t('memory.mc.changes_to_your_facts') }}</span>
+            <button id="v2-changes-refresh" type="button" class="btn btn-outline btn-xs" aria-label="{{ t('memory.mc.refresh_changes') }}" title="{{ t('memory.mc.refresh_changes') }}">↻</button>
+          </div>
+          <div class="mem-muted" style="font-size:0.65rem;margin-bottom:6px;">{{ t('memory.mc.changes_hint') }}</div>
+          <div id="v2-changes-list" class="mem-muted" style="font-size:0.72rem;max-height:260px;overflow-y:auto;">–</div>
+        </div>
         <!-- What Kazma remembers of conversations: forget one, or take it all
              away (plan U1, kazma_core/memory/forget.py). -->
         <div class="card-nested" style="padding:12px;margin-bottom:8px;">

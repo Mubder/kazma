@@ -120,18 +120,26 @@ too short.
   keeping.
 - **Arabic facts from grammar.** The quick pass reads Arabic sentences by rule.
   A negation, an imperative ("استخدم البحث"), a question, or a statement about
-  someone else ("أخوي ساكن في دبي") stores nothing about the user. A place has
-  to end where it is read.
+  someone else ("أخوي ساكن في دبي", "أختي انتقلت إلى روتردام") stores nothing
+  about the user. "انتقلت" is "I moved" and "she moved" alike, so it counts as
+  the user's only when no one else is named before it; once a sentence names
+  someone else ("عندي أخت اسمها نورة وانتقلت..."), it is theirs until "أنا"
+  comes. A new sentence starts fresh unless the person was introduced by name
+  ("اسمها نورة"); a role or a possession after "أنا"/"عندي" ("أنا مدير",
+  "عندي بنت") still describes the user, and a definite word ("الأهلي") is
+  never "my ...". A place has to end where it is read.
 - **Small talk by words, not length.** A greeting, thanks or "تمام" is small
   talk only when the whole message is, and only with a short reply. A short
   question about something is still a memory.
 
 **Where.** `kazma_core/memory/remember_request.py`,
-`kazma_core/memory/arabic_facts.py`, `kazma_core/memory/episode_text.py`
-(`is_small_talk`).
+`kazma_core/memory/arabic_facts.py`, `kazma_core/memory/clause_subject.py`,
+`kazma_core/memory/episode_text.py` (`is_small_talk`).
 
 **Proof.** `tests/test_memory_arabic_facts.py` (sentences not in the
 benchmark, both ways, with the pass switched off as the negative control),
+`tests/test_memory_clause_subject.py` (every trigger after a sentence about someone
+else, with the old rule as the negative control),
 `tests/test_memory_remember_and_small_talk.py`.
 
 ## 5. Reading Arabic documents and scans

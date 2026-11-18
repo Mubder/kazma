@@ -601,7 +601,7 @@ def test_every_write_category_is_asked_in_english_and_arabic():
     langs: dict[str, set[str]] = {}
     for scenario in data["scenarios"]:
         langs.setdefault(scenario["category"], set()).add(scenario["lang"])
-    assert set(langs) == {"update", "kept_as_said", "short", "someone_else"}
+    assert set(langs) == {"update", "kept_as_said", "short", "someone_else", "quoted", "model_read"}
     assert all({"en", "ar"} <= found for found in langs.values()), langs
 
 
@@ -623,13 +623,20 @@ def test_a_write_scenario_says_why_it_failed(writes_report):
         assert any("Rotterdam" in p for p in moved["problems"]), moved
 
 
-def test_the_lock_refuses_a_write_scenario_that_stops_passing():
+def test_the_lock_refuses_a_write_scenario_that_stops_passing(monkeypatch):
     script = _build_script()
     old = json.loads(json.dumps(_locked_writes()))
     _part, problems = script._writes_lock(old)
     assert not problems, problems
-    # A lock that holds one scenario fewer as failing than today's run: refused.
-    assert old["failing"], "every scenario passes: drop this case"
-    old["failing"] = old["failing"][1:]
+    # A run in which a scenario the lock holds as passing fails: refused.
+    real = benchmark.run_write_scenarios
+
+    def one_fails(*args, **kwargs):
+        report = real(*args, **kwargs)
+        passing = [r["id"] for r in report["results"] if r["id"] not in old["failing"]]
+        report["failing"] = [*report["failing"], passing[0]]
+        return report
+
+    monkeypatch.setattr(benchmark, "run_write_scenarios", one_fails)
     _part, problems = script._writes_lock(old)
     assert any("now fail" in p for p in problems), problems

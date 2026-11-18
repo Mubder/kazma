@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import re
 
-__all__ = ["display_text", "embed_text", "is_small_talk", "match_text"]
+__all__ = ["display_text", "embed_text", "is_small_talk", "is_small_talk_words", "match_text"]
 
 #: Characters of each side recall shows the model (five turns fit its budget).
 _SHOW_QUESTION = 200
@@ -56,6 +56,68 @@ _ACKNOWLEDGEMENT_RE = re.compile(
 #: A reply at least this long says something, whatever the user said.
 _GREETING_REPLY = 1000
 _ACKNOWLEDGEMENT_REPLY = 200
+
+
+#: The phrases small talk is made of, folded, each WHOLE: greetings, thanks,
+#: goodbyes, acknowledgements, the go-aheads and answers a person replies
+#: with ("thank you", "صباح الخير", "يعطيك العافية", "go ahead", "ان شاء
+#: الله", "I'm good"). A message is small talk only when it is nothing but
+#: these, the words that may follow one (``_SMALL_TALK_TAILS``), laughter and
+#: pauses. Judged by whole phrases, never by single words: made of small-talk
+#: WORDS, "I am a man", "I am Sure", "I'm Kazma" and "no it will do" were
+#: filler, and their facts never reached the deep pass (the security review
+#: of F1's second half, 2026-11-18).
+_SMALL_TALK_PHRASES = frozenset({
+    "hi", "hello", "hey", "hiya", "yo", "thanks", "thank you", "thx", "ty", "bye", "goodbye", "bye bye",
+    "good morning", "good afternoon", "good evening", "good night", "gm", "gn", "see you", "see ya",
+    "take care", "ok", "okay", "k", "kk", "ok then", "got it", "noted", "sure", "sure thing", "of course",
+    "for sure", "yes", "yes please", "yep", "yup", "yeah", "no", "no thanks", "no thank you", "nope", "nah",
+    "np", "no problem", "no worries", "cool", "nice", "great", "perfect", "awesome", "fine", "all good",
+    "good", "very good", "very nice", "good job", "well done", "lol", "lmao", "brb", "nvm", "please",
+    "go ahead", "go on", "go for it", "proceed", "continue", "done", "do it", "will do", "sounds good",
+    "sounds great", "that s it", "thats it", "that s all", "thats all", "i m good", "im good", "i am good",
+    "i m fine", "im fine", "i am fine", "i m ok", "im ok", "i am ok", "i m okay", "i am okay",
+    "mrhba", "مرحبا", "اهلا", "اهلا وسهلا", "هلا", "هلا والله", "السلام عليكم", "وعليكم السلام",
+    "صباح الخير", "مساء الخير", "صباح النور", "مساء النور", "شكرا", "شكرا جزيلا", "مشكور", "مشكوره",
+    "يعطيك العافيه", "الله يعطيك العافيه", "الله يعافيك", "يعافيك", "مع السلامه", "تمام", "طيب", "اوك",
+    "اوكي", "ممتاز", "حلو", "زين", "يسلمو", "تسلم", "تسلم ايدك", "نعم", "لا", "لا شكرا", "اي", "ايوه",
+    "ايه", "كمل", "كملي", "يلا", "خلاص", "تم", "ماشي", "صح", "الحمدلله", "الحمد لله", "ان شاء الله",
+    "حياك", "حياك الله", "ابشر", "انا زين", "انا بخير", "بخير", "اي والله", "والله",
+})
+#: Words that may follow a phrase, never stand alone: "thanks man", "thank
+#: you so much", "شكرا حبيبي". Alone, "man" or "you" says something.
+_SMALL_TALK_TAILS = frozenset({
+    "kazma", "there", "you", "all", "a lot", "so much", "very much", "again", "bro", "man", "buddy",
+    "dude", "so", "very", "too", "then", "now", "حبيبي", "جزيلا", "والله", "كثير", "مره", "يالغالي",
+})
+_PHRASE_WORDS = 4  # the longest phrase or tail, in words
+_LAUGH_OR_PAUSE_RE = re.compile(r"(?:ha){2,}+|(?:he){2,}+|lo+l|hm+|uh+|um+|ه{2,}+")
+_WORD_RE = re.compile(r"\w+")
+
+
+def is_small_talk_words(user_text: str | None) -> bool:
+    """Whether *user_text* is nothing but small talk ("ok thanks", "thank you
+    so much", "شكراً", "hmm"), or has no word at all ("👍"): such a message
+    teaches nothing. Read phrase by phrase, the longest first, a tail only
+    after a phrase; never by its length ("I'm vegan" and "عندي سكري" are short
+    and are statements) and never word by word ("I am a man")."""
+    from kazma_core.documents.arabic import fold_for_search
+
+    words = _WORD_RE.findall(fold_for_search(user_text or "").lower())
+    i, after_phrase = 0, False
+    while i < len(words):
+        if _LAUGH_OR_PAUSE_RE.fullmatch(words[i]):
+            i += 1
+            continue
+        for size in range(min(_PHRASE_WORDS, len(words) - i), 0, -1):
+            piece = " ".join(words[i:i + size])
+            if piece in _SMALL_TALK_PHRASES or (after_phrase and piece in _SMALL_TALK_TAILS):
+                i += size
+                after_phrase = True
+                break
+        else:
+            return False
+    return True
 
 
 def is_small_talk(user_text: str | None, assistant_text: str | None) -> bool:

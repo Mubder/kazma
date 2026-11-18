@@ -484,6 +484,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "الملخصات الأسبوعية",
         "en": "Weekly summaries",
     },
+    "memory.mc.changes_to_your_facts": {
+        "ar": "تغييرات على ما أخبرت به Kazma",
+        "en": "Changes to what you told Kazma",
+    },
+    "memory.mc.changes_hint": {
+        "ar": "عندما يحلّ كلامك محلّ معلومة أخبرت بها Kazma، يظهر ذلك هنا ويمكنك التراجع عنه. وعندما لا يتأكد Kazma أن التغيير يخصّك، يُبقي المعلومة السابقة ويسألك هنا.",
+        "en": "When something you said replaces a fact you told Kazma, it shows here and you can undo it. When Kazma is not sure a change is yours, it keeps the earlier fact and asks you here.",
+    },
+    "memory.mc.refresh_changes": {
+        "ar": "تحديث التغييرات",
+        "en": "Refresh changes",
+    },
     "memory.mc.legend_you": {
         "ar": "أنت",
         "en": "You",
@@ -1553,9 +1565,131 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "فشل تحميل الملخصات الأسبوعية",
         "en": "Weekly summaries load failed",
     },
+    "memory.console.change_update_title": {
+        "ar": "تغيّرت بناءً على كلامك",
+        "en": "Changed from what you said",
+    },
+    "memory.console.change_pending_title": {
+        "ar": "هل هذا تغيير؟ أبقى Kazma المعلومة السابقة",
+        "en": "Is this a change? Kazma kept the earlier fact",
+    },
+    "memory.console.change_was": {
+        "ar": "قبل: {value}",
+        "en": "Before: {value}",
+    },
+    "memory.console.change_now": {
+        "ar": "الآن: {value}",
+        "en": "Now: {value}",
+    },
+    "memory.console.change_kept": {
+        "ar": "المحفوظ: {value}",
+        "en": "Kept: {value}",
+    },
+    "memory.console.change_heard": {
+        "ar": "ربما قلت: {value}",
+        "en": "You may have said: {value}",
+    },
+    "memory.console.change_undo": {
+        "ar": "تراجع",
+        "en": "Undo",
+    },
+    "memory.console.change_confirm": {
+        "ar": "نعم، غيّرها",
+        "en": "Yes, change it",
+    },
+    "memory.console.change_dismiss": {
+        "ar": "لا، أبقِها",
+        "en": "No, keep it",
+    },
+    "memory.console.change_undone": {
+        "ar": "تم التراجع عن التغيير",
+        "en": "Change undone",
+    },
+    "memory.console.change_confirmed": {
+        "ar": "تم التغيير",
+        "en": "Changed",
+    },
+    "memory.console.change_dismissed": {
+        "ar": "بقيت كما كانت",
+        "en": "Kept as it was",
+    },
+    "memory.console.change_failed": {
+        "ar": "تعذّر إجراء هذا التغيير",
+        "en": "That change could not be made",
+    },
+    "memory.console.change_reading_title": {
+        "ar": "قراءة Kazma لرسالتك",
+        "en": "Kazma's reading of your message",
+    },
+    "memory.console.change_read": {
+        "ar": "قرأ Kazma: {value}",
+        "en": "Kazma read: {value}",
+    },
+    "memory.console.change_reading_right": {
+        "ar": "هذا صحيح",
+        "en": "This is right",
+    },
+    "memory.console.change_reading_not_me": {
+        "ar": "ليس عني",
+        "en": "Not me",
+    },
+    "memory.console.change_reading_kept": {
+        "ar": "حُفظت على أنها منك",
+        "en": "Kept as yours",
+    },
+    "memory.console.change_reading_removed": {
+        "ar": "أُزيلت، ولن يحفظها Kazma مرة أخرى",
+        "en": "Removed. Kazma will not file it again",
+    },
+    "memory.console.no_changes": {
+        "ar": "لم يتغيّر شيء في المعلومات التي أخبرت بها Kazma، ولا شيء ينتظر ردّك.",
+        "en": "Nothing has changed in the facts you told Kazma, and nothing is waiting for your answer.",
+    },
+    "memory.console.changes_load_failed": {
+        "ar": "فشل تحميل التغييرات",
+        "en": "Changes load failed",
+    },
+    "memory.err.not_open": {
+        "ar": "حُسم هذا من قبل",
+        "en": "This was already decided",
+    },
+    "memory.err.replaced_since": {
+        "ar": "تغيّرت هذه المعلومة مرة أخرى منذ ذلك؛ تراجع عن التغيير الأحدث أولًا",
+        "en": "This fact has changed again since; undo the newer change first",
+    },
+    "memory.err.forgotten": {
+        "ar": "نُسيت القيمة السابقة، فلا يمكن إعادتها",
+        "en": "The earlier value was forgotten, so it cannot come back",
+    },
+    "memory.err.not_written": {
+        "ar": "تعذّر حفظ القيمة",
+        "en": "The value could not be saved",
+    },
     "memory.console.no_active_beliefs": {
         "ar": "لا معتقدات نشطة بعد.",
         "en": "No active beliefs yet.",
+    },
+    # The user's own facts by Kazma's names (memory/fact_names.py KINDS), as
+    # a change card names them (the third review of F1, item 6).
+    "memory.console.fact_lives_in": {
+        "ar": "مكان السكن",
+        "en": "Home",
+    },
+    "memory.console.fact_name_is": {
+        "ar": "الاسم",
+        "en": "Name",
+    },
+    "memory.console.fact_preferred_name": {
+        "ar": "الاسم الذي تُنادى به",
+        "en": "Name you go by",
+    },
+    "memory.console.fact_works_at": {
+        "ar": "جهة العمل",
+        "en": "Employer",
+    },
+    "memory.console.fact_current_role": {
+        "ar": "المسمى الوظيفي",
+        "en": "Role",
     },
     "memory.console.ptype_functional": {
         "ar": "أحادي القيمة",

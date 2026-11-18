@@ -145,6 +145,123 @@ def test_an_agent_write_cannot_replace_a_users_fact_and_says_so(mem):
     assert _current(mem.db)["lives_in"] == ("Lisbon", "user_stated")
 
 
+# ── The third review of F1, item 1: tools follow rule A on replacement ───
+
+#: The review's three: the user asks to remember something, and the model
+#: files a fact of theirs that replaces one the user stated. (the user's
+#: message, the tool's fact, the value put to the user or None).
+TOOL_REPLACEMENTS = [
+    ("I'm visiting Dubai next week, remember that for the itinerary", ("lives_in", "Dubai"), "Dubai"),
+    ("Remember that my sister lives in Oslo", ("lives_in", "Oslo"), None),
+    ("I met Dana yesterday, remember that", ("name_is", "Dana"), "Dana"),
+]
+_HELD = {"lives_in": "Lisbon", "name_is": "Sam"}
+
+
+def _waiting(mem) -> list[str]:
+    from kazma_core.memory import changes
+
+    return [c["new_value"] for c in changes.list_changes(mem.db, tenant_id="default") if c["kind"] == "pending"]
+
+
+@pytest.mark.parametrize(("said", "fact", "asked"), TOOL_REPLACEMENTS)
+def test_a_tool_write_never_replaces_a_users_fact_it_is_put_to_the_user(mem, said, fact, asked):
+    predicate, value = fact
+    # An earlier turn: the tool's call is turn 2 (``_call``'s two user messages).
+    _user_says(mem, {"lives_in": "I live in Lisbon.", "name_is": "My name is Sam."}[predicate], turn=1,
+               now=time.time() - 600)
+    out = _call("memory_link_entities", user_said=said, subject="user", object=value, predicate=predicate,
+                predicate_type="functional")
+    assert _current(mem.db)[predicate] == (_HELD[predicate], "user_stated")
+    assert _waiting(mem) == ([asked] if asked else [])
+    if asked:
+        assert json.loads(out)["asked_the_user"] is True
+
+
+def test_a_tool_write_that_only_adds_stays_as_it_was(mem):
+    out = _call("memory_link_entities", user_said="Remember that I work at Initech.", subject="user",
+                object="Initech", predicate="works_at", predicate_type="functional")
+    assert '"ok": true' in out
+    assert _current(mem.db)["works_at"] == ("Initech", "user_explicit")
+
+
+def test_memory_store_puts_a_replacement_to_the_user(mem):
+    _user_says(mem, "I live in Lisbon.", turn=1, now=time.time() - 600)
+    out = _call("memory_store", user_said="I'm visiting Dubai next week, remember that for the itinerary",
+                text="I'm visiting Dubai next week", metadata={"facts": [
+                    {"subject": "user", "predicate": "lives_in", "object": "Dubai"}]})
+    assert _current(mem.db)["lives_in"] == ("Lisbon", "user_stated")
+    assert _waiting(mem) == ["Dubai"] and "waiting for the user to confirm" in out, out
+
+
+#: A memory tool naming the user's home in another way (the main session's
+#: check of the third review, fix 1: the tools skipped the name map, and
+#: wrote a second current home beside the user's at the user's trust).
+OTHER_NAMES = [
+    ("memory_link_entities", "user", "home_city"),
+    ("memory_link_entities", "user", "lives-in"),
+    ("memory_link_entities", "User", "currentLocation"),
+    ("memory_store", "User", "current_location"),
+    ("memory_store", "user", "home town"),
+]
+
+
+def _homes(db) -> list[tuple[str, str, str]]:
+    return sorted((r["subject"], r["predicate"], r["object"]) for r in db.execute(
+        "SELECT subject, predicate, object FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL"))
+
+
+def _tool_names_the_home(tool: str, subject: str, predicate: str, *, said: str) -> str:
+    if tool == "memory_store":
+        return _call("memory_store", user_said=said, text="Moved to Dubai", metadata={"facts": [
+            {"subject": subject, "predicate": predicate, "object": "Dubai"}]})
+    return _call("memory_link_entities", user_said=said, subject=subject, object="Dubai", predicate=predicate,
+                 predicate_type="set")
+
+
+@pytest.mark.parametrize(("tool", "subject", "predicate"), OTHER_NAMES)
+@pytest.mark.parametrize("in_their_words", [True, False], ids=["their-words", "a-page"])
+def test_a_tool_naming_the_users_home_otherwise_writes_no_second_home(mem, tool, subject, predicate,
+                                                                       in_their_words):
+    _user_says(mem, "I live in Lisbon.", turn=1, now=time.time() - 600)
+    said = ("I moved to Dubai last month, remember that" if in_their_words
+            else "Read this page and tell me what it says.")
+    _tool_names_the_home(tool, subject, predicate, said=said)
+    assert _homes(mem.db) == [("user", "lives_in", "Lisbon")]
+    assert _waiting(mem) == (["Dubai"] if in_their_words else [])
+
+
+def test_control_without_the_name_map_a_tool_writes_a_second_home(mem, monkeypatch):
+    """Negative control: with the map off, the tool's ``home_city`` stood
+    beside the user's own home, nothing asked."""
+    from kazma_core.memory import fact_names
+
+    monkeypatch.setattr(fact_names, "users_names", lambda subject, predicate: (subject, predicate))
+    _user_says(mem, "I live in Lisbon.", turn=1, now=time.time() - 600)
+    _tool_names_the_home("memory_link_entities", "user", "home_city",
+                         said="I moved to Dubai last month, remember that")
+    assert ("user", "home_city", "Dubai") in _homes(mem.db) and _waiting(mem) == []
+
+
+def test_control_a_tool_write_that_may_replace_takes_the_users_home(mem, monkeypatch):
+    """Negative control: with the tool's write allowed to replace, the
+    review's first sentence replaces the user's home at their trust."""
+    from kazma_core.memory import belief_mutation
+
+    real = belief_mutation.mutate_belief
+
+    def may_replace(*args, **kwargs):
+        kwargs["replaces_users_fact"] = True
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(belief_mutation, "mutate_belief", may_replace)
+    _user_says(mem, "I live in Lisbon.", turn=1, now=time.time() - 600)
+    said, (predicate, value), _ = TOOL_REPLACEMENTS[0]
+    _call("memory_link_entities", user_said=said, subject="user", object=value, predicate=predicate,
+          predicate_type="functional")
+    assert _current(mem.db)["lives_in"] == ("Dubai", "user_explicit")
+
+
 # ── The injection corpus ──────────────────────────────────────────────────
 
 
@@ -179,20 +296,33 @@ def test_no_injection_becomes_a_user_fact_or_outlasts_the_users_word(mem):
 # ── The model pass and its own turn ───────────────────────────────────────
 
 
-def test_the_model_pass_may_correct_its_own_turns_reading_and_no_other(mem):
+def _model_reads_after_the_user(mem, *, same_turn: bool) -> dict:
     from kazma_core.memory.belief_mutation import mutate_belief
 
     kw = dict(ops_conn=mem.ops, predicate_type="functional", source_session=THREAD)
-    mutate_belief(mem.db, "user", "favorite_color", "teal", extraction_method="user_stated",
-                  source_turn=1, now=1000.0, **kw)
-    other = mutate_belief(mem.db, "user", "favorite_color", "red", extraction_method="llm_inferred",
-                          source_turn=2, now=2000.0, **kw)
-    assert other.get("blocked") == "lower_trust_source"  # another turn's inference
-    assert _current(mem.db)["favorite_color"] == ("teal", "user_stated")
-    same = mutate_belief(mem.db, "user", "favorite_color", "navy", extraction_method="llm_inferred",
-                         source_turn=1, now=1000.0, **kw)
-    assert same["action"] == "supersede"  # the model reading the same turn better
-    assert _current(mem.db)["favorite_color"] == ("navy", "llm_inferred")
+    mutate_belief(mem.db, "user", "name_is", "Sam", extraction_method="user_stated", source_turn=1, now=1000.0, **kw)
+    return mutate_belief(mem.db, "user", "name_is", "Dana", extraction_method="llm_inferred",
+                         source_turn=1 if same_turn else 2, now=1000.0 if same_turn else 2000.0, **kw)
+
+
+@pytest.mark.parametrize("same_turn", [False, True])
+def test_the_model_pass_never_replaces_the_users_fact_even_in_its_own_turn(mem, same_turn):
+    """"My name is Sam. I met Dana yesterday.": a careless reading of the
+    same turn made the user Dana (the second security review of F1,
+    2026-11-18). The model pass corrected the quick pass of its own turn."""
+    assert _model_reads_after_the_user(mem, same_turn=same_turn).get("blocked") == "lower_trust_source"
+    assert _current(mem.db)["name_is"] == ("Sam", "user_stated")
+
+
+def test_control_with_the_same_turn_exception_the_user_became_dana(mem, monkeypatch):
+    from kazma_core.memory import provenance
+
+    real = provenance.may_overrule
+    monkeypatch.setattr(provenance, "may_overrule",
+                        lambda existing, incoming: real(existing, incoming)
+                        or (existing == "user_stated" and incoming == "llm_inferred"))
+    assert _model_reads_after_the_user(mem, same_turn=True)["action"] == "supersede"
+    assert _current(mem.db)["name_is"] == ("Dana", "llm_inferred")
 
 
 def test_the_old_rule_lets_the_agent_block_the_user(mem, monkeypatch):
@@ -216,6 +346,9 @@ def test_the_old_rule_lets_the_agent_block_the_user(mem, monkeypatch):
 USER_CHANNEL_SITES = {
     "kazma-ui/kazma_ui/memory_api.py": "the Memory page: the operator's own link and edit",
     "kazma-core/kazma_core/memory/eval_golden.py": "the golden eval's private database, never the install's",
+    "kazma-core/kazma_core/memory/changes.py": (
+        "confirm: the user's own answer to a waiting correction (the Memory page, a chat command)"
+    ),
 }
 
 

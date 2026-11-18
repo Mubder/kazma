@@ -1793,6 +1793,28 @@ four injected were noise.
   marks its episode (`metadata.deep_pass`, `_DEEP_PASS_VERSION`) and a
   second task for it does nothing; the embedder singleton is built once
   under a lock. Gate: `tests/test_memory_write_path_items.py`.
+- **A single value stays single whatever the writer labels it** (2026-11,
+  the memory framework audit's F7, `belief_mutation._classify_predicate`,
+  `_survivor`). Kazma's own class (`kazma_classifies`) wins over the caller's
+  label: the agent's memory tools label a fact "set" by default, and an
+  agent's `lives_in Tokyo` labelled a list stood beside the user's own
+  London, past the trust gate. The class is read from the name's words
+  (`belief_mutation._kazma_name`, as `predicates` compares names): "live_in",
+  "in_lives" or "is_name" labelled a list slipped past an exact-name class.
+  Of several current rows of a single-valued
+  fact, the newest the user said stays (else the newest), and a newer row
+  from a lower source closes where it began. On names a person holds several
+  of (`_LISTABLE`: works_at, active_project, current_role) a list labelled by
+  the user's own words stays a list, and stays whole until a write that may
+  replace the user's value replaces all of it; every other single-valued name
+  holds one value whoever labels it. **A plural name is a list**
+  (`_names_a_list`, the security review of F1's second half, 2026-11-18):
+  "names", "favorite_foods", "colors_favorite" put Kazma's one-value thing in
+  the plural and are written as a set; "lives_in" and "works_at" keep their
+  verb's "s", and "the_name" or "is_name" is still `name_is`. Gate:
+  `tests/test_memory_kazma_class_wins.py` (the label first, keeping the
+  newest, the exact-name class, no listable names and no plural rule as
+  negative controls).
 - **A list stays a list** (2026-10-19, `belief_mutation._established_kind`).
   The extractor labels each fact's type; a single-valued label on a predicate
   the subject keeps as a list (current `set` rows) is written as one more
@@ -1837,6 +1859,28 @@ four injected were noise.
   (local, Postgres-primary, mirror top-up) leaves it out; the row stays. A
   small-talk MESSAGE looks nothing up: `recall` returns empty at once and
   `search_transcripts` (the past-chats fallback an empty recall runs) too.
+  **Extraction's filler check follows the same rule** (2026-11, the memory
+  framework audit's F8): `belief_extractor.is_filler_turn` asks
+  `episode_text.is_small_talk_words` after the durable cues. A message of
+  twelve characters or fewer was filler by its length, and "I'm diabetic",
+  "Call me Sam", "No, Lisbon" and "عندي سكري" reached neither pass. **Small
+  talk is read by whole phrases** (the security review of F1's second half,
+  2026-11-18): a message is nothing but `_SMALL_TALK_PHRASES` (longest
+  first), the words that may follow one (`_SMALL_TALK_TAILS`: "thanks
+  man", "شكرا حبيبي"), laughter and pauses -- never every WORD small talk,
+  which made "I am a man", "I am Sure", "I'm Kazma" and "no it will do"
+  filler. The phrases include the replies a person answers and goes ahead
+  with ("نعم", "لا", "ايوه", "كمل", "يلا", "خلاص", "ان شاء الله", "go ahead",
+  "yes please", "sounds good", "I'm good"). A message past `_FILLER_MAX`
+  (400 characters) is never filler, and the cues read no further. A filler
+  turn queues no deep pass (one model call): the
+  post-turn path and turn reconcile ask `is_filler_turn` before queueing
+  `micro_consolidation`. Gate:
+  `tests/test_memory_short_statements.py` (the length rule and the
+  word-by-word rule as negative controls), the write scenarios' `short` category, and
+  `tests/test_filler_queues_no_deep_pass.py` (tasks counted through the real
+  post-turn function; every function queueing a deep pass asks, or is
+  declared; the path without the check as the control).
 - **The graph walk reads the seeds' neighbourhood (R5).** It loaded the
   tenant's most important facts (800 at the defaults) and walked those: a
   fact below the cut was out of reach however close to the question.
@@ -2006,9 +2050,10 @@ four injected were noise.
   post-turn scheduler stamps `at` when the turn closes; the durable queue
   carries it (`post_turn_memory` payload `at`); the episode, the heuristic
   facts and the LLM deep pass (`micro_consolidation`, from the episode's
-  `created_at`) all use it; turn reconcile uses the turn's. Same time for the
-  heuristic and the deep pass means the deep pass may still correct its own
-  turn. Gate: `tests/test_memory_event_time.py::test_every_late_writer_passes_the_turn_time`
+  `created_at`) all use it; turn reconcile uses the turn's. (The deep pass
+  no longer corrects its own turn's quick pass: a model's reading never
+  gets the user's trust by itself, below.) Gate:
+  `tests/test_memory_event_time.py::test_every_late_writer_passes_the_turn_time`
   (every call in the late-writer modules names its time).
 - The quick (heuristic) pass reads Arabic and mixed text too
   (`memory/arabic_facts.py`, 2026-10-14: the extraction benchmark measured
@@ -2019,6 +2064,311 @@ four injected were noise.
   kind, the English reading first. Gate: `tests/test_memory_arabic_facts.py`
   (sentences not in the benchmark, both ways; the pass switched off as the
   negative control).
+- **A fact about someone else is never the user's** (2026-11, the memory
+  framework audit's speaker rule, `memory/clause_subject.py`). `subjects` says, for
+  each word, who the words before it last named: the speaker ("أنا", "I",
+  "we", "اسمي"), someone else (a relative or a companion in any form, a
+  third-person pronoun where its clause begins, "اسمها", a reporting verb),
+  or no one; a wide list for someone else, a narrow one for the speaker. The
+  Arabic quick pass's triggers are each declared `_MARKED` (the form says the
+  user is the subject: "أسكن", "انتقلنا", "اسمي") or `_UNMARKED` (a
+  participle, or "انتقلت", which is I, you and she alike): an unmarked one
+  counts in the user's own clause (or after a time phrase: "قبل سنتين
+  انتقلت") and only with no one else named before it.
+  "أختي انتقلت إلى روتردام" was the user's home at the user's own trust, and
+  so was "أخوي اسمه أحمد وساكن في دبي" (a clause joined by "و"). Names no
+  one: a person noun right after the speaker ("أنا مدير", "عندي بنت", "I'm a
+  teacher": a description or a possession), a definite word ("الأهلي",
+  "الجاري" are never "my ..."), "جاري" (work in progress as often as a
+  neighbour), "her" with nothing after it ("I told her."). A sentence end
+  clears who was named, except someone introduced by name ("عندي أخت اسمها
+  نورة. انتقلت" is still Noura); the cost, decided, is "صديقتي معلمة. ساكنة
+  في جدة" read as the user's. Gate:
+  `tests/test_memory_clause_subject.py` (every trigger declared once, a planted
+  one as control; every unmarked trigger after a sentence about someone
+  else; the old trigger list, the rule switched off, and 40db48ba6's
+  time-phrase, sentence and role rules as negative controls), and the write
+  scenario `other-ar-sister-moved`.
+- **Only the user's own words are the user's statement** (2026-11, the
+  audit's F3, `memory/own_words.py`). `own_words` is the message without
+  data fences (an attached document's text: `build_user_content` puts it in
+  the user's message), "[Attached: ...]" lines, fenced code, "> " lines, a
+  forwarded message (a pasted header, "Forwarded from ...", "رسالة محولة";
+  Telegram and WhatsApp forwards are fenced by the gateway,
+  `kazma_gateway/forwarded.py`, a forwarded voice note's transcript too:
+  `WaInbound.forwarded`), a quoted sentence in the first person
+  (straight, curly, single, backtick quotes or «», never an inch mark), someone
+  else's words after a colon ("my sister said:", "قالت أختي:", "قلت لي:",
+  to the end of that sentence: "Kazma said: your name is Ahmed. No, my name
+  is Ahmad." keeps the correction), and the text an instruction works on
+  ("Translate to French:", "ترجم:", "Fix the grammar:", "Can you translate
+  this?", "سوي لي ترجمة:", "Write an email ... saying:", to the end of the
+  message or an aside after it: "By the way, ...", "بالمناسبة"). Inside a
+  request to remember, a quote is the user's statement
+  (`remember_request.asks_to_remember`). A verb that also means something else ("fix",
+  "correct", "صحح") is an instruction only when it names the text ("Fix the
+  grammar:"), so "Correct: my name is Ahmad" stays the user's own. Heads
+  are read in an 80-character window at the start of the message, a line or
+  a sentence, by either language's rules: linear time. **What the security
+  review of F1's second half found (2026-11-18)**, each in both languages:
+  the lines of a pasted chat (a name before a colon at a line's start,
+  `_without_speaker_lines`: an English name written with capitals, never one
+  of the user's own labels or a form field, `_OWN_LABELS`, nor an Arabic
+  verb Kazma knows); a pasted mail's "From:" or "Subject:" line; a text
+  handed over or asked about ("Here is the article:", "Tell me if this is
+  spam:", "What does this mean:", "Message from Dana:", "Her bio reads:",
+  "كتبت:"); a reporting head of up to 14 words; someone's words after a
+  reporting verb with no colon, when a first-person word follows ("He said,
+  I live in Lyon.", "Ali told me I work at Initech", "أختي تقول أنا ساكنة"),
+  unless the user is its subject ("I told Ali I ..."), and a sentence that
+  ends naming its speaker ("..., she added."; `_reported_cut`); a question
+  ("How do I say my name is Pierre in French?", `_asks`, unless it asks to
+  remember); a quote over a line break; a request to remember that quotes
+  someone ("remember that Dana wrote "..."") is not the user's statement.
+  Kept the user's: an aside on a line of its own ("Also my name is Sam"),
+  what follows a web address an instruction works on ("Summarize
+  https://x.y and my name is Sam"), facts given for the user's own bio, the
+  '90s, a "> " line under a request to remember. At most the first 2,000
+  characters are read, ended at their last paragraph break (`_bounded`:
+  never the end, which a head, fence or forward line in the unread middle
+  would decide). **Rule B of the review's second round (2026-11-18)**
+  widened the cheap paste shapes (the change log is the net for the rest):
+  a WhatsApp export's lines and those continuing them, any label
+  (`_EXPORT_LINE_RE`: a digit in the label, the Arabic form with its
+  direction marks), a bracketed time before any label ("[12:01, ...]
+  dana_92:"), a lower-case name or a handle ("dana:", "dana_92:") or a role
+  ("the customer:", "my sister:") at a line's start (`_names_a_speaker`;
+  never a greeting, "Good Morning:", nor a heading, "Random thought:",
+  "Step 2:", nor a lower-case phrase); the header a Telegram, Discord or
+  Slack copy puts over a message, or a time alone on its line, and a mail's
+  "... wrote:" line, with the text under it to the next blank line
+  (`_without_pasted_chats`), as a reporting head that ends its line
+  (`_reported_end`); a text of someone else's named ("Dana's bio:", "Her
+  message was:", "رسالتها:"); reported claims with no listed verb ("Ali
+  thinks I ...", "Dana claims I ...", "He was like, I ...", "As Dana put
+  it, ...", "According to Ali, ...", "حسب كلام أختي"، "أختي كاتبة إني ...":
+  `_THINKING_EN`, `_THINKING_AR`, `_reports_at`, `_attributed`); an example
+  or a part to play ("For example:", "مثلا:", "Pretend you are me and say:",
+  "تخيل"). **Rule C**: a text the user asks to remember and names as
+  pasted ("Remember this email:", "احفظ هذا الإيميل:") is not their
+  statement, so `agent_write_source` gives it `agent_asserted`, and a
+  negated "remember" ("Don't remember this", "I can't remember my
+  password", "لا تذكر") is no request (`remember_request`). **Rule D**:
+  `own_words.last_words` reads the last paragraph of a longer message (or
+  its last 400 characters from a sentence's start) as its own message,
+  never after an open code fence, a forwarded message, a quoted mail or an
+  instruction at the start; only `clause_subject.names_no_one_else` reads
+  it, so the model's reading of a correction there is a question to the
+  user (or Kazma's reading), never the user's trust. An episode keeps the
+  first 4,000 characters of the user's message (`dual_write`), and the deep
+  pass reads the episode: the end of a message longer than that reaches
+  neither pass (the main session's decision: it stays). **The third
+  review's items 2 and 3 (2026-11-18)**: a request to remember earns
+  `user_explicit` only when the whole message is the user's plain words
+  (`own_words.is_plain`: own_words drops nothing, no source named, "this
+  note from the web page", no reporting verb), else `user_stated` at most;
+  "Don't forget to <verb>" is the instruction it names. A copy header or a
+  mail's "wrote:" line (also French "a écrit :" and German "schrieb ...:")
+  and someone's words under a head that ends its line run to the END of the
+  message (copies have paragraphs); more headers ("Name, [date at time]",
+  "Name [12:01 PM]", "Name 12:01 PM", "Name — time", "Name - Today at",
+  "Name, 12:01 PM", `_HEADER_RE` with a name that names a speaker, never
+  an event like "Dinner"), "12:01 Name:", "To:", "Date:", "From Name:";
+  labels: a phone number, "A:" (`_SIDES`), "User 1", "Person A", titles,
+  parentheticals, "Dana from HR", "My best friend", "1. Dana:", `<Dana>`,
+  "RT @dana:"; reported speech: bare verbs ("My parents think", "People
+  assume", `_MORE_THINKING_EN`), "told everyone", "says here"
+  (`_MORE_FILLERS`), "Per Ali", "In Dana's words", "Her reply was",
+  "مكتوب", "ردها كان", "Dana said" ending its line; not statements: a
+  conditional, "I never said", "Is it correct to say"
+  (`_supposes_or_asks_to_say`). The best effort the main session asked for:
+  the threat is text the user pasted, and the change log is the net. The
+  quick pass (`extract_beliefs_heuristic`),
+  `is_remember_request` and `provenance.agent_write_source` read through
+  it; the turn keeps the whole message and the deep pass reads it (to the
+  episode's 4,000 characters) at
+  an inference's trust. "Translate to French: My name is Pierre" stored the
+  user's name as Pierre at `user_stated`, and a document beside a "remember
+  this" could earn `user_explicit`. The quick pass no longer reads "I need
+  X" as a preference. Gate: `tests/test_memory_own_words.py` (one sentence
+  per quick-pass pattern, EN/AR, in twelve forms and a real
+  `build_user_content` attachment; the user's own corrections kept; the
+  quoted write scenarios pass and fail with the raw message; the raw message
+  as the negative control for the quick pass and the trust gate; the
+  review's forms, kept cases and remember quotes, with the first rules as
+  the control; the security review's cases with the rules before it as the
+  control, the cap, and every scanner in bounded time with the uncapped
+  read as the control; rule B's pastes and kept cases with the rules before
+  it as the control, rule C with the old remember pattern and the rule taken
+  out as controls, rule D's ends), `tests/test_memory_own_statements.py`
+  (rule D through the real deep pass, without `last_words` as the control),
+  `tests/test_forwarded_messages.py` (the real Telegram
+  adapter and WhatsApp parser, the adapters that ignored forwards as the
+  control).
+  **A file's text reaches the model in a data fence on every surface**: the
+  web chat sends a text file beside the message (`text_attachment`), and the
+  server fences it and keeps only its name in the chat
+  (`agent/attached_text.py`). The page put it into the message in a code
+  block that a line of three backticks inside the file ended early, and the
+  rest was the user's words. A stub's name is cleaned (`file_label`: a name
+  holding "]" ended the stub), own_words reads a stub to its line's end and
+  nothing after the web chat's. Gate: `tests/test_attached_text_fenced.py`
+  (the real route EN/AR, the old page message as the negative control, no
+  page script builds a stub, every product function writing one declared
+  with how the file's text is fenced), `tests/e2e/test_attached_text_browser.py`.
+- **A model's reading never gets the user's trust by itself** (2026-11,
+  the audit's F1; rule A of its second security review, 2026-11-18). The
+  first half credited a deep-pass reading the user said of themself
+  (`user_stated`); the reviews found the tail endless -- "I'm visiting Dubai
+  next week" as lives_in, "I met Dana" as name_is, the same turn's reading
+  replacing the quick pass's fact ("My name is Sam. I met Dana yesterday."),
+  another name for the same fact standing beside the user's, a wrong first
+  reading taking the user's trust and blocking the real one. Whether the
+  model's name fits the words only the user can say. So
+  `_apply_beliefs_to_v2` writes every deep-pass fact as the model's
+  (`llm_inferred`), as before F1, and the trust gate
+  (`provenance.may_overrule`) lets a fact the user stated yield only to the
+  user's own words -- in its own turn too: the exception that let the model
+  pass correct the quick pass of its turn is gone. A reading of one of the
+  user's facts in their own words with no one else named is put to them
+  (below): a question only where it disagrees with a fact the USER gave;
+  as the first of its kind it is Kazma's reading, never a question -- not
+  sticky, since any later statement of the user's replaces it. The user's
+  facts go by Kazma's names before the write
+  (`memory/fact_names.py`, `_canonical_for_user`: "home_city", "located_in",
+  "resides_in" -> "lives_in"; employer, role, name, preferred name; subject
+  `user` only; a plural is a list -- the first layer of F4's table, which
+  grows to forty names after the owner's review). **One helper, every
+  writer** (the main session's check of the third review, fixes 1 and 4):
+  `fact_names.users_names` ("User" is the user, and the user's facts go by
+  Kazma's names) is called before `mutate_belief` by the deep pass, the
+  memory tools, the Memory page's link, a confirmed change and the V1
+  backfill (its own inserts too), so a memory tool's `home_city` or
+  `current_location` meets the user's home as one fact; a name is read in
+  snake case whatever its separators or case first (`_normalised`: "home
+  town", "lives.in", "livesIn", "currentLocation"). Gate:
+  `tests/test_user_fact_names_every_writer.py` (every function that calls
+  `mutate_belief` or inserts into `beliefs` calls the map or is declared
+  with why -- the hub's anchor, the two eval fixtures, `_insert_belief`; a
+  planted writer as the control). The retrieval benchmark's fixture seeds
+  the dataset's names as they are: seeded through the map, its "job_title"
+  and "name" facts become `current_role` / `name_is` and recall loses
+  "what is it that I do for a living?" (noise hit rate 1.0 -> 0.67,
+  measured with bge-m3's own vectors), a cost the deep pass's naming
+  already has live; the owner decides the dataset. The user's own word for a
+  value the model read raises it to the user's trust
+  (`belief_mutation`'s same-value branch). Every product call that applies
+  extracted facts names `user_text` (the two forwarders aside). "The same
+  value" is compared folded (`belief_mutation._same_value`: case,
+  underscores, spacing, Arabic forms and marks): the model's respelling
+  ("lisbon", "gulf_bank") is no change. Gates:
+  `tests/test_memory_own_statements.py` (the worker's own
+  micro_consolidation: corrections, first readings, a turn of five first
+  readings asking nothing, "Not me", aliases, the same turn, the review's
+  readings, a summarised page, the sister and the manager; every reading at
+  the user's trust, no name table, asking about every first reading and no
+  "Not me" as negative controls; every applier call names its message),
+  `tests/test_memory_provenance.py` (the same-turn exception as the
+  control), and the write scenarios (v4). **Recall says which facts the user
+  did not state**: in the recall block only a fact whose `extraction_method`
+  is in `provenance.USER_SOURCES` goes untagged. Any other recorded source
+  starts its line with "(Kazma's reading)", or "(قراءة Kazma)" for an
+  Arabic value (`recall.READING_TAG_EN`, `READING_TAG_AR`); no recorded
+  source (NULL, empty, another install's fact) with "(source unknown)" /
+  "(مصدر غير معروف)" (`UNKNOWN_SOURCE_TAG_EN`, `UNKNOWN_SOURCE_TAG_AR`). The tag comes BEFORE
+  the value and every entry is one line (`recall._one_line`): after it, a
+  value holding a line break ended the line untagged (fixes 2 and 3). The
+  Postgres-primary path reads the source from this install's copy
+  (`recall._add_local_methods`). Recall's ranking is unchanged (the
+  benchmark's 103 scores equal). Gate: `tests/test_memory_recall_reading_tag.py`
+  (the tag after the value, the rule that left an unknown source untagged,
+  and the hydrate without the source as negative controls).
+- **A fact the user stated changes only in ways the user can see and take
+  back** (2026-11, the audit's F1, second half; `memory/changes.py`, table
+  `memory_changes` in `memory_state.db`). An **update**: a `user_*` fact
+  replaced from another turn (`belief_mutation._mutate_functional_locked`,
+  `users_fact_replaced`) is recorded by `changes.record_update` in the
+  replacement's own transaction; `changes.undo` reopens the old fact and
+  closes the new one under the mutation lock, audited (`undo_update`), and
+  refuses with a code (`ChangeRefusedError`: `replaced_since`, `forgotten`).
+  The model read one of the user's facts -- the one way a reading only the
+  model made can become theirs -- with the value in the turn's own words,
+  in a sentence that states it, with no one but the speaker named before it
+  (`clause_subject.names_no_one_else`, the user's spelling: "We moved to
+  Rotterdam", "Moved to Rotterdam last month", "No, Lisbon"; "My sister
+  moved to Rotterdam" records nothing), from `_apply_beliefs_to_v2`
+  (`_put_to_the_user`). A **pending change** -- a question -- only where the
+  trust gate refused it over a fact the user stated (`changes.record_pending`;
+  never over the user's words of the same turn). A **reading** (kind
+  `reading`) -- never a question -- for the model's first reading of one of
+  `fact_names.KINDS`, written as its inference (`changes.record_first_reading`):
+  the deep pass files several facts on most turns, and a question the user
+  ignores teaches nothing. The user confirms either (`changes.confirm`:
+  written `user_explicit`, the change marked confirmed in that write's
+  transaction, `mutate_belief(confirms_change=)`; a reading the model
+  replaced since is refused, `replaced_since`) or dismisses it; "Not me" on
+  a reading takes the model's fact out while it is current and still the
+  model's (audited, `dismiss_reading`), and the deep pass never files that
+  value again (`changes.user_said_not_me`; the newest `KEEP_NOT_ME`, 500 a
+  tenant, are kept) -- the user's own words still can. Any fact the user
+  states answers what is waiting on it (`changes.answer_pending`). One open
+  change per value; an update supersedes them; one open 30 days
+  expires; the newest 200 decided ones are kept per tenant. An update that
+  closed the user's other list entries with its fact records them
+  (`also_closed`), and undo reopens every one (the third review, item 4),
+  except one whose value the user has said again since
+  (`changes._held_again`, `_same_value`: it is current already; fix 5).
+  **A memory tool follows rule A on replacement** (item 1): its subject and
+  fact name are the model's even when the value is the user's, so its write
+  passes `mutate_belief(replaces_users_fact=False)`; one that would replace
+  a fact the user stated is put to the user as a pending change
+  (`tool_builtins/memory._put_to_the_user`), one that only adds stays as it
+  was. The model's "User" is the user (`fact_names.users_names`); a
+  list-labelled value on a fact the user keeps single takes the user's
+  row's class (`belief_mutation._established_kind`); the name table also
+  reads "hometown", "location", "city", "current_location", "address",
+  "moved_to", "first_name", "user_name" and other separators ("lives-in")
+  (item 5). The turn's note is read at iteration 0
+  (`changes.read_changes_note`) and marked told only after the model
+  answered (`changes.mark_noted`): a failed call does not spend it (item
+  6). An operator's API token may confirm a change: it can already edit
+  facts at `user_explicit` (the main session's decision). Forget takes a
+  change with the fact, the turn, the chat or the text it holds
+  (`changes.forget_facts`, `forget_turn`, `forget_chat`,
+  `forget_mentioning`); it is in the export and the M01 plant. The accepted
+  cost of the speaker rule's sentence end ("صديقتي معلمة. ساكنة في جدة"
+  read as the user's) is an update the user can undo. The Memory API
+  answers them for the caller's tenant: `GET /api/memory/v2/changes`
+  (`state` open or decided) and `POST /api/memory/v2/changes/{change_id}/confirm`,
+  `.../dismiss`, `.../undo` (a refusal is its code, with the recorder's
+  status: 404, 409); they are in the memory tenant gate's REQUESTS, from
+  which Spaces S1-09 makes their matrix cases. The Memory page's card
+  "Changes to what you told Kazma" (`memory_console.js` `loadV2Changes`,
+  EN/AR, each value a `<bdi translate="no">`) shows them with Undo,
+  "Yes, change it" / "No, keep it", or for a reading "This is right" /
+  "Not me". In the chat apps `/memory changes`
+  lists them with a short id (`changes.short_ref`) and `/memory undo|confirm|dismiss <id>`
+  decides one (`changes.decide_change`: a unique start of the id, refused
+  `ambiguous` or `wrong_kind`); the four words are a gateway admin's
+  (`slash_commands.MEMORY_CHANGE_WORDS` in `changes_global_config`: they
+  show and rewrite the tenant's facts). The next turn of the chat a change
+  came from is told once: the supervisor adds the turn note
+  `memory_changes` at iteration 0 (`changes.read_changes_note`, off the
+  loop; the changes whose `source_session` is one of the thread's ids,
+  marked `noted_at` by `changes.mark_noted` once the model answered; the
+  values fenced, Kazma's lines outside).
+  It asks little (`changes._to_tell`): every update, at most one question
+  a turn, never about a fact asked about in the last day, never a reading;
+  the rest wait on the page and in `/memory changes`.
+  A turn of another thread -- a scheduled task, a sub-agent, an A2A
+  request -- never spends it; the model cannot apply a waiting change
+  (no tool decides one: a confirmation is the user's channel). Gates:
+  `tests/test_memory_changes.py` (EN/AR; the refusal with no change log
+  and every question in one note as negative controls), the plant's
+  control in `tests/test_memory_store_registry.py`, and in a browser,
+  reached by the sidebar, `tests/e2e/test_memory_changes_browser.py` (an
+  undo, a confirmation and Kazma's reading answered, the database read
+  after each, EN/AR).
 - The heuristic reads "I work at/for X" as `works_at` (it shared a pattern
   with "I live in" and stored the employer as `lives_in`), and the local
   embedder remembers short texts (<= 256 characters, 4,096 of them): each
@@ -4321,8 +4671,10 @@ import-unavailable degradation stay fail-open (treated as layer-off).
   remember AND holds 80 % of the stored words); `user_stated` -- the user's
   literal statement read by the heuristic pass from their own message;
   then `system_tool`, `agent_asserted` (a memory tool the user did not ask
-  for) and `llm_inferred`. A `user_*` fact yields only to `user_*`, except
-  the model pass correcting the heuristic reading of the SAME turn (§15H).
+  for) and `llm_inferred`. A `user_*` fact yields only to `user_*`, in its
+  own turn too (the model pass's same-turn correction was removed by rule A
+  of F1's second security review, 2026-11-18; §15H's entry on a model's
+  reading).
   Until then `memory_store` / `memory_link_entities` wrote `user_explicit`
   for anything the model chose (a fetched page, an email), unscreened, and
   the user's own words were `llm_inferred`: the model's fact blocked the

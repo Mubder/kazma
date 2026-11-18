@@ -25,6 +25,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from kazma_core.agent.attached_text import file_label
 from kazma_core.documents.errors import DocumentParseError
 from kazma_core.documents.registry import get_parser_registry
 from kazma_core.documents.service import DocumentService
@@ -194,7 +195,9 @@ def _persist_attachment(attachment: Attachment) -> str:
     ATTACHMENT_DIR.mkdir(parents=True, exist_ok=True)
     data = attachment.data or b""
     digest = hashlib.sha256(data).hexdigest()
-    base = attachment.filename or f"{attachment.kind}_{digest[:8]}"
+    # The name as a stub shows it (no bracket, line break or control
+    # character): the path is read back from the stub.
+    base = file_label(attachment.filename) if attachment.filename else f"{attachment.kind}_{digest[:8]}"
     dest = ATTACHMENT_DIR / f"{Path(base).stem}_{digest[:12]}{Path(base).suffix}"
     if not dest.is_file():
         atomic_write_bytes(dest, data)
@@ -271,6 +274,13 @@ def _resolve_active_model_vision_capable() -> bool:
         return True  # fail-open
 
 
+def _stub_name(att: Attachment, path: str) -> str:
+    """The name a stub shows: the sender's, cleaned (``file_label``: a name
+    holding "]" ended the stub early and its tail read as the user's words),
+    else the kept file's path."""
+    return file_label(att.filename) if att.filename else path
+
+
 def build_user_content(
     text: str,
     attachments: list[Attachment] | None,
@@ -327,7 +337,7 @@ def build_user_content(
                     "[attachments] failed to fetch %s: %s", att.url, exc
                 )
                 text_parts.append(
-                    f"[Attached: {att.filename or att.url} — fetch failed]"
+                    f"[Attached: {file_label(att.filename or att.url)} — fetch failed]"
                 )
                 continue
 
@@ -338,7 +348,7 @@ def build_user_content(
                     att.filename or att.url,
                 )
                 text_parts.append(
-                    f"[Attached: {att.filename or att.url or att.kind} — skipped: "
+                    f"[Attached: {file_label(att.filename or att.url or att.kind)} — skipped: "
                     "aggregate attachment size limit exceeded]"
                 )
                 continue
@@ -397,7 +407,7 @@ def build_user_content(
                                 source="document_attachment",
                             )
                             text_parts.append(
-                                f"[Attached: {att.filename or path} ({att.mime}) "
+                                f"[Attached: {_stub_name(att, path)} ({file_label(att.mime)}) "
                                 f"— parsed contents:\n{fenced_excerpt}]"
                             )
                             text_parts.append(
@@ -405,23 +415,23 @@ def build_user_content(
                             )
                         else:
                             text_parts.append(
-                                f"[Attached: {att.filename or path} ({att.mime}) "
+                                f"[Attached: {_stub_name(att, path)} ({file_label(att.mime)}) "
                                 f"— use read_document to open: {path}]"
                             )
                     else:
                         text_parts.append(
-                            f"[Attached: {att.filename or path} ({att.mime}) "
+                            f"[Attached: {_stub_name(att, path)} ({file_label(att.mime)}) "
                             f"— use file_read to open: {path}]"
                         )
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("[attachments] persist failed: %s", exc)
                     text_parts.append(
-                        f"[Attached: {att.filename} — save failed: {exc}]"
+                        f"[Attached: {file_label(att.filename)} — save failed: {file_label(exc)}]"
                     )
             else:
                 # No data and no fetchable URL — record what we know.
-                label = att.filename or att.url or att.kind
-                text_parts.append(f"[Attached: {label} ({att.mime}) — unavailable]")
+                label = file_label(att.filename or att.url or att.kind)
+                text_parts.append(f"[Attached: {label} ({file_label(att.mime)}) — unavailable]")
 
     if not saw_image:
         # No vision input — keep content a plain string for token efficiency

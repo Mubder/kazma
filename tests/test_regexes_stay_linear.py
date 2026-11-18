@@ -15,7 +15,11 @@ measured before it was changed:
   e-mail scrubber (``problem_report.redacted``) were quadratic;
 * the fence sentinel (``prompt_fence._SENTINEL_RE``, 2026-11-15) was
   quadratic on a run of dashes, and the fence's markers read on a folded copy
-  (``prompt_fence._FOLDED_MARKER_RE``) are held to the same time.
+  (``prompt_fence._FOLDED_MARKER_RE``) are held to the same time;
+* the whole-fence reader (``prompt_fence.outside_fences``, 2026-11, the review
+  of the memory framework audit's F3) read to the end of the text from every
+  opening with no closing after it: a message of repeated openings cost the
+  square of its length. It is a scan now (``prompt_fence._fenced_blocks``).
 
 Each new pattern is held to the old one's answers on random inputs, and to a
 time on hostile input that the old one could not meet; the old patterns'
@@ -39,6 +43,11 @@ OLD_VERSION = re.compile(r"^v?\d+([._]\d+)+([._-]?[a-z0-9]+)*$", re.I)
 OLD_VERSIONED = re.compile(r"/v\d+[a-z0-9]*(?:/|$)")
 OLD_FENCE = re.compile(r"</?kazma:data[^>]*>", re.I)
 OLD_SENTINEL = re.compile(r"-{2,}\s*(BEGIN|END)\s+OBSERVATION\s*-{2,}", re.I)
+OLD_FENCED_BLOCK = re.compile(
+    r"<kazma:data source=\"[^\"]*\" untrusted=\"true\">\n"
+    r".*?--- BEGIN OBSERVATION ---\n(.*?)\n--- END OBSERVATION ---\n</kazma:data>",
+    re.DOTALL,
+)
 OLD_EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 NEW_VERSIONED = re.compile(r"/v\d++[a-z0-9]*+(?:/|$)")
 
@@ -97,6 +106,24 @@ def test_the_sentinel_filter_redacts_what_it_did():
         assert prompt_fence._SENTINEL_RE.sub("x", s) == OLD_SENTINEL.sub("x", s), s
 
 
+_FENCE_PIECES = (
+    '<kazma:data source="doc" untrusted="true">\n', "preamble ", "--- BEGIN OBSERVATION ---\n",
+    "body", "\n--- END OBSERVATION ---\n</kazma:data>", "words ", "\n", "<kazma:data", "\"",
+)
+
+
+def test_the_fence_reader_finds_the_same_blocks():
+    for _ in range(20000):
+        s = "".join(RNG.choice(_FENCE_PIECES) for _ in range(RNG.randint(0, 9)))
+        assert prompt_fence.observation_text(s) == OLD_FENCED_BLOCK.sub(lambda m: m.group(1), s), s
+        old = OLD_FENCED_BLOCK.sub(" ", s)
+        match = prompt_fence._FENCE_OPEN_RE.search(old)
+        assert prompt_fence.outside_fences(s) == (old[: match.start()] if match else old), s
+    fenced = prompt_fence.format_untrusted_block("inside", source="doc")
+    assert prompt_fence.outside_fences(f"mine {fenced} also mine") == "mine   also mine"
+    assert prompt_fence.observation_text(f"a {fenced} b") == "a inside b"
+
+
 def test_the_email_scrubber_finds_the_same_addresses():
     for _ in range(5000):
         local = _random("ab.%+-1", 20) or "a"
@@ -122,6 +149,10 @@ def test_hostile_inputs_finish_at_once():
     assert _timed(problem_report._EMAIL.sub, "x", "%" * 200000) < 1.0
     assert _timed(prompt_fence._SENTINEL_RE.sub, "x", "-" * 200000) < 1.0
     assert _timed(prompt_fence._sanitize_fence_body, "-" * 200000) < 1.0
+    opening = '<kazma:data source="x" untrusted="true">\n'
+    for hostile in (opening * 20000, (opening + "--- BEGIN OBSERVATION ---\n") * 10000):
+        assert _timed(prompt_fence.outside_fences, hostile) < 1.0
+        assert _timed(prompt_fence.observation_text, hostile) < 1.0
     for hostile in ("< " + " " * 200000, "<|" + "a" * 200000, "\uff1c\uff0fkazma" * 50000,
                     ("\u2010" * 100 + " END") * 2000, "\u200b" * 200000):
         assert _timed(prompt_fence._sanitize_fence_body, hostile) < 1.0, hostile[:20]
@@ -163,3 +194,6 @@ def test_control_the_old_patterns_grow_faster_than_the_input():
     assert _grows_faster_than_linear(lambda s: OLD_VERSIONED.search(s), lambda n: "/v0" + "0" * n + "!", 3000, 4)
     assert _grows_faster_than_linear(lambda s: OLD_EMAIL.sub("x", s), lambda n: "%" * n, 3000, 4)
     assert _grows_faster_than_linear(lambda s: OLD_SENTINEL.sub("x", s), lambda n: "-" * n, 1500, 4)
+    opening = '<kazma:data source="x" untrusted="true">\n'
+    assert _grows_faster_than_linear(lambda s: OLD_FENCED_BLOCK.sub(" ", s), lambda n: opening * n, 400, 4)
+    assert not _grows_faster_than_linear(prompt_fence.outside_fences, lambda n: opening * n, 400, 4)

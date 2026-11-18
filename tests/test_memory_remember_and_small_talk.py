@@ -62,10 +62,16 @@ def test_an_arabic_request_to_remember_goes_to_the_recall_tier():
 
 
 def test_a_short_arabic_request_to_remember_is_not_filler():
+    """Filler is decided by words since 2026-11 (the memory framework
+    audit's F8), so a short message is not filler for being short."""
     from kazma_core.memory.belief_extractor import is_filler_turn
+    from kazma_core.memory.remember_request import is_remember_request
 
     assert is_filler_turn("تذكر هذا") is False
-    assert is_filler_turn("تذكرة") is True  # negative control: short, and a ticket
+    # Negative controls: small talk as short is filler, and "تذكرة" (a
+    # ticket) is no request to remember.
+    assert is_filler_turn("تمام شكراً") is True
+    assert is_remember_request("تذكرة") is False
 
 
 # ── W5 ────────────────────────────────────────────────────────────────────

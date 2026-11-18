@@ -395,6 +395,10 @@ def _forget_turn(
     _scrub_legacy_copies(conn, list(dict.fromkeys([eid, *ids])), texts)
     facts = _forget_turn_facts(conn, tenant_id=owner, keys=keys, turn=turn, now=now)
     _forget_archived_facts(conn, tenant_id=owner, keys=keys, turn=turn, now=now)
+    # What the turn changed or put to the user (memory/changes.py).
+    from kazma_core.memory import changes
+
+    changes.forget_turn(conn, tenant_id=owner, keys=keys, turn=turn)
     # Every memory of the turn now forgotten -- also copies an earlier forget
     # tombstoned, if it was cut short before their summaries were emptied.
     gone = list(dict.fromkeys([eid, *ids, *_forgotten_of_turn(conn, owner=owner, keys=keys, turn=turn)]))
@@ -495,6 +499,9 @@ def replay_turn(conn: sqlite3.Connection, entry: Any) -> None:
     now = time.time()
     facts = _forget_turn_facts(conn, tenant_id=owner, keys=keys, turn=turn, now=now)
     _forget_archived_facts(conn, tenant_id=owner, keys=keys, turn=turn, now=now)
+    from kazma_core.memory import changes
+
+    changes.forget_turn(conn, tenant_id=owner, keys=keys, turn=turn)
     conn.commit()
     _after_facts(conn, owner=owner, changed=facts, keys=keys, turn=turn)
 
@@ -710,6 +717,10 @@ def _forget_fact_rows(conn: sqlite3.Connection, rows: list[Any], *, now: float) 
             (json.dumps(kept), r["id"]),
         )
         changed.append(str(r["id"]))
+    # A change naming one of these facts holds its value (memory/changes.py).
+    from kazma_core.memory import changes
+
+    changes.forget_facts(conn, [str(r["id"]) for r in rows])
     return changed
 
 
@@ -1170,7 +1181,8 @@ def forget_mentions(text: str, *, tenant_id: str) -> dict[str, Any]:
     codeword, it forgot the 2 of 7 it was shown and reported the job done
     (live 2026-10-19), and the next new chat answered with the codeword.
     Each memory goes through :func:`forget_episode` (``by="user"``), each fact
-    through ``hygiene.invalidate_belief``.
+    through ``hygiene.invalidate_belief``, and every change or waiting
+    correction holding the text is deleted (``changes.forget_mentioning``).
     """
     needle = (text or "").strip()
     if len(needle) < MENTION_MIN_CHARS:
@@ -1187,12 +1199,17 @@ def forget_mentions(text: str, *, tenant_id: str) -> dict[str, Any]:
             "AND valid_until IS NULL AND invalidated_at IS NULL AND object LIKE ? ESCAPE '!'",
             (caller, pattern),
         ).fetchall()]
+        # Every change or waiting correction that holds it (memory/changes.py).
+        from kazma_core.memory import changes
+
+        changes_forgotten = changes.forget_mentioning(conn, tenant_id=caller, pattern=pattern)
+        conn.commit()
     finally:
         conn.close()
     from kazma_core.skills.self_improvement import forget_text
 
     lessons = forget_text(needle, tenant_id=caller)
-    if not episodes and not facts and not lessons:
+    if not episodes and not facts and not lessons and not changes_forgotten:
         return {"ok": False, "error": "nothing_holds_it"}
     from kazma_core.memory.hygiene import invalidate_belief
 
@@ -1203,6 +1220,7 @@ def forget_mentions(text: str, *, tenant_id: str) -> dict[str, Any]:
     return {
         "ok": all(r.get("ok", True) for r in [*fact_results, *memory_results]),
         "memories_forgotten": episodes, "facts_invalidated": facts, "lessons_removed": lessons,
+        "changes_forgotten": changes_forgotten,
     }
 
 
@@ -1279,6 +1297,10 @@ def forget_chat(
         _scrub_legacy_copies(conn, notes, note_texts)
         chat_facts = _forget_chat_facts(conn, tenant_id=owner, keys=keys, now=now)
         _forget_archived_facts(conn, tenant_id=owner, keys=keys, turn=None, now=now)
+        # What the chat changed or put to the user (memory/changes.py).
+        from kazma_core.memory import changes
+
+        changes.forget_chat(conn, tenant_id=owner, keys=keys)
         if notes:
             from kazma_core.memory.topic_summaries import on_turns_forgotten
 

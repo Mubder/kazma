@@ -102,7 +102,13 @@ Around the fence:
 - **What the user said outranks what the model inferred.** A fact you stated
   can only be replaced by your own words; a memory tool the model calls on
   its own writes facts at a lower trust, and text that tries to give
-  instructions is refused before it is stored.
+  instructions is refused before it is stored. Your own words are what you
+  say of yourself: a forwarded message, a pasted chat or mail, a quote,
+  someone's reported words and a text you ask Kazma to work on or about are
+  not, and neither is a question. When your own words replace a fact you
+  stated, the change is shown on the Memory page and can be undone. A
+  reading only the model made never replaces your fact: it waits for your
+  answer there.
 - **Lessons and memories come only from turns memory keeps.** A failed turn,
   or a chat you keep out of memory, teaches nothing.
 - **A tool gets its arguments whole.** Nothing in the executor reinterprets

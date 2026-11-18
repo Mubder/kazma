@@ -648,6 +648,16 @@ class TelegramAdapter(SenderGate, BaseAdapter):
             msg = await self._read_message(update, message)
             if msg is None:
                 return
+            # A forwarded message is someone else's words: fenced as data,
+            # never the person's own (kazma_gateway/forwarded.py), and never
+            # a command.
+            from kazma_gateway.forwarded import forwarded_text, telegram_forward_origin
+
+            origin = telegram_forward_origin(message or {})
+            said = ((message or {}).get("text") or (message or {}).get("caption")
+                    or msg.context_metadata.get("voice_transcribed"))
+            if origin is not None and said and msg.text:
+                msg.text = forwarded_text(msg.text, origin)
 
             from kazma_core.agent.command_catalog import normalize_telegram_command
 

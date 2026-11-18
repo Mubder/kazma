@@ -15,21 +15,28 @@ from __future__ import annotations
 
 import re
 
+from kazma_core.memory.own_words import own_words
+
 __all__ = ["is_remember_request"]
 
 #: English, as whole words (Memory audit M26: as substrings "Can you denote
 #: that" matched "note that"). "Do you remember that film?" asks Kazma to
 #: recall, not to remember: a phrase right after "do/did you" is a question.
+#: Nor after a negation: "Don't remember this", "I can't remember my
+#: password", "never remember" (rule C of the second security review of F1,
+#: 2026-11-18; "don't forget" is a phrase of its own and still asks).
 _ENGLISH = (
     "remember that",
     "remember my",
     "remember this",
+    "remember:",
     "don't forget",
     "do not forget",
     "note that",
 )
 _ENGLISH_RE = re.compile(
-    r"(?<![\w'])(?<!do you )(?<!did you )(?:" + "|".join(re.escape(p) for p in _ENGLISH) + r")(?![\w'])"
+    r"(?<![\w'])(?<!do you )(?<!did you )(?<!n't )(?<!not )(?<!never )(?<!cannot )(?<!dont )(?<!cant )"
+    r"(?<!no need to )(?:" + "|".join(re.escape(p) for p in _ENGLISH) + r")(?![\w'])"
 )
 
 #: Arabic (MSA and Gulf), written in folded form.
@@ -47,13 +54,25 @@ _ARABIC = (
     "حط في بالك",
     "خذ في بالك",
 )
+#: Never after a negation: "لا تذكر هذا" (don't mention this), "ما تذكر"
+#: ("لا تنسى", don't forget, is a phrase of its own and still asks).
 _ARABIC_RE = re.compile(
-    r"(?<!\w)[وف]?(?:" + "|".join(re.escape(p) for p in _ARABIC) + r")(?!\w)"
+    r"(?<!\w)(?<!لا )(?<!ما )(?<!مو )(?<!ليس )[وف]?(?:" + "|".join(re.escape(p) for p in _ARABIC) + r")(?!\w)"
 )
 
 
 def is_remember_request(text: str | None) -> bool:
-    """True when *text* asks Kazma to remember something."""
+    """True when the user's own words in *text* ask Kazma to remember
+    something: never a "remember" inside an attached document, a quote or a
+    text the user asked Kazma to translate (``memory.own_words``)."""
+    return asks_to_remember(own_words(text))
+
+
+def asks_to_remember(text: str | None) -> bool:
+    """Whether *text*, as it stands, asks Kazma to remember something.
+    ``own_words`` asks it of the words before a quote ("remember this:
+    "..."": the quote is then the user's own statement); everything else
+    asks :func:`is_remember_request`."""
     if not text:
         return False
     lowered = " ".join(text.strip().lower().replace("\u2019", "'").split())

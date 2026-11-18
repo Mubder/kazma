@@ -35,6 +35,7 @@ score that no rule ever read, removed on 2026-09-23 (``macro_sleep.py``).
 from __future__ import annotations
 
 import contextlib
+import functools
 import hashlib
 import json
 import logging
@@ -91,6 +92,79 @@ _FUNCTIONAL_PREDICATES = frozenset(
 
 # State-transition predicates (governed by a transition log).
 _STATE_PREDICATES = frozenset({"issue_status", "pipeline_state", "task_state"})
+
+# Single-valued names a person often holds several of at once: two jobs,
+# projects in parallel, two roles. Kazma's class wins over a writer's list
+# label on them too -- except a list from the user's own words (the review of
+# the memory framework audit's F7: F7 collapsed the user's own list of jobs
+# to the last one written). Every other name above was confirmed to hold one
+# value at a time: one name (name_is, preferred_name), one home and one
+# location (lives_in, located_in), one favourite of a kind, one next reset
+# per service.
+_LISTABLE = frozenset({"works_at", "active_project", "current_role"})
+
+
+@functools.lru_cache(maxsize=1)
+def _kazma_names() -> dict[frozenset[str], str]:
+    from kazma_core.memory.predicates import _predicate_key
+
+    return {_predicate_key(name): name for name in sorted(_FUNCTIONAL_PREDICATES | _STATE_PREDICATES)}
+
+
+def _kazma_name(predicate: str) -> str | None:
+    """Kazma's own single-valued or state name that *predicate* is the same
+    words as ("live_in", "in_lives", "lives_in_the" -> "lives_in"; "name",
+    "is_name", "the_name" -> "name_is"), or None. Compared as ``predicates``
+    compares names: order, filler words and a plural "s" aside. Read from the
+    exact name, a writer's "in_lives" labelled a list stood beside the user's
+    "lives_in", past the trust gate (the review of F7). Never a name that
+    puts Kazma's thing in the plural ("names": ``_names_a_list``)."""
+    from kazma_core.memory.predicates import _predicate_key
+
+    key = _predicate_key(predicate)
+    named = _kazma_names().get(key) if key else None
+    return None if named is not None and _plural_of(predicate, named) else named
+
+
+def _name_words(predicate: str) -> list[str]:
+    return [w for w in (predicate or "").strip().lower().replace(" ", "_").split("_") if w]
+
+
+def _is_plural(word: str) -> bool:
+    """A plural noun's "s", as ``predicates._predicate_key`` drops it."""
+    return len(word) > 3 and word.endswith("s") and not word.endswith("ss")
+
+
+def _plural_of(predicate: str, named: str) -> bool:
+    """Whether *predicate* says in the plural a word Kazma's *named* says in
+    the singular ("names" for "name_is"). "lives_in" and "works_at" keep
+    their own "s": a verb's, not a plural's."""
+    own = set(named.split("_"))
+    return any(_is_plural(w) and w not in own and w[:-1] in own for w in _name_words(predicate))
+
+
+def _names_a_list(predicate: str) -> bool:
+    """Whether *predicate* names in the plural what Kazma keeps one of:
+    "names", "favorite_foods", "colors_favorite". A plural name is a list,
+    whatever the writer labels it (the security review of F1's second half,
+    2026-11-18: "names" replaced the user's name, and "favorite_foods" kept
+    one food)."""
+    words = _name_words(predicate)
+    if _is_favorite(predicate) and any(_is_plural(w) for w in words if w != "favorite"):
+        return True
+    from kazma_core.memory.predicates import _predicate_key
+
+    key = _predicate_key(predicate)
+    named = _kazma_names().get(key) if key else None
+    if named is not None and _plural_of(predicate, named):
+        return True
+    from kazma_core.memory.fact_names import plural_of_a_kind
+
+    return plural_of_a_kind(predicate)  # "homes", "employers": a model's names in the plural
+
+
+def _is_favorite(predicate: str) -> bool:
+    return predicate.startswith("favorite_") or "favorite" in predicate.split("_")
 
 # Time-bound / scheduled predicates that must NEVER be superseded.
 # These are forced to 'set' type (append-only) regardless of LLM classification,
@@ -159,7 +233,7 @@ def _belief_id(tenant_id: str, subject: str, predicate: str, valid_from: float) 
     return f"b_{h[:20]}_{uuid.uuid4().hex[:6]}"
 
 
-def _classify_predicate(predicate: str, explicit: str | None) -> str:
+def _classify_predicate(predicate: str, explicit: str | None, *, source: str | None = None) -> str:
     p = (predicate or "").strip().lower().replace(" ", "_")
     # Time-bound predicates are NEVER functional — they accumulate, not replace.
     # This check runs BEFORE the explicit override so even LLM-classified
@@ -177,23 +251,35 @@ def _classify_predicate(predicate: str, explicit: str | None) -> str:
             return "functional"
     except Exception:
         pass
+    # Kazma's own class wins over the caller's label: the agent's memory tools
+    # label a fact "set" by default, and a list label on "lives_in" added a
+    # second home beside the user's, past the trust gate (2026-11, the memory
+    # framework audit's F7). Read from the name's words, never its exact
+    # spelling (``_kazma_name``), and favorite_* stays single-valued -- but a
+    # list the user's own words made on a name a person holds several of
+    # stays a list (``_LISTABLE``). A plural name is a list ("names",
+    # "favorite_foods": ``_names_a_list``).
+    if _names_a_list(p):
+        return "set"
+    named = _kazma_name(p)
+    if named in _FUNCTIONAL_PREDICATES or _is_favorite(p):
+        from kazma_core.memory.provenance import USER_SOURCES
+
+        if named in _LISTABLE and explicit == "set" and source in USER_SOURCES:
+            return "set"
+        return "functional"
+    if named in _STATE_PREDICATES:
+        return "state"
     if explicit in ("functional", "set", "state"):
         return explicit
-    if p in _FUNCTIONAL_PREDICATES:
-        return "functional"
-    if p in _STATE_PREDICATES:
-        return "state"
-    # favorite_* stays single-valued
-    if p.startswith("favorite_"):
-        return "functional"
     return "set"
 
 
 def kazma_classifies(predicate: str) -> bool:
     """Whether Kazma itself says how many values *predicate* holds (the
     functional and state lists, ``favorite_*``, the rotating current facts),
-    whatever the extractor's label."""
-    if predicate in _FUNCTIONAL_PREDICATES or predicate in _STATE_PREDICATES or predicate.startswith("favorite_"):
+    whatever the extractor's label. A plural of one of them is a list."""
+    if _kazma_name(predicate) is not None or _is_favorite(predicate) or _names_a_list(predicate):
         return True
     from kazma_core.memory.current_facts import is_functional_current_predicate
 
@@ -213,7 +299,29 @@ def _established_kind(
     and state lists, ``favorite_*``, the rotating current facts) keeps the
     type Kazma gives it.
     """
-    if ptype not in ("functional", "state") or kazma_classifies(predicate):
+    if kazma_classifies(predicate):
+        return ptype
+    if ptype == "set":
+        # The reverse (the third review of F1, item 5): a value labelled a
+        # list on a fact the user keeps single ("blood_type") takes the
+        # class of the user's own row, so it never stands beside it.
+        try:
+            held = conn.execute(
+                "SELECT predicate_type FROM beliefs WHERE tenant_id=? AND subject=? AND predicate=? "
+                "AND predicate_type IN ('functional', 'state') "
+                "AND extraction_method IN ('user_explicit', 'user_stated') "
+                "AND valid_until IS NULL AND invalidated_at IS NULL LIMIT 1",
+                (tenant_id, subject, predicate),
+            ).fetchone()
+        except sqlite3.Error:
+            logger.debug("[belief_mutate] could not read %s %s's kind; keeping %s", subject, predicate, ptype)
+            return ptype
+        if held:
+            logger.info("[belief_mutate] %s %s is the user's single value: this list-labelled value is one too",
+                        subject, predicate)
+            return str(held[0])
+        return ptype
+    if ptype not in ("functional", "state"):
         return ptype
     try:
         holds_list = conn.execute(
@@ -320,8 +428,21 @@ def mutate_belief(
     subject_id: str | None = None,
     now: float | None = None,
     private: bool = False,
+    confirms_change: tuple[str, str] | None = None,
+    replaces_users_fact: bool = True,
 ) -> dict[str, Any]:
     """Apply a belief mutation per the predicate-type rules.
+
+    *confirms_change* is ``(change id, actor)`` of the pending change this
+    write answers (``changes.confirm``): marked confirmed in the write's own
+    transaction, never superseded by it.
+
+    *replaces_users_fact* False: the write may add a fact, never replace one
+    the user stated, whatever its source -- it answers ``blocked:
+    lower_trust_source``, as the trust gate does. A memory tool's write is
+    the model's choice of subject and name even when the value is the
+    user's (the third review of F1, item 1): a replacement it would make is
+    put to the user instead (``changes.record_pending``).
 
     *now* is when the fact was stated (default: this moment): the valid
     time (``valid_from`` / ``valid_until``). Something that records a fact
@@ -373,7 +494,11 @@ def mutate_belief(
     except Exception:
         pass
 
-    ptype = _classify_predicate(predicate, predicate_type)
+    # Classified by the name's words ("in_lives" is "lives_in"'s class);
+    # canonical_predicate below then writes it under the name the subject
+    # already uses for those words, so the trust gate sees the user's fact.
+    pred = (predicate or "").strip().lower().replace(" ", "_") or "related"
+    ptype = _classify_predicate(pred, predicate_type, source=extraction_method)
     # Operator-driven links may carry an explicit subject_id (the exact
     # graph node id the operator clicked, e.g. a virtual-fact id like
     # "ShipX — Deployment Modes"). Slugifying that id would mint a
@@ -403,7 +528,6 @@ def mutate_belief(
         obj = canonical_entity_id(primary_conn, obj, tenant_id=tenant_id)
     except Exception:
         pass
-    pred = (predicate or "").strip().lower().replace(" ", "_") or "related"
     # Re-check after slugify (spaces → underscores)
     try:
         from kazma_core.memory.hygiene import is_blocked_belief_subject
@@ -447,7 +571,8 @@ def mutate_belief(
                     extraction_method=extraction_method, tenant_id=tenant_id,
                     source_session=source_session, source_turn=source_turn,
                     mem_class=mem_class, now=now, recorded=recorded, cfg=cfg,
-                    private=private,
+                    private=private, confirms_change=confirms_change,
+                    replaces_users_fact=replaces_users_fact,
                 )
             elif ptype == "state":
                 result = _mutate_state(
@@ -456,7 +581,7 @@ def mutate_belief(
                     extraction_method=extraction_method, tenant_id=tenant_id,
                     source_session=source_session, source_turn=source_turn,
                     mem_class=mem_class, now=now, recorded=recorded, cfg=cfg,
-                    private=private,
+                    private=private, replaces_users_fact=replaces_users_fact,
                 )
             else:
                 result = _mutate_set(
@@ -730,6 +855,39 @@ def _insert_kw(kw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _same_value(old: Any, new: Any) -> bool:
+    """Whether two values are one value written two ways: compared after
+    folding case, underscores, spacing and Arabic letter forms and marks
+    (``documents.arabic.fold_for_search``)."""
+    if old == new:
+        return True
+    if not old or not new:
+        return False
+    from kazma_core.documents.arabic import fold_for_search
+
+    def folded(value: Any) -> str:
+        return " ".join(fold_for_search(str(value).replace("_", " ")).split())
+
+    return folded(old) == folded(new)
+
+
+def _survivor(current: list[Any]) -> Any:
+    """Which of a single-valued fact's current rows (newest first) stays
+    current when there are several: the newest the user said, else the
+    newest. A value no lower source could have replaced (the trust gate,
+    ``provenance.may_overrule``) is never closed as an extra: an agent's write
+    labelled a list once stood beside the user's own fact, and the clean-up
+    kept the newer one and closed the user's (F7)."""
+    from kazma_core.memory.provenance import USER_SOURCES
+
+    if not current:
+        return None
+    for row in current:
+        if _col(row, "extraction_method", 2) in USER_SOURCES:
+            return row
+    return current[0]
+
+
 def _mutate_functional(
     conn: sqlite3.Connection,
     ops_conn: sqlite3.Connection | None,
@@ -784,24 +942,33 @@ def _mutate_functional_locked(
     # stale value of it.
     lists_kept = "" if kazma_classifies(pred) else "AND COALESCE(predicate_type, '') != 'set'"
     current = conn.execute(
-        f"""SELECT id, object, extraction_method, valid_from, source_session, source_turn FROM beliefs
+        f"""SELECT id, object, extraction_method, valid_from, source_session, source_turn, predicate_type
+           FROM beliefs
            WHERE subject=? AND predicate=? AND tenant_id=?
              {lists_kept}
              AND valid_until IS NULL AND invalidated_at IS NULL
            ORDER BY valid_from DESC, ingested_at DESC""",  # nosec B608 - a fixed clause, values bound
         (sub, pred, tenant_id),
     ).fetchall()
-    existing = current[0] if current else None
-    if len(current) > 1:
+    existing = _survivor(current)
+    # The user's own list on a name a person holds several of (``_LISTABLE``)
+    # is no set of stale values: it stays until a write that may replace the
+    # user's value replaces all of it, below. Closed here, a refused agent
+    # write closed the user's other jobs first.
+    held_list = [r for r in current if r is not existing and _users_list_entry(pred, r)]
+    extra = [r for r in current if r is not existing and not _users_list_entry(pred, r)]
+    if extra:
         from kazma_core.memory.hygiene import beliefs_write
 
-        newest_from = float(_col(existing, "valid_from", 3) or now)
-        extra = [str(_col(r, "id", 0)) for r in current[1:]]
-        logger.warning("[belief_mutate] %d current values of %s %s: keeping the newest, closing %s",
-                       len(current), sub, pred, extra)
-        for bid in extra:
+        kept_from = float(_col(existing, "valid_from", 3) or now)
+        logger.warning("[belief_mutate] %d current values of %s %s: keeping %s, closing %s",
+                       len(current), sub, pred, _col(existing, "id", 0), [str(_col(r, "id", 0)) for r in extra])
+        for row in extra:
+            # An older value held until the kept one began; a newer one never
+            # held in its place (it closes where it began).
+            ends = max(kept_from, float(_col(row, "valid_from", 3) or kept_from))
             beliefs_write(conn, "UPDATE beliefs SET valid_until=?, invalidated_at=? WHERE id=?",
-                          (newest_from, kw.get("recorded") or now, bid))
+                          (ends, kw.get("recorded") or now, str(_col(row, "id", 0))))
         if began:
             # Kept whatever this call decides next (a no-op rolls back).
             conn.commit()
@@ -815,6 +982,7 @@ def _mutate_functional_locked(
         return _record_earlier_statement(conn, ops_conn, sub, pred, obj, began=began, **kw)
     superseded_id = None
     state_before = None
+    users_fact_replaced = False
     if existing:
         superseded_id = existing["id"] if isinstance(existing, sqlite3.Row) else existing[0]
         old_obj = existing["object"] if isinstance(existing, sqlite3.Row) else existing[1]
@@ -822,8 +990,17 @@ def _mutate_functional_locked(
             existing["extraction_method"]
             if isinstance(existing, sqlite3.Row) else existing[2]
         )
-        # If the new object equals the existing one, this is a no-op
-        if old_obj == obj:
+        # The same value written another way ("lisbon", "gulf_bank", a vowel
+        # mark) is no change, and the stored spelling -- the user's -- stays:
+        # compared letter for letter, the model's respelling replaced the
+        # user's own fact in its own turn and took the user's trust with it
+        # (2026-11, the memory framework audit's F1). Except the user's own
+        # word for what the model read: the fact is then the user's, at the
+        # user's trust (a confirmed first reading, memory/changes.py).
+        from kazma_core.memory.provenance import USER_SOURCES as _USER_SOURCES
+
+        raises_trust = kw["extraction_method"] in _USER_SOURCES and existing_method not in _USER_SOURCES
+        if _same_value(old_obj, obj) and not raises_trust:
             # Release the BEGIN IMMEDIATE lock we acquired (no writes to
             # commit). Only roll back if WE started the txn — if the caller
             # already had one open, leave it to the caller (audit finding:
@@ -851,8 +1028,7 @@ def _mutate_functional_locked(
             and _col(existing, "source_session", 4) == kw.get("source_session")
             and _col(existing, "source_turn", 5) == kw.get("source_turn")
         )
-        if (bool(gate_cfg.get("functional_supersede_requires_user_assert", True))
-                and not may_overrule(existing_method, kw["extraction_method"], same_turn=same_turn)):
+        if _gate_refuses(existing_method, kw, gate_cfg, may_overrule):
             logger.info(
                 "[belief_mutate] blocked_supersede predicate=%s subject=%s "
                 "existing_source=%s incoming_source=%s — user fact stands",
@@ -874,6 +1050,12 @@ def _mutate_functional_locked(
             return {"action": "noop", "belief_id": superseded_id,
                     "superseded_id": None, "blocked": "lower_trust_source"}
         state_before = {"id": superseded_id, "object": old_obj}
+        # A fact the user stated, replaced from another turn: an update the
+        # user sees and can undo (memory/changes.py, F1).
+        from kazma_core.memory.provenance import USER_SOURCES
+
+        users_fact_replaced = (audit_event_type == "supersede" and existing_method in USER_SOURCES
+                               and not same_turn)
         from kazma_core.memory.hygiene import beliefs_write
 
         beliefs_write(
@@ -881,6 +1063,9 @@ def _mutate_functional_locked(
             "UPDATE beliefs SET valid_until=?, invalidated_at=? WHERE id=?",
             (now, kw.get("recorded") or now, superseded_id),
         )
+        for row in held_list:
+            beliefs_write(conn, "UPDATE beliefs SET valid_until=?, invalidated_at=? WHERE id=? AND tenant_id=?",
+                          (now, kw.get("recorded") or now, str(_col(row, "id", 0)), tenant_id))
         # The superseded row's graph edge and mirror tombstone (M-04) go
         # after the commit, in mutate_belief: a Neo4j or Postgres round trip
         # here held memory_state.db's write lock (Memory audit M14).
@@ -907,6 +1092,9 @@ def _mutate_functional_locked(
             "blocked": "insert_ignored",
         }
     bid = str(state_after.get("id") or bid)
+    _note_in_change_log(conn, kw, tenant_id=tenant_id, sub=sub, pred=pred, obj=obj, bid=bid, now=now,
+                        replaced=(str(superseded_id), state_before) if users_fact_replaced else None,
+                        also_closed=[str(_col(r, "id", 0)) for r in held_list] if users_fact_replaced else [])
     conn.commit()
     _write_audit(
         ops_conn, tenant_id=tenant_id, event_type=audit_event_type,
@@ -918,9 +1106,65 @@ def _mutate_functional_locked(
             "superseded_object": str(state_before["object"] or "") if state_before else None}
 
 
+def _gate_refuses(existing_method: Any, kw: dict[str, Any], gate_cfg: dict[str, Any], may_overrule: Any) -> bool:
+    """Whether the trust gate keeps the existing fact: a lower source may not
+    overrule it (``provenance.may_overrule``), and a write that may not
+    replace the user's fact (``replaces_users_fact`` False: a memory tool's)
+    never replaces one the user stated."""
+    from kazma_core.memory.provenance import USER_SOURCES
+
+    if (bool(gate_cfg.get("functional_supersede_requires_user_assert", True))
+            and not may_overrule(existing_method, kw["extraction_method"])):
+        return True
+    return not kw.get("replaces_users_fact", True) and existing_method in USER_SOURCES
+
+
+def _note_in_change_log(
+    conn: sqlite3.Connection, kw: dict[str, Any], *, tenant_id: str, sub: str, pred: str, obj: str, bid: str,
+    now: float, replaced: tuple[str, dict[str, Any] | None] | None, also_closed: list[str] | None = None,
+) -> None:
+    """In the write's own transaction (``memory/changes.py``): the user's fact
+    *replaced* (``(old id, state before)``) is an update the user can undo,
+    with the user's other list entries the write closed (*also_closed*); any
+    other fact of the user's own answers the changes waiting on it. A write
+    that is not the user's records nothing."""
+    from kazma_core.memory import changes
+    from kazma_core.memory.provenance import USER_SOURCES
+
+    if replaced is None and kw["extraction_method"] not in USER_SOURCES:
+        return
+    try:
+        if replaced is not None:
+            old_id, before = replaced
+            changes.record_update(
+                conn, tenant_id=tenant_id, subject=sub, predicate=pred, old_belief_id=old_id,
+                old_value=str(before["object"] if before else ""), new_belief_id=bid, new_value=obj,
+                session=kw.get("source_session"), turn=kw.get("source_turn"), now=now,
+                confirms=kw.get("confirms_change"), also_closed=also_closed,
+            )
+        else:
+            changes.answer_pending(conn, tenant_id=tenant_id, subject=sub, predicate=pred, now=now,
+                                   confirms=kw.get("confirms_change"))
+    except sqlite3.OperationalError as exc:
+        if "memory_changes" not in str(exc):
+            raise
+        # A store opened without the current schema: the write stands,
+        # unrecorded (ensure_primary_schema creates the table).
+        logger.warning("[belief_mutate] no change log in this store; %s %s written unrecorded", sub, pred)
+
+
 def _col(row: Any, name: str, index: int) -> Any:
     """A column of a row read with or without ``sqlite3.Row``."""
     return row[name] if isinstance(row, sqlite3.Row) else row[index]
+
+
+def _users_list_entry(pred: str, row: Any) -> bool:
+    """Whether *row* is an entry of the user's own list on a name a person
+    holds several of (``_LISTABLE``)."""
+    from kazma_core.memory.provenance import USER_SOURCES
+
+    return (pred in _LISTABLE and _col(row, "predicate_type", 6) == "set"
+            and _col(row, "extraction_method", 2) in USER_SOURCES)
 
 
 def _record_earlier_statement(
@@ -968,15 +1212,9 @@ def _record_earlier_statement(
     from kazma_core.memory.provenance import may_overrule
 
     gate_cfg = ((kw.get("cfg") or {}).get("v2") or {})
-    same_turn = prev is not None and (
-        kw.get("source_session") is not None
-        and _col(prev, "source_session", 5) == kw.get("source_session")
-        and _col(prev, "source_turn", 6) == kw.get("source_turn")
-    )
     if (prev is not None
             and bool(gate_cfg.get("functional_supersede_requires_user_assert", True))
-            and not may_overrule(_col(prev, "extraction_method", 2), kw["extraction_method"],
-                                 same_turn=same_turn)):
+            and not may_overrule(_col(prev, "extraction_method", 2), kw["extraction_method"])):
         logger.info(
             "[belief_mutate] blocked_history predicate=%s subject=%s -- a %s statement "
             "cannot cut short a %s one", pred, sub, kw["extraction_method"],

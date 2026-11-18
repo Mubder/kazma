@@ -59,7 +59,8 @@ def test_forget_leaves_the_word_nowhere(mem):
     # The seed reached every kind of copy (else the test proves nothing).
     for where in ("episodes.user_text", "beliefs.metadata_json", "beliefs_archive.original_belief_json",
                   "ops:memory_audit_log.state_after_json", "ops:memory_task_queue.payload_json",
-                  "episodes_archive.user_text", "entities_archive.name", "episodes_fts_data.block"):
+                  "episodes_archive.user_text", "entities_archive.name", "episodes_fts_data.block",
+                  "memory_changes.new_value"):
         assert where in before, (where, sorted(before))
     assert set(planted["facts"]) & mem.vectors.held
 
@@ -96,6 +97,17 @@ def test_the_forget_of_the_day_before_left_it_in_nine_places(mem, monkeypatch):
         assert where in left, (where, sorted(left))
 
 
+def test_without_the_change_log_hooks_the_word_stays_in_its_changes(mem, monkeypatch):
+    """Negative control: forget without memory/changes.py's hooks."""
+    from kazma_core.memory import changes
+
+    planted = _plant(mem)
+    for name in ("forget_facts", "forget_turn", "forget_chat"):
+        monkeypatch.setattr(changes, name, lambda *a, **k: 0)
+    forget.forget_episode(planted["eid"], tenant_id="default")
+    assert "memory_changes.new_value" in _everywhere(mem)
+
+
 def test_without_the_index_purge_the_words_stay_in_the_segments(mem, monkeypatch):
     """Negative control: FTS5 keeps a deleted row's words in its old segment."""
     planted = _plant(mem)
@@ -128,7 +140,9 @@ def test_the_export_says_when_a_fact_was_forgotten_never_what(mem):
     forget.forget_episode(planted["eid"], tenant_id="default")
     body = _export()
     forgotten = [f for f in body["facts"] + body["archived_facts"] if f.get("forgotten")]
-    assert len(forgotten) == 2  # the current fact, and the superseded one Hygiene archived
+    # The current fact, the superseded one Hygiene archived, and the turn's
+    # update of the user's hometown (the plant's change log).
+    assert len(forgotten) == 3
     for fact in forgotten:
         assert set(fact) <= {"tenant_id", "forgotten", "forgotten_at", "ingested_at", "archived_at"}
     assert WORD.lower() not in json.dumps(body).lower()
