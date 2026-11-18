@@ -395,6 +395,30 @@ def _fresh_x_stores():
     clear()
 
 
+# ── The vault singleton (2026-11-18) ────────────────────────────────────────
+# get_vault() decides once per process whether there is a vault. A test that
+# set KAZMA_VAULT_KEY with monkeypatch and asked for the vault left it
+# decided for every later test: the environment guard put the key back, the
+# singleton kept the vault. A test written for no vault (an MCP secret kept as
+# typed) then read a vault:// pointer, failing only when such a test ran
+# earlier in the same chunk. The singleton is put back as the test found it;
+# KAZMA_TEST_ISOLATION=0 turns this off (tests/test_order_independence.py).
+_VAULT_SINGLETON = ("_vault", "_vault_init_attempted", "_vault_retry_at", "_vault_retry_wait")
+
+
+@_pytest.fixture(autouse=True)
+def _vault_singleton_restored():
+    if os.environ.get("KAZMA_TEST_ISOLATION") == "0":
+        yield
+        return
+    from kazma_core.security import vault as vault_module
+
+    before = {name: getattr(vault_module, name) for name in _VAULT_SINGLETON}
+    yield
+    for name, value in before.items():
+        setattr(vault_module, name, value)
+
+
 @_pytest.fixture(autouse=True)
 def _isolated_tenant_context():
     """Restore the tenant ContextVar after every test.

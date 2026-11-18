@@ -169,6 +169,40 @@ def test_without_the_guard_the_service_reaches_the_next_test():
     assert "1 failed, 1 passed" in proc.stdout, proc.stdout[-2000:]
 
 
+# ── the vault singleton ────────────────────────────────────────────────────
+# get_vault() decides once per process. A test that set KAZMA_VAULT_KEY and
+# asked for the vault left one for every later test, and an MCP store test
+# written for no vault failed whenever such a test ran first (2026-11-18).
+
+
+def test_a_vault_is_made_here(monkeypatch):
+    """First of a pair: a test that sets the key and asks for the vault."""
+    from cryptography.fernet import Fernet
+
+    from kazma_core.security.vault import get_vault
+
+    monkeypatch.setenv("KAZMA_VAULT_KEY", Fernet.generate_key().decode())
+    assert get_vault() is not None
+
+
+def test_and_the_vault_does_not_reach_the_next_test():
+    from kazma_core.security.vault import get_vault
+
+    assert os.environ.get("KAZMA_VAULT_KEY") is None
+    assert get_vault() is None
+
+
+def test_without_the_guard_the_vault_reaches_the_next_test():
+    """Negative control: the same pair with test isolation off."""
+    proc = _child_pytest(
+        f"{HERE}::test_a_vault_is_made_here",
+        f"{HERE}::test_and_the_vault_does_not_reach_the_next_test",
+        KAZMA_TEST_ISOLATION="0",
+    )
+    assert proc.returncode == 1, proc.stdout[-2000:]
+    assert "1 failed, 1 passed" in proc.stdout, proc.stdout[-2000:]
+
+
 # ── the install's language ─────────────────────────────────────────────────
 # An app built on Arabic settings sets the process's install language at its
 # startup; until 2026-11-14 it stayed Arabic for every later test, and CI's
