@@ -76,29 +76,48 @@ long-range summaries, a profile) is thin next to what the leaders build.
 recall path, forget as a first-class operation) are the ones the research now
 favours. The way to best is: fix the five measured faults; make time and
 change first-class in what the model is shown; then prove it on LongMemEval
-and LoCoMo beside the named baselines, and publish the first Arabic memory
-benchmark. Section 4 gives the order, with a gate, a negative control and a
-cost for each step. My estimate is about 125 builder-days for all of it. The
-first ten weeks (measure honestly, say nothing wrong, forget means gone)
-carry most of the gain and all five measured faults.
+beside the named baselines, and publish the first Arabic memory benchmark. Section 4 gives the order, with a gate, a negative control and a
+relative size for each step. The sizes compare the steps with each other;
+they are not dates. The parts called measure honestly, say nothing wrong
+and forget means gone are under half of the whole and carry most of the
+gain and all five measured faults.
 
 **Spaces.** The Spaces plan is right about memory's shape and incomplete
-about its detail. Section 5 lists what it must add. Eleven items must land
-**before S1-09** is built, because S1-09 makes the space the memory tenant
-and several memory paths today either take the tenant from the retired mode,
-run with no tenant at all, or read every tenant when asked as `default`.
-Seven more must land **before S1-11**. Memory "shared by topic" (N19) is
-decided by the owner and owned by no plan item.
+about its detail. Section 5 lists what it must add. Eleven items belong to
+**S1-09** itself, because S1-09 makes the space the memory tenant and
+several memory paths today either take the tenant from the retired mode, run
+with no tenant at all, or read every tenant when asked as `default`. They
+are S1-09's checklist, and the main session has sent them to its builder.
+Seven more must be in place **before S1-11**. Memory "shared by topic" (N19)
+is decided by the owner and owned by no plan item.
 
-**Decisions.** Section 6 lists every decision for the owner with my proposal:
-the six benchmark decisions already agreed with the main session, and
-thirteen new ones.
+**Memory runs beside Spaces, not after it.** The owner's priority is Spaces.
+Nothing here asks Spaces to wait, except this: S1-11 extends a trust gate
+that is faulty today (F1, F3), so those fixes have to land first. They are a
+small, separate piece of work (part C1 of section 4: no model call, no
+prompt change) that a memory session can finish while S1-09 and S1-10 are
+being built. If that session starts now, S1-11 starts when Spaces reaches
+it, with no wait on memory.
+
+### 1.1 The four decisions needed now
+
+Everything else in section 6 goes "as proposed unless the owner says
+otherwise", each with the stage it belongs to.
+
+| | Decision | Proposal |
+|---|---|---|
+| A | **Start a memory track now, in its own sessions, beside Spaces.** Its first piece is part C1: what S1-11 needs. | Yes. It carries decisions 8 and 16 (how trust is graded, and a fixed table of names for personal facts). |
+| B | **Download LongMemEval for an outside measurement** (decision 7). Its code and its dataset card are MIT. LoCoMo is CC BY-NC 4.0, non-commercial. | LongMemEval: yes. LoCoMo: measure privately at most, and publish nothing from it unless the owner accepts the non-commercial term. No dataset text goes into the repository. |
+| C | **One recording budget** (decision 2): 150 askings of the model, 300 at most, made once, after the fixes that change the prompt. | Yes. |
+| D | **Rows now, the space inside new ids, no rebuild of the tables' keys** (decision 17). A memory database per space is kept for the sealed version. | Yes. It is already the working rule for S1-09 and needs the owner's word. |
 
 
 ## 2. Findings, ranked by impact
 
 Ranked by how much each can make Kazma tell its user something wrong, keep
 what the user took back, or miss what the user said. F1 to F8 are measured.
+Each finding ends with a size: a relative unit for comparing one fix with
+another, not a date (section 4 says what a unit is).
 
 ### F1. A user's correction is accepted or refused by chance
 
@@ -157,24 +176,61 @@ LongMemEval's knowledge-update questions. Mem0's current version does the
 opposite (it only adds, so old and new coexist) and scores 35.7 on its own
 contradiction test.
 
-Fix. Trust follows *whose words hold the value*, not which pass read it:
+Fix. Trust follows *who is speaking about themself*, not which pass read
+the fact, and not merely where the value's words are. "My sister moved to
+Rotterdam" holds the word Rotterdam in the user's own words; if the model
+wrote `user lives_in rotterdam` from it, a rule that looked only at the
+value would replace the user's real home at the user's own trust. So:
 
-- a deep-pass fact whose value is in the user's own words of that turn is
-  `user_stated` (the 80 % held-words rule `provenance._holds` already exists
-  for "remember" requests);
-- a deep-pass fact whose value is only in the assistant's text stays
-  `llm_inferred`;
-- "the same value" is compared after folding case, underscores and Arabic
-  forms, and the user's own spelling is the one kept.
+1. **A deep-pass fact is the user's own statement only when three things
+   hold.** Its subject is the user. Its value is in the user's own words of
+   that turn (F3's helper, with quoted and attached text removed, and the
+   held-words rule `provenance._holds` that already exists). And the clause
+   that holds the value has the speaker as its grammatical subject: "I",
+   "we", or in Arabic a first-person verb or pronoun. A possessive is not
+   enough: in "my sister moved" the subject is the sister. Kazma finds the
+   clause itself. The model is not asked, and the prompt does not change.
+   The Arabic quick pass already has this kind of rule (it refuses a
+   participle outside the user's own clause), and S1-11 needs the same rule
+   to decide which member "I" is, so it is one helper for all three.
+2. **Anything else stays an inference**, and an inference still cannot
+   replace the user's own statement.
+3. **A refusal is no longer silent.** When the gate refuses to replace a
+   user's own fact, it records a pending change the user can confirm: "You
+   mentioned Rotterdam. Is that your home now?" A strict rule will miss
+   some real corrections ("Moved to Rotterdam last month", with no "I");
+   this turns each miss into a question.
+4. **Every replacement of a user's own fact is visible and can be undone.**
+   One line: "Updated: home Paris → Rotterdam", on the turn (a "Memory
+   updated" row beside "Memory used") and on the Memory page with Undo. The
+   old value is already kept as history, so undo reopens it. The deep pass
+   runs after the reply is sent, so the line cannot be inside that reply;
+   it is on the turn afterwards and listed for the chat apps
+   (`/memory changes`).
+5. **"The same value"** is compared after folding case, underscores and
+   Arabic forms, and the user's own spelling is the one kept.
 
-This fix depends on F3's helper ("the user's own words", with quoted and
-attached text removed). Without it, raising the deep pass's trust widens F3.
+How likely is the sister case? In the recordings it did not happen: in the
+benchmark's three turns about another person the model filed the fact under
+that person each time (`hana`, `نورة`, `lulwa`), and the R3 study found "no
+fact about someone else was filed under the speaker" in its twelve speaker
+turns. That is 15 turns of one model. One such error would rewrite a
+person's home at their own trust, so the rule does not rest on the model
+getting it right.
 
-Gate: the three tables above as tests through the worker's own path, plus an
+This fix depends on F3's helper. Without it, raising the deep pass's trust
+widens F3.
+
+Gate: the tables above as tests through the worker's own path, plus an
 update category in the extraction benchmark (state, then correct in free
 words, in English, Arabic and mixed; expect exactly one current fact, the
-new one, at the user's trust). Negative control: today's grading refuses the
-correction. Cost: 3 to 4 days, after F3.
+new one, at the user's trust, and a "Memory updated" record). Negative
+controls: today's grading refuses the correction; and third-person
+sentences ("My sister moved to Rotterdam", "أختي انتقلت إلى روتردام", "My
+manager يشتغل في Meta now"), each with a model reply that wrongly files it
+under the user, must leave the user's own fact as it is and record no
+update. A sentence with no subject must end as a pending change, never as a
+silent refusal. Size: 5 to 6, after F3.
 
 ### F2. Memory has no sense of time when it speaks
 
@@ -226,9 +282,9 @@ Fix, in three steps of rising cost:
 
 Gate: a temporal category in the recall benchmark ("when did", "before X",
 "in March", "what changed"), which fails today, and LongMemEval's temporal
-questions (decision 7). Negative control: the block without dates. Cost:
-step 1 two days; step 2 four days plus a fresh recording (it changes the
-prompt, see decision 2); step 3 one week.
+questions (decision 7). Negative control: the block without dates. Size:
+step 1 is 2; step 2 is 4, plus the fresh recording (it changes the prompt,
+see decision 2); step 3 is 5.
 
 ### F3. Text the user quoted or attached is stored as the user's own statement
 
@@ -271,7 +327,7 @@ forms) treated as quoted. The quick pass, the "remember" detector,
 
 Gate: every quick-pass pattern planted inside a real `build_user_content`
 attachment message and inside each instruction form stores no `user_*` fact,
-in English and Arabic. Negative control: today's raw message. Cost: 3 days.
+in English and Arabic. Negative control: today's raw message. Size: 3.
 
 ### F4. One fact under two names stays two current facts
 
@@ -311,8 +367,9 @@ Fix. Two layers:
 
 Gate: the extraction benchmark's "same name each time" score (benchmark
 decision 1) and the update category of F1. Negative control: free naming
-leaves two current facts. Cost: one to two weeks. It changes the prompt, so
-it lands before the fresh recording.
+leaves two current facts. Size: 4 for the table, which is applied to the
+names the model returns and changes no prompt, and 4 for the second layer,
+which changes the prompt and so lands before the fresh recording.
 
 ### F5. Forgetting leaves more than it says
 
@@ -350,7 +407,7 @@ names, folds both sides, and is journaled.
 
 Gate: the existing completeness scan, with the word planted in the subject,
 the predicate and the value, and run after `forget_mentions` too, with an
-Arabic word in two spellings. Negative control: today's scrub. Cost: 4 days.
+Arabic word in two spellings. Negative control: today's scrub. Size: 4.
 
 ### F6. There is no outside yardstick, and the inside one has weak spots
 
@@ -400,7 +457,7 @@ default it is.
 
 Fix: for a name Kazma classifies, Kazma's class wins over the caller's
 label. F4's table makes most personal names classified. Gate: the probe as a
-test. Negative control: today's order. Cost: 1 day.
+test. Negative control: today's order. Size: 1.
 
 ### F8. Short statements are never read
 
@@ -415,7 +472,7 @@ is "by its words, never by length"; this path predates it.
 Fix: decide filler by words (the small-talk detector exists). Gate: a list of
 short statements in English, Arabic and Gulf Arabic that must reach
 extraction, and greetings that must not. Negative control: the length rule.
-Cost: 1 day.
+Size: 1.
 
 ### F9. Recall weakens where a person talks most, and cannot follow a follow-up
 
@@ -458,7 +515,7 @@ rewrite a follow-up with a model is decision 14.
 Gate: benchmark categories "dense topic" (20 to 100 turns on one subject),
 "follow-up", "count and list"; a forced embedder failure through the real
 supervisor node shows the note. Negative controls: the rank window; the raw
-follow-up. Cost: two to three weeks.
+follow-up. Size: 12.
 
 ### F10. What a chat leaves outside its own memory controls
 
@@ -481,7 +538,7 @@ Fix: a swarm result carries its chat's keys and tenant, asks the forget
 ledger, and is forgotten with its chat. The deep pass's input is fenced like
 every other model input, and facts whose value is only in the assistant's
 text are shown as inferred. Gate: a kept-out chat's swarm run writes no
-memory; a poisoned assistant text stores nothing. Cost: 3 days.
+memory; a poisoned assistant text stores nothing. Size: 3.
 
 ### F11. Forgets and restores
 
@@ -507,7 +564,7 @@ Fix: the journal covers every kind of forget; replay continues past a failed
 entry of an unrelated chat and reports what is pending in memory health; the
 horizon lists every copy. Gate: the convergence test with a fault after each
 step, extended to the new kinds; a restore drill that forgets by content
-first. Cost: one week.
+first. Size: 5.
 
 ### F12. The deep pass is invisible and does not always finish
 
@@ -529,7 +586,7 @@ Fix: the deep pass goes through `resilient_chat` (failover, ledger with the
 chat as its thread, bounded output), at a declared temperature; a sweep
 re-queues turns with no deep-pass mark; the third tier is fixed or removed.
 Gate: a ledger row per deep pass; a provider outage ends with every turn
-extracted. Cost: 3 days. Do it early: it makes every later measurement
+extracted. Size: 3. Do it early: it makes every later measurement
 cheaper and steadier.
 
 ### F13. What is kept beyond turns and facts is thin
@@ -562,8 +619,8 @@ context.
 Fix: learn on a signal (a correction, a recovered failure, explicit
 feedback), merge lessons, and allow "nothing"; stop injecting tool tallies;
 add monthly and per-project roll-ups with named sources so a forget follows
-them; suggest profile lines the user approves (decision 10). Cost: three to
-four weeks. Learning on a signal saves a model call on almost every turn.
+them; suggest profile lines the user approves (decision 10). Size: 18.
+Learning on a signal saves a model call on almost every turn.
 
 ### F14. Nothing says whether memory helped
 
@@ -578,7 +635,7 @@ recall pages nobody.
 Fix: one recall record per turn (ids injected, empty, degraded, latency);
 "used" (the answer overlaps an injected item) and "corrected" (the user
 supersedes or forgets soon after an injection); contradictions and growth
-per week; a line in the daily digest and three alerts. Cost: one week.
+per week; a line in the daily digest and three alerts. Size: 5.
 
 ### F15. Scale
 
@@ -592,7 +649,7 @@ own hardware and stores.
 Fix: keep exact search as the truth, and past a size narrow the candidates
 first (tenant, dates, keyword hits, an approximate index's top hits) and
 re-score them exactly, with a gate that the benchmark's results are equal.
-Give each sweep a cursor and a budget. Cost: two weeks. Not urgent for one
+Give each sweep a cursor and a budget. Size: 10. Not urgent for one
 operator's store.
 
 ### F16. Tenancy faults that exist today
@@ -633,8 +690,8 @@ properties, each with a number beside the named alternatives:
 1. Answers from memory as well as the leaders on LongMemEval's five
    abilities, with the reader model named and the full-context and oracle
    baselines beside it.
-2. Finds the right turns (recall at k) on LongMemEval and LoCoMo with no
-   model in the path.
+2. Finds the right turns (recall at k) on LongMemEval with no model in the
+   path (and on LoCoMo privately, whose licence is non-commercial).
 3. Says nothing when nothing is known.
 4. Handles a changed fact and a dated question.
 5. Forgets from every copy, proven by a planted word.
@@ -662,38 +719,77 @@ So an outside run of Kazma must carry its own baselines on the same reader,
 or it proves nothing. That is what decision 7 asks for.
 
 
-## 4. The plan to "best", in order, with costs
+## 4. The plan to "best", in order, with sizes
 
-Costs are builder-days by my estimate, good for comparing sizes and no
-better than plus or minus a third. "Calls" are model calls, which need the
-owner's yes each time.
+**What the sizes are.** Each size is a relative unit, for comparing one
+piece of work with another. One unit is roughly what a careful human
+builder does in a day, and that is all it means. It is not a date. In this
+project an agent session lands a unit much faster than a day, and several
+sessions run at once, so the sum of the units says how big the whole is and
+nothing about when it is done. My error on any single size is about a
+third. "Calls" are model calls, which need the owner's yes each time.
 
-Two rules shape the order:
+### 4.1 Beside Spaces, not after it
+
+The owner's priority is Spaces. This plan does not ask Spaces to wait.
+
+- **S1-09** needs nothing from this plan first. Section 5.2 is S1-09's own
+  checklist: S1-09 covers items 1 to 8, 10 and 11, and item 9 belongs to the
+  R6 migration step. The main session has sent it to the S1-09 builder,
+  with decision 17's proposal as the working rule (no key rebuilds; the
+  space is salted into new ids).
+- **S1-11** needs two things from this plan first, and only these: the
+  benchmark's edge rule (benchmark audit step 4, size 3) and part C1 below
+  (size 14). Both are free of model calls and change no prompt, so neither
+  waits for the recording.
+- **Everything else** in this plan runs in memory sessions of its own,
+  beside Spaces, and touches different files from the Spaces builders' for
+  the most part. The shared files are the write path's two modules
+  (`belief_extractor.py`, `belief_mutation.py`) and `recall.py`; C1 should
+  merge before S1-11 starts on them.
+
+**The earliest S1-11.** If a memory session starts C1 and the edge rule
+now, they are a smaller piece of work than S1-09 and S1-10 together, and
+S1-11 can start as soon as Spaces reaches it: its date is then set by
+Spaces' own order, not by memory. My expectation, from the pace of this
+project's recent sessions, is that C1 and the edge rule take a dedicated
+session a few days, not weeks. That is an expectation, not a promise, and
+it cannot begin before the owner's yes to decision A. If the memory track
+does not start until Spaces asks for it, S1-11 waits for all of C1. One
+thing in the edge rule needs the embedder (new float vectors), so it runs
+outside the quiet hours.
+
+### 4.2 The order
+
+Two rules shape it:
 
 - **Measure before and after.** The benchmark's scoring and lock are fixed
   first, and the new categories are added while they still fail, so every
   later fix shows as a number that moved.
-- **Record once.** Five fixes change the deep pass's prompt (the date, the
-  previous turn, the subject's current facts, the spelling rule, the name
-  table). Each changes every recorded reply's key. They land together, and
-  the fresh recording (benchmark decision 2: 150 askings, 300 at most) is
-  made once after them, not once per fix.
+- **Record once.** The fixes that change the deep pass's prompt (the date,
+  the previous turn, the subject's current facts, the spelling rule, the
+  names offered, retractions, the fenced input) are gathered in part C2.
+  Each changes every recorded reply's key. They land together, and the
+  fresh recording (decision 2: 150 askings, 300 at most) is made once after
+  them. Part C1 is kept free of prompt changes on purpose, so S1-11 does
+  not wait for it.
 
-| Stage | What | Closes | Gate (and its negative control) | Calls | Days |
+| Part | What | Closes | Gate (and its negative control) | Calls | Size |
 |---|---|---|---|---|---|
-| **A. Before S1-09** | The eleven items of section 5.2. | F16 | The Spaces matrix with a victim planted under `default`; a sweep under enforcement with no scope bound fails loudly. Control: today's code reads across. | 0 | 5, shared with the Spaces builders |
-| **B. Measure honestly** | Benchmark audit steps 1 and 2 (scoring: kept, kept under an expected name, unwanted; lock rules). New categories that fail today: update, temporal, quoted and attached text, short statements, dense topic, follow-up, count and list. The deep pass through the ledger with failover at a declared temperature (F12). The outside retrieval harness (decision 7, part 1). | F6, F12 | A lock that cannot keep an unreachable floor; each new category red on today's code. Control: the old scorer calls a kept fact "not found". | 0 | 16 |
-| **C. Say nothing wrong** | In this order: the user's own words (F3); trust by whose words (F1); Kazma's class wins (F7); filler by words (F8); the name table and "replaces" (F4); dates shown (F2 step 1); the date and the previous turn given to the extractor (F2 step 2); retractions; swarm results and the fenced deep-pass input (F10). Then the one recording and the extraction rebaseline. | F1, F2 (part), F3, F4, F7, F8, F10 | The update, temporal, quoted-text and short-statement categories go green. Controls: each fix switched off turns its category red again. | 150 (300 at most) | 28 |
+| **S1-09's checklist** (not a part of this plan) | Section 5.2, items 1 to 8, 10, 11; item 9 with the R6 migration step. | F16 | The Spaces matrix with a victim planted under `default`; a sweep under enforcement with no scope bound fails loudly. Control: today's code reads across. | 0 | in S1-09 |
+| **B. Measure honestly** | Benchmark audit steps 1 and 2 (no false passes; score what was kept). Step 4, the edge rule, which S1-11 needs. Step 5, sizes, and step 6, pgvector in CI, with the new categories that fail today: update, temporal, quoted and attached text, short statements, dense topic, follow-up, count and list. The deep pass through the ledger with failover at a declared temperature (F12). The outside retrieval harness (decision 7, first half). | F6, F12 | A lock that cannot keep an unreachable floor; each new category red on today's code. Control: the old scorer calls a kept fact "not found". | 0 | 20 |
+| **C1. The trust gate, as S1-11 needs it** | In this order: the user's own words (F3); trust by who is speaking about themself, with visible and undoable updates and pending changes (F1); Kazma's class wins (F7); filler by words (F8); the table of names, applied to the names the model returns (F4, first layer). No prompt change. | F1, F3, F7, F8, F4 (part) | The update, quoted-text and short-statement categories go green on the quick pass and on the existing recording. Controls: each fix switched off turns its category red; the third-person sentences of F1. | 0 | 14 |
+| **C2. What the model is told and shown** | Dates shown (F2 step 1); the date and the previous turn given to the extractor (F2 step 2); the subject's current facts and "replaces" (F4, second layer); the user's spelling asked for; retractions; swarm results and the fenced deep-pass input (F10). Then the one recording, the extraction rebaseline, and benchmark audit step 7 (names in use, end to end). | F2 (part), F4 (rest), F10 | The temporal category and the model-pass update category go green. Controls: each fix switched off; the block without dates. | 150 (300 at most), plus 150 for step 7 | 17 |
 | **D. Forget means gone** | The tombstone keeps nothing readable; `forget_mentions` complete and journaled; the journal covers every forget; the horizon lists every copy. | F5, F11 | The planted-word scan with the word in subject, predicate and value, after every kind of forget, and after a restore. Control: today's scrub. | 0 | 9 |
-| **E. Against the world** | LongMemEval-S and LoCoMo end to end on a sample, with full-context and oracle baselines on the same reader. The published poisoning attacks run against Kazma. The first parallel English and Arabic memory set. Results on the benchmarks page. | F6 | The page is generated from the result files, like today's. Control: a run without its baselines is refused by the page generator. | about 600 for 100 questions with both baselines | 15 |
-| **F. Recall** | Time words in the question (F2 step 3); median background; the gist per turn; ids, "open" and "list" tools; no boost inside the window; the "recall was incomplete" note. | F2 (rest), F9 | Dense-topic, follow-up, count-and-list categories green; outside recall at k not lower. Controls: the rank window; the raw follow-up. | 0 for the heuristic path | 17 |
+| **E. Against the world** | LongMemEval-S end to end on a sample, with full-context and oracle baselines on the same reader. The published poisoning attacks run against Kazma. The first parallel English and Arabic memory set. Results on the benchmarks page. | F6 | The page is generated from the result files, like today's. Control: a run without its baselines is refused by the page generator. | about 600 for 100 questions with both baselines | 15 |
+| **F. Recall** | Time words in the question (F2 step 3); median background; the gist per turn; ids, "open" and "list" tools; no boost inside the window; the "recall was incomplete" note. | F2 (rest), F9 | Dense-topic, follow-up, count-and-list categories green; outside recall at k not lower. Controls: the rank window; the raw follow-up. | 0 for the path with no model | 17 |
 | **G. Consolidation** | Lessons on a signal, merged; tool tallies no longer injected; monthly and per-project roll-ups with named sources; suggested profile lines. | F13 | Twelve routine turns keep a correction; a forget empties a roll-up built from it; nothing joins About me without the user's yes. Control: the 12-slot queue. | one per roll-up, in the background | 18 |
-| **H. Running it** | A recall record per turn and the quality signals; a "what Kazma knows about me" page with source, date, history and inline correction; cursors and budgets for the sweeps; candidate narrowing with exact re-scoring past a size. | F14, F15 | A week of failed extraction pages once; equal benchmark results with narrowing on. Control: narrowing without re-scoring changes results. | 0 | 20 |
+| **H. Running it** | A recall record per turn and the quality signals; a "what Kazma knows about me" page with source, date, history and inline correction; cursors and budgets for the sweeps; candidate narrowing with exact re-scoring past a size; the benchmark audit's step 8. | F14, F15 | A week of failed extraction pages once; equal benchmark results with narrowing on. Control: narrowing without re-scoring changes results. | 0 | 20 |
 
-In all about 125 builder-days, six months for one builder. Stages B, C and D
-(about ten weeks) carry most of the gain and all five measured faults.
-Stages D, G and H do not depend on C and can run in other sessions beside
-it. Spaces stage 1 runs beside all of it once stage A is in.
+About 130 units in all. Parts B, C1, C2 and D are 60 of them, carry most of
+the gain and close all five measured faults. D, G and H do not depend on C
+and can run in other sessions beside it. B's benchmark work and C1 can run
+in two sessions at once: they touch different files.
 
 What I would not do:
 
@@ -720,11 +816,15 @@ does not yet say.
 
 ### 5.1 The short version
 
-- **Before S1-09**: eleven items (5.2). Without them S1-09 either writes a
-  turn's memory under the wrong tenant, fails every background sweep, or
-  leaves paths that read every space.
+- **S1-09's own checklist**: eleven items (5.2). Without them S1-09 either
+  writes a turn's memory under the wrong tenant, fails every background
+  sweep, or leaves paths that read every space. S1-09 covers items 1 to 8,
+  10 and 11; item 9 belongs to the R6 migration step. The main session has
+  sent the list to the S1-09 builder.
 - **Before S1-11**: seven items (5.3). The largest is that S1-11 extends a
-  trust gate that today refuses a member's own corrections (F1).
+  trust gate that today refuses a member's own corrections (F1). The first
+  two items are part C1 of section 4, which a memory session builds beside
+  S1-09 and S1-10.
 - **S1-26**: "background sweeps read index columns only" is not true of
   memory, and vectors and the search index are content (5.4).
 - **S1-27**: the registry it counts, exports and erases "from" does not list
@@ -733,7 +833,7 @@ does not yet say.
 - **N19**, memory shared by topic: decided by the owner, owned by no item
   (5.7).
 
-### 5.2 Before S1-09 (the space is the memory tenant)
+### 5.2 S1-09's checklist (the space is the memory tenant)
 
 | # | What the plan must add | Evidence | Gate |
 |---|---|---|---|
@@ -745,7 +845,7 @@ does not yet say.
 | 6 | **A turn's identity includes its space.** The id of a remembered turn is a hash of chat, turn number and text, with no tenant. The same turn written for a second space is ignored, reported as written, and found by recall in the first space only. History import's "already held" check has no tenant either, so it tells one space what another holds. A note stored with `memory_store` uses the chat name `memory_store` and turn 0 for every space. | Measured: probe 3. Read: `memory/dual_write.py` (`_episode_id`), `memory/history_import.py` (`_existing`). | The same export imported into two spaces gives two sets of memories, each recalled only in its own. Control: today's id. |
 | 7 | **Tables keyed by `id` alone, and tables with no tenant.** Turns, facts, archived facts, summaries, merges and procedures have `id` as their whole key. The reconcile state is one row for the install (one cursor for every space). The applied-forget marks, summary sources and the task queue have no tenant column (the queue's is inside its payload). Recall has id-only reads and updates. | Read: `memory/schema_v2.py`. Reported: `vector_engine.py:182`; `recall.py:896, 1516, 1688, 2303, 2365` and the access-count update at 2259-2260. | Each id-only statement names its tenant, or is declared with why. This is the entity key's gate (M21), widened. |
 | 8 | **Routes that take the tenant from somewhere else.** Two GET routes read `default` for any caller (the Neo4j graph export and the procedure search). The graph-clear route takes the tenant from a query value. A tenant error becomes the tenant `__unscoped__`, and writes proceed under it. The operator trail records the session's tenant, not the one acted in. The route gate plants its victim under `beta` only, so it cannot see a read of `default`. | Read: `routes_direct/memory.py:971, 1259`; `memory_api.py:284-293`. Reported: `routes_direct/memory.py:133`; `memory_actions.py:103-107`; `tests/test_memory_routes_tenant_scope.py:328, 338`. | The matrix plants a victim under `default` as well. Control: the two routes answer it. |
-| 9 | **The old tenants (R6) are in more places than turns and facts.** The forget ledger and journal, About me, summaries and their periods, entities (each old tenant has its own `user` hub, so a merge into one space needs the entity merge), queue payloads, the mirror, the Neo4j copy. And on an install that used `per_platform` or `per_user`, turn reconcile filed second copies of turns under the chat store's tenant. | Read: `memory/turn_reconcile.py:141`. The plan's own step 4 of its migration counts turns and facts. | The count report names every table and copy. Nothing merges until the ledger and journal move with their rows; otherwise forgets stop applying. |
+| 9 | **The old tenants (R6) are in more places than turns and facts.** The forget ledger and journal, About me, summaries and their periods, entities (each old tenant has its own `user` hub, so a merge into one space needs the entity merge), queue payloads, the mirror, the Neo4j copy. And on an install that used `per_platform` or `per_user`, turn reconcile filed second copies of turns under the chat store's tenant; from S1-09 on it must take a turn's space from the thread's record (S1-07), not from the chat store's row. This item belongs to the R6 migration step. | Read: `memory/turn_reconcile.py:141`. The plan's own step 4 of its migration counts turns and facts. | The count report names every table and copy. Nothing merges until the ledger and journal move with their rows; otherwise forgets stop applying. |
 | 10 | **The registry lists memory's outside copies.** `SPACE_RULES` has rows for the three memory SQLite files. It has none for the Postgres mirror tables, pgvector or Qdrant, the Neo4j copy, the nightly export files or the repair copies. Step 0's gate ("every store declares its space rule") reads SQLite stores, so these escaped it. S1-27 works "from the registry". | Read: `kazma_core/store_registry.py` (`SPACE_RULES`), `memory/memory_stores.py` (`EXTERNAL_STORES`). | The space-rule gate also reads `EXTERNAL_STORES`. Control: a planted outside copy with no rule. |
 | 11 | **Recall's promise across spaces, as a test of every channel.** Recall has ten ways in: keywords, meaning, the graph walk, the bridge from turns to facts, summaries, the past-chats fallback, the mirror top-up, procedures, About me, lessons. Each is filtered by tenant today in its own way. | Reported: the tenant defaults listed in 5.8. | The same token planted in two spaces; each channel forced in turn; no hit across. Control: one channel with its filter removed. |
 
@@ -760,9 +860,9 @@ or the space ids need to be unique across installs.
 
 | # | What the plan must add | Why |
 |---|---|---|
-| 1 | **F3 and F1 land first.** S1-11 adds the label `member_stated` and the rule "a member's own words always win" (N34) to the trust gate. | Today the gate refuses a person's own free-form correction, or is undone by the model's spelling (F1), and counts quoted and attached text as the person's own words (F3). In a shared space that becomes: Omar forwards a document about Sara, and Kazma files it as Omar's own statement. |
-| 2 | **F4 lands first, or N34 holds only on paper.** | "Never replaces what the member said about themself" is a comparison under one predicate name. With free names, Sara's own "pilot" and Omar's "Sara is a captain" are two current facts under two names, and no rule is ever asked. |
-| 3 | **The benchmark's steps 1 and 2 and the edge rule land first.** S1-11's one-member gate is "the locked v5 scores exactly". | One of those scores rests on a question 0.0004 above the floor that flips on another machine (benchmark audit). And the speakers' lines change what the model returns: with them the recorded scores were English 0.692 and 0.714, Arabic 0.636 and 0.636, mixed 0.800 and 0.800, against a lock of 0.769/0.786, 0.909/0.909, 0.700/0.583. S1-11 needs its own recording, counted in decision 2's budget. |
+| 1 | **F3 and F1 land first** (part C1). S1-11 adds the label `member_stated` and the rule "a member's own words always win" (N34) to the trust gate. | Today the gate refuses a person's own free-form correction, or is undone by the model's spelling (F1), and counts quoted and attached text as the person's own words (F3). In a shared space that becomes: Omar forwards a document about Sara, and Kazma files it as Omar's own statement. F1's rule "the clause's subject is the speaker" is also the rule S1-11 needs to decide which member "I" is, so it is built once, as one helper. |
+| 2 | **F4's table of names lands first** (part C1), **or N34 holds only on paper.** | "Never replaces what the member said about themself" is a comparison under one predicate name. With free names, Sara's own "pilot" and Omar's "Sara is a captain" are two current facts under two names, and no rule is ever asked. |
+| 3 | **The benchmark's edge rule lands first** (benchmark audit step 4). S1-11's one-member gate is "the locked v5 scores exactly". | One of those scores rests on a question 0.0004 above the floor that flips on another machine (benchmark audit). The R3 study has since dropped its speaker lines from the deep pass's message, because their effect could not be told apart from the model's own variation; so S1-11 changes no prompt and needs no recording of its own. Part C1 changes no prompt either, for the same reason: the locked model scores stay replayable through both. |
 | 4 | **One home for the text a fact's vector is made from.** R3 changes it to `user <predicate> <object>`. | It is built in three places today: `memory/belief_mutation.py:607`, `memory/reembed.py:288` and the SQL at `memory/reembed.py:332`. A repair pass with the old text would quietly re-make every vector the old way. |
 | 5 | **Who, on the write path and the forget path.** `said_by` is in the plan for facts. | Nothing carries the asker today: not the turn, the post-turn record, the queue payload, the ledger or the journal. N32 ("the turn's author and the space's owner may forget") needs the author on the turn and the actor on the journal entry, or a restore replays forgets nobody can attribute. |
 | 6 | **Summaries and lessons in a shared space.** | Weekly summaries are written from text that labels every turn "User:" under "a user's conversations" (reported: `memory/topic_summaries.py:148, 449`), so a shared space's summary will give every member's words to one person. And N36 forgets a leaving member's facts; the summaries that state those facts in prose are rebuilt when a *turn* is forgotten, not when a fact is. The plan must either rebuild them or say on the leave screen that they stay. |
@@ -889,36 +989,46 @@ My proposal is a short study, like R3, after S1-11 (decision 18).
 
 ## 6. Decisions for the owner
 
-### 6.1 The six benchmark decisions, as agreed with the main session
+Nineteen decisions came out of the two audits. Four are needed now. The
+rest go ahead as proposed unless the owner says otherwise; each is listed
+with the part of section 4 it belongs to, so it can be raised again when
+that part starts.
 
-These still wait for the owner. One refinement from this audit is marked.
+### 6.1 Needed now
 
-| # | Decision | Proposal |
-|---|---|---|
-| 1 | How the extraction benchmark scores a fact. | Three outcomes: kept, kept under an expected name, unwanted. A "same name each time" score. Entries that must not be kept. |
-| 2 | New askings of the model. | 150 fresh askings, 300 at most, with the owner's yes in the recording session and the read-only rules. The old 36 are kept as a drift check. **Refined here: make the recording once, after the prompt-changing fixes of stage C, and count S1-11's speakers recording in the same budget.** Recording before them spends the budget twice. |
-| 3 | A hit that flips between machines. | It stops the lock, with the margin named and an "edge list" as the only exit. Never a threshold nudge. |
-| 4 | The held-out questions. | Rename today's set honestly and keep gating it. A fresh set written by another session is the sealed one, out of the per-commit gate, with every look logged. |
-| 5 | pgvector in CI. | A second service and job, exact against approximate settled first; fail on a named skip. |
-| 6 | The benchmarks page. | Each model-pass row says how many askings it rests on, generated from the lock. |
-
-### 6.2 New decisions
-
-| # | Decision | Proposal | Cost of yes |
+| | Decision | Proposal | What a yes starts |
 |---|---|---|---|
-| 7 | **Run Kazma on the public benchmarks.** Download LongMemEval and LoCoMo (public datasets), run retrieval through the real `recall()` first, then answer a sample end to end beside the full-context and oracle baselines. | Yes. Retrieval first: it needs no model call and gives the "before" number for every fix. End to end after stage C. The download needs the owner's yes. | Retrieval: about an hour of the embedder per 100 questions, after quiet hours. End to end: about 600 calls per 100 questions with both baselines. |
-| 8 | **Trust follows whose words hold the value** (F1). | Yes, after the "user's own words" helper (F3). The alternative is that corrections keep depending on how the model spelled the first value. | Stage C. |
-| 9 | **Publish the first English and Arabic memory benchmark.** A parallel set, each language on its own, written by a different session than the builders. | Yes. Nobody has one, and it is the claim nobody can take from Kazma. | 5 days in stage E. |
-| 10 | **A profile Kazma suggests.** Today nothing remembered has authority, and About me is typed by hand. | Suggestions only: "You said you prefer X. Add to About me?" Built from the user's own statements, never from inferences, and nothing binds without a yes. | Part of stage G. |
-| 11 | **Dates in what the model is shown** (F2 step 1). | Yes. A few tokens a line. | 2 days. |
-| 12 | **Lessons on a signal, not on every turn** (F13). | Yes. It also removes one model call from almost every turn. | Part of stage G; could be done alone in 3 days. |
-| 13 | **Stop injecting tool tallies into turns.** | Yes. Keep the tallies for health. | Half a day. |
-| 14 | **A model in the recall path** (rewrite a follow-up, rerank). Kazma has none today. | Not by default. Build the no-model rewrite, then measure a model rewrite and a local reranker on the outside benchmark as options and decide on the numbers. | Measured in stage F. |
-| 15 | **A forgotten fact keeps nothing a person can read** (F5). The Memory page can then say only "a fact was forgotten", not about whom. | Yes. The export already behaves this way. | Stage D. |
-| 16 | **Kazma owns the names of the common personal facts** (F4): about forty names with their aliases, in English and Arabic. | Yes, with the list reviewed by the owner. | Stage C. |
-| 17 | **Spaces: rows now, a memory database per space for the sealed version.** | Rows now, with the space salted into new ids and no rebuild of the tables' keys. Plan the sealed version as one memory database set per space folder. Decide before S1-09 touches a key. | Saves a table rebuild now. |
-| 18 | **Spaces: memory by topic (N19) gets an item and a study.** | A study like R3, after S1-11, before anything is built. | 3 days for the study. |
-| 19 | **Spaces: erasing a space is a hard delete, journaled; a restore is install-wide.** | Yes to both, said in plain words on the delete and restore screens. | Part of S1-27 and S1-28. |
+| **A** | **Start a memory track now, in its own sessions, beside Spaces.** | Yes. First the benchmark's edge rule and part C1, which S1-11 needs; then B, C2 and D. It carries decision 8 (trust follows who is speaking about themself, with every change of a user's own fact visible and undoable) and decision 16 (Kazma owns the names of about forty common personal facts; the list comes to the owner for review when it is drafted). | One memory session beside the Spaces builders. No model calls. |
+| **B** (decision 7) | **Download a public benchmark to measure Kazma against the world.** LongMemEval: the code is MIT and the dataset card on Hugging Face (`xiaowu0162/longmemeval-cleaned`) says MIT; its filler chats come from ShareGPT and UltraChat, whose licences the card does not state. LoCoMo: CC BY-NC 4.0 (`LICENSE.txt` in `snap-research/locomo`), non-commercial. | LongMemEval: yes, and it is the one to publish from. LoCoMo: at most a private measurement; publish nothing from it unless the owner accepts the non-commercial term or its authors agree, since KazmaAI is a company. In both cases no dataset text is committed: the data sits in a local cache outside the repository, downloaded on the owner's yes, and result files hold question ids and scores only. | Retrieval through the real `recall()` first: no model call, about an hour of the embedder per 100 questions, outside quiet hours. It gives the "before" number for every fix. The end-to-end run comes in part E and asks again for its calls. |
+| **C** (decision 2) | **One recording budget.** | 150 fresh askings of the model, 300 at most, with the owner's yes in the recording session and the read-only rules. Made once, after part C2's prompt changes; recording before them spends the budget twice. The old 36 replies are kept as a drift check. | Nothing yet. It is spent at the end of C2. |
+| **D** (decision 17) | **Spaces: how memory's rows are keyed.** | Rows now, with the space salted into new ids and no rebuild of the tables' keys. A memory database set per space folder is planned for the sealed version (N6 kept that open). | Already the working rule for S1-09; it needs the owner's word before S1-09 merges. |
+
+### 6.2 As proposed unless the owner says otherwise
+
+| # | Decision | Proposal | Part |
+|---|---|---|---|
+| 1 | How the extraction benchmark scores a fact. | Three outcomes: kept, kept under an expected name, unwanted. A "same name each time" score. Entries that must not be kept. | B |
+| 3 | A hit that flips between machines. | It stops the lock, with the margin named and an "edge list" as the only exit. Never a threshold nudge. | B, before S1-11 |
+| 4 | The held-out questions. | Rename today's set honestly and keep gating it. A fresh set written by another session is the sealed one, out of the per-commit gate, with every look logged. | B |
+| 5 | pgvector in CI. | A second service and job, exact against approximate settled first; fail on a named skip. | B |
+| 6 | The benchmarks page. | Each model-pass row says how many askings it rests on, generated from the lock. | B |
+| 8 | Trust follows who is speaking about themself (F1). | As amended in F1: subject, own words and a first-person clause; refusals become pending changes; every change of a user's own fact is shown and can be undone. | C1 (in decision A) |
+| 9 | Publish the first English and Arabic memory benchmark. | Yes. A parallel set, each language on its own, written by a different session than the builders. Nobody has one. | E |
+| 10 | A profile Kazma suggests. | Suggestions only: "You said you prefer X. Add to About me?" Built from the user's own statements, never from inferences; nothing binds without a yes. | G |
+| 11 | Dates in what the model is shown (F2 step 1). | Yes. A few tokens a line. | C2 |
+| 12 | Lessons on a signal, not on every turn (F13). | Yes. It also removes one model call from almost every turn. | G |
+| 13 | Stop injecting tool tallies into turns. | Yes. Keep the tallies for health. | G |
+| 14 | A model in the recall path (rewrite a follow-up, rerank). Kazma has none today. | Not by default. Build the rewrite with no model, then measure a model rewrite and a local reranker on the outside benchmark as options and decide on the numbers. | F |
+| 15 | A forgotten fact keeps nothing a person can read (F5). The Memory page can then say only "a fact was forgotten", not about whom. | Yes. The export already behaves this way. | D |
+| 16 | Kazma owns the names of the common personal facts (F4). | Yes; about forty names with their aliases, in English and Arabic, reviewed by the owner. | C1 (in decision A) |
+| 18 | Spaces: memory by topic (N19) gets an item and a study. | A study like R3, after S1-11, before anything is built. | after S1-11 |
+| 19 | Spaces: erasing a space is a hard delete, journaled; a restore is install-wide. | Yes to both, said in plain words on the delete and restore screens. | S1-27, S1-28 |
+
+One more question is open and not yet a decision: a read-only count on the
+live install of how often these faults have already happened (facts under
+two names, the user's statements now marked as inferences, corrections the
+gate refused). It needs the owner's yes in the session that runs it, and
+would say how urgent C1 is for the owner's own memory.
 
 
 ## 7. What already holds
@@ -949,19 +1059,29 @@ protecting as the rest changes:
 
 ## 8. What was measured, and when
 
-All times are Kuwait time (+03:00) on 2026-11-18.
+All times are Kuwait time (+03:00) on 2026-11-18. The owner's quiet-hours
+rule (no tests or measurements from 01:00 to 10:00 except small targeted
+ones) was written down at 05:22 and reached this session at about that
+minute.
 
-| When | What | Model loaded |
+**Stated plainly, because the owner is looking for the cause of the fans:**
+before the rule existed, this session loaded the embedding model (bge-m3)
+three times between 04:02 and 05:12, and ran the full test suite on eight
+cores for 31 minutes, from 04:21 to 04:52.
+
+| When | What | Load |
 |---|---|---|
-| 03:52 to 04:18 | The benchmark audit's replays and lock demonstrations (its own evidence folder). | bge-m3, twice, at about 04:04 and 04:09 |
-| 04:21 | A full test run was started and stopped at the main session's request. It never finished. | none |
-| 05:12 | Probe 4 with the real embedder (`probes_real_embedder.json`, taken from that run's own output). | bge-m3, once |
-| 05:26 and 05:30 | Probes 1 to 10 with no embedder (`probes.json`). Under one second each, at below-normal priority. | none |
+| 03:52 to 04:18 | The benchmark audit's replays and lock demonstrations (its own evidence folder). | One process at below-normal priority; recorded vectors, no model. |
+| 04:02 and 04:07 | The real-embedder comparison, run twice. | bge-m3 loaded each time; 460 texts embedded in about 125 seconds, four threads, below-normal priority. |
+| 04:21 to 04:52 | The full test suite (`scripts/fast_test.py --cores 8`), started for the benchmark audit's commit and stopped at the main session's request. It never finished. | Eight cores for 31 minutes, at the priority `fast_test.py` gives its own processes. The largest load of the night from this session. |
+| about 04:15 to 04:24 | The benchmark audit's commit: metrics regeneration (`pytest --collect-only`) and the three commit gates. | One process, a few minutes. |
+| 05:06 to 05:19 | Seven helper agents read code and public web pages. | No tests, no model. |
+| 05:12 | Probe 4 with the real embedder (`probes_real_embedder.json`, taken from that run's own output). | bge-m3 loaded once; a handful of texts. |
+| 05:19, 05:26, 05:30 | The probes with no embedder (`probes.json`), three runs. | Under one second each, below-normal priority. |
+| 05:38 to 06:10 | This audit's commits: the commit gates twice, and one metrics regeneration (`pytest --collect-only`). | One process each, a few minutes, below-normal priority. |
 
-The owner's quiet-hours rule (no tests or measurements from 01:00 to 10:00
-except small targeted ones) reached this session at 05:20. Everything before
-it was run without knowing of it. After it, only the two no-model probe runs
-above were made; the rest was reading.
+After the rule arrived, only the last two rows' runs from 05:26 on were
+made; the rest was reading and writing.
 
 Queued for after 10:00, to be run when the review continues:
 
@@ -1022,9 +1142,15 @@ Benchmarks:
 
 - LoCoMo: https://arxiv.org/abs/2402.17753 ·
   https://github.com/snap-research/locomo · its audit:
-  https://github.com/dial481/locomo-audit
+  https://github.com/dial481/locomo-audit. Licence: CC BY-NC 4.0, read from
+  the repository's `LICENSE.txt` on 2026-11-18. Non-commercial.
 - LongMemEval: https://arxiv.org/abs/2410.10813 ·
-  https://xiaowu0162.github.io/longmemeval-v2/
+  https://github.com/xiaowu0162/LongMemEval ·
+  https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned ·
+  https://xiaowu0162.github.io/longmemeval-v2/. Licence: MIT for the code
+  and on the dataset card, read on 2026-11-18. The repository says its
+  filler chats come from ShareGPT and UltraChat; the card states no licence
+  for those.
 - MemoryAgentBench: https://arxiv.org/abs/2507.05257 · GroupMemBench:
   https://arxiv.org/abs/2605.14498 · BEAM: https://arxiv.org/abs/2510.27246 ·
   PerLTQA: https://arxiv.org/abs/2402.16288
