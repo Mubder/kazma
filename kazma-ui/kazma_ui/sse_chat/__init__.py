@@ -948,25 +948,8 @@ def create_sse_chat_router(
         if system_prompt:
             system_msgs.append({"role": "system", "content": system_prompt})
 
-        # Kazma-wide self-improvement Soul (fresh every turn so new deltas apply
-        # without rebuilding the cached streaming graph). The deltas are wrapped
-        # in an untrusted data fence — the model must treat them as observation
-        # context, never as instructions to obey (prompt-injection defense).
-        try:
-            from kazma_core.safety.prompt_fence import format_untrusted_block
-            from kazma_core.skills.self_improvement import get_agent_evolution_block
-
-            # The Soul is a settings read (and a one-off migration) (audit 2026-10-26 AUD-111).
-            evo = await asyncio.to_thread(get_agent_evolution_block, "supervisor")
-            if evo:
-                system_msgs.append(
-                    {
-                        "role": "system",
-                        "content": format_untrusted_block(evo, source="self_improvement"),
-                    }
-                )
-        except Exception:
-            logger.debug("[sse_chat] agent evolution inject skipped", exc_info=True)
+        # The self-improvement lessons are the supervisor's, fenced, once per
+        # turn (S1-10 review: this transport added a second copy).
 
         # The Knowledge Library block is the supervisor's, once per turn
         # (Knowledge audit KB-S08: this transport injected the same chunks a

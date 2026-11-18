@@ -550,9 +550,9 @@ def _ensure_space_lessons(messages: list[dict[str, Any]], note: str) -> list[dic
     one given: every copy the call holds is dropped, and *note* (when there is
     one) placed after the identity notes.
 
-    Spaces S1-10: once Spaces is enforced the supervisor decides which Soul a
-    turn reads -- its own space's -- on every surface, whatever a transport
-    added and whatever the base prompt was built with.
+    The supervisor decides which Soul a turn reads, on every surface and
+    every install (S1-10 and its review): the one Soul, or once Spaces is
+    enforced its own space's; whatever another copy the call holds.
     """
     from kazma_core.memory.profile import ABOUT_MARKER
 

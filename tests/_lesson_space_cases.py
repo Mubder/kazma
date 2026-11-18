@@ -61,7 +61,7 @@ def lesson_world(matrix: Matrix) -> Iterator[SimpleNamespace]:
             yield SimpleNamespace(
                 client=_AsMember(TestClient(app, raise_server_exceptions=False), A),
                 held=held, marks=marks, status=lambda cid: get_commitment(cid).status,
-                lessons=lambda space: si.get_agent_evolution_block(space=space),
+                lessons=lambda space: si._agent_evolution_block(space=space),
             )
         finally:
             for key in (si._AGENT_EVO_KEY, si._SPACE_EVO_KEY):

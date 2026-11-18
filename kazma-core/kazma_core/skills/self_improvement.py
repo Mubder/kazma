@@ -13,10 +13,12 @@ Security boundary:
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 import re
 import threading
 from collections import Counter, OrderedDict
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -710,23 +712,50 @@ def _load_agent_evolution(space: str | None = None) -> dict[str, Any]:
     return data
 
 
-def _save_agent_evolution(data: dict[str, Any], space: str | None = None) -> None:
-    """Persist the Soul document of *space* (the owner's when None). Called
-    under ``_agent_evo_lock``; the spaces' document is changed in one atomic
-    step, so two processes teaching two spaces lose neither lesson."""
-    space = space or _owner_space()
-    if space == _owner_space():
-        get_config_store().set(_AGENT_EVO_KEY, data)
-        return
+def _soul_document(value: Any) -> dict[str, Any]:
+    """*value* as a Soul document ``{"agents": {...}}`` (a fresh one when it
+    is not one)."""
+    data = value if isinstance(value, dict) else {}
+    if not isinstance(data.get("agents"), dict):
+        data["agents"] = {}
+    return data
 
-    def put(every: Any) -> dict[str, Any]:
-        every = dict(every) if isinstance(every, dict) else {}
-        spaces = dict(every.get("spaces") or {})
-        spaces[space] = data
-        every["spaces"] = spaces
+
+def _update_soul(space: str, change: Callable[[dict[str, Any]], bool]) -> bool:
+    """Read, change and write the Soul document of *space* in ONE step of the
+    settings store (``atomic_update``: one transaction holding the key, across
+    processes too). *change* edits the document it is given in place and says
+    whether it changed it; returns that.
+
+    The read is inside the step: read outside it, a lesson another process
+    wrote between the read and the write was lost (S1-10 review), and two
+    first saves of the spaces' document could each start from nothing.
+    ``_agent_evo_lock`` still orders this process's own changes.
+    """
+    changed = False
+
+    def own(value: Any) -> dict[str, Any]:
+        nonlocal changed
+        data = _soul_document(value)
+        changed = bool(change(data))
+        return data
+
+    store = get_config_store()
+    if space == _owner_space():
+        store.atomic_update(_AGENT_EVO_KEY, own)
+        return changed
+
+    def spaces(value: Any) -> dict[str, Any]:
+        every = value if isinstance(value, dict) else {}
+        held = every.get("spaces") if isinstance(every.get("spaces"), dict) else {}
+        data = own(held.get(space))
+        if changed or space in held:
+            held[space] = data
+        every["spaces"] = held
         return every
 
-    get_config_store().atomic_update(_SPACE_EVO_KEY, put)
+    store.atomic_update(_SPACE_EVO_KEY, spaces)
+    return changed
 
 
 def _soul_spaces(tenant_id: str | None) -> list[str]:
@@ -742,7 +771,7 @@ def _soul_spaces(tenant_id: str | None) -> list[str]:
     if tenant_id:
         return [str(tenant_id)]
     every = get_config_store().get(_SPACE_EVO_KEY)
-    held = list(((every or {}).get("spaces") or {})) if isinstance(every, dict) else []
+    held = list((every or {}).get("spaces") or {}) if isinstance(every, dict) else []
     return [_owner_space(), *held]
 
 
@@ -761,25 +790,36 @@ def forget_text(text: str, tenant_id: str | None = None) -> int:
     needle = (text or "").strip().casefold()
     if not needle:
         return 0
+
+    def strip(data: dict[str, Any]) -> int:
+        here = 0
+        for entry in (data.get("agents") or {}).values():
+            base, lessons = _lessons(str(entry.get("soul") or ""))
+            kept = [b for b in lessons if needle not in b.casefold()]
+            hist = list(entry.get("history") or [])
+            kept_hist = [h for h in hist if needle not in str(h.get("delta") or "").casefold()]
+            if len(kept) == len(lessons) and len(kept_hist) == len(hist):
+                continue
+            here += (len(lessons) - len(kept)) + (len(hist) - len(kept_hist))
+            entry["soul"] = _render(base, kept)
+            entry["history"] = kept_hist
+        return here
+
     removed = 0
     with _agent_evo_lock:
         _migrate_legacy_evolution_if_present()
         for space in _soul_spaces(tenant_id):
-            data = _load_agent_evolution(space)
-            here = 0
-            for entry in (data.get("agents") or {}).values():
-                base, lessons = _lessons(str(entry.get("soul") or ""))
-                kept = [b for b in lessons if needle not in b.casefold()]
-                hist = list(entry.get("history") or [])
-                kept_hist = [h for h in hist if needle not in str(h.get("delta") or "").casefold()]
-                if len(kept) == len(lessons) and len(kept_hist) == len(hist):
-                    continue
-                here += (len(lessons) - len(kept)) + (len(hist) - len(kept_hist))
-                entry["soul"] = _render(base, kept)
-                entry["history"] = kept_hist
-            if here:
-                _save_agent_evolution(data, space)
-            removed += here
+            # A read first, so a Soul with nothing to forget is not written.
+            if not strip(copy.deepcopy(_load_agent_evolution(space))):
+                continue
+            counted = [0]
+
+            def change(data: dict[str, Any]) -> bool:
+                counted[0] = strip(data)
+                return counted[0] > 0
+
+            _update_soul(space, change)
+            removed += counted[0]
     if removed:
         logger.info("[SelfImprovement] forgot %d lesson(s) holding the text the user forgot", removed)
     return removed
@@ -815,39 +855,51 @@ def forget_lessons_from(chat_keys: Any, turn: int | None = None, tenant_id: str 
         except (TypeError, ValueError):
             return False
 
+    def take_back(data: dict[str, Any]) -> tuple[bool, int]:
+        """(changed, lessons that left the Soul)."""
+        changed, gone_lessons = False, 0
+        for entry in (data.get("agents") or {}).values():
+            hist = list(entry.get("history") or [])
+            gone = [h for h in hist if came_from_it(h)]
+            if not gone:
+                continue
+            kept_hist = [h for h in hist if not came_from_it(h)]
+            base, lessons = _lessons(str(entry.get("soul") or ""))
+            # One copy per forgotten source, never below what the remaining
+            # sources taught: the Soul holds a lesson two turns taught twice.
+            remaining = Counter(str(h.get("delta") or "") for h in kept_hist)
+            in_soul = Counter(lessons)
+            to_drop = Counter({
+                text: min(n, max(0, in_soul[text] - remaining[text]))
+                for text, n in Counter(str(h.get("delta") or "") for h in gone).items()
+            })
+            kept = []
+            for lesson in lessons:  # the oldest copies go first
+                if to_drop[lesson] > 0:
+                    to_drop[lesson] -= 1
+                    continue
+                kept.append(lesson)
+            gone_lessons += len(lessons) - len(kept)
+            entry["soul"] = _render(base, kept)
+            entry["history"] = kept_hist
+            changed = True
+        return changed, gone_lessons
+
     removed = 0
     with _agent_evo_lock:
         _migrate_legacy_evolution_if_present()
         for space in _soul_spaces(tenant_id):
-            data = _load_agent_evolution(space)
-            changed = False
-            for entry in (data.get("agents") or {}).values():
-                hist = list(entry.get("history") or [])
-                gone = [h for h in hist if came_from_it(h)]
-                if not gone:
-                    continue
-                kept_hist = [h for h in hist if not came_from_it(h)]
-                base, lessons = _lessons(str(entry.get("soul") or ""))
-                # One copy per forgotten source, never below what the remaining
-                # sources taught: the Soul holds a lesson two turns taught twice.
-                remaining = Counter(str(h.get("delta") or "") for h in kept_hist)
-                in_soul = Counter(lessons)
-                to_drop = Counter({
-                    text: min(n, max(0, in_soul[text] - remaining[text]))
-                    for text, n in Counter(str(h.get("delta") or "") for h in gone).items()
-                })
-                kept = []
-                for lesson in lessons:  # the oldest copies go first
-                    if to_drop[lesson] > 0:
-                        to_drop[lesson] -= 1
-                        continue
-                    kept.append(lesson)
-                removed += len(lessons) - len(kept)
-                entry["soul"] = _render(base, kept)
-                entry["history"] = kept_hist
-                changed = True
-            if changed:
-                _save_agent_evolution(data, space)
+            # A read first, so a Soul with nothing from that chat is not written.
+            if not take_back(copy.deepcopy(_load_agent_evolution(space)))[0]:
+                continue
+            counted = [0]
+
+            def change(data: dict[str, Any]) -> bool:
+                changed, counted[0] = take_back(data)
+                return changed
+
+            _update_soul(space, change)
+            removed += counted[0]
     if removed:
         logger.info("[SelfImprovement] took back %d lesson(s) learned from a forgotten %s",
                     removed, "chat" if turn is None else "turn")
@@ -862,7 +914,7 @@ def self_improvement_enabled() -> bool:
     return raw not in ("0", "false", "no", "off", "disabled")
 
 
-def get_agent_evolution_block(agent_id: str = _DEFAULT_AGENT_ID, *, space: str | None = None) -> str:
+def _agent_evolution_block(agent_id: str = _DEFAULT_AGENT_ID, *, space: str | None = None) -> str:
     """Return the cumulative [SelfImprovement] Soul block for the main agent.
 
     Empty when none applied or SI disabled. Safe to append as a system message
@@ -888,34 +940,47 @@ def get_agent_evolution_block(agent_id: str = _DEFAULT_AGENT_ID, *, space: str |
         return _render(*_lessons(str(entry.get("soul") or ""))).strip()
 
 
-_SOUL_FENCE_OPEN = '<kazma:data source="self_improvement"'
+#: The first line ``format_untrusted_block`` writes for the Soul. A baked
+#: block starts a line with it; a prompt that names it in passing holds no
+#: block.
+_SOUL_FENCE_OPEN = '<kazma:data source="self_improvement" untrusted="true">'
 _SOUL_FENCE_CLOSE = "</kazma:data>"
 
 
 def without_baked_soul(prompt: str) -> str:
-    """*prompt* without any fenced Soul block inside it.
+    """*prompt* without any fenced Soul block inside it (unchanged when it
+    holds none).
 
-    The agent adds the Soul it reads at build time to its base prompt
-    (``agent_runner``): on an install with one Soul that is the Soul. Once
-    Spaces is enforced the base prompt is every space's, so the supervisor
-    cuts that copy and adds the turn's own space's lessons instead
-    (:func:`space_lessons_note`). One pass, no pattern.
+    The agent of an older Kazma baked the Soul it read at start into its
+    base prompt (``agent_runner``): stale after the first new lesson, and a
+    second copy beside the turn's own. The supervisor cuts any such copy and
+    adds the current lessons itself (:func:`space_lessons_note`). Only a
+    whole block is cut -- its opening line at the start of a line, through
+    its close: the cut runs on every install, and a base prompt that names
+    the fence in passing, or an opener with no close, is left as it is.
+    One pass, no pattern.
     """
     text = prompt or ""
-    out: list[str] = []
-    at = 0
+    kept: list[str] = []
+    at = search = 0
     while True:
-        start = text.find(_SOUL_FENCE_OPEN, at)
+        start = text.find(_SOUL_FENCE_OPEN, search)
         if start < 0:
-            out.append(text[at:])
             break
+        if start > 0 and text[start - 1] != "\n":  # inside a line: named, not a block
+            search = start + 1
+            continue
         end = text.find(_SOUL_FENCE_CLOSE, start)
-        if end < 0:  # an opener with no end: everything from it on is the block
-            out.append(text[at:start])
+        if end < 0:  # no close: not a whole block
             break
-        out.append(text[at:start])
-        at = end + len(_SOUL_FENCE_CLOSE)
-    return "".join(part.rstrip() if i < len(out) - 1 else part for i, part in enumerate(out)).rstrip()
+        part = text[at:start]
+        kept.append(part.strip() if kept else part.rstrip())
+        at = search = end + len(_SOUL_FENCE_CLOSE)
+    if not kept:
+        return prompt
+    rest = text[at:].strip()
+    joined = "\n\n".join(part for part in (*kept, rest) if part)
+    return joined
 
 
 def space_lessons_note(space: str) -> str:
@@ -923,7 +988,7 @@ def space_lessons_note(space: str) -> str:
     none, or self-improvement is off). Blocking: a settings read."""
     from kazma_core.safety.prompt_fence import format_untrusted_block
 
-    block = get_agent_evolution_block(space=space)
+    block = _agent_evolution_block(space=space)
     return format_untrusted_block(block, source="self_improvement") if block else ""
 
 
@@ -956,17 +1021,20 @@ def _soul_commitment_confirmed(commitment_id: str) -> bool:
 
 
 def confirm_soul_delta(commitment_id: str) -> bool:
-    """Flip a soul commitment to 'committed' (the HITL approve path calls this).
+    """Flip a HELD soul commitment (``needs_confirm``) to 'committed' (the
+    confirm route calls this).
 
-    Returns True if flipped. The caller then re-applies the delta so it lands
-    (apply is event-driven; a confirm that only flips status would leave the
-    delta unapplied — §R2.5 design note).
+    Returns True only when this call flipped it (a compare-and-set): a lesson
+    confirmed, rejected or expired already is not confirmed again -- a second
+    confirm applied the lesson a second time. The caller then re-applies the
+    delta so it lands (apply is event-driven; a confirm that only flips status
+    would leave the delta unapplied — §R2.5 design note).
     """
     try:
         from kazma_core.safety.commitment.store import update_status
 
-        c = update_status(commitment_id, "committed", event_type="soul_confirmed")
-        return c is not None
+        c = update_status(commitment_id, "committed", event_type="soul_confirmed", expected="needs_confirm")
+        return c is not None and c.status == "committed"
     except Exception:
         logger.debug("[SelfImprovement] confirm_soul_delta %s failed", commitment_id, exc_info=True)
         return False
@@ -1056,10 +1124,10 @@ def apply_agent_mutation(
     # individual get/set, not this multi-step compound mutation. Without
     # this, concurrent apply_agent_mutation calls would each load the old
     # doc and clobber each other (lost update).
-    with _agent_evo_lock:
-        _migrate_legacy_evolution_if_present()
-        data = _load_agent_evolution(space)
-        agents = data.setdefault("agents", {})
+    sizes = [0, 0]
+
+    def teach(data: dict[str, Any]) -> bool:
+        agents = data["agents"]
         entry = agents.get(agent_id) or {"soul": "", "history": []}
         old = str(entry.get("soul") or "")
         # Cap treats prior soul as base + existing blocks
@@ -1075,12 +1143,17 @@ def apply_agent_mutation(
         )
         entry["history"] = hist[-40:]
         agents[agent_id] = entry
-        _save_agent_evolution(data, space)
+        sizes[:] = [len(old), len(new_soul)]
+        return True
+
+    with _agent_evo_lock:
+        _migrate_legacy_evolution_if_present()
+        _update_soul(space, teach)
     logger.info(
         "[SelfImprovement] Agent '%s' Soul updated (%d → %d chars)",
         agent_id,
-        len(old),
-        len(new_soul),
+        sizes[0],
+        sizes[1],
     )
     return True
 
@@ -1226,14 +1299,13 @@ async def _learn_from_turn(
         return {"action": "skip", "reason": "kept out of memory"}
     # The lesson is the turn's space's (Spaces S1-10), named here: this is a
     # background task, and what its context holds is not the turn's word.
-    # The refiner's own memory search runs for that tenant too. Once Spaces
-    # is enforced the task runs as a whole scope -- the space and the person
-    # the turn ran for (else the space's own: ``identity.acting_account``):
-    # bound by its tenant alone it was half a scope, and anything the
-    # refiner reached that asks ``require_scope`` was refused.
+    # Once Spaces is enforced the task runs as a whole scope -- the space and
+    # the person the turn ran for (else the space's own:
+    # ``identity.acting_account``), so the refiner's own memory search reads
+    # that space: bound by its tenant alone it was half a scope, and the
+    # search, refused, ran with no memory (at DEBUG).
     from kazma_core.spaces.identity import acting_account
     from kazma_core.spaces.scope import bind_scope, spaces_enforced
-    from kazma_core.tenant_context import tenant_scope
 
     async def learn() -> dict[str, Any]:
         return await analyze_and_apply_chat_turn(
@@ -1245,9 +1317,8 @@ async def _learn_from_turn(
         who = asker or await asyncio.to_thread(acting_account, tenant_id)
         with bind_scope(tenant_id, who):
             return await learn()
-    if tenant_id != _owner_space():
-        with tenant_scope(tenant_id):
-            return await learn()
+    # Not enforced: the context close_turn handed the task, as before Spaces
+    # (the older multi-user mode's tenants included).
     return await learn()
 
 

@@ -556,6 +556,15 @@ Disconnect's empty write as the control).
 - Multi-key writes MUST use `batch_set()` for atomicity. `transaction()` is
   SQLite-only (on Postgres its `_get_conn()` refuses) and no product code
   calls it: do not add a caller (audit 2026-10-26 AUD-079)
+- **`atomic_update` on Postgres locks the key itself first**
+  (`pg_advisory_xact_lock` on `_ATOMIC_UPDATE_LOCK_PREFIX` + key, for the
+  transaction; 2026-11-18, the Spaces S1-10 review). `SELECT ... FOR UPDATE`
+  locks nothing while the row does not exist: two processes' first updates
+  of a key each read nothing and the second replaced the first. A
+  read-modify-write belongs INSIDE the updater: a read before
+  `atomic_update` loses what another process wrote in between. Gate:
+  `tests/test_atomic_update_first_write.py` (real Postgres, two stores; the
+  raw `FOR UPDATE` order as the control).
 - Never construct `ConfigStore()` in gateway/core code — use `get_config_store()`
 - **`self._lock` covers the live statement, and `close()` must take it too.**
   Every read/write holds the lock across `_get_conn()` *and* the statement
@@ -1087,12 +1096,14 @@ them into every future system prompt. Two invariants must hold:
 **A. Storage is ConfigStore-backed, NOT a free-standing JSON file.**
 - The supervisor/main-agent Soul lives in `get_config_store()` under key
   `self_improvement.agent_evolution` (a dict `{"agents": {<id>: {soul, history}}}`).
-- `_load_agent_evolution` / `_save_agent_evolution` go through ConfigStore —
-  do NOT reintroduce a direct `path.write_text` write (the old
-  `agent_evolution.json` was non-atomic and corruptible on crash/concurrency).
-- A compound read-modify-write lock (`_agent_evo_lock`) serializes
-  `apply_agent_mutation` within a process; ConfigStore's own lock only guards
-  individual get/set, not the multi-step sequence. Both are required.
+- `_load_agent_evolution` (a read) and `_update_soul` (every change) go
+  through ConfigStore — do NOT reintroduce a direct `path.write_text` write
+  (the old `agent_evolution.json` was non-atomic and corruptible on
+  crash/concurrency).
+- Every change is one `atomic_update` with the read inside the updater
+  (across processes); `_agent_evo_lock` orders this process's own changes
+  (and the legacy migration). Both are required (S1-10 review, 2026-11-18:
+  a read before the write lost another process's lesson).
 - A one-time migration (`_migrate_legacy_evolution_if_present`) moves any
   pre-existing `agent_evolution.json` into ConfigStore and renames it
   `.migrated`. Leave this in place.
@@ -1115,9 +1126,17 @@ than `_MAX_DELTA_CHARS` (refused, never cut). The cap keeps whole lessons
   AND at apply time (`_auto_apply`/`apply_agent_mutation`) — defense-in-depth.
   Never inject a delta via the old `"Apply these refinements to your behaviour:"`
   framing; always use `format_untrusted_block(evo, source="self_improvement")`.
-- The 4 supervisor injection sites (`agent_runner.py`, `sse_chat/` package,
-  gateway `graph.py`, `voice_turn.py`) and the swarm worker (`worker.py`) all
-  use the fence. Keep them in sync if you add another.
+- **One place adds the main agent's Soul: the supervisor**, at the start of
+  every turn on every surface and every install
+  (`graph_helpers._ensure_space_lessons`: every other `self_improvement` note
+  the call holds is dropped, one current fenced copy added), and it cuts a
+  Soul baked into a base prompt (`self_improvement.without_baked_soul`).
+  Nothing bakes one (`agent_runner` did, read once at start: stale after the
+  first new lesson), and the transports (`sse_chat/`, gateway `graph.py`,
+  `voice_turn.py`) add none: the model saw it twice (S1-10 review,
+  2026-11-18). The swarm worker (`worker.py`) fences its own. Gate:
+  `tests/test_lessons_per_space.py` (one copy through the real supervisor
+  graph; the old base prompt with the cut taken out as the control).
 - Kill-switch `KAZMA_SELF_IMPROVEMENT=0` is checked live (not just at init) on
   both the chat/supervisor path and the swarm worker path.
 
@@ -12515,28 +12534,32 @@ product can turn it on, so an install with one account behaves as before.
     bound, and `NoSpaceBound` when there is none (nothing is read or learned
     for no one). The owner's space keeps `self_improvement.agent_evolution`;
     every other space's Soul is inside `self_improvement.space_evolution`
-    (`{"spaces": {id: {"agents": ...}}}`, saved with `atomic_update` under
-    `_agent_evo_lock`). Every reader and writer of a Soul takes `space`.
+    (`{"spaces": {id: {"agents": ...}}}`). Every change of a Soul is one
+    `atomic_update` with the read inside the updater
+    (`self_improvement._update_soul`), under `_agent_evo_lock` for this
+    process: read before it, another process's lesson written meanwhile was
+    lost. Every reader and writer of a Soul takes `space`.
   - **Learning**: `learn_from_finished_turn` passes the turn's tenant
     (`_post_turn_memory.tenant_id`, which `respond_node` sets from
     `space_of_state`) down to `apply_agent_mutation(space=)`. Once Spaces is
     enforced the background task binds a whole scope: the turn's space and
     the person the turn ran for, else `spaces.identity.acting_account` --
     the one answer to "who does Kazma's own work for a space act for" (the
-    queued memory tasks use it too). Not enforced: the tenant alone, as
+    queued memory tasks use it too), so the refiner's own memory search
+    reads that space. Not enforced: the context `close_turn` handed it, as
     before.
-  - **Reading**: once enforced, the supervisor chooses a turn's lessons at
-    its first step (`graph_helpers._ensure_space_lessons`: every
-    `self_improvement` turn note the call holds is dropped, the note of
-    `space_of_state(state)` added) and cuts a Soul baked into the base
-    prompt (`self_improvement.without_baked_soul`); `agent_runner` bakes
-    none once Spaces is enforced. Not enforced, the transports add the one
-    Soul as before (§11) and the supervisor changes nothing.
+  - **Reading**: on every install the supervisor adds a turn's lessons at
+    its first step, one current fenced copy (§11): the one Soul, or once
+    enforced the lessons of `space_of_state(state)`.
   - **Forgetting**: `forget_text` and `forget_lessons_from` take the
     tenant; with none (Kazma's own replay) they read every Soul.
   - **A held lesson** (`mint_soul_commitment(space=)`) is a commitment of
     its space; the confirm queue's routes act only on a `soul_delta`
-    commitment of the request's space (`commitment_api._held_here`).
+    commitment of the request's space (`commitment_api._lesson_here`) that
+    is still held: confirm and reject move it only from `needs_confirm`, in
+    the same UPDATE (`update_status(..., expected=)`); a decided one answers
+    409 `not_held` (an applied lesson was "rejected" while it stayed in the
+    Soul, and a second confirm applied it twice).
   - Gates: `tests/test_lessons_per_space.py` (the real hand-off and the
     real supervisor graph; the single Soul as each control),
     `tests/_lesson_space_cases.py`.

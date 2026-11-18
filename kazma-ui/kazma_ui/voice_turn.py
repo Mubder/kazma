@@ -332,19 +332,8 @@ async def _async_system_messages(
     system_msgs: list[dict[str, str]] = []
     if system_prompt:
         system_msgs.append({"role": "system", "content": system_prompt})
-    # Self-improvement Soul — fenced as untrusted data (§11), fresh per turn.
-    try:
-        from kazma_core.safety.prompt_fence import format_untrusted_block
-        from kazma_core.skills.self_improvement import get_agent_evolution_block
-
-        evo = await asyncio.to_thread(get_agent_evolution_block, "supervisor")
-        if evo:
-            system_msgs.append({
-                "role": "system",
-                "content": format_untrusted_block(evo, source="self_improvement"),
-            })
-    except Exception:
-        logger.debug("[voice] agent evolution inject skipped", exc_info=True)
+    # The self-improvement lessons are the supervisor's, fenced, once per
+    # turn (S1-10 review).
     # The Knowledge Library block is the supervisor's, once per turn
     # (Knowledge audit KB-S08).
     # IDE workspace awareness — fresh every turn (workspace switches apply
