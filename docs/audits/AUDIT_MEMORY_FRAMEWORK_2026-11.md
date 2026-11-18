@@ -680,6 +680,22 @@ routes read `default` for any caller; a tenant error becomes a junk tenant
 that writes proceed under; turn reconcile files a turn under the chat
 store's tenant.
 
+### F17. Known misses, left as they are for now
+
+**Measured** (the review of the speaker-rule fix, 2026-11-18).
+
+- **A named workplace with the article is read as a field.** "شغال في البنك
+  الأهلي وساكن في جدة" keeps the home and no employer: the Arabic quick pass
+  takes "أشتغل في البنك" as "I work in banking" (a field, which it rightly
+  keeps nothing from) and does not tell a named bank ("البنك الأهلي") from
+  the field. "أشتغل في بنك الخليج" (no article) is kept. The deep pass still
+  reads it, at an inference's trust. Unchanged until the quick pass can tell
+  a name from a field.
+- **The sentence-end rule's decided cost.** A person named in one sentence
+  is not carried into the next unless introduced by name, so "صديقتي معلمة.
+  ساكنة في جدة" files the second sentence under the user. Accepted once F1's
+  visible, undoable updates exist; it is one of F1's second-half cases.
+
 
 ## 3. Kazma against the state of the art, part by part
 
