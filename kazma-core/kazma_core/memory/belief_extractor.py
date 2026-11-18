@@ -241,7 +241,9 @@ async def _llm_extract(
         client = get_model_registry().get_client()
         if client is None:
             raise LookupError("no active LLM client returned by the model registry")
-        blob = f"User: {user_text[:1500]}\nAssistant: {(assistant_text or '')[:800]}"
+        from kazma_core.memory.limits import DEEP_PASS_ANSWER, DEEP_PASS_QUESTION
+
+        blob = f"User: {user_text[:DEEP_PASS_QUESTION]}\nAssistant: {(assistant_text or '')[:DEEP_PASS_ANSWER]}"
         if vocabulary:
             blob += "\n\nPredicates already in use: " + ", ".join(vocabulary[:60])
         if entities:

@@ -136,6 +136,9 @@ TOOL_TIERS: dict[str, str] = {
     "codebase_search": "read",
     "codebase_status": "read",
     "memory_search": "read",
+    # Reads one memory whole, a page at a time (2026-11-19: memories keep
+    # all of their text; lists show them bounded).
+    "memory_read": "read",
     "sqlite_query": "read",
     "current_datetime": "read",
     # The reader of save_proposal's drafts. Read-tier on purpose: reading

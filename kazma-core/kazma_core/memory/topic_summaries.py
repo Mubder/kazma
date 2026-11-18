@@ -70,6 +70,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from kazma_core.memory.legacy_tables import LEGACY_SESSION_PREFIX, LEGACY_TURN
+from kazma_core.memory.limits import turn_key
 
 from kazma_core.memory.tenant_view import narrowed_to, sees_every_tenant
 
@@ -275,7 +276,9 @@ def _load_turns(
             question, answer = legacy.group(1).strip(), legacy.group(2).strip()
         if not (question or answer) or is_small_talk(question, answer):
             continue
-        key = hashlib.sha256(f"{question.lower()}\x00{answer.lower()[:2000]}".encode()).hexdigest()
+        # By the turn key (memory/limits.py): one copy of a turn may hold
+        # 4,000 characters of it (written before 2026-11-19), the other all.
+        key = hashlib.sha256(f"{turn_key(question).lower()}\x00{turn_key(answer).lower()}".encode()).hexdigest()
         if key in seen:
             continue  # a copy of a turn: the live write and turn reconcile use different keys
         seen.add(key)

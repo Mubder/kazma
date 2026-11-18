@@ -165,6 +165,51 @@ and the embedder rests for 30 seconds, then longer, before it is asked again;
 memory health shows it as degraded meanwhile.
 Kill-switch: `KAZMA_PGVECTOR=0`.
 
+### Long memories {#long-memories}
+
+A memory of a conversation keeps all of its text: the whole message and the
+whole answer (since 2026-11-19). Until then every writer kept the first
+4,000 characters of each, 2,000 of a summary and 8,000 of a swarm result, so
+a long paste or a long report was remembered by its start only. The one
+bound left is a safety ceiling of 2 MiB per field, the most the web chat
+accepts in one request; nothing a person sends or a model answers reaches
+it, and a text past it keeps its start with a warning in the log.
+
+- **Searching.** Keyword search covers all of a long memory: the full-text
+  index holds every word. Meaning search covers its start: a memory's
+  meaning vector is made from its first 4,000 characters, as it always was,
+  so a question about something deep inside a long memory is found by its
+  words, not its meaning. Searching the whole of a long memory by meaning
+  (a vector per stretch of it) is a later step.
+- **Showing.** The memory block a turn gets shows each memory bounded (a
+  little of the question and of the answer: five memories must fit). When
+  it leaves part out, the memory ends with how many characters are not
+  shown and `memory_read("<id>")`, in the memory's language. The
+  `memory_search` tool and the Memory page's probe show up to 1,500
+  characters of one memory the same way.
+- **Reading one whole.** `memory_read` (a read tool: no approval) reads one
+  memory by its id, 8,000 characters a page, with where the next page
+  starts; it reads only memories of the space it runs in, and its text
+  reaches the model as data, never as instructions. On the Memory page,
+  "The whole memory" under a memory opens it, a part at a time.
+- **What was cut comes back.** The maintenance sweep "memory text fill"
+  finds memories written before 2026-11-19 whose question or answer is
+  exactly 4,000 characters long and fills in the rest from the chat they
+  came from, when the chat store still holds it: only when the memory holds
+  exactly that chat text's start and its id is that turn's, never a
+  forgotten memory or a turn you kept out of memory, never from another
+  space's chat. Its vector does not change (it is made from the start).
+  Memory health counts what was filled, what was already whole, and what
+  cannot be filled (the chat is gone; swarm results and weekly summaries
+  have no chat to fill them from).
+- **Matching the old rows.** Code that finds a turn's memory by its text
+  (turn reconcile, the forget ledger, the weekly summaries' copy check)
+  compares the first 4,000 characters, so a memory written before still
+  counts as the same turn and is never written a second time.
+- **Model inputs stay bounded.** The deep pass reads the first 1,500
+  characters of a message and 800 of the answer; a weekly summary reads 400
+  and 600 of each turn.
+
 ### Post-turn
 
 Every finished turn is handed to memory once, by the closer every transport
@@ -876,7 +921,8 @@ and counts, and so is what you add after the text you asked about
 of a message are read this way, up to their last blank line. The end of a
 longer message (its last paragraph) is read only to ask you: a correction
 there that the model's deep pass reads becomes a question, never your word.
-The deep pass reads the first 4,000 characters of a message. A fact only
+The deep pass reads the first 1,500 characters of a message and 800 of the
+answer (the memory itself keeps all of both: "Long memories" above). A fact only
 the model's deep pass reads is never your own word by itself: whether the
 model's name fits your words ("I'm visiting Dubai next week" read as your
 home) only you can say. It stays the model's inference, and a fact you state

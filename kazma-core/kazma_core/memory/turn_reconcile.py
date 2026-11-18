@@ -50,6 +50,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from kazma_core.memory.chat_history import STORE_ERRORS
+from kazma_core.memory.limits import turn_key
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,6 @@ STATE_KEY = "memory.v2.turn_reconcile"
 #: to memory within seconds); reconciling it too would race that write.
 _SETTLE_S = 600.0
 _PAGE = 100
-_TEXT_CAP = 4000
 #: LLM deep passes queued per 15-minute pass, so ~1,000 reconciled turns reach
 #: the model over hours, never in one burst.
 _DEEP_PER_PASS = 60
@@ -115,7 +115,14 @@ def _turns(messages: list[Any]) -> list[tuple[int, str, str, float | None]]:
 
 
 def _in_memory(conn: sqlite3.Connection, tenant: str, keys: list[str]) -> tuple[Counter, list[str]]:
-    """The conversation's episode questions (counted) and erased-row stubs."""
+    """The conversation's episode questions (counted, by ``limits.turn_key``)
+    and erased-row stubs.
+
+    By the key, never the whole text: a row written before 2026-11-19 holds
+    the first 4,000 characters of a long question, a row written since all of
+    it, and both are the same turn -- compared whole, every long turn already
+    in memory was written again.
+    """
     marks = ",".join("?" for _ in keys)
     texts: Counter = Counter()
     stubs: list[str] = []
@@ -124,7 +131,7 @@ def _in_memory(conn: sqlite3.Connection, tenant: str, keys: list[str]) -> tuple[
         [tenant, *keys],
     ):
         if user is not None:
-            texts[str(user).strip()] += 1
+            texts[turn_key(str(user))] += 1
         elif summary:
             stubs.append(str(summary))
     return texts, stubs
@@ -142,7 +149,7 @@ def _reconcile_session(
     fallback = _epoch(row["updated_at"]) or _epoch(row["created_at"])
     written = young = 0
     for index, question, answer, when in _turns(row["messages"]):
-        stored = question[:_TEXT_CAP].strip()
+        stored = turn_key(question)
         if texts[stored] > 0:
             texts[stored] -= 1
             continue
@@ -160,8 +167,8 @@ def _reconcile_session(
         if mirror_episode(
             session_id=thread,
             turn_number=index,
-            user_text=question[:_TEXT_CAP],
-            assistant_text=answer[:_TEXT_CAP],
+            user_text=question,
+            assistant_text=answer,
             tenant_id=row["tenant_id"],
             tier="episodic",
             source="turn_reconcile",

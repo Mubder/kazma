@@ -54,6 +54,7 @@ from pathlib import Path
 from typing import Any
 
 from kazma_core.memory.chat_history import STORE_ERRORS
+from kazma_core.memory.limits import LEGACY_BRIDGE_CUT, LEGACY_SUMMARY_CUT, LEGACY_TEXT_CUT
 
 logger = logging.getLogger(__name__)
 
@@ -78,10 +79,13 @@ NOTE_CALL_MARK = b"\xa4name\xacmemory_store"
 
 _NOTE_SOURCE = "memory_store_tool"
 
-#: What each writer stores: ``dual_write.mirror_episode`` keeps 4,000
-#: characters of text and 2,000 of summary; ``swarm_bridge`` keeps 8,000.
-_MIRROR_CAPS = (4000, 2000)
-_BRIDGE_CAPS = (8000, 8000)
+#: What each writer stored when the rows this module recovers were written
+#: (the archive rule erased them before 2026-09-26): ``dual_write`` kept
+#: 4,000 characters of text and 2,000 of summary, ``swarm_bridge`` 8,000.
+#: Recovery reproduces those rows as they were; the memory text fill
+#: (``memory/text_fill.py``) brings the rest back from the chat.
+_MIRROR_CAPS = (LEGACY_TEXT_CUT, LEGACY_SUMMARY_CUT)
+_BRIDGE_CAPS = (LEGACY_BRIDGE_CUT, LEGACY_BRIDGE_CUT)
 #: The ``noted`` belief a memory note leaves holds the note's first 1,000
 #: characters -- a shorter one is the whole note.
 _NOTED_CAP = 1000

@@ -993,7 +993,8 @@
       });
       (data.episodes || []).forEach(function(h) {
         lines.push('<div class="mem-hit" style="--mem-c:var(--cat-1);"><span class="mem-hit-kind">' + _esc(_mt('memory.console.hit_episode', 'EPISODE')) + '</span> ' +
-          '<span translate="no">' + _esc((h.content || '').slice(0, 200)) + '</span>' + _hitForget('episode', h.id) +
+          '<span translate="no" dir="auto">' + _esc(h.content || '') + '</span>' + _hitForget('episode', h.id) +
+          _wholeMemoryFold(h.id, Number(h.more || 0)) +
           '<div style="margin-top:3px;">' + _srcChips(h) + '</div></div>');
       });
       // Weekly topic summaries, as the model is shown them (Memory audit M32:
@@ -1018,6 +1019,7 @@
         document.getElementById('v2-probe-path-btn')?.addEventListener('click', function() { _v2gApplyPathFromQuery(); });
         document.getElementById('v2-eval-golden-btn')?.addEventListener('click', runGoldenEval);
         _wireHitForgets(out);
+        _bindWholeMemory(out);
       }
     } catch (e) {
       out.textContent = _mt('memory.console.probe_error', 'Probe error: {error}', { error: e });
@@ -1460,6 +1462,58 @@
     loadV2Memories();
     pollV2Health();
   }
+  // A memory is kept whole and listed bounded (2026-11-19, memory/limits.py):
+  // a folded "The whole memory" reads the rest, a page at a time, from
+  // GET /api/memory/v2/episodes/{id}/text. Loaded when first opened.
+  function _wholeMemoryFold(id, more) {
+    if (!id || !(more > 0)) return '';
+    return '<details class="v2-whole" data-id="' + _attr(id) + '" style="margin-top:4px;">' +
+      '<summary class="mem-muted" style="cursor:pointer;font-size:0.72rem;">' +
+      _esc(_mt('memory.console.whole_memory', 'The whole memory')) + ' · ' +
+      _esc(window.kazmaCount('memory.console.more_chars', more)) + '</summary>' +
+      '<div class="v2-whole-text mem-well" translate="no" dir="auto" style="white-space:pre-wrap;overflow-wrap:anywhere;' +
+      'max-height:360px;overflow-y:auto;padding:6px 8px;font-size:0.78rem;margin-top:4px;"></div>' +
+      '<div class="mem-muted v2-whole-range" style="font-size:0.68rem;margin-top:2px;"></div>' +
+      '<button type="button" class="btn btn-xs btn-secondary v2-whole-next" hidden style="margin-top:4px;">' +
+      _esc(_mt('memory.console.whole_next', 'Show the next part')) + '</button></details>';
+  }
+
+  function _bindWholeMemory(root) {
+    if (!root) return;
+    root.querySelectorAll('details.v2-whole').forEach(function(box) {
+      var next = 0;
+      var loading = false;
+      async function readPage() {
+        if (loading || next === null) return;
+        loading = true;
+        var text = box.querySelector('.v2-whole-text');
+        var range = box.querySelector('.v2-whole-range');
+        var btn = box.querySelector('.v2-whole-next');
+        try {
+          var resp = await fetch('/api/memory/v2/episodes/' + encodeURIComponent(box.getAttribute('data-id')) +
+            '/text?offset=' + next);
+          var data = await resp.json();
+          if (!resp.ok || !data.ok) throw new Error('HTTP ' + resp.status);
+          text.appendChild(document.createTextNode(data.text || ''));
+          next = data.next_offset == null ? null : data.next_offset;
+          var fmt = function(n) { return window.KazmaFormat ? window.KazmaFormat.number(n) : String(n); };
+          range.textContent = _mt('memory.console.whole_range', 'Characters {start}-{end} of {total}',
+            { start: fmt(data.total ? 1 : 0), end: fmt(data.end), total: fmt(data.total) });
+          if (btn) btn.hidden = next === null;
+        } catch (e) {
+          range.textContent = _mt('memory.console.whole_failed', 'The memory could not be read. It is not gone.');
+        } finally {
+          loading = false;
+        }
+      }
+      box.addEventListener('toggle', function() {
+        if (box.open && next === 0 && !box.querySelector('.v2-whole-text').textContent) readPage();
+      });
+      var btn = box.querySelector('.v2-whole-next');
+      if (btn) btn.addEventListener('click', readPage);
+    });
+  }
+
   async function loadV2Memories() {
     const el = document.getElementById('v2-memories-list');
     if (!el) return;
@@ -1489,12 +1543,14 @@
           // the row it took the page's direction, so on an Arabic page an
           // English memory sat on the right (2026-10-02).
           '<span style="min-width:0;overflow-wrap:anywhere;"><span translate="no" style="display:block;color:var(--text-primary);">' + _esc(ep.preview || ep.id) + '</span>' +
-          '<span class="mem-muted" style="display:block;font-size:0.65rem;"><bdi>' + _esc(when) + '</bdi>' + chat + '</span></span>' +
+          '<span class="mem-muted" style="display:block;font-size:0.65rem;"><bdi>' + _esc(when) + '</bdi>' + chat + '</span>' +
+          _wholeMemoryFold(ep.id, Math.max(0, Number(ep.length || 0) - String(ep.preview || '').length)) + '</span>' +
           '<button type="button" class="btn btn-sm v2-memory-forget btn-outline" data-id="' + _attr(ep.id) + '" style="flex-shrink:0;">' + _esc(_mt('memory.console.forget', 'Forget')) + '</button></div>';
       }).join('');
       el.querySelectorAll('.v2-memory-forget').forEach(function(btn) {
         btn.addEventListener('click', function() { _forgetEpisode(btn.getAttribute('data-id')); });
       });
+      _bindWholeMemory(el);
     } catch (e) { el.textContent = _mt('memory.console.memories_load_failed', 'Memories load failed'); }
   }
   document.getElementById('v2-memories-refresh')?.addEventListener('click', loadV2Memories);

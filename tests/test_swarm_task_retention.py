@@ -154,7 +154,7 @@ def test_the_maintenance_cadence_carries_the_retention_sweep():
         "provider health",
         "settings snapshot",
         "forget convergence", "memory vector repair", "memory recovery", "retired knowledge promotions",
-        "memory turn reconcile",
+        "memory turn reconcile", "memory text fill",
         "memory mirror sync", "memory graph sync", "memory topic summaries", "entity count repair",
         "knowledge vector repair",
     ], "a sweep left this list stops running; one added must be added here too"

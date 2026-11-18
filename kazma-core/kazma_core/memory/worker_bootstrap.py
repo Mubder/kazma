@@ -1166,6 +1166,17 @@ def _reconcile_memory_turns() -> None:
     run_turn_reconcile_pass()
 
 
+def _fill_cut_memory_text() -> None:
+    # Memories written before 2026-11-19 kept 4,000 characters of a long
+    # question or answer; this brings the rest back from the chat that still
+    # holds the turn whole, verified, the forget ledger first, one write each
+    # (memory/text_fill.py). After turn reconcile, so the rows it just wrote
+    # are whole already; before the mirror sync, which pushes what changed.
+    from kazma_core.memory.text_fill import run_text_fill_pass
+
+    run_text_fill_pass()
+
+
 def _sync_memory_mirror() -> None:
     # The Postgres mirror made whole again: every memory and fact it is
     # missing or holds stale is pushed, newest first (live on 2026-09-27: 116
@@ -1360,6 +1371,7 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("memory recovery", _recover_erased_memories),
     ("retired knowledge promotions", _retire_knowledge_promotions),
     ("memory turn reconcile", _reconcile_memory_turns),
+    ("memory text fill", _fill_cut_memory_text),
     ("memory mirror sync", _sync_memory_mirror),
     ("memory graph sync", _sync_memory_graph),
     ("memory topic summaries", _queue_topic_summaries),

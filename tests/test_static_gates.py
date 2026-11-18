@@ -1010,6 +1010,9 @@ _LOOP_STALL_HELPERS = frozenset({
     "search_transcripts", "promote_working_memory", "run_golden_eval",
     # The memory restore: a file copy, the forget journal and turn reconcile.
     "restore_memory_backup",
+    # One memory read whole or previewed, and the fill of text the old cut
+    # left out: SQLite reads and a chat-store read (2026-11-19).
+    "read_episode", "preview_episode", "run_text_fill_pass", "text_fill_counts",
     "count_current_facts", "backfill_vectors",
     # Writing a memory: a chat-store id read, an insert, embeddings, the
     # remote vector index, the Postgres mirror. The supervisor promoted
@@ -2778,6 +2781,8 @@ FENCED_TOOL_FUNCTIONS: dict[str, dict[str, bool]] = {
     # registered inside register_memory_tools.
     "kazma-core/kazma_core/agent/tool_builtins/memory.py": {
         "memory_search": True,
+        # One memory whole, a page at a time (2026-11-19): what a turn said.
+        "memory_read": True,
         "memory_list_beliefs": True,
         "memory_list_entities": True,
         # Its list actions return the same lists as the two tools above.

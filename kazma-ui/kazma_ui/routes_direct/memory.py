@@ -422,6 +422,25 @@ def register_memory_routes(self: Any) -> None:
             hints.append("empty recall — check memory health on Dashboard")
         return hints
 
+    def _probe_episodes(hits: list[Any], tenant_id: str) -> list[dict[str, Any]]:
+        from kazma_core.memory.episode_read import preview_episode
+        from kazma_core.memory.recall import shown_text
+
+        out: list[dict[str, Any]] = []
+        for h in hits:
+            preview = preview_episode(str(h.id), tenant_id=tenant_id)
+            text, more = preview if preview is not None else (shown_text(h), int((h.metadata or {}).get("more") or 0))
+            out.append({
+                "id": h.id,
+                "content": text,
+                "more": more,
+                "score": h.score,
+                "source": h.source,
+                "sources": (h.metadata or {}).get("sources"),
+                "metadata": h.metadata,
+            })
+        return out
+
     @self.app.post("/api/memory/v2/probe")
     async def _memory_v2_probe(request: Request):
         """Live recall dry-run for the dashboard probe panel."""
@@ -464,18 +483,9 @@ def register_memory_routes(self: Any) -> None:
                     }
                     for h in result.beliefs
                 ],
-                "episodes": [
-                    {
-                        "id": h.id,
-                        # What the model is shown: both sides of the turn.
-                        "content": shown_text(h),
-                        "score": h.score,
-                        "source": h.source,
-                        "sources": (h.metadata or {}).get("sources"),
-                        "metadata": h.metadata,
-                    }
-                    for h in result.episodes
-                ],
+                # Up to limits.MEMORY_SHOW_MAX characters of each memory,
+                # and how many more there are (the page reads the rest).
+                "episodes": await asyncio.to_thread(_probe_episodes, result.episodes, tenant_id),
                 # Weekly topic summaries (plan C2b), as the model is shown them.
                 "weekly_summaries": [
                     {
@@ -708,14 +718,16 @@ def register_memory_routes(self: Any) -> None:
                     (src_session, *((src_turn,) if src_turn is not None else ()), *oparams),
                 ).fetchone()
                 if ep_row:
-                    ut = (ep_row["user_text"] or "")[:160]
-                    at = (ep_row["assistant_text"] or "")[:120]
+                    from kazma_core.memory.episode_text import display_parts
+
+                    # A memory as a list shows it (memory/limits.py bounds it).
+                    shown, _more = display_parts(ep_row["user_text"], ep_row["assistant_text"], "")
                     # A forgotten memory says so; it has nothing else to show.
                     forgotten = ep_row["tier"] == "forgotten"
                     origin_episode = {
                         "id": ep_row["id"],
                         "tier": ep_row["tier"],
-                        "preview": "(forgotten)" if forgotten else (ut or at or ep_row["id"]),
+                        "preview": "(forgotten)" if forgotten else (shown or ep_row["id"]),
                         "created_at": ep_row["created_at"],
                         "turn": src_turn,
                     }
@@ -928,16 +940,21 @@ def register_memory_routes(self: Any) -> None:
             )
             rows = conn.execute(sql, [*params, lim, off]).fetchall()
             conn.close()
+            from kazma_core.memory.episode_read import episode_full_text
+            from kazma_core.memory.episode_text import display_parts
+
             out = []
             for r in rows:
-                ut = (r["user_text"] or "")[:120]
-                at = (r["assistant_text"] or "")[:80]
-                preview = ut or at or (r["summary_text"] or "")[:120] or r["id"]
+                preview, _hidden = display_parts(r["user_text"], r["assistant_text"], r["summary_text"])
                 out.append(
                     {
                         "id": r["id"],
                         "tier": r["tier"],
-                        "preview": preview,
+                        "preview": preview or r["id"],
+                        # The whole memory's length: the page offers it whole
+                        # when it is longer than the preview (2026-11-19).
+                        "length": len(episode_full_text(r["user_text"], r["assistant_text"],
+                                                        r["summary_text"])),
                         "created_at": r["created_at"],
                         "session_id": r["session_id"] or "",
                     }
@@ -954,6 +971,24 @@ def register_memory_routes(self: Any) -> None:
         finally:
             if conn is not None:
                 conn.close()
+    @self.app.get("/api/memory/v2/episodes/{episode_id}/text")
+    def _memory_v2_episode_text(episode_id: str, offset: int = 0):
+        """One memory's whole text, a page at a time (``episode_read``): the
+        Memory page's "the whole memory". The caller's tenant and the tiers
+        recall searches only: another space's memory, or a forgotten one, is
+        not found."""
+        from fastapi.responses import JSONResponse
+
+        from kazma_core.memory.episode_read import read_episode
+
+        try:
+            page = read_episode(str(episode_id or ""), tenant_id=_mem_tid(), offset=max(0, int(offset or 0)))
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
+        if page is None:
+            return JSONResponse({"ok": False, "error": "not_found", "code": "not_found"}, status_code=404)
+        return {"ok": True, **page}
+
     @self.app.post("/api/memory/v2/reconsolidate", dependencies=[Depends(rate_limit("admin_ops", 10))])
     def _memory_v2_reconsolidate():
         """Enqueue a global_reconsolidation task (Dashboard / Settings trigger).

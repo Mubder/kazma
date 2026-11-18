@@ -147,6 +147,9 @@ DECLARED = {
         "forget_episode remirrors every id it tombstones",
     ("kazma-core/kazma_core/memory/rehydrate.py", "_restore"):
         "run_rehydrate_pass remirrors each restored row",
+    ("kazma-core/kazma_core/memory/text_fill.py", "_fill_one"):
+        "the mirror outbox's triggers queue the filled row in the same write; the next "
+        "memory mirror sync pass pushes it (tests/test_memory_keeps_all_text.py)",
 }
 
 

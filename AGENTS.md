@@ -1527,7 +1527,7 @@ scheduler needs a case there.
   (§19 E), dependency advisories (§57), model failover drill (§38), provider
   health (§60), forget convergence (§15I), memory vector repair, memory recovery,
   retired knowledge promotions and memory turn reconcile (§15F), memory
-  mirror sync (§15K), memory graph sync (§15K2), weekly topic summaries (§15J), entity count repair
+  text fill (§15F), memory mirror sync (§15K), memory graph sync (§15K2), weekly topic summaries (§15J), entity count repair
   (§15L) and knowledge vector repair (§24F, last), run by ONE isolated
   runner so a failing sweep never stops the rest -- and is logged at WARNING
   (it was DEBUG: a sweep failing every pass is a feature that is off). A new periodic cleanup is a
@@ -1618,6 +1618,56 @@ Measured on live that day: meaning search compared episodes inside an
 unordered `LIMIT` slice (the 60 newest of 300 were never searched), facts
 inside the 400 "most important", fact meaning search ran only when keywords
 came up short, and archiving had erased 76 memories.
+- **A memory keeps all of its text** (2026-11-19, the owner: "Keep more,
+  so find a way or a workaround to keep all text"; `memory/limits.py`, the
+  one home of every length memory holds itself to). Every episode writer
+  cut: 4,000 characters of a turn's question and of its answer
+  (`dual_write.episode_row`, `turn_reconcile`), 2,000 of the summary, 8,000
+  of a swarm result (`swarm_bridge`), 16,000 of a turn waiting in the queue
+  (`consolidator._defer_turn_memory`). Now every writer stores through
+  `limits.episode_text`: whole, up to `EPISODE_TEXT_MAX` per field (2 MiB,
+  the web chat's request body limit: a safety ceiling nothing reaches; one
+  past it keeps its start with a WARNING). Ids are unchanged (they hash the
+  first 512/200 characters). **Old rows still match**: code that finds a
+  turn's row by its text compares `limits.turn_key` (the first 4,000
+  characters, stripped) -- turn reconcile's "already stored" count, the
+  forget ledger's key (`forget.question_sha` hashes `question_key`), the
+  weekly summaries' copy key; the archive's copies are matched in either
+  form (`forget._scrub_legacy_copies`), the legacy-copy rule by prefix as
+  before, and recovery (`rehydrate`) reproduces the old writers with
+  `LEGACY_*`. Compared whole, every long turn already in memory was written
+  a second time. **The cut text comes back** (`memory/text_fill.py`,
+  maintenance entry "memory text fill", after turn reconcile): a turn's row
+  (`e_`) whose question or answer is exactly 4,000 characters, not
+  forgotten, not yet marked, is filled from the chat store and its spool
+  (`chat_history.conversations_for`, which now returns each copy's tenant;
+  another space's copy is never read in) when the row holds exactly the
+  chat text's start and its id is that turn's -- one such text, or it is
+  left; the forget ledger is asked inside the write's transaction;
+  compare-and-set on the text read and the tier; the full-text index and the
+  mirror outbox follow through their triggers; the vector is written again
+  only when its text changed. Each row is marked once (`text_fill`: filled,
+  whole, unavailable) and memory health counts them (`findability.cut_text`,
+  with the swarm results and summaries no chat can fill). **Meaning search
+  covers the start of a long memory** (`EMBED_TEXT_CHARS`, 4,000: the vector
+  is what it always was), **keyword search all of it**; a passage vector per
+  stretch of a long memory is a later step (`docs/plans/MEMORY_REMAINING.md`).
+  **Shown bounded, read whole**: the recall block shows a memory with its
+  own bounds (`RECALL_SHOW_*`) and, when it leaves some out, a note in the
+  memory's language naming how many characters and `memory_read("<id>")`
+  (`episode_text.more_note`); `memory_search` and the probe show up to
+  `MEMORY_SHOW_MAX` (1,500); `memory_read` (read tier, fenced, the caller's
+  tenant, `memory/episode_read.py`) reads one whole, `MEMORY_READ_PAGE`
+  characters a page; the Memory page's list and probe offer "The whole
+  memory" folded (`GET /api/memory/v2/episodes/{id}/text`). Model inputs stay
+  bounded: the deep pass reads `DEEP_PASS_QUESTION`/`DEEP_PASS_ANSWER`
+  (1,500/800), weekly summaries 400/600 per turn. Gate:
+  `tests/test_memory_keeps_all_text.py` (every writer, a long turn through
+  the real code; old cut rows matching; the fill, the ledger, the race,
+  another space's chat; the bounded views and the reader; no slice of a
+  memory's text in memory code whose bound is not a `limits` name -- the
+  old cut put back through `limits` and the old cut lines as the negative
+  controls).
 - **Exact meaning search, every row** (`vector_engine.py`):
   `vec_distance_cosine` in SQL over every comparable row (same size, same
   model; NULL/'' version = legacy same model), NumPy chunked fallback, zero
@@ -2160,9 +2210,10 @@ four injected were noise.
   instruction at the start; only `clause_subject.names_no_one_else` reads
   it, so the model's reading of a correction there is a question to the
   user (or Kazma's reading), never the user's trust. An episode keeps the
-  first 4,000 characters of the user's message (`dual_write`), and the deep
-  pass reads the episode: the end of a message longer than that reaches
-  neither pass (the main session's decision: it stays). **The third
+  whole message (§15F, since 2026-11-19); the deep pass reads its first
+  1,500 characters (`limits.DEEP_PASS_QUESTION`): the end of a message
+  longer than that reaches neither pass but `last_words` (the main
+  session's decision: it stays). **The third
   review's items 2 and 3 (2026-11-18)**: a request to remember earns
   `user_explicit` only when the whole message is the user's plain words
   (`own_words.is_plain`: own_words drops nothing, no source named, "this
@@ -2185,8 +2236,8 @@ four injected were noise.
   the threat is text the user pasted, and the change log is the net. The
   quick pass (`extract_beliefs_heuristic`),
   `is_remember_request` and `provenance.agent_write_source` read through
-  it; the turn keeps the whole message and the deep pass reads it (to the
-  episode's 4,000 characters) at
+  it; the turn keeps the whole message and the deep pass reads it (its
+  first 1,500 characters) at
   an inference's trust. "Translate to French: My name is Pierre" stored the
   user's name as Pierre at `user_stated`, and a document beside a "remember
   this" could earn `user_explicit`. The quick pass no longer reads "I need

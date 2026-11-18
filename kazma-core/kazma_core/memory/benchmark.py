@@ -611,7 +611,9 @@ def _score_extraction(turns: list[dict[str, Any]], extracted: dict[str, list[dic
 def _llm_blob(user_text: str) -> str:
     """The user message ``belief_extractor._llm_extract`` sends for a turn
     with no vocabulary (the benchmark asks with none)."""
-    return f"User: {user_text[:1500]}\nAssistant: "
+    from kazma_core.memory.limits import DEEP_PASS_QUESTION
+
+    return f"User: {user_text[:DEEP_PASS_QUESTION]}\nAssistant: "
 
 
 class _ReplayClient:

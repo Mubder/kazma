@@ -42,7 +42,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
-from kazma_core.memory.episode_text import display_text, is_small_talk, match_text
+from kazma_core.memory.episode_text import display_parts, is_small_talk, match_text, more_note
+from kazma_core.memory.limits import KEYWORD_HIT_CHARS
 from kazma_core.memory.vector_engine import BELIEF_ACTIVE_SQL, RECALLABLE_TIERS
 
 logger = logging.getLogger(__name__)
@@ -545,10 +546,24 @@ def _backend_search(
         return []
 
 
-def _state_episode_texts(row: dict[str, Any]) -> tuple[str, str]:
-    """(match text, display text) of a mirrored episode, as :func:`_episode_texts` locally."""
+def _shown(user_text: Any, assistant_text: Any, summary_text: Any) -> dict[str, Any]:
+    """An episode's display (``episode_text.display_parts``) and, when the
+    display leaves some of it out, how many characters (``more``): the recall
+    block says so after it, with how to read the rest (``memory_read``)."""
+    text, more = display_parts(user_text, assistant_text, summary_text)
+    return {"display": text, **({"more": more} if more else {})}
+
+
+def _candidate_shown(user_text: Any, assistant_text: Any, summary_text: Any) -> dict[str, Any]:
+    """:func:`_shown` as a :class:`_Candidate`'s fields."""
+    text, more = display_parts(user_text, assistant_text, summary_text)
+    return {"display": text, "more": more}
+
+
+def _state_episode_texts(row: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """(match text, display fields) of a mirrored episode, as :func:`_episode_texts` locally."""
     sides = (row.get("user_text"), row.get("assistant_text"), row.get("summary_text"))
-    return match_text(*sides), display_text(*sides)
+    return match_text(*sides), _shown(*sides)
 
 
 def _locally_forgotten(rows: dict[str, dict[str, Any]], *, tenant_id: str) -> set[str]:
@@ -664,8 +679,8 @@ def _pg_primary_episodes(
                 by_meaning=eid in by_meaning,
                 content=match_text(row.get("user_text"), row.get("assistant_text"),
                                    row.get("summary_text")),
-                display=display_text(row.get("user_text"), row.get("assistant_text"),
-                                     row.get("summary_text")),
+                **_candidate_shown(row.get("user_text"), row.get("assistant_text"),
+                                   row.get("summary_text")),
             )
         )
     ranked = _rank_by_evidence(
@@ -958,7 +973,7 @@ def _merge_remote_state_hits(
                 "tier": row.get("tier"),
                 "remote_state": True,
                 "strength": "weak",
-                "display": shown,
+                **shown,
             }
             if explain:
                 meta["sources"] = ["postgres_state"]
@@ -1321,7 +1336,7 @@ def _recall_episodes(
         text, shown = _episode_texts(conn, hit.id)
         if text:
             meta = dict(hit.metadata or {})
-            meta["display"] = shown
+            meta.update(shown)
             if explain:
                 meta["sources"] = list(dict.fromkeys(sources.get(hit.id) or [hit.source or ""]))
             out.append(
@@ -1415,6 +1430,7 @@ class _Candidate:
     content: str = ""  # what recall compares it by, when the caller already has it
     standing: float = 0.0  # a belief's importance x confidence x trust
     display: str = ""  # what the model is shown, when it differs (an episode's both sides)
+    more: int = 0  # characters of an episode its display leaves out
 
 
 def _question_background(dense_scores: Iterable[float]) -> float:
@@ -1509,6 +1525,7 @@ def _rank_by_evidence(
                 "evidence": round(ev, 4),
                 "strength": "strong" if ev >= strong else "weak",
                 **({"display": cand.display} if cand.display else {}),
+                **({"more": cand.more} if cand.more else {}),
             },
         )
         for cand, ev, lift, cov in kept
@@ -1823,7 +1840,7 @@ def _episode_fts(
         return _episode_word_fallback(conn, query, tenant_id, limit)
     hits: list[RecallHit] = []
     for r in rows:
-        text = (r["user_text"] or r["assistant_text"] or "")[:300]
+        text = (r["user_text"] or r["assistant_text"] or "")[:KEYWORD_HIT_CHARS]
         # bm25: more negative = better match -> invert for higher-is-better
         bm = float(r["rank"] if r["rank"] is not None else 0.0)
         score = max(0.0, -bm) if bm < 0 else 1.0 / (1.0 + abs(bm))
@@ -1834,8 +1851,7 @@ def _episode_fts(
                 score=score if score > 0 else 0.01,
                 source="fts5",
                 metadata={"tier": r["tier"], "bm25": bm,
-                          "display": display_text(r["user_text"], r["assistant_text"],
-                                                  r["summary_text"])},
+                          **_shown(r["user_text"], r["assistant_text"], r["summary_text"])},
             )
         )
     return hits
@@ -1883,12 +1899,11 @@ def _episode_word_fallback(
         hits.append(
             RecallHit(
                 id=r["id"],
-                content=(r["user_text"] or r["assistant_text"] or "")[:300],
+                content=(r["user_text"] or r["assistant_text"] or "")[:KEYWORD_HIT_CHARS],
                 score=1.0 / (len(hits) + 1),
                 source="fts_like",
                 metadata={"tier": r["tier"],
-                          "display": display_text(r["user_text"], r["assistant_text"],
-                                                  r["summary_text"])},
+                          **_shown(r["user_text"], r["assistant_text"], r["summary_text"])},
             )
         )
         if len(hits) >= limit:
@@ -2424,8 +2439,8 @@ def _dedup_gate(hits: list[RecallHit]) -> list[RecallHit]:
     return list(seen.values())
 
 
-def _episode_texts(conn: sqlite3.Connection, episode_id: str) -> tuple[str, str]:
-    """An episode's (match text, display text); empty when it is gone.
+def _episode_texts(conn: sqlite3.Connection, episode_id: str) -> tuple[str, dict[str, Any]]:
+    """An episode's (match text, display fields); empty when it is gone.
 
     Recall compares and de-duplicates by the first and shows the second
     (``memory/episode_text.py``).
@@ -2436,11 +2451,11 @@ def _episode_texts(conn: sqlite3.Connection, episode_id: str) -> tuple[str, str]
             (episode_id,),
         ).fetchone()
     except Exception:
-        return "", ""
+        return "", {}
     if not row:
-        return "", ""
+        return "", {}
     sides = (row["user_text"], row["assistant_text"], row["summary_text"])
-    return match_text(*sides), display_text(*sides)
+    return match_text(*sides), _shown(*sides)
 
 
 # ── Formatting ────────────────────────────────────────────────────────────
@@ -2529,6 +2544,11 @@ def format_recall_block(
 
     def _line(h: RecallHit) -> str:
         shown = _one_line(shown_text(h))
+        more = int((h.metadata or {}).get("more") or 0)
+        if more:
+            # A memory is kept whole and shown bounded: how much is left out,
+            # and the tool that reads it (memory/limits.py).
+            shown = f"{shown} {more_note(more, h.id, shown)}"
         tag = _reading_tag(h)
         if tag:
             # Before the value, where nothing the value holds can push it away.
@@ -2625,7 +2645,10 @@ def format_recall_block(
         "- A recalled task/delivery note reflects a past state. If it looks "
         "actionable, verify with live tools first (scheduled jobs, the live "
         "thread); when recall is the only source, ask the user instead of "
-        "acting.\n\n"
+        "acting.\n"
+        "- A memory that ends with \"not shown: memory_read(...)\" is shown "
+        "in part; read it whole with memory_read before relying on what it "
+        "leaves out.\n\n"
     )
     return rules + format_untrusted_block(body, source=fence_source)
 

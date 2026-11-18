@@ -3014,4 +3014,45 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "تصفية المعتقدات المعروفة",
         "en": "Filter known beliefs",
     },
+    # A memory kept whole, shown bounded (2026-11-19, memory/limits.py).
+    "memory.console.whole_memory": {
+        "ar": "الذاكرة كاملة",
+        "en": "The whole memory",
+    },
+    "memory.console.more_chars.zero": {
+        "ar": "لا أحرف أخرى",
+        "en": "{n} more characters",
+    },
+    "memory.console.more_chars.one": {
+        "ar": "حرف واحد آخر",
+        "en": "1 more character",
+    },
+    "memory.console.more_chars.two": {
+        "ar": "حرفان آخران",
+        "en": "{n} more characters",
+    },
+    "memory.console.more_chars.few": {
+        "ar": "{n} أحرف أخرى",
+        "en": "{n} more characters",
+    },
+    "memory.console.more_chars.many": {
+        "ar": "{n} حرفًا آخر",
+        "en": "{n} more characters",
+    },
+    "memory.console.more_chars.other": {
+        "ar": "{n} حرف آخر",
+        "en": "{n} more characters",
+    },
+    "memory.console.whole_next": {
+        "ar": "اعرض الجزء التالي",
+        "en": "Show the next part",
+    },
+    "memory.console.whole_failed": {
+        "ar": "تعذّرت قراءة الذاكرة. لم تُحذف.",
+        "en": "The memory could not be read. It is not gone.",
+    },
+    "memory.console.whole_range": {
+        "ar": "الأحرف من {start} إلى {end} من أصل {total}",
+        "en": "Characters {start}-{end} of {total}",
+    },
 }
