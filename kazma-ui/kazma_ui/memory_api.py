@@ -1269,8 +1269,11 @@ async def link_entities(request: Request) -> dict[str, Any]:
 
 def _link_entities_sync(body: Any) -> dict[str, Any]:
     """Blocking half of :func:`link_entities` — runs off the event loop."""
-    subject = str((body or {}).get("subject") or "").strip()
-    predicate = str((body or {}).get("predicate") or "related_to").strip()
+    from kazma_core.memory.fact_names import users_names
+
+    # The user's facts go by Kazma's names, as from every other writer.
+    subject, predicate = users_names(str((body or {}).get("subject") or "").strip(),
+                                     str((body or {}).get("predicate") or "related_to").strip())
     obj = str((body or {}).get("object") or "").strip()
     if not subject or not obj:
         return {"ok": False, "error": "subject and object required"}

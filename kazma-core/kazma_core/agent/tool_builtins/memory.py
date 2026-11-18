@@ -476,12 +476,12 @@ def register_memory_tools(registry: Any) -> None:
         import sqlite3
 
         from kazma_core.memory.belief_mutation import mutate_belief
+        from kazma_core.memory.fact_names import users_names
         from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
         from kazma_core.paths import memory_ops_db, primary_memory_db
         from kazma_core.safety.hitl import get_current_tenant_id
 
-        sub = (subject or "").strip()
-        pred = (predicate or "related_to").strip() or "related_to"
+        sub, pred = users_names((subject or "").strip(), (predicate or "related_to").strip() or "related_to")
         object_ = (obj or "").strip()
         if not sub or not object_:
             raise RefusedBeforeEffect("Error: subject and object required")
@@ -731,12 +731,15 @@ def register_memory_tools(registry: Any) -> None:
             current = parse_current_facts(text, meta)
             actions: list[dict] = []
             if current:
+                from kazma_core.memory.fact_names import users_names
+
                 for fact in current:
+                    subject, predicate = users_names(fact.get("subject") or "user", fact["predicate"])
                     actions.append(
                         mutate_belief(
                             primary,
-                            fact.get("subject") or "user",
-                            fact["predicate"],
+                            subject,
+                            predicate,
                             fact["object"],
                             ops_conn=ops,
                             predicate_type=fact.get("predicate_type") or "functional",

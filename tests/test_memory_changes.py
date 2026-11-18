@@ -692,6 +692,45 @@ def test_undo_of_a_list_replacement_brings_back_every_entry(mem):
     assert _jobs(mem) == ["Acme", "Initech"]
 
 
+def _said_again(mem, job: str) -> None:
+    """The user adds *job* again, beside the new value, after the update."""
+    mutate_belief(mem.db, "user", "works_at", job, predicate_type="set", extraction_method="user_stated",
+                  source_session="s1", source_turn=6, now=time.time() + 5)
+
+
+@pytest.mark.parametrize("again", ["Acme", "acme", "ACME "])
+def test_undo_leaves_closed_an_entry_the_user_has_said_again(mem, again):
+    """The main session's check of the third review, fix 5: undo reopened a
+    closed entry the user had added again since, and it stood twice."""
+    change_id = _replace_a_list(mem)
+    _said_again(mem, again)
+    out = changes.undo(mem.db, change_id, tenant_id="default")
+    assert sorted(j.casefold().strip() for j in _jobs(mem)) == ["acme", "initech"], _jobs(mem)
+    assert len(out["already_held"]) == 1
+
+
+def test_undo_leaves_the_old_fact_closed_when_the_user_said_it_again(mem):
+    now = time.time()
+    for turn, job in enumerate(("Acme", "Initech"), start=1):
+        mutate_belief(mem.db, "user", "works_at", job, predicate_type="set", extraction_method="user_stated",
+                      source_session="s1", source_turn=turn, now=now - 600 + turn)
+    mutate_belief(mem.db, "user", "works_at", "Globex", predicate_type="functional",
+                  extraction_method="user_stated", source_session="s1", source_turn=5, now=now)
+    (change,) = [c for c in changes.list_changes(mem.db, tenant_id="default") if c["kind"] == "update"]
+    old = mem.db.execute("SELECT object FROM beliefs WHERE id = ?", (change["old_belief_id"],)).fetchone()[0]
+    _said_again(mem, old)
+    changes.undo(mem.db, change["id"], tenant_id="default")
+    assert sorted(_jobs(mem)) == ["Acme", "Initech"]
+
+
+def test_control_undo_without_the_check_makes_the_entry_twice(mem, monkeypatch):
+    monkeypatch.setattr(changes, "_held_again", lambda conn, belief_id, tenant: False)
+    change_id = _replace_a_list(mem)
+    _said_again(mem, "acme")
+    changes.undo(mem.db, change_id, tenant_id="default")
+    assert _jobs(mem) == ["Acme", "Initech", "acme"]
+
+
 def test_control_undo_without_the_closed_entries_brings_back_one(mem, monkeypatch):
     monkeypatch.setattr(changes, "_also_closed", lambda conn, change_id, tenant: [])
     changes.undo(mem.db, _replace_a_list(mem), tenant_id="default")

@@ -166,11 +166,33 @@ def test_a_new_job_in_arabic_waits_for_the_user(mem, monkeypatch):
     ("hometown", "lives_in"), ("location", "lives_in"), ("city", "lives_in"), ("current_location", "lives_in"),
     ("address", "lives_in"), ("moved_to", "lives_in"), ("lives-in", "lives_in"), ("lives in", "lives_in"),
     ("first_name", "name_is"), ("user_name", "name_is"),
+    # The main session's check, fix 4: any separator, and camel case.
+    ("home town", "lives_in"), ("lives.in", "lives_in"), ("livesIn", "lives_in"),
+    ("currentLocation", "lives_in"), ("Home-City", "lives_in"), ("homeTown", "lives_in"),
+    ("jobTitle", "current_role"), ("works/for", "works_at"), ("Full Name", "name_is"),
 ])
 def test_the_third_reviews_names_are_kazmas(name, kazma):
-    from kazma_core.memory.fact_names import canonical_for_user
+    from kazma_core.memory.fact_names import _canonical_for_user, users_predicate
 
-    assert canonical_for_user(name) == kazma
+    assert _canonical_for_user(name) == kazma
+    assert users_predicate("User", name) == kazma and users_predicate("acme", name) == name
+
+
+@pytest.mark.parametrize("name", ["homes", "homeTowns", "home towns", "Employers", "jobTitles"])
+def test_a_plural_in_any_spelling_stays_a_list(name):
+    from kazma_core.memory.fact_names import _canonical_for_user, plural_of_a_kind
+
+    assert _canonical_for_user(name) == name and plural_of_a_kind(name)
+
+
+def test_control_the_old_separator_rule_misses_the_spellings(monkeypatch):
+    """Negative control: eef80e49c's rule (hyphens and spaces only)."""
+    from kazma_core.memory import fact_names
+
+    monkeypatch.setattr(fact_names, "_normalised", lambda predicate: "_".join(predicate.replace("-", " ").split()))
+    missed = [n for n in ("home town", "lives.in", "livesIn", "currentLocation")
+              if fact_names._canonical_for_user(n) == n]
+    assert missed == ["lives.in", "livesIn", "currentLocation"]
 
 
 def test_a_capital_user_is_the_user(mem, monkeypatch):
@@ -183,7 +205,8 @@ def test_a_capital_user_is_the_user(mem, monkeypatch):
 
 
 def test_control_without_the_case_the_models_user_is_someone_else(mem, monkeypatch):
-    monkeypatch.setattr("kazma_core.memory.belief_extractor._as_the_user", lambda subject: subject)
+    # The fold and the map are one place (``fact_names``), for every writer.
+    monkeypatch.setattr("kazma_core.memory.fact_names.users_names", lambda subject, predicate: (subject, predicate))
     model = [{"subject": "User", "predicate": "home_city", "predicate_type": "functional", "object": "rotterdam"}]
     _deep_pass(mem, monkeypatch, value_first="Paris", then="We moved to Rotterdam last month.", model=model)
     assert _waiting(mem) == []
@@ -439,7 +462,7 @@ def test_control_a_reading_at_the_users_trust_replaced_each(mem, monkeypatch, pr
 
 
 def test_control_without_the_name_table_another_name_stands_beside(mem, monkeypatch):
-    monkeypatch.setattr("kazma_core.memory.fact_names.canonical_for_user", lambda predicate: predicate)
+    monkeypatch.setattr("kazma_core.memory.fact_names._canonical_for_user", lambda predicate: predicate)
     _deep_pass(mem, monkeypatch, value_first="Kuwait", then="We moved to Dubai last month.",
                model=[_fact("home_city", "dubai")])
     assert _facts(mem, "lives_in") == [("Kuwait", "user_stated")] and _facts(mem, "home_city") == [

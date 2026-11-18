@@ -1187,7 +1187,7 @@ def _asks(sentence: str) -> bool:
 
 #: Before a reporting verb, a denial: "I never said ...", "I didn't say ...".
 _NEGATIONS = frozenset({"never", "not", "didn't", "didnt", "don't", "dont", "doesn't", "doesnt", "won't",
-                        "wouldn't", "can't", "cant", "cannot", "never", "ما", "لم", "مو", "ابد", "ابدا"})
+                        "wouldn't", "can't", "cant", "cannot", "ما", "لم", "مو", "ابد", "ابدا"})
 #: Where a hypothetical starts: "If I live in Oslo, ...", "لو كنت ساكن ...".
 _SUPPOSING = frozenset({"if", "suppose", "supposing", "assuming", "imagine", "hypothetically", "lets", "let's",
                         "اذا", "لو", "فرضا", "افترض", "تخيل"})

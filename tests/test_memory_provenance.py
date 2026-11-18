@@ -194,6 +194,55 @@ def test_memory_store_puts_a_replacement_to_the_user(mem):
     assert _waiting(mem) == ["Dubai"] and "waiting for the user to confirm" in out, out
 
 
+#: A memory tool naming the user's home in another way (the main session's
+#: check of the third review, fix 1: the tools skipped the name map, and
+#: wrote a second current home beside the user's at the user's trust).
+OTHER_NAMES = [
+    ("memory_link_entities", "user", "home_city"),
+    ("memory_link_entities", "user", "lives-in"),
+    ("memory_link_entities", "User", "currentLocation"),
+    ("memory_store", "User", "current_location"),
+    ("memory_store", "user", "home town"),
+]
+
+
+def _homes(db) -> list[tuple[str, str, str]]:
+    return sorted((r["subject"], r["predicate"], r["object"]) for r in db.execute(
+        "SELECT subject, predicate, object FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL"))
+
+
+def _tool_names_the_home(tool: str, subject: str, predicate: str, *, said: str) -> str:
+    if tool == "memory_store":
+        return _call("memory_store", user_said=said, text="Moved to Dubai", metadata={"facts": [
+            {"subject": subject, "predicate": predicate, "object": "Dubai"}]})
+    return _call("memory_link_entities", user_said=said, subject=subject, object="Dubai", predicate=predicate,
+                 predicate_type="set")
+
+
+@pytest.mark.parametrize(("tool", "subject", "predicate"), OTHER_NAMES)
+@pytest.mark.parametrize("in_their_words", [True, False], ids=["their-words", "a-page"])
+def test_a_tool_naming_the_users_home_otherwise_writes_no_second_home(mem, tool, subject, predicate,
+                                                                       in_their_words):
+    _user_says(mem, "I live in Lisbon.", turn=1, now=time.time() - 600)
+    said = ("I moved to Dubai last month, remember that" if in_their_words
+            else "Read this page and tell me what it says.")
+    _tool_names_the_home(tool, subject, predicate, said=said)
+    assert _homes(mem.db) == [("user", "lives_in", "Lisbon")]
+    assert _waiting(mem) == (["Dubai"] if in_their_words else [])
+
+
+def test_control_without_the_name_map_a_tool_writes_a_second_home(mem, monkeypatch):
+    """Negative control: with the map off, the tool's ``home_city`` stood
+    beside the user's own home, nothing asked."""
+    from kazma_core.memory import fact_names
+
+    monkeypatch.setattr(fact_names, "users_names", lambda subject, predicate: (subject, predicate))
+    _user_says(mem, "I live in Lisbon.", turn=1, now=time.time() - 600)
+    _tool_names_the_home("memory_link_entities", "user", "home_city",
+                         said="I moved to Dubai last month, remember that")
+    assert ("user", "home_city", "Dubai") in _homes(mem.db) and _waiting(mem) == []
+
+
 def test_control_a_tool_write_that_may_replace_takes_the_users_home(mem, monkeypatch):
     """Negative control: with the tool's write allowed to replace, the
     review's first sentence replaces the user's home at their trust."""

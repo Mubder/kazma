@@ -471,7 +471,8 @@ Kazma** lists them:
 - **Changed from what you said.** You later said it plainly ("I live in
   Rotterdam now"): Kazma keeps the new value and shows the change, with
   **Undo**, which brings the earlier value back (every earlier value, when
-  it replaced a list such as two employers).
+  it replaced a list such as two employers; one you have said again since
+  is already there and is not added twice).
 - **Is this a change? Kazma kept the earlier fact.** A message Kazma reads
   as a correction only with its model ("We moved to Rotterdam last month",
   "No, Lisbon", "I'm visiting Dubai next week") does not replace your fact
@@ -490,9 +491,12 @@ Kazma** lists them:
   and does not ask: anything you say later replaces it. **This is right**
   makes it yours; **Not me** takes it out, and Kazma never files that value
   again (your own words still can). When a fact like this is recalled into a
-  conversation, it carries "(Kazma's reading)" ("(قراءة Kazma)" for an
+  conversation, it starts with "(Kazma's reading)" ("(قراءة Kazma)" for an
   Arabic fact), so the model knows you did not say it; so does any fact a
-  tool or the model wrote.
+  tool or the model wrote, and a fact whose source is not recorded (an
+  older one, or another install's) starts with "(source unknown)". Only
+  your own words go untagged. Each recalled fact is one line, whatever its
+  value holds.
 
 Kazma also tells you, once, in its next reply in the chat the change came
 from: what it changed, and at most one question a turn, never about the

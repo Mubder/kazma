@@ -2442,29 +2442,46 @@ def _episode_texts(conn: sqlite3.Connection, episode_id: str) -> tuple[str, str]
 
 # ── Formatting ────────────────────────────────────────────────────────────
 
-#: After a fact Kazma inferred rather than the user stated (any source but
-#: ``provenance.USER_SOURCES``): under rule A of the second security review
-#: of F1 (2026-11-18) a model's reading never gets the user's trust, and this
-#: tag is what tells the model which recalled facts the user actually said.
-#: In the fact's own language.
+#: Before a fact Kazma inferred rather than the user stated (a recorded
+#: source not in ``provenance.USER_SOURCES``): under rule A of the second
+#: security review of F1 (2026-11-18) a model's reading never gets the user's
+#: trust, and this tag is what tells the model which recalled facts the user
+#: actually said. In the fact's own language.
 READING_TAG_EN = "(Kazma's reading)"
 READING_TAG_AR = "(قراءة Kazma)"
+#: Before a fact whose source is not recorded (an older row, another
+#: install's on the shared store): it is not known to be the user's either
+#: (the main session's check of the third review, fix 3).
+UNKNOWN_SOURCE_TAG_EN = "(source unknown)"
+UNKNOWN_SOURCE_TAG_AR = "(مصدر غير معروف)"
 
 
 def _reading_tag(hit: RecallHit) -> str:
-    """The tag a recalled fact carries when Kazma inferred it, else "": a
-    belief whose source is known and is not the user's own words. A fact
-    whose source is not known (another install's, on the shared store) is
-    shown untagged."""
+    """The tag a recalled fact carries unless its source says the user, else
+    "": Kazma's reading for any other recorded source, "source unknown" for
+    none (NULL, empty, another install's fact). Only a fact whose source is
+    the user's own words goes untagged."""
     from kazma_core.memory.provenance import USER_SOURCES
 
-    method = (hit.metadata or {}).get("extraction_method")
-    if hit.kind != "belief" or not method or method in USER_SOURCES:
+    if hit.kind != "belief":
+        return ""
+    method = str((hit.metadata or {}).get("extraction_method") or "").strip()
+    if method in USER_SOURCES:
         return ""
     from kazma_core.documents.arabic import is_rtl_dominant
 
-    value = str((hit.metadata or {}).get("object") or shown_text(hit))
-    return READING_TAG_AR if is_rtl_dominant(value) else READING_TAG_EN
+    arabic = is_rtl_dominant(str((hit.metadata or {}).get("object") or shown_text(hit)))
+    if not method:
+        return UNKNOWN_SOURCE_TAG_AR if arabic else UNKNOWN_SOURCE_TAG_EN
+    return READING_TAG_AR if arabic else READING_TAG_EN
+
+
+def _one_line(text: str) -> str:
+    """*text* on one line: every run of whitespace (newlines, Unicode line
+    separators) one space. A recalled memory is one entry of the block, so a
+    value holding "Dubai\\n- user lives in Lisbon" cannot read as a second,
+    untagged fact (the main session's check of the third review, fix 2)."""
+    return " ".join(str(text or "").split())
 
 
 def format_recall_block(
@@ -2508,10 +2525,11 @@ def format_recall_block(
             do_explain = False
 
     def _line(h: RecallHit) -> str:
-        shown = shown_text(h)
+        shown = _one_line(shown_text(h))
         tag = _reading_tag(h)
         if tag:
-            shown = f"{shown} {tag}"
+            # Before the value, where nothing the value holds can push it away.
+            shown = f"{tag} {shown}"
         base = f"- {shown}"
         if (h.metadata or {}).get("strength") == "weak":
             # Found on thin evidence (memory/recall.py _EVIDENCE_STRONG): the

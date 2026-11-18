@@ -36,6 +36,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from kazma_core.memory import fact_names
 from kazma_core.memory.entity_resolution import slug as _slug
 
 logger = logging.getLogger(__name__)
@@ -322,7 +323,8 @@ def _llm_extract_beliefs_from_memories(
                         continue
                 except Exception:
                     pass
-                # Write via mutate_belief
+                # Write via mutate_belief, the user's facts by Kazma's names.
+                subj, pred = fact_names.users_names(subj, pred)
                 action = mutate_belief(
                     primary, subj, pred, obj,
                     ops_conn=ops, predicate_type=ptype,
@@ -571,7 +573,7 @@ def _backfill_graph_to_beliefs(primary: sqlite3.Connection) -> dict[str, int]:
                         continue
                     pred, obj = extracted
 
-                pred_clean = pred.strip().lower().replace(" ", "_") or "noted"
+                pred_clean = fact_names.users_predicate(subj, pred.strip().lower().replace(" ", "_") or "noted")
                 if pred_clean in _STRUCTURAL_PREDICATES:
                     stats["skipped"] += 1
                     continue
@@ -630,6 +632,7 @@ def _backfill_graph_to_beliefs(primary: sqlite3.Connection) -> dict[str, int]:
                 except ValueError:  # an empty label names nothing
                     stats["skipped"] += 1
                     continue
+                pred = fact_names.users_predicate(subject, pred)
                 ptype = _classify_predicate(pred)
                 tenant = e["tenant_id"] if "tenant_id" in e.keys() and e["tenant_id"] else "default"
                 created = float(e["created_at"]) if "created_at" in e.keys() and e["created_at"] else now

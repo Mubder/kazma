@@ -324,8 +324,11 @@ def confirm(
         raise ChangeRefusedError("not_open")
     if row["kind"] == READING and not _current(conn, row["new_belief_id"], tenant):
         raise ChangeRefusedError("replaced_since")  # the model read something else since
+    from kazma_core.memory.fact_names import users_names
+
+    subject, predicate = users_names(row["subject"], row["predicate"])  # recorded so already; one rule
     result = mutate_belief(
-        conn, row["subject"], row["predicate"], row["new_value"], predicate_type="functional",
+        conn, subject, predicate, row["new_value"], predicate_type="functional",
         confidence=1.0, importance=4, extraction_method="user_explicit", tenant_id=tenant,
         source_session=row["source_session"], source_turn=row["source_turn"],
         confirms_change=(change_id, actor), private=private,
@@ -408,6 +411,22 @@ def _also_closed(conn: sqlite3.Connection, change_id: str, tenant: str) -> list[
     return [str(i) for i in ids if i] if isinstance(ids, list) else []
 
 
+def _held_again(conn: sqlite3.Connection, belief_id: str, tenant: str) -> bool:
+    """Whether a current fact of the same subject and name holds the closed
+    fact *belief_id*'s value, written any way (``belief_mutation._same_value``):
+    the user said it again after the update (the main session's check of the
+    third review, fix 5)."""
+    from kazma_core.memory.belief_mutation import _same_value
+
+    closed = conn.execute("SELECT subject, predicate, object FROM beliefs WHERE id = ? AND tenant_id = ?",
+                          (belief_id, tenant)).fetchone()
+    if closed is None or not str(closed[2] or ""):
+        return False
+    return any(_same_value(current[0], closed[2]) for current in conn.execute(
+        "SELECT object FROM beliefs WHERE tenant_id = ? AND subject = ? AND predicate = ? AND id != ? "
+        "AND valid_until IS NULL AND invalidated_at IS NULL", (tenant, closed[0], closed[1], belief_id)))
+
+
 def undo(
     conn: sqlite3.Connection, change_id: str, *, tenant_id: str, actor: str = "user",
     ops_conn: sqlite3.Connection | None = None,
@@ -442,13 +461,17 @@ def undo(
             now = time.time()
             beliefs_write(conn, "UPDATE beliefs SET valid_until = ?, invalidated_at = ? WHERE id = ? "
                           "AND tenant_id = ?", (now, now, row["new_belief_id"], tenant))
-            beliefs_write(conn, "UPDATE beliefs SET valid_until = NULL, invalidated_at = NULL WHERE id = ? "
-                          "AND tenant_id = ?", (row["old_belief_id"], tenant))
-            # The user's other list entries the update closed with it: every
-            # one back, never one forgotten since (its value emptied).
-            for other in _also_closed(conn, change_id, tenant):
+            # The old fact and the user's other list entries the update closed
+            # with it: every one back, never one forgotten since (its value
+            # emptied), nor one the user has said again since (it is current
+            # already; reopened, it would stand twice).
+            already_held = []
+            for closed in (row["old_belief_id"], *_also_closed(conn, change_id, tenant)):
+                if _held_again(conn, closed, tenant):
+                    already_held.append(closed)
+                    continue
                 beliefs_write(conn, "UPDATE beliefs SET valid_until = NULL, invalidated_at = NULL WHERE id = ? "
-                              "AND tenant_id = ? AND COALESCE(object, '') != ''", (other, tenant))
+                              "AND tenant_id = ? AND COALESCE(object, '') != ''", (closed, tenant))
             _decide(conn, change_id, tenant, "undone", actor, now)
             conn.commit()
             committed = True
@@ -462,7 +485,7 @@ def undo(
         actor=str(actor or "user")[:120], reason=f"undo of change {change_id}",
         state_before={"id": row["new_belief_id"]}, state_after={"id": row["old_belief_id"]},
     )
-    return {"ok": True, "change_id": change_id, "restored": row["old_belief_id"]}
+    return {"ok": True, "change_id": change_id, "restored": row["old_belief_id"], "already_held": already_held}
 
 
 def forget_facts(conn: sqlite3.Connection, fact_ids: list[str]) -> int:

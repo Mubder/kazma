@@ -2235,10 +2235,27 @@ four injected were noise.
   as the first of its kind it is Kazma's reading, never a question -- not
   sticky, since any later statement of the user's replaces it. The user's
   facts go by Kazma's names before the write
-  (`memory/fact_names.py`, `canonical_for_user`: "home_city", "located_in",
+  (`memory/fact_names.py`, `_canonical_for_user`: "home_city", "located_in",
   "resides_in" -> "lives_in"; employer, role, name, preferred name; subject
   `user` only; a plural is a list -- the first layer of F4's table, which
-  grows to forty names after the owner's review). The user's own word for a
+  grows to forty names after the owner's review). **One helper, every
+  writer** (the main session's check of the third review, fixes 1 and 4):
+  `fact_names.users_names` ("User" is the user, and the user's facts go by
+  Kazma's names) is called before `mutate_belief` by the deep pass, the
+  memory tools, the Memory page's link, a confirmed change and the V1
+  backfill (its own inserts too), so a memory tool's `home_city` or
+  `current_location` meets the user's home as one fact; a name is read in
+  snake case whatever its separators or case first (`_normalised`: "home
+  town", "lives.in", "livesIn", "currentLocation"). Gate:
+  `tests/test_user_fact_names_every_writer.py` (every function that calls
+  `mutate_belief` or inserts into `beliefs` calls the map or is declared
+  with why -- the hub's anchor, the two eval fixtures, `_insert_belief`; a
+  planted writer as the control). The retrieval benchmark's fixture seeds
+  the dataset's names as they are: seeded through the map, its "job_title"
+  and "name" facts become `current_role` / `name_is` and recall loses
+  "what is it that I do for a living?" (noise hit rate 1.0 -> 0.67,
+  measured with bge-m3's own vectors), a cost the deep pass's naming
+  already has live; the owner decides the dataset. The user's own word for a
   value the model read raises it to the user's trust
   (`belief_mutation`'s same-value branch). Every product call that applies
   extracted facts names `user_text` (the two forwarders aside). "The same
@@ -2253,14 +2270,19 @@ four injected were noise.
   "Not me" as negative controls; every applier call names its message),
   `tests/test_memory_provenance.py` (the same-turn exception as the
   control), and the write scenarios (v4). **Recall says which facts the user
-  did not state**: in the recall block a fact whose `extraction_method` is
-  known and not in `provenance.USER_SOURCES` carries "(Kazma's reading)", or
-  "(قراءة Kazma)" for an Arabic value (`recall.READING_TAG_EN`,
-  `READING_TAG_AR`); the Postgres-primary path reads the source from this
-  install's copy (`recall._add_local_methods`; another install's fact is
-  shown untagged). Recall's ranking is unchanged (the benchmark's 103 scores
-  equal). Gate: `tests/test_memory_recall_reading_tag.py` (the hydrate
-  without the source as the negative control).
+  did not state**: in the recall block only a fact whose `extraction_method`
+  is in `provenance.USER_SOURCES` goes untagged. Any other recorded source
+  starts its line with "(Kazma's reading)", or "(قراءة Kazma)" for an
+  Arabic value (`recall.READING_TAG_EN`, `READING_TAG_AR`); no recorded
+  source (NULL, empty, another install's fact) with "(source unknown)" /
+  "(مصدر غير معروف)" (`UNKNOWN_SOURCE_TAG_EN`, `UNKNOWN_SOURCE_TAG_AR`). The tag comes BEFORE
+  the value and every entry is one line (`recall._one_line`): after it, a
+  value holding a line break ended the line untagged (fixes 2 and 3). The
+  Postgres-primary path reads the source from this install's copy
+  (`recall._add_local_methods`). Recall's ranking is unchanged (the
+  benchmark's 103 scores equal). Gate: `tests/test_memory_recall_reading_tag.py`
+  (the tag after the value, the rule that left an unknown source untagged,
+  and the hydrate without the source as negative controls).
 - **A fact the user stated changes only in ways the user can see and take
   back** (2026-11, the audit's F1, second half; `memory/changes.py`, table
   `memory_changes` in `memory_state.db`). An **update**: a `user_*` fact
@@ -2293,13 +2315,15 @@ four injected were noise.
   change per value; an update supersedes them; one open 30 days
   expires; the newest 200 decided ones are kept per tenant. An update that
   closed the user's other list entries with its fact records them
-  (`also_closed`), and undo reopens every one (the third review, item 4).
+  (`also_closed`), and undo reopens every one (the third review, item 4),
+  except one whose value the user has said again since
+  (`changes._held_again`, `_same_value`: it is current already; fix 5).
   **A memory tool follows rule A on replacement** (item 1): its subject and
   fact name are the model's even when the value is the user's, so its write
   passes `mutate_belief(replaces_users_fact=False)`; one that would replace
   a fact the user stated is put to the user as a pending change
   (`tool_builtins/memory._put_to_the_user`), one that only adds stays as it
-  was. The model's "User" is the user (`belief_extractor._as_the_user`); a
+  was. The model's "User" is the user (`fact_names.users_names`); a
   list-labelled value on a fact the user keeps single takes the user's
   row's class (`belief_mutation._established_kind`); the name table also
   reads "hometown", "location", "city", "current_location", "address",
