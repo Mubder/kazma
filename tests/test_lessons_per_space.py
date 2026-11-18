@@ -14,7 +14,11 @@ everyone's prompts. Once Spaces is enforced each space has its own, and:
   own space.
 
 An install that does not enforce Spaces has one Soul, whatever tenant a turn
-runs for, exactly as before: that is each rule's negative control.
+runs for, exactly as before. Every install reads it the same way: one
+current, fenced copy per call, added by the supervisor, nothing baked into
+the base prompt (S1-10 review). The tests named ``control`` take a guard out
+(or rebuild the old order) and show what it stops; the ``without_spaces``
+tests show that an install which does not enforce Spaces keeps its one Soul.
 """
 
 from __future__ import annotations
@@ -25,9 +29,13 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
+from kazma_core.memory import recall as _recall
 from kazma_core.skills import self_improvement as si
 from kazma_core.spaces import identity, scope
 from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, OWNER_SPACE_ID
+
+#: The real recall search (the fixture stubs it; one test puts it back).
+_REAL_SEARCH = _recall.search
 
 A, B = "alpha", "beta"
 BASE = "BASE-PROMPT-MARKER: you are Kazma."
@@ -40,9 +48,11 @@ class _Refiner:
     def __init__(self) -> None:
         self.answer = LESSON_A
         self.calls = 0
+        self.prompts: list[str] = []
 
     async def chat(self, messages):
         self.calls += 1
+        self.prompts.append("\n".join(str(m.get("content", "")) for m in messages))
         return SimpleNamespace(content=self.answer)
 
 
@@ -85,7 +95,7 @@ def _in(space: str):
 
 
 def _lessons(space: str) -> list[str]:
-    return si._lessons(si.get_agent_evolution_block(space=space))[1]
+    return si._lessons(si._agent_evolution_block(space=space))[1]
 
 
 # ── learning: the real hand-off ──────────────────────────────────────────
@@ -133,7 +143,7 @@ def test_a_turn_teaches_the_soul_of_its_own_space(env) -> None:
     assert held[A]["agents"]["supervisor"]["history"][-1]["source"] == {"chat": thread, "turn": 1}
 
 
-def test_control_without_spaces_there_is_one_soul_whatever_the_turns_tenant(env) -> None:
+def test_without_spaces_there_is_one_soul_whatever_the_turns_tenant(env) -> None:
     env.mp.setattr(scope, "_enforced", False)
     _close(A)  # a turn of an older multi-user tenant
     assert _lessons(A) == _lessons(B) == _lessons(OWNER_SPACE_ID) == [LESSON_A]
@@ -167,7 +177,7 @@ def test_a_lesson_is_learned_as_a_whole_scope(env) -> None:
     assert set(seen) == {scope.Scope(A, "sara"), scope.Scope(B, OWNER_ACCOUNT_ID)}
 
 
-def test_control_a_lesson_task_bound_by_its_tenant_alone_is_refused(env) -> None:
+def test_control_a_lesson_task_bound_by_its_tenant_alone_is_refused(env) -> None:  # the old binding
     """The binding S1-10 first wrote: the tenant alone, a half scope."""
     from kazma_core.tenant_context import tenant_scope
 
@@ -182,6 +192,35 @@ def test_control_a_lesson_task_bound_by_its_tenant_alone_is_refused(env) -> None
     env.mp.setattr(si, "_learn_from_turn", as_it_was)
     _close(A)
     assert "refused" in seen
+
+
+def test_the_refiner_recalls_the_memory_of_the_turns_own_space(env, memory_db) -> None:
+    """A real recall, not a stub: the lesson task of a turn of A asks memory
+    as A, and the refiner is shown A's memory and never B's."""
+    env.mp.setattr(_recall, "search", _REAL_SEARCH)
+    for space, word in ((A, "alphaword"), (B, "betaword")):
+        _remembered(space, f"plant-{space}", 1, f"zebra quokka pipeline supervisor {word}")
+    _close(A, question="zebra quokka")
+    [prompt] = env.refiner.prompts
+    assert "alphaword" in prompt and "betaword" not in prompt
+
+
+def test_control_a_lesson_task_with_nothing_bound_shows_the_refiner_no_memory(env, memory_db) -> None:
+    """The task as it ran before S1-10 bound it: in the context close_turn
+    left, nothing bound. The search is refused, quietly (DEBUG), and the
+    refiner sees no memory at all."""
+    env.mp.setattr(_recall, "search", _REAL_SEARCH)
+    _remembered(A, "plant-a", 1, "zebra quokka pipeline supervisor alphaword")
+
+    async def as_it_was(question, answer, *, session, turn, tenant_id, asker=None):
+        return await si.analyze_and_apply_chat_turn(
+            user_message=question, success=True, output_snippet=answer[:600],
+            source={"chat": session, "turn": turn}, space=tenant_id)
+
+    env.mp.setattr(si, "_learn_from_turn", as_it_was)
+    _close(A, question="zebra quokka")
+    [prompt] = env.refiner.prompts
+    assert "alphaword" not in prompt
 
 
 def test_the_account_a_spaces_own_work_acts_for(env) -> None:
@@ -202,16 +241,75 @@ def test_the_account_a_spaces_own_work_acts_for(env) -> None:
 
 
 def test_two_spaces_taught_one_after_another_keep_both_souls(env) -> None:
+    """One after another only: what this shows is that each space's lessons
+    are kept apart in the one document. What another process writing at the
+    same time does is the next test's."""
     assert si.apply_agent_mutation("supervisor", LESSON_A, space=A)
     assert si.apply_agent_mutation("supervisor", LESSON_B, space=B)
     assert si.apply_agent_mutation("supervisor", LESSON_OWNER, space=OWNER_SPACE_ID)
     assert (_lessons(A), _lessons(B), _lessons(OWNER_SPACE_ID)) == ([LESSON_A], [LESSON_B], [LESSON_OWNER])
 
 
+#: What another process writes while this one is between its read and its
+#: write: a lesson of its own, in the same space.
+OTHER = "Another process's lesson: dates as YYYY-MM-DD."
+
+
+def _another_process_writes_first(env, key: str, space: str) -> None:
+    """Every ``atomic_update`` of *key* starts with another process's lesson
+    written just before it (``_agent_evo_lock`` is this process's alone)."""
+    store = env.store
+    real = store.atomic_update
+
+    def other_lesson(value):
+        doc = value if isinstance(value, dict) else {}
+        target = doc if space == OWNER_SPACE_ID else doc.setdefault("spaces", {}).setdefault(space, {})
+        entry = target.setdefault("agents", {}).setdefault("supervisor", {"soul": "", "history": []})
+        base, lessons = si._lessons(entry.get("soul") or "")
+        entry["soul"] = si._render(base, [*lessons, OTHER])
+        return doc
+
+    def slipped_in(k, updater, *args, **kwargs):
+        if k == key:
+            real(k, other_lesson)
+        return real(k, updater, *args, **kwargs)
+
+    env.mp.setattr(store, "atomic_update", slipped_in)
+
+
+@pytest.mark.parametrize("space", [A, OWNER_SPACE_ID])
+def test_a_lesson_written_by_another_process_meanwhile_is_kept(env, space) -> None:
+    """The read is inside the store's one step: another process's lesson,
+    written after this one began, is read and kept (one space's document, the
+    owner's key)."""
+    key = si._AGENT_EVO_KEY if space == OWNER_SPACE_ID else si._SPACE_EVO_KEY
+    assert si.apply_agent_mutation("supervisor", LESSON_B, space=space)
+    _another_process_writes_first(env, key, space)
+    assert si.apply_agent_mutation("supervisor", LESSON_A, space=space)
+    assert _lessons(space) == [LESSON_B, OTHER, LESSON_A]
+
+
+def test_control_the_old_order_loses_the_other_processs_lesson(env) -> None:
+    """The order S1-10 first wrote: read the document, then write it back in
+    one atomic step. Another process's lesson written in between is lost."""
+    assert si.apply_agent_mutation("supervisor", LESSON_B, space=A)
+    data = si._load_agent_evolution(A)  # the read, outside the store's step
+    _another_process_writes_first(env, si._SPACE_EVO_KEY, A)
+    data["agents"]["supervisor"]["soul"] += "\n\n[SelfImprovement] " + LESSON_A
+
+    def put(every):
+        every = dict(every) if isinstance(every, dict) else {}
+        every["spaces"] = {**(every.get("spaces") or {}), A: data}
+        return every
+
+    env.store.atomic_update(si._SPACE_EVO_KEY, put)
+    assert OTHER not in _lessons(A)
+
+
 def test_with_no_space_bound_nothing_is_read_or_learned(env) -> None:
     assert si.apply_agent_mutation("supervisor", LESSON_A, space=A)
     assert scope.current_scope() is None
-    assert si.get_agent_evolution_block() == ""
+    assert si._agent_evolution_block() == ""
     assert si.apply_agent_mutation("supervisor", LESSON_B) is False
     assert env.store.get(si._AGENT_EVO_KEY) in (None, {}, {"agents": {}})
 
@@ -308,18 +406,54 @@ async def test_a_space_with_no_lessons_gets_none(env) -> None:
     assert LESSON_A not in text and "self_improvement" not in text
 
 
+def _old_base_prompt() -> str:
+    """The base prompt an older agent built: the Soul it read at start baked
+    in (``agent_runner`` before the S1-10 review)."""
+    return BASE + "\n\n" + si.space_lessons_note(OWNER_SPACE_ID)
+
+
+STALE = "The owner wanted long answers (an older lesson, since replaced)."
+
+
 @pytest.mark.asyncio
-async def test_control_without_spaces_the_supervisor_changes_nothing(env) -> None:
-    """One Soul: the transport's note and the baked copy are what the model
-    gets, as before Spaces."""
+async def test_without_spaces_the_model_gets_one_current_copy_of_the_lessons(env) -> None:
+    """On an install that does not enforce Spaces too: the supervisor adds
+    the one Soul, current and fenced, once a call, on every surface."""
     env.mp.setattr(scope, "_enforced", False)
     assert si.apply_agent_mutation("supervisor", LESSON_OWNER)
-    note = _transport_note(OWNER_SPACE_ID)
-    baked = BASE + "\n\n" + note["content"]
-    sent = await _sent_messages([note, {"role": "user", "content": "hello"}], base=baked)
-    assert _all_text(sent).count(LESSON_OWNER) == 2  # the baked copy and the transport's
-    bare = await _sent_messages([{"role": "user", "content": "hello"}])
-    assert LESSON_OWNER not in _all_text(bare)  # the supervisor adds none itself
+    plain = _all_text(await _sent_messages([{"role": "user", "content": "hello"}]))
+    assert plain.count(LESSON_OWNER) == 1
+    assert plain.count('<kazma:data source="self_improvement"') == 1
+
+
+@pytest.mark.asyncio
+async def test_an_old_base_prompt_and_a_transports_copy_still_make_one_current_copy(env) -> None:
+    """An agent built by an older Kazma baked the Soul it read at start, and a
+    transport added its own: the model gets the current lessons, once."""
+    env.mp.setattr(scope, "_enforced", False)
+    assert si.apply_agent_mutation("supervisor", STALE)
+    baked = _old_base_prompt()  # read at start: holds the stale lesson
+    forgot = si.forget_text("long answers")
+    assert forgot
+    assert si.apply_agent_mutation("supervisor", LESSON_OWNER)
+    turn = [_transport_note(OWNER_SPACE_ID), {"role": "user", "content": "hello"}]
+    text = _all_text(await _sent_messages(turn, base=baked))
+    assert text.count(LESSON_OWNER) == 1 and STALE not in text
+    assert text.count('<kazma:data source="self_improvement"') == 1
+    assert BASE in text
+
+
+@pytest.mark.asyncio
+async def test_control_without_the_cut_the_old_base_prompt_brings_a_second_stale_copy(env) -> None:
+    env.mp.setattr(scope, "_enforced", False)
+    assert si.apply_agent_mutation("supervisor", STALE)
+    baked = _old_base_prompt()
+    si.forget_text("long answers")
+    assert si.apply_agent_mutation("supervisor", LESSON_OWNER)
+    env.mp.setattr(si, "without_baked_soul", lambda prompt: prompt)  # the cut, out
+    text = _all_text(await _sent_messages([{"role": "user", "content": "hello"}], base=baked))
+    assert STALE in text
+    assert text.count('<kazma:data source="self_improvement"') == 2
 
 
 def test_a_baked_soul_is_cut_whole() -> None:
@@ -330,18 +464,28 @@ def test_a_baked_soul_is_cut_whole() -> None:
     assert si.without_baked_soul(f"{BASE}\n\n{block}") == BASE
     assert si.without_baked_soul(f"{BASE}\n\n{block}\n\n{other}\n\n{block}") == f"{BASE}\n\n{other}"
     assert si.without_baked_soul(BASE) == BASE and si.without_baked_soul("") == ""
-    cut = si.without_baked_soul(f"{BASE}\n\n{block[:120]}")  # an opener with no end
-    assert cut == BASE
+    # It runs on every install: what is not a whole block is left as it is.
+    truncated = f"{BASE}\n\n{block[:120]}"  # an opener with no close
+    assert si.without_baked_soul(truncated) == truncated
+    named = f"{BASE}\n- The lessons arrive as {si._SOUL_FENCE_OPEN} blocks.\nMore rules.\n\n"
+    assert si.without_baked_soul(named) == named
 
 
-def test_the_agent_bakes_no_soul_once_spaces_is_enforced() -> None:
-    """Source check on the one place a Soul is baked into the base prompt."""
-    from pathlib import Path
+@pytest.mark.parametrize("enforced", [False, True])
+def test_the_agent_bakes_no_soul_into_its_base_prompt(env, enforced) -> None:
+    """The agent itself, built with lessons stored: its base prompt holds
+    none (the agent before the S1-10 review baked the owner's Soul on an
+    install that does not enforce Spaces)."""
+    from kazma_core.agent_runner import KazmaAgent
 
-    source = (Path(__file__).resolve().parents[1] / "kazma-core/kazma_core/agent_runner.py").read_text(
-        encoding="utf-8")
-    at = source.index('get_agent_evolution_block("supervisor")')
-    assert "spaces_enforced()" in source[at - 120:at]
+    env.mp.setattr(scope, "_enforced", enforced)
+    if enforced:
+        _teach_all()
+    else:
+        assert si.apply_agent_mutation("supervisor", LESSON_OWNER)
+    agent = KazmaAgent()
+    assert "self_improvement" not in agent.system_prompt
+    assert not any(lesson in agent.system_prompt for lesson in (LESSON_A, LESSON_B, LESSON_OWNER))
 
 
 # ── forgetting ───────────────────────────────────────────────────────────
@@ -367,23 +511,67 @@ def test_kazmas_own_forget_reaches_every_soul(env) -> None:
     assert _lessons(A) == _lessons(B) == _lessons(OWNER_SPACE_ID) == []
 
 
-def test_control_without_spaces_a_forget_edits_the_one_soul(env) -> None:
+def test_without_spaces_a_forget_edits_the_one_soul(env) -> None:
     env.mp.setattr(scope, "_enforced", False)
     assert si.apply_agent_mutation("supervisor", "Use the codeword BLUE-HERON in the header.")
     assert si.forget_text("blue-heron", tenant_id="some-older-tenant") == 2
     assert _lessons(OWNER_SPACE_ID) == []
 
 
-def test_forgetting_a_turn_in_memory_takes_back_its_spaces_lesson(env) -> None:
-    """Through memory's own forget: the tenant it names is the Soul's space."""
-    import inspect
+@pytest.fixture()
+def memory_db(env):
+    """Memory's own writer and forget on the test's database."""
+    import os
 
-    from kazma_core.memory import forget
+    from kazma_core.memory import dual_write
+    from kazma_core.memory.schema_v2 import ensure_ops_schema
 
-    source = inspect.getsource(forget)
-    assert source.count("forget_lessons_from(keys, turn, tenant_id=owner)") == 1
-    assert source.count("forget_lessons_from(keys, None, tenant_id=owner)") == 1
-    assert source.count("forget_text(needle, tenant_id=caller)") == 1
+    ops = sqlite3.connect(os.environ["KAZMA_MEMORY_OPS_DB"])
+    ensure_ops_schema(ops)
+    ops.commit()
+    ops.close()
+    env.mp.setattr("kazma_core.memory.forget.chat_keys", lambda key: [key] if key else [])
+    dual_write._reset_mirror()
+    yield
+    dual_write._reset_mirror()
+
+
+def _remembered(space: str, chat: str, turn: int, question: str) -> str:
+    from kazma_core.memory.dual_write import mirror_episode
+
+    eid = mirror_episode(session_id=chat, turn_number=turn, user_text=question,
+                         assistant_text="noted", tenant_id=space)
+    assert eid
+    return eid
+
+
+def test_forgetting_a_turn_in_memory_takes_back_its_spaces_lesson(env, memory_db) -> None:
+    """Memory's own forget, run: forgetting a turn of A takes back the lesson
+    that turn taught A, and B's lesson from a chat of the same key stays;
+    forgetting B's chat takes back B's."""
+    from kazma_core.memory.forget import forget_chat, forget_episode
+
+    for space, lesson in ((A, LESSON_A), (B, LESSON_B)):
+        assert si.apply_agent_mutation("supervisor", lesson, space=space,
+                                       source={"chat": "chat-1", "turn": 1})
+    episode = _remembered(A, "chat-1", 1, "how should the weekly report look?")
+    _remembered(B, "chat-1", 1, "how should the weekly report look?")
+    with _in(A):
+        forget_episode(episode, tenant_id=A)
+    assert _lessons(A) == [] and _lessons(B) == [LESSON_B]
+    with _in(B):
+        forget_chat("chat-1", tenant_id=B)
+    assert _lessons(B) == []
+
+
+def test_control_a_forget_that_names_no_space_reads_every_soul(env) -> None:
+    """What the tenant a forget names decides: with none (Kazma's own
+    replay), both spaces' lessons from that chat go."""
+    for space, lesson in ((A, LESSON_A), (B, LESSON_B)):
+        assert si.apply_agent_mutation("supervisor", lesson, space=space,
+                                       source={"chat": "chat-1", "turn": 1})
+    assert si.forget_lessons_from(["chat-1"], 1) == 2
+    assert _lessons(A) == _lessons(B) == []
 
 
 # ── lessons held for confirmation ────────────────────────────────────────
@@ -434,7 +622,66 @@ def test_reject_aborts_only_a_held_lesson(env) -> None:
     assert get_commitment(held).status == "aborted"
 
 
-def test_control_one_account_keeps_its_one_queue(env) -> None:
+def _held(env, lesson: str = LESSON_OWNER) -> str:
+    env.mp.setattr(scope, "_enforced", False)
+    env.mp.setattr(si, "_soul_requires_confirm", lambda: True)
+    held = si.mint_soul_commitment(lesson, agent_id="supervisor")
+    assert held
+    return held
+
+
+def test_an_applied_lesson_is_not_rejected(env) -> None:
+    """Reject acts on a held lesson only: one already confirmed is in the
+    Soul, and "rejected" over it said what had not happened."""
+    from kazma_core.safety.commitment.store import get_commitment
+
+    held = _held(env)
+    client = _commitment_app()
+    assert client.post(f"/api/commitment/soul/{held}/confirm").json()["applied"] is True
+    refused = client.post(f"/api/commitment/soul/{held}/reject")
+    assert refused.status_code == 409 and refused.json()["code"] == "not_held"
+    assert refused.json()["status"] == "committed"
+    assert get_commitment(held).status == "committed" and _lessons(OWNER_SPACE_ID) == [LESSON_OWNER]
+
+
+def test_a_second_confirm_applies_nothing_twice(env) -> None:
+    held = _held(env)
+    client = _commitment_app()
+    assert client.post(f"/api/commitment/soul/{held}/confirm").status_code == 200
+    again = client.post(f"/api/commitment/soul/{held}/confirm")
+    assert again.status_code == 409 and again.json()["code"] == "not_held"
+    assert _lessons(OWNER_SPACE_ID) == [LESSON_OWNER]
+    # A rejected lesson is not confirmed afterwards either.
+    rejected = _held(env, LESSON_A)
+    assert client.post(f"/api/commitment/soul/{rejected}/reject").status_code == 200
+    late = client.post(f"/api/commitment/soul/{rejected}/confirm")
+    assert late.status_code == 409 and late.json()["status"] == "aborted"
+    assert LESSON_A not in _lessons(OWNER_SPACE_ID)
+
+
+def test_a_decision_moves_a_lesson_only_from_held(env) -> None:
+    """The store's compare-and-set: a confirm racing a reject leaves the
+    lesson in one state, the one the first decision chose."""
+    from kazma_core.safety.commitment.store import get_commitment, update_status
+
+    held = _held(env)
+    assert update_status(held, "aborted", event_type="soul_rejected", expected="needs_confirm").status == "aborted"
+    assert si.confirm_soul_delta(held) is False
+    assert get_commitment(held).status == "aborted"
+
+
+def test_control_without_the_status_check_an_applied_lesson_is_rejected(env) -> None:
+    """The rule before the review: the act and the space, not the status."""
+    from kazma_core.safety.commitment.store import get_commitment, update_status
+
+    held = _held(env)
+    client = _commitment_app()
+    assert client.post(f"/api/commitment/soul/{held}/confirm").json()["applied"] is True
+    update_status(held, "aborted", event_type="soul_rejected")  # what the old route did
+    assert get_commitment(held).status == "aborted" and _lessons(OWNER_SPACE_ID) == [LESSON_OWNER]
+
+
+def test_one_account_keeps_its_one_queue(env) -> None:
     env.mp.setattr(scope, "_enforced", False)
     env.mp.setattr(si, "_soul_requires_confirm", lambda: True)
     held = si.mint_soul_commitment(LESSON_OWNER, agent_id="supervisor", space="an-older-tenant")

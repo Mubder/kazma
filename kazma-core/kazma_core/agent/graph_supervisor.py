@@ -24,7 +24,7 @@ from kazma_core.agent.graph_helpers import (
     is_unusable_assistant_content,
     sanitize_tool_chains,
 )
-from kazma_core.spaces.scope import space_of_state, spaces_enforced
+from kazma_core.spaces.scope import space_of_state
 from kazma_core.agent.plan_fence import (
     AUTO_CONTINUE_PROMPT,
     PLAN_EXECUTE_CONTINUE,
@@ -441,14 +441,12 @@ async def supervisor_node(
     except RuntimeError:  # the thread pool is shut down: a call without the date beats none
         logger.debug("[Supervisor] daily note skipped", exc_info=True)
         _daily = ""
-    # Spaces S1-10: the base prompt is every space's once Spaces is enforced,
-    # so a Soul the agent baked into it at build time is cut here; the turn's
-    # own space's lessons are added below.
-    _spaces_on = spaces_enforced()
-    if _spaces_on:
-        from kazma_core.skills.self_improvement import without_baked_soul
+    # The lessons are never part of the base prompt: one built by an older
+    # Kazma with a Soul baked in has it cut here (the turn's current lessons
+    # are added below).
+    from kazma_core.skills.self_improvement import without_baked_soul
 
-        system_prompt = without_baked_soul(system_prompt)
+    system_prompt = without_baked_soul(system_prompt)
     messages = _ensure_base_prompt(messages, system_prompt, daily_note=_daily)
     if personality_prompt:
         messages = _ensure_personality(messages, system_prompt, personality_prompt)
@@ -469,12 +467,14 @@ async def supervisor_node(
     messages = _ensure_about_user(messages, about_block(_about.get("about", "")))
 
     # ── The lessons of the turn's space (Spaces S1-10) ──
-    # Enforced only: the supervisor is then the one place a turn's lessons
-    # are chosen, on every surface. A transport's own copy (read for the
-    # request's space) is replaced by the step's space's; a turn with no
-    # space reads none. Not enforced, the transports add the one Soul as
-    # before and nothing changes here.
-    if _spaces_on and iteration == 0:
+    # The supervisor is the one place a turn's lessons are added, on every
+    # surface and every install: one current, fenced copy, read at the start
+    # of the turn (it stays in the turn's messages). Any other copy the call
+    # holds is dropped. On an install that does not enforce Spaces it is the
+    # one Soul; enforced, the step's space's, and a turn with no space reads
+    # none. (The transports and the agent's base prompt each added one, so
+    # the model saw it twice, the base prompt's copy stale.)
+    if iteration == 0:
         from kazma_core.db.pg_helpers import store_errors
         from kazma_core.skills.self_improvement import space_lessons_note
         from kazma_core.spaces.scope import NoSpaceBound

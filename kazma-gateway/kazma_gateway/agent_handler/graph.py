@@ -1782,33 +1782,8 @@ def create_graph_handler(
                     _skill_exc,
                 )
 
-            # ── Self-improvement Soul (Kazma-wide) ─────────────────
-            # Deltas are wrapped in an untrusted data fence — treat as
-            # observation context only, never instructions (prompt-injection
-            # defense, audit C1).
-            try:
-                from kazma_core.safety.prompt_fence import format_untrusted_block
-                from kazma_core.skills.self_improvement import get_agent_evolution_block
-
-                evo = await asyncio.to_thread(get_agent_evolution_block, "supervisor")  # audit 2026-10-26 AUD-111
-                if evo:
-                    msgs = list(state.get("messages") or [])
-                    evo_sys = {
-                        "role": "system",
-                        "content": format_untrusted_block(evo, source="self_improvement"),
-                    }
-                    insert_at = 0
-                    for i, m in enumerate(msgs):
-                        if isinstance(m, dict) and m.get("role") == "user":
-                            insert_at = i
-                            break
-                    msgs.insert(insert_at, evo_sys)
-                    state = {**state, "messages": msgs}
-            except Exception:
-                logger.debug(
-                    "[agent-handler] agent evolution inject skipped",
-                    exc_info=True,
-                )
+            # The self-improvement lessons are the supervisor's, fenced,
+            # once per turn (S1-10 review: this handler added a second copy).
 
             # The Knowledge Library block is the supervisor's, once per
             # turn (Knowledge audit KB-S08: this handler injected the same
