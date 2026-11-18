@@ -401,6 +401,55 @@ def test_control_the_first_collector_loses_the_root_copy(svc, monkeypatch):
     assert not legacy.exists(), "the control should lose the root copy"
 
 
+def _nameless(svc, marker: str):
+    """A document whose catalog rows name no tenant ('': a restored or
+    hand-edited catalog), its original not promoted yet: its files are a
+    quarantine copy and a manifest, in the root."""
+    seeded = seed_document(svc, tenant_id=OWNER, owner="owner", marker=marker)
+    space = svc.storage.for_space(OWNER)
+    quarantine = space.put_stream(io.BytesIO(marker.encode("utf-8")), kind="quarantine", max_bytes=1 << 20)
+    space.blob_path(kind="originals", sha256=seeded.sha256).unlink()
+    conn = svc.repository._conn  # noqa: SLF001 - the hand edit
+    with svc.repository._lock:  # noqa: SLF001
+        conn.commit()
+        conn.execute("PRAGMA foreign_keys = OFF")  # the rows that name each other change together
+        tables = [row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+        for table in tables:
+            if table.startswith(("document_job", "document_audit", "document_intake")):
+                continue  # the queue and the trail are not the catalog (and are append-only)
+            if any(col[1] == "tenant_id" for col in conn.execute(f"PRAGMA table_info({table})")):
+                conn.execute(f"UPDATE {table} SET tenant_id = '' WHERE tenant_id = ?", (OWNER,))  # noqa: S608
+        conn.commit()
+        conn.execute("PRAGMA foreign_keys = ON")
+    manifest = svc.storage.root / legacy_manifest_rel(seeded.document_id, seeded.version_id)
+    for path in (quarantine.path, manifest):
+        _age(path)
+    return quarantine.path, manifest
+
+
+def test_gc_keeps_the_files_of_a_row_with_no_tenant_name(svc):
+    quarantine, manifest = _nameless(svc, "nameless")
+    report = _collect(svc)
+    assert quarantine.is_file() and manifest.is_file(), report.to_dict()
+
+
+def test_control_marks_that_drop_a_nameless_row_lose_its_files(svc, monkeypatch):
+    # Negative control: the first version's marks left a row with no tenant
+    # name out of the install-wide sets as well as the per-tenant ones.
+    from kazma_core.documents import repository as repository_module
+
+    real = repository_module.gc_marks_from_rows
+
+    def drops_nameless(sources, artifacts, versions, blob_ids):
+        return real([r for r in sources if r[0]], [r for r in artifacts if r[0]],
+                    [r for r in versions if r[0]], blob_ids)
+
+    monkeypatch.setattr(repository_module, "gc_marks_from_rows", drops_nameless)
+    quarantine, manifest = _nameless(svc, "dropped")
+    _collect(svc)
+    assert not quarantine.exists() and not manifest.exists(), "the control should lose both files"
+
+
 def test_gc_never_keeps_a_file_in_a_folder_for_another_spaces_reference(svc, enforced):
     """The same bytes in two spaces' folders, referenced in one: the other's
     copy goes; the root keeps every tenant's."""

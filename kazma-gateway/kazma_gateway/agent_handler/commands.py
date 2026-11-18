@@ -1195,17 +1195,26 @@ def _chat_document_scope(svc: Any, msg: IncomingMessage) -> Any:
     sender, not ``default``: the command reads the same documents as the
     agent in the same chat, where chat put them, until Spaces is enforced or
     the owner presses "Use one memory" (Spaces S1-09's rule; the rule itself
-    is memory's). Enforced, the bound scope decides. Blocking.
+    is memory's). A rule that cannot be read (the settings store away) means
+    the owner's space, as before Spaces, with a WARNING. Enforced, the bound
+    scope decides, and with none bound the command refuses. Blocking.
     """
+    from kazma_core.db.pg_helpers import store_errors
     from kazma_core.documents.principal import surface_scope
-    from kazma_core.spaces.scope import spaces_enforced
+    from kazma_core.spaces.scope import OWNER_SPACE_ID, spaces_enforced
 
     if spaces_enforced():
         return surface_scope(svc)
     from kazma_core.memory.config import resolve_tenant_id
     from kazma_core.tenant_context import tenant_scope
 
-    with tenant_scope(resolve_tenant_id(msg.platform, msg.sender_id or "")):
+    try:
+        tenant = resolve_tenant_id(msg.platform, msg.sender_id or "")
+    except store_errors() as exc:
+        logger.warning("[AgentHandler] /documents: the chat's tenant could not be read (%s); "
+                       "reading the owner's space", type(exc).__name__)
+        tenant = OWNER_SPACE_ID
+    with tenant_scope(tenant):
         return surface_scope(svc)
 
 

@@ -3235,7 +3235,9 @@ of a turn during boot, already reads them. Chat `/documents` reads the tenant
 its own turns run in (`_chat_document_scope`: memory's
 `resolve_tenant_id`, the one the turn's state and the agent's tools carry):
 with a retired memory mode stored, `telegram` or the sender, until Spaces is
-enforced or the owner presses "Use one memory" (S1-09's rule). The run
+enforced or the owner presses "Use one memory" (S1-09's rule); a rule that
+cannot be read (a settings outage) means the owner's space, as before, with
+a WARNING. The run
 supervisor's buttons use `owner_actor` (the owner's account,
 single-operator only) until S1-21. `surface_scope`, `owner_actor` and
 `grant_member_access` are loop-stall helpers. No surface passes a literal
@@ -3262,7 +3264,8 @@ install-level object has no content call.
   space's folder, then the root.
 - **The root keeps every tenant's files in this release** (a revert reads the
   root only): GC's root folder keeps every live reference of any tenant (its
-  recheck asks any tenant), and `spaces/<f>` keeps only its own tenants'
+  recheck asks any tenant; a catalog row with no tenant name is kept there
+  too), and `spaces/<f>` keeps only its own tenants'
   (`repository.gc_marks_from_rows` gives references per tenant,
   `gc_is_live_reference(tenant_ids=)`). Removing a copied space's root copies
   is a later step, after S1-33.

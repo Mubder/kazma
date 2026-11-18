@@ -63,23 +63,36 @@ def gc_marks_from_rows(
     ``(tenant, sha)`` and ``(tenant, document, version)`` rows: each set for
     the install and per tenant (``*_by_tenant``). A space's files are in its
     own folder (Spaces S1-12), so a folder keeps only its tenants' references.
+
+    The install-wide sets hold every row, a row with no tenant name too (a
+    restored or hand-edited catalog): the root keeps them all, and such a
+    row has no folder of its own, so it is in no ``*_by_tenant`` set.
     """
+    keep_source: set[str] = set()
+    keep_artifacts: set[str] = set()
+    keep_versions: set[tuple[str, str]] = set()
     by_source: dict[str, set[str]] = {}
     by_artifact: dict[str, set[str]] = {}
     by_version: dict[str, set[tuple[str, str]]] = {}
     for tenant, sha in sources:
-        if tenant and sha:
-            by_source.setdefault(str(tenant), set()).add(str(sha))
+        if sha:
+            keep_source.add(str(sha))
+            if tenant:
+                by_source.setdefault(str(tenant), set()).add(str(sha))
     for tenant, sha in artifacts:
-        if tenant and sha:
-            by_artifact.setdefault(str(tenant), set()).add(str(sha))
+        if sha:
+            keep_artifacts.add(str(sha))
+            if tenant:
+                by_artifact.setdefault(str(tenant), set()).add(str(sha))
     for tenant, document_id, version_id in versions:
-        if tenant and document_id and version_id:
-            by_version.setdefault(str(tenant), set()).add((str(document_id), str(version_id)))
+        if document_id and version_id:
+            keep_versions.add((str(document_id), str(version_id)))
+            if tenant:
+                by_version.setdefault(str(tenant), set()).add((str(document_id), str(version_id)))
     return {
-        "keep_source": set().union(*by_source.values()) if by_source else set(),
-        "keep_artifacts": set().union(*by_artifact.values()) if by_artifact else set(),
-        "keep_versions": set().union(*by_version.values()) if by_version else set(),
+        "keep_source": keep_source,
+        "keep_artifacts": keep_artifacts,
+        "keep_versions": keep_versions,
         "keep_source_by_tenant": by_source,
         "keep_artifacts_by_tenant": by_artifact,
         "keep_versions_by_tenant": by_version,

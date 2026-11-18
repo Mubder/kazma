@@ -360,6 +360,52 @@ async def test_control_the_first_chat_rule_loses_the_chats_documents(service, pe
     assert in_chat.document_id not in [row["document_id"] for row in listed]
 
 
+def _tenant_rule_away(monkeypatch) -> None:
+    """The memory-tenant rule cannot read its settings (a store outage)."""
+    from kazma_core.config_availability import ConfigStoreUnavailableError
+    from kazma_core.memory import config as memory_config
+
+    def away(*_args, **_kwargs):
+        raise ConfigStoreUnavailableError(reason="the settings store is away")
+
+    monkeypatch.setattr(memory_config, "resolve_tenant_id", away)
+
+
+async def test_a_tenant_rule_that_cannot_be_read_means_the_owners_space(
+    service, monkeypatch, no_people, caplog,
+):
+    """As before Spaces: chat /documents answers from the owner's space, and
+    says why at WARNING."""
+    import logging
+
+    owners = seed_document(service, tenant_id=OWNER_SPACE_ID, owner=OWNER_ACCOUNT_ID, marker=_marker("outage"))
+    _tenant_rule_away(monkeypatch)
+    with caplog.at_level(logging.WARNING, logger="kazma_gateway.agent_handler.commands"):
+        listed = await _chat("/documents list")
+    assert owners.document_id in listed
+    assert any("could not be read" in record.getMessage() for record in caplog.records)
+
+
+async def test_control_without_the_fallback_the_command_fails_in_an_outage(service, monkeypatch, no_people):
+    # Negative control: the first version of the helper, with no fallback.
+    from kazma_core.tenant_context import tenant_scope
+    from kazma_gateway.agent_handler import commands
+
+    def first_version(svc, msg):
+        from kazma_core.memory import config as memory_config
+
+        with tenant_scope(memory_config.resolve_tenant_id(msg.platform, msg.sender_id or "")):
+            return surface_scope(svc)
+
+    seed_document(service, tenant_id=OWNER_SPACE_ID, owner=OWNER_ACCOUNT_ID, marker=_marker("fails"))
+    _tenant_rule_away(monkeypatch)
+    monkeypatch.setattr(commands, "_chat_document_scope", first_version)
+    from kazma_core.config_availability import ConfigStoreUnavailableError
+
+    with pytest.raises(ConfigStoreUnavailableError):
+        await _chat("/documents list")
+
+
 # ── platform users, Spaces not enforced: as before ──────────────────────────
 
 
@@ -468,6 +514,13 @@ async def test_control_without_the_grant_a_member_cannot_read_anothers_document(
     with scope.bind_scope(Matrix.SPACE_A, account_c):
         reply = await tools.document_read(from_a.document_id)
     assert marks.a not in reply and reply.startswith("Error")
+
+
+async def test_enforced_a_tenant_rule_that_cannot_be_read_still_refuses(service, monkeypatch, spaces):
+    """Enforced, the memory-tenant rule is never asked: no space bound is a
+    refusal, never the owner's space."""
+    _tenant_rule_away(monkeypatch)
+    assert NO_SPACE_REFUSAL in await _chat("/documents list")
 
 
 async def test_enforced_with_no_space_bound_chat_and_the_agent_refuse(service, tools, spaces):
