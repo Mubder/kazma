@@ -385,6 +385,12 @@ def create_sse_chat_router(
         # Optional attachments uploaded via /api/chat/upload. The upload ID,
         # not a client filesystem path, is the server-side byte reference.
         raw_attachments = body.get("attachments") or []
+        # A text file the page read in the browser: its text reaches the
+        # model inside a data fence and the chat keeps only its name -- never
+        # the user's words (kazma_core/agent/attached_text.py).
+        from kazma_core.agent.attached_text import AttachedText, attached_text_from, display_text, model_text
+
+        _text_att: AttachedText | None = attached_text_from(body.get("text_attachment"))
         # Turn Delivery V2: a reconnecting client presents its cursor
         # (``last_event_id``, SSE-spec name; ``last_seq`` accepted as alias).
         # A request carrying one is an ATTACH, not a new prompt — it must
@@ -396,7 +402,7 @@ def create_sse_chat_router(
                 _attach_seq = int(_attach_raw)
             except Exception:
                 _attach_seq = None
-        if not user_message and not raw_attachments and _attach_seq is None:
+        if not user_message and not raw_attachments and _text_att is None and _attach_seq is None:
             return StreamingResponse(
                 iter([_sse_frame("error", {"content": "Empty message"})]),
                 media_type="text/event-stream",
@@ -862,7 +868,8 @@ def create_sse_chat_router(
         from datetime import datetime as _dt
 
         _ts = _dt.now(UTC).isoformat()
-        _user_row = {"role": "user", "content": user_message, "ts": _ts}
+        _user_row = {"role": "user", "content": display_text(user_message, _text_att) if _text_att else user_message,
+                     "ts": _ts}
         # CRITICAL: persist immediately so restarts keep the sidebar transcript.
         # AUD-052: appended under the session's transaction, so a reply the
         # previous turn persisted meanwhile is not overwritten by this
@@ -1011,10 +1018,11 @@ def create_sse_chat_router(
         from kazma_ui.thread_locks import rewind_generation
 
         _rewind_gen = rewind_generation(thread_id)
+        _model_user = model_text(user_message, _text_att) if _text_att else user_message
         messages = await build_turn_messages(
             current_graph,
             graph_config,
-            user_text=user_message,
+            user_text=_model_user,
             system_messages=system_msgs,
             fallback_history=session.messages[:-1],  # exclude the user line we just added
         )
@@ -1033,7 +1041,7 @@ def create_sse_chat_router(
                 # to_thread: build_user_content persists + parses documents
                 # synchronously — keep that disk work off the event loop.
                 multimodal_content = await asyncio.to_thread(
-                    build_user_content, user_message or "", atts
+                    build_user_content, _model_user or "", atts
                 )
                 # Replace the trailing user message content.
                 for i in range(len(messages) - 1, -1, -1):
@@ -1095,7 +1103,7 @@ def create_sse_chat_router(
             from kazma_core.agent.turn_input import build_turn_working_memory
 
             _wm = build_turn_working_memory(
-                user_message,
+                _user_row["content"],  # names an attached text file
                 messages=messages,
                 client_attachments=list(raw_attachments or []),
             )
@@ -1246,7 +1254,7 @@ def create_sse_chat_router(
                     {
                         "type": "user_message",
                         "data": {
-                            "content": user_message,
+                            "content": _user_row["content"],
                             "turn_id": _reply_turn,
                             "client_msg_id": _client_msg_id,
                             "session_id": session_id,

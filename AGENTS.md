@@ -2065,6 +2065,17 @@ four injected were noise.
   `build_user_content` attachment; the user's own corrections kept; the
   quoted write scenarios pass and fail with the raw message; the raw message
   as the negative control for the quick pass and the trust gate).
+  **A file's text reaches the model in a data fence on every surface**: the
+  web chat sends a text file beside the message (`text_attachment`), and the
+  server fences it and keeps only its name in the chat
+  (`agent/attached_text.py`). The page put it into the message in a code
+  block that a line of three backticks inside the file ended early, and the
+  rest was the user's words. A stub's name is cleaned (`file_label`: a name
+  holding "]" ended the stub), own_words reads a stub to its line's end and
+  nothing after the web chat's. Gate: `tests/test_attached_text_fenced.py`
+  (the real route EN/AR, the old page message as the negative control, no
+  page script builds a stub, every product function writing one declared
+  with how the file's text is fenced), `tests/e2e/test_attached_text_browser.py`.
 - **Trust follows who is speaking about themself, not which pass read the
   fact** (2026-11, the audit's F1, first half). `_apply_beliefs_to_v2`
   takes the turn's `user_text`; a fact the model read about `user` is

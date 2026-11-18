@@ -35,9 +35,16 @@ import re
 __all__ = ["own_words"]
 
 #: "[Attached: ...]" and "[Full document at: ...]" lines: a file's name is
-#: not the user's statement. To the closing bracket, at most 2,000
-#: characters, or the end of the line.
-_STUB_RE = re.compile(r"\[(?:Attached|Full document at)\b[^\]\n]{0,2000}\]?")
+#: not the user's statement. To the end of the line, at most 2,000
+#: characters: a name holding "]" ("report] I live in Lyon.pdf") ended the
+#: stub at its first bracket, and the rest read as the user's words. Kazma
+#: writes each stub on a line of its own, after the user's words.
+_STUB_RE = re.compile(r"\[(?:Attached|Full document at)\b[^\n]{0,2000}+")
+#: The web chat's file stub (``agent/attached_text.py``). It comes last in a
+#: message, and before 2026-11 the file's text followed it in a code block
+#: that a line of three backticks inside the file ended early: what follows
+#: it is never the user's.
+_WEB_FILE_STUB = "[Attached file:"
 #: A ``>`` quote line.
 _QUOTE_LINE_RE = re.compile(r"^[ \t]{0,3}>[^\n]*+", re.MULTILINE)
 #: A span in quotes, within one paragraph, at most 400 characters.
@@ -204,6 +211,9 @@ def own_words(text: str | None) -> str:
     from kazma_core.safety.prompt_fence import outside_fences
 
     body = outside_fences(str(text or ""))
+    stub = body.find(_WEB_FILE_STUB)
+    if stub >= 0:
+        body = body[:stub]
     body = _strip_code_fences(body)
     body = _STUB_RE.sub(" ", body)
     body = _QUOTE_LINE_RE.sub(" ", body)
