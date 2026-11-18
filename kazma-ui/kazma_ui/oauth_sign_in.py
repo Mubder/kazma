@@ -126,6 +126,29 @@ async def take_attempt(request: Request, state: str, *, providers: Iterable[str]
     return await asyncio.to_thread(take, state, bound_state=bound, providers=tuple(providers))
 
 
+def attempt_scope(attempt: dict[str, Any]) -> Any:
+    """The scope a callback finishes its sign-in in (Spaces S1-17): the space
+    and person the sign-in started in, so the connected account lands in
+    that space. Not enforced: nothing is bound, as before. Enforced: an
+    attempt that names no space, or whose person is no longer a member of
+    it, raises ``oauth_attempts.AttemptRefused("no_space")`` -- the account
+    is never kept for no one, nor in a space its person left. Blocking (the
+    identity store): call from a thread, or from a route that is a ``def``."""
+    import contextlib
+
+    from kazma_core.security.oauth_attempts import AttemptRefused
+    from kazma_core.spaces import identity
+    from kazma_core.spaces.scope import bind_scope, spaces_enforced
+
+    if not spaces_enforced():
+        return contextlib.nullcontext()
+    space = str(attempt.get("space") or "")
+    asker = str(attempt.get("asker") or "")
+    if not space or not asker or not identity.is_member(asker, space):
+        raise AttemptRefused("no_space")
+    return bind_scope(space, asker)
+
+
 def forget_binding(response: Response, request: Request, state: str, attempt: dict[str, Any] | None = None) -> Response:
     """Expire the attempt's binding cookie in the callback's *response*."""
     if state:

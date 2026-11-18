@@ -250,9 +250,15 @@ ROUTE_SCOPE_RULES: tuple[tuple[Pattern, str], ...] = (
     ("/api/research", SPACE),
     ("/api/runs", SPACE),
     # Connected accounts belong to the space that connected them (plan 4.6):
-    # X today, mail, calendar and GitHub with spaces.
+    # X today, mail, calendar and GitHub with spaces. The mail app
+    # registration -- the one Google and Microsoft app every space's
+    # accounts sign in through -- and the mail presets (Kazma's own host
+    # list) are the install's (Spaces S1-17).
     ("/x$", SPACE),
     ("/api/x", SPACE),
+    ("/api/email/presets$", INSTALL),
+    ("/api/email/oauth/gmail/client$", INSTALL),
+    ("/api/email/oauth/microsoft/client$", INSTALL),
     ("/api/email", SPACE),
     ("/api/calendar", SPACE),
     ("/api/github", SPACE),

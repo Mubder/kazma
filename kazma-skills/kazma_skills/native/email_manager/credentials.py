@@ -1,4 +1,18 @@
-"""Email credential resolution + vault persistence."""
+"""Email credential resolution + vault persistence.
+
+Every secret and every environment value of a connected mailbox or calendar
+is read and written here (Spaces S1-17): :func:`vault_retrieve`,
+:func:`vault_store`, :func:`vault_delete`, :func:`cred`, :func:`account_env`
+and :func:`set_account_env`. A connected account belongs to a space
+(``kazma_core.spaces.connected_accounts``): the owner's space keeps today's
+vault names and the process environment, unchanged; another space keeps its
+own under its space's prefix, and never reads or writes the process
+environment. The install's app registration -- the one Google and Microsoft
+app every space's accounts sign in through -- is the install's in any space
+(:data:`_INSTALL_NAMES`, :data:`_INSTALL_VARIABLES`).
+``tests/test_connected_accounts_spaces.py`` holds the mail and calendar code
+to these helpers.
+"""
 
 from __future__ import annotations
 
@@ -8,9 +22,43 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+#: The install's app registration in the vault: one Google and one Microsoft
+#: app sign in every space's accounts, so these names are the install's.
+_INSTALL_NAMES = frozenset({
+    "email.gmail.client_id", "email.gmail.client_secret",
+    "email.microsoft.client_id", "email.microsoft.client_secret",
+})
+#: The install's environment variables the mail and calendar code read: the
+#: app registration and Kazma's own address. Every other variable they read
+#: is a connected account's (the owner's, in the process environment).
+_INSTALL_VARIABLES = frozenset({
+    "EMAIL_GMAIL_CLIENT_ID", "EMAIL_GMAIL_CLIENT_SECRET", "EMAIL_GMAIL_REDIRECT_URI",
+    "EMAIL_MS_CLIENT_ID", "EMAIL_MS_CLIENT_SECRET", "EMAIL_MS_REDIRECT_URI", "EMAIL_MS_TENANT_ID",
+    "GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET",
+    "KAZMA_PUBLIC_URL", "KAZMA_HOST",
+})
+
 
 def _env(name: str, default: str = "") -> str:
     return (os.environ.get(name) or default).strip()
+
+
+def _space() -> str:
+    """The space whose connected accounts this work uses (``NoSpaceBound``
+    once Spaces is enforced with none bound)."""
+    from kazma_core.spaces.connected_accounts import connected_space
+
+    return connected_space()
+
+
+def _vault_name(name: str) -> str:
+    """Where *name* is kept for the bound space: the install's app
+    registration everywhere, else the space's own name."""
+    if name in _INSTALL_NAMES:
+        return name
+    from kazma_core.spaces.connected_accounts import space_secret_name
+
+    return space_secret_name(name)
 
 
 def _force_global_scope() -> tuple[Any, Any]:
@@ -22,7 +70,9 @@ def _force_global_scope() -> tuple[Any, Any]:
     while background paths (backup refresh, cron) read the global scope —
     producing duplicate rows where a stale rotated secret keeps shadowing
     the current one (incident 2026-08-16: invalid_client on every refresh).
-    Returns (token, reset) for try/finally use.
+    A space's own accounts are told apart by their names, never by the
+    tenant (``spaces.connected_accounts``). Returns (token, reset) for
+    try/finally use.
     """
     from kazma_core.tenant_context import reset_current_tenant_id, set_current_tenant_id
 
@@ -30,8 +80,9 @@ def _force_global_scope() -> tuple[Any, Any]:
     return token, reset_current_tenant_id
 
 
-def vault_retrieve(name: str) -> str:
-    """Decrypt a vault secret by name; empty if vault disabled/missing."""
+def _raw_retrieve(name: str) -> str:
+    """Decrypt the vault secret named *name* exactly; empty if vault
+    disabled/missing."""
     try:
         from kazma_core.security.vault import SecretVault, get_vault
         from kazma_core.paths import vault_db_path
@@ -53,6 +104,13 @@ def vault_retrieve(name: str) -> str:
         return ""
 
 
+def vault_retrieve(name: str) -> str:
+    """Decrypt the bound space's secret *name*; empty if vault
+    disabled/missing. Once Spaces is enforced with no space bound:
+    ``NoSpaceBound`` (nobody's connection is read for no one)."""
+    return _raw_retrieve(_vault_name(name))
+
+
 class VaultWriteFailed(RuntimeError):
     """A secret could not be written to the vault, so a sign-in is not kept.
 
@@ -64,9 +122,7 @@ class VaultWriteFailed(RuntimeError):
     """
 
 
-def vault_store(name: str, value: str, category: str = "email") -> bool:
-    """Encrypt and store a secret. Returns False for an empty value (nothing
-    to keep); raises :class:`VaultWriteFailed` when the vault cannot keep it."""
+def _raw_store(name: str, value: str, category: str) -> bool:
     if not value:
         return False
     try:
@@ -91,8 +147,16 @@ def vault_store(name: str, value: str, category: str = "email") -> bool:
         ) from exc
 
 
+def vault_store(name: str, value: str, category: str = "email") -> bool:
+    """Encrypt and store the bound space's secret *name*. Returns False for
+    an empty value (nothing to keep); raises :class:`VaultWriteFailed` when
+    the vault cannot keep it."""
+    return _raw_store(_vault_name(name), value, category)
+
+
 def cred(env_key: str, vault_key: str = "") -> str:
-    val = _env(env_key)
+    """The environment's value (:func:`account_env`), else the vault's."""
+    val = account_env(env_key)
     if val:
         return val
     if vault_key:
@@ -100,9 +164,7 @@ def cred(env_key: str, vault_key: str = "") -> str:
     return ""
 
 
-def vault_delete(*names: str) -> None:
-    """Delete vault secrets by name (global scope, like :func:`vault_store`).
-    A missing name is not an error; a vault that cannot write is logged."""
+def _raw_delete(names: tuple[str, ...]) -> None:
     try:
         from kazma_core.security.vault import SecretVault, get_vault
         from kazma_core.paths import vault_db_path
@@ -118,9 +180,56 @@ def vault_delete(*names: str) -> None:
         logger.warning("[email.creds] vault delete of %s failed", ", ".join(names), exc_info=True)
 
 
+def vault_delete(*names: str) -> None:
+    """Delete the bound space's secrets by name (global scope, like
+    :func:`vault_store`). A missing name is not an error; a vault that
+    cannot write is logged."""
+    _raw_delete(tuple(_vault_name(name) for name in names))
+
+
+def account_env(variable: str, default: str = "") -> str:
+    """A mailbox's or calendar's environment value for the bound space.
+
+    The install's variables (:data:`_INSTALL_VARIABLES`) and the owner's
+    space read the process environment, as before Spaces. Another space
+    reads its own copy in the vault (``env_secret_name``): the process
+    environment -- ``.env`` and what the owner's connects set -- is never
+    its."""
+    if variable in _INSTALL_VARIABLES:
+        return _env(variable, default)
+    from kazma_core.spaces.connected_accounts import env_secret_name
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    space = _space()
+    if space == OWNER_SPACE_ID:
+        return _env(variable, default)
+    return _raw_retrieve(env_secret_name(variable, space)).strip() or default
+
+
+def set_account_env(variable: str, value: str) -> None:
+    """Set (or, with an empty *value*, clear) a mailbox's environment value
+    for the bound space: the process environment for the install's
+    variables and the owner's space, the space's own vault copy otherwise."""
+    from kazma_core.spaces.connected_accounts import env_secret_name
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    space = OWNER_SPACE_ID if variable in _INSTALL_VARIABLES else _space()
+    if space == OWNER_SPACE_ID:
+        if value:
+            os.environ[variable] = value
+        else:
+            os.environ.pop(variable, None)
+        return
+    name = env_secret_name(variable, space)
+    if value:
+        _raw_store(name, value, "email")
+    else:
+        _raw_delete((name,))
+
+
 def env_account_aliases() -> list[str]:
     """Accounts written in .env: EMAIL_ACCOUNTS=a,b,c."""
-    raw = _env("EMAIL_ACCOUNTS")
+    raw = account_env("EMAIL_ACCOUNTS")
     if not raw:
         return []
     return [a.strip() for a in raw.split(",") if a.strip()]
@@ -188,7 +297,7 @@ def _env_account_config(alias: str) -> dict[str, str]:
     )
     out: dict[str, str] = {"alias": alias}
     for f in fields:
-        out[f.lower()] = _env(prefix + f)
+        out[f.lower()] = account_env(prefix + f)
     # Vault fallbacks per alias
     if not out.get("password"):
         out["password"] = vault_retrieve(f"email.account.{alias}.password")
@@ -256,11 +365,11 @@ def status_summary() -> dict[str, Any]:
     )
     ms_configured = ms_mode != "none"
 
-    generic_proto = (_env("EMAIL_PROTOCOL") or vault_retrieve("email.generic.auth") or "").lower()
-    generic_addr = _env("EMAIL_ADDRESS") or vault_retrieve("email.generic.address")
+    generic_proto = (account_env("EMAIL_PROTOCOL") or vault_retrieve("email.generic.auth") or "").lower()
+    generic_addr = account_env("EMAIL_ADDRESS") or vault_retrieve("email.generic.address")
     generic_pw = bool(cred("EMAIL_PASSWORD", "email.imap.password"))
-    imap_host = _env("EMAIL_IMAP_HOST")
-    pop_host = _env("EMAIL_POP_HOST")
+    imap_host = account_env("EMAIL_IMAP_HOST")
+    pop_host = account_env("EMAIL_POP_HOST")
     if not generic_proto:
         if generic_addr and generic_pw and imap_host:
             generic_proto = "imap"
@@ -273,9 +382,9 @@ def status_summary() -> dict[str, Any]:
         generic_addr and generic_pw and (generic_proto == "pop" or pop_host)
     )
 
-    ms_cid = _env("EMAIL_MS_CLIENT_ID") or vault_retrieve("email.microsoft.client_id")
+    ms_cid = account_env("EMAIL_MS_CLIENT_ID") or vault_retrieve("email.microsoft.client_id")
     return {
-        "default_provider": _env("EMAIL_DEFAULT_PROVIDER", "auto") or "auto",
+        "default_provider": account_env("EMAIL_DEFAULT_PROVIDER", "auto") or "auto",
         "gmail_configured": gmail_configured,
         "gmail_address": gmail_addr if gmail_configured else "",
         "gmail_auth_mode": gmail_mode,
@@ -295,7 +404,7 @@ def status_summary() -> dict[str, Any]:
         "sandbox_always": True,
         "accounts": aliases,
         "ms_client_id_set": bool(ms_cid),
-        "ms_tenant_id": _env("EMAIL_MS_TENANT_ID", "common") or "common",
+        "ms_tenant_id": account_env("EMAIL_MS_TENANT_ID", "common") or "common",
         "presets": {
             "gmail": {"imap": "imap.gmail.com", "pop": "pop.gmail.com", "smtp": "smtp.gmail.com"},
             "microsoft": {

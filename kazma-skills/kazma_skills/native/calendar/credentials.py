@@ -22,9 +22,9 @@ While a calendar is off nothing reads its tokens and nothing writes them.
 from __future__ import annotations
 
 import logging
-import os
 import time
 from typing import Any
+from kazma_skills.native.email_manager.credentials import set_account_env
 
 logger = logging.getLogger(__name__)
 
@@ -80,25 +80,12 @@ def _vault_store(name: str, value: str, category: str = "calendar") -> bool:
 
 
 def _vault_delete(*names: str) -> None:
-    try:
-        from kazma_core.paths import vault_db_path
-        from kazma_core.security.vault import SecretVault, get_vault
-        from kazma_core.tenant_context import reset_current_tenant_id, set_current_tenant_id
+    """The bound space's secrets (``credentials.vault_delete``, Spaces
+    S1-17): a missing name is not an error; a vault that cannot write is
+    said -- a disconnect that silently kept the tokens used to pass."""
+    from kazma_skills.native.email_manager.credentials import vault_delete
 
-        v = get_vault()
-        if v is None:
-            v = SecretVault(db_path=vault_db_path())
-        token = set_current_tenant_id(None)
-        try:
-            # A missing name is not an error (delete returns False); what
-            # raises is a vault that cannot write, which the caller must hear
-            # of -- a disconnect that silently kept the tokens used to pass.
-            for n in names:
-                v.delete(n)
-        finally:
-            reset_current_tenant_id(token)
-    except Exception:
-        logger.warning("[calendar.creds] vault delete of %s failed", ", ".join(names), exc_info=True)
+    vault_delete(*names)
 
 
 def calendar_off(provider: str) -> bool:
@@ -146,17 +133,17 @@ def persist_google_tokens(
         logger.debug("[calendar.creds] Google Calendar is off; tokens not kept")
         return
     if access:
-        os.environ["GOOGLE_CALENDAR_TOKEN"] = access
+        set_account_env("GOOGLE_CALENDAR_TOKEN", access)
         _vault_store(VAULT_GOOGLE_ACCESS, access)
     if refresh:
-        os.environ["GOOGLE_CALENDAR_REFRESH"] = refresh
+        set_account_env("GOOGLE_CALENDAR_REFRESH", refresh)
         _vault_store(VAULT_GOOGLE_REFRESH, refresh)
         _vault_store(VAULT_GOOGLE_CONNECTED_AT, str(int(time.time())))
     if email:
-        os.environ["GOOGLE_CALENDAR_ADDRESS"] = email
+        set_account_env("GOOGLE_CALENDAR_ADDRESS", email)
         _vault_store(VAULT_GOOGLE_ADDRESS, email)
     if scopes:
-        os.environ["GOOGLE_CALENDAR_SCOPES"] = scopes
+        set_account_env("GOOGLE_CALENDAR_SCOPES", scopes)
         _vault_store(VAULT_GOOGLE_SCOPES, scopes)
     if probe_ok:
         _vault_store(VAULT_GOOGLE_OK, probe_ok)
@@ -175,10 +162,10 @@ def persist_microsoft_tokens(
         logger.debug("[calendar.creds] Outlook Calendar is off; tokens not kept")
         return
     if access:
-        os.environ["MS_CALENDAR_TOKEN"] = access
+        set_account_env("MS_CALENDAR_TOKEN", access)
         _vault_store(VAULT_MS_ACCESS, access)
     if refresh:
-        os.environ["MS_CALENDAR_REFRESH"] = refresh
+        set_account_env("MS_CALENDAR_REFRESH", refresh)
         _vault_store(VAULT_MS_REFRESH, refresh)
         _vault_store(VAULT_MS_CONNECTED_AT, str(int(time.time())))
     if scopes:
@@ -205,7 +192,7 @@ def clear_google_tokens() -> dict[str, Any]:
         "GOOGLE_CALENDAR_ADDRESS",
         "GOOGLE_OAUTH_TOKEN",
     ):
-        os.environ.pop(k, None)
+        set_account_env(k, "")
     _vault_delete(
         VAULT_GOOGLE_ACCESS,
         VAULT_GOOGLE_REFRESH,
@@ -222,7 +209,7 @@ def clear_microsoft_calendar_tokens() -> dict[str, Any]:
     if not _turn_calendar_off("microsoft"):
         return {"ok": False, "error": "Could not record the disconnect; the vault did not keep it."}
     for k in ("MS_CALENDAR_TOKEN", "MS_CALENDAR_REFRESH", "MS_GRAPH_TOKEN"):
-        os.environ.pop(k, None)
+        set_account_env(k, "")
     _vault_delete(
         VAULT_MS_ACCESS, VAULT_MS_REFRESH, VAULT_MS_SCOPES, VAULT_MS_ADDRESS, VAULT_MS_CONNECTED_AT
     )

@@ -34,6 +34,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "The sign-in came back to the wrong place. Start it again.",
         "ar": "عاد تسجيل الدخول إلى المكان الخطأ. ابدأه من جديد.",
     },
+    "oauth.failed.no_space": {
+        "en": "The sign-in belongs to no space you are in. Start it again from your space.",
+        "ar": "تسجيل الدخول لا ينتمي إلى مساحة أنت فيها. ابدأه من جديد من مساحتك.",
+    },
     "oauth.failed.denied": {
         "en": "The sign-in was cancelled at the provider.",
         "ar": "أُلغي تسجيل الدخول لدى المزوّد.",

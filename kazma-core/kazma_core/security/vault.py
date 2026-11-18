@@ -104,6 +104,9 @@ INSTALL_SCOPED_SECRETS: tuple[tuple[str, str], ...] = (
     ("cfg:llm.api_key", "newest"),  # the legacy single-provider key
     ("email.", "global"),  # mail OAuth clients, tokens, scopes, IMAP/POP passwords
     ("calendar.", "global"),  # calendar tokens, written through the mail helper
+    # A space's own connected accounts (Spaces S1-17,
+    # ``spaces.connected_accounts``): read by background refreshes too.
+    ("space:", "global"),
     ("cfg:memory.backends.", "newest"),  # state DSN, vector/graph secrets, embedder key
     ("cfg:connectors.slack.", "newest"),  # bot + app-level (Socket Mode) tokens
     ("cfg:connectors.discord.", "newest"),  # bot token

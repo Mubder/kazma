@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from kazma_skills.native.email_manager.credentials import account_env
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +52,8 @@ def detect_available_provider() -> str:
 
 
 def resolve_provider(provider: str | None = None) -> str:
-    import os
 
-    p = (provider or os.getenv("KAZMA_CALENDAR_PROVIDER", "auto") or "auto").strip().lower()
+    p = (provider or account_env("KAZMA_CALENDAR_PROVIDER", "auto") or "auto").strip().lower()
     if p in ("", "auto"):
         return detect_available_provider()
     if p in ("microsoft", "microsoft_graph", "ms", "graph"):
@@ -90,7 +90,6 @@ def _account_backend(account: str) -> Any:
         return GoogleCalendarBackend(
             cal["access"] or "pending_refresh", refresh_token=cal["refresh"], account_alias=alias
         )
-    import os
 
     from kazma_skills.native.calendar.backends.outlook_calendar import OutlookCalendarBackend
     from kazma_skills.native.email_manager.credentials import cred
@@ -100,7 +99,7 @@ def _account_backend(account: str) -> Any:
         refresh_token=cal["refresh"],
         client_id=cred("EMAIL_MS_CLIENT_ID", "email.microsoft.client_id"),
         client_secret=cred("EMAIL_MS_CLIENT_SECRET", "email.microsoft.client_secret"),
-        tenant_id=(os.environ.get("EMAIL_MS_TENANT_ID") or "common").strip() or "common",
+        tenant_id=account_env("EMAIL_MS_TENANT_ID", "common") or "common",
         account_alias=alias,
     )
 
@@ -116,12 +115,11 @@ def get_backend(provider: str | None = None, account: str | None = None) -> Any:
     with no Google token quietly answered from the sandbox — the "Calendar:
     sandbox, No events found" shape of the 2026-09-08 incident (AGENTS.md §34).
     """
-    import os
 
     if account and str(account).strip():
         return _account_backend(str(account).strip())
     requested = (
-        provider or os.getenv("KAZMA_CALENDAR_PROVIDER", "auto") or "auto"
+        provider or account_env("KAZMA_CALENDAR_PROVIDER", "auto") or "auto"
     ).strip().lower()
     explicit = requested not in ("", "auto")
     name = resolve_provider(provider)

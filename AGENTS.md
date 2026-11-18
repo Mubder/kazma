@@ -12759,6 +12759,42 @@ product can turn it on, so an install with one account behaves as before.
     `tests/test_research_spaces.py` (the unfiltered list as the control,
     and each other guard taken out).
 
+- **A mailbox and a calendar belong to a space (S1-17, part a,
+  2026-11-18).** Guards act only where Spaces is enforced; one account
+  behaves as before. Parts b (X) and c (GitHub) follow.
+  - **One rule for a connected account's names**
+    (`kazma_core/spaces/connected_accounts.py`): the owner's space keeps
+    today's vault names and the process environment, so the owner's existing
+    connections stay where they are (N26); every other space keeps its own
+    under `space:<id>:<name>` (install-scoped in the vault, so a refresh with
+    nothing bound reads the space it was told), and its environment values in
+    the vault too (`space:<id>:env.<VARIABLE>`). `connected_space()` is the
+    bound space once enforced, `NoSpaceBound` with none: a connection is never
+    looked up for no one, nor the owner's lent to it.
+  - **Every mail and calendar secret and environment value goes through
+    `email_manager.credentials`** (`vault_retrieve`, `vault_store`,
+    `vault_delete`, `cred`, `account_env`, `set_account_env`). The install's
+    app registration -- the Google and Microsoft client ids and secrets, the
+    Microsoft tenant, Kazma's own address -- is the install's in every space
+    (`_INSTALL_NAMES`, `_INSTALL_VARIABLES`). The extra-accounts list is
+    `email.accounts` for the owner's space and `email.accounts_by_space`
+    (CREDENTIAL in `settings_restore`: S1-28 carries it) for the others. The
+    mail presets and the two app-registration routes are `install` routes.
+  - **A sign-in finishes in the space it started in**: `oauth_attempts.begin`
+    records the bound space and person, and a callback binds them back
+    (`kazma_ui.oauth_sign_in.attempt_scope`); an attempt of no space, or of a
+    person no longer a member, is refused (`no_space`, worded in both
+    languages). The GitHub and X callbacks bind theirs with parts c and b.
+  - **The background connector check goes space by space**
+    (`connector_health.check_connectors`): each space's grants are refreshed
+    in that space; only the owner's space raises the owner's alerts.
+  - Gates: `tests/test_connected_accounts_spaces.py` (two spaces, two
+    mailboxes; a refresh writes only its own; the source gate -- no mail or
+    calendar module reaches the process environment or the vault itself, and
+    no other module names their secrets but the declared offsite backup and
+    settings restore; each with its control), `tests/_mail_space_cases.py`
+    (19 routes and 12 tools; with the space names taken out, the cases fail).
+
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser

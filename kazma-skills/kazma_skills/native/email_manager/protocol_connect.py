@@ -3,34 +3,24 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
-from kazma_skills.native.email_manager.credentials import vault_store
+from kazma_skills.native.email_manager.credentials import set_account_env, vault_delete, vault_store
 from kazma_skills.native.email_manager.presets import get_preset
 
 logger = logging.getLogger(__name__)
 
 
 def _set_env(key: str, value: str) -> None:
-    if value:
-        os.environ[key] = value
-    else:
-        os.environ.pop(key, None)
+    """A connected account's environment value, for the bound space
+    (``credentials.set_account_env``, Spaces S1-17)."""
+    set_account_env(key, value)
 
 
 def _vault_delete(*names: str) -> None:
-    try:
-        from kazma_core.security.vault import SecretVault, get_vault
-        from kazma_core.paths import vault_db_path
-
-        v = get_vault() or SecretVault(db_path=vault_db_path())
-        # A missing name is not an error (delete returns False); a vault
-        # that cannot write is, and a disconnect must not hide it.
-        for n in names:
-            v.delete(n)
-    except Exception:
-        logger.warning("[email.protocol] vault delete of %s failed", ", ".join(names), exc_info=True)
+    """The bound space's secrets (``credentials.vault_delete``): a missing
+    name is not an error, a vault that cannot write is said."""
+    vault_delete(*names)
 
 
 def connect_protocol(
@@ -182,7 +172,7 @@ def disconnect_protocol(provider: str) -> dict[str, Any]:
             "EMAIL_GMAIL_APP_PASSWORD",
             "EMAIL_GMAIL_AUTH",
         ):
-            os.environ.pop(k, None)
+            set_account_env(k, "")
         # The grant's own record goes with it (what it covered, when it was
         # made, whether Drive answered); Google Calendar keeps its own copy
         # and is disconnected on the calendar card.
@@ -201,7 +191,7 @@ def disconnect_protocol(provider: str) -> dict[str, Any]:
             "EMAIL_GMAIL_REFRESH_TOKEN",
             "EMAIL_GMAIL_SCOPES",
         ):
-            os.environ.pop(k, None)
+            set_account_env(k, "")
         return {"ok": True, "message": "Gmail credentials cleared."}
 
     if p == "microsoft":
@@ -218,7 +208,7 @@ def disconnect_protocol(provider: str) -> dict[str, Any]:
             "EMAIL_MS_ACCESS_TOKEN",
             "EMAIL_MS_REFRESH_TOKEN",
         ):
-            os.environ.pop(k, None)
+            set_account_env(k, "")
         # The OAuth sign-in's address and scopes too: a later sign-in whose
         # response names no address must not show the old account's. Outlook
         # Calendar keeps its own copy and is disconnected on the calendar card.
@@ -245,7 +235,7 @@ def disconnect_protocol(provider: str) -> dict[str, Any]:
             "EMAIL_SMTP_HOST",
             "EMAIL_SMTP_PORT",
         ):
-            os.environ.pop(k, None)
+            set_account_env(k, "")
         _vault_delete(
             "email.imap.password",
             "email.generic.address",

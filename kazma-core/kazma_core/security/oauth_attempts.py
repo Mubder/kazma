@@ -63,7 +63,9 @@ MAX_PENDING = 32
 PROVIDERS = ("github", "gmail", "google_calendar", "microsoft", "x")
 
 #: Why :func:`take` refused, as a code the pages word.
-REFUSAL_REASONS = ("other_browser", "unknown", "expired", "other_provider")
+#: ``no_space``: Spaces enforced, and the sign-in started in no space or its
+#: person is no longer a member of it (``kazma_ui.oauth_sign_in.attempt_scope``).
+REFUSAL_REASONS = ("other_browser", "unknown", "expired", "other_provider", "no_space")
 
 
 class AttemptRefused(PermissionError):
@@ -124,8 +126,18 @@ def begin(provider: str, **data: str) -> str:
     if provider not in PROVIDERS:
         raise ValueError(f"unknown OAuth provider: {provider!r}")
     clean = {str(k): str(v) for k, v in data.items() if v is not None}
-    if {"provider", "exp"} & set(clean):
-        raise ValueError("'provider' and 'exp' are the attempt's own fields")
+    if {"provider", "exp", "space", "asker"} & set(clean):
+        raise ValueError("'provider', 'exp', 'space' and 'asker' are the attempt's own fields")
+    # The space and person the sign-in started in (Spaces S1-17): the
+    # callback is the provider's redirect and names no space, so it binds
+    # these back (``kazma_ui.oauth_sign_in.attempt_scope``) and the account
+    # lands in the space that connected it.
+    from kazma_core.spaces.scope import current_scope
+
+    bound = current_scope()
+    if bound is not None:
+        clean["space"] = bound.space_id
+        clean["asker"] = bound.asker or ""
     state = secrets.token_urlsafe(24)
     from kazma_core.config_store import get_config_store
 

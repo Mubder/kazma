@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from typing import Any
 from urllib.parse import quote
 
@@ -18,6 +17,7 @@ from kazma_skills.native.email_manager.models import (
     SendResult,
 )
 from kazma_core.http_tls import shared_ssl_context
+from kazma_skills.native.email_manager.credentials import account_env
 
 logger = logging.getLogger(__name__)
 
@@ -363,6 +363,6 @@ class MicrosoftGraphBackend:
 
 def graph_token_from_env() -> str:
     return (
-        (os.environ.get("EMAIL_MS_ACCESS_TOKEN") or "").strip()
-        or (os.environ.get("MICROSOFT_GRAPH_TOKEN") or "").strip()
+        account_env("EMAIL_MS_ACCESS_TOKEN")
+        or account_env("MICROSOFT_GRAPH_TOKEN")
     )

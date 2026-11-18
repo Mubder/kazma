@@ -122,7 +122,7 @@ CASES: dict[str, Case] = {}
 CASE_MODULES: tuple[str, ...] = (
     "tests._chat_space_cases", "tests._memory_space_cases", "tests._lesson_space_cases",
     "tests._knowledge_space_cases", "tests._scheduled_space_cases", "tests._swarm_space_cases",
-    "tests._research_space_cases",
+    "tests._research_space_cases", "tests._mail_space_cases",
 )
 
 
@@ -199,8 +199,6 @@ PENDING_ROUTE_RULES: tuple[tuple[Pattern, str], ...] = (
     # ── S1-17: connected accounts ─────────────────────────────────────────
     ("/x$", "S1-17"),
     ("/api/x", "S1-17"),
-    ("/api/email", "S1-17"),
-    ("/api/calendar", "S1-17"),
     ("/api/github", "S1-17"),
     # ── S1-21: approvals and running work ─────────────────────────────────
     ("/api/approve", "S1-21"),
@@ -242,11 +240,9 @@ _PENDING_TOOLS_BY_ITEM: dict[str, tuple[str, ...]] = {
     # its cases: tests/_research_space_cases.py. The research files went to
     # S1-19, the space folder.)
     # Connected accounts: mail, calendar, X and GitHub.
+    # (S1-17's first part -- mail and calendar -- wrote its cases:
+    # tests/_mail_space_cases.py. X and GitHub are its second and third.)
     "S1-17": (
-        "email_accounts", "email_list", "email_get", "email_analyze",
-        "email_send", "email_categorize", "email_delete",
-        "list_events", "find_free_slots", "create_event", "update_event",
-        "delete_event",
         "x_status", "x_account", "x_post", "x_delete_post", "x_draft_posts",
         "x_schedule_post", "x_list_scheduled", "x_cancel_scheduled_post",
         "x_download_media", "x_upload_media", "x_api_operations",

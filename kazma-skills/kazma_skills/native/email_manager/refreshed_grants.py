@@ -25,7 +25,7 @@ not the length of a network request.
 from __future__ import annotations
 
 import logging
-import os
+from kazma_skills.native.email_manager.credentials import set_account_env
 
 logger = logging.getLogger(__name__)
 
@@ -77,10 +77,10 @@ def _keep_microsoft_mail(access: str, new_refresh: str, address: str = "") -> No
     from kazma_skills.native.email_manager.credentials import vault_retrieve, vault_store
 
     if access and access != "pending_refresh":
-        os.environ["EMAIL_MS_ACCESS_TOKEN"] = access
+        set_account_env("EMAIL_MS_ACCESS_TOKEN", access)
         vault_store("email.microsoft.access_token", access, category="email")
     if new_refresh:
-        os.environ["EMAIL_MS_REFRESH_TOKEN"] = new_refresh
+        set_account_env("EMAIL_MS_REFRESH_TOKEN", new_refresh)
         vault_store("email.microsoft.refresh_token", new_refresh, category="email")
     if address and address != (vault_retrieve("email.microsoft.oauth_address") or "").lower():
         vault_store("email.microsoft.oauth_address", address, category="email")

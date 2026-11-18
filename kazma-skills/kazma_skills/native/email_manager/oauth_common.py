@@ -8,9 +8,9 @@ browser, and lost at every reload.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 from urllib.parse import urlencode
+from kazma_skills.native.email_manager.credentials import account_env
 
 
 def address_from_id_token(id_token: Any) -> str:
@@ -45,7 +45,7 @@ def address_from_id_token(id_token: Any) -> str:
 
 def public_base_url(request_base: str | None = None) -> str:
     """Prefer KAZMA_PUBLIC_URL, else request base, else localhost."""
-    env = (os.environ.get("KAZMA_PUBLIC_URL") or "").strip().rstrip("/")
+    env = account_env("KAZMA_PUBLIC_URL").rstrip("/")
     if env:
         return env
     if request_base:
