@@ -92,7 +92,7 @@ def test_a_store_an_older_build_left_keeps_the_users_value(conn):
 # ── negative controls: the order and the clean-up as they were ───────────
 
 
-def _old_classify(predicate, explicit):
+def _old_classify(predicate, explicit, **_source):
     p = (predicate or "").strip().lower().replace(" ", "_")
     if explicit in ("functional", "set", "state"):
         return explicit
@@ -115,3 +115,112 @@ def test_keeping_the_newest_closes_the_users_own_fact(conn, monkeypatch):
     _write(conn, "Tokyo", "set", "agent_asserted", 1)
     _write(conn, "Osaka", "functional", "agent_asserted", 2)
     assert ("London", "user_stated") not in _current(conn)
+
+
+# ── the review of F7 (2026-11): names of the same words, the user's own list ──
+
+
+def _all_current(conn) -> list[tuple[str, str, str]]:
+    return sorted(conn.execute(
+        "SELECT predicate, object, extraction_method FROM beliefs WHERE tenant_id='t' AND subject='user' "
+        "AND valid_until IS NULL AND invalidated_at IS NULL").fetchall())
+
+
+@pytest.mark.parametrize("variant", ["live_in", "in_lives", "lives_in_the", "LIVES_IN", "in_live"])
+@pytest.mark.parametrize("label", ["set", "functional", None])
+def test_a_name_of_the_same_words_is_kazmas_name(conn, variant, label):
+    """The class was read from the exact name: "live_in" or "in_lives"
+    labelled a list stood beside the user's home, past the trust gate."""
+    _write(conn, "London", "functional", "user_stated", 0)
+    result = _write(conn, "Tokyo", label, "agent_asserted", 1, variant)
+    assert result.get("blocked") == "lower_trust_source", result
+    assert _all_current(conn) == [("lives_in", "London", "user_stated")]
+
+
+@pytest.mark.parametrize("variant", ["name", "is_name", "the_name_is"])
+@pytest.mark.parametrize("label", ["set", "functional"])
+def test_a_name_of_the_same_words_beside_the_users_name(conn, variant, label):
+    _write(conn, "Sam", "functional", "user_stated", 0, "name_is")
+    result = _write(conn, "Bob", label, "agent_asserted", 1, variant)
+    assert result.get("blocked") == "lower_trust_source", result
+    assert _all_current(conn) == [("name_is", "Sam", "user_stated")]
+
+
+def test_the_users_write_under_another_name_of_the_same_words_lands_on_kazmas(conn):
+    _write(conn, "London", "functional", "user_stated", 0)
+    _write(conn, "Lisbon", "set", "user_stated", 1, "in_lives")
+    assert _all_current(conn) == [("lives_in", "Lisbon", "user_stated")]
+
+
+@pytest.mark.parametrize("predicate", ["works_at", "active_project", "current_role"])
+@pytest.mark.parametrize("source", ["user_explicit", "user_stated"])
+def test_the_users_own_list_stays_a_list(conn, predicate, source):
+    """Two jobs, projects in parallel: on these names a list from the user's
+    own words is kept (F7 had collapsed it to the last)."""
+    for day, value in enumerate(("Acme", "Initech", "Globex")):
+        _write(conn, value, "set", source, day, predicate)
+    assert sorted(value for value, _ in _current(conn, predicate)) == ["Acme", "Globex", "Initech"]
+
+
+@pytest.mark.parametrize("predicate", ["works_at", "active_project", "current_role"])
+@pytest.mark.parametrize("source", ["agent_asserted", "llm_inferred", "system_tool"])
+def test_a_list_from_anyone_else_is_still_single_valued(conn, predicate, source):
+    _write(conn, "Acme", "functional", "user_stated", 0, predicate)
+    result = _write(conn, "Initech", "set", source, 1, predicate)
+    assert result.get("blocked") == "lower_trust_source", result
+    assert _current(conn, predicate) == [("Acme", "user_stated")]
+
+
+def test_a_refused_write_leaves_the_users_list_whole(conn):
+    """The clean-up of extra current values closed the user's other jobs
+    before the trust gate refused the agent's write."""
+    _write(conn, "Acme", "set", "user_explicit", 0, "works_at")
+    _write(conn, "Initech", "set", "user_explicit", 1, "works_at")
+    result = _write(conn, "Globex", "functional", "agent_asserted", 2, "works_at")
+    assert result.get("blocked") == "lower_trust_source", result
+    assert sorted(value for value, _ in _current(conn, "works_at")) == ["Acme", "Initech"]
+
+
+def test_a_new_single_value_from_the_user_replaces_their_list(conn):
+    _write(conn, "Acme", "set", "user_stated", 0, "works_at")
+    _write(conn, "Initech", "set", "user_stated", 1, "works_at")
+    _write(conn, "Globex", "functional", "user_stated", 2, "works_at")
+    assert _current(conn, "works_at") == [("Globex", "user_stated")]
+
+
+@pytest.mark.parametrize("predicate", ["name_is", "preferred_name", "lives_in", "located_in", "favorite_color",
+                                       "color_favorite", "grok_next_reset"])
+def test_a_name_that_holds_one_value_holds_one_whatever_the_user_labels(conn, predicate):
+    """Confirmed single-valued: one name, one home, one location, one
+    favourite, one next reset per service."""
+    _write(conn, "a", "set", "user_explicit", 0, predicate)
+    _write(conn, "b", "set", "user_explicit", 1, predicate)
+    assert len(_all_current(conn)) == 1 and _all_current(conn)[0][1:] == ("b", "user_explicit")
+
+
+def test_every_single_valued_name_is_declared_listable_or_not():
+    """A new single-valued name says whether a person holds several at once."""
+    from kazma_core.memory.predicates import _predicate_key
+
+    names = sorted(belief_mutation._FUNCTIONAL_PREDICATES | belief_mutation._STATE_PREDICATES)
+    keys = [_predicate_key(n) for n in names]
+    assert len(keys) == len(set(keys)), "two of Kazma's names are the same words"
+    assert belief_mutation._LISTABLE <= belief_mutation._FUNCTIONAL_PREDICATES
+
+
+# ── negative controls: the review's findings on the F7 code ──────────────
+
+
+def test_control_classified_by_the_exact_name_a_variant_stands_beside(conn, monkeypatch):
+    declared = belief_mutation._FUNCTIONAL_PREDICATES | belief_mutation._STATE_PREDICATES
+    monkeypatch.setattr(belief_mutation, "_kazma_name", lambda predicate: predicate if predicate in declared else None)
+    _write(conn, "London", "functional", "user_stated", 0)
+    _write(conn, "Tokyo", "set", "agent_asserted", 1, "in_lives")
+    assert ("in_lives", "Tokyo", "agent_asserted") in _all_current(conn)
+
+
+def test_control_without_the_users_list_it_collapses_to_the_last(conn, monkeypatch):
+    monkeypatch.setattr(belief_mutation, "_LISTABLE", frozenset())
+    for day, value in enumerate(("Acme", "Initech", "Globex")):
+        _write(conn, value, "set", "user_explicit", day, "works_at")
+    assert _current(conn, "works_at") == [("Globex", "user_explicit")]

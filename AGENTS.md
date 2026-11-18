@@ -1779,11 +1779,18 @@ four injected were noise.
   `_survivor`). Kazma's own class (`kazma_classifies`) wins over the caller's
   label: the agent's memory tools label a fact "set" by default, and an
   agent's `lives_in Tokyo` labelled a list stood beside the user's own
-  London, past the trust gate. Of several current rows of a single-valued
+  London, past the trust gate. The class is read from the name's words
+  (`belief_mutation._kazma_name`, as `predicates` compares names): "live_in",
+  "in_lives" or "is_name" labelled a list slipped past an exact-name class.
+  Of several current rows of a single-valued
   fact, the newest the user said stays (else the newest), and a newer row
-  from a lower source closes where it began. Gate:
-  `tests/test_memory_kazma_class_wins.py` (the label first and keeping the
-  newest as negative controls).
+  from a lower source closes where it began. On names a person holds several
+  of (`_LISTABLE`: works_at, active_project, current_role) a list labelled by
+  the user's own words stays a list, and stays whole until a write that may
+  replace the user's value replaces all of it; every other single-valued name
+  holds one value whoever labels it. Gate:
+  `tests/test_memory_kazma_class_wins.py` (the label first, keeping the
+  newest, the exact-name class and no listable names as negative controls).
 - **A list stays a list** (2026-10-19, `belief_mutation._established_kind`).
   The extractor labels each fact's type; a single-valued label on a predicate
   the subject keeps as a list (current `set` rows) is written as one more
