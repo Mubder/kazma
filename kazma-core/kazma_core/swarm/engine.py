@@ -938,13 +938,7 @@ class SwarmEngine:
         # the account that asked (Spaces S1-15, always stamped when one is
         # bound): once Spaces is enforced the task's workers run as them.
         try:
-            from kazma_core.spaces.scope import bound_asker
-            from kazma_core.tenant_isolation import require_tenant_id
-
-            task.metadata = dict(task.metadata or {})
-            task.metadata.setdefault("tenant_id", require_tenant_id())
-            if bound_asker():
-                task.metadata.setdefault("asker", bound_asker())
+            self._stamp_whose(task)
         except Exception:
             # An unstamped task is listed for every tenant (SW-E14: was silent).
             logger.warning("[SwarmEngine] could not stamp the tenant of task '%s'", task.id, exc_info=True)
@@ -2122,6 +2116,37 @@ class SwarmEngine:
             intermediate_results=intermediate_results,
             blackboard=blackboard,
         )
+
+    @staticmethod
+    def _stamp_whose(task: SwarmTask) -> None:
+        """Record whose *task* is, at its admission.
+
+        Once Spaces is enforced and the admitting work is bound to a scope,
+        that scope IS the task's: its space and person overwrite whatever the
+        task arrived with, so no value carried in from a request or a copy
+        can make a worker run as someone else (Spaces S1-15 review). Bound to
+        nothing (a pipeline resumed after a restart, the durable path), the
+        task keeps the space and person it was admitted with. Otherwise, as
+        before Spaces: the tenant when the task has none, and the person when
+        one is bound. ``require_tenant_id`` is asked only for a task with no
+        tenant: asked for one that had it, it warned for nothing.
+        """
+        from kazma_core.spaces.scope import bound_asker, current_scope, spaces_enforced
+
+        task.metadata = dict(task.metadata or {})
+        bound = current_scope() if spaces_enforced() else None
+        if bound is not None:
+            task.metadata["tenant_id"] = bound.space_id
+            if bound.asker:
+                task.metadata["asker"] = bound.asker
+            return
+        if "tenant_id" not in task.metadata:
+            from kazma_core.tenant_isolation import require_tenant_id
+
+            task.metadata["tenant_id"] = require_tenant_id()
+        asker = bound_asker()
+        if asker and "asker" not in task.metadata:
+            task.metadata["asker"] = asker
 
     @staticmethod
     def _build_dispatch_context(

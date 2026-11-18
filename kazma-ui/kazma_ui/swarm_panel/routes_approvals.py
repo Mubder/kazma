@@ -52,6 +52,17 @@ def _not_this_spaces(view: dict[str, Any] | None) -> bool:
     return view is not None and spaces_enforced() and str(view.get("space") or "") != require_space_id()
 
 
+def _not_theirs(approval_id: str) -> bool:
+    """True for a request of this space this caller may not answer: once
+    Spaces is enforced, only the person whose task asked decides it
+    (decision N4, Spaces S1-15 review). Blocking (the identity store)."""
+    from kazma_core.swarm import shared_approvals
+    from kazma_core.swarm.single_operator import answered_by_caller
+
+    space, asker = shared_approvals.whose(approval_id)
+    return not answered_by_caller(space, asker or None)
+
+
 def register_approval_routes(router: APIRouter) -> None:
     """The approval panel's two routes. Plain ``def``s: each reads the
     settings store and the gate registry, off the event loop."""
@@ -75,6 +86,8 @@ def register_approval_routes(router: APIRouter) -> None:
         approval_id = valid_approval_id(approval_id)
         if _not_this_spaces(shared_approvals.describe(approval_id)):
             return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+        if _not_theirs(approval_id):
+            return JSONResponse({"ok": False, "error": "not_yours"}, status_code=403)
         actor = _actor(request)
         decided = shared_approvals.decide_from_web(approval_id, decision == "approve", actor=actor)
         if decided is None:

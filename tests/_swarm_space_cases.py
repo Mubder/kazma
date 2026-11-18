@@ -106,21 +106,23 @@ class World:
     def account_of(self, who: str) -> str:
         return {"a": self.matrix.account_a, "b": self.matrix.account_b}[who]
 
-    def call(self, who: str, method: str, path: str, **kwargs: Any) -> Any:
-        headers = {"x-matrix-person": who, space_binding.SPACE_HEADER: self.space_of(who)}
+    def call(self, who: str, method: str, path: str, *, space: str = "", **kwargs: Any) -> Any:
+        """A request of *who*'s page, in their own space or in *space*."""
+        headers = {"x-matrix-person": who, space_binding.SPACE_HEADER: space or self.space_of(who)}
         return self.client.request(method, path, headers=headers, **kwargs)
 
     @property
     def store(self) -> Any:
         return self.engine._task_store
 
-    def plant(self, who: str, mark: str, *, status: str = "completed") -> Task:
-        """A task of *who*'s space, asked by them, its prompt carrying *mark*."""
+    def plant(self, who: str, mark: str, *, status: str = "completed", space: str = "") -> Task:
+        """A task of *who*'s space (or *space*), asked by them, its prompt
+        carrying *mark*."""
         from kazma_core.swarm.task import SwarmTask, TaskStatus
 
         task = SwarmTask(
             prompt=f"task {mark}", workers=["probe"], status=TaskStatus(status),
-            metadata={"tenant_id": self.space_of(who), "asker": self.account_of(who)},
+            metadata={"tenant_id": space or self.space_of(who), "asker": self.account_of(who)},
             completed_at=datetime.now(UTC).isoformat() if status in ("completed", "failed") else None,
         )
         assert self.store.persist_task(task), task.id
@@ -153,17 +155,19 @@ class World:
         return {} if row is None else {"status": str(row.status), "prompt": row.prompt,
                                        "space": (row.metadata or {}).get("tenant_id")}
 
-    def approval(self, who: str, mark: str) -> str:
-        """A bus request a worker in *who*'s space opened."""
+    def approval(self, who: str, mark: str, *, space: str = "") -> str:
+        """A bus request a worker opened in *who*'s space (or *space*), running
+        as *who*."""
         from kazma_core.safety.hitl_gates import GateRow, register_gate
         from kazma_core.swarm import shared_approvals
 
         gate_id = "swarm-gate-" + uuid.uuid4().hex[:12]
         args = json.dumps({"path": f"{mark}.txt", "content": mark})
+        where = space or self.space_of(who)
         register_gate(GateRow(gate_id=gate_id, thread_id="swarm", tool="file_write", mechanism="swarm_bus",
-                              tenant_id=self.space_of(who), args_json=args, message=args), ttl_seconds=60)
+                              tenant_id=where, args_json=args, message=args), ttl_seconds=60)
         shared_approvals.open_request(gate_id, tool="file_write", args=args, deadline=time.time() + 60,
-                                      space=self.space_of(who))
+                                      space=where, asker=self.account_of(who))
         return gate_id
 
     def tool(self, who: str, name: str, **kwargs: Any) -> str:
@@ -357,6 +361,14 @@ def swarm_retry(w: World) -> None:
 @swarm_case("POST /api/swarm/dispatch")
 def swarm_dispatch(w: World) -> None:
     mark = w.matrix.plant("dispatch").a
+    # Naming B's space and person in the request's metadata (the S1-15
+    # review's witness) is refused: nothing recorded, no worker run.
+    forged = w.call("a", "POST", "/api/swarm/dispatch", json={
+        "task": f"task {mark}forged", "workers": ["probe"],
+        "metadata": {"tenant_id": Matrix.SPACE_B, "asker": w.matrix.account_b}})
+    assert forged.status_code == 400 and forged.json()["code"] == "metadata_set_by_kazma", forged.text
+    w.settle()
+    assert w.ran == [] and _stored_with(w, f"{mark}forged") == []
     done = w.call("a", "POST", "/api/swarm/dispatch", json={"task": f"task {mark}", "workers": ["probe"]})
     assert done.status_code == 200, done.text
     w.settle()

@@ -58,6 +58,31 @@ def _coerce_task_type(payload: dict[str, Any], worker_names: list[str]) -> Any:
     return TaskType.DISPATCH if len(worker_names) == 1 else TaskType.BROADCAST
 
 
+def _metadata_refusal(payload: dict[str, Any]) -> JSONResponse | None:
+    """The answer to a dispatch whose metadata names a key only Kazma sets,
+    else None. Whose task it is, where its result goes and what its worker
+    may do are Kazma's to record, never a request's (Spaces S1-15 review): a
+    request naming another space or person, a chat address or a worker's
+    limits is refused before anything else is looked at."""
+    from kazma_core.swarm.task_metadata import kazma_keys_in
+
+    forged = kazma_keys_in(payload.get("metadata"))
+    if not forged:
+        return None
+    return JSONResponse(
+        {
+            "status": "error",
+            "code": "metadata_set_by_kazma",
+            "message": (
+                "These metadata keys are set by Kazma, not by a request: "
+                f"{', '.join(forged)}. Nothing was recorded or run."
+            ),
+            "keys": forged,
+        },
+        status_code=400,
+    )
+
+
 def _coerce_timeout(payload: dict[str, Any]) -> float:
     """Return a numeric task timeout from the API payload."""
     try:
@@ -106,12 +131,15 @@ def register_tasks_routes(
         return svc.resolve_engine(swarm_manager)
 
     def _not_here(engine: Any, task_id: str) -> JSONResponse | None:
-        """The answer for a task this request may not see, else None.
+        """The answer for a task this request may not act on, else None.
 
         Once Spaces is enforced a task of another space answers exactly as
-        an unknown one (Spaces S1-15). Blocking (the task store)."""
+        an unknown one (Spaces S1-15), and a task of this space that acts
+        for someone else is not this caller's to answer: only the person
+        who asked approves, rejects, cancels or retries it (decision N4).
+        Blocking (the task store, the identity store)."""
         from kazma_core.spaces.scope import spaces_enforced
-        from kazma_core.swarm.single_operator import task_of_this_space
+        from kazma_core.swarm.single_operator import task_answered_by_caller, task_of_this_space
 
         if not spaces_enforced():
             return None
@@ -120,6 +148,10 @@ def register_tasks_routes(
             or engine.get_task(task_id) or (store.get_task(task_id) if store is not None else None)
         if task is None or not task_of_this_space(task):
             return JSONResponse({"status": "error", "message": f"Task '{task_id}' not found"}, status_code=404)
+        if not task_answered_by_caller(task):
+            return JSONResponse({"status": "error", "code": "not_yours",
+                                 "message": "Only the person who asked for this task can answer it."},
+                                status_code=403)
         return None
 
     def _require_admin(request: Request) -> JSONResponse | None:
@@ -129,15 +161,12 @@ def register_tasks_routes(
         authenticated user could approve/reject/cancel another user's swarm
         HITL checkpoint (audit finding). No-secret deployments pass; a check
         that raises now DENIES — this copy used to allow (audit 2026-09-22).
-        Once Spaces is enforced these are a space's own work (``route_roles``
-        SPACE, Spaces S1-15): the route's role check asked for the space,
-        and the task is checked to be the space's (:func:`_not_here`).
+        The admin's in every mode until feature grants give the swarm to
+        others (S2-11); once Spaces is enforced the task is also checked to
+        be the space's and the caller's own (:func:`_not_here`).
         """
-        from kazma_core.spaces.scope import spaces_enforced
         from kazma_ui.auth import admin_decision
 
-        if spaces_enforced():
-            return None
         decision = admin_decision(request)
         if decision == "ok":
             return None
@@ -305,8 +334,12 @@ def register_tasks_routes(
             # The result goes to the output target -- the one route swarm
             # results take. The separate swarm-bot notifier (a fourth
             # notifier beside AGENTS §33's three, reporting a send Telegram
-            # refused as sent) was removed (Swarm audit SW-S15).
-            if not await _route_task_result(result):
+            # refused as sent) was removed (Swarm audit SW-S15). The target
+            # is the owner's chat: someone else's result stays in its space.
+            if not await _for_the_owner(swarm_task):
+                logger.info("[Swarm] task '%s': not the owner's, its result stays in its space",
+                            getattr(swarm_task, "id", ""))
+            elif not await _route_task_result(result):
                 logger.info("[Swarm] task '%s': no output target took the result",
                             getattr(swarm_task, "id", ""))
             return result
@@ -317,8 +350,24 @@ def register_tasks_routes(
             from kazma_core.exceptions import sanitize_error
 
             error_msg = f"Swarm task '{getattr(swarm_task, 'id', '')}' failed. {sanitize_error(exc)}"
-            await _maybe_send_to_output_target_fallback(error_msg)
+            if await _for_the_owner(swarm_task):
+                await _maybe_send_to_output_target_fallback(error_msg)
             raise exc
+
+    async def _for_the_owner(swarm_task: Any) -> bool:
+        """Whether the install's output target -- the owner's chat -- may carry
+        this task's result (Spaces S1-15 review, O1): always while Spaces is
+        not enforced; once it is, only a task that acts for the owner. A
+        store that cannot say keeps the result in its space."""
+        from kazma_core.spaces.identity import IdentityUnavailable
+        from kazma_core.swarm.single_operator import task_for_the_owner
+
+        try:
+            return await asyncio.to_thread(task_for_the_owner, swarm_task)
+        except IdentityUnavailable:
+            logger.warning("[Swarm] task '%s': whose it is cannot be read; its result stays in its space",
+                           getattr(swarm_task, "id", ""))
+            return False
 
     def _settle_handle(svc: Any, task_id: str, handle: asyncio.Task) -> None:
         """A background dispatch ended: drop its handle and retrieve its
@@ -392,6 +441,9 @@ def register_tasks_routes(
                 {"status": "error", "code": problem[0], "message": problem[1]},
                 status_code=422,
             )
+        forged = _metadata_refusal(payload)
+        if forged is not None:
+            return forged
         worker_names = payload.get("workers", [])
         task = str(payload.get("task", "")).strip()
         context = str(payload.get("context", ""))

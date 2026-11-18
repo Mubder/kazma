@@ -12649,7 +12649,16 @@ product can turn it on, so an install with one account behaves as before.
   (`swarm.single_operator.swarm_refusal`), and work bound to no space is
   refused once enforced (`NO_SPACE_REFUSAL`).
   - A task carries its space and the person who asked (`metadata`
-    `tenant_id` and `asker`, stamped at admission). Every list, task,
+    `tenant_id` and `asker`, stamped at admission: once enforced the
+    admitting scope overwrites what the task arrived with,
+    `SwarmEngine._stamp_whose`). **Whose task it is is Kazma's to record**:
+    every key the swarm reads from a task's metadata is declared a request's
+    or Kazma's own (`swarm.task_metadata`: `REQUEST_KEYS`, `KAZMA_KEYS` --
+    whose task it is, where it came from and where its result goes, what its
+    worker may do, how a run ended), and the dispatch route refuses a request
+    naming a Kazma key (400 `metadata_set_by_kazma`, nothing recorded or
+    run). A new key the swarm reads is declared in one of the two or the
+    gate fails (`tests/test_swarm_task_metadata.py`). Every list, task,
     stream, action and the export keep to the caller's space
     (`single_operator.task_of_this_space`; the task store's list filter
     names the bound space, `"*"` is Kazma's own work); another space's task
@@ -12660,7 +12669,11 @@ product can turn it on, so an install with one account behaves as before.
     nothing). A worker usually inherits the dispatching request's scope;
     the binding is what holds for a task run with nothing bound (a pipeline
     resumed after a restart, the durable path), a hand-off target and its
-    approval's resume. A sub-agent runs in its spawner's scope.
+    approval's resume. A sub-agent runs in its spawner's scope. The scope is
+    resolved once, before the worker's breaker is asked
+    (`worker_dispatch._scope_or_refusal`): a task of no space, or an identity
+    store that cannot answer (reported to the database watch), is refused
+    there and never counts against the breaker every space shares.
   - **A worker serves every space**: its log lines and last task carry
     their space (`mark_dispatched(space=)`, `logs_for`) and are shown in it
     only (`services._kept_to_space`). A worker's lessons are the task's
@@ -12669,13 +12682,30 @@ product can turn it on, so an install with one account behaves as before.
     space shares); the registry prompt's own lessons were learned before
     Spaces and are shown in the owner's space only
     (`worker._prompt_in_this_space`).
-  - A bus approval records the space that asked (`shared_approvals`
-    `space`, the gate row's tenant); the Web page shows and decides it only
-    there. The swarm's writes on a space's own work are a member's once
-    enforced (`route_roles.SPACE`); the install's swarm stays the admin's.
+  - A bus approval records the space and the person that asked
+    (`shared_approvals` `space` and `asker`, the gate row's tenant); the Web
+    page shows it only in that space. **Only the person who asked answers**
+    (decision N4, `single_operator.answered_by_caller`): a task's approve,
+    reject, cancel and retry and its worker's approval are refused to anyone
+    else (403 `not_yours`); another member of a shared space sees them.
+    **Someone else's card and result stay off the owner's chat apps** (O1,
+    `single_operator.for_the_owner`): until people link their own chat apps
+    every one is the owner's, so a request that does not act for the owner
+    is never posted to the bus (`safety._kept_in_its_space`: it waits on its
+    row, answered in its space) and a chat app's button never decides it;
+    its result goes to neither the output target nor a chat
+    (`chat_delivery`). Delivering a request to its asker (the bell, Web
+    Push) is S2-05's.
+  - **The swarm's writes stay the admin's in every mode** (dispatch, a
+    task's actions, an approval's decision) until feature grants give the
+    swarm to others (S2-11); the install's swarm, read -- workers' totals and
+    breakers, the output target -- is the admin's once enforced
+    (`route_roles.INSTALL_READ`).
   - Gates: `tests/_swarm_space_cases.py` (the matrix cases),
     `tests/test_swarm_spaces.py` (each guard taken out as a control; the
-    unscoped dispatch as the control for a task run with nothing bound).
+    unscoped dispatch as the control for a task run with nothing bound; the
+    review's forged dispatch with both layers out; a shared space of two;
+    a real worker's real tool call), `tests/test_swarm_task_metadata.py`.
 
 ## UI Conventions (Web)
 
