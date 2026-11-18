@@ -541,7 +541,7 @@ def _refuse_rows_with_no_tenant(conn: Any) -> None:
     for table in tables:
         for when, event in (("insert", "INSERT"), ("retenant", "UPDATE OF tenant_id")):
             conn.execute(
-                f"CREATE TRIGGER IF NOT EXISTS kazma_no_tenant_{when}_{table} BEFORE {event} ON {table} "  # nosec B608
+                f"CREATE TRIGGER IF NOT EXISTS kazma_no_tenant_{when}_{table} BEFORE {event} ON {table} "  # nosec B608 - table names come from this database's own schema; the sentinel is a constant
                 f"WHEN NEW.tenant_id = '{NO_TENANT}' "
                 "BEGIN SELECT RAISE(ABORT, 'memory: no tenant is bound to this write'); END")
 

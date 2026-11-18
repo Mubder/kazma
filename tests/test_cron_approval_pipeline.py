@@ -182,7 +182,7 @@ class _Store:
         self.sibling = sibling
         self.repaired: tuple[str, str] | None = None
 
-    async def sibling_delivery_target(self, thread_id: str) -> str:
+    async def sibling_delivery_target(self, thread_id: str, tenant_id: str = "default") -> str:
         return self.sibling
 
     async def update_delivery_target(self, job_id: str, target: str) -> None:
