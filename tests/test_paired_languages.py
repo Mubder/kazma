@@ -105,6 +105,13 @@ def _facts(text: str) -> list[tuple[str, str]]:
     return sorted((f["subject"], f["predicate"]) for f in extract_beliefs_heuristic(text))
 
 
+def _named_last(text: str) -> str | None:
+    """Who the words before the last word of *text* last named."""
+    from kazma_core.memory.speaker import subjects
+
+    return subjects(re.findall(r"[^\s.,!?،؛؟:;]+|[.,!?،؛؟:;]", text))[-1]
+
+
 def _remind(text: str) -> tuple[str, Any]:
     from kazma_core.safety.commitment.relative_time import resolve_remind
 
@@ -290,6 +297,12 @@ PAIRS: list[Pair] = [
          "I work at Aramco.", "أشتغل عند أرامكو.", _facts, [("user", "works_at")]),
     Pair("fact_field_kept_out", (M + "memory/belief_extractor.py", M + "memory/arabic_facts.py"),
          "I work in marketing.", "أشتغل في التسويق.", _facts, []),
+    Pair("fact_someone_else_kept_out", (M + "memory/belief_extractor.py", M + "memory/arabic_facts.py"),
+         "My sister moved to Rotterdam.", "أختي انتقلت إلى روتردام.", _facts, []),
+    Pair("speaker_someone_else", (M + "memory/speaker.py",),
+         "My sister is a nurse. Moved", "أختي ممرضة. انتقلت", _named_last, "other"),
+    Pair("speaker_the_user", (M + "memory/speaker.py",),
+         "My sister is in Jeddah and I moved", "أختي في جدة وأنا انتقلت", _named_last, "speaker"),
     Pair("remind_tomorrow_9", (M + "safety/commitment/relative_time.py",),
          "remind me tomorrow at 9am to call mom", "ذكرني بكرة الساعة 9 الصبح أتصل على أمي", _remind,
          ("allow", datetime(2026, 11, 3, 6, 0, tzinfo=timezone.utc))),

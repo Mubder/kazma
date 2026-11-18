@@ -16,11 +16,16 @@ what the English pass refuses by capitalisation, which Arabic does not have:
   maqsura and vowel marks do not matter) with an optional "و"/"ف" prefix;
   the value kept is the user's own spelling;
 * a negated statement ("ما أحب", "مو ساكن") keeps nothing;
-* a word that is not first person on its own -- "اسمي" (my name, also in
-  "نسيت اسمي"), a participle ("ساكن", "شغال": "أخوي ساكن في دبي" is the
-  brother) -- counts only where the user's own clause begins: the start of
-  a sentence, after "أنا", a greeting, or joined by "و" to what came before;
-  a verb without its hamza ("اشتغل", "استخدم") is the imperative the user
+* "اسمي" (my name, also in "نسيت اسمي") counts only where the user's own
+  clause begins: the start of a sentence, after "أنا", a greeting, or joined
+  by "و" to what came before;
+* a trigger whose form does not say who its subject is -- a participle
+  ("ساكن", "شغال") or a past verb whose ending is the same for I, you and she
+  ("انتقلت") -- counts where the user's own clause begins, and only when no
+  one else is named before it (``memory.speaker``): "أخوي ساكن في دبي" is
+  the brother, "أختي انتقلت إلى روتردام" the sister, and in "عندي أخت اسمها
+  نورة وانتقلت إلى روتردام" it is Noura who moved;
+* a verb without its hamza ("اشتغل", "استخدم") is the imperative the user
   gives Kazma unless "أنا" comes first;
 * "أحب/أعشق" keep only a definite noun ("أحب الشاي"), never a verb
   ("أحب أعرف" -- "I'd like to know"); "أفضل" is also "the best", so it
@@ -37,6 +42,8 @@ from __future__ import annotations
 
 import re
 from typing import Any
+
+from kazma_core.memory.speaker import OTHER, subjects
 
 __all__ = ["extract_arabic_facts"]
 
@@ -63,9 +70,17 @@ _ENDERS = {"الشهر", "السنه", "الاسبوع", "العام", "امس",
            "الحين", "الان", "مؤخرا", "اليوم", "مع", "حاليا", "بعد", "لان", "عشان", "بس", "لكن",
            "علي", "كل", "دايم", "دايما", "دائما", "كثير", "وايد", "جدا", "مره", "اذا", "لما", "يعني"}
 _WORK_TRIGGERS = {"اشتغل", "نشتغل", "اعمل", "نعمل", "شغال", "شغاله", "اداوم", "موظف", "موظفه"}
-#: Words that are first person only where the user's clause begins.
-_PARTICIPLES = {"ساكن", "ساكنه", "ساكنين", "عايش", "عايشه", "عايشين", "مقيم", "مقيمه",
-                "شغال", "شغاله", "موظف", "موظفه"}
+#: Triggers whose form does not say who their subject is: participles, and
+#: a past verb whose ending is the same for I, you and she. The user's only
+#: in the user's own clause, with no one else named before them.
+_UNMARKED = {"ساكن", "ساكنه", "ساكنين", "عايش", "عايشه", "عايشين", "مقيم", "مقيمه",
+             "شغال", "شغاله", "موظف", "موظفه", "انتقلت"}
+#: Triggers whose form says the user is their subject: a first-person prefix
+#: or ending ("أسكن", "نسكن", "انتقلنا", "اسمي", "عندي"), or the imperative
+#: "call me". Every trigger is in exactly one of the two.
+_MARKED = {"اسمي", "ناديني", "نادني", "اسكن", "نسكن", "اعيش", "نعيش", "اقيم", "نقيم", "انتقلنا",
+           "اشتغل", "نشتغل", "اعمل", "نعمل", "اداوم", "احب", "اعشق", "استخدم", "استعمل", "افضل",
+           "عندي", "لدي"}
 #: Verbs that read as an imperative without their hamza ("اشتغل على الملف").
 _HAMZA_VERBS = {"اشتغل", "اعمل", "استخدم", "استعمل"}
 #: Words after which the user's own clause begins.
@@ -131,10 +146,13 @@ def _own_clause(words: list[_Word], i: int) -> bool:
     return i == 0 or words[i - 1].punct or words[i - 1].folded in _OPENERS or w.bare != w.folded
 
 
-def _first_person(words: list[_Word], i: int) -> bool:
-    """Whether word *i*, a trigger, speaks of the user."""
+def _first_person(words: list[_Word], i: int, named: list[str | None]) -> bool:
+    """Whether word *i*, a trigger, speaks of the user. *named* is who the
+    words before each word last named (``speaker.subjects``)."""
     w = words[i]
-    if w.bare in _PARTICIPLES or w.folded in _NAME_TRIGGERS:
+    if w.bare in _UNMARKED:
+        return _own_clause(words, i) and named[i] != OTHER
+    if w.folded in _NAME_TRIGGERS:
         return _own_clause(words, i)
     if w.bare in _HAMZA_VERBS:
         return w.text.lstrip("وف").startswith("أ") or (i > 0 and words[i - 1].folded in _I)
@@ -256,6 +274,7 @@ def extract_arabic_facts(text: str) -> list[dict[str, Any]]:
     if not text or not _ARABIC_LETTER.search(text):
         return []
     words = _words(text)
+    named = subjects([w.text for w in words])
     found: dict[str, dict[str, Any]] = {}
 
     def keep(fact: dict[str, Any]) -> None:
@@ -263,7 +282,7 @@ def extract_arabic_facts(text: str) -> list[dict[str, Any]]:
             found.setdefault(fact["predicate"], fact)
 
     for i, w in enumerate(words):
-        if w.punct or _negated(words, i) or not _first_person(words, i):
+        if w.punct or _negated(words, i) or not _first_person(words, i, named):
             continue
         nxt = words[i + 1] if i + 1 < len(words) else None
         if _is(w, _NAME_TRIGGERS):

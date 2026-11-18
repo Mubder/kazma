@@ -792,8 +792,12 @@ it now reads the same kinds of fact in Arabic and in Arabic mixed with
 English -- name, where you live (or moved to), where you work, a favourite,
 a preference, an allergy (`memory/arabic_facts.py`). Its rules come from the
 grammar, so it keeps nothing from a negation ("ما أحب"), an instruction to
-Kazma ("استخدم البحث"), a question, someone else ("أخوي ساكن في دبي") or a
-field of work ("أشتغل في المبيعات", like "I work in sales"). What it misses --
+Kazma ("استخدم البحث"), a question, someone else ("أخوي ساكن في دبي", "أختي
+انتقلت إلى روتردام", and "عندي أخت اسمها نورة وانتقلت إلى روتردام", where it
+is Noura who moved) or a field of work ("أشتغل في المبيعات", like "I work in
+sales"). Once a message names someone else, a statement with no "أنا" after it
+is read as about them: the quick pass would rather miss a fact than file
+another person's under you. What it misses --
 relatives, jobs, dates -- is the model's deep pass to find. That pass is scored from the configured model's recorded
 replies (`scripts/memory_extraction_record.py --out <fixture>`, run with an
 install's own Python, one model call per turn); a turn with no recorded reply

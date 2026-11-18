@@ -1287,10 +1287,20 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | N
                    indent=1, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
-    raised = sorted(k for k, v in scores.items() if v > old_scores.get(k, -1.0))
-    print(f"{THRESHOLDS}: dataset v{version}, {len(raised)} raised")
-    for k in raised:
-        print(f"  {k}: {old_scores.get(k)} -> {scores[k]}")
+    # What moved, in every part: the recall scores, then the extraction and
+    # write-scenario parts (it said "0 raised" over a write scenario that
+    # began to pass).
+    moved = [(k, old_scores.get(k), v) for k, v in sorted(scores.items()) if v > old_scores.get(k, -1.0)]
+    for part, new in (("extraction", extraction), ("writes", writes)):
+        was = (old.get(part) or {}).get("scores") or {}
+        moved += [(f"{part} {k}", was.get(k), v) for k, v in sorted(new.get("scores", {}).items())
+                  if v != was.get(k)]
+    now_pass = sorted(set((old.get("writes") or {}).get("failing") or []) - set(writes.get("failing") or []))
+    print(f"{THRESHOLDS}: dataset v{version}, {len(moved)} changed")
+    for k, was, now in moved:
+        print(f"  {k}: {was} -> {now}")
+    for sid in now_pass:
+        print(f"  writes: {sid} passes now")
     return 0
 
 

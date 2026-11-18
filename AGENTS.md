@@ -1905,7 +1905,7 @@ four injected were noise.
   a turn's `extras` are true, its `avoid` entries are never right and find
   nothing; the name is scored apart) and `quiet`; the old strict reading
   stays in each row as `recall`/`precision`, ungated. **A recording says
-  what it is** (`recording_identity`: its replies' hash, model, provider,
+  what it is** (`_recording_identity`: its replies' hash, model, provider,
   date, askings, the system prompt's hash) and a recording of another prompt
   is refused (`StaleRecordingError`, also at replay time); a message the
   recording holds no reply for is its own failure, never "the model is
@@ -2000,6 +2000,22 @@ four injected were noise.
   kind, the English reading first. Gate: `tests/test_memory_arabic_facts.py`
   (sentences not in the benchmark, both ways; the pass switched off as the
   negative control).
+- **A fact about someone else is never the user's** (2026-11, the memory
+  framework audit's speaker rule, `memory/speaker.py`). `subjects` says, for
+  each word, who the words before it last named: the speaker ("أنا", "I",
+  "we", "اسمي"), someone else (a relative or a companion in any form, a
+  third-person pronoun where its clause begins, "اسمها", a reporting verb),
+  or no one; a wide list for someone else, a narrow one for the speaker. The
+  Arabic quick pass's triggers are each declared `_MARKED` (the form says the
+  user is the subject: "أسكن", "انتقلنا", "اسمي") or `_UNMARKED` (a
+  participle, or "انتقلت", which is I, you and she alike): an unmarked one
+  counts in the user's own clause and only with no one else named before it.
+  "أختي انتقلت إلى روتردام" was the user's home at the user's own trust, and
+  so was "أخوي اسمه أحمد وساكن في دبي" (a clause joined by "و"). Gate:
+  `tests/test_memory_speaker.py` (every trigger declared once, a planted
+  one as control; every unmarked trigger after a sentence about someone
+  else; the old trigger list and the rule switched off as negative
+  controls), and the write scenario `other-ar-sister-moved`.
 - The heuristic reads "I work at/for X" as `works_at` (it shared a pattern
   with "I live in" and stored the employer as `lives_in`), and the local
   embedder remembers short texts (<= 256 characters, 4,096 of them): each
