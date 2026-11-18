@@ -154,20 +154,48 @@ def _is_bot(name: str, email: str) -> bool:
 
 
 # Some authors commit under several emails that git (unlike GitHub) cannot know
-# belong to one account — e.g. a personal gmail, a custom domain, and a
+# belong to one account — e.g. a personal address, a custom domain, and a
 # placeholder like "your-email@example.com", all from the same maintainer.
 # Map every known address for such a person to a single canonical login so they
 # count once, mirroring GitHub's account-merge behaviour. Edit this when you
 # adopt a new commit identity.
+#
+# Only PUBLIC addresses belong here (GitHub no-reply addresses, the project's
+# own domain, placeholders): this file is in a public repository. A personal
+# address is given on the maintainer's own machine instead, in
+# ``ALIASES_ENV`` (see ``_email_aliases``); tests/test_no_personal_addresses.py
+# fails on a personal commit address in any tracked file.
 _EMAIL_ALIASES: dict[str, str] = {
     # Mubder / Alfaris — one maintainer across many local git configs.
     "mubder@users.noreply.github.com": "mubder",
     "46130504+mubder@users.noreply.github.com": "mubder",
-    "b.alfaris@gmail.com": "mubder",
     "admin@kazma.ai": "mubder",
     "your-email@example.com": "mubder",
     "balfaris@users.noreply.github.com": "mubder",
 }
+
+#: Personal commit addresses, set on the maintainer's machine (never in this
+#: file): comma-separated ``address=login`` pairs, e.g.
+#: ``someone@example.org=mubder``. Read only by the offline fallback of
+#: ``count_human_contributors``; without it that fallback counts each such
+#: address as its own contributor (the GitHub API path, used whenever GitHub
+#: answers, does not read it).
+ALIASES_ENV = "KAZMA_METRICS_AUTHOR_ALIASES"
+
+
+def _email_aliases() -> dict[str, str]:
+    """The public alias map plus the pairs in ``ALIASES_ENV``, lower-cased.
+
+    A pair without ``=``, or with an empty side, is ignored: a mistyped
+    setting can cost an offline count one merge, never fail the generator.
+    """
+    aliases = dict(_EMAIL_ALIASES)
+    for pair in os.environ.get(ALIASES_ENV, "").split(","):
+        address, sep, login = pair.partition("=")
+        address, login = address.strip().lower(), login.strip()
+        if sep and address and login:
+            aliases[address] = login
+    return aliases
 
 
 def count_human_contributors() -> int:
@@ -203,6 +231,7 @@ def count_human_contributors() -> int:
 
     # Offline fallback: %ae=author email, %an=author name; one line per commit.
     raw = git("log", "--format=%ae%x09%an", "HEAD")
+    aliases = _email_aliases()
     identities: set[str] = set()
     for line in raw.splitlines():
         if "\t" not in line:
@@ -211,8 +240,8 @@ def count_human_contributors() -> int:
         email_l = email.strip().lower()
         if _is_bot(name.strip(), email_l):
             continue
-        if email_l in _EMAIL_ALIASES:
-            identities.add(_EMAIL_ALIASES[email_l])
+        if email_l in aliases:
+            identities.add(aliases[email_l])
             continue
         # Canonical GitHub no-reply addresses encode the login.
         login = None

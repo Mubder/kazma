@@ -129,9 +129,27 @@ bold.
 | `tests` (others) | `files`, `def_functions`, `async_def_functions`, `classes`, `lines`: static counts of the test code. |
 | `source_structure` | `functions`, `async_functions`, `classes` defined in the product packages. |
 | `assets` | `javascript_files`, `javascript_lines`, `html_files`, `yaml_files`, `markdown_files`, `tsx_files`, `css_files`, `json_files`, `svg_files`. |
-| `git` | `commits`, `contributors` (GitHub's contributors list, bots included), `branches`, `tags`. |
+| `git` | `commits`, `contributors` (GitHub's contributors list, bots included; see below when GitHub cannot be reached), `branches`, `tags`. |
 | `largest_python_files` | A list of the 15 largest `.py` files: `path`, `lines`. |
 | `versions` | `pyproject`, `kazma_yaml`, `cli`: version strings, null where none was found. |
+
+### Contributors when GitHub cannot be reached
+
+The contributor count comes from GitHub's contributors list. When GitHub does
+not answer, the generator counts the authors in `git log` instead, merging the
+addresses one person commits under. The public addresses (GitHub no-reply
+addresses, the project's domain) are listed in the generator itself. A
+personal address is never written in the repository: give it on your own
+machine, in `KAZMA_METRICS_AUTHOR_ALIASES`, as comma-separated
+`address=login` pairs, for example in PowerShell:
+
+```powershell
+setx KAZMA_METRICS_AUTHOR_ALIASES "you@yourmail.example=yourlogin"
+```
+
+Without it nothing fails: the offline count only counts that address as a
+person of its own. `tests/test_no_personal_addresses.py` fails when any
+tracked file holds a personal address someone has committed under.
 
 ## Refresh by hand
 
