@@ -364,7 +364,8 @@ Arabic word in two spellings. Negative control: today's scrub. Cost: 4 days.
   from 0.909 to 0.636.
 - The scoring counts a kept fact as "not found" when the model used a name
   the gold list does not have: all 20 "not found" facts of 77 were kept
-  under another name. Seven of nine "wrong" facts were right.
+  under another name. Of nine "wrong" facts, seven were right facts under
+  other names and one more was true and not listed.
 - The lock cannot follow a second recording, keeps old floors across a new
   dataset, and loses its model scores quietly when the recording is absent.
 - 40 of 72 recall scores rest on four questions or fewer. One question sits
@@ -584,8 +585,9 @@ per week; a line in the daily digest and three alerts. Cost: one week.
 Kazma's own guide states the ceiling: about 8 seconds a question at 170,000
 memories, because meaning search compares every row. **Reported**: several
 sweeps read every row of every tenant on each 15-minute pass, in one serial
-lane with no deadline. I measured no latency of my own. Zep reports 0.5 to
-0.8 s and Mem0 0.15 to 0.2 s for search, on their own hardware and stores.
+lane with no deadline. I measured no latency of my own. Mem0's paper
+measured search at 0.15 to 0.2 s for Mem0 and 0.5 to 0.8 s for Zep, on its
+own hardware and stores.
 
 Fix: keep exact search as the truth, and past a size narrow the candidates
 first (tenant, dates, keyword hits, an approximate index's top hits) and
