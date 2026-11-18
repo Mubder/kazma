@@ -1522,7 +1522,7 @@ def _own_episodes(conn: sqlite3.Connection, tenant_id: str, hits: list[RecallHit
     own = {
         str(r[0])
         for r in conn.execute(
-            f"SELECT id FROM episodes WHERE tenant_id = ? AND id IN ({','.join('?' for _ in ids)})",  # nosec B608
+            f"SELECT id FROM episodes WHERE tenant_id = ? AND id IN ({','.join('?' for _ in ids)})",  # nosec B608 - only '?' placeholders are joined; the ids are bound
             (tenant, *ids),
         )
     }
