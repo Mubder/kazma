@@ -164,6 +164,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "يستطيع المشغّل وحده الإجابة عن الطلب.",
         "en": "Only the operator can answer a request.",
     },
+    "swarm.approval.not_yours": {
+        "ar": "لا يجيب عن هذا الطلب إلا من طلب المهمة التي سألت.",
+        "en": "Only the person whose task asked can answer this request.",
+    },
     "swarm.approval.failed": {
         "ar": "تعذّر تسجيل الإجابة. حاول مرة أخرى.",
         "en": "The answer could not be recorded. Try again.",
@@ -1069,6 +1073,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "swarm.engine_unavailable": {
         "ar": "لم يُحمَّل محرك السرب، فلم تُسجَّل المهمة ولم تُشغَّل. سجل الخادم يذكر السبب.",
         "en": "The swarm engine did not load, so the task was not recorded or run. The server log names the cause.",
+    },
+    "swarm.metadata_set_by_kazma": {
+        "ar": "هذه المفاتيح في البيانات الوصفية يضعها Kazma لا الطلب: {keys}. لم تُسجَّل المهمة ولم تُشغَّل.",
+        "en": "These metadata keys are set by Kazma, not by a request: {keys}. The task was not recorded or run.",
+    },
+    "swarm.not_yours": {
+        "ar": "لا يجيب عن هذه المهمة إلا من طلبها.",
+        "en": "Only the person who asked for this task can answer it.",
     },
     "swarm.workers_not_registered": {
         "ar": "لا أحد من العمال المحددين مسجَّل ({names})، فلم تُسجَّل المهمة ولم تُشغَّل. اختر «تلقائي» أو أضف العامل في سجل العمال.",

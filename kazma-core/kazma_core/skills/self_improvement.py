@@ -24,7 +24,9 @@ from typing import Any
 
 from kazma_core.config_store import get_config_store
 
-__all__ = ["SelfImprovementSkill", "forget_text", "get_self_improvement", "learn_from_finished_turn"]
+__all__ = [
+    "SelfImprovementSkill", "forget_text", "get_self_improvement", "learn_from_finished_turn", "worker_lessons",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -367,13 +369,17 @@ Output ONLY the delta text, no preamble."""
     # ── Apply mutation ──────────────────────────────────────────────────
 
     async def apply_mutation(self, worker_name: str, delta: str,
-                             *, commitment_id: str | None = None) -> bool:
+                             *, commitment_id: str | None = None, space: str | None = None) -> bool:
         """Auto-apply the Soul delta to the worker's system prompt.
 
         Deltas are applied immediately, subject to the ``_cap_evolution_prompt``
         safeguards (max 12 blocks, 8000 chars).  The applied delta is also
         logged to the 4-layer memory adapter via ``log_evolution`` so future
         runs can retrieve it.
+
+        Once Spaces is enforced the lesson is *space*'s (the task's): kept in
+        that space's Soul under :func:`_worker_soul_id`, never in the worker's
+        registry prompt, which every space's tasks read (S1-15).
 
         Returns True if the delta was applied.
         """
@@ -383,14 +389,26 @@ Output ONLY the delta text, no preamble."""
         if not delta or not self_improvement_enabled():
             return False
         try:
-            return await self._auto_apply(worker_name, delta, commitment_id=commitment_id)
+            return await self._auto_apply(worker_name, delta, commitment_id=commitment_id, space=space)
         except Exception as exc:
             logger.warning("[SelfImprovement] Auto-apply failed for %s: %s", worker_name, exc)
             return False
 
     async def _auto_apply(self, worker_name: str, delta: str,
-                          *, commitment_id: str | None = None) -> bool:
+                          *, commitment_id: str | None = None, space: str | None = None) -> bool:
         """Apply the delta to the worker's system prompt with safety caps."""
+        from kazma_core.spaces.scope import spaces_enforced
+
+        if spaces_enforced():
+            # The space's Soul does the checks (injection, a lesson that
+            # fits, the confirm gate) and keeps the lesson in that space.
+            applied = await asyncio.to_thread(
+                apply_agent_mutation, _worker_soul_id(worker_name), delta,
+                commitment_id=commitment_id, space=space,
+            )
+            if applied:
+                logger.info("[SelfImprovement] Delta APPLIED to '%s' in its space's Soul", worker_name)
+            return applied
         # Defense-in-depth injection guard (audit C1): the creation-time check
         # in _analyze_* already rejects injected deltas, but re-check here in
         # case a caller bypasses analyze() or a stored delta is replayed.
@@ -679,6 +697,34 @@ def _owner_space() -> str:
     from kazma_core.spaces.scope import OWNER_SPACE_ID
 
     return OWNER_SPACE_ID
+
+
+#: The Soul entry of a swarm worker in a space's Soul (Spaces S1-15).
+_WORKER_SOUL_PREFIX = "worker:"
+
+
+def _worker_soul_id(worker_name: str) -> str:
+    """The agent id a swarm worker's lessons are kept under in a space's Soul."""
+    return f"{_WORKER_SOUL_PREFIX}{worker_name}"
+
+
+def worker_lessons(worker_name: str, *, space: str | None = None) -> list[str]:
+    """The lessons swarm worker *worker_name* learned in *space* (Spaces
+    S1-15): each whole, oldest first. Empty when none, when self-improvement
+    is off, or when no space is bound once Spaces is enforced. Blocking (the
+    settings store)."""
+    if not self_improvement_enabled():
+        return []
+    from kazma_core.spaces.scope import NoSpaceBound
+
+    try:
+        space = soul_space(space)
+    except NoSpaceBound:
+        return []
+    with _agent_evo_lock:
+        data = _load_agent_evolution(space)
+    entry = (data.get("agents") or {}).get(_worker_soul_id(worker_name)) or {}
+    return _lessons(str(entry.get("soul") or ""))[1]
 
 
 def soul_space(space: str | None = None) -> str:

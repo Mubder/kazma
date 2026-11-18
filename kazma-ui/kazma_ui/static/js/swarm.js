@@ -274,6 +274,8 @@
         if (err && err.status === 409) {
           showError(t('swarm.approval.not_pending'));
           if (err.body && err.body.approval) renderApproval(err.body.approval);
+        } else if (err && err.status === 403 && err.body && err.body.error === 'not_yours') {
+          showError(t('swarm.approval.not_yours'));
         } else if (err && err.status === 403) {
           showError(t('swarm.approval.forbidden'));
         } else {
@@ -1096,6 +1098,7 @@
     if (data.code === 'not_pending') return t('swarm.checkpoint_not_pending');
     if (data.code === 'approval_not_recorded') return t('swarm.approval_not_recorded');
     if (data.code === 'temporal_unavailable') return t('swarm.temporal_unavailable');
+    if (data.code === 'not_yours') return t('swarm.not_yours');
     return data.message || t('common.error');
   }
 
@@ -1132,7 +1135,7 @@
           closeTaskDetail();
           loadActiveTasks();
         } else {
-          showError(data.message || t('swarm.cancel_failed'));
+          showError(dispatchRefusalText(data, t('swarm.cancel_failed')));
         }
       })
       .catch(function(err) { showError(t('swarm.cancel_failed', {msg: err.message})); });
@@ -1154,6 +1157,12 @@
     if (data && data.code === 'workers_not_registered') {
       return t('swarm.workers_not_registered', {names: (data.missing || []).join(', ')});
     }
+    // Spaces S1-15 review: whose task it is and where its result goes are
+    // Kazma's to record, and only the person who asked answers a task.
+    if (data && data.code === 'metadata_set_by_kazma') {
+      return t('swarm.metadata_set_by_kazma', {keys: (data.keys || []).join(', ')});
+    }
+    if (data && data.code === 'not_yours') return t('swarm.not_yours');
     return (data && data.message) || fallback;
   }
 

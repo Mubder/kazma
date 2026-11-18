@@ -130,6 +130,12 @@ async def _deliver(task: Any, result: Any, platform: str, target: str) -> None:
     if _result_was_handed(task.id):
         logger.info("[swarm] task %s: the chat's turn read the result; not sent again", task.id)
         return
+    if not await _for_the_owner(task):
+        # Every chat address Kazma has is the owner's until people link their
+        # own chat apps (stage 3): someone else's result stays in its space
+        # (Spaces S1-15 review, O1).
+        logger.info("[swarm] task %s: not the owner's; its result stays in its space", task.id)
+        return
     from kazma_core.tools.send_message import send_failed, send_message
 
     text, attachment = _delivery_message(task, result)
@@ -148,6 +154,19 @@ async def _deliver(task: Any, result: Any, platform: str, target: str) -> None:
         return
     note_result_handed(task.id)
     logger.info("[swarm] task %s: result sent to %s", task.id, platform)
+
+
+async def _for_the_owner(task: Any) -> bool:
+    """Whether the task acts for the owner (always, Spaces not enforced). A
+    store that cannot say keeps the result in its space."""
+    from kazma_core.spaces.identity import IdentityUnavailable
+    from kazma_core.swarm.single_operator import task_for_the_owner
+
+    try:
+        return await asyncio.to_thread(task_for_the_owner, task)
+    except IdentityUnavailable:
+        logger.warning("[swarm] task %s: whose it is cannot be read; its result stays in its space", task.id)
+        return False
 
 
 def deliver_finished_task(task: Any, result: Any) -> bool:

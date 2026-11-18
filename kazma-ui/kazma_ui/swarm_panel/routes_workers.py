@@ -327,13 +327,19 @@ def register_workers_routes(
                 status_code=404,
             )
 
-        logs = list(worker.logs)
+        from kazma_core.spaces.scope import require_space_id, spaces_enforced
+
+        # A worker serves every space: once Spaces is enforced its log shows
+        # the lines of this request's space and those of none (S1-15).
+        here = require_space_id() if spaces_enforced() else None
+        logs = list(worker.logs) if here is None else worker.logs_for(here)
+        shown_last = here is None or getattr(worker, "last_task_space", "") == here
         if not logs:
             logs = [
                 f"[{getattr(worker, 'added_at', '')}] Worker '{name}' registered "
                 f"(model={worker.model or '?'}, provider={worker.provider or '?'})",
             ]
-            last_task = getattr(worker, 'last_task', None)
+            last_task = getattr(worker, 'last_task', None) if shown_last else None
             if last_task:
                 logs.append(
                     f"[{getattr(worker, 'last_heartbeat', None) or getattr(worker, 'added_at', '')}] Last task: {last_task}"

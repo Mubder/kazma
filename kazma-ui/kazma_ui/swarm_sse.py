@@ -226,7 +226,9 @@ def create_sse_router(*, event_bus: SSEEventBus | None = None) -> APIRouter:
             )  # type: ignore[return-value]
 
         task = await _current_task(engine, task_id)
-        if task is None:
+        from kazma_core.swarm.single_operator import task_of_this_space
+
+        if task is None or not task_of_this_space(task):  # another space's: as an unknown one (S1-15)
             from fastapi.responses import JSONResponse
 
             return JSONResponse(

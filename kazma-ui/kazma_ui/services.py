@@ -27,6 +27,23 @@ SWARM_CORE_MISSING = (
 )
 
 
+
+def _kept_to_space(worker: Any, shown: dict[str, Any]) -> dict[str, Any]:
+    """A worker as this request's space may see it (Spaces S1-15): once
+    Spaces is enforced, its last task only when it was this space's, and
+    its log lines of this space and of none. A worker serves every space."""
+    from kazma_core.spaces.scope import require_space_id, spaces_enforced
+
+    if not spaces_enforced() or not isinstance(shown, dict):
+        return shown
+    here = require_space_id()
+    shown = dict(shown)
+    if getattr(worker, "last_task_space", "") != here:
+        shown["last_task"] = None
+    logs_for = getattr(worker, "logs_for", None)
+    shown["logs"] = list(logs_for(here)) if callable(logs_for) else []
+    return shown
+
 class SwarmService:
     """Facade over SwarmEngine and related components."""
 
@@ -67,7 +84,7 @@ class SwarmService:
             return []
         try:
             workers = engine.list_workers()
-            return [self._serialize_worker(w) for w in workers]
+            return [_kept_to_space(w, self._serialize_worker(w)) for w in workers]
         except Exception as exc:
             logger.debug("list_workers failed: %s", exc)
             return []
