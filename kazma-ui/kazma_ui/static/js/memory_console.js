@@ -1486,7 +1486,10 @@
     return '<details class="v2-whole" data-id="' + _attr(id) + '" style="margin-top:4px;">' +
       '<summary class="mem-muted" style="cursor:pointer;font-size:0.72rem;">' +
       _esc(_mt('memory.console.whole_memory', 'The whole memory')) + ' · ' +
-      _esc(window.kazmaCount('memory.console.more_chars', more)) + '</summary>' +
+      // The number as the page writes numbers (18,770; Latin digits in
+      // Arabic too), its plural form chosen by the number itself.
+      _esc(window.kazmaCount('memory.console.more_chars', more,
+        { n: window.KazmaFormat ? window.KazmaFormat.number(more) : String(more) })) + '</summary>' +
       '<div class="v2-whole-text mem-well" translate="no" dir="auto" style="white-space:pre-wrap;overflow-wrap:anywhere;' +
       'max-height:360px;overflow-y:auto;padding:6px 8px;font-size:0.78rem;margin-top:4px;"></div>' +
       '<div class="mem-muted v2-whole-range" style="font-size:0.68rem;margin-top:2px;"></div>' +
@@ -1560,7 +1563,7 @@
           // English memory sat on the right (2026-10-02).
           '<span style="min-width:0;overflow-wrap:anywhere;"><span translate="no" style="display:block;color:var(--text-primary);">' + _esc(ep.preview || ep.id) + '</span>' +
           '<span class="mem-muted" style="display:block;font-size:0.65rem;"><bdi>' + _esc(when) + '</bdi>' + chat + '</span>' +
-          _wholeMemoryFold(ep.id, Math.max(0, Number(ep.length || 0) - String(ep.preview || '').length)) + '</span>' +
+          _wholeMemoryFold(ep.id, Number(ep.more || 0)) + '</span>' +
           '<button type="button" class="btn btn-sm v2-memory-forget btn-outline" data-id="' + _attr(ep.id) + '" style="flex-shrink:0;">' + _esc(_mt('memory.console.forget', 'Forget')) + '</button></div>';
       }).join('');
       el.querySelectorAll('.v2-memory-forget').forEach(function(btn) {
@@ -3266,7 +3269,7 @@
           _mt('memory.console.cut_message', 'Remove this edge from active memory?') + '\n' +
           (subject && predicate
             ? subject + ' —' + predicate + '→ ' + object
-            : _mt('memory.console.cut_message_soft', 'Soft-invalidate (recoverable via Hygiene).')),
+            : _mt('memory.console.cut_message_soft', 'It stays in the record of past facts.')),
         confirmText: _mt('memory.console.cut', 'Cut'),
         danger: true,
       });
@@ -4709,7 +4712,10 @@
         (count ? '<span class="mem-legend-count">' + _esc(window.KazmaFormat ? window.KazmaFormat.number(count) : String(count)) + '</span>' : '') +
         '</span>';
     }
-    function dot(token, extra) {
+    // *classes*: a list of class names (never one string of several: a
+    // string of words handed to an HTML builder reads as English text).
+    function dot(token, classes) {
+      var extra = (classes || []).join(' ');
       return '<span class="mem-legend-dot' + (extra ? ' ' + extra : '') + '" aria-hidden="true" style="--mem-c:' + _v2gTokenVar(token) + ';"></span>';
     }
     var parts = [];
@@ -4725,8 +4731,8 @@
     });
     parts.push(item('<span class="mem-legend-line" aria-hidden="true"></span>', _mt('memory.page.legend_line', 'a fact')));
     if (hasEnded) parts.push(item('<span class="mem-legend-line is-ended" aria-hidden="true"></span>', _mt('memory.page.legend_ended', 'a fact that ended')));
-    if (hasValue) parts.push(item(dot('--accent', 'is-hollow'), _mt('memory.page.legend_value', 'a value')));
-    if (hasEpisode) parts.push(item(dot('--secondary', 'is-hollow is-dashed'), _mt('memory.page.legend_conversation', 'a conversation')));
+    if (hasValue) parts.push(item(dot('--accent', ['is-hollow']), _mt('memory.page.legend_value', 'a value')));
+    if (hasEpisode) parts.push(item(dot('--secondary', ['is-hollow', 'is-dashed']), _mt('memory.page.legend_conversation', 'a conversation')));
     leg.innerHTML = parts.join('');
   }
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sqlite3
 from typing import Any
 from kazma_core.agent.tool_refusal import RefusedBeforeEffect
 
@@ -144,7 +145,9 @@ def _episode_shown(hit: Any, tenant_id: str) -> str:
 
     try:
         preview = preview_episode(str(hit.id), tenant_id=tenant_id)
-    except Exception:
+    except (sqlite3.Error, OSError):
+        # The memory database could not be read for this one memory: recall's
+        # own display stands in (it is the same text, bounded tighter).
         logger.debug("[memory_search] preview of %s failed", hit.id, exc_info=True)
         preview = None
     if preview is None:
@@ -929,8 +932,8 @@ def register_memory_tools(registry: Any) -> None:
             return "Error: offset is a number of characters (0, or the offset the previous page names)."
         try:
             page = read_episode(mid, tenant_id=get_current_tenant_id(), offset=start)
-        except Exception as exc:
-            logger.warning("[memory_read] failed: %s", exc)
+        except (sqlite3.Error, OSError):
+            logger.warning("[memory_read] the memory database could not be read", exc_info=True)
             return "Error: the memory could not be read right now. This is NOT a missing memory."
         if page is None:
             return (f"No memory {mid} here: it was forgotten, or it is not this space's. "

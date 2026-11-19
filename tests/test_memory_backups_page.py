@@ -52,7 +52,6 @@ def mem(tmp_path, monkeypatch):
 def _client():
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-
     from kazma_ui.routes_direct.system import register_system_routes
 
     app = FastAPI()
@@ -96,12 +95,12 @@ def test_restoring_the_operations_copy_is_refused_and_memory_stays(mem):
 
 
 def test_a_copy_renamed_like_a_memory_backup_is_refused_by_its_tables(mem):
-    from kazma_core.memory.backup import NotAMemoryBackup, is_memory_backup, restore_memory_backup
+    from kazma_core.memory.backup import NotAMemoryBackup, _is_memory_backup, restore_memory_backup
 
     state, ops = _backups(mem)
     disguised = ops.with_name("memory_state_1.db")
     shutil.copy2(ops, disguised)
-    assert is_memory_backup(state) and not is_memory_backup(disguised)
+    assert _is_memory_backup(state) and not _is_memory_backup(disguised)
     with pytest.raises(NotAMemoryBackup):
         restore_memory_backup(disguised)
     resp = _client().post("/api/system/memory/restore", json={"backup_name": disguised.name})

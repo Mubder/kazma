@@ -138,8 +138,8 @@ def episode_text(text: str | None, *, field: str = "text") -> str:
     value = text or ""
     if len(value) <= EPISODE_TEXT_MAX:
         return value
-    logger.warning("[memory] a %s of %d characters is past the %d-character ceiling; its start is kept",
-                   field, len(value), EPISODE_TEXT_MAX)
+    logger.warning("[memory] a memory's %s of %d characters is past the %d-character ceiling; "
+                   "its start is kept", field, len(value), EPISODE_TEXT_MAX)
     return value[:EPISODE_TEXT_MAX]
 
 

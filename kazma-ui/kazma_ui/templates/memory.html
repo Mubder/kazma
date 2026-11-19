@@ -108,6 +108,11 @@
 
 <div class="memory-page mem-console" style="width:100%;max-width:100%;margin:0;padding:0 0.75rem 2.5rem;box-sizing:border-box;min-width:0;">
 <style>
+  /* The `hidden` attribute hides, whatever display a class or an inline
+     style gives the element: "Show the next part" (.btn) stayed on screen
+     after the last part, and the map inspector's extras (inline flex) never
+     folded away (2026-11-19). */
+  .memory-page [hidden] { display: none !important; }
   .memory-page .mem-intro {
     margin: 0 0 1rem;
     color: var(--text-secondary);

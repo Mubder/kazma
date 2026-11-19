@@ -945,14 +945,19 @@ def register_memory_routes(self: Any) -> None:
 
             out = []
             for r in rows:
-                preview, _hidden = display_parts(r["user_text"], r["assistant_text"], r["summary_text"])
+                preview, hidden = display_parts(r["user_text"], r["assistant_text"], r["summary_text"])
                 out.append(
                     {
                         "id": r["id"],
                         "tier": r["tier"],
                         "preview": preview or r["id"],
-                        # The whole memory's length: the page offers it whole
-                        # when it is longer than the preview (2026-11-19).
+                        # What the preview leaves out (``display_parts``):
+                        # the page offers the whole memory only then. Never
+                        # guessed from the two lengths -- the preview folds
+                        # whitespace and labels the sides, so a short
+                        # memory of several lines read as "N more".
+                        "more": hidden,
+                        # The whole memory's length (2026-11-19).
                         "length": len(episode_full_text(r["user_text"], r["assistant_text"],
                                                         r["summary_text"])),
                         "created_at": r["created_at"],
@@ -981,9 +986,11 @@ def register_memory_routes(self: Any) -> None:
 
         from kazma_core.memory.episode_read import read_episode
 
+        import sqlite3
+
         try:
             page = read_episode(str(episode_id or ""), tenant_id=_mem_tid(), offset=max(0, int(offset or 0)))
-        except Exception as exc:
+        except (sqlite3.Error, OSError) as exc:
             return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
         if page is None:
             return JSONResponse({"ok": False, "error": "not_found", "code": "not_found"}, status_code=404)

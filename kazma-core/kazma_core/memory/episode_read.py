@@ -97,6 +97,12 @@ def read_episode(episode_id: str, *, tenant_id: str | None, offset: int = 0,
     start = max(0, min(int(offset or 0), total))
     size = max(1, min(int(length or MEMORY_READ_PAGE), MEMORY_READ_PAGE))
     end = min(total, start + size)
+    # A page never ends in whitespace: the model reads it inside a data fence,
+    # which drops a block's trailing whitespace, so a page cut after a space
+    # lost that space and the pages joined back were not the memory. The
+    # whitespace opens the next page instead (the whole text ends in none).
+    while start + 1 < end < total and whole[end - 1].isspace():
+        end -= 1
     return {
         "id": str(row["id"]),
         "tier": str(row["tier"] or ""),

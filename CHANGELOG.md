@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## Memory keeps all of its text; the Memory page reworked (2026-11-19)
+
+- A memory of a conversation keeps the whole turn: the question, the answer
+  and a swarm result were cut at 4,000 or 8,000 characters. Memories
+  written before are filled back from the chat where it still holds the
+  turn (the maintenance step "memory text fill"), never a forgotten one.
+- Keyword search reads all of a long memory; the model is shown it bounded,
+  told how much more there is, and reads the rest with the new read-only
+  tool `memory_read`. The Memory page offers "The whole memory" the same
+  way.
+- The Memory page is laid out by what a person comes for (what Kazma knows,
+  its conversations); the clean-up and the health numbers are folded away,
+  in plain words in English and Arabic.
+- Restore takes only a backup of the memory database: the list offered the
+  operations database's copies too, and restoring one replaced every memory
+  with the task queue. Back up now and Optimise say when they failed;
+  joining two things and the tidy-up ask first. The memory map fits itself
+  in view, draws Arabic names right to left and explains its marks.
+
 ## SonarCloud review (2026-11-16)
 
 Every one of SonarCloud's 1,623 open findings was read against the code;

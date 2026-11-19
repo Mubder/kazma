@@ -170,7 +170,7 @@ class NotAMemoryBackup(ValueError):
 _MEMORY_TABLES = frozenset({"beliefs", "episodes", "entities"})
 
 
-def memory_backup_prefix() -> str:
+def _memory_backup_prefix() -> str:
     """The name every backup of the memory database starts with
     (``<stem>_<timestamp>.db``, ``perform_native_backups``)."""
     from kazma_core.paths import primary_memory_db
@@ -184,10 +184,10 @@ def is_memory_backup_name(name: str) -> bool:
     ``memory_ops_<timestamp>.db`` beside it."""
     stem, dot, ext = str(name or "").rpartition(".")
     prefix, _, stamp = stem.rpartition("_")
-    return bool(dot) and ext == "db" and prefix == memory_backup_prefix() and stamp.isdigit()
+    return bool(dot) and ext == "db" and prefix == _memory_backup_prefix() and stamp.isdigit()
 
 
-def is_memory_backup(path: Path) -> bool:
+def _is_memory_backup(path: Path) -> bool:
     """Whether the file at *path* holds the memory database's own tables,
     read without writing anything (``immutable=1``)."""
     import sqlite3
@@ -238,7 +238,7 @@ def restore_memory_backup(src: Path, *, reconcile_budget_s: float = 120.0) -> di
 
     from kazma_core.memory.graph_sync import mark_full_due
 
-    if not is_memory_backup(Path(src)):
+    if not _is_memory_backup(Path(src)):
         raise NotAMemoryBackup(f"{Path(src).name} is not a backup of the memory database")
     started = time.monotonic()
     snapshot_copy(Path(src), Path(primary_memory_db()))

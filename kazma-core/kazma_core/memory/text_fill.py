@@ -43,6 +43,8 @@ import logging
 import os
 import sqlite3
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from kazma_core.memory.chat_history import STORE_ERRORS
@@ -109,6 +111,19 @@ def _mark(conn: sqlite3.Connection, row: Any, state: str) -> None:
     )
 
 
+@contextmanager
+def _write(conn: sqlite3.Connection) -> Iterator[None]:
+    """One write transaction (``BEGIN IMMEDIATE``) on the pass's autocommit
+    connection. The body commits what it means to keep; anything left open --
+    an early return, an error -- is rolled back on the way out."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        yield
+    finally:
+        if conn.in_transaction:
+            conn.rollback()
+
+
 def _fill_one(conn: sqlite3.Connection, row: Any) -> str:
     """Fill one row; returns its verdict (``filled``, ``whole``, ``unavailable``,
     ``kept_out`` or ``changed``)."""
@@ -123,15 +138,10 @@ def _fill_one(conn: sqlite3.Connection, row: Any) -> str:
         return "waiting"  # the chat store cannot be read now: never a verdict
     found = _candidates(row, conversations)
     if len(found) != 1:
-        state = "unavailable"
-        conn.execute("BEGIN IMMEDIATE")
-        try:
-            _mark(conn, row, state)
+        with _write(conn):
+            _mark(conn, row, "unavailable")
             conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        return state
+        return "unavailable"
     question, answer = next(iter(found))
     stored_q, stored_a = str(row["user_text"] or ""), str(row["assistant_text"] or "")
     if question == stored_q and answer == stored_a:
@@ -139,12 +149,10 @@ def _fill_one(conn: sqlite3.Connection, row: Any) -> str:
     else:
         state = "filled"
     keys = chat_keys(session)  # a chat-store read: before the write lock
-    conn.execute("BEGIN IMMEDIATE")
-    try:
+    with _write(conn):
         if refuses_write(conn, tenant_id=str(row["tenant_id"] or "default"), session_id=session,
                          turn_number=int(row["turn_number"] or 0), user_text=question, keys=keys):
-            conn.rollback()
-            return "kept_out"
+            return "kept_out"  # nothing written: _write rolls back
         if state == "filled":
             cur = conn.execute(
                 "UPDATE episodes SET user_text = ?, assistant_text = ? "
@@ -153,13 +161,9 @@ def _fill_one(conn: sqlite3.Connection, row: Any) -> str:
                 (question, answer, row["id"], row["tenant_id"], stored_q, stored_a),
             )
             if cur.rowcount != 1:
-                conn.rollback()
                 return "changed"  # a forget or another write landed first: it wins
         _mark(conn, row, state)
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
     if state == "filled":
         old_embed = embed_text(stored_q, stored_a, row["summary_text"])
         new_embed = embed_text(question, answer, row["summary_text"])
@@ -184,7 +188,8 @@ def _write_vector(conn: sqlite3.Connection, row: Any, question: str, answer: str
 
         def _still_held() -> bool:
             return conn.execute(
-                f"SELECT 1 FROM episodes WHERE id = ? AND {still}", (row["id"], question, answer)
+                f"SELECT 1 FROM episodes WHERE id = ? AND tenant_id = ? AND {still}",
+                (row["id"], row["tenant_id"], question, answer),
             ).fetchone() is not None
 
         index_remotely(str(row["id"]), vec, tenant_id=str(row["tenant_id"] or "default"),

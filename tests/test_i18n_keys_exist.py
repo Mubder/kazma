@@ -90,8 +90,10 @@ def test_the_scan_sees_the_helpers_pages_use() -> None:
     seen = set()
     for _name, text in _sources():
         seen |= used_keys(text, namespaces)
-    # Keys named through different helpers in different places.
-    for key in ("memory.console.expand_all", "settings.proxy_saved", "memory.pg.link_merge_hint"):
+    # Keys named through different helpers in different places (the third
+    # through ``{{ t('...') | safe }}``; the Memory page's own such key went
+    # with its rework, 2026-11-19).
+    for key in ("memory.console.expand_all", "settings.proxy_saved", "replay.about_browse"):
         assert key in seen, key
 
 

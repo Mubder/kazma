@@ -1658,16 +1658,26 @@ came up short, and archiving had erased 76 memories.
   (`episode_text.more_note`); `memory_search` and the probe show up to
   `MEMORY_SHOW_MAX` (1,500); `memory_read` (read tier, fenced, the caller's
   tenant, `memory/episode_read.py`) reads one whole, `MEMORY_READ_PAGE`
-  characters a page; the Memory page's list and probe offer "The whole
-  memory" folded (`GET /api/memory/v2/episodes/{id}/text`). Model inputs stay
+  characters a page, and a page never ends in whitespace (the data fence
+  drops a block's trailing whitespace: cut at a fixed size, the pages joined
+  back lost a space at each boundary); the Memory page's list and probe offer
+  "The whole memory" folded (`GET /api/memory/v2/episodes/{id}/text`), only
+  for a memory the preview cut -- the list route says how much (`more`,
+  from `display_parts`; guessed from the two lengths, a short memory of
+  several lines read as "N more"). Model inputs stay
   bounded: the deep pass reads `DEEP_PASS_QUESTION`/`DEEP_PASS_ANSWER`
   (1,500/800), weekly summaries 400/600 per turn. Gate:
   `tests/test_memory_keeps_all_text.py` (every writer, a long turn through
   the real code; old cut rows matching; the fill, the ledger, the race,
-  another space's chat; the bounded views and the reader; no slice of a
-  memory's text in memory code whose bound is not a `limits` name -- the
-  old cut put back through `limits` and the old cut lines as the negative
-  controls).
+  another space's chat; the bounded views and the reader; a long turn end
+  to end -- stored by the live writer, found by the real `recall` by a word
+  only its end holds, shown bounded with the note, read back whole by
+  `memory_read`, every character; no slice of a memory's text in memory
+  code whose bound is not a `limits` name -- the old cut put back through
+  `limits`, the old cut lines and fixed-size pages as the negative
+  controls), and in a browser by the sidebar, EN/AR,
+  `tests/e2e/test_memory_page_browser.py` (the list's fold reads a long
+  memory to its last word; a short one of several lines has none).
 - **Exact meaning search, every row** (`vector_engine.py`):
   `vec_distance_cosine` in SQL over every comparable row (same size, same
   model; NULL/'' version = legacy same model), NumPy chunked fallback, zero
@@ -2949,6 +2959,35 @@ drawing, the rest by extraction.
   `about_too_long` with `length`/`max`) worded by the page in its language.
   Gates: `tests/test_memory_page_truth.py`,
   `tests/e2e/test_about_me_limit_arabic.py`.
+- **The Memory page is laid out by what a person comes for** (2026-11-19,
+  the owner's request after the 2026-11-18 review): status, the memory map,
+  what Kazma knows, conversations; the clean-up and the health numbers are
+  folded (`#memory-cleanup`, `#memory-health`, `components/memory_health.html`).
+  Its words are the catalog slice `i18n/catalog/memory_page.py` (EN/AR).
+  **Restore takes only a backup of the memory database**: the list showed the
+  operations database's copies (`memory_ops_<ts>.db`) beside the memory
+  ones with the same Restore button, and restoring one replaced every memory
+  with the task queue. The list and the route take only
+  `backup.is_memory_backup_name` (`memory_state_<ts>.db`, the stem of
+  `primary_memory_db`), and `restore_memory_backup` refuses a file without
+  the memory database's own tables (`NotAMemoryBackup`, read `immutable=1`)
+  before anything is copied (400 `not_a_memory_backup`). **Back up now**
+  answers `failed` / `nothing_backed_up` when nothing was copied, and its
+  manifest names files, never server paths; **Optimise** says which database
+  failed. Joining two things (it moves every fact, for good) and the tidy-up
+  ask first, the tidy-up naming each clean-up it will run; a delete names
+  the thing. The map: label-sized layout, no idle animation, fit once
+  settled, token colours, labels placed by rank without overlap, Arabic
+  labels right to left, a legend of the marks in use, zoom and Show all and
+  pinch, and a failed load said as one (`#v2g-failed`, never "Nothing here
+  yet"). On this page the `hidden` attribute hides whatever display a class
+  or inline style gives (`.memory-page [hidden]`): "Show the next part"
+  (`.btn`) stayed after the last part, and the map inspector's extras
+  (inline flex) never folded. Gates: `tests/test_memory_backups_page.py`
+  (the real routes; the old list and the old restore as negative controls),
+  `tests/e2e/test_memory_page_browser.py` (by the sidebar, EN/AR, desktop
+  and phone; nothing marked hidden is drawn, the page without the rule as
+  the negative control).
 - **Every operator memory change leaves a trail and a real status** (2026-10-13,
   Memory audit M35, `kazma_ui/memory_actions.py`): `MemoryActionRecorder`,
   mounted with the memory API, records every POST/PUT/PATCH/DELETE under
