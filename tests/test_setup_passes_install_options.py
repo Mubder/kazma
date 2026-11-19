@@ -17,12 +17,13 @@ from pathlib import Path
 
 import pytest
 
+from tests._bash import find_bash
+
 REPO = Path(__file__).resolve().parents[1]
 
 
 def _bash() -> str | None:
-    found = shutil.which("bash")
-    return found if found and "System32" not in found else None
+    return find_bash()
 
 
 def _setup_sh_parser() -> str:
@@ -74,6 +75,62 @@ def test_setup_ps1_splits_the_options_onto_the_install(tmp_path) -> None:
                          capture_output=True, text=True, timeout=60)
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip() == "-m|kazma_cli|setup|install|--without|meaning_search|--no-browser"
+
+
+def _elevation_block(text: str) -> str:
+    """setup.ps1's reopening in an administrator window, from its list of
+    forwarded parameters to the command it runs there."""
+    start = text.index("$forward = @()")
+    return text[start:text.index("$shell =", start)]
+
+
+def _forwarded(text: str) -> tuple[set[str], set[str]]:
+    params = text[text.index("param("):text.index(")\n", text.index("param("))]
+    names = set(re.findall(r"\$(\w+)", params)) - {"NoElevate"}
+    block = _elevation_block(text)
+    return {name for name in names if f'"-{name}' in block}, names
+
+
+def test_every_parameter_reaches_the_administrator_window() -> None:
+    """2026-11-19: the owner's ``.\\setup.cmd -Mode full -InstallOptions
+    "--without docling ..."`` reopened itself as administrator with -Mode
+    alone, and Full installed the parts it was told to leave out."""
+    text = (REPO / "setup.ps1").read_text(encoding="utf-8-sig")
+    forwarded, names = _forwarded(text)
+    assert forwarded == names, sorted(names - forwarded)
+    # Negative control: the block before the fix forwarded four of five.
+    old = text.replace(_elevation_block(text), _elevation_block(text).split("    # Every parameter")[0]
+                       + "    $here = ")
+    assert _forwarded(old)[0] == names - {"InstallOptions"}
+
+
+@pytest.mark.skipif(_powershell() is None, reason="no PowerShell")
+def test_the_administrator_window_gets_the_options_as_typed(tmp_path) -> None:
+    """The command built for the administrator window, run as Start-Process
+    runs it (one double-quoted -Command argument), hands the options over."""
+    text = (REPO / "setup.ps1").read_text(encoding="utf-8-sig")
+    stub = tmp_path / "stub.ps1"
+    out_file = tmp_path / "got.txt"
+    stub.write_text('param([string]$Mode = "", [switch]$Yes, [int]$Port = 0, [switch]$Debug, '
+                    '[string]$InstallOptions = "")\n'
+                    f"Set-Content -LiteralPath '{out_file}' -Value \"$Mode|$Yes|$InstallOptions\"\n",
+                    encoding="utf-8")
+    block = _elevation_block(text).replace("$PSCommandPath", f"'{stub}'")
+    script = ('param([switch]$Debug, [string]$Mode = "", [switch]$Yes, [int]$Port = 0, '
+              '[string]$InstallOptions = "")\n'
+              + block
+              + "$shell = (Get-Process -Id $PID).Path\n"
+              + 'Start-Process -Wait -NoNewWindow -FilePath $shell -ArgumentList '
+                '"-NoProfile -ExecutionPolicy Bypass -Command `"$command`""\n')
+    runner = tmp_path / "runner.ps1"
+    runner.write_text(script, encoding="utf-8")
+    out = subprocess.run([_powershell(), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(runner),
+                          "-Mode", "full", "-Yes", "-InstallOptions",
+                          "--without docling --without cloud_sandbox --label it's"],
+                         capture_output=True, text=True, timeout=120)
+    assert out.returncode == 0, out.stderr
+    got = out_file.read_text(encoding="utf-8-sig").strip()
+    assert got == "full|True|--without docling --without cloud_sandbox --label it's", got
 
 
 def test_the_option_name_does_not_collide_with_the_scripts_own_list() -> None:

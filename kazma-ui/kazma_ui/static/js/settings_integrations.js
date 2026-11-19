@@ -1523,6 +1523,27 @@
             return row ? (row.models || []) : [];
         },
 
+        // The model is typed when "Another model" was chosen, or when the
+        // saved model is not one the provider lists.
+        xReplyAIModelTyping() {
+            const model = String((this.xReply.ai || {}).model || '');
+            return !!this.xReplyAIModelTyped || (!!model && this.xReplyAIModels().indexOf(model) < 0);
+        },
+
+        // The drop-down's choice: "" (none yet), "m:<model>", or "other".
+        xReplyPickModel(value) {
+            if (!this.xReply.ai) this.xReply.ai = { selection: 'specific', provider: '', model: '' };
+            if (value === 'other') {
+                this.xReplyAIModelTyped = true;
+                this.xReply.ai.model = '';
+                const box = typeof document !== 'undefined' ? document.getElementById('xr-ai-model-name') : null;
+                if (box && this.$nextTick) this.$nextTick(() => box.focus());
+                return;
+            }
+            this.xReplyAIModelTyped = false;
+            this.xReply.ai.model = String(value || '').replace(/^m:/, '');
+        },
+
         xReplyAIConfigPayload() {
             const settings = Object.assign({}, this.xReply.ai);
             if (this.xReplyRoleBindings && Object.keys(this.xReplyRoleBindings).length) {

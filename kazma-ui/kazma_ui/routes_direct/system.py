@@ -710,20 +710,13 @@ def register_system_routes(self: Any) -> None:
         # an extra a part brings is added with `kazma setup install --with
         # <part>`, which also installs the part's system pieces, and an extra
         # of a part left out of the recorded install is "not chosen", not
-        # missing (kazma_core.install_components.install_overview).
-        from kazma_core.install_components import by_id, current_os, install_overview, parts_of_extra
+        # missing (kazma_core.install_components.install_overview), and an
+        # extra whose part did not install (Neo4j's driver, Neo4j not) says so.
+        from kazma_core.install_components import annotate_extras, by_id, current_os, install_overview
         from kazma_core.postgres_service import read_record
 
         install = install_overview(await asyncio.to_thread(read_record), current_os())
-        chosen_parts = {p["id"] for p in install["parts"] if p["chosen"]}
-        for extra in extras_list:
-            owners = parts_of_extra(str(extra.get("name") or ""))
-            if not owners:
-                continue
-            extra["part"] = owners[0]
-            extra["install_cmd"] = f"kazma setup install --with {owners[0]}"
-            if install["mode"]:
-                extra["chosen"] = any(owner in chosen_parts for owner in owners)
+        annotate_extras(extras_list, install)
 
         # Live memory health snapshot for the Packages tab Memory card.
         memory_summary: dict = {
@@ -785,7 +778,10 @@ def register_system_routes(self: Any) -> None:
             "install": {**{k: install[k] for k in ("mode", "at", "chosen", "total")},
                         # Parts Express gained after this install ran: added by
                         # `kazma setup install`, never by `kazma update`.
-                        "new_in_express": [by_id(cid).title for cid in install["new_in_express"]]},
+                        "new_in_express": [by_id(cid).title for cid in install["new_in_express"]],
+                        # Chosen parts the last run could not put in place
+                        # (Docker, SearXNG...): `kazma setup install` again.
+                        "not_in_place": [by_id(cid).title for cid in install["not_in_place"]]},
         }
     @self.app.post("/api/system/memory/backup")
     async def _create_memory_backup():

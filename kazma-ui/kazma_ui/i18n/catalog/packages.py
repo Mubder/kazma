@@ -236,6 +236,19 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "أضفها بالأمر",
         "en": "Add them with",
     },
+    "packages.not_in_place": {
+        "ar": "لم يكتمل تثبيت هذه الأجزاء التي اختارها التثبيت:",
+        "en": "Chosen in this install and not in place:",
+    },
+    "packages.not_in_place_run": {
+        "ar": "لإكمالها، شغّل",
+        "en": "To finish them, run",
+    },
+    "packages.part_not_in_place_badge": {"ar": "الجزء غير مكتمل", "en": "Part not in place"},
+    "packages.part_not_in_place_hint": {
+        "ar": "حزم بايثون هنا، لكن هذا الجزء لم يكتمل:",
+        "en": "Its Python packages are here, but this part is not in place:",
+    },
     "packages.not_chosen_hint": {
         "ar": "تُرك خارج هذا التثبيت. لإضافته:",
         "en": "Left out of this install. To add it:",

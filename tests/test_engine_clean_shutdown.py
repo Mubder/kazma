@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -36,6 +35,7 @@ from pathlib import Path
 import pytest
 from kazma_core import container_engine_setup as ces
 
+from tests._bash import find_bash
 from tests.test_container_engine_setup import make_machine
 
 ASSETS = Path(ces.__file__).parent / "container_engine_assets"
@@ -55,14 +55,7 @@ def _heredoc(script: str, marker: str) -> str:
 
 
 def _bash() -> str | None:
-    found = shutil.which("bash")
-    if not found:
-        return None
-    # Windows' own bash.exe is WSL's launcher, not a shell for these tests.
-    if os.name == "nt" and Path(found).parent.name.lower() == "system32":
-        git_bash = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Git" / "bin" / "bash.exe"
-        return str(git_bash) if git_bash.is_file() else None
-    return found
+    return find_bash()
 
 
 needs_bash = pytest.mark.skipif(_bash() is None, reason="bash is not on this machine")

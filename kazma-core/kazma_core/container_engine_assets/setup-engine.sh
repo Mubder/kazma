@@ -64,7 +64,30 @@ kazma_trust_docker_key() {
   rm -f "$tmp"
 }
 
+# Ubuntu's archive over HTTPS (2026-11-19). archive.ubuntu.com and
+# security.ubuntu.com are served through a CDN, and over plain HTTP the
+# network on the way (Kuwait, 2026-11-19) handed back a corrupted copy of one
+# package list -- the same wrong bytes on every try, a day's cache and an
+# uncached fetch alike -- so apt refused it and the engine could not be set
+# up; over HTTPS the same list came back right. apt checks every list against
+# Ubuntu's signature either way: HTTPS keeps anything on the way from changing
+# the bytes. Every http:// source in apt's lists under $1 becomes https://,
+# once the distro has the CA certificates ($2) apt needs to reach it; without
+# them nothing is changed.
+kazma_https_sources() {
+  local apt_dir="$1" ca="${2:-/etc/ssl/certs/ca-certificates.crt}" f
+  if [ ! -s "$ca" ]; then
+    echo "no CA certificates in the distro: apt's sources are left as they are" >&2
+    return 0
+  fi
+  for f in "$apt_dir/sources.list" "$apt_dir"/sources.list.d/*.list "$apt_dir"/sources.list.d/*.sources; do
+    [ -f "$f" ] || continue
+    sed -i -E '/^[[:space:]]*(URIs:|deb[[:space:]]|deb-src[[:space:]])/ s#http://#https://#g' "$f"
+  done
+}
+
 export DEBIAN_FRONTEND=noninteractive
+kazma_https_sources /etc/apt
 apt-get update -q
 apt-get upgrade -y -q
 apt-get install -y -q ca-certificates curl gnupg openssl unattended-upgrades

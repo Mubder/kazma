@@ -64,8 +64,9 @@
       localLoading: false,
       lanAddress: '',
       models: [],
-      listed: false,
+      modelsLoaded: false,
       model: '',
+      typing: false,
       busy: false,
       status: '',
       error: '',
@@ -142,8 +143,9 @@
 
       resetModel() {
         this.models = [];
-        this.listed = false;
+        this.modelsLoaded = false;
         this.model = '';
+        this.typing = false;
         this.tested = false;
         this.error = '';
         this.errorLead = '';
@@ -220,11 +222,13 @@
             return;
           }
           this.models = Array.isArray(found.data.models) ? found.data.models.map(String) : [];
-          this.listed = true;
+          this.modelsLoaded = true;
           var p = this.preset(provider);
           var wanted = provider === this.activeProvider && this.activeModel ? this.activeModel
             : (p && p.default_model) || '';
           this.model = this.models.indexOf(wanted) >= 0 ? wanted : (this.models[0] || '');
+          // No list (a provider that names none): the name is typed.
+          this.typing = !this.models.length;
           if (!this.models.length && this.where === 'local') {
             this.fail('', '', tr('setup.no_local_models', 'This server has no models yet.'));
             return;
@@ -235,6 +239,23 @@
         }
         this.busy = false;
         this.status = '';
+      },
+
+      // The drop-down's choice: a model found ("m:<name>"), or "other" to
+      // type a name the server did not list.
+      pickModel(value) {
+        this.tested = false;
+        if (value === 'other') {
+          this.typing = true;
+          this.model = '';
+          this.$nextTick(function () {
+            var box = document.getElementById('setup-model-name');
+            if (box) box.focus();
+          });
+          return;
+        }
+        this.typing = false;
+        this.model = String(value || '').replace(/^m:/, '');
       },
 
       modelsFound() {

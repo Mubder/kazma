@@ -126,14 +126,24 @@
       </div>
     </div>
 
-    <div class="setup-card-part" x-show="listed">
+    {#- The models found are a list the person sees: a <select>, never a
+        <datalist>, which shows nothing until the box is clicked and then only
+        the names matching what is already in it (2026-11-19: "3 models found,
+        pick one from the list" over no list). Values carry an "m:" prefix so
+        no model name can be taken for "Another model". -#}
+    <div class="setup-card-part" x-show="modelsLoaded" x-cloak>
       <label class="setup-label" for="setup-model">{{ t('setup.model') }}</label>
-      <input id="setup-model" class="form-input" list="setup-model-list" x-model="model"
-             autocomplete="off" translate="no" dir="ltr">
-      <datalist id="setup-model-list">
-        <template x-for="m in models" :key="m"><option :value="m"></option></template>
-      </datalist>
-      <p class="setup-muted"><span x-text="modelsFound()"></span> {{ t('setup.model_hint') }}</p>
+      <select id="setup-model" class="form-select" x-show="models.length" x-cloak @change="pickModel($event.target.value)">
+        <template x-for="m in models" :key="m">
+          <option translate="no" :value="'m:' + m" :selected="!typing && m === model" x-text="m"></option>
+        </template>
+        <option value="other" :selected="typing">{{ t('setup.model_other') }}</option>
+      </select>
+      <input id="setup-model-name" class="form-input" x-show="typing || (modelsLoaded && !models.length)" x-cloak x-model="model"
+             autocomplete="off" translate="no" dir="ltr" aria-label="{{ t('setup.model_name') }}"
+             placeholder="{{ t('setup.model_name') }}" @keydown.enter="useModel()">
+      <p class="setup-muted" x-show="models.length" x-cloak><span x-text="modelsFound()"></span> {{ t('setup.model_hint') }}</p>
+      <p class="setup-muted" x-show="modelsLoaded && !models.length" x-cloak>{{ t('setup.model_type_hint') }}</p>
       <div class="setup-row">
         <button type="button" class="btn btn-primary" id="setup-use-model" @click="useModel()"
                 :disabled="busy || !String(model || '').trim()">{{ t('setup.use_model') }}</button>

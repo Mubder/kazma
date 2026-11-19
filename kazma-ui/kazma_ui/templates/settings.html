@@ -3178,29 +3178,41 @@
                 <p class="pkg-muted">{{ t('packages.optional_deps_hint') }}</p>
                 <p class="pkg-muted" id="pkg-install-line" x-show="pkgInstallLine()" x-text="pkgInstallLine()" x-cloak></p>
                 <p class="pkg-muted" id="pkg-new-in-express" x-show="pkgNewInExpress()" x-cloak>{{ t('packages.new_in_express') }} <bdi translate="no" x-text="pkgNewInExpress()"></bdi>. {{ t('packages.new_in_express_run') }} <code translate="no">kazma setup install</code></p>
+                {#- Parts this install chose that its last run could not put in
+                    place: their Python packages can all be here (every row
+                    green) while Docker, SearXNG or Neo4j are not (2026-11-19). -#}
+                <div class="notice tone-warning" id="pkg-not-in-place" role="status" x-show="pkgNotInPlace()" x-cloak>
+                    <span>{{ t('packages.not_in_place') }} <bdi translate="no" x-text="pkgNotInPlace()"></bdi>.
+                    {{ t('packages.not_in_place_run') }} <code translate="no">kazma setup install</code></span>
+                </div>
             </div>
             <div x-show="pkgLoading" class="pkg-loading" x-cloak>{{ t('common.loading') }}</div>
             <template x-for="extra in pkgExtras" :key="extra.name">
-                <div class="pkg-extra-row" :class="{ 'pkg-extra-rag': extra.name === 'rag', 'pkg-extra-installed': extra.installed }">
+                <div class="pkg-extra-row" :class="{ 'pkg-extra-rag': extra.name === 'rag', 'pkg-extra-installed': extra.installed && !extra.part_missing }">
                     <div class="pkg-extra-head">
                         <div class="pkg-extra-titles">
                             <span class="pkg-extra-title" translate="no" x-text="extra.title || extra.name"></span>
                             <span class="pkg-extra-slug" translate="no" x-text="'[' + extra.name + ']'"></span>
                             {# A part the recorded install left out is "not chosen", never
                                missing (or partial, when another part brought one of its
-                               packages): chosen is false only with a record. #}
+                               packages): chosen is false only with a record. Packages
+                               here and their part not in place is a warning, never
+                               green (pkgExtraBadge). #}
                             <span class="badge pkg-badge"
-                                  :class="extra.installed ? 'badge-success' : (extra.chosen === false ? 'badge-secondary' : (extra.partial ? 'badge-warning' : 'badge-danger'))"
-                                  x-text="extra.installed
-                                    ? t('packages.installed_badge')
-                                    : (extra.chosen === false
-                                      ? t('packages.not_chosen_badge')
-                                      : (extra.partial
-                                        ? (t('packages.partial_badge') + ' (' + (extra.installed_count || 0) + '/' + (extra.package_count || 0) + ')')
-                                        : t('packages.missing_badge')))"></span>
+                                  :class="pkgBadgeClass(extra)"
+                                  x-text="pkgExtraBadge(extra) === 'part_missing'
+                                    ? t('packages.part_not_in_place_badge')
+                                    : (pkgExtraBadge(extra) === 'installed'
+                                      ? t('packages.installed_badge')
+                                      : (pkgExtraBadge(extra) === 'not_chosen'
+                                        ? t('packages.not_chosen_badge')
+                                        : (pkgExtraBadge(extra) === 'partial'
+                                          ? (t('packages.partial_badge') + ' (' + (extra.installed_count || 0) + '/' + (extra.package_count || 0) + ')')
+                                          : t('packages.missing_badge'))))"></span>
                         </div>
                         <p class="pkg-extra-desc" translate="no" x-text="extra.description"></p>
                         <p class="pkg-muted" x-show="!extra.installed && extra.chosen === false" x-cloak>{{ t('packages.not_chosen_hint') }}</p>
+                        <p class="pkg-muted" x-show="extra.installed && extra.part_missing" x-cloak>{{ t('packages.part_not_in_place_hint') }} <bdi translate="no" x-text="extra.part_missing"></bdi>. {{ t('packages.not_in_place_run') }} <code translate="no">kazma setup install</code></p>
                     </div>
                     <div class="pkg-chips">
                         <template x-for="pkg in extra.packages" :key="pkg.name">
@@ -4048,7 +4060,7 @@
                     <div class="form-group">
                         <label for="xr-ai-provider">{{ t('settings.xt.ai_provider') }}</label>
                         <select id="xr-ai-provider" class="form-input" x-model="xReply.ai.provider"
-                                @change="xReply.ai.model = ''">
+                                @change="xReply.ai.model = ''; xReplyAIModelTyped = false">
                             <option value="">{{ t('settings.xt.ai_choose') }}</option>
                             <template x-for="p in xReply.ai_options" :key="p.provider">
                                 <option :value="p.provider" x-text="p.provider"></option>
@@ -4056,14 +4068,23 @@
                         </select>
                     </div>
                     <div class="form-group">
+                        {#- The provider's models are a list the page shows (a
+                            <select>), never a <datalist>, which shows nothing
+                            until the box is clicked. "m:" keeps a model named
+                            "other" apart from "Another model". -#}
                         <label for="xr-ai-model">{{ t('settings.xt.ai_model') }}</label>
-                        <input id="xr-ai-model" class="form-input" type="text" list="xr-ai-models"
-                               x-model="xReply.ai.model" autocomplete="off" translate="no">
-                        <datalist id="xr-ai-models">
+                        <select id="xr-ai-model" class="form-input" x-show="xReplyAIModels().length" x-cloak
+                                @change="xReplyPickModel($event.target.value)">
+                            <option value="" :selected="!xReply.ai.model && !xReplyAIModelTyping()">{{ t('settings.xt.ai_choose_model') }}</option>
                             <template x-for="m in xReplyAIModels()" :key="m">
-                                <option :value="m"></option>
+                                <option translate="no" :value="'m:' + m" :selected="!xReplyAIModelTyping() && m === xReply.ai.model" x-text="m"></option>
                             </template>
-                        </datalist>
+                            <option value="other" :selected="xReplyAIModelTyping()">{{ t('settings.xt.ai_model_other') }}</option>
+                        </select>
+                        <input id="xr-ai-model-name" class="form-input" type="text"
+                               x-show="xReplyAIModelTyping() || (xReplyLoaded && !xReplyAIModels().length)" x-cloak
+                               x-model="xReply.ai.model" autocomplete="off" translate="no" dir="ltr"
+                               aria-label="{{ t('settings.xt.ai_model') }}" placeholder="{{ t('settings.xt.ai_model') }}">
                     </div>
                 </div>
                 <p x-show="xReplyPreview.result && xReplyPreview.result.models" x-cloak

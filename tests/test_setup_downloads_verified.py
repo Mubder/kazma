@@ -35,7 +35,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-ROOT = Path(__file__).resolve().parents[1]
+from tests._bash import find_bash
+
+ROOT =Path(__file__).resolve().parents[1]
 UV_PIN = re.compile(r'\$UvVersion\s*=\s*"([^"]+)"')
 SH_PIN = re.compile(r'^UV_RELEASE="([^"]+)"', re.M)
 HEX64 = re.compile(r"\b[0-9a-f]{64}\b")
@@ -277,10 +279,7 @@ def test_setup_ps1_installs_a_matching_archive_and_refuses_another(shell, tmp_pa
 
 
 def _bash() -> str | None:
-    if os.name == "nt":
-        git_bash = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Git" / "bin" / "bash.exe"
-        return str(git_bash) if git_bash.is_file() else None
-    return shutil.which("bash")
+    return find_bash()
 
 
 def _fake_tar(path: Path, target: str) -> str:

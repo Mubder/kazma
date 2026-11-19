@@ -304,6 +304,15 @@ if ($Interactive -and -not $IsAdmin -and -not $NoElevate -and $env:OS -eq "Windo
     if ($Yes) { $forward += "-Yes" }
     if ($Port) { $forward += "-Port $Port" }
     if ($Debug) { $forward += "-Debug" }
+    # Every parameter goes to the administrator window (2026-11-19: the
+    # options were left behind, and a Full install with --without installed
+    # the parts it was told to leave out). The command is one double-quoted
+    # -Command argument: the value is single-quoted inside it, and an option
+    # never holds a double quote.
+    if ($InstallOptions) {
+        $options = ($InstallOptions -replace '"', '') -replace "'", "''"
+        $forward += "-InstallOptions '$options'"
+    }
     $here = (Get-Location).Path -replace "'", "''"
     $self = $PSCommandPath -replace "'", "''"
     $command = "Set-Location -LiteralPath '$here'; & '$self' $($forward -join ' ')"

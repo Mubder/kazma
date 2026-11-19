@@ -271,7 +271,7 @@ def test_the_install_overview_says_chosen_only_with_a_record():
     assert express["mode"] == "express" and express["chosen"] == len(ic.express_ids())
     assert parts["meaning_search"]["chosen"] is True and parts["meaning_search"]["ok"] is True
     assert parts["browser"]["chosen"] is False  # left out of Express: not chosen, never missing
-    assert ic.parts_of_extra("rag") == ["meaning_search"] and ic.parts_of_extra("tui") == []
+    assert ic._parts_of_extra("rag") == ["meaning_search"] and ic._parts_of_extra("tui") == []
 
 
 def test_the_packages_page_reads_chosen_and_the_install_command():
@@ -283,9 +283,62 @@ def test_the_packages_page_reads_chosen_and_the_install_command():
     root = Path(__file__).resolve().parent.parent
     page = (root / "kazma-ui" / "kazma_ui" / "templates" / "settings.html").read_text(encoding="utf-8")
     route = (root / "kazma-ui" / "kazma_ui" / "routes_direct" / "system.py").read_text(encoding="utf-8")
+    ops = (root / "kazma-ui" / "kazma_ui" / "static" / "js" / "settings_ops.js").read_text(encoding="utf-8")
     assert "extra.chosen === false" in page and "packages.not_chosen_badge" in page
+    assert "pkgExtraBadge(extra) === 'not_chosen'" in page and "extra.chosen === false" in ops
     assert 'uv pip install -e ".[all]"' not in page and "kazma setup install --mode full" in page
-    assert 'f"kazma setup install --with {owners[0]}"' in route
+    assert "annotate_extras(extras_list, install)" in route
+    from kazma_core import install_components as ic
+
+    extras = [{"name": "rag"}, {"name": "tui"}]
+    ic.annotate_extras(extras, ic.install_overview({}))
+    assert extras[0]["install_cmd"] == "kazma setup install --with meaning_search" and "chosen" not in extras[0]
+    assert "part" not in extras[1]
+
+
+# The owner's fresh Full install of 2026-11-19, as its record holds it: the
+# Python pieces in place, Docker and the three parts that need it not.
+_OWNERS_RECORD = {"install": {
+    "mode": "full", "at": 1, "without": [],
+    "components": ["meaning_search", "databases", "docker", "document_container", "private_search",
+                   "graph_neo4j", "service"],
+    "results": {"meaning_search": {"ok": True}, "databases": {"ok": True}, "docker": {"ok": False},
+                "document_container": {"ok": False}, "private_search": {"ok": False},
+                "graph_neo4j": {"ok": False}, "service": {"ok": True}}}}
+
+
+def test_the_packages_page_names_the_parts_not_in_place():
+    """Every row of Settings -> Packages was green over an install with no
+    Docker, SearXNG, Neo4j or document worker: the page listed Python extras
+    only, and Neo4j's driver was installed. The parts the last run could not
+    put in place are named, and an extra whose part failed is not green."""
+    from kazma_core import install_components as ic
+
+    overview = ic.install_overview(_OWNERS_RECORD, "windows")
+    assert overview["not_in_place"] == ["docker", "document_container", "private_search", "graph_neo4j"]
+    extras = [{"name": "neo4j", "installed": True}, {"name": "rag", "installed": True},
+              {"name": "sandbox", "installed": True}]
+    ic.annotate_extras(extras, overview)
+    neo4j, rag, sandbox = extras
+    assert neo4j["part_missing"] == "Neo4j memory graph" and neo4j["chosen"] is True
+    assert rag["part_missing"] == "" and rag["chosen"] is True
+    assert sandbox["chosen"] is False and sandbox["part_missing"] == ""
+    # A record that says nothing of a part (an older one) is not a failure.
+    quiet = {"install": {**_OWNERS_RECORD["install"], "results": {}}}
+    assert ic.install_overview(quiet, "windows")["not_in_place"] == []
+
+
+def test_control_the_old_annotation_left_a_failed_part_green():
+    """Negative control: the route's annotation before 2026-11-19 (part,
+    command, chosen) gives the Neo4j row nothing that is not green."""
+    from kazma_core import install_components as ic
+
+    overview = ic.install_overview(_OWNERS_RECORD, "windows")
+    chosen_parts = {p["id"] for p in overview["parts"] if p["chosen"]}
+    extra = {"name": "neo4j", "installed": True}
+    owners = ic._parts_of_extra(extra["name"])
+    extra["part"], extra["chosen"] = owners[0], any(o in chosen_parts for o in owners)
+    assert extra["installed"] and extra["chosen"] and not extra.get("part_missing")
 
 
 def test_switching_provider_ends_the_fallback_notice_of_the_one_left(monkeypatch):

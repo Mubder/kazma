@@ -596,6 +596,8 @@
             poller_running: false, live_reason: '', live_reason_code: '', live_reason_values: {},
         },
         xReplyRoleBindings: {},
+        // "Another model" chosen for X's model: the typed box shows.
+        xReplyAIModelTyped: false,
         xReplyModelTesting: false,
         xReplyModelResult: null,
         xReplySummonersText: '',

@@ -3,10 +3,14 @@
 A Kazma with no model shows the chat page's card; its button opens the guide
 (a soft navigation, as a person's click is). The guide finds a model server
 on this computer -- a stand-in Ollama on a loopback port, answering the
-OpenAI-compatible calls Kazma makes -- lists its model, switches Kazma to it,
-and sends it one message; the steps after it end on "Kazma is ready" with the
-model named. Then the guide is opened again from Settings in Arabic: right to
-left, in Arabic, and a cloud provider with no key is refused in Arabic.
+OpenAI-compatible calls Kazma makes -- lists its three models in a drop-down
+the person sees (2026-11-19: a ``<datalist>`` showed "3 models found, pick one
+from the list" over no list; the old markup has no option to pick, so this
+test fails on it), takes one, then "Another model" and a typed name, switches
+Kazma to it, and sends it one message; the steps after it end on "Kazma is
+ready" with the model named. Then the guide is opened again from Settings in
+Arabic: right to left, in Arabic, and a cloud provider with no key is refused
+in Arabic.
 """
 
 from __future__ import annotations
@@ -28,6 +32,8 @@ httpx = pytest.importorskip("httpx")
 pytestmark = [pytest.mark.e2e, pytest.mark.slow]
 
 MODEL = "tiny-model"
+#: What the stand-in server lists: three models, as the owner's Ollama had.
+MODELS = (MODEL, "second-model", "third-model")
 
 
 def _free_port() -> int:
@@ -49,9 +55,9 @@ class _FakeOllama(BaseHTTPRequestHandler):
 
     def do_GET(self):  # noqa: N802 -- http.server's name
         if self.path.endswith("/models"):
-            self._send({"object": "list", "data": [{"id": MODEL, "object": "model"}]})
+            self._send({"object": "list", "data": [{"id": m, "object": "model"} for m in MODELS]})
         elif self.path.endswith("/api/tags"):
-            self._send({"models": [{"name": MODEL}]})
+            self._send({"models": [{"name": m} for m in MODELS]})
         else:
             self.send_error(404)
 
@@ -150,8 +156,24 @@ def test_the_guide_takes_a_fresh_install_to_a_working_model(fresh_kazma: str) ->
             ollama = pg.locator(".setup-server", has_text="Ollama")
             ollama.get_by_text("Running", exact=True).wait_for(state="visible", timeout=15000)
             ollama.locator("button").click()
-            pg.wait_for_function("document.querySelector('#setup-model').value === %s" % json.dumps(MODEL),
-                                 timeout=20000)
+            # The models found are on screen, as options of a visible list.
+            picker = pg.locator("#setup-model")
+            picker.wait_for(state="visible", timeout=20000)
+            pg.wait_for_function("document.querySelectorAll('#setup-model option').length === 4", timeout=20000)
+            options = picker.locator("option").all_inner_texts()
+            assert sorted(options[:3]) == sorted(MODELS) and options[3] == "Another model…", options
+            assert "3 models found." in pg.locator("#setup-step-model").inner_text()
+            assert not pg.locator("#setup-model-name").is_visible()
+            guide = "Alpine.$data(document.querySelector('.setup-guide'))"
+            picker.select_option("m:third-model")
+            assert pg.evaluate(guide + ".model") == "third-model"
+            # "Another model": a name the server did not list, typed.
+            picker.select_option("other")
+            typed = pg.locator("#setup-model-name")
+            typed.wait_for(state="visible", timeout=5000)
+            assert typed.input_value() == "" and pg.locator("#setup-use-model").is_disabled()
+            typed.fill(MODEL)
+            assert pg.evaluate(guide + ".model") == MODEL
             pg.locator("#setup-use-model").click()
             pg.locator("#setup-check-ok").wait_for(state="visible", timeout=60000)
             pg.locator("#setup-next").click()

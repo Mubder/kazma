@@ -844,6 +844,31 @@
             return parts.length ? parts.join(', ') : '';
         },
 
+        // The parts this install chose that its last run could not put in
+        // place (their titles), or '' -- `kazma setup install` finishes them.
+        pkgNotInPlace() {
+            const parts = (this.pkgInstall && this.pkgInstall.not_in_place) || [];
+            return parts.length ? parts.join(', ') : '';
+        },
+
+        // An extra's state: "installed" only when its packages AND its part
+        // are in place; a part that did not install is "part_missing" (a
+        // warning), never green. The page words each from the catalog.
+        pkgExtraBadge(extra) {
+            if (extra.installed && extra.part_missing) return 'part_missing';
+            if (extra.installed) return 'installed';
+            if (extra.chosen === false) return 'not_chosen';
+            if (extra.partial) return 'partial';
+            return 'missing';
+        },
+
+        pkgBadgeClass(extra) {
+            return {
+                part_missing: 'badge-warning', installed: 'badge-success', not_chosen: 'badge-secondary',
+                partial: 'badge-warning', missing: 'badge-danger',
+            }[this.pkgExtraBadge(extra)];
+        },
+
         get pkgMemoryLayerRows() {
             const layers = (this.pkgMemory && this.pkgMemory.layers) || {};
             const layerText = (k) => (typeof window.tOr === 'function' ? window.tOr(k, k) : k);

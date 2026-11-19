@@ -5279,8 +5279,14 @@ read as the script's own `$installArgs`) reach `kazma setup install`. The CI
 job `fresh-install` runs them on clean Ubuntu and Windows runners (Express
 without `meaning_search` and `neural_ocr`; Windows also without the container
 parts, no virtualization there), then `setup install --check` and Kazma's
-`/health/live` and `/health/ready` on its port. Gate:
-`tests/test_setup_passes_install_options.py` (each script's own parsing run).
+`/health/live` and `/health/ready` on its port. **setup.ps1's administrator
+window gets every parameter** (2026-11-19: it reopened itself with `-Mode`,
+`-Yes`, `-Port` and `-Debug` and dropped `-InstallOptions`, so the owner's
+Full install with three `--without` installed all three): the options go
+single-quoted inside the window's one double-quoted `-Command`. Gate:
+`tests/test_setup_passes_install_options.py` (each script's own parsing run;
+every parameter in the elevation block, the old block as the control; the
+built command run as Start-Process runs it).
 **A clean Linux machine is drilled end to end** (REMAINING 2.3,
 `scripts/linux_drill.py`, run from Windows): a fresh Ubuntu 24.04 WSL distro
 of its own (`kazma-linux-drill`, Ubuntu's image checked against its
@@ -5479,6 +5485,14 @@ install lists Ollama and LM Studio.
   saves the provider (an empty key keeps the stored one; an address set in
   Settings stays) and switches model AND provider (§1). Errors are codes the
   page words (`setup.err.*`), never the provider's reply text.
+- **The models found are a list on screen** (2026-11-19): a `<select>`
+  (`#setup-model`, values `m:<model>` so no model name is taken for "Another
+  model") with "Another model" for a typed name (`#setup-model-name`,
+  `pickModel`); Settings -> X's model the same (`xReplyPickModel`). They were
+  a `<datalist>`, which shows nothing until the box is clicked and then only
+  the names matching what it holds: the owner's fresh install said "3 models
+  found. Pick one from the list" over no list. No page holds a datalist
+  (`tests/test_no_hidden_lists.py`, a planted one as the control).
 - Everything but `/api/setup/status` is admin (`platform_rbac._ADMIN_PREFIXES`).
 - **A switch ends a stale fallback notice**
   (`model_fallback.report_provider_chosen`, from both switches in
@@ -5486,13 +5500,23 @@ install lists Ollama and LM Studio.
   back from the shipped placeholder, and that notice closed only when the
   placeholder got a key.
 - **Settings -> Packages reads the install's record**
-  (`install_components.install_overview`, `parts_of_extra`): the mode and
+  (`install_components.install_overview`, `annotate_extras`): the mode and
   date, an extra of a part left out "Not chosen" (never Missing or Partial),
-  and `kazma setup install --with <part>` as each extra's command.
+  and `kazma setup install --with <part>` as each extra's command. **A part
+  the last run could not put in place is said** (2026-11-19: the owner's
+  fresh Full install had no Docker, SearXNG, Neo4j or document worker, and
+  every row was green -- the page listed Python extras, and Neo4j's driver
+  was installed): the route's install data names them (`not_in_place`) in a
+  warning (`#pkg-not-in-place`), and an extra whose packages are here while
+  its part is not (`part_missing`) is a warning badge, never "Installed"
+  (`pkgExtraBadge`). Only a recorded `ok:
+  false` counts; a record that says nothing of a part is no failure.
 Gates: `tests/test_setup_guide.py` (each with the old behaviour as its
 control), `tests/e2e/test_setup_guide_browser.py` (a fresh install's chat
-card to a working model on a stand-in Ollama; Settings to the guide in
-Arabic).
+card to a working model on a stand-in Ollama, three models listed, one
+picked, then "Another model" typed; Settings to the guide in Arabic),
+`tests/js/test_x_reply_model_picker.js`, `tests/js/test_packages_not_in_place.js`,
+`tests/e2e/test_packages_not_in_place_browser.py` (EN/AR, by the sidebar).
 
 ### 21e. The Windows installer and release installs (REMAINING 2.7, 2026-11-16)
 
@@ -12134,8 +12158,13 @@ SERVICE (a tunnel) reach its published ports, and it is back 19 s after a
   image, Docker Engine set up by `setup-engine.sh` piped over stdin (LF,
   idempotent, docker packages held, Docker's apt key kept only when its
   fingerprint is the published one, `kazma_trust_docker_key`,
-  `tests/test_engine_docker_key.py`, TLS keys made once, listening on
-  127.0.0.1 only with client certificates); Docker's Windows CLI and the
+  `tests/test_engine_docker_key.py`, Ubuntu's archive read over HTTPS
+  before the first `apt-get update`, `kazma_https_sources`,
+  `tests/test_engine_apt_over_https.py` -- over plain HTTP the network on the
+  way handed back a corrupted package list on every try and the first fresh
+  install after the 2026-11-19 reset could not set the engine up -- TLS keys
+  made once, listening on 127.0.0.1 only with client certificates); Docker's
+  Windows CLI and the
   compose plugin from Docker's own downloads. **Kazma's own CLI, not any
   CLI** (2026-11-14): the check's "cli" is
   `container_engine_setup._own_cli_installed_check` (`docker.exe` in

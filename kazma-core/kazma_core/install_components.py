@@ -29,9 +29,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-__all__ = ["COMPONENTS", "EXTRA_ALIASES", "MODES", "OS_NAMES", "Component", "by_id", "components_for",
-           "current_os", "express_ids", "extras_for", "full_ids", "install_overview",
-           "parts_of_extra", "toggle"]
+__all__ = ["COMPONENTS", "EXTRA_ALIASES", "MODES", "OS_NAMES", "Component", "annotate_extras", "by_id",
+           "components_for",
+           "current_os", "express_ids", "extras_for", "full_ids", "install_overview", "toggle"]
 
 MODES = ("express", "full", "custom")
 
@@ -295,7 +295,7 @@ def extras_for(components: list[Component]) -> list[str]:
     return seen
 
 
-def parts_of_extra(extra: str) -> list[str]:
+def _parts_of_extra(extra: str) -> list[str]:
     """The parts that install the Python extra *extra*, in table order."""
     return [comp.id for comp in COMPONENTS if extra in comp.extras]
 
@@ -332,5 +332,35 @@ def install_overview(record: dict | None, os_name: str = "") -> dict:
         })
     new = ([cid for cid in express_ids(os_name) if cid not in chosen and cid not in declined]
            if mode == "express" else [])
+    # Chosen and not in place, as the install's last run recorded it. Only an
+    # explicit failure: a part an older record says nothing about is not one.
+    not_in_place = [p["id"] for p in parts if p["chosen"] and p["ok"] is False]
     return {"mode": mode, "at": install.get("at"), "chosen": len(chosen) if mode else 0,
-            "total": len(COMPONENTS), "parts": parts, "new_in_express": new}
+            "total": len(COMPONENTS), "parts": parts, "new_in_express": new,
+            "not_in_place": not_in_place}
+
+
+def annotate_extras(extras: list[dict], overview: dict) -> None:
+    """Settings -> Packages' Python extras, each with the part that brings it.
+
+    ``part``/``install_cmd``: the part and `kazma setup install --with <part>`,
+    which also installs the part's system pieces. ``chosen``: whether the
+    recorded install chose it (only with a record). ``part_missing``: the
+    title of a chosen part that is not in place while the extra's packages
+    are -- Neo4j's Python driver installed and Neo4j itself not (2026-11-19:
+    the owner's fresh Full install had no Docker, SearXNG, Neo4j or document
+    worker, and every row of the page was green).
+    """
+    parts = {p["id"]: p for p in overview.get("parts") or []}
+    chosen_parts = {pid for pid, p in parts.items() if p.get("chosen")}
+    failed = set(overview.get("not_in_place") or [])
+    for extra in extras:
+        owners = _parts_of_extra(str(extra.get("name") or ""))
+        if not owners:
+            continue
+        extra["part"] = owners[0]
+        extra["install_cmd"] = f"kazma setup install --with {owners[0]}"
+        if overview.get("mode"):
+            extra["chosen"] = any(owner in chosen_parts for owner in owners)
+        missing = [by_id(owner).title for owner in owners if owner in failed]
+        extra["part_missing"] = ", ".join(missing)

@@ -4481,6 +4481,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.xt.ai_provider": {"ar": "المزوّد", "en": "Provider"},
     "settings.xt.ai_model": {"ar": "معرّف النموذج", "en": "Model ID"},
     "settings.xt.ai_choose": {"ar": "اختر مزوّداً", "en": "Choose a provider"},
+    "settings.xt.ai_choose_model": {"ar": "اختر نموذجاً", "en": "Choose a model"},
+    "settings.xt.ai_model_other": {"ar": "نموذج آخر…", "en": "Another model…"},
     "settings.xt.ai_used": {"ar": "النموذج المستخدم في المعاينة", "en": "Model used in preview"},
     "settings.xt.ai_hint": {
         "ar": "يُستخدم للتصنيف وصياغة الردود والتحقق من الموقف. يدعم مزوّداً محلياً مهيّأً دون تغيير النموذج العام. لا يُستخدم نموذج بديل إذا تعذّر تشغيل النموذج المحدد. اختبره بالمعاينة قبل الحفظ.",
