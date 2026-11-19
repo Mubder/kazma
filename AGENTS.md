@@ -13460,6 +13460,33 @@ product can turn it on, so an install with one account behaves as before.
     source gate on the environment -- any shape naming the variable but the
     one reader's and the owner's binding -- and on the sign-in's keys --
     each key constant handed to `github_key` -- each with planted shapes).
+- **The vault has a space scope (S1-18, 2026-11-19).** Guards act only
+  where Spaces is enforced; not enforced, the vault is exactly as before.
+  - `security.vault.secret_scope(name)` is the one answer to whose a name
+    is: the install's (`INSTALL_SCOPED_SECRETS`, which stays; the offsite
+    backup's passwords; every `cfg:` settings secret that is not a space's
+    connected account, until S1-23 classes settings) or a space's (a name
+    that carries its space, `space:<id>:` / `cfg:tenant.<id>.`; the X and
+    GitHub settings of the owner's space, `_SPACE_ACCOUNT_SETTINGS`; anything
+    the agent stored).
+  - A space's secret is returned only to work in that space
+    (`SecretVault._scopes_to_read`): another space, and work with no space
+    bound, get None. No `default` rung (`retrieve_scoped` asks the same
+    rule). A row with no tenant is the owner's space's (N19). The caller's
+    space is the bound scope's first (`_callers_space`: the mail code pins
+    the tenant to none while its scope stays bound).
+  - A secret is never written for no one (`NoSpaceBound`) nor for a space
+    its name does not carry (`VaultScopeError`), and the settings store
+    refuses such a save: it never keeps the secret as plaintext instead
+    (`config_store._vault_scope_refusals`).
+  - A list, a delete (`every_scope` too) and the divergent-duplicate scan
+    keep to the caller's space; a drill that must judge every row uses
+    `sample_opens`. No product code passes a tenant to a vault call
+    (`SecretVault.for_space(id)` is the declared way).
+  - A new vault name read by the install's own work with no space bound goes
+    on the install list, or it reads None once enforced.
+  - Gates: `tests/test_vault_space_scope.py` (the old read as each control),
+    `tests/_vault_space_cases.py`.
 
 ## UI Conventions (Web)
 

@@ -166,9 +166,12 @@ def world(matrix: Matrix, *, connect_a: bool = True) -> Iterator[World]:
         marks = matrix.plant("gh")
         # Stored with nothing bound: a global vault row, as an install from
         # before spaces keeps it -- the row every tenant's read falls back to.
-        store.batch_set([("connectors.github.token", OWNER_TOKEN, "connectors"),
-                         ("connectors.github.app_id", "4242", "connectors"),
-                         ("connectors.github.app_installation_id", "77", "connectors")])
+        # (Before Spaces: once enforced the vault writes no secret for no one.)
+        with pytest.MonkeyPatch.context() as before_spaces:
+            before_spaces.setattr(scope, "_enforced", False)
+            store.batch_set([("connectors.github.token", OWNER_TOKEN, "connectors"),
+                             ("connectors.github.app_id", "4242", "connectors"),
+                             ("connectors.github.app_installation_id", "77", "connectors")])
         app = FastAPI()
         app.middleware("http")(auth.create_tenant_middleware())
         role_refused = Matrix.role_checked(app)

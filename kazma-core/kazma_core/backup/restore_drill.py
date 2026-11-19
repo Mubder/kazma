@@ -336,17 +336,11 @@ def _check_vault_opens(backup: Path, res: DrillResult) -> None:
         # key opens NOTHING" about a backup whose key is perfectly fine.
         # A false alarm on recoverability is worse than no drill: it sends the
         # operator to rebuild a vault that was never broken.
-        sample = [
-            (str(s.get("name") or ""), s.get("tenant"))
-            for s in vault.list_secrets()
-            if s.get("name")
-        ][:5]
-        opened = sum(
-            1
-            for name, tenant in sample
-            if vault.retrieve(name, None if tenant in (None, "global") else str(tenant))
-            is not None
-        )
+        # ``sample_opens`` judges each row as the row it is: a read by name
+        # answers by the caller's space once Spaces is enforced (S1-18), and
+        # the drill has none.
+        sample = vault.sample_opens(5)
+        opened = sum(1 for _name, ok in sample if ok)
         names = [n for n, _ in sample]
         res.add(
             "vault:decrypt", opened > 0,

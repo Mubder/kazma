@@ -137,9 +137,17 @@ def _credentials_in(space: str, account: str) -> Any:
         return get_x_config().credentials
 
 
+def _store_as_an_old_setup_did(private) -> None:
+    """The legacy names in rows with no tenant, written before Spaces: once
+    enforced the vault writes no secret for no one (S1-18)."""
+    with pytest.MonkeyPatch.context() as before_spaces:
+        before_spaces.setattr(scope, "_enforced", False)
+        for name in ("x_api_key", "x_api_key_secret", "x_access_token", "x_access_token_secret"):
+            private.store(name, f"owners-{name}")
+
+
 def test_the_legacy_vault_names_are_the_owners_spaces_only(matrix, enforced, private) -> None:
-    for name in ("x_api_key", "x_api_key_secret", "x_access_token", "x_access_token_secret"):
-        private.store(name, f"owners-{name}")  # a global row, as an old setup left it
+    _store_as_an_old_setup_did(private)
     assert _credentials_in(OWNER_SPACE_ID, OWNER_ACCOUNT_ID).api_key == "owners-x_api_key"
     theirs = _credentials_in(Matrix.SPACE_A, matrix.account_a)
     assert not theirs.api_key and not theirs.complete()
@@ -151,8 +159,7 @@ def test_control_reading_the_legacy_names_in_every_space_lends_the_owners_keys(m
     space's vault read falls back to the global row, the owner's."""
     import kazma_core.spaces.scope as scope_mod
 
-    for name in ("x_api_key", "x_api_key_secret", "x_access_token", "x_access_token_secret"):
-        private.store(name, f"owners-{name}")
+    _store_as_an_old_setup_did(private)
     monkeypatch.setattr(scope_mod, "spaces_enforced", lambda: False)
     lent = _credentials_in(Matrix.SPACE_A, matrix.account_a)
     assert lent.api_key == "owners-x_api_key"

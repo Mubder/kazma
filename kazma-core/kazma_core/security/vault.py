@@ -42,6 +42,7 @@ from kazma_core.tenant_context import get_current_tenant_id
 __all__ = [
     "INSTALL_SCOPED_SECRETS",
     "SecretVault",
+    "VaultScopeError",
     "consolidate_install_scoped_secrets",
     "get_vault",
     "is_install_scoped_secret",
@@ -50,6 +51,7 @@ __all__ = [
     "reset_vault",
     "retrieve_scoped",
     "retrieve_with_tenant_ladder",
+    "secret_scope",
 ]
 
 logger = logging.getLogger(__name__)
@@ -172,6 +174,93 @@ def is_kazma_owned_secret(name: str) -> bool:
     """
     clean = str(name or "").strip()
     return clean.startswith(CONFIG_SECRET_PREFIX) or is_install_scoped_secret(clean)
+
+
+# ── The space scope (Spaces S1-18) ─────────────────────────────────────────
+#
+# Once Spaces is enforced every vault name is the install's or one space's,
+# and one function says which: :func:`secret_scope`. While it is not enforced
+# nothing below is asked and the vault behaves as it always did.
+
+#: The prefix of a space's connected-account secrets
+#: (``spaces.connected_accounts.SPACE_SECRET_PREFIX``): the name carries its
+#: space, ``space:<id>:<name>``.
+_SPACE_NAME_PREFIX = "space:"
+
+#: A settings key of one space (``tenant.<id>.<key>``): its secret's vault
+#: name is ``cfg:tenant.<id>.<key>``.
+_SPACE_SETTING_PREFIX = CONFIG_SECRET_PREFIX + "tenant."
+
+#: Settings whose secrets are a space's connected account, kept under the
+#: plain key in the owner's space (``spaces.connected_accounts``): the X
+#: account and the GitHub sign-in. Every other setting is the install's until
+#: settings are classed key by key (S1-23).
+_SPACE_ACCOUNT_SETTINGS: tuple[str, ...] = (
+    CONFIG_SECRET_PREFIX + "connectors.x.",
+    CONFIG_SECRET_PREFIX + "connectors.github.",
+)
+
+#: Names the install's own work reads with no space bound, beside
+#: :data:`INSTALL_SCOPED_SECRETS`: the offsite backup's passwords, which its
+#: route stores with no tenant.
+_INSTALL_NAMES_ONCE_ENFORCED: tuple[str, ...] = ("backups.offsite.",)
+
+
+class VaultScopeError(PermissionError):
+    """A write named a secret of another space than the one the work is in."""
+
+
+def secret_scope(name: str) -> tuple[str, str | None]:
+    """Whose secret *name* is once Spaces is enforced: ``("install", None)``,
+    or ``("space", <id>)`` when the name itself carries its space, or
+    ``("space", None)`` for a secret of whichever space stores it (its row's
+    ``tenant_id``).
+
+    * ``space:<id>:...`` and ``cfg:tenant.<id>....`` name their space.
+    * :data:`INSTALL_SCOPED_SECRETS`, the offsite backup's passwords and
+      every settings secret that is not a space's connected account are the
+      install's: one copy, read by every space and by the install's own work.
+    * Everything else -- a secret the agent stored, the X account and GitHub
+      sign-in of the owner's space, the legacy X names -- is a space's.
+    """
+    clean = str(name or "")
+    if clean.startswith(_SPACE_NAME_PREFIX):
+        space, sep, _rest = clean[len(_SPACE_NAME_PREFIX):].partition(":")
+        return "space", (space if sep else "")
+    if clean.startswith(_SPACE_SETTING_PREFIX):
+        space, sep, _rest = clean[len(_SPACE_SETTING_PREFIX):].partition(".")
+        return "space", (space if sep else "")
+    if is_install_scoped_secret(clean) or clean.startswith(_INSTALL_NAMES_ONCE_ENFORCED):
+        return "install", None
+    if clean.startswith(CONFIG_SECRET_PREFIX) and not clean.startswith(_SPACE_ACCOUNT_SETTINGS):
+        return "install", None
+    return "space", None
+
+
+def _enforced() -> bool:
+    from kazma_core.spaces.scope import spaces_enforced
+
+    return spaces_enforced()
+
+
+def _owner_space() -> str:
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    return OWNER_SPACE_ID
+
+
+def _callers_space(tenant_id: str | None) -> str | None:
+    """The space the calling work is in: the one it names, else its bound
+    scope's (the mail code pins the tenant to none while its scope stays
+    bound), else a tenant bound by older code, else none."""
+    if tenant_id:
+        return tenant_id
+    from kazma_core.spaces.scope import current_scope
+
+    bound = current_scope()
+    if bound is not None:
+        return bound.space_id
+    return get_current_tenant_id() or None
 
 # ── Constants ──────────────────────────────────────────────────────────────
 
@@ -323,10 +412,17 @@ class SecretVault:
         stray copy is what ``retrieve`` hands a caller that has a tenant.
         """
         refuse_write("vault", name)
-        if is_install_scoped_secret(name):
+        if _enforced():
+            kind, _named = secret_scope(name)
+            if kind == "install" or name.startswith(_SPACE_NAME_PREFIX):
+                self._space_for_write(name, tenant_id)  # a named space must be the caller's
+                return self._write_install_scoped(name, value, category, metadata)[1]
+            tid: str | None = self._space_for_write(name, tenant_id)
+        elif is_install_scoped_secret(name):
             return self._write_install_scoped(name, value, category, metadata)[1]
+        else:
+            tid = self._tenant_filter(tenant_id)
         ct, nonce = self._encrypt(value)
-        tid = self._tenant_filter(tenant_id)
         now = datetime.now(UTC).isoformat()
         sid = _secrets.token_hex(16)
         meta = json.dumps(metadata or {})
@@ -351,6 +447,49 @@ class SecretVault:
                 raise
         logger.info("[Vault] Stored secret '%s' (category=%s, tenant=%s)", name, category, tid or "global")
         return sid
+
+    @staticmethod
+    def _space_for_write(name: str, tenant_id: str | None) -> str | None:
+        """The space a write of *name* lands in once Spaces is enforced.
+
+        The install's secret: none. A space's: the calling work's space,
+        which must be the one the name carries when it carries one
+        (:class:`VaultScopeError`), and ``NoSpaceBound`` with none bound --
+        a secret written for no one would be the owner's.
+        """
+        kind, named = secret_scope(name)
+        if kind == "install":
+            return None
+        space = _callers_space(tenant_id)
+        if space is None:
+            from kazma_core.spaces.scope import require_space_id
+
+            space = require_space_id()  # raises NoSpaceBound
+        if named is not None and named != space:
+            raise VaultScopeError(
+                f"secret {name!r} belongs to another space than the one this work is in"
+            )
+        return space
+
+    def _scopes_to_read(self, name: str, tenant_id: str | None) -> list[str | None] | None:
+        """The rows (by ``tenant_id``) a read or delete of *name* may touch
+        once Spaces is enforced, in order; None when the calling work may not
+        touch it at all (no space bound, or another space's name)."""
+        kind, named = secret_scope(name)
+        owner = _owner_space()
+        if kind == "install":
+            return [owner, None]
+        space = _callers_space(tenant_id)
+        if space is None or (named is not None and named != space):
+            return None
+        if name.startswith(_SPACE_NAME_PREFIX):
+            return [None]  # kept as one row, told apart by its name
+        # What an install stored with no tenant before Spaces is the owner's.
+        return [space, None] if space == owner else [space]
+
+    def for_space(self, space_id: str) -> _SpaceVault:
+        """This vault for one space: every call names *space_id*."""
+        return _SpaceVault(self, space_id)
 
     def store_install_scoped(
         self, name: str, value: str, category: str = "general",
@@ -505,6 +644,8 @@ class SecretVault:
         Returns:
             The decrypted secret value, or None if not found.
         """
+        if _enforced():
+            return self._retrieve_enforced(name, tenant_id)
         tid = self._tenant_filter(tenant_id)
         with self._lock:
             # Try tenant-specific first, then global. Newest-first within a
@@ -528,6 +669,39 @@ class SecretVault:
                 if row:
                     return self._decrypt(row["encrypted_value"], row["nonce"])
             self._note_scoped_miss(name, tid)
+        return None
+
+    def _retrieve_enforced(self, name: str, tenant_id: str | None) -> str | None:
+        """:meth:`retrieve` once Spaces is enforced (S1-18).
+
+        The install's secret is read by anyone. A space's is read only by
+        work in that space: another space, and work with no space bound, get
+        None -- never the owner's copy (the ``default`` rung), never a row
+        with no tenant unless the caller is the owner's space, whose rows
+        from before Spaces those are.
+        """
+        scopes = self._scopes_to_read(name, tenant_id)
+        if scopes is None:
+            if name not in self._scoped_miss_warned:
+                self._scoped_miss_warned.add(name)
+                logger.warning(
+                    "[Vault] '%s' is a space's secret and was read %s: nothing is "
+                    "returned. The entry point must bind the space it works for.",
+                    name,
+                    "with no space bound" if _callers_space(tenant_id) is None
+                    else "from another space",
+                )
+            return None
+        with self._lock:
+            for query_tid in scopes:
+                row = self._conn.execute(
+                    """SELECT encrypted_value, nonce FROM secrets
+                       WHERE name = ? AND COALESCE(tenant_id, '__global__') = COALESCE(?, '__global__')
+                       ORDER BY rowid DESC LIMIT 1""",
+                    (name, query_tid),
+                ).fetchone()
+                if row:
+                    return self._decrypt(row["encrypted_value"], row["nonce"])
         return None
 
     def _note_scoped_miss(self, name: str, tid: str | None) -> None:
@@ -622,21 +796,32 @@ class SecretVault:
         import hashlib
         from collections import defaultdict
 
-        by_name: dict[str, list[tuple[str | None, Any]]] = defaultdict(list)
+        # Each scope's newest row, decrypted here: once Spaces is enforced
+        # ``retrieve`` answers by the caller's space, not by the row asked.
+        by_name: dict[str, dict[str | None, tuple[Any, Any, Any]]] = defaultdict(dict)
         with self._lock:
             for row in self._conn.execute(
-                "SELECT name, tenant_id, updated_at FROM secrets"
+                "SELECT name, tenant_id, updated_at, encrypted_value, nonce "
+                "FROM secrets ORDER BY rowid DESC"
             ).fetchall():
-                by_name[row["name"]].append((row["tenant_id"], row["updated_at"]))
+                by_name[row["name"]].setdefault(
+                    row["tenant_id"], (row["updated_at"], row["encrypted_value"], row["nonce"])
+                )
+        enforced = _enforced()
 
         out: list[dict[str, Any]] = []
-        for name, entries in by_name.items():
-            if len(entries) < 2:
+        for name, scopes in by_name.items():
+            if len(scopes) < 2:
                 continue
+            # The same name in two spaces is two secrets, not a duplicate:
+            # once enforced only the install's names can disagree.
+            if enforced and secret_scope(name)[0] != "install":
+                continue
+            entries = [(tid, updated) for tid, (updated, _ct, _nonce) in scopes.items()]
             seen: dict[str, str] = {}
-            for tid, updated in entries:
+            for tid, (_updated, ct, nonce) in scopes.items():
                 try:
-                    value = self.retrieve(name, tenant_id=tid)
+                    value = self._decrypt(ct, nonce)
                 except Exception:  # pragma: no cover - unreadable row
                     value = None
                 seen[str(tid)] = hashlib.sha256((value or "").encode()).hexdigest()
@@ -672,6 +857,8 @@ class SecretVault:
 
     def list_secrets(self, tenant_id: str | None = None) -> list[dict[str, Any]]:
         """List all secrets (names + categories, NOT values)."""
+        if _enforced():
+            return self._list_enforced(tenant_id)
         tid = self._tenant_filter(tenant_id)
         with self._lock:
             if tid:
@@ -696,6 +883,57 @@ class SecretVault:
                 for r in cursor
             ]
 
+    def _list_enforced(self, tenant_id: str | None) -> list[dict[str, Any]]:
+        """:meth:`list_secrets` once Spaces is enforced: a space's own rows
+        (the owner's space also the rows with no tenant, as before); work
+        with no space bound, the install's names only."""
+        space = _callers_space(tenant_id)
+        owner = _owner_space()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT name, category, tenant_id, created_at, updated_at FROM secrets ORDER BY name"
+            ).fetchall()
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            kind, named = secret_scope(r["name"])
+            if space is None:
+                shown = kind == "install"
+            elif named is not None:
+                shown = named == space
+            elif r["tenant_id"] is None:
+                shown = space == owner
+            else:
+                shown = r["tenant_id"] == space
+            if shown:
+                out.append({
+                    "name": r["name"],
+                    "category": r["category"],
+                    "tenant": r["tenant_id"] or "global",
+                    "created_at": r["created_at"],
+                    "updated_at": r["updated_at"],
+                })
+        return out
+
+    def sample_opens(self, limit: int = 5) -> list[tuple[str, bool]]:
+        """Up to *limit* rows, each with whether it decrypts with this key;
+        never a value. For a restore drill, which runs with no space bound
+        and must judge every row as the row it is."""
+        from cryptography.exceptions import InvalidTag
+
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT name, encrypted_value, nonce FROM secrets ORDER BY name LIMIT ?",
+                (int(limit),),
+            ).fetchall()
+        out: list[tuple[str, bool]] = []
+        for r in rows:
+            try:
+                self._decrypt(r["encrypted_value"], r["nonce"])
+                out.append((r["name"], True))
+            except (InvalidTag, ValueError):  # the wrong key: that is the answer
+                out.append((r["name"], False))
+        return out
+
     def delete(self, name: str, tenant_id: str | None = None, *, every_scope: bool = False) -> bool:
         """Delete a secret. Returns True if a row was deleted.
 
@@ -707,7 +945,22 @@ class SecretVault:
         Disconnect left an encrypted copy in the scope it did not run in).
         """
         refuse_write("vault", name)
-        if every_scope or is_install_scoped_secret(name):
+        if _enforced() and secret_scope(name)[0] != "install":
+            # A space's secret: only that space's own rows, whatever
+            # *every_scope* says -- the same name is another space's too.
+            scopes = self._scopes_to_read(name, tenant_id)
+            if scopes is None:
+                return False
+            with self._lock:
+                marks = ",".join("?" for _ in scopes)
+                cur = self._conn.execute(
+                    f"DELETE FROM secrets WHERE name = ? AND COALESCE(tenant_id, '__global__') IN ({marks})",  # noqa: S608 -- placeholders only
+                    (name, *[s if s is not None else "__global__" for s in scopes]),
+                )
+            if cur.rowcount > 0:
+                logger.info("[Vault] Deleted a space's secret '%s' (%d row(s))", name, cur.rowcount)
+            return cur.rowcount > 0
+        if every_scope or is_install_scoped_secret(name) or _enforced():
             with self._lock:
                 cur = self._conn.execute("DELETE FROM secrets WHERE name = ?", (name,))
             if cur.rowcount > 0:
@@ -745,6 +998,32 @@ class SecretVault:
                     # has no recoverable failure mode.
                     logger.debug("[Vault] close() failed", exc_info=True)
                 self._conn = None
+
+
+class _SpaceVault:
+    """A :class:`SecretVault` for one space (``SecretVault.for_space``):
+    every call names the space, so nothing depends on what is bound."""
+
+    def __init__(self, vault: SecretVault, space_id: str) -> None:
+        from kazma_core.spaces.scope import valid_space_id
+
+        if not valid_space_id(space_id):
+            raise ValueError(f"not a space id: {space_id!r}")
+        self._vault = vault
+        self.space_id = space_id
+
+    def store(self, name: str, value: str, category: str = "general",
+              metadata: dict[str, Any] | None = None) -> str:
+        return self._vault.store(name, value, category, metadata, tenant_id=self.space_id)
+
+    def retrieve(self, name: str) -> str | None:
+        return self._vault.retrieve(name, tenant_id=self.space_id)
+
+    def delete(self, name: str) -> bool:
+        return self._vault.delete(name, tenant_id=self.space_id)
+
+    def list_secrets(self) -> list[dict[str, Any]]:
+        return self._vault.list_secrets(tenant_id=self.space_id)
 
 
 #: Re-entrancy guard for the posture probe. ``multi_user_enabled()`` reads
@@ -860,6 +1139,12 @@ def retrieve_scoped(name: str, vault: Any | None = None) -> str | None:
         except Exception:  # noqa: BLE001
             return None
         return val if (val is not None and str(val) != "") else None
+
+    if _enforced():
+        # One rule, the vault's own (S1-18): the install's secret for anyone,
+        # a space's for work in that space. No ``default`` rung: work with no
+        # space bound never reads the owner's.
+        return _try(None)
 
     current = get_current_tenant_id()
 
