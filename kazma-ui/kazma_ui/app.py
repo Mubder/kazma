@@ -891,6 +891,15 @@ class KazmaAppBuilder:
 
         self.templates.env.globals["spaces_enforced"] = _spaces_enforced
 
+        def _development_here() -> bool:
+            # Whether the sidebar shows the Workspace and IDE entries (Spaces
+            # S1-20): no I/O, the tenant middleware worked it out.
+            from kazma_core.spaces.tools import development_here
+
+            return development_here()
+
+        self.templates.env.globals["development_here"] = _development_here
+
         # NOTE: no browser WS token is injected anymore. The per-session WS
         # token was embedded as a <meta> tag + ?token= query param, which
         # leaked the bearer token into page source, proxy/access logs, browser

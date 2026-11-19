@@ -194,6 +194,13 @@ def offered(definitions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """*definitions* without the tools switched off now, by their skill or
     their own switch: the list a model call is given. The graph holds the
     list it was built with, so a switch applies at the next model call
-    (blocking on a store's first read: callers on the loop use a thread)."""
-    return [d for d in definitions or []
-            if switched_off_reason(str(((d or {}).get("function") or {}).get("name") or "")) is None]
+    (blocking on a store's first read: callers on the loop use a thread).
+
+    Host tools the bound space may not have are left out too (Spaces S1-20,
+    ``spaces.tools.offered_here``)."""
+    from kazma_core.spaces.tools import offered_here
+
+    return offered_here([
+        d for d in definitions or []
+        if switched_off_reason(str(((d or {}).get("function") or {}).get("name") or "")) is None
+    ])

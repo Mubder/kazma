@@ -52,6 +52,7 @@ __all__ = [
     "sandboxed_space",
     "space_dir",
     "space_folder",
+    "space_kind",
 ]
 
 logger = logging.getLogger(__name__)
@@ -92,7 +93,7 @@ def _bound_space() -> str | None:
     return require_space_id()
 
 
-def _kind_of(space_id: str) -> str:
+def space_kind(space_id: str) -> str:
     """``host`` or ``sandboxed``, from the identity store."""
     if space_id == OWNER_SPACE_ID:
         return "host"  # the owner's space is the install's host space, always
@@ -123,7 +124,7 @@ def sandboxed_space() -> str | None:
     bound = current_scope()
     if bound is None:
         return None
-    return bound.space_id if _kind_of(bound.space_id) == "sandboxed" else None
+    return bound.space_id if space_kind(bound.space_id) == "sandboxed" else None
 
 
 def in_sandboxed_space() -> bool:

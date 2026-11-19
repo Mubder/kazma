@@ -51,6 +51,7 @@
             <span class="nav-label">{{ t('nav.chat') }}</span>
             <span class="nav-kbd" dir="ltr" translate="no">⌘1</span>
         </a>
+        {% if development_here is not defined or development_here() %}
         <a href="/workspace" class="nav-link {{ 'active' if active_page == 'workspace' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
@@ -69,6 +70,7 @@
             </span>
             <span class="nav-label">{{ t('nav.ide') }}</span>
         </a>
+        {% endif %}
 
         <span class="nav-section-title">{{ t('nav.section_knowledge') }}</span>
         <a href="/memory" class="nav-link {{ 'active' if active_page == 'memory' else '' }}" @click="closeMobileNav()">

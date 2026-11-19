@@ -352,6 +352,28 @@ def compile_rules(rules: Iterable[tuple[Pattern, str]]) -> tuple[Rule, ...]:
 
 _RULES = compile_rules(ROUTE_SCOPE_RULES)
 
+#: The routes and pages of the feature Development (Spaces S1-20, plan 4.8):
+#: the project folder of a host space, its files, git, the IDE, and a clone.
+#: Once Spaces is enforced the tenant middleware refuses them where the
+#: work's space may not have Development (``spaces.tools.host_allowance``).
+DEVELOPMENT_ROUTE_RULES: tuple[Pattern, ...] = (
+    "/api/github/repos/clone$",
+    "/workspace$",
+    "/api/workspace",
+    "/api/workspaces",
+    "/api/git",
+    "/api/bookmarks",
+    "/ide$",
+    "/api/ide",
+)
+
+_DEVELOPMENT_RULES = compile_rules((pattern, SPACE) for pattern in DEVELOPMENT_ROUTE_RULES)
+
+
+def is_development_route(path: str, method: str = "GET") -> bool:
+    """True when ``method path`` is one of the Development routes."""
+    return deciding_rule(method, path, _DEVELOPMENT_RULES) is not None
+
 
 def deciding_rule(
     method: str, path: str, rules: tuple[Rule, ...] | None = None

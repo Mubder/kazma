@@ -473,6 +473,46 @@ def work_scope(space_id: str, asker: str | None) -> tuple[str, str] | None:
     return space, (who if who and member else acting_account(space))
 
 
+def is_admin_account(account_id: str) -> bool:
+    """True when *account_id* is the install's admin (the owner). An
+    unreadable store raises: "not the admin" is never guessed."""
+    account_ = (read_registry().get("accounts") or {}).get(str(account_id or ""))
+    return bool(account_) and _is_admin_account(account_)
+
+
+def holds_development(account_id: str) -> bool:
+    """Whether the account holds the feature Development (plan 4.8, N1, N28):
+    the shell, git, the GitHub tools and the project's files, in a host space.
+
+    The admin holds it until they switch it off for themself (N28: on at
+    first). Another account holds it only once the admin turned it on for
+    them (N1), which the People page does with the feature grants (S2-11).
+    An unreadable store raises."""
+    registry = read_registry()
+    account_ = (registry.get("accounts") or {}).get(str(account_id or ""))
+    if not account_:
+        return False
+    policy = (registry.get("policies") or {}).get(str(account_id)) or {}
+    held = policy.get("development") if isinstance(policy, dict) else None
+    if isinstance(held, bool):
+        return held
+    return _is_admin_account(account_)
+
+
+def _set_development(account_id: str, held: bool) -> None:
+    """Turn the feature Development on or off for *account_id*. The caller is
+    the admin's own surface (the People page, S2-10)."""
+
+    def _change(reg: dict[str, Any]) -> None:
+        if account_id not in reg["accounts"]:
+            raise IdentityError("no_such_account", f"no account {account_id!r}")
+        policy = dict(reg["policies"].get(account_id) or {})
+        policy["development"] = bool(held)
+        reg["policies"][account_id] = policy
+
+    update_registry(_change)
+
+
 def add_member(space_id: str, account_id: str, *, role: str = "member") -> None:
     """Add an account to a shared space. A personal space refuses."""
 

@@ -87,7 +87,7 @@ READS = frozenset({
     "get_knowledge_index", "get_knowledge_store", "kb_refusal",
     "svc.list_documents", "svc.job_status", "svc.jobs_for_document", "svc.get_content", "svc.pdf_info_document",
     "svc.search_library", "svc.health", "get_ingestion_service", "surface_scope", "_chat_document_scope",
-    "get_current_tenant_id",
+    "get_current_tenant_id", "spaces_enforced", "host_allowance",
     "resolve_tenant_id", "get_workspace_store", "get_workspace_store().get_active_workspace",
     "get_workspace_store().list_workspaces", "get_github_token", "list_agent_skills", "get_skill",
     "_x_read_command", "get_x_config", "get_reply_config", "XClient", "XClient(xcfg.credentials).get_tweet",
