@@ -212,7 +212,7 @@ class PostgresStateBackend:
             from psycopg_pool import ConnectionPool
         except ImportError:
             return None
-        from kazma_core.db.postgres_pool import pool_connection_kwargs
+        from kazma_core.db.postgres_pool import close_at_exit, pool_connection_kwargs
 
         with self._pool_lock:
             if self._pool is None and not self._closed:
@@ -228,6 +228,7 @@ class PostgresStateBackend:
                     name="kazma-memory-mirror",
                     open=True,
                 )
+                close_at_exit(self._pool)
         return self._pool
 
     def close(self) -> None:

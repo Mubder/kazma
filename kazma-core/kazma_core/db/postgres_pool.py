@@ -6,9 +6,11 @@ uvicorn workers / replicas; SQLite must not be used for multi-replica.
 
 from __future__ import annotations
 
+import atexit
 import logging
 import re
 import threading
+import weakref
 from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
@@ -16,7 +18,8 @@ from typing import Any
 from kazma_core.db import availability as _availability
 from kazma_core.db.backend import get_database_url, is_postgres, require_postgres_driver
 
-__all__ = ["PostgresPool", "get_postgres_pool", "pool_connection_kwargs", "reset_postgres_pool"]
+__all__ = ["PostgresPool", "close_at_exit", "get_postgres_pool", "pool_connection_kwargs",
+           "reset_postgres_pool"]
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +31,52 @@ _driver_missing_said = False
 #: Seconds a new connection may take before psycopg gives up and the pool
 #: retries (with its own backoff). psycopg's default is 130.
 _CONNECT_TIMEOUT_S = 5
+
+#: The psycopg pools this process opened and has not closed (weakly held).
+_OPEN_POOLS: weakref.WeakSet[Any] = weakref.WeakSet()
+_open_pools_lock = threading.Lock()
+_exit_closer_registered = False
+#: How long one pool may take to close at exit.
+_EXIT_CLOSE_TIMEOUT_S = 2.0
+
+
+def close_at_exit(pool: Any) -> None:
+    """Close *pool* before the interpreter shuts down, if it is still open.
+
+    psycopg_pool's ``__del__`` stops a pool's worker threads, and at
+    interpreter shutdown Python 3.14 refuses to join a thread: every ``kazma``
+    command that touched Postgres ended with "Exception ignored while calling
+    deallocator ... ConnectionPool.__del__ ... PythonFinalizationError"
+    (2026-11-19, ``kazma migrate import``). An ``atexit`` handler runs before
+    that, and a closed pool's ``__del__`` does nothing. Every sync pool
+    Kazma opens is registered here (gate:
+    ``tests/test_pools_closed_at_exit.py``).
+    """
+    global _exit_closer_registered
+    with _open_pools_lock:
+        _OPEN_POOLS.add(pool)
+        if not _exit_closer_registered:
+            atexit.register(_close_open_pools)
+            _exit_closer_registered = True
+
+
+def _close_open_pools() -> None:
+    with _open_pools_lock:
+        pools = list(_OPEN_POOLS)
+        _OPEN_POOLS.clear()
+    errors: tuple[type[BaseException], ...] = (OSError, RuntimeError)
+    try:
+        import psycopg
+
+        errors = (psycopg.Error, *errors)
+    except ImportError:
+        pass
+    for pool in pools:
+        # Exiting: one pool's failure stops no other.
+        try:
+            pool.close(timeout=_EXIT_CLOSE_TIMEOUT_S)
+        except errors as exc:
+            logger.debug("[PostgresPool] close at exit failed: %s", type(exc).__name__)
 
 
 def _dsn_sets(dsn: str, param: str) -> bool:
@@ -106,6 +155,7 @@ class PostgresPool:
             check=ConnectionPool.check_connection,
             open=True,
         )
+        close_at_exit(self._pool)
         logger.info(
             "[PostgresPool] opened min=%s max=%s timeout=%s",
             min_size,

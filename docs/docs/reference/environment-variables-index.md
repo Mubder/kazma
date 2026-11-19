@@ -73,7 +73,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_DOCKER_BIN` | `""` | `kazma_core.docker_cli`, `kazma_core.documents.worker_broker` | yes |
 | `KAZMA_DOCLING` | `"1"` | `kazma_core.documents.extract_salvage`, `kazma_core.documents.service` | yes |
 | `KAZMA_DOCUMENTS_JOBS_BACKEND` | (none) | `kazma_core.documents.jobs_pg` | yes |
-| `KAZMA_DOCUMENTS_METADATA_BACKEND` | (none) | `kazma_core.documents.jobs_pg` | yes |
+| `KAZMA_DOCUMENTS_METADATA_BACKEND` | (none) | `kazma_core.documents.jobs_pg`, `kazma_core.migration.importer` | yes |
 | `KAZMA_DOCUMENT_BROKER_TOKEN_FILE` | (none) | `kazma_core.documents.worker_container`, `kazma_core.store_registry` | yes |
 | `KAZMA_DOCUMENT_BROKER_URL` | (none) | `kazma_core.documents.broker_supervision`, `kazma_core.documents.worker_container` | yes |
 | `KAZMA_DOCUMENT_BROKER_URL_SOURCE` | (none) | `kazma_core.documents.broker_supervision` | yes |

@@ -3374,6 +3374,39 @@ by `mark_working_folder`, taken off by `import_bundle` however the run ends;
 out). It was swept with `max_age_s=inf`, kept forever. Gate:
 `tests/test_failed_import_staging_expires.py` (the old age as the control).
 
+**What restoring the old Kazma after the PC reset taught it** (2026-11-19):
+- **`kazma migrate import` holds Kazma itself.** It runs the whole check
+  first as a dry run (a bundle that would be refused never stops Kazma),
+  stops Kazma through its guard once no chat turn runs (`setup._MoveHold`,
+  the database and engine moves' hold, under `_IMPORT_PAUSE_REASON`),
+  imports with `server_stopped=True` (the heartbeat the server stamped in
+  its last minute is no live server: the gate refused the owner for two
+  minutes after their own pause), and starts Kazma again whatever the
+  outcome (invariant C left the data as it was). `--force` imports
+  without the hold, as before. A bundle it cannot read is one sentence
+  (`_refuse_unreadable`), not zipfile's traceback.
+- **The vault status said at the end is the one after the import**
+  (`_say_key_written`: `replaced`, or `set` for an install with no key).
+  It printed the pairing read before the swap: "mismatch ... Re-run with
+  --reset-vault-key", after that flag had written the right key.
+- **The document list follows the bundle** (`_document_list_plan`, step
+  2b, before anything changes). A bundle carries `data/documents.db` only
+  when its source kept the list in SQLite; on an install whose list follows
+  Postgres the import said "documents.db not installed" and 29 documents
+  came back with no list. Now the setting unset or `auto` gets
+  `KAZMA_DOCUMENTS_METADATA_BACKEND=sqlite` written into `.env` (and the
+  process) before the store is restored, said in the output; named
+  `postgres`, the import stops, nothing changed.
+- **Every sync Postgres pool is closed before Python exits**
+  (`postgres_pool.close_at_exit`, one `atexit` handler): on Python 3.14
+  psycopg_pool's `__del__` cannot join its threads at shutdown, and every
+  `kazma` command that touched Postgres ended with "Exception ignored ...
+  PythonFinalizationError". Checked on the owner's 3.14 install (a plain
+  pool as the control).
+Gates: `tests/test_migrate_import_after_reset.py`,
+`tests/test_migrate_cli_holds_kazma.py`, `tests/test_pools_closed_at_exit.py`
+(each with the old behaviour as its control).
+
 **Scope — SQLite + Postgres (v2).** The bundle always carries the SQLite
 files (vault, memory, cron and the other stores `store_registry` carries —
 these are SQLite even under a Postgres backend). When the source is Postgres, it ALSO carries a

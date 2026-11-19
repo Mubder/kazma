@@ -142,6 +142,7 @@ def _cmd_verify(args: list[str]) -> None:
         print("\n  [ERROR] usage: kazma migrate verify BUNDLE [--no-hash]\n")
         sys.exit(1)
     check_hashes = "--no-hash" not in args
+    _refuse_unreadable(bundle_path)
 
     from kazma_core.migration import KazmaBundle
 
@@ -195,12 +196,80 @@ def _cmd_verify(args: list[str]) -> None:
 # ── import ────────────────────────────────────────────────────────────────
 
 
+#: The guard's pause reason while an import holds Kazma stopped.
+_IMPORT_PAUSE_REASON = "kazma migrate import: restoring a bundle"
+
+
+def _refuse_unreadable(bundle_path: str) -> None:
+    """Stop with one sentence when the bundle cannot be opened.
+
+    2026-11-19: a bundle on a backup drive kept the old account's
+    permissions after a Windows reset, and ``verify`` answered with a
+    PermissionError traceback from inside ``zipfile``.
+    """
+    path = Path(bundle_path)
+    if not path.is_file():
+        print(f"\n  [ERROR] bundle not found: {bundle_path}\n")
+        sys.exit(1)
+    try:
+        with path.open("rb") as fh:
+            fh.read(4)
+    except PermissionError:
+        print(
+            f"\n  [ERROR] cannot read {bundle_path}: permission denied.\n"
+            "  Copy it to a folder your account can read. A bundle made by another\n"
+            "  Windows account (before a reset) needs an administrator terminal:\n"
+            f"    robocopy \"{path.parent}\" <folder> \"{path.name}\" /B\n"
+        )
+        sys.exit(1)
+    except OSError as exc:
+        print(f"\n  [ERROR] cannot read {bundle_path}: {exc.strerror or type(exc).__name__}\n")
+        sys.exit(1)
+
+
+def _print_errors(report) -> None:
+    print("\n  ❌ import aborted:")
+    for e in report.errors:
+        print(f"    - {e}")
+
+
+def _import_hold():
+    """Kazma held stopped through its guard while the bundle is restored
+    (``setup._MoveHold``, the database and engine moves' hold)."""
+    from kazma_cli.setup import _MoveHold
+
+    return _MoveHold(_IMPORT_PAUSE_REASON, what="your data")
+
+
+def _resume(hold) -> None:
+    """Start Kazma again after the import, whatever its outcome: a failed
+    import left the data as it was (invariant C)."""
+    result = hold.resume()
+    if result == "up":
+        print("  Kazma is running again.")
+    elif result == "slow":
+        print("  Kazma has not answered yet; its guard keeps starting it:\n"
+              "    python scripts/service/kazma_guard.py --status")
+    elif result == "unsupervised":
+        print("  No guard is running, so nothing starts Kazma:\n"
+              "    python scripts/service/kazma_guard.py --reload")
+
+
 def _cmd_import(args: list[str]) -> None:
-    """``kazma migrate import BUNDLE [--workspace PATH] [--reset-vault-key] [--dry-run] [--force]``."""
+    """``kazma migrate import BUNDLE [--workspace PATH] [--reset-vault-key] [--dry-run] [--force]``.
+
+    Kazma is held stopped through its guard while the bundle is restored
+    (2026-11-19: the import refused a running Kazma and left its owner to
+    pause and resume the guard by hand, then refused again for two minutes
+    over the heartbeat the stopped server had stamped). The whole check runs
+    first, as a dry run: a bundle that would be refused never stops Kazma.
+    ``--force`` imports without the hold, at the operator's risk, as before.
+    """
     bundle_path = _positional(args, index=0)
     if not bundle_path:
         print("\n  [ERROR] usage: kazma migrate import BUNDLE [--workspace PATH] [--reset-vault-key] [--dry-run] [--force]\n")
         sys.exit(1)
+    _refuse_unreadable(bundle_path)
 
     workspace = _flag_value(args, "--workspace", default=None)
     reset_vault_key = "--reset-vault-key" in args
@@ -221,7 +290,25 @@ def _cmd_import(args: list[str]) -> None:
 
     from kazma_core.migration import import_bundle
 
+    hold = None
     try:
+        if not dry_run:
+            check = import_bundle(bundle_path, target_workspace_root=workspace,
+                                  reset_vault_key=reset_vault_key, dry_run=True)
+            if check.errors:
+                _print_errors(check)
+                print("\n  Nothing was changed, and Kazma was not stopped.\n")
+                sys.exit(1)
+            if not force:
+                hold = _import_hold()
+                hold.adopt_leftover()
+                refusal = hold.refusal()
+                if refusal:
+                    print(f"\n  [ERROR] {refusal}\n")
+                    sys.exit(1)
+                if not hold.stop():
+                    print("\n  Nothing was changed.\n")
+                    sys.exit(1)
         report = import_bundle(
             bundle_path,
             target_workspace_root=workspace,
@@ -229,15 +316,19 @@ def _cmd_import(args: list[str]) -> None:
             dry_run=dry_run,
             force=force,
             progress=progress,
+            server_stopped=bool(hold is not None and hold.held),
         )
     except Exception as exc:
         print(f"\n  [ERROR] import failed: {exc}\n")
         logger.exception("[migrate:import]")
+        if hold is not None and hold.held:
+            _resume(hold)
         sys.exit(1)
 
     print()
     if report.vault_status:
-        icon = {"match": "✅", "empty": "🔑", "mismatch": "⚠️", "no_vault": "∅"}.get(report.vault_status, "?")
+        icon = {"match": "✅", "empty": "🔑", "mismatch": "⚠️", "no_vault": "∅",
+                "replaced": "🔑", "set": "🔑"}.get(report.vault_status, "?")
         print(f"  {icon} vault: {report.vault_status} — {report.vault_message}")
 
     if report.rows_rewritten:
@@ -256,12 +347,12 @@ def _cmd_import(args: list[str]) -> None:
             print(f"    - {w}")
 
     if report.errors:
-        print(f"\n  ❌ import aborted:")
-        for e in report.errors:
-            print(f"    - {e}")
+        _print_errors(report)
         if report.staging_path:
             print(f"\n  staging dir preserved for inspection: {report.staging_path}")
         print()
+        if hold is not None and hold.held:
+            _resume(hold)
         sys.exit(1)
 
     if dry_run:
@@ -272,6 +363,9 @@ def _cmd_import(args: list[str]) -> None:
             print(f"     pre-import backup: {report.backup_path}")
             print(f"     (to roll back: copy the .db files from there back over the live ones)")
         print()
+        if hold is not None and hold.held:
+            _resume(hold)
+            print()
 
 
 # ── arg helpers ───────────────────────────────────────────────────────────

@@ -46,7 +46,7 @@ from kazma_core.migration.bundle import (
 )
 from kazma_core.migration.exporter import _DATA_DIR_DBS as _EXPORTED_DATA_DIR_DBS
 from kazma_core.migration.path_rewrite import build_path_map, rewrite_paths_in_sqlite
-from kazma_core.migration.vault_pairing import VaultKeyStatus, check_vault_key, sync_vault_key
+from kazma_core.migration.vault_pairing import VaultKeyStatus, _set_env_key, check_vault_key, sync_vault_key
 
 logger = logging.getLogger(__name__)
 
@@ -232,6 +232,7 @@ def import_bundle(
     dry_run: bool = False,
     force: bool = False,
     progress: Callable[[str], None] | None = None,
+    server_stopped: bool = False,
 ) -> ImportReport:
     """Import a migration bundle into the current installation.
 
@@ -246,6 +247,11 @@ def import_bundle(
             MISMATCH; default False = safe abort.
         dry_run: verify + plan only; do NOT write, swap, or rewrite anything.
         progress: optional callback for human-readable step messages.
+        server_stopped: the caller holds the server stopped through its
+            guard (``kazma migrate import`` does). The heartbeat a server
+            stamped in the minute before it stopped is then no live server:
+            the gate refused the owner's import for two minutes after the
+            hold (2026-11-19).
 
     Returns:
         An :class:`ImportReport`. Check ``report.ok``.
@@ -257,7 +263,7 @@ def import_bundle(
     try:
         return _import_bundle(bundle_path, target_workspace_root=target_workspace_root,
                               reset_vault_key=reset_vault_key, dry_run=dry_run, force=force,
-                              progress=progress, held=held)
+                              progress=progress, held=held, server_stopped=server_stopped)
     finally:
         for folder in held:
             release_working_folder(folder)
@@ -272,6 +278,7 @@ def _import_bundle(
     force: bool,
     progress: Callable[[str], None] | None,
     held: list[Path],
+    server_stopped: bool = False,
 ) -> ImportReport:
     report = ImportReport(
         dry_run=dry_run,
@@ -290,7 +297,7 @@ def _import_bundle(
     # Swapping DB files under a live process discards WAL frames and fails
     # on Windows (os.replace over open handles). Detect a running server
     # and abort unless the operator explicitly passes force.
-    if not dry_run:
+    if not dry_run and not server_stopped:
         live, why = _live_server_detected()
         if live and not force:
             report.error(
@@ -347,6 +354,14 @@ def _import_bundle(
         return report
     if pairing.status == VaultKeyStatus.MISMATCH and reset_vault_key:
         _log("  --reset-vault-key: will overwrite target KAZMA_VAULT_KEY after backup")
+
+    # ── 2b. Where the document list goes: decided before anything changes.
+    docs_to_sqlite, docs_refusal = _document_list_plan(bundle, data_dir)
+    if docs_refusal:
+        report.error(docs_refusal)
+        return report
+    if docs_to_sqlite:
+        _log(f"  document list: {_DOCS_SQLITE_NOTE}")
 
     if dry_run:
         _log("DRY RUN — no changes will be made. Plan below.")
@@ -580,8 +595,9 @@ def _import_bundle(
     # 8b. Restore the document store — documents.db + the content-addressed
     # tree — into the target's document-store root (resolved AFTER config
     # import so a custom storage_root is honored). documents.db carries no
-    # embedded paths, so it needs no rewrite.
-    file_failures += _restore_documents_reported(staging, staged_data, report, _log)
+    # embedded paths, so it needs no rewrite. A bundle whose list is a SQLite
+    # file takes this install's list there too, first (step 2b).
+    file_failures += _restore_documents_step(staging, staged_data, data_dir, docs_to_sqlite, report, _log)
 
     # 9. Notify workspace root change so MCP rebinds (AGENTS.md §10A).
     if report.target_workspace_root:
@@ -602,6 +618,8 @@ def _import_bundle(
     # swapped, one failed) must not report ok=True — the operator would believe
     # the migration succeeded while live data is stale/missing (audit finding).
     report.ok = not install_failures and not file_failures
+    if vault_undo is not None:
+        _say_key_written(report, pairing.status)
     if install_failures:
         _log(f"  {len(install_failures)} DB(s) failed to install: "
              + ", ".join(install_failures))
@@ -956,6 +974,99 @@ def _apply_path_rewrite(
                 report.rows_rewritten[db_name] = changed
         except Exception as exc:
             report.warn(f"path rewrite failed for {db_name}: {exc}")
+
+
+#: What the import says, and writes, when a bundle's document list is a
+#: SQLite file and this install would keep its list on Postgres.
+_DOCS_SQLITE_NOTE = (
+    "the bundle's document list is a SQLite file (as the source kept it): "
+    "KAZMA_DOCUMENTS_METADATA_BACKEND=sqlite is written into .env so this "
+    "install keeps it there too"
+)
+
+
+def _document_list_plan(bundle: Any, data_dir: Path) -> tuple[bool, str]:
+    """``(set_sqlite, refusal)`` for the bundle's document list.
+
+    A bundle carries ``data/documents.db`` only when its source kept the
+    list in SQLite (its Postgres dump holds the rest). The import installs it
+    only where this install's list is SQLite too (``_restore_document_store``),
+    and on an install whose list follows Postgres (the default with a Postgres
+    database) it said one line, "documents.db not installed", and the owner's
+    29 documents were contents with no list (2026-11-19). Now: the setting
+    unset or ``auto``, the import writes ``sqlite`` (``set_sqlite``); named
+    ``postgres``, the import stops before anything changes (``refusal``): a
+    list cannot be poured from one into the other here.
+    """
+    if not bundle.has_file("data/documents.db"):
+        return False, ""
+    from kazma_core.documents.backup import installed_document_backends
+
+    metadata, _jobs = installed_document_backends()
+    if metadata != "postgres":
+        return False, ""
+    named = (os.environ.get("KAZMA_DOCUMENTS_METADATA_BACKEND") or "").strip().lower()
+    if named not in ("", "auto"):
+        return False, (
+            "The bundle's document list is a SQLite file (as the source kept it), and "
+            f"this install names Postgres for its list (KAZMA_DOCUMENTS_METADATA_BACKEND={named}). "
+            "The import cannot move a list from one into the other: set "
+            "KAZMA_DOCUMENTS_METADATA_BACKEND=sqlite in .env (or remove the line) and run it again. "
+            "Nothing was changed."
+        )
+    if _find_env_file(data_dir) is None:
+        return False, (
+            "The bundle's document list is a SQLite file, and there is no .env to say so in "
+            "(KAZMA_DOCUMENTS_METADATA_BACKEND=sqlite). Create the install's .env and run it "
+            "again. Nothing was changed."
+        )
+    return True, ""
+
+
+def _say_key_written(report: Any, status: VaultKeyStatus) -> None:
+    """The vault status once the bundle's key was written and stayed: the
+    pairing's "mismatch" (read before the swap) is no longer true, and
+    printed at the end it told the owner to re-run with the flag they had
+    used (2026-11-19)."""
+    if status == VaultKeyStatus.EMPTY:
+        report.vault_status = "set"
+        report.vault_message = "the bundle's KAZMA_VAULT_KEY was written into .env; vault.db will decrypt"
+    else:
+        report.vault_status = "replaced"
+        report.vault_message = (
+            "this install's KAZMA_VAULT_KEY was replaced with the bundle's; vault.db will decrypt"
+        )
+
+
+def _restore_documents_step(staging: Path, staged_data: Path, data_dir: Path, docs_to_sqlite: bool,
+                            report: Any, _log: Any) -> list[str]:
+    """Step 8b: the document store, its list kept in SQLite first when the
+    bundle's is (step 2b). What could not be restored, or ``[]``."""
+    if docs_to_sqlite and not _keep_document_list_in_sqlite(data_dir, report, _log):
+        return ["document store"]
+    return _restore_documents_reported(staging, staged_data, report, _log)
+
+
+def _keep_document_list_in_sqlite(data_dir: Path, report: Any, _log: Any) -> bool:
+    """Write ``KAZMA_DOCUMENTS_METADATA_BACKEND=sqlite`` (``.env`` and this
+    process) before the document store is restored, so it installs the
+    bundle's list. False, with the error reported, when it cannot."""
+    env_path = _find_env_file(data_dir)
+    if env_path is None:
+        report.error("could not write KAZMA_DOCUMENTS_METADATA_BACKEND: no .env found")
+        return False
+    try:
+        _set_env_key(env_path, "KAZMA_DOCUMENTS_METADATA_BACKEND", "sqlite")
+    except OSError as exc:
+        report.error(f"could not write KAZMA_DOCUMENTS_METADATA_BACKEND into {env_path}: {exc}")
+        return False
+    os.environ["KAZMA_DOCUMENTS_METADATA_BACKEND"] = "sqlite"
+    _log(f"  {_DOCS_SQLITE_NOTE}")
+    report.warn(
+        "The document list stays in SQLite, as the source kept it "
+        "(KAZMA_DOCUMENTS_METADATA_BACKEND=sqlite was written into .env)."
+    )
+    return True
 
 
 def _find_env_file(data_dir: Path) -> Path | None:
