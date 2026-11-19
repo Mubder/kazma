@@ -341,15 +341,22 @@ def test_python_exec_in_a_container_sees_its_own_folder_only(matrix, enforced) -
                 await asyncio.to_thread(code_exec._workspace_mounts, root)
             except RuntimeError as exc:
                 pytest.skip(f"the engine cannot mount the test's folder: {exc}")
+            # The sandbox blocks the snippet's own ``os``/``pathlib`` imports;
+            # ``glob`` and ``open`` are what a person's code has.
             return await code_exec.python_exec(
-                "import os\n"
-                "for base, _dirs, names in os.walk('/workspace' if os.path.isdir('/workspace') else '.'):\n"
-                "    for name in names:\n"
-                "        print(os.path.join(base, name), open(os.path.join(base, name)).read())\n"
+                "import glob\n"
+                "for path in sorted(glob.glob('/workspace/**', recursive=True)):\n"
+                "    try:\n"
+                "        print(path, open(path).read())\n"
+                "    except OSError:\n"
+                "        pass\n"
             )
 
     shown = asyncio.run(run())
-    if "image" in shown.lower() and "a-only-word" not in shown:
+    # Every answer's header names the image, so only the engine's own words
+    # for a missing image mean "skip": any other failure fails the test.
+    missing = ("unable to find image", "no such image", "pull access denied")
+    if any(word in shown.lower() for word in missing) and "a-only-word" not in shown:
         pytest.skip(f"the sandbox image is not on this engine: {shown[:200]}")
     assert "a-only-word" in shown, shown
     assert "b-only-word" not in shown, shown
