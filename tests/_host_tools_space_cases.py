@@ -11,6 +11,7 @@ own function is never entered.
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -158,11 +159,29 @@ def _development_route_targets() -> list[str]:
     from kazma_ui.app import create_app
     from kazma_ui.route_scopes import is_development_route
 
+    from kazma_core.security import vault as vault_module
+
     from tests._space_matrix import space_routes
     from tests.test_route_scopes import served_routes
 
+    # This runs while pytest imports the file, before any test's guard: the
+    # app's build decides the vault ("no key, no vault") and may set
+    # variables, and a later test that sets a key would get that decision
+    # (tests/test_order_independence.py's vault pair failed after this file).
+    # So what the build changes is put back here.
+    singleton = ("_vault", "_vault_init_attempted", "_vault_retry_at", "_vault_retry_wait")
+    environment = dict(os.environ)
+    vault_state = {name: getattr(vault_module, name) for name in singleton}
+    try:
+        routes = served_routes(create_app())
+    finally:
+        for key in [k for k in os.environ if k not in environment]:
+            del os.environ[key]
+        os.environ.update(environment)
+        for name, value in vault_state.items():
+            setattr(vault_module, name, value)
     out = []
-    for target in space_routes(served_routes(create_app())):
+    for target in space_routes(routes):
         method, path = target.split(" ", 1)
         if method != "WEBSOCKET" and is_development_route(path, method):
             out.append(target)

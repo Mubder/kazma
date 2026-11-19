@@ -225,6 +225,49 @@ def test_without_the_guard_a_file_wide_vault_reaches_the_next_file():
     assert "1 failed, 1 passed" in proc.stdout, proc.stdout[-2000:]
 
 
+# A matrix case module is imported while pytest collects the files that name
+# it, before any guard above runs. S1-20's built the app there to list its
+# routes, which decided "no vault"; every later test that set a key got that
+# decision (the vault pair above failed in the full suite, 2026-11-20).
+_IMPORT_CHECK = """
+import importlib, os, sys
+os.environ.pop("KAZMA_VAULT_KEY", None)
+sys.path[:0] = sys.argv[2:]
+from kazma_core.security import vault
+decided = []
+for name in sys.argv[1].split(","):
+    importlib.import_module(name)
+    if vault._vault_init_attempted or vault._vault is not None:
+        decided.append(name)
+        vault.reset_vault()
+print("DECIDED:" + ",".join(decided))
+"""
+
+
+def _modules_that_decide_the_vault(names: list[str], *paths: str) -> list[str]:
+    proc = subprocess.run(
+        [sys.executable, "-c", _IMPORT_CHECK, ",".join(names), *paths],
+        cwd=str(REPO), env=dict(os.environ), capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=600,
+    )
+    line = next((ln for ln in proc.stdout.splitlines() if ln.startswith("DECIDED:")), None)
+    assert line is not None, (proc.stdout[-2000:], proc.stderr[-2000:])
+    return [name for name in line.removeprefix("DECIDED:").split(",") if name]
+
+
+def test_importing_a_case_module_decides_no_vault():
+    names = sorted("tests." + path.stem for path in (REPO / "tests").glob("_*cases.py"))
+    assert names, "no case modules found"
+    assert _modules_that_decide_the_vault(names) == []
+
+
+def test_the_import_check_sees_a_module_that_builds_the_app(tmp_path):
+    """Negative control: the shape S1-20's case module had."""
+    (tmp_path / "planted_app_cases.py").write_text(
+        "from kazma_ui.app import create_app\ncreate_app()\n", encoding="utf-8")
+    assert _modules_that_decide_the_vault(["planted_app_cases"], str(tmp_path)) == ["planted_app_cases"]
+
+
 # ── the install's language ─────────────────────────────────────────────────
 # An app built on Arabic settings sets the process's install language at its
 # startup; until 2026-11-14 it stayed Arabic for every later test, and CI's

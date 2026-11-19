@@ -354,10 +354,13 @@ def test_python_exec_in_a_container_sees_its_own_folder_only(matrix, enforced) -
 
     shown = asyncio.run(run())
     # Every answer's header names the image, so only the engine's own words
-    # for a missing image mean "skip": any other failure fails the test.
-    missing = ("unable to find image", "no such image", "pull access denied")
+    # for no engine or a missing image mean "skip": any other failure fails
+    # the test. (The docker CLI being found says nothing of an engine: the
+    # developer's current context may name one that is not there.)
+    missing = ("unable to find image", "no such image", "pull access denied",
+               "failed to connect to the docker api", "cannot connect to the docker daemon")
     if any(word in shown.lower() for word in missing) and "a-only-word" not in shown:
-        pytest.skip(f"the sandbox image is not on this engine: {shown[:200]}")
+        pytest.skip(f"no engine with the sandbox image answers here: {shown[:200]}")
     assert "a-only-word" in shown, shown
     assert "b-only-word" not in shown, shown
 
