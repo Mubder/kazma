@@ -448,6 +448,23 @@ async def _try_ide_command(
     tokens = body.split()
     sub = tokens[0].lower() if tokens else ""
 
+    # The IDE is Development's, on the machine (Spaces S1-20): absent where
+    # the work's space may not have it -- and, until chat apps are linked to
+    # accounts (stage 3), wherever Spaces is enforced, since no space is
+    # bound to a chat-app message.
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if spaces_enforced():
+        from kazma_core.spaces.tools import host_allowance
+
+        allowance = await asyncio.to_thread(host_allowance)
+        if not allowance.development:
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                f"⚠️ /ide is not available here ({allowance.why_not}).",
+            )
+            return True
+
     try:
         from kazma_core.ide import get_ide_service
 
@@ -752,16 +769,18 @@ async def _try_ide_command(
             # Private repos: the token rides a git config header, never argv
             # (clone_auth_env); the lookup may reach the vault or mint a
             # GitHub App token over the network -- off the loop.
-            from kazma_core.security.child_env import tool_child_env
 
-            from kazma_gateway.routers.github_client import clone_auth_env, get_github_token
+            from kazma_gateway.routers.github_client import get_github_token
 
             try:
                 token = await asyncio.to_thread(get_github_token)
             except Exception:  # noqa: BLE001 -- a public repo clones without it
                 logger.debug("[ide] no GitHub token for the clone", exc_info=True)
                 token = ""
-            clone_env = tool_child_env(clone_auth_env(token))
+            from kazma_core.security import git_auth
+
+            # S1-20: no machine credential outside the owner's space.
+            clone_env = git_auth.clone_env(token)
             await _send_model_reply(
                 msg, store, manager, thread_id, f"⏳ Cloning `{slug}`…",
             )

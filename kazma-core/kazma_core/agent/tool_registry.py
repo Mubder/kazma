@@ -548,6 +548,16 @@ class LocalToolRegistry:
 
         if (refusal := switched_off_reason(tool_name, tool.skill_id)) is not None:
             return {"content": refusal, "is_error": True, "refused": True}
+        # A host tool does not exist in a space that may not have it (Spaces
+        # S1-20): refused here as well as left out of the offer -- hiding it
+        # from the list alone is never enough.
+        from kazma_core.spaces.scope import spaces_enforced
+
+        if spaces_enforced():
+            from kazma_core.spaces.tools import host_refusal
+
+            if (refusal := await asyncio.to_thread(host_refusal, tool_name)) is not None:
+                return {"content": refusal, "is_error": True, "refused": True}
 
         # Closed schema: drop invented keys; JSON null on defaulted params
         # becomes "omitted" so Python defaults still apply (OpenAI strict).

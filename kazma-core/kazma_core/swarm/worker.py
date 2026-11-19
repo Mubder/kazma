@@ -454,6 +454,15 @@ class InProcessWorker(SwarmWorker):
                     ]
                 else:
                     tool_defs = all_defs
+                # A worker runs in its task's space: no host tool it may not
+                # have there is offered (Spaces S1-20); its call is refused too.
+                from kazma_core.spaces.scope import spaces_enforced
+
+                if spaces_enforced():
+                    from kazma_core.spaces.tools import offered_here
+
+                    unfiltered, tool_defs = tool_defs, []  # fail closed: no list, no tools
+                    tool_defs = await asyncio.to_thread(offered_here, unfiltered)
             except Exception:
                 logger.debug(
                     "[InProcessWorker:%s] tool registry unavailable, proceeding without tools",

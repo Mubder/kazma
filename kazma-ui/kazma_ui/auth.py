@@ -1905,7 +1905,29 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
             scope_tokens = set_scope(tenant_id, asker)
         else:
             token = set_current_tenant_id(tenant_id)
+        allowance_token = None
         try:
+            if spaces_enforced():
+                # Host pages and routes exist only where the space may have
+                # Development (Spaces S1-20); a page drawn here learns whether
+                # to show their entries, with no read of its own.
+                from kazma_core.spaces.tools import host_allowance, remember_allowance
+
+                from kazma_ui.route_scopes import is_development_route
+
+                path = judged_path(request)
+                host_route = is_development_route(path, request.method)
+                page = request.method in ("GET", "HEAD") and not path.startswith(
+                    ("/api/", "/static/", "/ws/", "/health"))
+                if host_route or page:
+                    allowance = await asyncio.to_thread(host_allowance)
+                    if host_route and not allowance.development:
+                        return JSONResponse(
+                            {"ok": False, "code": "host_only",
+                             "error": f"Not available in this space: {allowance.why_not}."},
+                            status_code=403,
+                        )
+                    allowance_token = remember_allowance(allowance)
             response = await call_next(request)
             if explicit_tenant and tenant_id and allow_spoof:
                 if request.cookies.get("X-Tenant-ID") != tenant_id:
@@ -1919,6 +1941,10 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
                     )
             return response
         finally:
+            if allowance_token is not None:
+                from kazma_core.spaces.tools import forget_allowance
+
+                forget_allowance(allowance_token)
             if scope_tokens is not None:
                 reset_scope(scope_tokens)
             else:

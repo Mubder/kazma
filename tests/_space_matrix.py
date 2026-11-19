@@ -125,6 +125,7 @@ CASE_MODULES: tuple[str, ...] = (
     "tests._research_space_cases", "tests._mail_space_cases", "tests._x_space_cases",
     "tests._github_space_cases", "tests._document_space_cases",  # S1-12
     "tests._vault_space_cases", "tests._files_space_cases",
+    "tests._host_tools_space_cases",
 )
 
 
@@ -179,17 +180,8 @@ PENDING_ROUTE_RULES: tuple[tuple[Pattern, str], ...] = (
     # tests/_research_space_cases.py.) A research report, a paper and the
     # acquisition journal are files and runs of the workspace folder, which
     # becomes the space's with S1-19:
-    # ── S1-20: host tools ─────────────────────────────────────────────────
-    # A clone writes a project folder on the machine, so it stands with the
-    # workspace before the GitHub connection's rule below.
-    ("/api/github/repos/clone$", "S1-20"),
-    ("/workspace$", "S1-20"),
-    ("/api/workspace", "S1-20"),
-    ("/api/workspaces", "S1-20"),
-    ("/api/git", "S1-20"),
-    ("/api/bookmarks", "S1-20"),  # the Workspace page's bookmarks
-    ("/ide$", "S1-20"),
-    ("/api/ide", "S1-20"),
+    # (S1-20 -- the Development routes: the workspace, its files, git, the
+    # IDE and a clone -- wrote its cases: tests/_host_tools_space_cases.py.)
     # ── S1-17: connected accounts ─────────────────────────────────────────
     # (Mail and calendar, X, then GitHub: written. Their cases are in
     # tests/_mail_space_cases.py, tests/_x_space_cases.py and
@@ -235,27 +227,9 @@ _PENDING_TOOLS_BY_ITEM: dict[str, tuple[str, ...]] = {
     # (S1-19 -- the space folder: every tool that takes a path or writes a
     # file, the browser and the research files -- wrote its cases:
     # tests/_files_space_cases.py.)
-    # Host tools: the shell, the project folder and its code index, git, MCP
-    # servers, skills and package installs, settings, the machine itself.
-    "S1-20": (
-        "shell_exec", "computer_use", "request_path_access",
-        "codebase_search", "codebase_status",
-        "git_status", "git_log", "git_diff", "git_commit", "git_checkout",
-        "git_merge", "git_pull", "git_push",
-        "mcp_list_resources", "mcp_read_resource", "mcp_list_prompts",
-        "mcp_get_prompt", "mcp_test_server",
-        "config_read", "config_save",
-        "list_agent_skills", "search_agent_skills", "activate_skill",
-        "install_agent_skill", "uninstall_agent_skill",
-        "install_python_packages", "install_npm_packages", "check_environment",
-        "lint_code", "format_code", "run_unit_tests",
-        "get_system_stats", "list_active_processes", "read_system_logs",
-        "repository_metrics",
-        # No item of stage 1 names the chat-app senders (stage 3 links chat
-        # accounts). They send through the install's bots to a chat named by
-        # its id, which makes them the host's until then.
-        "send_message", "dispatch_notification", "send_approval_request",
-    ),
+    # (S1-20 -- host tools: the shell, git, the code index, MCP servers,
+    # skills and packages, settings, the machine, the chat apps' senders --
+    # wrote its cases: tests/_host_tools_space_cases.py.)
     "S1-21": ("list_runs", "run_status"),
 }
 

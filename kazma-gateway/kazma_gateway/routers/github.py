@@ -1207,7 +1207,7 @@ async def clone_repo(body: CloneRepoRequest) -> JSONResponse:
     ``$KAZMA_CLONE_DIR`` (default ``~/kazma-repos``) and registers it.
     """
     from kazma_gateway.agent_handler.commands import safe_repo_dir_name
-    from kazma_gateway.routers.github_client import GitHubClient, clone_auth_env
+    from kazma_gateway.routers.github_client import GitHubClient
 
     full_name = body.full_name.strip()
     owner_part, _, repo_part = full_name.partition("/")
@@ -1291,7 +1291,10 @@ async def clone_repo(body: CloneRepoRequest) -> JSONResponse:
                 gh_token = await asyncio.to_thread(get_github_token) or None
             except Exception:
                 logger.debug("[github/repos/clone] token lookup failed, cloning anonymously", exc_info=True)
-        clone_env = tool_child_env(clone_auth_env(gh_token))
+        from kazma_core.security import git_auth
+
+        # S1-20: no machine credential outside the owner's space.
+        clone_env = git_auth.clone_env(gh_token)
 
         # to_thread: a sync clone would freeze the shared event loop for up
         # to the 120s timeout (mirrors agent_handler/commands.py).

@@ -13523,6 +13523,32 @@ product can turn it on, so an install with one account behaves as before.
   - Gates: `tests/_files_space_cases.py` (every tool that takes a path or
     writes a file, with B's file, the owner's file and climbing paths),
     `tests/test_space_files.py` (each rule taken out as a control).
+- **Host tools exist only in a host space (S1-20, 2026-11-20).** Guards act
+  only where Spaces is enforced; not enforced, every tool is offered and runs
+  as before.
+  - `kazma_core/spaces/tools.py` holds every tool's group: `DEVELOPMENT`,
+    `ADMIN`, `SPACE`, `OUTSIDE`. A new tool goes in one of them or
+    `tests/test_host_tools_absent.py` fails; a tool in no group (an MCP
+    server's) is `development`.
+  - `host_allowance()` is the one rule: a sandboxed space has no host tool;
+    the owner's space has the admin tools, and Development's while
+    `identity.holds_development` (N28, on at first); another host space has
+    none until S1-34 gives it its own folder; no space bound, none.
+  - Applied at the offer (`skills.switches.offered`, a swarm worker's list,
+    both through `offered_here`) and at the call
+    (`LocalToolRegistry._execute_inner`, `UnifiedToolExecutor`'s MCP
+    branch). A new place that offers or runs tools asks it too: hiding alone
+    is never enough.
+  - The Development routes (`route_scopes.DEVELOPMENT_ROUTE_RULES`) are
+    refused by the tenant middleware where Development is not (403
+    `host_only`); the sidebar's Workspace and IDE entries sit inside
+    `{% if development_here() %}` (no read while drawing). A new Development
+    page or route goes in the rules.
+  - A clone builds its environment with `security.git_auth.clone_env`:
+    outside the owner's space, none of the machine's credentials.
+  - Gates: `tests/test_host_tools_absent.py` (controls: a policy that only
+    hides the tool, the route rule taken out, the clone environment as it
+    was), `tests/_host_tools_space_cases.py`.
 
 ## UI Conventions (Web)
 

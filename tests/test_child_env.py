@@ -240,6 +240,9 @@ _BUILDERS = {
     "tool_child_env", "restricted_child_env", "get_commit_env",
     # The MCP allowlist (kazma_core/mcp/child_env.py) and the manager's delegate to it.
     "mcp_child_env", "_build_child_env",
+    # security/git_auth.py: tool_child_env plus the clone's token, and no machine
+    # credential outside the owner's space (Spaces S1-20).
+    "clone_env",
 }
 # Spawns whose env reaches them some other way, each with how.
 _ENV_BY_OTHER_ROUTE = {

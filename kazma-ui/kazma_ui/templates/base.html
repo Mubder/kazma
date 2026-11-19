@@ -134,10 +134,12 @@
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
             <span>{{ t('nav.chat') }}</span>
         </a>
+        {% if development_here is not defined or development_here() %}
         <a href="/workspace" class="{{ 'active' if active_page == 'workspace' else '' }}">
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
             <span>{{ t('nav.workspace') }}</span>
         </a>
+        {% endif %}
         <a href="/dashboard" class="{{ 'active' if active_page == 'dashboard' else '' }}">
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1"/></svg>
             <span>{{ t('nav.dashboard') }}</span>
