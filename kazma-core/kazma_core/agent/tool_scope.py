@@ -28,6 +28,17 @@ def _is_under_agent_skill_dir(resolved_p: Path) -> bool:
     return False
 
 
+def _in_sandboxed_space() -> bool:
+    """A sandboxed space reads its own folder only (Spaces S1-19): the skill
+    folders are in the machine's home. Unknown counts as sandboxed."""
+    from kazma_core.spaces.files import SpaceKindUnknown, in_sandboxed_space
+
+    try:
+        return in_sandboxed_space()
+    except SpaceKindUnknown:  # fail closed: no skill-folder read
+        return True
+
+
 def _workspace_scope_error(p: Path, path: str, op: str) -> str | None:
     """Return a safety error string if *p* is outside workspace/grants.
 
@@ -56,6 +67,7 @@ def _workspace_scope_error(p: Path, path: str, op: str) -> str | None:
     # folder included (the skill folders are in the home, beside .kazma).
     if (
         access.via != "store"
+        and not _in_sandboxed_space()
         and op in ("reads", "listings", "searches")
         and _is_under_agent_skill_dir(resolved_p)
     ):

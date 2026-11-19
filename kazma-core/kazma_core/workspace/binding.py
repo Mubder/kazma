@@ -97,6 +97,8 @@ def resolve_active_root() -> Path:
     """Resolve the active coding workspace root (single SoT ladder).
 
     Precedence:
+      0. The bound space's own folder, when Spaces is enforced and the
+         space is a sandboxed one (``spaces.files``).
       1. Per-task ``workspace_scope`` (swarm concurrent multi-repo).
       2. Active WorkspaceStore row (Switch Repo / clone — user intent).
       3. Process pin from :func:`configure_workspace`.
@@ -104,6 +106,15 @@ def resolve_active_root() -> Path:
       5. :func:`default_sandbox_root`.
     """
     global _WORKSPACE_ROOT
+
+    # 0. A sandboxed space works in its own folder and nowhere else (Spaces
+    #    S1-19): no per-task scope, active row, pin or variable moves it.
+    #    A kind that cannot be read raises -- never the machine's workspace.
+    from kazma_core.spaces.files import sandboxed_files_root
+
+    space_root = sandboxed_files_root()
+    if space_root is not None:
+        return space_root
 
     # 1. Per-task scope
     try:

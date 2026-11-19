@@ -26,6 +26,15 @@ from kazma_core.agent.tool_refusal import KnownEffectError, RefusedBeforeEffect
 #: somewhere the operator's backup (which goes through ``data_dir()``) never
 #: looked.
 DOC_DIR = _data_dir() / "documents"
+
+
+def _doc_dir() -> Path:
+    """Where the bound space keeps the documents made for it (Spaces S1-19):
+    :data:`DOC_DIR` for the owner's space and for an install that does not
+    enforce Spaces, the space's own folder for any other. No I/O."""
+    from kazma_core.spaces.files import space_folder
+
+    return space_folder("documents", install=DOC_DIR, create=False)
 _MAX_OUTPUT_CHARS = 20_000
 
 
@@ -202,7 +211,7 @@ async def pdf_merge(file_paths: list[str], output_name: str = "merged") -> str:
         tuple(sources),
         approved_paths=tuple(sources),
         output_name=output_name,
-        export_dir=DOC_DIR,
+        export_dir=_doc_dir(),
         **_scope(),
     )
     return _artifact_output(result, "PDF merge")
@@ -226,7 +235,7 @@ async def pdf_split(
         start_page=start_page,
         end_page=end_page,
         output_name=output_name or f"{source.stem}-split",
-        export_dir=DOC_DIR,
+        export_dir=_doc_dir(),
         **_scope(),
     )
     return _artifact_output(result, "PDF split")
@@ -275,7 +284,7 @@ async def convert_document(
         target_format,
         approved_path=source,
         output_name=output_name or source.stem,
-        export_dir=DOC_DIR,
+        export_dir=_doc_dir(),
         keep_source_style=bool(keep_source_style),
         **_scope(),
     )
@@ -299,7 +308,7 @@ async def pdf_fill_form(
         fields,
         approved_path=source,
         output_name=output_name or f"{source.stem}-filled",
-        export_dir=DOC_DIR,
+        export_dir=_doc_dir(),
         **_scope(),
     )
     return _artifact_output(result, "PDF form fill")
@@ -319,7 +328,7 @@ async def pdf_redact(
         terms,
         approved_path=source,
         output_name=output_name or f"{source.stem}-redacted",
-        export_dir=DOC_DIR,
+        export_dir=_doc_dir(),
         **_scope(),
     )
     return _artifact_output(result, "Secure PDF redaction")
@@ -341,7 +350,7 @@ async def generate_pptx(title: str, slides: list[Slide]) -> str:
             "pptx",
             {"title": title, "slides": staged},
             output_name=title,
-            export_dir=DOC_DIR,
+            export_dir=_doc_dir(),
             approved_assets=images.paths,
             **_scope(),
         )

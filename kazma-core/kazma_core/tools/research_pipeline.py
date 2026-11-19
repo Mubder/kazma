@@ -65,6 +65,12 @@ def _candidate_report_roots() -> list[Path]:
         roots.append(r)
 
     _add(_get_ws_root())
+    from kazma_core.spaces.files import in_sandboxed_space
+
+    if in_sandboxed_space():
+        # A sandboxed space's reports are in its own folder and nowhere
+        # else (Spaces S1-19): never the machine's workspaces.
+        return roots
     env = (os.environ.get("KAZMA_WORKSPACE") or "").strip()
     if env:
         _add(Path(env).expanduser())

@@ -18,6 +18,15 @@ from kazma_core.agent.tool_refusal import KnownEffectError, RefusedBeforeEffect
 #: Resolved via paths so KAZMA_DATA_DIR is honoured.
 DOC_DIR = _data_dir() / "documents"
 
+
+def _doc_dir() -> Path:
+    """Where the bound space keeps the documents made for it (Spaces S1-19):
+    :data:`DOC_DIR` for the owner's space and for an install that does not
+    enforce Spaces, the space's own folder for any other. No I/O."""
+    from kazma_core.spaces.files import space_folder
+
+    return space_folder("documents", install=DOC_DIR, create=False)
+
 logger = logging.getLogger(__name__)
 
 
@@ -349,7 +358,7 @@ async def generate_pdf(
             "pdf",
             payload,
             output_name=title,
-            export_dir=DOC_DIR,
+            export_dir=_doc_dir(),
             approved_assets=images.paths,
             **_scope(),
         )
@@ -418,7 +427,7 @@ async def generate_docx(
             "docx",
             payload,
             output_name=title,
-            export_dir=DOC_DIR,
+            export_dir=_doc_dir(),
             approved_assets=images.paths,
             **_scope(),
         )
@@ -438,7 +447,7 @@ async def generate_xlsx(
         "xlsx",
         {"title": filename, "sheets": sheets or []},
         output_name=filename,
-        export_dir=DOC_DIR,
+        export_dir=_doc_dir(),
         **_scope(),
     )
     return _output(result, "XLSX")
@@ -453,7 +462,7 @@ async def generate_markdown_doc(
         "markdown",
         {"title": title, "sections": _sections(sections)},
         output_name=title,
-        export_dir=DOC_DIR,
+        export_dir=_doc_dir(),
         **_scope(),
     )
     return _output(result, "Markdown")

@@ -148,8 +148,12 @@ async def generate_image(
     slug = _slugify(prompt)
     ext = "png"
     filename = f"{timestamp}_{slug}.{ext}"
-    IMAGE_DIR.mkdir(parents=True, exist_ok=True)
-    filepath = IMAGE_DIR / filename
+    from kazma_core.spaces.files import space_folder
+
+    # The bound space's own images (Spaces S1-19); IMAGE_DIR for the owner's
+    # space and for an install that does not enforce Spaces.
+    image_dir = await asyncio.to_thread(space_folder, "images", install=IMAGE_DIR)
+    filepath = image_dir / filename
 
     try:
         await asyncio.to_thread(filepath.write_bytes, image_bytes)  # off the loop (FA-139)

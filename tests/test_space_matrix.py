@@ -64,7 +64,7 @@ PLAN = REPO / "docs" / "plans" / "SPACES_PLAN.md"
 #: item of stage 1 writes the cases of its part and takes them out of the
 #: pending tables; this number may only go down, and lowering it means
 #: lowering the baseline in the same change.
-PENDING_BASELINE = 147
+PENDING_BASELINE = 92
 
 
 # ── what exists ──────────────────────────────────────────────────────────
@@ -240,8 +240,7 @@ def test_a_target_is_looked_up_one_way() -> None:
     assert pending_item("tool:no_such_tool") is None
     assert pending_item("GET /api/settings/system/logs") is None  # no rule: not a space route
     # A specific rule stands before its area.
-    assert pending_item("POST /api/chat/upload") == "S1-19"
-    assert pending_item("GET /api/chat/files/{file_id}") == "S1-19"
+    assert pending_item("POST /api/chat/upload") is None  # S1-19 wrote its case
     # An area whose item wrote its cases has no pending rule left.
     assert pending_item("POST /api/chat/stream") is None
     assert pending_item("GET /api/x/status") is None

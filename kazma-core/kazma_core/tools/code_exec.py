@@ -237,6 +237,17 @@ def local_exec_forbidden() -> bool:
     """
     from kazma_core.safety.deployment_policy import container_required, policy_read_failures
 
+    # A sandboxed space's code never runs on the machine itself (Spaces
+    # S1-19, plan 4.8): a container or nothing, whatever the lab switch says.
+    # A space whose kind cannot be read counts as sandboxed.
+    from kazma_core.spaces.files import SpaceKindUnknown, in_sandboxed_space
+
+    try:
+        if in_sandboxed_space():
+            return True
+    except SpaceKindUnknown:  # fail closed: no host fallback
+        logger.warning("[code_exec] the space's kind is unavailable; refusing host fallback", exc_info=True)
+        return True
     try:
         if container_required():
             return True

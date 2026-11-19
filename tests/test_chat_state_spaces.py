@@ -657,6 +657,13 @@ def test_control_keyed_by_the_states_tenant_a_receipt_answers_another_space(
 
     monkeypatch.setattr(effect_journal, "space_of_state",
                         lambda state: str(state.get("tenant_id") or OWNER_SPACE_ID))
+    # One working folder for both, as before S1-19: since then each space
+    # works in its own folder, which is in the request's hash, so the old
+    # key withholds A's call instead of answering it with B's result.
+    from kazma_core.workspace import binding
+
+    one_folder = binding.default_sandbox_root()
+    monkeypatch.setattr(binding, "resolve_active_root", lambda: one_folder)
     with pytest.raises(AssertionError, match="recorded"):
         _a_receipt_follows_the_scope(matrix)
 

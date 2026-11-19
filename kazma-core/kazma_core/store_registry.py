@@ -427,6 +427,10 @@ DATA_DIR_ENTRIES: dict[str, DataDirEntry] = {
         reason="made again by the next kazma observer setup from this build's code"),
     "images": DataDirEntry("generated images and browser screenshots", "bundle"),
     "workspace": DataDirEntry("the default workspace: the files the agent works on", "bundle"),
+    # One folder per space other than the owner's (Spaces S1-19,
+    # kazma_core.spaces.files): its working folder, uploads, images,
+    # generated documents and exports. The owner's space keeps the folders above.
+    "spaces": DataDirEntry("each space's own files, one folder per space", "bundle"),
     "document-store": DataDirEntry(
         "the document platform's content-addressed files", "documents",
         reason="carried with the document store export, beside documents.db"),
@@ -838,14 +842,17 @@ SPACE_RULES: dict[str, SpaceRule] = {
     ".runtime-writer.lock": _install("the server process's writer fence"),
     "swarm_registry.json": _install("the install's swarm workers, set by the admin", today="refuses"),
     "swarm_templates.json": _install("worker templates stay the install's", today="refuses"),
-    "attachments": SpaceRule("folder", today="whole"),
-    "documents": SpaceRule("folder", today="whole"),
-    "exports": SpaceRule("folder", today="whole"),
+    # The owner's space keeps these folders; every other space keeps its own
+    # under spaces/<id>/ once Spaces is enforced (spaces.files, S1-19).
+    "attachments": SpaceRule("folder", today="apart"),
+    "documents": SpaceRule("folder", today="apart"),
+    "exports": SpaceRule("folder", today="apart"),
+    "spaces": SpaceRule("folder", today="apart"),
     "problem_reports": _install("a report describes the install, for the admin"),
     "history_import": SpaceRule("folder", today="refuses"),
     "kazma-watch": _install("the install's own Kazma Watch code and configuration"),
-    "images": SpaceRule("folder", today="whole"),
-    "workspace": SpaceRule("folder", today="whole"),
+    "images": SpaceRule("folder", today="apart"),
+    "workspace": SpaceRule("folder", today="apart"),
     # Each space's document files under its own folder once Spaces is
     # enforced: the root for the owner's space, spaces/<id> for the others
     # (documents.storage, S1-12). Before, every tenant's files are in the
@@ -1224,7 +1231,39 @@ def is_kazma_secret_file(path: str | Path) -> bool:
         root = data_dir().resolve()
     except (ImportError, OSError, RuntimeError):
         return False
-    return _under(resolved, root) and not _under(resolved, root / "workspace")
+    return _under(resolved, root) and not _a_persons_files(resolved, root)
+
+
+def in_another_spaces_folder(path: str | Path) -> bool:
+    """True when *path* is inside another space's folder
+    (``<data dir>/spaces/<id>/``, Spaces S1-19): every door that asks
+    :func:`is_kazma_store` refuses it, the owner's file tools and shell too
+    -- the machine's workspace can hold the data folder, and the admin opens
+    no member's files (decision O1)."""
+    try:
+        from kazma_core.spaces.files import another_spaces_path
+
+        return another_spaces_path(Path(path).expanduser().resolve())
+    except (ImportError, OSError, RuntimeError, ValueError):
+        return False
+
+
+def _in_a_spaces_files(resolved: Path) -> bool:
+    """True when *resolved* is a space's working folder or inside one
+    (``<data dir>/spaces/<id>/files``, Spaces S1-19)."""
+    try:
+        from kazma_core.spaces.files import is_space_files_path
+
+        return is_space_files_path(resolved)
+    except ImportError:
+        return False
+
+
+def _a_persons_files(resolved: Path, root: Path) -> bool:
+    """True when *resolved*, under the data dir *root*, is in a folder of a
+    person's own files and not one of Kazma's: the default coding sandbox,
+    or a space's working folder. A database or ``.env`` there is theirs."""
+    return _under(resolved, root / "workspace") or _in_a_spaces_files(resolved)
 
 
 def install_secret_files() -> list[Path]:
@@ -1513,7 +1552,9 @@ def kazma_file_under(
         sandbox = (data_dir() / "workspace").resolve()
     except (ImportError, OSError, RuntimeError):
         sandbox = None
-    in_sandbox = sandbox is not None and (base == sandbox or _under(base, sandbox))
+    in_sandbox = sandbox is not None and (
+        base == sandbox or _under(base, sandbox) or _in_a_spaces_files(base)
+    )
     kazma_folders = [f for f in _kazma_folders() if f.is_dir()]
     if not in_sandbox:
         for place in kazma_folders:
@@ -1634,6 +1675,8 @@ def is_kazma_store(path: str | Path, *, write: bool = False) -> bool:
         return True
     if write and is_kazma_config_file(resolved):
         return True
+    if in_another_spaces_folder(resolved):
+        return True
     name = _strip_sidecar(resolved.name)
     if name in _ALWAYS_PROTECTED:
         return True
@@ -1644,7 +1687,7 @@ def is_kazma_store(path: str | Path, *, write: bool = False) -> bool:
     except (ImportError, OSError, RuntimeError):
         # Cannot classify; the callers' own rules still apply.
         return False
-    if not _under(resolved, root) or _under(resolved, root / "workspace"):
+    if not _under(resolved, root) or _a_persons_files(resolved, root):
         return False
     return (
         name.endswith(_DB_SUFFIXES)
@@ -1745,6 +1788,12 @@ def store_refusal(path_or_name: str | Path, *, door: str) -> str:
     is what sent the model digging through every other door.
     """
     raw = Path(str(path_or_name)).name or str(path_or_name)
+    if in_another_spaces_folder(path_or_name):
+        return (
+            f"{raw} is inside another space's folder; {door} may not open it. "
+            "A space's files are its own people's: tell the user it is not "
+            "reachable from here instead of looking for another way in."
+        )
     if is_secret_file_name(raw) or is_kazma_secret_file(path_or_name):
         return (
             f"{raw} holds Kazma's own secrets (keys, passwords, tokens); "

@@ -84,10 +84,10 @@ def _is_address(source: str) -> bool:
 
 def _kazma_folders() -> tuple[Path, ...]:
     """Folders of images Kazma made or received itself (blocking)."""
-    from kazma_core.paths import data_dir
+    from kazma_core.spaces.files import space_folder
 
-    root = data_dir()
-    return tuple(p.resolve() for p in (root / "images", root / "attachments"))
+    # The bound space's own (Spaces S1-19): never another space's pictures.
+    return tuple(space_folder(kind, create=False).resolve() for kind in ("images", "attachments"))
 
 
 def _in_kazma_folder(source: str) -> Path | None:
