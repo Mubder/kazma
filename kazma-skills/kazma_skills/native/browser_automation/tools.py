@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 # Shared Playwright state (lazy-initialized on first navigate). All access
 # goes through worker threads; the lock serializes boot + page operations.
-_state: dict[str, Any] = {"playwright": None, "browser": None, "page": None}
+_state: dict[str, Any] = {"playwright": None, "browser": None, "page": None, "space": None}
 _state_lock = threading.Lock()
 
 MAX_TEXT_CHARS = 8000
@@ -128,46 +128,67 @@ async def _run_sync(fn: Any, *args: Any, **kwargs: Any) -> Any:
         lease.release()
 
 
+def _page_space() -> str | None:
+    """The space the calling work is in once Spaces is enforced, else None.
+
+    The install has one browser page. It belongs to the space that opened
+    it (Spaces S1-19): a call from another space closes it and opens a new
+    one, so nobody reads the page, the cookies or the sign-ins another
+    space's person left in it. ``NoSpaceBound`` enforced with none bound.
+    """
+    from kazma_core.spaces.scope import require_space_id, spaces_enforced
+
+    return require_space_id() if spaces_enforced() else None
+
+
 def _ensure_page_sync() -> Any:
     """Compatibility facade; all HTTP uses the owned CDP/HTTPX broker."""
+    space = _page_space()
     with _state_lock:
+        if _state['page'] is not None and _state.get('space') != space:
+            _close_locked()  # another space's page: never handed over
         if _state['page'] is not None:
             return _state['page']
         from kazma_core.web_acquire.interactive import open_page
         page = open_page()
-        _state.update(page=page, browser=None, playwright=None)
+        _state.update(page=page, browser=None, playwright=None, space=space)
         return page
 
 
 def _close_sync() -> None:
     """Tear down the shared browser (call on errors to force a fresh boot)."""
     with _state_lock:
-        page = _state.get("page")
-        browser = _state.get("browser")
-        pw = _state.get("playwright")
-        if page is not None:
-            from kazma_core.web_acquire.interactive import PageFacade
-            if isinstance(page, PageFacade):
-                # Preserve the owner/handles on uncertain cleanup; do not open
-                # another native browser over a quarantined process tree.
-                page.close()
-                _state.update(playwright=None, browser=None, page=None)
-                return
-            try:
-                page.close()
-            except Exception:
-                logger.debug("[browser] page close error", exc_info=True)
-        if browser is not None:
-            try:
-                browser.close()
-            except Exception:
-                logger.debug("[browser] browser close error", exc_info=True)
-        if pw is not None:
-            try:
-                pw.stop()
-            except Exception:
-                logger.debug("[browser] playwright stop error", exc_info=True)
-        _state.update(playwright=None, browser=None, page=None)
+        _close_locked()
+
+
+def _close_locked() -> None:
+    """:func:`_close_sync` with ``_state_lock`` held."""
+    page = _state.get("page")
+    browser = _state.get("browser")
+    pw = _state.get("playwright")
+    if page is not None:
+        from kazma_core.web_acquire.interactive import PageFacade
+        if isinstance(page, PageFacade):
+            # Preserve the owner/handles on uncertain cleanup; do not open
+            # another native browser over a quarantined process tree.
+            page.close()
+            _state.update(playwright=None, browser=None, page=None)
+            return
+        try:
+            page.close()
+        except Exception:
+            logger.debug("[browser] page close error", exc_info=True)
+    if browser is not None:
+        try:
+            browser.close()
+        except Exception:
+            logger.debug("[browser] browser close error", exc_info=True)
+    if pw is not None:
+        try:
+            pw.stop()
+        except Exception:
+            logger.debug("[browser] playwright stop error", exc_info=True)
+    _state.update(playwright=None, browser=None, page=None)
 
 
 # ── per-tool sync ops (run on worker threads, serialized by the lock) ──────
@@ -205,10 +226,12 @@ def _extract_sync(selector: str) -> str:
 def _screenshot_sync(full_page: bool) -> str:
     page = _ensure_page_sync()
     with _state_lock:
-        SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
         import uuid
+        from kazma_core.spaces.files import space_folder
         from kazma_core.web_acquire.output_allowance import reserve
-        dest = SCREENSHOT_DIR / f'browser_{uuid.uuid4().hex}.png'
+        # The bound space's own images (Spaces S1-19).
+        shots = space_folder("images", install=SCREENSHOT_DIR)
+        dest = shots / f'browser_{uuid.uuid4().hex}.png'
         image = page.screenshot(full_page=full_page)
         reserve(dest, len(image))
         with dest.open('xb') as stream:

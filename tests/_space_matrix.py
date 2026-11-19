@@ -124,7 +124,7 @@ CASE_MODULES: tuple[str, ...] = (
     "tests._knowledge_space_cases", "tests._scheduled_space_cases", "tests._swarm_space_cases",
     "tests._research_space_cases", "tests._mail_space_cases", "tests._x_space_cases",
     "tests._github_space_cases", "tests._document_space_cases",  # S1-12
-    "tests._vault_space_cases",
+    "tests._vault_space_cases", "tests._files_space_cases",
 )
 
 
@@ -159,10 +159,8 @@ def load_cases() -> dict[str, Case]:
 #: and the plan item that will write the cases of the routes it decides. The
 #: first rule that matches decides, so a specific rule stands before its area.
 PENDING_ROUTE_RULES: tuple[tuple[Pattern, str], ...] = (
-    # ── S1-19: the space folder ───────────────────────────────────────────
-    # A chat's upload and a file shared into a chat are files of the space.
-    ("/api/chat/upload$", "S1-19"),
-    ("/api/chat/files", "S1-19"),
+    # (S1-19 -- a chat's uploads and shared files, and the research files of
+    # the space's folder -- wrote its cases: tests/_files_space_cases.py.)
     # (S1-08 -- chats, checkpoints, Time Travel, drafts, speech and A2A --
     # wrote its cases: tests/_chat_space_cases.py.)
     # (S1-09 -- memory, and a history brought in -- wrote its cases:
@@ -181,10 +179,6 @@ PENDING_ROUTE_RULES: tuple[tuple[Pattern, str], ...] = (
     # tests/_research_space_cases.py.) A research report, a paper and the
     # acquisition journal are files and runs of the workspace folder, which
     # becomes the space's with S1-19:
-    ("/api/research/papers", "S1-19"),
-    ("/api/research/download$", "S1-19"),
-    ("/api/research/eval$", "S1-19"),
-    ("/api/research/acquisition$", "S1-19"),
     # ── S1-20: host tools ─────────────────────────────────────────────────
     # A clone writes a project folder on the machine, so it stands with the
     # workspace before the GitHub connection's rule below.
@@ -238,29 +232,9 @@ _PENDING_TOOLS_BY_ITEM: dict[str, tuple[str, ...]] = {
     # cases: tests/_mail_space_cases.py, tests/_x_space_cases.py,
     # tests/_github_space_cases.py.)
     # (S1-18 -- the vault tools -- wrote its cases: tests/_vault_space_cases.py.)
-    # The space folder: every tool that takes a path or writes a file.
-    "S1-19": (
-        "file_read", "file_list", "file_search", "file_write", "file_append",
-        "file_apply_patch", "file_apply_patch_set", "file_delete", "send_file",
-        "python_exec",
-        "generate_image", "generate_ui_mockup", "download_image",
-        "analyze_image", "analyze_local_image",
-        "generate_pdf", "generate_docx", "generate_xlsx", "generate_pptx",
-        "generate_markdown_doc",
-        "read_document", "parse_document", "convert_document", "ocr_document",
-        "pdf_info", "pdf_merge", "pdf_split", "pdf_fill_form", "pdf_redact",
-        "sqlite_query", "execute_db_query", "inspect_db_schema",
-        # No item names the browser. Its pages and its saved screenshots are
-        # kept for whoever drives it, so the space folder is the closest item.
-        "browser_navigate", "browser_click", "browser_fill_form",
-        "browser_extract_text", "browser_eval_js", "browser_screenshot",
-        # Research files (S1-16 sent them here): the pipeline's reports and
-        # extracts, a page saved to a file, a crawl's saved pages, and the
-        # tools that read them back, all in the workspace's research folder.
-        "run_research_pipeline", "list_research_papers", "synthesize_from_digests",
-        "digest_research_file", "summarize_research_file", "list_research_chunks",
-        "read_research_chunk", "read_url_to_file", "crawl_site",
-    ),
+    # (S1-19 -- the space folder: every tool that takes a path or writes a
+    # file, the browser and the research files -- wrote its cases:
+    # tests/_files_space_cases.py.)
     # Host tools: the shell, the project folder and its code index, git, MCP
     # servers, skills and package installs, settings, the machine itself.
     "S1-20": (

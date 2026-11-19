@@ -322,6 +322,16 @@ def denied_message(
 ) -> str:
     """Agent-facing denial with recovery instructions (smooth UX)."""
     res = result or check_path_access(path, mode)
+    if res.via == "denied" and not res.workspace:
+        return f"Safety: {res.reason}"
+    if res.via == "denied" and res.reason == "outside this space's folder":
+        return (
+            f"Safety: {'read' if mode == 'read' else 'write/modify'} outside this space's "
+            "folder is not allowed.\n"
+            f"  path: {res.resolved}\n"
+            f"  this space's files: {res.workspace}\n"
+            "Use a path inside this space's files (a relative path means that folder)."
+        )
     if res.via == "store":
         # A path grant cannot open a Kazma store (rule 0 sits before the
         # grants), so offering request_path_access here would only buy a
@@ -337,6 +347,34 @@ def denied_message(
         "Or add a durable extra folder in Settings → Workspace → Extra folders.\n"
         "After grant, retry the same file tool."
     )
+
+
+def _space_home() -> Path | str | None:
+    """The folder a sandboxed space's file tools are held to; None for a
+    host space and for an install that does not enforce Spaces; a refusal
+    (text) once enforced with no space bound, or with a space whose kind
+    cannot be read: no file of the machine is opened for no one."""
+    from kazma_core.spaces import files as space_files
+    from kazma_core.spaces.scope import NoSpaceBound, current_scope, spaces_enforced
+
+    if not spaces_enforced():
+        return None
+    if current_scope() is None:
+        try:
+            from kazma_core.spaces.scope import require_space_id
+
+            require_space_id()
+        except NoSpaceBound as exc:
+            return f"no space is bound to this work: {exc}"
+    try:
+        space = space_files.sandboxed_space()
+    except space_files.SpaceKindUnknown as exc:
+        return str(exc)
+    if space is None:
+        return None
+    home = space_files.space_dir(space)
+    home.mkdir(parents=True, exist_ok=True)
+    return home.resolve()
 
 
 async def resolve_and_check(
@@ -369,6 +407,12 @@ def check_path_access(
 ) -> PathAccessResult:
     """Return whether *path* may be accessed at *mode*."""
     need: AccessMode = "write" if str(mode).lower() in ("write", "rw") else "read"
+    space_home = _space_home()
+    if isinstance(space_home, str):
+        return PathAccessResult(
+            allowed=False, reason=space_home, mode=need, via="denied",
+            resolved=str(path), workspace="",
+        )
     workspace = resolve_active_root()
     # A network or device path is refused on its text: resolving it would
     # already connect to the host it names (workspace/remote_paths).
@@ -420,7 +464,11 @@ def check_path_access(
             store_refusal,
         )
 
-        if is_kazma_secret_file(resolved):
+        from kazma_core.store_registry import in_another_spaces_folder
+
+        if in_another_spaces_folder(resolved):
+            kind = "Another space's folder — "
+        elif is_kazma_secret_file(resolved):
             kind = "Kazma secret file — "
         elif need == "write" and is_kazma_config_file(resolved):
             kind = "Kazma configuration file — "
@@ -438,6 +486,21 @@ def check_path_access(
             via="store",
             resolved=str(resolved),
             workspace=str(workspace),
+        )
+
+    # 0b) A sandboxed space (Spaces S1-19): its own folder, and nothing
+    #     else -- no extra folder of the machine, no path grant, no escape
+    #     hatch.
+    if space_home is not None:
+        inside = path_under_root(resolved, space_home)
+        return PathAccessResult(
+            allowed=inside,
+            reason="inside this space's folder" if inside else "outside this space's folder",
+            mode=need,
+            via="space" if inside else "denied",
+            resolved=str(resolved),
+            workspace=str(workspace),
+            grant_path=str(space_home) if inside else None,
         )
 
     # 1) Workspace

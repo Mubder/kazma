@@ -55,9 +55,11 @@ _SIGNATURES = (
 def _shared_dir() -> Path:
     """Where shared copies live: beside the uploads, so they travel with
     them (migration bundle, backups)."""
-    from kazma_core.paths import data_dir
+    from kazma_core.spaces.files import space_folder
 
-    return data_dir() / "attachments" / "shared"
+    # The bound space's own (Spaces S1-19): a shared file's id resolves only
+    # in the space it was shared in.
+    return space_folder("attachments") / "shared"
 
 
 def _sniff(head: bytes) -> str:

@@ -259,6 +259,37 @@ def _set_archived(task_id: str, archived: bool) -> JSONResponse:
     return JSONResponse({"ok": True, "task_id": task_id, "archived": archived})
 
 
+def _jobs_of_this_space() -> set[str] | None:
+    """The ids of the crawl-journal jobs that are the caller's space's, once
+    Spaces is enforced; None while it is not (the journal is the install's,
+    S1-13). A research job is its space's by the working folder it was
+    started in -- a sandboxed space's folder is its own alone -- and a
+    Knowledge crawl by its library. Blocking."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if not spaces_enforced():
+        return None
+    from kazma_core.stores.knowledge import get_knowledge_store
+    from kazma_core.web_acquire.crawl_jobs import inspect_jobs
+    from kazma_core.workspace.binding import resolve_active_root
+
+    here = resolve_active_root().resolve()
+    libraries = {lib["id"] for lib in get_knowledge_store().list_libraries(include_archived=True)}
+    mine: set[str] = set()
+    for row in inspect_jobs():
+        full = inspect_jobs(row['job_id']) or {}
+        folder = (full.get('policy') or {}).get('workspace')
+        if isinstance(folder, str) and folder:
+            try:
+                if Path(folder).resolve() == here:
+                    mine.add(row['job_id'])
+            except (OSError, RuntimeError):
+                continue
+        elif row.get('library_id') in libraries:
+            mine.add(row['job_id'])
+    return mine
+
+
 def create_research_router() -> APIRouter:
     """Create the research API router."""
     router = APIRouter(tags=["research"])
@@ -315,7 +346,15 @@ def create_research_router() -> APIRouter:
     def acquisition_status(language: str = "en", job_id: str | None = None) -> JSONResponse:
         from kazma_core.web_acquire.operations import cached_status, format_cached_status
         try:
+            mine = _jobs_of_this_space()
+            if job_id and mine is not None and job_id not in mine:
+                # Another space's job answers as an unknown one (S1-19).
+                raise AcquisitionError(FetchErrorCode.INVALID_URL,
+                                       'Retained acquisition job was not found; check its ID or retention.')
             report = cached_status(job_id)
+            listed = (report.get('acquisition') or {}).get('crawl_jobs')
+            if mine is not None and isinstance(listed, list):
+                report['acquisition']['crawl_jobs'] = [row for row in listed if row.get('job_id') in mine]
             report_url = None
             if job_id:
                 from kazma_core.web_acquire import crawl_jobs
@@ -829,7 +868,7 @@ def create_research_router() -> APIRouter:
     def download_export(path: str) -> Any:
         """Download an exported research file.
 
-        Takes a name relative to kazma-data/documents/ (the export's
+        Takes a name relative to the space's documents folder (the export's
         ``download_url`` names the file). Security: only serves files from
         that dir.
 
@@ -838,7 +877,7 @@ def create_research_router() -> APIRouter:
         to that host -- this GET is reachable by a cross-site navigation
         (2026-11-10 audit).
         """
-        from kazma_core.paths import data_dir as _dd
+        from kazma_core.spaces.files import space_folder
         from kazma_core.workspace.remote_paths import remote_path_reason
 
         if (
@@ -849,7 +888,8 @@ def create_research_router() -> APIRouter:
         ):
             return JSONResponse({"error": "invalid file path"}, status_code=400)
 
-        safe_root = os.path.realpath(str(_dd() / "documents"))
+        # The bound space's own documents folder (Spaces S1-19).
+        safe_root = os.path.realpath(str(space_folder("documents")))
         # Resolve under the safe root and enforce segment-aware containment
         # (relative_to semantics via relpath), not a byte-prefix startswith()
         # check: the latter let sibling dirs like "documents_secret" pass.

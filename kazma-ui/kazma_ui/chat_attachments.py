@@ -28,6 +28,16 @@ from kazma_core.paths import data_dir as _data_dir
 #: Resolved via paths so KAZMA_DATA_DIR is honoured.
 ATTACHMENT_DIR = _data_dir() / "attachments"
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+
+
+def _attachment_dir() -> Path:
+    """Where the bound space keeps its uploads (Spaces S1-19):
+    :data:`ATTACHMENT_DIR` for the owner's space and for an install that does
+    not enforce Spaces, the space's own folder for any other. An upload id
+    resolves only in the space that holds the file."""
+    from kazma_core.spaces.files import space_folder
+
+    return space_folder("attachments", install=ATTACHMENT_DIR)
 _UPLOAD_ID_RE = re.compile(r"^att_[0-9a-f]{32}$")
 
 
@@ -42,14 +52,14 @@ def store_uploaded_attachment(data: bytes, filename: str) -> str:
     if len(data) > MAX_UPLOAD_BYTES:
         raise ValueError("attachment exceeds upload size limit")
     attachment_id = f"att_{hashlib.sha256(data).hexdigest()[:32]}"
-    ATTACHMENT_DIR.mkdir(parents=True, exist_ok=True)
-    held = [p for p in ATTACHMENT_DIR.glob(f"{attachment_id}*")
+    folder = _attachment_dir()
+    held = [p for p in folder.glob(f"{attachment_id}*")
             if p.name == attachment_id or p.name.startswith(f"{attachment_id}.")]
     if held:
         return attachment_id
     from kazma_core.atomic_files import atomic_write_bytes
 
-    atomic_write_bytes(ATTACHMENT_DIR / f"{attachment_id}{Path(filename).suffix}", data)
+    atomic_write_bytes(folder / f"{attachment_id}{Path(filename).suffix}", data)
     return attachment_id
 
 
@@ -58,7 +68,7 @@ def _load_uploaded_attachment(attachment_id: Any) -> bytes | None:
     if not isinstance(attachment_id, str) or not _UPLOAD_ID_RE.fullmatch(attachment_id):
         return None
 
-    root = ATTACHMENT_DIR.resolve()
+    root = _attachment_dir().resolve()
     # A file is stored as ``<id><suffix>``, and the suffix is empty for a name
     # with no extension (``Dockerfile``, ``README``): ``<id>.*`` never found
     # those, so the turn carried no bytes (audit 2026-10-26 AUD-029). Match

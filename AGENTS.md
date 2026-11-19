@@ -13493,6 +13493,36 @@ product can turn it on, so an install with one account behaves as before.
     on the install list, or it reads None once enforced.
   - Gates: `tests/test_vault_space_scope.py` (the old read as each control),
     `tests/_vault_space_cases.py`.
+- **A space's files live in its own folder (S1-19, 2026-11-19).** Guards
+  act only where Spaces is enforced; not enforced, every folder and the
+  machine's workspace are as before.
+  - `kazma_core/spaces/files.py` is the one home: `space_dir(id)` is
+    `<data dir>/spaces/<id>/`, with `files/` (the working folder),
+    `attachments/`, `images/`, `documents/`, `exports/`
+    (`space_folder(kind, install=)`). The owner's space keeps the install's
+    folders and the machine's workspace (a mapping, not a move). A new
+    writer of a file asks `space_folder`, never `data_dir() / "<folder>"`.
+  - **A sandboxed space cannot leave its folder.** `resolve_active_root`'s
+    first rung is `sandboxed_files_root()`, and `check_path_access` allows
+    only paths inside the space folder (`path_policy._space_home`): no
+    durable root, session grant, absolute-path switch or skill folder.
+    Enforced with no space bound, the policy opens no file; a space whose
+    kind cannot be read raises `SpaceKindUnknown` (never "host").
+  - **Nobody opens another space's folder, the owner included** (O1):
+    `store_registry.in_another_spaces_folder` is part of `is_kazma_store`,
+    so every door refuses a path inside `spaces/<other>/` (the machine's
+    workspace can hold the data folder: on live it does). A database or
+    `.env` in a person's `files/` is theirs (`_a_persons_files`).
+  - An upload or shared-file id resolves only in the space that holds the
+    file. `python_exec` never uses the machine's own Python in a sandboxed
+    space (`local_exec_forbidden`). The install's one browser page belongs
+    to the space that opened it: another space's call closes it first
+    (`browser_automation.tools._page_space`).
+  - Research files follow the working folder; the acquisition status shows a
+    space its own journal jobs only (`research_panel.routes._jobs_of_this_space`).
+  - Gates: `tests/_files_space_cases.py` (every tool that takes a path or
+    writes a file, with B's file, the owner's file and climbing paths),
+    `tests/test_space_files.py` (each rule taken out as a control).
 
 ## UI Conventions (Web)
 

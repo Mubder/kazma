@@ -192,13 +192,17 @@ def _persist_attachment(attachment: Attachment) -> str:
     """
     from kazma_core.atomic_files import atomic_write_bytes
 
-    ATTACHMENT_DIR.mkdir(parents=True, exist_ok=True)
+    from kazma_core.spaces.files import space_folder
+
+    # The bound space's own folder (Spaces S1-19); ATTACHMENT_DIR for the
+    # owner's space and for an install that does not enforce Spaces.
+    folder = space_folder("attachments", install=ATTACHMENT_DIR)
     data = attachment.data or b""
     digest = hashlib.sha256(data).hexdigest()
     # The name as a stub shows it (no bracket, line break or control
     # character): the path is read back from the stub.
     base = file_label(attachment.filename) if attachment.filename else f"{attachment.kind}_{digest[:8]}"
-    dest = ATTACHMENT_DIR / f"{Path(base).stem}_{digest[:12]}{Path(base).suffix}"
+    dest = folder / f"{Path(base).stem}_{digest[:12]}{Path(base).suffix}"
     if not dest.is_file():
         atomic_write_bytes(dest, data)
     return str(dest.resolve())

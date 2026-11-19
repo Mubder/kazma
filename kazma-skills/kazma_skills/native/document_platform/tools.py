@@ -416,7 +416,7 @@ async def _saved_copy(
 
     def _copy() -> Path:
         from kazma_core.documents.operations import DocumentOperations
-        from kazma_core.paths import data_dir
+        from kazma_core.spaces.files import space_folder
 
         info = svc.resolve_artifact_blob(
             tenant_id=tenant, actor_id=actor, artifact_id=artifact_id
@@ -424,7 +424,7 @@ async def _saved_copy(
         filename = Path(str(info["filename"]))
         return DocumentOperations._export_atomic(
             Path(info["path"]),
-            data_dir() / "documents",
+            space_folder("documents"),  # the bound space's own (S1-19)
             output_name or filename.stem,
             filename.suffix.lstrip(".") or "bin",
             artifact_id,
