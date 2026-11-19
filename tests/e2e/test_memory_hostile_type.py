@@ -79,11 +79,13 @@ def test_a_hostile_entity_type_is_text_in_the_graph_filter(harness: Harness) -> 
             }""")
             assert found["handlers"] == 0, found
             assert "v2g-ft-entity-" + HOSTILE in found["ids"], found["ids"]
-            # The checkbox still toggles its filter (the id round-trips).
+            # The checkbox still toggles its filter (the id round-trips). The
+            # filters are folded away since 2026-11-18: opened first.
+            pg.click("#v2g-filters > summary")
             pg.locator("#v2g-filters-entity label", has_text="evil").first.click()
-            pg.wait_for_function("() => !!document.querySelector('#v2g-active-filters span[data-fg]')",
+            pg.wait_for_function("() => !!document.querySelector('#v2g-active-filters [data-fg]')",
                                  timeout=10000)
-            chip = pg.evaluate("() => document.querySelector('#v2g-active-filters span[data-fg]')"
+            chip = pg.evaluate("() => document.querySelector('#v2g-active-filters [data-fg]')"
                                ".getAttribute('data-fk')")
             assert chip == HOSTILE
             pg.mouse.move(10, 10)

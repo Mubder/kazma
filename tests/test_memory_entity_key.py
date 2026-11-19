@@ -416,6 +416,9 @@ TWIN_TOOL_CALLS: dict[str, list[dict]] = {
     "memory_delete_entity": [{"entity_id": TWIN}],
     "memory_link_entities": [{"subject": TWIN, "object": "alice"}, {"subject": "alice", "object": TWIN}],
     "memory_list_entities": [{"q": "shared"}],
+    # Reads a memory of a conversation by its id: an entity's id names
+    # none, and another tenant's memory is never shown (2026-11-19).
+    "memory_read": [{"id": TWIN}],
     "memory_admin": [{"action": "merge", "id": TWIN, "target": "alice"},
                      {"action": "delete_entity", "id": TWIN},
                      {"action": "list_entities", "q": "shared"},

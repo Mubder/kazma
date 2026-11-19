@@ -686,6 +686,7 @@ AUDIT_ONLY_ALLOWLIST = frozenset(
         "memory_list_entities",
         "memory_list_beliefs",
         "memory_search",
+        "memory_read",
         "update_scratchpad",  # typed findings only — does not mutate files
         "web_search",  # optional; still no writes
         "read_url",

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sqlite3
 from typing import Any
 from kazma_core.agent.tool_refusal import RefusedBeforeEffect
 
@@ -132,6 +133,54 @@ def _shown(hit: Any) -> str:
     """What a recalled memory shows: its display text (question AND answer),
     never only the match text (``recall.shown_text``'s rule)."""
     return str((hit.metadata or {}).get("display") or hit.content or "")
+
+
+def _episode_shown(hit: Any, tenant_id: str) -> str:
+    """What memory_search shows of a recalled memory: up to
+    ``limits.MEMORY_SHOW_MAX`` characters of it, read again by its id in the
+    caller's tenant, then how much more there is and how to read it. A
+    memory only the shared Postgres store holds shows recall's display."""
+    from kazma_core.memory.episode_read import preview_episode
+    from kazma_core.memory.episode_text import more_note
+
+    try:
+        preview = preview_episode(str(hit.id), tenant_id=tenant_id)
+    except (sqlite3.Error, OSError):
+        # The memory database could not be read for this one memory: recall's
+        # own display stands in (it is the same text, bounded tighter).
+        logger.debug("[memory_search] preview of %s failed", hit.id, exc_info=True)
+        preview = None
+    if preview is None:
+        text, more = _shown(hit), int((hit.metadata or {}).get("more") or 0)
+    else:
+        text, more = preview
+    note = more_note(more, str(hit.id), text)
+    return f"{text} {note}" if note else text
+
+
+#: memory_read's own line: where the page is in the memory, and the next
+#: call. In the memory's language (the model reads it beside that text).
+_READ_PAGE_EN = "Memory {id}: characters {start}-{end} of {total}."
+_READ_PAGE_AR = "الذاكرة {id}: الأحرف من {start} إلى {end} من أصل {total}."
+_READ_NEXT_EN = "Next page: memory_read(\"{id}\", offset={end})."
+_READ_NEXT_AR = "الصفحة التالية: memory_read(\"{id}\", offset={end})."
+_READ_LAST_EN = "This is the end of the memory."
+_READ_LAST_AR = "هذه نهاية الذاكرة."
+
+
+def _read_header(page: dict[str, Any]) -> str:
+    """memory_read's line before the page, EN or AR by the memory's text."""
+    from kazma_core.documents.arabic import is_rtl_dominant
+
+    arabic = is_rtl_dominant(page.get("text") or "")
+    values = {"id": page["id"], "start": f"{page['offset'] + 1:,}" if page["total"] else "0",
+              "end": f"{page['end']:,}", "total": f"{page['total']:,}"}
+    head = (_READ_PAGE_AR if arabic else _READ_PAGE_EN).format(**values)
+    if page.get("next_offset") is not None:
+        nxt = (_READ_NEXT_AR if arabic else _READ_NEXT_EN).format(id=page["id"], end=page["end"])
+    else:
+        nxt = _READ_LAST_AR if arabic else _READ_LAST_EN
+    return f"{head} {nxt}"
 
 
 def _chat_kept_out(thread: str, tenant_id: str) -> bool:
@@ -824,13 +873,16 @@ def register_memory_tools(registry: Any) -> None:
                 # "keyword matches only" is true.
                 return f"{_RECALL_DEGRADED} ({result.degraded})", True
             out: list[dict[str, Any]] = []
+            tenant = get_current_tenant_id()
             # A week's topic summary (plan C2) shows its week, title and text;
-            # a memory, its question and its answer.
+            # a memory, its question and its answer -- up to
+            # limits.MEMORY_SHOW_MAX characters, and how to read the rest.
             for kind, hits in (("belief", result.beliefs), ("weekly_summary", result.summaries),
                                ("episode", result.episodes)):
                 for h in hits:
+                    content = _episode_shown(h, tenant) if kind == "episode" else _shown(h)
                     out.append({
-                        "id": h.id, "content": _shown(h), "score": h.score,
+                        "id": h.id, "content": content, "score": h.score,
                         "kind": kind, "source": h.source, "metadata": h.metadata,
                     })
             if result.degraded:
@@ -846,6 +898,48 @@ def register_memory_tools(registry: Any) -> None:
         except Exception as exc:
             logger.warning("[memory_search] V2 recall failed: %s", exc)
             return _RECALL_DEGRADED, True
+    @registry.register(
+        description=(
+            "Read one memory of a conversation whole, by its id (e_..., from memory_search or a "
+            "recalled memory marked 'not shown'). Long memories come a page at a time: pass the "
+            "offset the previous page names. Read-only."
+        ),
+        category="memory",
+    )
+    async def memory_read(id: str, offset: int = 0) -> str:
+        from kazma_core.safety.prompt_fence import fence_untrusted
+
+        # SQLite: in a thread, never on the loop (AGENTS §35).
+        page = await asyncio.to_thread(_memory_read_sync, id, offset)
+        if isinstance(page, str):
+            return page
+        # Kazma's own line outside the fence, in the memory's language; the
+        # memory itself inside it (data, never instructions).
+        return _read_header(page) + "\n" + fence_untrusted(page["text"], source="memory_read")
+
+    def _memory_read_sync(memory_id: str, offset: int) -> dict[str, Any] | str:
+        """One page of a memory (``episode_read.read_episode``), or Kazma's
+        own message saying why there is none."""
+        from kazma_core.memory.episode_read import read_episode
+        from kazma_core.safety.hitl import get_current_tenant_id
+
+        mid = str(memory_id or "").strip()
+        if not mid:
+            return "Error: memory_read needs the memory's id (e_..., from memory_search)."
+        try:
+            start = max(0, int(offset or 0))
+        except (TypeError, ValueError):
+            return "Error: offset is a number of characters (0, or the offset the previous page names)."
+        try:
+            page = read_episode(mid, tenant_id=get_current_tenant_id(), offset=start)
+        except (sqlite3.Error, OSError):
+            logger.warning("[memory_read] the memory database could not be read", exc_info=True)
+            return "Error: the memory could not be read right now. This is NOT a missing memory."
+        if page is None:
+            return (f"No memory {mid} here: it was forgotten, or it is not this space's. "
+                    "memory_search lists the memories you can read.")
+        return page
+
     @registry.register(
         description=(
             "MEMORY ADMIN (read+write). Prefer this over SQL for all memory maintenance. "

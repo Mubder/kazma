@@ -266,6 +266,12 @@ function memoryPage() {
       // Canvas double-click sends this event (single click stays on the graph).
       this._graphListener = (ev) => {
         const d = (ev && ev.detail) || {};
+        // A double-click on the map asks for the row: the clean-up section
+        // is folded away by default, so it is opened first.
+        if (d.scrollOps) {
+          const cleanup = document.getElementById("memory-cleanup");
+          if (cleanup && !cleanup.open) cleanup.open = true;
+        }
         if (d.type === "entity" && d.id) {
           this.selectedEntityId = d.id;
           this.selectedBeliefId = null;
@@ -662,8 +668,11 @@ function memoryPage() {
     async deleteEntity(e) {
       if (e.protected) return;
       const ok = await confirm({
-        title: S.delete || "Delete entity",
-        message: (S.confirm_delete || "Delete entity shell?") + " " + e.id,
+        title: S.delete || "Delete",
+        message: tx("memory.page.delete_thing_confirm",
+          "Delete {name}? The facts that mention it stay. An Undo button shows for a few seconds after.",
+          { name: e.name || e.id }),
+        confirmText: S.delete || "Delete",
       });
       if (!ok) return;
       const d = await api("/api/memory/v2/entities/" + encodeURIComponent(e.id), {
@@ -847,7 +856,19 @@ function memoryPage() {
       } else toast(errText("memory.console.link_failed", "Link failed", d), "error");
     },
 
-    async decideMerge(id, approve) {
+    async decideMerge(id, approve, m) {
+      // A join moves every fact and cannot be undone: asked first. Keeping
+      // them apart only records the answer, so it is not.
+      if (approve) {
+        const from = (m && (m.source_entity_id || m.source_id)) || "";
+        const to = (m && (m.target_entity_id || m.target_id)) || "";
+        const ok = await confirm({
+          title: tx("memory.page.join_confirm_title", "Join them? This cannot be undone"),
+          message: tx("memory.page.join_confirm", "Every fact about {from} moves to {to}, and {from} goes.", { from: from, to: to }),
+          confirmText: tx("memory.page.join_yes", "Join them"),
+        });
+        if (!ok) return;
+      }
       const d = await api("/api/memory/v2/entity-merges/" + encodeURIComponent(id), {
         method: "POST",
         body: JSON.stringify({ action: approve ? "approve" : "reject" }),
@@ -861,9 +882,16 @@ function memoryPage() {
     },
 
     async runHygiene() {
+      // The question lists the clean-ups that will run, one a line.
+      const chosen = [];
+      if (this.hygiene.purge_empty_entities) chosen.push(tx("memory.page.tidy_empty", "Delete names that hold no facts"));
+      if (this.hygiene.invalidate_near_dup_noted) chosen.push(tx("memory.page.tidy_dupes", "Remove notes that repeat another"));
+      if (this.hygiene.archive_invalidated) chosen.push(tx("memory.page.tidy_archive", "Move ended facts to the archive"));
+      if (!chosen.length) return;
       const ok = await confirm({
-        title: S.run_hygiene || "Run hygiene",
-        message: S.confirm_hygiene || "Run selected hygiene actions?",
+        title: S.confirm_hygiene || "Run these clean-ups?",
+        message: chosen.map((c) => "• " + c).join("\n"),
+        confirmText: S.run_hygiene || "Run the selected clean-ups",
       });
       if (!ok) return;
       this.hygieneRunning = true;

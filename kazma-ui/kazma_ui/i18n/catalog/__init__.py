@@ -10,6 +10,7 @@ from kazma_ui.i18n.catalog import dashboard as _dashboard
 from kazma_ui.i18n.catalog import documents as _documents
 from kazma_ui.i18n.catalog import knowledge as _knowledge
 from kazma_ui.i18n.catalog import memory as _memory
+from kazma_ui.i18n.catalog import memory_page as _memory_page
 from kazma_ui.i18n.catalog import packages as _packages
 from kazma_ui.i18n.catalog import research as _research
 from kazma_ui.i18n.catalog import runs as _runs
@@ -37,6 +38,7 @@ CATALOG_MODULES = (
     _documents,
     _knowledge,
     _memory,
+    _memory_page,
     _packages,
     _research,
     _runs,

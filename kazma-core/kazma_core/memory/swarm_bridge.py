@@ -28,6 +28,8 @@ import sqlite3
 import time
 from typing import Any
 
+from kazma_core.memory.limits import episode_text
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -140,16 +142,18 @@ def _insert_episode(
         """,
         (
             eid, tenant_id, session_id, turn_number,
-            user_text[:8000] if user_text else None,
+            # Whole (memory/limits.py): a swarm result was cut at 8,000
+            # characters until 2026-11-19.
+            episode_text(user_text, field="swarm result") if user_text else None,
             None,
-            summary_text[:8000] if summary_text else None,
+            episode_text(summary_text, field="summary") if summary_text else None,
             importance, now, json.dumps(meta, ensure_ascii=False, default=str),
             emb_version,
         ),
     )
     # The row is committed BEFORE it is embedded: the embedding ran between
     # the INSERT and its commit, so memory_state.db's write lock was held for
-    # a whole embedder call (up to 8,000 characters) and every other memory
+    # a whole embedder call (up to 8,000 characters, now limits.EMBED_TEXT_CHARS) and every other memory
     # write waited out its busy timeout (audit 2026-10-26 AUD-112, AGENTS.md
     # §15 D2). The vector is then one guarded write (still no vector, not
     # forgotten) through vector_write -- a forget in between keeps it out.

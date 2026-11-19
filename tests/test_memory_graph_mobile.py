@@ -35,5 +35,10 @@ def test_inspect_js_closes_and_caps_phone_edges() -> None:
     assert "function _v2gIsPhone()" in js
     assert "_v2gInspectClose();" in js
     assert 'edgeLimit = (phone && !_v2gInspectAllEdges) ? 4' in js
-    assert "sheetOpen" in js
+    # The frame loop stopped while the phone sheet was open ("sheetOpen");
+    # since 2026-11-18 the map has no idle animation at all: it draws only
+    # while its layout settles or something is dragged.
+    tick = js.split("function _v2gTick() {", 1)[1].split("\n  }\n", 1)[0]
+    assert "if (_v2gAlpha > 0 || _v2gDrag) {" in tick
+    assert "Date.now()" not in js.split("function _v2gPaint(", 1)[1].split("function _v2gHit(", 1)[0]
     assert "v2g-inspect-more-btn" in js

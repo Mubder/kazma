@@ -85,6 +85,18 @@ User turn
 | Neo4j install default (env/compose) | **Done** — `KAZMA_NEO4J_DEFAULT` / URL env; fail-open SQLite; `deploy/docker-compose.neo4j.yml` |
 | Physical KB+beliefs one-table merge | **Index shipped** — `memory/unified_index.py` dual-writes beliefs + KB chunks into one `unified_items` table; source stores stay SoT ([#79](https://github.com/Mubder/kazma/issues/79)) |
 
+### P4 — A long memory found by meaning all the way through (later)
+
+Since 2026-11-19 a memory keeps all of its text (AGENTS.md §15F, the guide's
+"Long memories"). Keyword search covers all of it; meaning search covers its
+first 4,000 characters, the only part its vector is made from. A question
+about something deep inside a long paste is found by its words only.
+
+| Item | Status |
+|------|--------|
+| Passage vectors | **Later** — a vector per stretch of a long memory past its first 4,000 characters (2,000 characters a stretch, a few hundred overlapping), in a table of its own (`episode_passages`: episode id, tenant, start, end, model, vector), searched with the episodes and counted for the episode it belongs to. Forget, the tier moves, the vector repair pass and the mirror rules reach it as they reach an episode's own vector. |
+| Size | **Estimate** — bge-m3's 1,024 floats are 4 KB a stretch: a 40,000-character memory adds 18 stretches, about 72 KB, and about 18 embedder calls (a few seconds on CPU, in the background). How many memories it would touch is what memory health's `cut_text` counts (filled, whole) after the text fill's first passes. About two days with a benchmark category of questions answered only deep inside a long memory. |
+
 ### Architecture boundaries (updated)
 
 | Choice | Status |

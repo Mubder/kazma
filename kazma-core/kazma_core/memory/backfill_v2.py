@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Any
 
 from kazma_core.memory import fact_names
+from kazma_core.memory.limits import episode_text
 from kazma_core.memory.entity_resolution import slug as _slug
 
 logger = logging.getLogger(__name__)
@@ -437,7 +438,7 @@ def _backfill_memories_to_episodes(primary: sqlite3.Connection, *, extract_belie
                        VALUES (?, ?, ?, ?, ?, 'episodic', ?, ?, ?, ?)""",
                     (
                         eid, tenant, f"legacy-{src_id[:8]}", 0,
-                        content[:4000], importance, ts,
+                        episode_text(content, field="V1 memory"), importance, ts,
                         sqlite3.Binary(emb) if emb else None,
                         json.dumps(meta, ensure_ascii=False),
                     ),

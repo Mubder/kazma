@@ -21,12 +21,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "This entity is protected",
     },
     "memory.page.hygiene_partial": {
-        "ar": "فشلت بعض إجراءات التنظيف",
-        "en": "Some hygiene actions failed",
+        "ar": "فشلت بعض عمليات الترتيب",
+        "en": "Some clean-ups failed",
     },
     "memory.page.hygiene_more_left": {
-        "ar": "اكتمل التنظيف، وبقيت حقائق منتهية للتشغيل التالي",
-        "en": "Hygiene complete; more ended facts are left for the next run",
+        "ar": "تم الترتيب، وبقيت حقائق منتهية للمرة القادمة",
+        "en": "Clean-up done; more ended facts are left for the next run",
     },
     "memory.console.forgotten_remote_pending": {
         "ar": "نُسيت. تُزال النسخة الموجودة في فهرس المتجهات البعيد في جولة الصيانة التالية.",
@@ -849,16 +849,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Persistence: {config} (config/sessions/swarm); checkpoints: {checkpoints}. {engine}.",
     },
     "memory.console.engine_ok": {
-        "ar": "المحرك المعرفي V2 يعمل",
-        "en": "V2 cognitive engine operational",
+        "ar": "محرك الذاكرة يعمل",
+        "en": "memory engine working",
     },
     "memory.console.engine_degraded": {
-        "ar": "ذاكرة V2 متدهورة أو متوقفة",
-        "en": "V2 memory degraded or offline",
+        "ar": "محرك الذاكرة به مشكلة أو متوقف",
+        "en": "memory engine has a problem or is off",
     },
     "memory.console.demo_desc": {
-        "ar": "وضع العرض التجريبي — ذاكرة RAG معطّلة. تتضمن النسخة الكاملة بحث المتجهات ChromaDB وsentence-transformers.",
-        "en": "Demo mode — RAG memory is disabled. The full version includes ChromaDB vector search and sentence-transformers.",
+        "ar": "عرض تجريبي: الذاكرة متوقفة هنا. Kazma المثبَّت يتذكر محادثاتك.",
+        "en": "Demo: memory is off here. An installed Kazma remembers your conversations.",
     },
     "memory.console.demo_badge": {
         "ar": "تجريبي",
@@ -889,16 +889,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "LIVE",
     },
     "memory.console.v2_no_db": {
-        "ar": "قاعدة بيانات V2 لم تُهيَّأ بعد. ستمتلئ المعتقدات بعد أول دور.",
-        "en": "V2 database not initialized yet. Beliefs will populate after the first turn.",
+        "ar": "لا قاعدة بيانات للذاكرة بعد. تبدأ مع أول محادثة.",
+        "en": "Memory has no database yet. It starts with the first conversation.",
     },
     "memory.console.v2_live_desc": {
-        "ar": "V2 هو مسار القراءة النشط (use_new_stack=true). يقدّم الاسترجاع معتقدات ثنائية الزمن وحلقات متدرجة.",
-        "en": "V2 is the active read path (use_new_stack=true). Recall serves bi-temporal beliefs + tiered episodes.",
+        "ar": "الذاكرة تعمل: كل رد يستدعي الحقائق وذكريات المحادثات.",
+        "en": "Memory is on: each reply recalls facts and conversation memories.",
     },
     "memory.console.v2_off_desc": {
-        "ar": "V2 متوقف (use_new_stack=false). حقن الاسترجاع والدمج بعد الدور متوقفان، ولا يوجد قارئ قديم يُرجع إليه.",
-        "en": "V2 is off (use_new_stack=false). Recall injection and post-turn consolidation are paused. There is no legacy reader to fall back to.",
+        "ar": "الذاكرة متوقفة في الإعدادات: لا تستدعي الردود شيئًا ولا يُحفظ شيء جديد.",
+        "en": "Memory is off in Settings: replies recall nothing and nothing new is kept.",
     },
     "memory.console.beliefs_meta": {
         "ar": "{superseded} مستبدَلة · {archived} مؤرشفة",
@@ -1035,48 +1035,48 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "{n} failed queue tasks",
     },
     "memory.console.banner_last_error": {
-        "ar": "سُجّل خطأ بعد الدور",
-        "en": "last post-turn error recorded",
+        "ar": "لم تُحفظ ذاكرة أحد الردود",
+        "en": "a reply's memory was not saved",
     },
     "memory.console.banner_degraded": {
-        "ar": "الحالة: متدهورة",
-        "en": "status DEGRADED",
+        "ar": "الذاكرة لا تعمل بالكامل",
+        "en": "memory is not fully working",
     },
     "memory.console.banner_check": {
-        "ar": "افحص الطابور وشريط ما بعد الدور.",
-        "en": "Check queue and post-turn strip.",
+        "ar": "راجع الصحة والصيانة.",
+        "en": "See Health and maintenance.",
     },
     "memory.console.tier_working": {
-        "ar": "العاملة",
-        "en": "Working",
+        "ar": "جديدة",
+        "en": "New",
     },
     "memory.console.tier_episodic": {
-        "ar": "الحلقية",
-        "en": "Episodic",
+        "ar": "محفوظة",
+        "en": "Kept",
     },
     "memory.console.tier_recall": {
-        "ar": "الاسترجاع",
-        "en": "Recall",
+        "ar": "طُلب تذكّرها",
+        "en": "Asked to remember",
     },
     "memory.console.tier_archived": {
-        "ar": "المؤرشفة",
+        "ar": "مؤرشفة",
         "en": "Archived",
     },
     "memory.console.tier_short_working": {
-        "ar": "عاملة",
-        "en": "Work",
+        "ar": "جديدة",
+        "en": "New",
     },
     "memory.console.tier_short_episodic": {
-        "ar": "حلقية",
-        "en": "Epis",
+        "ar": "محفوظة",
+        "en": "Kept",
     },
     "memory.console.tier_short_recall": {
-        "ar": "استرجاع",
-        "en": "Reca",
+        "ar": "مطلوبة",
+        "en": "Asked",
     },
     "memory.console.tier_short_archived": {
         "ar": "مؤرشفة",
-        "en": "Arch",
+        "en": "Archived",
     },
     "memory.console.tier_title": {
         "ar": "{name}: {count} ({pct}%)",
@@ -1151,40 +1151,40 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "session",
     },
     "memory.console.recall_trail": {
-        "ar": "استُرجع {count} · آخر مرة {last} · عبر {method}",
-        "en": "recalled {count} · last {last} · via {method}",
+        "ar": "استُدعيت {count} · آخر مرة {last} · المصدر {method}",
+        "en": "Recalled {count} · last {last} · source {method}",
     },
     "memory.console.probe_from_belief": {
-        "ar": "افحص انطلاقًا من هذا المعتقد ←",
-        "en": "Probe from this belief →",
+        "ar": "ما الذي سيستدعيه Kazma مع هذا؟",
+        "en": "What would Kazma recall with this?",
     },
     "memory.console.belief_meta": {
-        "ar": "المعرّف: {id} · الثقة {conf}% · الأهمية {imp} · مرات الوصول {access}",
-        "en": "id: {id} · conf {conf}% · imp {imp} · access {access}",
+        "ar": "الثقة {conf}% · {recalled}",
+        "en": "Confidence {conf}% · {recalled}",
     },
     "memory.console.supersedes_chain": {
-        "ar": "سلسلة الاستبدال: {chain}",
-        "en": "supersedes chain: {chain}",
+        "ar": "استبدلت ما سبقها: {chain}",
+        "en": "Replaced earlier: {chain}",
     },
     "memory.console.load_failed": {
         "ar": "فشل التحميل",
         "en": "Load failed",
     },
     "memory.console.unlink_title": {
-        "ar": "فك ربط المعتقد؟",
-        "en": "Unlink belief?",
+        "ar": "إزالة هذه الحقيقة؟",
+        "en": "Remove this fact?",
     },
     "memory.console.unlink_message": {
-        "ar": "إبطال هذه الحافة من الذاكرة النشطة إبطالًا قابلًا للاسترجاع.",
-        "en": "Soft-invalidate this edge from active memory.",
+        "ar": "يتوقف Kazma عن استخدامها. وتبقى في سجل الحقائق السابقة.",
+        "en": "Kazma stops using it. It stays in the record of past facts.",
     },
     "memory.console.unlink_native": {
-        "ar": "فك ربط المعتقد (إبطاله)؟",
-        "en": "Unlink (invalidate) belief?",
+        "ar": "إزالة هذه الحقيقة؟",
+        "en": "Remove this fact?",
     },
     "memory.console.unlink_failed": {
-        "ar": "فشل فك الربط",
-        "en": "Unlink failed",
+        "ar": "تعذّرت إزالة الحقيقة",
+        "en": "Removing the fact failed",
     },
     "memory.console.queue_admins": {
         "ar": "طابور المهام خاص بالتثبيت: للمشرفين فقط.",
@@ -1225,12 +1225,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     # A memory queue task's status (the queue's pending/processing/completed/failed).
     "memory.console.queue_pending": {"ar": "بانتظار التنفيذ", "en": "pending"},
     "memory.console.link_mode_hint": {
-        "ar": "وضع الربط: انقر المصدر، ثم الهدف",
-        "en": "Link mode: click the source, then the target",
+        "ar": "الربط: انقر الشيء الأول، ثم الثاني",
+        "en": "Connect: click the first thing, then the second",
     },
     "memory.console.merge_mode_hint": {
-        "ar": "وضع الدمج: انقر ما سيُستبعد، ثم ما سيُبقى عليه",
-        "en": "Merge mode: click the one to retire, then the one to keep",
+        "ar": "الدمج: انقر الذي سيختفي، ثم الذي سيبقى",
+        "en": "Join: click the one that goes, then the one to keep",
     },
     "memory.console.queue_processing": {"ar": "قيد التنفيذ", "en": "running"},
     "memory.console.queue_completed": {"ar": "اكتمل", "en": "completed"},
@@ -1362,8 +1362,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Eval error: {error}",
     },
     "memory.console.reconsol_enqueued": {
-        "ar": "أُضيفت إعادة الدمج إلى الطابور",
-        "en": "Reconsolidation enqueued",
+        "ar": "يجري دمج الحقائق المكرّرة في الخلفية",
+        "en": "Merging duplicate facts in the background",
     },
     "memory.console.no_active_skills": {
         "ar": "لا مهارات نشطة بعد.",
@@ -1692,16 +1692,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Role",
     },
     "memory.console.ptype_functional": {
-        "ar": "أحادي القيمة",
-        "en": "functional",
+        "ar": "قيمة واحدة",
+        "en": "one value",
     },
     "memory.console.ptype_set": {
-        "ar": "متعدد القيم",
-        "en": "set",
+        "ar": "قائمة",
+        "en": "a list",
     },
     "memory.console.ptype_state": {
         "ar": "حالة",
-        "en": "state",
+        "en": "a state",
     },
     "memory.console.etype_person": {
         "ar": "شخص",
@@ -1712,8 +1712,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "tool",
     },
     "memory.console.etype_concept": {
-        "ar": "مفهوم",
-        "en": "concept",
+        "ar": "فكرة",
+        "en": "idea",
     },
     "memory.console.etype_location": {
         "ar": "مكان",
@@ -1724,8 +1724,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "project",
     },
     "memory.console.etype_entity": {
-        "ar": "كيان",
-        "en": "entity",
+        "ar": "شيء",
+        "en": "thing",
     },
     "memory.console.etype_organization": {
         "ar": "منظمة",
@@ -1744,36 +1744,36 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "tgt: {id}",
     },
     "memory.console.hint_link_target": {
-        "ar": "وضع الربط: انقر العقدة الهدف…",
-        "en": "Link mode: click the target node…",
+        "ar": "الربط: انقر الشيء الثاني…",
+        "en": "Connect: click the second thing…",
     },
     "memory.console.hint_link_source": {
-        "ar": "وضع الربط: انقر العقدة المصدر…",
-        "en": "Link mode: click the source node…",
+        "ar": "الربط: انقر الشيء الأول…",
+        "en": "Connect: click the first thing…",
     },
     "memory.console.hint_merge_target": {
-        "ar": "وضع الدمج: انقر الهدف (الباقي)…",
-        "en": "Merge mode: click the target (survivor)…",
+        "ar": "الدمج: انقر الشيء الذي يبقى…",
+        "en": "Join: click the thing to keep…",
     },
     "memory.console.hint_merge_source": {
-        "ar": "وضع الدمج: انقر المصدر (سيُحال)…",
-        "en": "Merge mode: click the source (will be retired)…",
+        "ar": "الدمج: انقر الشيء الذي سيُدمج في غيره…",
+        "en": "Join: click the thing to join into another…",
     },
     "memory.console.hint_move": {
-        "ar": "وضع النقل: انقر عقدة الطرف الجديد… (امسح للإلغاء)",
-        "en": "Move mode: click the new endpoint node… (Clear to cancel)",
+        "ar": "النقل: انقر الطرف الجديد لهذه الحقيقة… (امسح للإيقاف)",
+        "en": "Move: click the new end of this fact… (Clear to stop)",
     },
     "memory.console.hint_group": {
-        "ar": "وضع التجميع: انقر العقدة الأم… (امسح للإلغاء)",
-        "en": "Group mode: click the PARENT node… (Clear to cancel)",
+        "ar": "التجميع: انقر الشيء الذي تضعه تحته… (امسح للإيقاف)",
+        "en": "Group: click the thing to place it under… (Clear to stop)",
     },
     "memory.console.hint_ready": {
-        "ar": "جاهز — اضغط ربط أو دمج، أو انقر حافة لتعديلها أو فك ربطها.",
-        "en": "Ready — press Link or Merge, or click an edge to edit/unlink.",
+        "ar": "جاهز: اضغط «اربط» أو «ادمجهما في واحد».",
+        "en": "Ready: press Connect, or Join into one.",
     },
     "memory.console.hint_idle": {
-        "ar": "انقر عقدة ← فحص. انقر حافة ← تعديل/فك الربط. للربط: عيّن المصدر والهدف أو استخدم وضع الاختيار.",
-        "en": "Click node → inspect. Click edge → edit/unlink. Link: set src+tgt or use pick mode.",
+        "ar": "انقر نقطة لتراها. انقر خطًا لتغيير حقيقته أو إزالتها.",
+        "en": "Click a dot to see it. Click a line to change or remove its fact.",
     },
     "memory.console.linking": {
         "ar": "جارٍ الربط…",
@@ -1808,12 +1808,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Already linked · {subject} —{predicate}→ {object}",
     },
     "memory.console.merge_title": {
-        "ar": "دمج الكيانات",
-        "en": "Merge entities",
+        "ar": "دمج في واحد",
+        "en": "Join into one",
     },
     "memory.console.merge_message": {
-        "ar": "دمج {source} في {target}؟\nتنتقل المعتقدات إلى الهدف، ويُحال المصدر.",
-        "en": "Merge {source} into {target}?\nBeliefs rewire to the target; source is retired.",
+        "ar": "دمج {source} في {target}؟\nتنتقل كل الحقائق عن {source} إلى {target}، ويختفي {source}. لا يمكن التراجع عن هذا.",
+        "en": "Join {source} into {target}?\nEvery fact about {source} moves to {target}, and {source} goes. This cannot be undone.",
     },
     "memory.console.merged": {
         "ar": "دُمج {source} ← {target}",
@@ -1828,20 +1828,20 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Cannot cut — missing belief id and edge triple",
     },
     "memory.console.cut_title": {
-        "ar": "قطع الاتصال",
-        "en": "Cut connection",
+        "ar": "إزالة الحقيقة",
+        "en": "Remove fact",
     },
     "memory.console.cut_message": {
-        "ar": "إزالة هذه الحافة من الذاكرة النشطة؟",
-        "en": "Remove this edge from active memory?",
+        "ar": "إزالة هذه الحقيقة مما يعرفه Kazma؟",
+        "en": "Remove this fact from what Kazma knows?",
     },
     "memory.console.cut_message_soft": {
-        "ar": "إبطال قابل للاسترجاع (من التنظيف).",
-        "en": "Soft-invalidate (recoverable via Hygiene).",
+        "ar": "تبقى في سجل الحقائق السابقة.",
+        "en": "It stays in the record of past facts.",
     },
     "memory.console.cut": {
-        "ar": "قطع",
-        "en": "Cut",
+        "ar": "إزالة",
+        "en": "Remove",
     },
     "memory.console.cut_failed": {
         "ar": "فشل القطع",
@@ -1888,8 +1888,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Cut {n} connections from active memory?",
     },
     "memory.console.cut_connections_title": {
-        "ar": "قطع الاتصالات",
-        "en": "Cut connections",
+        "ar": "إزالة الحقائق",
+        "en": "Remove facts",
     },
     "memory.console.cut_n": {
         "ar": "قطع {n}",
@@ -1936,8 +1936,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Useful when the chain should be leaf → parent → hub (not leaf → hub).",
     },
     "memory.console.cut_hub_title": {
-        "ar": "قطع الاختصار إلى المحور",
-        "en": "Cut hub shortcut",
+        "ar": "إزالة الرابط المباشر بك",
+        "en": "Remove direct link to you",
     },
     "memory.console.cut_hub_message.zero": {
         "ar": "إزالة الروابط المباشرة بالمحور (أنت)؟",
@@ -1964,12 +1964,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Remove {n} direct links to the hub (you)?",
     },
     "memory.console.cut_hub_link": {
-        "ar": "اقطع رابط المحور",
-        "en": "Cut hub link",
+        "ar": "أزل الرابط المباشر",
+        "en": "Remove direct link",
     },
     "memory.console.cut_hub_links": {
-        "ar": "اقطع روابط المحور",
-        "en": "Cut hub links",
+        "ar": "أزل الروابط المباشرة",
+        "en": "Remove direct links",
     },
     "memory.console.no_belief_id_edit": {
         "ar": "لا معرّف للمعتقد — تعذّر التعديل",
@@ -2028,20 +2028,20 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "No belief id — cannot move",
     },
     "memory.console.move_title": {
-        "ar": "أي طرف من الحافة تنقل؟",
-        "en": "Move which end of the edge?",
+        "ar": "نقل أي طرف من هذه الحقيقة؟",
+        "en": "Move which end of this fact?",
     },
     "memory.console.move_message": {
-        "ar": "الموضوع = {subject} · القيمة = {object}. اختر الطرف الذي تنقله إلى عقدة أخرى.",
-        "en": "Subject = {subject} · Object = {object}. Pick the end to move to another node.",
+        "ar": "البداية = {subject} · النهاية = {object}. اختر الطرف الذي تربطه بشيء آخر.",
+        "en": "Start = {subject} · end = {object}. Pick the end to attach to another thing.",
     },
     "memory.console.move_subject": {
-        "ar": "انقل الموضوع",
-        "en": "Move subject",
+        "ar": "انقل البداية",
+        "en": "Move the start",
     },
     "memory.console.move_object": {
-        "ar": "انقل القيمة",
-        "en": "Move object",
+        "ar": "انقل النهاية",
+        "en": "Move the end",
     },
     "memory.console.click_new_endpoint": {
         "ar": "انقر عقدة الطرف الجديد…",
@@ -2052,8 +2052,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Move failed",
     },
     "memory.console.moved_edge": {
-        "ar": "نُقلت الحافة إلى {id}",
-        "en": "Moved edge to {id}",
+        "ar": "نُقلت الحقيقة إلى {id}",
+        "en": "Moved the fact to {id}",
     },
     "memory.console.moved_undo": {
         "ar": " · تراجع",
@@ -2084,16 +2084,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "The hub is the top-level root — not groupable",
     },
     "memory.console.group_pick_parent": {
-        "ar": "انقر العقدة الأم لتجميع «{id}» تحتها…",
-        "en": "Click the PARENT node to group \"{id}\" under…",
+        "ar": "انقر الشيء الذي تضع «{id}» تحته…",
+        "en": "Click the thing to place “{id}” under…",
     },
     "memory.console.group_failed": {
         "ar": "فشل التجميع",
         "en": "Group failed",
     },
     "memory.console.grouped": {
-        "ar": "جُمّعت {member} تحت {root} (المستوى {tier}) · للعرض فقط، الذاكرة لم تتغير",
-        "en": "Grouped {member} under {root} (tier {tier}) · view-only, memory untouched",
+        "ar": "وُضع {member} تحت {root} في الخريطة (المستوى {tier}). لا تتغيّر الذاكرة.",
+        "en": "Placed {member} under {root} on the map (level {tier}). Memory is unchanged.",
     },
     "memory.console.not_grouped": {
         "ar": "غير مُجمّعة",
@@ -2117,27 +2117,27 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "memory.console.act_set_tier": {
         "ar": "المستوى…",
-        "en": "Tier…",
+        "en": "Level…",
     },
     "memory.console.act_set_tier_title": {
         "ar": "حدد مستوى هذه العقدة في التجميع (0 = المحور … 4)",
         "en": "Set this node's tier in its group (0 = hub … 4)",
     },
     "memory.console.tier_prompt_title": {
-        "ar": "مستوى العقدة",
-        "en": "Node tier",
+        "ar": "المستوى في الخريطة",
+        "en": "Level on the map",
     },
     "memory.console.tier_prompt_message": {
-        "ar": "مستوى {id}، من 0 إلى 4. تبقى مستويات العقد تحتها كما هي.",
-        "en": "Tier for {id}, from 0 to 4. Nodes below it keep their tiers.",
+        "ar": "مستوى {id} في الخريطة، من 0 إلى 4. يحتفظ ما تحته بمستوياته.",
+        "en": "Level of {id} on the map, 0 to 4. Things under it keep theirs.",
     },
     "memory.console.tier_invalid": {
         "ar": "اكتب عددًا صحيحًا من 0 إلى 4",
         "en": "Enter a whole number from 0 to 4",
     },
     "memory.console.tier_set": {
-        "ar": "صار مستوى {id} {tier} · للعرض فقط، الذاكرة لم تتغير",
-        "en": "{id} is now tier {tier} · view-only, memory untouched",
+        "ar": "صار {id} في المستوى {tier} في الخريطة. لا تتغيّر الذاكرة.",
+        "en": "{id} is now level {tier} on the map. Memory is unchanged.",
     },
     "memory.console.tier_failed": {
         "ar": "تعذّر تغيير المستوى",
@@ -2148,12 +2148,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Cannot delete protected hub",
     },
     "memory.console.delete_title": {
-        "ar": "حذف الكيان",
-        "en": "Delete entity",
+        "ar": "حذف الاسم",
+        "en": "Delete name",
     },
     "memory.console.delete_message": {
-        "ar": "حذف غلاف الكيان «{id}»؟ (قد يفشل للمحمي أو غير الفارغ.)",
-        "en": "Delete entity shell “{id}”? (Protected / non-empty may fail.)",
+        "ar": "حذف الاسم «{id}»؟ تبقى الحقائق عنه؛ يُحذف الاسم فقط. لا يمكن حذف اسم محمي.",
+        "en": "Delete the name “{id}”? Facts about it stay; only the name goes. A protected name cannot be deleted.",
     },
     "memory.console.deleted": {
         "ar": "حُذف {id}",
@@ -2180,28 +2180,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Close",
     },
     "memory.console.edge_belief": {
-        "ar": "حافة · معتقد",
-        "en": "Edge · belief",
+        "ar": "حقيقة",
+        "en": "Fact",
     },
     "memory.console.edge_id": {
         "ar": "المعرّف: {id}",
         "en": "id: {id}",
     },
     "memory.console.edge_id_missing": {
-        "ar": "المعرّف: (غير موجود — قد يفشل فك الربط)",
-        "en": "id: (missing — unlink may fail)",
+        "ar": "(بلا معرّف: قد تفشل الإزالة)",
+        "en": "(no id: removing may fail)",
     },
     "memory.console.edge_conf": {
         "ar": " · الثقة {n}%",
-        "en": " · conf {n}%",
+        "en": " · confidence {n}%",
     },
     "memory.console.superseded": {
-        "ar": " · مستبدَل",
-        "en": " · superseded",
+        "ar": " · استُبدلت",
+        "en": " · replaced",
     },
     "memory.console.cut_this_edge": {
-        "ar": "اقطع هذه الحافة",
-        "en": "Cut this edge",
+        "ar": "أزل هذه الحقيقة",
+        "en": "Remove this fact",
     },
     "memory.console.edit": {
         "ar": "تعديل",
@@ -2216,12 +2216,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Tgt→B",
     },
     "memory.console.in_list": {
-        "ar": "في القائمة",
-        "en": "In list",
+        "ar": "اعرض في القائمة",
+        "en": "Show in list",
     },
     "memory.console.insp_you_hub": {
-        "ar": "أنت · محور الذاكرة",
-        "en": "you · memory hub",
+        "ar": "أنت: كل شيء يرتبط بك",
+        "en": "You: everything connects to you",
     },
     "memory.console.insp_type": {
         "ar": "النوع: {type}",
@@ -2232,68 +2232,68 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "id:",
     },
     "memory.console.high_stakes": {
-        "ar": "عالي الأهمية",
-        "en": "high-stakes",
+        "ar": "حسّاس",
+        "en": "sensitive",
     },
     "memory.console.fact_node": {
-        "ar": " · عقدة حقيقة",
-        "en": " · fact node",
+        "ar": " · قيمة",
+        "en": " · a value",
     },
     "memory.console.act_src": {
-        "ar": "مصدر",
-        "en": "Src",
+        "ar": "من",
+        "en": "From",
     },
     "memory.console.act_src_title": {
-        "ar": "اجعلها مصدر الربط/الدمج",
-        "en": "Set as link/merge source",
+        "ar": "استخدمه أولَ شيئين للربط أو الدمج",
+        "en": "Use as the first of two things to connect or join",
     },
     "memory.console.act_tgt": {
-        "ar": "هدف",
-        "en": "Tgt",
+        "ar": "إلى",
+        "en": "To",
     },
     "memory.console.act_tgt_title": {
-        "ar": "اجعلها هدف الربط/الدمج",
-        "en": "Set as link/merge target",
+        "ar": "استخدمه ثانيَ شيئين للربط أو الدمج",
+        "en": "Use as the second of two things to connect or join",
     },
     "memory.console.act_merge_from": {
-        "ar": "دمج←",
-        "en": "Merge→",
+        "ar": "ادمج في…",
+        "en": "Join into…",
     },
     "memory.console.act_merge_from_title": {
-        "ar": "ابدأ الدمج من هذه العقدة (ستُحال)",
-        "en": "Start merge from this node (will be retired)",
+        "ar": "هذا هو الشيء نفسه كشيء آخر: انقر ذاك بعد ذلك؛ يختفي هذا",
+        "en": "This is the same thing as another: click that one next; this one goes",
     },
     "memory.console.act_group_under": {
-        "ar": "جمّع تحت←",
-        "en": "Group under→",
+        "ar": "ضعه تحت…",
+        "en": "Place under…",
     },
     "memory.console.act_group_under_title": {
-        "ar": "جمّع هذه العقدة تحت عقدة أم",
-        "en": "Group this node under a parent",
+        "ar": "ارسم هذا تحت شيء آخر في الخريطة. لا تتغيّر الذاكرة.",
+        "en": "Draw this under another thing on the map. Memory is unchanged.",
     },
     "memory.console.act_ungroup": {
-        "ar": "فك التجميع",
-        "en": "Ungroup",
+        "ar": "ألغِ الوضع",
+        "en": "Unplace",
     },
     "memory.console.act_ungroup_title": {
-        "ar": "أزل التجميع المعروض لهذه العقدة",
-        "en": "Remove view-only grouping for this node",
+        "ar": "توقف عن رسم هذا تحت شيء آخر. لا تتغيّر الذاكرة.",
+        "en": "Stop drawing this under another thing. Memory is unchanged.",
     },
     "memory.console.act_cut_all": {
-        "ar": "اقطع الكل ({n})",
-        "en": "Cut all ({n})",
+        "ar": "أزل كل حقائقه ({n})",
+        "en": "Remove all its facts ({n})",
     },
     "memory.console.act_cut_all_title": {
-        "ar": "اقطع كل حواف هذه العقدة",
-        "en": "Cut every edge on this node",
+        "ar": "أزل كل حقيقة على هذه النقطة",
+        "en": "Remove every fact on this dot",
     },
     "memory.console.act_major_title": {
-        "ar": "علّمها كرئيسية",
-        "en": "Mark as major",
+        "ar": "ارسمه أكبر وبلونه الخاص",
+        "en": "Draw this bigger, in its own colour",
     },
     "memory.console.act_major": {
-        "ar": "رئيسية",
-        "en": "Major",
+        "ar": "أبرِزه",
+        "en": "Highlight",
     },
     "memory.console.act_rename": {
         "ar": "إعادة تسمية",
@@ -2304,32 +2304,32 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Change display name",
     },
     "memory.console.act_in_list_title": {
-        "ar": "أبرزها في قائمة الكيانات",
-        "en": "Highlight in entities list",
+        "ar": "اعرض في قائمة الأشياء",
+        "en": "Show in the Things list",
     },
     "memory.console.act_delete": {
-        "ar": "حذف",
-        "en": "Del",
+        "ar": "احذف الاسم",
+        "en": "Delete name",
     },
     "memory.console.act_delete_title": {
-        "ar": "احذف غلاف الكيان الفارغ",
-        "en": "Delete empty entity shell",
+        "ar": "احذف هذا الاسم. تبقى الحقائق عنه.",
+        "en": "Delete this name. Facts about it stay.",
     },
     "memory.console.act_link_from": {
-        "ar": "ربط←",
-        "en": "Link→",
+        "ar": "اربط…",
+        "en": "Connect…",
     },
     "memory.console.act_link_from_title": {
-        "ar": "ابدأ الربط من هذه العقدة — ثم انقر الهدف",
-        "en": "Start link from this node — click target next",
+        "ar": "اربط هذا بشيء آخر: انقر ذاك بعد ذلك",
+        "en": "Connect this to another thing: click that one next",
     },
     "memory.console.act_cut_hub": {
-        "ar": "اقطع المحور",
-        "en": "Cut hub",
+        "ar": "أزل الرابط المباشر بك",
+        "en": "Remove direct link to you",
     },
     "memory.console.act_cut_hub_title": {
-        "ar": "أزل الروابط المباشرة بالمحور (أنت)",
-        "en": "Remove direct link(s) to the hub (you)",
+        "ar": "أزل الحقائق التي تربط هذا بك مباشرة",
+        "en": "Remove the facts joining this straight to you",
     },
     "memory.console.more": {
         "ar": "المزيد",
@@ -2340,16 +2340,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Less",
     },
     "memory.console.hub_shortcut": {
-        "ar": "<strong>اختصار إلى المحور</strong> — رابط مباشر بالمحور مع ارتباط أيضًا بـ {parents}.",
-        "en": "<strong>Hub shortcut</strong> — direct link to hub while also linked to {parents}.",
+        "ar": "<strong>رابط مباشر بك</strong> مع أنه مرتبط أيضًا عبر {parents}.",
+        "en": "<strong>Direct link to you</strong> while also linked through {parents}.",
     },
     "memory.console.hub_shortcut_hint": {
-        "ar": "الأفضل: هذه ← الأصل ← المحور (أنت). استخدم <b>اقطع المحور</b> لإزالة حافة الاختصار.",
-        "en": "Preferred: this → parent → hub (you). Use <b>Cut hub</b> to drop the shortcut edge.",
+        "ar": "يكون أوضح عادة هكذا: هذا ← أصله ← أنت. استخدم <b>أزل الرابط المباشر بك</b> لإسقاط الاختصار.",
+        "en": "Usually clearer as this → its parent → you. Use <b>Remove direct link to you</b> to drop the shortcut.",
     },
     "memory.console.hub_only": {
-        "ar": "مرتبطة بالمحور فقط. استخدم <b>قطع</b> في صف الاتصال لفصلها.",
-        "en": "Linked only to hub. Use <b>Cut</b> on the connection row to detach.",
+        "ar": "مرتبط بك فقط. استخدم <b>إزالة</b> في صف الحقيقة لفصله.",
+        "en": "Linked only to you. Use <b>Remove</b> on a fact row to detach it.",
     },
     "memory.console.contents": {
         "ar": "المحتوى",
@@ -2360,28 +2360,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Connections ({n})",
     },
     "memory.console.hub_badge": {
-        "ar": "محور",
-        "en": "hub",
+        "ar": "أنت",
+        "en": "you",
     },
     "memory.console.cut_this_edge_only": {
-        "ar": "اقطع هذه الحافة فقط",
-        "en": "Cut this edge only",
+        "ar": "أزل هذه الحقيقة فقط",
+        "en": "Remove only this fact",
     },
     "memory.console.move": {
         "ar": "نقل",
         "en": "Move",
     },
     "memory.console.move_title_btn": {
-        "ar": "انقل هذه الحافة إلى عقدة أخرى",
-        "en": "Move this edge to another node (repoint)",
+        "ar": "اربط هذه الحقيقة بشيء آخر",
+        "en": "Attach this fact to another thing",
     },
     "memory.console.more_edges": {
         "ar": "+{n} أخرى",
         "en": "+{n} more",
     },
     "memory.console.no_direct_beliefs": {
-        "ar": "لا معتقدات مباشرة — استخدم ربط← لوصلها.",
-        "en": "No direct beliefs — use Link→ to connect it.",
+        "ar": "لا حقائق خاصة به. استخدم «اربط…» لوصله بشيء.",
+        "en": "No facts of its own. Use Connect… to join it to something.",
     },
     "memory.console.toast_source": {
         "ar": "المصدر = {id}",
@@ -2400,8 +2400,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Merge from {id} — click survivor target",
     },
     "memory.console.cut_all_title": {
-        "ar": "قطع كل الاتصالات",
-        "en": "Cut all connections",
+        "ar": "إزالة كل حقائقه",
+        "en": "Remove all its facts",
     },
     "memory.console.cut_all_message.zero": {
         "ar": "فصل «{name}» عن جيرانها؟ يبقى غلاف العقدة.",
@@ -2500,12 +2500,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "filtered from {n}",
     },
     "memory.console.filter_entity": {
-        "ar": "كيان:{type}",
-        "en": "entity:{type}",
+        "ar": "النوع: {type}",
+        "en": "Kind: {type}",
     },
     "memory.console.filter_pred": {
-        "ar": "محمول:{type}",
-        "en": "pred:{type}",
+        "ar": "الحقيقة: {type}",
+        "en": "Fact: {type}",
     },
     "memory.console.reset_all": {
         "ar": "إعادة ضبط الكل",
@@ -2532,12 +2532,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "SVG downloaded",
     },
     "memory.console.link_mode_cancelled": {
-        "ar": "أُلغي وضع الربط",
-        "en": "Link mode cancelled",
+        "ar": "أُلغي الربط",
+        "en": "Connecting cancelled",
     },
     "memory.console.merge_mode_cancelled": {
-        "ar": "أُلغي وضع الدمج",
-        "en": "Merge mode cancelled",
+        "ar": "أُلغي الدمج",
+        "en": "Joining cancelled",
     },
     "memory.console.slots_cleared": {
         "ar": "مُسح المصدر والهدف",
@@ -2572,28 +2572,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Undo failed: {error}",
     },
     "memory.page.chip_beliefs": {
-        "ar": "المعتقدات",
-        "en": "Beliefs",
+        "ar": "الحقائق",
+        "en": "Facts",
     },
     "memory.page.chip_invalidated": {
-        "ar": "المُبطَلة",
-        "en": "Invalidated",
+        "ar": "حقائق مُزالة",
+        "en": "Removed facts",
     },
     "memory.page.chip_entities": {
-        "ar": "الكيانات",
-        "en": "Entities",
+        "ar": "الأشياء",
+        "en": "Things",
     },
     "memory.page.chip_empty": {
-        "ar": "الفارغة",
-        "en": "Empty",
+        "ar": "بلا حقائق",
+        "en": "With no facts",
     },
     "memory.page.chip_isolated": {
-        "ar": "المعزولة",
-        "en": "Isolated",
+        "ar": "غير مرتبطة",
+        "en": "Unconnected",
     },
     "memory.page.chip_episodes": {
-        "ar": "الحلقات",
-        "en": "Episodes",
+        "ar": "ذكريات المحادثات",
+        "en": "Conversation memories",
     },
     "memory.page.showing": {
         "ar": "عرض {start}–{end} من {total}",
@@ -2736,12 +2736,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Merge rejected",
     },
     "memory.page.hygiene_complete": {
-        "ar": "اكتمل التنظيف",
-        "en": "Hygiene complete",
+        "ar": "تم الترتيب",
+        "en": "Clean-up done",
     },
     "memory.page.hygiene_failed": {
-        "ar": "فشل التنظيف",
-        "en": "Hygiene failed",
+        "ar": "فشل الترتيب",
+        "en": "The clean-up failed",
     },
     "memory.console.none": {
         "ar": "لا شيء",
@@ -2863,12 +2863,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     # The graph's hover tips (2026-10-01).
     "memory.console.tip_link_pick": {
-        "ar": "اختيار للربط",
-        "en": "link pick",
+        "ar": "انقر لاختياره للربط",
+        "en": "click to choose it for Connect",
     },
     "memory.console.tip_merge_pick": {
-        "ar": "اختيار للدمج",
-        "en": "merge pick",
+        "ar": "انقر لاختياره للدمج",
+        "en": "click to choose it for Join",
     },
     "memory.console.tip_you": {
         "ar": "أنت · مركز الذاكرة",
@@ -2879,8 +2879,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "type: {type}",
     },
     "memory.console.tip_high_stakes": {
-        "ar": "عالي الأهمية",
-        "en": "high-stakes",
+        "ar": "لا يُدمج تلقائيًا مع اسم مشابه",
+        "en": "never joined automatically with a similar name",
     },
     "memory.console.tip_fact": {
         "ar": "حقيقة",
@@ -3013,5 +3013,46 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "memory.mc.filter_beliefs": {
         "ar": "تصفية المعتقدات المعروفة",
         "en": "Filter known beliefs",
+    },
+    # A memory kept whole, shown bounded (2026-11-19, memory/limits.py).
+    "memory.console.whole_memory": {
+        "ar": "الذاكرة كاملة",
+        "en": "The whole memory",
+    },
+    "memory.console.more_chars.zero": {
+        "ar": "لا أحرف أخرى",
+        "en": "{n} more characters",
+    },
+    "memory.console.more_chars.one": {
+        "ar": "حرف واحد آخر",
+        "en": "1 more character",
+    },
+    "memory.console.more_chars.two": {
+        "ar": "حرفان آخران",
+        "en": "{n} more characters",
+    },
+    "memory.console.more_chars.few": {
+        "ar": "{n} أحرف أخرى",
+        "en": "{n} more characters",
+    },
+    "memory.console.more_chars.many": {
+        "ar": "{n} حرفًا آخر",
+        "en": "{n} more characters",
+    },
+    "memory.console.more_chars.other": {
+        "ar": "{n} حرف آخر",
+        "en": "{n} more characters",
+    },
+    "memory.console.whole_next": {
+        "ar": "اعرض الجزء التالي",
+        "en": "Show the next part",
+    },
+    "memory.console.whole_failed": {
+        "ar": "تعذّرت قراءة الذاكرة. لم تُحذف.",
+        "en": "The memory could not be read. It is not gone.",
+    },
+    "memory.console.whole_range": {
+        "ar": "الأحرف من {start} إلى {end} من أصل {total}",
+        "en": "Characters {start}-{end} of {total}",
     },
 }

@@ -323,11 +323,6 @@ def _schedule_post_turn_memory(
                            why="no thread")
 
 
-#: The most a deferred turn carries of each text: more than the episode keeps
-#: (4,000) and the extractor needs, bounded so a queue row stays small.
-_DEFERRED_TEXT_MAX = 16_000
-
-
 def _defer_turn_memory(
     messages: list[dict[str, Any]],
     *,
@@ -338,6 +333,7 @@ def _defer_turn_memory(
     at: float | None = None,
 ) -> None:
     """Hand one turn to the durable queue (``post_turn_memory``)."""
+    from kazma_core.memory.limits import episode_text
     from kazma_core.memory.task_queue import enqueue_task
 
     user_text, assistant_text = extract_turn_texts(messages)
@@ -346,8 +342,10 @@ def _defer_turn_memory(
     task_id = enqueue_task(
         "post_turn_memory",
         {
-            "user_text": user_text[:_DEFERRED_TEXT_MAX],
-            "assistant_text": assistant_text[:_DEFERRED_TEXT_MAX],
+            # The whole turn, as the episode keeps it (memory/limits.py): it
+            # carried 16,000 characters of each side until 2026-11-19.
+            "user_text": episode_text(user_text, field="question"),
+            "assistant_text": episode_text(assistant_text, field="answer"),
             "session_id": session_id,
             "turn": turn,
             "tenant_id": tenant_id,

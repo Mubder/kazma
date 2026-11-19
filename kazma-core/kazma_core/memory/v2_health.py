@@ -424,6 +424,7 @@ def _findability(primary_conn: sqlite3.Connection) -> dict[str, Any] | None:
     from kazma_core.memory.legacy_tables import legacy_archive_counts
     from kazma_core.memory.reembed import vector_repair_counts
     from kazma_core.memory.rehydrate import STATE_KEY, erased_counts
+    from kazma_core.memory.text_fill import text_fill_counts
     from kazma_core.memory.turn_reconcile import STATE_KEY as RECONCILE_KEY
 
     try:
@@ -431,6 +432,9 @@ def _findability(primary_conn: sqlite3.Connection) -> dict[str, Any] | None:
             "vectors": vector_repair_counts(primary_conn),
             "erased": erased_counts(primary_conn),
             "legacy_archive": legacy_archive_counts(primary_conn),
+            # Memories the old 4,000-character cut shortened: brought back
+            # from the chat, never cut, or with no whole copy left.
+            "cut_text": text_fill_counts(primary_conn),
         }
         state = get_config_store().get(STATE_KEY)
         if isinstance(state, dict) and isinstance(state.get("last"), dict):

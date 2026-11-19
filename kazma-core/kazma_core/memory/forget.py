@@ -66,15 +66,14 @@ __all__ = [
 #: and no tier rule (``macro_sleep``) moves it.
 FORGOTTEN_TIER = "forgotten"
 
-#: How much of a question an episode keeps (``dual_write`` / ``turn_reconcile``):
-#: the ledger hashes the stored form, so both sides hash the same text.
-_TEXT_CAP = 4000
-
-
 def question_sha(text: str | None) -> str:
-    """The ledger's key for a turn's question: its stored form, hashed."""
-    stored = (text or "")[:_TEXT_CAP].strip()
-    return hashlib.sha256(stored.encode("utf-8")).hexdigest()[:32]
+    """The ledger's key for a turn's question: ``limits.question_key`` (its
+    first 4,000 characters, stripped), hashed. A memory keeps its whole
+    question since 2026-11-19; the key is the part every row ever held, so a
+    ledger row written before still names the same turn."""
+    from kazma_core.memory.limits import question_key
+
+    return hashlib.sha256(question_key(text).encode("utf-8")).hexdigest()[:32]
 
 
 def chat_keys(key: str) -> list[str]:
@@ -938,11 +937,18 @@ def _scrub_legacy_copies(
         if sets:
             n += conn.execute(f"UPDATE episodes_archive SET {sets} WHERE id IN ({marks})", ids).rowcount
             if "user_text" in episode_cols and "tenant_id" in episode_cols:
+                from kazma_core.memory.limits import LEGACY_TEXT_CUT
+
                 for tenant, question, _answer in texts:
                     if question.strip():
+                        # The archive's copies were made from rows that kept
+                        # 4,000 characters of the question; a memory keeps
+                        # all of it since 2026-11-19: either form is a copy.
+                        forms = list(dict.fromkeys((question, question[:LEGACY_TEXT_CUT])))
+                        marks_q = ",".join("?" for _ in forms)
                         n += conn.execute(
-                            f"UPDATE episodes_archive SET {sets} WHERE tenant_id = ? AND user_text = ?",
-                            (tenant, question),
+                            f"UPDATE episodes_archive SET {sets} WHERE tenant_id = ? AND user_text IN ({marks_q})",
+                            (tenant, *forms),
                         ).rowcount
     entity_cols = _table_columns(conn, "entities_archive")
     if entity_cols and texts:

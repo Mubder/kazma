@@ -136,6 +136,7 @@ _PROF: dict[str, tuple[EffectKind, SemanticTier, str | None, tuple[str, ...]]] =
                      "store_fact|revise_fact",
                      ("subject", "predicate", "object")),
     "memory_search": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    "memory_read": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "memory_list_beliefs": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "memory_list_entities": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "memory_invalidate": (EffectKind.WRITE_MEMORY, SemanticTier.HIGH,

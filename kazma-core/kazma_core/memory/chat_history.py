@@ -152,7 +152,7 @@ def conversations_for(
     key: str, *, sqlite_path: Path | None = None, strict: bool = False
 ) -> list[dict[str, Any]]:
     """Every stored copy of the conversation *key* names, as a session id or
-    a thread id: ``[{"session_id", "thread_id", "messages"}]``.
+    a thread id: ``[{"session_id", "thread_id", "tenant_id", "messages"}]``.
 
     The primary store's row and a spooled copy are both returned -- a caller
     looking for one turn wants every version. Any tenant: a caller that
@@ -171,7 +171,7 @@ def conversations_for(
             from kazma_core.db.pg_helpers import get_pool
 
             rows = get_pool().execute(
-                "SELECT session_id, thread_id, messages FROM kazma_chat_sessions "
+                "SELECT session_id, thread_id, tenant_id, messages FROM kazma_chat_sessions "
                 "WHERE session_id = %s OR thread_id = %s",
                 [key, key],
             )
@@ -183,7 +183,7 @@ def conversations_for(
                 rows = [
                     dict(r)
                     for r in conn.execute(
-                        "SELECT session_id, thread_id, messages FROM sessions "
+                        "SELECT session_id, thread_id, tenant_id, messages FROM sessions "
                         "WHERE session_id = ? OR thread_id = ?",
                         (key, key),
                     ).fetchall()
@@ -358,6 +358,9 @@ def _conversation(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "session_id": str(row.get("session_id") or ""),
         "thread_id": str(row.get("thread_id") or ""),
+        # Whose chat it is: a reader that writes what it finds into memory
+        # keeps to the row's own tenant (memory/text_fill.py).
+        "tenant_id": str(row.get("tenant_id") or "default"),
         "messages": msgs if isinstance(msgs, list) else [],
     }
 

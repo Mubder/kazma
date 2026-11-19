@@ -20,18 +20,36 @@ which keyword search and word coverage already read. Live answers run to
 thousands of characters and would pull a vector further from what the turn
 was about than the benchmark's short ones. Word coverage and the keyword
 index read all three fields.
+
+**Stored whole, shown bounded** (2026-11-19, ``memory/limits.py``). A
+memory keeps all of its text; the vector is made from its first
+``EMBED_TEXT_CHARS`` characters (what it always was), and what a list of
+memories shows of one is bounded and says how much more there is
+(:func:`display_parts`), so the model knows to read the rest with
+``memory_read``.
 """
 
 from __future__ import annotations
 
 import re
 
-__all__ = ["display_text", "embed_text", "is_small_talk", "is_small_talk_words", "match_text"]
+from kazma_core.memory.limits import (
+    MATCH_TEXT_CHARS,
+    RECALL_SHOW_ANSWER,
+    RECALL_SHOW_ONE,
+    RECALL_SHOW_QUESTION,
+    embed_input,
+)
 
-#: Characters of each side recall shows the model (five turns fit its budget).
-_SHOW_QUESTION = 200
-_SHOW_ANSWER = 300
-_SHOW_ONE = 500
+__all__ = [
+    "display_parts",
+    "display_text",
+    "embed_text",
+    "is_small_talk",
+    "is_small_talk_words",
+    "match_text",
+    "more_note",
+]
 
 
 #: The whole message is small talk (plan W5) -- the words themselves, never a
@@ -146,9 +164,11 @@ def _clip(text: str, limit: int) -> str:
 def embed_text(user_text: str | None, assistant_text: str | None,
                summary_text: str | None = "") -> str:
     """The text an episode's meaning vector is made from: the first of the
-    summary, the question and the answer that is not blank."""
-    return next((t.strip() for t in (summary_text, user_text, assistant_text)
-                 if t and t.strip()), "")
+    summary, the question and the answer that is not blank -- its first
+    ``limits.EMBED_TEXT_CHARS`` characters (a memory is stored whole; the
+    vector covers its start, as it always did)."""
+    return embed_input(next((t.strip() for t in (summary_text, user_text, assistant_text)
+                             if t and t.strip()), "")).strip()
 
 
 def match_text(user_text: str | None, assistant_text: str | None,
@@ -160,17 +180,56 @@ def match_text(user_text: str | None, assistant_text: str | None,
     changed which memories recall kept -- one question asked twice with two
     answers stopped counting as one -- and precision fell on the benchmark.
     """
-    return str(summary_text or user_text or assistant_text or "")[:400]
+    return str(summary_text or user_text or assistant_text or "")[:MATCH_TEXT_CHARS]
 
 
-def display_text(user_text: str | None, assistant_text: str | None,
-                 summary_text: str | None = "") -> str:
-    """What recall shows of an episode: who said what, bounded.
+def display_parts(user_text: str | None, assistant_text: str | None,
+                  summary_text: str | None = "", *, question_max: int = RECALL_SHOW_QUESTION,
+                  answer_max: int = RECALL_SHOW_ANSWER, one_max: int = RECALL_SHOW_ONE) -> tuple[str, int]:
+    """What a list shows of an episode, and how many of its characters it
+    leaves out: who said what, each side bounded (the recall block's bounds
+    unless given; ``memory_search`` and the probe pass ``limits.MEMORY_SHOW_*``).
 
     Labelled only when both sides are there -- a swarm result keeps its
     whole text in one field and must not read as something the user said.
     """
     question, answer = _flat(user_text), _flat(assistant_text)
     if question and answer:
-        return f"User: {_clip(question, _SHOW_QUESTION)} / Assistant: {_clip(answer, _SHOW_ANSWER)}"
-    return _clip(question or answer or _flat(summary_text), _SHOW_ONE)
+        shown_q, shown_a = _clip(question, question_max), _clip(answer, answer_max)
+        hidden = _hidden(question, question_max) + _hidden(answer, answer_max)
+        return f"User: {shown_q} / Assistant: {shown_a}", hidden
+    text = question or answer or _flat(summary_text)
+    return _clip(text, one_max), _hidden(text, one_max)
+
+
+def display_text(user_text: str | None, assistant_text: str | None,
+                 summary_text: str | None = "") -> str:
+    """What recall shows of an episode: :func:`display_parts`' text."""
+    return display_parts(user_text, assistant_text, summary_text)[0]
+
+
+def _hidden(text: str, limit: int) -> int:
+    """Characters :func:`_clip` leaves out of *text* (it keeps limit - 1)."""
+    return 0 if len(text) <= limit else len(text) - (limit - 1)
+
+
+#: The note after a memory a list cut short: how much more there is, and the
+#: tool that reads it whole. In the memory's own language (the model reads
+#: it beside that text); the Arabic says "{n} of the characters were not
+#: shown", right for any number.
+_MORE_EN = "[{more} not shown: memory_read(\"{id}\") reads the whole memory]"
+_MORE_AR = "[لم يُعرض {n} من الأحرف: memory_read(\"{id}\") يقرأ الذاكرة كاملة]"
+
+
+def more_note(hidden: int, memory_id: str, sample: str = "") -> str:
+    """The note a cut memory ends with, or nothing when nothing was left out."""
+    if hidden <= 0 or not memory_id:
+        return ""
+    from kazma_core.documents.arabic import is_rtl_dominant
+
+    if is_rtl_dominant(sample or ""):
+        return _MORE_AR.format(n=f"{hidden:,}", id=memory_id)
+    from kazma_core.english_count import count_noun
+
+    return _MORE_EN.format(more=count_noun(hidden, "character"), id=memory_id)
+

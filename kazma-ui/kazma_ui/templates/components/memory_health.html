@@ -1,0 +1,180 @@
+{# How memory is running, and its backups (Memory page review, 2026-11-18):
+   folded away, since a person opens it when something seems wrong. Styles
+   are the console's (.mem-console on the page). Script: memory_console.js. #}
+<details class="card mem-fold" id="memory-health" style="padding:0;">
+  <summary>
+    <span class="mem-fold-chevron" aria-hidden="true"><span class="ki" data-icon="chevron-right"></span></span>
+    <span>
+      <span class="mem-fold-title">{{ t('memory.page.health_title') }}</span>
+      <span class="mem-fold-sub">{{ t('memory.page.health_sub') }}</span>
+    </span>
+  </summary>
+  <div class="mem-fold-body">
+
+    <!-- Overall status, its parts, and what needs attention -->
+    <div id="memory-governance-section" class="card-nested" style="margin-bottom:16px;">
+      <div class="mem-card-head">
+        <div>
+          <h3 class="mem-card-title">{{ t('memory.page.health_parts') }}</h3>
+          <p class="mem-card-hint" id="memory-status-detail" translate="no">–</p>
+        </div>
+        <button id="install-ml-btn" class="btn btn-sm btn-primary" style="display:none;white-space:nowrap;">
+          {{ t('memory.page.install_ml') }}
+        </button>
+      </div>
+      <div id="memory-pipeline" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;"></div>
+      <div id="memory-kpi-grid" class="mem-kpi-grid" style="margin-bottom:12px;">
+        <div id="kpi-health-tile" class="stat-tile tone-neutral mem-kpi">
+          <div class="stat-tile-icon"><span class="ki" data-icon="activity" aria-hidden="true"></span></div>
+          <div class="stat-tile-label">{{ t('memory.page.health_parts_ok') }}</div>
+          <div id="kpi-health-summary" class="stat-tile-value">–</div>
+          <div class="mem-kpi-sub">{{ t('memory.page.health_parts_ok_sub') }}</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+        <span class="mem-section-label">{{ t('dashboard.memory_components') }}</span>
+        <span style="display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span id="memory-health-summary" class="mem-muted" style="font-size:0.75rem;"></span>
+          <button type="button" id="memory-components-toggle-all" class="btn btn-secondary btn-xs" title="{{ t('memory.mc.expand_or_collapse_all_health') }}">{{ t('memory.mc.expand_all') }}</button>
+        </span>
+      </div>
+      <div id="memory-components-grid" style="display:flex;flex-direction:column;gap:8px;">
+        <div class="card-nested mem-muted" style="padding:10px 12px;font-size:0.8rem;">
+          {{ t('dashboard.memory_probing') }}
+        </div>
+      </div>
+      <div id="memory-issues-list" class="notice tone-warning" style="display:none;margin-top:10px;font-size:0.8rem;line-height:1.45;"></div>
+    </div>
+
+    <!-- The memory engine: what it holds and how its work is going -->
+    <div id="v2-memory-section" class="card-nested" style="margin-bottom:16px;">
+      <div class="mem-card-head" style="margin-bottom:6px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <h3 class="mem-card-title">{{ t('memory.page.engine_title') }}</h3>
+          <span id="v2-status-badge" class="badge badge-neutral">—</span>
+        </div>
+        <button id="v2-refresh-btn" type="button" class="btn btn-secondary btn-sm">{{ t('common.refresh') }}</button>
+      </div>
+      <div id="v2-status-desc" class="mem-muted" style="font-size:0.82rem;margin-bottom:14px;">{{ t('common.loading') }}</div>
+
+      <div id="v2-kpi-grid" class="mem-kpi-grid" style="margin-bottom:16px;">
+        <div class="stat-tile tone-accent mem-kpi">
+          <div class="stat-tile-icon"><span class="ki" data-icon="book" aria-hidden="true"></span></div>
+          <div class="stat-tile-label">{{ t('memory.page.kpi_facts') }}</div>
+          <div id="v2-kpi-beliefs-active" class="stat-tile-value">–</div>
+          <div id="v2-kpi-beliefs-meta" class="mem-kpi-sub">…</div>
+        </div>
+        <div class="stat-tile tone-info mem-kpi">
+          <div class="stat-tile-icon"><span class="ki" data-icon="message" aria-hidden="true"></span></div>
+          <div class="stat-tile-label">{{ t('memory.page.kpi_memories') }}</div>
+          <div id="v2-kpi-episodes-recall" class="stat-tile-value">–</div>
+          <div id="v2-kpi-episodes-meta" class="mem-kpi-sub">…</div>
+        </div>
+        <div class="stat-tile tone-neutral mem-kpi">
+          <div class="stat-tile-icon"><span class="ki" data-icon="hexagon" aria-hidden="true"></span></div>
+          <div class="stat-tile-label">{{ t('memory.page.kpi_things') }}</div>
+          <div id="v2-kpi-entities" class="stat-tile-value">–</div>
+          <div id="v2-kpi-procedural-meta" class="mem-kpi-sub">…</div>
+        </div>
+        <div id="v2-kpi-queue-tile" class="stat-tile tone-neutral mem-kpi">
+          <div class="stat-tile-icon"><span class="ki" data-icon="list" aria-hidden="true"></span></div>
+          <div class="stat-tile-label">{{ t('memory.page.kpi_queue') }}</div>
+          <div id="v2-kpi-queue" class="stat-tile-value">–</div>
+          <div id="v2-kpi-queue-meta" class="mem-kpi-sub">…</div>
+        </div>
+      </div>
+
+      <!-- After each reply: did the turn reach memory; the engine's parts -->
+      <div id="v2-post-turn-strip" class="card-nested mem-strip" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px;padding:10px 12px;font-size:0.8rem;">
+        <span style="font-weight:600;color:var(--text-secondary);">{{ t('memory.page.after_each_reply') }}</span>
+        <span id="v2-post-turn-ok" class="mem-muted">–</span>
+        <span id="v2-post-turn-err" class="mem-muted">{{ t('memory.mc.last_error') }}</span>
+        <span id="v2-embedder-ready" class="mem-muted">{{ t('memory.mc.embedder') }}</span>
+        <span id="v2-reconsol-meta" class="mem-muted">{{ t('memory.mc.reconsol') }}</span>
+        <span id="v2-graph-backend" class="mem-muted">{{ t('memory.mc.graph') }}</span>
+        <span id="v2-backends-mode" class="mem-muted">{{ t('memory.mc.backends') }}</span>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:12px;">
+        <div class="card-nested" style="padding:12px;">
+          <div class="mem-card-head" style="margin-bottom:6px;">
+            <span class="mem-section-label">{{ t('memory.page.queue_title') }}</span>
+            <span class="mem-actions-row">
+              <button id="v2-queue-clear-failed" type="button" class="btn btn-secondary btn-xs" title="{{ t('memory.mc.delete_failed_dead_letter_tasks') }}">{{ t('memory.page.queue_clear_failed') }}</button>
+              <button id="v2-queue-refresh" type="button" class="btn btn-ghost btn-xs" aria-label="{{ t('memory.page.refresh_queue') }}" title="{{ t('memory.page.refresh_queue') }}"><span class="ki" data-icon="refresh" aria-hidden="true"></span></button>
+            </span>
+          </div>
+          <p class="mem-card-hint" style="margin-top:0;">{{ t('memory.page.queue_hint') }}</p>
+          <div id="v2-queue-table" class="mem-muted" style="font-size:0.75rem;font-family:var(--font-mono);max-height:160px;overflow-y:auto;">{{ t('common.loading') }}</div>
+          <button id="v2-reconsolidate-btn" type="button" class="btn btn-sm btn-secondary" style="margin-top:8px;" title="{{ t('memory.page.reconsolidate_hint') }}">{{ t('memory.page.reconsolidate') }}</button>
+        </div>
+        <div class="card-nested" style="padding:12px;">
+          <div class="mem-card-head" style="margin-bottom:6px;">
+            <span class="mem-section-label">{{ t('memory.page.procedures_title') }}</span>
+            <button id="v2-procedural-refresh" type="button" class="btn btn-ghost btn-xs" aria-label="{{ t('memory.page.refresh_procedures') }}" title="{{ t('memory.page.refresh_procedures') }}"><span class="ki" data-icon="refresh" aria-hidden="true"></span></button>
+          </div>
+          <p class="mem-card-hint" style="margin-top:0;">{{ t('memory.page.procedures_hint') }}</p>
+          <div id="v2-procedural-list" class="mem-muted" style="font-size:0.75rem;max-height:160px;overflow-y:auto;">{{ t('common.loading') }}</div>
+          <div id="v2-procedural-breakdown" class="mem-muted" style="font-size:0.72rem;margin-top:6px;line-height:1.3;">–</div>
+        </div>
+        <div class="card-nested" style="padding:12px;">
+          <span class="mem-section-label">{{ t('memory.page.tiers_title') }}</span>
+          <p class="mem-card-hint">{{ t('memory.page.tiers_hint') }}</p>
+          <div id="v2-tier-breakdown" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;"></div>
+        </div>
+        <div class="card-nested" style="padding:12px;">
+          <span class="mem-section-label">{{ t('memory.mc.memory_quality') }}</span>
+          <div id="v2-quality-score" style="font-size:1.4rem;font-weight:600;color:var(--text-primary);margin-top:6px;">–</div>
+          <div id="v2-quality-detail" class="mem-muted" style="font-size:0.75rem;margin-top:4px;">–</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Backups and database upkeep -->
+    <div class="card-nested">
+      <div class="mem-card-head">
+        <div>
+          <h3 class="mem-card-title">{{ t('memory.page.backups_title') }}</h3>
+          <p class="mem-card-hint">{{ t('memory.page.backups_hint') }}</p>
+        </div>
+        <button id="toggle-maintenance-deck" type="button" class="btn btn-secondary btn-sm" aria-controls="maintenance-deck">
+          <span id="deck-toggle-arrow"><span class="ki" data-icon="chevron-right" aria-hidden="true"></span></span> {{ t('memory.page.backups_show') }}
+        </button>
+      </div>
+      <div id="maintenance-deck" style="display:none;margin-top:12px;">
+        <div class="mem-actions-row" style="margin-bottom:12px;">
+          <button id="trigger-backup-btn" type="button" class="btn btn-sm btn-primary" title="{{ t('memory.page.backup_now_hint') }}">
+            <span class="mem-spinner" id="backup-spinner"></span>
+            <span class="ki" data-icon="save" aria-hidden="true"></span> {{ t('memory.page.backup_now') }}
+          </button>
+          <button id="trigger-optimize-btn" type="button" class="btn btn-sm btn-secondary" title="{{ t('memory.page.optimize_hint') }}">
+            <span class="mem-spinner" id="optimize-spinner"></span>
+            <span class="ki" data-icon="zap" aria-hidden="true"></span> {{ t('memory.page.optimize') }}
+          </button>
+          <button id="trigger-snapshots-btn" type="button" class="btn btn-sm btn-secondary" title="{{ t('memory.page.snapshots_hint') }}">
+            <span class="mem-spinner" id="snapshots-spinner"></span>
+            <span class="ki" data-icon="clock" aria-hidden="true"></span> {{ t('memory.page.snapshots') }}
+          </button>
+        </div>
+        <div class="table-container" style="max-height:260px;overflow-y:auto;overflow-x:auto;">
+          <table class="data-table" style="width:100%;border-collapse:collapse;font-size:0.82rem;text-align:start;">
+            <caption class="sr-only">{{ t('memory.page.backups_caption') }}</caption>
+            <thead>
+              <tr>
+                <th scope="col" style="padding:8px 12px;">{{ t('memory.page.backup_col_made') }}</th>
+                <th scope="col" style="padding:8px 12px;">{{ t('memory.page.backup_col_size') }}</th>
+                <th scope="col" style="padding:8px 12px;">{{ t('memory.page.backup_col_file') }}</th>
+                <th scope="col" style="padding:8px 12px;"><span class="sr-only">{{ t('chat.actions') }}</span></th>
+              </tr>
+            </thead>
+            <tbody id="backups-tbody">
+              <tr>
+                <td colspan="4" class="mem-muted" style="text-align:center;padding:20px;">{{ t('dashboard.loading_backups') }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</details>

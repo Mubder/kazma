@@ -37,6 +37,7 @@ import time
 from typing import Any
 
 from kazma_core.memory.episode_text import embed_text
+from kazma_core.memory.limits import episode_text
 from kazma_core.memory.remember_request import is_remember_request
 
 logger = logging.getLogger(__name__)
@@ -169,9 +170,11 @@ def episode_row(
         "tenant_id": tenant_id,
         "session_id": session_id,
         "turn_number": int(turn_number),
-        "user_text": (user_text or "")[:4000],
-        "assistant_text": (assistant_text or "")[:4000],
-        "summary_text": (summary_text or "")[:2000],
+        # Whole (memory/limits.py): until 2026-11-19 the question and the
+        # answer were cut at 4,000 characters and the summary at 2,000.
+        "user_text": episode_text(user_text, field="question"),
+        "assistant_text": episode_text(assistant_text, field="answer"),
+        "summary_text": episode_text(summary_text, field="summary"),
         "tier": effective_tier,
         "importance": effective_importance,
         "created_at": time.time() if created_at is None else float(created_at),

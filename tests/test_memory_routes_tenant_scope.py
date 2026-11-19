@@ -102,6 +102,11 @@ REQUESTS: dict[tuple[str, str], list[tuple[str, Any]]] = {
         ("/api/memory/v2/episodes", None),
         ("/api/memory/v2/episodes?tier=episodic", None),
     ],
+    # A memory read whole (2026-11-19): another tenant's reads as not found.
+    ("GET", "/api/memory/v2/episodes/{episode_id}/text"): [
+        ("/api/memory/v2/episodes/beta9_e0/text", None),
+        ("/api/memory/v2/episodes/alpha_e1/text", None),
+    ],
     ("GET", "/api/memory/v2/procedural"): [
         ("/api/memory/v2/procedural", None),
         ("/api/memory/v2/procedural?q=routine", None),
@@ -243,6 +248,7 @@ SHOWS_OWN: dict[str, str] = {
     "/api/memory/v2/beliefs?q=lives": "alpha_b1",
     "/api/memory/v2/episodes": "alpha_e1",
     "/api/memory/v2/episodes?tier=episodic": "alpha_e1",
+    "/api/memory/v2/episodes/alpha_e1/text": "alpha_e1",
     "/api/memory/v2/graph": '"alice"',
     "/api/memory/v2/graph/export?format=json": "alpha_b1",
     "/api/memory/v2/graph/export?format=graphml": "alice",
@@ -818,6 +824,7 @@ def test_the_agent_invalidate_tool_reaches_the_row_it_may_change(seeded):
 #: until 2026-09-27.
 TOOL_CALLS: dict[str, list[dict]] = {
     "memory_search": [{"query": "where does Alice live"}],
+    "memory_read": [{"id": "alpha_e1"}],
     "memory_admin": [
         {"action": "list_beliefs", "q": "Paris"},
         {"action": "list_entities", "q": "Alice"},
