@@ -49,6 +49,7 @@ from typing import Any
 
 from kazma_core.memory.chat_history import STORE_ERRORS
 from kazma_core.memory.limits import LEGACY_BRIDGE_CUT, LEGACY_SUMMARY_CUT, LEGACY_TEXT_CUT
+from kazma_core.spaces.scope import OWNER_SPACE_ID
 
 logger = logging.getLogger(__name__)
 
@@ -77,13 +78,19 @@ def _meta(row: Any) -> dict[str, Any]:
     return meta if isinstance(meta, dict) else {}
 
 
+def _row_tenant(row: Any) -> str:
+    """The space a memory row is in: a row with no tenant is the owner's
+    (Spaces decision N19)."""
+    return str(row["tenant_id"] or OWNER_SPACE_ID)
+
+
 def _candidates(row: Any, conversations: list[dict[str, Any]]) -> set[tuple[str, str]]:
     """The whole ``(question, answer)`` pairs of the chat that are this row's
     turn: the row holds exactly their start and its id is theirs."""
     from kazma_core.memory.dual_write import episode_ids
     from kazma_core.memory.rehydrate import _turn_texts
 
-    tenant = str(row["tenant_id"] or "default")
+    tenant = _row_tenant(row)
     session, turn = str(row["session_id"] or ""), int(row["turn_number"] or 0)
     stored_q, stored_a = str(row["user_text"] or ""), str(row["assistant_text"] or "")
     out: set[tuple[str, str]] = set()
@@ -150,7 +157,7 @@ def _fill_one(conn: sqlite3.Connection, row: Any) -> str:
         state = "filled"
     keys = chat_keys(session)  # a chat-store read: before the write lock
     with _write(conn):
-        if refuses_write(conn, tenant_id=str(row["tenant_id"] or "default"), session_id=session,
+        if refuses_write(conn, tenant_id=_row_tenant(row), session_id=session,
                          turn_number=int(row["turn_number"] or 0), user_text=question, keys=keys):
             return "kept_out"  # nothing written: _write rolls back
         if state == "filled":
@@ -192,7 +199,7 @@ def _write_vector(conn: sqlite3.Connection, row: Any, question: str, answer: str
                 (row["id"], row["tenant_id"], question, answer),
             ).fetchone() is not None
 
-        index_remotely(str(row["id"]), vec, tenant_id=str(row["tenant_id"] or "default"),
+        index_remotely(str(row["id"]), vec, tenant_id=_row_tenant(row),
                        meta={"session_id": row["session_id"], "tier": row["tier"]}, still_held=_still_held)
 
 

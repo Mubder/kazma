@@ -391,6 +391,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "البحث في الذاكرة طويلة المدى عن محادثات سابقة ذات صلة.",
         "en": "Search long-term memory for relevant past conversations.",
     },
+    "tool.desc.memory_read": {
+        "ar": "قراءة ذاكرة واحدة كاملة، صفحة بعد صفحة.",
+        "en": "Read one memory whole, a page at a time.",
+    },
     "tool.desc.memory_store": {
         "ar": "تخزين معلومة أو تفضيل في الذاكرة طويلة المدى.",
         "en": "Store a fact or preference in long-term memory.",

@@ -165,7 +165,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "memory.page.connect_relation": {"en": "Relation", "ar": "العلاقة"},
     "memory.page.connect_relation_hint": {
         "en": "How the first relates to the second, in a few words joined by _ (works_at, sister_of)",
-        "ar": "كيف يرتبط الأول بالثاني، بكلمات قليلة تفصل بينها _ ‏(works_at، sister_of)",
+        "ar": "كيف يرتبط الأول بالثاني، بكلمات قليلة تفصل بينها _ \u200f(works_at، sister_of)",
     },
     "memory.page.connect_link": {"en": "Connect", "ar": "اربط"},
     "memory.page.connect_link_hint": {

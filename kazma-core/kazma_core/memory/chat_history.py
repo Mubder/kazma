@@ -31,6 +31,7 @@ from typing import Any
 
 from kazma_core.db.pg_helpers import store_errors
 from kazma_core.paths import chat_spool_db
+from kazma_core.spaces.scope import OWNER_SPACE_ID
 
 logger = logging.getLogger(__name__)
 
@@ -360,7 +361,7 @@ def _conversation(row: dict[str, Any]) -> dict[str, Any]:
         "thread_id": str(row.get("thread_id") or ""),
         # Whose chat it is: a reader that writes what it finds into memory
         # keeps to the row's own tenant (memory/text_fill.py).
-        "tenant_id": str(row.get("tenant_id") or "default"),
+        "tenant_id": str(row.get("tenant_id") or OWNER_SPACE_ID),  # none: the owner's (N19)
         "messages": msgs if isinstance(msgs, list) else [],
     }
 

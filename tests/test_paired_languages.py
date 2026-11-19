@@ -265,6 +265,18 @@ def _read_only_notice(text: str) -> bool:
     return detect_user_language(_notice(text)) == detect_user_language(text)
 
 
+
+def _memory_read_line(text: str) -> bool:
+    """memory_read's line about the page is in the memory's own language,
+    for a middle page and for the last one."""
+    from kazma_core.agent.tool_builtins.memory import _read_header
+
+    page = {"id": "e_1", "text": text, "offset": 0, "end": len(text), "total": 2 * len(text)}
+    middle = _read_header({**page, "next_offset": len(text)})
+    last = _read_header({**page, "next_offset": None})
+    return all(detect_user_language(line.replace("memory_read", "")) == detect_user_language(text)
+               for line in (middle, last))
+
 M = "kazma-core/kazma_core/"
 
 PAIRS: list[Pair] = [
@@ -273,6 +285,9 @@ PAIRS: list[Pair] = [
     Pair("fixed_reply", (M + "language_lock.py", M + "agent/graph_supervisor.py",
                          "kazma-gateway/kazma_gateway/agent_handler/graph.py"),
          "Why did it stop?", "ليش وقف؟", _fixed_reply, True),
+    Pair("memory_read_line", (M + "agent/tool_builtins/memory.py",),
+         "I booked the flight to Lisbon for the third of May and paid with the work card.",
+         "حجزت رحلة لشبونة يوم ثلاثة مايو ودفعت بالبطاقة حق الشغل.", _memory_read_line, True),
     Pair("remember_request", (M + "memory/remember_request.py",),
          "Remember that my sister's name is Noura.", "تذكر إن اسم أختي نورة.", _remember, True),
     Pair("remember_question", (M + "memory/remember_request.py",),
