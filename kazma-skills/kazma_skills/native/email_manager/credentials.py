@@ -24,10 +24,7 @@ logger = logging.getLogger(__name__)
 
 #: The install's app registration in the vault: one Google and one Microsoft
 #: app sign in every space's accounts, so these names are the install's.
-_INSTALL_NAMES = frozenset({
-    "email.gmail.client_id", "email.gmail.client_secret",
-    "email.microsoft.client_id", "email.microsoft.client_secret",
-})
+from kazma_core.spaces.connected_accounts import INSTALL_ACCOUNT_SECRETS as _INSTALL_NAMES
 #: The install's environment variables the mail and calendar code read: the
 #: app registration and Kazma's own address. Every other variable they read
 #: is a connected account's (the owner's, in the process environment).

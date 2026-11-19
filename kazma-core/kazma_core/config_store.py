@@ -355,6 +355,14 @@ def _store_config_secret(vault: Any, vname: str, value: str) -> bool:
     return True
 
 
+def _vault_scope_refusals() -> tuple[type[BaseException], ...]:
+    """What the vault raises when a write is not the calling work's to make."""
+    from kazma_core.security.vault import VaultScopeError
+    from kazma_core.spaces.scope import NoSpaceBound
+
+    return (NoSpaceBound, VaultScopeError)
+
+
 def _try_get_vault():
     """Best-effort vault handle; None if disabled or unavailable."""
     try:
@@ -1837,6 +1845,10 @@ class ConfigStore(_ChangeNotices):
         try:
             _store_config_secret(vault, vname, value)
             return f"{_VAULT_REF_PREFIX}{vname}"
+        except _vault_scope_refusals():
+            # A space's secret written for no one, or for another space
+            # (Spaces S1-18): refused, never kept as plaintext instead.
+            raise
         except Exception as exc:
             self._note_plaintext_fallback(path, vault_off=False, exc=exc)
             return value
@@ -2001,6 +2013,10 @@ class ConfigStore(_ChangeNotices):
             vname = _secret_vault_name(key, value) or _vault_secret_name(key)
             _store_config_secret(vault, vname, value)
             return f"{_VAULT_REF_PREFIX}{vname}"
+        except _vault_scope_refusals():
+            # A space's secret written for no one, or for another space
+            # (Spaces S1-18): refused, never kept as plaintext instead.
+            raise
         except Exception as exc:
             self._note_plaintext_fallback(key, vault_off=False, exc=exc)
             return value

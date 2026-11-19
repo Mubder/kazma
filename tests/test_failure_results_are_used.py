@@ -100,6 +100,9 @@ NOT_AN_ANSWER: dict[tuple[str, str], str] = {
         "True when a secret was there to delete; deleting one that is not there is not a "
         "failure, and a refused write raises (refuse_write) as a database error does"
     ),
+    ("kazma_core.security.vault", "_SpaceVault.delete"): (
+        "SecretVault.delete for one space (Spaces S1-18): True when a secret was there"
+    ),
     ("kazma_core.swarm.task_store", "TaskStore.delete_task"): (
         "True when a task row was there to delete; a database error raises"
     ),

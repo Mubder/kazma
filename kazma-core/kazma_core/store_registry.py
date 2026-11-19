@@ -737,8 +737,10 @@ SPACE_RULES: dict[str, SpaceRule] = {
         today="refuses"),
     "vault.db": SpaceRule(
         "row",
-        why="a space's secrets carry its id; the install's secrets (provider keys, the chat "
-            "apps' tokens) have none and stay the install's",
+        why="a space's secrets carry its id (or name it: space:<id>:...) and are read only in "
+            "that space once Spaces is enforced; the install's secrets (provider keys, the chat "
+            "apps' tokens, every setting that is not a space's connected account) stay the "
+            "install's (security.vault.secret_scope)",
         content={"secrets": ("encrypted_value", "metadata")},
         today="carries"),
     "settings.db": SpaceRule(

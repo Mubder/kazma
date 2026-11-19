@@ -124,6 +124,7 @@ CASE_MODULES: tuple[str, ...] = (
     "tests._knowledge_space_cases", "tests._scheduled_space_cases", "tests._swarm_space_cases",
     "tests._research_space_cases", "tests._mail_space_cases", "tests._x_space_cases",
     "tests._github_space_cases", "tests._document_space_cases",  # S1-12
+    "tests._vault_space_cases",
 )
 
 
@@ -236,7 +237,7 @@ _PENDING_TOOLS_BY_ITEM: dict[str, tuple[str, ...]] = {
     # (S1-17's three parts -- mail and calendar, X, GitHub -- wrote their
     # cases: tests/_mail_space_cases.py, tests/_x_space_cases.py,
     # tests/_github_space_cases.py.)
-    "S1-18": ("vault_list", "vault_retrieve", "vault_store", "vault_delete"),
+    # (S1-18 -- the vault tools -- wrote its cases: tests/_vault_space_cases.py.)
     # The space folder: every tool that takes a path or writes a file.
     "S1-19": (
         "file_read", "file_list", "file_search", "file_write", "file_append",

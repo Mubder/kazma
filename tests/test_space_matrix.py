@@ -64,7 +64,7 @@ PLAN = REPO / "docs" / "plans" / "SPACES_PLAN.md"
 #: item of stage 1 writes the cases of its part and takes them out of the
 #: pending tables; this number may only go down, and lowering it means
 #: lowering the baseline in the same change.
-PENDING_BASELINE = 151
+PENDING_BASELINE = 147
 
 
 # ── what exists ──────────────────────────────────────────────────────────
@@ -432,10 +432,10 @@ def test_a_planted_tool_with_nothing_is_reported(routes, tools, live) -> None:
     ):
         assert missing(routes, [*tools, "tool:planted_tool"], answered) == []
     # Without its pending entries, a real area's tools are findings.
-    bare = replace(live, tools={k: v for k, v in live.tools.items() if v != "S1-18"})
+    bare = replace(live, tools={k: v for k, v in live.tools.items() if v != "S1-21"})
     assert missing(routes, tools, bare) == [
         f"tool:{name}: a tool with no case, no pending item and no reason"
-        for name in ("vault_delete", "vault_list", "vault_retrieve", "vault_store")
+        for name in ("list_runs", "run_status")
     ]
 
 
