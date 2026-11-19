@@ -24,7 +24,7 @@ from kazma_ui.routes_direct._shared import (
     open_memory_db,
 )
 
-from kazma_core.memory.tenant_view import sees_every_tenant
+from kazma_core.memory.tenant_view import narrowed_to, sees_every_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -621,22 +621,24 @@ def register_memory_routes(self: Any) -> None:
         try:
             conn = open_memory_db()
             tid = _mem_tid()
+            only = narrowed_to(tid)
             row = conn.execute(
-                "SELECT * FROM beliefs WHERE id=?"
-                + (" AND tenant_id=?" if not sees_every_tenant(tid) else ""),
-                (belief_id, tid) if not sees_every_tenant(tid) else (belief_id,),
+                "SELECT * FROM beliefs WHERE id=? AND (? IS NULL OR tenant_id = ?)",
+                (belief_id, only, only),
             ).fetchone()
             if not row:
                 conn.close()
                 return {"ok": False, "error": "not_found"}
             chain = [_belief_json_safe(row)]
-            # Walk supersedes_id ancestors
+            # Walk supersedes_id ancestors, the caller's own rows only (S1-35).
             cur = row
             for _ in range(20):
                 sid = cur["supersedes_id"] if "supersedes_id" in cur.keys() else None
                 if not sid:
                     break
-                prev = conn.execute("SELECT * FROM beliefs WHERE id=?", (sid,)).fetchone()
+                prev = conn.execute(
+                    "SELECT * FROM beliefs WHERE id=? AND (? IS NULL OR tenant_id = ?)", (sid, only, only),
+                ).fetchone()
                 if not prev:
                     break
                 chain.append(_belief_json_safe(prev))
@@ -679,12 +681,12 @@ def register_memory_routes(self: Any) -> None:
         try:
             conn = open_memory_db()
             tid = _mem_tid()
+            only = narrowed_to(tid)
             row = conn.execute(
                 "SELECT id, subject, predicate, object, source_session, source_turn, "
                 "extraction_method, access_count, last_accessed, valid_from "
-                "FROM beliefs WHERE id=?"
-                + (" AND tenant_id=?" if not sees_every_tenant(tid) else ""),
-                (bid, tid) if not sees_every_tenant(tid) else (bid,),
+                "FROM beliefs WHERE id=? AND (? IS NULL OR tenant_id = ?)",
+                (bid, only, only),
             ).fetchone()
             if not row:
                 conn.close()

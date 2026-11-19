@@ -1042,10 +1042,12 @@ def forget_summary(
     if conn is None:
         return {"ok": False, "error": "not_found"}
     try:
-        row = conn.execute(
-            "SELECT tenant_id, status, metadata_json FROM memory_summaries WHERE id = ?", (summary_id,)
-        ).fetchone()
         caller = tenant_id or "default"
+        only = narrowed_to(caller)  # the caller's own summary, in each statement (Spaces S1-35)
+        row = conn.execute(
+            "SELECT tenant_id, status, metadata_json FROM memory_summaries "
+            "WHERE id = ? AND (? IS NULL OR tenant_id = ?)", (summary_id, only, only),
+        ).fetchone()
         if row is None or (not sees_every_tenant(caller) and str(row["tenant_id"]) != caller):
             return {"ok": False, "error": "not_found"}
         if row["status"] == "forgotten":
@@ -1063,8 +1065,8 @@ def forget_summary(
         conn.execute(
             "UPDATE memory_summaries SET status = 'forgotten', title = '', summary_text = '', "
             "embedding = NULL, embedding_model_version = NULL, queued_at = NULL, updated_at = ?, "
-            "metadata_json = ? WHERE id = ?",
-            (now, json.dumps(meta), summary_id),
+            "metadata_json = ? WHERE id = ? AND (? IS NULL OR tenant_id = ?)",
+            (now, json.dumps(meta), summary_id, only, only),
         )
         forget_journal.mark_applied(conn, seq)
         conn.commit()

@@ -133,12 +133,26 @@ _ADMIN_WRITE_PREFIXES = (
 # equal to ``route_scopes`` by ``tests/test_github_account_spaces.py``), and,
 # being outside this list, the GitHub App and a clone. Not enforced, every
 # one is the admin's, as before.
+#
+# X too (the owner, 2026-11-18: "Yes, per space"): a member connects their
+# own X account in their own space -- the credentials (the OAuth 1.0a keys,
+# the app's Bearer token and OAuth 2.0 client), Sign in with X and
+# Disconnect. What publishes is unchanged: the always-ask card, only the
+# asker approves their own posts (N4), nothing of another space reaches the
+# owner's chats (O1), a draft is seen before it is published. The reply
+# bot's policy and resuming X after a stop stay the admin's (continuing
+# authority, below).
 _SPACE_ACCOUNT_PREFIXES = (
     "/api/github/token",
     "/api/github/oauth/start",
     "/api/github/oauth/revoke",
     "/api/email",
     "/api/calendar",
+    "/api/x/credentials",
+    "/api/x/api-access",
+    "/api/x/oauth2/start",
+    "/api/x/oauth2/sign-out",
+    "/api/x/disconnect",
 )
 _INSTALL_ACCOUNT_PIECES = (
     "/api/email/presets",
@@ -219,6 +233,11 @@ def role_allows(role: str, path: str, method: str = "GET") -> bool:
     if rank >= ROLE_RANK["admin"]:
         return True
     m = method.upper()
+    # A space's own connected accounts are its members' once Spaces is
+    # enforced (GitHub, mail, calendar, X's credentials and sign-in): before
+    # the X rule below, which keeps them the admin's otherwise.
+    if _connects_a_spaces_own_account(path):
+        return rank >= ROLE_RANK["operator"]
     # Credentials and publication policy grant continuing authority. Operators
     # can review individual drafts, but only administrators can change that grant.
     if ((path.rstrip("/") in ("/api/x/reply", "/api/x/reply/qualification") and m == "PUT")
@@ -235,8 +254,6 @@ def role_allows(role: str, path: str, method: str = "GET") -> bool:
         return False
     if path.rstrip("/") in _ADMIN_EXACT:
         return False
-    if _connects_a_spaces_own_account(path):
-        return rank >= ROLE_RANK["operator"]
     # Admin-only surfaces
     for p in _ADMIN_PREFIXES:
         if path == p or path.startswith(p + "/"):

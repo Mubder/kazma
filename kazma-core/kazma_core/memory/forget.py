@@ -41,7 +41,7 @@ from typing import Any
 from kazma_core.db.fts5_purge import purge_deleted_rows
 from kazma_core.memory.memory_stores import MEMORY_TABLES
 
-from kazma_core.memory.tenant_view import ledger_reach, sees_every_tenant
+from kazma_core.memory.tenant_view import ledger_reach, narrowed_to, sees_every_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -293,12 +293,13 @@ def forget_episode(
     own = conn is None
     conn = conn or _open()
     try:
+        caller = tenant_id or "default"
+        only = narrowed_to(caller)  # the caller's own memory, in the statement (Spaces S1-35)
         row = conn.execute(
             "SELECT id, tenant_id, session_id, turn_number, user_text, tier, metadata_json "
-            "FROM episodes WHERE id = ?",
-            (eid,),
+            "FROM episodes WHERE id = ? AND (? IS NULL OR tenant_id = ?)",
+            (eid, only, only),
         ).fetchone()
-        caller = tenant_id or "default"
         if row is None or (not sees_every_tenant(caller) and str(row["tenant_id"] or "default") != caller):
             return {"ok": False, "error": "not_found"}
 
@@ -1064,8 +1065,10 @@ def forget_belief_source(belief_id: str, *, tenant_id: str) -> dict[str, Any]:
     caller = tenant_id or "default"
     conn = _open()
     try:
+        only = narrowed_to(caller)  # the caller's own fact, in the statement (Spaces S1-35)
         row = conn.execute(
-            "SELECT tenant_id, source_session, source_turn, object FROM beliefs WHERE id = ?", (bid,),
+            "SELECT tenant_id, source_session, source_turn, object FROM beliefs "
+            "WHERE id = ? AND (? IS NULL OR tenant_id = ?)", (bid, only, only),
         ).fetchone()
         if row is None or (not sees_every_tenant(caller) and str(row["tenant_id"] or "default") != caller):
             return {"ok": False, "error": "not_found"}

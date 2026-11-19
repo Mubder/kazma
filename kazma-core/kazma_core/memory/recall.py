@@ -1195,13 +1195,16 @@ def _beliefs_from_turns(
     ids = [h.id for h in episodes if h.id]
     if not ids:
         return []
+    from kazma_core.memory.tenant_view import narrowed_to
+
+    only = narrowed_to(tenant_id)  # the asker's own turns, in the statement (Spaces S1-35)
     try:
         turns = [
             (str(r[0]), int(r[1]))
             for r in conn.execute(
                 "SELECT session_id, turn_number FROM episodes "
-                f"WHERE id IN ({','.join('?' * len(ids))})",
-                ids,
+                f"WHERE id IN ({','.join('?' * len(ids))}) AND (? IS NULL OR tenant_id = ?)",
+                (*ids, only, only),
             )
             if r[0] and r[1] is not None
         ]

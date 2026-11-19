@@ -452,14 +452,18 @@ def test_the_install_pieces_are_the_install_routes() -> None:
     route there must not become a member's, nor a space route the admin's."""
     from kazma_core.security import platform_rbac
     from kazma_gateway.routers import github
-    from kazma_ui import calendar_api, email_api
+    from kazma_ui import calendar_api, email_api, x_api
     from kazma_ui.route_scopes import INSTALL, OPEN, scope_of
 
     routes = [(method, route.path) for router in (github.router, email_api.router, email_api.protected_router,
-                                                  calendar_api.router, calendar_api.protected_router)
+                                                  calendar_api.router, calendar_api.protected_router,
+                                                  x_api.router, x_api.protected_router)
               for route in router.routes for method in getattr(route, "methods", ()) or ()]
     under = [(m, p) for m, p in routes if platform_rbac._under(p, platform_rbac._SPACE_ACCOUNT_PREFIXES)]
     assert len(under) > 20, under
+    # Every prefix names a route the app serves (a typo would excuse nothing).
+    for prefix in platform_rbac._SPACE_ACCOUNT_PREFIXES:
+        assert any(platform_rbac._under(p, (prefix,)) for _m, p in routes), prefix
     for method, path in under:
         found = scope_of(method, path)
         if found == OPEN:  # a sign-in callback: before sign-in, no role
