@@ -32,13 +32,27 @@ from __future__ import annotations
 from kazma_core.spaces.scope import OWNER_SPACE_ID
 
 __all__ = [
-    "SPACE_SECRET_PREFIX", "connected_space", "env_secret_name", "owners_environment", "space_secret_name",
+    "INSTALL_ACCOUNT_SECRETS", "OWNER_ACCOUNT_PREFIXES", "SPACE_SECRET_PREFIX", "connected_space", "env_secret_name", "owners_environment", "space_secret_name",
     "space_setting_key",
 ]
 
 #: The prefix of a space's connected-account secrets (install-scoped in the
 #: vault, ``security.vault.INSTALL_SCOPED_SECRETS``).
 SPACE_SECRET_PREFIX = "space:"
+
+
+#: The install's app registration with Google and Microsoft: one for every
+#: space, read by each space's sign-in and refresh. The one list (the mail
+#: code and the vault's space scope both read it).
+INSTALL_ACCOUNT_SECRETS = frozenset({
+    "email.gmail.client_id", "email.gmail.client_secret",
+    "email.microsoft.client_id", "email.microsoft.client_secret",
+})
+
+#: Vault names of the owner's space's own mailbox and calendar (its tokens,
+#: scopes, passwords, extra accounts), kept under the names they always had
+#: (N26). Everything under them but :data:`INSTALL_ACCOUNT_SECRETS`.
+OWNER_ACCOUNT_PREFIXES = ("email.", "calendar.")
 
 
 def connected_space() -> str:

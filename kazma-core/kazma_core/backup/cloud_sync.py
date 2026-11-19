@@ -39,6 +39,8 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any, Protocol
 from urllib.parse import quote, unquote
 
@@ -92,9 +94,30 @@ def _read_vault(key: str) -> str:
     try:
         from kazma_core.security.vault import retrieve_with_tenant_ladder
 
-        return retrieve_with_tenant_ladder(key)
+        with _as_the_owners_space(key):
+            return retrieve_with_tenant_ladder(key)
     except Exception:
         return ""
+
+
+@contextmanager
+def _as_the_owners_space(key: str) -> Iterator[None]:
+    """Read or write *key* as the owner's space when it is the owner's own
+    Google or Microsoft sign-in (Spaces S1-18): the offsite copy goes to the
+    owner's Drive or OneDrive, and the backup runs with no space bound, where
+    a space's secret is not read. Not enforced: nothing is bound, as before."""
+    from kazma_core.spaces.scope import (
+        OWNER_ACCOUNT_ID,
+        OWNER_SPACE_ID,
+        bind_scope,
+        spaces_enforced,
+    )
+
+    if spaces_enforced() and key.startswith(("email.", "calendar.")):
+        with bind_scope(OWNER_SPACE_ID, OWNER_ACCOUNT_ID):
+            yield
+    else:
+        yield
 
 
 def _webdav_tls_verify() -> bool:
@@ -116,7 +139,8 @@ def _write_vault(key: str, value: str, category: str = "backups") -> None:
         from kazma_core.security.vault import get_vault
         vault = get_vault()
         if vault is not None:
-            vault.store(key, value, category=category)
+            with _as_the_owners_space(key):
+                vault.store(key, value, category=category)
     except Exception:
         logger.debug("[cloud_sync] vault write failed for %s", key, exc_info=True)
 

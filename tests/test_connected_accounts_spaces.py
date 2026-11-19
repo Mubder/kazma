@@ -119,9 +119,17 @@ def test_control_the_install_scoped_names_as_they_were(vault, matrix, enforced, 
     owner's mailbox, and B read A's."""
     import kazma_core.spaces.connected_accounts as connected_accounts
 
+    from kazma_skills.native.email_manager import credentials
+
     monkeypatch.setattr(connected_accounts, "connected_space", lambda: OWNER_SPACE_ID)
     with _owner():
         _connect("owner@example.org", "imap.owner.example")
+    # The vault holds the line by itself now (S1-18's review): the owner's
+    # names are the owner's space's, so A's write under them is refused.
+    with matrix.as_a(), pytest.raises(credentials.VaultWriteFailed):
+        _connect("a@example.org", "imap.a.example")
+    # With the vault's rule out too, as both were before S1-17:
+    monkeypatch.setattr(connected_accounts, "OWNER_ACCOUNT_PREFIXES", ())
     with matrix.as_a():
         _connect("a@example.org", "imap.a.example")
     with _owner():
@@ -558,7 +566,10 @@ _SIDE_DOORS = {"environ", "getenv", "putenv", "SecretVault", "get_vault", "retri
 _DECLARED = {
     "kazma-core/kazma_core/backup/cloud_sync.py": (
         "the offsite backup to Google Drive is the install's work and uses the owner's Google grant "
-        "(the owner's space's names, read with nothing bound)"),
+        "(the owner's space's names, read and written as the owner's space: S1-18's review)"),
+    "kazma-core/kazma_core/spaces/connected_accounts.py": (
+        "the one list of the install's app registration names, read by the mail code and by "
+        "the vault's space scope"),
     "kazma-core/kazma_core/settings_restore.py": (
         "a settings restore brings back the owner's extra mail accounts only while this vault holds "
         "their sign-in: the owner's names"),
@@ -653,5 +664,7 @@ def test_control_the_matrix_cases_fail_on_the_install_scoped_names(target, matri
     from tests._space_matrix import load_cases
 
     monkeypatch.setattr(connected_accounts, "connected_space", lambda: OWNER_SPACE_ID)
+    # (and the vault's own rule for the owner's names, S1-18's review)
+    monkeypatch.setattr(connected_accounts, "OWNER_ACCOUNT_PREFIXES", ())
     with pytest.raises((AssertionError, pytest.fail.Exception)):
         load_cases()[target].run(matrix)

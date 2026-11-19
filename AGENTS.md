@@ -13469,6 +13469,12 @@ product can turn it on, so an install with one account behaves as before.
     that carries its space, `space:<id>:` / `cfg:tenant.<id>.`; the X and
     GitHub settings of the owner's space, `_SPACE_ACCOUNT_SETTINGS`; anything
     the agent stored).
+    The owner's mailbox and calendar (`email.*`, `calendar.*`) are the
+    owner's space's, though the install list still stores them as one row;
+    only the app registration is the install's
+    (`connected_accounts.INSTALL_ACCOUNT_SECRETS`, the one list). Work with
+    no space that uses the owner's grant binds the owner's space
+    (`cloud_sync._as_the_owners_space`).
   - A space's secret is returned only to work in that space
     (`SecretVault._scopes_to_read`): another space, and work with no space
     bound, get None. No `default` rung (`retrieve_scoped` asks the same

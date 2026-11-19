@@ -217,6 +217,8 @@ def secret_scope(name: str) -> tuple[str, str | None]:
     ``tenant_id``).
 
     * ``space:<id>:...`` and ``cfg:tenant.<id>....`` name their space.
+    * The owner's mailbox and calendar (``email.*``, ``calendar.*``, but for
+      the app registration) are the owner's space's.
     * :data:`INSTALL_SCOPED_SECRETS`, the offsite backup's passwords and
       every settings secret that is not a space's connected account are the
       install's: one copy, read by every space and by the install's own work.
@@ -230,6 +232,15 @@ def secret_scope(name: str) -> tuple[str, str | None]:
     if clean.startswith(_SPACE_SETTING_PREFIX):
         space, sep, _rest = clean[len(_SPACE_SETTING_PREFIX):].partition(".")
         return "space", (space if sep else "")
+    from kazma_core.spaces.connected_accounts import (
+        INSTALL_ACCOUNT_SECRETS,
+        OWNER_ACCOUNT_PREFIXES,
+    )
+
+    if clean.startswith(OWNER_ACCOUNT_PREFIXES) and clean not in INSTALL_ACCOUNT_SECRETS:
+        # The owner's own mailbox and calendar (N26): the owner's space's,
+        # like its X account and GitHub sign-in -- never every space's.
+        return "space", _owner_space()
     if is_install_scoped_secret(clean) or clean.startswith(_INSTALL_NAMES_ONCE_ENFORCED):
         return "install", None
     if clean.startswith(CONFIG_SECRET_PREFIX) and not clean.startswith(_SPACE_ACCOUNT_SETTINGS):
@@ -414,8 +425,10 @@ class SecretVault:
         refuse_write("vault", name)
         if _enforced():
             kind, _named = secret_scope(name)
-            if kind == "install" or name.startswith(_SPACE_NAME_PREFIX):
-                self._space_for_write(name, tenant_id)  # a named space must be the caller's
+            if kind == "install" or is_install_scoped_secret(name):
+                # (A name kept as one row -- space:<id>:..., the owner's
+                # mail -- is still its space's: the caller must be in it.)
+                self._space_for_write(name, tenant_id)
                 return self._write_install_scoped(name, value, category, metadata)[1]
             tid: str | None = self._space_for_write(name, tenant_id)
         elif is_install_scoped_secret(name):

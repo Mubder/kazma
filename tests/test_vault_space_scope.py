@@ -59,7 +59,10 @@ def old_retrieve_scoped(vault: SecretVault, name: str, monkeypatch) -> str | Non
 
 @pytest.mark.parametrize(("name", "expected"), [
     ("cfg:providers.list.openai.api_key", ("install", None)),
-    ("email.gmail.refresh_token", ("install", None)),
+    ("email.gmail.refresh_token", ("space", "default")),  # the owner's mailbox
+    ("email.account.work.imap_password", ("space", "default")),
+    ("calendar.google.refresh_token", ("space", "default")),
+    ("email.gmail.client_secret", ("install", None)),  # the app registration
     ("cfg:voice.tts.api_key", ("install", None)),  # a setting: the install's until S1-23
     ("cfg-url:proxy.url", ("install", None)),
     ("backups.offsite.ftp.password", ("install", None)),
@@ -162,6 +165,68 @@ def test_a_spaces_setting_is_read_only_in_that_space(vault, enforced) -> None:
     with as_space(OWNER_SPACE_ID):
         assert retrieve_scoped(name, vault) is None
     assert retrieve_scoped(name, vault) is None
+
+
+def test_the_owners_mailbox_and_calendar_are_the_owners_spaces(vault, enforced, monkeypatch) -> None:
+    """The review of S1-18: ``email.`` and ``calendar.`` are on the install
+    list, so any space that named the owner's token read it."""
+    names = ("email.gmail.refresh_token", "email.account.work.imap_password",
+             "calendar.google.refresh_token")
+    with as_space(OWNER_SPACE_ID):
+        for name in names:
+            vault.store(name, f"owners-{name}")
+        vault.store("email.gmail.client_secret", "the-app-registration")
+    with as_space(B):
+        for name in names:
+            assert vault.retrieve(name) is None
+            assert retrieve_scoped(name, vault) is None
+            with pytest.raises(VaultScopeError):
+                vault.store(name, "taken-over")
+            assert vault.delete(name) is False
+        assert vault.retrieve("email.gmail.client_secret") == "the-app-registration"
+        assert vault.list_secrets() == []
+    for name in names:
+        assert vault.retrieve(name) is None  # no space bound
+    with as_space(OWNER_SPACE_ID):
+        for name in names:
+            assert vault.retrieve(name) == f"owners-{name}"
+            # The mail code pins the tenant to none while its scope stays bound.
+            with tenant_scope(None):
+                assert vault.retrieve(name) == f"owners-{name}"
+        vault.store(names[0], "rotated")  # still one row, with no tenant
+        assert vault.describe_secret(names[0])[0]["tenant_id"] is None
+        assert vault.delete(names[0]) is True
+    # Control: the rule as it was first built (the install list alone) hands
+    # B the owner's token.
+    monkeypatch.setattr("kazma_core.spaces.connected_accounts.OWNER_ACCOUNT_PREFIXES", ())
+    with as_space(B):
+        assert vault.retrieve(names[1]) == f"owners-{names[1]}"
+
+
+def test_a_token_from_before_spaces_is_read_by_the_owners_space(vault, enforced, monkeypatch) -> None:
+    monkeypatch.setattr(scope, "_enforced", False)
+    vault.store("email.gmail.refresh_token", "kept-since-august")  # as live keeps it
+    monkeypatch.setattr(scope, "_enforced", True)
+    with as_space(OWNER_SPACE_ID):
+        assert vault.retrieve("email.gmail.refresh_token") == "kept-since-august"
+    with as_space(B):
+        assert vault.retrieve("email.gmail.refresh_token") is None
+
+
+def test_the_offsite_backup_reads_the_owners_drive_grant_with_no_space_bound(vault, enforced, monkeypatch) -> None:
+    from kazma_core.backup import cloud_sync
+
+    monkeypatch.setattr(vault_mod, "get_vault", lambda: vault)
+    with as_space(OWNER_SPACE_ID):
+        vault.store("email.gmail.refresh_token", "owners-drive-grant")
+    assert cloud_sync._read_vault("email.gmail.refresh_token") == "owners-drive-grant"
+    cloud_sync._write_vault("email.gmail.access_token", "refreshed", category="email")
+    with as_space(OWNER_SPACE_ID):
+        assert vault.retrieve("email.gmail.access_token") == "refreshed"
+    with as_space(B):
+        assert vault.retrieve("email.gmail.access_token") is None
+    # Control: read with nothing bound, as the backup did, it finds nothing.
+    assert retrieve_scoped("email.gmail.refresh_token", vault) is None
 
 
 # ── the install's list stays ─────────────────────────────────────────────
