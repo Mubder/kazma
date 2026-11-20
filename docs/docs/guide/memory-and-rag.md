@@ -122,9 +122,12 @@ words.
 **Quality is measured.** `python scripts/memory_bench.py run` scores recall
 on a persona's life -- 1,120 chat turns and 69 facts inside unrelated chat,
 89 questions (single facts, paraphrases, things only the assistant said,
-updates, codes, Arabic, overviews, questions with no answer) -- and 40 more
-held out: written after the last tuning and never used to choose a
-threshold, so their scores say how far the tuning carries. CI replays the
+updates, codes, Arabic, overviews, questions with no answer) -- and a
+second set of 40: written after the last tuning, and no threshold is swept
+on them. They are a second check, not an unseen test: two decisions were
+taken by looking at them (the report below), and they are gated like every
+other score (renamed from "held out" on 2026-11-20, benchmark audit R8; a
+set nobody has looked at is a sealed one, scored only on request). CI replays the
 real model's recorded vectors and holds every score to a ratchet
 (`tests/test_memory_benchmark.py`); `lock` raises it. A score can fall only
 in a reviewed trade (`lock --trade "why"`: no score falls by more than 0.05,
@@ -845,34 +848,37 @@ Postgres dual-mirror and sparse ILIKE assist already exist as **optional** found
 
 ### Benchmark report (dataset v5, 2026-10-14)
 
-Recall on the retrieval benchmark, the tuning questions and the held-out
-ones, on both paths (vectors replayed from bge-m3):
+Recall on the retrieval benchmark, the tuning questions and the second
+set, on both paths (vectors replayed from bge-m3). The second set was
+called "held out" when this was written; the two decisions below were
+taken by looking at it, which is why it is the second set now and a
+sealed set is the held-out one (benchmark audit R8):
 
-| | Local (SQLite) tuning | Local held out | Postgres-primary tuning | Postgres-primary held out |
+| | Local (SQLite) tuning | Local second set | Postgres-primary tuning | Postgres-primary second set |
 |---|---|---|---|---|
 | Questions | 89 | 40 | 89 | 40 |
 | Hit rate (every piece of the answer shown) | 0.925 | 0.891 | 0.895 | 0.891 |
 | MRR (how high the first answer ranks) | 0.844 | 0.845 | 0.830 | 0.845 |
 | Precision (share of what is shown that answers) | 0.644 | 0.646 | 0.621 | 0.630 |
 | Abstention (nothing shown when nothing answers) | 0.28 (5 of 18) | 0.00 (0 of 8) | 0.28 | 0.00 |
-| Questions across languages (held out, `mixed`) | | hit 1.0, MRR 0.90 | | hit 1.0, MRR 0.90 |
+| Questions across languages (second set, `mixed`) | | hit 1.0, MRR 0.90 | | hit 1.0, MRR 0.90 |
 
-- **The ranking carries over:** the held-out hit rate, MRR and precision are
+- **The ranking carries over:** the second set's hit rate, MRR and precision are
   within a few points of the tuning set's, on both paths, and a question in
   Arabic about something said in English (or the reverse, or both in one
   sentence) is answered as well as any other.
 - **Abstention does not.** Recall shows something for most questions nothing
-  answers: 13 of 18 tuning questions and every one of the 8 held out, which
+  answers: 13 of 18 tuning questions and every one of the 8 in the second set, which
   were written to come close to a real memory (another person's dentist, a
   car's colour). The target is 0.6 on both sets (`TARGETS` in
   `scripts/memory_bench.py`); it is a goal recorded beside the floors, not a
   gate, and abstention is the one score no trade may lower.
 - **The thresholds cannot buy it** (swept 2026-10-14: the memory floor 0.04
   to 0.10 against the fact floor 0.06 to 0.12, 16 settings). Every setting
-  that shows nothing for a held-out question loses answers elsewhere past the
+  that shows nothing for a second-set question loses answers elsewhere past the
   trade rule's 0.05 -- Arabic hit rate 0.25, "noise" 0.33, overviews 0.5 --
   and the one setting inside the rule raises tuning abstention only (0.28 to
-  0.39) and leaves the held-out set at 0: a choice fitted to the tuning
+  0.39) and leaves the second set at 0: a choice fitted to the tuning
   questions. What these questions share with their near-miss memories is the
   person or thing (Noor, Maya, the car); telling "Noor's dentist" from
   "Noor's school" needs a signal of what is asked about, not a higher floor.
@@ -882,7 +888,7 @@ ones, on both paths (vectors replayed from bge-m3):
   a question naming a word no memory holds ("colour", "salary",
   "cholesterol", "anniversary") asks about something unremembered, so only
   strong matches are shown for it. It reaches the target -- abstention 0.28
-  to 0.67 on the tuning set, 0 to 0.50 (4 of 8) held out -- but the true
+  to 0.67 on the tuning set, 0 to 0.50 (4 of 8) in the second set -- but the true
   answers it removes look the same: weak matches of a paraphrase ("who looks
   after my teeth"), an Arabic question whose word carries a suffix the
   memory does not ("قهوتي"), a question naming a category its answer is an
@@ -893,8 +899,8 @@ ones, on both paths (vectors replayed from bge-m3):
   tuning set (summaries left out; only when nothing strong is shown). Asked
   only when most of the question's words are known, it still loses an update
   ("which company is it at now": no memory says "company"; at three fifths
-  known, held out 1 of 8) or Arabic answers (at half); the one setting inside
-  the rule (two thirds known) leaves held-out abstention at 0.
+  known, second set 1 of 8) or Arabic answers (at half); the one setting inside
+  the rule (two thirds known) leaves the second set's abstention at 0.
 
 Extraction (`python scripts/memory_bench.py extraction`): 30 single turns
 in English, Arabic and both, scored on what a reader would keep from each.

@@ -121,7 +121,7 @@ def test_the_benchmark_on_postgres_primary(tmp_path, monkeypatch):
             return results
 
         report = benchmark._summarise(ask(data["questions"]), [])
-        report["heldout"] = benchmark._summarise(ask(data["heldout"]), [])
+        report["second"] = benchmark._summarise(ask(data["second"]), [])
     finally:
         conn.close()
         state.close()

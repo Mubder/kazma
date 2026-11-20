@@ -41,4 +41,4 @@ def test_every_number_comes_from_a_result_file() -> None:
     text = (ROOT / "docs" / "docs" / "reference" / "benchmarks.md").read_text(encoding="utf-8")
     for source in ("scripts/memory_bench.py", "scripts/knowledge_bench.py", "scripts/document_fidelity.py"):
         assert source.split("/")[-1].removesuffix(".py") in text
-    assert "held out" in text.lower() and "Arabic" in text
+    assert "second set" in text.lower() and "Arabic" in text

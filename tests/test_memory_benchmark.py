@@ -157,25 +157,69 @@ def test_the_lock_never_lowers_the_ratchet(tmp_path, monkeypatch):
     assert written["targets"] == script.TARGETS and written["trades"] == []
 
 
-# ── held out (Memory audit M24) ───────────────────────────────────────────
+# ── the second set (Memory audit M24; renamed by benchmark audit R8) ──────
 
 
-def test_the_held_out_questions_are_scored_apart(report):
+def test_the_second_set_is_scored_apart_and_gated(report):
+    """The owner's decision 4: renamed honestly, and still gated."""
     data = benchmark.load_dataset()
-    assert report["heldout"]["overall"]["questions"] == len(data["heldout"]) >= 40
+    assert report["second"]["overall"]["questions"] == len(data["second"]) >= 40
     gated = benchmark.gated_scores(report)
-    assert "heldout.overall.mrr" in gated and "heldout.mixed.hit_rate" in gated
-    # Never the same question twice: a held-out copy of a tuning question
-    # would score the tuning, not the generalization.
-    assert not {q["text"] for q in data["questions"]} & {q["text"] for q in data["heldout"]}
+    assert "second.overall.mrr" in gated and "second.mixed.hit_rate" in gated
+    assert {k for k in gated if k.startswith("second.")} <= set(_floor())
+    # Never the same question twice: a copy of a tuning question would score
+    # the tuning again.
+    assert not {q["text"] for q in data["questions"]} & {q["text"] for q in data["second"]}
 
 
-def test_the_builder_refuses_a_held_out_question_that_repeats_a_tuning_one(monkeypatch):
+def test_the_builder_refuses_a_second_set_question_that_repeats_a_tuning_one(monkeypatch):
     script = _build_script()
-    monkeypatch.setattr(script, "HELDOUT", [*script.HELDOUT, ("h999", script.QUESTIONS[0][1], "single",
-                                                              script.QUESTIONS[0][3], [])])
+    monkeypatch.setattr(script, "SECOND_SET", [*script.SECOND_SET, ("h999", script.QUESTIONS[0][1], "single",
+                                                                    script.QUESTIONS[0][3], [])])
     with pytest.raises(ValueError, match="repeats a tuning question"):
         script.build()
+
+
+#: A set looked at in decisions is not held out (benchmark audit F9, R8): the
+#: words that call it so. Only a sealed set may be called held out.
+_HELD_OUT_CLAIM = r"held[ -]out|never used to choose|never seen|not looked at"
+
+
+def _held_out_claims(text: str) -> list[str]:
+    """The sentences of *text* that call a set held out without naming it
+    sealed."""
+    import re
+
+    sentences = re.split(r"(?<=[.!?:])\s+|\n\s*\n|\|", text)
+    return [s.strip() for s in sentences
+            if re.search(_HELD_OUT_CLAIM, s, re.IGNORECASE) and "sealed" not in s.lower()]
+
+
+def _what_a_reader_sees_of_the_recall_sets() -> dict[str, str]:
+    page = (REPO / "docs" / "docs" / "reference" / "benchmarks.md").read_text(encoding="utf-8")
+    memory = page[page.index("## Memory"):]
+    memory = memory[:memory.index("\n## ", 1)] if "\n## " in memory[1:] else memory
+    intro = page[:page.index("## Memory")]
+    guide = (REPO / "docs" / "docs" / "guide" / "memory-and-rag.md").read_text(encoding="utf-8")
+    script = (REPO / "scripts" / "memory_bench.py").read_text(encoding="utf-8")
+    builder = script[script.index("#: The second set"):script.index("SECOND_SET:")]
+    return {"the benchmarks page's memory section": memory, "the benchmarks page's opening": intro,
+            "the memory guide": guide, "the builder's comment": builder,
+            "the benchmark's docstring": benchmark.__doc__ or ""}
+
+
+def test_nothing_calls_the_second_set_held_out():
+    found = {where: claims for where, text in _what_a_reader_sees_of_the_recall_sets().items()
+             if (claims := _held_out_claims(text))}
+    assert not found, f"A set looked at in decisions is called held out: {found}"
+
+
+def test_the_held_out_check_sees_the_old_words():
+    """Negative control: the page row and the guide sentence as they were."""
+    assert _held_out_claims("| **Held out** (never used to choose a setting) | **89.1 %** |")
+    assert _held_out_claims("and 40 more held out: written after the last tuning and never used to "
+                            "choose a threshold, so their scores say how far the tuning carries.")
+    assert not _held_out_claims("A held-out set is a sealed one, scored only on request.")
 
 
 # ── the abstention target and the trade rule ──────────────────────────────

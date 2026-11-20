@@ -8,7 +8,7 @@ title: Benchmarks
 
 How well Kazma remembers, finds and reads, measured on versioned datasets kept in its repository and held by its tests: a change that makes a number worse fails the build. This page is written from those results (`scripts/benchmarks_page.py`), so it says what the code does today. Every dataset, script and result file is in the repository; the commands under each table reproduce it.
 
-The datasets are Kazma's own, built for these questions in English, Arabic and both, with questions held out from tuning. They are not a public leaderboard's: compare runs of Kazma with each other, not with numbers measured elsewhere.
+The datasets are Kazma's own, built for these questions in English, Arabic and both; the memory and Knowledge datasets each keep a second set of questions apart from tuning. They are not a public leaderboard's: compare runs of Kazma with each other, not with numbers measured elsewhere.
 
 ## Memory: does it find what you told it? {#memory}
 
@@ -27,9 +27,11 @@ Dataset version 5: a private memory seeded the product's way (turns, facts, week
 | Asked in Arabic | 100.0 % | 0.79 | 62.5 % |
 | A question with noise around it | 100.0 % | 1.00 | 61.1 % |
 | **All questions** | **92.5 %** | **0.84** | **64.4 %** |
-| **Held out** (never used to choose a setting) | **89.1 %** | **0.84** | **64.6 %** |
+| **Second set** (see below) | **89.1 %** | **0.84** | **64.6 %** |
 
-Questions it has no memory for are answered with nothing in 27.8 % of cases (0.0 % held out); the goal is 60.0 %: the weakest number on this page.
+Questions it has no memory for are answered with nothing in 27.8 % of cases (0.0 % in the second set); the goal is 60.0 %: the weakest number on this page.
+
+The second set was written after the settings were chosen, and no setting is chosen by sweeping it. It is not an unseen test: two decisions were taken by looking at it, and a change that lowers it fails the build like any other score, so it is a second check on the same memories. A set nobody has looked at would be a sealed one, scored only on request.
 
 ### Learning facts from a conversation {#memory-facts}
 

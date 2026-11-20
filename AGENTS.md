@@ -2018,10 +2018,17 @@ four injected were noise.
   re-recorded with the real model. The Dashboard's golden eval seeds facts
   the same way; a case marked `needs_meaning` is skipped without an
   embedder and must pass with one. **Dataset v5 (2026-10-14, Memory audit
-  M24)** adds 40 held-out questions (`HELDOUT`: never used to choose a
-  threshold; the builder refuses one that repeats a tuning question; a
+  M24)** adds a second set of 40 questions (`SECOND_SET`: no threshold is
+  swept on it; the builder refuses one that repeats a tuning question; a
   `mixed` category asks across languages), scored apart
-  (`report["heldout"]`, gated as `heldout.*`); an extraction benchmark
+  (`report["second"]`, gated as `second.*`). **It is not held out**
+  (renamed 2026-11-20, benchmark audit R8, the owner's decision 4): two
+  decisions were taken by looking at it and it is gated in the same lock,
+  so it stays gated as a second check, and only a sealed set (another
+  session's questions, scored on request) may be called held out
+  (`test_nothing_calls_the_second_set_held_out`: the page, the guide, the
+  builder and the benchmark's docstring; the old words as the negative
+  control). An extraction benchmark
   (`benchmark_data/extraction.json`, `run_extraction_benchmark`: 30 turns
   EN/AR/mixed; the heuristic pass in CI, the model's deep pass from
   recorded replies, `tests/fixtures/memory_bench/extraction_llm.json`,
@@ -2067,7 +2074,7 @@ four injected were noise.
   score falls more than 0.05, one rises 0.05 or more, abstention never
   falls; recorded in `trades`); and the Postgres-primary run
   (`tests/test_memory_benchmark_pg.py`, opt-in, pgvector, floors in
-  `postgres_primary`). The report (both backends, held out, extraction) is
+  `postgres_primary`). The report (both backends, the second set, extraction) is
   the guide's "Benchmark report"; the measured limits at 10x and 100x are
   the guide's "Measured limits" (`tests/test_memory_scale_bench.py`).
 - **A hit at the edge stops the lock** (2026-11-20, benchmark audit R4, the

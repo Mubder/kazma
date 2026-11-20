@@ -699,14 +699,19 @@ QUESTIONS: list[tuple[str, str, str, list[str], list[str]]] = [
 ]
 
 
-#: Held out (Memory audit M24): recall's thresholds were swept on QUESTIONS, so
-#: their scores say how well the tuning fits them. These were written after
-#: the last sweep, against the same memories, and are never used to choose a
-#: threshold: the gap between the two is how far the tuning generalizes.
-#: ``mixed`` asks in one language about a memory in the other, or switches
-#: language inside the question. Several abstain questions come close to a
-#: real memory (a dentist, a car), which is where injecting nothing is hard.
-HELDOUT: list[tuple[str, str, str, list[str], list[str]]] = [
+#: The second set (Memory audit M24; renamed 2026-11-20, benchmark audit R8
+#: and the owner's decision 4). Recall's thresholds were swept on QUESTIONS;
+#: these 40 were written after the last sweep, against the same memories, and
+#: no threshold is swept on them. They are a second check, not an unseen
+#: test: two decisions were taken by looking at them (2026-10-14 and
+#: 2026-10-15, the guide's "Benchmark report"), and they are gated in the
+#: same lock, so every change kept is one that did not lower them. They stay
+#: gated; a held-out set is a sealed one, written by another session and
+#: scored only on request. ``mixed`` asks in one language about a memory in the other, or
+#: switches language inside the question. Several abstain questions come close
+#: to a real memory (a dentist, a car), which is where injecting nothing is
+#: hard.
+SECOND_SET: list[tuple[str, str, str, list[str], list[str]]] = [
     ("h001", "What's my partner's name?", "single", ["p02#2|f07"], []),
     ("h002", "Which breed is Pixel?", "single", ["p01#2|f37"], ["x03"]),
     ("h003", "What's the name of my guitar teacher?", "single", ["p12#1|f19|h08#1"], []),
@@ -801,12 +806,12 @@ def build() -> dict[str, Any]:
     if len(summary_ids) != len(summaries) or summary_ids & (fact_ids | refs):
         raise ValueError("duplicate summary id")
     questions = _questions(QUESTIONS, refs, fact_ids, summary_ids)
-    heldout = _questions(HELDOUT, refs, fact_ids, summary_ids)
-    if {q["id"] for q in questions} & {q["id"] for q in heldout} or {q["text"] for q in questions} & {
-            q["text"] for q in heldout}:
-        raise ValueError("a held-out question repeats a tuning question")
+    second = _questions(SECOND_SET, refs, fact_ids, summary_ids)
+    if {q["id"] for q in questions} & {q["id"] for q in second} or {q["text"] for q in questions} & {
+            q["text"] for q in second}:
+        raise ValueError("a question of the second set repeats a tuning question")
     return {"version": 5, "seed": SEED, "sessions": sessions, "facts": facts,
-            "summaries": summaries, "questions": questions, "heldout": heldout}
+            "summaries": summaries, "questions": questions, "second": second}
 
 
 #: The extraction benchmark (Memory audit M24): one chat turn each, in English,
@@ -1302,13 +1307,13 @@ def _cmd_run(real: bool, as_json: bool, details: bool) -> int:
         extra = "  ".join(f"{k} {v}" for k, v in row.items() if k not in ("n",))
         print(f"  {name:<11} n={row['n']:<3} {extra}")
     print("overall:", json.dumps(report["overall"]))
-    held = report.get("heldout")
+    held = report.get("second")
     if held:
-        print(f"held out: {held['overall']['questions']} questions")
+        print(f"second set: {held['overall']['questions']} questions")
         for name, row in held["categories"].items():
             extra = "  ".join(f"{k} {v}" for k, v in row.items() if k not in ("n",))
             print(f"  {name:<11} n={row['n']:<3} {extra}")
-        print("held-out overall:", json.dumps(held["overall"]))
+        print("second-set overall:", json.dumps(held["overall"]))
     from kazma_core.memory.benchmark import gated_scores
 
     scores = gated_scores(report)
@@ -1323,7 +1328,7 @@ def _cmd_run(real: bool, as_json: bool, details: bool) -> int:
 
 #: Where recall should get to, not a floor: injecting nothing for a question
 #: nothing answers (Memory audit M24). The report shows the distance.
-TARGETS = {"abstain.hit_rate": 0.6, "heldout.abstain.hit_rate": 0.6}
+TARGETS = {"abstain.hit_rate": 0.6, "second.abstain.hit_rate": 0.6}
 
 #: A reviewed trade (``lock --trade "why"``): a change may lower gated scores
 #: only when every lowered score drops by at most TRADE_MAX_DROP, at least one
@@ -1333,7 +1338,7 @@ TARGETS = {"abstain.hit_rate": 0.6, "heldout.abstain.hit_rate": 0.6}
 #: review sees it in the diff.
 TRADE_MAX_DROP = 0.05
 TRADE_MIN_GAIN = 0.05
-_NEVER_TRADED = ("abstain.hit_rate", "heldout.abstain.hit_rate")
+_NEVER_TRADED = ("abstain.hit_rate", "second.abstain.hit_rate")
 
 
 def trade_problems(old: dict[str, float], new: dict[str, float]) -> list[str]:
@@ -1371,9 +1376,9 @@ def _edge_lock(
 
     check = benchmark.edge_check(VECTORS, base)
     data = benchmark.load_dataset()
-    questions = {q["id"]: q for q in data["questions"] + data.get("heldout", [])}
+    questions = {q["id"]: q for q in data["questions"] + data.get("second", [])}
     results = {r["id"]: r for r in list(base.get("results", []))
-               + list((base.get("heldout") or {}).get("results", []))}
+               + list((base.get("second") or {}).get("results", []))}
     listed = {} if fresh else {e["id"]: e for e in old.get("hits", [])}
     adding = dict(name or [])
     problems = [f"--edge {qid}: its hit does not flip in the {check['draws']} draws; there is nothing to name"

@@ -26,9 +26,11 @@ noise, arabic, fact, overview, abstain):
 It never touches live memory: its own temp database, its own tenant id, and
 ``recall(local_only=True)`` so no state mirror or remote index is consulted.
 
-Held out (dataset v5, Memory audit M24): ``heldout`` questions are scored the
-same way and reported apart (``report["heldout"]``); recall's thresholds were
-never swept on them. The extraction benchmark
+The second set (dataset v5, Memory audit M24): ``second`` questions are
+scored the same way and reported apart (``report["second"]``, gated as
+``second.*``). No threshold is swept on them, but decisions were taken by
+looking at them, so they are a second check, not an unseen test
+(benchmark audit R8, renamed 2026-11-20). The extraction benchmark
 (:func:`run_extraction_benchmark`) scores what the heuristic pass -- and,
 from recorded replies, the model's deep pass -- keeps from single turns in
 English, Arabic and mixed.
@@ -301,7 +303,7 @@ def gated_scores(report: dict[str, Any]) -> dict[str, float]:
     code's.
     """
     out: dict[str, float] = {}
-    for prefix, part in (("", report), ("heldout.", report.get("heldout"))):
+    for prefix, part in (("", report), ("second.", report.get("second"))):
         if not part:
             continue
         out.update({f"{prefix}overall.{k}": float(v) for k, v in part["overall"].items()
@@ -354,11 +356,11 @@ def run_benchmark(
         results, latencies = ask(data["questions"])
         report = _summarise(results, latencies)
         report["memories"] = len(refs)
-        if data.get("heldout"):
-            held, held_latencies = ask(data["heldout"])
-            report["heldout"] = _summarise(held, held_latencies)
+        if data.get("second"):
+            held, held_latencies = ask(data["second"])
+            report["second"] = _summarise(held, held_latencies)
             if keep_results:
-                report["heldout"]["results"] = held
+                report["second"]["results"] = held
         if keep_results:
             report["results"] = results
         return report
@@ -498,7 +500,7 @@ class _MovedEmbedder(ReplayEmbedder):
 
 
 def _all_results(report: dict[str, Any]) -> list[dict[str, Any]]:
-    return list(report.get("results", [])) + list((report.get("heldout") or {}).get("results", []))
+    return list(report.get("results", [])) + list((report.get("second") or {}).get("results", []))
 
 
 def edge_check(
@@ -525,7 +527,7 @@ def edge_check(
     data = dataset or load_dataset()
     if only is not None:
         data = {**data, "questions": [q for q in data["questions"] if q["id"] in only],
-                "heldout": [q for q in data.get("heldout", []) if q["id"] in only]}
+                "second": [q for q in data.get("second", []) if q["id"] in only]}
     was = {r["id"]: r for r in _all_results(base)}
     flips: dict[str, int] = {}
     shown: dict[str, int] = {}

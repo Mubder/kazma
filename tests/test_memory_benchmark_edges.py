@@ -60,7 +60,7 @@ def report():
 
 
 def _results(report: dict) -> dict[str, dict]:
-    return {r["id"]: r for r in report["results"] + report["heldout"]["results"]}
+    return {r["id"]: r for r in report["results"] + report["second"]["results"]}
 
 
 @pytest.fixture(scope="module")

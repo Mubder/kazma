@@ -695,6 +695,15 @@ framework audit's section 6.2, decisions 3 to 6).
   Not done: the float32 recording and the check of the model's commit, which
   need the embedder and belong with step 5's re-record, and the real-model
   run before a lock.
+- **Step 8, R8, 2026-11-20: today's set is renamed, and stays gated.** The
+  40 questions are the second set everywhere a reader sees them (the
+  dataset's key, the lock's `second.*` scores, the benchmarks page, the
+  guide and its 2026-10-14 report, which says why) and they stay in the
+  per-commit gate (decision 4). A check holds the words: nothing on the
+  page, in the guide, the builder or the benchmark's docstring calls a set
+  held out unless it names it sealed (`tests/test_memory_benchmark.py`,
+  the old words as the negative control). The sealed set itself is to be
+  written by another session; its specification comes next.
 
 ---
 

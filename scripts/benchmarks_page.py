@@ -88,14 +88,19 @@ def _memory(data: dict) -> list[str]:
                          f"{_pct(s.get(f'{key}.precision'))} |")
     lines.append(f"| **All questions** | **{_pct(s.get('overall.hit_rate'))}** | **{_num(s.get('overall.mrr'))}** | "
                  f"**{_pct(s.get('overall.precision'))}** |")
-    lines.append(f"| **Held out** (never used to choose a setting) | **{_pct(s.get('heldout.overall.hit_rate'))}** | "
-                 f"**{_num(s.get('heldout.overall.mrr'))}** | **{_pct(s.get('heldout.overall.precision'))}** |")
+    lines.append(f"| **Second set** (see below) | **{_pct(s.get('second.overall.hit_rate'))}** | "
+                 f"**{_num(s.get('second.overall.mrr'))}** | **{_pct(s.get('second.overall.precision'))}** |")
     target = (data.get("targets") or {}).get("abstain.hit_rate")
     lines += [
         "",
         f"Questions it has no memory for are answered with nothing in {_pct(s.get('abstain.hit_rate'))} of cases "
-        f"({_pct(s.get('heldout.abstain.hit_rate'))} held out); the goal is {_pct(target)}: the weakest "
+        f"({_pct(s.get('second.abstain.hit_rate'))} in the second set); the goal is {_pct(target)}: the weakest "
         "number on this page.",
+        "",
+        "The second set was written after the settings were chosen, and no setting is chosen by sweeping it. "
+        "It is not an unseen test: two decisions were taken by looking at it, and a change that lowers it "
+        "fails the build like any other score, so it is a second check on the same memories. A set nobody "
+        "has looked at would be a sealed one, scored only on request.",
         "",
     ]
     extraction = data.get("extraction") or {}
@@ -248,9 +253,9 @@ def render() -> str:
         "results (`scripts/benchmarks_page.py`), so it says what the code does today. Every dataset, script and "
         "result file is in the repository; the commands under each table reproduce it.",
         "",
-        "The datasets are Kazma's own, built for these questions in English, Arabic and both, with questions "
-        "held out from tuning. They are not a public leaderboard's: compare runs of Kazma with each other, not "
-        "with numbers measured elsewhere.",
+        "The datasets are Kazma's own, built for these questions in English, Arabic and both; the memory and "
+        "Knowledge datasets each keep a second set of questions apart from tuning. They are not a public "
+        "leaderboard's: compare runs of Kazma with each other, not with numbers measured elsewhere.",
         "",
     ]
     lines += _memory(memory) + _knowledge(knowledge) + _fidelity(fidelity)
