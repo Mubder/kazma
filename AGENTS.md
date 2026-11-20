@@ -13847,6 +13847,39 @@ product can turn it on, so an install with one account behaves as before.
   - Gates: `tests/test_admin_cannot_open_a_space.py` (a role check alone
     and an untouched record as controls), `tests/e2e/test_people_page_browser.py`
     (EN and AR, by the sidebar; no tab without Spaces as the control).
+- **Count, export and erase one space (S1-27, 2026-11-20).** Only once
+  Spaces is enforced (409 `spaces_off`); never the owner's personal space
+  (`owners_space`); not yet on Postgres or with memory's Postgres copy
+  (`postgres_not_yet`).
+  - `kazma_core/spaces/space_data.py` walks every table of every `row` store
+    (`store_registry.SPACE_RULES`) and finds the space's rows by its rule:
+    `TABLE_RULES`, else a space column (`tenant_id`, `tenant`, `space`,
+    `space_id`), else an FTS index its triggers keep, else its thread. A
+    table with none refuses the count, the export and the erase (500
+    `unknown_table`): a new table, or one the app makes at start, gets a
+    rule in the same change (`keep` says why it holds no space's words).
+    Settings, secrets (`SecretVault.erase_space`, whatever scope is bound)
+    and libraries (`knowledge_lifecycle.delete_library`) go through their
+    own stores; the space's folders after; then it leaves the identity
+    store, recorded (`space_erased`).
+  - An erase first closes the space (`people.close_space`: `erasing_at`, and
+    `identity.is_member` is False for everyone); one that stopped half way is
+    run again. Each store file's rows go in one transaction.
+  - Who may (`kazma_ui/spaces_api.py`, from the memberships): the admin or a
+    member counts (numbers only); the space's owner exports; an owner deletes
+    a shared space; the admin erases the closed personal space of a deleted
+    person and never exports a member's. The export is sealed with a
+    password the person chooses (decision N10, `security/sealed_zip.py`:
+    WinZip AES-256, at least 12 characters).
+  - Pages: Settings -> This space -> This space's data; People lists the
+    closed spaces with Erase.
+  - Gates: `tests/test_space_export_erase.py` (a word planted in every table
+    of A and of B; A's export holds A's only; erasing A leaves no column or
+    file holding A's word, B whole; yesterday's erase that misses a store, a
+    table with no rule and a Postgres copy of memory as controls),
+    `tests/test_sealed_zip.py` (7-Zip and bsdtar open it with the password
+    only, ZIP64 too; a big-endian counter as the control),
+    `tests/e2e/test_people_page_browser.py` (EN and AR, by the sidebar).
 
 ## UI Conventions (Web)
 

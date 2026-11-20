@@ -444,6 +444,7 @@
         peopleLoaded: false,
         peopleFailed: false,
         peopleRecordWhole: true,
+        closedSpaces: [],
         newPerson: { name: '', password: '' },
 
         _peopleError(data) {
@@ -459,8 +460,161 @@
                 return;
             }
             this.people = data.people;
+            this.closedSpaces = Array.isArray(data.closed_spaces) ? data.closed_spaces : [];
             this.peopleRecordWhole = data.record_whole !== false;
             this.peopleLoaded = true;
+        },
+
+        // ── A space's data (Spaces S1-27): count, export, erase ──
+        spaceData: {},
+        spaceDataLoaded: false,
+        spaceDataBusy: false,
+        spaceDataError: '',
+
+        _spaceDataError(data) {
+            const code = (data && data.error) || 'failed';
+            return _t('settings.space_data_err.' + code, _t('settings.space_data_err.failed', 'That did not work. Try again.'));
+        },
+
+        _thisSpace() {
+            return (window.kazmaSpace && window.kazmaSpace.id) || '';
+        },
+
+        async loadSpaceData() {
+            this.spaceDataError = '';
+            const space = this._thisSpace();
+            if (!space) {
+                this.spaceDataError = this._spaceDataError({ error: 'no_such_space' });
+                return;
+            }
+            try {
+                const resp = await fetch('/api/spaces/' + encodeURIComponent(space) + '/counts', { credentials: 'same-origin' });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok) {
+                    this.spaceDataLoaded = false;
+                    this.spaceDataError = this._spaceDataError(data);
+                    return;
+                }
+                this.spaceData = data;
+                this.spaceDataLoaded = true;
+            } catch (e) {
+                this.spaceDataError = this._spaceDataError(null);
+            }
+        },
+
+        async exportThisSpace() {
+            const space = this._thisSpace();
+            // Sealed with a password the person chooses: asked twice, since
+            // a mistyped one opens nothing.
+            const password = await window.kazmaPrompt({
+                title: _t('settings.space_data_export', 'Export this space'),
+                message: _t('settings.space_data_export_password',
+                    'Choose a password for the export (at least 12 characters). It opens with 7-Zip, WinZip or Keka, not with the zip tools built into Windows or macOS. Kazma does not keep it.'),
+                inputType: 'password',
+            });
+            if (password === null || password === undefined) return;
+            if (password.length < 12) {
+                showToast(this._spaceDataError({ error: 'password_too_short' }), 'error');
+                return;
+            }
+            const again = await window.kazmaPrompt({
+                title: _t('settings.space_data_export', 'Export this space'),
+                message: _t('settings.space_data_export_again', 'Type the password again.'),
+                inputType: 'password',
+            });
+            if (again === null || again === undefined) return;
+            if (again !== password) {
+                showToast(_t('settings.space_data_err.passwords_differ', 'The two passwords differ. Nothing was exported.'), 'error');
+                return;
+            }
+            this.spaceDataBusy = true;
+            try {
+                const resp = await fetch('/api/spaces/' + encodeURIComponent(space) + '/export', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: password }),
+                });
+                if (!resp.ok) {
+                    const data = await resp.json().catch(() => ({}));
+                    showToast(this._spaceDataError(data), 'error');
+                    return;
+                }
+                const blob = await resp.blob();
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = 'kazma-space-' + space + '.zip';
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+                showToast(_t('settings.space_data_exported', 'The space was exported.'), 'success');
+            } catch (e) {
+                showToast(this._spaceDataError(null), 'error');
+            } finally {
+                this.spaceDataBusy = false;
+            }
+        },
+
+        async _eraseSpace(space) {
+            const resp = await fetch('/api/spaces/' + encodeURIComponent(space), {
+                method: 'DELETE', credentials: 'same-origin',
+            });
+            const data = await resp.json().catch(() => ({}));
+            return { ok: resp.ok, data: data };
+        },
+
+        async deleteThisSpace() {
+            const space = this._thisSpace();
+            const name = this.spaceData.name || space;
+            const answer = await window.kazmaConfirm({
+                title: _t('settings.space_data_delete_title', 'Delete {name}?', { name: _iso(name) }),
+                message: _t('settings.space_data_delete_confirm',
+                    'Everything in it is erased for good: its chats, memory, files, documents, libraries, schedules and secrets. Its members leave it. Export it first if you want a copy.'),
+                danger: true,
+                confirmText: _t('settings.space_data_delete', 'Delete this space'),
+            });
+            if (!answer) return;
+            this.spaceDataBusy = true;
+            try {
+                const done = await this._eraseSpace(space);
+                if (!done.ok) {
+                    showToast(this._spaceDataError(done.data), 'error');
+                    return;
+                }
+                showToast(_t('settings.space_data_deleted', '{name} was deleted.', { name: _iso(name) }), 'success');
+                // This tab's space is gone: go to another of the person's.
+                const mine = await window.kazmaGetJson('/api/account/spaces');
+                const next = mine && Array.isArray(mine.spaces) ? mine.spaces.find((s) => s.id !== space) : null;
+                if (next && window.kazmaSpace) window.kazmaSpace.switchTo(next.id);
+                else window.location.assign('/');
+            } catch (e) {
+                showToast(this._spaceDataError(null), 'error');
+            } finally {
+                this.spaceDataBusy = false;
+            }
+        },
+
+        async eraseClosedSpace(closed) {
+            const answer = await window.kazmaConfirm({
+                title: _t('settings.people_erase_title', 'Erase the space of {name}?', { name: _iso(closed.name) }),
+                message: _t('settings.people_erase_confirm',
+                    'Everything their space holds is erased for good. You never see what it holds.'),
+                danger: true,
+                confirmText: _t('settings.people_erase', 'Erase'),
+            });
+            if (!answer) return;
+            try {
+                const done = await this._eraseSpace(closed.id);
+                if (!done.ok) {
+                    showToast(this._spaceDataError(done.data), 'error');
+                    return;
+                }
+                showToast(_t('settings.people_erased', 'The space of {name} was erased.', { name: _iso(closed.name) }), 'success');
+            } catch (e) {
+                showToast(this._spaceDataError(null), 'error');
+                return;
+            }
+            await this.loadPeople();
         },
 
         async createPerson() {

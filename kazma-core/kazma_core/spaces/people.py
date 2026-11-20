@@ -45,7 +45,10 @@ from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, spaces_enforced
 __all__ = [
     "PeopleRefused",
     "broken_at",
+    "close_space",
+    "closed_spaces",
     "create_person",
+    "forget_space",
     "delete_person",
     "list_people",
     "mark_seen",
@@ -56,7 +59,7 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 #: What the record holds.
-_KINDS = ("account_created", "password_reset", "account_deleted")
+_KINDS = ("account_created", "password_reset", "account_deleted", "space_erased")
 #: The events a person is told about, when someone else made them.
 _TOLD = ("password_reset",)
 _NAME_MAX = 64
@@ -92,7 +95,7 @@ def _event_hash(event: dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(fields, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
-def _record(reg: dict[str, Any], kind: str, account: str, by: str) -> None:
+def _record(reg: dict[str, Any], kind: str, account: str, by: str, *, space: str = "") -> None:
     """Append one event to *reg*'s record, chained to the one before."""
     if kind not in _KINDS:
         raise ValueError(f"not an event of the record: {kind!r}")
@@ -105,6 +108,8 @@ def _record(reg: dict[str, Any], kind: str, account: str, by: str) -> None:
         "by": by,
         "prev": events[-1].get("hash", "") if events else "",
     }
+    if space:
+        event["space"] = space
     event["hash"] = _event_hash(event)
     events.append(event)
 
@@ -147,6 +152,19 @@ def list_people() -> list[dict[str, Any]]:
         for account_id, account in reg["accounts"].items()
     ]
     return sorted(people, key=lambda p: (not p["owner"], p["name"].lower()))
+
+
+def closed_spaces() -> list[dict[str, Any]]:
+    """The personal spaces of deleted people, waiting to be erased (S1-27):
+    id, the name it had, when its person was deleted. Never what it holds."""
+    reg = identity.read_registry()
+    closed = [
+        {"id": space_id, "name": str(space.get("name") or ""),
+         "deleted_at": str(space.get("account_deleted_at") or "")}
+        for space_id, space in reg["spaces"].items()
+        if space.get("personal_of") and space.get("account_deleted_at")
+    ]
+    return sorted(closed, key=lambda space: space["deleted_at"])
 
 
 def notices_for(account_id: str) -> list[dict[str, Any]]:
@@ -308,3 +326,34 @@ def _end_sessions_of(user_id: str) -> None:
     from kazma_core.security.web_sessions import revoke_user_sessions
 
     revoke_user_sessions(user_id=user_id)
+
+
+# ── A space's end (S1-27) ───────────────────────────────────────────────
+
+
+def close_space(space_id: str, *, by: str) -> None:
+    """Mark *space_id* as being erased: from now on nobody is a member of it
+    (``identity.is_member``), so no request or job binds it, while its
+    memberships stay for an erase that stopped half way to be run again."""
+    def _change(reg: dict[str, Any]) -> None:
+        space = reg["spaces"].get(space_id)
+        if space is None:
+            raise identity.IdentityError("no_such_space", f"no space {space_id!r}")
+        space.setdefault("erasing_at", _now())
+        space.setdefault("erasing_by", by)
+
+    _changed(_change)
+
+
+def forget_space(space_id: str, *, by: str) -> None:
+    """Take an erased space and its memberships out of the identity store,
+    recorded (``space_erased``)."""
+    def _change(reg: dict[str, Any]) -> None:
+        space = reg["spaces"].pop(space_id, None)
+        if space is None:
+            return
+        reg["memberships"] = [m for m in reg["memberships"] if m.get("space") != space_id]
+        _record(reg, "space_erased", str(space.get("personal_of") or ""), by, space=space_id)
+
+    _changed(_change)
+

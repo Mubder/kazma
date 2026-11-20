@@ -622,7 +622,7 @@
         /* The area a tab is in: My account, This space or Install. */
         _tabArea(tab) {
             if (tab === 'account') return 'account';
-            if (tab === 'email' || tab === 'x') return 'space';
+            if (tab === 'email' || tab === 'x' || tab === 'space_data') return 'space';
             return 'install';
         },
 
@@ -992,6 +992,7 @@
                 case 'shortcuts': this.shortcutConflicts = this.detectConflicts(); break;
                 case 'account': await this.loadAccount(); break;
                 case 'people': await this.loadPeople(); break;
+                case 'space_data': await this.loadSpaceData(); break;
                 case 'tools': await this.loadTools(); break;
                 case 'system': await this.loadDiagnostics(); await this.loadLogs(); await this.loadVaultStatus(); await this.loadLogging(); await this.loadSwarmRetention(); await this.loadCheckpointRetention(); await this.loadTurnTimeout(); await this.loadReportUrl(); await this.loadA2a(); await this.loadTurnSpending(); await this.loadChatReasoning(); await this.loadContainerEngine(); await this.loadProxy(); await this.loadRestoreUndo(); break;
                 case 'backup': await Promise.all([this.loadBackupList(), this.loadOffsiteConfig(), this.syncBackupState()]); break;

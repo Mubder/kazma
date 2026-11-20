@@ -74,10 +74,12 @@ def create_people_router() -> APIRouter:
             return denied
         try:
             listed = people.list_people()
+            closed = people.closed_spaces()
             broken = people.broken_at()
         except IdentityUnavailable:
             return _unavailable()
         return JSONResponse({"ok": True, "enforced": spaces_enforced(), "people": listed,
+                             "closed_spaces": closed,
                              "record_whole": broken is None, "record_broken_at": broken})
 
     def _create(request: Request, body: dict[str, Any]) -> JSONResponse:

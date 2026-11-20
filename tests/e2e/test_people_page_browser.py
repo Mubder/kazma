@@ -1,10 +1,13 @@
-"""People, in a real browser (Spaces S1-25), English and Arabic.
+"""People, in a real browser (Spaces S1-25, S1-27), English and Arabic.
 
 The admin reaches Settings by the sidebar, opens People, adds a person,
 resets their password (typed into a password field) and deletes them. In
 between, the person loads a page in their own browser and is told, in the
 page's language, that their password was reset -- once: a reload does not
-tell them again.
+tell them again. The person then reaches Settings by the sidebar, opens
+This space's data, sees what their space holds and exports it (a zip); no
+Delete is offered for a personal space. Once the person is deleted, their
+closed space is listed under People and the admin erases it.
 
 Negative control: on an install that does not enforce Spaces, Settings has
 no People tab.
@@ -74,7 +77,7 @@ def test_the_admin_adds_resets_and_deletes_a_person(lang):
             pg.fill("#people-new-name", NAME)
             pg.fill("#people-new-password", "a-long-enough-password")
             pg.click("#people-add")
-            row = pg.locator("#settings-people .account-list-row", has_text=NAME)
+            row = pg.locator("#settings-people .account-list-row[data-person]", has_text=NAME)
             row.wait_for(state="visible", timeout=20000)
             person = pg.evaluate(
                 "(name) => fetch('/api/people').then(r => r.json())"
@@ -112,10 +115,50 @@ def test_the_admin_adds_resets_and_deletes_a_person(lang):
             assert theirs.evaluate("() => fetch('/api/account/notices').then(r => r.json())")["notices"] == []
             assert not theirs.locator("#modal-title").is_visible()
 
+            # This space's data: the person exports their own space.
+            _soft_nav(theirs, "/settings")
+            _settings_loaded(theirs)
+            theirs.locator(".settings-tab", has_text=_t("settings.tab_space_data", lang)).click()
+            panel = theirs.locator("#settings-space-data")
+            panel.wait_for(state="visible", timeout=20000)
+            export = theirs.locator("#space-data-export")
+            export.wait_for(state="visible", timeout=20000)
+            assert panel.inner_text().count(NAME) == 1
+            assert not theirs.locator("#space-data-delete").is_visible()
+            # Sealed with a password they choose, typed twice into password fields.
+            export.click()
+            field = theirs.locator(".modal input[x-model='$store.modal.inputValue']")
+            field.wait_for(state="visible", timeout=10000)
+            assert field.get_attribute("type") == "password"
+            field.fill("their-own-long-password")
+            _modal_action(theirs, _t("common.ok", lang))
+            again = theirs.locator(".modal", has_text=_t("settings.space_data_export_again", lang))
+            again.wait_for(state="visible", timeout=10000)
+            field.wait_for(state="visible", timeout=10000)
+            assert field.get_attribute("type") == "password"
+            field.fill("their-own-long-password")
+            with theirs.expect_download() as download:
+                _modal_action(theirs, _t("common.ok", lang))
+            assert download.value.suggested_filename == f"kazma-space-{person['personal_space']}.zip"
+            import zipfile
+
+            with zipfile.ZipFile(download.value.path()) as zipped:
+                assert {info.compress_type for info in zipped.infolist()} == {99}
+
             # Delete.
             row.locator("button", has_text=_t("settings.delete", lang)).click()
             _modal_action(pg, _t("settings.delete", lang))
             row.wait_for(state="detached", timeout=20000)
+
+            # Their closed space is listed under People; the admin erases it.
+            closed = pg.locator(f"#people-closed-spaces [data-closed-space='{person['personal_space']}']")
+            closed.wait_for(state="visible", timeout=20000)
+            closed.locator("button", has_text=_t("settings.people_erase", lang)).click()
+            with pg.expect_response(lambda r: r.request.method == "DELETE"
+                                    and "/api/spaces/" in r.url) as erased:
+                _modal_action(pg, _t("settings.people_erase", lang))
+            assert erased.value.ok, erased.value.text()
+            closed.wait_for(state="detached", timeout=20000)
         finally:
             browser.close()
             scope.set_enforced(False)

@@ -409,10 +409,14 @@ def spaces_of(account_id: str) -> list[dict[str, Any]]:
 
 def is_member(account_id: str, space_id: str) -> bool:
     """True when the account is a member of the space. An unreadable store
-    raises: "not a member" is never guessed."""
+    raises: "not a member" is never guessed. Nobody is a member of a space
+    being erased (``erasing_at``, S1-27): no request or job binds it."""
+    reg = read_registry()
+    if (reg["spaces"].get(space_id) or {}).get("erasing_at"):
+        return False
     return any(
         m.get("account") == account_id and m.get("space") == space_id
-        for m in read_registry()["memberships"]
+        for m in reg["memberships"]
     )
 
 

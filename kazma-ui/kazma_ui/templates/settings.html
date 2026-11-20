@@ -26,6 +26,9 @@
           <div class="tabs settings-area-tabs" role="tablist" aria-labelledby="settings-area-space">
             <button class="settings-tab tab" role="tab" :aria-selected="tab === 'email' ? 'true' : 'false'" :class="{ active: tab === 'email' }" @click="onTabChange('email')">{{ t('settings.tab_email') }}</button>
             <button class="settings-tab tab" role="tab" :aria-selected="tab === 'x' ? 'true' : 'false'" :class="{ active: tab === 'x' }" @click="onTabChange('x')">{{ t('settings.tab_x') }}</button>
+            {% if spaces_enforced is defined and spaces_enforced() %}
+            <button class="settings-tab tab" role="tab" :aria-selected="tab === 'space_data' ? 'true' : 'false'" :class="{ active: tab === 'space_data' }" @click="onTabChange('space_data')">{{ t('settings.tab_space_data') }}</button>
+            {% endif %}
           </div>
         </div>
         {% if install_area %}
@@ -2481,6 +2484,49 @@
                 </div>
               </template>
             </div>
+        </div>
+        <!-- The closed spaces of deleted people (S1-27): the admin erases
+             them; their contents are never shown here. -->
+        <div class="settings-group mb-6" id="people-closed-spaces" x-show="peopleLoaded && closedSpaces.length > 0" x-cloak>
+            <h3>{{ t('settings.people_closed_title') }}</h3>
+            <p class="form-hint">{{ t('settings.people_closed_help') }}</p>
+            <div class="account-list-table">
+              <template x-for="c in closedSpaces" :key="c.id">
+                <div class="account-list-row" :data-closed-space="c.id">
+                  <span class="account-list-name"><bdi translate="no" x-text="c.name"></bdi></span>
+                  <span class="account-list-meta" x-text="c.deleted_at ? KazmaFormat.date(c.deleted_at) : ''"></span>
+                  <span class="account-list-actions">
+                    <button type="button" class="btn btn-sm btn-danger" @click="eraseClosedSpace(c)" :aria-label="window.t('settings.people_erase_of', {name: c.name})">{{ t('settings.people_erase') }}</button>
+                  </span>
+                </div>
+              </template>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if spaces_enforced is defined and spaces_enforced() %}
+    <!-- This space's data (Spaces S1-27): how much it holds; its owner
+         exports it, and deletes a shared one. -->
+    <div x-show="tab === 'space_data'" x-transition x-cloak id="settings-space-data">
+        <div class="settings-group mb-6">
+            <h3>{{ t('settings.space_data_title') }}</h3>
+            <p class="form-hint">{{ t('settings.space_data_help') }}</p>
+            <div class="notice tone-danger" x-show="spaceDataError" x-cloak x-text="spaceDataError"></div>
+            <div class="account-list-table" x-show="spaceDataLoaded" x-cloak>
+              <div class="account-list-row"><span class="account-list-name">{{ t('settings.space_data_name') }}</span><span class="account-list-meta"><bdi translate="no" x-text="spaceData.name"></bdi></span></div>
+              <div class="account-list-row"><span class="account-list-name">{{ t('settings.space_data_rows') }}</span><span class="account-list-meta" x-text="KazmaFormat.number(spaceData.rows || 0)"></span></div>
+              <div class="account-list-row"><span class="account-list-name">{{ t('settings.space_data_chats') }}</span><span class="account-list-meta" x-text="KazmaFormat.number(spaceData.chats || 0)"></span></div>
+              <div class="account-list-row"><span class="account-list-name">{{ t('settings.space_data_files') }}</span><span class="account-list-meta" x-text="KazmaFormat.number(spaceData.files || 0)"></span></div>
+              <div class="account-list-row"><span class="account-list-name">{{ t('settings.space_data_libraries') }}</span><span class="account-list-meta" x-text="KazmaFormat.number(spaceData.libraries || 0)"></span></div>
+              <div class="account-list-row"><span class="account-list-name">{{ t('settings.space_data_settings') }}</span><span class="account-list-meta" x-text="KazmaFormat.number(spaceData.settings || 0)"></span></div>
+              <div class="account-list-row"><span class="account-list-name">{{ t('settings.space_data_secrets') }}</span><span class="account-list-meta" x-text="KazmaFormat.number(spaceData.secrets || 0)"></span></div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;" x-show="spaceDataLoaded" x-cloak>
+                <button class="btn btn-secondary" type="button" id="space-data-export" x-show="spaceData.role === 'owner'" :disabled="spaceDataBusy" @click="exportThisSpace()">{{ t('settings.space_data_export') }}</button>
+                <button class="btn btn-danger" type="button" id="space-data-delete" x-show="spaceData.role === 'owner' && !spaceData.personal" :disabled="spaceDataBusy" @click="deleteThisSpace()">{{ t('settings.space_data_delete') }}</button>
+            </div>
+            <p class="form-hint" x-show="spaceDataLoaded && spaceData.personal" x-cloak>{{ t('settings.space_data_personal_hint') }}</p>
         </div>
     </div>
     {% endif %}
