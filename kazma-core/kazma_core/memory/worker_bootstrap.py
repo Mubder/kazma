@@ -1878,11 +1878,20 @@ async def _handle_restic_maintenance(payload: dict[str, Any]) -> bool:
             # fails with "repository is already locked" while the schedule
             # keeps reporting success -- silent, and worse than any disk leak.
             await asyncio.to_thread(unlock_stale, repo, password)
-            pruned = await asyncio.to_thread(forget_prune, repo, password)
-            if pruned.interrupted:
+            if name == "folder":
+                # The folder the owner chose keeps its own count
+                # (backups.folder.keep: the newest N of each kind; 0 keeps all).
+                from kazma_core.backup.folder_copy import keep_policy
+
+                policy = await asyncio.to_thread(keep_policy)
+                pruned = (await asyncio.to_thread(forget_prune, repo, password, policy)
+                          if policy is not None else None)
+            else:
+                pruned = await asyncio.to_thread(forget_prune, repo, password)
+            if pruned is not None and pruned.interrupted:
                 logger.info("[memory_worker] restic %s: %s", name, pruned.error[:200])
                 continue
-            if not pruned.ok:
+            if pruned is not None and not pruned.ok:
                 logger.warning("[memory_worker] restic forget %s: %s",
                                name, pruned.error[:200])
                 continue

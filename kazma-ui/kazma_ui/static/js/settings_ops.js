@@ -1657,6 +1657,152 @@
             }
         },
 
+        // ── The backup folder on this computer (backup.folder_copy) ──────────
+        async loadBackupFolder() {
+            const data = await window.kazmaGetJson('/api/settings/backup/folder');
+            if (!data) {
+                this.backupFolderLoadFailed = true;
+                return;
+            }
+            this.backupFolderLoadFailed = false;
+            this._showBackupFolder(data);
+            this.backupFolderEnabled = !!data.enabled;
+            this.backupFolderPath = data.path || '';
+            this.backupFolderKeep = Number.isInteger(data.keep) ? data.keep : 7;
+            this.backupFolderLoaded = true;
+        },
+
+        _showBackupFolder(data) {
+            this.backupFolder = {
+                state: data.state || 'off',
+                path: data.path || '',
+                repo: data.repo || '',
+                missing_since: data.missing_since || null,
+            };
+        },
+
+        backupFolderStateText() {
+            const f = this.backupFolder || {};
+            if (f.state === 'missing') {
+                const since = f.missing_since ? window.KazmaFormat.dateTime(Number(f.missing_since) * 1000) : '';
+                return since
+                    ? _t('settings.bkf.state_missing_since', '', { path: _iso(f.path), since: since })
+                    : _t('settings.bkf.state_missing', '', { path: _iso(f.path) });
+            }
+            if (f.state === 'ready') return _t('settings.bkf.state_ready', '', { repo: _iso(f.repo) });
+            if (f.state === 'new') return _t('settings.bkf.state_new', '', { path: _iso(f.path) });
+            return _t('settings.bkf.state_off');
+        },
+
+        backupFolderProblemText(code, where) {
+            const known = ['empty', 'relative', 'inside_data', 'missing', 'cannot_create', 'network', 'unreadable', 'no_folder'];
+            if (known.indexOf(code) < 0) return _t('settings.bkf.problem_other', '', { code: code });
+            if (code === 'missing' && where === 'browse') return _t('settings.bkf.problem_browse_missing');
+            return _t('settings.bkf.problem_' + code);
+        },
+
+        backupFolderCheckText(c) {
+            if (c.check === 'free') {
+                const gb = Number(c.detail);
+                return Number.isFinite(gb)
+                    ? _t('settings.bkf.check_free', '', { size: window.KazmaFormat.number(gb) })
+                    : _t('settings.bkf.check_free_unknown');
+            }
+            if (c.check === 'other_disk') return _t(c.ok ? 'settings.bkf.check_other_disk' : 'settings.bkf.check_same_disk');
+            if (c.check === 'writable') {
+                if (!c.ok) return _t('settings.bkf.check_not_writable');
+                return _t(c.detail === 'made' ? 'settings.bkf.check_made' : 'settings.bkf.check_writable');
+            }
+            if (c.check === 'restic') return _t(c.ok ? 'settings.bkf.check_restic' : 'settings.bkf.check_no_restic');
+            if (c.check === 'passphrase') return _t(c.ok ? 'settings.bkf.check_passphrase' : 'settings.bkf.check_no_passphrase');
+            return c.check;
+        },
+
+        async saveBackupFolder() {
+            const keep = Number(this.backupFolderKeep);
+            if (!Number.isInteger(keep) || keep < 0) {
+                showToast(_t('settings.bkf.keep_invalid'), 'error');
+                return;
+            }
+            this.backupFolderSaving = true;
+            try {
+                const saved = await window.kazmaSave('/api/settings/backup/folder', {
+                    method: 'PUT',
+                    body: { enabled: !!this.backupFolderEnabled, path: this.backupFolderPath, keep: keep },
+                });
+                this._showBackupFolder(saved || {});
+                showToast(_t('settings.bkf.saved'), 'success');
+            } catch (e) {
+                const detail = e && e.body && e.body.detail;
+                const message = detail && typeof detail === 'object' && detail.code
+                    ? this.backupFolderProblemText(detail.code, 'save')
+                    : (typeof detail === 'string' ? detail : (e && e.message) || '');
+                showToast(_t('settings.failed_with_reason', 'Failed: {error}', { error: message }), 'error');
+            } finally {
+                this.backupFolderSaving = false;
+            }
+        },
+
+        async testBackupFolder() {
+            this.backupFolderTesting = true;
+            this.backupFolderTest = null;
+            try {
+                const resp = await fetch('/api/settings/backup/folder/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify({ path: this.backupFolderPath }),
+                });
+                let data = null;
+                try { data = await resp.json(); } catch (e) { data = null; }
+                this.backupFolderTest = resp.ok && data ? data : { ok: false, problem: 'unreadable', checks: [] };
+            } catch (e) {
+                this.backupFolderTest = { ok: false, problem: 'unreadable', checks: [] };
+            } finally {
+                this.backupFolderTesting = false;
+            }
+        },
+
+        async openBackupFolderBrowser() {
+            this.backupFolderBrowsing = true;
+            await this.browseBackupFolder(this.backupFolderPath || '');
+        },
+
+        async browseBackupFolder(path) {
+            this.backupFolderBrowseLoaded = false;
+            let data = null;
+            try {
+                data = await window.kazmaSave('/api/settings/backup/folder/browse', {
+                    method: 'POST', body: { path: path || '' },
+                });
+            } catch (e) { data = null; }
+            if (!data) {
+                this.backupFolderBrowse = Object.assign({}, this.backupFolderBrowse, { problem: 'unreadable', folders: [] });
+                this.backupFolderBrowseLoaded = true;
+                return;
+            }
+            this.backupFolderBrowse = {
+                path: data.path || '',
+                parent: data.parent || '',
+                folders: Array.isArray(data.folders) ? data.folders : [],
+                drives: Array.isArray(data.drives) ? data.drives : [],
+                more: !!data.more,
+                problem: data.problem || '',
+            };
+            this.backupFolderBrowseLoaded = true;
+        },
+
+        backupFolderJoin(parent, name) {
+            const sep = parent.indexOf('\\') >= 0 || /^[A-Za-z]:/.test(parent) ? '\\' : '/';
+            return parent.endsWith(sep) ? parent + name : parent + sep + name;
+        },
+
+        useBrowsedBackupFolder() {
+            if (!this.backupFolderBrowse.path || this.backupFolderBrowse.problem) return;
+            this.backupFolderPath = this.backupFolderBrowse.path;
+            this.backupFolderBrowsing = false;
+            this.backupFolderTest = null;
+        },
+
         _offsiteCredsPayload() {
             return {
                 provider: this.offsiteProvider,

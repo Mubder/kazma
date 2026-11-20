@@ -5098,6 +5098,77 @@
                           : (t('settings.backup_failed') + ' ' + (backupResult?.error || ''))"></span>
             </div>
         </div>
+        <!-- A copy in a folder on this computer: another drive, a USB disk, a share (backup.folder_copy) -->
+        <div class="settings-group mb-6" id="backup-folder">
+            <h3>{{ t('settings.bkf.heading') }}</h3>
+            <p class="text-muted" style="margin-bottom:1rem">{{ t('settings.bkf.desc') }}</p>
+            <div x-show="backupFolderLoaded" x-cloak class="notice" style="margin-bottom:1rem"
+                 :class="backupFolder.state === 'missing' ? 'tone-warning' : (backupFolder.state === 'off' ? 'tone-info' : 'tone-success')">
+                <span id="backup-folder-state" x-text="backupFolderStateText()"></span>
+            </div>
+            <p x-show="backupFolderLoadFailed" x-cloak class="text-error" style="font-size:0.85rem">{{ t('settings.bkf.load_failed') }}</p>
+            <label class="toggle-row" style="margin-bottom:12px">
+                <span class="toggle"><input type="checkbox" id="backup-folder-enabled" x-model="backupFolderEnabled"><span class="toggle-slider"></span></span>
+                <span>{{ t('settings.bkf.enabled') }}</span>
+            </label>
+            <label for="backup-folder-path" class="form-label">{{ t('settings.bkf.path') }}</label>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+                <input id="backup-folder-path" type="text" class="form-input" translate="no" dir="ltr"
+                       x-model="backupFolderPath" placeholder="{{ t('settings.bkf.path_placeholder') }}" style="flex:1;min-width:220px">
+                <button type="button" class="btn btn-secondary btn-sm" id="backup-folder-browse" @click="openBackupFolderBrowser()">{{ t('settings.bkf.browse') }}</button>
+            </div>
+            <div class="form-hint" style="margin-bottom:12px">{{ t('settings.bkf.path_hint') }}</div>
+            <!-- Folder picker -->
+            <div x-show="backupFolderBrowsing" x-cloak class="card-nested" id="backup-folder-picker" style="padding:12px;margin-bottom:12px">
+                <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+                    <span style="font-size:0.8rem;color:var(--text-muted)">{{ t('settings.bkf.drives') }}</span>
+                    <template x-for="d in backupFolderBrowse.drives" :key="d">
+                        <button type="button" class="btn btn-ghost btn-sm" translate="no" @click="browseBackupFolder(d)" x-text="d"></button>
+                    </template>
+                </div>
+                <div x-show="backupFolderBrowse.path" x-cloak style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+                    <button type="button" class="btn btn-secondary btn-sm" x-cloak x-show="backupFolderBrowse.parent" @click="browseBackupFolder(backupFolderBrowse.parent)">{{ t('settings.bkf.up') }}</button>
+                    <bdi dir="ltr" translate="no" style="font-size:0.85rem" x-text="backupFolderBrowse.path"></bdi>
+                </div>
+                <p x-show="backupFolderBrowse.problem" x-cloak class="text-error" style="font-size:0.85rem" x-text="backupFolderProblemText(backupFolderBrowse.problem, 'browse')"></p>
+                <p x-show="backupFolderBrowseLoaded && backupFolderBrowse.path && !backupFolderBrowse.problem && backupFolderBrowse.folders.length === 0" x-cloak
+                   style="font-size:0.85rem;color:var(--text-muted)">{{ t('settings.bkf.no_folders') }}</p>
+                <div style="max-height:220px;overflow:auto;display:flex;flex-direction:column;gap:2px">
+                    <template x-for="name in backupFolderBrowse.folders" :key="name">
+                        <button type="button" class="btn btn-ghost btn-sm" style="justify-content:flex-start" translate="no" dir="ltr"
+                                @click="browseBackupFolder(backupFolderJoin(backupFolderBrowse.path, name))" x-text="name"></button>
+                    </template>
+                </div>
+                <p x-show="backupFolderBrowse.more" x-cloak style="font-size:0.75rem;color:var(--text-muted)">{{ t('settings.bkf.more_folders') }}</p>
+                <div style="display:flex;gap:8px;margin-top:8px">
+                    <button type="button" class="btn btn-primary btn-sm" id="backup-folder-use" :disabled="!backupFolderBrowse.path || !!backupFolderBrowse.problem"
+                            @click="useBrowsedBackupFolder()">{{ t('settings.bkf.use_folder') }}</button>
+                    <button type="button" class="btn btn-ghost btn-sm" @click="backupFolderBrowsing = false">{{ t('settings.bkf.close') }}</button>
+                </div>
+            </div>
+            <div style="display:flex;gap:10px;align-items:center;margin-bottom:6px">
+                <label for="backup-folder-keep" style="font-size:0.85rem">{{ t('settings.bkf.keep') }}</label>
+                <input id="backup-folder-keep" type="number" class="form-input" x-model.number="backupFolderKeep" min="0" step="1" style="max-width:110px">
+            </div>
+            <div class="form-hint" style="margin-bottom:12px">{{ t('settings.bkf.keep_hint') }}</div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <button type="button" class="btn btn-primary btn-sm" id="backup-folder-save" @click="saveBackupFolder()" :disabled="backupFolderSaving">{{ t('settings.save') }}</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="backup-folder-test" @click="testBackupFolder()" :disabled="backupFolderTesting">
+                    <span x-cloak x-show="!backupFolderTesting">{{ t('settings.bkf.test') }}</span>
+                    <span x-show="backupFolderTesting" x-cloak>{{ t('settings.bkf.testing') }}</span>
+                </button>
+            </div>
+            <div x-show="backupFolderTest" x-cloak id="backup-folder-test-result" style="margin-top:12px">
+                <p style="font-size:0.85rem;margin:0 0 6px 0" :class="backupFolderTest?.ok ? 'text-success' : 'text-error'"
+                   x-text="backupFolderTest?.problem ? backupFolderProblemText(backupFolderTest.problem, 'test') : (backupFolderTest?.ok ? t('settings.bkf.test_ok') : t('settings.bkf.test_failed'))"></p>
+                <template x-for="c in (backupFolderTest?.checks || [])" :key="c.check">
+                    <div style="font-size:0.85rem;display:flex;gap:6px;align-items:baseline">
+                        <span :class="c.ok ? 'text-success' : (c.check === 'other_disk' || c.check === 'free' ? 'text-warning' : 'text-error')" x-text="c.ok ? '✓' : '✗'"></span>
+                        <span x-text="backupFolderCheckText(c)"></span>
+                    </div>
+                </template>
+            </div>
+        </div>
         <div class="settings-group mb-6">
             <h3>{{ t('settings.backup_history') }}</h3>
             <div x-show="backupListLoaded && backupList.length === 0 && !backupRunning" class="empty-state" x-cloak>

@@ -5319,6 +5319,29 @@ raises `backup.offsite_prune_failed` (warn) before the fallback check in
 `tests/test_offsite_retention.py` (a trusting rule deleting from a stale
 listing as the negative control), the provider cases in
 `tests/test_cloud_sync.py`.
+**A copy in a folder the owner chooses** (2026-11-20, the owner's item;
+`kazma_core/backup/folder_copy.py`, Settings -> Backup -> "A copy on another
+drive"). Another drive, a USB disk or a network share holds a restic
+repository (`<folder>/kazma-restic`, `restic_repo.repo_paths()["folder"]`,
+also in `configured_repos`, so the Postgres dump's copy goes there too):
+every universal backup is copied into it, encrypted with Kazma's restic
+passphrase, its repository made on the first copy
+(`restic_repo._folder_repo_made`). Settings `backups.folder.enabled`,
+`.path` (absolute, never inside the data folder: `folder_copy.path_problem`)
+and `.keep` (the newest N of each kind, `--keep-last`; 0 keeps every copy;
+the nightly restic maintenance applies it, `folder_copy.keep_policy`), each
+with a `settings_validation` rule. A folder that is not there is never a
+failed backup: `note_presence` says it once (`backup.folder_missing`, the
+runtime mark `system.backups.folder_missing_since`) and its return once
+(`backup.folder_back`). Routes: GET/PUT `/api/settings/backup/folder`, POST
+`.../test` (writes and removes one probe file; free space, same disk as the
+data, restic, passphrase) and POST `.../browse` (the page's folder picker;
+never a network path: listing one connects to its host). Gates:
+`tests/test_backup_folder_copy.py` (real restic; the copy without making the
+repository, the notice without its mark and the maintenance with the default
+policy as negative controls), `tests/e2e/test_backup_folder_browser.py` (by the
+sidebar, EN/AR, the picker, a refused save, Test).
+
 **Every copy of a live SQLite database is one step, through one helper**
 (`kazma_core.db.sqlite_snapshot.snapshot_copy`, 2026-10-13, Memory audit M19):
 the universal backup, the native memory backup (`memory/backup.backup_one`,

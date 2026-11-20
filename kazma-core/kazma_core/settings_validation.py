@@ -425,6 +425,37 @@ def _offsite_keep(value: Any) -> int:
     return number
 
 
+def _folder_keep(value: Any) -> int:
+    """``backups.folder.keep``: a whole number, 0 keeps every copy in the
+    backup folder (``backup.folder_copy``); refused, never read as the
+    default, so a form that sends -1 hears it was not saved."""
+    from kazma_core.backup.folder_copy import KEEP_KEY
+
+    try:
+        number = int(str(value).strip())
+    except (TypeError, ValueError):
+        raise SettingRejected(f"{KEEP_KEY} must be a whole number") from None
+    if isinstance(value, bool) or number < 0:
+        raise SettingRejected(f"{KEEP_KEY} must be 0 (keep every copy) or more")
+    return number
+
+
+def _folder_path(value: Any) -> str:
+    """``backups.folder.path``: empty (no folder), or an absolute folder that
+    is not inside Kazma's data folder (``folder_copy.path_problem``)."""
+    from kazma_core.backup.folder_copy import PATH_KEY, path_problem
+
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    problem = path_problem(text)
+    if problem == "relative":
+        raise SettingRejected(f"{PATH_KEY} must be a full path (a drive or a share), not a relative one")
+    if problem == "inside_data":
+        raise SettingRejected(f"{PATH_KEY} must not be inside Kazma's data folder: it would not survive that disk")
+    return text
+
+
 def shipped_values() -> dict[str, Any]:
     """Every setting ``kazma.yaml`` ships, dotted key -> value (blocking: a
     parse cached by the files' version)."""
@@ -495,6 +526,9 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
     from kazma_core.agent.chat_reasoning import CHAT_REASONING_KEY
     from kazma_core.agent.turn_budget import TURN_TIMEOUT_KEY
     from kazma_core.agent.turn_token_budget import DAILY_COST_LIMIT_KEY, TURN_TOKEN_BUDGET_KEY
+    from kazma_core.backup.folder_copy import ENABLED_KEY as FOLDER_ENABLED_KEY
+    from kazma_core.backup.folder_copy import KEEP_KEY as FOLDER_KEEP_KEY
+    from kazma_core.backup.folder_copy import PATH_KEY as FOLDER_PATH_KEY
     from kazma_core.backup.universal import OFFSITE_KEEP_KEY
     from kazma_core.checkpoint_retention import RETENTION_KEY
     from kazma_core.cron.settings import FIRE_WITHOUT_HITL_KEY, SETTING_BOUNDS
@@ -552,6 +586,10 @@ def _rules() -> dict[str, tuple[Callable[[Any], Any], str | None]]:
         OWNER_PRICES_KEY: (_model_prices, "models"),
         MODEL_DETAILS_KEY: (_model_details, "models"),
         OFFSITE_KEEP_KEY: (_offsite_keep, "backups"),
+        # The backup folder on this computer (backup.folder_copy).
+        FOLDER_ENABLED_KEY: (_strict_bool, "backups"),
+        FOLDER_PATH_KEY: (_folder_path, "backups"),
+        FOLDER_KEEP_KEY: (_folder_keep, "backups"),
         REPORT_URL_KEY: (_report_url, "support"),
         A2A_ENABLED_KEY: (_strict_bool, "a2a"),
     }

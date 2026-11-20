@@ -112,6 +112,7 @@ DYNAMIC_WRITES: dict[str, tuple[str, ...] | str] = {
     "kazma-ui/kazma_ui/providers.py::_purge": ("connectors.",),
     "kazma-ui/kazma_ui/routes_direct/settings.py::_save": ("memory.v2.", "knowledge."),
     "kazma-ui/kazma_ui/settings.py::api_save_document_settings": ("documents.",),
+    "kazma-ui/kazma_ui/settings.py::api_set_backup_folder": ("backups.folder.",),
     "kazma-ui/kazma_ui/settings.py::api_save_voice_settings": ("voice.",),
     "kazma-ui/kazma_ui/settings.py::api_update_settings": (
         "the page's batch save writes the keys the page sends (settings), each "

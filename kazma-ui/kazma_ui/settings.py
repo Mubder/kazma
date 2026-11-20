@@ -889,6 +889,78 @@ class SettingsRouterBuilder:
             _gcs().set("backups.retention", value, category="backups")
             return {"status": "ok"}
 
+        # ── The backup folder on this computer (backup.folder_copy) ──────────
+        @router.get("/api/settings/backup/folder")
+        def api_get_backup_folder() -> dict[str, Any]:
+            """The backup folder's settings and where it stands: ``state`` is
+            ``off``, ``missing``, ``ready`` or ``new``; ``missing_since`` is
+            when a backup first found it missing."""
+            from kazma_core.backup import folder_copy
+            from kazma_core.config_store import get_config_store as _gcs
+
+            from kazma_core.db.pg_helpers import store_errors
+
+            out = folder_copy.folder_state()
+            try:
+                out["missing_since"] = _gcs().get(folder_copy.MISSING_SINCE_KEY) or None
+            except store_errors():  # the page shows the rest
+                logger.debug("[settings] backup folder: missing-since read failed", exc_info=True)
+                out["missing_since"] = None
+            return out
+
+        @router.put("/api/settings/backup/folder")
+        def api_set_backup_folder(req: dict[str, Any]) -> dict[str, Any]:
+            """Save the backup folder: ``enabled``, ``path``, ``keep``. Every
+            field is checked before anything is written, and the three are
+            written together; switching it on needs a folder."""
+            from kazma_core.backup import folder_copy
+            from kazma_core.config_store import get_config_store as _gcs
+
+            fields = {
+                "enabled": folder_copy.ENABLED_KEY,
+                "path": folder_copy.PATH_KEY,
+                "keep": folder_copy.KEEP_KEY,
+            }
+            values: dict[str, Any] = {}
+            try:
+                for field, key in fields.items():
+                    if field in req:
+                        values[key], _category = validate_setting(key, req[field])
+            except SettingRejected as exc:
+                raise HTTPException(status_code=400, detail=validation_error(exc)) from None
+            current = folder_copy.folder_settings()
+            enabled = values.get(folder_copy.ENABLED_KEY, current["enabled"])
+            path = values.get(folder_copy.PATH_KEY, current["path"])
+            if enabled and not path:
+                raise HTTPException(status_code=400, detail={
+                    "code": "no_folder", "message": "Choose a folder before switching the backup folder on.",
+                })
+            if values:
+                _gcs().batch_set([(key, value, "backups") for key, value in values.items()])
+            return {"status": "ok", **folder_copy.folder_state()}
+
+        @router.post("/api/settings/backup/folder/test")
+        def api_test_backup_folder(req: dict[str, Any]) -> dict[str, Any]:
+            """Check a folder as the backup folder, saving nothing: Kazma can
+            write there, the room free, whether it is the disk Kazma's data
+            is on, and whether restic and its passphrase are ready."""
+            from kazma_core.backup.folder_copy import test_folder
+
+            return test_folder(str(req.get("path") or ""))
+
+        @router.post("/api/settings/backup/folder/browse")
+        def api_browse_backup_folder(req: dict[str, Any]) -> dict[str, Any]:
+            """The folders under a folder of this computer, for the page's
+            folder picker. A POST (the CSRF rule), and never a network path:
+            listing one connects to that host (type a share's path instead)."""
+            from kazma_core.backup.folder_copy import browse
+            from kazma_core.workspace.remote_paths import remote_path_reason
+
+            path = str(req.get("path") or "")
+            if path and remote_path_reason(path):
+                return {**browse(""), "path": path, "problem": "network"}
+            return browse(path)
+
         @router.get("/api/settings/agent")
         def api_get_agent() -> dict[str, Any]:
             """Get agent configuration (name, language, max tool rounds, …)."""

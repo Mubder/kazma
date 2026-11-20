@@ -65,13 +65,14 @@ Each cycle produces a *staging generation* under
 separately to `kazma-data/backups/pg/` with `pg_dump -Fc`.
 
 That generation is then snapshotted into **two independent restic
-repositories**:
+repositories**, and a third when a backup folder is chosen:
 
 | Repository | Location | Credential |
 |---|---|---|
 | Local | `kazma-data/backups/restic` | passphrase at `<install>/.kazma/restic.pass` (see below) |
 | Offsite (recommended) | `s3:https://<account>.r2.cloudflarestorage.com/<bucket>` (or B2) | append-only host key (`PutObject`/`GetObject`/`ListBucket` + `DeleteObject` on `locks/*` only) |
 | Offsite (legacy) | `rclone:<remote>/restic` | rclone OAuth — **do not use Google Drive / a service account**. Service accounts have no Drive quota; `rclone:` write probes can look healthy while every upload 403s. |
+| Backup folder (optional) | `<folder>/kazma-restic` on another drive, a USB disk or a network share (Settings → Backup → A copy on another drive) | the same passphrase as the local repository. Restore with `python -m kazma_core.backup.restore --repo <folder>/kazma-restic --target <empty folder>`. A folder that is not there is said once and again when it is back; old copies go by its own count |
 
 An rclone destination must name an existing configured remote, such as
 `backup:restic`. For a restic repository use `rclone:backup:restic`.

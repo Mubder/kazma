@@ -72,6 +72,9 @@ def test_the_table_names_the_keys_the_owning_modules_define() -> None:
     from kazma_core.agent.chat_reasoning import CHAT_REASONING_KEY
     from kazma_core.agent.turn_budget import TURN_TIMEOUT_KEY
     from kazma_core.agent.turn_token_budget import DAILY_COST_LIMIT_KEY, TURN_TOKEN_BUDGET_KEY
+    from kazma_core.backup.folder_copy import ENABLED_KEY as FOLDER_ENABLED_KEY
+    from kazma_core.backup.folder_copy import KEEP_KEY as FOLDER_KEEP_KEY
+    from kazma_core.backup.folder_copy import PATH_KEY as FOLDER_PATH_KEY
     from kazma_core.backup.universal import OFFSITE_KEEP_KEY
     from kazma_core.checkpoint_retention import RETENTION_KEY
     from kazma_core.cron.settings import FIRE_WITHOUT_HITL_KEY, SETTING_BOUNDS
@@ -127,7 +130,10 @@ def test_the_table_names_the_keys_the_owning_modules_define() -> None:
                              "agent.language", "agent.max_iterations",
                              # Where problem reports go and A2A's switch, 2026-11-14: an
                              # address that is not https, a switch that is not a yes or no.
-                             "support.report_url", "a2a.enabled"}
+                             "support.report_url", "a2a.enabled",
+                             # The backup folder, 2026-11-20: a relative folder, one inside
+                             # the data folder it should outlive, a count below zero.
+                             FOLDER_ENABLED_KEY, FOLDER_PATH_KEY, FOLDER_KEEP_KEY}
 
 
 # ── the TUI's client: an answered refusal is not "no server" ───────────────

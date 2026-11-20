@@ -199,7 +199,16 @@ def repo_paths() -> dict[str, str]:
                 remote = f"rclone:{rc.rstrip('/')}/restic"
     except Exception:  # noqa: BLE001
         logger.debug("[restic] repo config read failed", exc_info=True)
-    return {"local": local, "remote": remote}
+    out = {"local": local, "remote": remote}
+    # The folder the owner chose (Settings → Backup: another drive, a USB
+    # disk), while it is there (backup.folder_copy; a missing one is said by
+    # note_presence, never a failed copy).
+    from kazma_core.backup.folder_copy import repo_for_backup
+
+    folder = repo_for_backup()
+    if folder:
+        out["folder"] = folder
+    return out
 
 
 def configured_repos() -> dict[str, str]:
@@ -221,6 +230,8 @@ def configured_repos() -> dict[str, str]:
         out["local"] = local
     if paths.get("remote"):
         out["remote"] = paths["remote"]
+    if paths.get("folder"):
+        out["folder"] = paths["folder"]
     return out
 
 
@@ -786,12 +797,37 @@ def _local_repo_made(repo: str, password: str) -> ResticResult | None:
     return made
 
 
+def _folder_repo_made(repo: str, password: str) -> ResticResult | None:
+    """Make the repository in the folder the owner chose (Settings → Backup)
+    on its first backup; None when *repo* is not that repository or it is
+    already there. Its folder exists (``repo_paths`` lists it only then); the
+    repository is new by design, so it is said at INFO, never alerted."""
+    folder = repo_paths().get("folder") or ""
+    try:
+        same = bool(folder) and Path(repo).resolve() == Path(folder).resolve()
+    except OSError:
+        same = False
+    if not same or (Path(repo) / "config").is_file():
+        return None
+    with _MAKING_LOCK:
+        if (Path(repo) / "config").is_file():
+            return None
+        made = init_repo(repo, password)
+    if made.ok and not made.detail.get("already"):
+        logger.info("[restic] made the backup folder's repository %s", repo)
+    return made
+
+
 def backup(repo: str, password: str, paths: list[str], *,
            tags: list[str] | None = None) -> ResticResult:
-    made = _local_repo_made(repo, password) if password and restic_available() else None
+    made, which = None, "local"
+    if password and restic_available():
+        made = _local_repo_made(repo, password)
+        if made is None:
+            made, which = _folder_repo_made(repo, password), "folder's"
     if made is not None and not made.ok:
         made.action = "backup"
-        made.error = f"the local repository could not be made: {made.error}"
+        made.error = f"the {which} repository could not be made: {made.error}"
         return made
     args = ["backup", "--json"]
     for t in (tags or ["kazma"]):

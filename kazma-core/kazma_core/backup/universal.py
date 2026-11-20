@@ -1167,6 +1167,13 @@ def _snapshot_to_restic(dest: Path) -> dict[str, Any] | None:
             return {"skipped": "no restic passphrase"}
 
         out: dict[str, Any] = {}
+        # The folder the owner chose (a USB disk...): said once when it is
+        # missing and once when it is back; repo_paths lists it only when it
+        # is there (backup.folder_copy).
+        from kazma_core.backup.folder_copy import note_presence
+
+        if note_presence() == "missing":
+            out["folder"] = {"ok": False, "skipped": "missing"}
         for name, repo in repo_paths().items():
             if not repo:
                 continue

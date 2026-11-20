@@ -331,6 +331,199 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "عدد النسخ التي يبقيها Kazma في السحابة. بعد كل رفع ناجح يحذف نسخه الأقدم من هذا العدد من مجلد النسخ الاحتياطي (Google Drive وS3 وWebDAV وFTP تحذف فوراً؛ OneDrive ينقلها إلى سلة المحذوفات، وتبقى محسوبة من مساحتك حتى تُفرغ). 0 يحتفظ بكل النسخ. استخدم مجلداً سحابياً واحداً لكل تثبيت: يعدّ Kazma كل نسخة يجدها فيه.",
         "en": "How many copies Kazma keeps in the cloud. After every upload that succeeds it deletes its copies older than this from the backup folder (Google Drive, S3, WebDAV and FTP delete at once; OneDrive moves them to its recycle bin, which counts against your storage until emptied). 0 keeps every copy. Use one cloud folder per install: Kazma counts every backup it finds there.",
     },
+    # The backup folder on this computer (backup.folder_copy).
+    "settings.bkf.heading": {
+        "ar": "نسخة على قرص آخر",
+        "en": "A copy on another drive",
+    },
+    "settings.bkf.desc": {
+        "ar": "نسخ Kazma الاحتياطية محفوظة على القرص نفسه الذي يعمل عليه، فلا تنجو إن تعطل. اختر مجلداً على قرص آخر أو قرص USB أو مجلد مشترك على الشبكة، فتُنسخ إليه كل نسخة احتياطية مشفرة بكلمة مرور النسخ الاحتياطي في Kazma. النسخة التي لا تكتمل لا تُحسب، والنسخ القديمة لا تُحذف إلا بعد نسخة سليمة.",
+        "en": "Kazma's backups are kept on the same disk Kazma runs on, so they do not survive that disk. Choose a folder on another drive, a USB disk or a network share, and every backup is also copied there, encrypted with Kazma's backup passphrase. A copy that does not finish is never counted, and old copies go only after a good one.",
+    },
+    "settings.bkf.enabled": {
+        "ar": "انسخ كل نسخة احتياطية إلى هذا المجلد",
+        "en": "Copy every backup to this folder",
+    },
+    "settings.bkf.path": {
+        "ar": "المجلد",
+        "en": "Folder",
+    },
+    "settings.bkf.path_placeholder": {
+        "ar": "D:\\KazmaBackups",
+        "en": "D:\\KazmaBackups",
+    },
+    "settings.bkf.path_hint": {
+        "ar": "مسار كامل: حرف قرص أو مجلد مشترك على الشبكة (اكتب مسار المجلد المشترك بنفسك). يضع Kazma نسخه في مجلد kazma-restic داخله.",
+        "en": "A full path: a drive letter, or a network share (type a share's path yourself). Kazma keeps its copies in a kazma-restic folder inside it.",
+    },
+    "settings.bkf.browse": {
+        "ar": "استعراض",
+        "en": "Browse",
+    },
+    "settings.bkf.drives": {
+        "ar": "الأقراص:",
+        "en": "Drives:",
+    },
+    "settings.bkf.up": {
+        "ar": "للأعلى",
+        "en": "Up",
+    },
+    "settings.bkf.no_folders": {
+        "ar": "لا توجد مجلدات هنا.",
+        "en": "No folders here.",
+    },
+    "settings.bkf.more_folders": {
+        "ar": "تُعرض أول 500 مجلد فقط: اكتب المسار إن لم تجد المجلد.",
+        "en": "Only the first 500 folders are shown: type the path if the folder is not listed.",
+    },
+    "settings.bkf.use_folder": {
+        "ar": "استخدم هذا المجلد",
+        "en": "Use this folder",
+    },
+    "settings.bkf.close": {
+        "ar": "إغلاق",
+        "en": "Close",
+    },
+    "settings.bkf.keep": {
+        "ar": "النسخ المحفوظة",
+        "en": "Copies kept",
+    },
+    "settings.bkf.keep_hint": {
+        "ar": "عدد النسخ التي يبقيها المجلد من كل نوع؛ تُحذف الأقدم بعد نسخة احتياطية سليمة. 0 يحتفظ بكل النسخ.",
+        "en": "How many copies of each kind the folder keeps; older ones are removed after a good backup. 0 keeps every copy.",
+    },
+    "settings.bkf.keep_invalid": {
+        "ar": "النسخ المحفوظة يجب أن تكون 0 (الاحتفاظ بكل النسخ) أو أكثر",
+        "en": "Copies kept must be 0 (keep every copy) or more",
+    },
+    "settings.bkf.test": {
+        "ar": "اختبر المجلد",
+        "en": "Test the folder",
+    },
+    "settings.bkf.testing": {
+        "ar": "جارٍ الاختبار…",
+        "en": "Testing…",
+    },
+    "settings.bkf.saved": {
+        "ar": "حُفظ مجلد النسخ الاحتياطي",
+        "en": "Backup folder saved",
+    },
+    "settings.bkf.load_failed": {
+        "ar": "تعذرت قراءة إعداد مجلد النسخ الاحتياطي.",
+        "en": "The backup folder's setting could not be read.",
+    },
+    "settings.bkf.state_off": {
+        "ar": "متوقف: لا تُنسخ النسخ الاحتياطية إلى مجلد.",
+        "en": "Off: backups are not copied to a folder.",
+    },
+    "settings.bkf.state_new": {
+        "ar": "جاهز: تنشئ النسخة الاحتياطية التالية نسخة Kazma في {path}.",
+        "en": "Ready: the next backup makes Kazma's copy in {path}.",
+    },
+    "settings.bkf.state_ready": {
+        "ar": "يعمل: تُنسخ كل نسخة احتياطية إلى {repo}.",
+        "en": "On: every backup is copied to {repo}.",
+    },
+    "settings.bkf.state_missing": {
+        "ar": "المجلد {path} غير موجود الآن. تستمر النسخ الاحتياطية بدون هذه النسخة، ويخبرك Kazma حين يعود.",
+        "en": "The folder {path} is not there now. Backups go on without this copy; Kazma tells you when it is back.",
+    },
+    "settings.bkf.state_missing_since": {
+        "ar": "المجلد {path} غير موجود منذ {since}. تستمر النسخ الاحتياطية بدون هذه النسخة، ويخبرك Kazma حين يعود.",
+        "en": "The folder {path} has not been there since {since}. Backups go on without this copy; Kazma tells you when it is back.",
+    },
+    "settings.bkf.test_ok": {
+        "ar": "المجلد جاهز للنسخ الاحتياطية.",
+        "en": "The folder is ready for backups.",
+    },
+    "settings.bkf.test_failed": {
+        "ar": "لا يمكن للمجلد أن يحفظ النسخ الاحتياطية بعد.",
+        "en": "The folder cannot hold backups yet.",
+    },
+    "settings.bkf.check_writable": {
+        "ar": "يستطيع Kazma الكتابة فيه",
+        "en": "Kazma can write there",
+    },
+    "settings.bkf.check_made": {
+        "ar": "أنشأ Kazma المجلد ويستطيع الكتابة فيه",
+        "en": "Kazma made the folder and can write there",
+    },
+    "settings.bkf.check_not_writable": {
+        "ar": "لا يستطيع Kazma الكتابة فيه",
+        "en": "Kazma cannot write there",
+    },
+    "settings.bkf.check_free": {
+        "ar": "المساحة الفارغة: {size} غيغابايت",
+        "en": "Free space: {size} GB",
+    },
+    "settings.bkf.check_free_unknown": {
+        "ar": "تعذرت قراءة المساحة الفارغة",
+        "en": "The free space could not be read",
+    },
+    "settings.bkf.check_other_disk": {
+        "ar": "على قرص غير قرص بيانات Kazma",
+        "en": "On another disk than Kazma's data",
+    },
+    "settings.bkf.check_same_disk": {
+        "ar": "على القرص نفسه الذي عليه بيانات Kazma: هذه النسخة لا تنجو إن تعطل",
+        "en": "On the same disk as Kazma's data: this copy does not survive that disk",
+    },
+    "settings.bkf.check_restic": {
+        "ar": "برنامج restic مثبت",
+        "en": "restic is installed",
+    },
+    "settings.bkf.check_no_restic": {
+        "ar": "برنامج restic غير مثبت: يحتاجه Kazma لهذه النسخة",
+        "en": "restic is not installed: Kazma needs it for this copy",
+    },
+    "settings.bkf.check_passphrase": {
+        "ar": "كلمة مرور النسخ الاحتياطي موجودة",
+        "en": "Kazma's backup passphrase is set",
+    },
+    "settings.bkf.check_no_passphrase": {
+        "ar": "لا توجد كلمة مرور للنسخ الاحتياطي: ضعها في KAZMA_RESTIC_PASSWORD أو في الملف ‎.kazma/restic.pass",
+        "en": "Kazma has no backup passphrase: set KAZMA_RESTIC_PASSWORD or the .kazma/restic.pass file",
+    },
+    "settings.bkf.problem_empty": {
+        "ar": "اختر مجلداً أولاً.",
+        "en": "Choose a folder first.",
+    },
+    "settings.bkf.problem_no_folder": {
+        "ar": "اختر مجلداً قبل تشغيل النسخ إليه.",
+        "en": "Choose a folder before switching the copy on.",
+    },
+    "settings.bkf.problem_relative": {
+        "ar": "اكتب مساراً كاملاً: حرف قرص أو مجلداً مشتركاً على الشبكة.",
+        "en": "Type a full path: a drive letter or a network share.",
+    },
+    "settings.bkf.problem_inside_data": {
+        "ar": "هذا المجلد داخل مجلد بيانات Kazma: اختر قرصاً آخر.",
+        "en": "That folder is inside Kazma's data folder: choose another disk.",
+    },
+    "settings.bkf.problem_missing": {
+        "ar": "قرص هذا المجلد غير موجود.",
+        "en": "That folder's drive is not there.",
+    },
+    "settings.bkf.problem_browse_missing": {
+        "ar": "هذا المجلد غير موجود.",
+        "en": "That folder is not there.",
+    },
+    "settings.bkf.problem_cannot_create": {
+        "ar": "تعذر على Kazma إنشاء هذا المجلد.",
+        "en": "Kazma could not make that folder.",
+    },
+    "settings.bkf.problem_network": {
+        "ar": "لا يمكن استعراض مجلد مشترك على الشبكة: اكتب مساره.",
+        "en": "A network share cannot be browsed: type its path.",
+    },
+    "settings.bkf.problem_unreadable": {
+        "ar": "تعذر على Kazma قراءة هذا المجلد.",
+        "en": "Kazma could not read that folder.",
+    },
+    "settings.bkf.problem_other": {
+        "ar": "تعذر استخدام المجلد ({code}).",
+        "en": "The folder cannot be used ({code}).",
+    },
     "settings.offsite_keep_invalid": {
         "ar": "يجب أن يكون عدد النسخ السحابية 0 (الاحتفاظ بكل النسخ) أو أكثر",
         "en": "Cloud copies kept must be 0 (keep every copy) or more",

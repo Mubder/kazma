@@ -9,6 +9,18 @@ description: Operator guide for recent Kazma features — Hands 0.11, CodeMirror
 
 > This page is published at [kazma.ai/docs/recent-features/](https://kazma.ai/docs/recent-features/) ([Arabic](https://kazma.ai/ar/docs/recent-features/)).
 
+**New in 2026-11-20 — a backup copy on another drive.** Settings → Backup →
+**A copy on another drive**: choose a folder on another drive, a USB disk or
+a network share (Browse lists this computer's folders; type a share's path),
+and every backup is also copied there into a restic repository
+(`kazma-restic`), encrypted with Kazma's backup passphrase. **Copies kept**
+(default 7, 0 keeps every copy) is applied by the nightly maintenance after a
+good backup, and **Test the folder** checks Kazma can write there, the free
+space, whether it is the same disk as Kazma's data, and restic and its
+passphrase. A folder that is not there (a USB disk unplugged) never fails a
+backup: Kazma says so once, and again once when it is back (see
+[Disaster recovery](../ops/disaster-recovery.md)).
+
 **New in 2026-11-11 — alerts from their own bot, and a weekly report you
 can read.** Settings → Alerts → **Telegram bot that sends them** chooses
 Kazma's chat bot or a separate bot with its own chat; problems, recoveries,

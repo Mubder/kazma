@@ -444,6 +444,19 @@
         backupRetention: 7,
         offsiteKeep: 7,
         _backupPollId: null,
+        // The backup folder on this computer (backup.folder_copy).
+        backupFolder: { state: 'off', path: '', repo: '', missing_since: null },
+        backupFolderLoaded: false,
+        backupFolderLoadFailed: false,
+        backupFolderEnabled: false,
+        backupFolderPath: '',
+        backupFolderKeep: 7,
+        backupFolderSaving: false,
+        backupFolderTesting: false,
+        backupFolderTest: null,
+        backupFolderBrowsing: false,
+        backupFolderBrowseLoaded: false,
+        backupFolderBrowse: { path: '', parent: '', folders: [], drives: [], more: false, problem: '' },
 
         // ── Offsite Backup ──
         offsiteConfig: null,
@@ -998,7 +1011,7 @@
                 case 'space_data': await this.loadSpaceData(); break;
                 case 'tools': await this.loadTools(); break;
                 case 'system': await this.loadDiagnostics(); await this.loadLogs(); await this.loadVaultStatus(); await this.loadLogging(); await this.loadSwarmRetention(); await this.loadCheckpointRetention(); await this.loadTurnTimeout(); await this.loadReportUrl(); await this.loadA2a(); await this.loadTurnSpending(); await this.loadChatReasoning(); await this.loadContainerEngine(); await this.loadProxy(); await this.loadRestoreUndo(); break;
-                case 'backup': await Promise.all([this.loadBackupList(), this.loadOffsiteConfig(), this.syncBackupState()]); break;
+                case 'backup': await Promise.all([this.loadBackupList(), this.loadOffsiteConfig(), this.loadBackupFolder(), this.syncBackupState()]); break;
                 case 'packages': await this.loadPackages(); break;
                 case 'import': break;
                 case 'voice':
