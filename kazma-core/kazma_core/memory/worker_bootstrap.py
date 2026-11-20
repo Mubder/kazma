@@ -1871,15 +1871,29 @@ def _enqueue_pg_offsite_retry(path: Any) -> None:
 
 
 def _alert_pg_offsite(failed: list[str]) -> None:
+    """Say which copy of a Postgres dump failed. The offsite copy is the one
+    that survives the machine: critical. The local copy alone is a warning,
+    worded as local -- "Postgres offsite copy failed" for the local repository
+    sent the owner looking at a copy that had succeeded (2026-11-20)."""
     try:
         from kazma_core.observability.ops_alerts import alert
 
-        alert(
-            "backup.pg_offsite",
-            "Postgres offsite copy failed",
-            "Destinations still missing this dump: " + ", ".join(failed),
-            severity="critical",
-        )
+        if any(name != "local" for name in failed):
+            alert(
+                "backup.pg_offsite",
+                "Postgres offsite copy failed",
+                "Destinations still missing this dump: " + ", ".join(failed)
+                + ". The copy is tried again; restic's answer is in kazma.log.",
+                severity="critical",
+            )
+        else:
+            alert(
+                "backup.pg_local_copy",
+                "The Postgres dump was not copied into the local repository",
+                "The offsite copy is not affected. The local restic repository refused the dump; "
+                "the copy is tried again, and restic's answer is in kazma.log.",
+                severity="warn",
+            )
     except Exception:
         logger.debug("[memory_worker] pg offsite alert failed", exc_info=True)
 

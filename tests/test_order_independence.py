@@ -245,11 +245,18 @@ print("DECIDED:" + ",".join(decided))
 
 
 def _modules_that_decide_the_vault(names: list[str], *paths: str) -> list[str]:
-    proc = subprocess.run(
-        [sys.executable, "-c", _IMPORT_CHECK, ",".join(names), *paths],
-        cwd=str(REPO), env=dict(os.environ), capture_output=True, text=True,
-        encoding="utf-8", errors="replace", timeout=600,
-    )
+    import tempfile
+
+    # A data folder of the child's own: an app built on the suite's shared
+    # folder, while another test's app holds it, refuses to start (one
+    # writer per data folder), and the check would read nothing.
+    with tempfile.TemporaryDirectory(prefix="kazma-case-import-") as data:
+        env = {**os.environ, "KAZMA_DATA_DIR": data}
+        proc = subprocess.run(
+            [sys.executable, "-c", _IMPORT_CHECK, ",".join(names), *paths],
+            cwd=str(REPO), env=env, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=600,
+        )
     line = next((ln for ln in proc.stdout.splitlines() if ln.startswith("DECIDED:")), None)
     assert line is not None, (proc.stdout[-2000:], proc.stderr[-2000:])
     return [name for name in line.removeprefix("DECIDED:").split(",") if name]

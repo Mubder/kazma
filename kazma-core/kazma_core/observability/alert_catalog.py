@@ -228,6 +228,8 @@ CATALOG: tuple[_Entry, ...] = (
     _ops("backup.pg_dump", "critical", "The Postgres dump failed", "فشل تفريغ Postgres", page=_BACKUP),
     _ops("backup.pg_offsite", "critical", "The Postgres offsite copy failed", "فشلت النسخة الخارجية من Postgres",
          page=_BACKUP),
+    _ops("backup.pg_local_copy", "warn", "The Postgres dump was not copied into the local repository",
+         "لم تُنسخ نسخة Postgres إلى المستودع المحلي", page=_BACKUP),
     _ops("backup.pg_tools", "critical", "Postgres backups cannot run", "لا يمكن تشغيل نسخ Postgres الاحتياطية",
          page=_BACKUP),
     _ops("backup.pg_base_backup", "warn", "The weekly database base backup failed",

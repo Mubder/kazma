@@ -646,6 +646,29 @@ def _kazma_is_stopping() -> bool:
     return is_shutting_down()
 
 
+def _restic_sentence(line: str) -> str:
+    """restic's own sentence when *line* is one of its ``--json`` messages
+    (``{"message_type":"exit_error","code":10,"message":"Fatal: ..."}``, an
+    ``error`` with its ``error.message``): the first line of it. The raw JSON
+    reached the owner's phone as the alert, cut off half way through a path
+    (2026-11-20). Any other line as it is."""
+    if not line.startswith("{"):
+        return line
+    import json
+
+    try:
+        obj = json.loads(line)
+    except ValueError:
+        return line
+    if not isinstance(obj, dict):
+        return line
+    nested = obj.get("error") if isinstance(obj.get("error"), dict) else {}
+    message = obj.get("message") or nested.get("message")
+    if not isinstance(message, str) or not message.strip():
+        return line
+    return next((part.strip() for part in message.splitlines() if part.strip()), line)
+
+
 def _meaningful_error(stderr: str | None, stdout: str | None) -> str:
     """Return the part of the output that actually says what went wrong.
 
@@ -662,7 +685,7 @@ def _meaningful_error(stderr: str | None, stdout: str | None) -> str:
     if not text:
         return "failed with no output"
     lines = [
-        ln.strip() for ln in text.splitlines()
+        _restic_sentence(ln.strip()) for ln in text.splitlines()
         if ln.strip() and "NOTICE:" not in ln
     ]
     if not lines:

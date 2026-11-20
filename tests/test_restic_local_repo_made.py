@@ -16,6 +16,7 @@ remote one (a missing remote may be a wrong address).
 from __future__ import annotations
 
 import ast
+import json
 from pathlib import Path
 
 import pytest
@@ -113,3 +114,60 @@ def test_the_gate_finds_a_planted_restic_backup(tmp_path):
             and getattr(n.elts[0], "value", None) == "backup"
             and getattr(n.elts[1], "value", None) == "--json"]
     assert hits
+
+
+# ── what the alert says: restic's sentence, never its JSON ────────────────
+
+# restic writes its error as ONE JSON line (the message's line breaks are
+# JSON escapes), as the live alert carried it.
+_LIVE = json.dumps({
+    "message_type": "exit_error", "code": 10,
+    "message": ("Fatal: repository does not exist: unable to open config file: GetFileAttributesEx "
+                "C:/Users/x/kazma/kazma-data/backups/restic/config: The system cannot find the path "
+                "specified." + chr(10) + "Is there a repository at the following location?" + chr(10)
+                + "C:/Users/x/kazma/kazma-data/backups/restic"),
+}, separators=(",", ":"))
+
+
+def test_a_restic_json_error_reads_as_its_sentence():
+    said = rr._meaningful_error(_LIVE, "")
+    assert said.startswith("Fatal: repository does not exist")
+    assert "message_type" not in said and "{" not in said
+    nested = '{"message_type":"error","error":{"message":"pack 1a2b is damaged"},"during":"archival"}'
+    assert rr._meaningful_error(nested, "") == "pack 1a2b is damaged"
+
+
+def test_other_lines_are_kept_as_they_are():
+    assert rr._meaningful_error("Fatal: wrong password or no key found", "") == \
+        "Fatal: wrong password or no key found"
+    assert rr._meaningful_error("{not json at all", "") == "{not json at all"
+
+
+def test_control_the_raw_json_reached_the_alert(monkeypatch):
+    """What the owner's phone showed on 2026-11-20."""
+    monkeypatch.setattr(rr, "_restic_sentence", lambda line: line)
+    assert rr._meaningful_error(_LIVE, "").startswith('{"message_type":"exit_error"')
+
+
+# ── which copy of a Postgres dump failed ──────────────────────────────────
+
+
+def _pg_alerts(monkeypatch, failed):
+    from kazma_core.memory import worker_bootstrap
+
+    raised = []
+    monkeypatch.setattr("kazma_core.observability.ops_alerts.alert",
+                        lambda key, title, detail="", **kw: raised.append((key, kw.get("severity"))))
+    worker_bootstrap._alert_pg_offsite(failed)
+    return raised
+
+
+def test_a_failed_local_copy_is_said_as_local(monkeypatch):
+    """Live 2026-11-20: "Postgres offsite copy failed -- Destinations still
+    missing this dump: local", while the offsite copy had succeeded."""
+    assert _pg_alerts(monkeypatch, ["local"]) == [("backup.pg_local_copy", "warn")]
+
+
+def test_a_failed_offsite_copy_stays_critical(monkeypatch):
+    assert _pg_alerts(monkeypatch, ["remote"]) == [("backup.pg_offsite", "critical")]
+    assert _pg_alerts(monkeypatch, ["local", "remote"]) == [("backup.pg_offsite", "critical")]
