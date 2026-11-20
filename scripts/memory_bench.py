@@ -44,6 +44,10 @@ WRITES = DATASET.with_name("writes.json")
 LLM_REPLIES = REPO / "tests" / "fixtures" / "memory_bench" / "extraction_llm.json"
 #: The speakers case set's vectors (Spaces S1-11; recorded by the R3 study).
 SPEAKER_VECTORS = REPO / "tests" / "fixtures" / "memory_bench" / "speakers_vectors.npz"
+#: The sealed set (benchmark audit R8, docs/plans/MEMORY_SEALED_SET.md): written
+#: by another session, scored only by ``sealed --look "why"``.
+SEALED = REPO / "tests" / "fixtures" / "memory_bench" / "sealed_questions.json"
+SEALED_VECTORS = REPO / "tests" / "fixtures" / "memory_bench" / "sealed_vectors.npz"
 
 SEED = 20260926
 
@@ -1507,7 +1511,9 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | N
                     "extraction": extraction, "writes": writes, "speakers": speakers,
                     # The opt-in Postgres-primary run's floors
                     # (tests/test_memory_benchmark_pg.py), on the same dataset only.
-                    "postgres_primary": {} if recall_new else old.get("postgres_primary", {})},
+                    "postgres_primary": {} if recall_new else old.get("postgres_primary", {}),
+                    # Every look at the sealed set, kept whatever the lock does.
+                    **({"sealed": old["sealed"]} if old.get("sealed") else {})},
                    indent=1, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
@@ -1688,6 +1694,108 @@ def _cmd_extraction() -> int:
     return 0
 
 
+def _sealed_vectors(questions: list[dict[str, Any]], replay_model: str) -> str | None:
+    """Record the sealed questions' vectors with the real model the first
+    time (never the memories': they replay from the benchmark's recording).
+    Returns why it cannot, or None."""
+    from kazma_core.memory.benchmark import ReplayEmbedder, RecordingEmbedder, _text_key
+
+    if SEALED_VECTORS.is_file():
+        held = ReplayEmbedder(SEALED_VECTORS)
+        if held.model != replay_model:
+            return f"{SEALED_VECTORS.name} is {held.model}'s, the benchmark's vectors are {replay_model}'s"
+        if all(_text_key(q["text"]) in held._index for q in questions):
+            return None
+    from kazma_core.memory.embedder import get_embedder, get_embedding_model_name
+
+    _limit_cpu_threads()
+    real = get_embedder()
+    if real is None:
+        return "the sealed questions have no recorded vectors and no embedder is configured (the rag extra)"
+    model = get_embedding_model_name()
+    if model != replay_model:
+        return f"the embedder is {model}, the benchmark's vectors are {replay_model}'s"
+    recorder = RecordingEmbedder(real)
+    for q in questions:
+        recorder.encode(q["text"])
+    recorder.save(SEALED_VECTORS, model=model)
+    return None
+
+
+def _cmd_sealed(look: str | None, decided: bool = False) -> int:
+    """Score the sealed set: the only way it is scored, and every look is
+    logged in the lock (date, reason, commit, the file's hash, the scores). A
+    look that decides a change (``--decided``) spends the set: the next look
+    is refused until its questions are new (benchmark audit R8, the owner's
+    decision 4)."""
+    import datetime as _dt
+    import hashlib
+    import subprocess
+
+    from kazma_core.memory.benchmark import (
+        ReplayEmbedder,
+        SpeakerReplay,
+        gated_scores,
+        load_dataset,
+        run_benchmark,
+        sealed_dataset,
+        sealed_problems,
+    )
+
+    if not str(look or "").strip():
+        print("a look at the sealed set needs its reason: sealed --look \"why\" (every look is logged)",
+              file=sys.stderr)
+        return 1
+    if not SEALED.is_file():
+        print(f"no sealed set yet ({SEALED.name}): docs/plans/MEMORY_SEALED_SET.md says who writes it",
+              file=sys.stderr)
+        return 1
+    raw = SEALED.read_bytes()
+    sealed = json.loads(raw.decode("utf-8"))
+    data = load_dataset()
+    problems = sealed_problems(sealed, data)
+    if problems:
+        for line in problems:
+            print(f"  {line}", file=sys.stderr)
+        print("the sealed set is not the one specified: it is not scored", file=sys.stderr)
+        return 1
+    file_sha = hashlib.sha256(raw).hexdigest()
+    locked = json.loads(THRESHOLDS.read_text(encoding="utf-8"))
+    section = locked.get("sealed") or {}
+    looks = list(section.get("looks") or [])
+    spent = [x for x in looks if x.get("decided") and x.get("file_sha256") == file_sha]
+    if spent:
+        print(f"the sealed set is spent: a change was decided by looking at it on {spent[-1]['date']} "
+              f"({spent[-1]['reason']}); new questions, written by another session, are needed",
+              file=sys.stderr)
+        return 1
+    replay = ReplayEmbedder(VECTORS)
+    why_not = _sealed_vectors(sealed["questions"], replay.model)
+    if why_not:
+        print(f"cannot score the sealed set: {why_not}", file=sys.stderr)
+        return 1
+    embedder = SpeakerReplay(VECTORS, SEALED_VECTORS)
+    a, b = _patched(embedder, replay.model)
+    with a, b:
+        report = run_benchmark(sealed_dataset(sealed, data))
+    scores = {f"sealed.{k}": v for k, v in gated_scores(report).items()}
+    try:
+        commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=str(REPO), capture_output=True,
+                                text=True, timeout=10, check=True).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        commit = "unknown"
+    looks.append({"date": _dt.date.today().isoformat(), "reason": look.strip(), "decided": bool(decided),
+                  "commit": commit, "file_sha256": file_sha, "questions": len(sealed["questions"]),
+                  "written_by": sealed.get("written_by"), "scores": dict(sorted(scores.items()))})
+    locked["sealed"] = {"file": SEALED.name, "looks": looks}
+    THRESHOLDS.write_text(json.dumps(locked, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(f"sealed set: {len(sealed['questions'])} questions, look {len(looks)} logged in {THRESHOLDS.name}"
+          + (" (decided: the set is now spent)" if decided else ""))
+    for key in ("sealed.overall.hit_rate", "sealed.overall.mrr", "sealed.overall.precision"):
+        print(f"  {key}: {scores.get(key)}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -1702,6 +1810,10 @@ def main(argv: list[str] | None = None) -> int:
                       help="lock a new recording of the model's extraction pass; its scores replace the old")
     lock.add_argument("--edge", nargs=2, action="append", metavar=("QUESTION", "REASON"),
                       help="name a question whose hit flips inside the vectors' rounding (EDGE_RULE); recorded")
+    sealed = sub.add_parser("sealed", help="score the sealed set; every look is logged in the lock")
+    sealed.add_argument("--look", metavar="REASON", help="why this look (required, logged)")
+    sealed.add_argument("--decided", action="store_true",
+                        help="a change was decided by this look: the set is spent after it")
     sub.add_parser("extraction")
     sub.add_parser("writes")
     run = sub.add_parser("run")
@@ -1716,6 +1828,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "lock":
         return _cmd_lock(args.rebaseline, args.trade, args.new_recording,
                          [tuple(e) for e in args.edge] if args.edge else None)
+    if args.cmd == "sealed":
+        return _cmd_sealed(args.look, args.decided)
     if args.cmd == "extraction":
         return _cmd_extraction()
     if args.cmd == "writes":

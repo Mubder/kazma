@@ -1,8 +1,9 @@
 # The sealed question set for memory recall: specification
 
 **Status: specified 2026-11-20; to be written by another session.** The
-memory track builds the command that scores it; it does not write or read
-the questions.
+memory track built the command that scores it (`memory_bench.py sealed`,
+`tests/test_memory_benchmark_sealed.py`); it does not write or read the
+questions.
 
 ## Why
 

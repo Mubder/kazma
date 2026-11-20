@@ -2028,7 +2028,20 @@ four injected were noise.
   session's questions, scored on request) may be called held out
   (`test_nothing_calls_the_second_set_held_out`: the page, the guide, the
   builder and the benchmark's docstring; the old words as the negative
-  control). An extraction benchmark
+  control). **The sealed set** (2026-11-20, R8, decision 4;
+  `docs/plans/MEMORY_SEALED_SET.md`) is written by a session that does not
+  build or tune recall, as `tests/fixtures/memory_bench/sealed_questions.json`.
+  CI checks its shape only (`sealed_problems`: 8 questions or more in each of
+  `SEALED_CATEGORIES`, Arabic in each but keyword, every gold id in the
+  dataset, no repeat of a question the benchmark asks), never its scores:
+  `scripts/memory_bench.py sealed --look "why"` is the only way it is scored
+  (its question vectors recorded with the real model once, in
+  `sealed_vectors.npz`), every look is logged in the lock's `sealed` section
+  (date, reason, commit, the file's hash, the scores) and kept by every
+  `lock`, and a look with `--decided` spends the set until its questions are
+  new. The page prints the last look apart. Gate:
+  `tests/test_memory_benchmark_sealed.py` (a planted set; a test that scores
+  the sealed file as the negative control). An extraction benchmark
   (`benchmark_data/extraction.json`, `run_extraction_benchmark`: 30 turns
   EN/AR/mixed; the heuristic pass in CI, the model's deep pass from
   recorded replies, `tests/fixtures/memory_bench/extraction_llm.json`,

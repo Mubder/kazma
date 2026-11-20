@@ -103,6 +103,24 @@ def _edges(data: dict) -> list[str]:
     return out + [""] if out else []
 
 
+def _sealed(data: dict) -> list[str]:
+    """The sealed set's last look, apart from the gated scores (benchmark
+    audit R8): it is scored only on request, every look logged in the lock."""
+    looks = (data.get("sealed") or {}).get("looks") or []
+    if not looks:
+        return []
+    last = looks[-1]
+    s = last.get("scores") or {}
+    return [
+        f"**The sealed set**: {last.get('questions')} questions written by a session that does not build "
+        f"recall, never in the per-commit gate and scored only on request: "
+        f"{_pct(s.get('sealed.overall.hit_rate'))} hit rate, {_num(s.get('sealed.overall.mrr'))} MRR and "
+        f"{_pct(s.get('sealed.overall.precision'))} precision at its last look ({last.get('date')}; "
+        f"{_count(len(looks), 'look')} so far, each logged with its reason).",
+        "",
+    ]
+
+
 def _memory(data: dict) -> list[str]:
     s = data["scores"]
     lines = [
@@ -136,6 +154,7 @@ def _memory(data: dict) -> list[str]:
         "fails the build like any other score, so it is a second check on the same memories. A set nobody "
         "has looked at would be a sealed one, scored only on request.",
         "",
+        *_sealed(data),
         *_edges(data),
     ]
     extraction = data.get("extraction") or {}

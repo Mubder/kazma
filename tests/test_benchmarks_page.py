@@ -72,3 +72,21 @@ def test_a_model_pass_row_the_lock_does_not_count_is_not_printed(tmp_path, monke
     changed.write_text(json.dumps(data), encoding="utf-8")
     with pytest.raises(ValueError, match="rests on"):
         module.render()
+
+
+def test_the_sealed_set_is_printed_apart_with_its_looks(tmp_path, monkeypatch) -> None:
+    """Benchmark audit R8: the sealed set's last look, apart from the gated
+    scores, with how many looks; nothing while none was made."""
+    import json
+
+    module = _page_module()
+    data = json.loads(module.MEMORY.read_text(encoding="utf-8"))
+    if not (data.get("sealed") or {}).get("looks"):
+        assert "The sealed set" not in module.render()
+    data["sealed"] = {"looks": [{"date": "2026-12-01", "questions": 96, "scores": {
+        "sealed.overall.hit_rate": 0.8125, "sealed.overall.mrr": 0.7, "sealed.overall.precision": 0.6}}]}
+    changed = tmp_path / "thresholds.json"
+    changed.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setattr(module, "MEMORY", changed)
+    text = module.render()
+    assert "The sealed set**: 96 questions" in text and "81.2 %" in text and "1 look so far" in text

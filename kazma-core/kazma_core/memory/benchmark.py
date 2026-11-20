@@ -54,6 +54,10 @@ __all__ = [
     "EDGE_SEED",
     "EDGE_WATCH",
     "edge_check",
+    "SEALED_CATEGORIES",
+    "SEALED_PER_CATEGORY",
+    "sealed_dataset",
+    "sealed_problems",
     "EXTRACTION_PATH",
     "EXTRACTION_SCORES",
     "RECORD_AGAIN",
@@ -549,6 +553,119 @@ def edge_check(
     return {"draws": draws, "seed": EDGE_SEED, "move": EDGE_MOVE,
             "flips": dict(sorted(flips.items())), "shown": dict(sorted(shown.items())),
             "largest_move": round(largest, 4)}
+
+
+# ── The sealed set (benchmark audit R8; the owner's decision 4) ─────────────
+#
+# Questions written by a session that does not build or tune recall
+# (docs/plans/MEMORY_SEALED_SET.md), kept out of the per-commit gate: CI checks
+# the file's shape only (:func:`sealed_problems`), and the set is scored only
+# by ``scripts/memory_bench.py sealed --look "why"``, every look logged in the
+# lock, a deciding look spending it.
+
+#: The categories the sealed set covers, each with at least this many
+#: questions (the benchmark audit's R6 minimum for a locked category).
+SEALED_CATEGORIES = ("single", "paraphrase", "assistant", "multi", "update", "keyword", "noise", "fact",
+                     "overview", "arabic", "mixed", "abstain")
+SEALED_PER_CATEGORY = 8
+#: Categories other than these hold at least two Arabic questions.
+_SEALED_NOT_ARABIC = ("arabic", "mixed", "keyword")
+
+
+def _folded_question(text: str) -> str:
+    import re
+
+    return " ".join(re.findall(r"\w+", str(text or "").casefold()))
+
+
+def sealed_problems(sealed: dict[str, Any], dataset: dict[str, Any]) -> list[str]:
+    """Why *sealed* is not the set the specification asks for (empty: it is).
+
+    Its shape only: never a score. Counts per category, unique ``sNNN`` ids,
+    languages, every gold and ``below`` id present in *dataset*, nothing to
+    show for ``abstain``, no repeat of a tuning or second-set question.
+    """
+    import re
+
+    problems: list[str] = []
+    for key in ("version", "dataset_version", "written_by", "written_on", "questions"):
+        if not sealed.get(key):
+            problems.append(f"no {key}")
+    if sealed.get("dataset_version") not in (None, dataset.get("version")):
+        problems.append(f"written for dataset v{sealed.get('dataset_version')}, the dataset is "
+                        f"v{dataset.get('version')}: check its ids, and have it rewritten if they moved")
+    refs = {f"{s['id']}#{i}" for s in dataset["sessions"] for i in range(1, len(s["turns"]) + 1)}
+    refs |= {f["id"] for f in dataset.get("facts", [])} | {s["id"] for s in dataset.get("summaries", [])}
+    existing = {_folded_question(q["text"]) for q in dataset["questions"] + dataset.get("second", [])}
+    seen_ids: set[str] = set()
+    seen_texts: set[str] = set()
+    counts: dict[str, int] = {}
+    arabic: dict[str, int] = {}
+    dialects: dict[str, int] = {}
+    for q in sealed.get("questions") or []:
+        qid = str(q.get("id") or "")
+        where = qid or "a question with no id"
+        if not re.fullmatch(r"s\d{3}", qid):
+            problems.append(f"{where}: an id is s001 to s096")
+        if qid in seen_ids:
+            problems.append(f"{where}: the id is used twice")
+        seen_ids.add(qid)
+        category = q.get("category")
+        if category not in SEALED_CATEGORIES:
+            problems.append(f"{where}: no category {category!r}")
+            continue
+        counts[category] = counts.get(category, 0) + 1
+        lang = q.get("lang")
+        if lang not in ("en", "ar", "mixed"):
+            problems.append(f"{where}: lang is en, ar or mixed, not {lang!r}")
+        if lang == "ar":
+            arabic[category] = arabic.get(category, 0) + 1
+            if q.get("dialect") not in ("gulf", "msa"):
+                problems.append(f"{where}: an Arabic question names its dialect (gulf or msa)")
+            elif category == "arabic":
+                dialects[q["dialect"]] = dialects.get(q["dialect"], 0) + 1
+        if (category == "arabic" and lang != "ar") or (category == "mixed" and lang != "mixed"):
+            problems.append(f"{where}: a {category} question has lang {'ar' if category == 'arabic' else 'mixed'}")
+        folded = _folded_question(q.get("text"))
+        if not folded:
+            problems.append(f"{where}: no text")
+        elif folded in existing:
+            problems.append(f"{where}: repeats a question the benchmark already asks")
+        elif folded in seen_texts:
+            problems.append(f"{where}: asked twice in the sealed set")
+        seen_texts.add(folded)
+        gold = q.get("gold")
+        if not isinstance(gold, list):
+            problems.append(f"{where}: gold is a list")
+            gold = []
+        if category == "abstain" and gold:
+            problems.append(f"{where}: an abstain question has no gold (nothing should be shown)")
+        if category != "abstain" and not gold:
+            problems.append(f"{where}: an answerable question names the memories that answer it")
+        for piece in gold:
+            unknown = [a for a in str(piece).split("|") if a not in refs]
+            if unknown:
+                problems.append(f"{where}: no memory {', '.join(unknown)} in the dataset")
+        unknown_below = [b for b in q.get("below") or [] if b not in refs]
+        if unknown_below:
+            problems.append(f"{where}: no memory {', '.join(unknown_below)} in the dataset (below)")
+        if not str(q.get("why") or "").strip():
+            problems.append(f"{where}: no why")
+    for category in SEALED_CATEGORIES:
+        if counts.get(category, 0) < SEALED_PER_CATEGORY:
+            problems.append(f"{category}: {counts.get(category, 0)} questions, at least {SEALED_PER_CATEGORY}")
+        if category not in _SEALED_NOT_ARABIC and arabic.get(category, 0) < 2:
+            problems.append(f"{category}: {arabic.get(category, 0)} Arabic questions, at least 2")
+    for dialect in ("gulf", "msa"):
+        if dialects.get(dialect, 0) < 3:
+            problems.append(f"arabic: {dialects.get(dialect, 0)} {dialect} questions, about half of the category")
+    return problems
+
+
+def sealed_dataset(sealed: dict[str, Any], dataset: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The benchmark's memories, asked the sealed questions only."""
+    data = dataset or load_dataset()
+    return {**data, "questions": list(sealed["questions"]), "second": []}
 
 
 # ── Extraction (Memory audit M24; scored by value since 2026-11) ───────────

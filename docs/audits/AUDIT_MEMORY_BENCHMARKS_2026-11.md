@@ -704,7 +704,11 @@ framework audit's section 6.2, decisions 3 to 6).
   held out unless it names it sealed (`tests/test_memory_benchmark.py`,
   the old words as the negative control). The sealed set itself is to be
   written by another session: `docs/plans/MEMORY_SEALED_SET.md` specifies
-  what it covers, the file and the format.
+  what it covers, the file and the format. What scores it is built: CI
+  checks the file's shape only, `memory_bench.py sealed --look "why"` alone
+  scores it, every look is logged in the lock, and a deciding look spends
+  the set (`tests/test_memory_benchmark_sealed.py`, on a planted set until
+  the real one is written).
 - **Step 8, R12, 2026-11-20: the page says how many askings each model-pass
   row rests on** (decision 6). The extraction lock counts, per pass and
   language, the turns, the gold facts and the askings, and the page prints
