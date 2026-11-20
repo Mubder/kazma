@@ -900,6 +900,13 @@ Added as each piece lands.
   recording is locked only with five askings a turn and finished. Gates:
   `tests/test_memory_extraction_record.py` and the askings cases in
   `tests/test_memory_benchmark.py`.
+- **What the recording asks (extraction dataset v3), 2026-11-20: built, not
+  yet recorded.** Ten turns, English and Arabic, ask what C2 changed: a
+  start from the turn's day, the turn before as context only, a held fact
+  replaced, a fact ended, planted text kept out. The model's pass scores
+  each (`dated`, `replaced`, `ended`); until the recording they wait, named.
+  The quick pass finds less on them (it reads no dates or held facts) and
+  keeps nothing it should not. Gate: `tests/test_memory_benchmark_c2_turns.py`.
 
 What I would not do:
 

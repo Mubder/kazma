@@ -164,14 +164,18 @@ def test_a_recording_of_todays_prompt_ends_the_declaration(monkeypatch, tmp_path
     turns = json.loads(benchmark.EXTRACTION_PATH.read_text(encoding="utf-8"))["turns"]
     # Each reply keyed by the message today's extractor sends: a recording
     # made today.
+    # A turn added since the recording (``new_in``) was never asked: an
+    # answer that keeps nothing stands in for it.
     replies = {benchmark._text_key(benchmark._llm_blob(t["user"], **benchmark._turn_context(t))):
+               '{"beliefs": []}' if t.get("new_in") else
                recording["replies"][benchmark._text_key(benchmark._recorded_message(t["user"], 1))] for t in turns}
     n = benchmark.ASKINGS_STANDARD
     fresh = dict(recording, prompt_sha256=benchmark._extraction_prompt_sha256(),
                  message_shape=belief_extractor.MESSAGE_SHAPE, recorded_on="2026-12-01", askings=n, complete=True,
-                 # Each turn asked the standard number of times (benchmark audit R2);
-                 # one more reply: another recording.
-                 replies={k: [v] * n for k, v in dict(replies, unused="{}").items()})
+                 # Each turn asked the standard number of times (benchmark audit R2),
+                 # each reply reading the same, written a little differently (a
+                 # new recording never repeats the locked replies themselves).
+                 replies={k: [v + "\n" * (i + 1) for i in range(n)] for k, v in dict(replies, unused="{}").items()})
     path = tmp_path / "extraction_llm.json"
     path.write_text(json.dumps(fresh, ensure_ascii=False), encoding="utf-8")
     monkeypatch.setattr(script, "LLM_REPLIES", path)

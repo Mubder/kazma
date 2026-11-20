@@ -116,10 +116,37 @@
   }
  },
  "extraction": {
-  "version": 2,
+  "version": 3,
   "recording": {
    "sha256": "89c1b101b6ddbede2743d37b1ea2f2040f1ff1497cad515c2d035614f8f89157",
    "replies_sha256": "9bb200cfff12e6a25137b1c3bfd17952aa055cef4ce255f749cbae605be3b3c1",
+   "reply_hashes": [
+    "02d22e26dd3631fb",
+    "0a9769c0a9716a35",
+    "17f1374466bc35b2",
+    "21eb09d22219c039",
+    "374bfee058c534ee",
+    "4493f78da1242f8e",
+    "595f713e858e90e3",
+    "60bf7f5acf6a8f33",
+    "6de7be041a4cb6a7",
+    "7fa70939fa62dd29",
+    "883765eac3bbf073",
+    "88fa2aafee742847",
+    "8fb954427be32b4b",
+    "97aa73fd9038ae72",
+    "9e3560e378842dc5",
+    "b0b694b21025c652",
+    "bd375c8e984e7416",
+    "c05bcec0a8e8fa97",
+    "c7c74fad83f9ccbf",
+    "da4fb83d66ad154d",
+    "dad007b011f4b6ea",
+    "db4702d1a6f8eac4",
+    "e5630ebbc7305c35",
+    "edfd9bf1f8f0c61d",
+    "f572a89ec1efc6cd"
+   ],
    "turns": 30,
    "askings": 1,
    "model": "deepseek-flash",
@@ -129,11 +156,11 @@
    "message_shape": 1
   },
   "scores": {
-   "heuristic.ar.found": 0.6364,
+   "heuristic.ar.found": 0.5,
    "heuristic.ar.named": 1.0,
    "heuristic.ar.quiet": 1.0,
    "heuristic.ar.right": 1.0,
-   "heuristic.en.found": 0.4615,
+   "heuristic.en.found": 0.3158,
    "heuristic.en.named": 1.0,
    "heuristic.en.quiet": 1.0,
    "heuristic.en.right": 1.0,
@@ -157,14 +184,14 @@
   "rests_on": {
    "heuristic": {
     "ar": {
-     "turns": 10,
-     "gold": 11,
-     "quiet_turns": 2
+     "turns": 14,
+     "gold": 14,
+     "quiet_turns": 3
     },
     "en": {
-     "turns": 12,
-     "gold": 13,
-     "quiet_turns": 3
+     "turns": 18,
+     "gold": 19,
+     "quiet_turns": 4
     },
     "mixed": {
      "turns": 8,
@@ -239,6 +266,33 @@
   "recording": {
    "sha256": "89c1b101b6ddbede2743d37b1ea2f2040f1ff1497cad515c2d035614f8f89157",
    "replies_sha256": "9bb200cfff12e6a25137b1c3bfd17952aa055cef4ce255f749cbae605be3b3c1",
+   "reply_hashes": [
+    "02d22e26dd3631fb",
+    "0a9769c0a9716a35",
+    "17f1374466bc35b2",
+    "21eb09d22219c039",
+    "374bfee058c534ee",
+    "4493f78da1242f8e",
+    "595f713e858e90e3",
+    "60bf7f5acf6a8f33",
+    "6de7be041a4cb6a7",
+    "7fa70939fa62dd29",
+    "883765eac3bbf073",
+    "88fa2aafee742847",
+    "8fb954427be32b4b",
+    "97aa73fd9038ae72",
+    "9e3560e378842dc5",
+    "b0b694b21025c652",
+    "bd375c8e984e7416",
+    "c05bcec0a8e8fa97",
+    "c7c74fad83f9ccbf",
+    "da4fb83d66ad154d",
+    "dad007b011f4b6ea",
+    "db4702d1a6f8eac4",
+    "e5630ebbc7305c35",
+    "edfd9bf1f8f0c61d",
+    "f572a89ec1efc6cd"
+   ],
    "turns": 30,
    "askings": 1,
    "model": "deepseek-flash",

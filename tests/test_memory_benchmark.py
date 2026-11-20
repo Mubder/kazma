@@ -289,23 +289,25 @@ def _asked_today(recording: dict, prompt_sha256: str | None = None) -> dict:
     """*recording* as if it had been asked today: its replies keyed by the
     message today's extractor sends for each turn, labelled with today's
     message form and *prompt_sha256* (today's prompt by default)."""
-    turns = _turns()
-    by_old = {benchmark._text_key(benchmark._recorded_message(t["user"], benchmark._recording_shape(recording))): t
-              for t in turns}
+    shape = benchmark._recording_shape(recording)
     replies = {}
-    for key, reply in recording["replies"].items():
-        turn = by_old.get(key)
-        replies[benchmark._text_key(benchmark._llm_blob(turn["user"], **benchmark._turn_context(turn)))
-                if turn else key] = reply
+    for turn in _turns():
+        # A turn added since the recording (``new_in``) was never asked: an
+        # answer that keeps nothing stands in for it.
+        old = benchmark._text_key(benchmark._recorded_message(turn["user"], shape))
+        reply = '{"beliefs": []}' if turn.get("new_in") else recording["replies"][old]
+        replies[benchmark._text_key(benchmark._llm_blob(turn["user"], **benchmark._turn_context(turn)))] = reply
     return {**recording, "replies": replies, "message_shape": _today_shape(),
             "prompt_sha256": prompt_sha256 or benchmark._extraction_prompt_sha256()}
 
 
 def _askings(recording: dict, n: int, *, complete: bool = True) -> dict:
-    """*recording* asked *n* times, each asking answered as the first was,
-    by a recorder that finished (*complete*) or not (benchmark audit R2)."""
+    """*recording* asked again *n* times, each asking answered as the first
+    was (a reply that reads the same, written a little differently, as a new
+    recording's would be: never the locked replies themselves), by a
+    recorder that finished (*complete*) or not (benchmark audit R2)."""
     return {**recording, "askings": n, "complete": complete,
-            "replies": {k: [v] * n for k, v in recording["replies"].items()}}
+            "replies": {k: [v + "\n" * (i + 1) for i in range(n)] for k, v in recording["replies"].items()}}
 
 
 def test_a_new_recording_needs_the_standard_askings_and_a_finished_recorder(tmp_path, monkeypatch):
@@ -436,13 +438,15 @@ def test_a_relabelled_recording_is_not_the_locked_one(tmp_path, monkeypatch):
     import hashlib
 
     monkeypatch.setattr("kazma_core.memory.belief_extractor._EXTRACT_SYSTEM", "Keep nothing.")
+    # Relabelled, re-keyed by today's message, and with a reply that keeps
+    # nothing for each turn added since (the file the attack would need).
     relabelled = _asked_today(_recording(), hashlib.sha256(b"Keep nothing.").hexdigest())
     locked = _locked_extraction()
     report = benchmark.run_extraction_benchmark(llm_replies=relabelled)
-    # Control: the replies are the locked ones (keyed by today's message), and
-    # so are the scores.
-    assert sorted(report_replies := relabelled["replies"].values()) == sorted(_recording()["replies"].values())
-    assert report_replies and benchmark.extraction_scores(report) == locked["scores"]
+    # Control: every locked reply is there, and the old turns score as locked.
+    assert set(_recording()["replies"].values()) <= set(relabelled["replies"].values())
+    old = {k: v for k, v in benchmark.extraction_scores(report).items() if k.startswith("llm.")}
+    assert old and set(old) >= {k for k in locked["scores"] if k.startswith("llm.")}
     assert any("another prompt" in p for p in _recording_problems(report, locked))
 
     script = _build_script()

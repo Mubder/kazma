@@ -740,6 +740,10 @@ def _recording_identity(llm_replies: dict[str, Any]) -> dict[str, Any]:
         # replies keyed by another message and labelled with another prompt
         # are a relabelled recording, never a new one (``memory_bench``).
         "replies_sha256": _sha256(json.dumps(sorted(values), ensure_ascii=False)),
+        # Each reply's own hash: a later file that still holds every one of
+        # them is the same recording, re-keyed or extended, whatever it says
+        # it answered (``memory_bench._same_replies``).
+        "reply_hashes": sorted({_sha256(r)[:16] for v in replies.values() for r in _reply_list(v)}),
         "turns": len(replies),
         "askings": _recording_askings(llm_replies) or int(llm_replies.get("askings") or 1),
         "model": llm_replies.get("model"),
@@ -868,6 +872,10 @@ def _value_matches(alt: dict[str, Any], got: dict[str, Any]) -> bool:
     name finds only a negative or past fact)."""
     if _turned(got.get("predicate") or "") != any(_turned(p) for p in alt["predicates"]):
         return False
+    # A fact said to have ended is another statement than the fact held
+    # (part C2, retractions): each finds only its own kind.
+    if bool(got.get("ended")) != bool(alt.get("ended")):
+        return False
     gold = _folded(alt["object"])
     subject = _slug(alt["subject"])
     if _slug(got.get("subject")) == subject and _holds(gold, _folded(got.get("object"))):
@@ -911,7 +919,8 @@ def _score_extraction(turns: list[dict[str, Any]], extracted: dict[str, list[dic
     for turn in turns:
         row = by_lang.setdefault(turn["lang"], {
             "turns": 0, "gold": 0, "gold_found": 0, "gold_named": 0, "kept": 0, "kept_unwanted": 0,
-            "kept_listed": 0, "quiet_turns": 0, "quiet_kept_nothing": 0, "unwanted": []})
+            "kept_listed": 0, "quiet_turns": 0, "quiet_kept_nothing": 0, "unwanted": [],
+            **{k: 0 for k in (*_C2_GOLD.values(), *_C2_RIGHT.values())}})
         got = extracted.get(turn["id"], [])
         gold = turn["facts"]
         allowed = gold + (turn.get("extras") or [])
@@ -923,6 +932,7 @@ def _score_extraction(turns: list[dict[str, Any]], extracted: dict[str, list[dic
         row["turns"] += 1
         row["gold"] += len(gold)
         row["kept"] += len(got)
+        _score_c2(row, gold, good)
         row["gold_found"] += sum(1 for alts in gold if any(_value_matches(a, g) for a in alts for g in good))
         row["gold_named"] += sum(1 for alts in gold if any(_fact_matches(alts, g) for g in good))
         row["kept_listed"] += sum(1 for g in got if any(_fact_matches(alts, g) for alts in gold))
@@ -936,9 +946,43 @@ def _score_extraction(turns: list[dict[str, Any]], extracted: dict[str, list[dic
     return {lang: _with_ratios(row) for lang, row in sorted(by_lang.items())}
 
 
-#: A language row's counts that add up over askings (``turns``, ``gold`` and
-#: ``quiet_turns`` are the dataset's, the same in every asking).
-_ASKING_COUNTS = ("gold_found", "gold_named", "kept", "kept_unwanted", "kept_listed", "quiet_kept_nothing")
+#: What part C2 asks the model besides the fact itself, by the gold field
+#: that asks it: the count of gold facts asking it (the dataset's), the count
+#: given right (each asking's), and the score.
+_C2_GOLD = {"since": "gold_since", "replaces": "gold_replaces", "ended": "gold_ended"}
+_C2_RIGHT = {"since": "dated_right", "replaces": "replaced_right", "ended": "ended_found"}
+_C2_SCORES = {"since": "dated", "replaces": "replaced", "ended": "ended"}
+
+
+def _since_holds(gold: str, got: Any) -> bool:
+    """A start the model gave is the gold one, to the gold's own precision:
+    "2026-04-30" holds "2026-04", "2026" does not."""
+    return isinstance(got, str) and (got == gold or got.startswith(gold + "-"))
+
+
+def _score_c2(row: dict[str, Any], gold: list[list[dict[str, Any]]], good: list[dict[str, Any]]) -> None:
+    """Count what a turn's gold facts ask beyond the fact (a start, the held
+    fact replaced, an ending) and how often a kept fact gives it right."""
+    for alts in gold:
+        for field, counted in _C2_GOLD.items():
+            wanted = [a for a in alts if a.get(field) not in (None, False)]
+            if not wanted:
+                continue
+            row[counted] += 1
+            right = any(
+                _value_matches(a, g) and (
+                    field == "ended"
+                    or (field == "since" and _since_holds(a["since"], g.get("since")))
+                    or (field == "replaces" and str(g.get("replaces") or "").strip().lower() == a["replaces"]))
+                for a in wanted for g in good)
+            row[_C2_RIGHT[field]] += int(right)
+
+
+#: A language row's counts that add up over askings (``turns``, ``gold``,
+#: ``quiet_turns`` and the C2 gold counts are the dataset's, the same in
+#: every asking).
+_ASKING_COUNTS = ("gold_found", "gold_named", "kept", "kept_unwanted", "kept_listed", "quiet_kept_nothing",
+                  *_C2_RIGHT.values())
 
 
 def _with_ratios(row: dict[str, Any], askings: int = 1) -> dict[str, Any]:
@@ -957,6 +1001,12 @@ def _with_ratios(row: dict[str, Any], askings: int = 1) -> dict[str, Any]:
         "recall": round(row["gold_named"] / gold, 4) if gold else 0.0,
         "precision": round(row["kept_listed"] / kept, 4) if kept else 1.0,
     }
+    # Part C2's scores, where the language's turns ask them: a gold fact not
+    # kept counts as not given.
+    for field, score in _C2_SCORES.items():
+        asked = row.get(_C2_GOLD[field], 0) * askings
+        if asked:
+            out[score] = round(row.get(_C2_RIGHT[field], 0) / asked, 4)
     if askings > 1:
         out["askings"] = askings
     return out
@@ -988,8 +1038,9 @@ def _spread(parts: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
         return {}
     out: dict[str, dict[str, float]] = {}
     for lang in sorted(parts[0]):
+        scores = [k for k in (*EXTRACTION_SCORES, *_C2_SCORES.values()) if k in parts[0][lang]]
         out[lang] = {k: round(2 * statistics.stdev([p[lang][k] for p in parts]) / math.sqrt(len(parts)), 4)
-                     for k in EXTRACTION_SCORES}
+                     for k in scores}
     return out
 
 
@@ -1129,9 +1180,15 @@ def run_extraction_benchmark(
         report["llm"] = {"recorded": False}
         return report
     mode = _check_recording(llm_replies, pending)
+    # A drift check replays the recording of the prompt before a change: the
+    # turns added to ask what the change asks (``new_in``) wait for the
+    # recording, named, never guessed.
+    asked = [t for t in turns if mode == "current" or not t.get("new_in")]
+    if len(asked) < len(turns):
+        report["llm_waiting"] = [t["id"] for t in turns if t not in asked]
     # Every asking is scored, through the product's parser; a score is the
     # total over all askings, and its spread how much the askings differ.
-    parts = [_score_extraction(turns, _replayed_extraction(turns, _asking(llm_replies, i), mode=mode))
+    parts = [_score_extraction(asked, _replayed_extraction(asked, _asking(llm_replies, i), mode=mode))
              for i in range(max(1, _recording_askings(llm_replies)))]
     report["llm"] = _total_over_askings(parts)
     if len(parts) > 1:
@@ -1176,6 +1233,11 @@ def extraction_scores(report: dict[str, Any]) -> dict[str, float]:
             if isinstance(row, dict):
                 for k in EXTRACTION_SCORES:
                     out[f"{pass_name}.{lang}.{k}"] = float(row[k])
+                # Part C2's: the model's alone (the quick pass gives no start,
+                # replaces nothing and reads no endings).
+                for k in _C2_SCORES.values():
+                    if pass_name == "llm" and k in row:
+                        out[f"{pass_name}.{lang}.{k}"] = float(row[k])
     return dict(sorted(out.items()))
 
 

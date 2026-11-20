@@ -2055,13 +2055,26 @@ four injected were noise.
   new. The page prints the last look apart. Gate:
   `tests/test_memory_benchmark_sealed.py` (a planted set; a test that scores
   the sealed file as the negative control). An extraction benchmark
-  (`benchmark_data/extraction.json`, `run_extraction_benchmark`: 30 turns
+  (`benchmark_data/extraction.json`, `run_extraction_benchmark`: 40 turns
   EN/AR/mixed; the heuristic pass in CI, the model's deep pass from
   recorded replies, `tests/fixtures/memory_bench/extraction_llm.json`,
-  recorded with `scripts/memory_extraction_record.py --out <fixture>` run by
-  an install's own Python (it loads that install's `.env`; `memory_bench.py`
-  stays env-free) -- it costs a call a turn; a turn with no recording is an
-  error, never "the model was down"). **Scored by value since 2026-11**
+  recorded with `scripts/memory_extraction_record.py --out <fixture>
+  --limit N` run by an install's own Python (it loads that install's
+  `.env`; `memory_bench.py` stays env-free) -- it costs a call a turn and
+  asking; a turn with no recording is an error, never "the model was
+  down"). **Dataset v3 asks what part C2 changed** (2026-11-20,
+  `memory_bench.EXTRACTION_C2_TURNS`, ten turns EN/AR, `new_in: 3`): a
+  fact's start from the turn's day, the turn before read for context only,
+  a held fact replaced, a fact ended, planted text kept out. A gold fact
+  names what it asks (`since`, `replaces`, `ended`) and the model's pass
+  scores it per language (`dated`, `replaced`, `ended`; `_score_c2`); a
+  fact said to have ended finds only an ending (`_value_matches`). The
+  drift check leaves those turns out, named (`llm_waiting`), until the
+  recording. A relabel is a file holding every locked reply
+  (`reply_hashes`), re-keyed or extended. Gate:
+  `tests/test_memory_benchmark_c2_turns.py` (answers with no start,
+  replacement or ending, and a scorer that ignores `ended`, as negative
+  controls). **Scored by value since 2026-11**
   (dataset v2, benchmark audit R1): per pass and language `found` (a gold
   fact's whole value -- equal, or whole words of it -- under its subject, or
   the relation from the other side, under any name that does not turn it
