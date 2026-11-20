@@ -13639,6 +13639,50 @@ product can turn it on, so an install with one account behaves as before.
   - Gates: `tests/test_host_tools_absent.py` (controls: a policy that only
     hides the tool, the route rule taken out, the clone environment as it
     was), `tests/_host_tools_space_cases.py`.
+- **Running work and approvals carry their space (S1-21, 2026-11-20).**
+  Guards act only where Spaces is enforced; not enforced, every surface lists
+  and acts as before (the older multi-user mode keeps its refusal).
+  - `kazma_core/runs/spaces.py` holds the rules: `visible_here` (a run or
+    incident of the space bound now; none with no space bound),
+    `kept_in_its_space` (O1: news of a space other than the owner's stays
+    off the install's channels), `may_act` (its asker or an owner of its
+    space, `spaces.shared_work.may_change`), `runs_refusal`.
+  - **Every run carries `space` and `asker`** (`contract.Run`), stamped by
+    its adapter from the kind's own record: a thread record, a swarm task's
+    metadata, a job's tenant and creator, a document job's tenant and actor,
+    a research session's columns, a crawl's working folder
+    (`spaces.files.space_of_folder`) or library, an X operation's tenant, a
+    memory task's payload. Empty is the install's own work and work from
+    before Spaces: the owner's space's (N19). A new adapter names `space=`
+    on every `Run(` (gate; `maintenance.py` is declared install work).
+    Adapters read every space's runs (the swarm with the task store's `"*"`
+    once enforced; a chat turn's title inside its thread's own space).
+  - **The registry keeps a surface to the bound space**
+    (`list_runs(everyone=False)`); the supervisor alone reads `everyone`.
+    `perform` refuses another space's run ("gone") and anyone but its asker
+    or an owner of its space (`not_yours`, 403); a kind's own control may be
+    stricter (a swarm task answers only its asker, N4).
+  - **Incidents carry `space` and `asker`** (columns added to an older
+    file); `recent(space=)` and `live(space=)` keep a surface to its space,
+    a row with none being the owner's. The supervisor opens another space's
+    incident with `notify = suppressed` (`KEPT_IN_ITS_SPACE`), `deliver` and
+    the recovery and diagnosis notes refuse it as a second line, the bell
+    shows the bound space's, and the runbooks step only on the owner's
+    work, as the owner. Delivering a member's incident to them is S2-05's.
+  - `/api/runs` answers in the bound space; a member decides on their own
+    space's incidents (the admin rule stays while not enforced). Chat apps'
+    `/runs` and a card's button refuse until their chats are bound to a
+    space (stage 3).
+  - **An approval gate names whose work asked**: `GateRow.asker` (column
+    added to an older file), stamped by `register_gate` from the bound
+    scope, and its tenant from the bound space when the writer named none.
+    The pending list was already per space (the chat store, a bridge gate's
+    tenant); an MCP server's sampling request is shown only where
+    Development is. Only the asker answering is S2-05's.
+  - Gates: `tests/test_gates_and_runs_spaces.py` (the unfiltered listing,
+    today's supervisor paging a member's stuck X post with its words, and
+    the decision path without its space checks as controls),
+    `tests/_runs_space_cases.py`.
 
 ## UI Conventions (Web)
 

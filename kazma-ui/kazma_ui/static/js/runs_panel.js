@@ -59,6 +59,9 @@
   function messageLine(row) {
     var notify = row.notify || '';
     if (notify === 'suppressed') {
+      if (row.quiet_reason === 'kept_in_space') {
+        return tr('runs.message_kept_in_space', 'No message: it stays in its space');
+      }
       return row.quiet_reason === 'before_start'
         ? tr('runs.message_before_start', 'No message: it ended before Kazma started watching')
         : tr('runs.message_announced', 'No message: another Kazma notice already reports this');

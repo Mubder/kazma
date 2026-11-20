@@ -56,6 +56,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "No message: it ended before Kazma started watching",
         "ar": "بلا رسالة: انتهى قبل أن يبدأ كازما المراقبة",
     },
+    "runs.message_kept_in_space": {
+        "en": "No message: it stays in its space",
+        "ar": "بلا رسالة: يبقى في مساحته",
+    },
     "runs.message_pending": {"en": "Waiting to be sent", "ar": "بانتظار الإرسال"},
     "runs.message_sending": {"en": "Being sent", "ar": "قيد الإرسال"},
     "runs.action_done": {"en": "Done: {message}", "ar": "تم: {message}"},
@@ -101,6 +105,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "runs.chat_single_operator": {
         "en": "Running work is shown on a single-operator install only.",
         "ar": "تُعرض الأعمال الجارية في التثبيت ذي المشغّل الواحد فقط.",
+    },
+    "runs.chat_no_space": {
+        "en": "Running work is shown inside a space, and this chat is not tied to one yet.",
+        "ar": "تُعرض الأعمال الجارية داخل مساحة، وهذه المحادثة غير مرتبطة بمساحة بعد.",
     },
     "runs.chat_dashboard_link": {
         "en": "[Open Running work on the Dashboard](/dashboard#runs-panel) to act on a run.",

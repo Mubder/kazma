@@ -17,6 +17,12 @@ A verdict never cancels or fails a run by itself. A failure that ended long
 before this process started watching is recorded without a message (a
 restart is not a reason to page about yesterday).
 
+Once Spaces is enforced the supervisor reads every space's runs (Kazma's own
+work) and opens each one's incident, carrying its space; an incident of a
+space other than the owner's sends nothing (``runs.spaces.kept_in_its_space``,
+O1): the run's chat address and the ops channels are the owner's until people
+link their own chat apps (stage 3). It waits on its space's Dashboard and bell.
+
 The loop pages its own failure only after it has been unable to tick for
 five minutes, and says when it works again (the acquisition monitor's rule,
 2026-10-22: a database restart is not an incident).
@@ -32,6 +38,7 @@ from typing import Any
 from kazma_core.db import availability
 from kazma_core.runs.contract import ACTIVE_STATES, Run, RunState, Verdict
 from kazma_core.runs.kinds import KINDS
+from kazma_core.runs.spaces import kept_in_its_space
 
 __all__ = ["start", "status", "stop", "tick"]
 
@@ -86,8 +93,14 @@ def _changed(row: dict[str, Any], run: Run) -> bool:
             or row.get("link") != run.link or row.get("actions") != [*run.actions, *INCIDENT_ACTIONS])
 
 
+#: The quiet reason of an incident kept in its space (the page words it).
+KEPT_IN_ITS_SPACE = "kept in its space: the install's channels are the owner's"
+
+
 def _quiet_reason(run: Run, condition: str, watch_started: float) -> str:
     """Why this incident sends no message, or "" when it should."""
+    if kept_in_its_space(run.space):
+        return KEPT_IN_ITS_SPACE
     announced = KINDS[run.kind].announced_by.get(condition) or run.announced_by
     if announced:
         return f"announced by {announced}"
@@ -107,7 +120,7 @@ async def tick(*, now: float | None = None) -> dict[str, int]:
     if _watch_started is None:
         _watch_started = stamp
     store = get_incident_store()
-    listing = await list_runs(now=stamp, mark_handled=False)
+    listing = await list_runs(now=stamp, mark_handled=False, everyone=True)
     live = await asyncio.to_thread(store.live)
     decided = await asyncio.to_thread(store.decided_keys)
     live_by_key = {(row["run_id"], row["condition"]): row for row in live}
@@ -164,7 +177,8 @@ async def tick(*, now: float | None = None) -> dict[str, int]:
         logger.info("[runs] incident %s resolved: %s", row["id"], reason)
         moved_on = run is not None and (run.state in ACTIVE_STATES or run.state == RunState.DONE)
         if (row["condition"] in ("stalled", "dead") and moved_on
-                and row.get("notify") in ("delivered", "uncertain")):
+                and row.get("notify") in ("delivered", "uncertain")
+                and not kept_in_its_space(row.get("space"))):
             await notify.send_recovery(row, finished=run is not None and run.state == RunState.DONE)
 
     for row in await asyncio.to_thread(store.pending_notifications):

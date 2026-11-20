@@ -7,7 +7,8 @@ owner while its lease runs; the worker renews ``heartbeat_at`` as it works,
 which is the job's progress. OCR progress ("page 12 of 54") is the note.
 
 Cancel and Retry are the Documents page's (``cancel_job`` / ``retry_job``),
-acting as the operator principal (§19 B4b) -- a single-operator surface.
+acting as the owner's account on a single-operator install (§19 B4b), and
+once Spaces is enforced as the person acting (S1-21).
 Document jobs touch only Kazma's own document store: their effects are none.
 """
 
@@ -100,6 +101,7 @@ class _DocumentAdapter:
             detail=short_title(job.error_message or job.error_code or "", 200) if state == RunState.FAILED else "",
             lineage=f"document:{job.tenant_id}/{job.document_id}",
             announced_by="the document's refusal on the Documents page" if native == "rejected" else "",
+            space=str(job.tenant_id or ""), asker=str(getattr(job, "actor_id", "") or ""),
         )
 
     async def act(self, native_id: str, action: str, *, actor: str) -> ActionResult:
@@ -110,9 +112,16 @@ class _DocumentAdapter:
         service = peek_ingestion_service()
         if service is None:
             return ActionResult(False, "documents_unavailable", "Documents are not running.")
-        # The owner's account on a single-operator install; a run's own asker
-        # once running work carries one (Spaces S1-21).
-        principal = await asyncio.to_thread(owner_actor, service, tenant)
+        # The owner's account on a single-operator install. Once Spaces is
+        # enforced the person acting, whom the registry checked against the
+        # job's space and asker (S1-21): never the owner's account for a
+        # member's job.
+        from kazma_core.spaces.scope import bound_asker, spaces_enforced
+
+        if spaces_enforced():
+            principal = bound_asker()
+        else:
+            principal = await asyncio.to_thread(owner_actor, service, tenant)
         if principal is None:
             return ActionResult(False, "single_operator", "Documents act for one operator only.")
         call = {"cancel": service.cancel_job, "retry": service.retry_job}.get(action)

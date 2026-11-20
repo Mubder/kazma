@@ -160,6 +160,9 @@ class GateRow:
     tenant_id: str = ""
     session_id: str = ""
     turn_id: str = ""
+    #: The account whose work asked (Spaces S1-21); stamped by
+    #: :func:`register_gate` from the bound scope. Empty: none was bound.
+    asker: str = ""
     #: A writer passes the REAL arguments; :func:`register_gate` stores them
     #: as a card shows them and keeps their hash in ``args_digest``.
     args_json: str = "{}"
@@ -252,6 +255,7 @@ CREATE TABLE IF NOT EXISTS hitl_gates (
   alias_id     TEXT NOT NULL DEFAULT '',
   thread_id    TEXT NOT NULL,
   tenant_id    TEXT NOT NULL DEFAULT '',
+  asker        TEXT NOT NULL DEFAULT '',
   session_id   TEXT NOT NULL DEFAULT '',
   turn_id      TEXT NOT NULL DEFAULT '',
   mechanism    TEXT NOT NULL DEFAULT 'graph',
@@ -289,7 +293,10 @@ def ensure_gate_schema() -> None:
             conn.executescript(_SCHEMA)
             from kazma_core.db.sqlite_columns import add_missing_columns
 
-            add_missing_columns(conn, "hitl_gates", [("args_digest", "TEXT NOT NULL DEFAULT ''")])
+            add_missing_columns(conn, "hitl_gates", [
+                ("args_digest", "TEXT NOT NULL DEFAULT ''"),
+                ("asker", "TEXT NOT NULL DEFAULT ''"),
+            ])
             conn.commit()
             _redact_stored_rows(conn)
             _schema_ready = True
@@ -448,6 +455,7 @@ def _row_to_gate(r: sqlite3.Row) -> GateRow:
         alias_id=r["alias_id"],
         thread_id=r["thread_id"],
         tenant_id=r["tenant_id"],
+        asker=r["asker"],
         session_id=r["session_id"],
         turn_id=r["turn_id"],
         mechanism=r["mechanism"],
@@ -469,6 +477,21 @@ def _row_to_gate(r: sqlite3.Row) -> GateRow:
 
 
 # ── core API (sync) ─────────────────────────────────────────────────────────
+
+
+def _stamp_whose(gate: GateRow) -> None:
+    """Stamp whose work asked on a new gate row (Spaces S1-21): the account
+    bound now, always; and once Spaces is enforced the bound space when the
+    writer named no tenant. A writer's own tenant is kept (the swarm names its
+    task's, a bridge gate the request's). No I/O."""
+    from kazma_core.spaces.scope import bound_asker, current_scope, spaces_enforced
+
+    if not gate.asker:
+        gate.asker = bound_asker() or ""
+    if not gate.tenant_id and spaces_enforced():
+        bound = current_scope()
+        if bound is not None:
+            gate.tenant_id = bound.space_id
 
 
 def register_gate(gate: GateRow, *, ttl_seconds: float | None = None) -> GateRow:
@@ -497,6 +520,7 @@ def register_gate(gate: GateRow, *, ttl_seconds: float | None = None) -> GateRow
     shown, digest, gate.payload_json, gate.message = _record_view(
         gate.tool, gate.args_json, gate.payload_json, gate.message,
     )
+    _stamp_whose(gate)
     gate.args_json, gate.args_digest = shown, (gate.args_digest or digest)
     created = False
     with _write_lock:
@@ -541,13 +565,13 @@ def register_gate(gate: GateRow, *, ttl_seconds: float | None = None) -> GateRow
             gate.created_at = now
             conn.execute(
                 """INSERT INTO hitl_gates
-                   (gate_id, alias_id, thread_id, tenant_id, session_id, turn_id,
+                   (gate_id, alias_id, thread_id, tenant_id, asker, session_id, turn_id,
                     mechanism, kind, tool, args_json, args_digest, message, payload_json,
                     state, decision, actor, supersedes,
                     created_at, claimed_at, settled_at, expires_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
-                    gate.gate_id, gate.alias_id, gate.thread_id, gate.tenant_id,
+                    gate.gate_id, gate.alias_id, gate.thread_id, gate.tenant_id, gate.asker,
                     gate.session_id, gate.turn_id, gate.mechanism, gate.kind,
                     gate.tool, gate.args_json, gate.args_digest, gate.message, gate.payload_json,
                     gate.state, gate.decision, gate.actor, gate.supersedes,

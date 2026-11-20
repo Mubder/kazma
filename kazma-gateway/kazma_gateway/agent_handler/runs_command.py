@@ -83,10 +83,14 @@ async def try_runs_command(msg: IncomingMessage, send: Any) -> bool:
     head = text.split(maxsplit=1)[0].lower().split("@", 1)[0] if text else ""
     if head != "/runs":
         return False
-    from kazma_core.security.single_operator import single_operator_refusal
+    from kazma_core.runs.spaces import runs_refusal
 
-    if await asyncio.to_thread(single_operator_refusal, _REFUSAL):
-        await send(f"⚠️ {_REFUSAL}")
+    # Once Spaces is enforced a chat app's turn is tied to no space until its
+    # chats are bound to one (stage 3): running work, and a card's button,
+    # are refused there (S1-21).
+    refused = await asyncio.to_thread(runs_refusal, _REFUSAL)
+    if refused:
+        await send(f"⚠️ {refused}")
         return True
     parts = text.split()
     try:

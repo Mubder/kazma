@@ -16,6 +16,10 @@ Never, whatever the switch says:
 The step goes through :func:`kazma_core.runs.decide.decide`, as a person's
 button would (actor ``kazma``, platform ``runbook``); the incident's message
 then says what Kazma already did, with no buttons left to press.
+
+The switches are the admin's, for the admin's work: once Spaces is enforced a
+step is taken on a run of the owner's space only, as the owner (S1-21); a run
+of another space waits for its own people.
 """
 
 from __future__ import annotations
@@ -73,6 +77,10 @@ def enabled() -> dict[str, bool]:
 
 def refusal(run: Run, action: str) -> str:
     """Why *action* may not run automatically on *run*, or ""."""
+    from kazma_core.runs.spaces import kept_in_its_space
+
+    if kept_in_its_space(run.space):
+        return "it is another space's: the switches are the owner's, for the owner's work"
     if run.effects == "unknown":
         return "its effects are unknown"
     if action == "retry_checked":
@@ -104,7 +112,14 @@ async def apply(incident: dict[str, Any], run: Run) -> bool:
         logger.info("[runs] runbook %s not applied to %s: already tried today", name, run.run_id)
         return False
     from kazma_core.runs.decide import decide
+    from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, OWNER_SPACE_ID, bind_scope, spaces_enforced
 
-    outcome = await decide(incident["id"], action, actor="kazma", platform="runbook")
+    if spaces_enforced():
+        # Only the owner's work reaches here (``refusal``): the step is the
+        # owner's, made in advance.
+        with bind_scope(OWNER_SPACE_ID, OWNER_ACCOUNT_ID):
+            outcome = await decide(incident["id"], action, actor="kazma", platform="runbook")
+    else:
+        outcome = await decide(incident["id"], action, actor="kazma", platform="runbook")
     logger.warning("[runs] runbook %s on %s: %s (%s)", name, run.run_id, outcome.code, outcome.message)
     return outcome.ok

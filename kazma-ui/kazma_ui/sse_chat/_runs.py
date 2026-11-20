@@ -26,13 +26,14 @@ async def runs_reply(text: str, lang: str = "en") -> str:
 
     from kazma_core.runs.incidents import get_incident_store
     from kazma_core.runs.registry import get_run, list_runs
+    from kazma_core.runs.spaces import NO_SPACE_REFUSAL, runs_refusal
     from kazma_core.runs.text import describe_run, format_listing
-    from kazma_core.security.single_operator import single_operator_refusal
 
     from kazma_ui.i18n import t
 
-    if await asyncio.to_thread(single_operator_refusal, "refuse"):
-        return t("runs.chat_single_operator", lang)
+    refused = await asyncio.to_thread(runs_refusal, "refuse")
+    if refused:
+        return t("runs.chat_no_space" if refused == NO_SPACE_REFUSAL else "runs.chat_single_operator", lang)
     parts = text.strip().split()
     sub = parts[1].lower() if len(parts) > 1 else ""
     link = t("runs.chat_dashboard_link", lang)

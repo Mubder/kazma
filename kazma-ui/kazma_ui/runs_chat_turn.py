@@ -28,6 +28,7 @@ from collections.abc import Callable
 from typing import Any
 
 from kazma_core.runs.contract import ActionResult, Run, RunState
+from kazma_core.spaces.scope import OWNER_SPACE_ID
 
 __all__ = ["ADAPTER", "set_graph_getter"]
 
@@ -49,6 +50,21 @@ def _graph() -> Any:
     return _graph_getter() if _graph_getter is not None else None
 
 
+def _home(thread_id: str) -> tuple[str, str]:
+    """(space, opener) of a thread from its record; ("", "") for a thread
+    from before Spaces. Blocking."""
+    from kazma_core.spaces.threads import record_of
+
+    record = record_of(thread_id)
+    return (record.space_id, record.opener) if record is not None else ("", "")
+
+
+def _acting(space: str) -> str:
+    from kazma_core.spaces.identity import acting_account
+
+    return acting_account(space or OWNER_SPACE_ID)
+
+
 class _ChatTurnAdapter:
     STATE_MAP: dict[str, str] = {
         "running": RunState.RUNNING,
@@ -64,13 +80,16 @@ class _ChatTurnAdapter:
 
         from kazma_ui.active_turns import running_turns
         from kazma_ui.reply_sink import open_turns_snapshot
+        from kazma_ui.turn_resume import cut_turns
 
         running = running_turns()
         open_turns = open_turns_snapshot()
         mono_now = time.monotonic()
         beats = {tid: get_heartbeat(tid) for tid in set(running) | set(open_turns)}
         idle = [tid for tid in open_turns if tid not in running]
-        waiting, titles = await asyncio.to_thread(self._read, idle, list(set(running) | set(open_turns)))
+        cut = cut_turns()
+        waiting, titles, homes = await asyncio.to_thread(
+            self._read, idle, list(set(running) | set(open_turns) | set(cut)))
         for gone in set(_abandoned_since) - set(idle):
             _abandoned_since.pop(gone, None)
 
@@ -101,30 +120,38 @@ class _ChatTurnAdapter:
                 progress_note="", owner_alive=owner,
                 version=str(open_turns.get(tid, "")),
                 actions=("cancel",) if native == "running" else (("close",) if native == "abandoned" else ()),
-                link="/chat",
+                link="/chat", space=homes.get(tid, ("", ""))[0], asker=homes.get(tid, ("", ""))[1],
             ))
-        from kazma_ui.turn_resume import cut_turns
-
         listed = {run.native_id for run in runs}
-        for tid, cut in cut_turns().items():
+        for tid, turn in cut.items():
             if tid in listed:
                 continue
             runs.append(Run(
                 run_id=f"chat_turn:{tid}", kind="chat_turn", native_id=tid,
                 title=titles.get(tid) or tid[:12], state=RunState(self.STATE_MAP["cut"]),
-                native_state="cut", started_at=cut.at, progress_at=cut.at,
-                progress_note=f"cut off by a restart while {', '.join(cut.unknown)} ran; its effect is unknown",
-                owner_alive=False, version=str(int(cut.at)),
+                native_state="cut", started_at=turn.at, progress_at=turn.at,
+                progress_note=f"cut off by a restart while {', '.join(turn.unknown)} ran; its effect is unknown",
+                owner_alive=False, version=str(int(turn.at)),
                 actions=("continue", "close"), link="/chat",
+                space=homes.get(tid, ("", ""))[0], asker=homes.get(tid, ("", ""))[1],
             ))
         return runs
 
     @staticmethod
-    def _read(idle: list[str], threads: list[str]) -> tuple[set[str], dict[str, str]]:
-        """(threads waiting on an approval, chat titles): store reads, in a thread."""
+    def _read(idle: list[str], threads: list[str]) -> tuple[set[str], dict[str, str], dict[str, tuple[str, str]]]:
+        """(threads waiting on an approval, chat titles, each thread's space
+        and opener): store reads, in a thread.
+
+        A thread's space and opener are its record's (Spaces S1-21); a thread
+        with none is from before Spaces, the owner's (N19). Its title is read
+        inside its own space: once Spaces is enforced the chat store answers
+        only for the space bound (S1-08), and this read runs for every space."""
+        from kazma_core.spaces.scope import bind_scope, spaces_enforced
+
         from kazma_ui.turn_liveness import _is_awaiting_human
 
         waiting = {tid for tid in idle if _is_awaiting_human(tid)}
+        homes = {tid: _home(tid) for tid in threads}
         titles: dict[str, str] = {}
         try:
             from kazma_ui.session_manager import peek_session_manager
@@ -134,11 +161,16 @@ class _ChatTurnAdapter:
             manager = None
         if manager is not None:
             for tid in threads:
-                session = manager.get_by_thread_id(tid)
+                if spaces_enforced():
+                    space, opener = homes[tid]
+                    with bind_scope(space or OWNER_SPACE_ID, opener or _acting(space)):
+                        session = manager.get_by_thread_id(tid)
+                else:
+                    session = manager.get_by_thread_id(tid)
                 title = getattr(session, "title", "") if session is not None else ""
                 if title:
                     titles[tid] = " ".join(str(title).split())[:90]
-        return waiting, titles
+        return waiting, titles, homes
 
     async def origin_for(self, native_id: str) -> dict[str, str]:
         """The chat's address from its checkpoint (``_gateway``), or ``{}``."""

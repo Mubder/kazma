@@ -34,8 +34,9 @@ def _store_and_tenants() -> tuple[Any, list[str]]:
     operation, as the X background workers read them. The supervisor runs
     with no request tenant, and in production ``x_tenant_id()`` refuses that
     (live 2026-10-25: every pass failed "X requires an authenticated tenant
-    context"). Run supervision refuses installs with platform users (D1), so
-    every tenant here is the one operator's.
+    context"). Each run carries its tenant, its space (S1-21): the registry
+    keeps a surface to its own, and the supervisor keeps another space's
+    stuck post off the owner's channels.
     """
     from kazma_core.tenant_context import get_current_tenant_id
     from kazma_core.x_api.publication_store import get_publication_store
@@ -71,10 +72,10 @@ class _XAdapter:
                     ongoing = state in ("sending", "awaiting_approval", "outcome_unknown")
                     if not ongoing and float(row["updated_at"] or 0.0) < now - window_s:
                         continue
-                    runs.append(self._run(row, now))
+                    runs.append(self._run(row, now, tenant))
         return runs
 
-    def _run(self, row: dict[str, Any], now: float) -> Run:
+    def _run(self, row: dict[str, Any], now: float, tenant: str = "") -> Run:
         native = str(row["state"])
         state = RunState(self.STATE_MAP.get(native, RunState.UNKNOWN))
         owner = None
@@ -95,6 +96,9 @@ class _XAdapter:
             effects=effects, version=str(row["version"]), actions=actions, link="/x",
             detail=short_title(row.get("reason") or row.get("outcome") or "", 200)
             if state in (RunState.FAILED, RunState.UNKNOWN, RunState.WAITING_HUMAN) else "",
+            # The X account is its space's (S1-17 part b); an operation names
+            # no person, so an owner of the space acts on it (S1-21).
+            space=str(tenant or ""),
         )
 
     async def act(self, native_id: str, action: str, *, actor: str) -> ActionResult:

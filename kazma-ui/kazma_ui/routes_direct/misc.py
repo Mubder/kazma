@@ -80,6 +80,19 @@ def _current_tenant() -> str:
         return "default"
 
 
+def _sampling_shown_here() -> bool:
+    """Whether the MCP servers' sampling requests are shown to this request:
+    always while Spaces is not enforced; once it is, where Development is
+    (``spaces.tools.host_allowance``). Blocking (the identity store)."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if not spaces_enforced():
+        return True
+    from kazma_core.spaces.tools import host_allowance
+
+    return host_allowance().development
+
+
 def _is_own_bridge_gate(item: dict) -> bool:
     """True for a bus-bridge gate belonging to this request's tenant.
 
@@ -1196,6 +1209,11 @@ def register_misc_routes(self: Any) -> None:
 
             sampling = list_sampling_pending()
         except Exception:
+            sampling = []
+        if sampling and not await asyncio.to_thread(_sampling_shown_here):
+            # An MCP server's sampling request is the machine's (the admin's
+            # MCP servers, Development): once Spaces is enforced it is shown
+            # where Development is, never in another space (S1-21).
             sampling = []
         if graph is None or checkpointer is None:
             return _JSONResponse(
