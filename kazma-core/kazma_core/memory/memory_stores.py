@@ -167,6 +167,11 @@ MEMORY_TABLES: tuple[MemoryStore, ...] = (
         export="about_me", bound="one row per tenant, 2,000 characters",
     ),
     MemoryStore(
+        "memory_member_profile", "state", "no_turn_text", "user_text",
+        forget="nothing to forget: a member's own 'About me' in a shared space, which they edit",
+        export="about_me", bound="one row per member per shared space, 2,000 characters",
+    ),
+    MemoryStore(
         "memory_summaries", "state", "forget", "derived_text",
         forget="topic_summaries.on_turns_forgotten: emptied, written again without the turn",
         export="weekly_summaries", retention="kept; a forgotten summary stays a tombstone",

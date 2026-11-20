@@ -383,6 +383,8 @@ EPISODE_INSERTS = {
         "the golden eval's private database",
     ("kazma-core/kazma_core/memory/benchmark.py", "_seed"):
         "the benchmark's private database",
+    ("kazma-core/kazma_core/memory/benchmark.py", "_seed_speakers"):
+        "the speakers benchmark's private database (Spaces S1-11)",
 }
 #: The writers of live memory: each asks the ledger.
 _LEDGER_CHECKS = {"refuses_write", "_forgotten"}

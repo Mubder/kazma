@@ -41,6 +41,8 @@ THRESHOLDS = REPO / "tests" / "fixtures" / "memory_bench" / "thresholds.json"
 EXTRACTION = DATASET.with_name("extraction.json")
 WRITES = DATASET.with_name("writes.json")
 LLM_REPLIES = REPO / "tests" / "fixtures" / "memory_bench" / "extraction_llm.json"
+#: The speakers case set's vectors (Spaces S1-11; recorded by the R3 study).
+SPEAKER_VECTORS = REPO / "tests" / "fixtures" / "memory_bench" / "speakers_vectors.npz"
 
 SEED = 20260926
 
@@ -1373,7 +1375,13 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | N
     recall_new = old.get("dataset_version") != version
     extraction_new = (old.get("extraction") or {}).get("version") != extraction_version
     writes_new = (old.get("writes") or {}).get("version") != writes_version
-    if rebaseline and not (recall_new or extraction_new or writes_new):
+    from kazma_core.memory.benchmark import load_speakers
+
+    speakers_new = (old.get("speakers") or {}).get("version") != load_speakers()["version"]
+    if speakers_new and not rebaseline:
+        print("the ratchet does not measure this speakers case set: lock --rebaseline", file=sys.stderr)
+        return 1
+    if rebaseline and not (recall_new or extraction_new or writes_new or speakers_new):
         print(f"the ratchet already measures recall dataset v{version}, extraction dataset "
               f"v{extraction_version} and write scenarios v{writes_version}: nothing to rebaseline",
               file=sys.stderr)
@@ -1425,6 +1433,8 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | N
                                                 new_recording=new_recording)
         writes, more = _writes_lock(old.get("writes") or {}, fresh=writes_new, new_recording=new_recording)
         problems += more
+        speakers, more = _speakers_lock(old.get("speakers") or {}, fresh=speakers_new)
+        problems += more
     except (StaleRecordingError, KeyError) as exc:
         problems = [str(exc)]
     if problems:
@@ -1434,7 +1444,7 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | N
         return 1
     THRESHOLDS.write_text(
         json.dumps({"dataset_version": version, "scores": scores, "targets": TARGETS,
-                    "trades": trades, "extraction": extraction, "writes": writes,
+                    "trades": trades, "extraction": extraction, "writes": writes, "speakers": speakers,
                     # The opt-in Postgres-primary run's floors
                     # (tests/test_memory_benchmark_pg.py), on the same dataset only.
                     "postgres_primary": {} if recall_new else old.get("postgres_primary", {})},
@@ -1445,7 +1455,7 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | N
     # write-scenario parts (it said "0 raised" over a write scenario that
     # began to pass).
     moved = [(k, old_scores.get(k), v) for k, v in sorted(scores.items()) if v > old_scores.get(k, -1.0)]
-    for part, new in (("extraction", extraction), ("writes", writes)):
+    for part, new in (("extraction", extraction), ("writes", writes), ("speakers", speakers)):
         was = (old.get(part) or {}).get("scores") or {}
         moved += [(f"{part} {k}", was.get(k), v) for k, v in sorted(new.get("scores", {}).items())
                   if v != was.get(k)]
@@ -1521,6 +1531,26 @@ def _extraction_lock(
                          "scores": {k: v for k, v in sorted(was.items()) if k.startswith("llm.")}},
         })
     return {"version": report["version"], "recording": identity, "scores": now, "recordings": history}, problems
+
+
+def _speakers_lock(old: dict[str, Any], *, fresh: bool = False) -> tuple[dict[str, Any], list[str]]:
+    """The speakers case set's part of the lock (Spaces S1-11), and why it is
+    refused: a ratchet on the same case set (no score falls; no line shown
+    as the asker's that is another member's), reset only by ``--rebaseline``
+    when the case set's version changes."""
+    from kazma_core.memory.benchmark import SpeakerReplay, load_speakers, run_speaker_benchmark, speaker_scores
+
+    replay = SpeakerReplay(VECTORS, SPEAKER_VECTORS)
+    a, b = _patched(replay, replay.model)
+    with a, b:
+        now = speaker_scores(run_speaker_benchmark())
+    was = {} if fresh else (old.get("scores") or {})
+    problems = [f"speakers {k}: {now.get(k)} < {v}" for k, v in sorted(was.items())
+                if k != "overall.misattributed" and now.get(k, -1.0) < v]
+    if now.get("overall.misattributed", 0.0) > was.get("overall.misattributed", now.get("overall.misattributed")):
+        problems.append(f"speakers: {now['overall.misattributed']} line(s) now show another member's fact as "
+                        "the asker's")
+    return {"version": load_speakers()["version"], "scores": now}, problems
 
 
 def _writes_lock(

@@ -29,6 +29,7 @@ from datetime import UTC, datetime
 from typing import Any, Callable
 
 from kazma_core.memory.episode_text import embed_text
+from kazma_core.memory.speakers import fact_vector_text
 
 logger = logging.getLogger(__name__)
 
@@ -285,7 +286,7 @@ def rebuild_embeddings(
         for i, row in enumerate(rows, 1):
             # A forgotten fact has no value left to embed (object = '').
             if row["object"]:
-                text = f"{row['subject']} {row['predicate']} {row['object']}"
+                text = fact_vector_text(row["subject"], row["predicate"], row["object"])
                 outcome = _reencode_row(
                     conn, emb, "beliefs", str(row["id"]), text,
                     still_params=(row["subject"], row["predicate"], row["object"]),
@@ -463,7 +464,7 @@ def repair_unsearchable_vectors(
                         text = embed_text(a, b, c)
                         meta = {"kind": "episode", "tier": tier or "episodic", "session_id": session_id}
                     else:
-                        text = f"{a} {b} {c}".strip()
+                        text = fact_vector_text(a, b, c)
                         meta = {"kind": "belief", "tier": "semantic"}
                     outcome = _reencode_row(
                         conn, emb, kind, str(rid), text, still_params=(a, b, c),

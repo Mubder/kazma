@@ -54,6 +54,54 @@ def _chat_of_call() -> tuple[str, int]:
     return thread, user_turn_index(get_current_session_messages() or [])
 
 
+#: A memory tool's answer in a shared space whose speaker is not known.
+_NO_SPEAKER = (
+    "Error: in this shared space Kazma cannot tell who is speaking, so nothing was "
+    "stored (a fact is never filed under a guessed member)."
+)
+
+
+def _speakers_here(tenant: str) -> tuple[Any, str | None]:
+    """The space's people and the asker (Spaces S1-11, ``memory/speakers.py``)."""
+    from kazma_core.memory.speakers import room
+    from kazma_core.spaces.scope import bound_asker
+
+    return room(tenant), bound_asker()
+
+
+def _fact_said_by(belief_id: str, tenant: str | None) -> str | None:
+    """Who stated a fact, in a shared space (its ``said_by``)."""
+    from kazma_core.paths import primary_memory_db
+
+    conn = sqlite3.connect(primary_memory_db())
+    try:
+        row = conn.execute(
+            "SELECT json_extract(metadata_json, '$.said_by') FROM beliefs WHERE id = ? AND tenant_id = ?",
+            (belief_id, tenant or "default"),
+        ).fetchone()
+        return str(row[0]) if row and row[0] else None
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
+
+
+def _filed_for(people: Any, asker: str | None, subject: str, obj: str) -> tuple[str, str] | None:
+    """Where a tool's fact goes: ``user`` is the asker's own entry in a
+    shared space, a member's name is theirs. None: not stored -- the asker
+    is not known there, or the model named a member's entry itself (only
+    Kazma writes one)."""
+    from kazma_core.memory.speakers import is_member_entry
+
+    if is_member_entry(subject) or is_member_entry(obj):
+        return None
+    sub = people.filed(subject, asker)
+    object_ = people.filed(obj, asker) if obj == "user" else obj
+    if not sub or not object_:
+        return None
+    return sub, object_
+
+
 def _agent_write(*texts: str, value: str | None = None) -> tuple[str | None, str]:
     """``(refusal, extraction method)`` for a memory tool's write (Memory
     audit M03, ``memory.provenance``).
@@ -307,10 +355,27 @@ def register_memory_tools(registry: Any) -> None:
             # 2026-10-19 the model passed two; "not found" from the facts
             # table was recorded as an unknown effect and failed the turn.
             return _forget_memory(bid, tenant or "default")
+        from kazma_core.memory.forget import notes_for_forgotten_facts
+        from kazma_core.memory.speakers import may_forget_turn
+        from kazma_core.spaces.scope import bound_asker
+
         try:
+            asker = bound_asker()
+            if forget_source_turn and not may_forget_turn(tenant, asker, _fact_said_by(bid, tenant)):
+                # The source turn is another member's: theirs and the space
+                # owner's to forget (Spaces S1-11, N32). Nothing was changed.
+                raise RefusedBeforeEffect(
+                    "Error: that fact's turn is another member's; only its author or the space's "
+                    "owner can forget it. Forget the fact alone (forget_source_turn=false).")
+            notes = notes_for_forgotten_facts([bid], tenant_id=tenant or "default", asker=asker)
             # The turn's tenant, like the list tools above: an id from another
             # tenant reads as not found.
             result = invalidate_belief(bid, remove_graph=True, tenant_id=tenant)
+            if notes:
+                # N33: the other member's message stays and holds the words.
+                result["note"] = (
+                    f"Forgotten. {notes[0]['author']}'s message still holds these words and can "
+                    "still be recalled; they or the space's owner can forget it.")
             if not result.get("ok") and result.get("error") == "not found":
                 raise RefusedBeforeEffect(
                     f"Error: fact {bid} not found. Fact ids (b_...) come from memory_list_beliefs; "
@@ -540,6 +605,14 @@ def register_memory_tools(registry: Any) -> None:
         refusal, method = _agent_write(sub, pred, object_, value=object_)
         if refusal:
             raise RefusedBeforeEffect(refusal)
+        # Whose fact this is (Spaces S1-11): in a shared space "user" is the
+        # asker's own entry and a member's name is theirs.
+        people, asker = _speakers_here(get_current_tenant_id())
+        filed = _filed_for(people, asker, sub, object_)
+        if filed is None:
+            raise RefusedBeforeEffect(_NO_SPEAKER)
+        sub, object_ = filed
+        method = people.label(method, sub, asker)
         try:
             primary = sqlite3.connect(
                 primary_memory_db(), check_same_thread=False
@@ -551,8 +624,11 @@ def register_memory_tools(registry: Any) -> None:
             )
             ensure_ops_schema(ops)
             tenant = get_current_tenant_id()
+            from kazma_core.memory.speakers import account_of_entry
+
             for eid, etype in ((sub, "concept"), (object_, "concept")):
-                if eid.lower() == "user":
+                member = account_of_entry(eid)
+                if eid.lower() == "user" or member:
                     etype = "person"
                 row = primary.execute(
                     "SELECT id FROM entities WHERE id=? AND tenant_id=?", (eid, tenant)
@@ -562,7 +638,8 @@ def register_memory_tools(registry: Any) -> None:
                         """INSERT OR IGNORE INTO entities
                            (id, tenant_id, type, name, aliases_json, is_high_stakes, metadata_json)
                            VALUES (?, ?, ?, ?, '[]', 0, '{}')""",
-                        (eid, tenant, etype, eid.replace("_", " ")),
+                        (eid, tenant, etype,
+                         people.display_name(member) if member else eid.replace("_", " ")),
                     )
             primary.commit()
             result = mutate_belief(
@@ -579,6 +656,7 @@ def register_memory_tools(registry: Any) -> None:
                 source_session=thread or None,
                 source_turn=turn or None,
                 replaces_users_fact=False,
+                said_by=people.said_by(asker),
             )
             asked = result.get("blocked") == "lower_trust_source" and _put_to_the_user(
                 primary, result, value=object_, tenant=tenant, thread=thread, turn=turn)
@@ -768,6 +846,14 @@ def register_memory_tools(registry: Any) -> None:
             refusal, method = _agent_write(text)
             if refusal:
                 return refusal
+            # Whose note this is (Spaces S1-11): in a shared space it is
+            # filed under the asker's own entry, and names them.
+            people, asker = _speakers_here(_tenant)
+            if people.entry_for(asker) is None:
+                return _NO_SPEAKER
+            note_meta = {"chat": thread, "chat_turn": turn} if thread else {}
+            if people.said_by(asker):
+                note_meta["said_by"] = asker
             # Episode (raw text snapshot) — always keep diary trail
             eid = mirror_episode(
                 session_id=str(meta.get("session_id", "memory_store")),
@@ -775,7 +861,7 @@ def register_memory_tools(registry: Any) -> None:
                 user_text=text,
                 source="memory_store_tool",
                 tenant_id=_tenant,
-                metadata={"chat": thread, "chat_turn": turn} if thread else None,
+                metadata=note_meta or None,
             )
             current = parse_current_facts(text, meta)
             actions: list[dict] = []
@@ -784,6 +870,10 @@ def register_memory_tools(registry: Any) -> None:
 
                 for fact in current:
                     subject, predicate = users_names(fact.get("subject") or "user", fact["predicate"])
+                    filed = _filed_for(people, asker, subject, str(fact["object"]))
+                    if filed is None:
+                        continue
+                    subject = filed[0]
                     actions.append(
                         mutate_belief(
                             primary,
@@ -794,12 +884,13 @@ def register_memory_tools(registry: Any) -> None:
                             predicate_type=fact.get("predicate_type") or "functional",
                             confidence=float(fact.get("confidence") or 1.0),
                             importance=int(fact.get("importance") or 5),
-                            extraction_method=method,
+                            extraction_method=people.label(method, subject, asker),
                             tenant_id=_tenant,
                             source_session=thread or None,
                             source_turn=turn or None,
                             cfg=None,
                             replaces_users_fact=False,
+                            said_by=people.said_by(asker),
                         )
                     )
                     if actions[-1].get("blocked") == "lower_trust_source" and _put_to_the_user(
@@ -811,7 +902,7 @@ def register_memory_tools(registry: Any) -> None:
                 actions.append(
                     mutate_belief(
                         primary,
-                        "user",
+                        people.entry_for(asker) or "user",
                         "noted",
                         text[:1000],
                         ops_conn=ops,
@@ -823,6 +914,7 @@ def register_memory_tools(registry: Any) -> None:
                         source_session=thread or None,
                         source_turn=turn or None,
                         cfg=None,
+                        said_by=people.said_by(asker),
                     )
                 )
             bids = [a.get("belief_id", "") for a in actions if a.get("belief_id")]
@@ -866,7 +958,11 @@ def register_memory_tools(registry: Any) -> None:
             from kazma_core.memory.recall import recall as v2_recall
             from kazma_core.safety.hitl import get_current_tenant_id
 
-            result = v2_recall(query, limit=limit, tenant_id=get_current_tenant_id())
+            from kazma_core.spaces.scope import bound_asker
+
+            # The asker reads a shared space as theirs (Spaces S1-11).
+            result = v2_recall(query, limit=limit, tenant_id=get_current_tenant_id(),
+                               asker=bound_asker())
             if result.failed:
                 # Recall catches its own failures and says so in `degraded`
                 # (AUD-026): no search ran, so neither "nothing found" nor

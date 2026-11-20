@@ -218,6 +218,9 @@ REQUESTS: dict[tuple[str, str], list[tuple[str, Any]]] = {
     ("PUT", "/api/memory/v2/profile"): [
         ("/api/memory/v2/profile", {"about": "Alice's own words, rewritten"}),
     ],
+    # Spaces S1-11 (N31): copies the caller's own personal-space text into a
+    # shared space; in a personal space it refuses (not_shared), touching none.
+    ("POST", "/api/memory/v2/profile/copy-personal"): [("/api/memory/v2/profile/copy-personal", {})],
     # The audit's F1: what changed in the user's facts (memory/changes.py).
     ("GET", "/api/memory/v2/changes"): [
         ("/api/memory/v2/changes", None),
@@ -392,6 +395,16 @@ def _seed(root: Path) -> None:
     c.executemany(
         "INSERT INTO memory_profile (tenant_id, about, updated_at) VALUES (?, ?, ?)",
         [("alpha", "Alice's own words", now), ("beta", "BETA9 Bob's own words", now)],
+    )
+    # ... and each member's own in a tenant that is a shared space (Spaces
+    # S1-11, N31: the matrix's spaces are), where About me is per member.
+    from kazma_core.spaces import identity
+
+    words = {"alpha": "Alice's own words", "beta": "BETA9 Bob's own words"}
+    c.executemany(
+        "INSERT INTO memory_member_profile (tenant_id, account, about, updated_at) VALUES (?, ?, ?, ?)",
+        [(m["space"], m["account"], words[m["space"]], now)
+         for m in identity.read_registry()["memberships"] if m.get("space") in words],
     )
     # changes to the user's facts (the audit's F1): a correction waiting for
     # each tenant, and an update beta could undo (its old fact, beta9_old)

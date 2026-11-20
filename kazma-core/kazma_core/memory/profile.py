@@ -12,6 +12,12 @@ every turn, never inferred.
 One row per tenant in the memory database (backed up, migrated and exported
 with memory). Empty text deletes the row. The supervisor places it right
 after the system prompt and personality (``graph_helpers._ensure_about_user``).
+
+**A shared space** (Spaces S1-11, decision N31) holds one text per member
+(``memory_member_profile``): each member's own, shown only in that member's
+turns and edited only by them. :func:`copy_from_personal` copies a member's
+personal-space text in once; the two are independent after that. A personal
+space keeps its one row, as before.
 """
 
 from __future__ import annotations
@@ -22,7 +28,8 @@ import threading
 import time
 from typing import Any
 
-__all__ = ["ABOUT_MAX_CHARS", "ABOUT_MARKER", "about_block", "about_for_turn", "get_about", "set_about"]
+__all__ = ["ABOUT_MAX_CHARS", "ABOUT_MARKER", "about_block", "about_for_turn", "copy_from_personal",
+           "get_about", "set_about"]
 
 logger = logging.getLogger(__name__)
 
@@ -55,21 +62,40 @@ def _open() -> sqlite3.Connection:
     return conn
 
 
-def get_about(tenant_id: str, *, conn: sqlite3.Connection | None = None) -> dict[str, Any]:
-    """``{"about": text, "updated_at": epoch or None}`` for the tenant."""
+def _shared(tenant_id: str) -> bool:
+    from kazma_core.memory.speakers import room
+
+    return room(tenant_id).shared
+
+
+def get_about(tenant_id: str, *, conn: sqlite3.Connection | None = None,
+              account: str | None = None) -> dict[str, Any]:
+    """``{"about": text, "updated_at": epoch or None}`` for the tenant: in a
+    shared space *account*'s own text (none for no account), else the
+    tenant's."""
+    tenant = tenant_id or "default"
+    shared = _shared(tenant)
+    if shared and not account:
+        return {"about": "", "updated_at": None}
     own = conn is None
     conn = conn or _open()
     try:
-        row = conn.execute(
-            "SELECT about, updated_at FROM memory_profile WHERE tenant_id = ?", (tenant_id or "default",)
-        ).fetchone()
+        if shared:
+            row = conn.execute(
+                "SELECT about, updated_at FROM memory_member_profile WHERE tenant_id = ? AND account = ?",
+                (tenant, account),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT about, updated_at FROM memory_profile WHERE tenant_id = ?", (tenant,)
+            ).fetchone()
         return {"about": str(row[0]) if row else "", "updated_at": float(row[1]) if row else None}
     finally:
         if own:
             conn.close()
 
 
-def about_for_turn(tenant_id: str) -> dict[str, Any]:
+def about_for_turn(tenant_id: str, asker: str | None = None) -> dict[str, Any]:
     """What a turn of *tenant_id* is shown (Memory audit M07).
 
     Its own text. With tenants not enforced, a turn of a per-platform or
@@ -80,24 +106,31 @@ def about_for_turn(tenant_id: str) -> dict[str, Any]:
     from kazma_core.memory.config import memory_tenant_enforced
 
     tid = tenant_id or "default"
+    if _shared(tid):
+        # Only the asker's own text, in their own turns (N31).
+        return get_about(tid, account=asker)
     out = get_about(tid)
     if not out["about"] and tid != "default" and not memory_tenant_enforced():
         return get_about("default")
     return out
 
 
-def set_about(tenant_id: str, text: str, *, conn: sqlite3.Connection | None = None) -> dict[str, Any]:
-    """Save the tenant's text (trimmed; empty removes it). Longer than
-    :data:`ABOUT_MAX_CHARS` is refused, never cut: the user wrote all of it."""
+def set_about(tenant_id: str, text: str, *, conn: sqlite3.Connection | None = None,
+              account: str | None = None) -> dict[str, Any]:
+    """Save the tenant's text (trimmed; empty removes it); in a shared space
+    *account*'s own. Longer than :data:`ABOUT_MAX_CHARS` is refused, never
+    cut: the user wrote all of it."""
     about = str(text or "").strip()
     if len(about) > ABOUT_MAX_CHARS:
         # A code the page words in its own language (Memory audit M32).
         return {"ok": False, "error": "about_too_long", "code": "about_too_long",
                 "length": len(about), "max": ABOUT_MAX_CHARS}
+    tenant = tenant_id or "default"
+    if _shared(tenant):
+        return _set_member_about(tenant, account, about, conn=conn)
     own = conn is None
     conn = conn or _open()
     try:
-        tenant = tenant_id or "default"
         if about:
             now = time.time()
             conn.execute(
@@ -112,6 +145,52 @@ def set_about(tenant_id: str, text: str, *, conn: sqlite3.Connection | None = No
     finally:
         if own:
             conn.close()
+
+
+def _set_member_about(tenant: str, account: str | None, about: str, *,
+                      conn: sqlite3.Connection | None) -> dict[str, Any]:
+    if not account:
+        # Nobody's text is written for no one.
+        return {"ok": False, "error": "no_account", "code": "no_account"}
+    own = conn is None
+    conn = conn or _open()
+    try:
+        if about:
+            conn.execute(
+                "INSERT INTO memory_member_profile (tenant_id, account, about, updated_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(tenant_id, account) DO UPDATE SET about = excluded.about, "
+                "updated_at = excluded.updated_at",
+                (tenant, account, about, time.time()),
+            )
+        else:
+            conn.execute("DELETE FROM memory_member_profile WHERE tenant_id = ? AND account = ?",
+                         (tenant, account))
+        conn.commit()
+        return {"ok": True, "about": about}
+    finally:
+        if own:
+            conn.close()
+
+
+def copy_from_personal(tenant_id: str, account: str | None) -> dict[str, Any]:
+    """Copy *account*'s personal-space About me into their own text in the
+    shared space *tenant_id*, once (N31): the two are independent after that.
+    Refused with a code: ``not_shared`` (a personal space has one text),
+    ``no_account``, ``no_personal_space``, ``nothing_to_copy``."""
+    tenant = tenant_id or "default"
+    if not _shared(tenant):
+        return {"ok": False, "error": "not_shared", "code": "not_shared"}
+    if not account:
+        return {"ok": False, "error": "no_account", "code": "no_account"}
+    from kazma_core.spaces import identity
+
+    personal = next((s["id"] for s in identity.spaces_of(account) if s.get("personal_of") == account), None)
+    if not personal:
+        return {"ok": False, "error": "no_personal_space", "code": "no_personal_space"}
+    text = get_about(personal)["about"]
+    if not text:
+        return {"ok": False, "error": "nothing_to_copy", "code": "nothing_to_copy"}
+    return _set_member_about(tenant, account, text, conn=None)
 
 
 def about_block(text: str) -> str:

@@ -204,9 +204,34 @@
                 const r = await window.kazmaSave('/api/memory/v2/profile');
                 this.aboutMe = this.aboutMeSaved = (r && r.about) || '';
                 if (r && r.max_chars) this.aboutMeMax = r.max_chars;
+                this.aboutMeShared = !!(r && r.shared);
                 this.aboutMeError = '';
             } catch (e) {
                 this.aboutMeError = (e && e.message) || 'Could not load About me';
+            }
+        },
+
+        async copyAboutMeFromPersonal() {
+            // Once: the two texts are independent after that (N31).
+            this.aboutMeSaving = true;
+            this.aboutMeError = '';
+            try {
+                const r = await window.kazmaSave('/api/memory/v2/profile/copy-personal', { method: 'POST' });
+                if (!r || !r.ok) {
+                    const code = r && r.code;
+                    throw new Error(code === 'nothing_to_copy'
+                        ? _k('settings.about_me_nothing_to_copy', "Your personal space's About me is empty.")
+                        : _k('settings.agentjs.save_failed_2', 'Save failed'));
+                }
+                this.aboutMe = this.aboutMeSaved = r.about || '';
+                showToast(_k('settings.about_me_copied', 'Copied from your personal space.'), 'success');
+            } catch (e) {
+                const body = e && e.body;
+                this.aboutMeError = body && body.code === 'nothing_to_copy'
+                    ? _k('settings.about_me_nothing_to_copy', "Your personal space's About me is empty.")
+                    : ((e && e.message) || _k('settings.agentjs.save_failed_2', 'Save failed'));
+            } finally {
+                this.aboutMeSaving = false;
             }
         },
 

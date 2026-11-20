@@ -1233,6 +1233,100 @@ def forget_mentions(text: str, *, tenant_id: str) -> dict[str, Any]:
     }
 
 
+def forget_entry(entry_id: str, *, tenant_id: str, conn: sqlite3.Connection | None = None,
+                 journal: bool = True) -> dict[str, Any]:
+    """Forget every fact filed under a member's entry in a shared space, then
+    the entry itself (Spaces S1-11, decision N36): what the member said about
+    themself and what others said about them. Their turns stay -- the
+    conversation's history -- and so do facts about shared things, which are
+    not under their entry. The leave and remove flow of a shared space
+    (S2-12) and deleting an account (S1-25) call it.
+
+    Journaled first (kind ``entry``), so a restore of an older backup forgets
+    them again; each fact goes as a forgotten turn's facts go (no value, no
+    vector, no edit history; the change log's rows too); after the commit the
+    mirror and the remote vectors follow, and the graph copy through its
+    outbox. Idempotent."""
+    from kazma_core.memory import forget_journal
+    from kazma_core.memory.speakers import account_of_entry
+
+    if account_of_entry(entry_id) is None:
+        return {"ok": False, "error": "not_an_entry"}
+    owner = tenant_id or "default"
+    seq = forget_journal.append("entry", tenant_id=owner, session_key=entry_id) if journal else None
+    own = conn is None
+    conn = conn or _open()
+    try:
+        now = time.time()
+        rows = conn.execute(
+            "SELECT id, tenant_id, metadata_json, invalidated_at, valid_until FROM beliefs "
+            "WHERE tenant_id = ? AND subject = ?",
+            (owner, entry_id),
+        ).fetchall()
+        changed = _forget_fact_rows(conn, rows, now=now)
+        archived = conn.execute(
+            "UPDATE beliefs_archive SET original_belief_json = '{}' WHERE tenant_id = ? "
+            "AND json_extract(original_belief_json, '$.subject') = ?",
+            (owner, entry_id),
+        ).rowcount if _table_columns(conn, "beliefs_archive") >= {"tenant_id", "original_belief_json"} else 0
+        # The entry itself: no fact is filed under it now. A member who comes
+        # back starts from nothing.
+        conn.execute("DELETE FROM entities WHERE tenant_id = ? AND id = ?", (owner, entry_id))
+        if seq is not None:
+            forget_journal.mark_applied(conn, seq)
+        conn.commit()
+        _remirror_facts(conn, changed)
+        remote = [_delete_remote_vector(conn, bid, owner) for bid in [str(r["id"]) for r in rows]]
+        logger.info("[forget] entry %s of %s: %d fact(s) forgotten", entry_id, owner, len(rows))
+        return {"ok": True, "facts": [str(r["id"]) for r in rows], "archived": int(archived or 0),
+                "remote_pending": not all(remote)}
+    finally:
+        if own:
+            conn.close()
+
+
+def notes_for_forgotten_facts(belief_ids: list[str], *, tenant_id: str,
+                              asker: str | None) -> list[dict[str, Any]]:
+    """Call BEFORE forgetting facts in a shared space (Spaces S1-11, N33).
+
+    For each fact about *asker* that another member stated: the source turn
+    is marked so the deep pass never files that fact from it again
+    (``metadata.not_again``), and the note Forget says is returned -- the
+    other member's message stays, still holds the words and can still be
+    recalled; its author or the space's owner can forget it
+    (``speakers.forget_note``). Nothing in a personal space."""
+    from kazma_core.memory.speakers import forget_note, room
+
+    if not belief_ids or not room(tenant_id).shared:
+        return []
+    notes: list[dict[str, Any]] = []
+    conn = _open()
+    try:
+        marks = ",".join("?" for _ in belief_ids)
+        rows = conn.execute(
+            f"SELECT id, subject, predicate, object, source_session, source_turn, "
+            f"json_extract(metadata_json, '$.said_by') AS said_by FROM beliefs "
+            f"WHERE tenant_id = ? AND id IN ({marks})",
+            (tenant_id, *belief_ids),
+        ).fetchall()
+        for row in rows:
+            note = forget_note(tenant_id, asker, row["subject"], row["said_by"])
+            if note is None:
+                continue
+            notes.append({**note, "belief_id": str(row["id"])})
+            if row["source_session"]:
+                triple = [str(row["subject"]), str(row["predicate"]), str(row["object"]).casefold()]
+                conn.execute(
+                    "UPDATE episodes SET metadata_json = json_insert(COALESCE(metadata_json, '{}'), "
+                    "'$.not_again[#]', json(?)) WHERE tenant_id = ? AND session_id = ? AND turn_number = ?",
+                    (json.dumps(triple), tenant_id, row["source_session"], int(row["source_turn"] or 0)),
+                )
+        conn.commit()
+    finally:
+        conn.close()
+    return notes
+
+
 def _distinctive_value(value: str) -> str:
     """*value* when it names one thing -- one token of 6+ characters holding a
     digit, ``-`` or ``_`` (a codeword, an account or order number, a phone

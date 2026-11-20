@@ -1685,6 +1685,11 @@
                     :disabled="aboutMeSaving || (aboutMe || '') === (aboutMeSaved || '')">
                 {{ t('settings.about_me_save') }}
             </button>
+            {# A shared space: each member's own text; copy theirs in once (Spaces S1-11, N31). #}
+            <button class="btn btn-secondary" id="about-me-copy-personal" x-show="aboutMeShared" x-cloak
+                    @click="copyAboutMeFromPersonal()" :disabled="aboutMeSaving">
+                {{ t('settings.about_me_copy_personal') }}
+            </button>
         </div>
 
         <!-- The retired memory mode: shown only on an install that still

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import json
 import logging
 import os
 import sqlite3
@@ -326,7 +327,8 @@ def _micro_consolidation_prepare(episode_id: str) -> dict[str, Any] | None:
         ensure_ops_schema(ops)
         row = primary.execute(
             "SELECT user_text, assistant_text, session_id, turn_number, tenant_id, created_at, "
-            "json_extract(metadata_json, '$.deep_pass.version') AS deep_pass "
+            "json_extract(metadata_json, '$.deep_pass.version') AS deep_pass, "
+            "json_extract(metadata_json, '$.said_by') AS said_by "
             "FROM episodes WHERE id=?",
             (episode_id,),
         ).fetchone()
@@ -359,7 +361,7 @@ def _micro_consolidation_prepare(episode_id: str) -> dict[str, Any] | None:
                     primary, ops,
                     row["user_text"] or "", row["assistant_text"] or "",
                     session_id=row["session_id"], turn=row["turn_number"],
-                    tenant_id=row["tenant_id"], now=row["created_at"],
+                    tenant_id=row["tenant_id"], now=row["created_at"], said_by=row["said_by"],
                 )
                 if sync_stats.get("applied", 0) > 0:
                     logger.debug(
@@ -409,11 +411,19 @@ def _apply_if_still_remembered(raw, primary, ops, *, stats, episode_id: str, now
     stated at the turn's time *now*."""
     from kazma_core.memory.belief_extractor import _apply_beliefs_to_v2
 
-    row = primary.execute("SELECT tier FROM episodes WHERE id = ?", (episode_id,)).fetchone()
+    row = primary.execute(
+        "SELECT tier, json_extract(metadata_json, '$.not_again') FROM episodes WHERE id = ?", (episode_id,)
+    ).fetchone()
     if row is None or row[0] == "forgotten":
         logger.info("[memory_worker] micro_consolidation of %s skipped: forgotten meanwhile", episode_id)
         return {**stats, "applied": 0, "skipped_forgotten": True}
-    return _apply_beliefs_to_v2(raw, primary, ops, stats=stats, now=now, **kw)
+    # Facts a member forgot about themself, which another member's turn
+    # stated: never filed from this turn again (Spaces S1-11, N33).
+    try:
+        not_again = {tuple(t) for t in json.loads(row[1] or "[]") if isinstance(t, list) and len(t) == 3}
+    except (TypeError, ValueError):
+        not_again = set()
+    return _apply_beliefs_to_v2(raw, primary, ops, stats=stats, now=now, not_again=not_again, **kw)
 
 
 async def _handle_micro_consolidation(payload: dict[str, Any]) -> bool:
@@ -463,6 +473,8 @@ async def _handle_micro_consolidation(payload: dict[str, Any]) -> bool:
                     _apply_if_still_remembered, raw, primary, ops, stats=stats, episode_id=str(episode_id),
                     session_id=row["session_id"], turn=row["turn_number"],
                     tenant_id=row["tenant_id"], now=row["created_at"], user_text=row["user_text"] or "",
+                    # The turn's author, kept on its episode (Spaces S1-11).
+                    said_by=row.get("said_by"),
                 )
             await asyncio.to_thread(_mark_deep_pass, primary, str(episode_id))
             logger.info(
@@ -665,7 +677,8 @@ _RECONSOLIDATION_CADENCE_KEY = "system.cadence.reconsolidation"
 
 #: The memory tables whose rows name a tenant that maintenance must visit:
 #: a tenant with facts, a summary or About me and no turn was never swept.
-_TENANT_TABLES = ("episodes", "beliefs", "entities", "memory_summaries", "memory_profile")
+_TENANT_TABLES = ("episodes", "beliefs", "entities", "memory_summaries", "memory_profile",
+                  "memory_member_profile")
 
 
 def memory_tenants() -> list[str]:

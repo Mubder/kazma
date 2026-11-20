@@ -65,6 +65,7 @@
     replaced_since: ['memory.err.replaced_since', 'This fact has changed again since; undo the newer change first'],
     forgotten: ['memory.err.forgotten', 'The earlier value was forgotten, so it cannot come back'],
     not_written: ['memory.err.not_written', 'The value could not be saved'],
+    not_yours: ['memory.err.not_yours', "This is another member's; only they or the space's owner can forget it"],
   };
   function _errText(key, fallback, d) {
     var code = d && (d.code || d.error);

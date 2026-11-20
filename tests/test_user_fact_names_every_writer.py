@@ -36,6 +36,9 @@ DECLARED = {
     ("kazma-core/kazma_core/memory/benchmark.py", "_seed"):
         "the retrieval benchmark's fixture: it seeds the dataset's facts as the dataset names "
         "them, and its ratchet is measured on those names",
+    ("kazma-core/kazma_core/memory/benchmark.py", "_seed_speakers"):
+        "the speakers benchmark's fixture (Spaces S1-11): the R3 study's facts as the study "
+        "named them, filed by speakers.Room as live facts are; its ratchet is measured on them",
     ("kazma-core/kazma_core/memory/eval_golden.py", "_seed_belief"):
         "the golden eval's fixture: a case's fact as the case names it, on a private database",
 }

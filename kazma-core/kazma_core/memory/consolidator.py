@@ -240,6 +240,8 @@ def remember_turn(values: dict[str, Any] | None, *, thread_id: str = "") -> bool
         session_id=session or None,
         turn=turn,
         tenant_id=str(post.get("tenant_id") or "default"),
+        # Who asked (Spaces S1-11): in a shared space "I" is that member.
+        said_by=str(post.get("said_by") or "") or None,
     )
     return True
 
@@ -250,6 +252,7 @@ def _schedule_post_turn_memory(
     session_id: str | None = None,
     turn: int | None = None,
     tenant_id: str = "default",
+    said_by: str | None = None,
 ) -> None:
     """Run the V2 post-turn memory pipeline in a dedicated thread.
 
@@ -294,7 +297,8 @@ def _schedule_post_turn_memory(
     def _run_v2_bounded() -> None:
         done = False
         try:
-            done = _run_turn_memory(messages, session_id=session_id, turn=turn, tenant_id=tenant_id, at=at)
+            done = _run_turn_memory(messages, session_id=session_id, turn=turn, tenant_id=tenant_id, at=at,
+                                    said_by=said_by)
         finally:
             _v2_extract_sem.release()
             if not done:
@@ -302,7 +306,7 @@ def _schedule_post_turn_memory(
                 # (Memory audit M12) -- it used to wait for turn reconcile, and
                 # the turn's facts were never extracted.
                 _defer_turn_memory(messages, session_id=session_id, turn=turn, tenant_id=tenant_id,
-                                   why="the memory write failed", at=at)
+                                   why="the memory write failed", at=at, said_by=said_by)
 
     # A full pool, or a thread that will not start, sends the turn to the
     # durable queue: the memory worker runs the same pipeline later, with
@@ -310,7 +314,7 @@ def _schedule_post_turn_memory(
     # extracted, and only turn reconcile brought the episode back (Stage 2, W2).
     if not _v2_extract_sem.acquire(blocking=False):
         _defer_turn_memory(messages, session_id=session_id, turn=turn, tenant_id=tenant_id,
-                           why="extraction pool full")
+                           why="extraction pool full", said_by=said_by)
         return
     try:
         t = threading.Thread(target=_run_v2_bounded, daemon=True, name="kazma-v2-extract")
@@ -320,7 +324,7 @@ def _schedule_post_turn_memory(
         logger.warning("[post_turn] could not start V2 thread: %s", exc, exc_info=True)
         _metric_fail("thread", exc)
         _defer_turn_memory(messages, session_id=session_id, turn=turn, tenant_id=tenant_id,
-                           why="no thread")
+                           why="no thread", said_by=said_by)
 
 
 def _defer_turn_memory(
@@ -331,6 +335,7 @@ def _defer_turn_memory(
     tenant_id: str,
     why: str,
     at: float | None = None,
+    said_by: str | None = None,
 ) -> None:
     """Hand one turn to the durable queue (``post_turn_memory``)."""
     from kazma_core.memory.limits import episode_text
@@ -350,6 +355,7 @@ def _defer_turn_memory(
             "turn": turn,
             "tenant_id": tenant_id,
             "at": time.time() if at is None else float(at),
+            "said_by": said_by,
         },
     )
     if task_id:
@@ -380,6 +386,9 @@ def run_deferred_turn_memory(payload: dict[str, Any]) -> bool:
         turn=int(turn) if turn is not None else None,
         tenant_id=str(payload.get("tenant_id") or "default"),
         at=float(at) if at is not None else None,
+        # Absent in a task queued before Spaces S1-11: no speaker, so in a
+        # shared space the turn is remembered and no first-person fact filed.
+        said_by=str(payload.get("said_by") or "") or None,
     )
 
 
@@ -390,6 +399,7 @@ def _run_turn_memory(
     turn: int | None,
     tenant_id: str = "default",
     at: float | None = None,
+    said_by: str | None = None,
 ) -> bool:
     """Synchronous V2 mirror + heuristic belief extraction for one turn.
 
@@ -434,14 +444,15 @@ def _run_turn_memory(
     written: str | None = None
     try:
         written = _mirror_turn_to_v2(messages, session_id=session_id, turn=turn, tenant_id=tenant_id,
-                                     created_at=at)
+                                     created_at=at, said_by=said_by)
     except Exception as exc:
         logger.warning("[post_turn] V2 mirror failed: %s", exc, exc_info=True)
         _metric_fail("mirror", exc)
         ok = False
     # ── Stage 1: sync heuristic extraction ───────────────────────
     try:
-        _v2_extract_sync(messages, session_id=session_id, turn=turn, tenant_id=tenant_id, now=at)
+        _v2_extract_sync(messages, session_id=session_id, turn=turn, tenant_id=tenant_id, now=at,
+                         said_by=said_by)
     except Exception as exc:
         logger.warning("[post_turn] V2 heuristic extraction failed: %s", exc, exc_info=True)
         _metric_fail("extract", exc)
@@ -536,6 +547,7 @@ def _mirror_turn_to_v2(
     turn: int | None,
     tenant_id: str = "default",
     created_at: float | None = None,
+    said_by: str | None = None,
 ) -> str | None:
     """Best-effort mirror of the just-finished turn into the V2 schema.
 
@@ -552,6 +564,8 @@ def _mirror_turn_to_v2(
     u = (user_text or "").strip()
     if not u or u.startswith("/"):
         return None
+    from kazma_core.memory.speakers import episode_metadata
+
     status, eid = write_episode(
         session_id=session_id or "unknown",
         turn_number=int(turn) if turn is not None else 0,
@@ -559,6 +573,7 @@ def _mirror_turn_to_v2(
         assistant_text=assistant_text,
         tenant_id=tenant_id,
         created_at=created_at,
+        metadata=episode_metadata(tenant_id, said_by),
     )
     if status == "failed":
         # Not remembered: the caller counts it and the queue retries the turn
@@ -574,6 +589,7 @@ def _v2_extract_sync(
     turn: int | None,
     tenant_id: str = "default",
     now: float | None = None,
+    said_by: str | None = None,
 ) -> None:
     """SYNC heuristic belief extraction (runs in the V2 thread).
 
@@ -643,6 +659,7 @@ def _v2_extract_sync(
             tenant_id=tenant_id,
             cfg=cfg,
             now=now,
+            said_by=said_by,
         )
         if stats.get("applied"):
             logger.info(

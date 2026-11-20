@@ -24,7 +24,7 @@ from kazma_core.agent.graph_helpers import (
     is_unusable_assistant_content,
     sanitize_tool_chains,
 )
-from kazma_core.spaces.scope import space_of_state
+from kazma_core.spaces.scope import bound_asker, space_of_state
 from kazma_core.agent.plan_fence import (
     AUTO_CONTINUE_PROMPT,
     PLAN_EXECUTE_CONTINUE,
@@ -460,7 +460,8 @@ async def supervisor_node(
     from kazma_core.memory.profile import about_block, about_for_turn
 
     try:
-        _about = await asyncio.to_thread(about_for_turn, space_of_state(state))
+        # The asker's own text in a shared space (Spaces S1-11, N31).
+        _about = await asyncio.to_thread(about_for_turn, space_of_state(state), bound_asker())
     except sqlite3.Error:
         logger.warning("[Supervisor] About me unreadable; this call goes without it", exc_info=True)
         _about = {"about": ""}
@@ -1246,6 +1247,9 @@ async def supervisor_node(
                     session_id=_recall_session_id,
                     tenant_id=space_of_state(state),
                     explain=_explain,
+                    # Who asks (Spaces S1-11): in a shared space their own
+                    # facts read as "user", every other member's by name.
+                    asker=bound_asker(),
                 )
                 if not result.empty:
                     mem_block = await asyncio.to_thread(format_recall_block, result, explain=_explain)

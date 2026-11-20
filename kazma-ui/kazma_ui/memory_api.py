@@ -1814,7 +1814,9 @@ async def invalidate_batch(request: Request) -> dict[str, Any]:
 
 def _invalidate_batch_sync(wanted: list[str]) -> dict[str, Any]:
     """Blocking half of :func:`invalidate_batch` -- runs off the event loop."""
+    from kazma_core.memory.forget import notes_for_forgotten_facts
     from kazma_core.memory.hygiene import invalidate_belief
+    from kazma_core.spaces.scope import bound_asker
 
     tid = _memory_tenant_id()
     conn = _conn()
@@ -1829,6 +1831,9 @@ def _invalidate_batch_sync(wanted: list[str]) -> dict[str, Any]:
     finally:
         conn.close()
 
+    # A fact about the asker that another member stated (Spaces S1-11, N33):
+    # what Forget says about the message that stays, before it goes.
+    notes = notes_for_forgotten_facts([b for b in wanted if b in owned], tenant_id=tid, asker=bound_asker())
     results = []
     invalidated_ids: list[str] = []
     for bid in wanted:
@@ -1882,6 +1887,8 @@ def _invalidate_batch_sync(wanted: list[str]) -> dict[str, Any]:
         "undo_token": undo_token,
         "receipt": {"beliefs_invalidated": len(invalidated_ids)},
         "warn_orphaned": warn_orphaned,
+        # Spaces S1-11, N33: worded by the page in its language.
+        "notes": notes,
     }
 
 
@@ -2461,9 +2468,25 @@ def forget_memory(episode_id: str) -> dict[str, Any]:
     A plain ``def``: FastAPI runs it in its threadpool (every step is I/O).
     """
     from kazma_core.memory.forget import forget_episode
+    from kazma_core.memory.speakers import NOT_YOURS, may_forget_turn
+    from kazma_core.spaces.scope import bound_asker
 
+    tid = _memory_tenant_id()
     try:
-        return forget_episode(episode_id, tenant_id=_memory_tenant_id())
+        # In a shared space a turn is its author's and the space owner's to
+        # forget (Spaces S1-11, N32). Everyone can always forget their own.
+        conn = _conn()
+        try:
+            row = conn.execute(
+                "SELECT json_extract(metadata_json, '$.said_by') FROM episodes WHERE id = ? "
+                "AND (? IS NULL OR tenant_id = ?)",
+                (episode_id, narrowed_to(tid), narrowed_to(tid)),
+            ).fetchone()
+        finally:
+            conn.close()
+        if row is not None and not may_forget_turn(tid, bound_asker(), row[0]):
+            return {"ok": False, "error": NOT_YOURS, "code": NOT_YOURS}
+        return forget_episode(episode_id, tenant_id=tid)
     except sqlite3.Error as exc:
         logger.exception("[memory_api] forget failed")
         return {"ok": False, "error": safe_error(exc)}
@@ -2506,10 +2529,16 @@ async def set_chat_memory(chat_id: str, request: Request) -> dict[str, Any]:
 def _set_chat_memory_sync(chat_id: str, payload: Any) -> dict[str, Any]:
     """Blocking half of :func:`set_chat_memory` -- runs off the event loop."""
     from kazma_core.memory.forget import forget_chat, set_chat_remembered
+    from kazma_core.memory.speakers import NOT_YOURS, may_keep_chat_out
+    from kazma_core.spaces.scope import bound_asker
 
     if payload is _INVALID_JSON or not isinstance(payload, dict) or "remember" not in payload:
         return {"ok": False, "error": "body must be {\"remember\": true|false}"}
     tid = _memory_tenant_id()
+    if not may_keep_chat_out(tid, bound_asker(), chat_id):
+        # A shared chat is kept out of memory by its opener or the space's
+        # owner (Spaces S1-11, N32).
+        return {"ok": False, "error": NOT_YOURS, "code": NOT_YOURS}
     out = set_chat_remembered(chat_id, bool(payload.get("remember")), tenant_id=tid)
     if out.get("ok") and payload.get("forget_past"):
         out["forgot"] = forget_chat(chat_id, tenant_id=tid)
@@ -2556,10 +2585,18 @@ def forget_weekly_summary(summary_id: str) -> dict[str, Any]:
 @router.get("/api/memory/v2/profile")
 def about_me() -> dict[str, Any]:
     """The caller's "About me" (plan C1): what they want Kazma to know about
-    them, shown to the model on every call."""
+    them, shown to the model on every call. In a shared space (Spaces S1-11,
+    N31) it is the caller's own text there, and ``shared`` and ``members``
+    say who else's memory this is (the notice of N35)."""
     from kazma_core.memory.profile import ABOUT_MAX_CHARS, get_about
+    from kazma_core.memory.speakers import room
+    from kazma_core.spaces.scope import bound_asker
 
-    return {"ok": True, **get_about(_memory_tenant_id()), "max_chars": ABOUT_MAX_CHARS}
+    tenant, asker = _memory_tenant_id(), bound_asker()
+    people = room(tenant)
+    return {"ok": True, **get_about(tenant, account=asker), "max_chars": ABOUT_MAX_CHARS,
+            "shared": people.shared,
+            "members": [m.name or m.account for m in people.others(asker)] if people.shared else []}
 
 
 @router.put("/api/memory/v2/profile")
@@ -2571,10 +2608,22 @@ async def set_about_me(request: Request) -> dict[str, Any]:
 def _set_about_me_sync(payload: Any) -> dict[str, Any]:
     """Blocking half of :func:`set_about_me` -- runs off the event loop."""
     from kazma_core.memory.profile import set_about
+    from kazma_core.spaces.scope import bound_asker
 
     if payload is _INVALID_JSON or not isinstance(payload, dict) or not isinstance(payload.get("about"), str):
         return {"ok": False, "error": "body must be {\"about\": \"...\"}"}
-    return set_about(_memory_tenant_id(), payload["about"])
+    return set_about(_memory_tenant_id(), payload["about"], account=bound_asker())
+
+
+@router.post("/api/memory/v2/profile/copy-personal")
+def copy_about_me_from_personal() -> dict[str, Any]:
+    """Copy the caller's personal-space About me into their own text in this
+    shared space, once (Spaces S1-11, N31). Refused with a code the page
+    words (``not_shared``, ``no_personal_space``, ``nothing_to_copy``)."""
+    from kazma_core.memory.profile import copy_from_personal
+    from kazma_core.spaces.scope import bound_asker
+
+    return copy_from_personal(_memory_tenant_id(), bound_asker())
 
 
 # ── What changed in the user's facts (the audit's F1, memory/changes.py) ──
@@ -2711,7 +2760,10 @@ def _exported_summary(row: dict[str, Any], conn: sqlite3.Connection) -> dict[str
 #: the ones ``memory_stores`` names: a table there names its section or says
 #: why it has none, and the export refuses to run when the two disagree.
 _EXPORT_QUERIES: dict[str, tuple[tuple[str, str, Any], ...]] = {
-    "about_me": (("state", "SELECT tenant_id, about, updated_at FROM memory_profile WHERE {scope}", None),),
+    "about_me": (("state", "SELECT tenant_id, about, updated_at FROM memory_profile WHERE {scope}", None),
+                 # Each member's own text in a shared space (Spaces S1-11, N31).
+                 ("state", "SELECT tenant_id, account, about, updated_at FROM memory_member_profile "
+                           "WHERE {scope}", None)),
     "facts": ((
         "state",
         "SELECT tenant_id, subject, predicate, predicate_type, object, confidence, valid_from, "

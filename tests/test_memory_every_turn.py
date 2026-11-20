@@ -98,7 +98,7 @@ def scheduled(monkeypatch, tmp_path):
     monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
     calls: list[dict] = []
 
-    def record(messages, *, session_id=None, turn=None, tenant_id="default"):
+    def record(messages, *, session_id=None, turn=None, tenant_id="default", said_by=None):
         calls.append({"session": session_id, "turn": turn, "tenant": tenant_id,
                       "question": consolidator.extract_turn_texts(messages)[0]})
 

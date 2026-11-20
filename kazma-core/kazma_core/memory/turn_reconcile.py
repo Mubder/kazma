@@ -86,31 +86,35 @@ def _iso(epoch: float) -> str:
     return datetime.fromtimestamp(epoch, UTC).isoformat()
 
 
-def _turns(messages: list[Any]) -> list[tuple[int, str, str, float | None]]:
-    """``(turn index, question, answer, when)`` of every turn with a question:
-    the answer AFTER it (``consolidator.extract_turn_texts``), the index as
-    ``consolidator.user_turn_index`` counts it. Slash commands are skipped,
-    as the live pipeline skips them."""
+def _turns(messages: list[Any]) -> list[tuple[int, str, str, float | None, str | None]]:
+    """``(turn index, question, answer, when, author)`` of every turn with a
+    question: the answer AFTER it (``consolidator.extract_turn_texts``), the
+    index as ``consolidator.user_turn_index`` counts it, the account that
+    asked as the chat store recorded it (Spaces S1-08; None for a message
+    from before). Slash commands are skipped, as the live pipeline skips
+    them."""
     from kazma_core.memory.chat_history import normalize_message
     from kazma_core.memory.consolidator import extract_turn_texts, message_text
 
     msgs = [normalize_message(m) for m in messages or []]
-    out: list[tuple[int, str, str, float | None]] = []
+    out: list[tuple[int, str, str, float | None, str | None]] = []
     index = 0
     last_question = ""
     when: float | None = None
+    author: str | None = None
     for end in range(1, len(msgs) + 1):
         msg = msgs[end - 1]
         if msg.get("role") == "user":
             index += 1
             last_question = message_text(msg.get("content"))
             when = _epoch(msg.get("ts"))
+            author = str(msg.get("author") or "") or None
         closes = end == len(msgs) or msgs[end].get("role") == "user"
         if not (index and closes and last_question):
             continue  # no question yet, mid-turn, or an attachment-only message
         question, answer = extract_turn_texts(msgs[:end])
         if question and not question.startswith("/"):
-            out.append((index, question, answer, when))
+            out.append((index, question, answer, when, author))
     return out
 
 
@@ -148,7 +152,9 @@ def _reconcile_session(
     texts, stubs = _in_memory(conn, row["tenant_id"], keys)
     fallback = _epoch(row["updated_at"]) or _epoch(row["created_at"])
     written = young = 0
-    for index, question, answer, when in _turns(row["messages"]):
+    from kazma_core.memory.speakers import episode_metadata
+
+    for index, question, answer, when, author in _turns(row["messages"]):
         stored = turn_key(question)
         if texts[stored] > 0:
             texts[stored] -= 1
@@ -173,6 +179,10 @@ def _reconcile_session(
             tier="episodic",
             source="turn_reconcile",
             created_at=at,
+            # Its author, as a live turn keeps it (Spaces S1-11): the fact
+            # pass below reads it back; none in a shared space files no
+            # first-person fact.
+            metadata=episode_metadata(row["tenant_id"], author),
         ):
             written += 1
     return written, young
@@ -250,20 +260,21 @@ def _extract_facts(
                               "facts_done": False, "fact_attempts": attempts, "facts_set_aside": 0}
     rows = conn.execute(
         """SELECT rowid, id, session_id, turn_number, user_text, assistant_text, tenant_id,
-                  created_at
+                  created_at, json_extract(metadata_json, '$.said_by')
            FROM episodes
            WHERE rowid > ? AND json_extract(metadata_json, '$.source') = 'turn_reconcile'
            ORDER BY rowid LIMIT ?""",
         (after_rowid, _DEEP_PER_PASS),
     ).fetchall()
-    for rowid, episode_id, session, turn, user, answer, tenant, at in rows:
+    for rowid, episode_id, session, turn, user, answer, tenant, at, said_by in rows:
         if time.monotonic() >= deadline:
             return report
         messages = [{"role": "user", "content": user or ""}]
         if answer:
             messages.append({"role": "assistant", "content": answer})
         try:
-            _v2_extract_sync(messages, session_id=session, turn=turn, tenant_id=tenant, now=at)
+            _v2_extract_sync(messages, session_id=session, turn=turn, tenant_id=tenant, now=at,
+                             said_by=said_by)
         except sqlite3.OperationalError:
             raise  # locked or busy: an outage, counted by the runner (Memory audit M20)
         except (sqlite3.Error, ValueError, TypeError, KeyError, AttributeError, RuntimeError) as exc:

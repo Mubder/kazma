@@ -920,3 +920,216 @@ async def record_llm_extraction(dataset: dict[str, Any] | None = None) -> dict[s
             "recorded_on": _dt.date.today().isoformat(), "askings": 1,
             "prompt_sha256": _sha256(_EXTRACT_SYSTEM), "extraction_version": data["version"],
             "replies": replies}
+
+
+# ── Several members in one shared space (Spaces S1-11; the R3 study) ──────
+#
+# ``benchmark_data/speakers.json``: three members of one shared space, their
+# turns and facts, and questions asked by each. Seeded the product's way --
+# each turn names its author (``said_by``), each fact goes where
+# ``speakers.Room.filed`` files it with the label ``Room.label`` gives it --
+# and every question asked through the real ``recall`` as its asker. Scored
+# apart from dataset v5, with its own ratchet in ``thresholds.json``
+# (``speakers``). The study's vectors are replayed
+# (``tests/fixtures/memory_bench/speakers_vectors.npz``).
+
+SPEAKERS_PATH = Path(__file__).with_name("benchmark_data") / "speakers.json"
+SPEAKERS_TENANT = "bench_shared"
+#: The scores the speakers ratchet holds, per slice (``overall``, each
+#: ``lang:<x>`` and ``category:<x>``).
+SPEAKER_SCORES = ("hit_rate", "fact_hit_rate", "mrr", "precision")
+
+
+def load_speakers(path: str | os.PathLike[str] | None = None) -> dict[str, Any]:
+    return json.loads(Path(path or SPEAKERS_PATH).read_text(encoding="utf-8"))
+
+
+def speakers_room(cases: dict[str, Any]) -> Any:
+    """The case set's shared space, as ``speakers.room`` would read it."""
+    from types import MappingProxyType
+
+    from kazma_core.memory.speakers import Member, Room
+
+    members = {m["account"]: Member(account=m["account"], name=m["name"], called=tuple(m.get("aliases") or ()))
+               for m in cases["members"].values()}
+    return Room(space=SPEAKERS_TENANT, shared=True, members=MappingProxyType(members))
+
+
+def _seed_speakers(conn: sqlite3.Connection, cases: dict[str, Any], people: Any) -> dict[str, Any]:
+    from kazma_core.memory.belief_mutation import mutate_belief
+    from kazma_core.memory.dual_write import episode_row
+    from kazma_core.memory.embedder import encode_text_to_blob
+
+    members = cases["members"]
+    refs: dict[str, str] = {}
+    for session in cases["sessions"]:
+        for i, turn in enumerate(session["turns"], 1):
+            row = episode_row(
+                session_id=f"sp-{session['id']}", turn_number=i, user_text=turn["user"],
+                assistant_text=turn["assistant"], tenant_id=SPEAKERS_TENANT, source="benchmark",
+                created_at=BASE_TIME + session["day"] * 86400 + i * 60,
+                metadata={"said_by": members[turn["by"]]["account"]},
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO episodes (id, tenant_id, session_id, turn_number, user_text, "
+                "assistant_text, summary_text, tier, structural_importance, created_at, metadata_json, "
+                "embedding_model_version, embedding) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (row["id"], row["tenant_id"], row["session_id"], row["turn_number"], row["user_text"],
+                 row["assistant_text"], row["summary_text"], row["tier"], row["importance"],
+                 row["created_at"], json.dumps(row["meta"], ensure_ascii=False),
+                 row["embedding_model_version"], encode_text_to_blob(row["embed_text"])),
+            )
+            refs[f"{session['id']}#{i}"] = row["id"]
+    conn.commit()
+    for fact in cases["facts"]:
+        speaker = members[fact["by"]]["account"]
+        about = fact["about"]
+        if about.startswith("@"):
+            # "I ..." when the member speaks of themself; else the name it
+            # was written with ("Omar", "ليلى").
+            said = "user" if about[1:] == fact["by"] else (fact.get("written_as") or members[about[1:]]["name"])
+        else:
+            said = about
+        subject = people.filed(said, speaker)
+        result = mutate_belief(
+            conn, subject, fact["predicate"], fact["object"],
+            predicate_type=fact["predicate_type"], confidence=0.9, importance=4,
+            extraction_method=people.label(fact["method"], subject, speaker), tenant_id=SPEAKERS_TENANT,
+            source_session=f"sp-{fact['session']}", source_turn=fact["turn"],
+            now=BASE_TIME + fact["day"] * 86400 + fact["turn"] * 60 + 30, private=True,
+            said_by=people.said_by(speaker),
+        )
+        if result.get("belief_id") and result.get("action") not in ("noop", "blocked", "rejected"):
+            refs[fact["id"]] = str(result["belief_id"])
+    current = {str(r[0]) for r in conn.execute(
+        "SELECT id FROM beliefs WHERE tenant_id = ? AND valid_until IS NULL AND invalidated_at IS NULL",
+        (SPEAKERS_TENANT,))}
+    lost = [f["id"] for f in cases["facts"]
+            if f["id"] in refs and refs[f["id"]] not in current and not f.get("later") and not f.get("guess")]
+    return {"refs": refs, "lost": lost}
+
+
+def _speaker_slices(results: list[dict[str, Any]]) -> dict[str, Any]:
+    def part(rows: list[dict[str, Any]]) -> dict[str, Any]:
+        answerable = [r for r in rows if "rr" in r]
+        with_fact = [r for r in rows if "fact_hit" in r]
+        return {
+            "n": len(rows),
+            "hit_rate": round(sum(bool(r["hit"]) for r in rows) / len(rows), 4) if rows else None,
+            "fact_hit_rate": round(sum(r["fact_hit"] for r in with_fact) / len(with_fact), 4) if with_fact else None,
+            "mrr": round(sum(r["rr"] for r in answerable) / len(answerable), 4) if answerable else None,
+            "precision": round(sum(r["precision"] for r in answerable) / len(answerable), 4)
+            if answerable else None,
+            "misattributed": sum(r["misattributed"] for r in rows),
+        }
+
+    out: dict[str, Any] = {"overall": part(results)}
+    for key in ("lang", "category", "first_person", "dialect"):
+        for value in sorted({str(r[key]) for r in results if key in r}):
+            out[f"{key}:{value}"] = part([r for r in results if str(r.get(key)) == value])
+    return out
+
+
+def run_speaker_benchmark(cases: dict[str, Any] | None = None, *, questions: list[dict[str, Any]] | None = None,
+                          limit: int = 5, keep_results: bool = False) -> dict[str, Any]:
+    """Seed a private database with the case set, ask *questions* (the case
+    set's own by default) as their askers, return the scores by slice. A
+    line that shows another member's fact or turn as the asker's (``user ``
+    / ``User:``) counts as ``misattributed``."""
+    from kazma_core.memory import speakers
+    from kazma_core.memory.recall import recall
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+
+    cases = cases or load_speakers()
+    asked = questions if questions is not None else cases["questions"]
+    people = speakers_room(cases)
+    members = cases["members"]
+    facts = {f["id"]: f for f in cases["facts"]}
+    fd, path = tempfile.mkstemp(prefix="kazma-speakers-", suffix=".db")
+    os.close(fd)
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    try:
+        with speakers.private_room(people):
+            ensure_primary_schema(conn)
+            seeded = _seed_speakers(conn, cases, people)
+            refs = seeded["refs"]
+            owner_of = {refs[f["id"]]: f["about"][1:] for f in cases["facts"]
+                        if f["id"] in refs and f["about"].startswith("@")}
+            author_of = {refs[f"{s['id']}#{i}"]: t["by"]
+                         for s in cases["sessions"] for i, t in enumerate(s["turns"], 1)}
+            results: list[dict[str, Any]] = []
+            for q in asked:
+                asker = q["by"]
+                res = recall(q["text"], conn=conn, tenant_id=SPEAKERS_TENANT, limit=limit, local_only=True,
+                             asker=members[asker]["account"])
+                beliefs, episodes = list(res.beliefs[:limit]), list(res.episodes[:limit])
+                injected = [h.id for h in beliefs] + [h.id for h in episodes]
+                wrong = sum(1 for h in beliefs
+                            if owner_of.get(h.id, asker) != asker and h.content.startswith("user "))
+                wrong += sum(1 for h in episodes
+                             if author_of.get(h.id, asker) != asker
+                             and str((h.metadata or {}).get("display") or "").startswith("User: "))
+                out: dict[str, Any] = {"id": q["id"], "lang": q.get("lang"), "category": q.get("category"),
+                                       "by": asker, "misattributed": wrong}
+                for key in ("first_person", "dialect"):
+                    if key in q:
+                        out[key] = q[key]
+                pieces = [[refs[a] for a in piece.split("|") if a in refs] for piece in q.get("gold") or []]
+                answers = {a for piece in pieces for a in piece}
+                gold_facts = {refs[a] for piece in q.get("gold") or [] for a in piece.split("|")
+                              if a in facts and a in refs}
+                rank = {item: i for i, item in reversed(list(enumerate(injected, 1)))}
+                if not q.get("gold"):
+                    out["hit"] = wrong == 0
+                else:
+                    ranks = [rank[a] for a in answers if a in rank]
+                    out["hit"] = all(any(a in rank for a in piece) for piece in pieces)
+                    out["rr"] = 1.0 / min(ranks) if ranks else 0.0
+                    out["precision"] = sum(1 for i in injected if i in answers) / len(injected) if injected else 0.0
+                    if any(a in facts for piece in q["gold"] for a in piece.split("|")):
+                        out["fact_hit"] = bool(gold_facts & set(injected))
+                results.append(out)
+        report = {**_speaker_slices(results), "lost": seeded["lost"], "version": cases.get("version")}
+        if keep_results:
+            report["results"] = results
+        return report
+    finally:
+        conn.close()
+        for suffix in ("", "-wal", "-shm"):
+            try:
+                os.remove(path + suffix)
+            except OSError:
+                pass
+
+
+def speaker_scores(report: dict[str, Any]) -> dict[str, float]:
+    """The gated scores of a speakers run: ``<slice>.<score>``, and the
+    number of misattributed lines overall (held at its locked value, 0)."""
+    out: dict[str, float] = {}
+    for slice_name, part in report.items():
+        if not isinstance(part, dict) or "n" not in part:
+            continue
+        for score in SPEAKER_SCORES:
+            if part.get(score) is not None:
+                out[f"{slice_name}.{score}"] = float(part[score])
+    out["overall.misattributed"] = float(report["overall"]["misattributed"])
+    return out
+
+
+class SpeakerReplay:
+    """The recorded vectors of dataset v5 and of the speakers case set, as
+    one embedder: a text is answered from the first file that holds it."""
+
+    def __init__(self, *paths: str | os.PathLike[str]) -> None:
+        self._replays = [ReplayEmbedder(p) for p in paths]
+        self.model = self._replays[0].model
+        self.dim = self._replays[0].dim
+
+    def encode(self, text: str) -> list[float]:
+        for replay in self._replays:
+            try:
+                return replay.encode(text)
+            except KeyError:
+                continue
+        raise KeyError(f"no recorded vector for {text[:60]!r} in the speakers or v5 recordings")

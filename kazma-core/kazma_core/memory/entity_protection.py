@@ -28,8 +28,13 @@ _CORE_IDS = frozenset({"user", "assistant", "kazma"})
 
 
 def is_core_entity(entity_id: str) -> bool:
-    """True for the hub and the agent's own ids -- policy, no row needed."""
-    return str(entity_id or "").strip().lower() in _CORE_IDS
+    """True for the hub, the agent's own ids and a member's entry in a
+    shared space (Spaces S1-11: protected as ``user`` is) -- policy, no row
+    needed."""
+    from kazma_core.memory.speakers import is_member_entry
+
+    eid = str(entity_id or "").strip()
+    return eid.lower() in _CORE_IDS or is_member_entry(eid)
 
 
 def protection(
