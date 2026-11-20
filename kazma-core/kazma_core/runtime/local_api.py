@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 from typing import Any
 from kazma_core.http_tls import shared_ssl_context
+from kazma_core.spaces.scope import OWNER_SPACE_ID
 
 __all__ = [
     "LocalApiRefused",
@@ -119,13 +120,21 @@ def _secret_from_dotenv() -> str:
     return ""
 
 
+#: The space every call of the terminal app and the CLI names (Spaces S1-20):
+#: the owner's personal space. They run on the machine with the install's
+#: secret, so they are the admin, acting in the admin's own space. The header
+#: is ``kazma_ui.space_binding.SPACE_HEADER``; an install that does not
+#: enforce Spaces runs a call naming the owner's space as before.
+_MACHINE_SPACE = {"X-Kazma-Space": OWNER_SPACE_ID}
+
+
 def auth_headers() -> dict[str, str]:
     secret = (os.environ.get("KAZMA_SECRET") or "").strip()
     if not secret:
         secret = _secret_from_dotenv()
     if not secret:
-        return {}
-    return {"X-Kazma-Secret": secret}
+        return dict(_MACHINE_SPACE)
+    return {"X-Kazma-Secret": secret, **_MACHINE_SPACE}
 
 
 def _json_url(base: str, path: str) -> str:

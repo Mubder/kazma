@@ -537,12 +537,32 @@ def main(argv: list[str] | None = None) -> int:
             "the human-in-the-loop gate in front of the dangerous ones.\n\n"
             "Client config:\n"
             '  {"mcpServers": {"kazma": {"command": "kazma", "args": ["mcp"]}}}\n\n'
+            "Options:\n"
+            "  --space ID  Act in this space (once Spaces is on: the admin's own\n"
+            "              spaces only; default: your personal space)\n\n"
             "Environment:\n"
             "  KAZMA_MCP_TOOLS          comma-separated allowlist (default: all)\n"
             "  KAZMA_MCP_ALLOW_UNGATED  publish danger tools with no approval path\n"
         )
         return 0
+    space = ""
+    if argv and argv[0] == "--space" and len(argv) > 1:
+        space = argv[1]
+    elif argv and argv[0].startswith("--space="):
+        space = argv[0].split("=", 1)[1]
+    elif argv:
+        print(f"[kazma mcp] unknown argument: {argv[0]} (see kazma mcp --help)", file=sys.stderr)
+        return 2
+    # Every tool call acts in one space (Spaces S1-20): the owner's personal
+    # space, or one it names that the owner is a member of. Bound before the
+    # loop starts, so every task and thread it runs inherits it.
+    from kazma_core.spaces.machine import SpaceRefused, machine_scope
+
     try:
-        return asyncio.run(serve_stdio())
+        with machine_scope(space):
+            return asyncio.run(serve_stdio())
+    except SpaceRefused as exc:
+        print(f"[kazma mcp] {exc}", file=sys.stderr)
+        return 2
     except KeyboardInterrupt:  # pragma: no cover - interactive
         return 130

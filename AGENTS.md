@@ -13636,9 +13636,19 @@ product can turn it on, so an install with one account behaves as before.
     page or route goes in the rules.
   - A clone builds its environment with `security.git_auth.clone_env`:
     outside the owner's space, none of the machine's credentials.
+  - **Work on the machine acts as the admin** (`kazma_core/spaces/machine.py`,
+    2026-11-20): once enforced `kazma ask`/`acp` and `kazma mcp` bind the
+    owner's account in the owner's personal space, or in a space they name
+    (`--space`) that the owner is a member of (`machine_space`, read off the
+    loop in async code); any other space is refused before anything runs.
+    The terminal app's and the CLI's calls name the owner's personal space
+    (`local_api.auth_headers`). A new entry point that runs work on the
+    machine binds the same way.
   - Gates: `tests/test_host_tools_absent.py` (controls: a policy that only
     hides the tool, the route rule taken out, the clone environment as it
-    was), `tests/_host_tools_space_cases.py`.
+    was), `tests/_host_tools_space_cases.py`,
+    `tests/test_machine_work_acts_as_the_admin.py` (nothing bound and a call
+    naming no space as controls).
 - **Running work and approvals carry their space (S1-21, 2026-11-20).**
   Guards act only where Spaces is enforced; not enforced, every surface lists
   and acts as before (the older multi-user mode keeps its refusal).
