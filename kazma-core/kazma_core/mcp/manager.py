@@ -1949,9 +1949,18 @@ class AsyncMCPManager:
 
     @staticmethod
     async def _write_stdin(proc: Any, raw: str) -> None:
-        """Write one JSON-RPC line to a stdio server's stdin and drain."""
-        proc.stdin.write(raw.encode())
-        await proc.stdin.drain()
+        """Write one JSON-RPC line to a stdio server's stdin and drain.
+
+        A server whose process has ended refuses the write ("Broken pipe")
+        or the read finds its stdout closed, whichever comes first (a race,
+        2026-11-20): both are the server having exited, said as one."""
+        try:
+            proc.stdin.write(raw.encode())
+            await proc.stdin.drain()
+        except (BrokenPipeError, ConnectionResetError) as exc:
+            code = getattr(proc, "returncode", None)
+            ended = f" (exit code {code})" if code is not None else ""
+            raise MCPBridgeError(f"The server's process ended{ended}: it closed stdin and stdout") from exc
 
     async def _notify(self, handle: MCPServerHandle, method: str, params: dict[str, Any]) -> None:
         """Send a JSON-RPC notification (no response expected)."""

@@ -103,3 +103,50 @@ def test_the_live_connect_still_alerts(monkeypatch):
 
     asyncio.run(run())
     assert alerts == ["mcp.servers_unavailable"]
+
+
+# ── A server that exits before it reads the request (Linux CI, 2026-11-20) ──
+# Whether the write to its stdin fails first ("[Errno 32] Broken pipe") or the
+# read finds stdout closed is a race; the Test answered the raw error in the
+# first case. Both are the server having exited, said the same way.
+
+
+class _ClosedStdin:
+    def write(self, _data):
+        raise BrokenPipeError(32, "Broken pipe")
+
+    def flush(self):
+        raise BrokenPipeError(32, "Broken pipe")
+
+
+def _exited_client():
+    import io
+
+    from kazma_core import mcp_client
+
+    client = mcp_client.MCPClient()
+    client._config = mcp_client.MCPServerConfig(name="exits", transport="stdio", timeout=5.0)
+    client._process = SimpleNamespace(stdin=_ClosedStdin(), stdout=io.BytesIO(b""))
+    client._stderr_tail._data.extend(b"usage: server --root DIR")
+    return client
+
+
+def test_a_broken_pipe_is_the_server_having_closed_stdout():
+    from kazma_core.mcp_client import MCPConnectionError
+
+    client = _exited_client()
+    with pytest.raises(MCPConnectionError) as exc:
+        asyncio.run(client._send_stdio('{"jsonrpc": "2.0", "id": 1, "method": "initialize"}\n'))
+    assert "closed stdout" in str(exc.value)
+    assert "usage: server --root DIR" in str(exc.value), "its stderr says why"
+    with pytest.raises(MCPConnectionError) as note:
+        asyncio.run(client._notify("notifications/initialized", {}))
+    assert "closed stdout" in str(note.value)
+
+
+def test_control_without_the_closed_pipe_rule_the_raw_error_escapes(monkeypatch):
+    from kazma_core import mcp_client
+
+    monkeypatch.setattr(mcp_client, "_CLOSED_PIPE", ())
+    with pytest.raises(BrokenPipeError):
+        asyncio.run(_exited_client()._send_stdio('{"jsonrpc": "2.0", "id": 1, "method": "initialize"}\n'))

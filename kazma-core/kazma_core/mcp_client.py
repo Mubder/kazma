@@ -30,6 +30,10 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 _STDIO_BYTES = 16 * 1024 * 1024
+#: A write to a server whose process has ended. Which one comes first, this
+#: or an empty read, is a race (Linux CI, 2026-11-20: "[Errno 32] Broken
+#: pipe" in place of "closed stdout"); both mean the server exited.
+_CLOSED_PIPE = (BrokenPipeError, ConnectionResetError)
 
 import httpx
 
@@ -442,6 +446,9 @@ class MCPClient:
                     await asyncio.to_thread(proc.stdin.write, raw.encode())
                 async with asyncio.timeout(self._config.timeout):
                     await asyncio.to_thread(proc.stdin.flush)
+            except _CLOSED_PIPE as exc:
+                self._connected = False
+                raise await self._closed_stdout_error() from exc
             except TimeoutError as exc:
                 self._connected = False
                 raise MCPConnectionError(
@@ -467,12 +474,18 @@ class MCPClient:
                 # Match the manager: Python 3.11 wait_for can consume caller
                 # cancellation when a worker completes in the same tick.
                 timeout = self._config.timeout if self._config else 90.0
-                async with asyncio.timeout(timeout):
-                    await asyncio.to_thread(proc.stdin.write, raw.encode())
-                async with asyncio.timeout(timeout):
-                    await asyncio.to_thread(proc.stdin.flush)
-                async with asyncio.timeout(timeout):
-                    line = await asyncio.to_thread(self._read_reply, proc, expected)
+                try:
+                    async with asyncio.timeout(timeout):
+                        await asyncio.to_thread(proc.stdin.write, raw.encode())
+                    async with asyncio.timeout(timeout):
+                        await asyncio.to_thread(proc.stdin.flush)
+                except _CLOSED_PIPE:
+                    # The server ended before it read the request: the same
+                    # answer as one that closed stdout before answering.
+                    line = b""
+                else:
+                    async with asyncio.timeout(timeout):
+                        line = await asyncio.to_thread(self._read_reply, proc, expected)
             except TimeoutError as exc:
                 self._connected = False
                 timeout = self._config.timeout if self._config else 90.0
@@ -483,17 +496,20 @@ class MCPClient:
         if len(line) > _STDIO_BYTES:
             raise MCPConnectionError("MCP response exceeds its byte budget")
         if not line:
-            # The subprocess exited before answering. Show what it wrote to
-            # stderr so operators get the *real* cause (bad arg, missing
-            # dir, npm error) instead of an opaque EOF; the drain thread has
-            # it, once it has read to the end.
-            if self._stderr_thread is not None:
-                await asyncio.to_thread(self._stderr_thread.join, 0.5)
-            stderr_hint = self._stderr_tail.text().strip()[-4096:]
-            detail = f": {stderr_hint}" if stderr_hint else " (no stderr output)"
-            raise MCPConnectionError(f"Server closed stdout (EOF){detail}")
+            raise await self._closed_stdout_error()
 
         return _jsonrpc_response(line.decode().strip())
+
+    async def _closed_stdout_error(self) -> MCPConnectionError:
+        """The server exited before answering. Show what it wrote to stderr
+        so operators get the *real* cause (bad arg, missing dir, npm error)
+        instead of an opaque EOF; the drain thread has it, once it has read
+        to the end."""
+        if self._stderr_thread is not None:
+            await asyncio.to_thread(self._stderr_thread.join, 0.5)
+        stderr_hint = self._stderr_tail.text().strip()[-4096:]
+        detail = f": {stderr_hint}" if stderr_hint else " (no stderr output)"
+        return MCPConnectionError(f"Server closed stdout (EOF){detail}")
 
     def _read_reply(self, proc: Any, expected: Any) -> bytes:
         """Read stdout until the reply to *expected* (blocking: run in a thread).
