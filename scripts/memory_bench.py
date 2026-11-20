@@ -1715,6 +1715,11 @@ def _declare_prompt_change(
     }, []
 
 
+def _same_replies(locked: dict[str, Any], identity: dict[str, Any]) -> bool:
+    """The locked recording's replies, whatever message they are keyed by."""
+    return bool(locked.get("replies_sha256")) and locked.get("replies_sha256") == identity.get("replies_sha256")
+
+
 def _relabelled(locked: dict[str, Any], identity: dict[str, Any]) -> bool:
     """The locked replies now say they answered another prompt, or were asked
     in another message form: a relabelled recording, never a new one."""
@@ -1778,9 +1783,10 @@ def _extraction_lock(
                  if k.startswith("heuristic.") and k in now and now[k] < v]
     locked = old.get("recording") or {}
     same = locked.get("sha256") == identity["sha256"]
-    if same and _relabelled(locked, identity):
-        # The replies are the ones locked, and the file now says they answer
-        # another prompt: a relabelled recording, never a new one.
+    if (same or _same_replies(locked, identity)) and _relabelled(locked, identity):
+        # The replies are the ones locked (keyed by the same message, or
+        # re-keyed by another), and the file now says they answer another
+        # prompt: a relabelled recording, never a new one.
         problems.append("the recording now says it answered another prompt than the one locked: a recording "
                         f"is not relabelled; {RECORD_AGAIN}")
     if fresh:

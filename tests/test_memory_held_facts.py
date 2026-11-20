@@ -101,7 +101,7 @@ def test_held_facts_are_bounded(memory):
 def test_the_message_numbers_the_held_facts_and_the_prompt_asks_for_replaces():
     message = turn_message("Hana is a captain now.", held=[
         {"ref": "f1", "shown": "hana", "predicate": "occupation", "object": "pilot"}])
-    assert "Facts Kazma holds now about this turn's people and things" in message
+    assert "Facts Kazma holds now, numbered:" in message
     assert "\nf1. hana occupation pilot\n\nThis turn:\nUser: Hana is a captain now." in message
     prompt = belief_extractor._EXTRACT_SYSTEM
     assert '"replaces"' in prompt and "Only a held fact about the same\n  subject" in prompt

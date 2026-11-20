@@ -36,15 +36,18 @@ LATE_ON_THE_31ST = 1780266600.0
 def test_the_message_names_the_day_and_the_turn_before_bounded():
     message = turn_message("Yes, that one. We moved there last month.", "Noted.", said_on="2026-05-31",
                            previous=("Is Rotterdam nice?" + "q" * 2000, "It is." + "z" * 2000))
-    assert message.startswith("Date of this turn: 2026-05-31 (Sunday)\n\n"
-                              "The turn before, to understand this one (learn nothing from it):\nUser: Is Rotterdam")
-    before, this = message.split("\n\nThis turn:\n")
+    assert message.startswith("Date of this turn: 2026-05-31 (Sunday)\n\n<kazma:data source=\"memory_turn\"")
+    assert "The turn before (context only):\nUser: Is Rotterdam" in message
+    # Counted inside the fence's body (its preamble has words of its own).
+    before, this = message.split("--- BEGIN OBSERVATION ---")[1].split("\n\nThis turn:\n")
     assert this.startswith("User: Yes, that one. We moved there last month.\nAssistant: Noted.")
     assert before.count("q") == DEEP_PASS_PREVIOUS_QUESTION - len("Is Rotterdam nice?")
     assert before.count("z") == DEEP_PASS_PREVIOUS_ANSWER - len("It is.")
-    # With neither, the message is form 1's, exactly.
-    assert turn_message("I live in Lisbon.") == "User: I live in Lisbon.\nAssistant: "
-    assert turn_message("I live in Lisbon.", previous=("", "")) == "User: I live in Lisbon.\nAssistant: "
+    # With neither, the message is the turn alone, fenced; an empty turn
+    # before adds nothing.
+    alone = turn_message("I live in Lisbon.")
+    assert "This turn:\nUser: I live in Lisbon.\nAssistant:" in alone and "Date of this turn" not in alone
+    assert turn_message("I live in Lisbon.", previous=("", "")) == alone
 
 
 def test_the_prompt_asks_for_the_start_and_learns_only_from_this_turn():
@@ -131,7 +134,7 @@ def test_the_worker_gives_the_model_the_day_and_the_turn_before(memory):
     assert message.startswith("Date of this turn: 2026-06-01 (Monday)")
     assert "User: Is Rotterdam nice?\nAssistant: It is, by the water." in message
     assert "4412" not in message and "Another space" not in message
-    assert message.endswith("This turn:\nUser: Yes, that one. We moved there last month.\nAssistant: Welcome!")
+    assert "This turn:\nUser: Yes, that one. We moved there last month.\nAssistant: Welcome!" in message
 
 
 def test_control_the_worker_without_the_context_sends_neither(memory):

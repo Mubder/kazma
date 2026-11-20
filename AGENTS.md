@@ -2075,7 +2075,9 @@ four injected were noise.
   is refused (`StaleRecordingError`, also at replay time); a message the
   recording holds no reply for is its own failure, never "the model is
   down". The gate and the lock compare the locked prompt hash too: the same
-  replies relabelled as another prompt's are refused, flag or not. The lock
+  replies relabelled as another prompt's are refused, flag or not, also
+  when they are keyed by another message (`replies_sha256`, the replies
+  alone, `_same_replies`). The lock
   (`_extraction_lock`): the quick pass is a ratchet; the model's pass
   compares exactly on the same recording, a new recording is locked only with
   `lock --new-recording "why"` and replaces the old scores exactly (written
@@ -2273,6 +2275,19 @@ four injected were noise.
   and the write. Gates: `tests/test_memory_held_facts.py` ("replaces"
   ignored as the negative control), the write scenarios' `replaces`
   category.
+- **The deep pass reads the turn inside a data fence** (2026-11-20, the
+  framework audit's F10, part C2). `turn_message` (form 4) puts the turn
+  before, the facts held and the turn itself inside one
+  `prompt_fence.format_untrusted_block` (source `memory_turn`): a fence tag,
+  sentinel or foreign role marker planted in any of them is neutralised,
+  and Kazma's own lines (the day, the names in use) stand outside it. The
+  prompt says the fence is data and the reply's claims are not the user's.
+  `_sanitize_belief` refuses a fact whose text carries an override phrase,
+  an injection payload (`filter_injection`) or a fence marker
+  (`prompt_fence.carries_fence_marker`), as written or in disguise
+  (`_carries_injection`); a fact the model read stays the model's, tagged
+  "(Kazma's reading)" when recalled. Gate: `tests/test_memory_deep_pass_fenced.py`
+  (the fence taken out, and the screen taken out, as negative controls).
 - The quick (heuristic) pass reads Arabic and mixed text too
   (`memory/arabic_facts.py`, 2026-10-14: the extraction benchmark measured
   0.00 Arabic recall). Token rules from the grammar, compared folded: a

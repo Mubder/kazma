@@ -837,7 +837,8 @@ Added as each piece lands.
   (`recall._date_hits`). Probe 4's shape, seeded with Paris in May and
   London in October, now reads "[since Oct 2026] user lives in London;
   before that: Paris (May 2026 to Oct 2026)" and "[28 May 2026] User: I
-  live in Paris".
+  live in Paris". Gate: `tests/test_memory_recall_dates.py`; control:
+  recall without the dating step.
 - **Before the prompt changes, 2026-11-20: a declared change waits for its
   recording.** `lock --prompt-changed "why"` names each change in the lock;
   until the recording the model-pass rows replay the old recording through
@@ -871,8 +872,13 @@ Added as each piece lands.
   endings. The write scenarios gain a `retraction` category (seven, English
   and Arabic). Gates: `tests/test_memory_retractions.py`, the browser test
   of the change list.
-  Gate: `tests/test_memory_recall_dates.py`; control: recall without the
-  dating step.
+- **The fenced deep-pass input (F10, its second half), 2026-11-20: built,
+  not yet recorded.** The turn before, the facts held and the turn itself
+  travel inside one data fence; a fact carrying an injection payload or a
+  fence marker is refused; a value only the reply holds is Kazma's reading
+  when recalled. A poisoned reply stores nothing. Gate:
+  `tests/test_memory_deep_pass_fenced.py`. Not in this part (the main
+  session's list): F10's swarm results, and the user's spelling asked for.
 
 What I would not do:
 

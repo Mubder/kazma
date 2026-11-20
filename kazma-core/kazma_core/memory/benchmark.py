@@ -735,6 +735,10 @@ def _recording_identity(llm_replies: dict[str, Any]) -> dict[str, Any]:
     replies = llm_replies.get("replies") or {}
     return {
         "sha256": _sha256(json.dumps(replies, ensure_ascii=False, sort_keys=True)),
+        # The replies alone, whatever message they are keyed by: the same
+        # replies keyed by another message and labelled with another prompt
+        # are a relabelled recording, never a new one (``memory_bench``).
+        "replies_sha256": _sha256(json.dumps(sorted(replies.values()), ensure_ascii=False)),
         "turns": len(replies),
         "askings": int(llm_replies.get("askings") or 1),
         "model": llm_replies.get("model"),

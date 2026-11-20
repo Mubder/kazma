@@ -119,6 +119,7 @@
   "version": 2,
   "recording": {
    "sha256": "89c1b101b6ddbede2743d37b1ea2f2040f1ff1497cad515c2d035614f8f89157",
+   "replies_sha256": "9bb200cfff12e6a25137b1c3bfd17952aa055cef4ce255f749cbae605be3b3c1",
    "turns": 30,
    "askings": 1,
    "model": "deepseek-flash",
@@ -194,8 +195,8 @@
   },
   "recordings": [],
   "pending_recording": {
-   "prompt_sha256": "5ed9488a99decb87545384b5e9e5e1d7f477d5a9b664fed21a2d3c9eb6880afd",
-   "message_shape": 3,
+   "prompt_sha256": "d8ca7109c7f5b3882a2e00f500f66a77cb98363a17d9bb815896b7f2957b516c",
+   "message_shape": 4,
    "replaces_prompt_sha256": "3499be576e8493a660ee6105cfa25dbde9660826fa2a8d8e38270c07d969781b",
    "replaces_message_shape": 1,
    "since": "2026-11-20",
@@ -217,6 +218,12 @@
      "why": "Part C2, retractions: a fact this turn says stopped being true is returned with ended: true",
      "prompt_sha256": "5ed9488a99decb87545384b5e9e5e1d7f477d5a9b664fed21a2d3c9eb6880afd",
      "message_shape": 3
+    },
+    {
+     "date": "2026-11-20",
+     "why": "Part C2, F10: the turn's material travels inside one data fence, and the reply's claims are not the user's",
+     "prompt_sha256": "d8ca7109c7f5b3882a2e00f500f66a77cb98363a17d9bb815896b7f2957b516c",
+     "message_shape": 4
     }
    ]
   }
@@ -225,6 +232,7 @@
   "version": 7,
   "recording": {
    "sha256": "89c1b101b6ddbede2743d37b1ea2f2040f1ff1497cad515c2d035614f8f89157",
+   "replies_sha256": "9bb200cfff12e6a25137b1c3bfd17952aa055cef4ce255f749cbae605be3b3c1",
    "turns": 30,
    "askings": 1,
    "model": "deepseek-flash",

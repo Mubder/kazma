@@ -160,9 +160,15 @@ def test_a_recording_of_todays_prompt_ends_the_declaration(monkeypatch, tmp_path
     _change_the_prompt(monkeypatch)
     part, problems = script._extraction_lock(_locked()["extraction"], prompt_changed="the date for the extractor")
     assert not problems and part["pending_recording"]
-    fresh = dict(_recording(), prompt_sha256=benchmark._extraction_prompt_sha256(),
-                 message_shape=belief_extractor.MESSAGE_SHAPE, recorded_on="2026-12-01")
-    fresh["replies"] = dict(fresh["replies"], **{"unused": "{}"})  # other replies: another recording
+    recording = _recording()
+    turns = json.loads(benchmark.EXTRACTION_PATH.read_text(encoding="utf-8"))["turns"]
+    # Each reply keyed by the message today's extractor sends: a recording
+    # made today.
+    replies = {benchmark._text_key(benchmark._llm_blob(t["user"], **benchmark._turn_context(t))):
+               recording["replies"][benchmark._text_key(benchmark._recorded_message(t["user"], 1))] for t in turns}
+    fresh = dict(recording, prompt_sha256=benchmark._extraction_prompt_sha256(),
+                 message_shape=belief_extractor.MESSAGE_SHAPE, recorded_on="2026-12-01",
+                 replies=dict(replies, unused="{}"))  # one more reply: another recording
     path = tmp_path / "extraction_llm.json"
     path.write_text(json.dumps(fresh, ensure_ascii=False), encoding="utf-8")
     monkeypatch.setattr(script, "LLM_REPLIES", path)
