@@ -676,14 +676,16 @@ def erase_space(space: str, *, by: str) -> dict[str, Any]:
 
     # Nobody new can start work in it: its members go first.
     people.close_space(space, by=by)
-    before, _found = _walk(space)
+    before, first = _walk(space)
     from kazma_core.stores.knowledge_lifecycle import delete_library
 
     for library in before.ids["libraries"]:
         delete_library(library)
     ctx, found = _walk(space, before)
+    # The rows the library delete took, then the rest.
+    by_library = sum(item.rows for item in first) - sum(item.rows for item in found)
     erased = {
-        "rows": _erase_rows(found, ctx),
+        "rows": by_library + _erase_rows(found, ctx),
         "settings": _erase_settings(space, ctx.ids["threads"]),
         "secrets": _erase_secrets(space),
         "workspaces": _erase_workspaces(space),

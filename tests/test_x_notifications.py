@@ -93,3 +93,71 @@ async def test_denied_revision_does_not_send_an_obsolete_approval_notice(tmp_pat
         raise AssertionError("A denied candidate must not advertise approval")
     monkeypatch.setattr(ops_alerts, "deliver_acknowledged", should_not_deliver)
     assert await _drain_store(store) == 0
+
+
+def _plant_unreadable_notice(path, key="not-a-reply-key"):
+    """A row as an older build or a restored file left it: written straight
+    into the outbox, before the notice the drain must still reach."""
+    import time
+
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute("INSERT INTO x_notification_outbox (tenant_id, event_key, message, created_at) "
+                     "VALUES (?, ?, ?, ?)", ("default", key, "an older build's notice", time.time() - 60))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+@pytest.mark.asyncio
+async def test_a_notice_whose_key_cannot_be_read_never_stops_the_drain(tmp_path, monkeypatch):
+    """One bad row (an older build, a restored file) is finished as
+    superseded, and the notices behind it are still sent."""
+    from kazma_core.observability import ops_alerts
+    from kazma_core.x_api.notifications import _drain_store
+
+    path = tmp_path / "reply.db"
+    store = XReplyStore(path)
+    _plant_unreadable_notice(path)
+    held(store)
+    sent = []
+
+    async def delivered(text):
+        sent.append(text)
+        return True
+
+    monkeypatch.setattr(ops_alerts, "deliver_acknowledged", delivered)
+    for key in ("not-a-reply-key", "reply:123:abc", "reply::7", ""):
+        assert store.notification_current({"event_key": key, "tenant_id": "default"}) is False
+    assert await _drain_store(store) == 1
+    assert len(sent) == 1 and "Review the complete candidate" in sent[0]
+    with sqlite3.connect(path) as conn:
+        bad = conn.execute("SELECT delivered_at, last_error FROM x_notification_outbox "
+                           "WHERE event_key = 'not-a-reply-key'").fetchone()
+    assert bad[0] is None and "Superseded" in bad[1]
+
+
+@pytest.mark.asyncio
+async def test_control_the_key_reading_of_before_stops_the_drain(tmp_path, monkeypatch):
+    from kazma_core.observability import ops_alerts
+    from kazma_core.x_api.notifications import _drain_store
+
+    def before(self, notice):  # the line as it was
+        summon, revision = notice["event_key"].removeprefix("reply:").rsplit(":", 1)
+        return False
+
+    path = tmp_path / "reply.db"
+    store = XReplyStore(path)
+    _plant_unreadable_notice(path)
+    held(store)
+    sent = []
+
+    async def delivered(text):
+        sent.append(text)
+        return True
+
+    monkeypatch.setattr(ops_alerts, "deliver_acknowledged", delivered)
+    monkeypatch.setattr(XReplyStore, "notification_current", before)
+    with pytest.raises(ValueError):
+        await _drain_store(store)
+    assert sent == []

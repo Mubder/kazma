@@ -36,8 +36,8 @@ from tests._space_world import A, B, _where_word, plant_world
 
 
 @pytest.fixture
-def world(monkeypatch):
-    yield from plant_world(monkeypatch)
+def world(monkeypatch, tmp_path):
+    yield from plant_world(monkeypatch, tmp_path)
 
 
 def test_every_row_store_was_made_and_planted(world) -> None:
@@ -65,9 +65,14 @@ def test_an_export_holds_its_own_space_and_never_the_other(world, tmp_path) -> N
         text = "\n".join(zipped.read(name).decode("utf-8", "replace") for name in zipped.namelist())
     assert world["words"][A] in text
     assert world["words"][B] not in text
+    import fnmatch
+
     held = {item.split(":")[0] for item in world["planted"][A]}
     exported = {name.split("/")[1] for name in zipfile.ZipFile(target).namelist() if name.startswith("stores/")}
-    assert held <= exported | {"thread_scopes.db"}, sorted(held - exported)
+    # A store family is exported under its file's name.
+    missing = {name for name in held - exported - {"thread_scopes.db"}
+               if not any(fnmatch.fnmatch(found, name) for found in exported)}
+    assert not missing, sorted(missing)
 
 
 def test_after_erasing_a_no_store_holds_its_word_and_b_is_whole(world) -> None:
