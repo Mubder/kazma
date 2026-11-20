@@ -1,0 +1,89 @@
+{
+ "model": "BAAI/bge-m3",
+ "torch": "2.15.0+cpu",
+ "seconds": 124.6,
+ "texts_embedded": 460,
+ "gated_scores": 78,
+ "gated_scores_that_differ_from_the_lock": 2,
+ "differ_lock_then_real": {
+  "overall.precision": [
+   0.6443,
+   0.6464
+  ],
+  "single.precision": [
+   0.6559,
+   0.6642
+  ]
+ },
+ "questions_that_differ_recorded_then_real": {
+  "q017": {
+   "recorded": [
+    true,
+    0.5,
+    0.25,
+    null,
+    4
+   ],
+   "real": [
+    true,
+    0.5,
+    0.4,
+    null,
+    5
+   ]
+  },
+  "q810": {
+   "recorded": [
+    false,
+    -1.0,
+    -1.0,
+    null,
+    2
+   ],
+   "real": [
+    false,
+    -1.0,
+    -1.0,
+    null,
+    3
+   ]
+  },
+  "q816": {
+   "recorded": [
+    false,
+    -1.0,
+    -1.0,
+    null,
+    1
+   ],
+   "real": [
+    false,
+    -1.0,
+    -1.0,
+    null,
+    2
+   ]
+  }
+ },
+ "overall_real": {
+  "questions": 89,
+  "hit_rate": 0.9253,
+  "mrr": 0.8444,
+  "precision": 0.6464
+ },
+ "heldout_overall_real": {
+  "questions": 40,
+  "hit_rate": 0.8909,
+  "mrr": 0.8448,
+  "precision": 0.6464
+ },
+ "each_vector_against_its_recording": {
+  "lowest_cosine": 0.999659,
+  "mean_cosine": 0.999854
+ },
+ "similarity_of_a_pair_real_against_recorded": {
+  "largest_error": 0.002899,
+  "mean_error": 0.000545,
+  "error_99_in_100": 0.001773
+ }
+}
