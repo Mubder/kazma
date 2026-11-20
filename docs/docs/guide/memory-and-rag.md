@@ -113,7 +113,15 @@ related or not.
 4. **Content words** (`memory/query_terms.py`): English and Gulf/MSA
    stopwords dropped, Arabic folded with the article and one-letter prefixes
    handled, light plurals, whole words only ("out" is not in "about").
-5. Fence: `format_untrusted_block(..., source="memory_v2_recall")`.
+5. **Dates.** Every conversation memory is shown with the day it was said
+   ("[12 Jan 2026] User: ..."), every fact with when it began: the start
+   you named ("we moved last month", worked out from the day you said it),
+   else the month you said it ("[since May 2026] user lives in London").
+   A fact that holds one value is shown with the value it replaced
+   ("before that: Paris (Jan 2026 to May 2026)"). Dates are in the time
+   zone set for scheduled tasks. A value you asked Kazma to forget is never
+   shown as "before that".
+6. Fence: `format_untrusted_block(..., source="memory_v2_recall")`.
 
 When memory has nothing for a question, the **past-chats fallback** searches
 earlier chats; a chat must hold more than half of the question's content
@@ -544,6 +552,13 @@ Kazma** lists them:
   remember something and its memory tool would replace one of your facts:
   "I'm visiting Dubai next week, remember that for the itinerary" asks
   before it touches your home.
+- **Has this ended? Kazma kept the fact.** You said one of your facts
+  stopped being true ("I don't live in Paris anymore", "بطلت أستخدم فيم"),
+  and only the model read it. Kazma keeps the fact and asks: **Yes, it
+  ended** ends it (shown as **Ended from what you said**, "No longer:
+  Paris", with **Undo**), **No, keep it** leaves it. A fact Kazma or its
+  model wrote ends at once. Someone else's ending ("My sister doesn't live
+  in Paris anymore") or a question asks nothing.
 - **Kazma's reading of your message.** The first time only the model reads
   one of your facts (your home, your name, the name you go by, your
   employer, your role), Kazma keeps it as its own reading, not as yours,

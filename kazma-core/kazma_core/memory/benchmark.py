@@ -733,26 +733,97 @@ def _recording_identity(llm_replies: dict[str, Any]) -> dict[str, Any]:
     description beside them can be completed without making it another
     recording."""
     replies = llm_replies.get("replies") or {}
+    values = [v if isinstance(v, str) else json.dumps(v, ensure_ascii=False) for v in replies.values()]
     return {
         "sha256": _sha256(json.dumps(replies, ensure_ascii=False, sort_keys=True)),
+        # The replies alone, whatever message they are keyed by: the same
+        # replies keyed by another message and labelled with another prompt
+        # are a relabelled recording, never a new one (``memory_bench``).
+        "replies_sha256": _sha256(json.dumps(sorted(values), ensure_ascii=False)),
+        # Each reply's own hash: a later file that still holds every one of
+        # them is the same recording, re-keyed or extended, whatever it says
+        # it answered (``memory_bench._same_replies``).
+        "reply_hashes": sorted({_sha256(r)[:16] for v in replies.values() for r in _reply_list(v)}),
         "turns": len(replies),
-        "askings": int(llm_replies.get("askings") or 1),
+        "askings": _recording_askings(llm_replies) or int(llm_replies.get("askings") or 1),
         "model": llm_replies.get("model"),
         "provider": llm_replies.get("provider"),
         "recorded_on": llm_replies.get("recorded_on"),
         "prompt_sha256": llm_replies.get("prompt_sha256"),
+        "message_shape": _recording_shape(llm_replies),
     }
 
 
-def _check_recording(llm_replies: dict[str, Any]) -> None:
-    """Refuse a recording that does not say which prompt it answered, or
-    answered another one (benchmark audit F4: with the prompt replaced by
-    "Keep nothing", every deep-pass score stayed the same)."""
+#: The askings a turn a new recording of the model's pass has (benchmark
+#: audit R2; the owner's decision 2: 150 askings for the 30 turns). One asking
+#: has no spread: asked again, the model answers a little differently.
+ASKINGS_STANDARD = 5
+
+
+def _reply_list(value: Any) -> list[str]:
+    """A turn's recorded replies, one per asking: a recording made before R2
+    holds one reply a turn (a string), a later one the list of its askings."""
+    if isinstance(value, list):
+        return [str(v) for v in value]
+    return [str(value)]
+
+
+def _recording_askings(llm_replies: dict[str, Any]) -> int:
+    """The askings every turn of the recording has (the fewest any turn has;
+    0 with no replies)."""
+    replies = llm_replies.get("replies") or {}
+    return min((len(_reply_list(v)) for v in replies.values()), default=0)
+
+
+def _asking(llm_replies: dict[str, Any], i: int) -> dict[str, Any]:
+    """The recording as its *i*-th asking alone: each turn's *i*-th reply."""
+    return {**llm_replies,
+            "replies": {k: _reply_list(v)[i] for k, v in (llm_replies.get("replies") or {}).items()}}
+
+
+#: How a prompt change is declared until it is recorded (framework audit part
+#: C2: the prompt changes land first and are recorded once, with the owner's
+#: yes, after them).
+DECLARE_PENDING = 'python scripts/memory_bench.py lock --prompt-changed "why"'
+
+
+def _recording_shape(llm_replies: dict[str, Any]) -> int:
+    """The form of the user message the recording was asked in (form 1 when
+    it does not say: every recording made before the form was named)."""
+    return int(llm_replies.get("message_shape") or 1)
+
+
+def _check_recording(llm_replies: dict[str, Any], pending: dict[str, Any] | None = None) -> str:
+    """How a recording can be replayed against today's extractor:
+
+    * ``"current"``: it answered today's prompt, in today's message form.
+    * ``"previous"``: it answered the prompt before a change the lock
+      declares (``extraction.pending_recording``, written by
+      :data:`DECLARE_PENDING`): the change is named, dated and waits for its
+      recording. The replay is then a drift check -- the recorded replies
+      through today's parser, sanitizer and scorer -- never a measure of the
+      new prompt.
+
+    Anything else is refused (benchmark audit F4: with the prompt replaced by
+    "Keep nothing", every deep-pass score used to stay the same)."""
+    from kazma_core.memory.belief_extractor import MESSAGE_SHAPE
+
     recorded = llm_replies.get("prompt_sha256")
     if not recorded:
         raise StaleRecordingError(f"the recording does not say which extraction prompt it answered: {RECORD_AGAIN}")
-    if recorded != _extraction_prompt_sha256():
-        raise StaleRecordingError(f"the extraction prompt changed since the recording: {RECORD_AGAIN}")
+    current = _extraction_prompt_sha256()
+    if recorded == current and _recording_shape(llm_replies) == MESSAGE_SHAPE:
+        return "current"
+    if (pending and pending.get("prompt_sha256") == current
+            and int(pending.get("message_shape") or 1) == MESSAGE_SHAPE
+            and pending.get("replaces_prompt_sha256") == recorded
+            and int(pending.get("replaces_message_shape") or 1) == _recording_shape(llm_replies)):
+        return "previous"
+    if recorded == current:
+        raise StaleRecordingError(f"the extractor's message changed since the recording: {RECORD_AGAIN}, "
+                                  f"or declare the change until then: {DECLARE_PENDING}")
+    raise StaleRecordingError(f"the extraction prompt changed since the recording: {RECORD_AGAIN}, "
+                              f"or declare the change until then: {DECLARE_PENDING}")
 
 
 def _slug(text: str) -> str:
@@ -761,8 +832,8 @@ def _slug(text: str) -> str:
 
 def _folded(text: str) -> str:
     """A value as search reads it: folded, and an underscore separates words
-    (``memory/query_terms``, FTS5) -- the extraction prompt slugs values, so
-    ``kuwait_city`` is the user's "Kuwait City"."""
+    (``memory/query_terms``, FTS5) -- the extraction prompt slugged values
+    until part C2, so ``kuwait_city`` is the user's "Kuwait City"."""
     from kazma_core.documents.arabic import fold_for_search
 
     return " ".join(fold_for_search(str(text or "").replace("_", " ")).lower().split())
@@ -800,6 +871,10 @@ def _value_matches(alt: dict[str, Any], got: dict[str, Any]) -> bool:
     name that does not turn it around (:func:`_turned`: a negative or past
     name finds only a negative or past fact)."""
     if _turned(got.get("predicate") or "") != any(_turned(p) for p in alt["predicates"]):
+        return False
+    # A fact said to have ended is another statement than the fact held
+    # (part C2, retractions): each finds only its own kind.
+    if bool(got.get("ended")) != bool(alt.get("ended")):
         return False
     gold = _folded(alt["object"])
     subject = _slug(alt["subject"])
@@ -844,7 +919,8 @@ def _score_extraction(turns: list[dict[str, Any]], extracted: dict[str, list[dic
     for turn in turns:
         row = by_lang.setdefault(turn["lang"], {
             "turns": 0, "gold": 0, "gold_found": 0, "gold_named": 0, "kept": 0, "kept_unwanted": 0,
-            "kept_listed": 0, "quiet_turns": 0, "quiet_kept_nothing": 0, "unwanted": []})
+            "kept_listed": 0, "quiet_turns": 0, "quiet_kept_nothing": 0, "unwanted": [],
+            **{k: 0 for k in (*_C2_GOLD.values(), *_C2_RIGHT.values())}})
         got = extracted.get(turn["id"], [])
         gold = turn["facts"]
         allowed = gold + (turn.get("extras") or [])
@@ -856,6 +932,7 @@ def _score_extraction(turns: list[dict[str, Any]], extracted: dict[str, list[dic
         row["turns"] += 1
         row["gold"] += len(gold)
         row["kept"] += len(got)
+        _score_c2(row, gold, good)
         row["gold_found"] += sum(1 for alts in gold if any(_value_matches(a, g) for a in alts for g in good))
         row["gold_named"] += sum(1 for alts in gold if any(_fact_matches(alts, g) for g in good))
         row["kept_listed"] += sum(1 for g in got if any(_fact_matches(alts, g) for alts in gold))
@@ -866,40 +943,167 @@ def _score_extraction(turns: list[dict[str, Any]], extracted: dict[str, list[dic
         if not gold:
             row["quiet_turns"] += 1
             row["quiet_kept_nothing"] += int(not got)
-    out = {}
-    for lang, row in sorted(by_lang.items()):
-        found, kept = row["gold_found"], row["kept"]
-        out[lang] = {
-            **row,
-            "found": round(found / row["gold"], 4) if row["gold"] else 0.0,
-            "named": round(row["gold_named"] / found, 4) if found else 1.0,
-            "right": round((kept - row["kept_unwanted"]) / kept, 4) if kept else 1.0,
-            "quiet": round(row["quiet_kept_nothing"] / row["quiet_turns"], 4) if row["quiet_turns"] else 1.0,
-            # The reading before 2026-11 (a fact counts only under a listed
-            # name), kept for comparison; not gated.
-            "recall": round(row["gold_named"] / row["gold"], 4) if row["gold"] else 0.0,
-            "precision": round(row["kept_listed"] / kept, 4) if kept else 1.0,
-        }
+    return {lang: _with_ratios(row) for lang, row in sorted(by_lang.items())}
+
+
+#: What part C2 asks the model besides the fact itself, by the gold field
+#: that asks it: the count of gold facts asking it (the dataset's), the count
+#: given right (each asking's), and the score.
+_C2_GOLD = {"since": "gold_since", "replaces": "gold_replaces", "ended": "gold_ended"}
+_C2_RIGHT = {"since": "dated_right", "replaces": "replaced_right", "ended": "ended_found"}
+_C2_SCORES = {"since": "dated", "replaces": "replaced", "ended": "ended"}
+
+
+def _since_holds(gold: str, got: Any) -> bool:
+    """A start the model gave is the gold one, to the gold's own precision:
+    "2026-04-30" holds "2026-04", "2026" does not."""
+    return isinstance(got, str) and (got == gold or got.startswith(gold + "-"))
+
+
+def _score_c2(row: dict[str, Any], gold: list[list[dict[str, Any]]], good: list[dict[str, Any]]) -> None:
+    """Count what a turn's gold facts ask beyond the fact (a start, the held
+    fact replaced, an ending) and how often a kept fact gives it right."""
+    for alts in gold:
+        for field, counted in _C2_GOLD.items():
+            wanted = [a for a in alts if a.get(field) not in (None, False)]
+            if not wanted:
+                continue
+            row[counted] += 1
+            right = any(
+                _value_matches(a, g) and (
+                    field == "ended"
+                    or (field == "since" and _since_holds(a["since"], g.get("since")))
+                    or (field == "replaces" and str(g.get("replaces") or "").strip().lower() == a["replaces"]))
+                for a in wanted for g in good)
+            row[_C2_RIGHT[field]] += int(right)
+
+
+#: A language row's counts that add up over askings (``turns``, ``gold``,
+#: ``quiet_turns`` and the C2 gold counts are the dataset's, the same in
+#: every asking).
+_ASKING_COUNTS = ("gold_found", "gold_named", "kept", "kept_unwanted", "kept_listed", "quiet_kept_nothing",
+                  *_C2_RIGHT.values())
+
+
+def _with_ratios(row: dict[str, Any], askings: int = 1) -> dict[str, Any]:
+    """A language row's scores from its counts, over *askings* askings: a
+    score is the total over all askings (benchmark audit R2)."""
+    found, kept = row["gold_found"], row["kept"]
+    gold, quiet_turns = row["gold"] * askings, row["quiet_turns"] * askings
+    out = {
+        **row,
+        "found": round(found / gold, 4) if gold else 0.0,
+        "named": round(row["gold_named"] / found, 4) if found else 1.0,
+        "right": round((kept - row["kept_unwanted"]) / kept, 4) if kept else 1.0,
+        "quiet": round(row["quiet_kept_nothing"] / quiet_turns, 4) if quiet_turns else 1.0,
+        # The reading before 2026-11 (a fact counts only under a listed
+        # name), kept for comparison; not gated.
+        "recall": round(row["gold_named"] / gold, 4) if gold else 0.0,
+        "precision": round(row["kept_listed"] / kept, 4) if kept else 1.0,
+    }
+    # Part C2's scores, where the language's turns ask them: a gold fact not
+    # kept counts as not given.
+    for field, score in _C2_SCORES.items():
+        asked = row.get(_C2_GOLD[field], 0) * askings
+        if asked:
+            out[score] = round(row.get(_C2_RIGHT[field], 0) / asked, 4)
+    if askings > 1:
+        out["askings"] = askings
     return out
 
 
-def _llm_blob(user_text: str) -> str:
+def _total_over_askings(parts: list[dict[str, Any]]) -> dict[str, Any]:
+    """One score per language from each asking's scoring (one ``_score_extraction``
+    a part): the counts added up, the dataset's own counts kept."""
+    if len(parts) == 1:
+        return parts[0]
+    total: dict[str, Any] = {}
+    for i, part in enumerate(parts, 1):
+        for lang, row in part.items():
+            into = total.setdefault(lang, {**row, **{k: 0 for k in _ASKING_COUNTS}, "unwanted": []})
+            for k in _ASKING_COUNTS:
+                into[k] += row[k]
+            into["unwanted"] += [f"asking {i}, {u}" for u in row["unwanted"]]
+    return {lang: _with_ratios(row, len(parts)) for lang, row in sorted(total.items())}
+
+
+def _spread(parts: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
+    """How far each score could move with the model asked again: two standard
+    errors of the askings' scores, per language and score (benchmark audit R2;
+    empty with one asking, which has no spread)."""
+    import math
+    import statistics
+
+    if len(parts) < 2:
+        return {}
+    out: dict[str, dict[str, float]] = {}
+    for lang in sorted(parts[0]):
+        scores = [k for k in (*EXTRACTION_SCORES, *_C2_SCORES.values()) if k in parts[0][lang]]
+        out[lang] = {k: round(2 * statistics.stdev([p[lang][k] for p in parts]) / math.sqrt(len(parts)), 4)
+                     for k in scores}
+    return out
+
+
+def _llm_blob(user_text: str, *, said_on: str | None = None, previous: tuple[str, str] | None = None,
+              held: list[dict[str, Any]] | None = None) -> str:
     """The user message ``belief_extractor._llm_extract`` sends for a turn
-    with no vocabulary (the benchmark asks with none)."""
+    with no vocabulary (the benchmark asks with none): the product's own
+    builder, :func:`belief_extractor.turn_message`."""
+    from kazma_core.memory.belief_extractor import turn_message
+
+    return turn_message(user_text, said_on=said_on, previous=previous, held=held)
+
+
+def _turn_context(turn: dict[str, Any]) -> dict[str, Any]:
+    """An extraction turn's day, the turn before it and the facts held about
+    it, as the dataset gives them (``said_on``, ``previous``, ``held``: the
+    memory worker reads them from the memory store)."""
+    previous = turn.get("previous")
+    held = [{"ref": f"f{i}", "id": f"held-{i}", "subject": s, "shown": s, "predicate": p, "predicate_type": "set",
+             "object": o, "method": ""} for i, (s, p, o) in enumerate(turn.get("held") or (), 1)]
+    return {"said_on": turn.get("said_on"),
+            "previous": (previous.get("user", ""), previous.get("assistant", "")) if previous else None,
+            "held": held or None}
+
+
+def _recorded_message(user_text: str, shape: int) -> str:
+    """The user message a recording asked in form *shape* was asked for a
+    turn. Form 1 is the turn's text and an empty answer; today's form is the
+    product's builder; any other form is a recording Kazma can no longer
+    replay."""
+    from kazma_core.memory.belief_extractor import MESSAGE_SHAPE
     from kazma_core.memory.limits import DEEP_PASS_QUESTION
 
-    return f"User: {user_text[:DEEP_PASS_QUESTION]}\nAssistant: "
+    if shape == MESSAGE_SHAPE:
+        return _llm_blob(user_text)
+    if shape == 1:
+        return f"User: {user_text[:DEEP_PASS_QUESTION]}\nAssistant: "
+    raise StaleRecordingError(f"the recording was asked in message form {shape}, which Kazma no longer "
+                              f"builds: {RECORD_AGAIN}")
+
+
+def _reply_key(turn: dict[str, Any], llm_replies: dict[str, Any], mode: str) -> str:
+    """The key of a turn's recorded reply: the message today's extractor
+    sends (``current``), or the one the recording was asked (``previous``)."""
+    if mode == "current":
+        return _text_key(_llm_blob(turn["user"], **_turn_context(turn)))
+    return _text_key(_recorded_message(turn["user"], _recording_shape(llm_replies)))
 
 
 class _ReplayClient:
     """Answers the extraction prompt from recorded replies; a prompt nobody
     recorded is an error (the dataset changed: record again). It also checks
-    the system message it is sent against the recording's: a prompt built
-    another way at run time is a recording of something else."""
+    the system message it is sent against the prompt it expects: a prompt
+    built another way at run time is a recording of something else.
+
+    In the ``previous`` mode (:func:`_check_recording`) it expects today's prompt
+    and answers each turn with the reply recorded for it (``answer``), not by
+    the message it is sent: the recording was asked another message."""
 
     def __init__(self, replies: dict[str, str], prompt_sha256: str) -> None:
         self._replies = replies
         self._prompt = prompt_sha256
+        self.answer: str | None = None
         self.stale = False
         self.unrecorded: list[str] = []
 
@@ -911,14 +1115,16 @@ class _ReplayClient:
         if _sha256(system) != self._prompt:
             self.stale = True
             return ""
-        key = _text_key(messages[-1]["content"])
+        key = self.answer or _text_key(messages[-1]["content"])
         if key not in self._replies:
             self.unrecorded.append(str(messages[-1]["content"])[:80])
             return ""
         return self._replies[key]
 
 
-def _replayed_extraction(turns: list[dict[str, Any]], llm_replies: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+def _replayed_extraction(
+    turns: list[dict[str, Any]], llm_replies: dict[str, Any], *, mode: str = "current",
+) -> dict[str, list[dict[str, Any]]]:
     """What the deep pass keeps from each turn, from the recorded replies,
     read by the product's own parser and sanitizer."""
     import asyncio
@@ -926,19 +1132,20 @@ def _replayed_extraction(turns: list[dict[str, Any]], llm_replies: dict[str, Any
 
     from kazma_core.memory.belief_extractor import _llm_extract, _sanitize_belief
 
-    _check_recording(llm_replies)
-    missing = [t["id"] for t in turns if _text_key(_llm_blob(t["user"])) not in llm_replies["replies"]]
+    missing = [t["id"] for t in turns if _reply_key(t, llm_replies, mode) not in llm_replies["replies"]]
     if missing:
         # Checked here: the extractor reads any failed call as "the model is
         # down", which would score a stale recording as an outage.
         raise KeyError(f"no recorded reply for {missing}: {RECORD_AGAIN}")
-    client = _ReplayClient(llm_replies["replies"], llm_replies["prompt_sha256"])
+    expected = llm_replies["prompt_sha256"] if mode == "current" else _extraction_prompt_sha256()
+    client = _ReplayClient(llm_replies["replies"], expected)
     registry = type("_Registry", (), {"get_client": lambda self: client})()
 
     async def ask_all() -> dict[str, list[dict[str, Any]]]:
         got = {}
         for t in turns:
-            beliefs, _down = await _llm_extract(t["user"], "")
+            client.answer = None if mode == "current" else _reply_key(t, llm_replies, mode)
+            beliefs, _down = await _llm_extract(t["user"], "", **_turn_context(t))
             got[t["id"]] = [b for b in (_sanitize_belief(x) for x in beliefs or []) if b]
         return got
 
@@ -954,9 +1161,13 @@ def _replayed_extraction(turns: list[dict[str, Any]], llm_replies: dict[str, Any
 
 def run_extraction_benchmark(
     dataset: dict[str, Any] | None = None, *, llm_replies: dict[str, Any] | None = None,
+    pending: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Score the heuristic pass, and the model's pass when *llm_replies* (the
-    recorded file) is given."""
+    recorded file) is given. *pending* is the lock's declared prompt change
+    (``extraction.pending_recording``), if any: with it, a recording of the
+    prompt before the change is replayed as a drift check (:func:`_check_recording`),
+    and the report says so (``llm_replay``)."""
     from kazma_core.memory.belief_extractor import extract_beliefs_heuristic
 
     data = dataset or json.loads(EXTRACTION_PATH.read_text(encoding="utf-8"))
@@ -968,8 +1179,22 @@ def run_extraction_benchmark(
     if not llm_replies:
         report["llm"] = {"recorded": False}
         return report
-    report["llm"] = _score_extraction(turns, _replayed_extraction(turns, llm_replies))
+    mode = _check_recording(llm_replies, pending)
+    # A drift check replays the recording of the prompt before a change: the
+    # turns added to ask what the change asks (``new_in``) wait for the
+    # recording, named, never guessed.
+    asked = [t for t in turns if mode == "current" or not t.get("new_in")]
+    if len(asked) < len(turns):
+        report["llm_waiting"] = [t["id"] for t in turns if t not in asked]
+    # Every asking is scored, through the product's parser; a score is the
+    # total over all askings, and its spread how much the askings differ.
+    parts = [_score_extraction(asked, _replayed_extraction(asked, _asking(llm_replies, i), mode=mode))
+             for i in range(max(1, _recording_askings(llm_replies)))]
+    report["llm"] = _total_over_askings(parts)
+    if len(parts) > 1:
+        report["llm_spread"] = _spread(parts)
     report["llm_recording"] = _recording_identity(llm_replies)
+    report["llm_replay"] = mode
     return report
 
 
@@ -1008,6 +1233,11 @@ def extraction_scores(report: dict[str, Any]) -> dict[str, float]:
             if isinstance(row, dict):
                 for k in EXTRACTION_SCORES:
                     out[f"{pass_name}.{lang}.{k}"] = float(row[k])
+                # Part C2's: the model's alone (the quick pass gives no start,
+                # replaces nothing and reads no endings).
+                for k in _C2_SCORES.values():
+                    if pass_name == "llm" and k in row:
+                        out[f"{pass_name}.{lang}.{k}"] = float(row[k])
     return dict(sorted(out.items()))
 
 
@@ -1040,13 +1270,34 @@ class _ScriptedClient:
         return self.reply
 
 
-def _turn_reply(turn: dict[str, Any], recorded: dict[str, str]) -> str:
+def _extraction_turns() -> dict[str, dict[str, Any]]:
+    """The extraction dataset's turns by id."""
+    return {t["id"]: t for t in json.loads(EXTRACTION_PATH.read_text(encoding="utf-8"))["turns"]}
+
+
+def _turn_reply(turn: dict[str, Any], recorded: dict[str, str], llm_replies: dict[str, Any] | None = None,
+                mode: str = "current", held: list[dict[str, Any]] | None = None) -> str:
     if "recorded" in turn:
-        key = _text_key(_llm_blob(turn["user"]))
+        # The reply the recording holds for the extraction turn this one
+        # names, asked as that turn was asked (its day, the turn before).
+        source = _extraction_turns().get(turn["recorded"], turn)
+        key = _reply_key(source, llm_replies or {}, mode)
         if key not in recorded:
             raise KeyError(f"no recorded reply for {turn['recorded']}: {RECORD_AGAIN}")
         return recorded[key]
-    return json.dumps({"beliefs": turn["written"]}, ensure_ascii=False)
+    return json.dumps({"beliefs": [_numbered(fact, held) for fact in turn["written"]]}, ensure_ascii=False)
+
+
+def _numbered(fact: dict[str, Any], held: list[dict[str, Any]] | None) -> dict[str, Any]:
+    """A written reply's ``replaces``, named in the scenario by the held
+    fact's subject and predicate, as the number the model would see for it
+    (``f0``, which names nothing, when the turn was shown no such fact)."""
+    named = fact.get("replaces")
+    if not isinstance(named, dict):
+        return fact
+    ref = next((h["ref"] for h in held or () if h["shown"] == named["subject"]
+                and h["predicate"] == named["predicate"]), "f0")
+    return {**fact, "replaces": ref}
 
 
 def _expected_holds(expected: dict[str, Any], row: dict[str, Any]) -> bool:
@@ -1060,16 +1311,27 @@ def _expected_holds(expected: dict[str, Any], row: dict[str, Any]) -> bool:
             return False
     elif not _holds(_folded(expected["object"]), _folded(row["object"])):
         return False
+    if "started" in expected and row.get("started") != expected["started"]:
+        return False
+    if "predicate" in expected and row.get("predicate") != expected["predicate"]:
+        return False
+    if "ended" in row and bool(row["ended"]) != bool(expected.get("ended")):
+        return False
     return expected.get("trust") != "user" or row["extraction_method"] in _USER_SOURCES
 
 
-def _run_scenario(scenario: dict[str, Any], client: _ScriptedClient, recorded: dict[str, str]) -> dict[str, Any]:
+def _run_scenario(scenario: dict[str, Any], client: _ScriptedClient, recorded: dict[str, str],
+                  llm_replies: dict[str, Any] | None = None, mode: str = "current") -> dict[str, Any]:
     import asyncio
+
+    from datetime import UTC
 
     from kazma_core.memory.belief_extractor import (
         _apply_beliefs_to_v2,
         extract_and_apply_beliefs_sync,
         extract_beliefs_for_turn,
+        held_facts,
+        said_on_iso,
     )
     from kazma_core.memory.entity_resolution import entity_vocabulary
     from kazma_core.memory.predicates import predicate_vocabulary
@@ -1089,6 +1351,7 @@ def _run_scenario(scenario: dict[str, Any], client: _ScriptedClient, recorded: d
         ensure_primary_schema(primary)
         ensure_ops_schema(ops)
         session = f"writes-{scenario['id']}"
+        asked_before = ""
         for number, turn in enumerate(scenario["turns"], 1):
             if "answer" in turn:
                 # The user answers the newest change waiting for them, on the
@@ -1106,18 +1369,28 @@ def _run_scenario(scenario: dict[str, Any], client: _ScriptedClient, recorded: d
             at = BASE_TIME + number * 86400
             extract_and_apply_beliefs_sync(primary, ops, turn["user"], session_id=session, turn=number,
                                            tenant_id=BENCH_TENANT, now=at, private=True)
-            client.reply = _turn_reply(turn, recorded)
+            # The turn's day, the turn before and the facts held about it,
+            # as the memory worker gives them (worker_bootstrap._turn_context),
+            # on the benchmark's clock.
+            held = held_facts(primary, tenant_id=BENCH_TENANT, text=turn["user"])
+            client.reply = _turn_reply(turn, recorded, llm_replies, mode, held)
             raw, stats = asyncio.run(extract_beliefs_for_turn(
                 turn["user"], "", vocabulary=predicate_vocabulary(primary, tenant_id=BENCH_TENANT),
-                entities=entity_vocabulary(primary, tenant_id=BENCH_TENANT)))
+                entities=entity_vocabulary(primary, tenant_id=BENCH_TENANT),
+                said_on=said_on_iso(at, UTC), previous=(asked_before, "") if asked_before else None,
+                held=held))
+            asked_before = turn["user"]
             if raw:
                 _apply_beliefs_to_v2(raw, primary, ops, stats=stats, session_id=session, turn=number,
-                                     tenant_id=BENCH_TENANT, now=at, private=True, user_text=turn["user"])
+                                     tenant_id=BENCH_TENANT, now=at, private=True, user_text=turn["user"],
+                                     held=held)
         rows = [dict(r) for r in primary.execute(
-            "SELECT subject, predicate, object, extraction_method FROM beliefs WHERE tenant_id = ? "
+            "SELECT subject, predicate, object, extraction_method, json_extract(metadata_json, '$.started') "
+            "AS started FROM beliefs WHERE tenant_id = ? "
             "AND valid_until IS NULL AND invalidated_at IS NULL ORDER BY valid_from", (BENCH_TENANT,))]
         waiting = [dict(r) for r in primary.execute(
-            "SELECT subject, new_value AS object FROM memory_changes WHERE tenant_id = ? AND kind = 'pending' "
+            "SELECT subject, CASE WHEN new_value = '' THEN old_value ELSE new_value END AS object, "
+            "new_value = '' AS ended FROM memory_changes WHERE tenant_id = ? AND kind = 'pending' "
             "AND state = 'open' ORDER BY created_at", (BENCH_TENANT,))]
     finally:
         primary.close()
@@ -1152,22 +1425,25 @@ def _run_scenario(scenario: dict[str, Any], client: _ScriptedClient, recorded: d
 
 def run_write_scenarios(
     dataset: dict[str, Any] | None = None, *, llm_replies: dict[str, Any] | None = None,
+    pending: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Every write scenario through the write path; what passed, by category
     and language. *llm_replies* is the recording the ``recorded`` turns
-    replay (the extraction benchmark's)."""
+    replay (the extraction benchmark's), and *pending* the lock's declared
+    prompt change, as :func:`run_extraction_benchmark` takes them."""
     from unittest import mock
 
     data = dataset or json.loads(WRITES_PATH.read_text(encoding="utf-8"))
-    if llm_replies:
-        _check_recording(llm_replies)
-    recorded = (llm_replies or {}).get("replies") or {}
+    mode = _check_recording(llm_replies, pending) if llm_replies else "current"
+    # A scenario replays the first asking (a scenario measures Kazma's rules
+    # around one reply, never the model).
+    recorded = _asking(llm_replies, 0)["replies"] if llm_replies and llm_replies.get("replies") else {}
     client = _ScriptedClient()
     registry = type("_Registry", (), {"get_client": lambda self: client})()
     # Facts are judged by their rows: no vector is needed, and none is made.
     with mock.patch("kazma_core.model_registry.get_model_registry", lambda: registry), \
             mock.patch("kazma_core.memory.embedder.get_embedder", lambda: None):
-        results = [_run_scenario(s, client, recorded) for s in data["scenarios"]]
+        results = [_run_scenario(s, client, recorded, llm_replies, mode) for s in data["scenarios"]]
     groups: dict[str, dict[str, int]] = {}
     for r in results:
         for key in (f"{r['category']}.{r['lang']}", "overall"):
@@ -1182,6 +1458,7 @@ def run_write_scenarios(
     }
     if llm_replies:
         report["llm_recording"] = _recording_identity(llm_replies)
+        report["llm_replay"] = mode
     return report
 
 
@@ -1191,31 +1468,92 @@ def write_scores(report: dict[str, Any]) -> dict[str, float]:
     return {f"{k}.passed": float(v["share"]) for k, v in sorted(report["groups"].items())}
 
 
-async def record_llm_extraction(dataset: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Ask the configured model the extraction prompt for every turn and
-    return its raw replies (``scripts/memory_extraction_record.py``;
-    costs one call a turn)."""
+class _CapturingClient:
+    """The configured model's client, keeping the last message it was sent
+    and the raw reply it gave (the recorder asks through the product's own
+    call, ``belief_extractor._llm_extract``)."""
+
+    def __init__(self, client: Any) -> None:
+        self._client = client
+        self.message: str | None = None
+        self.reply: str | None = None
+
+    async def chat(self, messages: list[dict[str, Any]], **kw: Any) -> Any:
+        raw = await self._client.chat(messages, **kw)
+        self.message = str(messages[-1]["content"])
+        self.reply = raw.content if hasattr(raw, "content") else str(raw or "")
+        return raw
+
+
+async def record_llm_extraction(
+    dataset: dict[str, Any] | None = None, *, limit: int, askings: int = ASKINGS_STANDARD,
+    held: dict[str, Any] | None = None, save: Any = None,
+) -> dict[str, Any]:
+    """Ask the configured model the deep pass's question for every turn,
+    *askings* times, and return the recording (``scripts/memory_extraction_record.py``;
+    the benchmark audit's R2).
+
+    Each question is the product's own call (``belief_extractor._llm_extract``,
+    with the turn's day, the turn before and the facts held), and the raw
+    reply it got is kept. Every turn's first asking comes before any turn's
+    second, so a recording cut short still covers each turn the same number
+    of times. *held* is a recording made before, of the same prompt, message
+    form and dataset: what it holds is never asked again. *save* is called
+    with the recording after every reply. At most *limit* calls are made; a
+    recording that stopped there says so (``complete``: false)."""
+    import datetime as _dt
+    from unittest import mock
+
+    from kazma_core.memory.belief_extractor import _EXTRACT_SYSTEM, MESSAGE_SHAPE, _llm_extract
     from kazma_core.model_registry import get_model_registry
 
     data = dataset or json.loads(EXTRACTION_PATH.read_text(encoding="utf-8"))
     registry = get_model_registry()
     client = registry.get_client()
-    replies: dict[str, str] = {}
-    from kazma_core.memory.belief_extractor import _EXTRACT_SYSTEM
-
-    for t in data["turns"]:
-        blob = _llm_blob(t["user"])
-        raw = await client.chat([{"role": "system", "content": _EXTRACT_SYSTEM}, {"role": "user", "content": blob}])
-        replies[_text_key(blob)] = raw.content if hasattr(raw, "content") else str(raw or "")
+    if client is None:
+        raise LookupError("no model is configured: nothing can be recorded")
+    prompt = _sha256(_EXTRACT_SYSTEM)
+    replies: dict[str, list[str]] = {}
+    if held:
+        if (held.get("prompt_sha256"), _recording_shape(held), held.get("extraction_version")) != (
+                prompt, MESSAGE_SHAPE, data["version"]):
+            raise StaleRecordingError("the recording to continue answered another prompt, message form or "
+                                      "dataset: record into a new file")
+        replies = {k: _reply_list(v) for k, v in (held.get("replies") or {}).items()}
     # The provider client keeps its model on its config (``LLMProvider.config``).
     model = (getattr(getattr(client, "config", None), "model", None) or getattr(client, "model", None)
              or getattr(registry, "active_model", None) or "unknown")
-    import datetime as _dt
-
-    return {"model": str(model), "provider": str(getattr(registry, "_active_provider", "") or "unknown"),
-            "recorded_on": _dt.date.today().isoformat(), "askings": 1,
-            "prompt_sha256": _sha256(_EXTRACT_SYSTEM), "extraction_version": data["version"],
-            "replies": replies}
+    recording: dict[str, Any] = {
+        "model": str(model), "provider": str(getattr(registry, "_active_provider", "") or "unknown"),
+        "recorded_on": _dt.date.today().isoformat(), "askings": askings, "complete": False,
+        "prompt_sha256": prompt, "message_shape": MESSAGE_SHAPE, "extraction_version": data["version"],
+        "replies": replies}
+    capture = _CapturingClient(client)
+    calls = 0
+    with mock.patch("kazma_core.model_registry.get_model_registry",
+                    lambda: type("_Registry", (), {"get_client": lambda self: capture})()):
+        for asking in range(askings):
+            for t in data["turns"]:
+                context = _turn_context(t)
+                key = _text_key(_llm_blob(t["user"], **context))
+                have = replies.setdefault(key, [])
+                if len(have) > asking:
+                    continue
+                if calls >= limit:
+                    return recording
+                capture.message = capture.reply = None
+                await _llm_extract(t["user"], "", **context)
+                calls += 1
+                if capture.reply is None:
+                    raise RuntimeError(f"the model did not answer turn {t['id']}: the recording keeps what it has")
+                if _text_key(capture.message or "") != key:
+                    raise RuntimeError(f"the deep pass sent turn {t['id']} another message than the benchmark "
+                                       "replays: the two builders differ")
+                have.append(capture.reply)
+                if save is not None:
+                    save(recording)
+    recording["complete"] = True
+    return recording
 
 
 # ── Several members in one shared space (Spaces S1-11; the R3 study) ──────

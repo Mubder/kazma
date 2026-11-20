@@ -41,16 +41,17 @@ Turns in English, Arabic and both, with the facts a person would expect remember
 
 | Pass | Language | Found | Same name | Right | Quiet | Rests on |
 |---|---|---|---|---|---|---|
-| Quick pass | English | 46.2 % | 100.0 % | 100.0 % | 100.0 % | 12 turns |
-| Quick pass | Arabic | 63.6 % | 100.0 % | 100.0 % | 100.0 % | 10 turns |
+| Quick pass | English | 31.6 % | 100.0 % | 100.0 % | 100.0 % | 18 turns |
+| Quick pass | Arabic | 50.0 % | 100.0 % | 100.0 % | 100.0 % | 14 turns |
 | Quick pass | Mixed | 60.0 % | 100.0 % | 100.0 % | 100.0 % | 8 turns |
-| Model pass (1 asking a turn) | English | 100.0 % | 76.9 % | 100.0 % | 100.0 % | 12 askings (12 turns, 1 each) |
-| Model pass (1 asking a turn) | Arabic | 100.0 % | 90.9 % | 100.0 % | 100.0 % | 10 askings (10 turns, 1 each) |
-| Model pass (1 asking a turn) | Mixed | 100.0 % | 70.0 % | 91.7 % | 100.0 % | 8 askings (8 turns, 1 each) |
+| Model pass (1 asking a turn, previous prompt) | English | 100.0 % | 76.9 % | 100.0 % | 100.0 % | 12 askings (12 turns, 1 each) |
+| Model pass (1 asking a turn, previous prompt) | Arabic | 100.0 % | 90.9 % | 100.0 % | 100.0 % | 10 askings (10 turns, 1 each) |
+| Model pass (1 asking a turn, previous prompt) | Mixed | 100.0 % | 70.0 % | 91.7 % | 100.0 % | 8 askings (8 turns, 1 each) |
 
 The model pass is deepseek-flash's replies, recorded on 2026-10-15, 1 asking a turn. Asked again, a model answers a little differently, so a number from one asking can move by a few facts with nothing changed.
+Kazma's extraction prompt has changed since that recording (5 changes since 2026-11-20). The model-pass rows replay the recording through today's code, which checks that the code reading the model's replies still keeps what it kept; they do not measure the new prompt, which is measured when it is recorded.
 
-With Postgres and pgvector as the memory store, a run made by hand on 2026-10-14 scored 89.5 % hit rate, 0.83 MRR and 62.1 % precision. CI's pgvector job now measures it, with pgvector's own search and with every row compared, and these numbers are not locked from it yet.
+With Postgres and pgvector as the memory store (CI run 44732367729 (main af93192fd, job Tests (pgvector) 136275094486), approximate search), the same questions score 89.5 % hit rate, 0.83 MRR and 61.3 % precision. Comparing every row (exact search) scores the same on every measure.
 
 Reproduce: `python scripts/memory_bench.py run` (add `--real` to use the real model), and `python -m pytest tests/test_memory_benchmark.py`.
 

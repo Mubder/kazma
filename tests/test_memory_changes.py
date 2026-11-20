@@ -75,7 +75,7 @@ def _turn(mem, monkeypatch, *, first: str, then: str, model: list[dict], predica
                    created_at=turn_time)
 
     async def llm(user_text, assistant_text="", *, use_llm=True, ignore_filler=False, vocabulary=None,
-                  entities=None):
+                  entities=None, said_on=None, previous=None, held=None):
         return ([dict(b, confidence=0.9, importance=4) for b in model],
                 {"skipped_filler": False, "source": "llm", "applied": 0, "rejected": 0, "actions": []})
 
@@ -251,7 +251,8 @@ def test_a_first_reading_is_kazmas_reading_and_no_question(mem, monkeypatch):
     turn's note never asks about it."""
     _turn(mem, monkeypatch, first="", then="We moved to Rotterdam last month.",
           model=[_fact("lives_in", "rotterdam")])
-    assert _current(mem) == [("rotterdam", "llm_inferred")]
+    # The user's spelling is kept (part C2), the reading stays the model's.
+    assert _current(mem) == [("Rotterdam", "llm_inferred")]
     [reading] = _changes(mem, "open")
     assert (reading["kind"], reading["old_value"], reading["new_value"]) == ("reading", "", "Rotterdam")
     assert _note(tenant_id="default", thread_id="s1") == ""
@@ -266,7 +267,7 @@ def test_a_reading_replaced_since_cannot_be_confirmed(mem, monkeypatch):
     with pytest.raises(changes.ChangeRefusedError) as refused:
         changes.confirm(mem.db, first["id"], tenant_id="default")
     assert refused.value.code == "replaced_since"
-    assert _current(mem) == [("lisbon", "llm_inferred")]
+    assert _current(mem) == [("Lisbon", "llm_inferred")]
 
 
 def test_not_me_is_kept_past_the_decided_bound(mem, monkeypatch):

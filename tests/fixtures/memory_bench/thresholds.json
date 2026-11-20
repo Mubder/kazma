@@ -116,22 +116,51 @@
   }
  },
  "extraction": {
-  "version": 2,
+  "version": 3,
   "recording": {
    "sha256": "89c1b101b6ddbede2743d37b1ea2f2040f1ff1497cad515c2d035614f8f89157",
+   "replies_sha256": "9bb200cfff12e6a25137b1c3bfd17952aa055cef4ce255f749cbae605be3b3c1",
+   "reply_hashes": [
+    "02d22e26dd3631fb",
+    "0a9769c0a9716a35",
+    "17f1374466bc35b2",
+    "21eb09d22219c039",
+    "374bfee058c534ee",
+    "4493f78da1242f8e",
+    "595f713e858e90e3",
+    "60bf7f5acf6a8f33",
+    "6de7be041a4cb6a7",
+    "7fa70939fa62dd29",
+    "883765eac3bbf073",
+    "88fa2aafee742847",
+    "8fb954427be32b4b",
+    "97aa73fd9038ae72",
+    "9e3560e378842dc5",
+    "b0b694b21025c652",
+    "bd375c8e984e7416",
+    "c05bcec0a8e8fa97",
+    "c7c74fad83f9ccbf",
+    "da4fb83d66ad154d",
+    "dad007b011f4b6ea",
+    "db4702d1a6f8eac4",
+    "e5630ebbc7305c35",
+    "edfd9bf1f8f0c61d",
+    "f572a89ec1efc6cd"
+   ],
    "turns": 30,
    "askings": 1,
    "model": "deepseek-flash",
    "provider": "deepseek",
    "recorded_on": "2026-10-15",
-   "prompt_sha256": "3499be576e8493a660ee6105cfa25dbde9660826fa2a8d8e38270c07d969781b"
+   "prompt_sha256": "3499be576e8493a660ee6105cfa25dbde9660826fa2a8d8e38270c07d969781b",
+   "message_shape": 1
   },
   "scores": {
-   "heuristic.ar.found": 0.6364,
+   "heuristic.ar.found": 0.5,
    "heuristic.ar.named": 1.0,
    "heuristic.ar.quiet": 1.0,
    "heuristic.ar.right": 1.0,
-   "heuristic.en.found": 0.4615,
+   "heuristic.en.found": 0.3158,
    "heuristic.en.named": 1.0,
    "heuristic.en.quiet": 1.0,
    "heuristic.en.right": 1.0,
@@ -155,14 +184,14 @@
   "rests_on": {
    "heuristic": {
     "ar": {
-     "turns": 10,
-     "gold": 11,
-     "quiet_turns": 2
+     "turns": 14,
+     "gold": 14,
+     "quiet_turns": 3
     },
     "en": {
-     "turns": 12,
-     "gold": 13,
-     "quiet_turns": 3
+     "turns": 18,
+     "gold": 19,
+     "quiet_turns": 4
     },
     "mixed": {
      "turns": 8,
@@ -191,18 +220,86 @@
     }
    }
   },
-  "recordings": []
+  "recordings": [],
+  "pending_recording": {
+   "prompt_sha256": "c36418ea83e16c40204cb211b78de76b8f6af18d32cb152187f201f4aae0bcd8",
+   "message_shape": 4,
+   "replaces_prompt_sha256": "3499be576e8493a660ee6105cfa25dbde9660826fa2a8d8e38270c07d969781b",
+   "replaces_message_shape": 1,
+   "since": "2026-11-20",
+   "changes": [
+    {
+     "date": "2026-11-20",
+     "why": "Part C2, F2 step 2: the deep pass is told the turn's day and the turn before it, and gives a fact's start (since)",
+     "prompt_sha256": "d05c74ec91751338f7f65474f2499adaae39bf52d0835aa4740e6a79490abcce",
+     "message_shape": 2
+    },
+    {
+     "date": "2026-11-20",
+     "why": "Part C2, F4 second layer: the deep pass is shown the facts held about the turn's people and things, numbered, and may say which one a new fact replaces",
+     "prompt_sha256": "5a8fdebd62c615b8aa4ea97802b6a1c60f46c692e53c0ede1014d9c697daecb5",
+     "message_shape": 3
+    },
+    {
+     "date": "2026-11-20",
+     "why": "Part C2, retractions: a fact this turn says stopped being true is returned with ended: true",
+     "prompt_sha256": "5ed9488a99decb87545384b5e9e5e1d7f477d5a9b664fed21a2d3c9eb6880afd",
+     "message_shape": 3
+    },
+    {
+     "date": "2026-11-20",
+     "why": "Part C2, F10: the turn's material travels inside one data fence, and the reply's claims are not the user's",
+     "prompt_sha256": "d8ca7109c7f5b3882a2e00f500f66a77cb98363a17d9bb815896b7f2957b516c",
+     "message_shape": 4
+    },
+    {
+     "date": "2026-11-20",
+     "why": "Part C2, the user's spelling: an object is given as the user wrote it, never a slug",
+     "prompt_sha256": "c36418ea83e16c40204cb211b78de76b8f6af18d32cb152187f201f4aae0bcd8",
+     "message_shape": 4
+    }
+   ]
+  }
  },
  "writes": {
-  "version": 4,
+  "version": 7,
   "recording": {
    "sha256": "89c1b101b6ddbede2743d37b1ea2f2040f1ff1497cad515c2d035614f8f89157",
+   "replies_sha256": "9bb200cfff12e6a25137b1c3bfd17952aa055cef4ce255f749cbae605be3b3c1",
+   "reply_hashes": [
+    "02d22e26dd3631fb",
+    "0a9769c0a9716a35",
+    "17f1374466bc35b2",
+    "21eb09d22219c039",
+    "374bfee058c534ee",
+    "4493f78da1242f8e",
+    "595f713e858e90e3",
+    "60bf7f5acf6a8f33",
+    "6de7be041a4cb6a7",
+    "7fa70939fa62dd29",
+    "883765eac3bbf073",
+    "88fa2aafee742847",
+    "8fb954427be32b4b",
+    "97aa73fd9038ae72",
+    "9e3560e378842dc5",
+    "b0b694b21025c652",
+    "bd375c8e984e7416",
+    "c05bcec0a8e8fa97",
+    "c7c74fad83f9ccbf",
+    "da4fb83d66ad154d",
+    "dad007b011f4b6ea",
+    "db4702d1a6f8eac4",
+    "e5630ebbc7305c35",
+    "edfd9bf1f8f0c61d",
+    "f572a89ec1efc6cd"
+   ],
    "turns": 30,
    "askings": 1,
    "model": "deepseek-flash",
    "provider": "deepseek",
    "recorded_on": "2026-10-15",
-   "prompt_sha256": "3499be576e8493a660ee6105cfa25dbde9660826fa2a8d8e38270c07d969781b"
+   "prompt_sha256": "3499be576e8493a660ee6105cfa25dbde9660826fa2a8d8e38270c07d969781b",
+   "message_shape": 1
   },
   "scores": {
    "kept_as_said.ar.passed": 1.0,
@@ -214,11 +311,17 @@
    "quoted.ar.passed": 1.0,
    "quoted.en.passed": 1.0,
    "quoted.mixed.passed": 1.0,
+   "replaces.ar.passed": 1.0,
+   "replaces.en.passed": 1.0,
+   "retraction.ar.passed": 1.0,
+   "retraction.en.passed": 1.0,
    "short.ar.passed": 1.0,
    "short.en.passed": 1.0,
    "someone_else.ar.passed": 1.0,
    "someone_else.en.passed": 1.0,
    "someone_else.mixed.passed": 1.0,
+   "temporal.ar.passed": 1.0,
+   "temporal.en.passed": 1.0,
    "update.ar.passed": 1.0,
    "update.en.passed": 1.0,
    "update.mixed.passed": 1.0
@@ -261,8 +364,11 @@
   }
  },
  "pgvector": {
-  "status": "unverified",
-  "measured": "a run made by hand on 2026-10-14, with the product's (approximate) search; compared one way",
+  "status": "verified",
+  "mode": "approximate",
+  "run": "CI run 44732367729 (main af93192fd, job Tests (pgvector) 136275094486)",
+  "date": "2026-11-20",
+  "measured": "CI run 44732367729 (main af93192fd, job Tests (pgvector) 136275094486), approximate search",
   "floors": {
    "abstain.hit_rate": 0.2778,
    "arabic.hit_rate": 1.0,
@@ -274,6 +380,28 @@
    "fact.hit_rate": 1.0,
    "fact.mrr": 1.0,
    "fact.precision": 0.6458,
+   "keyword.hit_rate": 1.0,
+   "keyword.mrr": 1.0,
+   "keyword.order": 1.0,
+   "keyword.precision": 0.9375,
+   "multi.hit_rate": 1.0,
+   "multi.mrr": 1.0,
+   "multi.order": 1.0,
+   "multi.precision": 0.7937,
+   "noise.hit_rate": 0.6667,
+   "noise.mrr": 0.6667,
+   "noise.precision": 0.381,
+   "overall.hit_rate": 0.895,
+   "overall.mrr": 0.8303,
+   "overall.precision": 0.6133,
+   "overview.hit_rate": 0.9,
+   "overview.mrr": 0.6667,
+   "overview.order": 1.0,
+   "overview.precision": 0.5417,
+   "paraphrase.hit_rate": 1.0,
+   "paraphrase.mrr": 0.9375,
+   "paraphrase.order": 1.0,
+   "paraphrase.precision": 0.5729,
    "second.abstain.hit_rate": 0.0,
    "second.arabic.hit_rate": 1.0,
    "second.arabic.mrr": 1.0,
@@ -312,6 +440,26 @@
    "second.update.mrr": 0.8,
    "second.update.order": 0.75,
    "second.update.precision": 0.5083,
+   "single.hit_rate": 1.0,
+   "single.mrr": 0.8194,
+   "single.order": 1.0,
+   "single.precision": 0.641,
+   "update.hit_rate": 1.0,
+   "update.mrr": 1.0,
+   "update.order": 1.0,
+   "update.precision": 0.4795
+  },
+  "exact_for_the_record": {
+   "abstain.hit_rate": 0.2778,
+   "arabic.hit_rate": 1.0,
+   "arabic.mrr": 0.7917,
+   "arabic.precision": 0.625,
+   "assistant.hit_rate": 1.0,
+   "assistant.mrr": 0.6167,
+   "assistant.precision": 0.6319,
+   "fact.hit_rate": 1.0,
+   "fact.mrr": 1.0,
+   "fact.precision": 0.6458,
    "keyword.hit_rate": 1.0,
    "keyword.mrr": 1.0,
    "keyword.order": 1.0,
@@ -325,7 +473,7 @@
    "noise.precision": 0.381,
    "overall.hit_rate": 0.895,
    "overall.mrr": 0.8303,
-   "overall.precision": 0.6213,
+   "overall.precision": 0.6133,
    "overview.hit_rate": 0.9,
    "overview.mrr": 0.6667,
    "overview.order": 1.0,
@@ -334,6 +482,44 @@
    "paraphrase.mrr": 0.9375,
    "paraphrase.order": 1.0,
    "paraphrase.precision": 0.5729,
+   "second.abstain.hit_rate": 0.0,
+   "second.arabic.hit_rate": 1.0,
+   "second.arabic.mrr": 1.0,
+   "second.arabic.precision": 0.6111,
+   "second.assistant.hit_rate": 1.0,
+   "second.assistant.mrr": 0.8333,
+   "second.assistant.precision": 0.8333,
+   "second.fact.hit_rate": 1.0,
+   "second.fact.mrr": 1.0,
+   "second.fact.precision": 0.8333,
+   "second.keyword.hit_rate": 1.0,
+   "second.keyword.mrr": 1.0,
+   "second.keyword.precision": 1.0,
+   "second.mixed.hit_rate": 1.0,
+   "second.mixed.mrr": 0.9048,
+   "second.mixed.order": 1.0,
+   "second.mixed.precision": 0.5095,
+   "second.noise.hit_rate": 1.0,
+   "second.noise.mrr": 1.0,
+   "second.noise.precision": 1.0,
+   "second.overall.hit_rate": 0.8909,
+   "second.overall.mrr": 0.8448,
+   "second.overall.precision": 0.63,
+   "second.overview.hit_rate": 1.0,
+   "second.overview.mrr": 0.5,
+   "second.overview.precision": 0.2714,
+   "second.paraphrase.hit_rate": 0.8,
+   "second.paraphrase.mrr": 0.6,
+   "second.paraphrase.order": 0.0,
+   "second.paraphrase.precision": 0.5167,
+   "second.single.hit_rate": 1.0,
+   "second.single.mrr": 1.0,
+   "second.single.order": 1.0,
+   "second.single.precision": 0.8667,
+   "second.update.hit_rate": 1.0,
+   "second.update.mrr": 0.8,
+   "second.update.order": 0.75,
+   "second.update.precision": 0.5083,
    "single.hit_rate": 1.0,
    "single.mrr": 0.8194,
    "single.order": 1.0,
@@ -341,7 +527,7 @@
    "update.hit_rate": 1.0,
    "update.mrr": 1.0,
    "update.order": 1.0,
-   "update.precision": 0.5611
+   "update.precision": 0.4795
   }
  }
 }

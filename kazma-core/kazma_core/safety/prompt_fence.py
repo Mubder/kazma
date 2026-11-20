@@ -369,6 +369,14 @@ def sanitize_fence_source(source: str) -> str:
     )
 
 
+def carries_fence_marker(text: str | None) -> bool:
+    """Whether *text* holds a fence tag, a fence sentinel or a foreign role
+    marker, as written or in disguise: what :func:`format_untrusted_block`
+    would neutralize. A value meant to be stored and shown again (a memory
+    fact) never needs one."""
+    return bool(text) and _sanitize_fence_body(str(text)) != str(text)
+
+
 def is_override_delta(text: str) -> bool:
     """Return True if *text* contains a prompt-injection override marker.
 

@@ -285,6 +285,91 @@ def _turns() -> list[dict]:
     return json.loads(benchmark.EXTRACTION_PATH.read_text(encoding="utf-8"))["turns"]
 
 
+def _asked_today(recording: dict, prompt_sha256: str | None = None) -> dict:
+    """*recording* as if it had been asked today: its replies keyed by the
+    message today's extractor sends for each turn, labelled with today's
+    message form and *prompt_sha256* (today's prompt by default)."""
+    shape = benchmark._recording_shape(recording)
+    replies = {}
+    for turn in _turns():
+        # A turn added since the recording (``new_in``) was never asked: an
+        # answer that keeps nothing stands in for it.
+        old = benchmark._text_key(benchmark._recorded_message(turn["user"], shape))
+        reply = '{"beliefs": []}' if turn.get("new_in") else recording["replies"][old]
+        replies[benchmark._text_key(benchmark._llm_blob(turn["user"], **benchmark._turn_context(turn)))] = reply
+    return {**recording, "replies": replies, "message_shape": _today_shape(),
+            "prompt_sha256": prompt_sha256 or benchmark._extraction_prompt_sha256()}
+
+
+def _askings(recording: dict, n: int, *, complete: bool = True) -> dict:
+    """*recording* asked again *n* times, each asking answered as the first
+    was (a reply that reads the same, written a little differently, as a new
+    recording's would be: never the locked replies themselves), by a
+    recorder that finished (*complete*) or not (benchmark audit R2)."""
+    return {**recording, "askings": n, "complete": complete,
+            "replies": {k: [v + "\n" * (i + 1) for i in range(n)] for k, v in recording["replies"].items()}}
+
+
+def test_a_new_recording_needs_the_standard_askings_and_a_finished_recorder(tmp_path, monkeypatch):
+    """Benchmark audit R2: one asking has no spread, so a new recording is
+    locked only with ``ASKINGS_STANDARD`` askings a turn, and only once its
+    recorder finished. Negative control: today's one-reply file is refused."""
+    script = _build_script()
+    today = _asked_today(json.loads(json.dumps(_recording())))
+    path = tmp_path / "extraction_llm.json"
+    monkeypatch.setattr(script, "LLM_REPLIES", path)
+    for recording, refused in ((today, "5 askings a turn"),
+                               (_askings(today, benchmark.ASKINGS_STANDARD, complete=False), "stopped before"),
+                               (_askings(today, benchmark.ASKINGS_STANDARD - 1), "5 askings a turn")):
+        path.write_text(json.dumps(recording, ensure_ascii=False), encoding="utf-8")
+        _part, problems = script._extraction_lock(_locked_extraction(), new_recording="asked again")
+        assert any(refused in p for p in problems), (refused, problems)
+    path.write_text(json.dumps(_askings(today, benchmark.ASKINGS_STANDARD), ensure_ascii=False), encoding="utf-8")
+    part, problems = script._extraction_lock(_locked_extraction(), new_recording="asked again")
+    assert not problems, problems
+    assert part["recording"]["askings"] == benchmark.ASKINGS_STANDARD
+    # Five askings answered alike: no spread, and the same scores as one.
+    assert all(v == 0.0 for row in part["spread"].values() for v in row.values())
+    assert part["rests_on"]["llm"]["en"]["askings"] == part["rests_on"]["llm"]["en"]["turns"] * 5
+
+
+def test_a_score_is_the_total_over_the_askings_and_its_spread_how_they_differ():
+    """Benchmark audit R2: every asking scored; the total over them, and two
+    standard errors of their scores. Negative control: the first asking alone
+    is not the total."""
+    today = _asked_today(json.loads(json.dumps(_recording())))
+    a01 = next(t for t in _turns() if t["id"] == "a01")
+    key = benchmark._text_key(benchmark._llm_blob(a01["user"], **benchmark._turn_context(a01)))
+    asked = _askings(today, 2)
+    asked["replies"][key] = [today["replies"][key], '{"beliefs": []}']   # the second asking keeps nothing
+    report = benchmark.run_extraction_benchmark(llm_replies=asked)
+    first = benchmark.run_extraction_benchmark(llm_replies=today)
+    lang = a01["lang"]
+    in_a01 = benchmark.run_extraction_benchmark(
+        {"version": first["version"], "turns": [a01]}, llm_replies=today)["llm"][lang]["gold_found"]
+    assert in_a01 > 0
+    row, alone = report["llm"][lang], first["llm"][lang]
+    assert row["askings"] == 2 and row["gold"] == alone["gold"]
+    assert row["gold_found"] == 2 * alone["gold_found"] - in_a01
+    assert row["found"] == round(row["gold_found"] / (2 * row["gold"]), 4) < alone["found"]
+    assert report["llm_spread"][lang]["found"] > 0
+    assert report["llm_recording"]["askings"] == 2
+
+
+def _today_shape() -> int:
+    """The form of the message the deep pass sends today: a recording made
+    today says it."""
+    from kazma_core.memory.belief_extractor import MESSAGE_SHAPE
+
+    return MESSAGE_SHAPE
+
+
+def _pending() -> dict | None:
+    """The lock's declared prompt change waiting for its recording (framework
+    audit part C2; tests/test_memory_pending_recording.py), if any."""
+    return _locked_extraction().get("pending_recording")
+
+
 def test_the_extraction_dataset_is_what_the_builder_builds():
     built = _build_script().build_extraction()
     assert json.loads(benchmark.EXTRACTION_PATH.read_text(encoding="utf-8")) == json.loads(
@@ -309,7 +394,7 @@ def test_the_lock_counts_what_each_extraction_row_rests_on():
     from the lock, and the lock's count is the replay's (a hand-edited count
     fails here)."""
     locked = _locked_extraction()
-    report = benchmark.run_extraction_benchmark(llm_replies=_recording())
+    report = benchmark.run_extraction_benchmark(llm_replies=_recording(), pending=_pending())
     assert locked["rests_on"] == benchmark.extraction_rests_on(report)
     for lang, row in locked["rests_on"]["llm"].items():
         assert row["askings"] == row["turns"] * locked["recording"]["askings"], lang
@@ -320,7 +405,7 @@ def test_the_lock_counts_what_each_extraction_row_rests_on():
 
 def test_extraction_only_improves():
     locked = _locked_extraction()
-    report = benchmark.run_extraction_benchmark(llm_replies=_recording())
+    report = benchmark.run_extraction_benchmark(llm_replies=_recording(), pending=_pending())
     assert report["version"] == locked["version"], (
         "the extraction dataset changed: python scripts/memory_bench.py lock --rebaseline")
     problems = _recording_problems(report, locked)
@@ -352,14 +437,16 @@ def test_a_relabelled_recording_is_not_the_locked_one(tmp_path, monkeypatch):
     now compare the prompt the recording says it answered."""
     import hashlib
 
-    relabelled = _recording()
     monkeypatch.setattr("kazma_core.memory.belief_extractor._EXTRACT_SYSTEM", "Keep nothing.")
-    relabelled["prompt_sha256"] = hashlib.sha256(b"Keep nothing.").hexdigest()
+    # Relabelled, re-keyed by today's message, and with a reply that keeps
+    # nothing for each turn added since (the file the attack would need).
+    relabelled = _asked_today(_recording(), hashlib.sha256(b"Keep nothing.").hexdigest())
     locked = _locked_extraction()
     report = benchmark.run_extraction_benchmark(llm_replies=relabelled)
-    # Control: the replies are the locked ones, and so are the scores.
-    assert report["llm_recording"]["sha256"] == locked["recording"]["sha256"]
-    assert benchmark.extraction_scores(report) == locked["scores"]
+    # Control: every locked reply is there, and the old turns score as locked.
+    assert set(_recording()["replies"].values()) <= set(relabelled["replies"].values())
+    old = {k: v for k, v in benchmark.extraction_scores(report).items() if k.startswith("llm.")}
+    assert old and set(old) >= {k for k in locked["scores"] if k.startswith("llm.")}
     assert any("another prompt" in p for p in _recording_problems(report, locked))
 
     script = _build_script()
@@ -447,8 +534,9 @@ def test_a_reply_the_recording_does_not_hold_is_its_own_failure(monkeypatch):
     reply = json.dumps({"beliefs": []})
     # The benchmark's own idea of the message, which the precheck uses: here
     # it differs from what the extractor really sends.
-    monkeypatch.setattr(benchmark, "_llm_blob", lambda text: f"User: {text}\nDate: 2026-11-18\nAssistant: ")
+    monkeypatch.setattr(benchmark, "_llm_blob", lambda text, **_kw: f"User: {text}\nDate: 2026-11-18\nAssistant: ")
     replies = {"model": "stand-in", "prompt_sha256": benchmark._extraction_prompt_sha256(),
+               "message_shape": _today_shape(),
                "replies": {benchmark._text_key(benchmark._llm_blob(turn["user"])): reply}}
     with pytest.raises(benchmark.StaleRecordingError, match="no recorded reply for the message"):
         benchmark.run_extraction_benchmark({"version": 2, "turns": [turn]}, llm_replies=replies)
@@ -495,7 +583,7 @@ def test_a_changed_extraction_prompt_needs_a_new_recording(monkeypatch):
     """Negative control of the recording's identity: with the prompt replaced
     by "Keep nothing", every deep-pass score used to stay the same
     (benchmark audit F4). Now the run refuses."""
-    replies = _recording()
+    replies = _asked_today(_recording())
     monkeypatch.setattr("kazma_core.memory.belief_extractor._EXTRACT_SYSTEM", "Keep nothing.")
     with pytest.raises(benchmark.StaleRecordingError, match="prompt changed"):
         benchmark.run_extraction_benchmark(llm_replies=replies)
@@ -527,8 +615,10 @@ def test_a_second_recording_is_locked_only_on_purpose(tmp_path, monkeypatch):
     script = _build_script()
     recording = _recording()
     a01 = next(t for t in _turns() if t["id"] == "a01")
-    second = json.loads(json.dumps(recording))
+    # A recording of today's prompt (a declared change is answered by one).
+    second = _asked_today(json.loads(json.dumps(recording)))
     second["replies"][benchmark._text_key(benchmark._llm_blob(a01["user"]))] = '{"beliefs": []}'
+    second = _askings(second, benchmark.ASKINGS_STANDARD)
     path = tmp_path / "extraction_llm.json"
     path.write_text(json.dumps(second, ensure_ascii=False), encoding="utf-8")
     monkeypatch.setattr(script, "LLM_REPLIES", path)
@@ -612,6 +702,7 @@ def test_the_models_pass_replays_recorded_replies():
         {"subject": "user", "predicate": "lives_in", "predicate_type": "functional", "object": "دبي"}]},
         ensure_ascii=False)
     replies = {"model": "stand-in", "prompt_sha256": benchmark._extraction_prompt_sha256(),
+               "message_shape": _today_shape(),
                "replies": {benchmark._text_key(benchmark._llm_blob(turn["user"])): reply}}
     one = {"version": data["version"], "turns": [turn]}
     report = benchmark.run_extraction_benchmark(one, llm_replies=replies)
@@ -632,7 +723,7 @@ def test_the_models_pass_replays_recorded_replies():
 
 @pytest.fixture(scope="module")
 def writes_report():
-    return benchmark.run_write_scenarios(llm_replies=_recording())
+    return benchmark.run_write_scenarios(llm_replies=_recording(), pending=_pending())
 
 
 def _locked_writes() -> dict:
@@ -666,7 +757,8 @@ def test_every_write_category_is_asked_in_english_and_arabic():
     langs: dict[str, set[str]] = {}
     for scenario in data["scenarios"]:
         langs.setdefault(scenario["category"], set()).add(scenario["lang"])
-    assert set(langs) == {"update", "kept_as_said", "short", "someone_else", "quoted", "model_read"}
+    assert set(langs) == {"update", "kept_as_said", "short", "someone_else", "quoted", "model_read", "temporal",
+                          "replaces", "retraction"}
     assert all({"en", "ar"} <= found for found in langs.values()), langs
 
 
@@ -676,7 +768,7 @@ def test_the_write_scenarios_see_a_gate_that_lets_anything_replace_the_user(monk
     holds the gate fails."""
     assert "other-en-sister-moved" not in writes_report["failing"]
     monkeypatch.setattr("kazma_core.memory.provenance.may_overrule", lambda *_a, **_k: True)
-    open_gate = benchmark.run_write_scenarios(llm_replies=_recording())
+    open_gate = benchmark.run_write_scenarios(llm_replies=_recording(), pending=_pending())
     assert "other-en-sister-moved" in open_gate["failing"]
 
 
@@ -691,7 +783,7 @@ def test_a_write_scenario_says_why_it_failed(writes_report):
 def test_the_lock_refuses_a_write_scenario_that_stops_passing(monkeypatch):
     script = _build_script()
     old = json.loads(json.dumps(_locked_writes()))
-    _part, problems = script._writes_lock(old)
+    _part, problems = script._writes_lock(old, pending=_pending())
     assert not problems, problems
     # A run in which a scenario the lock holds as passing fails: refused.
     real = benchmark.run_write_scenarios
@@ -703,5 +795,5 @@ def test_the_lock_refuses_a_write_scenario_that_stops_passing(monkeypatch):
         return report
 
     monkeypatch.setattr(benchmark, "run_write_scenarios", one_fails)
-    _part, problems = script._writes_lock(old)
+    _part, problems = script._writes_lock(old, pending=_pending())
     assert any("now fail" in p for p in problems), problems

@@ -1597,6 +1597,26 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "ربما قلت: {value}",
         "en": "You may have said: {value}",
     },
+    "memory.console.change_ended_title": {
+        "ar": "انتهت حسب كلامك",
+        "en": "Ended from what you said",
+    },
+    "memory.console.change_no_longer": {
+        "ar": "لم تعد: {value}",
+        "en": "No longer: {value}",
+    },
+    "memory.console.change_pending_end_title": {
+        "ar": "هل انتهت هذه؟ أبقى Kazma المعلومة",
+        "en": "Has this ended? Kazma kept the fact",
+    },
+    "memory.console.change_heard_end": {
+        "ar": "ربما قلت إنها لم تعد صحيحة",
+        "en": "You may have said it is no longer true",
+    },
+    "memory.console.change_confirm_end": {
+        "ar": "نعم، انتهت",
+        "en": "Yes, it ended",
+    },
     "memory.console.change_undo": {
         "ar": "تراجع",
         "en": "Undo",

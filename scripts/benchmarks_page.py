@@ -73,6 +73,24 @@ def _count(n: int, word: str) -> str:
     return f"{n} {word}{'' if n == 1 else 's'}"
 
 
+def _other_search(pg: dict) -> str:
+    """The pgvector run's other search, as the lock keeps it for the record
+    (benchmark audit R7: exact against approximate is measured, not assumed)."""
+    mode = pg.get("mode") or "approximate"
+    other = "exact" if mode == "approximate" else "approximate"
+    held = pg.get(f"{other}_for_the_record") or {}
+    if not held:
+        return f"The {other} search was not measured in that run."
+    floors = pg.get("floors") or {}
+    differ = sorted(k for k in set(floors) | set(held) if floors.get(k) != held.get(k))
+    name = "Comparing every row (exact search)" if other == "exact" else "pgvector's own index (approximate search)"
+    if not differ:
+        return f"{name} scores the same on every measure."
+    return (f"{name} scores differently on {_count(len(differ), 'measure')}: "
+            f"{_pct(held.get('overall.hit_rate'))} hit rate, {_num(held.get('overall.mrr'))} MRR and "
+            f"{_pct(held.get('overall.precision'))} precision.")
+
+
 def _rests_on(extraction: dict, kind: str, lang: str) -> str:
     """What one extraction row rests on, from the lock (the owner's decision
     6): a model-pass row the lock does not count is not printed as a number."""
@@ -162,7 +180,9 @@ def _memory(data: dict) -> list[str]:
     if ex:
         recording = extraction.get("recording") or {}
         askings = int(recording.get("askings") or 1)
-        model_label = f"Model pass ({askings} asking{'' if askings == 1 else 's'} a turn)"
+        pending = extraction.get("pending_recording") or {}
+        model_label = (f"Model pass ({askings} asking{'' if askings == 1 else 's'} a turn"
+                       f"{', previous prompt' if pending else ''})")
         lines += [
             "### Learning facts from a conversation {#memory-facts}",
             "",
@@ -192,6 +212,14 @@ def _memory(data: dict) -> list[str]:
                 f"{askings} asking{'' if askings == 1 else 's'} a turn. Asked again, a model answers a little "
                 "differently, so a number from one asking can move by a few facts with nothing changed.",
             ]
+            if pending:
+                changes = len(pending.get("changes") or [])
+                lines.append(
+                    f"Kazma's extraction prompt has changed since that recording ({changes} "
+                    f"change{'' if changes == 1 else 's'} since {pending.get('since')}). The model-pass rows replay "
+                    "the recording through today's code, which checks that the code reading the model's replies "
+                    "still keeps what it kept; they do not measure the new prompt, which is measured when it is "
+                    "recorded.")
         lines.append("")
     pg = data.get("pgvector") or {}
     floors = pg.get("floors") or {}
@@ -200,7 +228,7 @@ def _memory(data: dict) -> list[str]:
                   f"{_pct(floors.get('overall.precision'))} precision")
         if pg.get("status") == "verified":
             lines += [f"With Postgres and pgvector as the memory store ({pg.get('run')}, {pg.get('mode')} "
-                      f"search), the same questions score {scores}.", ""]
+                      f"search), the same questions score {scores}. {_other_search(pg)}", ""]
         else:
             lines += [f"With Postgres and pgvector as the memory store, a run made by hand on 2026-10-14 scored "
                       f"{scores}. CI's pgvector job now measures it, with pgvector's own search and with every "

@@ -827,6 +827,87 @@ the gain and close all five measured faults. D, G and H do not depend on C
 and can run in other sessions beside it. B's benchmark work and C1 can run
 in two sessions at once: they touch different files.
 
+### 4.3 Status of part C2
+
+Added as each piece lands.
+
+- **Dates shown (F2 step 1), 2026-11-20: done.** Every recalled turn
+  carries its day, every fact the month it became true, and a single-valued
+  fact the value it replaced with its months, in the operator's zone
+  (`recall._date_hits`). Probe 4's shape, seeded with Paris in May and
+  London in October, now reads "[since Oct 2026] user lives in London;
+  before that: Paris (May 2026 to Oct 2026)" and "[28 May 2026] User: I
+  live in Paris". Gate: `tests/test_memory_recall_dates.py`; control:
+  recall without the dating step.
+- **Before the prompt changes, 2026-11-20: a declared change waits for its
+  recording.** `lock --prompt-changed "why"` names each change in the lock;
+  until the recording the model-pass rows replay the old recording through
+  today's code (a drift check) and the benchmarks page says they do not
+  measure the new prompt. The product and the benchmark build the deep
+  pass's message with one function, and a recording names its message form.
+  Gate: `tests/test_memory_pending_recording.py`.
+- **The date and the previous turn given to the extractor (F2 step 2),
+  2026-11-20: built, not yet recorded.** The memory worker gives the deep
+  pass the turn's day in the operator's zone and the chat's remembered turn
+  before it (context only); the model gives a fact's start (`since`),
+  which Kazma keeps beside the fact when it is a real date no later than
+  the turn, never in place of when it was said; recall shows it. The write
+  scenarios gain a `temporal` category (four, English and Arabic, passing
+  on written replies). What the model does with the new message is
+  measured by the recording. Gate: `tests/test_memory_extractor_context.py`.
+- **The subject's current facts and "replaces" (F4, second layer),
+  2026-11-20: built, not yet recorded.** The deep pass is shown the facts
+  held about the turn's people and things, numbered, and may say which one
+  a new fact replaces; Kazma takes it only for the same subject and a fact
+  still current, and the trust gate still decides. "hana occupation pilot"
+  then "hana works_as captain, replaces f1" leaves Hana a captain, not
+  both. The write scenarios gain a `replaces` category (six, English and
+  Arabic, passing on written replies). Gate: `tests/test_memory_held_facts.py`.
+- **Retractions, 2026-11-20: built, not yet recorded.** The deep pass may
+  say a fact stopped being true ("I stopped", "no longer"); Kazma ends it
+  instead of writing it. The model's own reading ends at once; a fact the
+  user stated is asked about first ("Has this ended?", only when the value
+  stands in the user's own words with no one else named), and "Yes, it
+  ended" records an ending the user can undo. The quick pass reads no
+  endings. The write scenarios gain a `retraction` category (seven, English
+  and Arabic). Gates: `tests/test_memory_retractions.py`, the browser test
+  of the change list.
+- **The fenced deep-pass input (F10, its second half), 2026-11-20: built,
+  not yet recorded.** The turn before, the facts held and the turn itself
+  travel inside one data fence; a fact carrying an injection payload or a
+  fence marker is refused; a value only the reply holds is Kazma's reading
+  when recalled. A poisoned reply stores nothing. Gate:
+  `tests/test_memory_deep_pass_fenced.py`.
+- **The user's spelling asked for (F1's third fault), 2026-11-20: built, not
+  yet recorded.** The prompt asks for an object as the user wrote it, and
+  Kazma keeps the user's spelling whatever the model writes: the words of
+  the message that are the same value, folded. "kuwait_city" from "We moved
+  to Kuwait City" is stored "Kuwait City", still the model's reading. The
+  old recording, replayed through it, scores the same. Gate:
+  `tests/test_memory_users_spelling.py`.
+- **Swarm results (F10, its first half), 2026-11-20: done.** A swarm
+  task's result names the chat that started it and its space; a chat kept
+  out of memory stores nothing from its tasks, and forgetting the chat
+  takes them. No prompt change. Gate:
+  `tests/test_swarm_results_follow_their_chat.py`. Not done: the weekly
+  summary still groups a swarm result with the user's turns (reported, not
+  read).
+- **The recording's machinery (benchmark audit R2), 2026-11-20: built, no
+  call made.** A recording holds five askings a turn; every asking is
+  scored, a score is the total over them, and its spread is kept in the
+  lock. The recorder asks through the product's own call, saves after every
+  reply, goes on where it stopped and never past its call limit; a new
+  recording is locked only with five askings a turn and finished. Gates:
+  `tests/test_memory_extraction_record.py` and the askings cases in
+  `tests/test_memory_benchmark.py`.
+- **What the recording asks (extraction dataset v3), 2026-11-20: built, not
+  yet recorded.** Ten turns, English and Arabic, ask what C2 changed: a
+  start from the turn's day, the turn before as context only, a held fact
+  replaced, a fact ended, planted text kept out. The model's pass scores
+  each (`dated`, `replaced`, `ended`); until the recording they wait, named.
+  The quick pass finds less on them (it reads no dates or held facts) and
+  keeps nothing it should not. Gate: `tests/test_memory_benchmark_c2_turns.py`.
+
 What I would not do:
 
 - **Not a graph database as the source of truth.** Zep's design needs one;

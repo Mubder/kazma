@@ -122,7 +122,7 @@ def _deep_pass(mem, monkeypatch, *, value_first: str | None, then: str, model: l
                    created_at=turn_time)
 
     async def llm(user_text, assistant_text="", *, use_llm=True, ignore_filler=False, vocabulary=None,
-                  entities=None):
+                  entities=None, said_on=None, previous=None, held=None):
         return ([dict(b, confidence=0.9, importance=4) for b in model],
                 {"skipped_filler": False, "source": "llm", "applied": 0, "rejected": 0, "actions": []})
 
@@ -281,7 +281,7 @@ def test_a_first_reading_is_the_models_and_asks_nothing(mem, monkeypatch, then, 
     from kazma_core.memory import changes
 
     assert _deep_pass(mem, monkeypatch, value_first=None, then=then,
-                      model=[_fact("lives_in", model)]) == [(model, "llm_inferred")]
+                      model=[_fact("lives_in", model)]) == [(spelled, "llm_inferred")]
     assert _waiting(mem) == []
     [reading] = changes.list_changes(mem.db, tenant_id="default")
     assert (reading["kind"], reading["new_value"]) == ("reading", spelled)
@@ -336,7 +336,7 @@ def _questions(mem) -> int:
 
 def test_a_turn_of_five_first_readings_asks_nothing(mem, monkeypatch):
     _deep_pass(mem, monkeypatch, value_first=None, then=FIVE_SAID, model=FIVE_FACTS)
-    assert _facts(mem, "lives_in") == [("rotterdam", "llm_inferred")]
+    assert _facts(mem, "lives_in") == [("Rotterdam", "llm_inferred")]
     assert _waiting(mem) == [] and _questions(mem) == 0
 
 
@@ -387,7 +387,7 @@ def test_a_plural_alias_is_a_list_of_its_own(mem, monkeypatch):
     _deep_pass(mem, monkeypatch, value_first="Kuwait", then="We have homes in Dubai and Oman.",
                model=[_fact("homes", "dubai"), _fact("homes", "oman")])
     assert _facts(mem, "lives_in") == [("Kuwait", "user_stated")]
-    assert sorted(_facts(mem, "homes")) == [("dubai", "llm_inferred"), ("oman", "llm_inferred")]
+    assert sorted(_facts(mem, "homes")) == [("Dubai", "llm_inferred"), ("Oman", "llm_inferred")]
     assert belief_mutation._classify_predicate("employers", "functional") == "set"
 
 
@@ -466,7 +466,7 @@ def test_control_without_the_name_table_another_name_stands_beside(mem, monkeypa
     _deep_pass(mem, monkeypatch, value_first="Kuwait", then="We moved to Dubai last month.",
                model=[_fact("home_city", "dubai")])
     assert _facts(mem, "lives_in") == [("Kuwait", "user_stated")] and _facts(mem, "home_city") == [
-        ("dubai", "llm_inferred")]
+        ("Dubai", "llm_inferred")]
     assert _waiting(mem) == []
 
 
@@ -480,7 +480,7 @@ def test_control_without_not_me_the_value_is_filed_again(mem, monkeypatch):
     monkeypatch.setattr(changes, "user_said_not_me", lambda conn, **kw: False)
     _deep_pass(mem, monkeypatch, value_first=None, then="Back in Dubai for the week.",
                model=[_fact("lives_in", "dubai")])
-    assert _facts(mem, "lives_in") == [("dubai", "llm_inferred")]
+    assert _facts(mem, "lives_in") == [("Dubai", "llm_inferred")]
 
 
 # ── one value written two ways ───────────────────────────────────────────

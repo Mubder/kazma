@@ -39,11 +39,17 @@ async def _index_worker_l4_memory(
     prompt: str,
     output: str,
     task_id: str = "",
+    chat: str = "",
+    tenant_id: str = "",
 ) -> None:
     """Best-effort memory index for a completed swarm worker.
 
     Index a compact prompt+output snippet as a V2 ``swarm_result`` episode
     under the worker name so subsequent recall for that worker has content.
+    *chat* is the conversation that started the task (its
+    ``source_thread_id``): a chat kept out of memory keeps its tasks' results
+    out too, and forgetting the chat takes them (the memory framework
+    audit's F10). *tenant_id* is the task's space.
     """
     name = (worker_name or "default").strip() or "default"
     body = (output or "").strip()
@@ -76,9 +82,17 @@ async def _index_worker_l4_memory(
 
         from kazma_core.memory.swarm_bridge import store_swarm_result
 
-        await _aio.to_thread(store_swarm_result, name, task_id or "", snippet, meta)
+        await _aio.to_thread(store_swarm_result, name, task_id or "", snippet, meta, tenant_id or None,
+                             chat=chat or None)
     except Exception:
         logger.debug("[SwarmEngine] V2 swarm_result store failed for %s", name, exc_info=True)
+
+
+def _source_chat(context: Any) -> str:
+    """The conversation that started the task (``source_thread_id``), or ``""``."""
+    metadata = getattr(context, "metadata", None)
+    chat = metadata.get("source_thread_id") if isinstance(metadata, dict) else None
+    return chat if isinstance(chat, str) else ""
 
 
 class _TaskOfNoSpace(RuntimeError):
@@ -510,6 +524,8 @@ async def dispatch_worker(
                         prompt=prompt or "",
                         output=str(worker_result.output or ""),
                         task_id=getattr(context, "task_id", "") if context is not None else "",
+                        chat=_source_chat(context),
+                        tenant_id=_task_space,
                     )
                 )
                 _MEMORY_INDEX_TASKS.add(_idx_task)

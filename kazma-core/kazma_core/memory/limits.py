@@ -36,6 +36,10 @@ import logging
 
 __all__ = [
     "DEEP_PASS_ANSWER",
+    "DEEP_PASS_HELD_FACTS",
+    "DEEP_PASS_HELD_VALUE",
+    "DEEP_PASS_PREVIOUS_ANSWER",
+    "DEEP_PASS_PREVIOUS_QUESTION",
     "DEEP_PASS_QUESTION",
     "EMBED_TEXT_CHARS",
     "EPISODE_TEXT_MAX",
@@ -125,6 +129,18 @@ MEMORY_READ_PAGE = 8000
 #: longer message is read only by ``own_words.last_words``.
 DEEP_PASS_QUESTION = 1500
 DEEP_PASS_ANSWER = 800
+
+#: The turn before, given to the deep pass to understand this one ("yes,
+#: that one", "she moved too"; framework audit F2 step 2): its question and
+#: its answer, bounded smaller (it is context, never a source of facts).
+DEEP_PASS_PREVIOUS_QUESTION = 600
+DEEP_PASS_PREVIOUS_ANSWER = 400
+
+#: The facts Kazma holds about a turn's people and things, shown to the deep
+#: pass so it can say which one a new fact replaces (framework audit F4,
+#: second layer): at most this many, each value cut to this length.
+DEEP_PASS_HELD_FACTS = 30
+DEEP_PASS_HELD_VALUE = 200
 
 
 def episode_text(text: str | None, *, field: str = "text") -> str:

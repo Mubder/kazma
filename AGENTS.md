@@ -1988,6 +1988,19 @@ four injected were noise.
   not yet in the remote index was invisible to meaning search. Both are
   searched and merged by id; the local store's score wins (it is the source
   of truth).
+- **The block carries the dates Kazma holds** (2026-11-20, framework audit
+  F2 step 1, part C2). `recall` ends with `recall._date_hits`: each turn
+  gets its day (`said_on`, from the candidate's `at`), each fact the month
+  it became true (`since`, its `valid_from`), and a functional or state
+  fact the value it replaced with its months (`before`, read through
+  `supersedes_id` in the fact's tenant; a forgotten value, `object = ''`,
+  is never shown). In the operator's zone (`_memory_zone`:
+  `resolve_cron_zone`). `_dated_line` puts them BEFORE the text ("[since
+  Oct 2026] user lives in London; before that: Paris (May 2026 to Oct
+  2026)"), after the reading tag, one line. No model, no new storage; a
+  read that fails leaves the dates out with a WARNING. Gate:
+  `tests/test_memory_recall_dates.py` (recall without the dating step as
+  the negative control).
 - **One fact, one predicate name (W6, `memory/predicates.py`).** The
   extractor names predicates freely; under two names a single-valued fact is
   never superseded (live 2026-09-27: "daily_tweet_cap" 16 and
@@ -2042,13 +2055,26 @@ four injected were noise.
   new. The page prints the last look apart. Gate:
   `tests/test_memory_benchmark_sealed.py` (a planted set; a test that scores
   the sealed file as the negative control). An extraction benchmark
-  (`benchmark_data/extraction.json`, `run_extraction_benchmark`: 30 turns
+  (`benchmark_data/extraction.json`, `run_extraction_benchmark`: 40 turns
   EN/AR/mixed; the heuristic pass in CI, the model's deep pass from
   recorded replies, `tests/fixtures/memory_bench/extraction_llm.json`,
-  recorded with `scripts/memory_extraction_record.py --out <fixture>` run by
-  an install's own Python (it loads that install's `.env`; `memory_bench.py`
-  stays env-free) -- it costs a call a turn; a turn with no recording is an
-  error, never "the model was down"). **Scored by value since 2026-11**
+  recorded with `scripts/memory_extraction_record.py --out <fixture>
+  --limit N` run by an install's own Python (it loads that install's
+  `.env`; `memory_bench.py` stays env-free) -- it costs a call a turn and
+  asking; a turn with no recording is an error, never "the model was
+  down"). **Dataset v3 asks what part C2 changed** (2026-11-20,
+  `memory_bench.EXTRACTION_C2_TURNS`, ten turns EN/AR, `new_in: 3`): a
+  fact's start from the turn's day, the turn before read for context only,
+  a held fact replaced, a fact ended, planted text kept out. A gold fact
+  names what it asks (`since`, `replaces`, `ended`) and the model's pass
+  scores it per language (`dated`, `replaced`, `ended`; `_score_c2`); a
+  fact said to have ended finds only an ending (`_value_matches`). The
+  drift check leaves those turns out, named (`llm_waiting`), until the
+  recording. A relabel is a file holding every locked reply
+  (`reply_hashes`), re-keyed or extended. Gate:
+  `tests/test_memory_benchmark_c2_turns.py` (answers with no start,
+  replacement or ending, and a scorer that ignores `ended`, as negative
+  controls). **Scored by value since 2026-11**
   (dataset v2, benchmark audit R1): per pass and language `found` (a gold
   fact's whole value -- equal, or whole words of it -- under its subject, or
   the relation from the other side, under any name that does not turn it
@@ -2062,7 +2088,22 @@ four injected were noise.
   is refused (`StaleRecordingError`, also at replay time); a message the
   recording holds no reply for is its own failure, never "the model is
   down". The gate and the lock compare the locked prompt hash too: the same
-  replies relabelled as another prompt's are refused, flag or not. The lock
+  replies relabelled as another prompt's are refused, flag or not, also
+  when they are keyed by another message (`replies_sha256`, the replies
+  alone, `_same_replies`). **Several askings a turn** (benchmark audit R2,
+  2026-11-20): a recording holds a list of replies a turn; every asking is
+  scored, a score is the total over the askings (`_total_over_askings`) and
+  its spread two standard errors of theirs (`_spread`, kept in the lock as
+  `spread`); a new recording is locked only with `ASKINGS_STANDARD` (5)
+  askings a turn and a finished recorder (`memory_bench._new_recording_problems`);
+  the write scenarios replay the first asking. The recorder
+  (`record_llm_extraction`, `scripts/memory_extraction_record.py --out PATH
+  --limit N`) asks through the product's own `_llm_extract`, every turn's
+  first asking before any second, saves after every reply, continues its
+  file without asking again what it has, and stops at its call limit
+  (`complete`: false). Gates: `tests/test_memory_extraction_record.py`, the
+  askings cases in `tests/test_memory_benchmark.py` (today's one-reply file
+  refused as a new recording, the first asking alone as the controls). The lock
   (`_extraction_lock`): the quick pass is a ratchet; the model's pass
   compares exactly on the same recording, a new recording is locked only with
   `lock --new-recording "why"` and replaces the old scores exactly (written
@@ -2070,7 +2111,23 @@ four injected were noise.
   resets the extraction part when its dataset version changes. Gates in
   `tests/test_memory_benchmark.py`, each with its negative control (a
   renamed extractor keeps `found`; "Keep nothing" as the prompt is refused;
-  the old max-of-two floor). **Write scenarios** (`benchmark_data/writes.json`,
+  the old max-of-two floor). **A prompt change waits for its recording,
+  declared** (2026-11-20, framework audit part C2: its prompt changes land
+  first and are recorded once, with the owner's yes). `lock --prompt-changed
+  "why"` writes `extraction.pending_recording` (the prompt and message form
+  it waits for, the recording it replaces, each change dated with its
+  reason; `memory_bench._declare_prompt_change`); until a recording of
+  today's prompt ends it, `benchmark._check_recording` answers `previous` and the
+  model's pass and the write scenarios replay the old recording by turn
+  through today's parser and scorer (a drift check, compared exactly), and
+  the benchmarks page says those rows do not measure the new prompt. An
+  undeclared change is refused as before. The deep pass's message has one
+  builder for the product and the benchmark (`belief_extractor.turn_message`),
+  and a recording says its form (`message_shape`; none is form 1); a new
+  form is `belief_extractor.MESSAGE_SHAPE` bumped and declared like a prompt
+  change. Gate: `tests/test_memory_pending_recording.py` (an undeclared
+  change and a sanitizer that drops every fact as negative controls).
+  **Write scenarios** (`benchmark_data/writes.json`,
   `run_write_scenarios`, 2026-11): a few turns of one chat through the write
   path in the live order (the quick pass, `extract_and_apply_beliefs_sync`;
   then the deep pass, `extract_beliefs_for_turn` with the names in use and
@@ -2132,11 +2189,14 @@ four injected were noise.
   from the HNSW index) and with index scans off on the test's own connection
   (`EXACT_OPTIONS`; the product is unchanged), and prints both
   (`PGVECTOR_MEASUREMENT`, shown by `-rP`). The product's mode is held to
-  the lock's `pgvector` floors both ways; floors not marked `verified` (the
-  run made by hand on 2026-10-14, until a CI run is locked) report a
-  difference instead of failing, since every CI job is a required check.
+  the lock's `pgvector` floors both ways; floors not marked `verified` (as
+  the run made by hand on 2026-10-14 was) report a difference instead of
+  failing, since every CI job is a required check.
   `memory_bench.py lock-pgvector --from LOG --run "<the run>"` locks the
-  floors from a run's measurement and marks them verified. Gates:
+  floors from a run's measurement and marks them verified, keeping the
+  other search's scores (`exact_for_the_record`), which the benchmarks page
+  compares. Locked from CI run 44732367729 (2026-11-20): exact and
+  approximate scored the same on every measure. Gates:
   `tests/test_postgres_suite.py` (pytest alone calls the planted skip
   green: the negative control) and `tests/test_memory_benchmark_pg.py`'s
   rules without a database (the same lower run fails against verified floors
@@ -2207,6 +2267,67 @@ four injected were noise.
   gets the user's trust by itself, below.) Gate:
   `tests/test_memory_event_time.py::test_every_late_writer_passes_the_turn_time`
   (every call in the late-writer modules names its time).
+- **The deep pass is told the turn's day and the turn before it**
+  (2026-11-20, framework audit F2 step 2, part C2). The memory worker
+  (`worker_bootstrap._turn_context`, off the loop) gives
+  `belief_extractor.turn_message` the turn's day in the operator's zone
+  (`said_on_iso`, `_turn_zone`) and the chat's remembered turn before it
+  (same tenant and session, never a forgotten one), bounded by
+  `limits.DEEP_PASS_PREVIOUS_QUESTION` / `DEEP_PASS_PREVIOUS_ANSWER`; the
+  prompt says to learn only from "This turn" and to give a fact's start as
+  `since` worked out from the day. `_since_value` keeps only a real date
+  (`YYYY`, `YYYY-MM`, `YYYY-MM-DD`, any digits, from 1900; never words),
+  `_started_on` drops one after the turn, and `mutate_belief(started=)`
+  keeps it in the row's metadata (`started`) -- never as `valid_from`, so
+  validity and supersession still follow the order facts were said (W1).
+  The same fact again gains a start it lacks, never over one it holds, and
+  keeps its source. Recall shows it ("[since Apr 2026]"; else the month it
+  was said). Message form 2 (`MESSAGE_SHAPE`); declared in the lock until
+  the recording. Gates: `tests/test_memory_extractor_context.py` (the
+  worker without the context and a writer that drops the start as negative
+  controls), the write scenarios' `temporal` category.
+- **The deep pass is shown the facts held and may say which one a new fact
+  replaces** (2026-11-20, framework audit F4's second layer, part C2).
+  `belief_extractor.held_facts` reads the current facts about the turn's
+  people and things -- the speaker's own first (`user`; their entry in a
+  shared space, shown as `user`), then each subject whose words the turn
+  holds (`query_terms.content_terms`), never another member's entry,
+  another tenant's or a forgotten fact -- at most
+  `limits.DEEP_PASS_HELD_FACTS`, values cut at `DEEP_PASS_HELD_VALUE`,
+  numbered `f1`... in the message (form 3). A fact whose `replaces` names
+  one (`_REF_RE`) goes by that fact's name and kind (`_take_replaces`) only
+  for the same subject (after filing) and only while it is still current;
+  the trust gate then decides as for any change. A replaced list entry is
+  closed when `provenance.may_overrule` lets the source change it, else
+  counted `replace_refused` (`_close_replaced_entry`; on a private database
+  no mirror or graph call). The worker passes the same list to the message
+  and the write. Gates: `tests/test_memory_held_facts.py` ("replaces"
+  ignored as the negative control), the write scenarios' `replaces`
+  category.
+- **The deep pass reads the turn inside a data fence** (2026-11-20, the
+  framework audit's F10, part C2). `turn_message` (form 4) puts the turn
+  before, the facts held and the turn itself inside one
+  `prompt_fence.format_untrusted_block` (source `memory_turn`): a fence tag,
+  sentinel or foreign role marker planted in any of them is neutralised,
+  and Kazma's own lines (the day, the names in use) stand outside it. The
+  prompt says the fence is data and the reply's claims are not the user's.
+  `_sanitize_belief` refuses a fact whose text carries an override phrase,
+  an injection payload (`filter_injection`) or a fence marker
+  (`prompt_fence.carries_fence_marker`), as written or in disguise
+  (`_carries_injection`); a fact the model read stays the model's, tagged
+  "(Kazma's reading)" when recalled. Gate: `tests/test_memory_deep_pass_fenced.py`
+  (the fence taken out, and the screen taken out, as negative controls).
+- **A value is kept in the user's own spelling** (2026-11-20, the framework
+  audit's F1, its third fault; part C2). The prompt asked for slugs, and
+  recall said "user name is layla" for the user's "Layla". The prompt now
+  asks for an object as the user wrote it, and `_apply_beliefs_to_v2`
+  keeps it whatever the model wrote (`belief_extractor._users_spelling`:
+  the run of the message's words that is the same value, folded as
+  `belief_mutation._same_value` folds; up to `_SPELLING_WORDS` words; a
+  value joined otherwise, "Kuwait-City", is left as the model wrote it).
+  Trust is not touched: the fact stays the model's reading. Subjects stay
+  slugs. Gate: `tests/test_memory_users_spelling.py` (the apply step
+  without the respelling as the negative control).
 - The quick (heuristic) pass reads Arabic and mixed text too
   (`memory/arabic_facts.py`, 2026-10-14: the extraction benchmark measured
   0.00 Arabic recall). Token rules from the grammar, compared folded: a
@@ -2522,6 +2643,31 @@ four injected were noise.
   reached by the sidebar, `tests/e2e/test_memory_changes_browser.py` (an
   undo, a confirmation and Kazma's reading answered, the database read
   after each, EN/AR).
+- **A fact said to have stopped being true is ended, by the same rules**
+  (2026-11-20, the framework audit's part C2, retractions). The deep pass
+  may return a fact with `"ended": true` (strictly the JSON true), naming
+  the held fact it ends ("replaces", F4's numbers) or matching a current
+  fact of the same subject, same-words name and value
+  (`belief_extractor._apply_ending`, `_current_fact`); it is never written
+  as a new fact. `belief_mutation.end_belief` ends it under the mutation
+  lock in one transaction (`valid_until` = when it was said; the mirror
+  and graph copies follow from their outboxes), and the trust gate
+  decides: the model's own reading ends at once, a fact the user stated
+  answers `blocked: lower_trust_source`. That is put to the user
+  (`changes.record_pending_end`) only when the value stands in the user's
+  own words with no one else named (`clause_subject.ends_in_own_words`:
+  `names_no_one_else` with the denial allowed, since an ending denies; a
+  question, a quote or someone else's ending asks nothing). An ending is a
+  change with no new value (`changes.is_ending`): "Yes, it ended" (confirm)
+  ends the fact at the user's trust and records an ending update, which
+  Undo reverses; the page ("Has this ended?", "Ended from what you said",
+  "No longer: ..."; catalog `memory.console.change_*end*`, EN/AR), the
+  turn note and `/memory changes` say it. The quick pass reads no endings:
+  the user's own words are asked about, as a correction only the model
+  reads. Gates: `tests/test_memory_retractions.py` (the ending ignored, and
+  the statement rule on a denial, as negative controls), the write
+  scenarios' `retraction` category, and `tests/e2e/test_memory_changes_browser.py`
+  (an ending confirmed and undone on the page, EN/AR).
 - The heuristic reads "I work at/for X" as `works_at` (it shared a pattern
   with "I live in" and stored the employer as `lives_in`), and the local
   embedder remembers short texts (<= 256 characters, 4,096 of them): each
@@ -2639,6 +2785,17 @@ has decided otherwise, and every path that rebuilds memory must respect it.
   a test chat's token ("pebble-live") outlived the chat as a current fact.
   Gate: `tests/test_memory_tool_provenance.py` (every memory write in the
   agent's tool code names its chat).
+- **A swarm task's result follows the chat that started it** (2026-11-20,
+  the framework audit's F10, part C2). The dispatch hands the task's
+  conversation (`source_thread_id`, `worker_dispatch._source_chat`) and its
+  space to `swarm_bridge.store_swarm_result(chat=)`: the result names its
+  chat (`metadata.chat`), a chat kept out of memory stores nothing (the
+  forget ledger asked for the chat too), and forgetting the chat takes it
+  (`forget._chat_notes`, with no turn; a turn forgotten alone leaves it).
+  A task no chat started is the worker's alone. Gate:
+  `tests/test_swarm_results_follow_their_chat.py` (the dispatch without
+  the chat, and a forget that does not look for results, as negative
+  controls).
 - **Compaction stores nothing in memory** (2026-09-27). Its summary was a
   second record of the chat under the session "compaction" and the tenant
   "default", out of reach of both controls above; every turn already

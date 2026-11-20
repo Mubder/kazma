@@ -1690,6 +1690,8 @@ def converge(conn: sqlite3.Connection | None = None) -> dict[str, Any]:
 
 #: The session the agent's saved notes live in (the memory_store tool).
 _NOTES_SESSION = "memory_store"
+#: The source a swarm task's result is stored under (``swarm_bridge``).
+_SWARM_RESULT = "swarm_result"
 
 
 def _chat_notes(
@@ -1697,15 +1699,19 @@ def _chat_notes(
 ) -> list[str]:
     """The agent's notes the memory tools wrote during the chat *keys* (in its
     *turn*, when given): each names the chat (``metadata.chat`` /
-    ``chat_turn``, 2026-09-27). *tenant_id* None: any tenant."""
+    ``chat_turn``, 2026-09-27). With no *turn*, also the results of the swarm
+    tasks the chat started (``swarm_bridge``, the memory framework audit's
+    F10): they name the chat and no turn. *tenant_id* None: any tenant."""
     if not keys:
         return []
     marks = ",".join("?" for _ in keys)
     sql = (
-        "SELECT id FROM episodes WHERE session_id = ? AND tier != ? AND json_valid(metadata_json) "
+        "SELECT id FROM episodes WHERE tier != ? AND json_valid(metadata_json) "
+        "AND (session_id = ? OR (session_id LIKE 'swarm:%' "
+        f"AND json_extract(metadata_json, '$.source') = '{_SWARM_RESULT}')) "
         f"AND json_extract(metadata_json, '$.chat') IN ({marks})"
     )
-    params: list[Any] = [_NOTES_SESSION, FORGOTTEN_TIER, *keys]
+    params: list[Any] = [FORGOTTEN_TIER, _NOTES_SESSION, *keys]
     if turn is not None:
         sql += " AND json_extract(metadata_json, '$.chat_turn') = ?"
         params.append(int(turn))

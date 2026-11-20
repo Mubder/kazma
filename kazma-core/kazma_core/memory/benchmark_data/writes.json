@@ -1,5 +1,5 @@
 {
- "version": 4,
+ "version": 7,
  "scenarios": [
   {
    "id": "update-en-moved",
@@ -1655,6 +1655,719 @@
     {
      "subject": "user",
      "object": "Lyon"
+    }
+   ]
+  },
+  {
+   "id": "temporal-en-started",
+   "category": "temporal",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "I started working at Zain in March.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "works_at",
+       "predicate_type": "functional",
+       "object": "Zain",
+       "confidence": 0.9,
+       "since": "2026-03"
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "Zain",
+     "started": "2026-03"
+    }
+   ],
+   "not_current": []
+  },
+  {
+   "id": "temporal-ar-started",
+   "category": "temporal",
+   "lang": "ar",
+   "turns": [
+    {
+     "user": "بديت أشتغل في زين من شهر مارس.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "works_at",
+       "predicate_type": "functional",
+       "object": "زين",
+       "confidence": 0.9,
+       "since": "2026-03"
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "زين",
+     "started": "2026-03"
+    }
+   ],
+   "not_current": []
+  },
+  {
+   "id": "temporal-en-future-start",
+   "category": "temporal",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "I have lived in Lisbon for years.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "Lisbon",
+       "confidence": 0.9,
+       "since": "2031-01"
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "Lisbon",
+     "started": null
+    }
+   ],
+   "not_current": []
+  },
+  {
+   "id": "temporal-ar-words-not-a-date",
+   "category": "temporal",
+   "lang": "ar",
+   "turns": [
+    {
+     "user": "ساكن في الدوحة من سنتين.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "الدوحة",
+       "confidence": 0.9,
+       "since": "قبل سنتين"
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "الدوحة",
+     "started": null
+    }
+   ],
+   "not_current": []
+  },
+  {
+   "id": "replaces-en-job",
+   "category": "replaces",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "My sister Hana is a pilot.",
+     "written": [
+      {
+       "subject": "hana",
+       "predicate": "occupation",
+       "predicate_type": "functional",
+       "object": "pilot",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "Hana is a captain now.",
+     "written": [
+      {
+       "subject": "hana",
+       "predicate": "works_as",
+       "predicate_type": "functional",
+       "object": "captain",
+       "confidence": 0.9,
+       "replaces": {
+        "subject": "hana",
+        "predicate": "occupation"
+       }
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "hana",
+     "object": "captain",
+     "predicate": "occupation"
+    }
+   ],
+   "not_current": [
+    {
+     "subject": "hana",
+     "object": "pilot"
+    }
+   ]
+  },
+  {
+   "id": "replaces-ar-job",
+   "category": "replaces",
+   "lang": "ar",
+   "turns": [
+    {
+     "user": "أختي هند طيارة.",
+     "written": [
+      {
+       "subject": "هند",
+       "predicate": "occupation",
+       "predicate_type": "functional",
+       "object": "طيارة",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "هند صارت كابتن.",
+     "written": [
+      {
+       "subject": "هند",
+       "predicate": "works_as",
+       "predicate_type": "functional",
+       "object": "كابتن",
+       "confidence": 0.9,
+       "replaces": {
+        "subject": "هند",
+        "predicate": "occupation"
+       }
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "هند",
+     "object": "كابتن",
+     "predicate": "occupation"
+    }
+   ],
+   "not_current": [
+    {
+     "subject": "هند",
+     "object": "طيارة"
+    }
+   ]
+  },
+  {
+   "id": "replaces-en-other-name",
+   "category": "replaces",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "Tea is my favourite drink.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "favorite_drink",
+       "predicate_type": "functional",
+       "object": "tea",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "These days my morning drink is coffee.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "favorite_morning_drink",
+       "predicate_type": "functional",
+       "object": "coffee",
+       "confidence": 0.9,
+       "replaces": {
+        "subject": "user",
+        "predicate": "favorite_drink"
+       }
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "coffee",
+     "predicate": "favorite_drink"
+    }
+   ],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "tea"
+    },
+    {
+     "subject": "user",
+     "object": "coffee",
+     "predicate": "favorite_morning_drink"
+    }
+   ]
+  },
+  {
+   "id": "replaces-ar-list-entry",
+   "category": "replaces",
+   "lang": "ar",
+   "turns": [
+    {
+     "user": "أستخدم فيم للبرمجة.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "uses_tool",
+       "predicate_type": "set",
+       "object": "فيم",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "تركت فيم وصرت أستخدم إيماكس.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "uses_tool",
+       "predicate_type": "set",
+       "object": "إيماكس",
+       "confidence": 0.9,
+       "replaces": {
+        "subject": "user",
+        "predicate": "uses_tool"
+       }
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "إيماكس"
+    }
+   ],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "فيم"
+    }
+   ]
+  },
+  {
+   "id": "replaces-en-other-subject-refused",
+   "category": "replaces",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "My sister Hana is a pilot.",
+     "written": [
+      {
+       "subject": "hana",
+       "predicate": "occupation",
+       "predicate_type": "functional",
+       "object": "pilot",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "Unlike Hana, I am a teacher.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "occupation",
+       "predicate_type": "functional",
+       "object": "teacher",
+       "confidence": 0.9,
+       "replaces": {
+        "subject": "hana",
+        "predicate": "occupation"
+       }
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "hana",
+     "object": "pilot"
+    },
+    {
+     "subject": "user",
+     "object": "teacher"
+    }
+   ],
+   "not_current": []
+  },
+  {
+   "id": "replaces-ar-users-fact-asked",
+   "category": "replaces",
+   "lang": "ar",
+   "turns": [
+    {
+     "user": "ساكن في الكويت.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "الكويت",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "رحنا الدوحة الشهر اللي طاف.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "residence",
+       "predicate_type": "functional",
+       "object": "الدوحة",
+       "confidence": 0.9,
+       "replaces": {
+        "subject": "user",
+        "predicate": "lives_in"
+       }
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "الكويت",
+     "trust": "user"
+    }
+   ],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "الدوحة"
+    }
+   ],
+   "pending": [
+    {
+     "subject": "user",
+     "object": "الدوحة"
+    }
+   ]
+  },
+  {
+   "id": "retraction-en-reading-ended",
+   "category": "retraction",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "Vim is the editor on my laptop.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "uses_tool",
+       "predicate_type": "set",
+       "object": "vim",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "I stopped using vim.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "uses_tool",
+       "predicate_type": "set",
+       "object": "vim",
+       "confidence": 0.9,
+       "ended": true,
+       "replaces": {
+        "subject": "user",
+        "predicate": "uses_tool"
+       }
+      }
+     ]
+    }
+   ],
+   "current": [],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "vim"
+    }
+   ]
+  },
+  {
+   "id": "retraction-ar-reading-ended",
+   "category": "retraction",
+   "lang": "ar",
+   "turns": [
+    {
+     "user": "فيم هو المحرر في لابتوبي.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "uses_tool",
+       "predicate_type": "set",
+       "object": "فيم",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "بطلت أستخدم فيم.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "uses_tool",
+       "predicate_type": "set",
+       "object": "فيم",
+       "confidence": 0.9,
+       "ended": true,
+       "replaces": {
+        "subject": "user",
+        "predicate": "uses_tool"
+       }
+      }
+     ]
+    }
+   ],
+   "current": [],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "فيم"
+    }
+   ]
+  },
+  {
+   "id": "retraction-en-users-fact-asked",
+   "category": "retraction",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "I live in Paris.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "Paris",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "I don't live in Paris anymore.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "Paris",
+       "confidence": 0.9,
+       "ended": true,
+       "replaces": {
+        "subject": "user",
+        "predicate": "lives_in"
+       }
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "Paris",
+     "trust": "user"
+    }
+   ],
+   "not_current": [],
+   "pending": [
+    {
+     "subject": "user",
+     "object": "Paris",
+     "ended": true
+    }
+   ]
+  },
+  {
+   "id": "retraction-en-users-fact-confirmed",
+   "category": "retraction",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "I live in Paris.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "Paris",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "I don't live in Paris anymore.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "Paris",
+       "confidence": 0.9,
+       "ended": true,
+       "replaces": {
+        "subject": "user",
+        "predicate": "lives_in"
+       }
+      }
+     ]
+    },
+    {
+     "answer": "confirm"
+    }
+   ],
+   "current": [],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "Paris"
+    }
+   ]
+  },
+  {
+   "id": "retraction-ar-users-fact-asked",
+   "category": "retraction",
+   "lang": "ar",
+   "turns": [
+    {
+     "user": "ساكن في الكويت.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "الكويت",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "ما عدت ساكن في الكويت.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "الكويت",
+       "confidence": 0.9,
+       "ended": true,
+       "replaces": {
+        "subject": "user",
+        "predicate": "lives_in"
+       }
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "الكويت",
+     "trust": "user"
+    }
+   ],
+   "not_current": [],
+   "pending": [
+    {
+     "subject": "user",
+     "object": "الكويت",
+     "ended": true
+    }
+   ]
+  },
+  {
+   "id": "retraction-ar-someone-else",
+   "category": "retraction",
+   "lang": "ar",
+   "turns": [
+    {
+     "user": "ساكن في الكويت.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "الكويت",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "أختي ما عادت ساكنة في الكويت.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "الكويت",
+       "confidence": 0.9,
+       "ended": true,
+       "replaces": {
+        "subject": "user",
+        "predicate": "lives_in"
+       }
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "الكويت",
+     "trust": "user"
+    }
+   ],
+   "not_current": []
+  },
+  {
+   "id": "retraction-en-nothing-held",
+   "category": "retraction",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "I no longer use emacs.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "uses_tool",
+       "predicate_type": "set",
+       "object": "emacs",
+       "confidence": 0.9,
+       "ended": true
+      }
+     ]
+    }
+   ],
+   "current": [],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "emacs"
     }
    ]
   }

@@ -44,6 +44,9 @@ def db(tmp_path, monkeypatch):
     monkeypatch.setenv("KAZMA_MEMORY_STATE_DB", str(tmp_path / "memory_state.db"))
     monkeypatch.setattr("kazma_core.memory.embedder.get_embedder", lambda: None)
     monkeypatch.setattr("kazma_core.memory.embedder.encode_text_to_blob", lambda text: None)
+    # These lines are read for their tags; the dates beside them (after the
+    # tag, framework audit F2) are tests/test_memory_recall_dates.py's.
+    monkeypatch.setattr("kazma_core.memory.recall._date_hits", lambda *_a, **_k: None)
     conn = sqlite3.connect(str(tmp_path / "memory_state.db"), isolation_level=None)
     conn.row_factory = sqlite3.Row
     ensure_primary_schema(conn)
