@@ -131,6 +131,10 @@ TABLE_RULES: dict[tuple[str, str], TableRule] = {
     # the swarm: a task names its space inside its metadata (S1-15)
     ("swarm_tasks.db", "swarm_tasks"): _json("metadata", "$.tenant_id"),
     ("swarm_tasks.db", "kazma_swarm_tasks"): _json("metadata", "$.tenant_id"),
+    # The approval bus makes this table the first time a process watches for
+    # approvals (safety.bus_bridge): it is on every install that ran one.
+    ("hitl_gates.db", "hitl_watchers"): _keep("which Kazma processes watch for approval requests: "
+                                           "a heartbeat per process, no space's content"),
     ("swarm_tasks.db", "swarm_worker_metrics"): _keep("counts per worker; workers are the install's"),
     ("swarm_tasks.db", "kazma_swarm_worker_metrics"): _keep("counts per worker; workers are the install's"),
     ("pipeline_logs.db", "pipeline_logs"): _ids("correlation_id", "swarm_tasks"),

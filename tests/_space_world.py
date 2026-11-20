@@ -113,6 +113,12 @@ def _make_stores() -> list[str]:
     from kazma_core.safety.hitl_gates import ensure_gate_schema
 
     ensure_gate_schema()
+    # The approval bus's watcher table, made by its own code the first time a
+    # process watches for approvals: on every install that ran one, never by
+    # ensure_gate_schema (S1-27's walk refused live's hitl_gates.db for it).
+    from kazma_core.safety.bus_bridge import record_watcher
+
+    record_watcher(kind="ui", detail="the space world")
     made.append("hitl_gates.db")
     from kazma_core.runs.incidents import get_incident_store
 

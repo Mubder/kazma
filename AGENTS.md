@@ -13857,7 +13857,11 @@ product can turn it on, so an install with one account behaves as before.
     `space_id`), else an FTS index its triggers keep, else its thread. A
     table with none refuses the count, the export and the erase (500
     `unknown_table`): a new table, or one the app makes at start, gets a
-    rule in the same change (`keep` says why it holds no space's words).
+    rule in the same change (`keep` says why it holds no space's words),
+    and so does a table a feature makes only when it first runs: the
+    approval bus's `hitl_watchers` had none, and every count, export and
+    erase refused on live's `hitl_gates.db`; the test world makes each such
+    table by its own code (`tests/_space_world.py`).
     Settings, secrets (`SecretVault.erase_space`, whatever scope is bound)
     and libraries (`knowledge_lifecycle.delete_library`) go through their
     own stores; the space's folders after; then it leaves the identity

@@ -58,6 +58,23 @@ def test_a_count_says_what_a_holds(world) -> None:
     assert counts["settings"] == 2 and counts["secrets"] == 1 and counts["files"] == 1, counts
 
 
+def test_a_table_a_feature_makes_on_first_use_is_counted(world, monkeypatch) -> None:
+    """The approval bus makes ``hitl_watchers`` the first time a process
+    watches for approvals, never with the gate schema: live's hitl_gates.db
+    holds it, and S1-27's walk refused every count, export and erase there
+    (``unknown_table``) until it had a rule. The world makes it by the bus's
+    own code; the rules without its entry are the control."""
+    with closing(sqlite3.connect(str(paths.data_dir() / "hitl_gates.db"))) as conn:
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert "hitl_watchers" in tables
+    assert space_data.count_space(A)["rows"] >= len(world["planted"][A])
+    without = {key: rule for key, rule in space_data.TABLE_RULES.items() if key != ("hitl_gates.db", "hitl_watchers")}
+    monkeypatch.setattr(space_data, "TABLE_RULES", without)
+    with pytest.raises(space_data.SpaceDataRefused) as refused:
+        space_data.count_space(A)
+    assert refused.value.code == "unknown_table" and "hitl_watchers" in str(refused.value)
+
+
 def test_an_export_holds_its_own_space_and_never_the_other(world, tmp_path) -> None:
     target = tmp_path / "a.zip"
     space_data.export_space(A, target)
