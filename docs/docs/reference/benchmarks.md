@@ -49,7 +49,7 @@ Turns in English, Arabic and both, with the facts a person would expect remember
 | Model pass (1 asking a turn, previous prompt) | Mixed | 100.0 % | 70.0 % | 91.7 % | 100.0 % | 8 askings (8 turns, 1 each) |
 
 The model pass is deepseek-flash's replies, recorded on 2026-10-15, 1 asking a turn. Asked again, a model answers a little differently, so a number from one asking can move by a few facts with nothing changed.
-Kazma's extraction prompt has changed since that recording (4 changes since 2026-11-20). The model-pass rows replay the recording through today's code, which checks that the code reading the model's replies still keeps what it kept; they do not measure the new prompt, which is measured when it is recorded.
+Kazma's extraction prompt has changed since that recording (5 changes since 2026-11-20). The model-pass rows replay the recording through today's code, which checks that the code reading the model's replies still keeps what it kept; they do not measure the new prompt, which is measured when it is recorded.
 
 With Postgres and pgvector as the memory store (CI run 44732367729 (main af93192fd, job Tests (pgvector) 136275094486), approximate search), the same questions score 89.5 % hit rate, 0.83 MRR and 61.3 % precision. Comparing every row (exact search) scores the same on every measure.
 

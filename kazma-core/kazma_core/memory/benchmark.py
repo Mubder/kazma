@@ -800,8 +800,8 @@ def _slug(text: str) -> str:
 
 def _folded(text: str) -> str:
     """A value as search reads it: folded, and an underscore separates words
-    (``memory/query_terms``, FTS5) -- the extraction prompt slugs values, so
-    ``kuwait_city`` is the user's "Kuwait City"."""
+    (``memory/query_terms``, FTS5) -- the extraction prompt slugged values
+    until part C2, so ``kuwait_city`` is the user's "Kuwait City"."""
     from kazma_core.documents.arabic import fold_for_search
 
     return " ".join(fold_for_search(str(text or "").replace("_", " ")).lower().split())

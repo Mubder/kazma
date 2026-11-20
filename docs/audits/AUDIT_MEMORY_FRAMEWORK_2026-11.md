@@ -877,8 +877,14 @@ Added as each piece lands.
   travel inside one data fence; a fact carrying an injection payload or a
   fence marker is refused; a value only the reply holds is Kazma's reading
   when recalled. A poisoned reply stores nothing. Gate:
-  `tests/test_memory_deep_pass_fenced.py`. Not in this part (the main
-  session's list): F10's swarm results, and the user's spelling asked for.
+  `tests/test_memory_deep_pass_fenced.py`.
+- **The user's spelling asked for (F1's third fault), 2026-11-20: built, not
+  yet recorded.** The prompt asks for an object as the user wrote it, and
+  Kazma keeps the user's spelling whatever the model writes: the words of
+  the message that are the same value, folded. "kuwait_city" from "We moved
+  to Kuwait City" is stored "Kuwait City", still the model's reading. The
+  old recording, replayed through it, scores the same. Gate:
+  `tests/test_memory_users_spelling.py`.
 
 What I would not do:
 

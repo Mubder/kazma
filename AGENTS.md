@@ -2291,6 +2291,17 @@ four injected were noise.
   (`_carries_injection`); a fact the model read stays the model's, tagged
   "(Kazma's reading)" when recalled. Gate: `tests/test_memory_deep_pass_fenced.py`
   (the fence taken out, and the screen taken out, as negative controls).
+- **A value is kept in the user's own spelling** (2026-11-20, the framework
+  audit's F1, its third fault; part C2). The prompt asked for slugs, and
+  recall said "user name is layla" for the user's "Layla". The prompt now
+  asks for an object as the user wrote it, and `_apply_beliefs_to_v2`
+  keeps it whatever the model wrote (`belief_extractor._users_spelling`:
+  the run of the message's words that is the same value, folded as
+  `belief_mutation._same_value` folds; up to `_SPELLING_WORDS` words; a
+  value joined otherwise, "Kuwait-City", is left as the model wrote it).
+  Trust is not touched: the fact stays the model's reading. Subjects stay
+  slugs. Gate: `tests/test_memory_users_spelling.py` (the apply step
+  without the respelling as the negative control).
 - The quick (heuristic) pass reads Arabic and mixed text too
   (`memory/arabic_facts.py`, 2026-10-14: the extraction benchmark measured
   0.00 Arabic recall). Token rules from the grammar, compared folded: a

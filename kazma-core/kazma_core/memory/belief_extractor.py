@@ -150,7 +150,10 @@ Rules:
   (a research run pending, a test passing, a deploy in progress) -- and internal
   identifiers (session, message, run or task ids), unless the user asked to
   remember them.
-- Slug subjects/objects: "John Smith" -> "john_smith". Use "user" for the user themselves.
+- Slug subjects: "John Smith" -> "john_smith". Use "user" for the user themselves,
+  as a subject or an object.
+- Give an object as the user wrote it, in their spelling and capitals: "Kuwait
+  City", "Gulf Bank", "Layla" (not "kuwait_city", "gulf_bank", "layla").
 - Keep every subject and object in the language and script the user wrote it in.
   Never translate or transliterate it: "اسمي سلمى" -> object "سلمى" (not "salma"),
   "أعيش في الدوحة" -> "الدوحة", "أخوي منصور طيار" -> subject "منصور", "١٤٤٦" stays "١٤٤٦".
@@ -604,6 +607,42 @@ def _same_value_text(a: Any, b: Any) -> bool:
     return _same_value(str(a or ""), str(b or ""))
 
 
+#: A word of the user's message: letters, digits and the Arabic marks between
+#: them (``\w`` alone splits a vocalised word at each mark).
+_SPELLED_WORD = re.compile(r"[\wؐ-ًؚ-ٰٟۖ-ۭ]+")
+#: The longest value (in words) whose spelling is looked for in the message.
+_SPELLING_WORDS = 8
+
+
+def _users_spelling(value: Any, text: str | None) -> Any:
+    """*value* as the user wrote it: the run of the message's words that is
+    the same value (case, underscores, spacing, Arabic forms and marks
+    folded, ``belief_mutation._same_value``), else *value* unchanged.
+
+    The extraction prompt asked for slugs, and the Memory page and recall
+    said "user name is layla" for the user's "Layla" (the framework audit's
+    F1, its third fault; part C2, the user's spelling). The prompt now asks
+    for the user's spelling; this keeps it whatever the model wrote. Trust is
+    not touched: the fact is still the model's reading."""
+    if not isinstance(value, str) or not value or value == "user" or not text:
+        return value
+    from kazma_core.documents.arabic import fold_for_search
+
+    def fold(word: str) -> str:
+        return fold_for_search(word).casefold()
+
+    want = [fold(word) for word in _SPELLED_WORD.findall(value.replace("_", " "))]
+    if not want or len(want) > _SPELLING_WORDS:
+        return value
+    words = list(_SPELLED_WORD.finditer(text))
+    folded = [fold(match.group()) for match in words]
+    for i in range(len(words) - len(want) + 1):
+        if folded[i:i + len(want)] == want:
+            span = text[words[i].start():words[i + len(want) - 1].end()]
+            return span if _same_value_text(span, value) else value
+    return value
+
+
 #: The forms a fact's start may take (``since``): a year, a month or a day.
 _SINCE_RE = re.compile(r"([0-9]{4})(?:-([0-9]{2})(?:-([0-9]{2}))?)?")
 #: Arabic-Indic and Persian digits, read as the same numbers.
@@ -1006,6 +1045,8 @@ def _apply_beliefs_to_v2(
         from kazma_core.memory.fact_names import users_names
 
         clean["subject"], clean["predicate"] = users_names(clean.get("subject"), clean["predicate"])
+        # The value as the user wrote it, when the turn holds it (part C2).
+        clean["object"] = _users_spelling(clean["object"], user_text)
         if people.shared:
             # A shared space files by member (Spaces S1-11, N30): "I" is the
             # speaker's entry, a member's name theirs; with no speaker known a
