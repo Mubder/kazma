@@ -285,6 +285,14 @@ def _turns() -> list[dict]:
     return json.loads(benchmark.EXTRACTION_PATH.read_text(encoding="utf-8"))["turns"]
 
 
+def _today_shape() -> int:
+    """The form of the message the deep pass sends today: a recording made
+    today says it."""
+    from kazma_core.memory.belief_extractor import MESSAGE_SHAPE
+
+    return MESSAGE_SHAPE
+
+
 def _pending() -> dict | None:
     """The lock's declared prompt change waiting for its recording (framework
     audit part C2; tests/test_memory_pending_recording.py), if any."""
@@ -361,6 +369,7 @@ def test_a_relabelled_recording_is_not_the_locked_one(tmp_path, monkeypatch):
     relabelled = _recording()
     monkeypatch.setattr("kazma_core.memory.belief_extractor._EXTRACT_SYSTEM", "Keep nothing.")
     relabelled["prompt_sha256"] = hashlib.sha256(b"Keep nothing.").hexdigest()
+    relabelled["message_shape"] = _today_shape()
     locked = _locked_extraction()
     report = benchmark.run_extraction_benchmark(llm_replies=relabelled)
     # Control: the replies are the locked ones, and so are the scores.
@@ -453,8 +462,9 @@ def test_a_reply_the_recording_does_not_hold_is_its_own_failure(monkeypatch):
     reply = json.dumps({"beliefs": []})
     # The benchmark's own idea of the message, which the precheck uses: here
     # it differs from what the extractor really sends.
-    monkeypatch.setattr(benchmark, "_llm_blob", lambda text: f"User: {text}\nDate: 2026-11-18\nAssistant: ")
+    monkeypatch.setattr(benchmark, "_llm_blob", lambda text, **_kw: f"User: {text}\nDate: 2026-11-18\nAssistant: ")
     replies = {"model": "stand-in", "prompt_sha256": benchmark._extraction_prompt_sha256(),
+               "message_shape": _today_shape(),
                "replies": {benchmark._text_key(benchmark._llm_blob(turn["user"])): reply}}
     with pytest.raises(benchmark.StaleRecordingError, match="no recorded reply for the message"):
         benchmark.run_extraction_benchmark({"version": 2, "turns": [turn]}, llm_replies=replies)
@@ -501,7 +511,7 @@ def test_a_changed_extraction_prompt_needs_a_new_recording(monkeypatch):
     """Negative control of the recording's identity: with the prompt replaced
     by "Keep nothing", every deep-pass score used to stay the same
     (benchmark audit F4). Now the run refuses."""
-    replies = _recording()
+    replies = dict(_recording(), message_shape=_today_shape())
     monkeypatch.setattr("kazma_core.memory.belief_extractor._EXTRACT_SYSTEM", "Keep nothing.")
     with pytest.raises(benchmark.StaleRecordingError, match="prompt changed"):
         benchmark.run_extraction_benchmark(llm_replies=replies)
@@ -534,6 +544,8 @@ def test_a_second_recording_is_locked_only_on_purpose(tmp_path, monkeypatch):
     recording = _recording()
     a01 = next(t for t in _turns() if t["id"] == "a01")
     second = json.loads(json.dumps(recording))
+    # A recording of today's prompt (a declared change is answered by one).
+    second["prompt_sha256"], second["message_shape"] = benchmark._extraction_prompt_sha256(), _today_shape()
     second["replies"][benchmark._text_key(benchmark._llm_blob(a01["user"]))] = '{"beliefs": []}'
     path = tmp_path / "extraction_llm.json"
     path.write_text(json.dumps(second, ensure_ascii=False), encoding="utf-8")
@@ -618,6 +630,7 @@ def test_the_models_pass_replays_recorded_replies():
         {"subject": "user", "predicate": "lives_in", "predicate_type": "functional", "object": "دبي"}]},
         ensure_ascii=False)
     replies = {"model": "stand-in", "prompt_sha256": benchmark._extraction_prompt_sha256(),
+               "message_shape": _today_shape(),
                "replies": {benchmark._text_key(benchmark._llm_blob(turn["user"])): reply}}
     one = {"version": data["version"], "turns": [turn]}
     report = benchmark.run_extraction_benchmark(one, llm_replies=replies)
@@ -672,7 +685,7 @@ def test_every_write_category_is_asked_in_english_and_arabic():
     langs: dict[str, set[str]] = {}
     for scenario in data["scenarios"]:
         langs.setdefault(scenario["category"], set()).add(scenario["lang"])
-    assert set(langs) == {"update", "kept_as_said", "short", "someone_else", "quoted", "model_read"}
+    assert set(langs) == {"update", "kept_as_said", "short", "someone_else", "quoted", "model_read", "temporal"}
     assert all({"en", "ar"} <= found for found in langs.values()), langs
 
 
@@ -697,7 +710,7 @@ def test_a_write_scenario_says_why_it_failed(writes_report):
 def test_the_lock_refuses_a_write_scenario_that_stops_passing(monkeypatch):
     script = _build_script()
     old = json.loads(json.dumps(_locked_writes()))
-    _part, problems = script._writes_lock(old)
+    _part, problems = script._writes_lock(old, pending=_pending())
     assert not problems, problems
     # A run in which a scenario the lock holds as passing fails: refused.
     real = benchmark.run_write_scenarios
@@ -709,5 +722,5 @@ def test_the_lock_refuses_a_write_scenario_that_stops_passing(monkeypatch):
         return report
 
     monkeypatch.setattr(benchmark, "run_write_scenarios", one_fails)
-    _part, problems = script._writes_lock(old)
+    _part, problems = script._writes_lock(old, pending=_pending())
     assert any("now fail" in p for p in problems), problems

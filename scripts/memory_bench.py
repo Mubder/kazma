@@ -956,20 +956,32 @@ def build_extraction() -> dict[str, Any]:
 #: the user's), ``quoted`` (text the user quoted, attached or asked Kazma to
 #: work on is never the user's own statement), ``model_read`` (a name the
 #: model chose may not fit the words: the user's fact stands, and a
-#: statement is asked about). ``pending`` names the corrections that must wait
+#: statement is asked about), ``temporal`` (the start a turn names is kept
+#: beside the fact, worked out from the turn's day; a start after the turn
+#: or in words is never kept). ``pending`` names the corrections that must wait
 #: for the user (``memory/changes.py``), and only those; an ``("", ("answer",
 #: "confirm"))`` turn is the user answering the newest one.
 def _said(subject: str, predicate: str, kind: str, obj: str) -> dict[str, Any]:
     return {"subject": subject, "predicate": predicate, "predicate_type": kind, "object": obj, "confidence": 0.9}
 
 
-def _now(subject: str, obj: str, trust: str | None = None, *, exact: bool = False) -> dict[str, Any]:
+def _now(subject: str, obj: str, trust: str | None = None, *, exact: bool = False,
+         started: str | bool | None = False) -> dict[str, Any]:
+    """A fact that must be current (or must not). *started*: the start kept
+    beside it (``metadata.started``), None for none; False checks nothing."""
     out: dict[str, Any] = {"subject": subject, "object": obj}
     if trust:
         out["trust"] = trust
     if exact:
         out["exact"] = True
+    if started is not False:
+        out["started"] = started
     return out
+
+
+def _began(fact: dict[str, Any], since: str) -> dict[str, Any]:
+    """*fact* with the start the model gives it (``since``)."""
+    return {**fact, "since": since}
 
 
 def _attached(message: str, filename: str, mime: str, document: str) -> str:
@@ -1188,14 +1200,35 @@ WRITE_SCENARIOS: list[dict[str, Any]] = [
         ("My sister said: I live in Lyon now.",
          ("written", [_said("sister", "lives_in", "functional", "Lyon")]))],
      "current": [_now("user", "Paris", "user")], "not_current": [_now("user", "Lyon")]},
+    # ── temporal: the start a turn names, kept beside the fact ──────────────
+    # The model is given the turn's day (framework audit F2 step 2) and works
+    # out "since"; Kazma keeps a real date no later than the turn, as said,
+    # and never moves the fact's place in time for it (W1).
+    {"id": "temporal-en-started", "category": "temporal", "lang": "en", "turns": [
+        ("I started working at Zain in March.",
+         ("written", [_began(_said("user", "works_at", "functional", "Zain"), "2026-03")]))],
+     "current": [_now("user", "Zain", started="2026-03")], "not_current": []},
+    {"id": "temporal-ar-started", "category": "temporal", "lang": "ar", "turns": [
+        ("بديت أشتغل في زين من شهر مارس.",
+         ("written", [_began(_said("user", "works_at", "functional", "زين"), "2026-03")]))],
+     "current": [_now("user", "زين", started="2026-03")], "not_current": []},
+    {"id": "temporal-en-future-start", "category": "temporal", "lang": "en", "turns": [
+        ("I have lived in Lisbon for years.",
+         ("written", [_began(_said("user", "lives_in", "functional", "Lisbon"), "2031-01")]))],
+     "current": [_now("user", "Lisbon", started=None)], "not_current": []},
+    {"id": "temporal-ar-words-not-a-date", "category": "temporal", "lang": "ar", "turns": [
+        ("ساكن في الدوحة من سنتين.",
+         ("written", [_began(_said("user", "lives_in", "functional", "الدوحة"), "قبل سنتين")]))],
+     "current": [_now("user", "الدوحة", started=None)], "not_current": []},
 ]
 
 #: The write scenarios' version. 3: a correction only the model reads waits
 #: for the user (``pending``, ``answer`` turns), and the ``model_read``
 #: category (2026-11-18). 4: a model's reading never gets the user's trust by
 #: itself (rule A of the second security review, 2026-11-18); its first
-#: reading of a fact is Kazma's own and no question.
-WRITES_VERSION = 4
+#: reading of a fact is Kazma's own and no question. 5: ``temporal`` (the
+#: framework audit's part C2, 2026-11-20).
+WRITES_VERSION = 5
 
 
 def build_writes() -> dict[str, Any]:
@@ -1214,6 +1247,8 @@ def build_writes() -> dict[str, Any]:
                 for fact in reply:
                     if not all(fact.get(k) for k in ("subject", "predicate", "predicate_type", "object")):
                         raise ValueError(f"{sc['id']}: a written reply needs subject, predicate, type and object")
+                    if set(fact) - {"subject", "predicate", "predicate_type", "object", "confidence", "since"}:
+                        raise ValueError(f"{sc['id']}: a written reply holds only what the model's reply holds")
                 turns.append({"user": text, "written": reply})
             elif kind == "answer":
                 if reply not in ("confirm", "dismiss"):

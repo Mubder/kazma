@@ -382,11 +382,31 @@ def _micro_consolidation_prepare(episode_id: str) -> dict[str, Any] | None:
             entities = entity_vocabulary(primary, tenant_id=row["tenant_id"] or "default")
         keep = True
         return {"primary": primary, "ops": ops, "row": dict(row), "use_llm": use_llm,
-                "vocabulary": vocabulary, "entities": entities}
+                "vocabulary": vocabulary, "entities": entities, **_turn_context(primary, row)}
     finally:
         if not keep:
             primary.close()
             ops.close()
+
+
+def _turn_context(primary: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
+    """The turn's day in the operator's zone and the turn before it in the
+    same chat (``said_on``, ``previous``), for the deep pass's message
+    (framework audit F2 step 2). A forgotten turn is never the one before:
+    its text is gone, and its chat's next remembered turn is taken."""
+    from kazma_core.memory.belief_extractor import _turn_zone, said_on_iso
+
+    before = None
+    if row["session_id"] and row["turn_number"] is not None:
+        before = primary.execute(
+            "SELECT user_text, assistant_text FROM episodes WHERE tenant_id = ? AND session_id = ? "
+            "AND turn_number < ? AND tier != 'forgotten' "
+            "AND (COALESCE(user_text, '') != '' OR COALESCE(assistant_text, '') != '') "
+            "ORDER BY turn_number DESC, created_at DESC LIMIT 1",
+            (row["tenant_id"] or "default", row["session_id"], int(row["turn_number"])),
+        ).fetchone()
+    return {"said_on": said_on_iso(row["created_at"], _turn_zone()),
+            "previous": (before[0] or "", before[1] or "") if before else None}
 
 
 #: The deep pass's rules: an episode marked with this version (``metadata.
@@ -449,6 +469,7 @@ async def _handle_micro_consolidation(payload: dict[str, Any]) -> bool:
             raw, stats = await extract_beliefs_for_turn(
                 row["user_text"] or "", row["assistant_text"] or "", use_llm=prep["use_llm"],
                 vocabulary=prep.get("vocabulary"), entities=prep.get("entities"),
+                said_on=prep.get("said_on"), previous=prep.get("previous"),
             )
             if prep["use_llm"] and stats.get("model_unavailable"):
                 # The model could not be asked: the deep pass is retried with

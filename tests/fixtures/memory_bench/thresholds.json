@@ -124,7 +124,8 @@
    "model": "deepseek-flash",
    "provider": "deepseek",
    "recorded_on": "2026-10-15",
-   "prompt_sha256": "3499be576e8493a660ee6105cfa25dbde9660826fa2a8d8e38270c07d969781b"
+   "prompt_sha256": "3499be576e8493a660ee6105cfa25dbde9660826fa2a8d8e38270c07d969781b",
+   "message_shape": 1
   },
   "scores": {
    "heuristic.ar.found": 0.6364,
@@ -191,10 +192,25 @@
     }
    }
   },
-  "recordings": []
+  "recordings": [],
+  "pending_recording": {
+   "prompt_sha256": "d05c74ec91751338f7f65474f2499adaae39bf52d0835aa4740e6a79490abcce",
+   "message_shape": 2,
+   "replaces_prompt_sha256": "3499be576e8493a660ee6105cfa25dbde9660826fa2a8d8e38270c07d969781b",
+   "replaces_message_shape": 1,
+   "since": "2026-11-20",
+   "changes": [
+    {
+     "date": "2026-11-20",
+     "why": "Part C2, F2 step 2: the deep pass is told the turn's day and the turn before it, and gives a fact's start (since)",
+     "prompt_sha256": "d05c74ec91751338f7f65474f2499adaae39bf52d0835aa4740e6a79490abcce",
+     "message_shape": 2
+    }
+   ]
+  }
  },
  "writes": {
-  "version": 4,
+  "version": 5,
   "recording": {
    "sha256": "89c1b101b6ddbede2743d37b1ea2f2040f1ff1497cad515c2d035614f8f89157",
    "turns": 30,
@@ -202,7 +218,8 @@
    "model": "deepseek-flash",
    "provider": "deepseek",
    "recorded_on": "2026-10-15",
-   "prompt_sha256": "3499be576e8493a660ee6105cfa25dbde9660826fa2a8d8e38270c07d969781b"
+   "prompt_sha256": "3499be576e8493a660ee6105cfa25dbde9660826fa2a8d8e38270c07d969781b",
+   "message_shape": 1
   },
   "scores": {
    "kept_as_said.ar.passed": 1.0,
@@ -219,6 +236,8 @@
    "someone_else.ar.passed": 1.0,
    "someone_else.en.passed": 1.0,
    "someone_else.mixed.passed": 1.0,
+   "temporal.ar.passed": 1.0,
+   "temporal.en.passed": 1.0,
    "update.ar.passed": 1.0,
    "update.en.passed": 1.0,
    "update.mixed.passed": 1.0

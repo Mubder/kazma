@@ -114,11 +114,13 @@ related or not.
    stopwords dropped, Arabic folded with the article and one-letter prefixes
    handled, light plurals, whole words only ("out" is not in "about").
 5. **Dates.** Every conversation memory is shown with the day it was said
-   ("[12 Jan 2026] User: ..."), every fact with the month it became true
-   ("[since May 2026] user lives in London"), and a fact that holds one
-   value with the value it replaced ("before that: Paris (Jan 2026 to May
-   2026)"), in the time zone set for scheduled tasks. A value you asked
-   Kazma to forget is never shown as "before that".
+   ("[12 Jan 2026] User: ..."), every fact with when it began: the start
+   you named ("we moved last month", worked out from the day you said it),
+   else the month you said it ("[since May 2026] user lives in London").
+   A fact that holds one value is shown with the value it replaced
+   ("before that: Paris (Jan 2026 to May 2026)"). Dates are in the time
+   zone set for scheduled tasks. A value you asked Kazma to forget is never
+   shown as "before that".
 6. Fence: `format_untrusted_block(..., source="memory_v2_recall")`.
 
 When memory has nothing for a question, the **past-chats fallback** searches

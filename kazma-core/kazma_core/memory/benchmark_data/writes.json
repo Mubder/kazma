@@ -1,5 +1,5 @@
 {
- "version": 4,
+ "version": 5,
  "scenarios": [
   {
    "id": "update-en-moved",
@@ -1657,6 +1657,118 @@
      "object": "Lyon"
     }
    ]
+  },
+  {
+   "id": "temporal-en-started",
+   "category": "temporal",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "I started working at Zain in March.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "works_at",
+       "predicate_type": "functional",
+       "object": "Zain",
+       "confidence": 0.9,
+       "since": "2026-03"
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "Zain",
+     "started": "2026-03"
+    }
+   ],
+   "not_current": []
+  },
+  {
+   "id": "temporal-ar-started",
+   "category": "temporal",
+   "lang": "ar",
+   "turns": [
+    {
+     "user": "بديت أشتغل في زين من شهر مارس.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "works_at",
+       "predicate_type": "functional",
+       "object": "زين",
+       "confidence": 0.9,
+       "since": "2026-03"
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "زين",
+     "started": "2026-03"
+    }
+   ],
+   "not_current": []
+  },
+  {
+   "id": "temporal-en-future-start",
+   "category": "temporal",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "I have lived in Lisbon for years.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "Lisbon",
+       "confidence": 0.9,
+       "since": "2031-01"
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "Lisbon",
+     "started": null
+    }
+   ],
+   "not_current": []
+  },
+  {
+   "id": "temporal-ar-words-not-a-date",
+   "category": "temporal",
+   "lang": "ar",
+   "turns": [
+    {
+     "user": "ساكن في الدوحة من سنتين.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "الدوحة",
+       "confidence": 0.9,
+       "since": "قبل سنتين"
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "الدوحة",
+     "started": null
+    }
+   ],
+   "not_current": []
   }
  ]
 }

@@ -2236,6 +2236,25 @@ four injected were noise.
   gets the user's trust by itself, below.) Gate:
   `tests/test_memory_event_time.py::test_every_late_writer_passes_the_turn_time`
   (every call in the late-writer modules names its time).
+- **The deep pass is told the turn's day and the turn before it**
+  (2026-11-20, framework audit F2 step 2, part C2). The memory worker
+  (`worker_bootstrap._turn_context`, off the loop) gives
+  `belief_extractor.turn_message` the turn's day in the operator's zone
+  (`said_on_iso`, `_turn_zone`) and the chat's remembered turn before it
+  (same tenant and session, never a forgotten one), bounded by
+  `limits.DEEP_PASS_PREVIOUS_QUESTION` / `DEEP_PASS_PREVIOUS_ANSWER`; the
+  prompt says to learn only from "This turn" and to give a fact's start as
+  `since` worked out from the day. `_since_value` keeps only a real date
+  (`YYYY`, `YYYY-MM`, `YYYY-MM-DD`, any digits, from 1900; never words),
+  `_started_on` drops one after the turn, and `mutate_belief(started=)`
+  keeps it in the row's metadata (`started`) -- never as `valid_from`, so
+  validity and supersession still follow the order facts were said (W1).
+  The same fact again gains a start it lacks, never over one it holds, and
+  keeps its source. Recall shows it ("[since Apr 2026]"; else the month it
+  was said). Message form 2 (`MESSAGE_SHAPE`); declared in the lock until
+  the recording. Gates: `tests/test_memory_extractor_context.py` (the
+  worker without the context and a writer that drops the start as negative
+  controls), the write scenarios' `temporal` category.
 - The quick (heuristic) pass reads Arabic and mixed text too
   (`memory/arabic_facts.py`, 2026-10-14: the extraction benchmark measured
   0.00 Arabic recall). Token rules from the grammar, compared folded: a

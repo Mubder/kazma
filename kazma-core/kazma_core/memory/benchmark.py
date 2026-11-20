@@ -918,13 +918,22 @@ def _score_extraction(turns: list[dict[str, Any]], extracted: dict[str, list[dic
     return out
 
 
-def _llm_blob(user_text: str) -> str:
+def _llm_blob(user_text: str, *, said_on: str | None = None, previous: tuple[str, str] | None = None) -> str:
     """The user message ``belief_extractor._llm_extract`` sends for a turn
     with no vocabulary (the benchmark asks with none): the product's own
     builder, :func:`belief_extractor.turn_message`."""
     from kazma_core.memory.belief_extractor import turn_message
 
-    return turn_message(user_text)
+    return turn_message(user_text, said_on=said_on, previous=previous)
+
+
+def _turn_context(turn: dict[str, Any]) -> dict[str, Any]:
+    """An extraction turn's day and the turn before it, as the dataset gives
+    them (``said_on``, ``previous``: the memory worker reads both from the
+    episode store)."""
+    previous = turn.get("previous")
+    return {"said_on": turn.get("said_on"),
+            "previous": (previous.get("user", ""), previous.get("assistant", "")) if previous else None}
 
 
 def _recorded_message(user_text: str, shape: int) -> str:
@@ -943,12 +952,12 @@ def _recorded_message(user_text: str, shape: int) -> str:
                               f"builds: {RECORD_AGAIN}")
 
 
-def _reply_key(user_text: str, llm_replies: dict[str, Any], mode: str) -> str:
+def _reply_key(turn: dict[str, Any], llm_replies: dict[str, Any], mode: str) -> str:
     """The key of a turn's recorded reply: the message today's extractor
     sends (``current``), or the one the recording was asked (``previous``)."""
     if mode == "current":
-        return _text_key(_llm_blob(user_text))
-    return _text_key(_recorded_message(user_text, _recording_shape(llm_replies)))
+        return _text_key(_llm_blob(turn["user"], **_turn_context(turn)))
+    return _text_key(_recorded_message(turn["user"], _recording_shape(llm_replies)))
 
 
 class _ReplayClient:
@@ -993,7 +1002,7 @@ def _replayed_extraction(
 
     from kazma_core.memory.belief_extractor import _llm_extract, _sanitize_belief
 
-    missing = [t["id"] for t in turns if _reply_key(t["user"], llm_replies, mode) not in llm_replies["replies"]]
+    missing = [t["id"] for t in turns if _reply_key(t, llm_replies, mode) not in llm_replies["replies"]]
     if missing:
         # Checked here: the extractor reads any failed call as "the model is
         # down", which would score a stale recording as an outage.
@@ -1005,8 +1014,8 @@ def _replayed_extraction(
     async def ask_all() -> dict[str, list[dict[str, Any]]]:
         got = {}
         for t in turns:
-            client.answer = None if mode == "current" else _reply_key(t["user"], llm_replies, mode)
-            beliefs, _down = await _llm_extract(t["user"], "")
+            client.answer = None if mode == "current" else _reply_key(t, llm_replies, mode)
+            beliefs, _down = await _llm_extract(t["user"], "", **_turn_context(t))
             got[t["id"]] = [b for b in (_sanitize_belief(x) for x in beliefs or []) if b]
         return got
 
@@ -1114,10 +1123,18 @@ class _ScriptedClient:
         return self.reply
 
 
+def _extraction_turns() -> dict[str, dict[str, Any]]:
+    """The extraction dataset's turns by id."""
+    return {t["id"]: t for t in json.loads(EXTRACTION_PATH.read_text(encoding="utf-8"))["turns"]}
+
+
 def _turn_reply(turn: dict[str, Any], recorded: dict[str, str], llm_replies: dict[str, Any] | None = None,
                 mode: str = "current") -> str:
     if "recorded" in turn:
-        key = _reply_key(turn["user"], llm_replies or {}, mode)
+        # The reply the recording holds for the extraction turn this one
+        # names, asked as that turn was asked (its day, the turn before).
+        source = _extraction_turns().get(turn["recorded"], turn)
+        key = _reply_key(source, llm_replies or {}, mode)
         if key not in recorded:
             raise KeyError(f"no recorded reply for {turn['recorded']}: {RECORD_AGAIN}")
         return recorded[key]
@@ -1135,6 +1152,8 @@ def _expected_holds(expected: dict[str, Any], row: dict[str, Any]) -> bool:
             return False
     elif not _holds(_folded(expected["object"]), _folded(row["object"])):
         return False
+    if "started" in expected and row.get("started") != expected["started"]:
+        return False
     return expected.get("trust") != "user" or row["extraction_method"] in _USER_SOURCES
 
 
@@ -1142,10 +1161,13 @@ def _run_scenario(scenario: dict[str, Any], client: _ScriptedClient, recorded: d
                   llm_replies: dict[str, Any] | None = None, mode: str = "current") -> dict[str, Any]:
     import asyncio
 
+    from datetime import UTC
+
     from kazma_core.memory.belief_extractor import (
         _apply_beliefs_to_v2,
         extract_and_apply_beliefs_sync,
         extract_beliefs_for_turn,
+        said_on_iso,
     )
     from kazma_core.memory.entity_resolution import entity_vocabulary
     from kazma_core.memory.predicates import predicate_vocabulary
@@ -1165,6 +1187,7 @@ def _run_scenario(scenario: dict[str, Any], client: _ScriptedClient, recorded: d
         ensure_primary_schema(primary)
         ensure_ops_schema(ops)
         session = f"writes-{scenario['id']}"
+        asked_before = ""
         for number, turn in enumerate(scenario["turns"], 1):
             if "answer" in turn:
                 # The user answers the newest change waiting for them, on the
@@ -1183,14 +1206,19 @@ def _run_scenario(scenario: dict[str, Any], client: _ScriptedClient, recorded: d
             extract_and_apply_beliefs_sync(primary, ops, turn["user"], session_id=session, turn=number,
                                            tenant_id=BENCH_TENANT, now=at, private=True)
             client.reply = _turn_reply(turn, recorded, llm_replies, mode)
+            # The turn's day and the turn before, as the memory worker gives
+            # them (worker_bootstrap._turn_context), on the benchmark's clock.
             raw, stats = asyncio.run(extract_beliefs_for_turn(
                 turn["user"], "", vocabulary=predicate_vocabulary(primary, tenant_id=BENCH_TENANT),
-                entities=entity_vocabulary(primary, tenant_id=BENCH_TENANT)))
+                entities=entity_vocabulary(primary, tenant_id=BENCH_TENANT),
+                said_on=said_on_iso(at, UTC), previous=(asked_before, "") if asked_before else None))
+            asked_before = turn["user"]
             if raw:
                 _apply_beliefs_to_v2(raw, primary, ops, stats=stats, session_id=session, turn=number,
                                      tenant_id=BENCH_TENANT, now=at, private=True, user_text=turn["user"])
         rows = [dict(r) for r in primary.execute(
-            "SELECT subject, predicate, object, extraction_method FROM beliefs WHERE tenant_id = ? "
+            "SELECT subject, predicate, object, extraction_method, json_extract(metadata_json, '$.started') "
+            "AS started FROM beliefs WHERE tenant_id = ? "
             "AND valid_until IS NULL AND invalidated_at IS NULL ORDER BY valid_from", (BENCH_TENANT,))]
         waiting = [dict(r) for r in primary.execute(
             "SELECT subject, new_value AS object FROM memory_changes WHERE tenant_id = ? AND kind = 'pending' "
@@ -1282,7 +1310,7 @@ async def record_llm_extraction(dataset: dict[str, Any] | None = None) -> dict[s
     from kazma_core.memory.belief_extractor import _EXTRACT_SYSTEM, MESSAGE_SHAPE
 
     for t in data["turns"]:
-        blob = _llm_blob(t["user"])
+        blob = _llm_blob(t["user"], **_turn_context(t))
         raw = await client.chat([{"role": "system", "content": _EXTRACT_SYSTEM}, {"role": "user", "content": blob}])
         replies[_text_key(blob)] = raw.content if hasattr(raw, "content") else str(raw or "")
     # The provider client keeps its model on its config (``LLMProvider.config``).

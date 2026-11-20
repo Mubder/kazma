@@ -99,11 +99,20 @@ Return ONLY valid JSON (no markdown fences) with this shape:
       "predicate_type": "functional" | "set" | "state",
       "object": "the fact value",
       "confidence": 0.0 to 1.0,
-      "importance": 1 to 5
+      "importance": 1 to 5,
+      "since": "optional: when the fact began, YYYY-MM-DD, YYYY-MM or YYYY"
     }
   ]
 }
 Rules:
+- The message may give the date of this turn and the turn before it. Learn only
+  from "This turn". The turn before is there to understand this one ("yes, that
+  one", "she moved too"); never take a fact from it alone.
+- When this turn says when a fact began ("last month", "since 2019", "in March",
+  "two weeks ago"), give "since": the date it began, worked out from the date of
+  this turn ("last month" said on 2026-05-31 is "2026-04"; "two weeks ago" said on
+  2026-05-31 is "2026-05-17"). Leave "since" out when the turn names no time;
+  never guess one.
 - functional = single-valued (lives_in, name_is, works_at, favorite_*, active_project,
   grok_next_reset, zcode_next_reset, *_next_reset, *_weekly_reset).
   A new value supersedes the old one — only ONE active value per (subject, predicate).
@@ -228,7 +237,27 @@ async def extract_beliefs_with_llm(
 #: the deep pass says which form it was asked in (``message_shape``; a
 #: recording that says none was asked in form 1), so a change of form is a
 #: change the benchmark sees: bump this with any change to the message.
-MESSAGE_SHAPE = 1
+#: Form 2 (2026-11-20): the turn's date and the turn before it.
+MESSAGE_SHAPE = 2
+
+
+def _turn_zone() -> Any:
+    """The operator's zone, the one a turn's day is told in."""
+    from kazma_core.cron.scheduler import resolve_cron_zone
+
+    return resolve_cron_zone()[0]
+
+
+def said_on_iso(at: float | None, zone: Any) -> str | None:
+    """The day a turn was said, ``YYYY-MM-DD`` in *zone*, for
+    :func:`turn_message` (None: not known)."""
+    from datetime import datetime
+
+    try:
+        value = float(at)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return datetime.fromtimestamp(value, zone).date().isoformat() if value > 0 else None
 
 
 def turn_message(
@@ -237,12 +266,37 @@ def turn_message(
     *,
     vocabulary: list[str] | None = None,
     entities: list[str] | None = None,
+    said_on: str | None = None,
+    previous: tuple[str, str] | None = None,
 ) -> str:
     """The user message the deep pass sends for a turn: the one builder, for
-    the product and the benchmark's recordings alike."""
-    from kazma_core.memory.limits import DEEP_PASS_ANSWER, DEEP_PASS_QUESTION
+    the product and the benchmark's recordings alike.
+
+    *said_on* is the turn's day (``YYYY-MM-DD``, :func:`said_on_iso`), so the
+    model can turn "last month" into a date; *previous* is the turn before
+    it (question, answer), so it can read "yes, that one" -- context, never
+    a source of facts (framework audit F2 step 2). Without either, the
+    message is form 1's."""
+    from datetime import date
+
+    from kazma_core.memory.limits import (
+        DEEP_PASS_ANSWER,
+        DEEP_PASS_PREVIOUS_ANSWER,
+        DEEP_PASS_PREVIOUS_QUESTION,
+        DEEP_PASS_QUESTION,
+    )
 
     blob = f"User: {user_text[:DEEP_PASS_QUESTION]}\nAssistant: {(assistant_text or '')[:DEEP_PASS_ANSWER]}"
+    head = []
+    if said_on:
+        head.append(f"Date of this turn: {said_on} ({date.fromisoformat(said_on).strftime('%A')})")
+    asked, answered = previous or ("", "")
+    if (asked or "").strip() or (answered or "").strip():
+        head.append("The turn before, to understand this one (learn nothing from it):\n"
+                    f"User: {(asked or '')[:DEEP_PASS_PREVIOUS_QUESTION]}\n"
+                    f"Assistant: {(answered or '')[:DEEP_PASS_PREVIOUS_ANSWER]}")
+    if head:
+        blob = "\n\n".join(head) + "\n\nThis turn:\n" + blob
     if vocabulary:
         blob += "\n\nPredicates already in use: " + ", ".join(vocabulary[:60])
     if entities:
@@ -256,6 +310,8 @@ async def _llm_extract(
     *,
     vocabulary: list[str] | None = None,
     entities: list[str] | None = None,
+    said_on: str | None = None,
+    previous: tuple[str, str] | None = None,
 ) -> tuple[list[dict[str, Any]] | None, bool]:
     """``(beliefs, model_unavailable)``: None with True when the model could
     not be asked or did not answer (no client, the call raised -- retry
@@ -270,7 +326,7 @@ async def _llm_extract(
         messages = [
             {"role": "system", "content": _EXTRACT_SYSTEM},
             {"role": "user", "content": turn_message(user_text, assistant_text, vocabulary=vocabulary,
-                                                     entities=entities)},
+                                                     entities=entities, said_on=said_on, previous=previous)},
         ]
         raw = await client.chat(messages)
     except Exception as exc:  # noqa: BLE001 - no client, or no answer: retry later
@@ -347,7 +403,7 @@ def _sanitize_belief(b: dict[str, Any]) -> dict[str, Any] | None:
         importance = max(1, min(5, int(b.get("importance", 2))))
     except (TypeError, ValueError):
         importance = 2
-    return {
+    clean = {
         "subject": subject,
         "predicate": predicate,
         "predicate_type": ptype,
@@ -355,6 +411,45 @@ def _sanitize_belief(b: dict[str, Any]) -> dict[str, Any] | None:
         "confidence": confidence,
         "importance": importance,
     }
+    since = _since_value(b.get("since"))
+    if since:
+        clean["since"] = since
+    return clean
+
+
+#: The forms a fact's start may take (``since``): a year, a month or a day.
+_SINCE_RE = re.compile(r"([0-9]{4})(?:-([0-9]{2})(?:-([0-9]{2}))?)?")
+#: Arabic-Indic and Persian digits, read as the same numbers.
+_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
+
+
+def _since_value(value: Any) -> str | None:
+    """*value* as a start the model may give a fact (``YYYY``, ``YYYY-MM`` or
+    ``YYYY-MM-DD``, a real date from 1900 on, in any digits), else None: a
+    start is never guessed from words ("last month" is the model's to work
+    out)."""
+    from datetime import date
+
+    match = _SINCE_RE.fullmatch(str(value or "").strip().translate(_DIGITS))
+    if not match:
+        return None
+    year, month, day = int(match[1]), int(match[2] or 1), int(match[3] or 1)
+    try:
+        date(year, month, day)
+    except ValueError:
+        return None
+    return match[0] if year >= 1900 else None
+
+
+def _started_on(since: str | None, said_at: float | None, zone: Any) -> str | None:
+    """*since* when it is not after the day the turn was said (a start in
+    the future is a misreading, never kept), else None."""
+    said = said_on_iso(said_at, zone) if said_at else None
+    if not since:
+        return None
+    if said and since[: len(said)] > said[: len(since)]:
+        return None
+    return since
 
 
 # ── Heuristic fallback (no LLM) ──────────────────────────────────────────
@@ -523,10 +618,14 @@ async def extract_beliefs_for_turn(
     ignore_filler: bool = False,
     vocabulary: list[str] | None = None,
     entities: list[str] | None = None,
+    said_on: str | None = None,
+    previous: tuple[str, str] | None = None,
 ) -> tuple[list[dict[str, Any]] | None, dict[str, Any]]:
     """The extraction half, with no database: ``(raw_beliefs, stats)``.
 
     LLM preferred, heuristic fallback; filler and slash commands skipped.
+    *said_on* and *previous* are the turn's day and the turn before it
+    (:func:`turn_message`).
     """
     stats: dict[str, Any] = {
         "skipped_filler": False,
@@ -553,7 +652,8 @@ async def extract_beliefs_for_turn(
             pass
         else:
             raw_beliefs, unavailable = await _llm_extract(
-                user_text, assistant_text, vocabulary=vocabulary, entities=entities
+                user_text, assistant_text, vocabulary=vocabulary, entities=entities, said_on=said_on,
+                previous=previous,
             )
             if unavailable:
                 stats["model_unavailable"] = True
@@ -824,6 +924,10 @@ def _apply_beliefs_to_v2(
             now=now,
             private=private,
             said_by=people.said_by(said_by),
+            # The start this turn names ("since 2019", "last month"), kept
+            # beside the fact; validity follows the order facts were said
+            # (W1), so a start never reorders them (framework audit F2).
+            started=_started_on(clean["since"], now, _turn_zone()) if clean.get("since") else None,
         )
         if action["action"] != "noop":
             stats["applied"] += 1

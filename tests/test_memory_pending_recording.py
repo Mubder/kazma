@@ -135,7 +135,10 @@ def test_the_lock_writes_the_declaration_and_refuses_its_misuses(monkeypatch):
     if _today_mode() == "current":
         _part, problems = script._extraction_lock(old, prompt_changed="nothing changed")
         assert any("are the ones the recording answered" in p for p in problems), problems
-        _change_the_prompt(monkeypatch)
+    else:
+        _part, problems = script._extraction_lock(old, prompt_changed="declared again")
+        assert any("already declared" in p for p in problems), problems
+    _change_the_prompt(monkeypatch)
     part, problems = script._extraction_lock(old, prompt_changed="the date for the extractor")
     assert not problems, problems
     pending = part["pending_recording"]
@@ -223,16 +226,15 @@ def test_a_message_form_change_is_declared_like_a_prompt_change(monkeypatch):
     refused undeclared; declared, the replay answers each turn with the reply
     the recording was asked for it, in the recording's own form."""
     recording = _recording()
-    monkeypatch.setattr(belief_extractor, "MESSAGE_SHAPE", 2)
+    pending_before = _pending_in_lock()
+    monkeypatch.setattr(belief_extractor, "MESSAGE_SHAPE", belief_extractor.MESSAGE_SHAPE + 1)
     real = belief_extractor.turn_message
     monkeypatch.setattr(belief_extractor, "turn_message",
                         lambda text, answer="", **kw: "Said on: 2026-11-20\n" + real(text, answer, **kw))
-    pending_before = _pending_in_lock()
-    if pending_before is None:
-        with pytest.raises(benchmark.StaleRecordingError, match="message changed"):
-            benchmark.run_extraction_benchmark(llm_replies=recording)
+    with pytest.raises(benchmark.StaleRecordingError, match="changed since the recording"):
+        benchmark.run_extraction_benchmark(llm_replies=recording, pending=pending_before)
     pending, problems = _script()._declare_prompt_change(recording, pending_before, "the date for the extractor")
-    assert not problems and pending["message_shape"] == 2
+    assert not problems and pending["message_shape"] == belief_extractor.MESSAGE_SHAPE
     report = benchmark.run_extraction_benchmark(llm_replies=recording, pending=pending)
     assert report["llm_replay"] == "previous"
     assert _llm_scores(benchmark.extraction_scores(report)) == _llm_scores(_locked()["extraction"]["scores"])

@@ -845,6 +845,15 @@ Added as each piece lands.
   measure the new prompt. The product and the benchmark build the deep
   pass's message with one function, and a recording names its message form.
   Gate: `tests/test_memory_pending_recording.py`.
+- **The date and the previous turn given to the extractor (F2 step 2),
+  2026-11-20: built, not yet recorded.** The memory worker gives the deep
+  pass the turn's day in the operator's zone and the chat's remembered turn
+  before it (context only); the model gives a fact's start (`since`),
+  which Kazma keeps beside the fact when it is a real date no later than
+  the turn, never in place of when it was said; recall shows it. The write
+  scenarios gain a `temporal` category (four, English and Arabic, passing
+  on written replies). What the model does with the new message is
+  measured by the recording. Gate: `tests/test_memory_extractor_context.py`.
   Gate: `tests/test_memory_recall_dates.py`; control: recall without the
   dating step.
 

@@ -308,17 +308,35 @@ def _month_of(ts: Any, zone: Any) -> str:
     return f"{_MONTHS[when.month - 1]} {when.year}" if when else ""
 
 
-def _replaced_values(conn: sqlite3.Connection, ids: list[str], tenant_id: str) -> dict[str, tuple]:
-    """``fact id -> (value, from, until)`` of the fact each one replaced
-    (``supersedes_id``), when it still holds its value (a forgotten fact
+def _fact_dates(conn: sqlite3.Connection, ids: list[str], tenant_id: str) -> dict[str, tuple]:
+    """``fact id -> (started, kind, replaced value, its from, its until)``:
+    the start its turn named (``metadata.started``), and the fact it replaced
+    (``supersedes_id``) when that still holds its value (a forgotten fact
     keeps none)."""
     marks = ",".join("?" for _ in ids)
     rows = conn.execute(
-        f"SELECT cur.id, prev.object, prev.valid_from, prev.valid_until FROM beliefs cur "
-        f"JOIN beliefs prev ON prev.id = cur.supersedes_id AND prev.tenant_id = cur.tenant_id "
-        f"WHERE cur.tenant_id = ? AND cur.id IN ({marks}) AND COALESCE(prev.object, '') != ''",
+        f"SELECT cur.id, json_extract(cur.metadata_json, '$.started'), cur.predicate_type, prev.object, "
+        f"prev.valid_from, prev.valid_until FROM beliefs cur "
+        f"LEFT JOIN beliefs prev ON prev.id = cur.supersedes_id AND prev.tenant_id = cur.tenant_id "
+        f"AND COALESCE(prev.object, '') != '' "
+        f"WHERE cur.tenant_id = ? AND cur.id IN ({marks})",
         (tenant_id, *ids)).fetchall()
-    return {str(r[0]): (r[1], r[2], r[3]) for r in rows}
+    return {str(r[0]): tuple(r[1:]) for r in rows}
+
+
+def _started_label(started: Any) -> str:
+    """A start a turn named, as the block shows it: "2019", "Apr 2026" or
+    "3 Apr 2026"."""
+    parts = str(started or "").split("-")
+    try:
+        year = int(parts[0])
+        month = int(parts[1]) if len(parts) > 1 else 0
+        day = int(parts[2]) if len(parts) > 2 else 0
+    except ValueError:
+        return ""
+    if not 1 <= month <= 12:
+        return str(year)
+    return f"{day} {_MONTHS[month - 1]} {year}" if day else f"{_MONTHS[month - 1]} {year}"
 
 
 def _date_hits(result: RecallResult, *, conn: sqlite3.Connection | None, tenant_id: str) -> None:
@@ -332,14 +350,11 @@ def _date_hits(result: RecallResult, *, conn: sqlite3.Connection | None, tenant_
         day = _said_on((hit.metadata or {}).get("at"), zone)
         if day:
             hit.metadata["said_on"] = day
-    singles = []
     for hit in result.beliefs:
         since = _month_of((hit.metadata or {}).get("valid_from"), zone)
         if since:
             hit.metadata["since"] = since
-        if (hit.metadata or {}).get("predicate_type") in ("functional", "state"):
-            singles.append(hit.id)
-    if not singles:
+    if not result.beliefs:
         return
     own = conn is None
     try:
@@ -349,16 +364,23 @@ def _date_hits(result: RecallResult, *, conn: sqlite3.Connection | None, tenant_
             conn = _connect_existing(primary_memory_db())
             if conn is None:
                 return
-        before = _replaced_values(conn, singles, tenant_id)
+        dates = _fact_dates(conn, [h.id for h in result.beliefs], tenant_id)
     except sqlite3.Error:
-        logger.warning("[recall] could not read the values recalled facts replaced", exc_info=True)
+        logger.warning("[recall] could not read when the recalled facts began", exc_info=True)
         return
     finally:
         if own and conn is not None:
             conn.close()
     for hit in result.beliefs:
-        if hit.id in before:
-            value, start, end = before[hit.id]
+        if hit.id not in dates:
+            continue
+        started, kind, value, start, end = dates[hit.id]
+        # The start the turn named ("we moved last month") is the fact's own;
+        # the month it was said is the fallback.
+        label = _started_label(started)
+        if label:
+            hit.metadata["since"] = label
+        if value is not None and (kind or (hit.metadata or {}).get("predicate_type")) in ("functional", "state"):
             span = " to ".join(m for m in (_month_of(start, zone), _month_of(end, zone)) if m)
             hit.metadata["before"] = f"{value} ({span})" if span else str(value)
 

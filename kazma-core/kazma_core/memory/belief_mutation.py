@@ -343,6 +343,9 @@ def _established_kind(
 #: The account whose words the write in progress are (``mutate_belief``'s
 #: *said_by*), read where the row is built.
 _SAID_BY: contextvars.ContextVar[str | None] = contextvars.ContextVar("kazma_belief_said_by", default=None)
+#: When the fact the write in progress records began, as its turn named it
+#: (``mutate_belief``'s *started*), read where the row is built.
+_STARTED: contextvars.ContextVar[str | None] = contextvars.ContextVar("kazma_belief_started", default=None)
 
 
 def _trust_weight(extraction_method: str, cfg: dict[str, Any] | None) -> float:
@@ -441,8 +444,15 @@ def mutate_belief(
     confirms_change: tuple[str, str] | None = None,
     replaces_users_fact: bool = True,
     said_by: str | None = None,
+    started: str | None = None,
 ) -> dict[str, Any]:
     """Apply a belief mutation per the predicate-type rules.
+
+    *started* is when the fact began, as the turn named it (``YYYY``,
+    ``YYYY-MM`` or ``YYYY-MM-DD``: "we moved last month"; framework audit
+    F2 step 2), kept in the row's metadata (``started``) and shown by
+    recall. It never moves *now*: validity and supersession follow the order
+    facts were said in, whatever start a statement names.
 
     *said_by* is the account whose words these are, in a shared space
     (Spaces S1-11, ``memory/speakers.py``): kept in the fact's metadata, so
@@ -564,7 +574,7 @@ def mutate_belief(
     now = recorded if now is None else float(now)
 
     result: dict[str, Any] | None = None
-    said_token = _SAID_BY.set(str(said_by) if said_by else None)
+    tokens = _bind_write_context(said_by, started)
     try:
         with _mutation_lock:
             # W6: the name the subject already uses for the same words and
@@ -715,7 +725,60 @@ def mutate_belief(
     except Exception as exc:
         return _after_failure(exc, result)
     finally:
-        _SAID_BY.reset(said_token)
+        _unbind_write_context(tokens)
+
+
+def _same_fact_again(conn: sqlite3.Connection, belief_id: str, tenant_id: str, *, began: bool) -> dict:
+    """The outcome of writing the fact *belief_id* already holds: a start
+    its turn names is added (:func:`_add_named_start`), else nothing."""
+    gained = _add_named_start(conn, belief_id, tenant_id, began=began)
+    if gained:
+        return gained
+    # Release the BEGIN IMMEDIATE lock we acquired (no writes to commit).
+    # Only roll back if WE started the txn -- if the caller already had one
+    # open, leave it to the caller (audit finding: early returns leaked the
+    # write lock until the connection closed if the caller's later commit
+    # raised).
+    if began:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    return {"action": "noop", "belief_id": belief_id, "superseded_id": None}
+
+
+def _add_named_start(conn: sqlite3.Connection, belief_id: str, tenant_id: str, *, began: bool) -> dict | None:
+    """The same fact again, now with the start its turn names ("since 2019";
+    framework audit F2 step 2): kept on the row that holds none, never over
+    one it holds; the value and its source stay. The write's outcome, or
+    None when there is no start to add."""
+    started = _STARTED.get()
+    if not started:
+        return None
+    from kazma_core.memory.hygiene import beliefs_write
+
+    cur = beliefs_write(
+        conn,
+        "UPDATE beliefs SET metadata_json = json_set(COALESCE(metadata_json, '{}'), '$.started', ?) "
+        "WHERE id = ? AND tenant_id = ? AND json_extract(metadata_json, '$.started') IS NULL",
+        (started, belief_id, tenant_id))
+    if not getattr(cur, "rowcount", 0):
+        return None
+    if began:
+        conn.commit()
+    return {"action": "noop", "belief_id": belief_id, "superseded_id": None, "started_recorded": True}
+
+
+def _bind_write_context(said_by: str | None, started: str | None) -> tuple[Any, Any]:
+    """Bind who said the write in progress and the start its turn named,
+    read where the row is built (:func:`_insert_belief`)."""
+    return (_SAID_BY.set(str(said_by) if said_by else None), _STARTED.set(str(started) if started else None))
+
+
+def _unbind_write_context(tokens: tuple[Any, Any]) -> None:
+    said, started = tokens
+    _STARTED.reset(started)
+    _SAID_BY.reset(said)
 
 
 def _after_failure(exc: Exception, result: dict[str, Any] | None) -> dict[str, Any]:
@@ -794,6 +857,9 @@ def _insert_belief(
     said_by = _SAID_BY.get()
     if said_by:
         meta["said_by"] = said_by
+    started = _STARTED.get()
+    if started:
+        meta["started"] = started
     try:
         from kazma_core.memory.embedder import get_embedding_model_name
 
@@ -1026,17 +1092,7 @@ def _mutate_functional_locked(
 
         raises_trust = kw["extraction_method"] in _USER_SOURCES and existing_method not in _USER_SOURCES
         if _same_value(old_obj, obj) and not raises_trust:
-            # Release the BEGIN IMMEDIATE lock we acquired (no writes to
-            # commit). Only roll back if WE started the txn — if the caller
-            # already had one open, leave it to the caller (audit finding:
-            # early returns leaked the write lock until the connection closed
-            # if the caller's later commit raised).
-            if began:
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
-            return {"action": "noop", "belief_id": superseded_id, "superseded_id": None}
+            return _same_fact_again(conn, str(superseded_id), tenant_id, began=began)
         # Commitment Layer Phase 1 — source-trust gate (plan §3.6 rule 2):
         # a fact the user stated may NOT be superseded by a lower-trust
         # source (``memory.provenance.may_overrule``: an agent tool call, the
