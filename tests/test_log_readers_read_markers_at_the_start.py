@@ -181,7 +181,8 @@ def test_the_same_markers_at_the_start_count(tmp_path, monkeypatch, markers):
     logs = _Logs(tmp_path, monkeypatch, list(markers), guard)
 
     counts, turns, alerts, chats, unread = _digest(daily_digest)
-    assert turns == {"planted-turn": ("web", True)}
+    # (platform, failed, the person it ran for: none named on this line)
+    assert turns == {"planted-turn": ("web", True, None)}
     assert counts["scheduled messages not delivered"] == 2  # the JSON and the plain record
     assert counts["memory forgets"] == 2
     assert {"answers recovered from checkpoint", "LLM retries", "MCP connection failures"} <= set(counts)

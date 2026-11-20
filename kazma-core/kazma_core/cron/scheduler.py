@@ -1064,7 +1064,9 @@ class CronScheduler:
             self._in_flight.discard(job.job_id)
             logger.debug("[CronScheduler] %s claimed by another instance or changed — skipping", job.job_id)
             return
-        logger.info("[CronScheduler] Executing %s (%s): %.80s", job.job_id, job.kind, job.prompt)
+        from kazma_core.observability.log_words import words_for_log
+
+        logger.info("[CronScheduler] Executing %s (%s): %s", job.job_id, job.kind, words_for_log(job.prompt, 80))
 
         # Bind the cron-parent context for the whole execution: jobs the
         # agent RESCHEDULES from inside this turn inherit this job's

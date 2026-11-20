@@ -330,12 +330,18 @@ def _note_finished_turn(snap: Any, thread_id: str) -> None:
         platform = str(gateway.get("platform") or "") if isinstance(gateway, dict) else ""
         if not platform and str(thread_id).startswith("gw-"):
             platform = str(thread_id).split("-", 2)[1]
-        # The daily digest reads this line (observability.daily_digest).
+        # The daily digest reads this line (observability.daily_digest). It
+        # names the person the turn ran for by account id, never their words:
+        # once Spaces is enforced the digest counts turns per person
+        # (Spaces S1-24); ``-`` when the turn bound no person.
+        from kazma_core.spaces.scope import bound_asker
+
         logger.info(
-            "[turn] Turn finished: platform=%s key=%s failed=%s",
+            "[turn] Turn finished: platform=%s key=%s failed=%s asker=%s",
             platform or "other",
             key,
             "yes" if values.get("turn_failed") else "no",
+            bound_asker() or "-",
         )
     except (TypeError, ValueError, KeyError, AttributeError, IndexError, ImportError):
         logger.warning(

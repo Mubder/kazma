@@ -276,6 +276,22 @@ class KazmaTracer:
             logger.warning("Langfuse init failed (%s), falling back to console", e)
             self.backend = TracingBackend.CONSOLE
 
+    def _to_langfuse(self) -> bool:
+        """Whether this trace goes to Langfuse, an outside service that keeps
+        prompts, answers and tool inputs. Once Spaces is enforced, only the
+        owner's space's work goes there: what reaches the admin carries no
+        member content (Spaces S1-24, decision O1). A call of another space,
+        or of work bound to no space, gets the console line, which names
+        no words. An install that does not enforce Spaces traces as before."""
+        if self.backend != TracingBackend.LANGFUSE or not self._client:
+            return False
+        from kazma_core.spaces.scope import OWNER_SPACE_ID, current_scope, spaces_enforced
+
+        if not spaces_enforced():
+            return True
+        bound = current_scope()
+        return bound is not None and bound.space_id == OWNER_SPACE_ID
+
     def trace_llm_call(
         self,
         model: str,
@@ -301,7 +317,7 @@ class KazmaTracer:
             )
         )
 
-        if self.backend == TracingBackend.LANGFUSE and self._client:
+        if self._to_langfuse():
             self._trace_llm_langfuse(model, tokens, cost, duration_ms, prompt, response)
         else:
             logger.info(
@@ -362,7 +378,7 @@ class KazmaTracer:
             )
         )
 
-        if self.backend == TracingBackend.LANGFUSE and self._client:
+        if self._to_langfuse():
             self._trace_tool_langfuse(tool_name, input_data, output_data, duration_ms, success)
         else:
             status_label = "OK" if success else "FAIL"
@@ -412,7 +428,7 @@ class KazmaTracer:
             )
         )
 
-        if self.backend == TracingBackend.LANGFUSE and self._client:
+        if self._to_langfuse():
             self._trace_transition_langfuse(from_state, to_state, checkpoint_id)
         else:
             logger.info(
@@ -458,7 +474,7 @@ class KazmaTracer:
             )
         )
 
-        if self.backend == TracingBackend.LANGFUSE and self._client:
+        if self._to_langfuse():
             self._trace_compaction_langfuse(tokens_before, tokens_after, summary, reduction_pct)
         else:
             logger.info(
@@ -491,7 +507,7 @@ class KazmaTracer:
             logger.warning("Langfuse compaction trace failed: %s", e)
 
     def flush(self) -> None:
-        if self.backend == TracingBackend.LANGFUSE and self._client:
+        if self._to_langfuse():
             try:
                 self._client.flush()
             except Exception as e:

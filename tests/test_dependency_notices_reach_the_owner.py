@@ -177,7 +177,7 @@ def test_negative_control_the_old_digest_named_none(alerts, monkeypatch):
     # The old digest had neither line: no package lines, and no open-problems
     # line (resilience plan G2), which lists the same unmet requirement.
     monkeypatch.setattr(daily_digest, "_package_lines", lambda: [])
-    monkeypatch.setattr(daily_digest, "_open_problems_line", lambda: None)
+    monkeypatch.setattr(daily_digest, "_open_problems_line", lambda *labels: None)
     assert "fastapi" not in daily_digest.build_digest(24)
 
 

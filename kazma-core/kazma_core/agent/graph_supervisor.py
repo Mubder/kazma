@@ -914,12 +914,14 @@ async def supervisor_node(
             messages.insert(_ins, {"role": "system", "content": _prio})
 
         if iteration == 0:
+            from kazma_core.observability.log_words import words_for_log
+
             logger.info(
                 "[Supervisor] intent_mode=%s task_status=%s session_boost=%s recall_q=%r",
                 _intent_mode,
                 intent_patch.get("task_status", _prev_status),
                 _recall_session_id is not None,
-                (_recall_query or "")[:80],
+                words_for_log(_recall_query, 80),
             )
         # Mid-turn ReAct: keep prior focus fields; do not re-supersede from the
         # same user message re-read as "latest" after tool messages.

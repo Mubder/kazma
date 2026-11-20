@@ -39,7 +39,7 @@ from typing import Any
 
 from kazma_core.english_count import count_noun
 from kazma_core.observability.log_lines import opens_with, read_app_line, read_guard_line
-from kazma_core.observability.turn_line import TURN_MARKER, read_turn_line
+from kazma_core.observability.turn_line import TURN_MARKER, read_turn_asker, read_turn_line
 
 logger = logging.getLogger(__name__)
 
@@ -356,8 +356,9 @@ def _note_unasked(chats: dict[str, dict], ts: float, message: str) -> bool:
 
 def _scan_app_log(
     since: float, unread: Counter | None = None,
-) -> tuple[Counter, dict[str, tuple[str, bool]], dict[str, dict], dict[str, dict]]:
-    """Counted markers; each finished turn, key -> (platform, failed); each
+) -> tuple[Counter, dict[str, tuple[str, bool, str | None]], dict[str, dict], dict[str, dict]]:
+    """Counted markers; each finished turn, key -> (platform, failed, the
+    account it ran for or None); each
     alert key -> its tally (sent, held back, titles, needs attention); and
     each chat in which a call ran without asking or YOLO was turned on ->
     its YOLO windows and those calls by standing approval.
@@ -366,7 +367,7 @@ def _scan_app_log(
     it closed before a restart.
     """
     counts: Counter = Counter()
-    turns: dict[str, tuple[str, bool]] = {}
+    turns: dict[str, tuple[str, bool, str | None]] = {}
     alerts: dict[str, dict] = {}
     chats: dict[str, dict] = {}
     needles = (
@@ -385,7 +386,7 @@ def _scan_app_log(
         turn = read_turn_line(message)
         if turn:
             platform, key, failed = turn
-            turns[key] = (platform, failed)
+            turns[key] = (platform, failed, read_turn_asker(message))
             continue
         cron = opens_with(message, _CRON_LINE)
         if cron:
@@ -509,12 +510,114 @@ def _window_text(window: dict, zone: Any) -> str:
     return text
 
 
-def _unasked_lines(chats: dict[str, dict], zone: Any, zone_name: str) -> list[str]:
+# ── Spaces S1-24: counts per person ─────────────────────────────────────
+#
+# What reaches the admin carries no member content. Once Spaces is enforced
+# the digest names no chat another person opened -- not its id, nor what ran
+# there -- and counts it under that person; the turns and the open problems
+# are counted per person too. The owner's own chats are listed as before. An
+# install that does not enforce Spaces gets the digest it always had.
+
+#: How the digest names the owner, who reads it.
+_YOU = "you"
+#: A person whose account could not be read.
+_SOMEONE = "someone"
+
+
+def _person_labels() -> dict[str, str]:
+    """account id -> how the digest names the person: the owner is "you",
+    anyone else their account's name. With the identity store unreadable,
+    the owner alone (said once); every other person is then named by their
+    account id, an id and never their words."""
+    from kazma_core.spaces import identity
+    from kazma_core.spaces.scope import OWNER_ACCOUNT_ID
+
+    try:
+        accounts = identity.list_accounts()
+    except identity.IdentityUnavailable as exc:
+        logger.warning("[digest] the people could not be read: %s", type(exc).__name__)
+        accounts = []
+    labels = {str(a["id"]): str(a.get("name") or a["id"]) for a in accounts}
+    labels[OWNER_ACCOUNT_ID] = _YOU
+    return labels
+
+
+def _label(labels: dict[str, str], account: str | None) -> str:
+    from kazma_core.spaces.scope import OWNER_ACCOUNT_ID
+
+    if not account:
+        return labels.get(OWNER_ACCOUNT_ID, _YOU)
+    return labels.get(account) or account
+
+
+def _others_chats(chats: dict[str, dict]) -> dict[str, str]:
+    """thread -> the account of the other person who opened that chat, for
+    every chat in *chats* the owner did not open (a thread's record, Spaces
+    S1-08). A chat with no record is from before Spaces: the owner's (N19).
+    A record that cannot be read keeps its chat out of the list, counted
+    under "someone". Only once Spaces is enforced."""
+    from kazma_core.spaces import threads
+    from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, spaces_enforced
+
+    if not spaces_enforced():
+        return {}
+    others: dict[str, str] = {}
+    for thread in chats:
+        try:
+            record = threads.record_of(thread)
+        except (sqlite3.Error, OSError) as exc:
+            logger.warning("[digest] a chat's space could not be read: %s", type(exc).__name__)
+            others[thread] = ""
+            continue
+        if record is not None and record.opener != OWNER_ACCOUNT_ID:
+            others[thread] = record.opener
+    return others
+
+
+def _turns_per_person(turns: dict[str, tuple[str, bool, str | None]],
+                      labels: dict[str, str]) -> Counter:
+    """The completed turns by person, once Spaces is enforced and someone
+    besides the owner had one; else nothing. A turn that named no person
+    (a chat app's, a line from before) is the owner's."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if not spaces_enforced():
+        return Counter()
+    per = Counter(_label(labels, asker) for _platform, failed, asker in turns.values() if not failed)
+    return per if set(per) - {_YOU} else Counter()
+
+
+def _others_problems(labels: dict[str, str]) -> Counter:
+    """The open run incidents of other people's spaces, by person (their
+    asker, S1-21): a count, never a title. Only once Spaces is enforced."""
+    from kazma_core.runs.incidents import get_incident_store
+    from kazma_core.spaces.scope import OWNER_SPACE_ID, spaces_enforced
+
+    if not spaces_enforced():
+        return Counter()
+    try:
+        rows = get_incident_store().live()
+    except (sqlite3.Error, OSError) as exc:
+        logger.warning("[digest] other people's open problems could not be read: %s", type(exc).__name__)
+        return Counter()
+    return Counter(labels.get(str(row.get("asker") or "")) or str(row.get("asker") or "") or _SOMEONE
+                   for row in rows if str(row.get("space") or "") not in ("", OWNER_SPACE_ID))
+
+
+def _unasked_lines(chats: dict[str, dict], zone: Any, zone_name: str,
+                   others: dict[str, str] | None = None,
+                   labels: dict[str, str] | None = None) -> list[str]:
     """The section: every chat where a call ran without its card or YOLO was
-    turned on, oldest first, with what ran under which standing approval."""
+    turned on, oldest first, with what ran under which standing approval.
+
+    A chat another person opened (*others*, thread -> account) is never
+    named: its calls and YOLO windows are counted under the person."""
+    others = others or {}
     total = sum(sum(c.values()) for chat in chats.values() for c in chat["calls"].values())
     lines = [f"Ran without asking: {count_noun(total, 'call')} (times in {zone_name})"]
     for thread, chat in sorted(chats.items(), key=lambda kv: (kv[1]["first"], kv[0])):
+        if thread in others:
+            continue
         lines.append(f"  chat {thread[:8]}:")
         lines += [f"    {_window_text(w, zone)}" for w in chat["windows"]]
         calls = chat["calls"]
@@ -525,6 +628,19 @@ def _unasked_lines(chats: dict[str, dict], zone: Any, zone_name: str) -> list[st
             lines.append(f"    under {by}: {_split(calls[by])}")
         if not any(calls.values()):
             lines.append("    nothing ran without asking")
+    if others:
+        per: dict[str, list[int]] = {}
+        for thread, account in others.items():
+            chat = chats[thread]
+            counts = per.setdefault(_label(labels or {}, account) if account else _SOMEONE, [0, 0])
+            counts[0] += sum(sum(c.values()) for c in chat["calls"].values())
+            counts[1] += len(chat["windows"])
+        lines.append("  in other people's chats (counted, never named):")
+        for person, (calls, windows) in sorted(per.items()):
+            text = f"    {person}: {count_noun(calls, 'call')}"
+            if windows:
+                text += f", YOLO turned on {count_noun(windows, 'time')}"
+            lines.append(text)
     return lines
 
 
@@ -587,17 +703,29 @@ def _outside_watch_line() -> str | None:
         return "Outside watch: could not be read"
 
 
-def _open_problems_line() -> str | None:
+def _open_problems_line(labels: dict[str, str] | None = None) -> str | None:
     """The Dashboard's open problems (resilience plan G2), the same list:
-    how many, the first few by name. None when nothing is open."""
-    from kazma_core.observability.open_problems import open_problems
+    how many, the first few by name. None when nothing is open.
 
-    data = open_problems("en")
+    Once Spaces is enforced the list is the owner's space's (the digest is
+    the owner's; the bell answers for the space bound, S1-21), and other
+    people's open problems are counted per person, never named (S1-24)."""
+    from kazma_core.observability.open_problems import open_problems
+    from kazma_core.spaces import scope as space_scope
+
+    if space_scope.spaces_enforced():
+        with space_scope.bind_scope(space_scope.OWNER_SPACE_ID, space_scope.OWNER_ACCOUNT_ID):
+            data = open_problems("en")
+    else:
+        data = open_problems("en")
+    others = _others_problems(labels or {})
     rows, unread = data["problems"], data["unreadable"]
-    if not rows and not unread:
+    if not rows and not unread and not others:
         return None
     titles = "; ".join(str(r["title"])[:80] for r in rows[:5]) + ("; ..." if len(rows) > 5 else "")
     line = f"Open problems: {len(rows)}" + (f" ({titles})" if titles else "")
+    if others:
+        line += f" -- in other people's spaces: {_split(others)}"
     if unread:
         line += " -- could not read: " + ", ".join(unread)
     return line
@@ -616,11 +744,17 @@ def build_digest(hours: float = DIGEST_INTERVAL_HOURS) -> str:
 
     lines = ["\U0001f4c5 [Ops] Daily digest", f"Window: {window}"]
 
-    completed = Counter(platform for platform, failed in turns.values() if not failed)
-    failed_turns = sum(1 for _platform, failed in turns.values() if failed)
+    from kazma_core.spaces.scope import spaces_enforced
+
+    labels = _person_labels() if spaces_enforced() else {}
+    completed = Counter(platform for platform, failed, _asker in turns.values() if not failed)
+    failed_turns = sum(1 for _platform, failed, _asker in turns.values() if failed)
     lines.append("")
     total = sum(completed.values())
     lines.append(f"Turns completed: {total}" + (f" ({_split(completed)})" if total else ""))
+    per_person = _turns_per_person(turns, labels)
+    if per_person:
+        lines.append(f"  by person: {_split(per_person)}")
     asked = sum(approvals.values())
     if asked:
         outcomes: Counter = Counter()
@@ -637,7 +771,7 @@ def build_digest(hours: float = DIGEST_INTERVAL_HOURS) -> str:
     outside = _outside_watch_line()
     if outside:
         lines.append(outside)
-    problems = _open_problems_line()
+    problems = _open_problems_line(labels)
     if problems:
         lines.append(problems)
 
@@ -661,7 +795,7 @@ def build_digest(hours: float = DIGEST_INTERVAL_HOURS) -> str:
     # the approvals above are not the whole story without it.
     if unasked:
         lines.append("")
-        lines += _unasked_lines(unasked, *_operator_zone())
+        lines += _unasked_lines(unasked, *_operator_zone(), _others_chats(unasked), labels)
 
     # Recoveries: things that went wrong and were fixed without you.
     recovered = {

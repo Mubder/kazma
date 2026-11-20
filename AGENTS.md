@@ -13732,6 +13732,25 @@ product can turn it on, so an install with one account behaves as before.
   - Gates: `tests/test_settings_scope.py` (a planted key, the
     not-enforced save and a page built for everyone as controls),
     `tests/e2e/test_settings_areas_browser.py` (EN and AR, by the sidebar).
+- **What reaches the admin carries no member content (S1-24, 2026-11-20).**
+  Guards act only where Spaces is enforced, except the finished-turn line's
+  `asker=`, which is always written.
+  - Every log line at INFO or above that quotes someone's words goes through
+    `kazma_core/observability/log_words.py` (`words_for_log`,
+    `args_for_log`): once enforced it says how long they are, never the
+    words. A new such line uses it.
+  - The finished-turn line names the person by account id (`asker=`, read
+    by `turn_line.read_turn_asker`). Once enforced the daily digest shows
+    the turns by person, counts what ran without asking in a chat another
+    person opened under that person (`daily_digest._others_chats`: never
+    the chat's id or its tools), and counts other people's open problems by
+    person; its own list is the owner's space's.
+  - Langfuse gets only the owner's space's work once enforced
+    (`KazmaTracer._to_langfuse`); the rest gets the console line.
+  - Gate: `tests/test_admin_signals_hold_no_content.py` (a member's real
+    turn, every INFO line, alert, the digest and the weekly report read for
+    a planted word; the log's words as before, today's digest and every
+    call sent to Langfuse as controls).
 
 ## UI Conventions (Web)
 
