@@ -161,21 +161,16 @@ def test_a_recording_of_todays_prompt_ends_the_declaration(monkeypatch, tmp_path
     part, problems = script._extraction_lock(_locked()["extraction"], prompt_changed="the date for the extractor")
     assert not problems and part["pending_recording"]
     recording = _recording()
-    turns = json.loads(benchmark.EXTRACTION_PATH.read_text(encoding="utf-8"))["turns"]
-    # Each reply keyed by the message today's extractor sends: a recording
-    # made today.
-    # A turn added since the recording (``new_in``) was never asked: an
-    # answer that keeps nothing stands in for it.
-    replies = {benchmark._text_key(benchmark._llm_blob(t["user"], **benchmark._turn_context(t))):
-               '{"beliefs": []}' if t.get("new_in") else
-               recording["replies"][benchmark._text_key(benchmark._recorded_message(t["user"], 1))] for t in turns}
+    # The changed prompt asked again, in today's message form (the same keys):
+    # each turn the standard number of times (benchmark audit R2), each reply
+    # reading as the locked one, written a little differently (a new
+    # recording never repeats the locked replies themselves), and one more
+    # turn's replies: another recording.
     n = benchmark.ASKINGS_STANDARD
+    replies = {k: [r + "\n" for r in benchmark._reply_list(v)] for k, v in recording["replies"].items()}
     fresh = dict(recording, prompt_sha256=benchmark._extraction_prompt_sha256(),
                  message_shape=belief_extractor.MESSAGE_SHAPE, recorded_on="2026-12-01", askings=n, complete=True,
-                 # Each turn asked the standard number of times (benchmark audit R2),
-                 # each reply reading the same, written a little differently (a
-                 # new recording never repeats the locked replies themselves).
-                 replies={k: [v + "\n" * (i + 1) for i in range(n)] for k, v in dict(replies, unused="{}").items()})
+                 replies={**replies, "unused": ["{}"] * n})
     path = tmp_path / "extraction_llm.json"
     path.write_text(json.dumps(fresh, ensure_ascii=False), encoding="utf-8")
     monkeypatch.setattr(script, "LLM_REPLIES", path)
@@ -232,6 +227,21 @@ def test_the_product_and_the_benchmark_build_one_message():
         asyncio.run(belief_extractor._llm_extract("I live in Lisbon.", ""))
     assert sent == [benchmark._llm_blob("I live in Lisbon.")]
     assert benchmark._recorded_message("I live in Lisbon.", 1) == "User: I live in Lisbon.\nAssistant: "
+
+
+def test_control_without_the_asked_messages_a_later_form_cannot_replay_this_recording(monkeypatch):
+    """The recording names the message each turn was asked (``asked``, part
+    C2): once Kazma builds another form, the old message cannot be rebuilt.
+    Without the names, a declared form change replays nothing."""
+    recording = {k: v for k, v in _recording().items() if k != "asked"}
+    monkeypatch.setattr(belief_extractor, "MESSAGE_SHAPE", belief_extractor.MESSAGE_SHAPE + 1)
+    real = belief_extractor.turn_message
+    monkeypatch.setattr(belief_extractor, "turn_message",
+                        lambda text, answer="", **kw: "Said on: 2026-11-20\n" + real(text, answer, **kw))
+    pending, problems = _script()._declare_prompt_change(recording, _pending_in_lock(), "a later form")
+    assert not problems
+    with pytest.raises(benchmark.StaleRecordingError, match="no longer builds"):
+        benchmark.run_extraction_benchmark(llm_replies=recording, pending=pending)
 
 
 def test_a_message_form_change_is_declared_like_a_prompt_change(monkeypatch):

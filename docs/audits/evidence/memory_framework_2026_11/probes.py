@@ -229,7 +229,7 @@ def _recorded_deep_pass(turn_id: str) -> tuple[str, list[dict[str, Any]]]:
     root = HERE.parents[3]
     turn = next(t for t in json.loads(bench.EXTRACTION_PATH.read_text(encoding="utf-8"))["turns"]
                 if t["id"] == turn_id)
-    replies = json.loads((root / "tests" / "fixtures" / "memory_bench" / "extraction_llm.json")
+    replies = json.loads((root / "tests" / "fixtures" / "memory_bench" / "extraction_llm_2026-10-15.json")
                          .read_text(encoding="utf-8"))["replies"]
     reply = replies[bench._text_key(bench._llm_blob(turn["user"]))]
 

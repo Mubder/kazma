@@ -63,15 +63,38 @@ def test_a_model_pass_row_the_lock_does_not_count_is_not_printed(tmp_path, monke
     module = _page_module()
     data = json.loads(module.MEMORY.read_text(encoding="utf-8"))
     changed = tmp_path / "thresholds.json"
-    data["extraction"]["rests_on"]["llm"]["ar"]["askings"] = 50
+    turns = data["extraction"]["rests_on"]["llm"]["ar"]["turns"]
+    data["extraction"]["rests_on"]["llm"]["ar"]["askings"] = turns * 7
     changed.write_text(json.dumps(data), encoding="utf-8")
     monkeypatch.setattr(module, "MEMORY", changed)
-    assert "50 askings (10 turns, 5 each)" in module.render()
+    assert f"{turns * 7} askings ({turns} turns, 7 each)" in module.render()
     assert module.main(["--check"]) == 1
     del data["extraction"]["rests_on"]
     changed.write_text(json.dumps(data), encoding="utf-8")
     with pytest.raises(ValueError, match="rests on"):
         module.render()
+
+
+def test_the_model_pass_says_its_spread_and_what_c2_asks(tmp_path, monkeypatch) -> None:
+    """A recording of several askings prints its spread for the table's
+    scores and the part C2 scores, from the lock; one asking keeps the old
+    sentence and prints no spread."""
+    import json
+
+    module = _page_module()
+    data = json.loads(module.MEMORY.read_text(encoding="utf-8"))
+    data["extraction"]["recording"]["askings"] = 5
+    data["extraction"]["spread"] = {"en": {"found": 0.031, "dated": 0.5}}
+    data["extraction"]["scores"]["llm.en.dated"] = 0.9
+    changed = tmp_path / "thresholds.json"
+    changed.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setattr(module, "MEMORY", changed)
+    text = module.render()
+    assert "at most 3.1 points for the scores in this table" in text          # not the 50 of a start
+    assert "gives a fact's start right 90.0 % in English" in text
+    data["extraction"]["recording"]["askings"] = 1
+    changed.write_text(json.dumps(data), encoding="utf-8")
+    assert "a number from one asking can move" in module.render()
 
 
 def test_the_pgvector_line_says_both_searches(tmp_path, monkeypatch) -> None:

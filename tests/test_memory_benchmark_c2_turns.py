@@ -23,6 +23,8 @@ import json
 import pytest
 from kazma_core.memory import benchmark
 
+FIXTURES = benchmark.EXTRACTION_PATH.parents[3].parent / "tests" / "fixtures" / "memory_bench"
+
 #: Right answers to the C2 turns, by turn id (the facts the model should give).
 RIGHT = {
     "t01": [{"subject": "user", "predicate": "works_at", "object": "Zain", "since": "2026-03"}],
@@ -54,8 +56,7 @@ def _recording(answers: dict[str, list[dict]]) -> dict:
     *answers* for the turns C2 added."""
     from kazma_core.memory.belief_extractor import MESSAGE_SHAPE
 
-    path = benchmark.EXTRACTION_PATH.parents[3].parent / "tests" / "fixtures" / "memory_bench" / "extraction_llm.json"
-    old = json.loads(path.read_text(encoding="utf-8"))
+    old = json.loads((FIXTURES / "extraction_llm_2026-10-15.json").read_text(encoding="utf-8"))
     shape = benchmark._recording_shape(old)
     replies = {}
     for turn in _turns():
@@ -127,16 +128,31 @@ def test_control_a_scorer_that_ignores_ended_takes_the_held_fact_for_the_ending(
     assert _c2_report(held_vim)["en"]["found"] > honest
 
 
-def test_the_drift_check_names_them_as_waiting():
-    path = benchmark.EXTRACTION_PATH.parents[3].parent / "tests" / "fixtures" / "memory_bench"
-    old = json.loads((path / "extraction_llm.json").read_text(encoding="utf-8"))
-    pending = json.loads((path / "thresholds.json").read_text(encoding="utf-8"))["extraction"].get(
-        "pending_recording")
-    if benchmark._check_recording(old, pending) != "previous":
-        pytest.skip("the recording answers today's prompt: nothing waits")
-    report = benchmark.run_extraction_benchmark(llm_replies=old, pending=pending)
+def _declared_over(recording: dict) -> dict:
+    """A declared prompt change over *recording* (today's prompt waiting for
+    its recording), as ``memory_bench.py lock --prompt-changed`` writes it."""
+    from kazma_core.memory.belief_extractor import MESSAGE_SHAPE
+
+    return {"prompt_sha256": benchmark._extraction_prompt_sha256(), "message_shape": MESSAGE_SHAPE,
+            "replaces_prompt_sha256": recording["prompt_sha256"],
+            "replaces_message_shape": benchmark._recording_shape(recording)}
+
+
+def test_a_drift_check_names_the_turns_added_after_its_recording_as_waiting(monkeypatch):
+    """The recording before C2 (dataset v1) never answered the turns v3
+    added: replayed as a drift check, they wait, named. Control: C2's own
+    recording (dataset v3) answered them, so a drift check over it, after a
+    later prompt change, leaves nothing out."""
+    old = json.loads((FIXTURES / "extraction_llm_2026-10-15.json").read_text(encoding="utf-8"))
+    report = benchmark.run_extraction_benchmark(llm_replies=old, pending=_declared_over(old))
+    assert report["llm_replay"] == "previous"
     assert report["llm_waiting"] == [t["id"] for t in _turns() if t.get("new_in")]
-    assert all(t.get("new_in") is None or t["id"] in report["llm_waiting"] for t in _turns())
+    from kazma_core.memory import belief_extractor
+
+    current = json.loads((FIXTURES / "extraction_llm.json").read_text(encoding="utf-8"))
+    monkeypatch.setattr(belief_extractor, "_EXTRACT_SYSTEM", belief_extractor._EXTRACT_SYSTEM + "\nA later change.")
+    later = benchmark.run_extraction_benchmark(llm_replies=current, pending=_declared_over(current))
+    assert later["llm_replay"] == "previous" and "llm_waiting" not in later
 
 
 @pytest.mark.parametrize(("gold", "got", "holds"), [

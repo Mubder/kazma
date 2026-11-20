@@ -281,14 +281,22 @@ def _recording() -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _old_recording() -> dict:
+    """The recording of 2026-10-15 (one asking a turn, message form 1,
+    dataset v1's turns), kept under its date when part C2's replaced it: the
+    material a test fabricates another recording from."""
+    return json.loads((FIXTURES / "extraction_llm_2026-10-15.json").read_text(encoding="utf-8"))
+
+
 def _turns() -> list[dict]:
     return json.loads(benchmark.EXTRACTION_PATH.read_text(encoding="utf-8"))["turns"]
 
 
 def _asked_today(recording: dict, prompt_sha256: str | None = None) -> dict:
-    """*recording* as if it had been asked today: its replies keyed by the
-    message today's extractor sends for each turn, labelled with today's
-    message form and *prompt_sha256* (today's prompt by default)."""
+    """*recording* (a one-asking recording of an older form, the dated one)
+    as if it had been asked today: its replies keyed by the message today's
+    extractor sends for each turn, labelled with today's message form and
+    *prompt_sha256* (today's prompt by default)."""
     shape = benchmark._recording_shape(recording)
     replies = {}
     for turn in _turns():
@@ -297,8 +305,9 @@ def _asked_today(recording: dict, prompt_sha256: str | None = None) -> dict:
         old = benchmark._text_key(benchmark._recorded_message(turn["user"], shape))
         reply = '{"beliefs": []}' if turn.get("new_in") else recording["replies"][old]
         replies[benchmark._text_key(benchmark._llm_blob(turn["user"], **benchmark._turn_context(turn)))] = reply
-    return {**recording, "replies": replies, "message_shape": _today_shape(),
-            "prompt_sha256": prompt_sha256 or benchmark._extraction_prompt_sha256()}
+    return {**{k: v for k, v in recording.items() if k != "asked"}, "replies": replies,
+            "message_shape": _today_shape(), "prompt_sha256": prompt_sha256 or benchmark._extraction_prompt_sha256(),
+            "extraction_version": json.loads(benchmark.EXTRACTION_PATH.read_text(encoding="utf-8"))["version"]}
 
 
 def _askings(recording: dict, n: int, *, complete: bool = True) -> dict:
@@ -315,7 +324,7 @@ def test_a_new_recording_needs_the_standard_askings_and_a_finished_recorder(tmp_
     locked only with ``ASKINGS_STANDARD`` askings a turn, and only once its
     recorder finished. Negative control: today's one-reply file is refused."""
     script = _build_script()
-    today = _asked_today(json.loads(json.dumps(_recording())))
+    today = _asked_today(json.loads(json.dumps(_old_recording())))
     path = tmp_path / "extraction_llm.json"
     monkeypatch.setattr(script, "LLM_REPLIES", path)
     for recording, refused in ((today, "5 askings a turn"),
@@ -337,7 +346,7 @@ def test_a_score_is_the_total_over_the_askings_and_its_spread_how_they_differ():
     """Benchmark audit R2: every asking scored; the total over them, and two
     standard errors of their scores. Negative control: the first asking alone
     is not the total."""
-    today = _asked_today(json.loads(json.dumps(_recording())))
+    today = _asked_today(json.loads(json.dumps(_old_recording())))
     a01 = next(t for t in _turns() if t["id"] == "a01")
     key = benchmark._text_key(benchmark._llm_blob(a01["user"], **benchmark._turn_context(a01)))
     asked = _askings(today, 2)
@@ -438,15 +447,14 @@ def test_a_relabelled_recording_is_not_the_locked_one(tmp_path, monkeypatch):
     import hashlib
 
     monkeypatch.setattr("kazma_core.memory.belief_extractor._EXTRACT_SYSTEM", "Keep nothing.")
-    # Relabelled, re-keyed by today's message, and with a reply that keeps
-    # nothing for each turn added since (the file the attack would need).
-    relabelled = _asked_today(_recording(), hashlib.sha256(b"Keep nothing.").hexdigest())
+    # The locked replies, said to answer "Keep nothing.".
+    relabelled = {**_recording(), "prompt_sha256": hashlib.sha256(b"Keep nothing.").hexdigest()}
     locked = _locked_extraction()
     report = benchmark.run_extraction_benchmark(llm_replies=relabelled)
-    # Control: every locked reply is there, and the old turns score as locked.
-    assert set(_recording()["replies"].values()) <= set(relabelled["replies"].values())
-    old = {k: v for k, v in benchmark.extraction_scores(report).items() if k.startswith("llm.")}
-    assert old and set(old) >= {k for k in locked["scores"] if k.startswith("llm.")}
+    # Control: the replies are the locked ones, and so are the scores.
+    assert report["llm_recording"]["reply_hashes"] == locked["recording"]["reply_hashes"]
+    llm = {k: v for k, v in locked["scores"].items() if k.startswith("llm.")}
+    assert llm and {k: v for k, v in benchmark.extraction_scores(report).items() if k.startswith("llm.")} == llm
     assert any("another prompt" in p for p in _recording_problems(report, locked))
 
     script = _build_script()
@@ -456,6 +464,13 @@ def test_a_relabelled_recording_is_not_the_locked_one(tmp_path, monkeypatch):
     _part, problems = script._extraction_lock(locked)
     assert any("another prompt" in p for p in problems), problems
     _part, problems = script._extraction_lock(locked, new_recording="relabelled")
+    assert any("another prompt" in p for p in problems), problems
+    # Extended (one more reply on a turn): still every locked reply, still a relabel.
+    key = next(iter(relabelled["replies"]))
+    extended = {**relabelled, "replies": {**relabelled["replies"],
+                                          key: [*relabelled["replies"][key], '{"beliefs": []}']}}
+    path.write_text(json.dumps(extended, ensure_ascii=False), encoding="utf-8")
+    _part, problems = script._extraction_lock(locked, new_recording="relabelled and extended")
     assert any("another prompt" in p for p in problems), problems
 
 
@@ -583,7 +598,7 @@ def test_a_changed_extraction_prompt_needs_a_new_recording(monkeypatch):
     """Negative control of the recording's identity: with the prompt replaced
     by "Keep nothing", every deep-pass score used to stay the same
     (benchmark audit F4). Now the run refuses."""
-    replies = _asked_today(_recording())
+    replies = _recording()
     monkeypatch.setattr("kazma_core.memory.belief_extractor._EXTRACT_SYSTEM", "Keep nothing.")
     with pytest.raises(benchmark.StaleRecordingError, match="prompt changed"):
         benchmark.run_extraction_benchmark(llm_replies=replies)
@@ -613,7 +628,7 @@ def test_a_second_recording_is_locked_only_on_purpose(tmp_path, monkeypatch):
     with a reason; the old rule (the higher of the two, score by score) made a
     floor no recording reaches (benchmark audit F3)."""
     script = _build_script()
-    recording = _recording()
+    recording = _old_recording()
     a01 = next(t for t in _turns() if t["id"] == "a01")
     # A recording of today's prompt (a declared change is answered by one).
     second = _asked_today(json.loads(json.dumps(recording)))

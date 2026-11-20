@@ -907,6 +907,20 @@ Added as each piece lands.
   each (`dated`, `replaced`, `ended`); until the recording they wait, named.
   The quick pass finds less on them (it reads no dates or held facts) and
   keeps nothing it should not. Gate: `tests/test_memory_benchmark_c2_turns.py`.
+- **The recording, 2026-11-20: made and locked** (the owner's yes;
+  deepseek-flash; 40 turns, 5 askings each, 200 calls; 307,945 prompt
+  tokens, 259,712 of them cache hits, and 31,740 completion tokens, 21,916
+  of them reasoning, as DeepSeek counted them; Kazma holds no price for the
+  model). On the 30 turns the old recording answered, the new prompt keeps
+  every fact in English and the mixed turns and 96.4 % in Arabic (two of
+  five askings of a06 kept Noura's job but not that she is the user's
+  sister); "same name" rises (English 0.77 to 0.80, Arabic 0.91 to 0.92);
+  nothing kept is wrong in English and Arabic. On the ten C2 turns, every
+  fact is found, every held fact replaced and every ending read, in both
+  languages; nothing is taken from the turn before or from the planted
+  text; one start in ten is a month late (r01's first asking: "last
+  month" said on 31 May given as May). The write scenarios all still pass.
+  The declared prompt changes end with it.
 
 What I would not do:
 

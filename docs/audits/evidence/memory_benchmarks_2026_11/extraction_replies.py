@@ -5,7 +5,7 @@ deep-pass scores. No model call: every reply read here was recorded before.
 It reads three sets of replies of the same model (deepseek-flash) to the same
 30 turns:
 
-* the locked recording, ``tests/fixtures/memory_bench/extraction_llm.json``
+* the locked recording, ``tests/fixtures/memory_bench/extraction_llm_2026-10-15.json``
   (one asking a turn, 2026-10-15);
 * six turns asked again with the same message, and
 * all 30 turns asked with two "who speaks" lines appended,
@@ -35,7 +35,7 @@ from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[3]
-LOCKED = ROOT / "tests" / "fixtures" / "memory_bench" / "extraction_llm.json"
+LOCKED = ROOT / "tests" / "fixtures" / "memory_bench" / "extraction_llm_2026-10-15.json"
 LANGS = ("en", "ar", "mixed")
 
 

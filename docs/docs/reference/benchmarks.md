@@ -44,12 +44,12 @@ Turns in English, Arabic and both, with the facts a person would expect remember
 | Quick pass | English | 31.6 % | 100.0 % | 100.0 % | 100.0 % | 18 turns |
 | Quick pass | Arabic | 50.0 % | 100.0 % | 100.0 % | 100.0 % | 14 turns |
 | Quick pass | Mixed | 60.0 % | 100.0 % | 100.0 % | 100.0 % | 8 turns |
-| Model pass (1 asking a turn, previous prompt) | English | 100.0 % | 76.9 % | 100.0 % | 100.0 % | 12 askings (12 turns, 1 each) |
-| Model pass (1 asking a turn, previous prompt) | Arabic | 100.0 % | 90.9 % | 100.0 % | 100.0 % | 10 askings (10 turns, 1 each) |
-| Model pass (1 asking a turn, previous prompt) | Mixed | 100.0 % | 70.0 % | 91.7 % | 100.0 % | 8 askings (8 turns, 1 each) |
+| Model pass (5 askings a turn) | English | 100.0 % | 86.3 % | 100.0 % | 100.0 % | 90 askings (18 turns, 5 each) |
+| Model pass (5 askings a turn) | Arabic | 97.1 % | 94.1 % | 100.0 % | 100.0 % | 70 askings (14 turns, 5 each) |
+| Model pass (5 askings a turn) | Mixed | 100.0 % | 72.0 % | 92.6 % | 100.0 % | 40 askings (8 turns, 5 each) |
 
-The model pass is deepseek-flash's replies, recorded on 2026-10-15, 1 asking a turn. Asked again, a model answers a little differently, so a number from one asking can move by a few facts with nothing changed.
-Kazma's extraction prompt has changed since that recording (5 changes since 2026-11-20). The model-pass rows replay the recording through today's code, which checks that the code reading the model's replies still keeps what it kept; they do not measure the new prompt, which is measured when it is recorded.
+The model pass is deepseek-flash's replies, recorded on 2026-11-20, 5 askings a turn. Asked again, a model answers a little differently, so the lock keeps each score's spread: two standard errors over the askings, at most 7.5 points for the scores in this table.
+On the ten turns that give it the turn's day, the turn before and the facts held, the model pass gives a fact's start right 90.0 % in English, 100.0 % in Arabic; names the held fact it replaces 100.0 % in English, 100.0 % in Arabic; reads that a fact ended 100.0 % in English, 100.0 % in Arabic.
 
 With Postgres and pgvector as the memory store (CI run 44732367729 (main af93192fd, job Tests (pgvector) 136275094486), approximate search), the same questions score 89.5 % hit rate, 0.83 MRR and 61.3 % precision. Comparing every row (exact search) scores the same on every measure.
 

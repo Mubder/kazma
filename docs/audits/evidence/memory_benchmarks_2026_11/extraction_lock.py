@@ -55,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     script = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(script)
 
-    first = json.loads((FIXTURES / "extraction_llm.json").read_text(encoding="utf-8"))
+    first = json.loads((FIXTURES / "extraction_llm_2026-10-15.json").read_text(encoding="utf-8"))  # the recording measured
     locked = json.loads((FIXTURES / "thresholds.json").read_text(encoding="utf-8"))
     r3 = json.loads((args.r3 / "deep_replies.json").read_text(encoding="utf-8"))["replies"]
 

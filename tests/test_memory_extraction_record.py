@@ -50,7 +50,11 @@ class _Model:
         city = ["دبي", "Doha", "Kuwait", "Riyadh", "Muscat"][len(self.asked) % 5]
         return SimpleNamespace(content=json.dumps({"beliefs": [
             {"subject": "user", "predicate": "lives_in", "predicate_type": "functional", "object": city,
-             "confidence": 0.9}]}, ensure_ascii=False))
+             "confidence": 0.9}]}, ensure_ascii=False),
+            # The provider's own counts (DeepSeek's usage fields), no price.
+            usage={"prompt_tokens": 1500, "completion_tokens": 150, "prompt_cache_hit_tokens": 1200,
+                   "prompt_cache_miss_tokens": 300, "completion_tokens_details": {"reasoning_tokens": 60}},
+            cost_usd=0.0, cost_known=False)
 
 
 def _use(monkeypatch, stand_in) -> None:
@@ -99,9 +103,16 @@ def test_the_limit_stops_it_and_a_second_run_goes_on_without_asking_again(model,
     # Every turn's first asking before any turn's second.
     assert first["complete"] is False and len(model.asked) == 5
     assert sorted(len(v) for v in first["replies"].values()) == [1, 1, 1, 2]
+    # A turn not asked yet has no entry: a file cut short holds only replies.
+    assert all(first["replies"].values())
     _script().record_to(out, dataset=_dataset(4), limit=100, askings=2)
     assert len(model.asked) == 8 and _read(out)["complete"] is True
     assert len(set(model.asked)) == 4                                   # nothing asked a third time
+    # What the calls cost, as the provider counted them, over both runs.
+    usage = _read(out)["usage"]
+    assert usage["calls"] == 8 and usage["prompt_tokens"] == 8 * 1500 and usage["completion_tokens"] == 8 * 150
+    assert usage["reasoning_tokens"] == 8 * 60 and usage["prompt_cache_hit_tokens"] == 8 * 1200
+    assert usage["cost_known"] is False                                 # no price: unknown, never free
 
 
 def test_a_failure_keeps_what_was_recorded(monkeypatch, tmp_path):

@@ -1084,10 +1084,21 @@ def _recorded_message(user_text: str, shape: int) -> str:
 
 def _reply_key(turn: dict[str, Any], llm_replies: dict[str, Any], mode: str) -> str:
     """The key of a turn's recorded reply: the message today's extractor
-    sends (``current``), or the one the recording was asked (``previous``)."""
+    sends (``current``), or the one the recording was asked (``previous``):
+    named by the recording itself (``asked``: turn id -> key, written by the
+    recorder since part C2, so a message form Kazma no longer builds still
+    replays), else rebuilt (form 1, or today's form with the turn's context)."""
     if mode == "current":
         return _text_key(_llm_blob(turn["user"], **_turn_context(turn)))
-    return _text_key(_recorded_message(turn["user"], _recording_shape(llm_replies)))
+    asked = llm_replies.get("asked") or {}
+    if turn["id"] in asked:
+        return str(asked[turn["id"]])
+    from kazma_core.memory.belief_extractor import MESSAGE_SHAPE
+
+    shape = _recording_shape(llm_replies)
+    if shape == MESSAGE_SHAPE:
+        return _text_key(_llm_blob(turn["user"], **_turn_context(turn)))
+    return _text_key(_recorded_message(turn["user"], shape))
 
 
 class _ReplayClient:
@@ -1181,9 +1192,11 @@ def run_extraction_benchmark(
         return report
     mode = _check_recording(llm_replies, pending)
     # A drift check replays the recording of the prompt before a change: the
-    # turns added to ask what the change asks (``new_in``) wait for the
-    # recording, named, never guessed.
-    asked = [t for t in turns if mode == "current" or not t.get("new_in")]
+    # turns added to the dataset after that recording (``new_in`` past the
+    # recording's ``extraction_version``) wait for the next one, named,
+    # never guessed.
+    made_for = int(llm_replies.get("extraction_version") or 0)
+    asked = [t for t in turns if mode == "current" or int(t.get("new_in") or 0) <= made_for]
     if len(asked) < len(turns):
         report["llm_waiting"] = [t["id"] for t in turns if t not in asked]
     # Every asking is scored, through the product's parser; a score is the
@@ -1468,20 +1481,41 @@ def write_scores(report: dict[str, Any]) -> dict[str, float]:
     return {f"{k}.passed": float(v["share"]) for k, v in sorted(report["groups"].items())}
 
 
-class _CapturingClient:
-    """The configured model's client, keeping the last message it was sent
-    and the raw reply it gave (the recorder asks through the product's own
-    call, ``belief_extractor._llm_extract``)."""
+#: The usage a recording adds up from the model's answers (the provider's
+#: own counts; ``cost_usd`` is Kazma's price, unknown without one).
+_USAGE_COUNTS = ("prompt_tokens", "completion_tokens", "prompt_cache_hit_tokens", "prompt_cache_miss_tokens")
 
-    def __init__(self, client: Any) -> None:
+
+def _empty_usage() -> dict[str, Any]:
+    return {"calls": 0, **{k: 0 for k in _USAGE_COUNTS}, "reasoning_tokens": 0, "cost_usd": 0.0,
+            "cost_known": True}
+
+
+class _CapturingClient:
+    """The configured model's client, keeping the last message it was sent,
+    the raw reply it gave (the recorder asks through the product's own call,
+    ``belief_extractor._llm_extract``) and the usage it reported."""
+
+    def __init__(self, client: Any, usage: dict[str, Any]) -> None:
         self._client = client
         self.message: str | None = None
         self.reply: str | None = None
+        self.usage = usage
 
     async def chat(self, messages: list[dict[str, Any]], **kw: Any) -> Any:
         raw = await self._client.chat(messages, **kw)
         self.message = str(messages[-1]["content"])
         self.reply = raw.content if hasattr(raw, "content") else str(raw or "")
+        given = getattr(raw, "usage", None)
+        given = given if isinstance(given, dict) else {}
+        details = given.get("completion_tokens_details")
+        reasoning = details.get("reasoning_tokens") if isinstance(details, dict) else 0
+        self.usage["calls"] += 1
+        for k in _USAGE_COUNTS:
+            self.usage[k] += int(given.get(k) or 0)
+        self.usage["reasoning_tokens"] += int(reasoning or 0)
+        self.usage["cost_usd"] = round(self.usage["cost_usd"] + float(getattr(raw, "cost_usd", 0.0) or 0.0), 8)
+        self.usage["cost_known"] = bool(self.usage["cost_known"] and getattr(raw, "cost_known", False))
         return raw
 
 
@@ -1523,12 +1557,18 @@ async def record_llm_extraction(
     # The provider client keeps its model on its config (``LLMProvider.config``).
     model = (getattr(getattr(client, "config", None), "model", None) or getattr(client, "model", None)
              or getattr(registry, "active_model", None) or "unknown")
+    # What the calls cost, as the provider counted them (added to what a
+    # recording continued had already spent).
+    usage = {**_empty_usage(), **((held or {}).get("usage") or {})}
+    # Which message each turn was asked (turn id -> key): a later drift check
+    # replays by it, whatever message Kazma builds by then (``_reply_key``).
+    asked: dict[str, str] = dict((held or {}).get("asked") or {})
     recording: dict[str, Any] = {
         "model": str(model), "provider": str(getattr(registry, "_active_provider", "") or "unknown"),
         "recorded_on": _dt.date.today().isoformat(), "askings": askings, "complete": False,
         "prompt_sha256": prompt, "message_shape": MESSAGE_SHAPE, "extraction_version": data["version"],
-        "replies": replies}
-    capture = _CapturingClient(client)
+        "usage": usage, "asked": asked, "replies": replies}
+    capture = _CapturingClient(client, usage)
     calls = 0
     with mock.patch("kazma_core.model_registry.get_model_registry",
                     lambda: type("_Registry", (), {"get_client": lambda self: capture})()):
@@ -1536,8 +1576,7 @@ async def record_llm_extraction(
             for t in data["turns"]:
                 context = _turn_context(t)
                 key = _text_key(_llm_blob(t["user"], **context))
-                have = replies.setdefault(key, [])
-                if len(have) > asking:
+                if len(replies.get(key, ())) > asking:
                     continue
                 if calls >= limit:
                     return recording
@@ -1549,7 +1588,8 @@ async def record_llm_extraction(
                 if _text_key(capture.message or "") != key:
                     raise RuntimeError(f"the deep pass sent turn {t['id']} another message than the benchmark "
                                        "replays: the two builders differ")
-                have.append(capture.reply)
+                replies.setdefault(key, []).append(capture.reply)
+                asked[t["id"]] = key
                 if save is not None:
                     save(recording)
     recording["complete"] = True

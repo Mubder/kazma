@@ -1,40 +1,344 @@
 {
  "model": "deepseek-flash",
  "provider": "deepseek",
- "recorded_on": "2026-10-15",
- "askings": 1,
- "prompt_sha256": "3499be576e8493a660ee6105cfa25dbde9660826fa2a8d8e38270c07d969781b",
- "extraction_version": 1,
+ "recorded_on": "2026-11-20",
+ "askings": 5,
+ "complete": true,
+ "prompt_sha256": "c36418ea83e16c40204cb211b78de76b8f6af18d32cb152187f201f4aae0bcd8",
+ "message_shape": 4,
+ "extraction_version": 3,
+ "usage": {
+  "calls": 200,
+  "prompt_tokens": 307945,
+  "completion_tokens": 31740,
+  "prompt_cache_hit_tokens": 259712,
+  "prompt_cache_miss_tokens": 48233,
+  "reasoning_tokens": 21916,
+  "cost_usd": 0.0,
+  "cost_known": false
+ },
+ "asked": {
+  "e01": "4b514dbb66912603c9b46db974523f44",
+  "e02": "991f1846575e360e2439dc3aa2b2494f",
+  "e03": "f48dcff5da28e0e326c8d133b1f7c6fb",
+  "e04": "38d412d5fd8b91ae62ddf5c1a5541b35",
+  "e05": "71ceeb32420dd0ec34171e6113a47ac8",
+  "e06": "2e9abbccbe37ae40f362bf1f3de40a9a",
+  "e07": "c52a5d864ab2b63f2925318e1baa88ca",
+  "e08": "2c344f68a3c45a5228fe6d04da02c29c",
+  "e09": "b476bc64e8aab2c6eedf296289dfbcaa",
+  "e10": "bb52cd27a06e1ad0d6cec0c8343e7e7e",
+  "e11": "ebce37fdd46ab02b91a21bd91eefb44c",
+  "e12": "cb4a0c63a02b3ce65de5bbccde2dbe07",
+  "a01": "196f9fcb2ea35c8365cf7e9808c19121",
+  "a02": "27d14a5e010e8e172dbfbe3f1f31ff9f",
+  "a03": "d4dce318193b7f00f6e24b383cdd505d",
+  "a04": "7988fa3bc189f8facab86221d2e5c016",
+  "a05": "abc91cd97aac073047afa5505ef2625a",
+  "a06": "08d6d8efe5e93f7a9f2bf4b9aeb1bf1e",
+  "a07": "33cd9e5a2964edb2fc7acb76b2701d19",
+  "a08": "8ea01aaec8a99f63cee3c062b84ba9cd",
+  "a09": "5a544d86b36ce74622bd24c0a3abeac9",
+  "a10": "6db72f3877b4b97a98386afa355c3a31",
+  "m01": "ca25e682dd38d070bcb03ea2ebca1280",
+  "m02": "b4c4b96bba0831cbdf6e3050fe7129fa",
+  "m03": "1b0485a6e77fec6a4ca69510db709af1",
+  "m04": "db9c3305abd526af698e8683604c7d32",
+  "m05": "9f51972f4a7f4367710f5fda7b812eb8",
+  "m06": "ba0683e2358cf2fea5834cbf6d179061",
+  "m07": "74c084de3de4646a0fbb5a65cc79ecc5",
+  "m08": "ea67faf03a1cfa9316da05a4cc072636",
+  "t01": "4f1543e29f2ea381c926f6745e84e6e7",
+  "t02": "55f3bdd41ff46e77df609760f54a7a07",
+  "t03": "5f5f3467e5720d92a3cc09f5bfa75c05",
+  "r01": "ba23ca5a02ac655fbf995f1fddb73079",
+  "r02": "8326f07be9b46d6e75f865dced0270aa",
+  "r03": "b66885cb65fd9d44df543b3ac540aa55",
+  "x01": "7f7a4138cf0d2c0ea6275d011bb2072e",
+  "x02": "1b0ec21e4025158078db544bdc8917f0",
+  "p01": "12af2bc9caf032885b12161b9a5494e2",
+  "p02": "ed7b1885fc9cd07441c001a2cb6f3e62"
+ },
  "replies": {
-  "151872822c6678dbfbbeb63257ef6948": "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"name_is\",\"predicate_type\":\"functional\",\"object\":\"layla\",\"confidence\":0.95,\"importance\":5},{\"subject\":\"user\",\"predicate\":\"lives_in\",\"predicate_type\":\"functional\",\"object\":\"lisbon\",\"confidence\":0.9,\"importance\":4}]}",
-  "2c09ac347c1cabf64f010306d91d7c64": "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"works_at\", \"predicate_type\": \"functional\", \"object\": \"northwind_labs\", \"confidence\": 0.95, \"importance\": 4}, {\"subject\": \"user\", \"predicate\": \"job_title\", \"predicate_type\": \"functional\", \"object\": \"data_analyst\", \"confidence\": 0.95, \"importance\": 3}]}",
-  "9fcccdbb76a5dffc3e11ebdf19575103": "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"favorite_morning_drink\", \"predicate_type\": \"functional\", \"object\": \"tea\", \"confidence\": 0.9, \"importance\": 3}]}",
-  "305f476f8e12c29db7879698fe8d06d9": "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"favorite_city\",\"predicate_type\":\"functional\",\"object\":\"kyoto\",\"confidence\":0.9,\"importance\":3}]}",
-  "393fea3e58ee30419dc614eb535fe587": "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"allergic_to\", \"predicate_type\": \"set\", \"object\": \"penicillin\", \"confidence\": 0.95, \"importance\": 5}]}",
-  "b938d86f44f9b7da396147679eae66fe": "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"lives_in\", \"predicate_type\": \"functional\", \"object\": \"rotterdam\", \"confidence\": 0.9, \"importance\": 4}]}",
-  "a835ce43c761387f1ded400e38e4e9c8": "{\n  \"beliefs\": [\n    {\n      \"subject\": \"hana\",\n      \"predicate\": \"occupation\",\n      \"predicate_type\": \"functional\",\n      \"object\": \"pilot\",\n      \"confidence\": 0.95,\n      \"importance\": 4\n    },\n    {\n      \"subject\": \"hana\",\n      \"predicate\": \"works_at\",\n      \"predicate_type\": \"functional\",\n      \"object\": \"klm\",\n      \"confidence\": 0.95,\n      \"importance\": 4\n    },\n    {\n      \"subject\": \"user\",\n      \"predicate\": \"has_sister\",\n      \"predicate_type\": \"set\",\n      \"object\": \"hana\",\n      \"confidence\": 0.9,\n      \"importance\": 3\n    }\n  ]\n}",
-  "82f7368e2cd41d19078521e5d3f0db9a": "{\"beliefs\": []}",
-  "605c75251251503d18f644b5a39778ad": "{\"beliefs\": []}",
-  "8d160a37aaecd19b201f0d3c280a516c": "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"enjoys_activity\", \"predicate_type\": \"set\", \"object\": \"hiking\", \"confidence\": 0.9, \"importance\": 3}, {\"subject\": \"user\", \"predicate\": \"uses_tool\", \"predicate_type\": \"set\", \"object\": \"garmin_watch\", \"confidence\": 0.9, \"importance\": 3}]}",
-  "359503361c7982dadbfcee0db6145938": "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"project_deadline\", \"predicate_type\": \"functional\", \"object\": \"3rd of May\", \"confidence\": 0.9, \"importance\": 3}]}",
-  "c30631e9015ae63bcf162572074c6ee9": "{\"beliefs\": []}",
-  "20aa3940faab9161d76e30cd8572015a": "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"name_is\", \"predicate_type\": \"functional\", \"object\": \"ليلى\", \"confidence\": 1.0, \"importance\": 5}, {\"subject\": \"user\", \"predicate\": \"lives_in\", \"predicate_type\": \"functional\", \"object\": \"دبي\", \"confidence\": 1.0, \"importance\": 4}]}",
-  "fa7a69e3aeff3b904265ca9ce61f0f0c": "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"works_at\", \"predicate_type\": \"functional\", \"object\": \"أرامكو\", \"confidence\": 0.95, \"importance\": 5}, {\"subject\": \"user\", \"predicate\": \"job_title\", \"predicate_type\": \"functional\", \"object\": \"مهندسة\", \"confidence\": 0.95, \"importance\": 4}]}",
-  "79944cf46221260b22067123167b4e6d": "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"favorite_drink\", \"predicate_type\": \"functional\", \"object\": \"الشاي بالنعناع\", \"confidence\": 0.9, \"importance\": 3}]}",
-  "c6561f49c49f14efd56ad00d02e621ae": "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"allergic_to\",\"predicate_type\":\"set\",\"object\":\"الفول السوداني\",\"confidence\":0.95,\"importance\":5}]}",
-  "acf8a2ac78f42f4297fc3023abf03149": "{\n  \"beliefs\": [\n    {\n      \"subject\": \"user\",\n      \"predicate\": \"lives_in\",\n      \"predicate_type\": \"functional\",\n      \"object\": \"الرياض\",\n      \"confidence\": 0.9,\n      \"importance\": 4\n    }\n  ]\n}",
-  "fb863a961a1d1c08614aea68081fe09c": "{\"beliefs\":[{\"subject\":\"نورة\",\"predicate\":\"profession_is\",\"predicate_type\":\"functional\",\"object\":\"طبيبة أسنان\",\"confidence\":0.9,\"importance\":4},{\"subject\":\"user\",\"predicate\":\"has_sister\",\"predicate_type\":\"set\",\"object\":\"نورة\",\"confidence\":0.9,\"importance\":3}]}",
-  "ceac3124223442fefa51c7cd643f2b2d": "{\"beliefs\": []}",
-  "269716e8e1ff1e7d6ce8b9fb225623d8": "{\"beliefs\": []}",
-  "596e1096875c44045a5f78b291192cb2": "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"passport_expires\",\"predicate_type\":\"functional\",\"object\":\"٢٠٢٩\",\"confidence\":0.9,\"importance\":3}]}",
-  "25b43b00d7a8e3ad2ba9aa3e360f35f6": "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"favorite_sport\",\"predicate_type\":\"functional\",\"object\":\"السباحة\",\"confidence\":0.9,\"importance\":3}]}",
-  "53560e17f2fa4ce86560ccab663f62c5": "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"name_is\", \"predicate_type\": \"functional\", \"object\": \"Omar\", \"confidence\": 0.95, \"importance\": 5}, {\"subject\": \"user\", \"predicate\": \"lives_in\", \"predicate_type\": \"functional\", \"object\": \"Kuwait City\", \"confidence\": 0.95, \"importance\": 4}]}",
-  "d654b2f86e02e5f4beda79638d90d7bd": "{\n  \"beliefs\": [\n    {\n      \"subject\": \"user\",\n      \"predicate\": \"works_at\",\n      \"predicate_type\": \"functional\",\n      \"object\": \"gulf_bank\",\n      \"confidence\": 0.9,\n      \"importance\": 4\n    },\n    {\n      \"subject\": \"user\",\n      \"predicate\": \"job_title\",\n      \"predicate_type\": \"functional\",\n      \"object\": \"teller\",\n      \"confidence\": 0.9,\n      \"importance\": 3\n    }\n  ]\n}",
-  "cba89f3ad1519749de38e43bf3cc9991": "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"favorite_coffee\",\"predicate_type\":\"functional\",\"object\":\"القهوة العربية with cardamom\",\"confidence\":0.9,\"importance\":3}]}",
-  "7cc56a179eedb56e020416f60010fadc": "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"scheduled_event\", \"predicate_type\": \"set\", \"object\": \"meeting مع Sarah كل Sunday الساعة 9\", \"confidence\": 0.9, \"importance\": 3}]}",
-  "53b36205b1b8f5617610c271d02b260c": "{\n  \"beliefs\": [\n    {\n      \"subject\": \"lulwa\",\n      \"predicate\": \"child_of\",\n      \"predicate_type\": \"functional\",\n      \"object\": \"user\",\n      \"confidence\": 0.95,\n      \"importance\": 4\n    },\n    {\n      \"subject\": \"lulwa\",\n      \"predicate\": \"studies_at\",\n      \"predicate_type\": \"functional\",\n      \"object\": \"bayan_school\",\n      \"confidence\": 0.9,\n      \"importance\": 4\n    }\n  ]\n}",
-  "52c857753e8bd1df47e3d332754a6937": "{\"beliefs\": []}",
-  "317185ac45843b1e51220ab687b589d9": "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"Zain\",\"confidence\":0.95,\"importance\":4},{\"subject\":\"user\",\"predicate\":\"previously_worked_at\",\"predicate_type\":\"set\",\"object\":\"Ooredoo\",\"confidence\":0.9,\"importance\":3}]}",
-  "b3a6429f28fe86ade1c2314bde9c8937": "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"name_is\",\"predicate_type\":\"functional\",\"object\":\"abu_faisal\",\"confidence\":0.95,\"importance\":4},{\"subject\":\"assistant\",\"predicate\":\"name_is\",\"predicate_type\":\"functional\",\"object\":\"kazma\",\"confidence\":0.7,\"importance\":3}]}"
+  "4b514dbb66912603c9b46db974523f44": [
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"name_is\", \"predicate_type\": \"functional\", \"object\": \"Layla\", \"confidence\": 0.95, \"importance\": 5}, {\"subject\": \"user\", \"predicate\": \"lives_in\", \"predicate_type\": \"functional\", \"object\": \"Lisbon\", \"confidence\": 0.9, \"importance\": 4}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"name_is\",\"predicate_type\":\"functional\",\"object\":\"Layla\",\"confidence\":0.95,\"importance\":5},{\"subject\":\"user\",\"predicate\":\"lives_in\",\"predicate_type\":\"functional\",\"object\":\"Lisbon\",\"confidence\":0.95,\"importance\":4}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"name_is\",\"predicate_type\":\"functional\",\"object\":\"Layla\",\"confidence\":0.98,\"importance\":5},{\"subject\":\"user\",\"predicate\":\"lives_in\",\"predicate_type\":\"functional\",\"object\":\"Lisbon\",\"confidence\":0.95,\"importance\":4}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"name_is\",\"predicate_type\":\"functional\",\"object\":\"Layla\",\"confidence\":0.95,\"importance\":4},{\"subject\":\"user\",\"predicate\":\"lives_in\",\"predicate_type\":\"functional\",\"object\":\"Lisbon\",\"confidence\":0.9,\"importance\":4}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"name_is\",\"predicate_type\":\"functional\",\"object\":\"Layla\",\"confidence\":0.95,\"importance\":5},{\"subject\":\"user\",\"predicate\":\"lives_in\",\"predicate_type\":\"functional\",\"object\":\"Lisbon\",\"confidence\":0.9,\"importance\":4}]}"
+  ],
+  "991f1846575e360e2439dc3aa2b2494f": [
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"Northwind Labs\",\"confidence\":0.95,\"importance\":4},{\"subject\":\"user\",\"predicate\":\"job_title\",\"predicate_type\":\"functional\",\"object\":\"data analyst\",\"confidence\":0.9,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"Northwind Labs\",\"confidence\":0.95,\"importance\":4},{\"subject\":\"user\",\"predicate\":\"job_title\",\"predicate_type\":\"functional\",\"object\":\"data analyst\",\"confidence\":0.95,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"Northwind Labs\",\"confidence\":0.95,\"importance\":4},{\"subject\":\"user\",\"predicate\":\"job_title\",\"predicate_type\":\"functional\",\"object\":\"data analyst\",\"confidence\":0.9,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"Northwind Labs\",\"confidence\":0.92,\"importance\":4},{\"subject\":\"user\",\"predicate\":\"job_title\",\"predicate_type\":\"functional\",\"object\":\"data analyst\",\"confidence\":0.9,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"Northwind Labs\",\"confidence\":0.95,\"importance\":4},{\"subject\":\"user\",\"predicate\":\"job_title\",\"predicate_type\":\"functional\",\"object\":\"data analyst\",\"confidence\":0.9,\"importance\":3}]}"
+  ],
+  "f48dcff5da28e0e326c8d133b1f7c6fb": [
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"prefers_morning_drink\",\"predicate_type\":\"functional\",\"object\":\"tea over coffee\",\"confidence\":0.9,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"morning_drink\",\"predicate_type\":\"functional\",\"object\":\"tea\",\"confidence\":0.8,\"importance\":2}]}",
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"prefers_drink\", \"predicate_type\": \"functional\", \"object\": \"tea over coffee in the mornings\", \"confidence\": 0.85, \"importance\": 3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"morning_drink\",\"predicate_type\":\"functional\",\"object\":\"tea\",\"confidence\":0.85,\"importance\":2}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"prefers_morning_drink\",\"predicate_type\":\"functional\",\"object\":\"tea\",\"confidence\":0.85,\"importance\":2}]}"
+  ],
+  "38d412d5fd8b91ae62ddf5c1a5541b35": [
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"favorite_city\",\"predicate_type\":\"functional\",\"object\":\"Kyoto\",\"confidence\":0.95,\"importance\":3}]}",
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"favorite_city\", \"predicate_type\": \"functional\", \"object\": \"Kyoto\", \"confidence\": 0.95, \"importance\": 3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"favorite_city\",\"predicate_type\":\"functional\",\"object\":\"Kyoto\",\"confidence\":0.95,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"favorite_city\",\"predicate_type\":\"functional\",\"object\":\"Kyoto\",\"confidence\":0.95,\"importance\":2}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"favorite_city\",\"predicate_type\":\"functional\",\"object\":\"Kyoto\",\"confidence\":0.95,\"importance\":3}]}"
+  ],
+  "71ceeb32420dd0ec34171e6113a47ac8": [
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"allergic_to\",\"predicate_type\":\"set\",\"object\":\"penicillin\",\"confidence\":0.97,\"importance\":5}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"allergic_to\",\"predicate_type\":\"set\",\"object\":\"penicillin\",\"confidence\":0.98,\"importance\":5}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"allergic_to\",\"predicate_type\":\"set\",\"object\":\"penicillin\",\"confidence\":0.98,\"importance\":5}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"allergic_to\",\"predicate_type\":\"set\",\"object\":\"penicillin\",\"confidence\":0.95,\"importance\":5}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"allergic_to\",\"predicate_type\":\"set\",\"object\":\"penicillin\",\"confidence\":0.97,\"importance\":5}]}"
+  ],
+  "2e9abbccbe37ae40f362bf1f3de40a9a": [
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"lives_in\",\"predicate_type\":\"functional\",\"object\":\"Rotterdam\",\"confidence\":0.95,\"importance\":4}]}",
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"lives_in\", \"predicate_type\": \"functional\", \"object\": \"Rotterdam\", \"confidence\": 0.95, \"importance\": 4}]}",
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"lives_in\", \"predicate_type\": \"functional\", \"object\": \"Rotterdam\", \"confidence\": 0.95, \"importance\": 4}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"lives_in\",\"predicate_type\":\"functional\",\"object\":\"Rotterdam\",\"confidence\":0.95,\"importance\":4}]}",
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"lives_in\", \"predicate_type\": \"functional\", \"object\": \"Rotterdam\", \"confidence\": 0.95, \"importance\": 4}]}"
+  ],
+  "c52a5d864ab2b63f2925318e1baa88ca": [
+   "{\"beliefs\":[{\"subject\":\"hana\",\"predicate\":\"sibling_of\",\"predicate_type\":\"set\",\"object\":\"user\",\"confidence\":0.95,\"importance\":4},{\"subject\":\"hana\",\"predicate\":\"occupation\",\"predicate_type\":\"functional\",\"object\":\"pilot\",\"confidence\":0.9,\"importance\":3},{\"subject\":\"hana\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"KLM\",\"confidence\":0.9,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"hana\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"KLM\",\"confidence\":0.95,\"importance\":4},{\"subject\":\"hana\",\"predicate\":\"occupation\",\"predicate_type\":\"functional\",\"object\":\"pilot\",\"confidence\":0.95,\"importance\":3},{\"subject\":\"hana\",\"predicate\":\"sibling_of\",\"predicate_type\":\"set\",\"object\":\"user\",\"confidence\":0.95,\"importance\":4}]}",
+   "{\"beliefs\":[{\"subject\":\"hana\",\"predicate\":\"relation_to_user\",\"predicate_type\":\"functional\",\"object\":\"sister\",\"confidence\":0.95,\"importance\":4},{\"subject\":\"hana\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"KLM\",\"confidence\":0.95,\"importance\":4},{\"subject\":\"hana\",\"predicate\":\"occupation\",\"predicate_type\":\"functional\",\"object\":\"pilot\",\"confidence\":0.95,\"importance\":3}]}",
+   "{\"beliefs\": [{\"subject\": \"hana\", \"predicate\": \"works_at\", \"predicate_type\": \"functional\", \"object\": \"KLM\", \"confidence\": 0.95, \"importance\": 4}, {\"subject\": \"hana\", \"predicate\": \"occupation\", \"predicate_type\": \"functional\", \"object\": \"pilot\", \"confidence\": 0.95, \"importance\": 3}, {\"subject\": \"hana\", \"predicate\": \"relation_to_user\", \"predicate_type\": \"functional\", \"object\": \"sister\", \"confidence\": 0.95, \"importance\": 4}]}",
+   "{\"beliefs\":[{\"subject\":\"hana\",\"predicate\":\"relationship_to_user\",\"predicate_type\":\"state\",\"object\":\"sister\",\"confidence\":0.95,\"importance\":3},{\"subject\":\"hana\",\"predicate\":\"occupation\",\"predicate_type\":\"functional\",\"object\":\"pilot\",\"confidence\":0.95,\"importance\":3},{\"subject\":\"hana\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"KLM\",\"confidence\":0.95,\"importance\":3}]}"
+  ],
+  "2c344f68a3c45a5228fe6d04da02c29c": [
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}"
+  ],
+  "b476bc64e8aab2c6eedf296289dfbcaa": [
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}"
+  ],
+  "bb52cd27a06e1ad0d6cec0c8343e7e7e": [
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"likes\",\"predicate_type\":\"set\",\"object\":\"hiking\",\"confidence\":0.9,\"importance\":3},{\"subject\":\"user\",\"predicate\":\"uses_tool\",\"predicate_type\":\"set\",\"object\":\"Garmin watch\",\"confidence\":0.9,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"likes\",\"predicate_type\":\"set\",\"object\":\"hiking\",\"confidence\":0.9,\"importance\":2},{\"subject\":\"user\",\"predicate\":\"uses_tool\",\"predicate_type\":\"set\",\"object\":\"Garmin watch\",\"confidence\":0.9,\"importance\":2}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"likes\",\"predicate_type\":\"set\",\"object\":\"hiking\",\"confidence\":0.9,\"importance\":3},{\"subject\":\"user\",\"predicate\":\"uses_tool\",\"predicate_type\":\"set\",\"object\":\"Garmin watch\",\"confidence\":0.9,\"importance\":2}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"likes\",\"predicate_type\":\"set\",\"object\":\"hiking\",\"confidence\":0.9,\"importance\":3},{\"subject\":\"user\",\"predicate\":\"uses_tool\",\"predicate_type\":\"set\",\"object\":\"Garmin watch\",\"confidence\":0.9,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"likes\",\"predicate_type\":\"set\",\"object\":\"hiking\",\"confidence\":0.9,\"importance\":3},{\"subject\":\"user\",\"predicate\":\"uses_tool\",\"predicate_type\":\"set\",\"object\":\"Garmin watch\",\"confidence\":0.9,\"importance\":2}]}"
+  ],
+  "ebce37fdd46ab02b91a21bd91eefb44c": [
+   "{\"beliefs\": [{\"subject\": \"project\", \"predicate\": \"deadline\", \"predicate_type\": \"functional\", \"object\": \"3rd of May\", \"confidence\": 0.85, \"importance\": 3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"project_deadline\",\"predicate_type\":\"set\",\"object\":\"3rd of May\",\"confidence\":0.9,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"project_deadline\",\"predicate_type\":\"functional\",\"object\":\"3rd of May\",\"confidence\":0.9,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"project\",\"predicate\":\"deadline\",\"predicate_type\":\"functional\",\"object\":\"3rd of May\",\"confidence\":0.9,\"importance\":2}]}",
+   "{\"beliefs\":[{\"subject\":\"project\",\"predicate\":\"deadline\",\"predicate_type\":\"functional\",\"object\":\"3rd of May\",\"confidence\":0.85,\"importance\":3}]}"
+  ],
+  "cb4a0c63a02b3ce65de5bbccde2dbe07": [
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}"
+  ],
+  "196f9fcb2ea35c8365cf7e9808c19121": [
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"name_is\",\"predicate_type\":\"functional\",\"object\":\"ليلى\",\"confidence\":0.95,\"importance\":5},{\"subject\":\"user\",\"predicate\":\"lives_in\",\"predicate_type\":\"functional\",\"object\":\"دبي\",\"confidence\":0.9,\"importance\":4}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"name_is\",\"predicate_type\":\"functional\",\"object\":\"ليلى\",\"confidence\":0.98,\"importance\":5},{\"subject\":\"user\",\"predicate\":\"lives_in\",\"predicate_type\":\"functional\",\"object\":\"دبي\",\"confidence\":0.98,\"importance\":4}]}",
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"name_is\", \"predicate_type\": \"functional\", \"object\": \"ليلى\", \"confidence\": 0.95, \"importance\": 5}, {\"subject\": \"user\", \"predicate\": \"lives_in\", \"predicate_type\": \"functional\", \"object\": \"دبي\", \"confidence\": 0.95, \"importance\": 4}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"name_is\",\"predicate_type\":\"functional\",\"object\":\"ليلى\",\"confidence\":0.95,\"importance\":5},{\"subject\":\"user\",\"predicate\":\"lives_in\",\"predicate_type\":\"functional\",\"object\":\"دبي\",\"confidence\":0.9,\"importance\":4}]}",
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"name_is\", \"predicate_type\": \"functional\", \"object\": \"ليلى\", \"confidence\": 0.99, \"importance\": 5}, {\"subject\": \"user\", \"predicate\": \"lives_in\", \"predicate_type\": \"functional\", \"object\": \"دبي\", \"confidence\": 0.99, \"importance\": 5}]}"
+  ],
+  "27d14a5e010e8e172dbfbe3f1f31ff9f": [
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"شركة أرامكو\",\"confidence\":0.95,\"importance\":4},{\"subject\":\"user\",\"predicate\":\"job_title\",\"predicate_type\":\"functional\",\"object\":\"مهندسة\",\"confidence\":0.9,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"شركة أرامكو\",\"confidence\":0.95,\"importance\":5},{\"subject\":\"user\",\"predicate\":\"job_title\",\"predicate_type\":\"functional\",\"object\":\"مهندسة\",\"confidence\":0.9,\"importance\":4}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"شركة أرامكو\",\"confidence\":0.95,\"importance\":4},{\"subject\":\"user\",\"predicate\":\"job_title\",\"predicate_type\":\"functional\",\"object\":\"مهندسة\",\"confidence\":0.9,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"شركة أرامكو\",\"confidence\":0.95,\"importance\":4},{\"subject\":\"user\",\"predicate\":\"job_title\",\"predicate_type\":\"functional\",\"object\":\"مهندسة\",\"confidence\":0.9,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"شركة أرامكو\",\"confidence\":0.95,\"importance\":4},{\"subject\":\"user\",\"predicate\":\"job_title\",\"predicate_type\":\"functional\",\"object\":\"مهندسة\",\"confidence\":0.95,\"importance\":4}]}"
+  ],
+  "d4dce318193b7f00f6e24b383cdd505d": [
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"likes\", \"predicate_type\": \"set\", \"object\": \"الشاي بالنعناع\", \"confidence\": 0.9, \"importance\": 3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"likes\",\"predicate_type\":\"set\",\"object\":\"الشاي بالنعناع\",\"confidence\":0.9,\"importance\":2}]}",
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"likes\", \"predicate_type\": \"set\", \"object\": \"الشاي بالنعناع\", \"confidence\": 0.9, \"importance\": 2}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"likes\",\"predicate_type\":\"set\",\"object\":\"الشاي بالنعناع\",\"confidence\":0.9,\"importance\":2}]}",
+   "{\n  \"beliefs\": [\n    {\n      \"subject\": \"user\",\n      \"predicate\": \"favorite_tea\",\n      \"predicate_type\": \"functional\",\n      \"object\": \"الشاي بالنعناع\",\n      \"confidence\": 0.9,\n      \"importance\": 3\n    }\n  ]\n}"
+  ],
+  "7988fa3bc189f8facab86221d2e5c016": [
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"allergic_to\",\"predicate_type\":\"set\",\"object\":\"الفول السوداني\",\"confidence\":0.95,\"importance\":4}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"allergic_to\",\"predicate_type\":\"set\",\"object\":\"الفول السوداني\",\"confidence\":0.95,\"importance\":5}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"has_allergy\",\"predicate_type\":\"set\",\"object\":\"الفول السوداني\",\"confidence\":0.95,\"importance\":4}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"allergic_to\",\"predicate_type\":\"set\",\"object\":\"الفول السوداني\",\"confidence\":0.95,\"importance\":4}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"allergic_to\",\"predicate_type\":\"set\",\"object\":\"الفول السوداني\",\"confidence\":0.95,\"importance\":5}]}"
+  ],
+  "abc91cd97aac073047afa5505ef2625a": [
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"lives_in\",\"predicate_type\":\"functional\",\"object\":\"الرياض\",\"confidence\":0.9,\"importance\":4}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"lives_in\",\"predicate_type\":\"functional\",\"object\":\"الرياض\",\"confidence\":0.9,\"importance\":4}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"lives_in\",\"predicate_type\":\"functional\",\"object\":\"الرياض\",\"confidence\":0.95,\"importance\":5}]}",
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"lives_in\", \"predicate_type\": \"functional\", \"object\": \"الرياض\", \"confidence\": 0.9, \"importance\": 4}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"lives_in\",\"predicate_type\":\"functional\",\"object\":\"الرياض\",\"confidence\":0.95,\"importance\":4}]}"
+  ],
+  "08d6d8efe5e93f7a9f2bf4b9aeb1bf1e": [
+   "{\"beliefs\":[{\"subject\":\"نورة\",\"predicate\":\"occupation_is\",\"predicate_type\":\"functional\",\"object\":\"طبيبة أسنان\",\"confidence\":0.95,\"importance\":3},{\"subject\":\"نورة\",\"predicate\":\"relation_to_user\",\"predicate_type\":\"functional\",\"object\":\"أخت\",\"confidence\":0.95,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"has_sister\",\"predicate_type\":\"set\",\"object\":\"نورة\",\"confidence\":0.95,\"importance\":3},{\"subject\":\"نورة\",\"predicate\":\"occupation_is\",\"predicate_type\":\"functional\",\"object\":\"طبيبة أسنان\",\"confidence\":0.95,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"نورة\",\"predicate\":\"occupation\",\"predicate_type\":\"functional\",\"object\":\"طبيبة أسنان\",\"confidence\":0.95,\"importance\":3},{\"subject\":\"نورة\",\"predicate\":\"relationship_to_user\",\"predicate_type\":\"functional\",\"object\":\"أخت\",\"confidence\":0.95,\"importance\":3}]}",
+   "{\"beliefs\": [{\"subject\": \"نورة\", \"predicate\": \"occupation_is\", \"predicate_type\": \"functional\", \"object\": \"طبيبة أسنان\", \"confidence\": 0.95, \"importance\": 3}]}",
+   "{\"beliefs\":[{\"subject\":\"نورة\",\"predicate\":\"occupation\",\"predicate_type\":\"functional\",\"object\":\"طبيبة أسنان\",\"confidence\":0.95,\"importance\":3}]}"
+  ],
+  "33cd9e5a2964edb2fc7acb76b2701d19": [
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}"
+  ],
+  "8ea01aaec8a99f63cee3c062b84ba9cd": [
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}"
+  ],
+  "5a544d86b36ce74622bd24c0a3abeac9": [
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"passport_expires\",\"predicate_type\":\"functional\",\"object\":\"٢٠٢٩\",\"confidence\":0.9,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"passport_expires\",\"predicate_type\":\"functional\",\"object\":\"٢٠٢٩\",\"confidence\":0.95,\"importance\":4}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"passport_expires\",\"predicate_type\":\"functional\",\"object\":\"٢٠٢٩\",\"confidence\":0.9,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"passport_expires\",\"predicate_type\":\"functional\",\"object\":\"٢٠٢٩\",\"confidence\":0.95,\"importance\":4}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"passport_expires\",\"predicate_type\":\"functional\",\"object\":\"٢٠٢٩\",\"confidence\":0.95,\"importance\":3}]}"
+  ],
+  "6db72f3877b4b97a98386afa355c3a31": [
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"favorite_sport\",\"predicate_type\":\"functional\",\"object\":\"السباحة\",\"confidence\":0.95,\"importance\":3}]}",
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"favorite_sport\", \"predicate_type\": \"functional\", \"object\": \"السباحة\", \"confidence\": 0.95, \"importance\": 3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"favorite_sport\",\"predicate_type\":\"functional\",\"object\":\"السباحة\",\"confidence\":0.9,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"favorite_sport\",\"predicate_type\":\"functional\",\"object\":\"السباحة\",\"confidence\":0.95,\"importance\":2}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"favorite_sport\",\"predicate_type\":\"functional\",\"object\":\"السباحة\",\"confidence\":0.95,\"importance\":3}]}"
+  ],
+  "ca25e682dd38d070bcb03ea2ebca1280": [
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"name_is\",\"predicate_type\":\"functional\",\"object\":\"Omar\",\"confidence\":0.95,\"importance\":4},{\"subject\":\"user\",\"predicate\":\"lives_in\",\"predicate_type\":\"functional\",\"object\":\"Kuwait City\",\"confidence\":0.95,\"importance\":4}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"name_is\",\"predicate_type\":\"functional\",\"object\":\"Omar\",\"confidence\":0.99,\"importance\":5},{\"subject\":\"user\",\"predicate\":\"lives_in\",\"predicate_type\":\"functional\",\"object\":\"Kuwait City\",\"confidence\":0.99,\"importance\":4}]}",
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"name_is\", \"predicate_type\": \"functional\", \"object\": \"Omar\", \"confidence\": 0.95, \"importance\": 5}, {\"subject\": \"user\", \"predicate\": \"lives_in\", \"predicate_type\": \"functional\", \"object\": \"Kuwait City\", \"confidence\": 0.9, \"importance\": 4}]}",
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"name_is\", \"predicate_type\": \"functional\", \"object\": \"Omar\", \"confidence\": 0.95, \"importance\": 5}, {\"subject\": \"user\", \"predicate\": \"lives_in\", \"predicate_type\": \"functional\", \"object\": \"Kuwait City\", \"confidence\": 0.95, \"importance\": 4}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"name_is\",\"predicate_type\":\"functional\",\"object\":\"Omar\",\"confidence\":0.98,\"importance\":4},{\"subject\":\"user\",\"predicate\":\"lives_in\",\"predicate_type\":\"functional\",\"object\":\"Kuwait City\",\"confidence\":0.98,\"importance\":4}]}"
+  ],
+  "b4c4b96bba0831cbdf6e3050fe7129fa": [
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"Gulf Bank\",\"confidence\":0.95,\"importance\":4},{\"subject\":\"user\",\"predicate\":\"job_title\",\"predicate_type\":\"functional\",\"object\":\"teller\",\"confidence\":0.9,\"importance\":3}]}",
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"works_at\", \"predicate_type\": \"functional\", \"object\": \"Gulf Bank\", \"confidence\": 0.9, \"importance\": 4}, {\"subject\": \"user\", \"predicate\": \"job_title\", \"predicate_type\": \"functional\", \"object\": \"teller\", \"confidence\": 0.85, \"importance\": 3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"Gulf Bank\",\"confidence\":0.9,\"importance\":4},{\"subject\":\"user\",\"predicate\":\"job_title\",\"predicate_type\":\"functional\",\"object\":\"teller\",\"confidence\":0.85,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"Gulf Bank\",\"confidence\":0.92,\"importance\":4},{\"subject\":\"user\",\"predicate\":\"job_title\",\"predicate_type\":\"functional\",\"object\":\"teller\",\"confidence\":0.9,\"importance\":3}]}",
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"works_at\", \"predicate_type\": \"functional\", \"object\": \"Gulf Bank\", \"confidence\": 0.95, \"importance\": 4}, {\"subject\": \"user\", \"predicate\": \"job_title\", \"predicate_type\": \"functional\", \"object\": \"teller\", \"confidence\": 0.9, \"importance\": 3}]}"
+  ],
+  "1b0485a6e77fec6a4ca69510db709af1": [
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"favorite_coffee\",\"predicate_type\":\"functional\",\"object\":\"القهوة العربية with cardamom\",\"confidence\":0.85,\"importance\":2}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"prefers_coffee\",\"predicate_type\":\"functional\",\"object\":\"القهوة العربية with cardamom\",\"confidence\":0.9,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"favorite_coffee\",\"predicate_type\":\"functional\",\"object\":\"القهوة العربية with cardamom\",\"confidence\":0.85,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"prefers_coffee\",\"predicate_type\":\"functional\",\"object\":\"القهوة العربية with cardamom\",\"confidence\":0.85,\"importance\":3}]}",
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"prefers\", \"predicate_type\": \"set\", \"object\": \"القهوة العربية with cardamom\", \"confidence\": 0.9, \"importance\": 2}]}"
+  ],
+  "db9c3305abd526af698e8683604c7d32": [
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"scheduled_event\",\"predicate_type\":\"set\",\"object\":\"meeting مع Sarah كل Sunday الساعة 9\",\"confidence\":0.9,\"importance\":4}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"scheduled_event\",\"predicate_type\":\"set\",\"object\":\"meeting مع Sarah كل Sunday الساعة 9\",\"confidence\":0.9,\"importance\":4}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"scheduled_event\",\"predicate_type\":\"set\",\"object\":\"meeting مع Sarah كل Sunday الساعة 9\",\"confidence\":0.9,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"scheduled_event\",\"predicate_type\":\"set\",\"object\":\"Meeting مع Sarah كل Sunday الساعة 9\",\"confidence\":0.9,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"recurring_meeting\",\"predicate_type\":\"set\",\"object\":\"Sarah كل Sunday الساعة 9\",\"confidence\":0.9,\"importance\":3}]}"
+  ],
+  "9f51972f4a7f4367710f5fda7b812eb8": [
+   "{\"beliefs\":[{\"subject\":\"lulwa\",\"predicate\":\"studies_at\",\"predicate_type\":\"functional\",\"object\":\"Bayan School\",\"confidence\":0.95,\"importance\":3},{\"subject\":\"lulwa\",\"predicate\":\"relationship_to_user\",\"predicate_type\":\"functional\",\"object\":\"daughter\",\"confidence\":0.95,\"importance\":3}]}",
+   "{\"beliefs\": [{\"subject\": \"lulwa\", \"predicate\": \"studies_at\", \"predicate_type\": \"functional\", \"object\": \"Bayan School\", \"confidence\": 0.95, \"importance\": 3}, {\"subject\": \"lulwa\", \"predicate\": \"is_child_of\", \"predicate_type\": \"functional\", \"object\": \"user\", \"confidence\": 0.95, \"importance\": 3}]}",
+   "{\"beliefs\":[{\"subject\":\"lulwa\",\"predicate\":\"studies_at\",\"predicate_type\":\"functional\",\"object\":\"Bayan School\",\"confidence\":0.95,\"importance\":4},{\"subject\":\"user\",\"predicate\":\"has_daughter\",\"predicate_type\":\"set\",\"object\":\"Lulwa\",\"confidence\":0.95,\"importance\":4}]}",
+   "{\"beliefs\":[{\"subject\":\"lulwa\",\"predicate\":\"studies_at\",\"predicate_type\":\"functional\",\"object\":\"Bayan School\",\"confidence\":0.95,\"importance\":4},{\"subject\":\"lulwa\",\"predicate\":\"relationship_to_user\",\"predicate_type\":\"functional\",\"object\":\"daughter\",\"confidence\":0.95,\"importance\":4}]}",
+   "{\"beliefs\":[{\"subject\":\"Lulwa\",\"predicate\":\"attends_school\",\"predicate_type\":\"functional\",\"object\":\"Bayan School\",\"confidence\":0.95,\"importance\":3},{\"subject\":\"Lulwa\",\"predicate\":\"daughter_of\",\"predicate_type\":\"functional\",\"object\":\"user\",\"confidence\":0.95,\"importance\":4}]}"
+  ],
+  "ba0683e2358cf2fea5834cbf6d179061": [
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}"
+  ],
+  "74c084de3de4646a0fbb5a65cc79ecc5": [
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"Zain\",\"confidence\":0.95,\"importance\":4}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"Zain\",\"confidence\":0.95,\"importance\":4},{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"Ooredoo\",\"confidence\":0.9,\"importance\":3,\"ended\":true}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"Zain\",\"confidence\":0.95,\"importance\":4},{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"Ooredoo\",\"confidence\":0.9,\"importance\":3,\"ended\":true}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"Zain\",\"confidence\":0.95,\"importance\":4},{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"Ooredoo\",\"confidence\":0.9,\"importance\":3,\"ended\":true}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"Zain\",\"confidence\":0.95,\"importance\":4},{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"Ooredoo\",\"confidence\":0.8,\"importance\":3,\"ended\":true}]}"
+  ],
+  "ea67faf03a1cfa9316da05a4cc072636": [
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"preferred_name\", \"predicate_type\": \"functional\", \"object\": \"Abu Faisal\", \"confidence\": 0.95, \"importance\": 4}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"name_is\",\"predicate_type\":\"functional\",\"object\":\"Abu Faisal\",\"confidence\":0.95,\"importance\":4}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"name_is\",\"predicate_type\":\"functional\",\"object\":\"Abu Faisal\",\"confidence\":0.95,\"importance\":4}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"goes_by\",\"predicate_type\":\"functional\",\"object\":\"Abu Faisal\",\"confidence\":0.95,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"name_is\",\"predicate_type\":\"functional\",\"object\":\"Abu Faisal\",\"confidence\":0.95,\"importance\":4}]}"
+  ],
+  "4f1543e29f2ea381c926f6745e84e6e7": [
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"works_at\", \"predicate_type\": \"functional\", \"object\": \"Zain\", \"confidence\": 0.95, \"importance\": 4, \"since\": \"2026-03\"}]}",
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"works_at\", \"predicate_type\": \"functional\", \"object\": \"Zain\", \"confidence\": 0.95, \"importance\": 4, \"since\": \"2026-03\"}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"Zain\",\"confidence\":0.95,\"importance\":4,\"since\":\"2026-03\"}]}",
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"works_at\", \"predicate_type\": \"functional\", \"object\": \"Zain\", \"confidence\": 0.95, \"importance\": 4, \"since\": \"2026-03\"}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"Zain\",\"confidence\":0.95,\"importance\":4,\"since\":\"2026-03\"}]}"
+  ],
+  "55f3bdd41ff46e77df609760f54a7a07": [
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"works_at\", \"predicate_type\": \"functional\", \"object\": \"زين\", \"confidence\": 0.95, \"importance\": 4, \"since\": \"2024-05\"}]}",
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"works_at\", \"predicate_type\": \"functional\", \"object\": \"زين\", \"confidence\": 0.95, \"importance\": 4, \"since\": \"2024-05\"}]}",
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"works_at\", \"predicate_type\": \"functional\", \"object\": \"زين\", \"confidence\": 0.95, \"importance\": 4, \"since\": \"2024-05\"}]}",
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"works_at\", \"predicate_type\": \"functional\", \"object\": \"زين\", \"confidence\": 0.95, \"importance\": 4, \"since\": \"2024-05\"}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"زين\",\"confidence\":0.95,\"importance\":4,\"since\":\"2024-05\"}]}"
+  ],
+  "5f5f3467e5720d92a3cc09f5bfa75c05": [
+   "{\"beliefs\":[{\"subject\":\"hana\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"Qatar Airways\",\"confidence\":0.95,\"importance\":3}]}",
+   "{\"beliefs\": [{\"subject\": \"hana\", \"predicate\": \"works_at\", \"predicate_type\": \"functional\", \"object\": \"Qatar Airways\", \"confidence\": 0.9, \"importance\": 3}]}",
+   "{\"beliefs\":[{\"subject\":\"hana\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"Qatar Airways\",\"confidence\":0.9,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"hana\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"Qatar Airways\",\"confidence\":0.9,\"importance\":3}]}",
+   "{\"beliefs\": [{\"subject\": \"hana\", \"predicate\": \"works_at\", \"predicate_type\": \"functional\", \"object\": \"Qatar Airways\", \"confidence\": 0.95, \"importance\": 4}]}"
+  ],
+  "ba23ca5a02ac655fbf995f1fddb73079": [
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"lives_in\",\"predicate_type\":\"functional\",\"object\":\"Rotterdam\",\"confidence\":0.95,\"importance\":5,\"since\":\"2026-05\",\"replaces\":\"f1\"}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"lives_in\",\"predicate_type\":\"functional\",\"object\":\"Rotterdam\",\"confidence\":0.95,\"importance\":4,\"since\":\"2026-04\",\"replaces\":\"f1\"}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"lives_in\",\"predicate_type\":\"functional\",\"object\":\"Rotterdam\",\"confidence\":0.95,\"importance\":4,\"since\":\"2026-04\",\"replaces\":\"f1\"}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"lives_in\",\"predicate_type\":\"functional\",\"object\":\"Rotterdam\",\"confidence\":0.95,\"importance\":5,\"since\":\"2026-04\",\"replaces\":\"f1\"}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"lives_in\",\"predicate_type\":\"functional\",\"object\":\"Rotterdam\",\"confidence\":0.95,\"importance\":5,\"since\":\"2026-04\",\"replaces\":\"f1\"}]}"
+  ],
+  "8326f07be9b46d6e75f865dced0270aa": [
+   "{\"beliefs\":[{\"subject\":\"hana\",\"predicate\":\"occupation\",\"predicate_type\":\"functional\",\"object\":\"captain\",\"confidence\":0.95,\"importance\":4,\"replaces\":\"f1\"}]}",
+   "{\"beliefs\": [{\"subject\": \"hana\", \"predicate\": \"occupation\", \"predicate_type\": \"functional\", \"object\": \"captain\", \"confidence\": 0.95, \"importance\": 3, \"replaces\": \"f1\"}]}",
+   "{\"beliefs\":[{\"subject\":\"hana\",\"predicate\":\"occupation\",\"predicate_type\":\"functional\",\"object\":\"captain\",\"confidence\":0.95,\"importance\":4,\"replaces\":\"f1\"}]}",
+   "{\"beliefs\":[{\"subject\":\"hana\",\"predicate\":\"occupation\",\"predicate_type\":\"functional\",\"object\":\"captain\",\"confidence\":0.95,\"importance\":3,\"replaces\":\"f1\"}]}",
+   "{\"beliefs\":[{\"subject\":\"hana\",\"predicate\":\"occupation\",\"predicate_type\":\"functional\",\"object\":\"captain\",\"confidence\":0.95,\"importance\":4,\"replaces\":\"f1\"}]}"
+  ],
+  "b66885cb65fd9d44df543b3ac540aa55": [
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"سابك\",\"confidence\":0.9,\"importance\":4,\"replaces\":\"f1\"}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"أرامكو\",\"confidence\":0.95,\"importance\":4,\"replaces\":\"f1\",\"ended\":true},{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"سابك\",\"confidence\":0.95,\"importance\":4,\"replaces\":\"f1\"}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"أرامكو\",\"confidence\":0.95,\"importance\":4,\"ended\":true,\"replaces\":\"f1\"},{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"سابك\",\"confidence\":0.95,\"importance\":4,\"replaces\":\"f1\"}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"أرامكو\",\"confidence\":0.9,\"importance\":4,\"ended\":true,\"replaces\":\"f1\"},{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"سابك\",\"confidence\":0.95,\"importance\":4,\"replaces\":\"f1\"}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"أرامكو\",\"confidence\":0.95,\"importance\":4,\"ended\":true,\"replaces\":\"f1\"},{\"subject\":\"user\",\"predicate\":\"works_at\",\"predicate_type\":\"functional\",\"object\":\"سابك\",\"confidence\":0.95,\"importance\":5,\"replaces\":\"f1\"}]}"
+  ],
+  "7f7a4138cf0d2c0ea6275d011bb2072e": [
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"uses_tool\",\"predicate_type\":\"set\",\"object\":\"vim\",\"confidence\":0.95,\"importance\":3,\"ended\":true,\"replaces\":\"f1\"},{\"subject\":\"user\",\"predicate\":\"uses_tool\",\"predicate_type\":\"set\",\"object\":\"VS Code\",\"confidence\":0.95,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"uses_tool\",\"predicate_type\":\"set\",\"object\":\"vim\",\"confidence\":0.95,\"importance\":3,\"ended\":true,\"replaces\":\"f1\"},{\"subject\":\"user\",\"predicate\":\"uses_tool\",\"predicate_type\":\"set\",\"object\":\"VS Code\",\"confidence\":0.95,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"uses_tool\",\"predicate_type\":\"set\",\"object\":\"vim\",\"confidence\":0.95,\"importance\":2,\"ended\":true,\"replaces\":\"f1\"},{\"subject\":\"user\",\"predicate\":\"uses_tool\",\"predicate_type\":\"set\",\"object\":\"VS Code\",\"confidence\":0.95,\"importance\":3}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"uses_tool\",\"predicate_type\":\"set\",\"object\":\"vim\",\"confidence\":0.95,\"importance\":2,\"ended\":true,\"replaces\":\"f1\"},{\"subject\":\"user\",\"predicate\":\"uses_tool\",\"predicate_type\":\"set\",\"object\":\"VS Code\",\"confidence\":0.95,\"importance\":3}]}",
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"uses_tool\", \"predicate_type\": \"set\", \"object\": \"vim\", \"confidence\": 0.95, \"importance\": 3, \"ended\": true, \"replaces\": \"f1\"}, {\"subject\": \"user\", \"predicate\": \"uses_tool\", \"predicate_type\": \"set\", \"object\": \"VS Code\", \"confidence\": 0.95, \"importance\": 3}]}"
+  ],
+  "1b0ec21e4025158078db544bdc8917f0": [
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"lives_in\", \"predicate_type\": \"functional\", \"object\": \"باريس\", \"confidence\": 0.95, \"importance\": 4, \"replaces\": \"f1\", \"ended\": true}]}",
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"lives_in\", \"predicate_type\": \"functional\", \"object\": \"باريس\", \"confidence\": 0.95, \"importance\": 4, \"replaces\": \"f1\", \"ended\": true}]}",
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"lives_in\", \"predicate_type\": \"functional\", \"object\": \"باريس\", \"confidence\": 0.95, \"importance\": 4, \"ended\": true, \"replaces\": \"f1\"}]}",
+   "{\"beliefs\": [{\"subject\": \"user\", \"predicate\": \"lives_in\", \"predicate_type\": \"functional\", \"object\": \"باريس\", \"confidence\": 0.95, \"importance\": 4, \"ended\": true, \"replaces\": \"f1\"}]}",
+   "{\"beliefs\":[{\"subject\":\"user\",\"predicate\":\"lives_in\",\"predicate_type\":\"functional\",\"object\":\"باريس\",\"confidence\":0.95,\"importance\":4,\"ended\":true,\"replaces\":\"f1\"}]}"
+  ],
+  "12af2bc9caf032885b12161b9a5494e2": [
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}"
+  ],
+  "ed7b1885fc9cd07441c001a2cb6f3e62": [
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}",
+   "{\"beliefs\": []}"
+  ]
  }
 }

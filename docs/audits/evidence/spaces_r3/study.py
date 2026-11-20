@@ -70,7 +70,9 @@ MAX_DEEP_CALLS = 60
 ASKED_AGAIN = ("e07", "a04", "a06", "m05", "m07", "m08")
 V5_VECTORS = ROOT / "tests" / "fixtures" / "memory_bench" / "vectors.npz"
 THRESHOLDS = ROOT / "tests" / "fixtures" / "memory_bench" / "thresholds.json"
-LLM_REPLIES = ROOT / "tests" / "fixtures" / "memory_bench" / "extraction_llm.json"
+# The extraction recording the study measured (2026-10-15, message form 1),
+# kept under its date when part C2's recording replaced it.
+LLM_REPLIES = ROOT / "tests" / "fixtures" / "memory_bench" / "extraction_llm_2026-10-15.json"
 TENANT = "bench-speakers"
 BASE_TIME = 1780000000.0
 VARIANTS = ("control", "name", "name_uv", "id", "id_names", "id_uv")

@@ -2068,10 +2068,18 @@ four injected were noise.
   a held fact replaced, a fact ended, planted text kept out. A gold fact
   names what it asks (`since`, `replaces`, `ended`) and the model's pass
   scores it per language (`dated`, `replaced`, `ended`; `_score_c2`); a
-  fact said to have ended finds only an ending (`_value_matches`). The
-  drift check leaves those turns out, named (`llm_waiting`), until the
-  recording. A relabel is a file holding every locked reply
-  (`reply_hashes`), re-keyed or extended. Gate:
+  fact said to have ended finds only an ending (`_value_matches`). A drift
+  check leaves out, named (`llm_waiting`), the turns added after its
+  recording's `extraction_version`. A relabel is a file holding every
+  locked reply (`reply_hashes`), re-keyed or extended. **The recording**
+  (2026-11-20, the owner's yes): deepseek-flash, all 40 turns of v3, 5
+  askings each, 200 calls; the file says what the provider counted
+  (`usage`: 307,945 prompt tokens, 259,712 of them cache hits, 31,740
+  completion tokens, 21,916 of them reasoning; no price known to Kazma)
+  and names the message each turn was asked (`asked`, which a drift check
+  replays by after a later message form, `_reply_key`). The recording of
+  2026-10-15 is kept as `extraction_llm_2026-10-15.json`: the Spaces R3
+  study and the 2026-11 audits' evidence measured it. Gate:
   `tests/test_memory_benchmark_c2_turns.py` (answers with no start,
   replacement or ending, and a scorer that ignores `ended`, as negative
   controls). **Scored by value since 2026-11**
@@ -2099,9 +2107,10 @@ four injected were noise.
   the write scenarios replay the first asking. The recorder
   (`record_llm_extraction`, `scripts/memory_extraction_record.py --out PATH
   --limit N`) asks through the product's own `_llm_extract`, every turn's
-  first asking before any second, saves after every reply, continues its
-  file without asking again what it has, and stops at its call limit
-  (`complete`: false). Gates: `tests/test_memory_extraction_record.py`, the
+  first asking before any second, saves after every reply with the usage
+  the provider reported (`usage`) and the message each turn was asked
+  (`asked`), continues its file without asking again what it has, and
+  stops at its call limit (`complete`: false). Gates: `tests/test_memory_extraction_record.py`, the
   askings cases in `tests/test_memory_benchmark.py` (today's one-reply file
   refused as a new recording, the first asking alone as the controls). The lock
   (`_extraction_lock`): the quick pass is a ratchet; the model's pass

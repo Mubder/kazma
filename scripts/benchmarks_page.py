@@ -73,6 +73,35 @@ def _count(n: int, word: str) -> str:
     return f"{n} {word}{'' if n == 1 else 's'}"
 
 
+_LANGS = (("en", "English"), ("ar", "Arabic"), ("mixed", "mixed"))
+
+
+def _spread_sentence(spread: dict) -> str:
+    """How far the table's model-pass scores could move asked again: the
+    widest spread the lock keeps for them (two standard errors over the
+    askings)."""
+    table = ("found", "named", "right", "quiet")
+    widest = max((v for row in spread.values() for k, v in row.items() if k in table), default=0.0)
+    return (f"so the lock keeps each score's spread: two standard errors over the askings, at most "
+            f"{widest * 100:.1f} points for the scores in this table.")
+
+
+def _c2_sentence(ex: dict) -> str:
+    """What the model pass does with what memory gives it besides the turn
+    (the memory framework audit's part C2), per language, from the lock."""
+    parts = []
+    for score, what in (("dated", "gives a fact's start right"), ("replaced", "names the held fact it replaces"),
+                        ("ended", "reads that a fact ended")):
+        langs = [f"{_pct(ex[f'llm.{lang}.{score}'])} in {name}" for lang, name in _LANGS
+                 if f"llm.{lang}.{score}" in ex]
+        if langs:
+            parts.append(f"{what} {', '.join(langs)}")
+    if not parts:
+        return ""
+    return ("On the ten turns that give it the turn's day, the turn before and the facts held, the model pass "
+            + "; ".join(parts) + ".")
+
+
 def _other_search(pg: dict) -> str:
     """The pgvector run's other search, as the lock keeps it for the record
     (benchmark audit R7: exact against approximate is measured, not assumed)."""
@@ -210,8 +239,12 @@ def _memory(data: dict) -> list[str]:
                 "",
                 f"The model pass is {recording.get('model')}'s replies, recorded on {recording.get('recorded_on')}, "
                 f"{askings} asking{'' if askings == 1 else 's'} a turn. Asked again, a model answers a little "
-                "differently, so a number from one asking can move by a few facts with nothing changed.",
+                "differently, " + (_spread_sentence(extraction.get("spread") or {}) if askings > 1 else
+                                   "so a number from one asking can move by a few facts with nothing changed."),
             ]
+            told = _c2_sentence(ex)
+            if told:
+                lines.append(told)
             if pending:
                 changes = len(pending.get("changes") or [])
                 lines.append(
