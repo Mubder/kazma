@@ -350,11 +350,13 @@ class TestV2ArchitecturePresent:
         """The running git commit + start time must be checkable at a glance
         (sidebar badge + /health/live) — the 2026-08-26 incident had fixes
         on disk while the process predating them served the turn."""
-        src = _CHAT_JS.read_text(encoding="utf-8")
-        html = (_UI / "templates" / "chat.html").read_text(encoding="utf-8")
-        assert "function _paintBuildBadge()" in src
-        assert "fetch('/health/live')" in src
-        assert 'id="build-badge"' in html
+        # Since 2026-11-20 it is in the sidebar's card on every page (the
+        # owner moved it from the chat page's sessions column): the release,
+        # the commit and when the server started.
+        sidebar = (_UI / "templates" / "components" / "sidebar.html").read_text(encoding="utf-8")
+        assert 'id="sidebar-build"' in sidebar
+        assert "kazma_version()" in sidebar and "build_commit()" in sidebar
+        assert "data-started=\"{{ build_started() if build_started is defined else '' }}\"" in sidebar
         from kazma_ui.health import get_build_info
 
         info = get_build_info()

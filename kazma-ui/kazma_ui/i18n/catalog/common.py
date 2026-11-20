@@ -528,6 +528,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "الإعدادات",
         "en": "Settings",
     },
+    "nav.build_word": {
+        "ar": "البناء",
+        "en": "build",
+    },
+    "nav.up_since": {
+        "ar": "يعمل منذ {when}",
+        "en": "up since {when}",
+    },
+    "nav.build_hint": {
+        "ar": "الإصدار والبناء الذي يعمل الآن ووقت بدء الخادم: هل التقطت إعادة التشغيل آخر تحديث؟",
+        "en": "The release and build running now, and when the server started: did the restart pick up the latest update?",
+    },
     "nav.skills": {
         "ar": "المهارات",
         "en": "Skills",

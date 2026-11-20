@@ -7,7 +7,7 @@
     {# Header / Logo #}
     <div class="sidebar-header">
         <a href="/chat" class="logo" style="text-decoration:none">
-            <img src="/static/img/kazma-logo.png" alt="Kazma" class="logo-img">
+            <img src="/static/img/kazma-logo-dark-theme.png" alt="Kazma" class="logo-img brand-on-dark"><img src="/static/img/kazma-logo.png" alt="Kazma" class="logo-img brand-on-light">
             <span class="logo-text" x-show="!sidebarCollapsed" x-cloak>Kazma</span>
         </a>
         {# On mobile (≤768px) the sidebar is a drawer — this button closes it
@@ -227,12 +227,24 @@
         </div>
 
         <div class="sidebar-user" x-data="{ open: false }" @click.outside="open = false">
-            <img src="/static/img/kazma-icon.png" alt="Kazma" class="user-avatar-img">
+            <img src="/static/img/kazma-icon-dark-theme.png" alt="Kazma" class="user-avatar-img brand-on-dark"><img src="/static/img/kazma-icon.png" alt="Kazma" class="user-avatar-img brand-on-light">
             <div class="sidebar-footer-info">
                 <div class="user-name">{{ t('common.agent_name') }}</div>
                 <div class="user-role sidebar-collapsed-hide">
                     <span class="status-dot status-ok sidebar-status-dot"></span>
                     <span translate="no" x-show="activeModel" x-text="activeModel"></span><span x-show="activeModelLoaded && !activeModel" x-cloak>{{ t('common.no_model_selected') }}</span>
+                </div>
+                {# The running build: release, commit and when this server
+                   started -- whether a restart picked up the latest update
+                   (2026-08-26 restart-mid-turn incident). The time is put in
+                   the page's language by sidebarComponent. #}
+                <div id="sidebar-build" class="sidebar-build sidebar-collapsed-hide"
+                     title="{{ t('nav.build_hint') }}" data-started="{{ build_started() if build_started is defined else '' }}">
+                    {# The version and the hash each in their own isolate: in
+                       Arabic a hash starting with a digit joined the word
+                       before it ("9 البناء e686daf8"). #}
+                    <span class="sidebar-build-id"><bdi dir="ltr" translate="no">{{ kazma_version() if kazma_version is defined else '' }}</bdi> · {{ t('nav.build_word') }} <bdi dir="ltr" translate="no">{{ (build_commit() if build_commit is defined else '') or '?' }}</bdi></span>
+                    <span class="sidebar-build-since" x-show="upSince" x-text="upSince" x-cloak></span>
                 </div>
             </div>
         </div>

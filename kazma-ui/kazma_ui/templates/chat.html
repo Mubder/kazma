@@ -51,7 +51,6 @@
         <kbd>Ctrl+K</kbd> {{ t('chat.search') }}
         <kbd>Ctrl+N</kbd> {{ t('chat.new') }}
       </span>
-      <div id="build-badge" class="build-badge" title="{{ t('chat.build_badge_hint') }}"></div>
     </div>
   </aside>
 
@@ -60,7 +59,7 @@
     <!-- Chat Messages Transcript -->
     <div id="chat-messages" class="chat-messages">
       <div class="chat-welcome">
-        <div class="welcome-icon"><img src="/static/img/kazma-icon.png" alt="Kazma" class="welcome-logo"></div>
+        <div class="welcome-icon"><img src="/static/img/kazma-icon-dark-theme.png" alt="Kazma" class="welcome-logo brand-on-dark"><img src="/static/img/kazma-icon.png" alt="Kazma" class="welcome-logo brand-on-light"></div>
         <h2>{{ t('chat.welcome_title') }}</h2>
         <p>{{ t('chat.welcome_subtitle') }}</p>
         <div class="welcome-hints">
@@ -398,8 +397,6 @@ function setupWall() {
     placeholder_paused: {{ t('chat.placeholder_paused') | tojson }},
     send_title: {{ t('chat.send_title') | tojson }},
     send_steer: {{ t('chat.send_steer') | tojson }},
-    build_badge: {{ t('chat.build_badge') | tojson }},
-    build_since: {{ t('chat.build_since') | tojson }},
     session_heading: {{ t('chat.session_heading') | tojson }},
     session_empty: {{ t('chat.session_empty') | tojson }},
     mode_chat: {{ t('chat.mode_chat') | tojson }},

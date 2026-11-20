@@ -44,7 +44,7 @@ self.addEventListener('push', function (event) {
     tag: 'kazma-turn-complete',
     renotify: true,
     badge: '/static/img/kazma-icon.png',
-    icon: '/static/img/kazma-icon.png',
+    icon: '/static/img/app-icon-192.png',
   }));
 });
 

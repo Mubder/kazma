@@ -858,6 +858,26 @@ class KazmaAppBuilder:
 
         self.templates.env.globals["build_commit"] = _build_commit
 
+        def _build_started() -> float:
+            # When this server started (epoch seconds): the sidebar's card
+            # says "up since" in the page's language. No I/O.
+            from kazma_ui.health import get_build_info
+
+            return float(get_build_info().get("started_at") or 0.0)
+
+        # The release this build is (0.21.2): the sidebar's card names it
+        # beside the commit. Read once, here: get_base_version reads
+        # pyproject.toml, and a render does no I/O.
+        from kazma_core.version import get_public_version
+
+        _release = get_public_version()
+
+        def _kazma_version() -> str:
+            return _release
+
+        self.templates.env.globals["build_started"] = _build_started
+        self.templates.env.globals["kazma_version"] = _kazma_version
+
         def _kazma_space() -> str:
             # The space the request being rendered is bound to
             # (<meta name="kazma-space">, Spaces S1-06). Read from the

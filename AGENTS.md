@@ -13831,6 +13831,22 @@ product can turn it on, so an install with one account behaves as before.
   scan the asset files on `/health/live`: it is the guard's probe, on the
   loop. Gates: `tests/js/test_build_watch.js`, `tests/e2e/test_update_notice.py`
   (EN/AR, after a sidebar navigation, Refresh reloads).
+- **Kazma's mark has a face per theme** (2026-11-20, the owner's logo,
+  `scripts/make_app_icons.py`, from `static/img/brand/kazma-logo-master.webp`):
+  the dark theme shows the artwork as drawn (`kazma-logo-dark-theme.png`,
+  `kazma-icon-dark-theme.png`), the light theme a two-tone mark whose white
+  strokes are navy ink and blue strokes as drawn (`kazma-logo.png`,
+  `kazma-icon.png`; the plain names are the one that reads on either page,
+  so a place with one image uses it). Every place that shows it holds both
+  `<img>`s, classed `brand-on-dark` / `brand-on-light`, and `kazma.css` hides
+  the other theme's; chat.js draws it only through `_kazmaMarkHtml`. The
+  website's first light mark recoloured every stroke blue, and the owner
+  asked why the logo was one solid blue. The favicon and app icons are the
+  artwork on the dark rounded square. Gates: `tests/test_logo_by_theme.py`
+  (the website's recolour and the artwork as negative controls),
+  `tests/e2e/test_sidebar_brand_and_build.py` (by the sidebar, EN/AR, both
+  themes; also the sidebar card's release, build and start time, and the
+  hover backdrop).
 - **One colour system: a card is one step above the wall** (2026-11-09, the
   owner's refresh, `docs/plans/UI_DESIGN_REFRESH.md`; raised 2026-11-17 to
   the look kazma.ai took the day before). Every colour is a token in

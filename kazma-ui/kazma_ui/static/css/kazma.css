@@ -79,7 +79,9 @@
   --nav-item-radius: 6px;
   --nav-item-height: 45px;
   --nav-item-ink: var(--text-secondary);
-  --nav-item-hover-bg: transparent;
+  /* A hovered item sits on the accent's soft tint (it changed only its
+     text colour: no backdrop, the owner 2026-11-20). */
+  --nav-item-hover-bg: var(--accent-subtle);
   --nav-item-hover-ink: var(--accent-light);
   --nav-item-active-bg: var(--accent);
   --nav-item-active-ink: var(--on-accent);
@@ -715,6 +717,27 @@ button { cursor: pointer; font-family: inherit; }
   vertical-align: middle;
   margin-inline-end: 4px;
 }
+/* The running build under the model: the release and commit, then when the
+   server started. Quiet, one line each; selectable so it can be copied. */
+.sidebar-build {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 4px;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--text-secondary);
+}
+.sidebar-build > span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sidebar-build-id {
+  font-variant-numeric: tabular-nums;
+  user-select: all;
+}
+.sidebar.collapsed .sidebar-build { display: none; }
 .sidebar-model-select {
   padding: 8px 12px;
   border-top: 1px solid var(--border-subtle);
@@ -2297,6 +2320,14 @@ tbody tr:last-child td {
   height: 100%;
   object-fit: contain;
   display: block;
+}
+/* Kazma's mark has a face per theme (scripts/make_app_icons.py): the artwork
+   on the dark theme, the two-tone mark on the light one. Every place that
+   shows it holds both; the other theme's is hidden, the shown one keeps the
+   display its own class gives it. */
+:root:not([data-theme="light"]) .brand-on-light,
+[data-theme="light"] .brand-on-dark {
+  display: none !important;
 }
 .message-user .message-avatar { background: var(--accent); }
 .message-assistant .message-avatar { background: var(--bg-surface); }

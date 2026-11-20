@@ -604,16 +604,6 @@ html[data-theme="light"] { color-scheme: only light; }
   border-radius: 3px;
   font-size: 0.65rem;
 }
-/* Running build identity (see /health/live build) — lets anyone verify a
-   restart actually picked up the pulled code (restart-mid-turn incident). */
-.build-badge {
-  margin-top: 6px;
-  font-size: 0.65rem;
-  color: var(--text-muted);  /* no extra opacity: at 0.75 it read 3.24:1 */
-  user-select: all;
-  cursor: default;
-}
-
 /* HITL card spacing lives with the rest of the card rules in kazma.css.
    Redefining those selectors here made this file win the cascade for two of
    them, so the card rendered as a mixture of the two stylesheets. */

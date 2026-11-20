@@ -236,7 +236,6 @@
 
     if (!messagesEl) return; // not on chat page
 
-    _paintBuildBadge();
     _watchMemoryChoice();
 
     // Input handlers
@@ -934,24 +933,6 @@
       } catch (e) { /* ignore */ }
       scrollToBottom();
     } catch (e) { /* corrupt outbox — drop silently */ _outboxClear(); }
-  }
-
-  /** Running build identity in the sidebar footer (see /health/live build). */
-  function _paintBuildBadge() {
-    try {
-      fetch('/health/live')
-        .then(function(r) { return r.ok ? r.json() : null; })
-        .then(function(d) {
-          var b = d && d.build;
-          var el = document.getElementById('build-badge');
-          if (!b || !el) return;
-          var started = b.started_at && window.KazmaFormat
-            ? window.KazmaFormat.time(b.started_at) : '';
-          el.textContent = tiFmt('build_badge', 'build {commit}', { commit: b.commit || '?' }) +
-            (started ? ' · ' + tiFmt('build_since', 'up since {time}', { time: started }) : '');
-        })
-        .catch(function() { /* badge is best-effort */ });
-    } catch (e) { /* ignore */ }
   }
 
   /**
@@ -3059,7 +3040,7 @@
     if (text.toLowerCase() === '/reset') {
       messagesEl.innerHTML =
         '<div class="chat-welcome">' +
-          '<div class="welcome-icon"><img src="/static/img/kazma-icon.png" alt="Kazma" class="welcome-logo"></div>' +
+          '<div class="welcome-icon">' + _kazmaMarkHtml('welcome-logo') + '</div>' +
           '<h2>Kazma</h2>' +
           '<p>' + escapeHtml(ti('welcome_subtitle', 'How can I help you today?')) + '</p>' +
         '</div>';
@@ -4894,6 +4875,15 @@
     var name = data && data.author_name ? String(data.author_name) : '';
     return (name && String((data && data.author) || '') !== String(mine || '')) ? name : '';
   }
+  // Kazma's mark, in both of its faces: the artwork on the dark theme and
+  // the two-tone mark on the light one (kazma.css shows the theme's; one
+  // img per face, so a theme switch needs no repaint). scripts/make_app_icons.py.
+  function _kazmaMarkHtml(cls, extra) {
+    var more = extra || '';
+    return '<img src="/static/img/kazma-icon-dark-theme.png" alt="Kazma" class="' + cls + ' brand-on-dark"' + more + '>' +
+      '<img src="/static/img/kazma-icon.png" alt="Kazma" class="' + cls + ' brand-on-light"' + more + '>';
+  }
+
   function _memberAvatarHtml(name) {
     return '<div class="message-avatar message-avatar-user message-avatar-member" translate="no" title="' +
       escapeHtml(name) + '">' + escapeHtml(String(name).trim().charAt(0).toUpperCase()) + '</div>';
@@ -4925,8 +4915,8 @@
           ? _memberAvatarHtml(authorName)
           : '<div class="message-avatar message-avatar-user">' + escapeHtml(ti('you_avatar', 'You')) + '</div>')
       : '<div class="message-avatar message-avatar-agent" title="Kazma">' +
-          '<img src="/static/img/kazma-icon.png" alt="Kazma" class="message-avatar-img" ' +
-          'onerror="this.style.display=\'none\';this.parentNode.textContent=\'K\';" />' +
+          _kazmaMarkHtml('message-avatar-img',
+            ' onerror="this.parentNode.textContent=\'K\';"') +
         '</div>';
 
     // The turn's saved usage, in the line the live terminal frame writes.
@@ -7096,7 +7086,7 @@
     // Clear messages and show loading state (only for explicit session loads)
     messagesEl.innerHTML =
       '<div class="chat-welcome">' +
-        '<div class="welcome-icon"><img src="/static/img/kazma-icon.png" alt="Kazma" class="welcome-logo"></div>' +
+        '<div class="welcome-icon">' + _kazmaMarkHtml('welcome-logo') + '</div>' +
         '<h2>' + escapeHtml(tiFmt('session_heading', 'Session {id}', { id: sessionId.slice(0, 8) })) + '</h2>' +
         '<p>' + escapeHtml(ti('loading_messages', 'Loading messages\u2026')) + '</p>' +
       '</div>';
@@ -7137,7 +7127,7 @@
         if (!messages || messages.length === 0) {
           messagesEl.innerHTML =
             '<div class="chat-welcome">' +
-              '<div class="welcome-icon"><img src="/static/img/kazma-icon.png" alt="Kazma" class="welcome-logo"></div>' +
+              '<div class="welcome-icon">' + _kazmaMarkHtml('welcome-logo') + '</div>' +
               '<h2>' + escapeHtml(tiFmt('session_heading', 'Session {id}', { id: sessionId.slice(0, 8) })) + '</h2>' +
               '<p>' + escapeHtml(ti('session_empty', 'No messages in this session yet.')) + '</p>' +
             '</div>';
@@ -7268,7 +7258,7 @@
         if (!hadContent) {
           messagesEl.innerHTML =
             '<div class="chat-welcome">' +
-              '<div class="welcome-icon"><img src="/static/img/kazma-icon.png" alt="Kazma" class="welcome-logo"></div>' +
+              '<div class="welcome-icon">' + _kazmaMarkHtml('welcome-logo') + '</div>' +
               '<h2>' + escapeHtml(tiFmt('session_heading', 'Session {id}', { id: sessionId.slice(0, 8) })) + '</h2>' +
               '<p>' + escapeHtml(tiFmt('session_messages_failed', 'Failed to load messages: {error}', { error: (err && err.message) || String(err) })) + '</p>' +
             '</div>';
@@ -7372,7 +7362,7 @@
     _applyChatModel();
     messagesEl.innerHTML =
       '<div class="chat-welcome">' +
-        '<div class="welcome-icon"><img src="/static/img/kazma-icon.png" alt="Kazma" class="welcome-logo"></div>' +
+        '<div class="welcome-icon">' + _kazmaMarkHtml('welcome-logo') + '</div>' +
         '<h2>Kazma</h2>' +
         '<p>' + escapeHtml(ti('welcome_subtitle', 'How can I help you today?')) + '</p>' +
       '</div>';

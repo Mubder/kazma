@@ -822,18 +822,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "إرسال توجيه أو أمر",
         "en": "Send steer or command",
     },
-    "chat.build_badge": {
-        "ar": "الإصدار {commit}",
-        "en": "build {commit}",
-    },
-    "chat.build_since": {
-        "ar": "يعمل منذ {time}",
-        "en": "up since {time}",
-    },
-    "chat.build_badge_hint": {
-        "ar": "إصدار الخادم العامل (الإيداع ووقت التشغيل) — تحقّق من أن إعادة التشغيل التقطت آخر تحديث",
-        "en": "Running server build (commit + start time) — verify your restart picked up the latest pull",
-    },
     "chat.session_empty": {
         "ar": "لا توجد رسائل في هذه الجلسة بعد.",
         "en": "No messages in this session yet.",

@@ -171,3 +171,58 @@ def test_a_failed_local_copy_is_said_as_local(monkeypatch):
 def test_a_failed_offsite_copy_stays_critical(monkeypatch):
     assert _pg_alerts(monkeypatch, ["remote"]) == [("backup.pg_offsite", "critical")]
     assert _pg_alerts(monkeypatch, ["local", "remote"]) == [("backup.pg_offsite", "critical")]
+
+
+@needs_restic
+def test_two_copies_at_once_make_one_repository(local, alerts, payload):
+    """Live 2026-11-20: two retried Postgres dump copies ran together; both
+    found no repository, the second's ``init`` met the first's and failed."""
+    import threading
+
+    results = []
+
+    def copy():
+        results.append(rr.backup(local, _PW, [payload]))
+
+    threads = [threading.Thread(target=copy) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=300)
+    assert len(results) == 2 and all(r.ok for r in results), [r.error for r in results]
+    assert alerts == ["backup.restic_local_made"]
+
+
+@needs_restic
+def test_control_without_the_lock_the_second_maker_fails(local, alerts, payload, monkeypatch):
+    """Both copies past the "is it there?" check before either makes it: the
+    live race, made certain with a barrier and no lock."""
+    import contextlib
+    import threading
+
+    barrier = threading.Barrier(2)
+
+    def init_after_both_looked(repo, password):
+        barrier.wait(timeout=30)
+        return rr._run(["init"], repo, password, action="init", timeout=600)
+
+    monkeypatch.setattr(rr, "_MAKING_LOCK", contextlib.nullcontext())
+    monkeypatch.setattr(rr, "init_repo", init_after_both_looked)
+    monkeypatch.setattr(rr, "_local_repo_made", _old_maker)
+    results = []
+    threads = [threading.Thread(target=lambda: results.append(rr.backup(local, _PW, [payload])))
+               for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=300)
+    assert sorted(r.ok for r in results) == [False, True], [r.error for r in results]
+
+
+def _old_maker(repo, password):
+    """``_local_repo_made`` as first deployed: no lock, no second look."""
+    from pathlib import Path as _Path
+
+    if not rr._is_local_repo(repo) or (_Path(repo) / "config").is_file():
+        return None
+    return rr.init_repo(repo, password)

@@ -737,6 +737,10 @@ def unlock_stale(repo: str, password: str) -> ResticResult:
     return _run(["unlock"], repo, password, action="unlock", timeout=600)
 
 
+#: One maker of the local repository at a time (see ``_local_repo_made``).
+_MAKING_LOCK = threading.Lock()
+
+
 def _is_local_repo(repo: str) -> bool:
     """True when *repo* is the install's own local repository
     (``repo_paths()["local"]``): never a remote, whatever its spelling."""
@@ -761,7 +765,12 @@ def _local_repo_made(repo: str, password: str) -> ResticResult | None:
     The new repository is said once (earlier local snapshots are not in it)."""
     if not _is_local_repo(repo) or (Path(repo) / "config").is_file():
         return None
-    made = init_repo(repo, password)
+    with _MAKING_LOCK:
+        # Two copies at once (two retried Postgres dumps, live 2026-11-20):
+        # the second waits here and finds the first one's repository.
+        if (Path(repo) / "config").is_file():
+            return None
+        made = init_repo(repo, password)
     if made.ok and not made.detail.get("already"):
         logger.warning("[restic] the local repository %s was missing: a new one was made "
                        "(earlier local snapshots are not in it)", repo)

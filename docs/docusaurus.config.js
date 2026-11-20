@@ -73,6 +73,7 @@ const config = {
         logo: {
           alt: 'Kazma Logo',
           src: 'img/kazma-logo.png',
+          srcDark: 'img/kazma-logo-dark-theme.png',
         },
         items: [
           {

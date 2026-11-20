@@ -394,8 +394,12 @@ export function sidebarComponent() {
         // was on every page for as long as the two reads took.
         activeModelLoaded: false,
         modelOptions: [],
+        // "up since 20/11/2026, 2:58 AM": when this server started, in the
+        // page's language (the card's data-started, epoch seconds).
+        upSince: '',
 
         async init() {
+            this._paintUpSince();
             // Fetch options first so the <select> has the <option>s
             // before we set activeModel, then fetch+set the active model.
             await this._fetchModelOptions();
@@ -417,6 +421,16 @@ export function sidebarComponent() {
                     });
                 }
             });
+        },
+
+        _paintUpSince() {
+            const card = this.$el.querySelector('#sidebar-build');
+            const started = card ? Number(card.getAttribute('data-started')) : 0;
+            if (!started || !window.KazmaFormat) return;
+            const when = window.KazmaFormat.dateTime(started);
+            this.upSince = typeof window.kazmaT === 'function'
+                ? window.kazmaT('nav.up_since', 'up since {when}', { when: when })
+                : 'up since ' + when;
         },
 
         async _fetchActiveModel() {
