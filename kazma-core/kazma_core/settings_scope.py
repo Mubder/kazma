@@ -168,13 +168,27 @@ def _scope_of_key(key: str) -> str | None:
     return best.scope if best is not None else None
 
 
+#: Kazma's own record of who is who, and the switch that turns Spaces on:
+#: written only by their own code, in every mode (S1-30's check of the docs'
+#: claim that nothing in the product turns Spaces on before its switch).
+_IDENTITY_KEYS = ("identity.",)
+
+
 def install_writer_refusal(key: str) -> str | None:
     """Why the install's own writers (Settings' generic save, a batch save,
-    the agent's ``config_save``) refuse *key*, or None. Only once Spaces is
-    enforced, and only for a key that is a space's or a person's: each is
-    changed on its own page, in its own space or account."""
+    the agent's ``config_save``) refuse *key*, or None.
+
+    The identity store and the Spaces switch, in every mode: written here
+    before Spaces is enforced, the switch would turn Spaces on before the
+    checks that must pass first, and the store would take a person into a
+    space with no record. Once Spaces is enforced, also a key that is a
+    space's or a person's (each is changed on its own page, in its own space
+    or account) and every key that is not a setting."""
     from kazma_core.spaces.scope import spaces_enforced
 
+    if key.startswith(_IDENTITY_KEYS):
+        return (f"'{key}' is Kazma's own record of who is who, written only by its own code, "
+                "never as a setting.")
     if not spaces_enforced():
         return None
     scope = _scope_of_key(key)

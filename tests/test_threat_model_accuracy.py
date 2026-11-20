@@ -280,3 +280,88 @@ def test_the_guide_warns_about_mcp_name_classification(guide):
     reader actually follows, not only in KNOWN_GAPS."""
     assert "KAZMA_MCP_SAFE_ALLOWLIST" in guide
     assert "read_env" in guide
+
+
+# ── Spaces (S1-30): what the first section and the guide promise ─────────
+
+_SPACES_GUIDE = _ROOT / "docs" / "docs" / "guide" / "spaces.md"
+_SAFETY = _ROOT / "docs" / "docs" / "security" / "safety-design.md"
+_PRODUCT = [_ROOT / p for p in ("kazma-core/kazma_core", "kazma-ui/kazma_ui", "kazma-gateway/kazma_gateway",
+                                "kazma-cli/kazma_cli", "kazma-tui/kazma_tui", "kazma-skills/kazma_skills")]
+
+
+def _spaces_pages() -> dict[str, str]:
+    return {"threat model": _DOC.read_text(encoding="utf-8"),
+            "guide": _SPACES_GUIDE.read_text(encoding="utf-8"),
+            "safety design": _SAFETY.read_text(encoding="utf-8")}
+
+
+def test_every_spaces_page_says_it_is_not_on_and_keeps_nothing_from_the_operator():
+    for name, text in _spaces_pages().items():
+        low = " ".join(text.lower().split())
+        assert "not switched on in any release yet" in low, name
+        assert "reviewed independently" in low, name
+        assert "the person who runs the machine" in low or "against the operator" in low, name
+
+
+def _writes_of_the_switch() -> list[str]:
+    """Product code that names the Spaces switch's key, beyond the identity
+    store (which reads it) and the restore classes (which name its rule)."""
+    import re
+
+    allowed = {"kazma_core/spaces/identity.py", "kazma_core/settings_restore.py"}
+    found = []
+    for root in _PRODUCT:
+        for path in root.rglob("*.py"):
+            text = path.read_text(encoding="utf-8", errors="replace")
+            rel = path.relative_to(root.parent).as_posix()
+            if ("ENFORCED_KEY" in text or "identity.enforced" in text) and rel not in allowed:
+                found.append(rel)
+            if rel == "kazma_core/spaces/identity.py" and re.search(
+                    r"\.(set|batch_set|atomic_update)\(\s*ENFORCED_KEY", text):
+                found.append(rel + " writes it")
+    return found
+
+
+def test_nothing_in_the_product_switches_spaces_on():
+    """The pages say Spaces is not switched on in any release: no product
+    code writes the switch, and Settings' writers and the agent refuse it."""
+    from kazma_core.settings_scope import install_writer_refusal
+    from kazma_core.spaces import identity
+
+    assert _writes_of_the_switch() == []
+    assert install_writer_refusal(identity.ENFORCED_KEY)
+    assert install_writer_refusal(identity.REGISTRY_KEY)
+
+
+def test_control_a_planted_writer_of_the_switch_is_found(tmp_path, monkeypatch):
+    planted = tmp_path / "kazma_core" / "planted.py"
+    planted.parent.mkdir()
+    planted.write_text("store.set(ENFORCED_KEY, True)\n", encoding="utf-8")
+    import sys
+
+    module = sys.modules[__name__]
+    monkeypatch.setattr(module, "_PRODUCT", [tmp_path / "kazma_core"])
+    assert module._writes_of_the_switch() == ["kazma_core/planted.py"]
+
+
+def test_membership_is_checked_on_every_request_and_socket():
+    """One check: a socket's handshake goes through the request's."""
+    import inspect
+
+    from kazma_ui import space_binding
+
+    assert "identity.is_member(" in inspect.getsource(space_binding.space_for_request)
+    assert "space_for_request(" in inspect.getsource(space_binding.space_for_socket)
+
+
+def test_the_export_password_and_the_offsite_copy_are_as_the_pages_say():
+    import inspect
+
+    from kazma_core.backup import universal
+    from kazma_core.security.sealed_zip import MIN_PASSWORD
+
+    guide = _SPACES_GUIDE.read_text(encoding="utf-8")
+    assert f"at least {MIN_PASSWORD} characters" in guide
+    assert "_plain_copy_refused()" in inspect.getsource(universal._offsite_sync)
+    assert "restic" in guide and "encrypted" in guide

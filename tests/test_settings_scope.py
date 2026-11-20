@@ -158,6 +158,52 @@ def test_control_without_spaces_the_generic_save_writes_it(settings_client) -> N
         store.delete("connectors.x.drafting.post_length")
 
 
+def test_nothing_writes_the_identity_store_or_the_switch_before_spaces(settings_client) -> None:
+    """Before Spaces is enforced too: written as a setting, the switch would
+    turn Spaces on before the checks that must pass first, and the store
+    would take a person into a space with no record (S1-30)."""
+    import asyncio
+
+    from kazma_core.agent.tool_refusal import RefusedBeforeEffect
+    from kazma_core.spaces import identity, scope
+
+    from tests._chat_space_cases import _registry
+
+    assert not scope.spaces_enforced()
+    client, store = settings_client
+    for key, value in ((identity.ENFORCED_KEY, True), (identity.REGISTRY_KEY, {"accounts": {}})):
+        assert "Kazma's own record" in (install_writer_refusal(key) or "")
+        single = client.put("/api/settings/single", json={"key": key, "value": value})
+        assert single.status_code == 400, single.text
+        batch = client.put("/api/settings", json=[{"key": key, "value": value}])
+        assert batch.status_code == 400, batch.text
+        assert store.get(key) is None
+        tool = _registry().get_tool("config_save")
+        with pytest.raises(RefusedBeforeEffect):
+            result = tool.func(key=key, value="true")
+            if asyncio.iscoroutine(result):
+                asyncio.run(result)
+    assert not scope.spaces_enforced()
+
+
+def test_control_the_rule_of_before_lets_the_switch_through(settings_client, monkeypatch) -> None:
+    from kazma_core import settings_scope
+    from kazma_core.spaces import identity
+
+    monkeypatch.setattr(settings_scope, "_IDENTITY_KEYS", ())
+    monkeypatch.setattr("kazma_ui.settings.install_writer_refusal", settings_scope.install_writer_refusal)
+    client, store = settings_client
+    try:
+        got = client.put("/api/settings/single", json={"key": identity.ENFORCED_KEY, "value": True})
+        assert got.status_code == 200, got.text
+        assert store.get(identity.ENFORCED_KEY) is True
+    finally:
+        store.delete(identity.ENFORCED_KEY)
+        from kazma_core.spaces import scope
+
+        scope.set_enforced(False)
+
+
 def test_the_agent_s_config_save_refuses_a_space_s_key(enforced) -> None:
     import asyncio
 

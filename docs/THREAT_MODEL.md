@@ -12,7 +12,7 @@ security reviewer is a boundary described as stronger than it is. Every limit
 below is a real one; several are load-bearing; none of them is a jail in the
 sense that word is usually used.
 
-## Who Kazma is for: one operator per install
+## Who Kazma is for: one operator per install, and the people they let in
 
 Kazma is software you run for yourself. Each install has **one operator**:
 the person who runs the server, holds its keys and edits its settings.
@@ -20,15 +20,32 @@ Everything on this page protects the operator from the **agent** -- from its
 mistakes, and from the untrusted web pages, documents and messages it reads.
 Nothing on it protects an install from its own operator.
 
+**Spaces** (being built; [the guide](docs/guide/spaces.md)) will let the
+operator share an install with a few people they know, each in a space of
+their own. It is **not switched on in any release yet**: an install has one
+account, and the identity store and its switch are written only by Kazma's
+own code, never as a setting. Once it is on, it is a boundary **between the
+people who use Kazma**: a request names its space and the server checks
+membership on every request and socket, the operator included; every store
+keeps a space's rows apart, and one space is tested against another for
+every route and tool. It is **not a boundary against the operator**, who
+can read the disk, the databases and the backups, where every space is.
+Encrypting a space so that only its members can open it is planned, not
+built. A person's export of their own space is sealed with a password they
+choose; once a second person exists, the only copy of a backup that leaves
+the machine is restic's encrypted one. Spaces has not been reviewed
+independently.
+
 - **The operator has full control.** Every safeguard below can be switched
   off by whoever runs the install. Each has its own switch, off by default,
   listed with what it stops protecting under
   [Switches that weaken a security default](docs/reference/environment-variables.md#switches-that-weaken-a-security-default).
   Turning one on is the operator's decision, and the operator's responsibility.
-- **Anyone the operator lets in acts with the operator's authority.** A web
-  login, or an allowlisted Telegram, Discord or Slack account, can ask the
-  agent for anything the operator could. There are no permissions that keep
-  people who do not trust each other apart (section 6).
+- **Anyone the operator lets in acts with the operator's authority** until
+  Spaces is on. A web login, or an allowlisted Telegram, Discord or Slack
+  account, can ask the agent for anything the operator could; the older
+  multi-user mode's permissions do not keep people who do not trust each
+  other apart (section 6).
 - **What the agent does, the operator does.** A post, an email, a message or
   a command sent through an install is its operator's. By default Kazma asks
   before a dangerous action and records what it did; it does not decide what
@@ -38,7 +55,8 @@ Nothing on it protects an install from its own operator.
   people you do not trust, is outside what these safeguards are built for;
   section 7 says what a real boundary would take.
 
-**Reviewed 2026-09-12** against the code, not against the README.
+**Reviewed 2026-09-12** against the code, not against the README; the
+Spaces paragraph on 2026-11-20.
 
 ---
 
@@ -264,9 +282,11 @@ true; the point of this page is that you should know which one you are running.
 ## 6. Out of scope, stated plainly
 
 - **Multi-tenant isolation.** The default threat model is a single operator on a
-  trusted host. Tenancy exists in the data layer (`tenant_id` on secrets,
-  sessions, gates) but it has not been adversarially reviewed, and it is not a
-  boundary to rely on for mutually distrusting users.
+  trusted host. The older multi-user mode's tenancy (`tenant_id` on secrets,
+  sessions, gates) is not a boundary to rely on for mutually distrusting
+  users. Spaces, once switched on, keeps the people who use an install apart
+  from each other; it has not been adversarially reviewed, and it keeps
+  nothing from the operator of the machine.
 - **A malicious operator.** Everything here assumes the human at the approval
   prompt is on your side.
 - **Supply chain of what you approve.** Signing covers Kazma's own releases

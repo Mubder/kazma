@@ -13895,6 +13895,17 @@ product can turn it on, so an install with one account behaves as before.
     a real migration of two planted spaces, judged by a child pinned to the
     restored folder; a restore without the identity store, the Settings
     file of before and the plain-copy check of before as controls).
+- **The docs say what Spaces promises and what it does not (S1-30,
+  2026-11-20):** the threat model's first section and section 6, the safety
+  design's section 10, and `docs/docs/guide/spaces.md`. Each says Spaces is
+  not switched on in any release yet, keeps nothing from the person who runs
+  the machine, and has not been reviewed independently;
+  `tests/test_threat_model_accuracy.py` holds them to the code. **The
+  identity store and the Spaces switch are written only by their own code,
+  in every mode** (`settings_scope.install_writer_refusal`): before Spaces is
+  enforced Settings' generic save wrote the switch (`identity.ENFORCED_KEY`), turning Spaces
+  on before S1-33's checks. Gate: `tests/test_settings_scope.py` (the rule
+  of before as the control).
 
 ## UI Conventions (Web)
 

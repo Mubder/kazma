@@ -163,10 +163,16 @@ def test_settings_cannot_write_the_identity_store_once_enforced(client, enforced
         _registry().get_tool("config_save").func(key=identity.REGISTRY_KEY, value="{}")
 
 
-def test_control_without_spaces_the_writers_refuse_nothing_new() -> None:
+def test_without_spaces_the_writers_refuse_only_the_identity_keys() -> None:
+    """Before Spaces is enforced the writers keep every key they wrote,
+    except Kazma's record of who is who and its switch (S1-30), refused in
+    every mode."""
     from kazma_core.settings_scope import install_writer_refusal
 
-    assert install_writer_refusal(identity.REGISTRY_KEY) is None
+    assert install_writer_refusal(identity.REGISTRY_KEY)
+    assert install_writer_refusal(identity.ENFORCED_KEY)
+    for key in ("account.tokens", "platform.users", "connectors.x.bearer_token", "agent.name"):
+        assert install_writer_refusal(key) is None, key
 
 
 # ── the record: a reset is never silent ──────────────────────────────────
