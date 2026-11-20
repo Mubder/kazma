@@ -132,12 +132,16 @@ test("negative control: the old patterns grow faster than their input", () => {
   const oldAlign = (s) => /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(s);
   const grows = (fn, make, n) => {
     fn(make(n));
-    const small = Math.min(...[0, 1, 2].map(() => timed(() => fn(make(n)))));
-    const large = Math.min(...[0, 1, 2].map(() => timed(() => fn(make(4 * n)))));
+    // The fastest of five runs each way: a single slow run on a busy machine
+    // must not read as growth (it did, at 30,000 characters, 2026-11-20).
+    const small = Math.min(...[0, 1, 2, 3, 4].map(() => timed(() => fn(make(n)))));
+    const large = Math.min(...[0, 1, 2, 3, 4].map(() => timed(() => fn(make(4 * n)))));
     return large > 6 * small;
   };
   assert.ok(grows(oldLink, (n) => "[".repeat(n), 3000));
   assert.ok(grows(oldImage, (n) => "![".repeat(n), 1500));
   assert.ok(grows(oldAlign, (n) => " ".repeat(n) + "x", 3000));
-  assert.ok(!grows((s) => s.replace(/\[([^\][]+)\]\(([^)[]+)\)/g, "x"), (n) => "[".repeat(n), 30000));
+  // The linear pattern at a size whose run takes long enough to measure (at
+  // 30,000 characters a run took 0.02 ms, and noise passed for growth).
+  assert.ok(!grows((s) => s.replace(/\[([^\][]+)\]\(([^)[]+)\)/g, "x"), (n) => "[".repeat(n), 1000000));
 });

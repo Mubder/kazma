@@ -75,7 +75,7 @@ class _Bag:
         vec[0] = 2.0  # the shared base
         for word in re.findall(r"[^\W\d_]+", fold_for_search(str(text)).lower()):
             word = self._STEMS.get(word, word)
-            vec[1 + int(hashlib.md5(word.encode()).hexdigest(), 16) % (self.dim - 1)] += 1.0
+            vec[1 + int(hashlib.md5(word.encode(), usedforsecurity=False).hexdigest(), 16) % (self.dim - 1)] += 1.0
         norm = math.sqrt(sum(x * x for x in vec)) or 1.0
         return [x / norm for x in vec]
 
