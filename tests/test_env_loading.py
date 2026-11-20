@@ -204,6 +204,10 @@ def test_the_cli_skips_the_folder_for_mcp_and_ask(argv, include_cwd, monkeypatch
 
 #: Entry points that must NOT load `.env`, and why.
 ENV_FREE_ENTRY_POINTS: dict[str, str] = {
+    "scripts/postgres_suite.py": (
+        "lists the tests each Postgres CI job must run and reads their JUnit report; "
+        "it reads no Kazma setting (its one import is the XML parser for untrusted input)"
+    ),
     "scripts/windows_installer/build.py": (
         "builds the Windows installer in the release workflow from the release's source "
         "archive; it reads no Kazma setting, only where Inno Setup is installed"
