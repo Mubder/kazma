@@ -136,7 +136,12 @@ def _make_stores() -> list[str]:
     from kazma_core.documents.config import get_document_storage_root
     from kazma_core.documents.repository import DocumentRepository
 
-    DocumentRepository(Path(get_document_storage_root()) / "documents.db")
+    from kazma_core.documents.jobs import DocumentJobRepository
+
+    # The SQLite job queue shares documents.db, with its append-only guards
+    # (document_job_events refuses every delete): made here, not left to
+    # whichever earlier test of the process made it in a shared folder.
+    DocumentJobRepository(DocumentRepository(Path(get_document_storage_root()) / "documents.db"))
     made.append("documents.db")
     from kazma_skills.native.email_manager.backends.sandbox import SandboxBackend
 

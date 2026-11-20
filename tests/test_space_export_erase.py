@@ -104,6 +104,43 @@ def test_after_erasing_a_no_store_holds_its_word_and_b_is_whole(world) -> None:
     assert identity.read_registry()["events"][-1]["kind"] == "space_erased"
 
 
+def _documents_db() -> Path:
+    from kazma_core.documents.config import get_document_storage_root
+
+    return Path(get_document_storage_root()) / "documents.db"
+
+
+def _guards() -> set[str]:
+    with closing(sqlite3.connect(str(_documents_db()))) as conn:
+        return {row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'document_job_events'")}
+
+
+def test_an_append_only_table_is_erased_and_keeps_its_guard(world) -> None:
+    """document_job_events refuses every delete (its no-delete trigger), and
+    an install whose document job queue is SQLite keeps it in documents.db:
+    the erase failed there with "document job events are immutable" (CI,
+    2026-11-20, when an earlier test had made the queue's tables). The erase
+    lifts the guard inside its own transaction and puts it back."""
+    assert any(item.startswith("documents.db:document_job_events") for item in world["planted"][A]), \
+        sorted(item for item in world["planted"][A] if item.startswith("documents.db"))
+    before = _guards()
+    assert "document_job_events_no_delete" in before
+    space_data.erase_space(A, by=OWNER_ACCOUNT_ID)
+    assert _guards() == before
+    with closing(sqlite3.connect(str(_documents_db()))) as conn:
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            conn.execute("DELETE FROM document_job_events")
+
+
+def test_control_without_lifting_the_guard_the_erase_fails(world, monkeypatch) -> None:
+    monkeypatch.setattr(space_data, "_lift_delete_guards", lambda conn, tables: [])
+    with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+        space_data.erase_space(A, by=OWNER_ACCOUNT_ID)
+    # Nothing of that file went: one file's rows go together or not at all.
+    assert any(key.startswith("documents.db") for key in _where_word(world["words"][A]))
+
+
 def test_control_yesterdays_erase_misses_a_store(world, monkeypatch) -> None:
     real = space_data._store_paths
     monkeypatch.setattr(space_data, "_store_paths",

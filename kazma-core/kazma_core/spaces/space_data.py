@@ -593,6 +593,29 @@ def export_space(space: str, target: Path, *, password: str | None = None) -> di
 # ── erase ───────────────────────────────────────────────────────────────
 
 
+def _is_delete_guard(sql: str) -> bool:
+    """Whether trigger *sql* refuses deletes: BEFORE DELETE, and it aborts."""
+    words = " ".join(sql.upper().split())
+    return " BEFORE DELETE ON " in f" {words} " and "RAISE(ABORT" in words.replace(" ", "")
+
+
+def _lift_delete_guards(conn: sqlite3.Connection, tables: set[str]) -> list[str]:
+    """Drop the triggers that refuse every delete from *tables* (an
+    append-only table's guard: ``document_job_events_no_delete``), inside the
+    erase's own transaction, and return their SQL to put them back before it
+    commits. An erase is the one deliberate removal of a space's rows; a
+    rollback brings the guards back with the rows. Only a BEFORE DELETE
+    trigger that aborts is lifted: the index and outbox triggers that follow
+    a delete still run."""
+    lifted: list[str] = []
+    for name, table, sql in conn.execute(
+            "SELECT name, tbl_name, sql FROM sqlite_master WHERE type = 'trigger'").fetchall():
+        if table in tables and sql and _is_delete_guard(sql):
+            conn.execute(f'DROP TRIGGER "{name}"')
+            lifted.append(str(sql))
+    return lifted
+
+
 def _erase_rows(found: list[_Found], ctx: _Context) -> int:
     erased = 0
     by_path: dict[Path, list[_Found]] = {}
@@ -604,9 +627,12 @@ def _erase_rows(found: list[_Found], ctx: _Context) -> int:
             committed = False
             try:
                 here = 0
+                guards = _lift_delete_guards(conn, {item.table for item in items})
                 for item in items:
                     for clause, params in _where(item.rule, ctx):
                         here += conn.execute(f'DELETE FROM "{item.table}" WHERE {clause}', params).rowcount
+                for sql in guards:
+                    conn.execute(sql)
                 virtual = [table for table, is_fts in _tables(conn) if is_fts]
                 if virtual and any(i.rows for i in items):
                     from kazma_core.db.fts5_purge import purge_deleted_rows

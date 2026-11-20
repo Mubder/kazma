@@ -14125,7 +14125,15 @@ product can turn it on, so an install with one account behaves as before.
     store, recorded (`space_erased`).
   - An erase first closes the space (`people.close_space`: `erasing_at`, and
     `identity.is_member` is False for everyone); one that stopped half way is
-    run again. Each store file's rows go in one transaction.
+    run again. Each store file's rows go in one transaction. A table whose
+    trigger refuses every delete (the SQLite document job queue's
+    `document_job_events`, in `documents.db`) has that guard lifted inside
+    the erase's transaction and put back before it commits
+    (`space_data._lift_delete_guards`): the erase failed "document job events
+    are immutable" on such an install (CI, 2026-11-20). The test world makes
+    the queue's tables by their own code
+    (`test_an_append_only_table_is_erased_and_keeps_its_guard`, the erase
+    without the lift as the control).
   - Who may (`kazma_ui/spaces_api.py`, from the memberships): the admin or a
     member counts (numbers only); the space's owner exports; an owner deletes
     a shared space; the admin erases the closed personal space of a deleted
