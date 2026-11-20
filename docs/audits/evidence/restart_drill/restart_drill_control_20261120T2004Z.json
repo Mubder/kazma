@@ -1,0 +1,69 @@
+{
+ "label": "control",
+ "meta": {
+  "commit": "9b96c2b8c61b10857c5f9926f842436f947683c3",
+  "ref": "9b96c2b8c",
+  "install": {
+   "exit": 0,
+   "seconds": 151,
+   "tail": "      icacls C:\\ProgramData\\Kazma\\pg_wal_archive-18 /inheritance:r /grant *S-1-5-20:(OI)(CI)M /grant KazmaDrill_1:(OI)(CI)M /grant *S-1-5-32-544:(OI)(CI)F\n   3. Install PostgreSQL 18 (a Windows service)\n      winget install --id PostgreSQL.PostgreSQL.18 --exact --silent --override \"... --servicename postgresql-x64-18 --serverport 5432 --superpassword ****\"\n   4. Start it at boot\n      sc config postgresql-x64-18 start= auto\n   5. Restart it when it fails\n      sc failure postgresql-x64-18 reset= 86400 actions= restart/5000/restart/30000/restart/60000\n   6. Wait for it to answer\n      wait\n   7. Set the superuser's password, this machine only, Kazma's database\n      C:\\Program Files\\PostgreSQL\\18\\bin\\psql.exe -h 127.0.0.1 -U postgres -w -v ON_ERROR_STOP=1 -X -q -p 5432 -d postgres < (password, settings)\n   8. Restart it to apply the settings\n      restart\n   9. Wait for it to answer\n      wait\n  10. Create the kazma_app role (not a superuser)\n      C:\\Program Files\\PostgreSQL\\18\\bin\\psql.exe -h 127.0.0.1 -U postgres -w -v ON_ERROR_STOP=1 -X -q -p 5432 -d kazma < kazma_app_role.sql\n  11. Give kazma_app its password\n      C:\\Program Files\\PostgreSQL\\18\\bin\\psql.exe -h 127.0.0.1 -U postgres -w -v ON_ERROR_STOP=1 -X -q -p 5432 -d kazma < (password)\n  then: write KAZMA_DATABASE_URL into .env (not shown), and sign in once as Kazma will\n-> Create the WAL archive folder\n-> icacls C:\\ProgramData\\Kazma\\pg_wal_archive-18 /inheritance:r /grant *S-1-5-20:(OI)(CI)M /grant KazmaDrill_1:(OI)(CI)M /grant *S-1-5-32-544:(OI)(CI)F\n-> Install PostgreSQL 18 (a Windows service)\n-> Start it at boot\n-> Restart it when it fails\n-> Wait for it to answer\n-> Set the superuser's password, this machine only, Kazma's database\n-> Restart it to apply the settings\n-> Wait for it to answer\n-> Create the kazma_app role (not a superuser)\n-> Give kazma_app its password\n-> KAZMA_DATABASE_URL written to C:\\kazma-drill\\.env (this account only)\n-> Kazma signs in as kazma_app (not a superuser).\nDone. Reload Kazma when it is idle to use the new database:\n  python scripts/service/kazma_guard.py --reload --when-idle\n-> install Kazma as a service (its guard starts at boot)\n-> start it now\nDone: 2 parts of Custom in place.\nWaiting for Kazma to answer at http://127.0.0.1:9090 (its first start loads its models) ...\nKazma is running: http://127.0.0.1:9090 (its setup guide connects the AI model)\n"
+  },
+  "first_boot": {
+   "status": "alive",
+   "timestamp": 1795204964.935403,
+   "build": {
+    "commit": "unknown",
+    "started_at": 1795204912.8255768
+   }
+  },
+  "second_boot": {
+   "status": "alive",
+   "timestamp": 1795205019.636444,
+   "build": {
+    "commit": "unknown",
+    "started_at": 1795205010.2653635
+   }
+  },
+  "finished": "2026-11-20 20:04 UTC"
+ },
+ "before": {
+  "boot": 1795204914.0919926,
+  "stop": null,
+  "asked": 1795204996.485
+ },
+ "after": {
+  "boot": 1795205010.6891556,
+  "stop": null
+ },
+ "evidence": {
+  "service": [],
+  "system": [
+   {
+    "id": 6005,
+    "at": 1795205003.827
+   },
+   {
+    "id": 1074,
+    "at": 1795204997.018
+   },
+   {
+    "id": 6006,
+    "at": 1795204997.39
+   }
+  ],
+  "log": [
+   "{\"timestamp\": \"2026-11-20T20:01:54.091993+00:00\", \"level\": \"INFO\", \"logger\": \"kazma_core.config_store\", \"message\": \"Setting updated: system.lifecycle.last_boot_epoch = 1795204914.0919926 (category=internal)\", \"filename\": \"config_store.py\", \"lineno\": 2289, \"funcName\": \"set\"}",
+   "{\"timestamp\": \"2026-11-20T20:03:17.366307+00:00\", \"level\": \"INFO\", \"logger\": \"kazma_core.shutdown\", \"message\": \"Shutdown signal sent \\u2014 terminating all streams\", \"filename\": \"shutdown.py\", \"lineno\": 206, \"funcName\": \"signal_shutdown\"}",
+   "{\"timestamp\": \"2026-11-20T20:03:30.691170+00:00\", \"level\": \"INFO\", \"logger\": \"kazma_core.config_store\", \"message\": \"Setting updated: system.lifecycle.last_boot_epoch = 1795205010.6891556 (category=internal)\", \"filename\": \"config_store.py\", \"lineno\": 2289, \"funcName\": \"set\"}"
+  ]
+ },
+ "verdict": {
+  "verdict": "unclean",
+  "reasons": [
+   "no stop stamp from this restart: the server never ran its stop (stamp None, boot before 1795204914.0919926)",
+   "the server logged no stop of its own before Windows stopped",
+   "the KazmaEngineShutdown service said: nothing"
+  ],
+  "held_s": 0.9
+ }
+}

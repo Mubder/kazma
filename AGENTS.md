@@ -12852,7 +12852,17 @@ SERVICE (a tunnel) reach its published ports, and it is back 19 s after a
     waited for, the real SIGBREAK ending a process; a server that never
     ends, and no server, as controls), the install, uninstall and engine
     tests (the task alone as the service part's control).
-  - The real restart is `scripts/restart_drill.py` on the drill VM.
+  - The real restart is `scripts/restart_drill.py` on the drill VM: a
+    Custom install (PostgreSQL and the service only), then `shutdown /r /t 0
+    /f`, judged from the stop stamp, the server's own stop line, the
+    service's Application log and event 6006. Passed 2026-11-20
+    (`docs/audits/evidence/restart_drill/`): the fix `clean` (the service
+    told the server 1.7 s in, the stop recorded 1.9 s in, Windows stopped
+    2.1 s in); the control at 9b96c2b8c `unclean` ("Shutdown signal sent"
+    0.9 s in, as Windows stopped, no stamp: the live symptom). The VM has no
+    TPM since the PC reset (its virtual TPM was locked to the old Windows'
+    guardian certificates); its clean checkpoint is
+    `engine_boot_drill.CHECKPOINT`.
 
 ### 65. A2A: other agents call Kazma (`kazma_ui/a2a_api.py`, 2026-11-14)
 

@@ -1,0 +1,91 @@
+{
+ "label": "fix",
+ "meta": {
+  "commit": "97528993e1d8ccda068f6fb109e74f22727d823a",
+  "ref": "HEAD",
+  "install": {
+   "exit": 0,
+   "seconds": 336,
+   "tail": "   3. Install PostgreSQL 18 (a Windows service)\n      winget install --id PostgreSQL.PostgreSQL.18 --exact --silent --override \"... --servicename postgresql-x64-18 --serverport 5432 --superpassword ****\"\n   4. Start it at boot\n      sc config postgresql-x64-18 start= auto\n   5. Restart it when it fails\n      sc failure postgresql-x64-18 reset= 86400 actions= restart/5000/restart/30000/restart/60000\n   6. Wait for it to answer\n      wait\n   7. Set the superuser's password, this machine only, Kazma's database\n      C:\\Program Files\\PostgreSQL\\18\\bin\\psql.exe -h 127.0.0.1 -U postgres -w -v ON_ERROR_STOP=1 -X -q -p 5432 -d postgres < (password, settings)\n   8. Restart it to apply the settings\n      restart\n   9. Wait for it to answer\n      wait\n  10. Create the kazma_app role (not a superuser)\n      C:\\Program Files\\PostgreSQL\\18\\bin\\psql.exe -h 127.0.0.1 -U postgres -w -v ON_ERROR_STOP=1 -X -q -p 5432 -d kazma < kazma_app_role.sql\n  11. Give kazma_app its password\n      C:\\Program Files\\PostgreSQL\\18\\bin\\psql.exe -h 127.0.0.1 -U postgres -w -v ON_ERROR_STOP=1 -X -q -p 5432 -d kazma < (password)\n  then: write KAZMA_DATABASE_URL into .env (not shown), and sign in once as Kazma will\n-> Create the WAL archive folder\n-> icacls C:\\ProgramData\\Kazma\\pg_wal_archive-18 /inheritance:r /grant *S-1-5-20:(OI)(CI)M /grant KazmaDrill_1:(OI)(CI)M /grant *S-1-5-32-544:(OI)(CI)F\n-> Install PostgreSQL 18 (a Windows service)\n-> Start it at boot\n-> Restart it when it fails\n-> Wait for it to answer\n-> Set the superuser's password, this machine only, Kazma's database\n-> Restart it to apply the settings\n-> Wait for it to answer\n-> Create the kazma_app role (not a superuser)\n-> Give kazma_app its password\n-> KAZMA_DATABASE_URL written to C:\\kazma-drill\\.env (this account only)\n-> Kazma signs in as kazma_app (not a superuser).\nDone. Reload Kazma when it is idle to use the new database:\n  python scripts/service/kazma_guard.py --reload --when-idle\n-> install Kazma as a service (its guard starts at boot)\n-> start it now\n-> stop Kazma cleanly when Windows shuts down (the KazmaEngineShutdown service)\nDone: 2 parts of Custom in place.\nWaiting for Kazma to answer at http://127.0.0.1:9090 (its first start loads its models) ...\nKazma is running: http://127.0.0.1:9090 (its setup guide connects the AI model)\n"
+  },
+  "first_boot": {
+   "status": "alive",
+   "timestamp": 1795205471.3170307,
+   "build": {
+    "commit": "unknown",
+    "started_at": 1795205415.538505
+   }
+  },
+  "second_boot": {
+   "status": "alive",
+   "timestamp": 1795205543.515252,
+   "build": {
+    "commit": "unknown",
+    "started_at": 1795205521.9914432
+   }
+  },
+  "finished": "2026-11-20 20:12 UTC"
+ },
+ "before": {
+  "boot": 1795205416.8848903,
+  "stop": null,
+  "asked": 1795205502.907
+ },
+ "after": {
+  "boot": 1795205522.4589133,
+  "stop": 1795205504.8246436
+ },
+ "evidence": {
+  "service": [
+   {
+    "at": 1795205515.987,
+    "text": "ready: at a shutdown, Kazma gets up to 75 s to stop, then its engine up to 120 s"
+   },
+   {
+    "at": 1795205504.886,
+    "text": "Windows is shutting down: no holder is connected (is keep-engine.ps1 running?): nothing to stop"
+   },
+   {
+    "at": 1795205504.885,
+    "text": "Kazma stopped after 0.2 s"
+   },
+   {
+    "at": 1795205504.638,
+    "text": "Windows is shutting down: stopping Kazma (1 server)"
+   }
+  ],
+  "system": [
+   {
+    "id": 6005,
+    "at": 1795205515.389
+   },
+   {
+    "id": 6006,
+    "at": 1795205505.043
+   },
+   {
+    "id": 1074,
+    "at": 1795205503.436
+   }
+  ],
+  "log": [
+   "{\"timestamp\": \"2026-11-20T20:08:15.213164+00:00\", \"level\": \"INFO\", \"logger\": \"kazma_core.shutdown_notice\", \"message\": \"[shutdown-notice] Kazma will be stopped cleanly when Windows shuts down (the KazmaEngineShutdown service listens)\", \"filename\": \"shutdown_notice.py\", \"lineno\": 69, \"funcName\": \"_flush_held\"}",
+   "{\"timestamp\": \"2026-11-20T20:10:16.884890+00:00\", \"level\": \"INFO\", \"logger\": \"kazma_core.config_store\", \"message\": \"Setting updated: system.lifecycle.last_boot_epoch = 1795205416.8848903 (category=internal)\", \"filename\": \"config_store.py\", \"lineno\": 2289, \"funcName\": \"set\"}",
+   "{\"timestamp\": \"2026-11-20T20:11:44.636544+00:00\", \"level\": \"INFO\", \"logger\": \"kazma_core.shutdown_notice\", \"message\": \"[shutdown-notice] Windows is shutting down: Kazma stops now\", \"filename\": \"shutdown_notice.py\", \"lineno\": 86, \"funcName\": \"_log\"}",
+   "{\"timestamp\": \"2026-11-20T20:11:44.713714+00:00\", \"level\": \"INFO\", \"logger\": \"kazma_core.shutdown\", \"message\": \"Shutdown signal sent \\u2014 terminating all streams\", \"filename\": \"shutdown.py\", \"lineno\": 206, \"funcName\": \"signal_shutdown\"}",
+   "{\"timestamp\": \"2026-11-20T20:11:44.824644+00:00\", \"level\": \"INFO\", \"logger\": \"kazma_core.config_store\", \"message\": \"Setting updated: system.lifecycle.last_shutdown_epoch = 1795205504.8246436 (category=internal)\", \"filename\": \"config_store.py\", \"lineno\": 2289, \"funcName\": \"set\"}",
+   "{\"timestamp\": \"2026-11-20T20:11:44.874590+00:00\", \"level\": \"INFO\", \"logger\": \"kazma_core.shutdown\", \"message\": \"[shutdown] the stop took 0.0 s of its 50 s budget (every step under 0.1 s)\", \"filename\": \"shutdown.py\", \"lineno\": 121, \"funcName\": \"report\"}",
+   "{\"timestamp\": \"2026-11-20T20:11:59.954724+00:00\", \"level\": \"INFO\", \"logger\": \"kazma_core.shutdown_notice\", \"message\": \"[shutdown-notice] Kazma will be stopped cleanly when Windows shuts down (the KazmaEngineShutdown service listens)\", \"filename\": \"shutdown_notice.py\", \"lineno\": 69, \"funcName\": \"_flush_held\"}",
+   "{\"timestamp\": \"2026-11-20T20:12:02.458913+00:00\", \"level\": \"INFO\", \"logger\": \"kazma_core.config_store\", \"message\": \"Setting updated: system.lifecycle.last_boot_epoch = 1795205522.4589133 (category=internal)\", \"filename\": \"config_store.py\", \"lineno\": 2289, \"funcName\": \"set\"}"
+  ]
+ },
+ "verdict": {
+  "verdict": "clean",
+  "reasons": [
+   "the server recorded its stop 1.9 s after the restart was asked",
+   "the server logged its stop: [shutdown] the stop took 0.0 s of its 50 s budget (every step under 0.1 s)",
+   "the KazmaEngineShutdown service said: Kazma stopped after 0.2 s"
+  ],
+  "held_s": 2.1
+ }
+}
